@@ -1,29 +1,29 @@
-// src/components/WritingEnvironment/hooks/useDocumentManager.ts
-import { useState, useEffect, useCallback } from 'react';
-import { DocumentState, UserSettings } from '../../../types';
+// // src/components/WritingEnvironment/hooks/useDocumentManager.ts
+// import { useState, useEffect, useCallback } from 'react';
+// import { DocumentState, UserSettings } from '../../../types';
 
-export const useDocumentManager = () => {
-  const [document, setDocument] = useState<DocumentState>({
-    content: '',
-    lastSaved: new Date(),
-    versionHistory: []
-  });
+// export const useDocumentManager = () => {
+//   const [document, setDocument] = useState<DocumentState>({
+//     content: '',
+//     lastSaved: new Date(),
+//     versionHistory: []
+//   });
 
-  const [settings, setSettings] = useState<UserSettings>({
-    theme: 'dark',
-    font: 'Inter',
-    fontSize: 16,
-    autoSaveInterval: 5 // minutes
-  });
+//   const [settings, setSettings] = useState<UserSettings>({
+//     theme: 'dark',
+//     font: 'Inter',
+//     fontSize: 16,
+//     autoSaveInterval: 5 // minutes
+//   });
 
-  // ... (previous implementation of save, restore, update methods)
+//   // ... (previous implementation of save, restore, update methods)
 
-  return {
-    document,
-    settings,
-    saveDocument,
-    restoreVersion,
-    updateContent,
-    updateSettings
-  };
-};
+//   return {
+//     document,
+//     settings,
+//     saveDocument,
+//     restoreVersion,
+//     updateContent,
+//     updateSettings
+//   };
+// };
