@@ -1,26 +1,29 @@
 import React from 'react';
-import logo from './logo.svg';
+import WordProcessor from './components/WordProcessor';
 import './App.css';
 
-function App() {
+const App: React.FC = () => {
+  const handleSave = (content: string) => {
+    console.log('Saved content:', content);
+    // Here you could implement saving to localStorage, a database, etc.
+  };
+
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
+    <div className="app">
+      <header className="app-header">
+        <h1>Simple Word Processor</h1>
       </header>
+      <main>
+        <WordProcessor 
+          initialContent="<p>Start typing your document here...</p>" 
+          onSave={handleSave} 
+        />
+      </main>
+      <footer className="app-footer">
+        <p>Simple Word Processor © {new Date().getFullYear()}</p>
+      </footer>
     </div>
   );
-}
+};
 
 export default App;
