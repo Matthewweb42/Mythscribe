@@ -1,19 +1,18 @@
+// index.tsx
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import './index.css';
 import App from './App';
-import reportWebVitals from './reportWebVitals';
+
+// Import fonts (you would typically include this in your HTML head or use a solution like react-helmet)
+// Note: In a real project, you might want to use a better way to manage fonts like using Next.js built-in font handling
+// or other solutions like react-helmet or importing in your CSS file
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
+
 root.render(
   <React.StrictMode>
     <App />
   </React.StrictMode>
 );
-
-// If you want to start measuring performance in your app, pass a function
-// to log results (for example: reportWebVitals(console.log))
-// or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitals
-reportWebVitals();

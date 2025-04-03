@@ -1,33 +1,45 @@
-import React, { useState, useEffect } from 'react';
+// components/FileExplorer.tsx
+import React from 'react';
+import { Folder, FileItem } from '../App';
 
 interface FileExplorerProps {
-  onFileSelect: (fileName: string) => void;
+  folders: Folder[];
+  onToggleFolder: (folderId: string) => void;
+  onSelectFile: (folderId: string, fileId: string) => void;
 }
 
-const FileExplorer: React.FC<FileExplorerProps> = ({ onFileSelect }) => {
-  const [files, setFiles] = useState<string[]>([]);
-
-  useEffect(() => {
-    // Simulate fetching files from a directory
-    const mockFiles = ['Document1.txt', 'Document2.txt', 'Notes.md', 'ProjectPlan.docx'];
-    setFiles(mockFiles);
-  }, []);
-
-  const handleSort = () => {
-    setFiles((prevFiles) => [...prevFiles].sort());
-  };
-
+const FileExplorer: React.FC<FileExplorerProps> = ({ folders, onToggleFolder, onSelectFile }) => {
   return (
-    <div>
-      <h2>File Explorer</h2>
-      <button onClick={handleSort}>Sort Files</button>
-      <ul>
-        {files.map((file) => (
-          <li key={file} onClick={() => onFileSelect(file)}>
-            {file}
-          </li>
+    <div className="file-explorer">
+      <div className="explorer-header">
+        <h3 className="explorer-title">Project Files</h3>
+        <button className="add-btn">+</button>
+      </div>
+      <div className="search-box">
+        <input type="text" className="search-input" placeholder="Search files..." />
+      </div>
+      <div className="file-list">
+        {folders.map(folder => (
+          <div key={folder.id} className={`project-folder ${folder.isOpen ? 'folder-open' : ''}`}>
+            <div className="folder-header" onClick={() => onToggleFolder(folder.id)}>
+              <span className="icon">▶</span>
+              <span>{folder.name}</span>
+            </div>
+            <div className="folder-files" style={{ display: folder.isOpen ? 'block' : 'none' }}>
+              {folder.files.map(file => (
+                <div 
+                  key={file.id} 
+                  className={`file-item ${file.isActive ? 'active' : ''}`}
+                  onClick={() => onSelectFile(folder.id, file.id)}
+                >
+                  <span className="icon">◆</span>
+                  <span>{file.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         ))}
-      </ul>
+      </div>
     </div>
   );
 };
