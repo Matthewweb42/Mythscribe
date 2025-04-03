@@ -1,38 +1,483 @@
-.App {
+/* Mythscribe Word Processor Theme - Emerald and Black */
+:root {
+  --primary-color: #0a332c;
+  --secondary-color: #1e5e52;
+  --accent-color: #7cae7a;
+  --highlight-color: #0fd085;
+  --text-color: #e3e9e5;
+  --background-color: #0e1b19;
+  --editor-background: #141f1c;
+  --parchment-texture: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="%23141f1c" opacity="0.8"/><filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="discrete" tableValues="0 0.01 0.02 0.03 0.04 0.05 0.06"/></feComponentTransfer></filter><rect width="100" height="100" filter="url(%23noise)" opacity="0.15"/></svg>');
+}
+
+body {
+  font-family: 'Eczar', 'Cambria', serif;
+  background-color: var(--background-color);
+  color: var(--text-color);
+  margin: 0;
+  padding: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 100 100"><rect width="100" height="100" fill="%230e1b19"/><filter id="stars"><feTurbulence type="fractalNoise" baseFrequency="0.15" numOctaves="3"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="discrete" tableValues="0 0 0 0 0 0 0 0 0 1"/></feComponentTransfer></filter><rect width="100" height="100" filter="url(%23stars)" fill="%230fd085" opacity="0.3"/></svg>');
+}
+
+.editor-container {
+  width: 100%;
+  height: 85vh;
+  margin: 20px auto;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  box-shadow: 0 0 30px rgba(13, 184, 129, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--accent-color);
+}
+
+/* App Header with Logo */
+.app-header {
+  background-color: var(--primary-color);
+  color: var(--text-color);
+  padding: 10px 20px; /* Match the padding of the nav bar */
+  display: flex;
+  align-items: center;
+  justify-content: center; /* Center the app name */
+  width: 100vw; /* Ensure the header spans the full width of the viewport */
+  border-bottom: 2px solid var(--highlight-color);
+  margin: 0; /* Remove any margins */
+  box-sizing: border-box; /* Include padding in the width */
+  font-size: 16px; /* Match the font size of the nav bar */
+  line-height: 1; /* Ensure consistent line height */
+}
+
+.app-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-icon {
+  width: 36px;
+  height: 36px;
+  background-color: var(--highlight-color);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 10px rgba(13, 184, 129, 0.5);
+}
+
+.logo-icon::before {
+  content: "⦿";
+  color: var(--primary-color);
+  font-size: 24px;
+}
+
+.app-title {
+  font-family: 'Cinzel', serif;
+  font-size: 24px;
+  font-weight: bold;
+  color: var(--highlight-color);
+  letter-spacing: 1px;
+  margin: 0;
+}
+
+/* Toolbar */
+.toolbar {
+  background-color: var(--secondary-color);
+  padding: 8px 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--accent-color);
+}
+
+.toolbar-section {
+  display: flex;
+  gap: 10px;
+}
+
+.toolbar button {
+  background-color: var(--primary-color);
+  color: var(--accent-color);
+  border: 1px solid var(--accent-color);
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  transition: all 0.3s ease;
+}
+
+.toolbar button:hover {
+  background-color: var(--accent-color);
+  color: var(--primary-color);
+  box-shadow: 0 0 8px rgba(13, 208, 133, 0.5);
+}
+
+.toolbar button:active {
+  transform: translateY(1px);
+}
+
+/* Main Editor Area */
+.editor {
+  flex-grow: 1;
+  padding: 40px;
+  background-color: var(--editor-background);
+  background-image: var(--parchment-texture);
+  overflow-y: auto;
+  position: relative;
+}
+
+/* Decorative runes in corners */
+.editor::before, .editor::after,
+.corner-top-right, .corner-bottom-left {
+  content: "";
+  position: absolute;
+  width: 50px;
+  height: 50px;
+  opacity: 0.2;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.editor::before {
+  top: 15px;
+  left: 15px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50"><path d="M10,10 L20,5 L30,10 L25,20 L30,30 L20,35 L10,30 L15,20 Z" fill="none" stroke="%237cae7a" stroke-width="2"/></svg>');
+}
+
+.editor::after {
+  bottom: 15px;
+  right: 15px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50"><path d="M10,10 L40,10 L40,40 L10,40 Z M15,15 L35,15 L35,35 L15,35 Z" fill="none" stroke="%237cae7a" stroke-width="2"/></svg>');
+}
+
+.corner-top-right {
+  top: 15px;
+  right: 15px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50"><circle cx="25" cy="25" r="15" fill="none" stroke="%237cae7a" stroke-width="2"/><circle cx="25" cy="25" r="5" fill="none" stroke="%237cae7a" stroke-width="2"/></svg>');
+}
+
+.corner-bottom-left {
+  bottom: 15px;
+  left: 15px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50"><path d="M10,25 L25,10 L40,25 L25,40 Z" fill="none" stroke="%237cae7a" stroke-width="2"/></svg>');
+}
+
+/* Content Area */
+.content-area {
+  min-height: 100%;
+  outline: none;
+  line-height: 1.6;
+  color: var(--text-color);
+  position: relative;
+  z-index: 2;
+}
+
+/* Typography */
+.content-area p {
+  margin-bottom: 20px;
+  text-align: justify;
+  font-size: 16px;
+}
+
+.content-area h1, .content-area h2, .content-area h3 {
+  font-family: 'Cinzel', serif;
+  color: var(--highlight-color);
+  text-shadow: 0 0 5px rgba(13, 208, 133, 0.2);
+}
+
+.content-area h1 {
+  font-size: 32px;
+  margin-bottom: 30px;
+  position: relative;
   text-align: center;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+.content-area h1::after {
+  content: "";
+  position: absolute;
+  left: 25%;
+  bottom: -10px;
+  width: 50%;
+  height: 2px;
+  background: linear-gradient(to right, transparent, var(--highlight-color), transparent);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+.content-area h2 {
+  font-size: 24px;
+  margin-top: 30px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--accent-color);
+  padding-bottom: 5px;
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
+.content-area h3 {
+  font-size: 20px;
+  margin-top: 25px;
+  margin-bottom: 15px;
+}
+
+/* Mythic Drop Cap */
+.content-area p:first-of-type::first-letter {
+  font-family: 'Cinzel Decorative', serif;
+  font-size: 3.5em;
+  float: left;
+  line-height: 0.8;
+  margin: 0.15em 0.15em 0 0;
+  color: var(--highlight-color);
+  text-shadow: 0 0 5px rgba(13, 208, 133, 0.3);
+}
+
+/* Mythscribe Lists */
+.content-area ul {
+  list-style: none;
+  padding-left: 20px;
+}
+
+.content-area ul li {
+  position: relative;
+  padding-left: 25px;
+  margin-bottom: 10px;
+}
+
+.content-area ul li::before {
+  content: "⟐";
+  position: absolute;
+  left: 0;
+  color: var(--accent-color);
+}
+
+/* Status Bar */
+.status-bar {
+  background-color: var(--primary-color);
+  color: var(--accent-color);
+  padding: 8px 20px;
+  font-size: 13px;
+  font-family: 'Cinzel', serif;
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
+  border-top: 1px solid var(--accent-color);
+}
+
+/* Scrollbar */
+.editor::-webkit-scrollbar {
+  width: 12px;
+}
+
+.editor::-webkit-scrollbar-track {
+  background: var(--editor-background);
+}
+
+.editor::-webkit-scrollbar-thumb {
+  background: var(--secondary-color);
+  border: 3px solid var(--editor-background);
+  border-radius: 10px;
+}
+
+.editor::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-color);
+}
+
+/* Selection */
+::selection {
+  background-color: rgba(13, 208, 133, 0.3);
+  color: var(--highlight-color);
+}
+
+/* Animations */
+@keyframes glowPulse {
+  0% { box-shadow: 0 0 5px rgba(13, 208, 133, 0.2); }
+  50% { box-shadow: 0 0 20px rgba(13, 208, 133, 0.4); }
+  100% { box-shadow: 0 0 5px rgba(13, 208, 133, 0.2); }
+}
+
+.editor-container:hover {
+  animation: glowPulse 4s infinite;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .editor-container {
+    width: 95%;
+  }
+  
+  .toolbar {
+    flex-wrap: wrap;
+  }
+  
+  .toolbar-section {
+    margin-bottom: 5px;
+  }
+  
+  .editor {
+    padding: 20px;
+  }
+}
+
+/* Special Mythscribe styling elements */
+.myth-divider {
+  text-align: center;
+  margin: 30px 0;
+  font-size: 18px;
+  color: var(--accent-color);
+  position: relative;
+}
+
+.myth-divider::before,
+.myth-divider::after {
+  content: "⬢";
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 15px;
+}
+
+.myth-divider span {
+  display: inline-block;
+  width: 30%;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--accent-color), transparent);
+  vertical-align: middle;
+}
+
+/* Quote styling */
+blockquote {
+  border-left: 3px solid var(--highlight-color);
+  margin-left: 20px;
+  padding: 15px 0 15px 20px;
+  font-style: italic;
+  color: var(--accent-color);
+  position: relative;
+  background: rgba(13, 208, 133, 0.05);
+}
+
+blockquote::before {
+  content: "";
+  font-size: 60px;
+  font-family: 'Georgia', serif;
+  color: var(--highlight-color);
+  opacity: 0.2;
+  position: absolute;
+  top: -10px;
+  left: 5px;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 25px 0;
+  border: 1px solid var(--secondary-color);
+}
+
+th {
+  background-color: var(--primary-color);
+  color: var(--highlight-color);
+  padding: 12px 15px;
+  text-align: left;
+  font-family: 'Cinzel', serif;
+  font-weight: normal;
+}
+
+td {
+  padding: 10px 15px;
+  border-bottom: 1px solid var(--secondary-color);
+}
+
+tr:nth-child(even) {
+  background-color: rgba(30, 94, 82, 0.1);
+}
+
+tr:hover {
+  background-color: rgba(13, 208, 133, 0.1);
+}
+
+/* Code blocks */
+pre {
+  background-color: var(--primary-color);
+  padding: 15px;
+  border-radius: 5px;
+  overflow-x: auto;
+  border-left: 3px solid var(--highlight-color);
+  font-family: 'Fira Code', monospace;
+  font-size: 14px;
+}
+
+code {
+  color: var(--highlight-color);
+}
+
+/* Focus Modes */
+.focus-mode {
+  background-color: rgba(10, 51, 44, 0.95);
+}
+
+.focus-mode p {
+  max-width: 38em;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Mythscribe rune links */
+.rune-link {
+  font-family: 'Cinzel', serif;
+  color: var(--highlight-color);
+  text-decoration: none;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.rune-link::after {
+  content: "";
+  position: absolute;
+  width: 100%;
+  height: 1px;
+  bottom: -2px;
+  left: 0;
+  background-color: var(--highlight-color);
+  transform: scaleX(0);
+  transition: transform 0.3s ease;
+}
+
+.rune-link:hover {
+  text-shadow: 0 0 8px rgba(13, 208, 133, 0.5);
+}
+
+.rune-link:hover::after {
+  transform: scaleX(1);
+}
+
+/* Ensure the word processor spans almost the full width */
+.word-processor {
+  flex: 1; /* Allow the word processor to take up remaining space */
+  width: 95%; /* Set the width to 95% of the window */
+  margin: 0 auto; /* Center the word processor */
+  padding: 20px;
+  box-sizing: border-box; /* Include padding in the width */
+}
+
+/* Ensure the main content spans the full width */
+.app-main {
+  display: flex;
+  flex-direction: column; /* Stack the file explorer and word processor vertically */
+  align-items: center; /* Center the content horizontally */
+  width: 100vw; /* Ensure the main content spans the full width */
+}
+
+/* Ensure the navigation bar spans the full width */
+.nav-bar {
+  background-color: var(--primary-color);
+  color: var(--text-color);
+  padding: 10px 20px; /* Match the padding of the header */
+  display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
-}
-
-.App-link {
-  color: #61dafb;
-}
-
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  width: 100vw; /* Ensure the nav bar spans the full width of the viewport */
+  margin: 0; /* Remove any margins */
+  box-sizing: border-box; /* Include padding in the width */
+  font-size: 16px; /* Match the font size of the header */
+  line-height: 1; /* Ensure consistent line height */
 }

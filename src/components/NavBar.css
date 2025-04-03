@@ -1,0 +1,52 @@
+.nav-bar {
+  background-color: var(--primary-color);
+  color: var(--text-color);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid var(--highlight-color);
+  width: 100%; /* Ensure the nav bar spans the full width */
+  max-width: 100%; /* Prevent shrinking */
+  box-sizing: border-box; /* Include padding in the width */
+}
+
+.menu {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 20px;
+}
+
+.menu-item {
+  position: relative;
+  cursor: pointer;
+}
+
+.menu-item:hover .dropdown {
+  display: block;
+}
+
+.dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background-color: var(--secondary-color);
+  border: 1px solid var(--highlight-color);
+  list-style: none;
+  margin: 0;
+  padding: 5px 0;
+  z-index: 1000;
+}
+
+.dropdown li {
+  padding: 8px 15px;
+  cursor: pointer;
+  color: var(--text-color);
+}
+
+.dropdown li:hover {
+  background-color: var(--highlight-color);
+  color: var(--primary-color);
+}
