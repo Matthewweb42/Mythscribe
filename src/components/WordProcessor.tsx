@@ -17,15 +17,17 @@ const WordProcessor: React.FC<WordProcessorProps> = ({
   const [fontSize, setFontSize] = useState<number>(16);
   const editorRef = useRef<HTMLDivElement>(null);
 
+  // Set initial content only once when the component mounts
   useEffect(() => {
     if (editorRef.current) {
-      editorRef.current.innerHTML = content;
+      editorRef.current.innerHTML = initialContent;
     }
-  }, []);
+  }, [initialContent]);
 
-  const handleContentChange = () => {
+  const handleContentChange = (e: React.FormEvent<HTMLDivElement>) => {
     if (editorRef.current) {
-      setContent(editorRef.current.innerHTML);
+      const newContent = e.currentTarget.innerHTML;
+      setContent(newContent);
     }
   };
 
@@ -45,7 +47,7 @@ const WordProcessor: React.FC<WordProcessorProps> = ({
   };
 
   const increaseFontSize = () => {
-    setFontSize(prev => {
+    setFontSize((prev) => {
       const newSize = prev + 2;
       document.execCommand('fontSize', false, '7');
       const selection = window.getSelection();
@@ -60,7 +62,7 @@ const WordProcessor: React.FC<WordProcessorProps> = ({
   };
 
   const decreaseFontSize = () => {
-    setFontSize(prev => {
+    setFontSize((prev) => {
       const newSize = Math.max(8, prev - 2);
       document.execCommand('fontSize', false, '1');
       const selection = window.getSelection();
@@ -84,51 +86,51 @@ const WordProcessor: React.FC<WordProcessorProps> = ({
   return (
     <div className="word-processor">
       <div className="toolbar">
-        <button 
-          className={`tool-button ${isBold ? 'active' : ''}`} 
-          onClick={toggleBold} 
+        <button
+          className={`tool-button ${isBold ? 'active' : ''}`}
+          onClick={toggleBold}
           title="Bold"
         >
           B
         </button>
-        <button 
-          className={`tool-button ${isItalic ? 'active' : ''}`} 
-          onClick={toggleItalic} 
+        <button
+          className={`tool-button ${isItalic ? 'active' : ''}`}
+          onClick={toggleItalic}
           title="Italic"
         >
           I
         </button>
-        <button 
-          className={`tool-button ${isUnderline ? 'active' : ''}`} 
-          onClick={toggleUnderline} 
+        <button
+          className={`tool-button ${isUnderline ? 'active' : ''}`}
+          onClick={toggleUnderline}
           title="Underline"
         >
           U
         </button>
-        <button 
-          className="tool-button" 
-          onClick={decreaseFontSize} 
+        <button
+          className="tool-button"
+          onClick={decreaseFontSize}
           title="Decrease Font Size"
         >
           A-
         </button>
         <span className="font-size-display">{fontSize}px</span>
-        <button 
-          className="tool-button" 
-          onClick={increaseFontSize} 
+        <button
+          className="tool-button"
+          onClick={increaseFontSize}
           title="Increase Font Size"
         >
           A+
         </button>
-        <button 
-          className="save-button" 
-          onClick={handleSave} 
+        <button
+          className="save-button"
+          onClick={handleSave}
           title="Save"
         >
           Save
         </button>
       </div>
-      <div 
+      <div
         className="editor"
         ref={editorRef}
         contentEditable={true}
