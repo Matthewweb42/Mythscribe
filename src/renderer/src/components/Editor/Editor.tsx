@@ -1,14 +1,12 @@
-// src/renderer/components/Editor/Editor.tsx
-import React, { useState, useMemo, useCallback } from 'react';
-import { createEditor, Descendant, Editor as SlateEditor, Transforms, Element as SlateElement } from 'slate';
+// src/renderer/src/components/Editor/Editor.tsx
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { createEditor, Descendant, Editor as SlateEditor, Transforms } from 'slate';
 import { Slate, Editable, withReact, RenderLeafProps, RenderElementProps } from 'slate-react';
 import { withHistory } from 'slate-history';
-import { Document } from '../../types';
 import { Bold, Italic, Underline } from 'lucide-react';
-
-interface EditorProps {
-  document: Document | null;
-}
+import { useProject } from '../../contexts/ProjectContext';
+import { DocumentRow } from '../../../types/window';
+import { File } from 'lucide-react';
 
 // Custom types for Slate
 type CustomText = { 
@@ -34,7 +32,7 @@ declare module 'slate' {
 const initialValue: Descendant[] = [
   {
     type: 'paragraph',
-    children: [{ text: 'Start writing your story...' }],
+    children: [{ text: '' }],
   },
 ];
 
@@ -63,9 +61,64 @@ const Element = ({ attributes, children, element }: RenderElementProps) => {
   }
 };
 
-const Editor: React.FC<EditorProps> = ({ document }) => {
+const Editor: React.FC = () => {
+  const { activeDocumentId, documents, updateDocumentContent } = useProject();
   const editor = useMemo(() => withHistory(withReact(createEditor())), []);
   const [value, setValue] = useState<Descendant[]>(initialValue);
+  const [currentDoc, setCurrentDoc] = useState<DocumentRow | null>(null);
+  const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
+
+  // Load document content when active document changes
+  useEffect(() => {
+    const loadDocument = async () => {
+      if (!activeDocumentId) {
+        setCurrentDoc(null);
+        setValue(initialValue);
+        return;
+      }
+
+      const doc = documents.find(d => d.id === activeDocumentId);
+      if (!doc) return;
+
+      setCurrentDoc(doc);
+
+      // Parse the content
+      try {
+        if (doc.content) {
+          const parsed = JSON.parse(doc.content);
+          setValue(parsed);
+        } else {
+          setValue(initialValue);
+        }
+      } catch (error) {
+        console.error('Error parsing document content:', error);
+        setValue(initialValue);
+      }
+    };
+
+    loadDocument();
+  }, [activeDocumentId, documents]);
+
+  // Auto-save with debounce
+  const handleChange = useCallback((newValue: Descendant[]) => {
+    setValue(newValue);
+
+    if (!currentDoc) return;
+
+    // Clear existing timeout
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+    }
+
+    // Set new timeout to save after 1 second of no typing
+    const timeout = setTimeout(() => {
+      const content = JSON.stringify(newValue);
+      updateDocumentContent(currentDoc.id, content);
+      console.log('Auto-saved');
+    }, 1000);
+
+    setSaveTimeout(timeout);
+  }, [currentDoc, saveTimeout, updateDocumentContent]);
 
   // Toggle format helper
   const toggleFormat = useCallback((format: 'bold' | 'italic' | 'underline') => {
@@ -100,19 +153,31 @@ const Editor: React.FC<EditorProps> = ({ document }) => {
         event.preventDefault();
         toggleFormat('underline');
         break;
+      case 's':
+        event.preventDefault();
+        // Manual save
+        if (currentDoc) {
+          const content = JSON.stringify(value);
+          updateDocumentContent(currentDoc.id, content);
+          console.log('Manually saved');
+        }
+        break;
     }
-  }, [toggleFormat]);
+  }, [toggleFormat, currentDoc, value, updateDocumentContent]);
 
-  if (!document) {
+  if (!currentDoc) {
     return (
       <div style={{
         height: '100%',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        color: '#888'
+        color: '#888',
+        flexDirection: 'column',
+        gap: '12px'
       }}>
-        Select a document to start writing
+        <File size={48} color="#666" />
+        <div>Select a document to start writing</div>
       </div>
     );
   }
@@ -129,7 +194,8 @@ const Editor: React.FC<EditorProps> = ({ document }) => {
         padding: '8px 16px',
         borderBottom: '1px solid #333',
         display: 'flex',
-        gap: '4px'
+        gap: '4px',
+        alignItems: 'center'
       }}>
         <button
           onMouseDown={(e) => {
@@ -189,7 +255,7 @@ const Editor: React.FC<EditorProps> = ({ document }) => {
         </button>
 
         <div style={{ marginLeft: 'auto', fontSize: '12px', color: '#888', alignSelf: 'center' }}>
-          Free Write Mode
+          Free Write Mode | Ctrl+S to save
         </div>
       </div>
 
@@ -202,7 +268,8 @@ const Editor: React.FC<EditorProps> = ({ document }) => {
         <Slate
           editor={editor}
           initialValue={value}
-          onValueChange={setValue}
+          value={value}
+          onChange={handleChange}
         >
           <Editable
             renderLeaf={Leaf}
