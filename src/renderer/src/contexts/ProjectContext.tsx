@@ -1,6 +1,6 @@
 // src/renderer/src/contexts/ProjectContext.tsx
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { DocumentRow, ReferenceRow, ProjectMetadata } from '../types/window';
+import { DocumentRow, ReferenceRow, ProjectMetadata } from '../../types/window';
 
 interface ProjectContextType {
   // Project state
