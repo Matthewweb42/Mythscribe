@@ -46,6 +46,16 @@ const api = {
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
     set: (key: string, value: string) => ipcRenderer.invoke('settings:set', key, value)
+  },
+
+  // AI operations
+  ai: {
+    generateSuggestion: (recentText: string, context?: {
+      characterNotes?: string;
+      settingNotes?: string;
+      worldBuildingNotes?: string;
+    }) => ipcRenderer.invoke('ai:generate-suggestion', recentText, context),
+    testApiKey: () => ipcRenderer.invoke('ai:test-api-key')
   }
 };
 

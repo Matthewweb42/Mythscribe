@@ -2,8 +2,19 @@
 import { ipcMain, dialog, app } from 'electron';
 import path from 'path';
 import ProjectDatabase from './database';
+import OpenAI from 'openai';
 
 let currentDb: ProjectDatabase | null = null;
+let openaiClient: OpenAI | null = null;
+
+// Initialize OpenAI client
+function initializeOpenAI() {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (apiKey && !openaiClient) {
+    openaiClient = new OpenAI({ apiKey });
+    console.log('OpenAI client initialized in main process');
+  }
+}
 
 export function setupIpcHandlers() {
   // ============= PROJECT OPERATIONS =============
@@ -168,6 +179,148 @@ export function setupIpcHandlers() {
   ipcMain.handle('settings:set', async (_, key: string, value: string) => {
     if (!currentDb) throw new Error('No project open');
     currentDb.setSetting(key, value);
+  });
+
+  // ============= AI OPERATIONS =============
+
+  // Rate limiting for AI requests
+  let lastAIRequestTime = 0;
+  const MIN_REQUEST_INTERVAL = 2000; // 2 seconds between requests
+
+  ipcMain.handle('ai:generate-suggestion', async (_, recentText: string, context?: {
+    characterNotes?: string;
+    settingNotes?: string;
+    worldBuildingNotes?: string;
+  }) => {
+    try {
+      // Rate limiting check
+      const now = Date.now();
+      const timeSinceLastRequest = now - lastAIRequestTime;
+      
+      if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
+        const waitTime = MIN_REQUEST_INTERVAL - timeSinceLastRequest;
+        console.log(`⏳ Rate limiting: waiting ${waitTime}ms before making request`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+      
+      lastAIRequestTime = Date.now();
+
+      // Initialize OpenAI if not already done
+      if (!openaiClient) {
+        initializeOpenAI();
+      }
+      
+      if (!openaiClient) {
+        throw new Error('OpenAI API key not found in environment variables');
+      }
+
+      // Validate API key format
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey || !apiKey.startsWith('sk-')) {
+        throw new Error('Invalid OpenAI API key format. Key should start with "sk-"');
+      }
+
+      // Build the prompt with context
+      let systemPrompt = `You are a creative writing assistant helping an author write their novel. 
+Your job is to suggest the next few words or sentence that naturally continues the story.
+Keep suggestions concise (1-2 sentences max).
+Match the author's tone and style.
+Be creative but consistent with the established context.`;
+
+      // Add context if available
+      if (context) {
+        let contextInfo = '';
+        
+        if (context.characterNotes) {
+          contextInfo += `\n\nCHARACTER NOTES:\n${context.characterNotes}`;
+        }
+        if (context.settingNotes) {
+          contextInfo += `\n\nSETTING NOTES:\n${context.settingNotes}`;
+        }
+        if (context.worldBuildingNotes) {
+          contextInfo += `\n\nWORLD-BUILDING NOTES:\n${context.worldBuildingNotes}`;
+        }
+
+        if (contextInfo) {
+          systemPrompt += `\n\nUse the following context to ensure consistency:${contextInfo}`;
+        }
+      }
+
+      console.log('🤖 Making OpenAI API call from main process...');
+      console.log('📝 Request text length:', recentText.length);
+      
+      const response = await openaiClient.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Continue this text naturally:\n\n${recentText}` }
+        ],
+        temperature: 0.7,
+        max_tokens: 50, // Reduced from 100 to stay within limits
+        stream: false
+      });
+
+      const suggestion = response.choices[0]?.message?.content?.trim() || '';
+      console.log('✅ OpenAI suggestion received:', suggestion);
+      return suggestion;
+    } catch (error) {
+      console.error('❌ OpenAI API error:', error);
+      
+      // Handle specific error types
+      if (error instanceof Error) {
+        if (error.message.includes('429')) {
+          throw new Error('Rate limit exceeded. Please wait a moment before trying again. If you have a new OpenAI account, you may have lower rate limits.');
+        } else if (error.message.includes('401')) {
+          throw new Error('Invalid API key. Please check your OpenAI API key in the .env file.');
+        } else if (error.message.includes('quota')) {
+          throw new Error('OpenAI quota exceeded. Please check your OpenAI account billing and usage at https://platform.openai.com/usage');
+        }
+      }
+      
+      throw new Error(`AI generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  });
+
+  // Test API key functionality
+  ipcMain.handle('ai:test-api-key', async () => {
+    try {
+      if (!openaiClient) {
+        initializeOpenAI();
+      }
+      
+      if (!openaiClient) {
+        throw new Error('OpenAI API key not found in environment variables');
+      }
+
+      console.log('🧪 Testing OpenAI API key...');
+      const response = await openaiClient.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Say "API key is working" in exactly those words.' }],
+        max_tokens: 10,
+        temperature: 0
+      });
+
+      const result = response.choices[0]?.message?.content?.trim() || '';
+      console.log('✅ API key test successful:', result);
+      return { success: true, message: 'API key is working correctly' };
+    } catch (error) {
+      console.error('❌ API key test failed:', error);
+      let errorMessage = 'Unknown error';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('429')) {
+          errorMessage = 'Rate limit exceeded. Your API key works but you\'re making requests too quickly.';
+        } else if (error.message.includes('401')) {
+          errorMessage = 'Invalid API key. Please check your OpenAI API key.';
+        } else if (error.message.includes('quota')) {
+          errorMessage = 'Quota exceeded. Check your OpenAI billing at https://platform.openai.com/usage';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      return { success: false, message: errorMessage };
+    }
   });
 }
 

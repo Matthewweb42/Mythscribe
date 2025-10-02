@@ -64,6 +64,14 @@ declare global {
         get: (key: string) => Promise<string | undefined>;
         set: (key: string, value: string) => Promise<void>;
       };
+      ai: {
+        generateSuggestion: (recentText: string, context?: {
+          characterNotes?: string;
+          settingNotes?: string;
+          worldBuildingNotes?: string;
+        }) => Promise<string>;
+        testApiKey: () => Promise<{ success: boolean; message: string }>;
+      };
     };
   }
 }

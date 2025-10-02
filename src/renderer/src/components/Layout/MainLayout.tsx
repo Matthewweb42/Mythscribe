@@ -4,11 +4,14 @@ import Sidebar from '../Sidebar';
 import Editor from '../Editor/Editor';
 import ReferencePanel from '../ReferencePanel/ReferencePanel';
 import WelcomeScreen from '../WelcomeScreen';
+import SettingsModal from '../SettingsModal';
 import { useProject } from '../../contexts/ProjectContext';
+import { Settings } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
   const { isProjectOpen, projectMetadata, closeProject } = useProject();
   const [showReferences, setShowReferences] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Show welcome screen if no project is open
   if (!isProjectOpen) {
@@ -55,10 +58,29 @@ const MainLayout: React.FC = () => {
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
             <button
+              onClick={() => setShowSettings(true)}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: '#333',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <Settings size={14} />
+              Settings
+            </button>
+
+            <button
               onClick={() => setShowReferences(!showReferences)}
               style={{
                 padding: '6px 12px',
-                backgroundColor: showReferences ? 'var(--primary-green)' : '#333',
+                backgroundColor: showReferences ? '#0e639c' : '#333',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '4px',
@@ -107,6 +129,9 @@ const MainLayout: React.FC = () => {
           <ReferencePanel />
         </div>
       )}
+
+      {/* Settings Modal */}
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
     </div>
   );
 };
