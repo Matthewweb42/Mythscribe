@@ -22,11 +22,25 @@ type CustomElement = ParagraphElement | HeadingElement;
 
 declare module 'slate' {
   interface CustomTypes {
-    Editor: SlateEditor;
+    Editor: BaseEditor & ReactEditor & HistoryEditor;
     Element: CustomElement;
     Text: CustomText;
   }
 }
+
+// Fix for JSX namespace
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      [elemName: string]: any;
+    }
+  }
+}
+
+// Import base editor types
+import { BaseEditor } from 'slate';
+import { ReactEditor } from 'slate-react';
+import { HistoryEditor } from 'slate-history';
 
 // Initial empty content
 const initialValue: Descendant[] = [
@@ -54,8 +68,8 @@ const Leaf = ({ attributes, children, leaf }: RenderLeafProps) => {
 const Element = ({ attributes, children, element }: RenderElementProps) => {
   switch (element.type) {
     case 'heading':
-      const HeadingTag = `h${element.level}` as keyof JSX.IntrinsicElements;
-      return <HeadingTag {...attributes}>{children}</HeadingTag>;
+      // Use React.createElement for dynamic heading elements
+      return React.createElement(`h${element.level}`, attributes, children);
     default:
       return <p {...attributes}>{children}</p>;
   }
@@ -204,7 +218,7 @@ const Editor: React.FC = () => {
           }}
           style={{
             padding: '6px 10px',
-            backgroundColor: isFormatActive(editor, 'bold') ? '#0e639c' : '#333',
+            backgroundColor: isFormatActive(editor, 'bold') ? 'var(--primary-green)' : '#333',
             color: '#fff',
             border: 'none',
             borderRadius: '3px',
@@ -223,7 +237,7 @@ const Editor: React.FC = () => {
           }}
           style={{
             padding: '6px 10px',
-            backgroundColor: isFormatActive(editor, 'italic') ? '#0e639c' : '#333',
+            backgroundColor: isFormatActive(editor, 'italic') ? 'var(--primary-green)' : '#333',
             color: '#fff',
             border: 'none',
             borderRadius: '3px',
@@ -242,7 +256,7 @@ const Editor: React.FC = () => {
           }}
           style={{
             padding: '6px 10px',
-            backgroundColor: isFormatActive(editor, 'underline') ? '#0e639c' : '#333',
+            backgroundColor: isFormatActive(editor, 'underline') ? 'var(--primary-green)' : '#333',
             color: '#fff',
             border: 'none',
             borderRadius: '3px',
@@ -268,7 +282,6 @@ const Editor: React.FC = () => {
         <Slate
           editor={editor}
           initialValue={value}
-          value={value}
           onChange={handleChange}
         >
           <Editable

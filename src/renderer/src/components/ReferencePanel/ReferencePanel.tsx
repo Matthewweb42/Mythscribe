@@ -97,7 +97,7 @@ const ReferencePanel: React.FC = () => {
                 backgroundColor: activeCategory === cat.key ? '#1e1e1e' : 'transparent',
                 color: activeCategory === cat.key ? '#fff' : '#888',
                 border: 'none',
-                borderBottom: activeCategory === cat.key ? '2px solid #0e639c' : 'none',
+                borderBottom: activeCategory === cat.key ? '2px solid var(--primary-green)' : 'none',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
@@ -145,7 +145,7 @@ const ReferencePanel: React.FC = () => {
               backgroundColor: ref.id === selectedRefId ? '#37373d' : 'transparent',
               borderRadius: '4px',
               cursor: 'pointer',
-              borderLeft: ref.id === selectedRefId ? '3px solid #0e639c' : '3px solid transparent'
+              borderLeft: ref.id === selectedRefId ? '3px solid var(--primary-green)' : '3px solid transparent'
             }}
             onMouseEnter={(e) => {
               if (ref.id !== selectedRefId) {
@@ -186,7 +186,7 @@ const ReferencePanel: React.FC = () => {
                 width: '100%',
                 padding: '8px',
                 backgroundColor: '#1e1e1e',
-                border: '1px solid #0e639c',
+                border: '1px solid var(--primary-green)',
                 borderRadius: '4px',
                 color: '#d4d4d4',
                 fontSize: '12px',
@@ -199,7 +199,7 @@ const ReferencePanel: React.FC = () => {
                 style={{
                   flex: 1,
                   padding: '6px',
-                  backgroundColor: '#0e639c',
+                  backgroundColor: 'var(--primary-green)',
                   color: '#fff',
                   border: 'none',
                   borderRadius: '3px',
@@ -236,7 +236,7 @@ const ReferencePanel: React.FC = () => {
               width: '100%',
               padding: '8px',
               marginTop: '8px',
-              backgroundColor: '#0e639c',
+              backgroundColor: 'var(--primary-green)',
               color: '#fff',
               border: 'none',
               borderRadius: '4px',

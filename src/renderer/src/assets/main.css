@@ -1,3 +1,17 @@
+:root {
+  --primary-green: #4ade80;
+  --primary-green-dark: #22c55e;
+  --primary-green-darker: #16a34a;
+  --primary-green-light: #86efac;
+  --accent-green: #065f46;
+  
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #333;
+  --text-primary: #d4d4d4;
+  --text-secondary: #888;
+}
+
 body {
   margin: 0;
   padding: 0;

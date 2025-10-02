@@ -46,7 +46,7 @@ const TreeNodeComponent: React.FC<{
           alignItems: 'center',
           gap: '6px',
           backgroundColor: isActive ? '#37373d' : 'transparent',
-          borderLeft: isActive ? '2px solid #0e639c' : '2px solid transparent',
+          borderLeft: isActive ? '2px solid var(--primary-green)' : '2px solid transparent',
           position: 'relative'
         }}
         onMouseEnter={(e) => {
@@ -60,12 +60,12 @@ const TreeNodeComponent: React.FC<{
           {isFolder ? (
             <>
               {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              <FolderIcon size={16} color="#dcb67a" />
+              <FolderIcon size={16} color="var(--primary-green-light)" />
             </>
           ) : (
             <>
               <div style={{ width: '16px' }} />
-              <File size={16} color="#519aba" />
+              <File size={16} color="var(--primary-green)" />
             </>
           )}
           <span style={{ fontSize: '13px' }}>{node.item.name}</span>
@@ -205,7 +205,7 @@ const Sidebar: React.FC = () => {
               width: '100%',
               padding: '6px',
               backgroundColor: '#252526',
-              border: '1px solid #0e639c',
+              border: '1px solid var(--primary-green)',
               borderRadius: '3px',
               color: '#d4d4d4',
               fontSize: '12px',
@@ -218,7 +218,7 @@ const Sidebar: React.FC = () => {
               style={{
                 flex: 1,
                 padding: '4px',
-                backgroundColor: '#0e639c',
+                backgroundColor: 'var(--primary-green)',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '3px',
@@ -260,7 +260,7 @@ const Sidebar: React.FC = () => {
             style={{
               flex: 1,
               padding: '6px',
-              backgroundColor: '#0e639c',
+              backgroundColor: 'var(--primary-green)',
               color: '#fff',
               border: 'none',
               borderRadius: '3px',

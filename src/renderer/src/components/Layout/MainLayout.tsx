@@ -58,7 +58,7 @@ const MainLayout: React.FC = () => {
               onClick={() => setShowReferences(!showReferences)}
               style={{
                 padding: '6px 12px',
-                backgroundColor: showReferences ? '#0e639c' : '#333',
+                backgroundColor: showReferences ? 'var(--primary-green)' : '#333',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '4px',

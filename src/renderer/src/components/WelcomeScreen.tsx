@@ -1,7 +1,8 @@
 // src/renderer/src/components/WelcomeScreen.tsx
 import React, { useState } from 'react';
-import { FileText, FolderOpen, Sparkles } from 'lucide-react';
+import { FileText, FolderOpen } from 'lucide-react';
 import { useProject } from '../contexts/ProjectContext';
+import logoImage from '../assets/MythScribeTempLogo.jpg';
 
 const WelcomeScreen: React.FC = () => {
   const { createProject, openProject } = useProject();
@@ -70,7 +71,7 @@ const WelcomeScreen: React.FC = () => {
               style={{
                 flex: 1,
                 padding: '10px',
-                backgroundColor: '#0e639c',
+                backgroundColor: 'var(--primary-green-dark)',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '4px',
@@ -122,12 +123,20 @@ const WelcomeScreen: React.FC = () => {
           gap: '12px',
           marginBottom: '12px'
         }}>
-          <Sparkles size={40} color="#dcb67a" />
+          <img 
+            src={logoImage} 
+            alt="Mythscribe Logo" 
+            style={{ 
+              width: '60px', 
+              height: '60px', 
+              objectFit: 'contain'
+            }} 
+          />
           <h1 style={{ 
             margin: 0, 
             fontSize: '48px',
             fontWeight: 'bold',
-            background: 'linear-gradient(135deg, #dcb67a 0%, #8b7355 100%)',
+            background: 'linear-gradient(135deg, var(--primary-green-dark) 0%, var(--primary-green-darker) 100%)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent'
           }}>
@@ -145,7 +154,7 @@ const WelcomeScreen: React.FC = () => {
           onClick={() => setShowNewProject(true)}
           style={{
             padding: '16px 24px',
-            backgroundColor: '#0e639c',
+            backgroundColor: 'var(--primary-green-dark)',
             color: '#fff',
             border: 'none',
             borderRadius: '6px',
@@ -158,8 +167,8 @@ const WelcomeScreen: React.FC = () => {
             gap: '10px',
             transition: 'background-color 0.2s'
           }}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1177bb'}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#0e639c'}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--primary-green-darker)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'var(--primary-green-dark)'}
         >
           <FileText size={20} />
           New Project
