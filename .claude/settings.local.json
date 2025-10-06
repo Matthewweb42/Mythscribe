@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(git reset:*)",
+      "Bash(EDITOR=cat GIT_SEQUENCE_EDITOR=\"sed -i ''s/^pick 2adb94e/edit 2adb94e/''\" git rebase -i 96ab6b3)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git rebase:*)",
+      "Bash(git log:*)",
+      "Bash(git push:*)",
+      "Bash(npm run build:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

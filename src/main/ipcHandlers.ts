@@ -3,6 +3,7 @@ import { ipcMain, dialog, app } from 'electron';
 import path from 'path';
 import ProjectDatabase from './database';
 import OpenAI from 'openai';
+import { getActivePresetSettings, DEFAULT_CUSTOM_SETTINGS, CustomAISettings } from '../shared/aiPresets';
 
 let currentDb: ProjectDatabase | null = null;
 let openaiClient: OpenAI | null = null;
@@ -220,12 +221,27 @@ export function setupIpcHandlers() {
         throw new Error('Invalid OpenAI API key format. Key should start with "sk-"');
       }
 
-      // Build the prompt with context
-      let systemPrompt = `You are a creative writing assistant helping an author write their novel. 
+      // Load preset settings from database
+      const presetSettings: CustomAISettings = {
+        activePresetId: currentDb?.getSetting('ai_preset_id') || DEFAULT_CUSTOM_SETTINGS.activePresetId,
+        customInstructions: currentDb?.getSetting('ai_custom_instructions') || DEFAULT_CUSTOM_SETTINGS.customInstructions,
+        customTemperature: parseFloat(currentDb?.getSetting('ai_custom_temperature') || String(DEFAULT_CUSTOM_SETTINGS.customTemperature)),
+        customMaxTokens: parseInt(currentDb?.getSetting('ai_custom_max_tokens') || String(DEFAULT_CUSTOM_SETTINGS.customMaxTokens)),
+        customIntroduceNewElements: currentDb?.getSetting('ai_custom_introduce_new_elements') === 'true' || DEFAULT_CUSTOM_SETTINGS.customIntroduceNewElements
+      };
+
+      const activePreset = getActivePresetSettings(presetSettings);
+
+      // Build the prompt with context and preset instructions
+      let systemPrompt = `You are a creative writing assistant helping an author write their novel.
 Your job is to suggest the next few words or sentence that naturally continues the story.
 Keep suggestions concise (1-2 sentences max).
 Match the author's tone and style.
-Be creative but consistent with the established context.`;
+Be creative but consistent with the established context.
+
+${activePreset.systemPromptAddition}
+
+${!activePreset.introduceNewElements ? 'IMPORTANT: Do not introduce new plot elements, characters, or locations. Only continue with what has been established.' : ''}`;
 
       // Add context if available
       if (context) {
@@ -248,15 +264,18 @@ Be creative but consistent with the established context.`;
 
       console.log('🤖 Making OpenAI API call from main process...');
       console.log('📝 Request text length:', recentText.length);
-      
+      console.log('🎨 Using preset:', activePreset.name);
+      console.log('🌡️ Temperature:', activePreset.temperature);
+      console.log('📏 Max tokens:', activePreset.maxTokens);
+
       const response = await openaiClient.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Continue this text naturally:\n\n${recentText}` }
         ],
-        temperature: 0.7,
-        max_tokens: 50, // Reduced from 100 to stay within limits
+        temperature: activePreset.temperature,
+        max_tokens: activePreset.maxTokens,
         stream: false
       });
 
@@ -320,6 +339,108 @@ Be creative but consistent with the established context.`;
       }
       
       return { success: false, message: errorMessage };
+    }
+  });
+
+  // Directed AI generation (from AI Assistant Panel)
+  ipcMain.handle('ai:generate-directed', async (_, params: {
+    instruction: string;
+    paragraphCount: number;
+    conversationHistory?: Array<{ role: string; content: string }>;
+    referencedNotes?: string;
+  }) => {
+    try {
+      if (!openaiClient) {
+        initializeOpenAI();
+      }
+
+      if (!openaiClient) {
+        throw new Error('OpenAI API key not found in environment variables');
+      }
+
+      // Load preset settings
+      const presetSettings: CustomAISettings = {
+        activePresetId: currentDb?.getSetting('ai_preset_id') || DEFAULT_CUSTOM_SETTINGS.activePresetId,
+        customInstructions: currentDb?.getSetting('ai_custom_instructions') || DEFAULT_CUSTOM_SETTINGS.customInstructions,
+        customTemperature: parseFloat(currentDb?.getSetting('ai_custom_temperature') || String(DEFAULT_CUSTOM_SETTINGS.customTemperature)),
+        customMaxTokens: parseInt(currentDb?.getSetting('ai_custom_max_tokens') || String(DEFAULT_CUSTOM_SETTINGS.customMaxTokens)),
+        customIntroduceNewElements: currentDb?.getSetting('ai_custom_introduce_new_elements') === 'true' || DEFAULT_CUSTOM_SETTINGS.customIntroduceNewElements
+      };
+
+      const activePreset = getActivePresetSettings(presetSettings);
+
+      // Build system prompt for directed generation
+      let systemPrompt = `You are a creative writing assistant helping an author write their novel.
+The author will give you specific instructions about what should happen next in the story.
+Your job is to write ${params.paragraphCount} paragraph${params.paragraphCount > 1 ? 's' : ''} that fulfill their request.
+
+${activePreset.systemPromptAddition}
+
+${!activePreset.introduceNewElements ? 'IMPORTANT: Do not introduce new plot elements, characters, or locations unless specifically instructed. Only work with what has been established.' : ''}
+
+Write exactly ${params.paragraphCount} paragraph${params.paragraphCount > 1 ? 's' : ''}.
+Make it compelling and consistent with the established tone and style.`;
+
+      // Add referenced notes if provided
+      if (params.referencedNotes) {
+        systemPrompt += `\n\nRELEVANT REFERENCE NOTES:${params.referencedNotes}`;
+      }
+
+      // Build messages array with conversation history
+      const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+        { role: 'system', content: systemPrompt }
+      ];
+
+      // Add conversation history for context (last few exchanges)
+      if (params.conversationHistory && params.conversationHistory.length > 0) {
+        params.conversationHistory.forEach(msg => {
+          messages.push({
+            role: msg.role as 'user' | 'assistant',
+            content: msg.content
+          });
+        });
+      }
+
+      // Add current instruction
+      messages.push({
+        role: 'user',
+        content: params.instruction
+      });
+
+      console.log('🤖 Making directed AI generation call...');
+      console.log('📝 Instruction:', params.instruction);
+      console.log('📄 Paragraphs requested:', params.paragraphCount);
+      console.log('🎨 Using preset:', activePreset.name);
+
+      // Calculate max tokens based on paragraph count (roughly 100-150 tokens per paragraph)
+      const maxTokens = Math.min(params.paragraphCount * 150, 1000);
+
+      const response = await openaiClient.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: messages,
+        temperature: activePreset.temperature,
+        max_tokens: maxTokens,
+        stream: false
+      });
+
+      const generatedText = response.choices[0]?.message?.content?.trim() || '';
+      console.log('✅ Directed generation successful');
+      return generatedText;
+
+    } catch (error) {
+      console.error('❌ Directed AI generation error:', error);
+
+      if (error instanceof Error) {
+        if (error.message.includes('429')) {
+          throw new Error('Rate limit exceeded. Please wait a moment before trying again.');
+        } else if (error.message.includes('401')) {
+          throw new Error('Invalid API key. Please check your OpenAI API key in the .env file.');
+        } else if (error.message.includes('quota')) {
+          throw new Error('OpenAI quota exceeded. Please check your OpenAI account billing.');
+        }
+      }
+
+      throw new Error(`AI generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   });
 }

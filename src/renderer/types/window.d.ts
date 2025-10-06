@@ -71,6 +71,12 @@ declare global {
           worldBuildingNotes?: string;
         }) => Promise<string>;
         testApiKey: () => Promise<{ success: boolean; message: string }>;
+        generateDirected: (params: {
+          instruction: string;
+          paragraphCount: number;
+          conversationHistory?: Array<{ role: string; content: string }>;
+          referencedNotes?: string;
+        }) => Promise<string>;
       };
     };
   }

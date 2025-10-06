@@ -1,7 +1,8 @@
 // src/renderer/src/components/SettingsModal.tsx
 import React, { useState, useEffect } from 'react';
-import { X, Key, Zap } from 'lucide-react';
+import { X, Key, Zap, Sparkles } from 'lucide-react';
 import aiService, { DEFAULT_AI_SETTINGS } from '../services/aiService';
+import { BUILT_IN_PRESETS } from '../../../shared/aiPresets';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -15,12 +16,42 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [suggestionDelay, setSuggestionDelay] = useState(DEFAULT_AI_SETTINGS.suggestionDelay);
   const [temperature, setTemperature] = useState(DEFAULT_AI_SETTINGS.temperature);
 
+  // AI Preset settings
+  const [activePresetId, setActivePresetId] = useState('general');
+  const [customInstructions, setCustomInstructions] = useState('');
+  const [customTemperature, setCustomTemperature] = useState(0.7);
+  const [customMaxTokens, setCustomMaxTokens] = useState(50);
+  const [customIntroduceNewElements, setCustomIntroduceNewElements] = useState(true);
+
   useEffect(() => {
-    setIsInitialized(true); // AI service is always ready with IPC
-    const settings = aiService.getSettings();
-    setAiEnabled(settings.enabled);
-    setSuggestionDelay(settings.suggestionDelay);
-    setTemperature(settings.temperature);
+    const loadSettings = async () => {
+      setIsInitialized(true); // AI service is always ready with IPC
+      const settings = aiService.getSettings();
+      setAiEnabled(settings.enabled);
+      setSuggestionDelay(settings.suggestionDelay);
+      setTemperature(settings.temperature);
+
+      // Load preset settings from database
+      try {
+        const presetId = await window.api.settings.get('ai_preset_id') || 'general';
+        const instructions = await window.api.settings.get('ai_custom_instructions') || '';
+        const temp = await window.api.settings.get('ai_custom_temperature');
+        const tokens = await window.api.settings.get('ai_custom_max_tokens');
+        const newElements = await window.api.settings.get('ai_custom_introduce_new_elements');
+
+        setActivePresetId(presetId);
+        setCustomInstructions(instructions);
+        setCustomTemperature(temp ? parseFloat(temp) : 0.7);
+        setCustomMaxTokens(tokens ? parseInt(tokens) : 50);
+        setCustomIntroduceNewElements(newElements === 'true' || newElements === undefined);
+      } catch (error) {
+        console.error('Error loading preset settings:', error);
+      }
+    };
+
+    if (isOpen) {
+      loadSettings();
+    }
   }, [isOpen]);
 
   const handleSaveApiKey = () => {
@@ -54,15 +85,33 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  const handleSaveSettings = () => {
-    aiService.updateSettings({
-      enabled: aiEnabled,
-      suggestionDelay: suggestionDelay,
-      temperature: temperature
-    });
-    alert('Settings saved!');
-    onClose();
+  const handleSaveSettings = async () => {
+    try {
+      // Save basic AI settings
+      aiService.updateSettings({
+        enabled: aiEnabled,
+        suggestionDelay: suggestionDelay,
+        temperature: temperature
+      });
+
+      // Save preset settings to database
+      await window.api.settings.set('ai_preset_id', activePresetId);
+      await window.api.settings.set('ai_custom_instructions', customInstructions);
+      await window.api.settings.set('ai_custom_temperature', customTemperature.toString());
+      await window.api.settings.set('ai_custom_max_tokens', customMaxTokens.toString());
+      await window.api.settings.set('ai_custom_introduce_new_elements', customIntroduceNewElements.toString());
+
+      alert('Settings saved!');
+      onClose();
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      alert('Error saving settings: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
   };
+
+  // Get current active preset
+  const currentPreset = BUILT_IN_PRESETS[activePresetId] || BUILT_IN_PRESETS.general;
+  const isCustomPreset = activePresetId === 'custom';
 
   if (!isOpen) return null;
 
@@ -217,6 +266,149 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
               />
               <span style={{ fontSize: '14px' }}>Enable AI Suggestions</span>
             </label>
+          </div>
+
+          {/* Writing Presets Section */}
+          <div style={{ marginBottom: '24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <Sparkles size={18} color="#dcb67a" />
+              <h3 style={{ margin: 0, fontSize: '16px' }}>Writing Presets</h3>
+            </div>
+
+            {/* Preset Selector */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: '#888' }}>
+                Scene Type
+              </label>
+              <select
+                value={activePresetId}
+                onChange={(e) => setActivePresetId(e.target.value)}
+                disabled={!aiEnabled}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  backgroundColor: '#1e1e1e',
+                  border: '1px solid #333',
+                  borderRadius: '4px',
+                  color: '#d4d4d4',
+                  fontSize: '13px',
+                  cursor: aiEnabled ? 'pointer' : 'not-allowed'
+                }}
+              >
+                {Object.values(BUILT_IN_PRESETS).map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name} - {preset.description}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Preset Info */}
+            <div style={{
+              padding: '12px',
+              backgroundColor: '#1e1e1e',
+              borderRadius: '4px',
+              border: '1px solid #333',
+              marginBottom: '16px'
+            }}>
+              <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>
+                <strong style={{ color: '#dcb67a' }}>{currentPreset.name}</strong>
+              </div>
+              <div style={{ fontSize: '11px', color: '#aaa', marginBottom: '8px' }}>
+                {currentPreset.description}
+              </div>
+              {!isCustomPreset && (
+                <div style={{ fontSize: '11px', color: '#666' }}>
+                  {currentPreset.systemPromptAddition}
+                </div>
+              )}
+            </div>
+
+            {/* Custom Preset Settings */}
+            {isCustomPreset && (
+              <>
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: '#888' }}>
+                    Custom Instructions
+                  </label>
+                  <textarea
+                    value={customInstructions}
+                    onChange={(e) => setCustomInstructions(e.target.value)}
+                    placeholder="Describe the style and tone you want..."
+                    disabled={!aiEnabled}
+                    style={{
+                      width: '100%',
+                      minHeight: '80px',
+                      padding: '8px',
+                      backgroundColor: '#1e1e1e',
+                      border: '1px solid #333',
+                      borderRadius: '4px',
+                      color: '#d4d4d4',
+                      fontSize: '12px',
+                      fontFamily: 'inherit',
+                      resize: 'vertical'
+                    }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: '#888' }}>
+                    Custom Creativity: {customTemperature.toFixed(1)}
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={customTemperature}
+                    onChange={(e) => setCustomTemperature(Number(e.target.value))}
+                    disabled={!aiEnabled}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: '#888' }}>
+                    Max Length: {customMaxTokens} tokens
+                  </label>
+                  <input
+                    type="range"
+                    min="20"
+                    max="150"
+                    step="10"
+                    value={customMaxTokens}
+                    onChange={(e) => setCustomMaxTokens(Number(e.target.value))}
+                    disabled={!aiEnabled}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginBottom: '16px',
+                  cursor: aiEnabled ? 'pointer' : 'not-allowed'
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={customIntroduceNewElements}
+                    onChange={(e) => setCustomIntroduceNewElements(e.target.checked)}
+                    disabled={!aiEnabled}
+                    style={{ cursor: aiEnabled ? 'pointer' : 'not-allowed' }}
+                  />
+                  <span style={{ fontSize: '13px', color: '#888' }}>Allow introducing new elements</span>
+                </label>
+              </>
+            )}
+          </div>
+
+          {/* AI Behavior Settings */}
+          <div style={{ marginBottom: '24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <Zap size={18} color="#dcb67a" />
+              <h3 style={{ margin: 0, fontSize: '16px' }}>AI Behavior</h3>
+            </div>
 
             {/* Suggestion Delay */}
             <div style={{ marginBottom: '16px' }}>

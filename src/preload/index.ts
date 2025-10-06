@@ -55,7 +55,13 @@ const api = {
       settingNotes?: string;
       worldBuildingNotes?: string;
     }) => ipcRenderer.invoke('ai:generate-suggestion', recentText, context),
-    testApiKey: () => ipcRenderer.invoke('ai:test-api-key')
+    testApiKey: () => ipcRenderer.invoke('ai:test-api-key'),
+    generateDirected: (params: {
+      instruction: string;
+      paragraphCount: number;
+      conversationHistory?: Array<{ role: string; content: string }>;
+      referencedNotes?: string;
+    }) => ipcRenderer.invoke('ai:generate-directed', params)
   }
 };
 

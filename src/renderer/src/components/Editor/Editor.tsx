@@ -3,10 +3,11 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { createEditor, Descendant, Editor as SlateEditor, Transforms, Text, Node } from 'slate';
 import { Slate, Editable, withReact, RenderLeafProps, RenderElementProps } from 'slate-react';
 import { withHistory } from 'slate-history';
-import { Bold, Italic, Underline, File, Sparkles } from 'lucide-react';
+import { Bold, Italic, Underline, File, Sparkles, MessageSquare } from 'lucide-react';
 import { useProject } from '../../contexts/ProjectContext';
 import { DocumentRow } from '../../../types/window';
 import aiService from '../../services/aiService';
+import AIAssistantPanel from '../AIAssistantPanel';
 
 // Custom types for Slate
 type CustomText = {
@@ -111,6 +112,7 @@ const Editor: React.FC = () => {
   const [mode, setMode] = useState<'freewrite' | 'vibewrite'>('freewrite');
   const suggestionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTextRef = useRef<string>(''); // Track the last text to detect what user typed
+  const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
 
   // Initialize AI service with API key
   useEffect(() => {
@@ -353,8 +355,20 @@ const Editor: React.FC = () => {
     return marks ? marks[format] === true : false;
   };
 
+  // Insert text from AI assistant
+  const handleInsertText = useCallback((text: string) => {
+    editor.insertText(text);
+  }, [editor]);
+
   // Keyboard shortcuts
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    // Ctrl+K to toggle AI assistant
+    if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+      event.preventDefault();
+      setIsAIAssistantOpen(prev => !prev);
+      return;
+    }
+
     // Tab to accept suggestion (full or partial)
     if (event.key === 'Tab' && ghostText) {
       event.preventDefault();
@@ -400,7 +414,7 @@ const Editor: React.FC = () => {
         }
         break;
     }
-  }, [toggleFormat, currentDoc, value, updateDocumentContent, ghostText, acceptSuggestion, acceptOneWord, clearGhostText]);
+  }, [toggleFormat, currentDoc, value, updateDocumentContent, ghostText, acceptSuggestion, acceptOneWord, clearGhostText, editor]);
 
   // Render decorator for ghost text - shows inline after cursor
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
@@ -560,10 +574,31 @@ const Editor: React.FC = () => {
           {mode === 'vibewrite' ? 'Vibe Write' : 'Free Write'}
         </button>
 
-        <div style={{ marginLeft: 'auto', fontSize: '12px', color: '#888', alignSelf: 'center' }}>
-          {mode === 'vibewrite' && ghostText && '✨ Tab to accept all | Shift+Tab for one word | Esc to dismiss'}
-          {mode === 'vibewrite' && isLoadingSuggestion && '⏳ Generating...'}
-          {mode === 'freewrite' && 'Ctrl+S to save'}
+        <div style={{ marginLeft: 'auto', fontSize: '12px', color: '#888', alignSelf: 'center', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span>
+            {mode === 'vibewrite' && ghostText && '✨ Tab to accept all | Shift+Tab for one word | Esc to dismiss'}
+            {mode === 'vibewrite' && isLoadingSuggestion && '⏳ Generating...'}
+            {mode === 'freewrite' && 'Ctrl+S to save'}
+          </span>
+          <button
+            onClick={() => setIsAIAssistantOpen(prev => !prev)}
+            title="AI Assistant (Ctrl+K)"
+            style={{
+              padding: '6px 10px',
+              backgroundColor: isAIAssistantOpen ? '#0e639c' : '#333',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '3px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <MessageSquare size={14} />
+            AI Chat
+          </button>
         </div>
       </div>
 
@@ -595,6 +630,14 @@ const Editor: React.FC = () => {
           />
         </Slate>
       </div>
+
+      {/* AI Assistant Panel */}
+      <AIAssistantPanel
+        isOpen={isAIAssistantOpen}
+        onClose={() => setIsAIAssistantOpen(false)}
+        onInsertText={handleInsertText}
+        references={references}
+      />
     </div>
   );
 };
