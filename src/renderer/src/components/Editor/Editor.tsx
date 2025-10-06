@@ -9,12 +9,12 @@ import { DocumentRow } from '../../../types/window';
 import aiService from '../../services/aiService';
 
 // Custom types for Slate
-type CustomText = { 
-  text: string; 
-  bold?: boolean; 
-  italic?: boolean; 
+type CustomText = {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
   underline?: boolean;
-  ghost?: boolean; // For ghost text suggestions
+  ghostSuggestion?: string; // Ghost text to show after this text node
 };
 
 type ParagraphElement = { type: 'paragraph'; children: CustomText[] };
@@ -54,19 +54,7 @@ const initialValue: Descendant[] = [
 // Render leaf (for bold, italic, underline, ghost text)
 const Leaf = ({ attributes, children, leaf }: RenderLeafProps) => {
   let style: React.CSSProperties = {};
-  
-  if (leaf.ghost) {
-    style = { 
-      ...style, 
-      color: 'var(--primary-green)', 
-      fontStyle: 'italic',
-      opacity: 0.8,
-      backgroundColor: 'rgba(78, 222, 128, 0.1)',
-      padding: '2px 4px',
-      borderRadius: '3px'
-    };
-  }
-  
+
   if (leaf.bold) {
     children = <strong>{children}</strong>;
   }
@@ -76,7 +64,28 @@ const Leaf = ({ attributes, children, leaf }: RenderLeafProps) => {
   if (leaf.underline) {
     children = <u>{children}</u>;
   }
-  
+
+  // Add ghost text suggestion after the text if it exists
+  if (leaf.ghostSuggestion) {
+    children = (
+      <>
+        {children}
+        <span
+          contentEditable={false}
+          style={{
+            color: 'var(--primary-green)',
+            opacity: 0.5,
+            fontStyle: 'italic',
+            pointerEvents: 'none',
+            userSelect: 'none'
+          }}
+        >
+          {leaf.ghostSuggestion}
+        </span>
+      </>
+    );
+  }
+
   return <span {...attributes} style={style}>{children}</span>;
 };
 
@@ -101,6 +110,7 @@ const Editor: React.FC = () => {
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
   const [mode, setMode] = useState<'freewrite' | 'vibewrite'>('freewrite');
   const suggestionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastTextRef = useRef<string>(''); // Track the last text to detect what user typed
 
   // Initialize AI service with API key
   useEffect(() => {
@@ -207,16 +217,10 @@ const Editor: React.FC = () => {
 
       console.log('✅ DEBUG: Got suggestion from AI:', suggestion);
       setGhostText(suggestion);
-      
-      // Add a temporary alert to make it super obvious
-      if (suggestion) {
-        alert(`AI Suggestion Received: ${suggestion.substring(0, 100)}...`);
-      }
-      
+
     } catch (error) {
       console.error('❌ DEBUG: Error getting suggestion:', error);
       setGhostText('');
-      alert(`AI Error: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsLoadingSuggestion(false);
     }
@@ -227,13 +231,33 @@ const Editor: React.FC = () => {
     setGhostText('');
   }, []);
 
-  // Accept ghost text suggestion
+  // Accept ghost text suggestion (full)
   const acceptSuggestion = useCallback(() => {
     if (!ghostText) return;
 
     // Insert the ghost text at the cursor
     editor.insertText(ghostText);
     clearGhostText();
+  }, [editor, ghostText, clearGhostText]);
+
+  // Accept one word from ghost text (partial)
+  const acceptOneWord = useCallback(() => {
+    if (!ghostText) return;
+
+    // Find the first word in the ghost text
+    const match = ghostText.match(/^\s*\S+/);
+    if (match) {
+      const firstWord = match[0];
+      editor.insertText(firstWord);
+
+      // Remove the accepted word from ghost text
+      const remaining = ghostText.slice(firstWord.length);
+      if (remaining.trim()) {
+        setGhostText(remaining);
+      } else {
+        clearGhostText();
+      }
+    }
   }, [editor, ghostText, clearGhostText]);
 
   // Auto-save with debounce
@@ -255,25 +279,55 @@ const Editor: React.FC = () => {
 
     setSaveTimeout(timeout);
 
+    // Get current text to compare with last text
+    const currentText = extractText(newValue);
+    const lastText = lastTextRef.current;
+
+    // Handle ghost text matching logic
+    if (ghostText && mode === 'vibewrite') {
+      // Check if user typed something that matches the ghost text
+      if (currentText.length > lastText.length) {
+        const newChars = currentText.slice(lastText.length);
+
+        // Check if the new characters match the beginning of ghost text
+        const ghostLower = ghostText.toLowerCase().trimStart();
+        const newCharsLower = newChars.toLowerCase();
+
+        if (ghostLower.startsWith(newCharsLower)) {
+          // User is typing matching text - trim the ghost text
+          const remainingGhost = ghostText.trimStart().slice(newChars.length);
+          setGhostText(remainingGhost);
+        } else {
+          // User typed something that doesn't match - clear ghost text
+          clearGhostText();
+        }
+      }
+    }
+
+    // Update last text reference
+    lastTextRef.current = currentText;
+
     // Handle AI suggestion in vibe write mode
     console.log('🔍 DEBUG: handleChange - mode =', mode, 'AI enabled =', aiService.getSettings().enabled);
-    
+
     if (mode === 'vibewrite' && aiService.getSettings().enabled) {
       console.log('✅ DEBUG: Setting up AI suggestion timer...');
-      
+
       // Clear existing suggestion timeout
       if (suggestionTimeoutRef.current) {
         clearTimeout(suggestionTimeoutRef.current);
         console.log('🔍 DEBUG: Cleared existing suggestion timeout');
       }
 
-      // Clear current ghost text
-      clearGhostText();
+      // Only clear ghost text if we haven't already handled it above
+      if (!ghostText) {
+        clearGhostText();
+      }
 
       // Set new timeout for suggestion
       const settings = aiService.getSettings();
       console.log('🔍 DEBUG: Setting timer for', settings.suggestionDelay, 'ms');
-      
+
       suggestionTimeoutRef.current = setTimeout(() => {
         console.log('⏰ DEBUG: Timer fired! Calling requestSuggestion...');
         requestSuggestion();
@@ -281,7 +335,7 @@ const Editor: React.FC = () => {
     } else {
       console.log('❌ DEBUG: Not setting AI timer - mode:', mode, 'AI enabled:', aiService.getSettings().enabled);
     }
-  }, [currentDoc, saveTimeout, updateDocumentContent, mode, requestSuggestion, clearGhostText]);
+  }, [currentDoc, saveTimeout, updateDocumentContent, mode, requestSuggestion, clearGhostText, ghostText, extractText]);
 
   // Toggle format helper
   const toggleFormat = useCallback((format: 'bold' | 'italic' | 'underline') => {
@@ -301,10 +355,17 @@ const Editor: React.FC = () => {
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
-    // Tab to accept suggestion
+    // Tab to accept suggestion (full or partial)
     if (event.key === 'Tab' && ghostText) {
       event.preventDefault();
-      acceptSuggestion();
+
+      if (event.shiftKey) {
+        // Shift+Tab: accept one word
+        acceptOneWord();
+      } else {
+        // Tab: accept full suggestion
+        acceptSuggestion();
+      }
       return;
     }
 
@@ -339,34 +400,54 @@ const Editor: React.FC = () => {
         }
         break;
     }
-  }, [toggleFormat, currentDoc, value, updateDocumentContent, ghostText, acceptSuggestion, clearGhostText]);
+  }, [toggleFormat, currentDoc, value, updateDocumentContent, ghostText, acceptSuggestion, acceptOneWord, clearGhostText]);
 
-  // Render decorator for ghost text
+  // Render decorator for ghost text - shows inline after cursor
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
     const ranges: any[] = [];
 
-    if (!ghostText || !Text.isText(node)) {
+    if (!ghostText || !Text.isText(node) || mode !== 'vibewrite') {
       return ranges;
     }
 
-    // Show ghost text at the end of the last text node
-    if (path.length === 2 && path[0] === value.length - 1) {
+    // Get the current selection
+    const { selection } = editor;
+    if (!selection || !selection.focus) {
+      return ranges;
+    }
+
+    // Check if this is the node where the cursor is
+    const focusPath = selection.focus.path;
+    if (path.length === focusPath.length && path.every((p, i) => p === focusPath[i])) {
+      const focusOffset = selection.focus.offset;
       const { text } = node;
-      const lastTextNode = value[value.length - 1];
-      const lastChild = (lastTextNode as any).children?.[(lastTextNode as any).children?.length - 1];
-      
-      if (lastChild === node && text.length > 0) {
+
+      // Split the text node at cursor to show ghost text
+      if (focusOffset === text.length) {
+        // Cursor is at the end of the text - add ghost suggestion to this range
         ranges.push({
-          anchor: { path, offset: text.length },
+          anchor: { path, offset: 0 },
           focus: { path, offset: text.length },
-          ghost: true,
-          text: ghostText
+          ghostSuggestion: ghostText
         });
+      } else if (focusOffset < text.length) {
+        // Cursor is in the middle - split into before and after cursor
+        ranges.push(
+          {
+            anchor: { path, offset: 0 },
+            focus: { path, offset: focusOffset },
+          },
+          {
+            anchor: { path, offset: focusOffset },
+            focus: { path, offset: text.length },
+            ghostSuggestion: ghostText
+          }
+        );
       }
     }
 
     return ranges;
-  }, [ghostText, value]);
+  }, [ghostText, editor, mode]);
 
   if (!currentDoc) {
     return (
@@ -480,7 +561,7 @@ const Editor: React.FC = () => {
         </button>
 
         <div style={{ marginLeft: 'auto', fontSize: '12px', color: '#888', alignSelf: 'center' }}>
-          {mode === 'vibewrite' && ghostText && '✨ Tab to accept | Esc to dismiss'}
+          {mode === 'vibewrite' && ghostText && '✨ Tab to accept all | Shift+Tab for one word | Esc to dismiss'}
           {mode === 'vibewrite' && isLoadingSuggestion && '⏳ Generating...'}
           {mode === 'freewrite' && 'Ctrl+S to save'}
         </div>
@@ -512,39 +593,6 @@ const Editor: React.FC = () => {
               outline: 'none'
             }}
           />
-          
-          {/* Ghost text display */}
-          {ghostText && mode === 'vibewrite' && (
-            <div style={{
-              position: 'fixed',
-              bottom: '80px',
-              right: '20px',
-              padding: '16px 20px',
-              backgroundColor: '#2d3748',
-              border: '2px solid var(--primary-green)',
-              borderRadius: '8px',
-              maxWidth: '450px',
-              fontSize: '14px',
-              color: '#e2e8f0',
-              lineHeight: '1.5',
-              zIndex: 1000,
-              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
-            }}>
-              <div style={{ 
-                marginBottom: '10px', 
-                fontSize: '12px', 
-                color: 'var(--primary-green)', 
-                fontWeight: 'bold',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px'
-              }}>
-                ✨ AI SUGGESTION • Press Tab to Accept
-              </div>
-              <div style={{ color: '#cbd5e0', fontStyle: 'italic' }}>
-                {ghostText}
-              </div>
-            </div>
-          )}
         </Slate>
       </div>
     </div>
