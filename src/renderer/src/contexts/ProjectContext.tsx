@@ -23,9 +23,11 @@ interface ProjectContextType {
   loadDocuments: () => Promise<void>;
   setActiveDocument: (id: string | null) => void;
   
-  createDocument: (name: string, parentId: string | null) => Promise<string>;
-  createFolder: (name: string, parentId: string | null) => Promise<string>;
+  createDocument: (name: string, parentId: string | null, hierarchyLevel?: 'novel' | 'part' | 'chapter' | 'scene' | null) => Promise<string>;
+  createFolder: (name: string, parentId: string | null, hierarchyLevel?: 'novel' | 'part' | 'chapter' | null) => Promise<string>;
   updateDocumentContent: (id: string, content: string) => Promise<void>;
+  updateDocumentNotes: (id: string, notes: string) => Promise<void>;
+  updateDocumentWordCount: (id: string, wordCount: number) => Promise<void>;
   deleteDocument: (id: string) => Promise<void>;
   
   loadReferences: () => Promise<void>;
@@ -104,9 +106,9 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
-  const createDocument = useCallback(async (name: string, parentId: string | null) => {
+  const createDocument = useCallback(async (name: string, parentId: string | null, hierarchyLevel?: 'novel' | 'part' | 'chapter' | 'scene' | null) => {
     try {
-      const id = await window.api.document.create(name, parentId, 'manuscript');
+      const id = await window.api.document.create(name, parentId, 'manuscript', hierarchyLevel);
       await loadDocuments();
       return id;
     } catch (error) {
@@ -115,9 +117,9 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [loadDocuments]);
 
-  const createFolder = useCallback(async (name: string, parentId: string | null) => {
+  const createFolder = useCallback(async (name: string, parentId: string | null, hierarchyLevel?: 'novel' | 'part' | 'chapter' | null) => {
     try {
-      const id = await window.api.folder.create(name, parentId);
+      const id = await window.api.folder.create(name, parentId, hierarchyLevel);
       await loadDocuments();
       return id;
     } catch (error) {
@@ -131,6 +133,22 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       await window.api.document.updateContent(id, content);
     } catch (error) {
       console.error('Error updating document:', error);
+    }
+  }, []);
+
+  const updateDocumentNotes = useCallback(async (id: string, notes: string) => {
+    try {
+      await window.api.document.updateNotes(id, notes);
+    } catch (error) {
+      console.error('Error updating document notes:', error);
+    }
+  }, []);
+
+  const updateDocumentWordCount = useCallback(async (id: string, wordCount: number) => {
+    try {
+      await window.api.document.updateWordCount(id, wordCount);
+    } catch (error) {
+      console.error('Error updating word count:', error);
     }
   }, []);
 
@@ -201,6 +219,8 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     createDocument,
     createFolder,
     updateDocumentContent,
+    updateDocumentNotes,
+    updateDocumentWordCount,
     deleteDocument,
     loadReferences,
     createReference,

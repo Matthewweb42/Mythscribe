@@ -1,6 +1,6 @@
 // src/renderer/src/components/Sidebar/Sidebar.tsx
 import React, { useState, useMemo } from 'react';
-import { ChevronRight, ChevronDown, File, FolderIcon, Trash2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, File, FolderIcon, Trash2, Plus, BookOpen, Layers, FileText } from 'lucide-react';
 import { useProject } from '../contexts/ProjectContext';
 import { DocumentRow } from '../../types/window';
 
@@ -8,6 +8,22 @@ interface TreeNode {
   item: DocumentRow;
   children: TreeNode[];
 }
+
+// Helper to get icon and color based on hierarchy level
+const getHierarchyIcon = (level: string | null) => {
+  switch (level) {
+    case 'novel':
+      return { icon: BookOpen, color: 'var(--primary-green)' };
+    case 'part':
+      return { icon: Layers, color: '#569cd6' };
+    case 'chapter':
+      return { icon: FolderIcon, color: '#ce9178' };
+    case 'scene':
+      return { icon: FileText, color: '#4ec9b0' };
+    default:
+      return { icon: File, color: 'var(--primary-green)' };
+  }
+};
 
 const TreeNodeComponent: React.FC<{
   node: TreeNode;
@@ -60,15 +76,28 @@ const TreeNodeComponent: React.FC<{
           {isFolder ? (
             <>
               {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              <FolderIcon size={16} color="var(--primary-green-light)" />
+              {(() => {
+                const { icon: Icon, color } = getHierarchyIcon(node.item.hierarchy_level);
+                return <Icon size={16} color={color} />;
+              })()}
             </>
           ) : (
             <>
               <div style={{ width: '16px' }} />
-              <File size={16} color="var(--primary-green)" />
+              {(() => {
+                const { icon: Icon, color } = getHierarchyIcon(node.item.hierarchy_level);
+                return <Icon size={16} color={color} />;
+              })()}
             </>
           )}
-          <span style={{ fontSize: '13px' }}>{node.item.name}</span>
+          <span style={{ fontSize: '13px' }}>
+            {node.item.name}
+            {node.item.word_count > 0 && (
+              <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888' }}>
+                ({node.item.word_count.toLocaleString()} words)
+              </span>
+            )}
+          </span>
         </div>
 
         {/* Delete button */}
@@ -108,6 +137,8 @@ const Sidebar: React.FC = () => {
   const { documents, activeDocumentId, setActiveDocument, createDocument, createFolder, deleteDocument } = useProject();
   const [newItemName, setNewItemName] = useState('');
   const [showInput, setShowInput] = useState<'document' | 'folder' | null>(null);
+  const [hierarchyLevel, setHierarchyLevel] = useState<'novel' | 'part' | 'chapter' | 'scene' | null>(null);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
 
   // Build tree structure from flat document list
   const tree = useMemo(() => {
@@ -131,19 +162,41 @@ const Sidebar: React.FC = () => {
 
   const handleCreate = async (type: 'document' | 'folder') => {
     if (!newItemName.trim()) return;
-    
+
     try {
       if (type === 'document') {
-        const id = await createDocument(newItemName, null);
+        const id = await createDocument(newItemName, null, hierarchyLevel || undefined);
         setActiveDocument(id);
       } else {
-        await createFolder(newItemName, null);
+        await createFolder(newItemName, null, hierarchyLevel as 'novel' | 'part' | 'chapter' | null);
       }
       setNewItemName('');
       setShowInput(null);
+      setHierarchyLevel(null);
+      setShowCreateMenu(false);
     } catch (error) {
       console.error('Error creating item:', error);
     }
+  };
+
+  const openCreateDialog = (type: 'document' | 'folder', level: 'novel' | 'part' | 'chapter' | 'scene' | null) => {
+    setShowInput(type);
+    setHierarchyLevel(level);
+    setShowCreateMenu(false);
+  };
+
+  const menuButtonStyle: React.CSSProperties = {
+    padding: '8px 10px',
+    backgroundColor: '#252526',
+    color: '#d4d4d4',
+    border: '1px solid #333',
+    borderRadius: '3px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'background-color 0.2s'
   };
 
   return (
@@ -248,7 +301,7 @@ const Sidebar: React.FC = () => {
       )}
 
       {/* Add buttons */}
-      {!showInput && (
+      {!showInput && !showCreateMenu && (
         <div style={{
           padding: '12px',
           borderTop: '1px solid #333',
@@ -256,34 +309,78 @@ const Sidebar: React.FC = () => {
           gap: '8px'
         }}>
           <button
-            onClick={() => setShowInput('document')}
+            onClick={() => setShowCreateMenu(true)}
             style={{
               flex: 1,
-              padding: '6px',
+              padding: '8px',
               backgroundColor: 'var(--primary-green)',
               color: '#fff',
               border: 'none',
               borderRadius: '3px',
               cursor: 'pointer',
-              fontSize: '12px'
+              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px'
             }}
           >
-            + Document
+            <Plus size={14} />
+            New Item
           </button>
+        </div>
+      )}
+
+      {/* Create menu */}
+      {showCreateMenu && (
+        <div style={{
+          padding: '12px',
+          borderTop: '1px solid #333',
+          backgroundColor: '#1e1e1e',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px'
+        }}>
+          <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px', textTransform: 'uppercase' }}>
+            Create New:
+          </div>
+
+          <button onClick={() => openCreateDialog('folder', 'part')} style={menuButtonStyle}>
+            <Layers size={14} color="#569cd6" />
+            <span>Part</span>
+          </button>
+
+          <button onClick={() => openCreateDialog('folder', 'chapter')} style={menuButtonStyle}>
+            <FolderIcon size={14} color="#ce9178" />
+            <span>Chapter</span>
+          </button>
+
+          <button onClick={() => openCreateDialog('document', 'scene')} style={menuButtonStyle}>
+            <FileText size={14} color="#4ec9b0" />
+            <span>Scene</span>
+          </button>
+
+          <div style={{ borderTop: '1px solid #333', margin: '4px 0' }} />
+
+          <button onClick={() => openCreateDialog('document', null)} style={menuButtonStyle}>
+            <File size={14} color="var(--primary-green)" />
+            <span>Generic Document</span>
+          </button>
+
+          <button onClick={() => openCreateDialog('folder', null)} style={menuButtonStyle}>
+            <FolderIcon size={14} color="var(--primary-green-light)" />
+            <span>Generic Folder</span>
+          </button>
+
           <button
-            onClick={() => setShowInput('folder')}
+            onClick={() => setShowCreateMenu(false)}
             style={{
-              flex: 1,
-              padding: '6px',
+              ...menuButtonStyle,
               backgroundColor: '#333',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '3px',
-              cursor: 'pointer',
-              fontSize: '12px'
+              marginTop: '4px'
             }}
           >
-            + Folder
+            Cancel
           </button>
         </div>
       )}

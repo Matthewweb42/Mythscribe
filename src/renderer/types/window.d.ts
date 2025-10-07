@@ -15,6 +15,9 @@ export interface DocumentRow {
   type: 'document' | 'folder';
   content: string | null;
   doc_type: 'manuscript' | 'note' | null;
+  hierarchy_level: 'novel' | 'part' | 'chapter' | 'scene' | null;
+  notes: string | null;
+  word_count: number;
   position: number;
   created: string;
   modified: string;
@@ -39,17 +42,19 @@ declare global {
         close: () => Promise<void>;
       };
       document: {
-        create: (name: string, parentId: string | null, docType: 'manuscript' | 'note') => Promise<string>;
+        create: (name: string, parentId: string | null, docType: 'manuscript' | 'note', hierarchyLevel?: 'novel' | 'part' | 'chapter' | 'scene' | null) => Promise<string>;
         get: (id: string) => Promise<DocumentRow | undefined>;
         getByParent: (parentId: string | null) => Promise<DocumentRow[]>;
         getAll: () => Promise<DocumentRow[]>;
         updateContent: (id: string, content: string) => Promise<void>;
         updateName: (id: string, name: string) => Promise<void>;
+        updateNotes: (id: string, notes: string) => Promise<void>;
+        updateWordCount: (id: string, wordCount: number) => Promise<void>;
         delete: (id: string) => Promise<void>;
         move: (id: string, newParentId: string | null, newPosition: number) => Promise<void>;
       };
       folder: {
-        create: (name: string, parentId: string | null) => Promise<string>;
+        create: (name: string, parentId: string | null, hierarchyLevel?: 'novel' | 'part' | 'chapter' | null) => Promise<string>;
       };
       reference: {
         create: (name: string, category: 'character' | 'setting' | 'worldBuilding', content: string) => Promise<string>;

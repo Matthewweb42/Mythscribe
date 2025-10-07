@@ -12,21 +12,24 @@ const api = {
 
   // Document operations
   document: {
-    create: (name: string, parentId: string | null, docType: 'manuscript' | 'note') => 
-      ipcRenderer.invoke('document:create', name, parentId, docType),
+    create: (name: string, parentId: string | null, docType: 'manuscript' | 'note', hierarchyLevel?: 'novel' | 'part' | 'chapter' | 'scene' | null) =>
+      ipcRenderer.invoke('document:create', name, parentId, docType, hierarchyLevel),
     get: (id: string) => ipcRenderer.invoke('document:get', id),
     getByParent: (parentId: string | null) => ipcRenderer.invoke('document:getByParent', parentId),
     getAll: () => ipcRenderer.invoke('document:getAll'),
     updateContent: (id: string, content: string) => ipcRenderer.invoke('document:updateContent', id, content),
     updateName: (id: string, name: string) => ipcRenderer.invoke('document:updateName', id, name),
+    updateNotes: (id: string, notes: string) => ipcRenderer.invoke('document:updateNotes', id, notes),
+    updateWordCount: (id: string, wordCount: number) => ipcRenderer.invoke('document:updateWordCount', id, wordCount),
     delete: (id: string) => ipcRenderer.invoke('document:delete', id),
-    move: (id: string, newParentId: string | null, newPosition: number) => 
+    move: (id: string, newParentId: string | null, newPosition: number) =>
       ipcRenderer.invoke('document:move', id, newParentId, newPosition)
   },
 
   // Folder operations
   folder: {
-    create: (name: string, parentId: string | null) => ipcRenderer.invoke('folder:create', name, parentId)
+    create: (name: string, parentId: string | null, hierarchyLevel?: 'novel' | 'part' | 'chapter' | null) =>
+      ipcRenderer.invoke('folder:create', name, parentId, hierarchyLevel)
   },
 
   // Reference operations

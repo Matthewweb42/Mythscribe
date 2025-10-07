@@ -88,14 +88,14 @@ export function setupIpcHandlers() {
 
   // ============= DOCUMENT OPERATIONS =============
 
-  ipcMain.handle('document:create', async (_, name: string, parentId: string | null, docType: 'manuscript' | 'note') => {
+  ipcMain.handle('document:create', async (_, name: string, parentId: string | null, docType: 'manuscript' | 'note', hierarchyLevel?: 'novel' | 'part' | 'chapter' | 'scene' | null) => {
     if (!currentDb) throw new Error('No project open');
-    return currentDb.createDocument(name, parentId, docType);
+    return currentDb.createDocument(name, parentId, docType, hierarchyLevel || null);
   });
 
-  ipcMain.handle('folder:create', async (_, name: string, parentId: string | null) => {
+  ipcMain.handle('folder:create', async (_, name: string, parentId: string | null, hierarchyLevel?: 'novel' | 'part' | 'chapter' | null) => {
     if (!currentDb) throw new Error('No project open');
-    return currentDb.createFolder(name, parentId);
+    return currentDb.createFolder(name, parentId, hierarchyLevel || null);
   });
 
   ipcMain.handle('document:get', async (_, id: string) => {
@@ -121,6 +121,16 @@ export function setupIpcHandlers() {
   ipcMain.handle('document:updateName', async (_, id: string, name: string) => {
     if (!currentDb) throw new Error('No project open');
     currentDb.updateDocumentName(id, name);
+  });
+
+  ipcMain.handle('document:updateNotes', async (_, id: string, notes: string) => {
+    if (!currentDb) throw new Error('No project open');
+    currentDb.updateDocumentNotes(id, notes);
+  });
+
+  ipcMain.handle('document:updateWordCount', async (_, id: string, wordCount: number) => {
+    if (!currentDb) throw new Error('No project open');
+    currentDb.updateDocumentWordCount(id, wordCount);
   });
 
   ipcMain.handle('document:delete', async (_, id: string) => {

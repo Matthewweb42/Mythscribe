@@ -18,6 +18,9 @@ export interface DocumentRow {
   type: 'document' | 'folder';
   content: string | null; // Slate JSON stringified
   doc_type: 'manuscript' | 'note' | null;
+  hierarchy_level: 'novel' | 'part' | 'chapter' | 'scene' | null; // Novel structure
+  notes: string | null; // Slate JSON for scene/chapter notes
+  word_count: number; // Cached word count
   position: number; // for ordering
   created: string;
   modified: string;
@@ -70,6 +73,9 @@ export class ProjectDatabase {
         type TEXT NOT NULL CHECK(type IN ('document', 'folder')),
         content TEXT,
         doc_type TEXT CHECK(doc_type IN ('manuscript', 'note', NULL)),
+        hierarchy_level TEXT CHECK(hierarchy_level IN ('novel', 'part', 'chapter', 'scene', NULL)),
+        notes TEXT,
+        word_count INTEGER NOT NULL DEFAULT 0,
         position INTEGER NOT NULL DEFAULT 0,
         created TEXT NOT NULL,
         modified TEXT NOT NULL,
@@ -137,7 +143,12 @@ export class ProjectDatabase {
 
   // ============= DOCUMENT OPERATIONS =============
 
-  createDocument(name: string, parentId: string | null, docType: 'manuscript' | 'note' = 'manuscript'): string {
+  createDocument(
+    name: string,
+    parentId: string | null,
+    docType: 'manuscript' | 'note' = 'manuscript',
+    hierarchyLevel: 'novel' | 'part' | 'chapter' | 'scene' | null = null
+  ): string {
     const id = this.generateId();
     const now = new Date().toISOString();
     const position = this.getNextPosition(parentId);
@@ -147,24 +158,36 @@ export class ProjectDatabase {
       { type: 'paragraph', children: [{ text: '' }] }
     ]);
 
+    const initialNotes = JSON.stringify([
+      { type: 'paragraph', children: [{ text: '' }] }
+    ]);
+
     this.db.prepare(`
-      INSERT INTO documents (id, parent_id, name, type, content, doc_type, position, created, modified)
-      VALUES (?, ?, ?, 'document', ?, ?, ?, ?, ?)
-    `).run(id, parentId, name, initialContent, docType, position, now, now);
+      INSERT INTO documents (id, parent_id, name, type, content, doc_type, hierarchy_level, notes, word_count, position, created, modified)
+      VALUES (?, ?, ?, 'document', ?, ?, ?, ?, 0, ?, ?, ?)
+    `).run(id, parentId, name, initialContent, docType, hierarchyLevel, initialNotes, position, now, now);
 
     this.updateProjectModified();
     return id;
   }
 
-  createFolder(name: string, parentId: string | null): string {
+  createFolder(
+    name: string,
+    parentId: string | null,
+    hierarchyLevel: 'novel' | 'part' | 'chapter' | null = null
+  ): string {
     const id = this.generateId();
     const now = new Date().toISOString();
     const position = this.getNextPosition(parentId);
 
+    const initialNotes = JSON.stringify([
+      { type: 'paragraph', children: [{ text: '' }] }
+    ]);
+
     this.db.prepare(`
-      INSERT INTO documents (id, parent_id, name, type, content, doc_type, position, created, modified)
-      VALUES (?, ?, ?, 'folder', NULL, NULL, ?, ?, ?)
-    `).run(id, parentId, name, position, now, now);
+      INSERT INTO documents (id, parent_id, name, type, content, doc_type, hierarchy_level, notes, word_count, position, created, modified)
+      VALUES (?, ?, ?, 'folder', NULL, NULL, ?, ?, 0, ?, ?, ?)
+    `).run(id, parentId, name, hierarchyLevel, initialNotes, position, now, now);
 
     this.updateProjectModified();
     return id;
@@ -198,12 +221,31 @@ export class ProjectDatabase {
   updateDocumentName(id: string, name: string) {
     const now = new Date().toISOString();
     this.db.prepare(`
-      UPDATE documents 
+      UPDATE documents
       SET name = ?, modified = ?
       WHERE id = ?
     `).run(name, now, id);
 
     this.updateProjectModified();
+  }
+
+  updateDocumentNotes(id: string, notes: string) {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE documents
+      SET notes = ?, modified = ?
+      WHERE id = ?
+    `).run(notes, now, id);
+
+    this.updateProjectModified();
+  }
+
+  updateDocumentWordCount(id: string, wordCount: number) {
+    this.db.prepare(`
+      UPDATE documents
+      SET word_count = ?
+      WHERE id = ?
+    `).run(wordCount, id);
   }
 
   deleteDocument(id: string) {
