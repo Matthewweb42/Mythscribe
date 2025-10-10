@@ -29,7 +29,9 @@ interface ProjectContextType {
   updateDocumentNotes: (id: string, notes: string) => Promise<void>;
   updateDocumentWordCount: (id: string, wordCount: number) => Promise<void>;
   deleteDocument: (id: string) => Promise<void>;
-  
+  renameDocument: (id: string, name: string) => Promise<void>;
+  moveDocument: (id: string, newParentId: string | null, newPosition: number) => Promise<void>;
+
   loadReferences: () => Promise<void>;
   createReference: (name: string, category: 'character' | 'setting' | 'worldBuilding') => Promise<string>;
   updateReference: (id: string, content: string) => Promise<void>;
@@ -100,6 +102,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const loadDocuments = useCallback(async () => {
     try {
       const docs = await window.api.document.getAll();
+      console.log('Loaded documents:', docs);
       setDocuments(docs);
     } catch (error) {
       console.error('Error loading documents:', error);
@@ -164,6 +167,24 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [loadDocuments, activeDocumentId]);
 
+  const renameDocument = useCallback(async (id: string, name: string) => {
+    try {
+      await window.api.document.updateName(id, name);
+      await loadDocuments();
+    } catch (error) {
+      console.error('Error renaming document:', error);
+    }
+  }, [loadDocuments]);
+
+  const moveDocument = useCallback(async (id: string, newParentId: string | null, newPosition: number) => {
+    try {
+      await window.api.document.move(id, newParentId, newPosition);
+      await loadDocuments();
+    } catch (error) {
+      console.error('Error moving document:', error);
+    }
+  }, [loadDocuments]);
+
   // ============= REFERENCE OPERATIONS =============
 
   const loadReferences = useCallback(async () => {
@@ -222,6 +243,8 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     updateDocumentNotes,
     updateDocumentWordCount,
     deleteDocument,
+    renameDocument,
+    moveDocument,
     loadReferences,
     createReference,
     updateReference,

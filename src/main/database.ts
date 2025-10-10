@@ -49,9 +49,82 @@ export class ProjectDatabase {
     this.initializeTables();
   }
 
+  private runMigrations() {
+    // Check if documents table exists
+    const tableInfo = this.db.pragma('table_info(documents)') as Array<{ name: string }>;
+
+    if (tableInfo.length === 0) {
+      // Table doesn't exist yet, skip migrations
+      return;
+    }
+
+    // Check and add hierarchy_level column
+    const hasHierarchyLevel = tableInfo.some((col) => col.name === 'hierarchy_level');
+    if (!hasHierarchyLevel) {
+      console.log('Running migration: Adding hierarchy_level column to documents table');
+      try {
+        this.db.exec(`
+          ALTER TABLE documents
+          ADD COLUMN hierarchy_level TEXT CHECK(hierarchy_level IN ('novel', 'part', 'chapter', 'scene', NULL))
+        `);
+        console.log('Migration completed: hierarchy_level column added');
+      } catch (error) {
+        console.error('Migration error (hierarchy_level):', error);
+      }
+    }
+
+    // Check and add notes column
+    const hasNotes = tableInfo.some((col) => col.name === 'notes');
+    if (!hasNotes) {
+      console.log('Running migration: Adding notes column to documents table');
+      try {
+        this.db.exec(`
+          ALTER TABLE documents
+          ADD COLUMN notes TEXT
+        `);
+        console.log('Migration completed: notes column added');
+      } catch (error) {
+        console.error('Migration error (notes):', error);
+      }
+    }
+
+    // Check and add word_count column
+    const hasWordCount = tableInfo.some((col) => col.name === 'word_count');
+    if (!hasWordCount) {
+      console.log('Running migration: Adding word_count column to documents table');
+      try {
+        this.db.exec(`
+          ALTER TABLE documents
+          ADD COLUMN word_count INTEGER NOT NULL DEFAULT 0
+        `);
+        console.log('Migration completed: word_count column added');
+      } catch (error) {
+        console.error('Migration error (word_count):', error);
+      }
+    }
+
+    // Check and add doc_type column
+    const hasDocType = tableInfo.some((col) => col.name === 'doc_type');
+    if (!hasDocType) {
+      console.log('Running migration: Adding doc_type column to documents table');
+      try {
+        this.db.exec(`
+          ALTER TABLE documents
+          ADD COLUMN doc_type TEXT CHECK(doc_type IN ('manuscript', 'note', NULL))
+        `);
+        console.log('Migration completed: doc_type column added');
+      } catch (error) {
+        console.error('Migration error (doc_type):', error);
+      }
+    }
+  }
+
   private initializeTables() {
     // Enable foreign keys
     this.db.pragma('foreign_keys = ON');
+
+    // Run migrations first
+    this.runMigrations();
 
     // Project metadata
     this.db.exec(`

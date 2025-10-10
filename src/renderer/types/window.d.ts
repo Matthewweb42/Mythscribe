@@ -35,6 +35,7 @@ export interface ReferenceRow {
 declare global {
   interface Window {
     api: {
+      onMenuEvent: (callback: (event: string) => void) => void;
       project: {
         create: (projectName: string) => Promise<{ projectId: string; projectPath: string } | null>;
         open: () => Promise<{ metadata: ProjectMetadata; projectPath: string } | null>;

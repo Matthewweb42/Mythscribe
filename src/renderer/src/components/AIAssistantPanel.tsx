@@ -16,14 +16,12 @@ interface PendingInsertion {
 }
 
 interface AIAssistantPanelProps {
-  isOpen: boolean;
   onClose: () => void;
   onInsertText: (text: string) => void;
   references: Array<{ id: string; name: string; category: string; content: string }>;
 }
 
 const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
-  isOpen,
   onClose,
   onInsertText,
   references
@@ -44,13 +42,6 @@ const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Focus input when panel opens
-  useEffect(() => {
-    if (isOpen) {
-      inputRef.current?.focus();
-    }
-  }, [isOpen]);
-
   // Load conversation history from database
   useEffect(() => {
     const loadHistory = async () => {
@@ -68,10 +59,8 @@ const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
       }
     };
 
-    if (isOpen) {
-      loadHistory();
-    }
-  }, [isOpen, activeTab]);
+    loadHistory();
+  }, [activeTab]);
 
   // Save conversation history to database
   const saveHistory = async (newMessages: Message[]) => {
@@ -221,22 +210,13 @@ const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
     }
   };
 
-  if (!isOpen) return null;
-
   return (
     <div style={{
-      position: 'fixed',
-      bottom: '20px',
-      right: '20px',
-      width: '400px',
-      height: '600px',
+      height: '100%',
       backgroundColor: '#1e1e1e',
-      border: '1px solid #333',
-      borderRadius: '8px',
+      borderLeft: '1px solid #333',
       display: 'flex',
-      flexDirection: 'column',
-      zIndex: 1000,
-      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)'
+      flexDirection: 'column'
     }}>
       {/* Header */}
       <div style={{

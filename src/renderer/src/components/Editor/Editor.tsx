@@ -3,8 +3,9 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { createEditor, Descendant, Editor as SlateEditor, Transforms, Text, Node } from 'slate';
 import { Slate, Editable, withReact, RenderLeafProps, RenderElementProps } from 'slate-react';
 import { withHistory } from 'slate-history';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import {
-  Bold, Italic, Underline, File, Sparkles, MessageSquare,
+  Bold, Italic, Underline, File, Sparkles,
   Strikethrough, Code, Heading1, Heading2, Heading3,
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
   Quote, Minus, StickyNote, Maximize2, Minimize2, Image as ImageIcon, X
@@ -12,7 +13,6 @@ import {
 import { useProject } from '../../contexts/ProjectContext';
 import { DocumentRow } from '../../../types/window';
 import aiService from '../../services/aiService';
-import AIAssistantPanel from '../AIAssistantPanel';
 
 // Custom types for Slate
 type CustomText = {
@@ -160,7 +160,11 @@ const Element = ({ attributes, children, element }: RenderElementProps) => {
   }
 };
 
-const Editor: React.FC = () => {
+interface EditorProps {
+  onInsertTextReady?: (insertFn: (text: string) => void) => void;
+}
+
+const Editor: React.FC<EditorProps> = ({ onInsertTextReady }) => {
   const { activeDocumentId, documents, updateDocumentContent, updateDocumentWordCount, updateDocumentNotes, references } = useProject();
   const editor = useMemo(() => withHistory(withReact(createEditor())), []);
   const [value, setValue] = useState<Descendant[]>(initialValue);
@@ -171,7 +175,6 @@ const Editor: React.FC = () => {
   const [mode, setMode] = useState<'freewrite' | 'vibewrite'>('freewrite');
   const suggestionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTextRef = useRef<string>(''); // Track the last text to detect what user typed
-  const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
 
   // Stats tracking
   const [wordCount, setWordCount] = useState(0);
@@ -536,6 +539,13 @@ const Editor: React.FC = () => {
     editor.insertText(text);
   }, [editor]);
 
+  // Expose insert function to parent
+  useEffect(() => {
+    if (onInsertTextReady) {
+      onInsertTextReady(handleInsertText);
+    }
+  }, [onInsertTextReady, handleInsertText]);
+
   // Handle notes change
   const handleNotesChange = useCallback((newValue: Descendant[]) => {
     setNotesValue(newValue);
@@ -577,13 +587,6 @@ const Editor: React.FC = () => {
         clearGhostText();
         return;
       }
-    }
-
-    // Ctrl+K to toggle AI assistant
-    if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
-      event.preventDefault();
-      setIsAIAssistantOpen(prev => !prev);
-      return;
     }
 
     // Tab to accept suggestion (full or partial)
@@ -1087,47 +1090,27 @@ const Editor: React.FC = () => {
             {isFullScreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
             Focus
           </button>
-          <button
-            onClick={() => setIsAIAssistantOpen(prev => !prev)}
-            title="AI Assistant (Ctrl+K)"
-            style={{
-              padding: '6px 10px',
-              backgroundColor: isAIAssistantOpen ? '#0e639c' : '#333',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '3px',
-              cursor: 'pointer',
-              fontSize: '12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            <MessageSquare size={14} />
-            AI Chat
-          </button>
         </div>
       </div>
 
       {/* Editor and Notes area */}
       <div style={{
         flex: 1,
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'row'
+        overflow: 'hidden'
       }}>
-        {/* Main editor area */}
-        <div style={{
-          flex: (showNotes && !isFullScreen) ? 1 : 1,
-          overflow: 'auto',
-          padding: isFullScreen ? '80px 20%' : '40px 80px',
-          borderRight: (showNotes && !isFullScreen) ? '1px solid #333' : 'none',
-          backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'none',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundAttachment: 'fixed',
-          position: 'relative'
-        }}>
+        <PanelGroup direction="horizontal" autoSaveId="editor-notes-layout">
+          {/* Main editor area */}
+          <Panel minSize={30}>
+            <div style={{
+              height: '100%',
+              overflow: 'auto',
+              padding: isFullScreen ? '80px 20%' : '40px 80px',
+              backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'none',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundAttachment: 'fixed',
+              position: 'relative'
+            }}>
           {isFullScreen && backgroundImage && (
             <div style={{
               position: 'absolute',
@@ -1240,79 +1223,92 @@ const Editor: React.FC = () => {
             </div>
           )}
 
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <Slate
-              editor={editor}
-              initialValue={value}
-              onChange={handleChange}
-            >
-              <Editable
-                renderLeaf={Leaf}
-                renderElement={Element}
-                decorate={decorate}
-                onKeyDown={handleKeyDown}
-                placeholder="Start writing..."
-                spellCheck
-                style={{
-                  minHeight: '100%',
-                  fontSize: '16px',
-                  lineHeight: '1.6',
-                  color: '#d4d4d4',
-                  outline: 'none'
-                }}
-              />
-            </Slate>
-          </div>
-        </div>
-
-        {/* Notes panel */}
-        {showNotes && !isFullScreen && (
-          <div style={{
-            flex: 1,
-            overflow: 'auto',
-            padding: '40px 40px',
-            backgroundColor: '#252526'
-          }}>
-            <div style={{
-              marginBottom: '16px',
-              fontSize: '14px',
-              color: '#888',
-              fontWeight: 'bold',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px'
-            }}>
-              Scene Notes
+              <div style={{ position: 'relative', zIndex: 1 }}>
+                <Slate
+                  editor={editor}
+                  initialValue={value}
+                  onChange={handleChange}
+                >
+                  <Editable
+                    renderLeaf={Leaf}
+                    renderElement={Element}
+                    decorate={decorate}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Start writing..."
+                    spellCheck
+                    style={{
+                      minHeight: '100%',
+                      fontSize: '16px',
+                      lineHeight: '1.6',
+                      color: '#d4d4d4',
+                      outline: 'none'
+                    }}
+                  />
+                </Slate>
+              </div>
             </div>
-            <Slate
-              editor={notesEditor}
-              initialValue={notesValue}
-              onChange={handleNotesChange}
-            >
-              <Editable
-                renderLeaf={Leaf}
-                renderElement={Element}
-                placeholder="Add notes for this scene or chapter..."
-                spellCheck
-                style={{
-                  minHeight: '100%',
-                  fontSize: '14px',
-                  lineHeight: '1.6',
-                  color: '#b0b0b0',
-                  outline: 'none'
-                }}
+          </Panel>
+
+          {/* Notes panel */}
+          {showNotes && !isFullScreen && (
+            <>
+              <PanelResizeHandle style={{
+                width: '4px',
+                backgroundColor: '#333',
+                cursor: 'col-resize',
+                transition: 'background-color 0.2s'
+              }}
+              onMouseEnter={(e) => (e.currentTarget as unknown as HTMLElement).style.backgroundColor = 'var(--primary-green)'}
+              onMouseLeave={(e) => (e.currentTarget as unknown as HTMLElement).style.backgroundColor = '#333'}
               />
-            </Slate>
-          </div>
-        )}
+
+              <Panel
+                defaultSize={30}
+                minSize={20}
+                maxSize={50}
+              >
+                <div style={{
+                  height: '100%',
+                  overflow: 'auto',
+                  padding: '40px 40px',
+                  backgroundColor: '#252526'
+                }}>
+                  <div style={{
+                    marginBottom: '16px',
+                    fontSize: '14px',
+                    color: '#888',
+                    fontWeight: 'bold',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px'
+                  }}>
+                    Scene Notes
+                  </div>
+                  <Slate
+                    editor={notesEditor}
+                    initialValue={notesValue}
+                    onChange={handleNotesChange}
+                  >
+                    <Editable
+                      renderLeaf={Leaf}
+                      renderElement={Element}
+                      placeholder="Add notes for this scene or chapter..."
+                      spellCheck
+                      style={{
+                        minHeight: '100%',
+                        fontSize: '14px',
+                        lineHeight: '1.6',
+                        color: '#b0b0b0',
+                        outline: 'none'
+                      }}
+                    />
+                  </Slate>
+                </div>
+              </Panel>
+            </>
+          )}
+        </PanelGroup>
       </div>
 
-      {/* AI Assistant Panel */}
-      <AIAssistantPanel
-        isOpen={isAIAssistantOpen}
-        onClose={() => setIsAIAssistantOpen(false)}
-        onInsertText={handleInsertText}
-        references={references}
-      />
     </div>
   );
 };

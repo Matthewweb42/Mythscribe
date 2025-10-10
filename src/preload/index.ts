@@ -2,6 +2,26 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 const api = {
+  // Menu event listeners
+  onMenuEvent: (callback: (event: string) => void) => {
+    const menuEvents = [
+      'menu:new-project', 'menu:open-project', 'menu:save',
+      'menu:export-pdf', 'menu:export-docx', 'menu:export-epub', 'menu:export-markdown',
+      'menu:import-document', 'menu:import-characters',
+      'menu:find', 'menu:find-replace',
+      'menu:insert-scene', 'menu:insert-chapter', 'menu:insert-part',
+      'menu:insert-character', 'menu:insert-setting', 'menu:insert-worldbuilding',
+      'menu:insert-scene-break',
+      'menu:toggle-sidebar', 'menu:toggle-notes', 'menu:toggle-ai', 'menu:toggle-focus',
+      'menu:word-count', 'menu:statistics', 'menu:goals', 'menu:tags',
+      'menu:drafts', 'menu:snapshots', 'menu:settings',
+      'menu:documentation', 'menu:shortcuts'
+    ];
+
+    menuEvents.forEach(event => {
+      ipcRenderer.on(event, () => callback(event));
+    });
+  },
   // Project operations
   project: {
     create: (projectName: string) => ipcRenderer.invoke('project:create', projectName),
