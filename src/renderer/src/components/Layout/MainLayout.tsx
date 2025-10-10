@@ -7,6 +7,7 @@ import ReferencePanel from '../ReferencePanel/ReferencePanel';
 import WelcomeScreen from '../WelcomeScreen';
 import SettingsModal from '../SettingsModal';
 import AIAssistantPanel from '../AIAssistantPanel';
+import { ConfirmModal } from '../ConfirmModal';
 import { useProject } from '../../contexts/ProjectContext';
 import { useMenuEvents } from '../../hooks/useMenuEvents';
 import { Settings } from 'lucide-react';
@@ -18,6 +19,7 @@ const MainLayout: React.FC = () => {
   const [showSidebar, setShowSidebar] = useState(true);
   const [showAI, setShowAI] = useState(false);
   const [editorInsertText, setEditorInsertText] = useState<((text: string) => void) | null>(null);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
   // Handle menu events
   useMenuEvents({
@@ -230,11 +232,7 @@ const MainLayout: React.FC = () => {
                     </button>
 
                     <button
-                      onClick={() => {
-                        if (confirm('Close this project?')) {
-                          closeProject();
-                        }
-                      }}
+                      onClick={() => setShowCloseConfirm(true)}
                       style={{
                         padding: '6px 12px',
                         backgroundColor: '#333',
@@ -321,6 +319,21 @@ const MainLayout: React.FC = () => {
 
       {/* Settings Modal */}
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+
+      {/* Close Project Confirmation */}
+      <ConfirmModal
+        isOpen={showCloseConfirm}
+        title="Close Project"
+        message="Are you sure you want to close this project? Any unsaved changes will be saved automatically."
+        confirmText="Close Project"
+        cancelText="Cancel"
+        onConfirm={() => {
+          closeProject();
+          setShowCloseConfirm(false);
+        }}
+        onCancel={() => setShowCloseConfirm(false)}
+        danger={false}
+      />
     </div>
   );
 };

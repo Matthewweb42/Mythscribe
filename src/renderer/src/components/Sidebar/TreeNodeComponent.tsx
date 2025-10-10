@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronRight, ChevronDown, File, FolderIcon, Trash2, BookOpen, Layers, FileText } from 'lucide-react';
 import { DocumentRow } from '../../../types/window';
+import { ConfirmModal } from '../ConfirmModal';
 
 interface TreeNode {
   item: DocumentRow;
@@ -57,6 +58,7 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(true);
   const [editName, setEditName] = useState(node.item.name);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isFolder = node.item.type === 'folder';
@@ -75,17 +77,25 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
   const handleClick = () => {
     if (!isRenaming) {
       onSelect(node.item);
-      if (isFolder) {
-        setIsOpen(!isOpen);
-      }
+      // Don't toggle - just select
+    }
+  };
+
+  const handleToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isFolder) {
+      setIsOpen(!isOpen);
     }
   };
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm(`Delete "${node.item.name}"?`)) {
-      onDelete(node.item.id);
-    }
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = () => {
+    onDelete(node.item.id);
+    setShowDeleteConfirm(false);
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -166,7 +176,9 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
           {isFolder ? (
             <>
-              {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              <div onClick={handleToggle} style={{ display: 'flex', cursor: 'pointer' }}>
+                {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              </div>
               {(() => {
                 const { icon: Icon, color } = getHierarchyIcon(node.item.hierarchy_level);
                 return <Icon size={16} color={color} />;
@@ -260,6 +272,17 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
           dragOverId={dragOverId}
         />
       ))}
+
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        title="Delete Item"
+        message={`Are you sure you want to delete "${node.item.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={confirmDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+        danger={true}
+      />
     </div>
   );
 };

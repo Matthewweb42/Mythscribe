@@ -694,18 +694,20 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady }) => {
   }
 
   return (
-    <div style={{
-      height: '100%',
-      display: 'flex',
-      flexDirection: 'column',
-      backgroundColor: '#1e1e1e',
-      position: isFullScreen ? 'fixed' : 'relative',
-      top: isFullScreen ? 0 : 'auto',
-      left: isFullScreen ? 0 : 'auto',
-      right: isFullScreen ? 0 : 'auto',
-      bottom: isFullScreen ? 0 : 'auto',
-      zIndex: isFullScreen ? 9999 : 'auto'
-    }}>
+    <div
+      key={currentDoc?.id || 'no-doc'} // Force remount when document changes
+      style={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        backgroundColor: '#1e1e1e',
+        position: isFullScreen ? 'fixed' : 'relative',
+        top: isFullScreen ? 0 : 'auto',
+        left: isFullScreen ? 0 : 'auto',
+        right: isFullScreen ? 0 : 'auto',
+        bottom: isFullScreen ? 0 : 'auto',
+        zIndex: isFullScreen ? 9999 : 'auto'
+      }}>
       {/* Formatting toolbar */}
       <div style={{
         padding: '8px 16px',
