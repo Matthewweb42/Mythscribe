@@ -167,11 +167,13 @@ interface EditorProps {
 
 const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady }) => {
   const { activeDocumentId, documents, updateDocumentContent, updateDocumentWordCount, updateDocumentNotes, references } = useProject();
-  const editor = useMemo(() => withHistory(withReact(createEditor())), []);
+  // Create a new editor instance when the document changes to ensure clean state
+  const editor = useMemo(() => withHistory(withReact(createEditor())), [activeDocumentId]);
   const [value, setValue] = useState<Descendant[]>(initialValue);
   const [currentDoc, setCurrentDoc] = useState<DocumentRow | null>(null);
   const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
-  const [ghostText, setGhostText] = useState<string>('');
+  const [ghostText, setGhostText] = useState<string>(''); // VibeWrite ghost text
+  const [aiAssistantGhostText, setAiAssistantGhostText] = useState<string>(''); // AI Assistant ghost text
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
   const [mode, setMode] = useState<'freewrite' | 'vibewrite'>('freewrite');
   const suggestionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -238,30 +240,67 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         setWordCount(0);
         setCharCount(0);
         setSessionWordCount(0);
+        // Clear ghost text when switching documents
+        setGhostText('');
+        setAiAssistantGhostText('');
         return;
       }
 
       const doc = documents.find(d => d.id === activeDocumentId);
       if (!doc) return;
 
+      // Clear ghost text when switching documents to prevent stale selections
+      setGhostText('');
+      setAiAssistantGhostText('');
+
       setCurrentDoc(doc);
 
       // Parse the content
       try {
-        if (doc.content) {
-          const parsed = JSON.parse(doc.content);
-          setValue(parsed);
+        let contentToLoad = initialValue;
 
-          // Calculate initial stats
-          const { words } = calculateStats(parsed);
-          sessionStartWordCount.current = words;
-          setSessionWordCount(0);
-        } else {
-          setValue(initialValue);
+        if (doc.content) {
+          try {
+            const parsed = JSON.parse(doc.content);
+            // Ensure content has at least one paragraph
+            if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+              contentToLoad = parsed;
+            }
+          } catch (parseError) {
+            console.error('Error parsing document content:', parseError);
+            contentToLoad = initialValue;
+          }
+        }
+
+        // Deselect first to clear any stale selection
+        Transforms.deselect(editor);
+
+        setValue(contentToLoad);
+
+        // Use setTimeout to ensure selection happens after setValue completes
+        setTimeout(() => {
+          try {
+            // Verify the path exists before selecting
+            if (editor.children.length > 0) {
+              Transforms.select(editor, {
+                anchor: { path: [0, 0], offset: 0 },
+                focus: { path: [0, 0], offset: 0 }
+              });
+            }
+          } catch (e) {
+            // Ignore selection errors on load
+            console.log('Could not set initial selection:', e);
+          }
+        }, 0);
+
+        // Calculate initial stats
+        const { words } = calculateStats(contentToLoad);
+        sessionStartWordCount.current = words;
+        setSessionWordCount(words > 0 ? 0 : 0);
+
+        if (words === 0) {
           setWordCount(0);
           setCharCount(0);
-          sessionStartWordCount.current = 0;
-          setSessionWordCount(0);
         }
 
         // Load notes
@@ -372,32 +411,58 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
   // Accept ghost text suggestion (full)
   const acceptSuggestion = useCallback(() => {
-    if (!ghostText) return;
+    // AI Assistant ghost text has priority
+    const activeGhost = aiAssistantGhostText || ghostText;
+    if (!activeGhost) return;
 
-    // Insert the ghost text at the cursor
-    editor.insertText(ghostText);
-    clearGhostText();
-  }, [editor, ghostText, clearGhostText]);
+    // Use Editor.withoutNormalizing to batch operations and prevent selection issues
+    SlateEditor.withoutNormalizing(editor, () => {
+      // Insert the ghost text at the cursor
+      editor.insertText(activeGhost);
+    });
+
+    // Clear the appropriate ghost text after insertion
+    if (aiAssistantGhostText) {
+      setAiAssistantGhostText('');
+    } else {
+      clearGhostText();
+    }
+  }, [editor, ghostText, aiAssistantGhostText, clearGhostText]);
 
   // Accept one word from ghost text (partial)
   const acceptOneWord = useCallback(() => {
-    if (!ghostText) return;
+    // AI Assistant ghost text has priority
+    const activeGhost = aiAssistantGhostText || ghostText;
+    if (!activeGhost) return;
 
     // Find the first word in the ghost text
-    const match = ghostText.match(/^\s*\S+/);
+    const match = activeGhost.match(/^\s*\S+/);
     if (match) {
       const firstWord = match[0];
-      editor.insertText(firstWord);
 
-      // Remove the accepted word from ghost text
-      const remaining = ghostText.slice(firstWord.length);
+      // Use Editor.withoutNormalizing to batch operations and prevent selection issues
+      SlateEditor.withoutNormalizing(editor, () => {
+        editor.insertText(firstWord);
+      });
+
+      // Remove the accepted word from the appropriate ghost text
+      const remaining = activeGhost.slice(firstWord.length);
       if (remaining.trim()) {
-        setGhostText(remaining);
+        if (aiAssistantGhostText) {
+          setAiAssistantGhostText(remaining);
+        } else {
+          setGhostText(remaining);
+        }
       } else {
-        clearGhostText();
+        // Clear the appropriate ghost text
+        if (aiAssistantGhostText) {
+          setAiAssistantGhostText('');
+        } else {
+          clearGhostText();
+        }
       }
     }
-  }, [editor, ghostText, clearGhostText]);
+  }, [editor, ghostText, aiAssistantGhostText, clearGhostText]);
 
   // Auto-save with debounce
   const handleChange = useCallback((newValue: Descendant[]) => {
@@ -430,7 +495,8 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     const lastText = lastTextRef.current;
 
     // Handle ghost text matching logic
-    if (ghostText && mode === 'vibewrite') {
+    // Only handle VibeWrite ghost text here - AI Assistant ghost text is controlled separately
+    if (ghostText && mode === 'vibewrite' && !aiAssistantGhostText) {
       // Check if user typed something that matches the ghost text
       if (currentText.length > lastText.length) {
         const newChars = currentText.slice(lastText.length);
@@ -454,9 +520,10 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     lastTextRef.current = currentText;
 
     // Handle AI suggestion in vibe write mode
+    // Don't generate VibeWrite suggestions if AI Assistant ghost text is active
     console.log('🔍 DEBUG: handleChange - mode =', mode, 'AI enabled =', aiService.getSettings().enabled);
 
-    if (mode === 'vibewrite' && aiService.getSettings().enabled) {
+    if (mode === 'vibewrite' && aiService.getSettings().enabled && !aiAssistantGhostText) {
       console.log('✅ DEBUG: Setting up AI suggestion timer...');
 
       // Clear existing suggestion timeout
@@ -479,9 +546,9 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         requestSuggestion();
       }, settings.suggestionDelay);
     } else {
-      console.log('❌ DEBUG: Not setting AI timer - mode:', mode, 'AI enabled:', aiService.getSettings().enabled);
+      console.log('❌ DEBUG: Not setting AI timer - mode:', mode, 'AI enabled:', aiService.getSettings().enabled, 'AI Assistant ghost text active:', !!aiAssistantGhostText);
     }
-  }, [currentDoc, saveTimeout, updateDocumentContent, updateDocumentWordCount, mode, requestSuggestion, clearGhostText, ghostText, extractText, calculateStats]);
+  }, [currentDoc, saveTimeout, updateDocumentContent, updateDocumentWordCount, mode, requestSuggestion, clearGhostText, ghostText, aiAssistantGhostText, extractText, calculateStats]);
 
   // Toggle format helper
   const toggleFormat = useCallback((format: 'bold' | 'italic' | 'underline' | 'strikethrough' | 'code') => {
@@ -518,21 +585,31 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
   // Check if format is active
   const isFormatActive = (editor: SlateEditor, format: string) => {
-    const marks = SlateEditor.marks(editor);
-    return marks ? marks[format] === true : false;
+    try {
+      const marks = SlateEditor.marks(editor);
+      return marks ? marks[format] === true : false;
+    } catch (e) {
+      // Selection may be invalid, return false
+      return false;
+    }
   };
 
   // Check if block type is active
   const isBlockActive = (editor: SlateEditor, format: string) => {
-    const { selection } = editor;
-    if (!selection) return false;
+    try {
+      const { selection } = editor;
+      if (!selection) return false;
 
-    const [match] = SlateEditor.nodes(editor, {
-      at: SlateEditor.unhangRange(editor, selection),
-      match: n => !SlateEditor.isEditor(n) && SlateEditor.isBlock(editor, n as any) && (n as any).type === format,
-    });
+      const [match] = SlateEditor.nodes(editor, {
+        at: SlateEditor.unhangRange(editor, selection),
+        match: n => !SlateEditor.isEditor(n) && SlateEditor.isBlock(editor, n as any) && (n as any).type === format,
+      });
 
-    return !!match;
+      return !!match;
+    } catch (e) {
+      // Selection may be invalid, return false
+      return false;
+    }
   };
 
   // Insert text from AI assistant
@@ -542,7 +619,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
   // Set ghost text from external source (like AI Assistant)
   const handleSetGhostText = useCallback((text: string) => {
-    setGhostText(text);
+    setAiAssistantGhostText(text);
   }, []);
 
   // Expose insert function to parent
@@ -595,6 +672,12 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         setIsFullScreen(false);
         return;
       }
+      // Clear AI Assistant ghost text first (priority), then VibeWrite ghost text
+      if (aiAssistantGhostText) {
+        event.preventDefault();
+        setAiAssistantGhostText('');
+        return;
+      }
       if (ghostText) {
         event.preventDefault();
         clearGhostText();
@@ -603,7 +686,9 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     }
 
     // Tab to accept suggestion (full or partial)
-    if (event.key === 'Tab' && ghostText) {
+    // AI Assistant ghost text has priority
+    const activeGhost = aiAssistantGhostText || ghostText;
+    if (event.key === 'Tab' && activeGhost) {
       event.preventDefault();
 
       if (event.shiftKey) {
@@ -646,7 +731,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
     const ranges: any[] = [];
 
-    if (!ghostText || !Text.isText(node) || mode !== 'vibewrite') {
+    if (!Text.isText(node)) {
       return ranges;
     }
 
@@ -656,38 +741,62 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
       return ranges;
     }
 
+    // Safety check: verify the selection path exists in the current document
+    try {
+      const focusPath = selection.focus.path;
+      const nodeAtPath = Node.get(editor, focusPath);
+      if (!nodeAtPath) {
+        return ranges;
+      }
+    } catch (e) {
+      // Selection path is invalid, return empty ranges
+      return ranges;
+    }
+
     // Check if this is the node where the cursor is
     const focusPath = selection.focus.path;
     if (path.length === focusPath.length && path.every((p, i) => p === focusPath[i])) {
       const focusOffset = selection.focus.offset;
       const { text } = node;
 
-      // Split the text node at cursor to show ghost text
-      if (focusOffset === text.length) {
-        // Cursor is at the end of the text - add ghost suggestion to this range
-        ranges.push({
-          anchor: { path, offset: 0 },
-          focus: { path, offset: text.length },
-          ghostSuggestion: ghostText
-        });
-      } else if (focusOffset < text.length) {
-        // Cursor is in the middle - split into before and after cursor
-        ranges.push(
-          {
+      // Determine which ghost text to show
+      // AI Assistant ghost text takes priority and shows in all modes
+      // VibeWrite ghost text only shows in vibewrite mode
+      let activeGhostText = '';
+      if (aiAssistantGhostText) {
+        activeGhostText = aiAssistantGhostText;
+      } else if (mode === 'vibewrite' && ghostText) {
+        activeGhostText = ghostText;
+      }
+
+      if (activeGhostText) {
+        // Split the text node at cursor to show ghost text
+        if (focusOffset === text.length) {
+          // Cursor is at the end of the text - add ghost suggestion to this range
+          ranges.push({
             anchor: { path, offset: 0 },
-            focus: { path, offset: focusOffset },
-          },
-          {
-            anchor: { path, offset: focusOffset },
             focus: { path, offset: text.length },
-            ghostSuggestion: ghostText
-          }
-        );
+            ghostSuggestion: activeGhostText
+          });
+        } else if (focusOffset < text.length) {
+          // Cursor is in the middle - split into before and after cursor
+          ranges.push(
+            {
+              anchor: { path, offset: 0 },
+              focus: { path, offset: focusOffset },
+            },
+            {
+              anchor: { path, offset: focusOffset },
+              focus: { path, offset: text.length },
+              ghostSuggestion: activeGhostText
+            }
+          );
+        }
       }
     }
 
     return ranges;
-  }, [ghostText, editor, mode]);
+  }, [ghostText, aiAssistantGhostText, editor, mode]);
 
   if (!currentDoc) {
     return (
