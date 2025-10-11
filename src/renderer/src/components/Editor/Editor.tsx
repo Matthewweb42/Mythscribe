@@ -162,9 +162,10 @@ const Element = ({ attributes, children, element }: RenderElementProps) => {
 
 interface EditorProps {
   onInsertTextReady?: (insertFn: (text: string) => void) => void;
+  onSetGhostTextReady?: (setGhostTextFn: (text: string) => void) => void;
 }
 
-const Editor: React.FC<EditorProps> = ({ onInsertTextReady }) => {
+const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady }) => {
   const { activeDocumentId, documents, updateDocumentContent, updateDocumentWordCount, updateDocumentNotes, references } = useProject();
   const editor = useMemo(() => withHistory(withReact(createEditor())), []);
   const [value, setValue] = useState<Descendant[]>(initialValue);
@@ -404,7 +405,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady }) => {
 
     // Calculate stats
     const { words } = calculateStats(newValue);
-    const sessionWords = words - sessionStartWordCount.current;
+    const sessionWords = Math.max(0, words - sessionStartWordCount.current); // Never go negative
     setSessionWordCount(sessionWords);
 
     if (!currentDoc) return;
@@ -539,12 +540,24 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady }) => {
     editor.insertText(text);
   }, [editor]);
 
+  // Set ghost text from external source (like AI Assistant)
+  const handleSetGhostText = useCallback((text: string) => {
+    setGhostText(text);
+  }, []);
+
   // Expose insert function to parent
   useEffect(() => {
     if (onInsertTextReady) {
       onInsertTextReady(handleInsertText);
     }
   }, [onInsertTextReady, handleInsertText]);
+
+  // Expose setGhostText function to parent
+  useEffect(() => {
+    if (onSetGhostTextReady) {
+      onSetGhostTextReady(handleSetGhostText);
+    }
+  }, [onSetGhostTextReady, handleSetGhostText]);
 
   // Handle notes change
   const handleNotesChange = useCallback((newValue: Descendant[]) => {
@@ -1039,11 +1052,11 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady }) => {
             <span title="Total character count">
               <strong style={{ color: '#888' }}>{charCount.toLocaleString()}</strong> chars
             </span>
-            {sessionWordCount !== 0 && (
+            {sessionWordCount > 0 && (
               <>
                 <span style={{ color: '#555' }}>|</span>
-                <span title="Words written this session" style={{ color: sessionWordCount > 0 ? '#4ec9b0' : '#f48771' }}>
-                  {sessionWordCount > 0 ? '+' : ''}{sessionWordCount.toLocaleString()} session
+                <span title="Words written today" style={{ color: '#4ec9b0' }}>
+                  +{sessionWordCount.toLocaleString()} today
                 </span>
               </>
             )}

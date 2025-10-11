@@ -13,12 +13,13 @@ import { useMenuEvents } from '../../hooks/useMenuEvents';
 import { Settings } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { isProjectOpen, projectMetadata, closeProject, openProject, createProject, references } = useProject();
+  const { isProjectOpen, projectMetadata, closeProject, openProject, createProject, references, documents, activeDocumentId } = useProject();
   const [showReferences, setShowReferences] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const [showAI, setShowAI] = useState(false);
   const [editorInsertText, setEditorInsertText] = useState<((text: string) => void) | null>(null);
+  const [editorSetGhostText, setEditorSetGhostText] = useState<((text: string) => void) | null>(null);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
   // Handle menu events
@@ -250,7 +251,10 @@ const MainLayout: React.FC = () => {
 
                 {/* Editor Content */}
                 <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <Editor onInsertTextReady={(insertFn) => setEditorInsertText(() => insertFn)} />
+                  <Editor
+                    onInsertTextReady={(insertFn) => setEditorInsertText(() => insertFn)}
+                    onSetGhostTextReady={(setGhostTextFn) => setEditorSetGhostText(() => setGhostTextFn)}
+                  />
                 </div>
               </div>
             </Panel>
@@ -280,7 +284,17 @@ const MainLayout: React.FC = () => {
                         editorInsertText(text);
                       }
                     }}
+                    onSetGhostText={(text) => {
+                      if (editorSetGhostText) {
+                        editorSetGhostText(text);
+                      }
+                    }}
                     references={references}
+                    activeDocument={
+                      activeDocumentId
+                        ? documents.find(d => d.id === activeDocumentId) || null
+                        : null
+                    }
                   />
                 </Panel>
               </>

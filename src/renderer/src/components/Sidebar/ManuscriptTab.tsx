@@ -1,9 +1,10 @@
 // src/renderer/src/components/Sidebar/ManuscriptTab.tsx
 import React, { useState, useMemo } from 'react';
-import { File, FolderIcon, Plus, Layers, FileText } from 'lucide-react';
+import { File, FolderIcon, Layers, FileText, Copy, Trash2 } from 'lucide-react';
 import { useProject } from '../../contexts/ProjectContext';
 import { DocumentRow } from '../../../types/window';
 import { TreeNodeComponent } from './TreeNodeComponent';
+import { ConfirmModal } from '../ConfirmModal';
 
 interface TreeNode {
   item: DocumentRow;
@@ -21,6 +22,8 @@ const ManuscriptTab: React.FC = () => {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draggedItem, setDraggedItem] = useState<DocumentRow | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<DocumentRow | null>(null);
 
   // Build tree structure from flat document list
   const tree = useMemo(() => {
@@ -93,6 +96,55 @@ const ManuscriptTab: React.FC = () => {
 
     setDraggedItem(null);
     setDragOverId(null);
+  };
+
+  const handleDuplicate = async (item: DocumentRow) => {
+    const duplicateName = `${item.name} (Copy)`;
+
+    // Create the duplicate at the same level (same parent)
+    const newId = item.type === 'document'
+      ? await createDocument(duplicateName, item.parent_id, item.hierarchy_level || undefined)
+      : await createFolder(duplicateName, item.parent_id, item.hierarchy_level as 'novel' | 'part' | 'chapter' | null);
+
+    // If it's a document, copy the content
+    if (item.type === 'document' && item.content) {
+      await window.api.document.updateContent(newId, item.content);
+      if (item.notes) {
+        await window.api.document.updateNotes(newId, item.notes);
+      }
+    }
+
+    // If it's a folder, recursively duplicate children
+    if (item.type === 'folder') {
+      const children = documents.filter(doc => doc.parent_id === item.id);
+      for (const child of children) {
+        await duplicateRecursive(child, newId);
+      }
+    }
+
+    setContextMenu(null);
+  };
+
+  const duplicateRecursive = async (item: DocumentRow, newParentId: string) => {
+    const duplicateName = item.name;
+
+    const newId = item.type === 'document'
+      ? await createDocument(duplicateName, newParentId, item.hierarchy_level || undefined)
+      : await createFolder(duplicateName, newParentId, item.hierarchy_level as 'novel' | 'part' | 'chapter' | null);
+
+    if (item.type === 'document' && item.content) {
+      await window.api.document.updateContent(newId, item.content);
+      if (item.notes) {
+        await window.api.document.updateNotes(newId, item.notes);
+      }
+    }
+
+    if (item.type === 'folder') {
+      const children = documents.filter(doc => doc.parent_id === item.id);
+      for (const child of children) {
+        await duplicateRecursive(child, newId);
+      }
+    }
   };
 
   const handleCreate = async (type: 'document' | 'folder', parentId?: string, level?: 'novel' | 'part' | 'chapter' | 'scene' | null) => {
@@ -247,30 +299,76 @@ const ManuscriptTab: React.FC = () => {
       {/* Add buttons */}
       {!showInput && !showCreateMenu && (
         <div style={{
-          padding: '12px',
+          padding: '8px',
           borderTop: '1px solid #333',
           display: 'flex',
-          gap: '8px'
+          gap: '4px'
         }}>
           <button
-            onClick={() => setShowCreateMenu(true)}
+            onClick={() => handleCreate('document', undefined, 'scene')}
             style={{
               flex: 1,
-              padding: '8px',
-              backgroundColor: 'var(--primary-green)',
-              color: '#fff',
-              border: 'none',
+              padding: '6px 4px',
+              backgroundColor: '#252526',
+              color: '#4ec9b0',
+              border: '1px solid #333',
               borderRadius: '3px',
               cursor: 'pointer',
-              fontSize: '12px',
+              fontSize: '11px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '4px'
+              gap: '4px',
+              whiteSpace: 'nowrap'
             }}
+            title="New Scene"
           >
-            <Plus size={14} />
-            New Item
+            <FileText size={12} />
+            Scene
+          </button>
+          <button
+            onClick={() => handleCreate('folder', undefined, 'chapter')}
+            style={{
+              flex: 1,
+              padding: '6px 4px',
+              backgroundColor: '#252526',
+              color: '#ce9178',
+              border: '1px solid #333',
+              borderRadius: '3px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              whiteSpace: 'nowrap'
+            }}
+            title="New Chapter"
+          >
+            <FolderIcon size={12} />
+            Chapter
+          </button>
+          <button
+            onClick={() => handleCreate('folder', undefined, 'part')}
+            style={{
+              flex: 1,
+              padding: '6px 4px',
+              backgroundColor: '#252526',
+              color: '#569cd6',
+              border: '1px solid #333',
+              borderRadius: '3px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              whiteSpace: 'nowrap'
+            }}
+            title="New Part"
+          >
+            <Layers size={12} />
+            Part
           </button>
         </div>
       )}
@@ -365,6 +463,34 @@ const ManuscriptTab: React.FC = () => {
             <span>Rename</span>
           </button>
 
+          <button
+            onClick={() => handleDuplicate(contextMenu.item)}
+            style={{
+              ...menuButtonStyle,
+              width: '100%',
+              justifyContent: 'flex-start'
+            }}
+          >
+            <Copy size={14} color="#569cd6" />
+            <span>Duplicate</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setItemToDelete(contextMenu.item);
+              setShowDeleteConfirm(true);
+              setContextMenu(null);
+            }}
+            style={{
+              ...menuButtonStyle,
+              width: '100%',
+              justifyContent: 'flex-start'
+            }}
+          >
+            <Trash2 size={14} color="#f48771" />
+            <span>Delete</span>
+          </button>
+
           <div style={{ borderTop: '1px solid #333', margin: '4px 0' }} />
 
           <div style={{ fontSize: '10px', color: '#666', padding: '6px 8px', textTransform: 'uppercase' }}>
@@ -449,6 +575,27 @@ const ManuscriptTab: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        title="Delete Item"
+        message={`Are you sure you want to delete "${itemToDelete?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={() => {
+          if (itemToDelete) {
+            deleteDocument(itemToDelete.id);
+          }
+          setShowDeleteConfirm(false);
+          setItemToDelete(null);
+        }}
+        onCancel={() => {
+          setShowDeleteConfirm(false);
+          setItemToDelete(null);
+        }}
+        danger={true}
+      />
     </div>
   );
 };

@@ -1,8 +1,7 @@
 // src/renderer/src/components/Sidebar/TreeNodeComponent.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronRight, ChevronDown, File, FolderIcon, Trash2, BookOpen, Layers, FileText } from 'lucide-react';
+import { ChevronRight, ChevronDown, File, FolderIcon, BookOpen, Layers, FileText } from 'lucide-react';
 import { DocumentRow } from '../../../types/window';
-import { ConfirmModal } from '../ConfirmModal';
 
 interface TreeNode {
   item: DocumentRow;
@@ -58,7 +57,6 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(true);
   const [editName, setEditName] = useState(node.item.name);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isFolder = node.item.type === 'folder';
@@ -86,16 +84,6 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
     if (isFolder) {
       setIsOpen(!isOpen);
     }
-  };
-
-  const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowDeleteConfirm(true);
-  };
-
-  const confirmDelete = () => {
-    onDelete(node.item.id);
-    setShowDeleteConfirm(false);
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -173,7 +161,7 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
           if (!isActive && !isSelected && !isDragOver) e.currentTarget.style.backgroundColor = 'transparent';
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
           {isFolder ? (
             <>
               <div onClick={handleToggle} style={{ display: 'flex', cursor: 'pointer' }}>
@@ -219,11 +207,19 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
                 borderRadius: '2px',
                 padding: '2px 4px',
                 color: '#d4d4d4',
-                outline: 'none'
+                outline: 'none',
+                minWidth: 0
               }}
             />
           ) : (
-            <span style={{ fontSize: '13px' }}>
+            <span style={{
+              fontSize: '13px',
+              flex: 1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              minWidth: 0
+            }}>
               {node.item.name}
               {node.item.word_count > 0 && (
                 <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888' }}>
@@ -234,24 +230,6 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
           )}
         </div>
 
-        {!isRenaming && (
-          <button
-            onClick={handleDelete}
-            style={{
-              padding: '2px 4px',
-              backgroundColor: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              opacity: 0.5,
-              display: 'flex',
-              alignItems: 'center'
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
-            onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.5')}
-          >
-            <Trash2 size={14} color="#f48771" />
-          </button>
-        )}
       </div>
 
       {isFolder && isOpen && node.children.map((child) => (
@@ -272,17 +250,6 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
           dragOverId={dragOverId}
         />
       ))}
-
-      <ConfirmModal
-        isOpen={showDeleteConfirm}
-        title="Delete Item"
-        message={`Are you sure you want to delete "${node.item.name}"? This action cannot be undone.`}
-        confirmText="Delete"
-        cancelText="Cancel"
-        onConfirm={confirmDelete}
-        onCancel={() => setShowDeleteConfirm(false)}
-        danger={true}
-      />
     </div>
   );
 };

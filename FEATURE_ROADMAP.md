@@ -399,5 +399,12 @@ This document outlines all planned features for MythScribe, organized by priorit
 
 ---
 
+### Tags
+- Every different kind of info will be color coded. Parts dark blue, scenes aqua, chapters, orange, characters green, settings brown, world building info a nice silver... or something.
+- When a tag is used, it will become that color so it is easily identifyable. 
+- Tags should be in the form of words-like-this so that they can all be highlighted
+- When a Chapter or scene or whatever is created, the title might look like Fallen Creator or Tash Kalmanes... the tag should be auto created to be fallen-creator and tash-kalmanes so it can be referenced accordingly. 
+- There should be a database or place 
+
 **Last Updated:** 2025-01-09
 **Version:** 1.0 (Initial Roadmap)

@@ -1,6 +1,6 @@
 // src/renderer/src/components/AIAssistantPanel.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Send, RotateCcw, Check, Trash2, MessageSquare } from 'lucide-react';
+import { X, Send, Check, Trash2, MessageSquare } from 'lucide-react';
 
 interface Message {
   id: string;
@@ -9,30 +9,29 @@ interface Message {
   timestamp: number;
 }
 
-interface PendingInsertion {
-  id: string;
-  content: string;
-  position: number; // Position in the document where it should be inserted
-}
-
 interface AIAssistantPanelProps {
   onClose: () => void;
   onInsertText: (text: string) => void;
+  onSetGhostText?: (text: string) => void;
   references: Array<{ id: string; name: string; category: string; content: string }>;
+  activeDocument?: { id: string; name: string; content: string | null } | null;
 }
 
 const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
   onClose,
-  onInsertText,
-  references
+  onSetGhostText,
+  references,
+  activeDocument
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [paragraphCount, setParagraphCount] = useState(1);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [pendingInsertion, setPendingInsertion] = useState<PendingInsertion | null>(null);
   const [activeTab, setActiveTab] = useState(0);
   const [conversationTabs, setConversationTabs] = useState<string[]>(['Conversation 1']);
+  const [aiMode, setAiMode] = useState<'plan' | 'agent'>('plan');
+  const [showNotification, setShowNotification] = useState(false);
+  const [notificationPreview, setNotificationPreview] = useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -70,6 +69,9 @@ const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
       console.error('Error saving conversation history:', error);
     }
   };
+
+  // Track which tags are referenced in current input
+  const [referencedTags, setReferencedTags] = useState<string[]>([]);
 
   // Parse #tags from input text
   const parseReferenceTags = (text: string): { cleanText: string; referencedNotes: string } => {
@@ -116,31 +118,73 @@ const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
       // Parse tags and get referenced notes
       const { cleanText, referencedNotes } = parseReferenceTags(inputText);
 
+      // Build context from active document
+      let documentContext = '';
+      if (activeDocument && activeDocument.content) {
+        try {
+          // Parse Slate content and extract text
+          const slateContent = JSON.parse(activeDocument.content);
+          const extractText = (nodes: any[]): string => {
+            return nodes.map(node => {
+              if (node.text !== undefined) return node.text;
+              if (node.children) return extractText(node.children);
+              return '';
+            }).join('');
+          };
+          const docText = extractText(slateContent);
+
+          if (docText.trim()) {
+            documentContext = `\n\nCurrent Scene: "${activeDocument.name}"\nContent:\n${docText.substring(0, 2000)}${docText.length > 2000 ? '...' : ''}`;
+          }
+        } catch (error) {
+          console.error('Error parsing active document:', error);
+        }
+      }
+
       // Call AI generation with context
       const response = await window.api.ai.generateDirected({
         instruction: cleanText,
         paragraphCount: paragraphCount,
         conversationHistory: messages.slice(-6), // Last 3 exchanges
-        referencedNotes: referencedNotes || undefined
+        referencedNotes: (referencedNotes || '') + documentContext || undefined
       });
 
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: response,
-        timestamp: Date.now()
-      };
+      if (aiMode === 'agent') {
+        // Agent mode: Send ghost text to editor with brief confirmation
+        const confirmMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: "✓ Added to editor as ghost text",
+          timestamp: Date.now()
+        };
 
-      const updatedMessages = [...newMessages, assistantMessage];
-      setMessages(updatedMessages);
-      saveHistory(updatedMessages);
+        const updatedMessages = [...newMessages, confirmMessage];
+        setMessages(updatedMessages);
+        saveHistory(updatedMessages);
 
-      // Set as pending insertion
-      setPendingInsertion({
-        id: assistantMessage.id,
-        content: response,
-        position: 0 // Will be set to current cursor position
-      });
+        // Send ghost text to editor
+        if (onSetGhostText) {
+          onSetGhostText(response);
+        }
+
+        // Show notification with preview (first 50 characters)
+        const preview = response.length > 50 ? response.substring(0, 50) + '...' : response;
+        setNotificationPreview(preview);
+        setShowNotification(true);
+        setTimeout(() => setShowNotification(false), 3000);
+      } else {
+        // Plan mode: Show response in chat (no accept/reject)
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: response,
+          timestamp: Date.now()
+        };
+
+        const updatedMessages = [...newMessages, assistantMessage];
+        setMessages(updatedMessages);
+        saveHistory(updatedMessages);
+      }
 
     } catch (error) {
       console.error('Error generating AI response:', error);
@@ -158,35 +202,6 @@ const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
     }
   };
 
-  const handleAccept = () => {
-    if (pendingInsertion) {
-      onInsertText(pendingInsertion.content);
-      setPendingInsertion(null);
-    }
-  };
-
-  const handleRegenerate = async () => {
-    if (messages.length < 2) return;
-
-    // Remove last assistant message and regenerate
-    const lastUserMessage = messages[messages.length - 2];
-    const trimmedMessages = messages.slice(0, -1);
-    setMessages(trimmedMessages);
-    setPendingInsertion(null);
-
-    setInputText(lastUserMessage.content);
-    // Will trigger regeneration on next send
-  };
-
-  const handleDiscard = () => {
-    // Remove last assistant message
-    if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
-      const trimmedMessages = messages.slice(0, -1);
-      setMessages(trimmedMessages);
-      saveHistory(trimmedMessages);
-    }
-    setPendingInsertion(null);
-  };
 
   const handleNewTab = () => {
     const newTabIndex = conversationTabs.length;
@@ -199,7 +214,6 @@ const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
     if (confirm('Clear this conversation? This cannot be undone.')) {
       setMessages([]);
       await window.api.settings.set(`ai_conversation_${activeTab}`, JSON.stringify([]));
-      setPendingInsertion(null);
     }
   };
 
@@ -260,6 +274,64 @@ const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
             <X size={18} />
           </button>
         </div>
+      </div>
+
+      {/* Notification Banner */}
+      {showNotification && (
+        <div style={{
+          padding: '8px 16px',
+          backgroundColor: '#4ec9b0',
+          color: '#1e1e1e',
+          fontSize: '12px',
+          fontWeight: 500,
+          animation: 'slideDown 0.3s ease-out'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            <Check size={14} />
+            Ghost text added - Press Tab to accept
+          </div>
+          {notificationPreview && (
+            <div style={{
+              fontSize: '11px',
+              fontStyle: 'italic',
+              opacity: 0.8,
+              marginLeft: '22px'
+            }}>
+              {notificationPreview}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* AI Mode Selector */}
+      <div style={{
+        padding: '8px 16px',
+        borderBottom: '1px solid #333',
+        backgroundColor: '#252526',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px'
+      }}>
+        <label style={{ fontSize: '12px', color: '#888', fontWeight: 500 }}>
+          Mode:
+        </label>
+        <select
+          value={aiMode}
+          onChange={(e) => setAiMode(e.target.value as 'plan' | 'agent')}
+          style={{
+            padding: '6px 10px',
+            backgroundColor: '#1e1e1e',
+            border: '1px solid #333',
+            borderRadius: '4px',
+            color: '#d4d4d4',
+            fontSize: '12px',
+            cursor: 'pointer',
+            flex: 1
+          }}
+        >
+          <option value="plan">Plan - Ideas & Feedback</option>
+          <option value="agent">Agent - Ghost Text Edits</option>
+        </select>
       </div>
 
       {/* Conversation Tabs */}
@@ -350,69 +422,6 @@ const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
             }}>
               {message.content}
             </div>
-            {message.role === 'assistant' && pendingInsertion?.id === message.id && (
-              <div style={{
-                display: 'flex',
-                gap: '6px',
-                marginTop: '6px',
-                justifyContent: 'flex-start'
-              }}>
-                <button
-                  onClick={handleAccept}
-                  title="Accept and insert"
-                  style={{
-                    padding: '4px 8px',
-                    backgroundColor: '#0e639c',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '11px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                >
-                  <Check size={12} /> Accept
-                </button>
-                <button
-                  onClick={handleRegenerate}
-                  title="Regenerate"
-                  style={{
-                    padding: '4px 8px',
-                    backgroundColor: '#333',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '11px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                >
-                  <RotateCcw size={12} /> Regenerate
-                </button>
-                <button
-                  onClick={handleDiscard}
-                  title="Discard"
-                  style={{
-                    padding: '4px 8px',
-                    backgroundColor: '#333',
-                    color: '#888',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '11px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                >
-                  <X size={12} /> Discard
-                </button>
-              </div>
-            )}
           </div>
         ))}
 
@@ -471,7 +480,20 @@ const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
           <textarea
             ref={inputRef}
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
+            onChange={(e) => {
+              const newValue = e.target.value;
+              setInputText(newValue);
+
+              // Update referenced tags
+              const tagRegex = /#(\w+)/g;
+              const matches = newValue.match(tagRegex);
+              if (matches) {
+                const foundTags = matches.map(tag => tag.slice(1));
+                setReferencedTags(foundTags);
+              } else {
+                setReferencedTags([]);
+              }
+            }}
             onKeyDown={handleKeyDown}
             placeholder="What should happen next? (Use #Name for references)"
             disabled={isGenerating}
@@ -509,9 +531,41 @@ const AIAssistantPanel: React.FC<AIAssistantPanelProps> = ({
           </button>
         </div>
 
-        <p style={{ fontSize: '10px', color: '#666', marginTop: '6px', marginBottom: 0 }}>
-          Press Enter to send • Shift+Enter for new line
-        </p>
+        {/* Context Indicator */}
+        <div style={{
+          fontSize: '10px',
+          color: '#666',
+          marginTop: '6px',
+          marginBottom: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px'
+        }}>
+          <div>Press Enter to send • Shift+Enter for new line</div>
+
+          {(activeDocument || referencedTags.length > 0) && (
+            <div style={{
+              padding: '4px 6px',
+              backgroundColor: '#1e1e1e',
+              borderRadius: '3px',
+              fontSize: '10px',
+              color: '#888'
+            }}>
+              <strong style={{ color: '#aaa' }}>Context:</strong>{' '}
+              {activeDocument && (
+                <span style={{ color: '#4ec9b0' }}>
+                  {activeDocument.name}
+                </span>
+              )}
+              {activeDocument && referencedTags.length > 0 && <span> • </span>}
+              {referencedTags.length > 0 && (
+                <span style={{ color: '#ce9178' }}>
+                  {referencedTags.map(tag => `#${tag}`).join(', ')}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
