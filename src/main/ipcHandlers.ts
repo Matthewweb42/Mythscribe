@@ -244,6 +244,28 @@ export function setupIpcHandlers() {
     currentDb.deleteTagTemplate(id);
   });
 
+  // ============= DOCUMENT-TAG OPERATIONS =============
+
+  ipcMain.handle('documentTag:add', async (_, documentId: string, tagId: string, positionStart?: number | null, positionEnd?: number | null) => {
+    if (!currentDb) throw new Error('No project open');
+    return currentDb.addTagToDocument(documentId, tagId, positionStart, positionEnd);
+  });
+
+  ipcMain.handle('documentTag:remove', async (_, documentId: string, tagId: string) => {
+    if (!currentDb) throw new Error('No project open');
+    currentDb.removeTagFromDocument(documentId, tagId);
+  });
+
+  ipcMain.handle('documentTag:getForDocument', async (_, documentId: string) => {
+    if (!currentDb) throw new Error('No project open');
+    return currentDb.getDocumentTags(documentId);
+  });
+
+  ipcMain.handle('documentTag:getDocumentsByTag', async (_, tagId: string) => {
+    if (!currentDb) throw new Error('No project open');
+    return currentDb.getDocumentsByTag(tagId);
+  });
+
   // ============= AI OPERATIONS =============
 
   // Rate limiting for AI requests

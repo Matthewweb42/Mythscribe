@@ -54,6 +54,12 @@ declare global {
         getAll: () => Promise<any[]>
         delete: (id: string) => Promise<void>
       }
+      documentTag: {
+        add: (documentId: string, tagId: string, positionStart?: number | null, positionEnd?: number | null) => Promise<string>
+        remove: (documentId: string, tagId: string) => Promise<void>
+        getForDocument: (documentId: string) => Promise<any[]>
+        getDocumentsByTag: (tagId: string) => Promise<any[]>
+      }
       ai: {
         generateSuggestion: (recentText: string, context?: {
           characterNotes?: string

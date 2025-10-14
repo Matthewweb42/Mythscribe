@@ -32,10 +32,13 @@ This document outlines all planned features for MythScribe, organized by priorit
   - [ ] Hierarchical display (parent → subtags)
   - [ ] [+ Add Tag] button
   - [ ] [✨ AI Suggest Tags] button
-- [ ] Document Metadata Tag Box:
-  - [ ] Tag input field (supports #hashtag syntax)
-  - [ ] Visual tag display with colors
-  - [ ] Natural language AI suggestion button
+- [x] Document Metadata Tag Box:
+  - [x] Visual tag display with colors
+  - [x] Add/remove tags from dropdown
+  - [x] Search tags functionality
+  - [x] Usage count display
+  - [x] Integrated into Editor above content area
+  - [ ] Natural language AI suggestion button (Future)
 - [ ] Default Tag Templates:
   - [ ] "Standard Fiction" template
   - [ ] "Mystery" template

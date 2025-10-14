@@ -13,6 +13,7 @@ import {
 import { useProject } from '../../contexts/ProjectContext';
 import { DocumentRow } from '../../../types/window';
 import aiService from '../../services/aiService';
+import DocumentTagBox from '../DocumentTagBox';
 
 // Custom types for Slate
 type CustomText = {
@@ -1216,6 +1217,9 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
           </button>
         </div>
       </div>
+
+      {/* Document Tags */}
+      {!isFullScreen && <DocumentTagBox documentId={activeDocumentId} />}
 
       {/* Editor and Notes area */}
       <div style={{

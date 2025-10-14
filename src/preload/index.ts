@@ -93,6 +93,18 @@ const api = {
     delete: (id: string) => ipcRenderer.invoke('tagTemplate:delete', id)
   },
 
+  // Document-Tag operations
+  documentTag: {
+    add: (documentId: string, tagId: string, positionStart?: number | null, positionEnd?: number | null) =>
+      ipcRenderer.invoke('documentTag:add', documentId, tagId, positionStart, positionEnd),
+    remove: (documentId: string, tagId: string) =>
+      ipcRenderer.invoke('documentTag:remove', documentId, tagId),
+    getForDocument: (documentId: string) =>
+      ipcRenderer.invoke('documentTag:getForDocument', documentId),
+    getDocumentsByTag: (tagId: string) =>
+      ipcRenderer.invoke('documentTag:getDocumentsByTag', tagId)
+  },
+
   // AI operations
   ai: {
     generateSuggestion: (recentText: string, context?: {

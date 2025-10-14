@@ -562,6 +562,57 @@ export class ProjectDatabase {
     `).run(id);
   }
 
+  // ============= DOCUMENT-TAG RELATIONSHIP OPERATIONS =============
+
+  addTagToDocument(documentId: string, tagId: string, positionStart?: number | null, positionEnd?: number | null): string {
+    const id = this.generateId();
+    const now = new Date().toISOString();
+
+    this.db.prepare(`
+      INSERT INTO document_tags (id, document_id, tag_id, position_start, position_end, created)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, documentId, tagId, positionStart || null, positionEnd || null, now);
+
+    // Increment tag usage count
+    this.incrementTagUsage(tagId);
+    this.updateProjectModified();
+    return id;
+  }
+
+  removeTagFromDocument(documentId: string, tagId: string) {
+    this.db.prepare(`
+      DELETE FROM document_tags
+      WHERE document_id = ? AND tag_id = ?
+    `).run(documentId, tagId);
+
+    // Decrement tag usage count
+    this.db.prepare(`
+      UPDATE tags
+      SET usage_count = CASE WHEN usage_count > 0 THEN usage_count - 1 ELSE 0 END
+      WHERE id = ?
+    `).run(tagId);
+
+    this.updateProjectModified();
+  }
+
+  getDocumentTags(documentId: string): TagRow[] {
+    return this.db.prepare(`
+      SELECT t.* FROM tags t
+      INNER JOIN document_tags dt ON dt.tag_id = t.id
+      WHERE dt.document_id = ?
+      ORDER BY t.category, t.name ASC
+    `).all(documentId) as TagRow[];
+  }
+
+  getDocumentsByTag(tagId: string): DocumentRow[] {
+    return this.db.prepare(`
+      SELECT d.* FROM documents d
+      INNER JOIN document_tags dt ON dt.document_id = d.id
+      WHERE dt.tag_id = ?
+      ORDER BY d.modified DESC
+    `).all(tagId) as DocumentRow[];
+  }
+
   // ============= TAG TEMPLATE OPERATIONS =============
 
   createTagTemplate(name: string, tagsJson: string, isGlobal: boolean = true): string {
