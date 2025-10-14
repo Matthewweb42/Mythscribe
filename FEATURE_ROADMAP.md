@@ -7,17 +7,20 @@ This document outlines all planned features for MythScribe, organized by priorit
 ## 🌟 **Phase 0: Story Intelligence System** (PRIORITY - IN PROGRESS)
 
 ### 0.1 Tag System Foundation
-- [ ] Database schema updates:
-  - [ ] `tags` table (id, project_id, name, category, parent_tag_id, color, usage_count)
-  - [ ] `document_tags` table (many-to-many with position tracking)
-  - [ ] `tag_templates` table (pre-built tag structures)
-  - [ ] `scene_summaries` table (AI-generated cache for fast lookups)
-- [ ] Tag Manager Panel:
-  - [ ] View all tags by category
-  - [ ] See tag usage counts
-  - [ ] Edit/rename/delete tags
-  - [ ] Color customization per category
-  - [ ] Search/filter tags
+- [x] Database schema updates:
+  - [x] `tags` table (id, project_id, name, category, parent_tag_id, color, usage_count)
+  - [x] `document_tags` table (many-to-many with position tracking)
+  - [x] `tag_templates` table (pre-built tag structures)
+  - [x] `scene_summaries` table (AI-generated cache for fast lookups)
+  - [x] IPC handlers for tag CRUD operations
+  - [x] Default tag templates seeded (Fiction, Mystery, Fantasy, Sci-Fi)
+- [x] Tag Manager Panel:
+  - [x] View all tags by category
+  - [x] See tag usage counts
+  - [x] Edit/rename/delete tags
+  - [x] Color customization per category
+  - [x] Search/filter tags
+  - [x] Integrated into TabbedSidebar as "Tags" tab
   - [ ] Bulk operations
 - [ ] Inline Tag Editor:
   - [ ] Detect `#` keypress → ghost text autocomplete

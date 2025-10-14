@@ -71,6 +71,28 @@ const api = {
     set: (key: string, value: string) => ipcRenderer.invoke('settings:set', key, value)
   },
 
+  // Tag operations
+  tag: {
+    create: (name: string, category: 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom' | null, color?: string, parentTagId?: string | null) =>
+      ipcRenderer.invoke('tag:create', name, category, color, parentTagId),
+    get: (id: string) => ipcRenderer.invoke('tag:get', id),
+    getAll: () => ipcRenderer.invoke('tag:getAll'),
+    getByCategory: (category: 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom') =>
+      ipcRenderer.invoke('tag:getByCategory', category),
+    update: (id: string, name: string, color: string, category: 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom' | null) =>
+      ipcRenderer.invoke('tag:update', id, name, color, category),
+    delete: (id: string) => ipcRenderer.invoke('tag:delete', id),
+    incrementUsage: (id: string) => ipcRenderer.invoke('tag:incrementUsage', id)
+  },
+
+  // Tag Template operations
+  tagTemplate: {
+    create: (name: string, tagsJson: string, isGlobal?: boolean) =>
+      ipcRenderer.invoke('tagTemplate:create', name, tagsJson, isGlobal),
+    getAll: () => ipcRenderer.invoke('tagTemplate:getAll'),
+    delete: (id: string) => ipcRenderer.invoke('tagTemplate:delete', id)
+  },
+
   // AI operations
   ai: {
     generateSuggestion: (recentText: string, context?: {

@@ -1,14 +1,15 @@
 // src/renderer/src/components/Sidebar/TabbedSidebar.tsx
 import React, { useState } from 'react';
-import { BookOpen, Users, MapPin, Globe, List, Clock } from 'lucide-react';
+import { BookOpen, Users, MapPin, Globe, List, Clock, Tag } from 'lucide-react';
 import ManuscriptTab from './ManuscriptTab';
 import CharactersTab from './CharactersTab';
 import SettingsTab from './SettingsTab';
 import WorldBuildingTab from './WorldBuildingTab';
 import OutlineTab from './OutlineTab';
 import TimelineTab from './TimelineTab';
+import TagManagerPanel from '../TagManagerPanel';
 
-type TabId = 'manuscript' | 'characters' | 'settings' | 'world' | 'outline' | 'timeline';
+type TabId = 'manuscript' | 'characters' | 'settings' | 'world' | 'outline' | 'timeline' | 'tags';
 
 interface Tab {
   id: TabId;
@@ -56,6 +57,12 @@ const TabbedSidebar: React.FC = () => {
       label: 'Timeline',
       icon: <Clock size={16} />,
       component: <TimelineTab />
+    },
+    {
+      id: 'tags',
+      label: 'Tags',
+      icon: <Tag size={16} />,
+      component: <TagManagerPanel />
     }
   ];
 
