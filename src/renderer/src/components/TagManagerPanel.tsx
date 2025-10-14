@@ -1,6 +1,6 @@
 // src/renderer/src/components/TagManagerPanel.tsx
 import React, { useState, useEffect } from 'react';
-import { Tag, Plus, Edit2, Trash2, Search } from 'lucide-react';
+import { Tag, Plus, Edit2, Trash2, Search, Download } from 'lucide-react';
 
 type TagCategory = 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom';
 
@@ -26,6 +26,9 @@ const TagManagerPanel: React.FC = () => {
   const [editingTag, setEditingTag] = useState<TagRow | null>(null);
   const [editName, setEditName] = useState('');
   const [editColor, setEditColor] = useState('');
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
 
   // Load tags on mount
   useEffect(() => {
@@ -116,6 +119,58 @@ const TagManagerPanel: React.FC = () => {
     }
   };
 
+  const loadTemplates = async () => {
+    setLoadingTemplates(true);
+    try {
+      const allTemplates = await (window.api as any).tagTemplate.getAll();
+      setTemplates(allTemplates);
+    } catch (error) {
+      console.error('Error loading templates:', error);
+      alert('Failed to load templates');
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+
+  const handleLoadTemplate = async (template: any) => {
+    if (!confirm(`Load "${template.name}" template? This will create all tags from this template.`)) {
+      return;
+    }
+
+    try {
+      const templateData = JSON.parse(template.tags_json);
+
+      // Create tags from template
+      for (const categoryDef of templateData.categories) {
+        const { category, color, tags: tagNames } = categoryDef;
+
+        for (const tagName of tagNames) {
+          // Check if tag already exists
+          const existingTag = tags.find(t => t.name === tagName && t.category === category);
+          if (existingTag) {
+            console.log(`Tag "${tagName}" already exists, skipping`);
+            continue;
+          }
+
+          // Create the tag
+          await (window.api as any).tag.create(tagName, category, color, null);
+        }
+      }
+
+      await loadTags();
+      setShowTemplateModal(false);
+      alert(`Template "${template.name}" loaded successfully!`);
+    } catch (error) {
+      console.error('Error loading template:', error);
+      alert('Failed to load template');
+    }
+  };
+
+  const handleShowTemplateModal = () => {
+    setShowTemplateModal(true);
+    loadTemplates();
+  };
+
   return (
     <div style={{
       height: '100%',
@@ -141,6 +196,25 @@ const TagManagerPanel: React.FC = () => {
         }}>
           Tag Manager
         </span>
+        <button
+          onClick={handleShowTemplateModal}
+          style={{
+            padding: '4px 8px',
+            backgroundColor: '#0e639c',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '3px',
+            cursor: 'pointer',
+            fontSize: '11px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}
+          title="Load tag template"
+        >
+          <Download size={12} />
+          Load Template
+        </button>
       </div>
 
       {/* Search bar */}
@@ -574,6 +648,132 @@ const TagManagerPanel: React.FC = () => {
           <div style={{ fontSize: '11px', color: '#666' }}>
             <div>Created: {new Date(selectedTag.created).toLocaleString()}</div>
             <div>Modified: {new Date(selectedTag.modified).toLocaleString()}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Template loading modal */}
+      {showTemplateModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: '#252526',
+            padding: '20px',
+            borderRadius: '8px',
+            border: '1px solid #333',
+            minWidth: '400px',
+            maxWidth: '600px',
+            maxHeight: '70vh',
+            overflow: 'auto'
+          }}>
+            <h3 style={{ marginTop: 0, marginBottom: '16px', fontSize: '16px' }}>
+              Load Tag Template
+            </h3>
+
+            {loadingTemplates && (
+              <div style={{ padding: '20px', textAlign: 'center', color: '#888' }}>
+                Loading templates...
+              </div>
+            )}
+
+            {!loadingTemplates && templates.length === 0 && (
+              <div style={{ padding: '20px', textAlign: 'center', color: '#888' }}>
+                No templates available.
+              </div>
+            )}
+
+            {!loadingTemplates && templates.length > 0 && (
+              <div style={{ marginBottom: '16px' }}>
+                {templates.map(template => {
+                  const templateData = JSON.parse(template.tags_json);
+                  const totalTags = templateData.categories.reduce((sum: number, cat: any) => sum + cat.tags.length, 0);
+
+                  return (
+                    <div
+                      key={template.id}
+                      style={{
+                        padding: '12px',
+                        marginBottom: '8px',
+                        backgroundColor: '#1e1e1e',
+                        border: '1px solid #333',
+                        borderRadius: '6px'
+                      }}
+                    >
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        marginBottom: '8px'
+                      }}>
+                        <h4 style={{ margin: 0, fontSize: '14px' }}>{template.name}</h4>
+                        <button
+                          onClick={() => handleLoadTemplate(template)}
+                          style={{
+                            padding: '6px 12px',
+                            backgroundColor: 'var(--primary-green)',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '11px'
+                          }}
+                        >
+                          Load
+                        </button>
+                      </div>
+
+                      <div style={{ fontSize: '11px', color: '#888', marginBottom: '8px' }}>
+                        {totalTags} tags across {templateData.categories.length} categories
+                      </div>
+
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                        {templateData.categories.map((cat: any, idx: number) => (
+                          <span
+                            key={idx}
+                            style={{
+                              padding: '3px 8px',
+                              backgroundColor: cat.color,
+                              color: '#fff',
+                              borderRadius: '3px',
+                              fontSize: '10px',
+                              fontWeight: 'bold'
+                            }}
+                          >
+                            {cat.name} ({cat.tags.length})
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowTemplateModal(false)}
+              style={{
+                width: '100%',
+                padding: '8px',
+                backgroundColor: '#333',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px'
+              }}
+            >
+              Close
+            </button>
           </div>
         </div>
       )}

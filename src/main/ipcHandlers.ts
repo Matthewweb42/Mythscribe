@@ -66,6 +66,9 @@ export function setupIpcHandlers() {
       currentDb = new ProjectDatabase(filePaths[0]);
       currentDb.updateLastOpened();
 
+      // Seed tag templates if they don't exist (for existing projects)
+      currentDb.seedDefaultTagTemplates();
+
       const metadata = currentDb.getProjectMetadata();
       return { metadata, projectPath: filePaths[0] };
     } catch (error) {

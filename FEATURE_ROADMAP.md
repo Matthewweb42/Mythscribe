@@ -39,20 +39,22 @@ This document outlines all planned features for MythScribe, organized by priorit
   - [x] Usage count display
   - [x] Integrated into Editor above content area
   - [ ] Natural language AI suggestion button (Future)
-- [ ] Default Tag Templates:
-  - [ ] "Standard Fiction" template
-  - [ ] "Mystery" template
-  - [ ] "Fantasy" template
-  - [ ] "Sci-Fi" template
-  - [ ] Easy template creation/editing
-- [ ] Tag Categories (with default colors):
-  - [ ] Characters (Red) - user customizable
-  - [ ] Settings (Orange) - user customizable
-  - [ ] World Building (Teal) - user customizable
-  - [ ] Tone (Blue) - user customizable
-  - [ ] Content (Green) - user customizable
-  - [ ] Plot Threads (Purple) - user customizable
-  - [ ] Custom categories
+- [x] Default Tag Templates:
+  - [x] "Standard Fiction" template
+  - [x] "Mystery" template
+  - [x] "Fantasy" template
+  - [x] "Sci-Fi" template
+  - [x] Load template UI in Tag Manager
+  - [x] Template parsing and tag creation
+  - [ ] Easy template creation/editing (Future)
+- [x] Tag Categories (with default colors):
+  - [x] Characters (Red) - user customizable
+  - [x] Settings (Orange) - user customizable
+  - [x] World Building (Teal) - user customizable
+  - [x] Tone (Blue) - user customizable
+  - [x] Content (Green) - user customizable
+  - [x] Plot Threads (Purple) - user customizable
+  - [x] Custom categories
 - [ ] Tag Import/Export:
   - [ ] Export tag bank from project
   - [ ] Import tag bank to project
