@@ -530,6 +530,100 @@ Make it compelling and consistent with the established tone and style.`;
       throw new Error(`AI generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   });
+
+  // AI Tag Suggestions
+  ipcMain.handle('ai:suggest-tags', async (_, documentContent: string) => {
+    try {
+      if (!currentDb) throw new Error('No project open');
+
+      if (!openaiClient) {
+        initializeOpenAI();
+      }
+
+      if (!openaiClient) {
+        throw new Error('OpenAI API key not found in environment variables');
+      }
+
+      // Get available tags
+      const allTags = currentDb.getAllTags();
+
+      // Build tag list by category for the prompt
+      const tagsByCategory: Record<string, string[]> = {};
+      allTags.forEach(tag => {
+        const cat = tag.category || 'custom';
+        if (!tagsByCategory[cat]) tagsByCategory[cat] = [];
+        tagsByCategory[cat].push(tag.name);
+      });
+
+      const tagListText = Object.entries(tagsByCategory)
+        .map(([category, tags]) => `${category}: ${tags.join(', ')}`)
+        .join('\n');
+
+      const systemPrompt = `You are a writing assistant helping an author tag their story content for better organization.
+
+Analyze the provided scene/chapter content and suggest relevant tags from the available tag list.
+
+Available tags by category:
+${tagListText}
+
+Your task:
+1. Read the content carefully
+2. Identify key elements: characters mentioned, settings/locations, tone/mood, content type (action, dialogue, etc.), and plot threads
+3. Suggest 3-8 relevant tags from the available list that best describe this content
+4. Return ONLY a JSON array of tag names, nothing else
+
+Example response format:
+["protagonist", "dark", "action", "main-plot"]`;
+
+      console.log('🏷️ Generating AI tag suggestions...');
+      console.log('📝 Content length:', documentContent.length);
+      console.log('🏷️ Available tags:', allTags.length);
+
+      const response = await openaiClient.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Analyze this content and suggest relevant tags:\n\n${documentContent.slice(0, 3000)}` }
+        ],
+        temperature: 0.3,
+        max_tokens: 200,
+        stream: false
+      });
+
+      const suggestionsText = response.choices[0]?.message?.content?.trim() || '[]';
+      console.log('✅ AI tag suggestions received:', suggestionsText);
+
+      // Parse the JSON response
+      try {
+        const suggestedTagNames = JSON.parse(suggestionsText);
+
+        // Find the actual tag objects
+        const suggestedTags = suggestedTagNames
+          .map((name: string) => allTags.find(t => t.name.toLowerCase() === name.toLowerCase()))
+          .filter((t: any) => t != null);
+
+        return suggestedTags;
+      } catch (parseError) {
+        console.error('Failed to parse AI response:', parseError);
+        return [];
+      }
+
+    } catch (error) {
+      console.error('❌ AI tag suggestion error:', error);
+
+      if (error instanceof Error) {
+        if (error.message.includes('429')) {
+          throw new Error('Rate limit exceeded. Please wait before requesting suggestions.');
+        } else if (error.message.includes('401')) {
+          throw new Error('Invalid API key.');
+        } else if (error.message.includes('quota')) {
+          throw new Error('OpenAI quota exceeded.');
+        }
+      }
+
+      throw new Error(`Tag suggestion failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  });
 }
 
 export function closeDatabase() {

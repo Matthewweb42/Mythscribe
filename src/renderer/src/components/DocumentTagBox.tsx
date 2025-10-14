@@ -1,6 +1,6 @@
 // src/renderer/src/components/DocumentTagBox.tsx
 import React, { useState, useEffect } from 'react';
-import { Tag, Plus, X } from 'lucide-react';
+import { Tag, Plus, X, Sparkles } from 'lucide-react';
 
 interface TagRow {
   id: string;
@@ -12,13 +12,17 @@ interface TagRow {
 
 interface DocumentTagBoxProps {
   documentId: string | null;
+  documentContent?: string; // Optional: plain text content of the document
 }
 
-const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId }) => {
+const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentContent }) => {
   const [documentTags, setDocumentTags] = useState<TagRow[]>([]);
   const [allTags, setAllTags] = useState<TagRow[]>([]);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [suggestedTags, setSuggestedTags] = useState<TagRow[]>([]);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   // Load document tags and all available tags
   useEffect(() => {
@@ -77,6 +81,73 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId }) => {
     }
   };
 
+  const handleRecommendTags = async () => {
+    if (!documentId || !documentContent) {
+      alert('No document content available for tag suggestions');
+      return;
+    }
+
+    if (documentContent.trim().length < 50) {
+      alert('Document is too short for meaningful tag suggestions. Write at least a few sentences.');
+      return;
+    }
+
+    setIsLoadingSuggestions(true);
+    setShowSuggestions(true);
+    setSuggestedTags([]);
+
+    try {
+      const suggestions = await (window.api as any).ai.suggestTags(documentContent);
+
+      // Filter out tags that are already on the document
+      const documentTagIds = new Set(documentTags.map(t => t.id));
+      const newSuggestions = suggestions.filter((tag: TagRow) => !documentTagIds.has(tag.id));
+
+      setSuggestedTags(newSuggestions);
+
+      if (newSuggestions.length === 0) {
+        alert('No new tag suggestions found. The AI thinks your current tags are perfect!');
+        setShowSuggestions(false);
+      }
+    } catch (error) {
+      console.error('Error getting tag suggestions:', error);
+      alert('Failed to get tag suggestions. Make sure your OpenAI API key is configured.');
+      setShowSuggestions(false);
+    } finally {
+      setIsLoadingSuggestions(false);
+    }
+  };
+
+  const handleAcceptSuggestion = async (tagId: string) => {
+    await handleAddTag(tagId);
+    // Remove from suggestions
+    setSuggestedTags(prev => prev.filter(t => t.id !== tagId));
+    if (suggestedTags.length <= 1) {
+      setShowSuggestions(false);
+    }
+  };
+
+  const handleAcceptAllSuggestions = async () => {
+    if (!documentId) return;
+
+    try {
+      for (const tag of suggestedTags) {
+        await (window.api as any).documentTag.add(documentId, tag.id, null, null);
+      }
+      await loadDocumentTags();
+      setSuggestedTags([]);
+      setShowSuggestions(false);
+    } catch (error) {
+      console.error('Error accepting all suggestions:', error);
+      alert('Failed to add all suggested tags');
+    }
+  };
+
+  const handleDismissSuggestions = () => {
+    setSuggestedTags([]);
+    setShowSuggestions(false);
+  };
+
   // Filter available tags (not already on document)
   const documentTagIds = new Set(documentTags.map(t => t.id));
   const availableTags = allTags.filter(tag => {
@@ -113,6 +184,27 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId }) => {
         }}>
           Document Tags
         </span>
+        <button
+          onClick={handleRecommendTags}
+          disabled={isLoadingSuggestions || !documentContent || documentContent.trim().length < 50}
+          style={{
+            padding: '4px 8px',
+            backgroundColor: isLoadingSuggestions ? '#555' : '#0e639c',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '3px',
+            cursor: isLoadingSuggestions ? 'wait' : 'pointer',
+            fontSize: '11px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            opacity: (!documentContent || documentContent.trim().length < 50) ? 0.5 : 1
+          }}
+          title={isLoadingSuggestions ? 'Loading suggestions...' : 'Get AI tag recommendations'}
+        >
+          <Sparkles size={12} />
+          {isLoadingSuggestions ? 'Loading...' : 'Recommend'}
+        </button>
         <button
           onClick={() => setShowAddMenu(!showAddMenu)}
           style={{
@@ -178,7 +270,7 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId }) => {
         </div>
       )}
 
-      {documentTags.length === 0 && !showAddMenu && (
+      {documentTags.length === 0 && !showAddMenu && !showSuggestions && (
         <div style={{
           padding: '8px',
           textAlign: 'center',
@@ -186,6 +278,111 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId }) => {
           fontSize: '11px'
         }}>
           No tags yet. Click "Add" to tag this document.
+        </div>
+      )}
+
+      {/* AI Suggestions */}
+      {showSuggestions && suggestedTags.length > 0 && (
+        <div style={{
+          marginTop: documentTags.length > 0 ? '12px' : '0',
+          padding: '12px',
+          backgroundColor: '#252526',
+          border: '1px solid #0e639c',
+          borderRadius: '4px'
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: '8px'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '11px',
+              fontWeight: 'bold',
+              color: '#0e639c'
+            }}>
+              <Sparkles size={12} />
+              AI Suggested Tags
+            </div>
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <button
+                onClick={handleAcceptAllSuggestions}
+                style={{
+                  padding: '3px 8px',
+                  backgroundColor: 'var(--primary-green)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  fontSize: '10px',
+                  fontWeight: 'bold'
+                }}
+                title="Accept all suggestions"
+              >
+                Accept All
+              </button>
+              <button
+                onClick={handleDismissSuggestions}
+                style={{
+                  padding: '3px 8px',
+                  backgroundColor: '#555',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  fontSize: '10px'
+                }}
+                title="Dismiss suggestions"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '6px'
+          }}>
+            {suggestedTags.map(tag => (
+              <div
+                key={tag.id}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '4px 8px',
+                  backgroundColor: tag.color,
+                  color: '#fff',
+                  borderRadius: '3px',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  opacity: 0.9
+                }}
+              >
+                <span>{tag.name}</span>
+                <button
+                  onClick={() => handleAcceptSuggestion(tag.id)}
+                  style={{
+                    padding: '2px 6px',
+                    backgroundColor: 'rgba(255,255,255,0.3)',
+                    border: 'none',
+                    borderRadius: '2px',
+                    cursor: 'pointer',
+                    fontSize: '9px',
+                    color: '#fff',
+                    fontWeight: 'bold'
+                  }}
+                  title="Accept this tag"
+                >
+                  +
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

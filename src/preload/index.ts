@@ -118,7 +118,8 @@ const api = {
       paragraphCount: number;
       conversationHistory?: Array<{ role: string; content: string }>;
       referencedNotes?: string;
-    }) => ipcRenderer.invoke('ai:generate-directed', params)
+    }) => ipcRenderer.invoke('ai:generate-directed', params),
+    suggestTags: (documentContent: string) => ipcRenderer.invoke('ai:suggest-tags', documentContent)
   }
 };
 

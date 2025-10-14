@@ -73,6 +73,7 @@ declare global {
           conversationHistory?: Array<{ role: string; content: string }>
           referencedNotes?: string
         }) => Promise<string>
+        suggestTags: (documentContent: string) => Promise<any[]>
       }
     }
   }

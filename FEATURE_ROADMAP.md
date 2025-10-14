@@ -61,15 +61,20 @@ This document outlines all planned features for MythScribe, organized by priorit
   - [ ] Series linking (shared tags across books)
 
 ### 0.2 AI Tag Suggestions
-- [ ] Scene analysis endpoint (main process)
-- [ ] Background AI tag suggestion (non-blocking)
-- [ ] Tag suggestion UI in sidebar:
-  - [ ] Show suggested tags with confidence
-  - [ ] Accept/reject individual suggestions
-  - [ ] Accept all button
-- [ ] Manual trigger: [✨ Recommend Tags] button
-- [ ] Batch tag generation for existing content
-- [ ] Tag suggestion settings:
+- [x] Scene analysis endpoint (main process)
+- [x] Manual trigger: [✨ Recommend Tags] button in DocumentTagBox
+- [x] Tag suggestion UI in DocumentTagBox:
+  - [x] Show suggested tags with colors
+  - [x] Accept individual suggestions with + button
+  - [x] Accept all button
+  - [x] Dismiss button
+  - [x] Filter out already-applied tags
+- [x] Content validation (minimum 50 characters)
+- [x] Loading state during AI request
+- [x] Error handling for API failures
+- [ ] Background AI tag suggestion (non-blocking) - Future enhancement
+- [ ] Batch tag generation for existing content - Future enhancement
+- [ ] Tag suggestion settings - Future enhancement:
   - [ ] Enable/disable auto-suggestions
   - [ ] Suggestion frequency
   - [ ] Minimum confidence threshold
