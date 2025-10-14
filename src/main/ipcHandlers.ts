@@ -192,6 +192,58 @@ export function setupIpcHandlers() {
     currentDb.setSetting(key, value);
   });
 
+  // ============= TAG OPERATIONS =============
+
+  ipcMain.handle('tag:create', async (_, name: string, category: 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom' | null, color?: string, parentTagId?: string | null) => {
+    if (!currentDb) throw new Error('No project open');
+    return currentDb.createTag(name, category, color, parentTagId);
+  });
+
+  ipcMain.handle('tag:get', async (_, id: string) => {
+    if (!currentDb) throw new Error('No project open');
+    return currentDb.getTag(id);
+  });
+
+  ipcMain.handle('tag:getAll', async () => {
+    if (!currentDb) throw new Error('No project open');
+    return currentDb.getAllTags();
+  });
+
+  ipcMain.handle('tag:getByCategory', async (_, category: 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom') => {
+    if (!currentDb) throw new Error('No project open');
+    return currentDb.getTagsByCategory(category);
+  });
+
+  ipcMain.handle('tag:update', async (_, id: string, name: string, color: string, category: 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom' | null) => {
+    if (!currentDb) throw new Error('No project open');
+    currentDb.updateTag(id, name, color, category);
+  });
+
+  ipcMain.handle('tag:delete', async (_, id: string) => {
+    if (!currentDb) throw new Error('No project open');
+    currentDb.deleteTag(id);
+  });
+
+  ipcMain.handle('tag:incrementUsage', async (_, id: string) => {
+    if (!currentDb) throw new Error('No project open');
+    currentDb.incrementTagUsage(id);
+  });
+
+  ipcMain.handle('tagTemplate:create', async (_, name: string, tagsJson: string, isGlobal?: boolean) => {
+    if (!currentDb) throw new Error('No project open');
+    return currentDb.createTagTemplate(name, tagsJson, isGlobal);
+  });
+
+  ipcMain.handle('tagTemplate:getAll', async () => {
+    if (!currentDb) throw new Error('No project open');
+    return currentDb.getAllTagTemplates();
+  });
+
+  ipcMain.handle('tagTemplate:delete', async (_, id: string) => {
+    if (!currentDb) throw new Error('No project open');
+    currentDb.deleteTagTemplate(id);
+  });
+
   // ============= AI OPERATIONS =============
 
   // Rate limiting for AI requests

@@ -35,6 +35,17 @@ export interface ReferenceRow {
   modified: string;
 }
 
+export interface TagRow {
+  id: string;
+  name: string;
+  category: 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom' | null;
+  parent_tag_id: string | null;
+  color: string;
+  usage_count: number;
+  created: string;
+  modified: string;
+}
+
 export class ProjectDatabase {
   private db: Database.Database;
 
@@ -181,6 +192,88 @@ export class ProjectDatabase {
         value TEXT NOT NULL
       )
     `);
+
+    // Tags (for Story Intelligence system)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS tags (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT CHECK(category IN ('character', 'setting', 'worldBuilding', 'tone', 'content', 'plot-thread', 'custom')),
+        parent_tag_id TEXT,
+        color TEXT NOT NULL DEFAULT '#999999',
+        usage_count INTEGER NOT NULL DEFAULT 0,
+        created TEXT NOT NULL,
+        modified TEXT NOT NULL,
+        FOREIGN KEY (parent_tag_id) REFERENCES tags(id) ON DELETE SET NULL
+      )
+    `);
+
+    // Create index for faster tag queries
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_tag_category
+      ON tags(category)
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_tag_name
+      ON tags(name)
+    `);
+
+    // Document-Tag relationship (many-to-many)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS document_tags (
+        id TEXT PRIMARY KEY,
+        document_id TEXT NOT NULL,
+        tag_id TEXT NOT NULL,
+        position_start INTEGER,
+        position_end INTEGER,
+        created TEXT NOT NULL,
+        FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+        FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Create indexes for faster tag lookups
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_document_tags_doc
+      ON document_tags(document_id)
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_document_tags_tag
+      ON document_tags(tag_id)
+    `);
+
+    // Tag Templates (pre-built tag structures)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS tag_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        tags_json TEXT NOT NULL,
+        is_global INTEGER NOT NULL DEFAULT 1,
+        created TEXT NOT NULL
+      )
+    `);
+
+    // Scene Summaries (AI-generated cache for fast lookups)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS scene_summaries (
+        id TEXT PRIMARY KEY,
+        document_id TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        key_points TEXT,
+        characters_present TEXT,
+        created TEXT NOT NULL,
+        modified TEXT NOT NULL,
+        FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Create index for faster summary lookups
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_scene_summary_doc
+      ON scene_summaries(document_id)
+    `);
   }
 
   // ============= PROJECT OPERATIONS =============
@@ -188,7 +281,7 @@ export class ProjectDatabase {
   createProject(name: string): string {
     const id = this.generateId();
     const now = new Date().toISOString();
-    
+
     this.db.prepare(`
       INSERT INTO project (id, name, created, modified, last_opened)
       VALUES (?, ?, ?, ?, ?)
@@ -196,6 +289,9 @@ export class ProjectDatabase {
 
     // Create root folder
     this.createFolder('Manuscript', null);
+
+    // Seed default tag templates
+    this.seedDefaultTagTemplates();
 
     return id;
   }
@@ -406,6 +502,148 @@ export class ProjectDatabase {
       INSERT INTO settings (key, value) VALUES (?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `).run(key, value);
+  }
+
+  // ============= TAG OPERATIONS =============
+
+  createTag(
+    name: string,
+    category: 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom' | null,
+    color: string = '#999999',
+    parentTagId: string | null = null
+  ): string {
+    const id = this.generateId();
+    const now = new Date().toISOString();
+
+    this.db.prepare(`
+      INSERT INTO tags (id, name, category, parent_tag_id, color, usage_count, created, modified)
+      VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(id, name, category, parentTagId, color, now, now);
+
+    this.updateProjectModified();
+    return id;
+  }
+
+  getTag(id: string): TagRow | undefined {
+    return this.db.prepare('SELECT * FROM tags WHERE id = ?').get(id) as TagRow | undefined;
+  }
+
+  getAllTags(): TagRow[] {
+    return this.db.prepare('SELECT * FROM tags ORDER BY category, name ASC').all() as TagRow[];
+  }
+
+  getTagsByCategory(category: 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom'): TagRow[] {
+    return this.db.prepare(
+      'SELECT * FROM tags WHERE category = ? ORDER BY name ASC'
+    ).all(category) as TagRow[];
+  }
+
+  updateTag(id: string, name: string, color: string, category: 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom' | null) {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE tags
+      SET name = ?, color = ?, category = ?, modified = ?
+      WHERE id = ?
+    `).run(name, color, category, now, id);
+
+    this.updateProjectModified();
+  }
+
+  deleteTag(id: string) {
+    this.db.prepare('DELETE FROM tags WHERE id = ?').run(id);
+    this.updateProjectModified();
+  }
+
+  incrementTagUsage(id: string) {
+    this.db.prepare(`
+      UPDATE tags
+      SET usage_count = usage_count + 1
+      WHERE id = ?
+    `).run(id);
+  }
+
+  // ============= TAG TEMPLATE OPERATIONS =============
+
+  createTagTemplate(name: string, tagsJson: string, isGlobal: boolean = true): string {
+    const id = this.generateId();
+    const now = new Date().toISOString();
+
+    this.db.prepare(`
+      INSERT INTO tag_templates (id, name, tags_json, is_global, created)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, name, tagsJson, isGlobal ? 1 : 0, now);
+
+    return id;
+  }
+
+  getAllTagTemplates(): Array<{ id: string; name: string; tags_json: string; is_global: number; created: string }> {
+    return this.db.prepare('SELECT * FROM tag_templates ORDER BY name ASC').all() as Array<{ id: string; name: string; tags_json: string; is_global: number; created: string }>;
+  }
+
+  deleteTagTemplate(id: string) {
+    this.db.prepare('DELETE FROM tag_templates WHERE id = ?').run(id);
+  }
+
+  seedDefaultTagTemplates() {
+    // Check if templates already exist
+    const existing = this.getAllTagTemplates();
+    if (existing.length > 0) {
+      return; // Already seeded
+    }
+
+    // Standard Fiction Template
+    const standardFiction = {
+      categories: [
+        { name: 'Characters', category: 'character', color: '#ef4444', tags: ['protagonist', 'antagonist', 'supporting-character', 'minor-character'] },
+        { name: 'Settings', category: 'setting', color: '#f97316', tags: ['primary-location', 'secondary-location', 'time-period'] },
+        { name: 'World Building', category: 'worldBuilding', color: '#14b8a6', tags: ['rules', 'culture', 'history', 'technology'] },
+        { name: 'Tone', category: 'tone', color: '#3b82f6', tags: ['dramatic', 'humorous', 'suspenseful', 'romantic', 'dark', 'lighthearted'] },
+        { name: 'Content', category: 'content', color: '#22c55e', tags: ['action', 'dialogue', 'description', 'internal-monologue', 'flashback'] },
+        { name: 'Plot Threads', category: 'plot-thread', color: '#a855f7', tags: ['main-plot', 'subplot', 'character-arc', 'mystery', 'romance-arc'] }
+      ]
+    };
+
+    // Mystery Template
+    const mystery = {
+      categories: [
+        { name: 'Characters', category: 'character', color: '#ef4444', tags: ['detective', 'suspect', 'victim', 'witness', 'accomplice'] },
+        { name: 'Settings', category: 'setting', color: '#f97316', tags: ['crime-scene', 'investigation-location', 'hideout'] },
+        { name: 'World Building', category: 'worldBuilding', color: '#14b8a6', tags: ['police-procedure', 'forensics', 'legal-system'] },
+        { name: 'Tone', category: 'tone', color: '#3b82f6', tags: ['suspenseful', 'noir', 'cozy', 'psychological'] },
+        { name: 'Content', category: 'content', color: '#22c55e', tags: ['clue', 'red-herring', 'revelation', 'interrogation', 'deduction'] },
+        { name: 'Plot Threads', category: 'plot-thread', color: '#a855f7', tags: ['main-mystery', 'personal-stakes', 'ticking-clock', 'twist'] }
+      ]
+    };
+
+    // Fantasy Template
+    const fantasy = {
+      categories: [
+        { name: 'Characters', category: 'character', color: '#ef4444', tags: ['hero', 'mentor', 'villain', 'magical-creature', 'ally'] },
+        { name: 'Settings', category: 'setting', color: '#f97316', tags: ['kingdom', 'magical-realm', 'dungeon', 'village', 'wilderness'] },
+        { name: 'World Building', category: 'worldBuilding', color: '#14b8a6', tags: ['magic-system', 'mythology', 'races', 'politics', 'prophecy'] },
+        { name: 'Tone', category: 'tone', color: '#3b82f6', tags: ['epic', 'dark-fantasy', 'whimsical', 'gritty'] },
+        { name: 'Content', category: 'content', color: '#22c55e', tags: ['battle', 'magic-use', 'quest', 'world-building-exposition', 'training'] },
+        { name: 'Plot Threads', category: 'plot-thread', color: '#a855f7', tags: ['heroes-journey', 'magical-quest', 'war', 'coming-of-age', 'political-intrigue'] }
+      ]
+    };
+
+    // Sci-Fi Template
+    const sciFi = {
+      categories: [
+        { name: 'Characters', category: 'character', color: '#ef4444', tags: ['captain', 'scientist', 'android', 'alien', 'pilot'] },
+        { name: 'Settings', category: 'setting', color: '#f97316', tags: ['spaceship', 'space-station', 'alien-planet', 'colony', 'laboratory'] },
+        { name: 'World Building', category: 'worldBuilding', color: '#14b8a6', tags: ['technology', 'alien-species', 'faster-than-light-travel', 'time-travel', 'AI'] },
+        { name: 'Tone', category: 'tone', color: '#3b82f6', tags: ['hard-sci-fi', 'space-opera', 'cyberpunk', 'dystopian', 'hopeful'] },
+        { name: 'Content', category: 'content', color: '#22c55e', tags: ['space-battle', 'scientific-discovery', 'first-contact', 'tech-explanation', 'survival'] },
+        { name: 'Plot Threads', category: 'plot-thread', color: '#a855f7', tags: ['exploration', 'invasion', 'rebellion', 'mystery', 'ethical-dilemma'] }
+      ]
+    };
+
+    // Create templates
+    this.createTagTemplate('Standard Fiction', JSON.stringify(standardFiction), true);
+    this.createTagTemplate('Mystery', JSON.stringify(mystery), true);
+    this.createTagTemplate('Fantasy', JSON.stringify(fantasy), true);
+    this.createTagTemplate('Sci-Fi', JSON.stringify(sciFi), true);
   }
 
   // ============= UTILITY METHODS =============

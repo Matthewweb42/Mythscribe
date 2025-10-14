@@ -4,7 +4,142 @@ This document outlines all planned features for MythScribe, organized by priorit
 
 ---
 
-## 🎯 **Phase 1: Core UI/UX Improvements** (CURRENT)
+## 🌟 **Phase 0: Story Intelligence System** (PRIORITY - IN PROGRESS)
+
+### 0.1 Tag System Foundation
+- [ ] Database schema updates:
+  - [ ] `tags` table (id, project_id, name, category, parent_tag_id, color, usage_count)
+  - [ ] `document_tags` table (many-to-many with position tracking)
+  - [ ] `tag_templates` table (pre-built tag structures)
+  - [ ] `scene_summaries` table (AI-generated cache for fast lookups)
+- [ ] Tag Manager Panel:
+  - [ ] View all tags by category
+  - [ ] See tag usage counts
+  - [ ] Edit/rename/delete tags
+  - [ ] Color customization per category
+  - [ ] Search/filter tags
+  - [ ] Bulk operations
+- [ ] Inline Tag Editor:
+  - [ ] Detect `#` keypress → ghost text autocomplete
+  - [ ] Arrow navigation, Enter to select/create
+  - [ ] Colored tag backgrounds by category
+  - [ ] Right-click menu (Edit, Delete, Jump to Manager)
+- [ ] Tag Sidebar Panel (right side of editor):
+  - [ ] Show all tags in current scene
+  - [ ] Hierarchical display (parent → subtags)
+  - [ ] [+ Add Tag] button
+  - [ ] [✨ AI Suggest Tags] button
+- [ ] Document Metadata Tag Box:
+  - [ ] Tag input field (supports #hashtag syntax)
+  - [ ] Visual tag display with colors
+  - [ ] Natural language AI suggestion button
+- [ ] Default Tag Templates:
+  - [ ] "Standard Fiction" template
+  - [ ] "Mystery" template
+  - [ ] "Fantasy" template
+  - [ ] "Sci-Fi" template
+  - [ ] Easy template creation/editing
+- [ ] Tag Categories (with default colors):
+  - [ ] Characters (Red) - user customizable
+  - [ ] Settings (Orange) - user customizable
+  - [ ] World Building (Teal) - user customizable
+  - [ ] Tone (Blue) - user customizable
+  - [ ] Content (Green) - user customizable
+  - [ ] Plot Threads (Purple) - user customizable
+  - [ ] Custom categories
+- [ ] Tag Import/Export:
+  - [ ] Export tag bank from project
+  - [ ] Import tag bank to project
+  - [ ] Series linking (shared tags across books)
+
+### 0.2 AI Tag Suggestions
+- [ ] Scene analysis endpoint (main process)
+- [ ] Background AI tag suggestion (non-blocking)
+- [ ] Tag suggestion UI in sidebar:
+  - [ ] Show suggested tags with confidence
+  - [ ] Accept/reject individual suggestions
+  - [ ] Accept all button
+- [ ] Manual trigger: [✨ Recommend Tags] button
+- [ ] Batch tag generation for existing content
+- [ ] Tag suggestion settings:
+  - [ ] Enable/disable auto-suggestions
+  - [ ] Suggestion frequency
+  - [ ] Minimum confidence threshold
+
+### 0.3 Story Intelligence AI (Renamed AI Assistant)
+- [ ] Rename "AI Assistant" → "Story Intelligence"
+- [ ] Three-mode system:
+  - [ ] **Query Mode** (default): Ask questions about story
+  - [ ] **Author Mode** (formerly Agent): Direct editing via ghost text
+  - [ ] **Plan Mode**: Ideas and feedback (read-only)
+- [ ] Query Processing Pipeline:
+  - [ ] Parse user question
+  - [ ] Extract key entities (characters, events, themes)
+  - [ ] Tag-based document search
+  - [ ] Load scene summaries (fast)
+  - [ ] Load full scene content if needed (slow)
+  - [ ] Send to OpenAI with optimized context
+  - [ ] Format response with citations
+- [ ] Query Response UI:
+  - [ ] Text answer with source citations
+  - [ ] Jump links: [Open in New Tab]
+  - [ ] Split view support
+  - [ ] Highlight relevant sections in opened scenes
+  - [ ] "Also mentioned in:" related scenes list
+- [ ] Scene Summary System:
+  - [ ] Auto-generate summaries on save
+  - [ ] Cache summaries for fast lookups
+  - [ ] Key points extraction
+  - [ ] Characters present tracking
+  - [ ] Background summary updates
+- [ ] Token Optimization:
+  - [ ] Scene summaries: ~100 tokens each
+  - [ ] Full scenes: ~500-1000 tokens each
+  - [ ] Max context: 3 full scenes + 10 summaries
+  - [ ] Smart context pruning
+
+### 0.4 Granular Tagging (Text Selection)
+- [ ] Select text → Tag menu
+- [ ] Tag position tracking (character offsets)
+- [ ] Visual indicators for tagged regions
+- [ ] Tag overlay system (show tags in margin)
+- [ ] Tag conflict resolution (overlapping)
+- [ ] Tag range editor
+- [ ] Clear all tags in selection
+
+### 0.5 Story Intelligence Polish
+- [ ] Database indexes for tag search
+- [ ] Scene summary caching optimization
+- [ ] Token usage monitoring
+- [ ] Error handling for AI failures
+- [ ] Loading states for AI operations
+- [ ] User documentation
+- [ ] Keyboard shortcuts for tagging
+
+### 0.6 Advanced Analytics (Future)
+- [ ] Plot thread visualization timeline
+- [ ] Character arc analysis graphs
+- [ ] Consistency checker (dialogue tone, facts, etc.)
+- [ ] Tag-based export filtering
+- [ ] Story statistics dashboard
+- [ ] Character appearance frequency
+- [ ] Setting usage distribution
+
+### 0.7 Multi-Project Features (Future)
+- [ ] Series linking (shared characters/tags across books)
+- [ ] Cross-book queries ("When was Emma introduced in the series?")
+- [ ] Unified tag bank for series
+- [ ] Series-wide search
+
+### 0.8 Collaboration & Sharing (Future)
+- [ ] Share tags with co-authors
+- [ ] Tag templates marketplace
+- [ ] Community tag suggestions
+- [ ] Export annotated manuscript with tags
+
+---
+
+## 🎯 **Phase 1: Core UI/UX Improvements**
 
 ### 1.1 Menu Bar System
 - [ ] Top menu bar (File, Edit, Insert, View, Tools, Help)
@@ -359,12 +494,13 @@ This document outlines all planned features for MythScribe, organized by priorit
 - Auto-save functionality
 
 ### Priority Order
-1. **Phase 1**: Foundation (Menu bar, Resizable panels, Enhanced sidebar, Docked AI)
-2. **Phase 2**: Core writing experience (Formatting, Templates, Focus mode upgrades)
-3. **Phase 3**: Organization (Tags, Search, Goals, Reference panel)
-4. **Phase 4**: Advanced features (Templates, Versions, Export, Import)
-5. **Phase 5**: Polish (Themes, Outlining, Timeline)
-6. **Phase 6**: Future enhancements (Analytics, Backups, Collaboration)
+1. **Phase 0**: **PRIORITY** - Story Intelligence System (Tags, AI queries, Scene summaries)
+2. **Phase 1**: Foundation (Menu bar, Resizable panels, Enhanced sidebar, Docked AI)
+3. **Phase 2**: Core writing experience (Formatting, Templates, Focus mode upgrades)
+4. **Phase 3**: Organization (Tags, Search, Goals, Reference panel)
+5. **Phase 4**: Advanced features (Templates, Versions, Export, Import)
+6. **Phase 5**: Polish (Themes, Outlining, Timeline)
+7. **Phase 6**: Future enhancements (Analytics, Backups, Collaboration)
 
 ### Dependencies
 - Phase 2 depends on Phase 1 (need menu bar and proper layout)
@@ -406,5 +542,5 @@ This document outlines all planned features for MythScribe, organized by priorit
 - When a Chapter or scene or whatever is created, the title might look like Fallen Creator or Tash Kalmanes... the tag should be auto created to be fallen-creator and tash-kalmanes so it can be referenced accordingly. 
 - There should be a database or place 
 
-**Last Updated:** 2025-01-09
-**Version:** 1.0 (Initial Roadmap)
+**Last Updated:** 2025-01-14
+**Version:** 2.0 (Added Phase 0: Story Intelligence System - PRIORITY)
