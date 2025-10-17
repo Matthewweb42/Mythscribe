@@ -22,11 +22,13 @@ This document outlines all planned features for MythScribe, organized by priorit
   - [x] Search/filter tags
   - [x] Integrated into TabbedSidebar as "Tags" tab
   - [ ] Bulk operations
-- [ ] Inline Tag Editor:
-  - [ ] Detect `#` keypress → ghost text autocomplete
+- [ ] Inline Tag Editor: **(IN PROGRESS - See INLINE_TAG_IMPLEMENTATION.md)**
+  - [x] InlineTagAutocomplete component created
+  - [ ] Detect `#` keypress → show autocomplete
   - [ ] Arrow navigation, Enter to select/create
-  - [ ] Colored tag backgrounds by category
-  - [ ] Right-click menu (Edit, Delete, Jump to Manager)
+  - [ ] Insert tags with colored backgrounds
+  - [ ] Add tags to document in database
+  - [ ] Right-click menu (Edit, Delete, Jump to Manager) - Future
 - [ ] Tag Sidebar Panel (right side of editor):
   - [ ] Show all tags in current scene
   - [ ] Hierarchical display (parent → subtags)

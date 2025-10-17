@@ -14,6 +14,7 @@ import { useProject } from '../../contexts/ProjectContext';
 import { DocumentRow } from '../../../types/window';
 import aiService from '../../services/aiService';
 import DocumentTagBox from '../DocumentTagBox';
+import InlineTagAutocomplete from './InlineTagAutocomplete';
 
 // Custom types for Slate
 type CustomText = {
@@ -197,6 +198,14 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
   const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
   const [showBgPicker, setShowBgPicker] = useState(false);
 
+  // Inline tag autocomplete state
+  const [showTagAutocomplete, setShowTagAutocomplete] = useState(false);
+  const [tagSearchQuery, setTagSearchQuery] = useState('');
+  const [tagAutocompletePosition, setTagAutocompletePosition] = useState({ top: 0, left: 0 });
+  const [tagSelectedIndex, setTagSelectedIndex] = useState(0);
+  const [allTags, setAllTags] = useState<any[]>([]);
+  const [hashStartPosition, setHashStartPosition] = useState<{ path: number[]; offset: number } | null>(null);
+
   const presetBackgrounds = [
     { name: 'None', url: null },
     { name: 'Cafe', url: 'https://images.unsplash.com/photo-1445116572660-236099ec97a0?w=1600' },
@@ -328,6 +337,22 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
     loadDocument();
   }, [activeDocumentId, documents, calculateStats]);
+
+  // Load all tags for autocomplete
+  useEffect(() => {
+    const loadTags = async () => {
+      try {
+        const tags = await (window.api as any).tag.getAll();
+        setAllTags(tags);
+      } catch (error) {
+        console.error('Error loading tags:', error);
+      }
+    };
+
+    if (activeDocumentId) {
+      loadTags();
+    }
+  }, [activeDocumentId]);
 
   // Extract text from Slate nodes
   const extractText = (nodes: Descendant[]): string => {
@@ -465,8 +490,113 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     }
   }, [editor, ghostText, aiAssistantGhostText, clearGhostText]);
 
+  // Tag autocomplete functions
+  const closeTagAutocomplete = useCallback(() => {
+    setShowTagAutocomplete(false);
+    setTagSearchQuery('');
+    setTagSelectedIndex(0);
+    setHashStartPosition(null);
+  }, []);
+
+  const handleSelectTag = useCallback(async (tag: any) => {
+    if (!hashStartPosition || !activeDocumentId) {
+      closeTagAutocomplete();
+      return;
+    }
+
+    try {
+      // Remove the # and search query text
+      const { selection } = editor;
+      if (selection) {
+        Transforms.delete(editor, {
+          at: {
+            anchor: hashStartPosition,
+            focus: selection.anchor
+          }
+        });
+
+        // Insert the tag as a special node with background color
+        Transforms.insertText(editor, `#${tag.name}`, {
+          at: hashStartPosition
+        });
+
+        // Apply tag formatting (background color)
+        Transforms.setNodes(
+          editor,
+          { backgroundColor: tag.color } as any,
+          {
+            at: {
+              anchor: hashStartPosition,
+              focus: {
+                path: hashStartPosition.path,
+                offset: hashStartPosition.offset + tag.name.length + 1
+              }
+            },
+            match: Text.isText,
+            split: true
+          }
+        );
+
+        // Add tag to document in database
+        await (window.api as any).documentTag.add(activeDocumentId, tag.id, null, null);
+      }
+
+      closeTagAutocomplete();
+    } catch (error) {
+      console.error('Error inserting tag:', error);
+      closeTagAutocomplete();
+    }
+  }, [hashStartPosition, activeDocumentId, editor, closeTagAutocomplete]);
+
+  const handleCreateAndInsertTag = useCallback(async (tagName: string) => {
+    if (!hashStartPosition || !activeDocumentId) {
+      closeTagAutocomplete();
+      return;
+    }
+
+    try {
+      // Create new tag with default color
+      const newTagId = await (window.api as any).tag.create(
+        tagName,
+        'custom',
+        '#888888',
+        null
+      );
+
+      // Get the created tag
+      const newTag = await (window.api as any).tag.get(newTagId);
+
+      // Insert it
+      await handleSelectTag(newTag);
+    } catch (error) {
+      console.error('Error creating tag:', error);
+      closeTagAutocomplete();
+    }
+  }, [hashStartPosition, activeDocumentId, closeTagAutocomplete, handleSelectTag]);
+
   // Auto-save with debounce
   const handleChange = useCallback((newValue: Descendant[]) => {
+    // Track tag search query while autocomplete is open
+    if (showTagAutocomplete && hashStartPosition) {
+      const { selection } = editor;
+      if (selection) {
+        // Extract text after the # symbol
+        try {
+          const textAfterHash = SlateEditor.string(editor, {
+            anchor: {
+              path: hashStartPosition.path,
+              offset: hashStartPosition.offset + 1
+            },
+            focus: selection.anchor
+          });
+          setTagSearchQuery(textAfterHash);
+        } catch (e) {
+          // If extraction fails, close autocomplete
+          closeTagAutocomplete();
+        }
+      }
+    }
+
     setValue(newValue);
 
     // Calculate stats
@@ -549,7 +679,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     } else {
       console.log('❌ DEBUG: Not setting AI timer - mode:', mode, 'AI enabled:', aiService.getSettings().enabled, 'AI Assistant ghost text active:', !!aiAssistantGhostText);
     }
-  }, [currentDoc, saveTimeout, updateDocumentContent, updateDocumentWordCount, mode, requestSuggestion, clearGhostText, ghostText, aiAssistantGhostText, extractText, calculateStats]);
+  }, [currentDoc, saveTimeout, updateDocumentContent, updateDocumentWordCount, mode, requestSuggestion, clearGhostText, ghostText, aiAssistantGhostText, extractText, calculateStats, showTagAutocomplete, hashStartPosition, editor, closeTagAutocomplete]);
 
   // Toggle format helper
   const toggleFormat = useCallback((format: 'bold' | 'italic' | 'underline' | 'strikethrough' | 'code') => {
@@ -659,6 +789,74 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    // Handle tag autocomplete navigation
+    if (showTagAutocomplete) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        const filteredTags = allTags.filter(tag =>
+          tag.name.toLowerCase().includes(tagSearchQuery.toLowerCase())
+        );
+        setTagSelectedIndex(prev => (prev + 1) % filteredTags.length);
+        return;
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        const filteredTags = allTags.filter(tag =>
+          tag.name.toLowerCase().includes(tagSearchQuery.toLowerCase())
+        );
+        setTagSelectedIndex(prev => (prev - 1 + filteredTags.length) % filteredTags.length);
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const filteredTags = allTags.filter(tag =>
+          tag.name.toLowerCase().includes(tagSearchQuery.toLowerCase())
+        );
+        if (filteredTags[tagSelectedIndex]) {
+          handleSelectTag(filteredTags[tagSelectedIndex]);
+        } else if (tagSearchQuery.trim()) {
+          // Create new tag if no match
+          handleCreateAndInsertTag(tagSearchQuery);
+        }
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeTagAutocomplete();
+        return;
+      }
+    }
+
+    // Detect # keypress to start tag autocomplete
+    if (event.key === '#') {
+      const { selection } = editor;
+      if (selection) {
+        // Store the position where # was typed
+        setHashStartPosition({
+          path: selection.anchor.path,
+          offset: selection.anchor.offset
+        });
+        setTagSearchQuery('');
+        setTagSelectedIndex(0);
+
+        // Calculate position for autocomplete dropdown
+        const domSelection = window.getSelection();
+        if (domSelection && domSelection.rangeCount > 0) {
+          const range = domSelection.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          setTagAutocompletePosition({
+            top: rect.bottom + window.scrollY + 5,
+            left: rect.left + window.scrollX
+          });
+        }
+
+        setShowTagAutocomplete(true);
+      }
+    }
+
     // F11 to toggle full screen
     if (event.key === 'F11') {
       event.preventDefault();
@@ -726,7 +924,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         }
         break;
     }
-  }, [toggleFormat, currentDoc, value, updateDocumentContent, ghostText, acceptSuggestion, acceptOneWord, clearGhostText, isFullScreen]);
+  }, [toggleFormat, currentDoc, value, updateDocumentContent, ghostText, acceptSuggestion, acceptOneWord, clearGhostText, isFullScreen, showTagAutocomplete, allTags, tagSearchQuery, tagSelectedIndex, editor, handleSelectTag, handleCreateAndInsertTag, closeTagAutocomplete]);
 
   // Render decorator for ghost text - shows inline after cursor
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
@@ -1373,6 +1571,18 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
                     }}
                   />
                 </Slate>
+
+                {/* Inline Tag Autocomplete */}
+                {showTagAutocomplete && (
+                  <InlineTagAutocomplete
+                    tags={allTags}
+                    searchQuery={tagSearchQuery}
+                    selectedIndex={tagSelectedIndex}
+                    position={tagAutocompletePosition}
+                    onSelect={handleSelectTag}
+                    onClose={closeTagAutocomplete}
+                  />
+                )}
               </div>
             </div>
           </Panel>
