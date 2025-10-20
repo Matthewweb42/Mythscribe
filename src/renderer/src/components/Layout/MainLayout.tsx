@@ -8,6 +8,7 @@ import WelcomeScreen from '../WelcomeScreen';
 import SettingsModal from '../SettingsModal';
 import AIAssistantPanel from '../AIAssistantPanel';
 import { ConfirmModal } from '../ConfirmModal';
+import MenuBar from '../MenuBar';
 import { useProject } from '../../contexts/ProjectContext';
 import { useMenuEvents } from '../../hooks/useMenuEvents';
 import { Settings } from 'lucide-react';
@@ -22,6 +23,38 @@ const MainLayout: React.FC = () => {
   const [editorSetGhostText, setEditorSetGhostText] = useState<((text: string) => void) | null>(null);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
+  // Handle menu bar actions
+  const handleMenuAction = (action: string) => {
+    switch (action) {
+      case 'menu:new-project':
+        const name = prompt('Enter project name:');
+        if (name) createProject(name);
+        break;
+      case 'menu:open-project':
+        openProject();
+        break;
+      case 'menu:save':
+        console.log('Save triggered');
+        break;
+      case 'menu:toggle-sidebar':
+        setShowSidebar(prev => !prev);
+        break;
+      case 'menu:toggle-notes':
+        console.log('Toggle notes');
+        break;
+      case 'menu:toggle-ai':
+        setShowAI(prev => !prev);
+        break;
+      case 'menu:toggle-focus':
+        console.log('Toggle focus mode');
+        break;
+      case 'menu:settings':
+        setShowSettings(true);
+        break;
+      default:
+        console.log('Menu action:', action);
+    }
+  };
 
   // Handle menu events
   useMenuEvents({
@@ -133,6 +166,9 @@ const MainLayout: React.FC = () => {
       display: 'flex',
       flexDirection: 'column'
     }}>
+      {/* Menu Bar */}
+      <MenuBar onMenuAction={handleMenuAction} />
+
       {/* Main Content Area */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
         <PanelGroup direction="horizontal" autoSaveId="main-layout">

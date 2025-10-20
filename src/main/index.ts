@@ -4,7 +4,6 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import dotenv from 'dotenv'
-import { createApplicationMenu } from './menu'
 
 // Load environment variables
 dotenv.config()
@@ -15,7 +14,7 @@ function createWindow(): void {
     width: 1400,
     height: 900,
     show: false,
-    autoHideMenuBar: false, // Show menu bar
+    autoHideMenuBar: true, // Hide the native menu bar
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -23,9 +22,8 @@ function createWindow(): void {
     }
   })
 
-  // Create and set application menu
-  const menu = createApplicationMenu(mainWindow);
-  Menu.setApplicationMenu(menu);
+  // Remove the native application menu
+  Menu.setApplicationMenu(null);
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
