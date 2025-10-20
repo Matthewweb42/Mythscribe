@@ -20,7 +20,7 @@ function initializeOpenAI() {
 export function setupIpcHandlers() {
   // ============= PROJECT OPERATIONS =============
 
-  ipcMain.handle('project:create', async (_, projectName: string) => {
+  ipcMain.handle('project:create', async (_, projectName: string, format: 'novel' | 'epic' | 'webnovel' = 'novel') => {
     try {
       const { filePath } = await dialog.showSaveDialog({
         title: 'Create New Project',
@@ -38,7 +38,7 @@ export function setupIpcHandlers() {
 
       // Create new database
       currentDb = new ProjectDatabase(filePath);
-      const projectId = currentDb.createProject(projectName);
+      const projectId = currentDb.createProject(projectName, format);
 
       return { projectId, projectPath: filePath };
     } catch (error) {

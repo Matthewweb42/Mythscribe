@@ -16,7 +16,7 @@ interface ProjectContextType {
   references: ReferenceRow[];
   
   // Actions
-  createProject: (name: string) => Promise<void>;
+  createProject: (name: string, format?: 'novel' | 'epic' | 'webnovel') => Promise<void>;
   openProject: () => Promise<void>;
   closeProject: () => Promise<void>;
   
@@ -50,9 +50,9 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // ============= PROJECT OPERATIONS =============
 
-  const createProject = useCallback(async (name: string) => {
+  const createProject = useCallback(async (name: string, format: 'novel' | 'epic' | 'webnovel' = 'novel') => {
     try {
-      const result = await window.api.project.create(name);
+      const result = await window.api.project.create(name, format);
       if (result) {
         setProjectPath(result.projectPath);
         const metadata = await window.api.project.getMetadata();

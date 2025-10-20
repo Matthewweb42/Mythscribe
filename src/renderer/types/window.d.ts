@@ -3,6 +3,7 @@
 export interface ProjectMetadata {
   id: string;
   name: string;
+  novel_format: 'novel' | 'epic' | 'webnovel';
   created: string;
   modified: string;
   last_opened: string;
@@ -37,7 +38,7 @@ declare global {
     api: {
       onMenuEvent: (callback: (event: string) => void) => void;
       project: {
-        create: (projectName: string) => Promise<{ projectId: string; projectPath: string } | null>;
+        create: (projectName: string, format?: 'novel' | 'epic' | 'webnovel') => Promise<{ projectId: string; projectPath: string } | null>;
         open: () => Promise<{ metadata: ProjectMetadata; projectPath: string } | null>;
         getMetadata: () => Promise<ProjectMetadata>;
         close: () => Promise<void>;

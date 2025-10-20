@@ -157,45 +157,53 @@ const Leaf = ({ attributes, children, leaf }: RenderLeafProps) => {
 };
 
 // Render element (for paragraphs, headings, blockquotes, scene breaks)
-const Element = ({ attributes, children, element }: RenderElementProps) => {
-  const style: React.CSSProperties = {};
+// This will be created inside the Editor component to access formatting settings
+const createElementRenderer = (paragraphSpacing: number, paragraphIndent: number) => {
+  return ({ attributes, children, element }: RenderElementProps) => {
+    const style: React.CSSProperties = {};
 
-  if ('align' in element && element.align) {
-    style.textAlign = element.align;
-  }
+    if ('align' in element && element.align) {
+      style.textAlign = element.align;
+    }
 
-  switch (element.type) {
-    case 'heading':
-      return React.createElement(`h${element.level}`, { ...attributes, style }, children);
-    case 'blockquote':
-      return (
-        <blockquote {...attributes} style={{
-          borderLeft: '3px solid var(--primary-green)',
-          paddingLeft: '16px',
-          marginLeft: '0',
-          fontStyle: 'italic',
-          color: '#b0b0b0'
-        }}>
-          {children}
-        </blockquote>
-      );
-    case 'sceneBreak':
-      return (
-        <div {...attributes} contentEditable={false} style={{
-          textAlign: 'center',
-          margin: '20px 0',
-          color: '#888',
-          fontSize: '20px',
-          userSelect: 'none',
-          cursor: 'default'
-        }}>
-          {children}
-          <div contentEditable={false}>* * *</div>
-        </div>
-      );
-    default:
-      return <p {...attributes} style={style}>{children}</p>;
-  }
+    switch (element.type) {
+      case 'heading':
+        return React.createElement(`h${element.level}`, { ...attributes, style }, children);
+      case 'blockquote':
+        return (
+          <blockquote {...attributes} style={{
+            borderLeft: '3px solid var(--primary-green)',
+            paddingLeft: '16px',
+            marginLeft: '0',
+            fontStyle: 'italic',
+            color: '#b0b0b0'
+          }}>
+            {children}
+          </blockquote>
+        );
+      case 'sceneBreak':
+        return (
+          <div {...attributes} contentEditable={false} style={{
+            textAlign: 'center',
+            margin: '20px 0',
+            color: '#888',
+            fontSize: '20px',
+            userSelect: 'none',
+            cursor: 'default'
+          }}>
+            {children}
+            <div contentEditable={false}>* * *</div>
+          </div>
+        );
+      default:
+        // Apply paragraph spacing and indentation
+        style.marginBottom = `${paragraphSpacing}em`;
+        if (paragraphIndent > 0) {
+          style.textIndent = `${paragraphIndent}em`;
+        }
+        return <p {...attributes} style={style}>{children}</p>;
+    }
+  };
 };
 
 interface EditorProps {
@@ -222,6 +230,12 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
   const [charCount, setCharCount] = useState(0);
   const [sessionWordCount, setSessionWordCount] = useState(0);
   const sessionStartWordCount = useRef<number>(0);
+
+  // Editor formatting settings
+  const [editorTextSize, setEditorTextSize] = useState(16);
+  const [editorLineHeight, setEditorLineHeight] = useState(1.6);
+  const [editorParagraphSpacing, setEditorParagraphSpacing] = useState(0);
+  const [editorParagraphIndent, setEditorParagraphIndent] = useState(0);
 
   // Notes panel
   const [showNotes, setShowNotes] = useState(false);
@@ -250,11 +264,35 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     { name: 'Cozy', url: 'https://images.unsplash.com/photo-1515694346937-94d85e41e6f0?w=1600' },
   ];
 
+  // Create Element renderer with current formatting settings
+  const Element = useMemo(() => createElementRenderer(editorParagraphSpacing, editorParagraphIndent), [editorParagraphSpacing, editorParagraphIndent]);
+
   // Initialize AI service with API key
   useEffect(() => {
     // Note: API key is now handled securely in the main process via .env file
     // No need to handle API key in renderer process anymore
     console.log('AI Service ready - API key handled by main process');
+  }, []);
+
+  // Load editor formatting settings from database
+  useEffect(() => {
+    const loadEditorSettings = async () => {
+      try {
+        const textSize = await window.api.settings.get('editor_text_size');
+        const lineHeight = await window.api.settings.get('editor_line_height');
+        const paragraphSpacing = await window.api.settings.get('editor_paragraph_spacing');
+        const paragraphIndent = await window.api.settings.get('editor_paragraph_indent');
+
+        if (textSize) setEditorTextSize(parseFloat(textSize));
+        if (lineHeight) setEditorLineHeight(parseFloat(lineHeight));
+        if (paragraphSpacing) setEditorParagraphSpacing(parseFloat(paragraphSpacing));
+        if (paragraphIndent) setEditorParagraphIndent(parseFloat(paragraphIndent));
+      } catch (error) {
+        console.error('Error loading editor settings:', error);
+      }
+    };
+
+    loadEditorSettings();
   }, []);
 
   // Count words in text
@@ -1706,8 +1744,8 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
                     spellCheck
                     style={{
                       minHeight: '100%',
-                      fontSize: '16px',
-                      lineHeight: '1.6',
+                      fontSize: `${editorTextSize}px`,
+                      lineHeight: `${editorLineHeight}`,
                       color: '#d4d4d4',
                       outline: 'none'
                     }}

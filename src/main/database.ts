@@ -6,6 +6,7 @@ import fs from 'fs';
 export interface ProjectMetadata {
   id: string;
   name: string;
+  novel_format: 'novel' | 'epic' | 'webnovel';
   created: string;
   modified: string;
   last_opened: string;
@@ -61,6 +62,26 @@ export class ProjectDatabase {
   }
 
   private runMigrations() {
+    // Check if project table exists for project-related migrations
+    const projectTableInfo = this.db.pragma('table_info(project)') as Array<{ name: string }>;
+
+    if (projectTableInfo.length > 0) {
+      // Check and add novel_format column to project table
+      const hasNovelFormat = projectTableInfo.some((col) => col.name === 'novel_format');
+      if (!hasNovelFormat) {
+        console.log('Running migration: Adding novel_format column to project table');
+        try {
+          this.db.exec(`
+            ALTER TABLE project
+            ADD COLUMN novel_format TEXT NOT NULL DEFAULT 'novel' CHECK(novel_format IN ('novel', 'epic', 'webnovel'))
+          `);
+          console.log('Migration completed: novel_format column added');
+        } catch (error) {
+          console.error('Migration error (novel_format):', error);
+        }
+      }
+    }
+
     // Check if documents table exists
     const tableInfo = this.db.pragma('table_info(documents)') as Array<{ name: string }>;
 
@@ -142,6 +163,7 @@ export class ProjectDatabase {
       CREATE TABLE IF NOT EXISTS project (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
+        novel_format TEXT NOT NULL DEFAULT 'novel' CHECK(novel_format IN ('novel', 'epic', 'webnovel')),
         created TEXT NOT NULL,
         modified TEXT NOT NULL,
         last_opened TEXT NOT NULL
@@ -278,20 +300,32 @@ export class ProjectDatabase {
 
   // ============= PROJECT OPERATIONS =============
 
-  createProject(name: string): string {
+  createProject(name: string, format: 'novel' | 'epic' | 'webnovel' = 'novel'): string {
     const id = this.generateId();
     const now = new Date().toISOString();
 
     this.db.prepare(`
-      INSERT INTO project (id, name, created, modified, last_opened)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, name, now, now, now);
+      INSERT INTO project (id, name, novel_format, created, modified, last_opened)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, name, format, now, now, now);
 
-    // Create root folder
-    this.createFolder('Manuscript', null);
+    // Create initial folder structure based on format
+    if (format === 'novel') {
+      // Standard Novel: Part → Chapter → Scene
+      this.createFolder('Manuscript', null);
+    } else if (format === 'epic') {
+      // Epic Scale: Series → Novel → Part → Chapter → Scene
+      this.createFolder('Series', null);
+    } else if (format === 'webnovel') {
+      // Web-novel: Volume → Arc → Chapter
+      this.createFolder('Volume 1', null);
+    }
 
     // Seed default tag templates
     this.seedDefaultTagTemplates();
+
+    // Seed default editor formatting settings
+    this.seedDefaultEditorSettings();
 
     return id;
   }
@@ -695,6 +729,38 @@ export class ProjectDatabase {
     this.createTagTemplate('Mystery', JSON.stringify(mystery), true);
     this.createTagTemplate('Fantasy', JSON.stringify(fantasy), true);
     this.createTagTemplate('Sci-Fi', JSON.stringify(sciFi), true);
+  }
+
+  seedDefaultEditorSettings(format: 'novel' | 'epic' | 'webnovel' = 'novel') {
+    // Check if settings already exist
+    const textSize = this.getSetting('editor_text_size');
+    if (textSize) {
+      return; // Already seeded
+    }
+
+    // Default editor formatting settings based on format
+    // Novel & Epic: Traditional manuscript style (Scrivener-like)
+    //   - No spacing between paragraphs
+    //   - First-line indentation
+    //   - Double-spaced lines
+    // Web-novel: Modern web reading style
+    //   - Spacing between paragraphs
+    //   - No first-line indentation
+    //   - More compact line spacing
+
+    if (format === 'novel' || format === 'epic') {
+      // Traditional manuscript formatting (like Scrivener)
+      this.setSetting('editor_text_size', '16'); // 16px
+      this.setSetting('editor_line_height', '2.0'); // Double-spaced
+      this.setSetting('editor_paragraph_spacing', '0'); // No spacing between paragraphs
+      this.setSetting('editor_paragraph_indent', '1.5'); // 1.5em first-line indent
+    } else if (format === 'webnovel') {
+      // Web-novel formatting (modern web reading)
+      this.setSetting('editor_text_size', '16'); // 16px
+      this.setSetting('editor_line_height', '1.6'); // Tighter line spacing
+      this.setSetting('editor_paragraph_spacing', '1.0'); // 1.0em between paragraphs
+      this.setSetting('editor_paragraph_indent', '0'); // No first-line indent
+    }
   }
 
   // ============= UTILITY METHODS =============
