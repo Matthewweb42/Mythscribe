@@ -28,6 +28,9 @@ type CustomText = {
   color?: string;
   backgroundColor?: string;
   ghostSuggestion?: string; // Ghost text to show after this text node
+  isTag?: boolean; // Whether this text is a tag
+  tagId?: string; // ID of the tag
+  tagName?: string; // Name of the tag (for rendering without #)
 };
 
 type ParagraphElement = { type: 'paragraph'; align?: 'left' | 'center' | 'right' | 'justify'; children: CustomText[] };
@@ -69,6 +72,7 @@ const initialValue: Descendant[] = [
 // Render leaf (for bold, italic, underline, ghost text, etc.)
 const Leaf = ({ attributes, children, leaf }: RenderLeafProps) => {
   let style: React.CSSProperties = {};
+  const [isHovering, setIsHovering] = React.useState(false);
 
   if (leaf.fontSize) {
     style.fontSize = `${leaf.fontSize}px`;
@@ -78,6 +82,21 @@ const Leaf = ({ attributes, children, leaf }: RenderLeafProps) => {
   }
   if (leaf.backgroundColor) {
     style.backgroundColor = leaf.backgroundColor;
+  }
+
+  // If this is a tag, add interactive styling and hide the # prefix visually
+  if (leaf.isTag && leaf.tagName) {
+    style.cursor = 'pointer';
+    style.borderRadius = '3px';
+    style.padding = '2px 6px';
+    style.transition = 'opacity 0.2s';
+    // Use a pseudo-element approach via className instead
+    style.position = 'relative';
+
+    if (isHovering) {
+      style.opacity = '0.8';
+      style.textDecoration = 'underline';
+    }
   }
 
   if (leaf.bold) {
@@ -114,6 +133,23 @@ const Leaf = ({ attributes, children, leaf }: RenderLeafProps) => {
           {leaf.ghostSuggestion}
         </span>
       </>
+    );
+  }
+
+  // Wrap tags to add event handlers and hide # symbol
+  if (leaf.isTag && leaf.tagName) {
+    return (
+      <span
+        {...attributes}
+        style={style}
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
+        title={`Tag: ${leaf.tagName}`}
+        data-tag-id={leaf.tagId}
+        className="inline-tag"
+      >
+        {children}
+      </span>
     );
   }
 
@@ -505,43 +541,116 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     }
 
     try {
-      // Remove the # and search query text
       const { selection } = editor;
-      if (selection) {
-        Transforms.delete(editor, {
-          at: {
-            anchor: hashStartPosition,
-            focus: selection.anchor
-          }
-        });
-
-        // Insert the tag as a special node with background color
-        Transforms.insertText(editor, `#${tag.name}`, {
-          at: hashStartPosition
-        });
-
-        // Apply tag formatting (background color)
-        Transforms.setNodes(
-          editor,
-          { backgroundColor: tag.color } as any,
-          {
-            at: {
-              anchor: hashStartPosition,
-              focus: {
-                path: hashStartPosition.path,
-                offset: hashStartPosition.offset + tag.name.length + 1
-              }
-            },
-            match: Text.isText,
-            split: true
-          }
-        );
-
-        // Add tag to document in database
-        await (window.api as any).documentTag.add(activeDocumentId, tag.id, null, null);
+      if (!selection) {
+        closeTagAutocomplete();
+        return;
       }
 
+      // Convert hex color to rgba with reduced opacity (20% opacity for subtle highlight)
+      const hexToRgba = (hex: string, alpha: number) => {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      };
+
+      const subtleColor = hexToRgba(tag.color, 0.2);
+      const tagText = `#${tag.name}`;
+
+      // Delete the # and search query
+      Transforms.delete(editor, {
+        at: {
+          anchor: hashStartPosition,
+          focus: selection.anchor
+        }
+      });
+
+      // Insert tag as formatted text
+      Transforms.insertText(editor, tagText, { at: hashStartPosition });
+
+      // Apply tag formatting
+      Transforms.setNodes(
+        editor,
+        { backgroundColor: subtleColor, isTag: true, tagId: tag.id, tagName: tag.name } as any,
+        {
+          at: {
+            anchor: hashStartPosition,
+            focus: {
+              path: hashStartPosition.path,
+              offset: hashStartPosition.offset + tagText.length
+            }
+          },
+          match: Text.isText,
+          split: true
+        }
+      );
+
+      // Calculate position after tag
+      const afterTagPosition = {
+        path: hashStartPosition.path,
+        offset: hashStartPosition.offset + tagText.length
+      };
+
+      // Insert a space using insertText instead of insertNodes to avoid path issues
+      Transforms.insertText(editor, ' ', { at: afterTagPosition });
+
+      // Explicitly clear formatting on the space that was just inserted
+      Transforms.setNodes(
+        editor,
+        {
+          backgroundColor: undefined,
+          isTag: undefined,
+          tagId: undefined,
+          tagName: undefined
+        } as any,
+        {
+          at: {
+            anchor: afterTagPosition,
+            focus: {
+              path: afterTagPosition.path,
+              offset: afterTagPosition.offset + 1
+            }
+          },
+          match: Text.isText,
+          split: true
+        }
+      );
+
+      // Position cursor after the space
+      const cursorPosition = {
+        path: afterTagPosition.path,
+        offset: afterTagPosition.offset + 1
+      };
+
+      Transforms.select(editor, cursorPosition);
+
+      // Force focus back to editor and clear ALL marks
+      ReactEditor.focus(editor);
+
+      // Clear all possible marks that could bleed
+      const allMarks: any = SlateEditor.marks(editor);
+      if (allMarks) {
+        Object.keys(allMarks).forEach(key => {
+          SlateEditor.removeMark(editor, key);
+        });
+      }
+
+      // Add tag to document in database
+      await (window.api as any).documentTag.add(activeDocumentId, tag.id, null, null);
+
+      // Close autocomplete AFTER everything is done
       closeTagAutocomplete();
+
+      // Ensure editor stays focused with a slight delay
+      setTimeout(() => {
+        try {
+          ReactEditor.focus(editor);
+        } catch (e) {
+          // Ignore focus errors
+        }
+      }, 10);
+
     } catch (error) {
       console.error('Error inserting tag:', error);
       closeTagAutocomplete();
@@ -809,7 +918,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         return;
       }
 
-      if (event.key === 'Enter') {
+      if (event.key === 'Tab') {
         event.preventDefault();
         const filteredTags = allTags.filter(tag =>
           tag.name.toLowerCase().includes(tagSearchQuery.toLowerCase())
@@ -820,6 +929,12 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
           // Create new tag if no match
           handleCreateAndInsertTag(tagSearchQuery);
         }
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        // Enter does nothing in tag autocomplete - just prevent default
+        event.preventDefault();
         return;
       }
 
@@ -842,15 +957,26 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         setTagSearchQuery('');
         setTagSelectedIndex(0);
 
-        // Calculate position for autocomplete dropdown
-        const domSelection = window.getSelection();
-        if (domSelection && domSelection.rangeCount > 0) {
-          const range = domSelection.getRangeAt(0);
-          const rect = range.getBoundingClientRect();
-          setTagAutocompletePosition({
-            top: rect.bottom + window.scrollY + 5,
-            left: rect.left + window.scrollX
-          });
+        // Calculate position for autocomplete dropdown (relative to editor container)
+        try {
+          const domSelection = window.getSelection();
+          if (domSelection && domSelection.rangeCount > 0) {
+            const range = domSelection.getRangeAt(0);
+            const rangeRect = range.getBoundingClientRect();
+
+            // Get the editor's DOM element to calculate relative position
+            const editorElement = ReactEditor.toDOMNode(editor, editor);
+            const editorRect = editorElement.getBoundingClientRect();
+
+            // Calculate position relative to the editor container
+            // Position dropdown directly below the # character, aligned to its left edge
+            setTagAutocompletePosition({
+              top: rangeRect.bottom - editorRect.top + 2, // 2px gap below cursor
+              left: rangeRect.left - editorRect.left
+            });
+          }
+        } catch (e) {
+          console.error('Error calculating autocomplete position:', e);
         }
 
         setShowTagAutocomplete(true);

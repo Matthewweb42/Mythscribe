@@ -66,3 +66,12 @@ body {
   scrollbar-width: thin;
   scrollbar-color: #555 #1e1e1e;
 }
+
+/* Inline tag styling - hide the # prefix visually */
+.inline-tag::first-letter {
+  font-size: 0;
+  color: transparent;
+  width: 0;
+  display: inline-block;
+  overflow: hidden;
+}

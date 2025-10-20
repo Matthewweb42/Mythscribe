@@ -29,10 +29,30 @@ const InlineTagAutocomplete: React.FC<InlineTagAutocompleteProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Filter tags based on search query
-  const filteredTags = tags.filter(tag =>
-    tag.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filter tags based on search query and remove duplicates
+  const filteredTags = tags
+    .filter(tag => tag.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .filter((tag, index, self) =>
+      // Remove duplicates - keep only the first occurrence of each unique tag ID
+      index === self.findIndex(t => t.id === tag.id)
+    );
+
+  // Calculate dynamic width based on longest tag name
+  const calculateDynamicWidth = () => {
+    if (filteredTags.length === 0) return 250;
+
+    const longestTag = filteredTags.reduce((longest, tag) => {
+      const tagLength = tag.name.length + (tag.category?.length || 0);
+      const currentLongest = longest.name.length + (longest.category?.length || 0);
+      return tagLength > currentLongest ? tag : longest;
+    }, filteredTags[0]);
+
+    // Estimate width: ~8px per character + padding + icons + category badge
+    const estimatedWidth = Math.max(250, Math.min(500, longestTag.name.length * 8 + 100));
+    return estimatedWidth;
+  };
+
+  const dynamicWidth = calculateDynamicWidth();
 
   // Handle click outside to close
   useEffect(() => {
@@ -64,25 +84,24 @@ const InlineTagAutocomplete: React.FC<InlineTagAutocompleteProps> = ({
           position: 'absolute',
           top: `${position.top}px`,
           left: `${position.left}px`,
-          minWidth: '250px',
-          maxWidth: '350px',
+          width: `${dynamicWidth}px`,
           backgroundColor: '#252526',
-          border: '1px solid #454545',
-          borderRadius: '4px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-          padding: '8px',
+          border: '1px solid #3c3c3c',
+          borderRadius: '3px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+          padding: '4px',
           zIndex: 1000
         }}
       >
         <div style={{
-          padding: '8px 12px',
+          padding: '4px 8px',
           color: '#888',
-          fontSize: '12px',
+          fontSize: '11px',
           textAlign: 'center'
         }}>
-          No tags found for "{searchQuery}"
-          <div style={{ marginTop: '8px', fontSize: '11px' }}>
-            Press <strong>Enter</strong> to create new tag
+          No tags found
+          <div style={{ marginTop: '2px', fontSize: '10px', color: '#666' }}>
+            <kbd style={{ backgroundColor: '#333', padding: '1px 3px', borderRadius: '2px', fontSize: '9px' }}>Tab</kbd> to create
           </div>
         </div>
       </div>
@@ -96,33 +115,19 @@ const InlineTagAutocomplete: React.FC<InlineTagAutocompleteProps> = ({
         position: 'absolute',
         top: `${position.top}px`,
         left: `${position.left}px`,
-        minWidth: '250px',
-        maxWidth: '350px',
-        maxHeight: '300px',
+        width: `${dynamicWidth}px`,
+        maxHeight: '200px',
         overflow: 'auto',
         backgroundColor: '#252526',
-        border: '1px solid #454545',
-        borderRadius: '4px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-        padding: '4px 0',
-        zIndex: 1000
+        border: '1px solid #3c3c3c',
+        borderRadius: '3px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+        padding: '2px',
+        zIndex: 1000,
+        fontSize: '12px'
       }}
     >
-      {/* Header */}
-      <div style={{
-        padding: '6px 12px',
-        fontSize: '10px',
-        color: '#888',
-        textTransform: 'uppercase',
-        letterSpacing: '0.5px',
-        borderBottom: '1px solid #333',
-        marginBottom: '4px'
-      }}>
-        <Tag size={10} style={{ display: 'inline', marginRight: '4px' }} />
-        Tags {searchQuery && `matching "${searchQuery}"`}
-      </div>
-
-      {/* Tag list */}
+      {/* Tag list - no header for compact design */}
       {filteredTags.map((tag, index) => (
         <button
           key={tag.id}
@@ -130,21 +135,22 @@ const InlineTagAutocomplete: React.FC<InlineTagAutocompleteProps> = ({
           onClick={() => onSelect(tag)}
           style={{
             width: '100%',
-            padding: '8px 12px',
-            backgroundColor: index === selectedIndex ? '#0e639c' : 'transparent',
+            padding: '4px 8px',
+            backgroundColor: index === selectedIndex ? '#094771' : 'transparent',
             color: '#d4d4d4',
             border: 'none',
             textAlign: 'left',
             cursor: 'pointer',
-            fontSize: '13px',
+            fontSize: '12px',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            transition: 'background-color 0.1s'
+            gap: '6px',
+            transition: 'background-color 0.05s',
+            borderRadius: '2px'
           }}
           onMouseEnter={(e) => {
             if (index !== selectedIndex) {
-              e.currentTarget.style.backgroundColor = '#333';
+              e.currentTarget.style.backgroundColor = '#2a2d2e';
             }
           }}
           onMouseLeave={(e) => {
@@ -153,11 +159,11 @@ const InlineTagAutocomplete: React.FC<InlineTagAutocompleteProps> = ({
             }
           }}
         >
-          {/* Color indicator */}
+          {/* Color indicator - smaller */}
           <div
             style={{
-              width: '14px',
-              height: '14px',
+              width: '10px',
+              height: '10px',
               backgroundColor: tag.color,
               borderRadius: '2px',
               flexShrink: 0
@@ -165,50 +171,34 @@ const InlineTagAutocomplete: React.FC<InlineTagAutocompleteProps> = ({
           />
 
           {/* Tag name */}
-          <span style={{ flex: 1, fontWeight: '500' }}>
+          <span style={{ flex: 1, fontWeight: '400' }}>
             {tag.name}
           </span>
 
-          {/* Category badge */}
+          {/* Category badge - more subtle */}
           {tag.category && (
             <span style={{
-              fontSize: '10px',
-              padding: '2px 6px',
-              backgroundColor: 'rgba(255,255,255,0.1)',
-              borderRadius: '3px',
+              fontSize: '9px',
+              padding: '1px 4px',
+              backgroundColor: 'rgba(255,255,255,0.08)',
+              borderRadius: '2px',
               color: '#888'
             }}>
               {tag.category}
             </span>
           )}
 
-          {/* Usage count */}
+          {/* Usage count - smaller */}
           {tag.usage_count > 0 && (
             <span style={{
-              fontSize: '10px',
-              color: '#666',
-              marginLeft: 'auto'
+              fontSize: '9px',
+              color: '#666'
             }}>
               {tag.usage_count}×
             </span>
           )}
         </button>
       ))}
-
-      {/* Footer hint */}
-      <div style={{
-        padding: '6px 12px',
-        fontSize: '10px',
-        color: '#666',
-        borderTop: '1px solid #333',
-        marginTop: '4px'
-      }}>
-        <kbd style={{ backgroundColor: '#333', padding: '2px 4px', borderRadius: '2px' }}>↑↓</kbd> Navigate
-        {' • '}
-        <kbd style={{ backgroundColor: '#333', padding: '2px 4px', borderRadius: '2px' }}>Enter</kbd> Select
-        {' • '}
-        <kbd style={{ backgroundColor: '#333', padding: '2px 4px', borderRadius: '2px' }}>Esc</kbd> Cancel
-      </div>
     </div>
   );
 };
