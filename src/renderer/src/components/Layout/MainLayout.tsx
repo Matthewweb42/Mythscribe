@@ -8,13 +8,16 @@ import WelcomeScreen from '../WelcomeScreen';
 import SettingsModal from '../SettingsModal';
 import AIAssistantPanel from '../AIAssistantPanel';
 import { ConfirmModal } from '../ConfirmModal';
+import { InputModal } from '../InputModal';
 import MenuBar from '../MenuBar';
 import { useProject } from '../../contexts/ProjectContext';
+import { useNotification } from '../../contexts/NotificationContext';
 import { useMenuEvents } from '../../hooks/useMenuEvents';
 import { Settings } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
   const { isProjectOpen, projectMetadata, closeProject, openProject, createProject, references, documents, activeDocumentId } = useProject();
+  const { showInfo } = useNotification();
   const [showReferences, setShowReferences] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -22,13 +25,22 @@ const MainLayout: React.FC = () => {
   const [editorInsertText, setEditorInsertText] = useState<((text: string) => void) | null>(null);
   const [editorSetGhostText, setEditorSetGhostText] = useState<((text: string) => void) | null>(null);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const [showInputModal, setShowInputModal] = useState(false);
+  const [inputModalConfig, setInputModalConfig] = useState({ title: '', message: '', onConfirm: (_: string) => {} });
+
+  const openInputModal = (title: string, message: string, onConfirm: (value: string) => void) => {
+    setInputModalConfig({ title, message, onConfirm });
+    setShowInputModal(true);
+  };
 
   // Handle menu bar actions
   const handleMenuAction = (action: string) => {
     switch (action) {
       case 'menu:new-project':
-        const name = prompt('Enter project name:');
-        if (name) createProject(name);
+        openInputModal('New Project', 'Enter a name for your new project:', (name) => {
+          createProject(name);
+          setShowInputModal(false);
+        });
         break;
       case 'menu:open-project':
         openProject();
@@ -59,8 +71,10 @@ const MainLayout: React.FC = () => {
   // Handle menu events
   useMenuEvents({
     'menu:new-project': () => {
-      const name = prompt('Enter project name:');
-      if (name) createProject(name);
+      openInputModal('New Project', 'Enter a name for your new project:', (name) => {
+        createProject(name);
+        setShowInputModal(false);
+      });
     },
     'menu:open-project': () => openProject(),
     'menu:save': () => {
@@ -81,73 +95,73 @@ const MainLayout: React.FC = () => {
     },
     'menu:settings': () => setShowSettings(true),
     'menu:export-pdf': () => {
-      alert('PDF export coming soon!');
+      showInfo('PDF export coming soon!');
     },
     'menu:export-docx': () => {
-      alert('DOCX export coming soon!');
+      showInfo('DOCX export coming soon!');
     },
     'menu:export-epub': () => {
-      alert('EPUB export coming soon!');
+      showInfo('EPUB export coming soon!');
     },
     'menu:export-markdown': () => {
-      alert('Markdown export coming soon!');
+      showInfo('Markdown export coming soon!');
     },
     'menu:import-document': () => {
-      alert('Document import coming soon!');
+      showInfo('Document import coming soon!');
     },
     'menu:import-characters': () => {
-      alert('Character import coming soon!');
+      showInfo('Character import coming soon!');
     },
     'menu:find': () => {
-      alert('Find coming soon!');
+      showInfo('Find coming soon!');
     },
     'menu:find-replace': () => {
-      alert('Find & Replace coming soon!');
+      showInfo('Find & Replace coming soon!');
     },
     'menu:insert-scene': () => {
-      alert('Insert scene - use sidebar for now');
+      showInfo('Insert scene - use sidebar for now');
     },
     'menu:insert-chapter': () => {
-      alert('Insert chapter - use sidebar for now');
+      showInfo('Insert chapter - use sidebar for now');
     },
     'menu:insert-part': () => {
-      alert('Insert part - use sidebar for now');
+      showInfo('Insert part - use sidebar for now');
     },
     'menu:insert-character': () => {
-      alert('Insert character coming soon!');
+      showInfo('Insert character coming soon!');
     },
     'menu:insert-setting': () => {
-      alert('Insert setting coming soon!');
+      showInfo('Insert setting coming soon!');
     },
     'menu:insert-worldbuilding': () => {
-      alert('Insert world building coming soon!');
+      showInfo('Insert world building coming soon!');
     },
     'menu:insert-scene-break': () => {
-      alert('Insert scene break - use toolbar for now');
+      showInfo('Insert scene break - use toolbar for now');
     },
     'menu:word-count': () => {
-      alert('Word count details coming soon!');
+      showInfo('Word count details coming soon!');
     },
     'menu:statistics': () => {
-      alert('Statistics coming soon!');
+      showInfo('Statistics coming soon!');
     },
     'menu:goals': () => {
-      alert('Goals coming soon!');
+      showInfo('Goals coming soon!');
     },
     'menu:tags': () => {
-      alert('Tags manager coming soon!');
+      showInfo('Tags manager coming soon!');
     },
     'menu:drafts': () => {
-      alert('Draft manager coming soon!');
+      showInfo('Draft manager coming soon!');
     },
     'menu:snapshots': () => {
-      alert('Snapshots coming soon!');
+      showInfo('Snapshots coming soon!');
     },
     'menu:documentation': () => {
-      alert('Documentation coming soon!');
+      showInfo('Documentation coming soon!');
     },
     'menu:shortcuts': () => {
-      alert('Keyboard shortcuts:\n\nCtrl+N - New Project\nCtrl+O - Open Project\nCtrl+S - Save\nCtrl+F - Find\nF11 - Focus Mode\nCtrl+K - AI Assistant');
+      showInfo('Keyboard shortcuts:\n\nCtrl+N - New Project\nCtrl+O - Open Project\nCtrl+S - Save\nCtrl+F - Find\nF11 - Focus Mode\nCtrl+K - AI Assistant');
     }
   });
 
@@ -375,6 +389,16 @@ const MainLayout: React.FC = () => {
 
       {/* Settings Modal */}
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+
+      {/* Input Modal */}
+      <InputModal
+        isOpen={showInputModal}
+        title={inputModalConfig.title}
+        message={inputModalConfig.message}
+        placeholder="Enter name..."
+        onConfirm={inputModalConfig.onConfirm}
+        onCancel={() => setShowInputModal(false)}
+      />
 
       {/* Close Project Confirmation */}
       <ConfirmModal

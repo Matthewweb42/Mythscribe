@@ -1,6 +1,8 @@
 // src/renderer/src/components/TagManagerPanel.tsx
 import React, { useState, useEffect } from 'react';
 import { Tag, Plus, Edit2, Trash2, Search, Download } from 'lucide-react';
+import { useNotification } from '../contexts/NotificationContext';
+import { ConfirmModal } from './ConfirmModal';
 
 type TagCategory = 'character' | 'setting' | 'worldBuilding' | 'tone' | 'content' | 'plot-thread' | 'custom';
 
@@ -16,6 +18,7 @@ interface TagRow {
 }
 
 const TagManagerPanel: React.FC = () => {
+  const { showSuccess, showError } = useNotification();
   const [tags, setTags] = useState<TagRow[]>([]);
   const [activeCategory, setActiveCategory] = useState<TagCategory | 'all'>('all');
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
@@ -29,6 +32,10 @@ const TagManagerPanel: React.FC = () => {
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [templates, setTemplates] = useState<any[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [tagToDelete, setTagToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [showLoadTemplateConfirm, setShowLoadTemplateConfirm] = useState(false);
+  const [templateToLoad, setTemplateToLoad] = useState<any | null>(null);
 
   // Load tags on mount
   useEffect(() => {
@@ -75,9 +82,10 @@ const TagManagerPanel: React.FC = () => {
       setNewTagName('');
       setNewTagColor('#999999');
       setShowNewTagInput(false);
+      showSuccess(`Tag "${newTagName}" created successfully!`);
     } catch (error) {
       console.error('Error creating tag:', error);
-      alert('Failed to create tag');
+      showError('Failed to create tag');
     }
   };
 
@@ -93,29 +101,36 @@ const TagManagerPanel: React.FC = () => {
     try {
       await (window.api as any).tag.update(editingTag.id, editName, editColor, editingTag.category);
       await loadTags();
+      showSuccess(`Tag "${editName}" updated successfully!`);
       setEditingTag(null);
       setEditName('');
       setEditColor('');
     } catch (error) {
       console.error('Error updating tag:', error);
-      alert('Failed to update tag');
+      showError('Failed to update tag');
     }
   };
 
-  const handleDeleteTag = async (tagId: string, tagName: string) => {
-    if (!confirm(`Delete tag "${tagName}"? This will remove it from all tagged items.`)) {
-      return;
-    }
+  const handleDeleteTag = (tagId: string, tagName: string) => {
+    setTagToDelete({ id: tagId, name: tagName });
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDeleteTag = async () => {
+    if (!tagToDelete) return;
 
     try {
-      await (window.api as any).tag.delete(tagId);
+      await (window.api as any).tag.delete(tagToDelete.id);
       await loadTags();
-      if (selectedTagId === tagId) {
+      if (selectedTagId === tagToDelete.id) {
         setSelectedTagId(null);
       }
+      showSuccess(`Tag "${tagToDelete.name}" deleted successfully!`);
+      setShowDeleteConfirm(false);
+      setTagToDelete(null);
     } catch (error) {
       console.error('Error deleting tag:', error);
-      alert('Failed to delete tag');
+      showError('Failed to delete tag');
     }
   };
 
@@ -126,19 +141,22 @@ const TagManagerPanel: React.FC = () => {
       setTemplates(allTemplates);
     } catch (error) {
       console.error('Error loading templates:', error);
-      alert('Failed to load templates');
+      showError('Failed to load templates');
     } finally {
       setLoadingTemplates(false);
     }
   };
 
-  const handleLoadTemplate = async (template: any) => {
-    if (!confirm(`Load "${template.name}" template? This will create all tags from this template.`)) {
-      return;
-    }
+  const handleLoadTemplate = (template: any) => {
+    setTemplateToLoad(template);
+    setShowLoadTemplateConfirm(true);
+  };
+
+  const confirmLoadTemplate = async () => {
+    if (!templateToLoad) return;
 
     try {
-      const templateData = JSON.parse(template.tags_json);
+      const templateData = JSON.parse(templateToLoad.tags_json);
 
       // Create tags from template
       for (const categoryDef of templateData.categories) {
@@ -159,10 +177,12 @@ const TagManagerPanel: React.FC = () => {
 
       await loadTags();
       setShowTemplateModal(false);
-      alert(`Template "${template.name}" loaded successfully!`);
+      setShowLoadTemplateConfirm(false);
+      setTemplateToLoad(null);
+      showSuccess(`Template "${templateToLoad.name}" loaded successfully!`);
     } catch (error) {
       console.error('Error loading template:', error);
-      alert('Failed to load template');
+      showError('Failed to load template');
     }
   };
 
@@ -777,6 +797,36 @@ const TagManagerPanel: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Tag Confirmation */}
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        title="Delete Tag"
+        message={`Delete tag "${tagToDelete?.name}"? This will remove it from all tagged items.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={confirmDeleteTag}
+        onCancel={() => {
+          setShowDeleteConfirm(false);
+          setTagToDelete(null);
+        }}
+        danger={true}
+      />
+
+      {/* Load Template Confirmation */}
+      <ConfirmModal
+        isOpen={showLoadTemplateConfirm}
+        title="Load Template"
+        message={`Load "${templateToLoad?.name}" template? This will create all tags from this template.`}
+        confirmText="Load Template"
+        cancelText="Cancel"
+        onConfirm={confirmLoadTemplate}
+        onCancel={() => {
+          setShowLoadTemplateConfirm(false);
+          setTemplateToLoad(null);
+        }}
+        danger={false}
+      />
     </div>
   );
 };

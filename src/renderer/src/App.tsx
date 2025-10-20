@@ -1,12 +1,15 @@
 // src/renderer/src/App.tsx
 import MainLayout from './components/Layout/MainLayout';
 import { ProjectProvider } from './contexts/ProjectContext';
+import { NotificationProvider } from './contexts/NotificationContext';
 
 function App() {
   return (
-    <ProjectProvider>
-      <MainLayout />
-    </ProjectProvider>
+    <NotificationProvider>
+      <ProjectProvider>
+        <MainLayout />
+      </ProjectProvider>
+    </NotificationProvider>
   );
 }
 

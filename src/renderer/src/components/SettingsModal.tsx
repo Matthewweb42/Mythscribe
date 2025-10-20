@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Key, Zap, Sparkles, Type, Layout } from 'lucide-react';
 import aiService, { DEFAULT_AI_SETTINGS } from '../services/aiService';
 import { BUILT_IN_PRESETS } from '../../../shared/aiPresets';
+import { useNotification } from '../contexts/NotificationContext';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -12,6 +13,7 @@ interface SettingsModalProps {
 type TabId = 'editor' | 'ai';
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
+  const { showSuccess, showError, showWarning, showInfo } = useNotification();
   const [activeTab, setActiveTab] = useState<TabId>('editor');
   const [apiKey, setApiKey] = useState('');
   const [isInitialized, setIsInitialized] = useState(false);
@@ -82,18 +84,18 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
 
   const handleSaveApiKey = () => {
     if (!apiKey.trim()) {
-      alert('Please enter an API key');
+      showError('Please enter an API key');
       return;
     }
 
     try {
       // Note: API key is now handled via .env file and main process
       setIsInitialized(true);
-      alert('API key setting noted! Make sure to add OPENAI_API_KEY to your .env file.');
+      showInfo('API key setting noted! Make sure to add OPENAI_API_KEY to your .env file.');
       setApiKey(''); // Clear the input for security
     } catch (error) {
       console.error('Error with API key setting:', error);
-      alert('Note: API key should be set in .env file for security.');
+      showWarning('Note: API key should be set in .env file for security.');
     }
   };
 
@@ -101,13 +103,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
     try {
       const result = await window.api.ai.testApiKey();
       if (result.success) {
-        alert('✅ API Key Test Successful!\n\n' + result.message);
+        showSuccess('API Key Test Successful!\n\n' + result.message);
       } else {
-        alert('❌ API Key Test Failed:\n\n' + result.message);
+        showError('API Key Test Failed:\n\n' + result.message);
       }
     } catch (error) {
       console.error('Error testing API key:', error);
-      alert('❌ Error testing API key:\n\n' + (error instanceof Error ? error.message : 'Unknown error'));
+      showError('Error testing API key:\n\n' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
@@ -135,11 +137,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
       await window.api.settings.set('editor_max_width', editorMaxWidth.toString());
       await window.api.settings.set('editor_scene_break_style', editorSceneBreakStyle);
 
-      alert('Settings saved! Reload the editor to see changes.');
+      showSuccess('Settings saved! Reload the editor to see changes.');
       onClose();
     } catch (error) {
       console.error('Error saving settings:', error);
-      alert('Error saving settings: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      showError('Error saving settings: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
