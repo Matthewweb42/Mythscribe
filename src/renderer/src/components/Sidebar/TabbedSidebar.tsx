@@ -1,6 +1,6 @@
 // src/renderer/src/components/Sidebar/TabbedSidebar.tsx
 import React, { useState } from 'react';
-import { BookOpen, Users, MapPin, Globe, List, Clock, Tag } from 'lucide-react';
+import { Book, Users, MapPin, Globe, List, Clock, Tag } from 'lucide-react';
 import ManuscriptTab from './ManuscriptTab';
 import CharactersTab from './CharactersTab';
 import SettingsTab from './SettingsTab';
@@ -25,7 +25,7 @@ const TabbedSidebar: React.FC = () => {
     {
       id: 'manuscript',
       label: 'Manuscript',
-      icon: <BookOpen size={16} />,
+      icon: <Book size={16} />,
       component: <ManuscriptTab />
     },
     {

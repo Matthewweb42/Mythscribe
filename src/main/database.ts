@@ -324,8 +324,11 @@ export class ProjectDatabase {
     // Seed default tag templates
     this.seedDefaultTagTemplates();
 
-    // Seed default editor formatting settings
-    this.seedDefaultEditorSettings();
+    // Seed default editor formatting settings based on format
+    this.seedDefaultEditorSettings(format);
+
+    // Seed initial project structure based on format
+    this.seedProjectStructure(format);
 
     return id;
   }
@@ -760,6 +763,44 @@ export class ProjectDatabase {
       this.setSetting('editor_line_height', '1.6'); // Tighter line spacing
       this.setSetting('editor_paragraph_spacing', '1.0'); // 1.0em between paragraphs
       this.setSetting('editor_paragraph_indent', '0'); // No first-line indent
+    }
+  }
+
+  seedProjectStructure(format: 'novel' | 'epic' | 'webnovel') {
+    // Get the root folder that was already created in createProject
+    const rootFolders = this.getDocumentsByParent(null);
+    if (rootFolders.length === 0) return;
+
+    const rootId = rootFolders[0].id;
+
+    if (format === 'novel' || format === 'epic') {
+      // Novel/Epic: Manuscript → Part 1-2 → Chapter 1-3 each → Scene 1 each
+      // Create Part 1 and Part 2
+      for (let partNum = 1; partNum <= 2; partNum++) {
+        const partId = this.createFolder(`Part ${partNum}`, rootId, 'part');
+
+        // Create 3 chapters in each part
+        for (let chapterNum = 1; chapterNum <= 3; chapterNum++) {
+          const chapterId = this.createFolder(`Chapter ${chapterNum}`, partId, 'chapter');
+
+          // Create 1 scene in each chapter
+          this.createDocument(`Scene 1`, chapterId, 'manuscript', 'scene');
+        }
+      }
+    } else if (format === 'webnovel') {
+      // Web-novel: Volume 1 → Arc 1-2 → Chapter 1-3 each → Scene 1 each
+      // Create Arc 1 and Arc 2 (stored as 'part' in hierarchy_level)
+      for (let arcNum = 1; arcNum <= 2; arcNum++) {
+        const arcId = this.createFolder(`Arc ${arcNum}`, rootId, 'part');
+
+        // Create 3 chapters in each arc
+        for (let chapterNum = 1; chapterNum <= 3; chapterNum++) {
+          const chapterId = this.createFolder(`Chapter ${chapterNum}`, arcId, 'chapter');
+
+          // Create 1 scene in each chapter
+          this.createDocument(`Scene 1`, chapterId, 'manuscript', 'scene');
+        }
+      }
     }
   }
 

@@ -12,7 +12,7 @@ interface TreeNode {
 }
 
 const ManuscriptTab: React.FC = () => {
-  const { documents, activeDocumentId, setActiveDocument, createDocument, createFolder, deleteDocument, renameDocument, moveDocument } = useProject();
+  const { documents, activeDocumentId, setActiveDocument, createDocument, createFolder, deleteDocument, renameDocument, moveDocument, projectMetadata } = useProject();
   const [newItemName, setNewItemName] = useState('');
   const [showInput, setShowInput] = useState<'document' | 'folder' | null>(null);
   const [hierarchyLevel, setHierarchyLevel] = useState<'novel' | 'part' | 'chapter' | 'scene' | null>(null);
@@ -24,6 +24,9 @@ const ManuscriptTab: React.FC = () => {
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<DocumentRow | null>(null);
+
+  // Determine label for "Part" based on novel format
+  const partLabel = projectMetadata?.novel_format === 'webnovel' ? 'Arc' : 'Part';
 
   // Build tree structure from flat document list
   const tree = useMemo(() => {
@@ -365,10 +368,10 @@ const ManuscriptTab: React.FC = () => {
               gap: '4px',
               whiteSpace: 'nowrap'
             }}
-            title="New Part"
+            title={`New ${partLabel}`}
           >
             <Layers size={12} />
-            Part
+            {partLabel}
           </button>
         </div>
       )}
@@ -389,7 +392,7 @@ const ManuscriptTab: React.FC = () => {
 
           <button onClick={() => openCreateDialog('folder', 'part')} style={menuButtonStyle}>
             <Layers size={14} color="#569cd6" />
-            <span>Part</span>
+            <span>{partLabel}</span>
           </button>
 
           <button onClick={() => openCreateDialog('folder', 'chapter')} style={menuButtonStyle}>
@@ -448,51 +451,6 @@ const ManuscriptTab: React.FC = () => {
             "{contextMenu.item.name}"
           </div>
 
-          <button
-            onClick={() => {
-              setRenamingId(contextMenu.item.id);
-              setContextMenu(null);
-            }}
-            style={{
-              ...menuButtonStyle,
-              width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
-            <File size={14} color="var(--primary-green)" />
-            <span>Rename</span>
-          </button>
-
-          <button
-            onClick={() => handleDuplicate(contextMenu.item)}
-            style={{
-              ...menuButtonStyle,
-              width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
-            <Copy size={14} color="#569cd6" />
-            <span>Duplicate</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setItemToDelete(contextMenu.item);
-              setShowDeleteConfirm(true);
-              setContextMenu(null);
-            }}
-            style={{
-              ...menuButtonStyle,
-              width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
-            <Trash2 size={14} color="#f48771" />
-            <span>Delete</span>
-          </button>
-
-          <div style={{ borderTop: '1px solid #333', margin: '4px 0' }} />
-
           <div style={{ fontSize: '10px', color: '#666', padding: '6px 8px', textTransform: 'uppercase' }}>
             Add to this:
           </div>
@@ -509,7 +467,7 @@ const ManuscriptTab: React.FC = () => {
             }}
           >
             <Layers size={14} color="#569cd6" />
-            <span>Part</span>
+            <span>{partLabel}</span>
           </button>
 
           <button
@@ -572,6 +530,51 @@ const ManuscriptTab: React.FC = () => {
           >
             <FolderIcon size={14} color="var(--primary-green-light)" />
             <span>Generic Folder</span>
+          </button>
+
+          <div style={{ borderTop: '1px solid #333', margin: '4px 0' }} />
+
+          <button
+            onClick={() => {
+              setRenamingId(contextMenu.item.id);
+              setContextMenu(null);
+            }}
+            style={{
+              ...menuButtonStyle,
+              width: '100%',
+              justifyContent: 'flex-start'
+            }}
+          >
+            <File size={14} color="var(--primary-green)" />
+            <span>Rename</span>
+          </button>
+
+          <button
+            onClick={() => handleDuplicate(contextMenu.item)}
+            style={{
+              ...menuButtonStyle,
+              width: '100%',
+              justifyContent: 'flex-start'
+            }}
+          >
+            <Copy size={14} color="#569cd6" />
+            <span>Duplicate</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setItemToDelete(contextMenu.item);
+              setShowDeleteConfirm(true);
+              setContextMenu(null);
+            }}
+            style={{
+              ...menuButtonStyle,
+              width: '100%',
+              justifyContent: 'flex-start'
+            }}
+          >
+            <Trash2 size={14} color="#f48771" />
+            <span>Delete</span>
           </button>
         </div>
       )}

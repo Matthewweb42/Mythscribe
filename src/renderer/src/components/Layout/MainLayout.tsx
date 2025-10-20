@@ -8,7 +8,6 @@ import WelcomeScreen from '../WelcomeScreen';
 import SettingsModal from '../SettingsModal';
 import AIAssistantPanel from '../AIAssistantPanel';
 import { ConfirmModal } from '../ConfirmModal';
-import MenuBar from '../MenuBar';
 import { useProject } from '../../contexts/ProjectContext';
 import { useMenuEvents } from '../../hooks/useMenuEvents';
 import { Settings } from 'lucide-react';
@@ -23,40 +22,6 @@ const MainLayout: React.FC = () => {
   const [editorSetGhostText, setEditorSetGhostText] = useState<((text: string) => void) | null>(null);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
-  // Handle menu bar actions (from custom MenuBar component)
-  const handleMenuAction = (action: string) => {
-    // Trigger the same handlers as the native menu
-    switch (action) {
-      case 'menu:new-project':
-        const name = prompt('Enter project name:');
-        if (name) createProject(name);
-        break;
-      case 'menu:open-project':
-        openProject();
-        break;
-      case 'menu:save':
-        console.log('Save triggered');
-        break;
-      case 'menu:toggle-sidebar':
-        setShowSidebar(prev => !prev);
-        break;
-      case 'menu:toggle-ai':
-        setShowAI(prev => !prev);
-        break;
-      case 'menu:toggle-notes':
-        setShowReferences(prev => !prev);
-        break;
-      case 'menu:settings':
-        setShowSettings(true);
-        break;
-      case 'menu:about':
-        alert('MythScribe\n\nA professional novel writing application.\n\nVersion 1.0.0\n\nBuilt with Electron, React, and TypeScript.');
-        break;
-      default:
-        // For other actions, use the existing menu event system
-        window.electron.ipcRenderer.send(action);
-    }
-  };
 
   // Handle menu events
   useMenuEvents({
@@ -168,9 +133,6 @@ const MainLayout: React.FC = () => {
       display: 'flex',
       flexDirection: 'column'
     }}>
-      {/* Custom Menu Bar */}
-      <MenuBar onMenuAction={handleMenuAction} />
-
       {/* Main Content Area */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
         <PanelGroup direction="horizontal" autoSaveId="main-layout">

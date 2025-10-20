@@ -1,6 +1,6 @@
 // src/renderer/src/components/SettingsModal.tsx
 import React, { useState, useEffect } from 'react';
-import { X, Key, Zap, Sparkles } from 'lucide-react';
+import { X, Key, Zap, Sparkles, Type } from 'lucide-react';
 import aiService, { DEFAULT_AI_SETTINGS } from '../services/aiService';
 import { BUILT_IN_PRESETS } from '../../../shared/aiPresets';
 
@@ -23,6 +23,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [customMaxTokens, setCustomMaxTokens] = useState(50);
   const [customIntroduceNewElements, setCustomIntroduceNewElements] = useState(true);
 
+  // Editor Formatting settings
+  const [editorTextSize, setEditorTextSize] = useState(16);
+  const [editorLineHeight, setEditorLineHeight] = useState(1.6);
+  const [editorParagraphSpacing, setEditorParagraphSpacing] = useState(0);
+  const [editorParagraphIndent, setEditorParagraphIndent] = useState(0);
+
   useEffect(() => {
     const loadSettings = async () => {
       setIsInitialized(true); // AI service is always ready with IPC
@@ -44,6 +50,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
         setCustomTemperature(temp ? parseFloat(temp) : 0.7);
         setCustomMaxTokens(tokens ? parseInt(tokens) : 50);
         setCustomIntroduceNewElements(newElements === 'true' || newElements === undefined);
+
+        // Load editor formatting settings
+        const textSize = await window.api.settings.get('editor_text_size');
+        const lineHeight = await window.api.settings.get('editor_line_height');
+        const paragraphSpacing = await window.api.settings.get('editor_paragraph_spacing');
+        const paragraphIndent = await window.api.settings.get('editor_paragraph_indent');
+
+        if (textSize) setEditorTextSize(parseFloat(textSize));
+        if (lineHeight) setEditorLineHeight(parseFloat(lineHeight));
+        if (paragraphSpacing) setEditorParagraphSpacing(parseFloat(paragraphSpacing));
+        if (paragraphIndent) setEditorParagraphIndent(parseFloat(paragraphIndent));
       } catch (error) {
         console.error('Error loading preset settings:', error);
       }
@@ -101,6 +118,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
       await window.api.settings.set('ai_custom_max_tokens', customMaxTokens.toString());
       await window.api.settings.set('ai_custom_introduce_new_elements', customIntroduceNewElements.toString());
 
+      // Save editor formatting settings
+      await window.api.settings.set('editor_text_size', editorTextSize.toString());
+      await window.api.settings.set('editor_line_height', editorLineHeight.toString());
+      await window.api.settings.set('editor_paragraph_spacing', editorParagraphSpacing.toString());
+      await window.api.settings.set('editor_paragraph_indent', editorParagraphIndent.toString());
+
       alert('Settings saved!');
       onClose();
     } catch (error) {
@@ -131,7 +154,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
       <div style={{
         backgroundColor: '#252526',
         borderRadius: '8px',
-        width: '500px',
+        width: '550px',
         maxHeight: '80vh',
         overflow: 'auto',
         border: '1px solid #333'
@@ -448,6 +471,121 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
               <p style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
                 Lower = more focused, Higher = more creative
               </p>
+            </div>
+          </div>
+
+          {/* Editor Formatting Section */}
+          <div style={{ marginBottom: '24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <Type size={18} color="#dcb67a" />
+              <h3 style={{ margin: 0, fontSize: '16px' }}>Editor Formatting</h3>
+            </div>
+
+            {/* Font Size */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: '#888' }}>
+                Font Size: {editorTextSize}px
+              </label>
+              <input
+                type="range"
+                min="12"
+                max="20"
+                step="1"
+                value={editorTextSize}
+                onChange={(e) => setEditorTextSize(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+              <p style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
+                Adjust the text size in the editor
+              </p>
+            </div>
+
+            {/* Line Spacing */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: '#888' }}>
+                Line Spacing: {editorLineHeight.toFixed(1)}
+              </label>
+              <input
+                type="range"
+                min="1.0"
+                max="2.5"
+                step="0.1"
+                value={editorLineHeight}
+                onChange={(e) => setEditorLineHeight(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+              <p style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
+                Single-spaced (1.0) to double-spaced (2.0) or more
+              </p>
+            </div>
+
+            {/* Paragraph Spacing */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: '#888' }}>
+                Paragraph Spacing: {editorParagraphSpacing.toFixed(1)}em
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="1.5"
+                step="0.1"
+                value={editorParagraphSpacing}
+                onChange={(e) => setEditorParagraphSpacing(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+              <p style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
+                Space between paragraphs (0 = no space, traditional manuscript)
+              </p>
+            </div>
+
+            {/* Paragraph Indent */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: '#888' }}>
+                First-Line Indent: {editorParagraphIndent.toFixed(1)}em
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="2.0"
+                step="0.1"
+                value={editorParagraphIndent}
+                onChange={(e) => setEditorParagraphIndent(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+              <p style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
+                First-line indentation (0 = no indent, modern web style)
+              </p>
+            </div>
+
+            {/* Preview */}
+            <div style={{
+              padding: '12px',
+              backgroundColor: '#1e1e1e',
+              borderRadius: '4px',
+              border: '1px solid #333'
+            }}>
+              <div style={{ fontSize: '11px', color: '#888', marginBottom: '8px', fontWeight: 'bold' }}>
+                Preview:
+              </div>
+              <div style={{
+                fontSize: `${editorTextSize}px`,
+                lineHeight: `${editorLineHeight}`
+              }}>
+                <p style={{
+                  marginBottom: `${editorParagraphSpacing}em`,
+                  textIndent: `${editorParagraphIndent}em`,
+                  color: '#d4d4d4'
+                }}>
+                  This is how your text will appear in the editor. The quick brown fox jumps over the lazy dog.
+                </p>
+                <p style={{
+                  marginBottom: `${editorParagraphSpacing}em`,
+                  textIndent: `${editorParagraphIndent}em`,
+                  color: '#d4d4d4'
+                }}>
+                  Each paragraph will use these spacing and indentation settings automatically.
+                </p>
+              </div>
             </div>
           </div>
 
