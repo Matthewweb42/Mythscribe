@@ -403,63 +403,52 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
   // Request AI suggestion
   const requestSuggestion = useCallback(async () => {
-    console.log('🔍 DEBUG: requestSuggestion called');
-    console.log('🔍 DEBUG: mode =', mode);
-    
     if (mode !== 'vibewrite') {
-      console.log('❌ DEBUG: Not in vibewrite mode, skipping');
       return;
     }
-    
+
     if (!aiService.getSettings().enabled) {
-      console.log('❌ DEBUG: AI service not enabled, skipping');
       return;
     }
 
     const settings = aiService.getSettings();
-    console.log('🔍 DEBUG: AI settings =', settings);
-    
+
     if (!settings.enabled) {
-      console.log('❌ DEBUG: AI settings disabled, skipping');
       return;
     }
 
-    console.log('✅ DEBUG: Starting AI suggestion request...');
     setIsLoadingSuggestion(true);
 
     try {
       // Get recent text for context
       const recentText = getRecentContext(value, 500);
-      console.log('🔍 DEBUG: Recent text for context:', recentText);
-      
+
       // Get reference context
       const characterNotes = references
         .filter(r => r.category === 'character')
         .map(r => `${r.name}: ${r.content}`)
         .join('\n');
-      
+
       const settingNotes = references
         .filter(r => r.category === 'setting')
         .map(r => `${r.name}: ${r.content}`)
         .join('\n');
-      
+
       const worldBuildingNotes = references
         .filter(r => r.category === 'worldBuilding')
         .map(r => `${r.name}: ${r.content}`)
         .join('\n');
 
-      console.log('🔍 DEBUG: About to call aiService.generateSuggestion...');
       const suggestion = await aiService.generateSuggestion(recentText, {
         characterNotes: characterNotes || undefined,
         settingNotes: settingNotes || undefined,
         worldBuildingNotes: worldBuildingNotes || undefined
       });
 
-      console.log('✅ DEBUG: Got suggestion from AI:', suggestion);
       setGhostText(suggestion);
 
     } catch (error) {
-      console.error('❌ DEBUG: Error getting suggestion:', error);
+      console.error('Error getting AI suggestion:', error);
       setGhostText('');
     } finally {
       setIsLoadingSuggestion(false);
@@ -535,7 +524,11 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
   }, []);
 
   const handleSelectTag = useCallback(async (tag: any) => {
+    console.log('[TAG INSERT] Starting tag insertion for:', tag.name);
+    const startTime = performance.now();
+
     if (!hashStartPosition || !activeDocumentId) {
+      console.log('[TAG INSERT] Missing hashStartPosition or activeDocumentId, aborting');
       closeTagAutocomplete();
       return;
     }
@@ -543,9 +536,15 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     try {
       const { selection } = editor;
       if (!selection) {
+        console.log('[TAG INSERT] No selection, aborting');
         closeTagAutocomplete();
         return;
       }
+
+      console.log('[TAG INSERT] Initial focus - Editor focused:', document.activeElement?.tagName);
+      // Keep focus on editor THROUGHOUT the entire operation
+      ReactEditor.focus(editor);
+      console.log('[TAG INSERT] After ReactEditor.focus - Focused element:', document.activeElement?.tagName);
 
       // Convert hex color to rgba with reduced opacity (20% opacity for subtle highlight)
       const hexToRgba = (hex: string, alpha: number) => {
@@ -558,7 +557,12 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
       const subtleColor = hexToRgba(tag.color, 0.2);
       const tagText = `#${tag.name}`;
 
-      // Delete the # and search query
+      console.log('[TAG INSERT] Closing autocomplete');
+      // Close autocomplete BEFORE doing transformations (prevents focus stealing)
+      closeTagAutocomplete();
+
+      console.log('[TAG INSERT] Step 1: Deleting # and search query');
+      // Step 1: Delete the # and search query
       Transforms.delete(editor, {
         at: {
           anchor: hashStartPosition,
@@ -566,10 +570,12 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         }
       });
 
-      // Insert tag as formatted text
+      console.log('[TAG INSERT] Step 2: Inserting tag text:', tagText);
+      // Step 2: Insert tag as formatted text at the hash position
       Transforms.insertText(editor, tagText, { at: hashStartPosition });
 
-      // Apply tag formatting
+      console.log('[TAG INSERT] Step 3: Applying tag formatting');
+      // Step 3: Apply tag formatting to the tag we just inserted
       Transforms.setNodes(
         editor,
         { backgroundColor: subtleColor, isTag: true, tagId: tag.id, tagName: tag.name } as any,
@@ -586,73 +592,92 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         }
       );
 
-      // Calculate position after tag
-      const afterTagPosition = {
-        path: hashStartPosition.path,
-        offset: hashStartPosition.offset + tagText.length
-      };
+      console.log('[TAG INSERT] Step 4: Getting current selection after tag insertion');
+      // Step 4: Get the ACTUAL current selection (where cursor is now)
+      const currentSelection = editor.selection;
+      if (!currentSelection) {
+        console.error('[TAG INSERT] No selection after tag insertion!');
+        return;
+      }
 
-      // Insert a space using insertText instead of insertNodes to avoid path issues
-      Transforms.insertText(editor, ' ', { at: afterTagPosition });
+      console.log('[TAG INSERT] Current selection after tag:', currentSelection.anchor);
 
-      // Explicitly clear formatting on the space that was just inserted
+      console.log('[TAG INSERT] Step 5: Inserting space at current selection');
+      // Step 5: Insert ONE space at the current cursor position
+      Transforms.insertText(editor, ' ');
+
+      console.log('[TAG INSERT] Step 6: Getting selection after space insertion');
+      // Step 6: Get selection after inserting spaces
+      const afterSpacesSelection = editor.selection;
+      if (!afterSpacesSelection) {
+        console.error('[TAG INSERT] No selection after spaces insertion!');
+        return;
+      }
+
+      console.log('[TAG INSERT] Selection after spaces:', afterSpacesSelection.anchor);
+
+      console.log('[TAG INSERT] Step 7: Clearing formatting on space');
+      // Step 7: Clear formatting on the space we just inserted
+      // Go back 1 character and clear formatting
       Transforms.setNodes(
         editor,
         {
-          backgroundColor: undefined,
-          isTag: undefined,
-          tagId: undefined,
-          tagName: undefined
+          backgroundColor: null,
+          isTag: null,
+          tagId: null,
+          tagName: null,
+          bold: null,
+          italic: null,
+          underline: null,
+          strikethrough: null,
+          code: null
         } as any,
         {
           at: {
-            anchor: afterTagPosition,
-            focus: {
-              path: afterTagPosition.path,
-              offset: afterTagPosition.offset + 1
-            }
+            anchor: {
+              path: afterSpacesSelection.anchor.path,
+              offset: afterSpacesSelection.anchor.offset - 1
+            },
+            focus: afterSpacesSelection.anchor
           },
           match: Text.isText,
           split: true
         }
       );
 
-      // Position cursor after the space
-      const cursorPosition = {
-        path: afterTagPosition.path,
-        offset: afterTagPosition.offset + 1
-      };
-
-      Transforms.select(editor, cursorPosition);
-
-      // Force focus back to editor and clear ALL marks
-      ReactEditor.focus(editor);
-
-      // Clear all possible marks that could bleed
-      const allMarks: any = SlateEditor.marks(editor);
-      if (allMarks) {
-        Object.keys(allMarks).forEach(key => {
-          SlateEditor.removeMark(editor, key);
+      console.log('[TAG INSERT] Step 8: Clearing all editor marks');
+      // Step 8: Clear ALL editor marks to prevent inheritance
+      if (editor.marks) {
+        Object.keys(editor.marks).forEach(key => {
+          delete editor.marks![key];
         });
       }
 
-      // Add tag to document in database
-      await (window.api as any).documentTag.add(activeDocumentId, tag.id, null, null);
-
-      // Close autocomplete AFTER everything is done
-      closeTagAutocomplete();
-
-      // Ensure editor stays focused with a slight delay
-      setTimeout(() => {
+      console.log('[TAG INSERT] Step 9: Removing individual marks');
+      // Step 9: Explicitly remove all mark types
+      ['backgroundColor', 'isTag', 'tagId', 'tagName', 'bold', 'italic', 'underline', 'strikethrough', 'code', 'fontSize', 'color'].forEach(mark => {
         try {
-          ReactEditor.focus(editor);
+          SlateEditor.removeMark(editor, mark);
         } catch (e) {
-          // Ignore focus errors
+          // Ignore errors
         }
-      }, 10);
+      });
+
+      console.log('[TAG INSERT] Step 10: Final focus');
+      // Step 10: Force focus again after all transformations
+      ReactEditor.focus(editor);
+
+      const endTime = performance.now();
+      console.log(`[TAG INSERT] ✅ Tag insertion completed in ${(endTime - startTime).toFixed(2)}ms`);
+      console.log('[TAG INSERT] Final cursor position:', editor.selection?.anchor);
+
+      // Add tag to document in database (async, but don't wait)
+      (window.api as any).documentTag.add(activeDocumentId, tag.id, null, null).catch((err: any) => {
+        console.error('[TAG INSERT] Error adding tag to database:', err);
+      });
 
     } catch (error) {
-      console.error('Error inserting tag:', error);
+      console.error('[TAG INSERT] ❌ Error during tag insertion:', error);
       closeTagAutocomplete();
     }
   }, [hashStartPosition, activeDocumentId, editor, closeTagAutocomplete]);
@@ -761,15 +786,10 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
     // Handle AI suggestion in vibe write mode
     // Don't generate VibeWrite suggestions if AI Assistant ghost text is active
-    console.log('🔍 DEBUG: handleChange - mode =', mode, 'AI enabled =', aiService.getSettings().enabled);
-
     if (mode === 'vibewrite' && aiService.getSettings().enabled && !aiAssistantGhostText) {
-      console.log('✅ DEBUG: Setting up AI suggestion timer...');
-
       // Clear existing suggestion timeout
       if (suggestionTimeoutRef.current) {
         clearTimeout(suggestionTimeoutRef.current);
-        console.log('🔍 DEBUG: Cleared existing suggestion timeout');
       }
 
       // Only clear ghost text if we haven't already handled it above
@@ -779,14 +799,10 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
       // Set new timeout for suggestion
       const settings = aiService.getSettings();
-      console.log('🔍 DEBUG: Setting timer for', settings.suggestionDelay, 'ms');
 
       suggestionTimeoutRef.current = setTimeout(() => {
-        console.log('⏰ DEBUG: Timer fired! Calling requestSuggestion...');
         requestSuggestion();
       }, settings.suggestionDelay);
-    } else {
-      console.log('❌ DEBUG: Not setting AI timer - mode:', mode, 'AI enabled:', aiService.getSettings().enabled, 'AI Assistant ghost text active:', !!aiAssistantGhostText);
     }
   }, [currentDoc, saveTimeout, updateDocumentContent, updateDocumentWordCount, mode, requestSuggestion, clearGhostText, ghostText, aiAssistantGhostText, extractText, calculateStats, showTagAutocomplete, hashStartPosition, editor, closeTagAutocomplete]);
 
@@ -1543,7 +1559,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
       </div>
 
       {/* Document Tags */}
-      {!isFullScreen && <DocumentTagBox documentId={activeDocumentId} documentContent={extractText(value)} />}
+      {!isFullScreen && <DocumentTagBox documentId={activeDocumentId} documentContent={extractText(value)} documentNodes={value} />}
 
       {/* Editor and Notes area */}
       <div style={{
