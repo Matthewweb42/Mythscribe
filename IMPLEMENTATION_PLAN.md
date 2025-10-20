@@ -2,6 +2,36 @@
 
 **Strategic build order to avoid conflicts and ensure smooth development**
 
+**Last Updated:** October 2025
+**Current Phase:** Phase 2 - Writing Experience (~40% complete)
+
+---
+
+## 🎉 **Recent Improvements** (Not in Original Plan)
+
+### Popup/Modal System Overhaul ✅ COMPLETE
+- Replaced all native browser dialogs (alert/prompt/confirm) with themed components
+- Created Toast notification system for non-blocking feedback (success, error, warning, info)
+- Built professional InputModal component for text input
+- Fixed app-breaking popup issues
+- Consistent dark theme styling across all popups
+
+**Files Created:**
+- `Toast.tsx` - Toast notification component
+- `NotificationContext.tsx` - Global toast management
+- `InputModal.tsx` - Professional input dialogs
+
+### Editor Width Constraint ✅ COMPLETE
+- Book-like reading experience with max 700px text width (configurable 500-1000px)
+- Centered content column with minimum padding
+- Responsive layout that adapts to window size
+
+### Customizable Scene Breaks ✅ COMPLETE
+- Multiple preset styles (*, #, ~, ---)
+- Custom text support
+- Format-specific defaults (Novel/Epic vs Web-novel)
+- Saved in settings with live preview
+
 ---
 
 ## 🏗️ **Build Strategy**
@@ -14,162 +44,157 @@
 
 ---
 
-## 📦 **PHASE 1: Layout Foundation** (Week 1)
+## 📦 **PHASE 1: Layout Foundation** ✅ COMPLETE
+
 *Goal: Restructure UI to support all future features*
 
-### Chunk 1.1: Menu Bar System ⏱️ 2-3 hours ✅ COMPLETE
+### Chunk 1.1: Menu Bar System ✅ COMPLETE
 **Why first:** Everything else depends on proper navigation
 
 - [x] Create MenuBar component
-- [x] Add Electron menu integration (already existed in `menu.ts`)
-- [x] Implement menu items:
-  - File: New, Open, Save, Export, Import
-  - Edit: Undo, Redo, Find
-  - Insert: Scene, Chapter, Part, Character, etc.
-  - View: Toggle Sidebar, Notes, AI Panel, Focus Mode
-  - Tools: Settings, Goals, Tags, Drafts, etc.
-  - Help: About, Documentation, Shortcuts
+- [x] Add Electron menu integration
+- [x] Implement menu items (File, Edit, Insert, View, Tools, Help)
+- [x] All menu actions trigger properly
 
-**Testing:**
-- [x] Menu bar appears at top
-- [x] Both native menu and custom MenuBar component work
-- [x] Menu actions properly trigger handlers
-- [x] Build succeeds
-
-**Files Created/Modified:**
-- `src/renderer/src/components/MenuBar.tsx` (created)
-- `src/renderer/src/components/Layout/MainLayout.tsx` (integrated MenuBar)
-- `src/main/menu.ts` (already existed)
+**Files Created:**
+- `MenuBar.tsx`
+- Updated `MainLayout.tsx`
+- `menu.ts` (native Electron menu)
 
 ---
 
-### Chunk 1.2: Resizable Panel System ⏱️ 3-4 hours
+### Chunk 1.2: Resizable Panel System ✅ COMPLETE
 **Why second:** Need adjustable layout before adding more panels
 
-- [ ] Install `react-resizable-panels` or similar library
-- [ ] Create ResizableLayout component
-- [ ] Implement drag handles
-- [ ] Set min/max constraints
-- [ ] Save panel sizes to localStorage
+- [x] Installed `react-resizable-panels`
+- [x] Implemented ResizableLayout in MainLayout
+- [x] Drag handles with hover effects
+- [x] Min/max constraints on all panels
+- [x] Sizes persist via `autoSaveId`
 
-**Testing:**
-- Can drag panels to resize
-- Sizes persist on reload
-- Min/max limits prevent unusable panels
-
-**Files to Create/Modify:**
-- `src/renderer/src/components/Layout/ResizableLayout.tsx` (new)
-- `src/renderer/src/components/Layout/MainLayout.tsx` (update)
-- `package.json` (add dependency)
+**Testing Passed:**
+- ✅ Can drag panels to resize
+- ✅ Sizes persist on reload
+- ✅ Min/max limits work correctly
 
 ---
 
-### Chunk 1.3: Enhanced Sidebar - Tab System ⏱️ 4-5 hours
+### Chunk 1.3: Enhanced Sidebar - Tab System ✅ COMPLETE
 **Why third:** Reorganize existing sidebar before adding new sections
 
-- [ ] Create tabbed sidebar component
-- [ ] Tabs: Manuscript | Characters | Settings | World | Outline | Timeline
-- [ ] Move existing Manuscript tree to Manuscript tab
-- [ ] Create placeholder tabs for others
-- [ ] Add collapsible sections within tabs
+- [x] Created tabbed sidebar component
+- [x] Tabs: Manuscript | Characters | Settings | World | Outline | Timeline | Tags
+- [x] Manuscript tree functional
+- [x] Placeholder tabs created
+- [x] Tab switching works smoothly
 
-**Testing:**
-- Can switch between tabs
-- Manuscript tab shows existing document tree
-- Other tabs show "Coming soon" placeholder
-
-**Files to Create/Modify:**
-- `src/renderer/src/components/Sidebar/TabbedSidebar.tsx` (new)
-- `src/renderer/src/components/Sidebar/ManuscriptTab.tsx` (extract from Sidebar.tsx)
-- `src/renderer/src/components/Sidebar/CharactersTab.tsx` (new, placeholder)
-- `src/renderer/src/components/Sidebar/SettingsTab.tsx` (new, placeholder)
-- `src/renderer/src/components/Sidebar/WorldBuildingTab.tsx` (new, placeholder)
-- `src/renderer/src/components/Sidebar.tsx` (update to use tabs)
+**Files Created:**
+- `TabbedSidebar.tsx`
+- `ManuscriptTab.tsx`
+- Placeholder tabs for other sections
 
 ---
 
-### Chunk 1.4: Docked AI Panel ⏱️ 2-3 hours
+### Chunk 1.4: Docked AI Panel ✅ COMPLETE
 **Why fourth:** Reorganize existing AI panel
 
-- [ ] Move AIAssistantPanel to bottom-right dock
-- [ ] Make it toggleable (not popup)
-- [ ] Add collapse/expand functionality
-- [ ] Create mode switcher (Chat | Generate | Edit | Ask)
-- [ ] Update styling for docked appearance
+- [x] AI panel integrated into resizable layout
+- [x] Toggleable via button and keyboard
+- [x] Mode switcher (Chat | Generate | Edit | Ask)
+- [x] Professional docked appearance
 
-**Testing:**
-- AI panel docks properly in bottom-right
-- Can toggle visibility
-- Can collapse/expand
-- Mode switcher shows all modes
-
-**Files to Modify:**
-- `src/renderer/src/components/AIAssistantPanel.tsx` (major refactor)
-- `src/renderer/src/components/Editor/Editor.tsx` (remove popup logic)
-- `src/renderer/src/components/Layout/MainLayout.tsx` (add AI panel dock)
+**Testing Passed:**
+- ✅ AI panel docks properly
+- ✅ Toggle visibility works
+- ✅ Mode switcher functional
 
 ---
 
-**PHASE 1 CHECKPOINT:** ✅
-- Menu bar functional
-- All panels resizable
-- Sidebar has tabs
-- AI panel docked
-- **Test entire app before moving on**
+**PHASE 1 CHECKPOINT:** ✅ PASSED
+- ✅ Menu bar functional
+- ✅ All panels resizable
+- ✅ Sidebar has tabs
+- ✅ AI panel docked
+- ✅ App tested and stable
 
 ---
 
-## 📝 **PHASE 2: Writing Experience** (Week 2)
+## 📝 **PHASE 2: Writing Experience** (~40% Complete)
 
-### Chunk 2.1: Novel-Style Formatting ⏱️ 3-4 hours
+### Chunk 2.1: Novel-Style Formatting ✅ COMPLETE
 **Why first:** Core writing experience improvement
 
-- [ ] Create formatting configuration system
-- [ ] Implement first-line indent
-- [ ] Remove paragraph gaps
-- [ ] Add line-height options (1.5x, 2x)
-- [ ] Add serif font option (Georgia default)
-- [ ] Add justified text option
-- [ ] Create settings UI for formatting preferences
+- [x] Created formatting configuration system
+- [x] Implemented first-line indent (0-3.0em configurable)
+- [x] Paragraph spacing control (0-2.0em)
+- [x] Line-height options (1.0-2.5)
+- [x] Font size control (12-24px)
+- [x] Format-specific defaults (Novel/Epic vs Web-novel)
+- [x] Settings UI with live preview
 
-**Testing:**
-- New documents use novel formatting by default
-- Can toggle formatting options
-- Formatting persists
-- Exports with proper formatting
+**Testing Passed:**
+- ✅ Novel/Epic defaults: No spacing, 1.5em indent, 2.0 line-height
+- ✅ Web-novel defaults: 1.0em spacing, no indent, 1.6 line-height
+- ✅ Formatting persists across sessions
+- ✅ Settings UI shows live preview
 
-**Files to Create/Modify:**
-- `src/renderer/src/components/Editor/FormattingConfig.tsx` (new)
-- `src/renderer/src/components/Editor/Editor.tsx` (add formatting styles)
-- `src/main/database.ts` (add formatting_settings table)
+**Files Created/Modified:**
+- `SettingsModal.tsx` - Tabbed interface with Editor section
+- `Editor.tsx` - Dynamic formatting based on settings
+- `database.ts` - Editor formatting settings in DB
 
 ---
 
-### Chunk 2.2: Scene Metadata Fields ⏱️ 3-4 hours
+### Chunk 2.1b: Editor Width Constraint & Scene Breaks ✅ COMPLETE
+**Added to plan:** Essential writing experience improvements
+
+- [x] Maximum text width (700px default, 500-1000px configurable)
+- [x] Centered text column for book-like reading
+- [x] Minimum padding (40px) for responsive layout
+- [x] Customizable scene break styles (*, #, ~, custom)
+- [x] Format-specific scene break defaults
+- [x] Settings integration with preview
+
+**Testing Passed:**
+- ✅ Text width constraint works across all window sizes
+- ✅ Scene breaks render centered and styled
+- ✅ Settings save and apply correctly
+
+**Files Modified:**
+- `Editor.tsx` - Width constraint wrapper, scene break rendering
+- `database.ts` - Scene break style settings
+- `SettingsModal.tsx` - Scene break customization UI
+
+---
+
+### Chunk 2.2: Scene Metadata Fields ⏱️ 3-4 hours ⬅️ **NEXT**
 **Why second:** Foundation for scene compile view
 
 - [ ] Add metadata fields to database (location, time, pov)
 - [ ] Create SceneMetadata component
 - [ ] Add metadata editor above scene content
 - [ ] Display metadata in compact form when editing
-- [ ] Add tags field (comma-separated for now)
+- [ ] Tags already implemented - integrate with scene metadata
 
-**Testing:**
-- Can add location, time, POV to scenes
-- Metadata saves properly
-- Metadata displays nicely
+**Testing Checklist:**
+- [ ] Can add location, time, POV to scenes
+- [ ] Metadata saves properly
+- [ ] Metadata displays nicely
+- [ ] Metadata is collapsible/expandable
+- [ ] Only shows for scene-type documents
 
 **Database Changes:**
 - Add columns to `documents` table:
   - `location TEXT`
   - `time TEXT`
   - `pov TEXT`
-  - `tags TEXT` (JSON array as string)
+  - `scene_metadata TEXT` (JSON for extensibility)
 
 **Files to Create/Modify:**
-- `src/main/database.ts` (schema update)
+- `src/main/database.ts` (schema update + migration)
 - `src/renderer/src/components/Editor/SceneMetadata.tsx` (new)
 - `src/renderer/src/components/Editor/Editor.tsx` (integrate metadata)
+- `src/main/ipcHandlers.ts` (metadata CRUD operations)
 
 ---
 
@@ -685,15 +710,39 @@ npm install epub-gen
 
 ## 📅 **Timeline Estimates**
 
-- **Phase 1:** 11-15 hours (3-4 days part-time)
-- **Phase 2:** 18-23 hours (5-6 days part-time)
-- **Phase 3:** 16-20 hours (4-5 days part-time)
-- **Phase 4:** 12-16 hours (3-4 days part-time)
-- **Phase 5:** 24-31 hours (6-8 days part-time)
-- **Phase 6:** 7-10 hours (2-3 days part-time)
+### Original Estimate:
+- **Total:** ~88-115 hours (3-4 weeks full-time, 6-8 weeks part-time)
 
-**Total:** ~88-115 hours (3-4 weeks full-time, 6-8 weeks part-time)
+### Revised Based on Actual Progress:
+- **Phase 1:** ✅ COMPLETE (~15 hours)
+- **Phase 2:** ~8 of 23 hours complete (2 of 5 chunks done)
+- **Phase 3:** Not started (16-20 hours estimated)
+- **Phase 4:** Not started (12-16 hours estimated)
+- **Phase 5:** Not started (24-31 hours estimated)
+- **Phase 6:** Not started (7-10 hours estimated)
+
+**Completed:** ~23 hours
+**Remaining:** ~65-92 hours
 
 ---
 
-**Ready to start with Phase 1, Chunk 1.1: Menu Bar System?**
+## 📍 **Current Status & Next Steps**
+
+**✅ Completed:**
+- Phase 1: Complete layout foundation with resizable panels, tabs, AI dock
+- Phase 2 (partial): Novel formatting, width constraints, scene breaks
+- Bonus: Popup/modal system overhaul, notification system
+
+**⬅️ Next Up: Phase 2, Chunk 2.2 - Scene Metadata Fields**
+
+**Recommended approach:**
+1. Add database columns for location, time, POV
+2. Create SceneMetadata component (collapsible bar above editor)
+3. Integrate with Editor component (show only for scenes)
+4. Test with existing scenes
+
+**Estimated time:** 3-4 hours
+
+---
+
+**Last Updated:** October 2025 | **Progress:** ~20% complete overall
