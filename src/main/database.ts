@@ -757,12 +757,16 @@ export class ProjectDatabase {
       this.setSetting('editor_line_height', '2.0'); // Double-spaced
       this.setSetting('editor_paragraph_spacing', '0'); // No spacing between paragraphs
       this.setSetting('editor_paragraph_indent', '1.5'); // 1.5em first-line indent
+      this.setSetting('editor_max_width', '700'); // 700px max width (book-like)
+      this.setSetting('editor_scene_break_style', '* * *'); // Traditional scene break
     } else if (format === 'webnovel') {
       // Web-novel formatting (modern web reading)
       this.setSetting('editor_text_size', '16'); // 16px
       this.setSetting('editor_line_height', '1.6'); // Tighter line spacing
       this.setSetting('editor_paragraph_spacing', '1.0'); // 1.0em between paragraphs
       this.setSetting('editor_paragraph_indent', '0'); // No first-line indent
+      this.setSetting('editor_max_width', '700'); // 700px max width (book-like)
+      this.setSetting('editor_scene_break_style', '~~~'); // Modern scene break
     }
   }
 

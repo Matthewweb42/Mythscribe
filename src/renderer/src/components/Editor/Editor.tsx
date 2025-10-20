@@ -158,7 +158,7 @@ const Leaf = ({ attributes, children, leaf }: RenderLeafProps) => {
 
 // Render element (for paragraphs, headings, blockquotes, scene breaks)
 // This will be created inside the Editor component to access formatting settings
-const createElementRenderer = (paragraphSpacing: number, paragraphIndent: number) => {
+const createElementRenderer = (paragraphSpacing: number, paragraphIndent: number, sceneBreakStyle: string) => {
   return ({ attributes, children, element }: RenderElementProps) => {
     const style: React.CSSProperties = {};
 
@@ -192,7 +192,7 @@ const createElementRenderer = (paragraphSpacing: number, paragraphIndent: number
             cursor: 'default'
           }}>
             {children}
-            <div contentEditable={false}>* * *</div>
+            <div contentEditable={false}>{sceneBreakStyle}</div>
           </div>
         );
       default:
@@ -236,6 +236,8 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
   const [editorLineHeight, setEditorLineHeight] = useState(1.6);
   const [editorParagraphSpacing, setEditorParagraphSpacing] = useState(0);
   const [editorParagraphIndent, setEditorParagraphIndent] = useState(0);
+  const [editorMaxWidth, setEditorMaxWidth] = useState(700);
+  const [editorSceneBreakStyle, setEditorSceneBreakStyle] = useState('* * *');
 
   // Notes panel
   const [showNotes, setShowNotes] = useState(false);
@@ -265,7 +267,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
   ];
 
   // Create Element renderer with current formatting settings
-  const Element = useMemo(() => createElementRenderer(editorParagraphSpacing, editorParagraphIndent), [editorParagraphSpacing, editorParagraphIndent]);
+  const Element = useMemo(() => createElementRenderer(editorParagraphSpacing, editorParagraphIndent, editorSceneBreakStyle), [editorParagraphSpacing, editorParagraphIndent, editorSceneBreakStyle]);
 
   // Initialize AI service with API key
   useEffect(() => {
@@ -282,11 +284,15 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         const lineHeight = await window.api.settings.get('editor_line_height');
         const paragraphSpacing = await window.api.settings.get('editor_paragraph_spacing');
         const paragraphIndent = await window.api.settings.get('editor_paragraph_indent');
+        const maxWidth = await window.api.settings.get('editor_max_width');
+        const sceneBreakStyle = await window.api.settings.get('editor_scene_break_style');
 
         if (textSize) setEditorTextSize(parseFloat(textSize));
         if (lineHeight) setEditorLineHeight(parseFloat(lineHeight));
         if (paragraphSpacing) setEditorParagraphSpacing(parseFloat(paragraphSpacing));
         if (paragraphIndent) setEditorParagraphIndent(parseFloat(paragraphIndent));
+        if (maxWidth) setEditorMaxWidth(parseFloat(maxWidth));
+        if (sceneBreakStyle) setEditorSceneBreakStyle(sceneBreakStyle);
       } catch (error) {
         console.error('Error loading editor settings:', error);
       }
@@ -1730,27 +1736,34 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
           )}
 
               <div style={{ position: 'relative', zIndex: 1 }}>
-                <Slate
-                  editor={editor}
-                  initialValue={value}
-                  onChange={handleChange}
-                >
-                  <Editable
-                    renderLeaf={Leaf}
-                    renderElement={Element}
-                    decorate={decorate}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Start writing..."
-                    spellCheck
-                    style={{
-                      minHeight: '100%',
-                      fontSize: `${editorTextSize}px`,
-                      lineHeight: `${editorLineHeight}`,
-                      color: '#d4d4d4',
-                      outline: 'none'
-                    }}
-                  />
-                </Slate>
+                {/* Constrained width container for editor content */}
+                <div style={{
+                  maxWidth: `${editorMaxWidth}px`,
+                  margin: '0 auto',
+                  padding: '0 40px'
+                }}>
+                  <Slate
+                    editor={editor}
+                    initialValue={value}
+                    onChange={handleChange}
+                  >
+                    <Editable
+                      renderLeaf={Leaf}
+                      renderElement={Element}
+                      decorate={decorate}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Start writing..."
+                      spellCheck
+                      style={{
+                        minHeight: '100%',
+                        fontSize: `${editorTextSize}px`,
+                        lineHeight: `${editorLineHeight}`,
+                        color: '#d4d4d4',
+                        outline: 'none'
+                      }}
+                    />
+                  </Slate>
+                </div>
 
                 {/* Inline Tag Autocomplete */}
                 {showTagAutocomplete && (
