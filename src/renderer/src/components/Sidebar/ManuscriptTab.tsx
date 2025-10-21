@@ -47,9 +47,9 @@ const ManuscriptTab: React.FC = () => {
 
   const handleSelect = (doc: DocumentRow) => {
     setSelectedItem(doc);
-    if (doc.type === 'document') {
-      setActiveDocument(doc.id);
-    }
+    // Allow both documents AND folders to be set as active
+    // Folders (chapters/parts) will show their child scenes stacked in the editor
+    setActiveDocument(doc.id);
   };
 
   const handleContextMenu = (doc: DocumentRow, e: React.MouseEvent) => {

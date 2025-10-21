@@ -15,6 +15,7 @@ import { DocumentRow } from '../../../types/window';
 import aiService from '../../services/aiService';
 import DocumentTagBox from '../DocumentTagBox';
 import InlineTagAutocomplete from './InlineTagAutocomplete';
+import StackedSceneEditor from './StackedSceneEditor';
 
 // Custom types for Slate
 type CustomText = {
@@ -212,7 +213,7 @@ interface EditorProps {
 }
 
 const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady }) => {
-  const { activeDocumentId, documents, updateDocumentContent, updateDocumentWordCount, updateDocumentNotes, references } = useProject();
+  const { activeDocumentId, documents, updateDocumentContent, updateDocumentWordCount, updateDocumentNotes, references, loadDocuments } = useProject();
   // Create a new editor instance when the document changes to ensure clean state
   const editor = useMemo(() => withHistory(withReact(createEditor())), [activeDocumentId]);
   const [value, setValue] = useState<Descendant[]>(initialValue);
@@ -257,6 +258,10 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
   const [tagSelectedIndex, setTagSelectedIndex] = useState(0);
   const [allTags, setAllTags] = useState<any[]>([]);
   const [hashStartPosition, setHashStartPosition] = useState<{ path: number[]; offset: number } | null>(null);
+
+  // Stacked scene view state (for chapters/parts)
+  const [isViewingFolder, setIsViewingFolder] = useState(false);
+  const [childScenes, setChildScenes] = useState<DocumentRow[]>([]);
 
   const presetBackgrounds = [
     { name: 'None', url: null },
@@ -336,14 +341,87 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         return;
       }
 
-      const doc = documents.find(d => d.id === activeDocumentId);
+      // For single documents, fetch fresh from database to avoid stale cached data
+      // For folders, use cached documents array (needed to find children)
+      let doc = documents.find(d => d.id === activeDocumentId);
       if (!doc) return;
+
+      // If it's a single document (not folder), fetch fresh from DB
+      if (doc.type === 'document') {
+        const freshDoc = await window.api.document.get(activeDocumentId);
+        if (freshDoc) {
+          doc = freshDoc;
+        }
+      }
 
       // Clear ghost text when switching documents to prevent stale selections
       setGhostText('');
       setAiAssistantGhostText('');
 
       setCurrentDoc(doc);
+
+      // Check if this is a folder (chapter/part)
+      if (doc.type === 'folder') {
+        setIsViewingFolder(true);
+
+        // Get fresh data from database (in case scenes were edited)
+        // Don't call loadDocuments() as it will trigger infinite loop
+        const freshDocs = await window.api.document.getAll();
+
+        // If this is a Part, we need to load chapters and their scenes recursively
+        // If this is a Chapter, just load direct child scenes
+        let childScenesToLoad: DocumentRow[] = [];
+
+        if (doc.hierarchy_level === 'part') {
+          // Part: Load all child chapters, then recursively load scenes for each chapter
+          const chapters = freshDocs
+            .filter(d => d.parent_id === doc.id && d.type === 'folder')
+            .sort((a, b) => a.position - b.position);
+
+          // For each chapter, get its child scenes
+          chapters.forEach(chapter => {
+            const scenes = freshDocs
+              .filter(d => d.parent_id === chapter.id && d.type === 'document')
+              .sort((a, b) => a.position - b.position);
+
+            childScenesToLoad.push(...scenes);
+          });
+
+          console.log(`Viewing Part "${doc.name}" with ${chapters.length} chapters and ${childScenesToLoad.length} total scenes`);
+        } else {
+          // Chapter (or other folder): Load direct child scenes only
+          childScenesToLoad = freshDocs
+            .filter(d => d.parent_id === doc.id && d.type === 'document')
+            .sort((a, b) => a.position - b.position);
+
+          console.log(`Viewing folder "${doc.name}" with ${childScenesToLoad.length} child scenes:`, childScenesToLoad.map(c => c.name));
+        }
+
+        setChildScenes(childScenesToLoad);
+
+        // Calculate combined word count from all child scenes
+        const totalWords = childScenesToLoad.reduce((sum, scene) => sum + (scene.word_count || 0), 0);
+        setWordCount(totalWords);
+        setCharCount(0); // We'll calculate this from actual content later if needed
+        sessionStartWordCount.current = totalWords;
+        setSessionWordCount(0);
+
+        // Load folder's notes if any
+        if (doc.notes) {
+          try {
+            const parsedNotes = JSON.parse(doc.notes);
+            setNotesValue(parsedNotes);
+          } catch {
+            setNotesValue(initialValue);
+          }
+        }
+
+        return; // Skip normal document loading
+      }
+
+      // Not a folder - regular document
+      setIsViewingFolder(false);
+      setChildScenes([]);
 
       // Parse the content
       try {
@@ -435,9 +513,44 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
   }, [activeDocumentId]);
 
   // Extract text from Slate nodes
-  const extractText = (nodes: Descendant[]): string => {
+  const extractText = useCallback((nodes: Descendant[]): string => {
     return nodes.map(n => Node.string(n)).join('\n');
-  };
+  }, []);
+
+  // Handle scene content change in stacked editor
+  const handleSceneContentChange = useCallback(async (sceneId: string, content: string) => {
+    console.log('[STACKED SAVE] Saving scene:', sceneId);
+    console.log('[STACKED SAVE] Content length:', content.length);
+
+    try {
+      await updateDocumentContent(sceneId, content);
+      console.log('[STACKED SAVE] Content saved successfully');
+
+      // Update word count for this scene
+      const parsed = JSON.parse(content);
+      const text = extractText(parsed);
+      const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+      console.log('[STACKED SAVE] Word count:', words);
+
+      await updateDocumentWordCount(sceneId, words);
+      console.log('[STACKED SAVE] Word count updated');
+
+      // Reload documents to get updated data
+      await loadDocuments();
+      console.log('[STACKED SAVE] Documents reloaded');
+
+      // Recalculate total word count from reloaded documents
+      const updatedDocs = await window.api.document.getAll();
+      const updatedChildren = updatedDocs
+        .filter(d => d.parent_id === activeDocumentId && d.type === 'document');
+
+      const totalWords = updatedChildren.reduce((sum, scene) => sum + (scene.word_count || 0), 0);
+      setWordCount(totalWords);
+      console.log('[STACKED SAVE] Total word count updated:', totalWords);
+    } catch (error) {
+      console.error('[STACKED SAVE] Error saving scene content:', error);
+    }
+  }, [updateDocumentContent, updateDocumentWordCount, loadDocuments, activeDocumentId, extractText]);
 
   // Get the last N characters of text for context
   const getRecentContext = (nodes: Descendant[], maxChars: number = 500): string => {
@@ -782,22 +895,34 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     const sessionWords = Math.max(0, words - sessionStartWordCount.current); // Never go negative
     setSessionWordCount(sessionWords);
 
-    if (!currentDoc) return;
+    if (!currentDoc) {
+      console.log('[SINGLE SCENE] No currentDoc, skipping save');
+      return;
+    }
+
+    console.log('[SINGLE SCENE] Content changed for:', currentDoc.name);
 
     // Clear existing save timeout
     if (saveTimeout) {
       clearTimeout(saveTimeout);
+      console.log('[SINGLE SCENE] Cleared existing timeout');
     }
 
     // Set new timeout to save after 1 second of no typing
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
+      console.log('[SINGLE SCENE] Debounce complete, saving...');
       const content = JSON.stringify(newValue);
-      updateDocumentContent(currentDoc.id, content);
+      await updateDocumentContent(currentDoc.id, content);
+      console.log('[SINGLE SCENE] Content saved');
       // Update word count in database
-      updateDocumentWordCount(currentDoc.id, words);
+      await updateDocumentWordCount(currentDoc.id, words);
+      console.log('[SINGLE SCENE] Word count saved:', words);
+      // NOTE: We don't reload documents here to avoid infinite loop
+      // The save has persisted to DB, and when user switches views, it will reload
     }, 1000);
 
     setSaveTimeout(timeout);
+    console.log('[SINGLE SCENE] Set timeout for save');
 
     // Get current text to compare with last text
     const currentText = extractText(newValue);
@@ -1736,13 +1861,49 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
           )}
 
               <div style={{ position: 'relative', zIndex: 1 }}>
-                {/* Constrained width container for editor content */}
-                <div style={{
-                  maxWidth: `${editorMaxWidth}px`,
-                  margin: '0 auto',
-                  padding: '0 40px'
-                }}>
-                  <Slate
+                {/* Folder View (Chapter/Part with child scenes) */}
+                {isViewingFolder && currentDoc && (
+                  <div style={{
+                    maxWidth: `${editorMaxWidth}px`,
+                    margin: '0 auto',
+                    padding: '0 40px'
+                  }}>
+                    {childScenes.length > 0 ? (
+                      <StackedSceneEditor
+                        scenes={childScenes}
+                        onSceneChange={handleSceneContentChange}
+                        sceneBreakStyle={editorSceneBreakStyle}
+                        renderElement={Element}
+                        renderLeaf={Leaf}
+                        editorTextSize={editorTextSize}
+                        editorLineHeight={editorLineHeight}
+                      />
+                    ) : (
+                      <div style={{
+                        padding: '60px 40px',
+                        textAlign: 'center',
+                        color: '#666',
+                        fontSize: '16px'
+                      }}>
+                        <p style={{ marginBottom: '10px', fontSize: '18px', color: '#888' }}>
+                          This {currentDoc.hierarchy_level || 'folder'} is empty
+                        </p>
+                        <p style={{ fontSize: '14px', fontStyle: 'italic' }}>
+                          Add scenes to "{currentDoc.name}" to start writing
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Regular Document Editor */}
+                {!isViewingFolder && (
+                  <div style={{
+                    maxWidth: `${editorMaxWidth}px`,
+                    margin: '0 auto',
+                    padding: '0 40px'
+                  }}>
+                    <Slate
                     editor={editor}
                     initialValue={value}
                     onChange={handleChange}
@@ -1764,6 +1925,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
                     />
                   </Slate>
                 </div>
+                )}
 
                 {/* Inline Tag Autocomplete */}
                 {showTagAutocomplete && (
