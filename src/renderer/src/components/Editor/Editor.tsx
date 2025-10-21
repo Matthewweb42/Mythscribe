@@ -16,6 +16,7 @@ import aiService from '../../services/aiService';
 import DocumentTagBox from '../DocumentTagBox';
 import InlineTagAutocomplete from './InlineTagAutocomplete';
 import StackedSceneEditor from './StackedSceneEditor';
+import EditorStatusBar from './EditorStatusBar';
 
 // Custom types for Slate
 type CustomText = {
@@ -228,7 +229,6 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
   // Stats tracking
   const [wordCount, setWordCount] = useState(0);
-  const [charCount, setCharCount] = useState(0);
   const [sessionWordCount, setSessionWordCount] = useState(0);
   const sessionStartWordCount = useRef<number>(0);
 
@@ -320,7 +320,6 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     const chars = text.length;
 
     setWordCount(words);
-    setCharCount(chars);
 
     return { words, chars };
   }, []);
@@ -333,7 +332,6 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         setValue(initialValue);
         setNotesValue(initialValue);
         setWordCount(0);
-        setCharCount(0);
         setSessionWordCount(0);
         // Clear ghost text when switching documents
         setGhostText('');
@@ -398,7 +396,6 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         // Calculate combined word count from all child scenes
         const totalWords = childScenesToLoad.reduce((sum, scene) => sum + (scene.word_count || 0), 0);
         setWordCount(totalWords);
-        setCharCount(0); // We'll calculate this from actual content later if needed
         sessionStartWordCount.current = totalWords;
         setSessionWordCount(0);
 
@@ -464,7 +461,6 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
         if (words === 0) {
           setWordCount(0);
-          setCharCount(0);
         }
 
         // Load notes
@@ -483,7 +479,6 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         setValue(initialValue);
         setNotesValue(initialValue);
         setWordCount(0);
-        setCharCount(0);
         sessionStartWordCount.current = 0;
         setSessionWordCount(0);
       }
@@ -1648,25 +1643,6 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         </button>
 
         <div style={{ marginLeft: 'auto', fontSize: '12px', color: '#888', alignSelf: 'center', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* Stats */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '4px 12px', backgroundColor: '#252526', borderRadius: '3px' }}>
-            <span title="Total word count">
-              <strong style={{ color: 'var(--primary-green)' }}>{wordCount.toLocaleString()}</strong> words
-            </span>
-            <span style={{ color: '#555' }}>|</span>
-            <span title="Total character count">
-              <strong style={{ color: '#888' }}>{charCount.toLocaleString()}</strong> chars
-            </span>
-            {sessionWordCount > 0 && (
-              <>
-                <span style={{ color: '#555' }}>|</span>
-                <span title="Words written today" style={{ color: '#4ec9b0' }}>
-                  +{sessionWordCount.toLocaleString()} today
-                </span>
-              </>
-            )}
-          </div>
-
           <span>
             {mode === 'vibewrite' && ghostText && '✨ Tab to accept all | Shift+Tab for one word | Esc to dismiss'}
             {mode === 'vibewrite' && isLoadingSuggestion && '⏳ Generating...'}
@@ -1987,6 +1963,12 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
           )}
         </PanelGroup>
       </div>
+
+      {/* Status Bar at Bottom */}
+      <EditorStatusBar
+        wordCount={wordCount}
+        sessionWordCount={sessionWordCount}
+      />
 
     </div>
   );

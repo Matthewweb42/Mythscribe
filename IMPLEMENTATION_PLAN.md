@@ -199,54 +199,82 @@
 
 ---
 
-### Chunk 2.3: Document Compilation View ⏱️ 4-5 hours ⬅️ **NEXT**
-**Why third:** Show compiled chapter/scene views with metadata
+### Chunk 2.3: Stacked Scene Editing for Chapters/Parts ✅ COMPLETE
+**Why third:** Edit multiple scenes in one view with compiled display
 
-**Features:**
-- [ ] Create CompileView component
-- [ ] Chapter/Part compile: Show all child scenes with metadata headers
-- [ ] Scene compile: Show scene with metadata header
-- [ ] Separate notes for chapters/parts vs scenes
-- [ ] Add "Compile View" toggle button
-- [ ] Style compiled output like a manuscript
-- [ ] Scene breaks between compiled scenes (use user's configured style)
-- [ ] Collapsible metadata headers in compile view
+**Implementation Details:**
+- [x] Click Chapter → view/edit all child scenes stacked vertically
+- [x] Click Part → view/edit all scenes from all chapters stacked vertically
+- [x] Each scene editable with independent Slate editor instance
+- [x] Scene break separators between scenes (read-only, uses configured style)
+- [x] Individual save logic for each scene (debounced 1s)
+- [x] Combined word count across all scenes
+- [x] Metadata displays for current document (chapter/part metadata at top)
+- [x] Fixed scene content mixing issue (ID-based editor mapping, not index-based)
+- [x] Proper data persistence (fresh DB fetches prevent stale data)
 
-**Chapter/Part Notes:**
-- [ ] When folder (chapter/part) selected + notes open → show folder notes
-- [ ] When scene selected + notes open → show scene notes
-- [ ] Notes are independent for each document level
-- [ ] Notes panel already supports this (uses document.notes field)
+**Key Architecture:**
+- Created `StackedSceneEditor` component with Map-based editor tracking
+- Each scene has unique editor keyed by scene ID (not array index)
+- Prevents content swapping when scenes have same names across chapters
+- Content forced to remount when loaded from database
+- No infinite loops from document reloading
 
-**Compile View Structure:**
-```
-─────────────────────────────
-Scene: [Scene Name]
-Location: [Location tag]
-POV: [POV character]
-Timeline: [Position]
-─────────────────────────────
-[Scene content...]
+**Testing Passed:**
+- ✅ Chapter view shows all child scenes stacked with editable editors
+- ✅ Part view shows all scenes from all chapters
+- ✅ Scene breaks render with user's configured style between scenes
+- ✅ Each scene saves independently
+- ✅ Switching between views preserves all edits
+- ✅ Scenes with identical names don't mix content
+- ✅ Combined word count accurate
 
-* * *  (scene break)
+**Files Created/Modified:**
+- `src/renderer/src/components/Editor/StackedSceneEditor.tsx` (new) - Stacked editor component
+- `src/renderer/src/components/Editor/Editor.tsx` - Folder detection, stacked view integration
+- `src/renderer/src/components/Sidebar/ManuscriptTab.tsx` - Allow folder selection
 
-─────────────────────────────
-Scene: [Next Scene Name]
-...
-```
+---
 
-**Testing:**
-- [ ] Chapter view shows all child scenes with headers
-- [ ] Scene view shows metadata
-- [ ] Formatting looks professional
-- [ ] Notes panel shows correct notes for document level
-- [ ] Can toggle between compile view and edit mode
-- [ ] Scene breaks render with user's configured style
+### Chunk 2.3b: UI/UX Improvements ✅ COMPLETE
+**Added to plan:** Major UI restructuring and improvements
 
-**Files to Create/Modify:**
-- `src/renderer/src/components/Editor/CompileView.tsx` (new)
-- `src/renderer/src/components/Editor/Editor.tsx` (add compile mode)
-- `src/renderer/src/components/Sidebar/ManuscriptTab.tsx` (detect folder selection)
+**Document Tags/Metadata Bar Restructure:**
+- [x] Swapped panel positions: Metadata left (40%), Document Tags right (60%)
+- [x] Made entire bar collapsible with single minimize button
+- [x] Removed individual section collapse toggles (always expanded when visible)
+- [x] Added vertical resizing with drag handle at bottom
+  - Min height: 100px, Max height: 60vh
+  - Height persists to localStorage
+- [x] Horizontal drag divider still works (resize left/right panels)
+- [x] Removed metadata panel hide functionality (X button)
+- [x] Moved Inline Tags to separate section below Document Tags
+
+**Editor Status Bar:**
+- [x] Created EditorStatusBar component at bottom of editor
+- [x] Displays: Word Count | Session Count (centered)
+- [x] Removed character count
+- [x] Removed word/char/session counts from top formatting toolbar
+- [x] Clean, minimal design
+- [x] Always visible (not toggleable)
+
+**Testing Passed:**
+- ✅ Bar expands/collapses smoothly with minimize button
+- ✅ Vertical resize works with min/max constraints
+- ✅ Horizontal resize still functional
+- ✅ All preferences persist to localStorage
+- ✅ Status bar shows accurate counts
+- ✅ Top toolbar has no word/char counts
+
+**Files Created/Modified:**
+- `src/renderer/src/components/DocumentTagBox.tsx` - Complete restructure
+- `src/renderer/src/components/Editor/EditorStatusBar.tsx` (new) - Bottom status bar
+- `src/renderer/src/components/Editor/Editor.tsx` - Integrated status bar
+
+**localStorage Keys Added:**
+- `tagMetadataBarCollapsed` - Bar expanded/collapsed state
+- `tagMetadataSplitRatio` - Horizontal split ratio (0.3-0.7)
+- `tagMetadataBarHeight` - Vertical height in pixels
 
 ---
 
@@ -304,12 +332,13 @@ Scene: [Next Scene Name]
 
 ---
 
-**PHASE 2 CHECKPOINT:** ✅
-- Novel formatting works
-- Scene metadata functional
-- Compile view operational
-- Templates available
-- Focus mode enhanced
+**PHASE 2 CHECKPOINT:** ⏱️ IN PROGRESS
+- ✅ Novel formatting works
+- ✅ Scene metadata functional
+- ✅ Stacked scene editing operational
+- ✅ UI/UX improvements complete (resizable bar, status bar, swapped panels)
+- [ ] Templates available (Chunk 2.4)
+- [ ] Focus mode enhanced (Chunk 2.5)
 - **Test entire app before moving on**
 
 ---
@@ -754,34 +783,51 @@ npm install epub-gen
 
 ### Revised Based on Actual Progress:
 - **Phase 1:** ✅ COMPLETE (~15 hours)
-- **Phase 2:** ~8 of 23 hours complete (2 of 5 chunks done)
+- **Phase 2:** ~18 of 23 hours complete (3.5 of 5 chunks done - stacked editing + UI/UX improvements added significant work)
 - **Phase 3:** Not started (16-20 hours estimated)
 - **Phase 4:** Not started (12-16 hours estimated)
 - **Phase 5:** Not started (24-31 hours estimated)
 - **Phase 6:** Not started (7-10 hours estimated)
 
-**Completed:** ~23 hours
-**Remaining:** ~65-92 hours
+**Completed:** ~33 hours
+**Remaining:** ~55-82 hours
 
 ---
 
 ## 📍 **Current Status & Next Steps**
 
 **✅ Completed:**
-- Phase 1: Complete layout foundation with resizable panels, tabs, AI dock
-- Phase 2 (partial): Novel formatting, width constraints, scene breaks
-- Bonus: Popup/modal system overhaul, notification system
+- ✅ Phase 1: Complete layout foundation with resizable panels, tabs, AI dock
+- ✅ Phase 2 (70% complete):
+  - ✅ Chunk 2.1: Novel formatting, width constraints, scene breaks
+  - ✅ Chunk 2.2: Scene metadata fields with tag integration
+  - ✅ Chunk 2.3: Stacked scene editing for chapters/parts
+  - ✅ Chunk 2.3b: Major UI/UX improvements (resizable bar, status bar, panel swap)
+- ✅ Bonus: Popup/modal system overhaul, notification system
 
-**⬅️ Next Up: Phase 2, Chunk 2.2 - Scene Metadata Fields**
+**⬅️ Next Up: Phase 2, Chunk 2.4 - Document Templates**
 
 **Recommended approach:**
-1. Add database columns for location, time, POV
-2. Create SceneMetadata component (collapsible bar above editor)
-3. Integrate with Editor component (show only for scenes)
-4. Test with existing scenes
+1. Create template system in `src/renderer/src/templates/documentTemplates.ts`
+2. Add template picker to document creation modal
+3. Implement templates:
+   - Title Page (front matter)
+   - Copyright Page (front matter)
+   - Dedication (front matter)
+   - Acknowledgments (back matter)
+   - About the Author (back matter)
+   - Scene (with metadata fields pre-populated)
+   - Chapter (with auto-numbering option)
+4. Test template creation and population
 
 **Estimated time:** 3-4 hours
 
+**After Templates:** Phase 2, Chunk 2.5 - Focus Mode Enhancements (5-6 hours)
+- Background image upload
+- Adjustable overlay window
+- Background rotation
+- This completes Phase 2!
+
 ---
 
-**Last Updated:** October 2025 | **Progress:** ~20% complete overall
+**Last Updated:** January 2025 | **Progress:** ~30% complete overall

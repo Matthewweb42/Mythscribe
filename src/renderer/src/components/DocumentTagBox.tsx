@@ -1,6 +1,6 @@
 // src/renderer/src/components/DocumentTagBox.tsx
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Tag, Plus, X, Sparkles, Hash, ChevronDown, ChevronRight, MapPin, User, Clock } from 'lucide-react';
+import { Tag, Plus, X, Sparkles, Hash, ChevronDown, MapPin, User, Clock, Minimize2 } from 'lucide-react';
 import { Descendant } from 'slate';
 import { extractInlineTags, inlineTagsToArray } from '../utils/tagParser';
 import { DocumentRow } from '../../types/window';
@@ -28,8 +28,29 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentCon
   const [location, setLocation] = useState<string>('');
   const [pov, setPov] = useState<string>('');
   const [timelinePosition, setTimelinePosition] = useState<string>('');
-  const [isMetadataExpanded, setIsMetadataExpanded] = useState(true);
   const metadataSaveTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Bar collapse state (entire bar toggleable)
+  const [isBarCollapsed, setIsBarCollapsed] = useState<boolean>(() => {
+    const saved = localStorage.getItem('tagMetadataBarCollapsed');
+    return saved ? saved === 'true' : false; // Default expanded
+  });
+
+  // Resizable split panel state (horizontal)
+  const [splitRatio, setSplitRatio] = useState<number>(() => {
+    const saved = localStorage.getItem('tagMetadataSplitRatio');
+    return saved ? parseFloat(saved) : 0.6; // Default 60/40 split
+  });
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Vertical resize state
+  const [barHeight, setBarHeight] = useState<number>(() => {
+    const saved = localStorage.getItem('tagMetadataBarHeight');
+    return saved ? parseInt(saved) : 250; // Default 250px
+  });
+  const [isResizingHeight, setIsResizingHeight] = useState(false);
+
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Parse inline tags from document nodes
   const inlineTags = useMemo(() => {
@@ -42,8 +63,6 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentCon
   const [suggestedTags, setSuggestedTags] = useState<TagRow[]>([]);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [isDocumentTagsExpanded, setIsDocumentTagsExpanded] = useState(true);
-  const [isInlineTagsExpanded, setIsInlineTagsExpanded] = useState(true);
 
   // Load document tags and all available tags
   useEffect(() => {
@@ -76,6 +95,100 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentCon
   useEffect(() => {
     loadMetadata();
   }, [currentDocument]);
+
+  // Persist bar collapsed state to localStorage
+  useEffect(() => {
+    localStorage.setItem('tagMetadataBarCollapsed', isBarCollapsed.toString());
+  }, [isBarCollapsed]);
+
+  // Persist split ratio to localStorage
+  useEffect(() => {
+    localStorage.setItem('tagMetadataSplitRatio', splitRatio.toString());
+  }, [splitRatio]);
+
+  // Persist bar height to localStorage
+  useEffect(() => {
+    localStorage.setItem('tagMetadataBarHeight', barHeight.toString());
+  }, [barHeight]);
+
+  // Toggle entire bar collapse/expand
+  const toggleBar = useCallback(() => {
+    setIsBarCollapsed(prev => !prev);
+  }, []);
+
+  // Handle horizontal drag to resize panels left/right
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isDragging || !containerRef.current) return;
+
+    const container = containerRef.current;
+    const containerRect = container.getBoundingClientRect();
+    const offsetX = e.clientX - containerRect.left;
+    const newRatio = offsetX / containerRect.width;
+
+    // Constrain ratio between 0.3 and 0.7 (30%-70%)
+    const constrainedRatio = Math.max(0.3, Math.min(0.7, newRatio));
+    setSplitRatio(constrainedRatio);
+  }, [isDragging]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  // Handle vertical drag to resize bar height
+  const handleHeightMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingHeight(true);
+  }, []);
+
+  const handleHeightMouseMove = useCallback((e: MouseEvent) => {
+    if (!isResizingHeight || !containerRef.current) return;
+
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const newHeight = e.clientY - containerRect.top;
+    const viewportHeight = window.innerHeight;
+
+    // Constrain between 100px and 60% of viewport
+    const minHeight = 100;
+    const maxHeight = viewportHeight * 0.6;
+    const constrainedHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
+
+    setBarHeight(constrainedHeight);
+  }, [isResizingHeight]);
+
+  const handleHeightMouseUp = useCallback(() => {
+    setIsResizingHeight(false);
+  }, []);
+
+  // Attach/detach mouse event listeners for horizontal dragging
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+    return undefined;
+  }, [isDragging, handleMouseMove, handleMouseUp]);
+
+  // Attach/detach mouse event listeners for vertical dragging
+  useEffect(() => {
+    if (isResizingHeight) {
+      window.addEventListener('mousemove', handleHeightMouseMove);
+      window.addEventListener('mouseup', handleHeightMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleHeightMouseMove);
+        window.removeEventListener('mouseup', handleHeightMouseUp);
+      };
+    }
+    return undefined;
+  }, [isResizingHeight, handleHeightMouseMove, handleHeightMouseUp]);
 
   const loadDocumentTags = async () => {
     if (!documentId) return;
@@ -267,44 +380,263 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentCon
     return null;
   }
 
-  return (
-    <div style={{
-      padding: '12px',
-      borderBottom: '1px solid #333',
-      backgroundColor: '#1e1e1e'
-    }}>
-      {/* Header */}
+  // If bar is collapsed, show thin collapsed bar
+  if (isBarCollapsed) {
+    return (
       <div style={{
+        padding: '6px 12px',
+        borderBottom: '1px solid #333',
+        backgroundColor: '#1e1e1e',
         display: 'flex',
         alignItems: 'center',
-        gap: '8px',
-        marginBottom: '8px'
+        justifyContent: 'flex-end',
+        minHeight: '24px'
       }}>
         <button
-          onClick={() => setIsDocumentTagsExpanded(!isDocumentTagsExpanded)}
+          onClick={toggleBar}
           style={{
-            padding: '0',
-            backgroundColor: 'transparent',
+            padding: '4px 8px',
+            backgroundColor: '#0e639c',
+            color: '#fff',
             border: 'none',
+            borderRadius: '3px',
             cursor: 'pointer',
+            fontSize: '11px',
             display: 'flex',
             alignItems: 'center',
-            color: '#888'
+            gap: '6px',
+            fontWeight: 'bold'
           }}
-          title={isDocumentTagsExpanded ? 'Collapse' : 'Expand'}
+          title="Expand tags and metadata"
         >
-          {isDocumentTagsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <ChevronDown size={12} />
+          Show Tags
         </button>
-        <Tag size={14} color="#888" />
-        <span
-          onClick={() => setIsDocumentTagsExpanded(!isDocumentTagsExpanded)}
+      </div>
+    );
+  }
+
+  // Calculate panel widths (swapped: metadata left 40%, tags right 60%)
+  const leftPanelWidth = shouldShowMetadata ? `${(1 - splitRatio) * 100}%` : '100%'; // 40% when metadata visible
+  const rightPanelWidth = shouldShowMetadata ? `${splitRatio * 100}%` : '100%'; // 60% when metadata visible
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        padding: '12px',
+        paddingBottom: '0', // Remove bottom padding for drag handle
+        borderBottom: '1px solid #333',
+        backgroundColor: '#1e1e1e',
+        display: 'flex',
+        gap: '0',
+        position: 'relative',
+        height: `${barHeight}px`,
+        minHeight: '100px',
+        maxHeight: '60vh',
+        overflow: 'hidden'
+      }}
+    >
+      {/* LEFT PANEL - Metadata Section (40%) */}
+      {shouldShowMetadata && (
+        <div style={{
+          width: leftPanelWidth,
+          minWidth: '200px',
+          paddingRight: '8px',
+          display: 'flex',
+          flexDirection: 'column',
+          transition: 'width 0.2s ease',
+          overflow: 'auto'
+        }}>
+          {/* Metadata Header */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            marginBottom: '8px'
+          }}>
+            <MapPin size={14} color="#888" />
+            <span style={{
+                fontSize: '11px',
+                fontWeight: 'bold',
+                color: '#888',
+                textTransform: 'uppercase',
+                userSelect: 'none',
+                flex: 1
+              }}
+            >
+              Metadata
+            </span>
+          </div>
+
+          {/* Metadata Fields - always expanded */}
+          <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}>
+              {/* Location Field */}
+              <div>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '10px',
+                  color: '#888',
+                  marginBottom: '4px',
+                  fontWeight: 'bold'
+                }}>
+                  <MapPin size={10} />
+                  LOCATION/SETTING
+                </label>
+                <input
+                  type="text"
+                  value={location}
+                  onChange={(e) => handleMetadataChange('location', e.target.value)}
+                  placeholder="Enter location or select from settings..."
+                  list="location-suggestions"
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    backgroundColor: '#252526',
+                    border: '1px solid #555',
+                    borderRadius: '3px',
+                    color: '#d4d4d4',
+                    fontSize: '11px'
+                  }}
+                />
+                <datalist id="location-suggestions">
+                  {settingTags.map(tag => (
+                    <option key={tag.id} value={tag.name} />
+                  ))}
+                </datalist>
+              </div>
+
+              {/* POV Field */}
+              <div>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '10px',
+                  color: '#888',
+                  marginBottom: '4px',
+                  fontWeight: 'bold'
+                }}>
+                  <User size={10} />
+                  POV CHARACTER
+                </label>
+                <input
+                  type="text"
+                  value={pov}
+                  onChange={(e) => handleMetadataChange('pov', e.target.value)}
+                  placeholder="Enter POV character..."
+                  list="pov-suggestions"
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    backgroundColor: '#252526',
+                    border: '1px solid #555',
+                    borderRadius: '3px',
+                    color: '#d4d4d4',
+                    fontSize: '11px'
+                  }}
+                />
+                <datalist id="pov-suggestions">
+                  {characterTags.map(tag => (
+                    <option key={tag.id} value={tag.name} />
+                  ))}
+                </datalist>
+              </div>
+
+              {/* Timeline Position Field */}
+              <div>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '10px',
+                  color: '#888',
+                  marginBottom: '4px',
+                  fontWeight: 'bold'
+                }}>
+                  <Clock size={10} />
+                  TIMELINE POSITION
+                </label>
+                <input
+                  type="text"
+                  value={timelinePosition}
+                  onChange={(e) => handleMetadataChange('timeline', e.target.value)}
+                  placeholder="e.g., Day 3, Morning or Chapter 2 + 3 hours"
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    backgroundColor: '#252526',
+                    border: '1px solid #555',
+                    borderRadius: '3px',
+                    color: '#d4d4d4',
+                    fontSize: '11px'
+                  }}
+                />
+                <div style={{
+                  fontSize: '9px',
+                  color: '#666',
+                  marginTop: '4px',
+                  fontStyle: 'italic'
+                }}>
+                  Note: Timeline picker integration coming in Phase 3
+                </div>
+              </div>
+            </div>
+        </div>
+      )}
+      {/* END LEFT PANEL */}
+
+      {/* DRAG DIVIDER */}
+      {shouldShowMetadata && (
+        <div
+          onMouseDown={handleMouseDown}
           style={{
+            width: '5px',
+            cursor: 'col-resize',
+            backgroundColor: isDragging ? '#0e639c' : '#333',
+            transition: isDragging ? 'none' : 'background-color 0.2s ease',
+            flexShrink: 0,
+            userSelect: 'none'
+          }}
+          onMouseEnter={(e) => {
+            if (!isDragging) e.currentTarget.style.backgroundColor = '#555';
+          }}
+          onMouseLeave={(e) => {
+            if (!isDragging) e.currentTarget.style.backgroundColor = '#333';
+          }}
+        />
+      )}
+
+      {/* RIGHT PANEL - Document Tags Section (60%) */}
+      <div style={{
+        width: rightPanelWidth,
+        minWidth: shouldShowMetadata ? '200px' : 'auto',
+        paddingLeft: shouldShowMetadata ? '8px' : '0',
+        display: 'flex',
+        flexDirection: 'column',
+        transition: 'width 0.2s ease',
+        overflow: 'auto'
+      }}>
+        {/* Document Tags Header */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '8px'
+        }}>
+        <Tag size={14} color="#888" />
+        <span style={{
             fontSize: '11px',
             fontWeight: 'bold',
             color: '#888',
             textTransform: 'uppercase',
             flex: 1,
-            cursor: 'pointer',
             userSelect: 'none'
           }}
         >
@@ -350,11 +682,27 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentCon
           <Plus size={12} />
           Add
         </button>
+        <button
+          onClick={toggleBar}
+          style={{
+            padding: '4px 6px',
+            backgroundColor: 'transparent',
+            border: '1px solid #555',
+            borderRadius: '3px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            color: '#888',
+            fontSize: '10px'
+          }}
+          title="Minimize bar"
+        >
+          <Minimize2 size={12} />
+        </button>
       </div>
 
-      {/* Document tags - only show if expanded */}
-      {isDocumentTagsExpanded && (
-        <>
+      {/* Document tags - always show content when bar is expanded */}
+      <>
           {documentTags.length > 0 && (
             <div style={{
               display: 'flex',
@@ -610,258 +958,95 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentCon
             </div>
           )}
         </>
-      )}
 
-      {/* Scene Metadata Section */}
-      {shouldShowMetadata && (
-        <div style={{
-          marginTop: '12px',
-          paddingTop: '12px',
-          borderTop: '1px solid #333'
-        }}>
+        {/* Inline Tags Section - now in left panel, always expanded */}
+        {inlineTags.length > 0 && (
           <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '8px'
+            marginTop: documentTags.length > 0 ? '12px' : '8px',
+            paddingTop: '12px',
+            borderTop: documentTags.length > 0 ? '1px solid #333' : 'none'
           }}>
-            <button
-              onClick={() => setIsMetadataExpanded(!isMetadataExpanded)}
-              style={{
-                padding: '0',
-                backgroundColor: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                color: '#888'
-              }}
-              title={isMetadataExpanded ? 'Collapse' : 'Expand'}
-            >
-              {isMetadataExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            </button>
-            <MapPin size={14} color="#888" />
-            <span
-              onClick={() => setIsMetadataExpanded(!isMetadataExpanded)}
-              style={{
-                fontSize: '11px',
-                fontWeight: 'bold',
-                color: '#888',
-                textTransform: 'uppercase',
-                cursor: 'pointer',
-                userSelect: 'none'
-              }}
-            >
-              Scene Metadata
-            </span>
-          </div>
-
-          {isMetadataExpanded && (
             <div style={{
               display: 'flex',
-              flexDirection: 'column',
-              gap: '8px'
+              alignItems: 'center',
+              gap: '8px',
+              marginBottom: '8px'
             }}>
-              {/* Location Field */}
-              <div>
-                <label style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  fontSize: '10px',
+              <Hash size={14} color="#888" />
+              <span style={{
+                  fontSize: '11px',
+                  fontWeight: 'bold',
                   color: '#888',
-                  marginBottom: '4px',
-                  fontWeight: 'bold'
-                }}>
-                  <MapPin size={10} />
-                  LOCATION/SETTING
-                </label>
-                <input
-                  type="text"
-                  value={location}
-                  onChange={(e) => handleMetadataChange('location', e.target.value)}
-                  placeholder="Enter location or select from settings..."
-                  list="location-suggestions"
-                  style={{
-                    width: '100%',
-                    padding: '6px 8px',
-                    backgroundColor: '#252526',
-                    border: '1px solid #555',
-                    borderRadius: '3px',
-                    color: '#d4d4d4',
-                    fontSize: '11px'
-                  }}
-                />
-                <datalist id="location-suggestions">
-                  {settingTags.map(tag => (
-                    <option key={tag.id} value={tag.name} />
-                  ))}
-                </datalist>
-              </div>
-
-              {/* POV Field */}
-              <div>
-                <label style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  fontSize: '10px',
-                  color: '#888',
-                  marginBottom: '4px',
-                  fontWeight: 'bold'
-                }}>
-                  <User size={10} />
-                  POV CHARACTER
-                </label>
-                <input
-                  type="text"
-                  value={pov}
-                  onChange={(e) => handleMetadataChange('pov', e.target.value)}
-                  placeholder="Enter POV character..."
-                  list="pov-suggestions"
-                  style={{
-                    width: '100%',
-                    padding: '6px 8px',
-                    backgroundColor: '#252526',
-                    border: '1px solid #555',
-                    borderRadius: '3px',
-                    color: '#d4d4d4',
-                    fontSize: '11px'
-                  }}
-                />
-                <datalist id="pov-suggestions">
-                  {characterTags.map(tag => (
-                    <option key={tag.id} value={tag.name} />
-                  ))}
-                </datalist>
-              </div>
-
-              {/* Timeline Position Field */}
-              <div>
-                <label style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  fontSize: '10px',
-                  color: '#888',
-                  marginBottom: '4px',
-                  fontWeight: 'bold'
-                }}>
-                  <Clock size={10} />
-                  TIMELINE POSITION
-                </label>
-                <input
-                  type="text"
-                  value={timelinePosition}
-                  onChange={(e) => handleMetadataChange('timeline', e.target.value)}
-                  placeholder="e.g., Day 3, Morning or Chapter 2 + 3 hours"
-                  style={{
-                    width: '100%',
-                    padding: '6px 8px',
-                    backgroundColor: '#252526',
-                    border: '1px solid #555',
-                    borderRadius: '3px',
-                    color: '#d4d4d4',
-                    fontSize: '11px'
-                  }}
-                />
-                <div style={{
-                  fontSize: '9px',
-                  color: '#666',
-                  marginTop: '4px',
-                  fontStyle: 'italic'
-                }}>
-                  Note: Timeline picker integration coming in Phase 3
-                </div>
-              </div>
+                  textTransform: 'uppercase',
+                  userSelect: 'none'
+                }}
+              >
+                Inline Tags
+              </span>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Inline Tags Section */}
-      {inlineTags.length > 0 && (
-        <div style={{
-          marginTop: documentTags.length > 0 ? '12px' : '8px',
-          paddingTop: '12px',
-          borderTop: documentTags.length > 0 ? '1px solid #333' : 'none'
-        }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '8px'
-          }}>
-            <button
-              onClick={() => setIsInlineTagsExpanded(!isInlineTagsExpanded)}
-              style={{
-                padding: '0',
-                backgroundColor: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                color: '#888'
-              }}
-              title={isInlineTagsExpanded ? 'Collapse' : 'Expand'}
-            >
-              {isInlineTagsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            </button>
-            <Hash size={14} color="#888" />
-            <span
-              onClick={() => setIsInlineTagsExpanded(!isInlineTagsExpanded)}
-              style={{
-                fontSize: '11px',
-                fontWeight: 'bold',
-                color: '#888',
-                textTransform: 'uppercase',
-                cursor: 'pointer',
-                userSelect: 'none'
-              }}
-            >
-              Inline Tags
-            </span>
-          </div>
-          {isInlineTagsExpanded && (
             <div style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '6px'
-            }}>
-              {inlineTags.map(tag => (
-                <div
-                  key={tag.id}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '4px 8px',
-                    backgroundColor: tag.color,
-                    opacity: 0.6,
-                    color: '#fff',
-                    borderRadius: '3px',
-                    fontSize: '11px',
-                    fontWeight: 'bold'
-                  }}
-                  title={`Used ${tag.count} time${tag.count > 1 ? 's' : ''} in this document`}
-                >
-                  <span>{tag.name}</span>
-                  {tag.count > 1 && (
-                    <span style={{
-                      fontSize: '10px',
-                      padding: '1px 4px',
-                      backgroundColor: 'rgba(255,255,255,0.3)',
-                      borderRadius: '2px'
-                    }}>
-                      {tag.count}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '6px'
+              }}>
+                {inlineTags.map(tag => (
+                  <div
+                    key={tag.id}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '4px 8px',
+                      backgroundColor: tag.color,
+                      opacity: 0.6,
+                      color: '#fff',
+                      borderRadius: '3px',
+                      fontSize: '11px',
+                      fontWeight: 'bold'
+                    }}
+                    title={`Used ${tag.count} time${tag.count > 1 ? 's' : ''} in this document`}
+                  >
+                    <span>{tag.name}</span>
+                    {tag.count > 1 && (
+                      <span style={{
+                        fontSize: '10px',
+                        padding: '1px 4px',
+                        backgroundColor: 'rgba(255,255,255,0.3)',
+                        borderRadius: '2px'
+                      }}>
+                        {tag.count}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+          </div>
+        )}
+      </div>
+      {/* END RIGHT PANEL */}
+
+      {/* Horizontal drag handle for vertical resizing */}
+      <div
+        onMouseDown={handleHeightMouseDown}
+        style={{
+          height: '5px',
+          cursor: 'row-resize',
+          backgroundColor: isResizingHeight ? '#0e639c' : '#333',
+          transition: isResizingHeight ? 'none' : 'background-color 0.2s ease',
+          width: '100%',
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          flexShrink: 0,
+          userSelect: 'none'
+        }}
+        onMouseEnter={(e) => {
+          if (!isResizingHeight) e.currentTarget.style.backgroundColor = '#555';
+        }}
+        onMouseLeave={(e) => {
+          if (!isResizingHeight) e.currentTarget.style.backgroundColor = '#333';
+        }}
+      />
     </div>
   );
 };
