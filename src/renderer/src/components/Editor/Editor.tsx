@@ -213,7 +213,7 @@ interface EditorProps {
 }
 
 const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady }) => {
-  const { activeDocumentId, documents, updateDocumentContent, updateDocumentWordCount, updateDocumentNotes, references, loadDocuments } = useProject();
+  const { activeDocumentId, documents, updateDocumentContent, updateDocumentWordCount, updateDocumentNotes, references } = useProject();
   // Create a new editor instance when the document changes to ensure clean state
   const editor = useMemo(() => withHistory(withReact(createEditor())), [activeDocumentId]);
   const [value, setValue] = useState<Descendant[]>(initialValue);
@@ -386,15 +386,11 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
             childScenesToLoad.push(...scenes);
           });
-
-          console.log(`Viewing Part "${doc.name}" with ${chapters.length} chapters and ${childScenesToLoad.length} total scenes`);
         } else {
           // Chapter (or other folder): Load direct child scenes only
           childScenesToLoad = freshDocs
             .filter(d => d.parent_id === doc.id && d.type === 'document')
             .sort((a, b) => a.position - b.position);
-
-          console.log(`Viewing folder "${doc.name}" with ${childScenesToLoad.length} child scenes:`, childScenesToLoad.map(c => c.name));
         }
 
         setChildScenes(childScenesToLoad);
@@ -519,38 +515,28 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
   // Handle scene content change in stacked editor
   const handleSceneContentChange = useCallback(async (sceneId: string, content: string) => {
-    console.log('[STACKED SAVE] Saving scene:', sceneId);
-    console.log('[STACKED SAVE] Content length:', content.length);
-
     try {
       await updateDocumentContent(sceneId, content);
-      console.log('[STACKED SAVE] Content saved successfully');
 
       // Update word count for this scene
       const parsed = JSON.parse(content);
       const text = extractText(parsed);
       const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-      console.log('[STACKED SAVE] Word count:', words);
 
       await updateDocumentWordCount(sceneId, words);
-      console.log('[STACKED SAVE] Word count updated');
 
-      // Reload documents to get updated data
-      await loadDocuments();
-      console.log('[STACKED SAVE] Documents reloaded');
-
-      // Recalculate total word count from reloaded documents
+      // Recalculate total word count without reloading all documents
+      // This prevents unnecessary re-renders and content mixing issues
       const updatedDocs = await window.api.document.getAll();
       const updatedChildren = updatedDocs
         .filter(d => d.parent_id === activeDocumentId && d.type === 'document');
 
       const totalWords = updatedChildren.reduce((sum, scene) => sum + (scene.word_count || 0), 0);
       setWordCount(totalWords);
-      console.log('[STACKED SAVE] Total word count updated:', totalWords);
     } catch (error) {
-      console.error('[STACKED SAVE] Error saving scene content:', error);
+      console.error('[STACKED SAVE] Error saving scene:', error);
     }
-  }, [updateDocumentContent, updateDocumentWordCount, loadDocuments, activeDocumentId, extractText]);
+  }, [updateDocumentContent, updateDocumentWordCount, activeDocumentId, extractText]);
 
   // Get the last N characters of text for context
   const getRecentContext = (nodes: Descendant[], maxChars: number = 500): string => {

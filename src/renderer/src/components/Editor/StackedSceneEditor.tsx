@@ -24,67 +24,78 @@ const StackedSceneEditor: React.FC<StackedSceneEditorProps> = ({
   editorTextSize,
   editorLineHeight
 }) => {
-  // Create a separate editor instance for each scene
+  // Create a Map of editor instances keyed by scene ID for stable references
   const sceneEditors = useMemo(() => {
-    return scenes.map(() => withHistory(withReact(createEditor())));
-  }, [scenes.length]); // Only recreate when number of scenes changes
+    const editorMap = new Map<string, ReturnType<typeof createEditor>>();
+    scenes.forEach(scene => {
+      editorMap.set(scene.id, withHistory(withReact(createEditor())));
+    });
+    return editorMap;
+  }, [scenes.map(s => s.id).join(',')]); // Recreate when scene IDs change
 
-  // Initialize content for each scene
-  const [sceneContents, setSceneContents] = useState<Descendant[][]>([]);
+  // Initialize content for each scene using Map for stable ID-based tracking
+  const [sceneContents, setSceneContents] = useState<Map<string, Descendant[]>>(new Map());
 
   // Update scene contents when scenes change
   useEffect(() => {
-    const initialContents = scenes.map(scene => {
+    const contentMap = new Map<string, Descendant[]>();
+
+    scenes.forEach(scene => {
+      let parsedContent: Descendant[];
+
       if (scene.content) {
         try {
           const parsed = JSON.parse(scene.content);
           if (parsed && Array.isArray(parsed) && parsed.length > 0) {
-            return parsed;
+            parsedContent = parsed;
+          } else {
+            parsedContent = [{ type: 'paragraph', children: [{ text: '' }] }];
           }
         } catch (error) {
-          console.error('[STACKED EDITOR] Error parsing scene content:', error);
+          console.error(`[STACKED EDITOR] Error parsing content for scene ${scene.id} (${scene.name}):`, error);
+          parsedContent = [{ type: 'paragraph', children: [{ text: '' }] }];
         }
+      } else {
+        parsedContent = [{ type: 'paragraph', children: [{ text: '' }] }];
       }
-      return [{ type: 'paragraph', children: [{ text: '' }] }];
+
+      contentMap.set(scene.id, parsedContent);
     });
 
-    console.log('[STACKED EDITOR] Initializing contents for', scenes.length, 'scenes');
-    setSceneContents(initialContents);
+    setSceneContents(contentMap);
   }, [scenes]);
 
   // Track save timeouts for each scene
   const saveTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
-  // Handle content change for a specific scene
-  const handleSceneChange = useCallback((sceneIndex: number, newContent: Descendant[]) => {
-    const scene = scenes[sceneIndex];
-    if (!scene) return;
+  // Handle content change for a specific scene - now using scene ID directly
+  const handleSceneChange = useCallback((sceneId: string, newContent: Descendant[]) => {
+    const scene = scenes.find(s => s.id === sceneId);
+    if (!scene) {
+      console.error('[STACKED EDITOR] Scene not found for ID:', sceneId);
+      return;
+    }
 
-    console.log('[STACKED EDITOR] Scene changed:', scene.name, 'Index:', sceneIndex);
-
-    // Update local state
+    // Update local state using Map
     setSceneContents(prev => {
-      const updated = [...prev];
-      updated[sceneIndex] = newContent;
+      const updated = new Map(prev);
+      updated.set(sceneId, newContent);
       return updated;
     });
 
     // Debounced save
-    const existingTimeout = saveTimeouts.current.get(scene.id);
+    const existingTimeout = saveTimeouts.current.get(sceneId);
     if (existingTimeout) {
       clearTimeout(existingTimeout);
-      console.log('[STACKED EDITOR] Cleared existing timeout for:', scene.name);
     }
 
     const timeout = setTimeout(() => {
-      console.log('[STACKED EDITOR] Debounce complete, calling onSceneChange for:', scene.name);
       const contentStr = JSON.stringify(newContent);
-      onSceneChange(scene.id, contentStr);
-      saveTimeouts.current.delete(scene.id);
+      onSceneChange(sceneId, contentStr);
+      saveTimeouts.current.delete(sceneId);
     }, 1000); // 1 second debounce
 
-    saveTimeouts.current.set(scene.id, timeout);
-    console.log('[STACKED EDITOR] Set timeout for:', scene.name);
+    saveTimeouts.current.set(sceneId, timeout);
   }, [scenes, onSceneChange]);
 
   // Cleanup timeouts on unmount
@@ -95,16 +106,26 @@ const StackedSceneEditor: React.FC<StackedSceneEditorProps> = ({
     };
   }, []);
 
-  // Don't render until contents are loaded
-  if (sceneContents.length === 0 || sceneContents.length !== scenes.length) {
+  // Don't render until contents are loaded for all scenes
+  if (sceneContents.size === 0 || sceneContents.size !== scenes.length) {
     return <div style={{ padding: '40px', textAlign: 'center', color: '#888' }}>Loading scenes...</div>;
   }
 
   return (
     <div>
       {scenes.map((scene, index) => {
-        // Ensure we have valid content for this scene
-        const content = sceneContents[index] || [{ type: 'paragraph', children: [{ text: '' }] }];
+        // Get content and editor by scene ID (not index!)
+        const content = sceneContents.get(scene.id) || [{ type: 'paragraph', children: [{ text: '' }] }];
+        const editor = sceneEditors.get(scene.id);
+
+        if (!editor) {
+          console.error('[STACKED EDITOR] No editor found for scene:', scene.id, scene.name);
+          return null;
+        }
+
+        // Use scene.id + content hash as key to force remount when content changes externally
+        const contentHash = JSON.stringify(content).length;
+        const componentKey = `${scene.id}-${contentHash}`;
 
         return (
           <React.Fragment key={scene.id}>
@@ -113,9 +134,10 @@ const StackedSceneEditor: React.FC<StackedSceneEditorProps> = ({
               marginBottom: index < scenes.length - 1 ? '0' : '40px'
             }}>
               <Slate
-                editor={sceneEditors[index]}
+                key={componentKey}
+                editor={editor}
                 initialValue={content}
-                onChange={(value) => handleSceneChange(index, value)}
+                onChange={(value) => handleSceneChange(scene.id, value)}
               >
               <Editable
                 renderLeaf={renderLeaf}
