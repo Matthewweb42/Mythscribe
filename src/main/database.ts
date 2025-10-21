@@ -23,6 +23,10 @@ export interface DocumentRow {
   notes: string | null; // Slate JSON for scene/chapter notes
   word_count: number; // Cached word count
   position: number; // for ordering
+  location: string | null; // Scene location/setting (tag name)
+  pov: string | null; // Scene POV character (tag name)
+  timeline_position: string | null; // Scene position in timeline (free text for now)
+  scene_metadata: string | null; // JSON for additional custom metadata
   created: string;
   modified: string;
 }
@@ -149,6 +153,66 @@ export class ProjectDatabase {
         console.error('Migration error (doc_type):', error);
       }
     }
+
+    // Check and add location column
+    const hasLocation = tableInfo.some((col) => col.name === 'location');
+    if (!hasLocation) {
+      console.log('Running migration: Adding location column to documents table');
+      try {
+        this.db.exec(`
+          ALTER TABLE documents
+          ADD COLUMN location TEXT
+        `);
+        console.log('Migration completed: location column added');
+      } catch (error) {
+        console.error('Migration error (location):', error);
+      }
+    }
+
+    // Check and add pov column
+    const hasPov = tableInfo.some((col) => col.name === 'pov');
+    if (!hasPov) {
+      console.log('Running migration: Adding pov column to documents table');
+      try {
+        this.db.exec(`
+          ALTER TABLE documents
+          ADD COLUMN pov TEXT
+        `);
+        console.log('Migration completed: pov column added');
+      } catch (error) {
+        console.error('Migration error (pov):', error);
+      }
+    }
+
+    // Check and add timeline_position column
+    const hasTimelinePosition = tableInfo.some((col) => col.name === 'timeline_position');
+    if (!hasTimelinePosition) {
+      console.log('Running migration: Adding timeline_position column to documents table');
+      try {
+        this.db.exec(`
+          ALTER TABLE documents
+          ADD COLUMN timeline_position TEXT
+        `);
+        console.log('Migration completed: timeline_position column added');
+      } catch (error) {
+        console.error('Migration error (timeline_position):', error);
+      }
+    }
+
+    // Check and add scene_metadata column
+    const hasSceneMetadata = tableInfo.some((col) => col.name === 'scene_metadata');
+    if (!hasSceneMetadata) {
+      console.log('Running migration: Adding scene_metadata column to documents table');
+      try {
+        this.db.exec(`
+          ALTER TABLE documents
+          ADD COLUMN scene_metadata TEXT
+        `);
+        console.log('Migration completed: scene_metadata column added');
+      } catch (error) {
+        console.error('Migration error (scene_metadata):', error);
+      }
+    }
   }
 
   private initializeTables() {
@@ -183,6 +247,10 @@ export class ProjectDatabase {
         notes TEXT,
         word_count INTEGER NOT NULL DEFAULT 0,
         position INTEGER NOT NULL DEFAULT 0,
+        location TEXT,
+        pov TEXT,
+        timeline_position TEXT,
+        scene_metadata TEXT,
         created TEXT NOT NULL,
         modified TEXT NOT NULL,
         FOREIGN KEY (parent_id) REFERENCES documents(id) ON DELETE CASCADE
@@ -463,12 +531,48 @@ export class ProjectDatabase {
   moveDocument(id: string, newParentId: string | null, newPosition: number) {
     const now = new Date().toISOString();
     this.db.prepare(`
-      UPDATE documents 
+      UPDATE documents
       SET parent_id = ?, position = ?, modified = ?
       WHERE id = ?
     `).run(newParentId, newPosition, now, id);
 
     this.updateProjectModified();
+  }
+
+  updateDocumentMetadata(
+    id: string,
+    location: string | null,
+    pov: string | null,
+    timelinePosition: string | null
+  ) {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE documents
+      SET location = ?, pov = ?, timeline_position = ?, modified = ?
+      WHERE id = ?
+    `).run(location, pov, timelinePosition, now, id);
+
+    this.updateProjectModified();
+  }
+
+  getDocumentMetadata(id: string): {
+    location: string | null;
+    pov: string | null;
+    timeline_position: string | null;
+    scene_metadata: string | null;
+  } | undefined {
+    const row = this.db.prepare(`
+      SELECT location, pov, timeline_position, scene_metadata
+      FROM documents
+      WHERE id = ?
+    `).get(id) as {
+      location: string | null;
+      pov: string | null;
+      timeline_position: string | null;
+      scene_metadata: string | null;
+    } | undefined;
+
+    return row;
   }
 
   // ============= REFERENCE OPERATIONS =============

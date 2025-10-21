@@ -1,8 +1,9 @@
 // src/renderer/src/components/DocumentTagBox.tsx
-import React, { useState, useEffect, useMemo } from 'react';
-import { Tag, Plus, X, Sparkles, Hash, ChevronDown, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Tag, Plus, X, Sparkles, Hash, ChevronDown, ChevronRight, MapPin, User, Clock } from 'lucide-react';
 import { Descendant } from 'slate';
-import { extractInlineTags, inlineTagsToArray, InlineTag } from '../utils/tagParser';
+import { extractInlineTags, inlineTagsToArray } from '../utils/tagParser';
+import { DocumentRow } from '../../types/window';
 
 interface TagRow {
   id: string;
@@ -16,11 +17,19 @@ interface DocumentTagBoxProps {
   documentId: string | null;
   documentContent?: string; // Optional: plain text content of the document (for AI)
   documentNodes?: Descendant[]; // Slate nodes for parsing inline tags
+  currentDocument?: DocumentRow | null; // The current document being edited
 }
 
-const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentContent, documentNodes }) => {
+const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentContent, documentNodes, currentDocument }) => {
   const [documentTags, setDocumentTags] = useState<TagRow[]>([]);
   const [allTags, setAllTags] = useState<TagRow[]>([]);
+
+  // Metadata state
+  const [location, setLocation] = useState<string>('');
+  const [pov, setPov] = useState<string>('');
+  const [timelinePosition, setTimelinePosition] = useState<string>('');
+  const [isMetadataExpanded, setIsMetadataExpanded] = useState(true);
+  const metadataSaveTimeout = useRef<NodeJS.Timeout | null>(null);
 
   // Parse inline tags from document nodes
   const inlineTags = useMemo(() => {
@@ -45,7 +54,28 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentCon
 
     loadDocumentTags();
     loadAllTags();
+    loadMetadata();
   }, [documentId]);
+
+  // Load metadata when document changes
+  const loadMetadata = async () => {
+    if (!documentId || !currentDocument) {
+      setLocation('');
+      setPov('');
+      setTimelinePosition('');
+      return;
+    }
+
+    // Load from currentDocument if available
+    setLocation(currentDocument.location || '');
+    setPov(currentDocument.pov || '');
+    setTimelinePosition(currentDocument.timeline_position || '');
+  };
+
+  // Update metadata state when currentDocument changes
+  useEffect(() => {
+    loadMetadata();
+  }, [currentDocument]);
 
   const loadDocumentTags = async () => {
     if (!documentId) return;
@@ -171,6 +201,58 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentCon
     setSuggestedTags([]);
     setShowSuggestions(false);
   };
+
+  // Metadata handlers
+  const saveMetadata = useCallback(async (loc: string, p: string, time: string) => {
+    if (!documentId) return;
+
+    try {
+      await window.api.document.updateMetadata(
+        documentId,
+        loc || null,
+        p || null,
+        time || null
+      );
+    } catch (error) {
+      console.error('Error saving metadata:', error);
+    }
+  }, [documentId]);
+
+  const handleMetadataChange = useCallback((field: 'location' | 'pov' | 'timeline', value: string) => {
+    // Update local state immediately
+    if (field === 'location') setLocation(value);
+    else if (field === 'pov') setPov(value);
+    else if (field === 'timeline') setTimelinePosition(value);
+
+    // Debounced save
+    if (metadataSaveTimeout.current) {
+      clearTimeout(metadataSaveTimeout.current);
+    }
+
+    metadataSaveTimeout.current = setTimeout(() => {
+      const newLocation = field === 'location' ? value : location;
+      const newPov = field === 'pov' ? value : pov;
+      const newTimeline = field === 'timeline' ? value : timelinePosition;
+      saveMetadata(newLocation, newPov, newTimeline);
+    }, 500);
+  }, [location, pov, timelinePosition, saveMetadata]);
+
+  // Get setting and character tags for autocomplete
+  const settingTags = useMemo(() =>
+    allTags.filter(tag => tag.category === 'setting'),
+    [allTags]
+  );
+
+  const characterTags = useMemo(() =>
+    allTags.filter(tag => tag.category === 'character'),
+    [allTags]
+  );
+
+  // Determine if metadata section should be shown
+  const shouldShowMetadata = currentDocument &&
+    (currentDocument.hierarchy_level === 'scene' ||
+     currentDocument.hierarchy_level === 'chapter' ||
+     currentDocument.hierarchy_level === 'part');
 
   // Filter available tags (not already on document)
   const documentTagIds = new Set(documentTags.map(t => t.id));
@@ -528,6 +610,173 @@ const DocumentTagBox: React.FC<DocumentTagBoxProps> = ({ documentId, documentCon
             </div>
           )}
         </>
+      )}
+
+      {/* Scene Metadata Section */}
+      {shouldShowMetadata && (
+        <div style={{
+          marginTop: '12px',
+          paddingTop: '12px',
+          borderTop: '1px solid #333'
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            marginBottom: '8px'
+          }}>
+            <button
+              onClick={() => setIsMetadataExpanded(!isMetadataExpanded)}
+              style={{
+                padding: '0',
+                backgroundColor: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                color: '#888'
+              }}
+              title={isMetadataExpanded ? 'Collapse' : 'Expand'}
+            >
+              {isMetadataExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </button>
+            <MapPin size={14} color="#888" />
+            <span
+              onClick={() => setIsMetadataExpanded(!isMetadataExpanded)}
+              style={{
+                fontSize: '11px',
+                fontWeight: 'bold',
+                color: '#888',
+                textTransform: 'uppercase',
+                cursor: 'pointer',
+                userSelect: 'none'
+              }}
+            >
+              Scene Metadata
+            </span>
+          </div>
+
+          {isMetadataExpanded && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}>
+              {/* Location Field */}
+              <div>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '10px',
+                  color: '#888',
+                  marginBottom: '4px',
+                  fontWeight: 'bold'
+                }}>
+                  <MapPin size={10} />
+                  LOCATION/SETTING
+                </label>
+                <input
+                  type="text"
+                  value={location}
+                  onChange={(e) => handleMetadataChange('location', e.target.value)}
+                  placeholder="Enter location or select from settings..."
+                  list="location-suggestions"
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    backgroundColor: '#252526',
+                    border: '1px solid #555',
+                    borderRadius: '3px',
+                    color: '#d4d4d4',
+                    fontSize: '11px'
+                  }}
+                />
+                <datalist id="location-suggestions">
+                  {settingTags.map(tag => (
+                    <option key={tag.id} value={tag.name} />
+                  ))}
+                </datalist>
+              </div>
+
+              {/* POV Field */}
+              <div>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '10px',
+                  color: '#888',
+                  marginBottom: '4px',
+                  fontWeight: 'bold'
+                }}>
+                  <User size={10} />
+                  POV CHARACTER
+                </label>
+                <input
+                  type="text"
+                  value={pov}
+                  onChange={(e) => handleMetadataChange('pov', e.target.value)}
+                  placeholder="Enter POV character..."
+                  list="pov-suggestions"
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    backgroundColor: '#252526',
+                    border: '1px solid #555',
+                    borderRadius: '3px',
+                    color: '#d4d4d4',
+                    fontSize: '11px'
+                  }}
+                />
+                <datalist id="pov-suggestions">
+                  {characterTags.map(tag => (
+                    <option key={tag.id} value={tag.name} />
+                  ))}
+                </datalist>
+              </div>
+
+              {/* Timeline Position Field */}
+              <div>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '10px',
+                  color: '#888',
+                  marginBottom: '4px',
+                  fontWeight: 'bold'
+                }}>
+                  <Clock size={10} />
+                  TIMELINE POSITION
+                </label>
+                <input
+                  type="text"
+                  value={timelinePosition}
+                  onChange={(e) => handleMetadataChange('timeline', e.target.value)}
+                  placeholder="e.g., Day 3, Morning or Chapter 2 + 3 hours"
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    backgroundColor: '#252526',
+                    border: '1px solid #555',
+                    borderRadius: '3px',
+                    color: '#d4d4d4',
+                    fontSize: '11px'
+                  }}
+                />
+                <div style={{
+                  fontSize: '9px',
+                  color: '#666',
+                  marginTop: '4px',
+                  fontStyle: 'italic'
+                }}>
+                  Note: Timeline picker integration coming in Phase 3
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Inline Tags Section */}

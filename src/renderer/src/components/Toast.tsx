@@ -21,6 +21,7 @@ const Toast: React.FC<ToastProps> = ({ id, type, message, duration = 4000, onClo
 
       return () => clearTimeout(timer);
     }
+    return undefined;
   }, [id, duration, onClose]);
 
   const getIcon = () => {
@@ -32,6 +33,8 @@ const Toast: React.FC<ToastProps> = ({ id, type, message, duration = 4000, onClo
       case 'warning':
         return <AlertCircle size={20} color="#fbbf24" />;
       case 'info':
+        return <Info size={20} color="#60a5fa" />;
+      default:
         return <Info size={20} color="#60a5fa" />;
     }
   };
@@ -46,6 +49,8 @@ const Toast: React.FC<ToastProps> = ({ id, type, message, duration = 4000, onClo
         return '#3a2e1e';
       case 'info':
         return '#1e2a3a';
+      default:
+        return '#1e2a3a';
     }
   };
 
@@ -58,6 +63,8 @@ const Toast: React.FC<ToastProps> = ({ id, type, message, duration = 4000, onClo
       case 'warning':
         return '#fbbf24';
       case 'info':
+        return '#60a5fa';
+      default:
         return '#60a5fa';
     }
   };

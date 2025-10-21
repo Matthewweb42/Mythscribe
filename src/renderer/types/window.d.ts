@@ -20,6 +20,10 @@ export interface DocumentRow {
   notes: string | null;
   word_count: number;
   position: number;
+  location: string | null;
+  pov: string | null;
+  timeline_position: string | null;
+  scene_metadata: string | null;
   created: string;
   modified: string;
 }
@@ -52,6 +56,13 @@ declare global {
         updateName: (id: string, name: string) => Promise<void>;
         updateNotes: (id: string, notes: string) => Promise<void>;
         updateWordCount: (id: string, wordCount: number) => Promise<void>;
+        updateMetadata: (id: string, location: string | null, pov: string | null, timelinePosition: string | null) => Promise<void>;
+        getMetadata: (id: string) => Promise<{
+          location: string | null;
+          pov: string | null;
+          timeline_position: string | null;
+          scene_metadata: string | null;
+        } | undefined>;
         delete: (id: string) => Promise<void>;
         move: (id: string, newParentId: string | null, newPosition: number) => Promise<void>;
       };

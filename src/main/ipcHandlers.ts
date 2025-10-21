@@ -146,6 +146,16 @@ export function setupIpcHandlers() {
     currentDb.moveDocument(id, newParentId, newPosition);
   });
 
+  ipcMain.handle('document:updateMetadata', async (_, id: string, location: string | null, pov: string | null, timelinePosition: string | null) => {
+    if (!currentDb) throw new Error('No project open');
+    currentDb.updateDocumentMetadata(id, location, pov, timelinePosition);
+  });
+
+  ipcMain.handle('document:getMetadata', async (_, id: string) => {
+    if (!currentDb) throw new Error('No project open');
+    return currentDb.getDocumentMetadata(id);
+  });
+
   // ============= REFERENCE OPERATIONS =============
 
   ipcMain.handle('reference:create', async (_, name: string, category: 'character' | 'setting' | 'worldBuilding', content: string) => {

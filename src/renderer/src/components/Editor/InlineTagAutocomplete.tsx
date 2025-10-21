@@ -1,6 +1,5 @@
 // src/renderer/src/components/Editor/InlineTagAutocomplete.tsx
 import React, { useEffect, useRef } from 'react';
-import { Tag } from 'lucide-react';
 
 interface TagRow {
   id: string;

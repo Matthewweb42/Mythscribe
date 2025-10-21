@@ -1603,7 +1603,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
       </div>
 
       {/* Document Tags */}
-      {!isFullScreen && <DocumentTagBox documentId={activeDocumentId} documentContent={extractText(value)} documentNodes={value} />}
+      {!isFullScreen && <DocumentTagBox documentId={activeDocumentId} documentContent={extractText(value)} documentNodes={value} currentDocument={currentDoc} />}
 
       {/* Editor and Notes area */}
       <div style={{

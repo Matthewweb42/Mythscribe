@@ -167,54 +167,86 @@
 
 ---
 
-### Chunk 2.2: Scene Metadata Fields ⏱️ 3-4 hours ⬅️ **NEXT**
+### Chunk 2.2: Scene Metadata Fields ⏱️ 3-4 hours ✅ COMPLETE
 **Why second:** Foundation for scene compile view
 
-- [ ] Add metadata fields to database (location, time, pov)
-- [ ] Create SceneMetadata component
-- [ ] Add metadata editor above scene content
-- [ ] Display metadata in compact form when editing
-- [ ] Tags already implemented - integrate with scene metadata
+- [x] Add metadata fields to database (location, timeline_position, pov, scene_metadata)
+- [x] Integrate metadata into DocumentTagBox component (not separate component)
+- [x] Add metadata fields with autocomplete from tags
+- [x] Display metadata in collapsible section
+- [x] Tags integration - location uses setting tags, POV uses character tags
 
 **Testing Checklist:**
-- [ ] Can add location, time, POV to scenes
-- [ ] Metadata saves properly
-- [ ] Metadata displays nicely
-- [ ] Metadata is collapsible/expandable
-- [ ] Only shows for scene-type documents
+- [x] Can add location, time, POV to scenes
+- [x] Metadata saves properly (debounced 500ms)
+- [x] Metadata displays nicely in DocumentTagBox
+- [x] Metadata is collapsible/expandable (expanded by default)
+- [x] Shows for scene, chapter, and part documents
 
 **Database Changes:**
-- Add columns to `documents` table:
-  - `location TEXT`
-  - `time TEXT`
-  - `pov TEXT`
-  - `scene_metadata TEXT` (JSON for extensibility)
+- Added columns to `documents` table:
+  - `location TEXT` - stores tag name or free text
+  - `timeline_position TEXT` - free text for now, timeline picker in Phase 3
+  - `pov TEXT` - stores character tag name or free text
+  - `scene_metadata TEXT` - JSON for future extensibility
 
-**Files to Create/Modify:**
-- `src/main/database.ts` (schema update + migration)
-- `src/renderer/src/components/Editor/SceneMetadata.tsx` (new)
-- `src/renderer/src/components/Editor/Editor.tsx` (integrate metadata)
-- `src/main/ipcHandlers.ts` (metadata CRUD operations)
+**Files Modified:**
+- `src/main/database.ts` - schema update + migrations + CRUD methods
+- `src/renderer/src/components/DocumentTagBox.tsx` - integrated metadata section
+- `src/renderer/src/components/Editor/Editor.tsx` - pass currentDocument prop
+- `src/main/ipcHandlers.ts` - metadata update/get handlers
+- `src/renderer/types/window.d.ts` - DocumentRow interface + API types
 
 ---
 
-### Chunk 2.3: Document Compilation View ⏱️ 4-5 hours
-**Why third:** Show compiled chapter/scene views
+### Chunk 2.3: Document Compilation View ⏱️ 4-5 hours ⬅️ **NEXT**
+**Why third:** Show compiled chapter/scene views with metadata
 
+**Features:**
 - [ ] Create CompileView component
-- [ ] Chapter compile: Show all scenes with chapter header
+- [ ] Chapter/Part compile: Show all child scenes with metadata headers
 - [ ] Scene compile: Show scene with metadata header
+- [ ] Separate notes for chapters/parts vs scenes
 - [ ] Add "Compile View" toggle button
 - [ ] Style compiled output like a manuscript
+- [ ] Scene breaks between compiled scenes (use user's configured style)
+- [ ] Collapsible metadata headers in compile view
+
+**Chapter/Part Notes:**
+- [ ] When folder (chapter/part) selected + notes open → show folder notes
+- [ ] When scene selected + notes open → show scene notes
+- [ ] Notes are independent for each document level
+- [ ] Notes panel already supports this (uses document.notes field)
+
+**Compile View Structure:**
+```
+─────────────────────────────
+Scene: [Scene Name]
+Location: [Location tag]
+POV: [POV character]
+Timeline: [Position]
+─────────────────────────────
+[Scene content...]
+
+* * *  (scene break)
+
+─────────────────────────────
+Scene: [Next Scene Name]
+...
+```
 
 **Testing:**
-- Chapter view shows all child scenes
-- Scene view shows metadata
-- Formatting looks professional
+- [ ] Chapter view shows all child scenes with headers
+- [ ] Scene view shows metadata
+- [ ] Formatting looks professional
+- [ ] Notes panel shows correct notes for document level
+- [ ] Can toggle between compile view and edit mode
+- [ ] Scene breaks render with user's configured style
 
 **Files to Create/Modify:**
 - `src/renderer/src/components/Editor/CompileView.tsx` (new)
 - `src/renderer/src/components/Editor/Editor.tsx` (add compile mode)
+- `src/renderer/src/components/Sidebar/ManuscriptTab.tsx` (detect folder selection)
 
 ---
 
@@ -662,6 +694,13 @@ npm install epub-gen
 - [ ] Create Timeline tab UI
 - [ ] Basic data structure
 - [ ] "Coming soon" message
+
+**Timeline Integration with Scene Metadata (Future Enhancement):**
+- [ ] Replace free-text timeline field in DocumentTagBox with timeline picker
+- [ ] Allow selecting position on visual timeline
+- [ ] Auto-populate from timeline data
+- [ ] Sync timeline position back to scene metadata
+- [ ] NOTE: Currently using `timeline_position` TEXT field for free text (e.g., "Day 3, Morning")
 
 **Files to Create:**
 - `src/renderer/src/components/Sidebar/TimelineTab.tsx` (placeholder)
