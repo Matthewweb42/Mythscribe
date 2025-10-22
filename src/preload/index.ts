@@ -122,6 +122,22 @@ const api = {
       referencedNotes?: string;
     }) => ipcRenderer.invoke('ai:generate-directed', params),
     suggestTags: (documentContent: string) => ipcRenderer.invoke('ai:suggest-tags', documentContent)
+  },
+
+  // Focus mode operations
+  focus: {
+    uploadBackground: () => ipcRenderer.invoke('focus:uploadBackground'),
+    getBackgrounds: () => ipcRenderer.invoke('focus:getBackgrounds'),
+    deleteBackground: (assetId: string) => ipcRenderer.invoke('focus:deleteBackground', assetId),
+    getFocusSettings: () => ipcRenderer.invoke('focus:getFocusSettings'),
+    updateFocusSetting: (key: string, value: number | string | null) =>
+      ipcRenderer.invoke('focus:updateFocusSetting', key, value)
+  },
+
+  // Window operations
+  window: {
+    setFullScreen: (isFullScreen: boolean) => ipcRenderer.invoke('window:setFullScreen', isFullScreen),
+    isFullScreen: () => ipcRenderer.invoke('window:isFullScreen')
   }
 };
 

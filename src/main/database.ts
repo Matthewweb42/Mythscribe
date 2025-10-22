@@ -264,6 +264,37 @@ export class ProjectDatabase {
 
     // Create three root folders if they don't exist (for existing projects)
     this.ensureThreeSectionStructure();
+
+    // Add focus mode columns to project table
+    if (projectTableInfo.length > 0) {
+      const hasFocusBgRotation = projectTableInfo.some((col) => col.name === 'focus_bg_rotation');
+      if (!hasFocusBgRotation) {
+        console.log('Running migration: Adding focus mode columns to project table');
+        try {
+          this.db.exec(`
+            ALTER TABLE project ADD COLUMN focus_bg_rotation INTEGER DEFAULT 0;
+          `);
+          this.db.exec(`
+            ALTER TABLE project ADD COLUMN focus_bg_rotation_interval INTEGER DEFAULT 10;
+          `);
+          this.db.exec(`
+            ALTER TABLE project ADD COLUMN focus_bg_current TEXT;
+          `);
+          this.db.exec(`
+            ALTER TABLE project ADD COLUMN focus_overlay_opacity INTEGER DEFAULT 50;
+          `);
+          this.db.exec(`
+            ALTER TABLE project ADD COLUMN focus_window_width INTEGER DEFAULT 60;
+          `);
+          this.db.exec(`
+            ALTER TABLE project ADD COLUMN focus_window_offset_x INTEGER DEFAULT 0;
+          `);
+          console.log('Migration completed: focus mode columns added');
+        } catch (error) {
+          console.error('Migration error (focus mode columns):', error);
+        }
+      }
+    }
   }
 
   private initializeTables() {
@@ -281,7 +312,13 @@ export class ProjectDatabase {
         novel_format TEXT NOT NULL DEFAULT 'novel' CHECK(novel_format IN ('novel', 'epic', 'webnovel')),
         created TEXT NOT NULL,
         modified TEXT NOT NULL,
-        last_opened TEXT NOT NULL
+        last_opened TEXT NOT NULL,
+        focus_bg_rotation INTEGER DEFAULT 0,
+        focus_bg_rotation_interval INTEGER DEFAULT 10,
+        focus_bg_current TEXT,
+        focus_overlay_opacity INTEGER DEFAULT 50,
+        focus_window_width INTEGER DEFAULT 60,
+        focus_window_offset_x INTEGER DEFAULT 0
       )
     `);
 
@@ -417,6 +454,25 @@ export class ProjectDatabase {
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_scene_summary_doc
       ON scene_summaries(document_id)
+    `);
+
+    // Project Assets (background images, etc.)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS project_assets (
+        id TEXT PRIMARY KEY,
+        asset_type TEXT NOT NULL CHECK(asset_type IN ('background-image')),
+        file_name TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        file_size INTEGER,
+        mime_type TEXT,
+        created TEXT NOT NULL
+      )
+    `);
+
+    // Create index for faster asset lookups by type
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_asset_type
+      ON project_assets(asset_type)
     `);
   }
 
@@ -1075,6 +1131,104 @@ export class ProjectDatabase {
 
   private generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  // ============= PROJECT ASSETS OPERATIONS =============
+
+  createAsset(
+    assetType: 'background-image',
+    fileName: string,
+    filePath: string,
+    fileSize: number,
+    mimeType: string
+  ): string {
+    const id = this.generateId();
+    const now = new Date().toISOString();
+
+    this.db.prepare(`
+      INSERT INTO project_assets (id, asset_type, file_name, file_path, file_size, mime_type, created)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, assetType, fileName, filePath, fileSize, mimeType, now);
+
+    return id;
+  }
+
+  getAssetsByType(assetType: 'background-image'): Array<{
+    id: string;
+    asset_type: string;
+    file_name: string;
+    file_path: string;
+    file_size: number | null;
+    mime_type: string | null;
+    created: string;
+  }> {
+    return this.db.prepare(`
+      SELECT * FROM project_assets
+      WHERE asset_type = ?
+      ORDER BY created DESC
+    `).all(assetType) as Array<{
+      id: string;
+      asset_type: string;
+      file_name: string;
+      file_path: string;
+      file_size: number | null;
+      mime_type: string | null;
+      created: string;
+    }>;
+  }
+
+  deleteAsset(id: string) {
+    this.db.prepare('DELETE FROM project_assets WHERE id = ?').run(id);
+  }
+
+  // ============= FOCUS SETTINGS OPERATIONS =============
+
+  getFocusSettings(): {
+    focus_bg_rotation: number;
+    focus_bg_rotation_interval: number;
+    focus_bg_current: string | null;
+    focus_overlay_opacity: number;
+    focus_window_width: number;
+    focus_window_offset_x: number;
+  } | undefined {
+    const result = this.db.prepare(`
+      SELECT
+        focus_bg_rotation,
+        focus_bg_rotation_interval,
+        focus_bg_current,
+        focus_overlay_opacity,
+        focus_window_width,
+        focus_window_offset_x
+      FROM project
+      LIMIT 1
+    `).get() as {
+      focus_bg_rotation: number;
+      focus_bg_rotation_interval: number;
+      focus_bg_current: string | null;
+      focus_overlay_opacity: number;
+      focus_window_width: number;
+      focus_window_offset_x: number;
+    } | undefined;
+
+    return result;
+  }
+
+  updateFocusSetting(key: string, value: number | string | null) {
+    const validKeys = [
+      'focus_bg_rotation',
+      'focus_bg_rotation_interval',
+      'focus_bg_current',
+      'focus_overlay_opacity',
+      'focus_window_width',
+      'focus_window_offset_x'
+    ];
+
+    if (!validKeys.includes(key)) {
+      throw new Error(`Invalid focus setting key: ${key}`);
+    }
+
+    this.db.prepare(`UPDATE project SET ${key} = ?`).run(value);
+    this.updateProjectModified();
   }
 
   close() {

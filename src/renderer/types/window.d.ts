@@ -40,6 +40,25 @@ export interface ReferenceRow {
   modified: string;
 }
 
+export interface ProjectAsset {
+  id: string;
+  asset_type: 'background-image';
+  file_name: string;
+  file_path: string;
+  file_size: number;
+  mime_type: string;
+  created: string;
+}
+
+export interface FocusSettings {
+  focus_bg_rotation: number;
+  focus_bg_rotation_interval: number;
+  focus_bg_current: string | null;
+  focus_overlay_opacity: number;
+  focus_window_width: number;
+  focus_window_offset_x: number;
+}
+
 declare global {
   interface Window {
     api: {
@@ -99,6 +118,23 @@ declare global {
           conversationHistory?: Array<{ role: string; content: string }>;
           referencedNotes?: string;
         }) => Promise<string>;
+      };
+      focus: {
+        uploadBackground: () => Promise<{
+          id: string;
+          fileName: string;
+          filePath: string;
+          fileSize: number;
+          mimeType: string;
+        } | null>;
+        getBackgrounds: () => Promise<ProjectAsset[]>;
+        deleteBackground: (assetId: string) => Promise<{ success: boolean }>;
+        getFocusSettings: () => Promise<FocusSettings | undefined>;
+        updateFocusSetting: (key: string, value: number | string | null) => Promise<{ success: boolean }>;
+      };
+      window: {
+        setFullScreen: (isFullScreen: boolean) => Promise<{ success: boolean }>;
+        isFullScreen: () => Promise<boolean>;
       };
     };
   }

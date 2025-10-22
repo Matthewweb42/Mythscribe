@@ -8,7 +8,7 @@ import {
   Bold, Italic, Underline, File, Sparkles,
   Strikethrough, Code, Heading1, Heading2, Heading3,
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
-  Quote, Minus, StickyNote, Maximize2, Minimize2, Image as ImageIcon, X
+  Quote, Minus, StickyNote, Maximize2, Minimize2
 } from 'lucide-react';
 import { useProject } from '../../contexts/ProjectContext';
 import { DocumentRow } from '../../../types/window';
@@ -17,6 +17,10 @@ import DocumentTagBox from '../DocumentTagBox';
 import InlineTagAutocomplete from './InlineTagAutocomplete';
 import StackedSceneEditor from './StackedSceneEditor';
 import EditorStatusBar from './EditorStatusBar';
+import BackgroundManager from './BackgroundManager';
+import FocusModePanel from './FocusModePanel';
+import FloatingNotesPanel from './FloatingNotesPanel';
+import FloatingAIPanel from './FloatingAIPanel';
 
 // Custom types for Slate
 type CustomText = {
@@ -248,8 +252,6 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
   // Full-screen mode
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
-  const [showBgPicker, setShowBgPicker] = useState(false);
 
   // Inline tag autocomplete state
   const [showTagAutocomplete, setShowTagAutocomplete] = useState(false);
@@ -263,13 +265,19 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
   const [isViewingFolder, setIsViewingFolder] = useState(false);
   const [childScenes, setChildScenes] = useState<DocumentRow[]>([]);
 
-  const presetBackgrounds = [
-    { name: 'None', url: null },
-    { name: 'Cafe', url: 'https://images.unsplash.com/photo-1445116572660-236099ec97a0?w=1600' },
-    { name: 'Library', url: 'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?w=1600' },
-    { name: 'Forest', url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1600' },
-    { name: 'Cozy', url: 'https://images.unsplash.com/photo-1515694346937-94d85e41e6f0?w=1600' },
-  ];
+  // Focus mode state
+  const [currentBackgroundAssetId, setCurrentBackgroundAssetId] = useState<string | null>(null);
+  const [currentBackgroundPath, setCurrentBackgroundPath] = useState<string | null>(null);
+  const [showBackgroundManager, setShowBackgroundManager] = useState(false);
+  const [focusOverlayOpacity, setFocusOverlayOpacity] = useState(50);
+  const [focusWindowWidth, setFocusWindowWidth] = useState(60);
+  const [focusWindowOffsetX, setFocusWindowOffsetX] = useState(0);
+  const [focusRotationEnabled, setFocusRotationEnabled] = useState(false);
+  const [focusRotationInterval, setFocusRotationInterval] = useState(10);
+  const [isDraggingWindow, setIsDraggingWindow] = useState(false);
+  const [dragStartX, setDragStartX] = useState(0);
+  const [showFloatingNotes, setShowFloatingNotes] = useState(false);
+  const [showFloatingAI, setShowFloatingAI] = useState(false);
 
   // Create Element renderer with current formatting settings
   const Element = useMemo(() => createElementRenderer(editorParagraphSpacing, editorParagraphIndent, editorSceneBreakStyle), [editorParagraphSpacing, editorParagraphIndent, editorSceneBreakStyle]);
@@ -305,6 +313,61 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
     loadEditorSettings();
   }, []);
+
+  // Load focus mode settings from database
+  useEffect(() => {
+    const loadFocusSettings = async () => {
+      try {
+        const settings = await window.api.focus.getFocusSettings();
+        if (settings) {
+          setFocusOverlayOpacity(settings.focus_overlay_opacity);
+          setFocusWindowWidth(settings.focus_window_width);
+          setFocusWindowOffsetX(settings.focus_window_offset_x);
+          setFocusRotationEnabled(settings.focus_bg_rotation === 1);
+          setFocusRotationInterval(settings.focus_bg_rotation_interval);
+
+          // Load current background if set
+          if (settings.focus_bg_current) {
+            const backgrounds = await window.api.focus.getBackgrounds();
+            const bg = backgrounds.find(b => b.id === settings.focus_bg_current);
+            if (bg) {
+              setCurrentBackgroundAssetId(bg.id);
+              setCurrentBackgroundPath(bg.file_path);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading focus settings:', error);
+      }
+    };
+
+    loadFocusSettings();
+  }, []);
+
+  // Background rotation timer
+  useEffect(() => {
+    if (!isFullScreen || !focusRotationEnabled) return;
+
+    const rotationTimer = setInterval(async () => {
+      try {
+        const backgrounds = await window.api.focus.getBackgrounds();
+        if (backgrounds.length === 0) return;
+
+        // Find current background index
+        const currentIndex = backgrounds.findIndex(b => b.id === currentBackgroundAssetId);
+        const nextIndex = (currentIndex + 1) % backgrounds.length;
+        const nextBackground = backgrounds[nextIndex];
+
+        setCurrentBackgroundAssetId(nextBackground.id);
+        setCurrentBackgroundPath(nextBackground.file_path);
+        await window.api.focus.updateFocusSetting('focus_bg_current', nextBackground.id);
+      } catch (error) {
+        console.error('Error rotating background:', error);
+      }
+    }, focusRotationInterval * 60 * 1000); // Convert minutes to milliseconds
+
+    return () => clearInterval(rotationTimer);
+  }, [isFullScreen, focusRotationEnabled, focusRotationInterval, currentBackgroundAssetId]);
 
   // Count words in text
   const countWords = (text: string): number => {
@@ -1160,6 +1223,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     if (event.key === 'Escape') {
       if (isFullScreen) {
         event.preventDefault();
+        window.api.window.setFullScreen(false);
         setIsFullScreen(false);
         return;
       }
@@ -1217,6 +1281,67 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         break;
     }
   }, [toggleFormat, currentDoc, value, updateDocumentContent, ghostText, acceptSuggestion, acceptOneWord, clearGhostText, isFullScreen, showTagAutocomplete, allTags, tagSearchQuery, tagSelectedIndex, editor, handleSelectTag, handleCreateAndInsertTag, closeTagAutocomplete]);
+
+  // Focus mode handlers
+  const handleSelectBackground = async (assetId: string | null) => {
+    if (assetId === null) {
+      setCurrentBackgroundAssetId(null);
+      setCurrentBackgroundPath(null);
+      await window.api.focus.updateFocusSetting('focus_bg_current', null);
+    } else {
+      const backgrounds = await window.api.focus.getBackgrounds();
+      const bg = backgrounds.find(b => b.id === assetId);
+      if (bg) {
+        setCurrentBackgroundAssetId(bg.id);
+        setCurrentBackgroundPath(bg.file_path);
+        await window.api.focus.updateFocusSetting('focus_bg_current', bg.id);
+      }
+    }
+    setShowBackgroundManager(false);
+  };
+
+  const handleOverlayOpacityChange = async (value: number) => {
+    setFocusOverlayOpacity(value);
+    await window.api.focus.updateFocusSetting('focus_overlay_opacity', value);
+  };
+
+  const handleWindowWidthChange = async (value: number) => {
+    setFocusWindowWidth(value);
+    await window.api.focus.updateFocusSetting('focus_window_width', value);
+  };
+
+  const handleRotationToggle = async () => {
+    const newValue = !focusRotationEnabled;
+    setFocusRotationEnabled(newValue);
+    await window.api.focus.updateFocusSetting('focus_bg_rotation', newValue ? 1 : 0);
+  };
+
+  const handleWindowDragStart = (e: React.MouseEvent) => {
+    setIsDraggingWindow(true);
+    setDragStartX(e.clientX);
+  };
+
+  const handleWindowDrag = (e: React.MouseEvent) => {
+    if (!isDraggingWindow) return;
+
+    const deltaX = e.clientX - dragStartX;
+    const windowWidthPx = (window.innerWidth * focusWindowWidth) / 100;
+    const maxOffset = (window.innerWidth - windowWidthPx) / 2;
+
+    // Calculate new offset in pixels, constrained to viewport bounds
+    let newOffsetPx = focusWindowOffsetX + deltaX;
+    newOffsetPx = Math.max(-maxOffset, Math.min(maxOffset, newOffsetPx));
+
+    setFocusWindowOffsetX(newOffsetPx);
+    setDragStartX(e.clientX);
+  };
+
+  const handleWindowDragEnd = async () => {
+    if (isDraggingWindow) {
+      setIsDraggingWindow(false);
+      await window.api.focus.updateFocusSetting('focus_window_offset_x', focusWindowOffsetX);
+    }
+  };
 
   // Render decorator for ghost text - shows inline after cursor
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
@@ -1668,7 +1793,11 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
             Notes
           </button>
           <button
-            onClick={() => setIsFullScreen(prev => !prev)}
+            onClick={async () => {
+              const newState = !isFullScreen;
+              await window.api.window.setFullScreen(newState);
+              setIsFullScreen(newState);
+            }}
             title="Full Screen Mode (F11)"
             style={{
               padding: '6px 10px',
@@ -1700,129 +1829,50 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         <PanelGroup direction="horizontal" autoSaveId="editor-notes-layout">
           {/* Main editor area */}
           <Panel minSize={30}>
-            <div style={{
-              height: '100%',
-              overflow: 'auto',
-              padding: isFullScreen ? '80px 20%' : '40px 80px',
-              backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'none',
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              backgroundAttachment: 'fixed',
-              position: 'relative'
-            }}>
-          {isFullScreen && backgroundImage && (
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.7)',
-              pointerEvents: 'none'
-            }} />
-          )}
+            <div
+              style={{
+                height: '100%',
+                overflow: 'auto',
+                backgroundImage: currentBackgroundPath && isFullScreen ? `url(file:///${currentBackgroundPath.replace(/\\/g, '/')})` : 'none',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundAttachment: 'fixed',
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              onMouseMove={isDraggingWindow ? handleWindowDrag : undefined}
+              onMouseUp={handleWindowDragEnd}
+            >
+              {/* Background Overlay */}
+              {isFullScreen && currentBackgroundPath && (
+                <div style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: `rgba(0, 0, 0, ${focusOverlayOpacity / 100})`,
+                  pointerEvents: 'none'
+                }} />
+              )}
 
-          {/* Full-screen controls */}
-          {isFullScreen && (
-            <div style={{
-              position: 'absolute',
-              top: 20,
-              right: 20,
-              zIndex: 10,
-              display: 'flex',
-              gap: '8px'
-            }}>
-              <button
-                onClick={() => setShowBgPicker(prev => !prev)}
-                title="Change Background"
+              {/* Adjustable Writing Area Container */}
+              <div
                 style={{
-                  padding: '8px 12px',
-                  backgroundColor: 'rgba(30, 30, 30, 0.9)',
-                  color: '#fff',
-                  border: '1px solid #333',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
+                  position: 'relative',
+                  width: isFullScreen ? `${focusWindowWidth}%` : '100%',
+                  maxWidth: isFullScreen ? 'none' : `${editorMaxWidth}px`,
+                  height: isFullScreen ? '100%' : 'auto',
+                  padding: isFullScreen ? '80px 40px' : '40px 80px',
+                  transform: isFullScreen ? `translateX(${focusWindowOffsetX}px)` : 'none',
+                  cursor: isDraggingWindow ? 'grabbing' : (isFullScreen ? 'grab' : 'default'),
+                  transition: isDraggingWindow ? 'none' : 'width 0.2s ease-in-out, transform 0.2s ease-in-out',
+                  zIndex: 1
                 }}
+                onMouseDown={isFullScreen ? handleWindowDragStart : undefined}
               >
-                <ImageIcon size={14} />
-                Background
-              </button>
-              <button
-                onClick={() => setIsFullScreen(false)}
-                title="Exit Full Screen (F11 or Esc)"
-                style={{
-                  padding: '8px 12px',
-                  backgroundColor: 'rgba(30, 30, 30, 0.9)',
-                  color: '#fff',
-                  border: '1px solid #333',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <X size={14} />
-                Exit
-              </button>
-            </div>
-          )}
-
-          {/* Background picker */}
-          {isFullScreen && showBgPicker && (
-            <div style={{
-              position: 'absolute',
-              top: 70,
-              right: 20,
-              zIndex: 10,
-              backgroundColor: 'rgba(30, 30, 30, 0.95)',
-              border: '1px solid #333',
-              borderRadius: '8px',
-              padding: '16px',
-              minWidth: '200px'
-            }}>
-              <div style={{
-                fontSize: '12px',
-                color: '#888',
-                marginBottom: '12px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px'
-              }}>
-                Choose Background
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {presetBackgrounds.map((preset) => (
-                  <button
-                    key={preset.name}
-                    onClick={() => {
-                      setBackgroundImage(preset.url);
-                      setShowBgPicker(false);
-                    }}
-                    style={{
-                      padding: '8px 12px',
-                      backgroundColor: backgroundImage === preset.url ? '#0e639c' : '#252526',
-                      color: '#fff',
-                      border: '1px solid #333',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '12px',
-                      textAlign: 'left',
-                      transition: 'background-color 0.2s'
-                    }}
-                  >
-                    {preset.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-              <div style={{ position: 'relative', zIndex: 1 }}>
                 {/* Folder View (Chapter/Part with child scenes) */}
                 {isViewingFolder && currentDoc && (
                   <div style={{
@@ -1968,6 +2018,68 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
       <EditorStatusBar
         wordCount={wordCount}
         sessionWordCount={sessionWordCount}
+      />
+
+      {/* Focus Mode Panel */}
+      {isFullScreen && (
+        <FocusModePanel
+          onOpenBackgroundManager={() => setShowBackgroundManager(true)}
+          onExit={async () => {
+            await window.api.window.setFullScreen(false);
+            setIsFullScreen(false);
+          }}
+          overlayOpacity={focusOverlayOpacity}
+          onOverlayOpacityChange={handleOverlayOpacityChange}
+          windowWidth={focusWindowWidth}
+          onWindowWidthChange={handleWindowWidthChange}
+          rotationEnabled={focusRotationEnabled}
+          onRotationToggle={handleRotationToggle}
+          wordCount={wordCount}
+          mode={mode}
+          onModeToggle={() => setMode(mode === 'freewrite' ? 'vibewrite' : 'freewrite')}
+          notesVisible={showFloatingNotes}
+          onNotesToggle={() => setShowFloatingNotes(prev => !prev)}
+          aiVisible={showFloatingAI}
+          onAIToggle={() => setShowFloatingAI(prev => !prev)}
+        />
+      )}
+
+      {/* Floating Notes Panel */}
+      {isFullScreen && (
+        <FloatingNotesPanel
+          isVisible={showFloatingNotes}
+          onClose={() => setShowFloatingNotes(false)}
+          notesEditor={notesEditor}
+          notesValue={notesValue}
+          onNotesChange={setNotesValue}
+          renderLeaf={Leaf}
+          renderElement={Element}
+        />
+      )}
+
+      {/* Floating AI Assistant Panel */}
+      {isFullScreen && (
+        <FloatingAIPanel
+          isVisible={showFloatingAI}
+          onClose={() => setShowFloatingAI(false)}
+          onInsertText={(text) => {
+            const { selection } = editor;
+            if (selection) {
+              Transforms.insertText(editor, text);
+            }
+          }}
+          onSetGhostText={setAiAssistantGhostText}
+          references={[]}
+          activeDocument={currentDoc}
+        />
+      )}
+
+      {/* Background Manager Modal */}
+      <BackgroundManager
+        isOpen={showBackgroundManager}
+        onClose={() => setShowBackgroundManager(false)}
+        currentBackgroundId={currentBackgroundAssetId}
+        onSelectBackground={handleSelectBackground}
       />
 
     </div>

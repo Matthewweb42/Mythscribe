@@ -1,4 +1,4 @@
-import { setupIpcHandlers, closeDatabase } from './ipcHandlers'
+import { setupIpcHandlers, closeDatabase, setMainWindow } from './ipcHandlers'
 import { app, shell, BrowserWindow, ipcMain, Menu } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -28,6 +28,9 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
+
+  // Pass mainWindow reference to IPC handlers
+  setMainWindow(mainWindow)
 
   // Add keyboard shortcut for DevTools (F12 or Ctrl+Shift+I)
   mainWindow.webContents.on('before-input-event', (event, input) => {

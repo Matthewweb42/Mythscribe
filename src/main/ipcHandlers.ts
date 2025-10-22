@@ -1,12 +1,20 @@
 // src/main/ipcHandlers.ts
-import { ipcMain, dialog, app } from 'electron';
+import { ipcMain, dialog, app, BrowserWindow } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import ProjectDatabase from './database';
 import OpenAI from 'openai';
 import { getActivePresetSettings, DEFAULT_CUSTOM_SETTINGS, CustomAISettings } from '../shared/aiPresets';
 
 let currentDb: ProjectDatabase | null = null;
+let currentProjectPath: string | null = null;
+let mainWindow: BrowserWindow | null = null;
 let openaiClient: OpenAI | null = null;
+
+// Set main window reference
+export function setMainWindow(window: BrowserWindow) {
+  mainWindow = window;
+}
 
 // Initialize OpenAI client
 function initializeOpenAI() {
@@ -15,6 +23,22 @@ function initializeOpenAI() {
     openaiClient = new OpenAI({ apiKey });
     console.log('OpenAI client initialized in main process');
   }
+}
+
+// Helper function to ensure assets folder exists
+function ensureAssetsFolderExists(projectPath: string): string {
+  const projectDir = path.dirname(projectPath);
+  const assetsDir = path.join(projectDir, 'assets');
+  const backgroundsDir = path.join(assetsDir, 'backgrounds');
+
+  if (!fs.existsSync(assetsDir)) {
+    fs.mkdirSync(assetsDir, { recursive: true });
+  }
+  if (!fs.existsSync(backgroundsDir)) {
+    fs.mkdirSync(backgroundsDir, { recursive: true });
+  }
+
+  return backgroundsDir;
 }
 
 export function setupIpcHandlers() {
@@ -38,7 +62,11 @@ export function setupIpcHandlers() {
 
       // Create new database
       currentDb = new ProjectDatabase(filePath);
+      currentProjectPath = filePath;
       const projectId = currentDb.createProject(projectName, format);
+
+      // Ensure assets folder structure exists
+      ensureAssetsFolderExists(filePath);
 
       return { projectId, projectPath: filePath };
     } catch (error) {
@@ -64,10 +92,14 @@ export function setupIpcHandlers() {
 
       // Open database
       currentDb = new ProjectDatabase(filePaths[0]);
+      currentProjectPath = filePaths[0];
       currentDb.updateLastOpened();
 
       // Seed tag templates if they don't exist (for existing projects)
       currentDb.seedDefaultTagTemplates();
+
+      // Ensure assets folder structure exists
+      ensureAssetsFolderExists(filePaths[0]);
 
       const metadata = currentDb.getProjectMetadata();
       return { metadata, projectPath: filePaths[0] };
@@ -87,6 +119,7 @@ export function setupIpcHandlers() {
       currentDb.close();
       currentDb = null;
     }
+    currentProjectPath = null;
   });
 
   // ============= DOCUMENT OPERATIONS =============
@@ -639,6 +672,159 @@ Example response format:
       throw new Error(`Tag suggestion failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   });
+
+  // ============= FOCUS MODE OPERATIONS =============
+
+  ipcMain.handle('focus:uploadBackground', async () => {
+    try {
+      if (!currentDb) throw new Error('No project open');
+      if (!currentProjectPath) throw new Error('Project path not available');
+
+      // Open file dialog
+      const { filePaths } = await dialog.showOpenDialog({
+        title: 'Select Background Image',
+        filters: [
+          { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }
+        ],
+        properties: ['openFile']
+      });
+
+      if (!filePaths || filePaths.length === 0) return null;
+
+      const selectedFile = filePaths[0];
+      const originalFileName = path.basename(selectedFile);
+      const fileExtension = path.extname(selectedFile);
+      const timestamp = Date.now();
+      const newFileName = `${timestamp}-${originalFileName}`;
+
+      // Get backgrounds directory
+      const backgroundsDir = ensureAssetsFolderExists(currentProjectPath);
+      const destPath = path.join(backgroundsDir, newFileName);
+
+      // Copy file to backgrounds directory
+      fs.copyFileSync(selectedFile, destPath);
+
+      // Get file stats
+      const stats = fs.statSync(destPath);
+      const fileSize = stats.size;
+
+      // Determine MIME type
+      let mimeType = 'image/jpeg';
+      switch (fileExtension.toLowerCase()) {
+        case '.png':
+          mimeType = 'image/png';
+          break;
+        case '.webp':
+          mimeType = 'image/webp';
+          break;
+        case '.gif':
+          mimeType = 'image/gif';
+          break;
+      }
+
+      // Create database entry
+      const assetId = currentDb.createAsset(
+        'background-image',
+        newFileName,
+        destPath,
+        fileSize,
+        mimeType
+      );
+
+      // Return the asset info
+      return {
+        id: assetId,
+        fileName: newFileName,
+        filePath: destPath,
+        fileSize,
+        mimeType
+      };
+    } catch (error) {
+      console.error('Error uploading background:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('focus:getBackgrounds', async () => {
+    try {
+      if (!currentDb) throw new Error('No project open');
+      return currentDb.getAssetsByType('background-image');
+    } catch (error) {
+      console.error('Error getting backgrounds:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('focus:deleteBackground', async (_, assetId: string) => {
+    try {
+      if (!currentDb) throw new Error('No project open');
+
+      // Get asset info before deleting
+      const assets = currentDb.getAssetsByType('background-image');
+      const asset = assets.find(a => a.id === assetId);
+
+      if (!asset) {
+        throw new Error('Asset not found');
+      }
+
+      // Delete file from disk
+      if (fs.existsSync(asset.file_path)) {
+        fs.unlinkSync(asset.file_path);
+      }
+
+      // Delete from database
+      currentDb.deleteAsset(assetId);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting background:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('focus:getFocusSettings', async () => {
+    try {
+      if (!currentDb) throw new Error('No project open');
+      return currentDb.getFocusSettings();
+    } catch (error) {
+      console.error('Error getting focus settings:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('focus:updateFocusSetting', async (_, key: string, value: number | string | null) => {
+    try {
+      if (!currentDb) throw new Error('No project open');
+      currentDb.updateFocusSetting(key, value);
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating focus setting:', error);
+      throw error;
+    }
+  });
+
+  // ============= WINDOW OPERATIONS =============
+
+  ipcMain.handle('window:setFullScreen', async (_, isFullScreen: boolean) => {
+    try {
+      if (!mainWindow) throw new Error('Main window not available');
+      mainWindow.setFullScreen(isFullScreen);
+      return { success: true };
+    } catch (error) {
+      console.error('Error setting full screen:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('window:isFullScreen', async () => {
+    try {
+      if (!mainWindow) throw new Error('Main window not available');
+      return mainWindow.isFullScreen();
+    } catch (error) {
+      console.error('Error checking full screen:', error);
+      throw error;
+    }
+  });
 }
 
 export function closeDatabase() {
@@ -646,4 +832,5 @@ export function closeDatabase() {
     currentDb.close();
     currentDb = null;
   }
+  currentProjectPath = null;
 }
