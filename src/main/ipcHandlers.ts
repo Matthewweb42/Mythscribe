@@ -756,7 +756,6 @@ Example response format:
   ipcMain.handle('focus:uploadBackground', async () => {
     try {
       if (!currentDb) throw new Error('No project open');
-      if (!currentProjectPath) throw new Error('Project path not available');
 
       // Open file dialog
       const { filePaths } = await dialog.showOpenDialog({
@@ -775,16 +774,9 @@ Example response format:
       const timestamp = Date.now();
       const newFileName = `${timestamp}-${originalFileName}`;
 
-      // Get backgrounds directory
-      const backgroundsDir = ensureAssetsFolderExists(currentProjectPath);
-      const destPath = path.join(backgroundsDir, newFileName);
-
-      // Copy file to backgrounds directory
-      fs.copyFileSync(selectedFile, destPath);
-
-      // Get file stats
-      const stats = fs.statSync(destPath);
-      const fileSize = stats.size;
+      // Read file and convert to base64
+      const imageData = fs.readFileSync(selectedFile);
+      const fileSize = imageData.length;
 
       // Determine MIME type
       let mimeType = 'image/jpeg';
@@ -800,23 +792,23 @@ Example response format:
           break;
       }
 
-      // Store relative path in database
-      const relativePath = path.join('assets', 'backgrounds', newFileName);
+      // Convert to base64 data URL
+      const base64Data = `data:${mimeType};base64,${imageData.toString('base64')}`;
 
-      // Create database entry
+      // Create database entry with base64 data
       const assetId = currentDb.createAsset(
         'background-image',
         newFileName,
-        relativePath,  // Store relative path
+        base64Data,  // Store base64 data URL
         fileSize,
         mimeType
       );
 
-      // Return the asset info with absolute path for immediate use
+      // Return the asset info with base64 data
       return {
         id: assetId,
         fileName: newFileName,
-        filePath: destPath,
+        filePath: base64Data,  // Return base64 data URL
         fileSize,
         mimeType
       };
@@ -829,26 +821,9 @@ Example response format:
   ipcMain.handle('focus:getBackgrounds', async () => {
     try {
       if (!currentDb) throw new Error('No project open');
-      if (!currentProjectPath) throw new Error('Project path not available');
 
-      const assets = currentDb.getAssetsByType('background-image');
-
-      // Convert relative paths to absolute paths
-      return assets.map(asset => {
-        const absolutePath = path.isAbsolute(asset.file_path)
-          ? asset.file_path
-          : path.join(currentProjectPath, asset.file_path);
-
-        console.log(`Background asset: ${asset.file_name}`);
-        console.log(`  - DB path: ${asset.file_path}`);
-        console.log(`  - Absolute path: ${absolutePath}`);
-        console.log(`  - Exists: ${fs.existsSync(absolutePath)}`);
-
-        return {
-          ...asset,
-          file_path: absolutePath
-        };
-      });
+      // Simply return assets - file_path is already a base64 data URL
+      return currentDb.getAssetsByType('background-image');
     } catch (error) {
       console.error('Error getting backgrounds:', error);
       throw error;
@@ -858,27 +833,8 @@ Example response format:
   ipcMain.handle('focus:deleteBackground', async (_, assetId: string) => {
     try {
       if (!currentDb) throw new Error('No project open');
-      if (!currentProjectPath) throw new Error('Project path not available');
 
-      // Get asset info before deleting
-      const assets = currentDb.getAssetsByType('background-image');
-      const asset = assets.find(a => a.id === assetId);
-
-      if (!asset) {
-        throw new Error('Asset not found');
-      }
-
-      // Convert relative path to absolute if needed
-      const absolutePath = path.isAbsolute(asset.file_path)
-        ? asset.file_path
-        : path.join(currentProjectPath, asset.file_path);
-
-      // Delete file from disk
-      if (fs.existsSync(absolutePath)) {
-        fs.unlinkSync(absolutePath);
-      }
-
-      // Delete from database
+      // Simply delete from database (no files to delete)
       currentDb.deleteAsset(assetId);
 
       return { success: true };

@@ -1,7 +1,6 @@
 import { setupIpcHandlers, closeDatabase, setMainWindow } from './ipcHandlers'
-import { app, shell, BrowserWindow, ipcMain, Menu, protocol } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, Menu } from 'electron'
 import { join } from 'path'
-import { readFile } from 'fs/promises'
 import icon from '../../resources/icon.png?asset'
 import dotenv from 'dotenv'
 
@@ -10,19 +9,6 @@ dotenv.config()
 
 // Simple dev check - use environment variable or process check
 const isDev = process.env.NODE_ENV === 'development' || process.defaultApp || /[\\/]electron-prebuilt[\\/]/.test(process.execPath) || /[\\/]electron[\\/]/.test(process.execPath)
-
-// Register custom protocol BEFORE app ready (this is required for custom protocols)
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: 'mythscribe-asset',
-    privileges: {
-      secure: true,
-      standard: true,
-      supportFetchAPI: true,
-      bypassCSP: true  // Allow loading images from custom protocol
-    }
-  }
-])
 
 function createWindow(): void {
   // Create the browser window.
@@ -77,40 +63,6 @@ app.whenReady().then(() => {
   // Set app user model id for windows
   setupIpcHandlers()
   app.setAppUserModelId('com.electron')
-
-  // Register custom protocol handler for project assets
-  protocol.handle('mythscribe-asset', async (request) => {
-    try {
-      // Extract the file path from the URL
-      // Format: mythscribe-asset://path/to/file
-      const url = request.url.replace('mythscribe-asset://', '')
-      const filePath = decodeURIComponent(url)
-
-      console.log('Loading asset:', filePath)
-
-      // Read the file
-      const data = await readFile(filePath)
-
-      // Determine MIME type based on extension
-      let mimeType = 'application/octet-stream'
-      if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
-        mimeType = 'image/jpeg'
-      } else if (filePath.endsWith('.png')) {
-        mimeType = 'image/png'
-      } else if (filePath.endsWith('.webp')) {
-        mimeType = 'image/webp'
-      } else if (filePath.endsWith('.gif')) {
-        mimeType = 'image/gif'
-      }
-
-      return new Response(data, {
-        headers: { 'Content-Type': mimeType }
-      })
-    } catch (error) {
-      console.error('Error loading asset:', error)
-      return new Response('File not found', { status: 404 })
-    }
-  })
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))

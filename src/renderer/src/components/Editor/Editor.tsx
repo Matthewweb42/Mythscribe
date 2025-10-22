@@ -1869,7 +1869,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
               style={{
                 height: '100%',
                 overflow: 'auto',
-                backgroundImage: currentBackgroundPath && isFullScreen ? `url(mythscribe-asset://${encodeURIComponent(currentBackgroundPath)})` : 'none',
+                backgroundImage: currentBackgroundPath && isFullScreen ? `url(${currentBackgroundPath})` : 'none',
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 backgroundAttachment: 'fixed',
