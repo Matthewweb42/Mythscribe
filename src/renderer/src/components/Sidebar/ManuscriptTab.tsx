@@ -5,6 +5,8 @@ import { useProject } from '../../contexts/ProjectContext';
 import { DocumentRow } from '../../../types/window';
 import { TreeNodeComponent } from './TreeNodeComponent';
 import { ConfirmModal } from '../ConfirmModal';
+import { MatterTemplateMenu } from './MatterTemplateMenu';
+import { getTemplateByType } from '../../../../main/templates/matterTemplates';
 
 interface TreeNode {
   item: DocumentRow;
@@ -73,6 +75,34 @@ const ManuscriptTab: React.FC = () => {
 
   const handleDrop = async (targetDoc: DocumentRow) => {
     if (!draggedItem || draggedItem.id === targetDoc.id) {
+      setDraggedItem(null);
+      setDragOverId(null);
+      return;
+    }
+
+    // SECTION RESTRICTION: Prevent dragging between sections
+    // Get the root section for both dragged item and target
+    const getDraggedRootSection = (doc: DocumentRow): DocumentRow | null => {
+      if (doc.parent_id === null) return doc; // Already at root
+      const parent = documents.find(d => d.id === doc.parent_id);
+      if (!parent) return null;
+      return getDraggedRootSection(parent);
+    };
+
+    const draggedRoot = getDraggedRootSection(draggedItem);
+    const targetRoot = getDraggedRootSection(targetDoc);
+
+    // Prevent drag if roots don't match (different sections)
+    if (draggedRoot?.id !== targetRoot?.id) {
+      console.warn('Cannot drag between different sections (Front Matter, Manuscript, End Matter)');
+      setDraggedItem(null);
+      setDragOverId(null);
+      return;
+    }
+
+    // Prevent dragging root folders
+    if (draggedItem.parent_id === null) {
+      console.warn('Cannot move root folders');
       setDraggedItem(null);
       setDragOverId(null);
       return;
@@ -176,6 +206,34 @@ const ManuscriptTab: React.FC = () => {
       setContextMenu(null);
     } catch (error) {
       console.error('Error creating item:', error);
+    }
+  };
+
+  const handleCreateMatter = async (templateType: string, displayName: string, section: 'front-matter' | 'end-matter', parentId: string) => {
+    try {
+      // Get the template content
+      const template = getTemplateByType(templateType);
+      if (!template) {
+        console.error(`Template not found: ${templateType}`);
+        return;
+      }
+
+      const templateContent = JSON.stringify(template.content);
+
+      // Create the matter document using the new IPC handler
+      const id = await window.api.document.createMatter(
+        displayName,
+        parentId,
+        section,
+        templateType,
+        templateContent
+      );
+
+      console.log(`Matter document created with id: ${id}`);
+      setActiveDocument(id);
+      setContextMenu(null);
+    } catch (error) {
+      console.error('Error creating matter document:', error);
     }
   };
 
@@ -431,153 +489,199 @@ const ManuscriptTab: React.FC = () => {
       )}
 
       {/* Context Menu */}
-      {contextMenu && (
-        <div
-          style={{
-            position: 'fixed',
-            top: contextMenu.y,
-            left: contextMenu.x,
-            backgroundColor: '#252526',
-            border: '1px solid #333',
-            borderRadius: '4px',
-            padding: '4px',
-            zIndex: 9999,
-            minWidth: '180px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)'
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ fontSize: '11px', color: '#888', padding: '6px 8px', textTransform: 'uppercase' }}>
-            "{contextMenu.item.name}"
+      {contextMenu && (() => {
+        const item = contextMenu.item;
+        const isRootFolder = item.parent_id === null;
+        const isFrontMatter = item.section === 'front-matter' || (isRootFolder && item.name === 'Front Matter');
+        const isManuscript = item.section === 'manuscript' || (isRootFolder && item.name !== 'Front Matter' && item.name !== 'End Matter');
+        const isEndMatter = item.section === 'end-matter' || (isRootFolder && item.name === 'End Matter');
+
+        return (
+          <div
+            style={{
+              position: 'fixed',
+              top: contextMenu.y,
+              left: contextMenu.x,
+              backgroundColor: '#252526',
+              border: '1px solid #333',
+              borderRadius: '4px',
+              padding: '4px',
+              zIndex: 9999,
+              minWidth: '180px',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: '11px', color: '#888', padding: '6px 8px', textTransform: 'uppercase' }}>
+              "{item.name}"
+            </div>
+
+            {/* Don't show "Add to this" for root folders */}
+            {!isRootFolder && (
+              <div style={{ fontSize: '10px', color: '#666', padding: '6px 8px', textTransform: 'uppercase' }}>
+                Add to this:
+              </div>
+            )}
+
+            {/* Front Matter Section - Show template submenu */}
+            {isFrontMatter && (
+              <MatterTemplateMenu
+                section="front-matter"
+                onSelectTemplate={(templateType, displayName) =>
+                  handleCreateMatter(templateType, displayName, 'front-matter', item.id)
+                }
+                menuButtonStyle={menuButtonStyle}
+              />
+            )}
+
+            {/* Manuscript Section - Show traditional Part/Chapter/Scene options */}
+            {isManuscript && (
+              <>
+                <button
+                  onClick={() => {
+                    setSelectedItem(item);
+                    handleCreate('folder', item.id, 'part');
+                  }}
+                  style={{
+                    ...menuButtonStyle,
+                    width: '100%',
+                    justifyContent: 'flex-start'
+                  }}
+                >
+                  <Layers size={14} color="#569cd6" />
+                  <span>{partLabel}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setSelectedItem(item);
+                    handleCreate('folder', item.id, 'chapter');
+                  }}
+                  style={{
+                    ...menuButtonStyle,
+                    width: '100%',
+                    justifyContent: 'flex-start'
+                  }}
+                >
+                  <FolderIcon size={14} color="#ce9178" />
+                  <span>Chapter</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setSelectedItem(item);
+                    handleCreate('document', item.id, 'scene');
+                  }}
+                  style={{
+                    ...menuButtonStyle,
+                    width: '100%',
+                    justifyContent: 'flex-start'
+                  }}
+                >
+                  <FileText size={14} color="#4ec9b0" />
+                  <span>Scene</span>
+                </button>
+
+                <div style={{ borderTop: '1px solid #333', margin: '4px 0' }} />
+
+                <button
+                  onClick={() => {
+                    setSelectedItem(item);
+                    handleCreate('document', item.id, null);
+                  }}
+                  style={{
+                    ...menuButtonStyle,
+                    width: '100%',
+                    justifyContent: 'flex-start'
+                  }}
+                >
+                  <File size={14} color="var(--primary-green)" />
+                  <span>Generic Document</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setSelectedItem(item);
+                    handleCreate('folder', item.id, null);
+                  }}
+                  style={{
+                    ...menuButtonStyle,
+                    width: '100%',
+                    justifyContent: 'flex-start'
+                  }}
+                >
+                  <FolderIcon size={14} color="var(--primary-green-light)" />
+                  <span>Generic Folder</span>
+                </button>
+              </>
+            )}
+
+            {/* End Matter Section - Show template submenu */}
+            {isEndMatter && (
+              <MatterTemplateMenu
+                section="end-matter"
+                onSelectTemplate={(templateType, displayName) =>
+                  handleCreateMatter(templateType, displayName, 'end-matter', item.id)
+                }
+                menuButtonStyle={menuButtonStyle}
+              />
+            )}
+
+            {/* Common actions for all sections */}
+            {!isRootFolder && (
+              <>
+                <div style={{ borderTop: '1px solid #333', margin: '4px 0' }} />
+
+                {/* Don't allow renaming root folders */}
+                {item.parent_id !== null && (
+                  <button
+                    onClick={() => {
+                      setRenamingId(item.id);
+                      setContextMenu(null);
+                    }}
+                    style={{
+                      ...menuButtonStyle,
+                      width: '100%',
+                      justifyContent: 'flex-start'
+                    }}
+                  >
+                    <File size={14} color="var(--primary-green)" />
+                    <span>Rename</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => handleDuplicate(item)}
+                  style={{
+                    ...menuButtonStyle,
+                    width: '100%',
+                    justifyContent: 'flex-start'
+                  }}
+                >
+                  <Copy size={14} color="#569cd6" />
+                  <span>Duplicate</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setItemToDelete(item);
+                    setShowDeleteConfirm(true);
+                    setContextMenu(null);
+                  }}
+                  style={{
+                    ...menuButtonStyle,
+                    width: '100%',
+                    justifyContent: 'flex-start'
+                  }}
+                >
+                  <Trash2 size={14} color="#f48771" />
+                  <span>Delete</span>
+                </button>
+              </>
+            )}
           </div>
-
-          <div style={{ fontSize: '10px', color: '#666', padding: '6px 8px', textTransform: 'uppercase' }}>
-            Add to this:
-          </div>
-
-          <button
-            onClick={() => {
-              setSelectedItem(contextMenu.item);
-              handleCreate('folder', contextMenu.item.id, 'part');
-            }}
-            style={{
-              ...menuButtonStyle,
-              width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
-            <Layers size={14} color="#569cd6" />
-            <span>{partLabel}</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setSelectedItem(contextMenu.item);
-              handleCreate('folder', contextMenu.item.id, 'chapter');
-            }}
-            style={{
-              ...menuButtonStyle,
-              width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
-            <FolderIcon size={14} color="#ce9178" />
-            <span>Chapter</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setSelectedItem(contextMenu.item);
-              handleCreate('document', contextMenu.item.id, 'scene');
-            }}
-            style={{
-              ...menuButtonStyle,
-              width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
-            <FileText size={14} color="#4ec9b0" />
-            <span>Scene</span>
-          </button>
-
-          <div style={{ borderTop: '1px solid #333', margin: '4px 0' }} />
-
-          <button
-            onClick={() => {
-              setSelectedItem(contextMenu.item);
-              handleCreate('document', contextMenu.item.id, null);
-            }}
-            style={{
-              ...menuButtonStyle,
-              width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
-            <File size={14} color="var(--primary-green)" />
-            <span>Generic Document</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setSelectedItem(contextMenu.item);
-              handleCreate('folder', contextMenu.item.id, null);
-            }}
-            style={{
-              ...menuButtonStyle,
-              width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
-            <FolderIcon size={14} color="var(--primary-green-light)" />
-            <span>Generic Folder</span>
-          </button>
-
-          <div style={{ borderTop: '1px solid #333', margin: '4px 0' }} />
-
-          <button
-            onClick={() => {
-              setRenamingId(contextMenu.item.id);
-              setContextMenu(null);
-            }}
-            style={{
-              ...menuButtonStyle,
-              width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
-            <File size={14} color="var(--primary-green)" />
-            <span>Rename</span>
-          </button>
-
-          <button
-            onClick={() => handleDuplicate(contextMenu.item)}
-            style={{
-              ...menuButtonStyle,
-              width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
-            <Copy size={14} color="#569cd6" />
-            <span>Duplicate</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setItemToDelete(contextMenu.item);
-              setShowDeleteConfirm(true);
-              setContextMenu(null);
-            }}
-            style={{
-              ...menuButtonStyle,
-              width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
-            <Trash2 size={14} color="#f48771" />
-            <span>Delete</span>
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Delete Confirmation Modal */}
       <ConfirmModal

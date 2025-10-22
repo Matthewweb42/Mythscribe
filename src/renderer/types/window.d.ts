@@ -24,6 +24,9 @@ export interface DocumentRow {
   pov: string | null;
   timeline_position: string | null;
   scene_metadata: string | null;
+  section: 'front-matter' | 'manuscript' | 'end-matter' | null;
+  matter_type: string | null;
+  formatting_preset: string | null;
   created: string;
   modified: string;
 }
@@ -49,6 +52,7 @@ declare global {
       };
       document: {
         create: (name: string, parentId: string | null, docType: 'manuscript' | 'note', hierarchyLevel?: 'novel' | 'part' | 'chapter' | 'scene' | null) => Promise<string>;
+        createMatter: (name: string, parentId: string | null, section: 'front-matter' | 'end-matter', matterType: string, templateContent: string) => Promise<string>;
         get: (id: string) => Promise<DocumentRow | undefined>;
         getByParent: (parentId: string | null) => Promise<DocumentRow[]>;
         getAll: () => Promise<DocumentRow[]>;

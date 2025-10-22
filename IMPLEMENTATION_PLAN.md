@@ -3,7 +3,7 @@
 **Strategic build order to avoid conflicts and ensure smooth development**
 
 **Last Updated:** October 2025
-**Current Phase:** Phase 2 - Writing Experience (~40% complete)
+**Current Phase:** Phase 2 - Writing Experience (~80% complete)
 
 ---
 
@@ -278,28 +278,42 @@
 
 ---
 
-### Chunk 2.4: Document Templates ⏱️ 3-4 hours
-**Why fourth:** Quick document creation
+### Chunk 2.4: Front Matter & End Matter System ✅ COMPLETE
+**Why fourth:** Professional manuscript structure with industry-standard templates
 
-- [ ] Create template system
-- [ ] Add template selection to document creation
-- [ ] Templates:
-  - Title Page (front matter)
-  - Copyright Page (front matter)
-  - Dedication (front matter)
-  - Acknowledgments (back matter)
-  - About the Author (back matter)
-  - Scene (with metadata fields)
-  - Chapter (with auto-numbering)
+- [x] Three-section manuscript structure (Front Matter, Manuscript, End Matter)
+- [x] Database schema updates (section, matter_type, formatting_preset columns)
+- [x] Migration system for existing projects
+- [x] Created 14 professional templates with industry-standard formatting
+- [x] Context-aware right-click menus (section-specific document creation)
+- [x] Drag & drop restrictions (can reorder within sections, not between)
+- [x] Root folder protection (cannot delete/rename Front Matter/End Matter/Manuscript)
 
-**Testing:**
-- Can create documents from templates
-- Templates populate correctly
-- Chapter numbering works
+**Front Matter Templates (7):**
+- Title Page, Copyright Page, Dedication, Epigraph, Foreword, Preface, Table of Contents
 
-**Files to Create/Modify:**
-- `src/renderer/src/templates/documentTemplates.ts` (new)
-- `src/renderer/src/components/Sidebar/ManuscriptTab.tsx` (add template picker)
+**End Matter Templates (7):**
+- Acknowledgments, About the Author, Author's Note, Afterword, Appendix, Glossary, Bibliography
+
+**Testing Passed:**
+- ✅ Database migrations work for existing projects
+- ✅ New projects create three-section structure automatically
+- ✅ Context menus show correct options based on section
+- ✅ Templates load with proper formatting
+- ✅ Drag & drop respects section boundaries
+- ✅ Root folders protected from deletion/renaming
+- ✅ TypeScript compilation successful
+
+**Files Created:**
+- `src/main/templates/matterTemplates.ts` (all 14 templates)
+- `src/renderer/src/components/Sidebar/MatterTemplateMenu.tsx` (submenu component)
+
+**Files Modified:**
+- `src/main/database.ts` - Schema updates, migration logic, createMatterDocument()
+- `src/main/ipcHandlers.ts` - Added document:createMatter handler
+- `src/preload/index.ts` - Exposed createMatter API
+- `src/renderer/types/window.d.ts` - Updated DocumentRow interface
+- `src/renderer/src/components/Sidebar/ManuscriptTab.tsx` - Section-aware context menus, drag restrictions
 
 ---
 
@@ -332,12 +346,12 @@
 
 ---
 
-**PHASE 2 CHECKPOINT:** ⏱️ IN PROGRESS
+**PHASE 2 CHECKPOINT:** ⏱️ IN PROGRESS (~80% Complete)
 - ✅ Novel formatting works
 - ✅ Scene metadata functional
 - ✅ Stacked scene editing operational
 - ✅ UI/UX improvements complete (resizable bar, status bar, swapped panels)
-- [ ] Templates available (Chunk 2.4)
+- ✅ Front Matter & End Matter system with 14 templates (Chunk 2.4)
 - [ ] Focus mode enhanced (Chunk 2.5)
 - **Test entire app before moving on**
 
@@ -798,35 +812,25 @@ npm install epub-gen
 
 **✅ Completed:**
 - ✅ Phase 1: Complete layout foundation with resizable panels, tabs, AI dock
-- ✅ Phase 2 (70% complete):
+- ✅ Phase 2 (80% complete):
   - ✅ Chunk 2.1: Novel formatting, width constraints, scene breaks
   - ✅ Chunk 2.2: Scene metadata fields with tag integration
   - ✅ Chunk 2.3: Stacked scene editing for chapters/parts
   - ✅ Chunk 2.3b: Major UI/UX improvements (resizable bar, status bar, panel swap)
+  - ✅ Chunk 2.4: Front Matter & End Matter system with 14 professional templates
 - ✅ Bonus: Popup/modal system overhaul, notification system
 
-**⬅️ Next Up: Phase 2, Chunk 2.4 - Document Templates**
+**⬅️ Next Up: Phase 2, Chunk 2.5 - Focus Mode Enhancements**
 
 **Recommended approach:**
-1. Create template system in `src/renderer/src/templates/documentTemplates.ts`
-2. Add template picker to document creation modal
-3. Implement templates:
-   - Title Page (front matter)
-   - Copyright Page (front matter)
-   - Dedication (front matter)
-   - Acknowledgments (back matter)
-   - About the Author (back matter)
-   - Scene (with metadata fields pre-populated)
-   - Chapter (with auto-numbering option)
-4. Test template creation and population
+1. Add background image upload functionality
+2. Implement image storage in project database
+3. Create overlay window with adjustable opacity
+4. Add background rotation feature
+5. Create Settings UI for focus mode customization
+6. Test focus mode with various image sizes and formats
 
-**Estimated time:** 3-4 hours
-
-**After Templates:** Phase 2, Chunk 2.5 - Focus Mode Enhancements (5-6 hours)
-- Background image upload
-- Adjustable overlay window
-- Background rotation
-- This completes Phase 2!
+**Estimated time:** 5-6 hours
 
 ---
 

@@ -96,6 +96,11 @@ export function setupIpcHandlers() {
     return currentDb.createDocument(name, parentId, docType, hierarchyLevel || null);
   });
 
+  ipcMain.handle('document:createMatter', async (_, name: string, parentId: string | null, section: 'front-matter' | 'end-matter', matterType: string, templateContent: string) => {
+    if (!currentDb) throw new Error('No project open');
+    return currentDb.createMatterDocument(name, parentId, section, matterType, templateContent);
+  });
+
   ipcMain.handle('folder:create', async (_, name: string, parentId: string | null, hierarchyLevel?: 'novel' | 'part' | 'chapter' | null) => {
     if (!currentDb) throw new Error('No project open');
     return currentDb.createFolder(name, parentId, hierarchyLevel || null);

@@ -27,6 +27,9 @@ export interface DocumentRow {
   pov: string | null; // Scene POV character (tag name)
   timeline_position: string | null; // Scene position in timeline (free text for now)
   scene_metadata: string | null; // JSON for additional custom metadata
+  section: 'front-matter' | 'manuscript' | 'end-matter' | null; // Three-section structure
+  matter_type: string | null; // Type of front/end matter (e.g., 'title-page', 'acknowledgments')
+  formatting_preset: string | null; // JSON string with formatting settings for this document
   created: string;
   modified: string;
 }
@@ -213,6 +216,54 @@ export class ProjectDatabase {
         console.error('Migration error (scene_metadata):', error);
       }
     }
+
+    // Check and add section column
+    const hasSection = tableInfo.some((col) => col.name === 'section');
+    if (!hasSection) {
+      console.log('Running migration: Adding section column to documents table');
+      try {
+        this.db.exec(`
+          ALTER TABLE documents
+          ADD COLUMN section TEXT CHECK(section IN ('front-matter', 'manuscript', 'end-matter', NULL))
+        `);
+        console.log('Migration completed: section column added');
+      } catch (error) {
+        console.error('Migration error (section):', error);
+      }
+    }
+
+    // Check and add matter_type column
+    const hasMatterType = tableInfo.some((col) => col.name === 'matter_type');
+    if (!hasMatterType) {
+      console.log('Running migration: Adding matter_type column to documents table');
+      try {
+        this.db.exec(`
+          ALTER TABLE documents
+          ADD COLUMN matter_type TEXT
+        `);
+        console.log('Migration completed: matter_type column added');
+      } catch (error) {
+        console.error('Migration error (matter_type):', error);
+      }
+    }
+
+    // Check and add formatting_preset column
+    const hasFormattingPreset = tableInfo.some((col) => col.name === 'formatting_preset');
+    if (!hasFormattingPreset) {
+      console.log('Running migration: Adding formatting_preset column to documents table');
+      try {
+        this.db.exec(`
+          ALTER TABLE documents
+          ADD COLUMN formatting_preset TEXT
+        `);
+        console.log('Migration completed: formatting_preset column added');
+      } catch (error) {
+        console.error('Migration error (formatting_preset):', error);
+      }
+    }
+
+    // Create three root folders if they don't exist (for existing projects)
+    this.ensureThreeSectionStructure();
   }
 
   private initializeTables() {
@@ -251,6 +302,9 @@ export class ProjectDatabase {
         pov TEXT,
         timeline_position TEXT,
         scene_metadata TEXT,
+        section TEXT CHECK(section IN ('front-matter', 'manuscript', 'end-matter', NULL)),
+        matter_type TEXT,
+        formatting_preset TEXT,
         created TEXT NOT NULL,
         modified TEXT NOT NULL,
         FOREIGN KEY (parent_id) REFERENCES documents(id) ON DELETE CASCADE
@@ -377,17 +431,8 @@ export class ProjectDatabase {
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(id, name, format, now, now, now);
 
-    // Create initial folder structure based on format
-    if (format === 'novel') {
-      // Standard Novel: Part → Chapter → Scene
-      this.createFolder('Manuscript', null);
-    } else if (format === 'epic') {
-      // Epic Scale: Series → Novel → Part → Chapter → Scene
-      this.createFolder('Series', null);
-    } else if (format === 'webnovel') {
-      // Web-novel: Volume → Arc → Chapter
-      this.createFolder('Volume 1', null);
-    }
+    // Create three-section structure (Front Matter, Manuscript, End Matter)
+    this.createThreeSectionStructure(format);
 
     // Seed default tag templates
     this.seedDefaultTagTemplates();
@@ -440,6 +485,30 @@ export class ProjectDatabase {
       INSERT INTO documents (id, parent_id, name, type, content, doc_type, hierarchy_level, notes, word_count, position, created, modified)
       VALUES (?, ?, ?, 'document', ?, ?, ?, ?, 0, ?, ?, ?)
     `).run(id, parentId, name, initialContent, docType, hierarchyLevel, initialNotes, position, now, now);
+
+    this.updateProjectModified();
+    return id;
+  }
+
+  createMatterDocument(
+    name: string,
+    parentId: string | null,
+    section: 'front-matter' | 'end-matter',
+    matterType: string,
+    templateContent: string
+  ): string {
+    const id = this.generateId();
+    const now = new Date().toISOString();
+    const position = this.getNextPosition(parentId);
+
+    const initialNotes = JSON.stringify([
+      { type: 'paragraph', children: [{ text: '' }] }
+    ]);
+
+    this.db.prepare(`
+      INSERT INTO documents (id, parent_id, name, type, content, doc_type, hierarchy_level, notes, word_count, position, section, matter_type, formatting_preset, created, modified)
+      VALUES (?, ?, ?, 'document', ?, NULL, NULL, ?, 0, ?, ?, ?, NULL, ?, ?)
+    `).run(id, parentId, name, templateContent, initialNotes, position, section, matterType, now, now);
 
     this.updateProjectModified();
     return id;
@@ -875,11 +944,12 @@ export class ProjectDatabase {
   }
 
   seedProjectStructure(format: 'novel' | 'epic' | 'webnovel') {
-    // Get the root folder that was already created in createProject
+    // Get the Manuscript root folder
     const rootFolders = this.getDocumentsByParent(null);
-    if (rootFolders.length === 0) return;
+    const manuscriptFolder = rootFolders.find(f => f.section === 'manuscript');
+    if (!manuscriptFolder) return;
 
-    const rootId = rootFolders[0].id;
+    const rootId = manuscriptFolder.id;
 
     if (format === 'novel' || format === 'epic') {
       // Novel/Epic: Manuscript → Part 1-2 → Chapter 1-3 each → Scene 1 each
@@ -910,6 +980,87 @@ export class ProjectDatabase {
         }
       }
     }
+  }
+
+  // ============= THREE-SECTION STRUCTURE METHODS =============
+
+  private createThreeSectionStructure(format: 'novel' | 'epic' | 'webnovel') {
+    const now = new Date().toISOString();
+
+    // Create Front Matter root folder (position 0, cannot be deleted/moved)
+    const frontMatterId = this.generateId();
+    this.db.prepare(`
+      INSERT INTO documents (id, parent_id, name, type, content, doc_type, hierarchy_level, notes, word_count, position, section, matter_type, formatting_preset, created, modified)
+      VALUES (?, NULL, 'Front Matter', 'folder', NULL, NULL, NULL, ?, 0, 0, 'front-matter', NULL, NULL, ?, ?)
+    `).run(frontMatterId, JSON.stringify([{ type: 'paragraph', children: [{ text: '' }] }]), now, now);
+
+    // Create Manuscript root folder (position 1, cannot be deleted/moved)
+    const manuscriptId = this.generateId();
+    const manuscriptName = format === 'epic' ? 'Series' : format === 'webnovel' ? 'Volume 1' : 'Manuscript';
+    this.db.prepare(`
+      INSERT INTO documents (id, parent_id, name, type, content, doc_type, hierarchy_level, notes, word_count, position, section, matter_type, formatting_preset, created, modified)
+      VALUES (?, NULL, ?, 'folder', NULL, NULL, NULL, ?, 0, 1, 'manuscript', NULL, NULL, ?, ?)
+    `).run(manuscriptId, manuscriptName, JSON.stringify([{ type: 'paragraph', children: [{ text: '' }] }]), now, now);
+
+    // Create End Matter root folder (position 2, cannot be deleted/moved)
+    const endMatterId = this.generateId();
+    this.db.prepare(`
+      INSERT INTO documents (id, parent_id, name, type, content, doc_type, hierarchy_level, notes, word_count, position, section, matter_type, formatting_preset, created, modified)
+      VALUES (?, NULL, 'End Matter', 'folder', NULL, NULL, NULL, ?, 0, 2, 'end-matter', NULL, NULL, ?, ?)
+    `).run(endMatterId, JSON.stringify([{ type: 'paragraph', children: [{ text: '' }] }]), now, now);
+
+    return { frontMatterId, manuscriptId, endMatterId };
+  }
+
+  private ensureThreeSectionStructure() {
+    // Check if three root folders exist
+    const rootFolders = this.getDocumentsByParent(null);
+
+    // If there are already 3+ root folders with proper sections, assume structure is correct
+    const hasFrontMatter = rootFolders.some(f => f.section === 'front-matter');
+    const hasManuscript = rootFolders.some(f => f.section === 'manuscript');
+    const hasEndMatter = rootFolders.some(f => f.section === 'end-matter');
+
+    if (hasFrontMatter && hasManuscript && hasEndMatter) {
+      return; // Structure already exists
+    }
+
+    console.log('Migrating existing project to three-section structure...');
+
+    const now = new Date().toISOString();
+
+    // If there's an existing root folder (old "Manuscript"), update it to be in manuscript section
+    if (rootFolders.length > 0 && !hasManuscript) {
+      const oldRoot = rootFolders[0];
+      this.db.prepare(`
+        UPDATE documents
+        SET section = 'manuscript', position = 1, modified = ?
+        WHERE id = ?
+      `).run(now, oldRoot.id);
+      console.log(`Migrated existing root folder "${oldRoot.name}" to Manuscript section`);
+    }
+
+    // Create Front Matter if it doesn't exist
+    if (!hasFrontMatter) {
+      const frontMatterId = this.generateId();
+      this.db.prepare(`
+        INSERT INTO documents (id, parent_id, name, type, content, doc_type, hierarchy_level, notes, word_count, position, section, matter_type, formatting_preset, created, modified)
+        VALUES (?, NULL, 'Front Matter', 'folder', NULL, NULL, NULL, ?, 0, 0, 'front-matter', NULL, NULL, ?, ?)
+      `).run(frontMatterId, JSON.stringify([{ type: 'paragraph', children: [{ text: '' }] }]), now, now);
+      console.log('Created Front Matter root folder');
+    }
+
+    // Create End Matter if it doesn't exist
+    if (!hasEndMatter) {
+      const endMatterId = this.generateId();
+      this.db.prepare(`
+        INSERT INTO documents (id, parent_id, name, type, content, doc_type, hierarchy_level, notes, word_count, position, section, matter_type, formatting_preset, created, modified)
+        VALUES (?, NULL, 'End Matter', 'folder', NULL, NULL, NULL, ?, 0, 2, 'end-matter', NULL, NULL, ?, ?)
+      `).run(endMatterId, JSON.stringify([{ type: 'paragraph', children: [{ text: '' }] }]), now, now);
+      console.log('Created End Matter root folder');
+    }
+
+    console.log('Three-section structure migration completed');
   }
 
   // ============= UTILITY METHODS =============

@@ -34,6 +34,8 @@ const api = {
   document: {
     create: (name: string, parentId: string | null, docType: 'manuscript' | 'note', hierarchyLevel?: 'novel' | 'part' | 'chapter' | 'scene' | null) =>
       ipcRenderer.invoke('document:create', name, parentId, docType, hierarchyLevel),
+    createMatter: (name: string, parentId: string | null, section: 'front-matter' | 'end-matter', matterType: string, templateContent: string) =>
+      ipcRenderer.invoke('document:createMatter', name, parentId, section, matterType, templateContent),
     get: (id: string) => ipcRenderer.invoke('document:get', id),
     getByParent: (parentId: string | null) => ipcRenderer.invoke('document:getByParent', parentId),
     getAll: () => ipcRenderer.invoke('document:getAll'),
