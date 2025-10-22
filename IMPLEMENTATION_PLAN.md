@@ -295,6 +295,13 @@
 **End Matter Templates (7):**
 - Acknowledgments, About the Author, Author's Note, Afterword, Appendix, Glossary, Bibliography
 
+**UI/UX Enhancements:**
+- [x] Matter documents display with golden FileText icon (vs teal for regular scenes)
+- [x] Matter documents function as scene-level documents (hierarchy_level: 'scene')
+- [x] Stacked editing for Front/End Matter folders (click folder to view all children)
+- [x] Gray page breaks between stacked matter documents (thin 1px line)
+- [x] Traditional scene breaks for manuscript scenes (customizable text)
+
 **Testing Passed:**
 - ✅ Database migrations work for existing projects
 - ✅ New projects create three-section structure automatically
@@ -302,6 +309,10 @@
 - ✅ Templates load with proper formatting
 - ✅ Drag & drop respects section boundaries
 - ✅ Root folders protected from deletion/renaming
+- ✅ Matter documents show golden icons in sidebar
+- ✅ Stacked editing works for Front/End Matter folders
+- ✅ Gray page breaks display between matter documents
+- ✅ Scene breaks still work for manuscript scenes
 - ✅ TypeScript compilation successful
 
 **Files Created:**
@@ -309,11 +320,14 @@
 - `src/renderer/src/components/Sidebar/MatterTemplateMenu.tsx` (submenu component)
 
 **Files Modified:**
-- `src/main/database.ts` - Schema updates, migration logic, createMatterDocument()
+- `src/main/database.ts` - Schema updates, migration logic, createMatterDocument() with hierarchy_level: 'scene'
 - `src/main/ipcHandlers.ts` - Added document:createMatter handler
 - `src/preload/index.ts` - Exposed createMatter API
 - `src/renderer/types/window.d.ts` - Updated DocumentRow interface
 - `src/renderer/src/components/Sidebar/ManuscriptTab.tsx` - Section-aware context menus, drag restrictions
+- `src/renderer/src/components/Sidebar/TreeNodeComponent.tsx` - Golden icon for matter documents
+- `src/renderer/src/components/Editor/Editor.tsx` - Stacked editing for Front/End Matter folders
+- `src/renderer/src/components/Editor/StackedSceneEditor.tsx` - Gray page breaks for matter documents
 
 ---
 

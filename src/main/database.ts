@@ -507,7 +507,7 @@ export class ProjectDatabase {
 
     this.db.prepare(`
       INSERT INTO documents (id, parent_id, name, type, content, doc_type, hierarchy_level, notes, word_count, position, section, matter_type, formatting_preset, created, modified)
-      VALUES (?, ?, ?, 'document', ?, NULL, NULL, ?, 0, ?, ?, ?, NULL, ?, ?)
+      VALUES (?, ?, ?, 'document', ?, NULL, 'scene', ?, 0, ?, ?, ?, NULL, ?, ?)
     `).run(id, parentId, name, templateContent, initialNotes, position, section, matterType, now, now);
 
     this.updateProjectModified();

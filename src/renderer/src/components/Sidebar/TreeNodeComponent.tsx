@@ -8,8 +8,8 @@ interface TreeNode {
   children: TreeNode[];
 }
 
-// Helper to get icon and color based on hierarchy level
-const getHierarchyIcon = (level: string | null) => {
+// Helper to get icon and color based on hierarchy level and section
+const getHierarchyIcon = (level: string | null, section: string | null) => {
   switch (level) {
     case 'novel':
       return { icon: BookOpen, color: 'var(--primary-green)' };
@@ -18,6 +18,11 @@ const getHierarchyIcon = (level: string | null) => {
     case 'chapter':
       return { icon: FolderIcon, color: '#ce9178' };
     case 'scene':
+      // Matter documents (Front/End Matter) use golden color
+      if (section === 'front-matter' || section === 'end-matter') {
+        return { icon: FileText, color: '#d4a574' }; // Golden/amber color
+      }
+      // Regular scenes use teal color
       return { icon: FileText, color: '#4ec9b0' };
     default:
       return { icon: File, color: 'var(--primary-green)' };
@@ -168,7 +173,7 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
                 {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
               </div>
               {(() => {
-                const { icon: Icon, color } = getHierarchyIcon(node.item.hierarchy_level);
+                const { icon: Icon, color } = getHierarchyIcon(node.item.hierarchy_level, node.item.section);
                 return <Icon size={16} color={color} />;
               })()}
             </>
@@ -176,7 +181,7 @@ export const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({
             <>
               <div style={{ width: '16px' }} />
               {(() => {
-                const { icon: Icon, color } = getHierarchyIcon(node.item.hierarchy_level);
+                const { icon: Icon, color } = getHierarchyIcon(node.item.hierarchy_level, node.item.section);
                 return <Icon size={16} color={color} />;
               })()}
             </>

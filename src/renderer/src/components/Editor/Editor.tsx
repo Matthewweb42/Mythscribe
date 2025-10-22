@@ -358,7 +358,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
       setCurrentDoc(doc);
 
-      // Check if this is a folder (chapter/part)
+      // Check if this is a folder (chapter/part/front matter/end matter)
       if (doc.type === 'folder') {
         setIsViewingFolder(true);
 
@@ -367,7 +367,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
         const freshDocs = await window.api.document.getAll();
 
         // If this is a Part, we need to load chapters and their scenes recursively
-        // If this is a Chapter, just load direct child scenes
+        // If this is a Chapter, Front Matter, or End Matter: load direct child documents only
         let childScenesToLoad: DocumentRow[] = [];
 
         if (doc.hierarchy_level === 'part') {
@@ -385,7 +385,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
             childScenesToLoad.push(...scenes);
           });
         } else {
-          // Chapter (or other folder): Load direct child scenes only
+          // Chapter, Front Matter, End Matter, or other folder: Load direct child documents only
           childScenesToLoad = freshDocs
             .filter(d => d.parent_id === doc.id && d.type === 'document')
             .sort((a, b) => a.position - b.position);

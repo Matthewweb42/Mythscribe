@@ -157,25 +157,47 @@ const StackedSceneEditor: React.FC<StackedSceneEditorProps> = ({
           </div>
 
           {/* Scene Break Separator (read-only) */}
-          {index < scenes.length - 1 && (
-            <div
-              contentEditable={false}
-              style={{
-                textAlign: 'center',
-                color: '#666',
-                fontSize: '16px',
-                padding: '30px 0',
-                margin: '0',
-                userSelect: 'none',
-                cursor: 'default',
-                borderTop: '1px solid #333',
-                borderBottom: '1px solid #333',
-                backgroundColor: 'rgba(30, 30, 30, 0.5)'
-              }}
-            >
-              {sceneBreakStyle}
-            </div>
-          )}
+          {index < scenes.length - 1 && (() => {
+            // Check if this is a matter document (front/end matter)
+            const isMatterDocument = scene.section === 'front-matter' || scene.section === 'end-matter';
+
+            if (isMatterDocument) {
+              // Gray page break for matter documents
+              return (
+                <div
+                  contentEditable={false}
+                  style={{
+                    height: '1px',
+                    backgroundColor: '#555',
+                    margin: '40px 0',
+                    userSelect: 'none',
+                    cursor: 'default'
+                  }}
+                />
+              );
+            } else {
+              // Traditional scene break for manuscript scenes
+              return (
+                <div
+                  contentEditable={false}
+                  style={{
+                    textAlign: 'center',
+                    color: '#666',
+                    fontSize: '16px',
+                    padding: '30px 0',
+                    margin: '0',
+                    userSelect: 'none',
+                    cursor: 'default',
+                    borderTop: '1px solid #333',
+                    borderBottom: '1px solid #333',
+                    backgroundColor: 'rgba(30, 30, 30, 0.5)'
+                  }}
+                >
+                  {sceneBreakStyle}
+                </div>
+              );
+            }
+          })()}
           </React.Fragment>
         );
       })}
