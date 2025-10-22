@@ -1,12 +1,28 @@
 import { setupIpcHandlers, closeDatabase, setMainWindow } from './ipcHandlers'
-import { app, shell, BrowserWindow, ipcMain, Menu } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, Menu, protocol } from 'electron'
 import { join } from 'path'
-import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { readFile } from 'fs/promises'
 import icon from '../../resources/icon.png?asset'
 import dotenv from 'dotenv'
 
 // Load environment variables
 dotenv.config()
+
+// Simple dev check - use environment variable or process check
+const isDev = process.env.NODE_ENV === 'development' || process.defaultApp || /[\\/]electron-prebuilt[\\/]/.test(process.execPath) || /[\\/]electron[\\/]/.test(process.execPath)
+
+// Register custom protocol BEFORE app ready (this is required for custom protocols)
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'mythscribe-asset',
+    privileges: {
+      secure: true,
+      standard: true,
+      supportFetchAPI: true,
+      bypassCSP: true  // Allow loading images from custom protocol
+    }
+  }
+])
 
 function createWindow(): void {
   // Create the browser window.
@@ -47,7 +63,7 @@ function createWindow(): void {
 
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+  if (isDev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
@@ -60,14 +76,41 @@ function createWindow(): void {
 app.whenReady().then(() => {
   // Set app user model id for windows
   setupIpcHandlers()
-  electronApp.setAppUserModelId('com.electron')
+  app.setAppUserModelId('com.electron')
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
-  }) // <-- Close this bracket here!
+  // Register custom protocol handler for project assets
+  protocol.handle('mythscribe-asset', async (request) => {
+    try {
+      // Extract the file path from the URL
+      // Format: mythscribe-asset://path/to/file
+      const url = request.url.replace('mythscribe-asset://', '')
+      const filePath = decodeURIComponent(url)
+
+      console.log('Loading asset:', filePath)
+
+      // Read the file
+      const data = await readFile(filePath)
+
+      // Determine MIME type based on extension
+      let mimeType = 'application/octet-stream'
+      if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
+        mimeType = 'image/jpeg'
+      } else if (filePath.endsWith('.png')) {
+        mimeType = 'image/png'
+      } else if (filePath.endsWith('.webp')) {
+        mimeType = 'image/webp'
+      } else if (filePath.endsWith('.gif')) {
+        mimeType = 'image/gif'
+      }
+
+      return new Response(data, {
+        headers: { 'Content-Type': mimeType }
+      })
+    } catch (error) {
+      console.error('Error loading asset:', error)
+      return new Response('File not found', { status: 404 })
+    }
+  })
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))

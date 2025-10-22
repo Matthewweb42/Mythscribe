@@ -208,7 +208,7 @@ const BackgroundManager: React.FC<BackgroundManagerProps> = ({
                   style={{
                     width: '100%',
                     height: '150px',
-                    backgroundImage: `url(file:///${bg.file_path.replace(/\\/g, '/')})`,
+                    backgroundImage: `url(mythscribe-asset://${encodeURIComponent(bg.file_path)})`,
                     backgroundSize: 'cover',
                     backgroundPosition: 'center'
                   }}

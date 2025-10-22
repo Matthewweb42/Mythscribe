@@ -27,8 +27,8 @@ function initializeOpenAI() {
 
 // Helper function to ensure assets folder exists
 function ensureAssetsFolderExists(projectPath: string): string {
-  const projectDir = path.dirname(projectPath);
-  const assetsDir = path.join(projectDir, 'assets');
+  // projectPath is now the folder containing project.db
+  const assetsDir = path.join(projectPath, 'assets');
   const backgroundsDir = path.join(assetsDir, 'backgrounds');
 
   if (!fs.existsSync(assetsDir)) {
@@ -39,6 +39,48 @@ function ensureAssetsFolderExists(projectPath: string): string {
   }
 
   return backgroundsDir;
+}
+
+// Helper function to migrate old project file to new folder structure
+function migrateOldProject(oldFilePath: string): string {
+  // Old format: /path/to/Project.mythscribe (SQLite file)
+  // New format: /path/to/Project.mythscribe/ (folder) containing project.db
+
+  const projectName = path.basename(oldFilePath);
+  const projectDir = path.dirname(oldFilePath);
+  const newProjectFolderPath = oldFilePath; // Same path but will be a folder
+  const tempOldPath = path.join(projectDir, `${projectName}.old`);
+
+  // Rename old file temporarily
+  fs.renameSync(oldFilePath, tempOldPath);
+
+  // Create new folder structure
+  fs.mkdirSync(newProjectFolderPath, { recursive: true });
+
+  // Move database file to new location
+  const newDbPath = path.join(newProjectFolderPath, 'project.db');
+  fs.renameSync(tempOldPath, newDbPath);
+
+  // Create assets folder structure
+  const backgroundsDir = ensureAssetsFolderExists(newProjectFolderPath);
+
+  // Migrate old assets from parent directory to new location
+  const oldAssetsDir = path.join(projectDir, 'assets', 'backgrounds');
+  if (fs.existsSync(oldAssetsDir)) {
+    const files = fs.readdirSync(oldAssetsDir);
+    files.forEach(file => {
+      const oldPath = path.join(oldAssetsDir, file);
+      const newPath = path.join(backgroundsDir, file);
+      if (fs.statSync(oldPath).isFile()) {
+        fs.copyFileSync(oldPath, newPath);
+        console.log(`Migrated asset: ${file}`);
+      }
+    });
+  }
+
+  console.log(`Migrated project from old format: ${oldFilePath}`);
+
+  return newProjectFolderPath;
 }
 
 export function setupIpcHandlers() {
@@ -60,15 +102,22 @@ export function setupIpcHandlers() {
         currentDb.close();
       }
 
-      // Create new database
-      currentDb = new ProjectDatabase(filePath);
-      currentProjectPath = filePath;
-      const projectId = currentDb.createProject(projectName, format);
+      // Create project folder structure
+      const projectFolderPath = filePath;
+      if (!fs.existsSync(projectFolderPath)) {
+        fs.mkdirSync(projectFolderPath, { recursive: true });
+      }
 
       // Ensure assets folder structure exists
-      ensureAssetsFolderExists(filePath);
+      ensureAssetsFolderExists(projectFolderPath);
 
-      return { projectId, projectPath: filePath };
+      // Create database inside the project folder
+      const dbPath = path.join(projectFolderPath, 'project.db');
+      currentDb = new ProjectDatabase(dbPath, projectFolderPath);
+      currentProjectPath = projectFolderPath;
+      const projectId = currentDb.createProject(projectName, format);
+
+      return { projectId, projectPath: projectFolderPath };
     } catch (error) {
       console.error('Error creating project:', error);
       throw error;
@@ -80,29 +129,58 @@ export function setupIpcHandlers() {
       const { filePaths } = await dialog.showOpenDialog({
         title: 'Open Project',
         filters: [{ name: 'Mythscribe Project', extensions: ['mythscribe'] }],
-        properties: ['openFile']
+        properties: ['openFile', 'openDirectory']
       });
 
       if (!filePaths || filePaths.length === 0) return null;
+
+      const selectedPath = filePaths[0];
 
       // Close existing database if any
       if (currentDb) {
         currentDb.close();
       }
 
+      let projectFolderPath: string;
+      let dbPath: string;
+
+      // Check if it's an old format (SQLite file) or new format (folder)
+      const stats = fs.statSync(selectedPath);
+
+      if (stats.isFile()) {
+        // Old format: SQLite file - migrate automatically
+        console.log('Detected old project format, migrating...');
+        projectFolderPath = migrateOldProject(selectedPath);
+        dbPath = path.join(projectFolderPath, 'project.db');
+      } else if (stats.isDirectory()) {
+        // New format: Folder containing project.db
+        projectFolderPath = selectedPath;
+        dbPath = path.join(projectFolderPath, 'project.db');
+
+        // Verify project.db exists
+        if (!fs.existsSync(dbPath)) {
+          throw new Error('Invalid project folder: project.db not found');
+        }
+      } else {
+        throw new Error('Invalid project file or folder');
+      }
+
       // Open database
-      currentDb = new ProjectDatabase(filePaths[0]);
-      currentProjectPath = filePaths[0];
+      currentDb = new ProjectDatabase(dbPath, projectFolderPath);
+      currentProjectPath = projectFolderPath;
       currentDb.updateLastOpened();
 
       // Seed tag templates if they don't exist (for existing projects)
       currentDb.seedDefaultTagTemplates();
 
+      // Migrate asset paths from absolute to relative (for old projects)
+      currentDb.migrateAssetPaths();
+
       // Ensure assets folder structure exists
-      ensureAssetsFolderExists(filePaths[0]);
+      ensureAssetsFolderExists(projectFolderPath);
 
       const metadata = currentDb.getProjectMetadata();
-      return { metadata, projectPath: filePaths[0] };
+      return { metadata, projectPath: projectFolderPath };
     } catch (error) {
       console.error('Error opening project:', error);
       throw error;
@@ -722,16 +800,19 @@ Example response format:
           break;
       }
 
+      // Store relative path in database
+      const relativePath = path.join('assets', 'backgrounds', newFileName);
+
       // Create database entry
       const assetId = currentDb.createAsset(
         'background-image',
         newFileName,
-        destPath,
+        relativePath,  // Store relative path
         fileSize,
         mimeType
       );
 
-      // Return the asset info
+      // Return the asset info with absolute path for immediate use
       return {
         id: assetId,
         fileName: newFileName,
@@ -748,7 +829,26 @@ Example response format:
   ipcMain.handle('focus:getBackgrounds', async () => {
     try {
       if (!currentDb) throw new Error('No project open');
-      return currentDb.getAssetsByType('background-image');
+      if (!currentProjectPath) throw new Error('Project path not available');
+
+      const assets = currentDb.getAssetsByType('background-image');
+
+      // Convert relative paths to absolute paths
+      return assets.map(asset => {
+        const absolutePath = path.isAbsolute(asset.file_path)
+          ? asset.file_path
+          : path.join(currentProjectPath, asset.file_path);
+
+        console.log(`Background asset: ${asset.file_name}`);
+        console.log(`  - DB path: ${asset.file_path}`);
+        console.log(`  - Absolute path: ${absolutePath}`);
+        console.log(`  - Exists: ${fs.existsSync(absolutePath)}`);
+
+        return {
+          ...asset,
+          file_path: absolutePath
+        };
+      });
     } catch (error) {
       console.error('Error getting backgrounds:', error);
       throw error;
@@ -758,6 +858,7 @@ Example response format:
   ipcMain.handle('focus:deleteBackground', async (_, assetId: string) => {
     try {
       if (!currentDb) throw new Error('No project open');
+      if (!currentProjectPath) throw new Error('Project path not available');
 
       // Get asset info before deleting
       const assets = currentDb.getAssetsByType('background-image');
@@ -767,9 +868,14 @@ Example response format:
         throw new Error('Asset not found');
       }
 
+      // Convert relative path to absolute if needed
+      const absolutePath = path.isAbsolute(asset.file_path)
+        ? asset.file_path
+        : path.join(currentProjectPath, asset.file_path);
+
       // Delete file from disk
-      if (fs.existsSync(asset.file_path)) {
-        fs.unlinkSync(asset.file_path);
+      if (fs.existsSync(absolutePath)) {
+        fs.unlinkSync(absolutePath);
       }
 
       // Delete from database

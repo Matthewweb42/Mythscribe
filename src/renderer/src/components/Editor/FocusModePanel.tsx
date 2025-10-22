@@ -250,7 +250,7 @@ const FocusModePanel: React.FC<FocusModePanelProps> = ({
                   letterSpacing: '0.5px'
                 }}
               >
-                <span>Overlay Opacity</span>
+                <span>Background Darkness</span>
                 <span>{overlayOpacity}%</span>
               </div>
               <input
@@ -284,7 +284,7 @@ const FocusModePanel: React.FC<FocusModePanelProps> = ({
               </div>
               <input
                 type="range"
-                min="40"
+                min="35"
                 max="100"
                 value={windowWidth}
                 onChange={(e) => onWindowWidthChange(parseInt(e.target.value))}

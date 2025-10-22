@@ -56,16 +56,75 @@ export interface TagRow {
 
 export class ProjectDatabase {
   private db: Database.Database;
+  private projectFolderPath: string;
 
-  constructor(projectPath: string) {
+  constructor(dbPath: string, projectFolderPath?: string) {
     // Ensure directory exists
-    const dir = path.dirname(projectPath);
+    const dir = path.dirname(dbPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    this.db = new Database(projectPath);
+    this.db = new Database(dbPath);
+
+    // Store project folder path (for resolving relative asset paths)
+    // If not provided, use the parent directory of the database file
+    this.projectFolderPath = projectFolderPath || path.dirname(dbPath);
+
     this.initializeTables();
+  }
+
+  getProjectFolderPath(): string {
+    return this.projectFolderPath;
+  }
+
+  // Migrate asset paths from absolute to relative
+  migrateAssetPaths() {
+    try {
+      const assets = this.getAssetsByType('background-image');
+
+      assets.forEach(asset => {
+        // Skip if already a relative path
+        if (!path.isAbsolute(asset.file_path)) {
+          return;
+        }
+
+        // Check if file exists at absolute path
+        if (fs.existsSync(asset.file_path)) {
+          const fileName = path.basename(asset.file_path);
+          const relativePath = path.join('assets', 'backgrounds', fileName);
+
+          // Update to relative path
+          this.db.prepare(`
+            UPDATE project_assets
+            SET file_path = ?
+            WHERE id = ?
+          `).run(relativePath, asset.id);
+
+          console.log(`Migrated asset path: ${asset.file_path} -> ${relativePath}`);
+        } else {
+          // File doesn't exist, try to find it by filename in new location
+          const fileName = path.basename(asset.file_path);
+          const newPath = path.join(this.projectFolderPath, 'assets', 'backgrounds', fileName);
+
+          if (fs.existsSync(newPath)) {
+            const relativePath = path.join('assets', 'backgrounds', fileName);
+            this.db.prepare(`
+              UPDATE project_assets
+              SET file_path = ?
+              WHERE id = ?
+            `).run(relativePath, asset.id);
+
+            console.log(`Fixed missing asset path: ${relativePath}`);
+          } else {
+            console.warn(`Asset file not found, removing from database: ${asset.file_path}`);
+            this.deleteAsset(asset.id);
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error migrating asset paths:', error);
+    }
   }
 
   private runMigrations() {
@@ -317,7 +376,7 @@ export class ProjectDatabase {
         focus_bg_rotation_interval INTEGER DEFAULT 10,
         focus_bg_current TEXT,
         focus_overlay_opacity INTEGER DEFAULT 50,
-        focus_window_width INTEGER DEFAULT 60,
+        focus_window_width INTEGER DEFAULT 50,
         focus_window_offset_x INTEGER DEFAULT 0
       )
     `);

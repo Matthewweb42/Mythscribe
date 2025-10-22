@@ -270,7 +270,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
   const [currentBackgroundPath, setCurrentBackgroundPath] = useState<string | null>(null);
   const [showBackgroundManager, setShowBackgroundManager] = useState(false);
   const [focusOverlayOpacity, setFocusOverlayOpacity] = useState(50);
-  const [focusWindowWidth, setFocusWindowWidth] = useState(60);
+  const [focusWindowWidth, setFocusWindowWidth] = useState(50);
   const [focusWindowOffsetX, setFocusWindowOffsetX] = useState(0);
   const [focusRotationEnabled, setFocusRotationEnabled] = useState(false);
   const [focusRotationInterval, setFocusRotationInterval] = useState(10);
@@ -933,6 +933,42 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     }
 
     setValue(newValue);
+
+    // Auto-center current line in focus mode
+    if (isFullScreen) {
+      requestAnimationFrame(() => {
+        try {
+          const { selection } = editor;
+          if (selection) {
+            const domSelection = window.getSelection();
+            if (domSelection && domSelection.rangeCount > 0) {
+              const range = domSelection.getRangeAt(0);
+              const rect = range.getBoundingClientRect();
+
+              if (rect.top !== 0 || rect.bottom !== 0) {
+                // Get the container element
+                const container = document.querySelector('[style*="overflow: auto"]') as HTMLElement;
+                if (container) {
+                  const containerRect = container.getBoundingClientRect();
+                  const lineMiddle = rect.top + rect.height / 2;
+                  const containerMiddle = containerRect.top + containerRect.height / 2;
+                  const scrollOffset = lineMiddle - containerMiddle;
+
+                  // Smooth scroll to center the current line
+                  container.scrollBy({
+                    top: scrollOffset,
+                    behavior: 'smooth'
+                  });
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // Silently fail if DOM elements aren't ready
+          console.log('Auto-center skipped:', e);
+        }
+      });
+    }
 
     // Calculate stats
     const { words } = calculateStats(newValue);
@@ -1833,7 +1869,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
               style={{
                 height: '100%',
                 overflow: 'auto',
-                backgroundImage: currentBackgroundPath && isFullScreen ? `url(file:///${currentBackgroundPath.replace(/\\/g, '/')})` : 'none',
+                backgroundImage: currentBackgroundPath && isFullScreen ? `url(mythscribe-asset://${encodeURIComponent(currentBackgroundPath)})` : 'none',
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 backgroundAttachment: 'fixed',
