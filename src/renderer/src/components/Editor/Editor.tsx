@@ -230,6 +230,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
   const [mode, setMode] = useState<'freewrite' | 'vibewrite'>('freewrite');
   const suggestionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTextRef = useRef<string>(''); // Track the last text to detect what user typed
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Stats tracking
   const [wordCount, setWordCount] = useState(0);
@@ -368,6 +369,46 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
     return () => clearInterval(rotationTimer);
   }, [isFullScreen, focusRotationEnabled, focusRotationInterval, currentBackgroundAssetId]);
+
+  // Auto-center text when entering focus mode
+  useEffect(() => {
+    if (!isFullScreen || !scrollContainerRef.current) return;
+
+    // Delay to ensure DOM is ready
+    const timer = setTimeout(() => {
+      try {
+        const container = scrollContainerRef.current;
+        if (container) {
+          const editorElement = container.querySelector('[data-slate-editor="true"]') as HTMLElement;
+          if (editorElement) {
+            // Focus mode padding from container style
+            const FOCUS_PADDING_TOP = 80;
+            const FOCUS_PADDING_BOTTOM = 80;
+
+            const containerHeight = container.clientHeight;
+            const editorHeight = editorElement.scrollHeight;
+
+            // Subtract padding to get actual content height
+            const actualContentHeight = editorHeight - FOCUS_PADDING_TOP - FOCUS_PADDING_BOTTOM;
+
+            // Calculate scroll position: content bottom at viewport center
+            const targetScrollTop = actualContentHeight - (containerHeight / 2) + FOCUS_PADDING_TOP;
+
+            if (targetScrollTop > 0) {
+              container.scrollTo({
+                top: targetScrollTop,
+                behavior: 'smooth'
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.log('Initial center failed:', e);
+      }
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [isFullScreen]);
 
   // Count words in text
   const countWords = (text: string): number => {
@@ -934,32 +975,35 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
     setValue(newValue);
 
-    // Auto-center current line in focus mode
-    if (isFullScreen) {
+    // Auto-center: Keep bottom of text at vertical center (typewriter mode)
+    if (isFullScreen && scrollContainerRef.current) {
       requestAnimationFrame(() => {
         try {
-          const { selection } = editor;
-          if (selection) {
-            const domSelection = window.getSelection();
-            if (domSelection && domSelection.rangeCount > 0) {
-              const range = domSelection.getRangeAt(0);
-              const rect = range.getBoundingClientRect();
+          const container = scrollContainerRef.current;
+          if (container) {
+            // Find the Slate editor content container
+            const editorElement = container.querySelector('[data-slate-editor="true"]') as HTMLElement;
+            if (editorElement) {
+              // Focus mode padding from container style (line 1932)
+              const FOCUS_PADDING_TOP = 80;
+              const FOCUS_PADDING_BOTTOM = 80;
 
-              if (rect.top !== 0 || rect.bottom !== 0) {
-                // Get the container element
-                const container = document.querySelector('[style*="overflow: auto"]') as HTMLElement;
-                if (container) {
-                  const containerRect = container.getBoundingClientRect();
-                  const lineMiddle = rect.top + rect.height / 2;
-                  const containerMiddle = containerRect.top + containerRect.height / 2;
-                  const scrollOffset = lineMiddle - containerMiddle;
+              const containerHeight = container.clientHeight;
+              const editorHeight = editorElement.scrollHeight;
 
-                  // Smooth scroll to center the current line
-                  container.scrollBy({
-                    top: scrollOffset,
-                    behavior: 'smooth'
-                  });
-                }
+              // Subtract padding to get actual content height
+              const actualContentHeight = editorHeight - FOCUS_PADDING_TOP - FOCUS_PADDING_BOTTOM;
+
+              // Calculate scroll position: content bottom at viewport center
+              // Add back the top padding offset
+              const targetScrollTop = actualContentHeight - (containerHeight / 2) + FOCUS_PADDING_TOP;
+
+              // Only scroll if we need to (content is long enough)
+              if (targetScrollTop > 0 && Math.abs(container.scrollTop - targetScrollTop) > 5) {
+                container.scrollTo({
+                  top: targetScrollTop,
+                  behavior: 'smooth'
+                });
               }
             }
           }
@@ -1866,6 +1910,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
           {/* Main editor area */}
           <Panel minSize={30}>
             <div
+              ref={scrollContainerRef}
               style={{
                 height: '100%',
                 overflow: 'auto',
@@ -1873,10 +1918,7 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 backgroundAttachment: 'fixed',
-                position: 'relative',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
+                position: 'relative'
               }}
               onMouseMove={isDraggingWindow ? handleWindowDrag : undefined}
               onMouseUp={handleWindowDragEnd}
@@ -1884,13 +1926,14 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
               {/* Background Overlay */}
               {isFullScreen && currentBackgroundPath && (
                 <div style={{
-                  position: 'absolute',
+                  position: 'fixed',
                   top: 0,
                   left: 0,
                   right: 0,
                   bottom: 0,
                   backgroundColor: `rgba(0, 0, 0, ${focusOverlayOpacity / 100})`,
-                  pointerEvents: 'none'
+                  pointerEvents: 'none',
+                  zIndex: 0
                 }} />
               )}
 
@@ -1900,10 +1943,11 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
                   position: 'relative',
                   width: isFullScreen ? `${focusWindowWidth}%` : '100%',
                   maxWidth: isFullScreen ? 'none' : `${editorMaxWidth}px`,
-                  height: isFullScreen ? '100%' : 'auto',
+                  minHeight: isFullScreen ? '100%' : 'auto',
                   padding: isFullScreen ? '80px 40px' : '40px 80px',
+                  margin: '0 auto',
                   transform: isFullScreen ? `translateX(${focusWindowOffsetX}px)` : 'none',
-                  cursor: isDraggingWindow ? 'grabbing' : (isFullScreen ? 'grab' : 'default'),
+                  cursor: isDraggingWindow ? 'grabbing' : 'text',
                   transition: isDraggingWindow ? 'none' : 'width 0.2s ease-in-out, transform 0.2s ease-in-out',
                   zIndex: 1
                 }}
@@ -1912,9 +1956,9 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
                 {/* Folder View (Chapter/Part with child scenes) */}
                 {isViewingFolder && currentDoc && (
                   <div style={{
-                    maxWidth: `${editorMaxWidth}px`,
+                    maxWidth: isFullScreen ? 'none' : `${editorMaxWidth}px`,
                     margin: '0 auto',
-                    padding: '0 40px'
+                    padding: isFullScreen ? '0' : '0 40px'
                   }}>
                     {childScenes.length > 0 ? (
                       <StackedSceneEditor
@@ -1947,9 +1991,9 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
                 {/* Regular Document Editor */}
                 {!isViewingFolder && (
                   <div style={{
-                    maxWidth: `${editorMaxWidth}px`,
+                    maxWidth: isFullScreen ? 'none' : `${editorMaxWidth}px`,
                     margin: '0 auto',
-                    padding: '0 40px'
+                    padding: isFullScreen ? '0' : '0 40px'
                   }}>
                     <Slate
                     editor={editor}
