@@ -370,45 +370,40 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
     return () => clearInterval(rotationTimer);
   }, [isFullScreen, focusRotationEnabled, focusRotationInterval, currentBackgroundAssetId]);
 
-  // Auto-center text when entering focus mode
+  // Center cursor when entering focus mode (typewriter mode initialization)
   useEffect(() => {
-    if (!isFullScreen || !scrollContainerRef.current) return;
+    if (!isFullScreen || !scrollContainerRef.current || !editor.selection) return;
 
     // Delay to ensure DOM is ready
     const timer = setTimeout(() => {
       try {
         const container = scrollContainerRef.current;
-        if (container) {
-          const editorElement = container.querySelector('[data-slate-editor="true"]') as HTMLElement;
-          if (editorElement) {
-            // Focus mode padding from container style
-            const FOCUS_PADDING_TOP = 80;
-            const FOCUS_PADDING_BOTTOM = 80;
+        if (!container) return;
 
-            const containerHeight = container.clientHeight;
-            const editorHeight = editorElement.scrollHeight;
+        // Find the DOM node for the current cursor position
+        const domRange = ReactEditor.toDOMRange(editor, editor.selection);
+        const cursorRect = domRange.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
 
-            // Subtract padding to get actual content height
-            const actualContentHeight = editorHeight - FOCUS_PADDING_TOP - FOCUS_PADDING_BOTTOM;
+        // Calculate where cursor currently is relative to container
+        const cursorRelativeTop = cursorRect.top - containerRect.top + container.scrollTop;
 
-            // Calculate scroll position: content bottom at viewport center
-            const targetScrollTop = actualContentHeight - (containerHeight / 2) + FOCUS_PADDING_TOP;
+        // Calculate target position: cursor at vertical center (50%)
+        const containerHeight = container.clientHeight;
+        const targetScrollTop = cursorRelativeTop - (containerHeight / 2);
 
-            if (targetScrollTop > 0) {
-              container.scrollTo({
-                top: targetScrollTop,
-                behavior: 'smooth'
-              });
-            }
-          }
-        }
+        // Smoothly scroll to center the cursor
+        container.scrollTo({
+          top: targetScrollTop,
+          behavior: 'smooth'
+        });
       } catch (e) {
-        console.log('Initial center failed:', e);
+        console.log('Initial typewriter center failed:', e);
       }
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [isFullScreen]);
+  }, [isFullScreen, editor.selection]);
 
   // Count words in text
   const countWords = (text: string): number => {
@@ -975,41 +970,33 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
 
     setValue(newValue);
 
-    // Auto-center: Keep bottom of text at vertical center (typewriter mode)
-    if (isFullScreen && scrollContainerRef.current) {
+    // Typewriter mode: Keep cursor at vertical center (50%) in focus mode
+    if (isFullScreen && scrollContainerRef.current && editor.selection) {
       requestAnimationFrame(() => {
         try {
           const container = scrollContainerRef.current;
-          if (container) {
-            // Find the Slate editor content container
-            const editorElement = container.querySelector('[data-slate-editor="true"]') as HTMLElement;
-            if (editorElement) {
-              // Focus mode padding from container style (line 1932)
-              const FOCUS_PADDING_TOP = 80;
-              const FOCUS_PADDING_BOTTOM = 80;
+          if (!container) return;
 
-              const containerHeight = container.clientHeight;
-              const editorHeight = editorElement.scrollHeight;
+          // Find the DOM node for the current cursor position
+          const domRange = ReactEditor.toDOMRange(editor, editor.selection);
+          const cursorRect = domRange.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
 
-              // Subtract padding to get actual content height
-              const actualContentHeight = editorHeight - FOCUS_PADDING_TOP - FOCUS_PADDING_BOTTOM;
+          // Calculate where cursor currently is relative to container
+          const cursorRelativeTop = cursorRect.top - containerRect.top + container.scrollTop;
 
-              // Calculate scroll position: content bottom at viewport center
-              // Add back the top padding offset
-              const targetScrollTop = actualContentHeight - (containerHeight / 2) + FOCUS_PADDING_TOP;
+          // Calculate target position: cursor at vertical center (50%)
+          const containerHeight = container.clientHeight;
+          const targetScrollTop = cursorRelativeTop - (containerHeight / 2);
 
-              // Only scroll if we need to (content is long enough)
-              if (targetScrollTop > 0 && Math.abs(container.scrollTop - targetScrollTop) > 5) {
-                container.scrollTo({
-                  top: targetScrollTop,
-                  behavior: 'smooth'
-                });
-              }
-            }
-          }
+          // Smoothly scroll to center the cursor
+          container.scrollTo({
+            top: targetScrollTop,
+            behavior: 'smooth'
+          });
         } catch (e) {
-          // Silently fail if DOM elements aren't ready
-          console.log('Auto-center skipped:', e);
+          // Silently fail if cursor position can't be determined
+          console.log('Typewriter scroll skipped:', e);
         }
       });
     }
@@ -1920,38 +1907,20 @@ const Editor: React.FC<EditorProps> = ({ onInsertTextReady, onSetGhostTextReady 
                 backgroundAttachment: 'fixed',
                 position: 'relative'
               }}
-              onMouseMove={isDraggingWindow ? handleWindowDrag : undefined}
-              onMouseUp={handleWindowDragEnd}
             >
-              {/* Background Overlay */}
-              {isFullScreen && currentBackgroundPath && (
-                <div style={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: `rgba(0, 0, 0, ${focusOverlayOpacity / 100})`,
-                  pointerEvents: 'none',
-                  zIndex: 0
-                }} />
-              )}
-
               {/* Adjustable Writing Area Container */}
               <div
                 style={{
                   position: 'relative',
                   width: isFullScreen ? `${focusWindowWidth}%` : '100%',
                   maxWidth: isFullScreen ? 'none' : `${editorMaxWidth}px`,
-                  minHeight: isFullScreen ? '100%' : 'auto',
-                  padding: isFullScreen ? '80px 40px' : '40px 80px',
+                  padding: isFullScreen ? '80px 40px 400px 40px' : '40px 80px',
                   margin: '0 auto',
-                  transform: isFullScreen ? `translateX(${focusWindowOffsetX}px)` : 'none',
-                  cursor: isDraggingWindow ? 'grabbing' : 'text',
-                  transition: isDraggingWindow ? 'none' : 'width 0.2s ease-in-out, transform 0.2s ease-in-out',
-                  zIndex: 1
+                  cursor: 'text',
+                  transition: 'width 0.2s ease-in-out',
+                  zIndex: 1,
+                  backgroundColor: isFullScreen && currentBackgroundPath ? `rgba(0, 0, 0, ${focusOverlayOpacity / 100})` : 'transparent'
                 }}
-                onMouseDown={isFullScreen ? handleWindowDragStart : undefined}
               >
                 {/* Folder View (Chapter/Part with child scenes) */}
                 {isViewingFolder && currentDoc && (

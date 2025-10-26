@@ -2,8 +2,8 @@
 
 **Strategic build order to avoid conflicts and ensure smooth development**
 
-**Last Updated:** October 2025
-**Current Phase:** Phase 2 - Writing Experience (~80% complete)
+**Last Updated:** January 2025
+**Current Phase:** Phase 3 - Organization (Ready to start)
 
 ---
 
@@ -331,72 +331,106 @@
 
 ---
 
-### Chunk 2.5: Focus Mode Enhancements ⏱️ 5-6 hours
+### Chunk 2.5: Focus Mode Enhancements ✅ COMPLETE
 **Why last in phase:** Builds on existing focus mode
 
-- [ ] Add background image upload
-- [ ] Store images per-project (in project folder or database)
-- [ ] Create adjustable overlay window
-  - Opacity slider (0-100%)
-  - Width slider (40%-100%)
-  - Drag to reposition
-- [ ] Add background rotation option
-- [ ] Create background management UI
+- [x] Add background image upload
+- [x] Store images as base64 data URLs in database (simplified from file-based system)
+- [x] Create adjustable overlay window
+  - [x] Opacity slider (0-100%, labeled "Background Darkness")
+  - [x] Width slider (35%-100%, default 50%)
+  - [x] Removed drag-to-reposition (kept centered)
+- [x] Add background rotation option (automatic timer-based)
+- [x] Create background management UI (modal with thumbnails)
+- [x] Implemented typewriter mode scrolling
+  - [x] Cursor stays at vertical center (50%) while typing
+  - [x] Initial scroll position matches normal editor view
+  - [x] Smooth scroll behavior everywhere in document
+  - [x] Works when editing beginning, middle, or end
 
-**Testing:**
-- Can upload custom backgrounds
-- Backgrounds save per-project
-- Overlay window adjustable
-- Can rotate through backgrounds
+**Testing Passed:**
+- ✅ Can upload custom backgrounds (converts to base64)
+- ✅ Backgrounds save per-project in database
+- ✅ Overlay opacity adjustable (0-100%)
+- ✅ Width adjustable (35-100%)
+- ✅ Can rotate through backgrounds manually or automatically
+- ✅ Typewriter mode keeps cursor centered while typing
+- ✅ Smooth scrolling experience
+
+**Implementation Notes:**
+- Switched from custom protocol (`mythscribe-asset://`) to base64 data URLs to avoid Electron bundling issues
+- Background images stored directly in `project_assets` table as base64 strings
+- Typewriter mode uses Slate's `ReactEditor.toDOMRange()` to track cursor position
+- Auto-scroll triggers on every change in focus mode to maintain centered cursor
+- Large bottom padding (400px) creates visual dark gap below text
 
 **Database Changes:**
-- Add `project_assets` table for images
-- Add `focus_settings` columns to project metadata
+- ✅ Added `project_assets` table for images (stores base64 data)
+- ✅ Added focus mode settings columns to project metadata:
+  - `focus_background_asset_id` - Currently selected background
+  - `focus_overlay_opacity` - Darkness level (0-100)
+  - `focus_window_width` - Text width percentage (35-100, default 50)
+  - `focus_rotation_enabled` - Auto-rotation toggle
+  - `focus_rotation_interval` - Rotation interval in minutes
 
-**Files to Modify:**
-- `src/renderer/src/components/Editor/Editor.tsx` (focus mode upgrades)
-- `src/main/database.ts` (add assets table)
-- `src/main/ipcHandlers.ts` (add file upload handler)
+**Files Created:**
+- `src/renderer/src/components/Editor/BackgroundManager.tsx` - Background upload/management modal
+- `src/renderer/src/components/Editor/FocusModePanel.tsx` - Control panel with sliders
+
+**Files Modified:**
+- `src/renderer/src/components/Editor/Editor.tsx` - Typewriter mode implementation, background display, focus mode controls
+- `src/main/database.ts` - Assets table, focus settings schema
+- `src/main/ipcHandlers.ts` - Background upload (base64 conversion), getBackgrounds, deleteBackground
+- `src/main/index.ts` - Removed custom protocol code (simplified architecture)
 
 ---
 
-**PHASE 2 CHECKPOINT:** ⏱️ IN PROGRESS (~80% Complete)
+**PHASE 2 CHECKPOINT:** ✅ COMPLETE
 - ✅ Novel formatting works
 - ✅ Scene metadata functional
 - ✅ Stacked scene editing operational
 - ✅ UI/UX improvements complete (resizable bar, status bar, swapped panels)
 - ✅ Front Matter & End Matter system with 14 templates (Chunk 2.4)
-- [ ] Focus mode enhanced (Chunk 2.5)
-- **Test entire app before moving on**
+- ✅ Focus mode enhanced with backgrounds and typewriter scrolling (Chunk 2.5)
+- **Ready to move to Phase 3: Organization**
 
 ---
 
 ## 🎯 **PHASE 3: Organization** (Week 3)
 
-### Chunk 3.1: Tagging System Foundation ⏱️ 4-5 hours
+### Chunk 3.1: Tagging System Foundation ✅ COMPLETE
 **Why first:** Tags used by multiple features
 
-- [ ] Create tags database table
-- [ ] Add tag CRUD operations
-- [ ] Create TagManager component
-- [ ] Add tag input to scenes
-- [ ] Create tag badge UI
-- [ ] Tag autocomplete
+- [x] Create tags database table
+- [x] Add tag CRUD operations
+- [x] Create TagManager component
+- [x] Add tag input to scenes
+- [x] Create tag badge UI
+- [x] Tag autocomplete (inline #tag syntax)
 
-**Testing:**
-- Can create/edit/delete tags
-- Can apply tags to scenes
-- Tags display properly
+**Testing Passed:**
+- ✅ Can create/edit/delete tags
+- ✅ Can apply tags to scenes
+- ✅ Tags display properly with colors
+- ✅ Category filtering works (character, setting, worldBuilding, tone, content, plot-thread, custom)
+- ✅ Tag templates system functional
+- ✅ Inline tag autocomplete in editor
+- ✅ AI tag suggestions working
 
-**Database Changes:**
-- Add `tags` table (id, name, color, category)
-- Add `document_tags` junction table
+**Database Implementation:**
+- ✅ `tags` table (id, name, color, category, parent_tag_id, usage_count, created, modified)
+- ✅ `document_tags` junction table with position tracking
+- ✅ Indexes for performance optimization
 
-**Files to Create/Modify:**
-- `src/main/database.ts` (tags schema)
-- `src/renderer/src/components/Tags/TagManager.tsx` (new)
-- `src/renderer/src/components/Tags/TagInput.tsx` (new)
-- `src/renderer/src/components/Editor/SceneMetadata.tsx` (integrate tags)
+**Files Created:**
+- `src/renderer/src/components/TagManagerPanel.tsx` - Full tag management UI with categories, search, templates
+- `src/renderer/src/components/Editor/InlineTagAutocomplete.tsx` - Autocomplete for #tags in editor
+
+**Files Modified:**
+- `src/main/database.ts` - Tags schema, CRUD operations
+- `src/main/ipcHandlers.ts` - Tag IPC handlers (create, get, update, delete, add to document)
+- `src/renderer/src/components/DocumentTagBox.tsx` - Tag display and document integration
+- `src/renderer/src/components/Sidebar/TabbedSidebar.tsx` - Tags tab with TagManagerPanel
 
 ---
 
@@ -826,26 +860,29 @@ npm install epub-gen
 
 **✅ Completed:**
 - ✅ Phase 1: Complete layout foundation with resizable panels, tabs, AI dock
-- ✅ Phase 2 (80% complete):
+- ✅ Phase 2: Complete writing experience (ALL chunks done!)
   - ✅ Chunk 2.1: Novel formatting, width constraints, scene breaks
   - ✅ Chunk 2.2: Scene metadata fields with tag integration
   - ✅ Chunk 2.3: Stacked scene editing for chapters/parts
   - ✅ Chunk 2.3b: Major UI/UX improvements (resizable bar, status bar, panel swap)
   - ✅ Chunk 2.4: Front Matter & End Matter system with 14 professional templates
+  - ✅ Chunk 2.5: Focus Mode with backgrounds, typewriter scrolling, and controls
+- ✅ Phase 3 (Started):
+  - ✅ Chunk 3.1: Tagging System Foundation (complete with categories, autocomplete, templates)
 - ✅ Bonus: Popup/modal system overhaul, notification system
 
-**⬅️ Next Up: Phase 2, Chunk 2.5 - Focus Mode Enhancements**
+**⬅️ Next Up: Phase 3, Chunk 3.2 - Global Search System**
 
 **Recommended approach:**
-1. Add background image upload functionality
-2. Implement image storage in project database
-3. Create overlay window with adjustable opacity
-4. Add background rotation feature
-5. Create Settings UI for focus mode customization
-6. Test focus mode with various image sizes and formats
+1. Create SearchPanel component with modern UI
+2. Implement full-text search across all documents (manuscript, front/end matter)
+3. Add search filters (by document type, tags, hierarchy level)
+4. Add result highlighting and preview
+5. Implement jump-to-result navigation
+6. Add keyboard shortcuts (Cmd/Ctrl+F for global search)
 
 **Estimated time:** 5-6 hours
 
 ---
 
-**Last Updated:** January 2025 | **Progress:** ~30% complete overall
+**Last Updated:** January 2025 | **Progress:** ~38% complete overall (Phase 1 & 2 complete, Phase 3 started!)
