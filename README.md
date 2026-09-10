@@ -1,34 +1,10 @@
-# mythscribe
+# MythScribe
 
-An Electron application with React and TypeScript
+A local-first desktop app for writing novels: Scrivener-style manuscript organizer, distraction-free
+editor, story tagging, and AI assistance that understands your manuscript.
 
-## Recommended IDE Setup
+**Status:** being rebuilt from a clean specification. The previous prototype lives at git tag
+`v0-legacy`.
 
-- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
-
-## Project Setup
-
-### Install
-
-```bash
-$ npm install
-```
-
-### Development
-
-```bash
-$ npm run dev
-```
-
-### Build
-
-```bash
-# For windows
-$ npm run build:win
-
-# For macOS
-$ npm run build:mac
-
-# For Linux
-$ npm run build:linux
-```
+- What it does and will do: [`FEATURES.md`](FEATURES.md)
+- How the project is built with Claude Code: [`CLAUDE.md`](CLAUDE.md)

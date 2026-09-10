@@ -1,0 +1,230 @@
+# MythScribe — Feature Specification
+
+**This file is the single source of truth for what MythScribe is and does.**
+Everything is rebuilt from this document. If a feature is not listed here, it does not exist.
+Implement features by ID with `/feature <ID>`. Keep statuses honest with `/audit`.
+
+Legend, per feature line:
+- `[ ]` / `[x]` — rebuild status (unbuilt / built and verified in the new codebase)
+- `v0 ✅` — existed and worked in the original prototype (verified in code before it was deleted; git tag `v0-legacy`)
+- `v0 🟡` — existed in the prototype but was partial, stubbed, or buggy
+- `v0 ⬜` — never built; carried over from the old roadmap
+
+---
+
+## 0. Vision
+
+MythScribe is a desktop novel-writing application for fiction authors. It combines a Scrivener-style
+manuscript organizer (parts, chapters, scenes, front and end matter) with a distraction-free editor,
+a story-tagging system, and AI assistance that understands the author's own story. The long-term
+differentiator is **Story Intelligence**: the author can ask questions about their manuscript
+("Where did Emma first meet the villain?") and get cited answers that jump to the scene.
+
+Principles:
+1. **Local-first.** A project is a folder on disk the author owns. No account required. Works offline except for AI calls.
+2. **Never lose words.** Autosave, crash safety, and versioning matter more than any feature.
+3. **The editor is the product.** Everything else is in service of writing without friction.
+4. **AI assists, the author decides.** AI output is always a suggestion (ghost text, chat, tag recommendations), never a silent edit.
+5. **Novel-aware, not generic.** Structure, formatting defaults, and templates follow publishing conventions.
+
+Target users: solo fiction writers (novels, epics/series, web novels). Single user per project.
+
+---
+
+## 1. Domain Model
+
+- **Project** — one novel or series. Has a `format`: `novel`, `epic` (series), or `webnovel`. Stored as a folder `<Name>.mythscribe/` containing the database and an `assets/` directory. Tracks created/modified/last-opened.
+- **Section** — every project has exactly three root containers that cannot be deleted, renamed, or moved: **Front Matter**, **Manuscript** (labelled "Series" for epic, "Volume 1" for webnovel), **End Matter**.
+- **Document tree** — ordered, nested nodes under a section. A node is a **folder** or a **document**, with a `hierarchy_level` of `part` (labelled "Arc" for webnovel), `chapter`, `scene`, or none (generic). Documents hold rich-text content, per-document notes, a cached word count, and scene metadata (location, POV, timeline position, free-form JSON). Front/end matter documents also carry a `matter_type` (e.g. `title-page`) and an optional formatting preset.
+- **Reference** — a character, setting, or world-building entry with a name and free-form content. Used as AI context. (To be superseded by structured **Entities**, see §2.9.)
+- **Tag** — name (kebab-case `like-this`), category (`character`, `setting`, `worldBuilding`, `tone`, `content`, `plot-thread`, `custom`), color, optional parent tag, usage count.
+- **Document tag** — many-to-many link between a document and a tag, with optional character-offset range for granular tagging.
+- **Inline tag** — a tag reference embedded in document content (`#tag-name`), rendered as a colored token; parsed from content, never stored separately.
+- **Tag template** — a named bundle of categories and tag names used to seed a project's tag bank.
+- **Scene summary** — AI-generated summary, key points, and characters-present for a document; cache for Story Intelligence.
+- **Asset** — a file belonging to the project (focus-mode background images, later entity images). Stored on disk under `assets/`; the database stores the path, never the bytes.
+- **Settings** — key/value store per project (editor formatting, AI preferences, panel layout, conversation history).
+
+---
+
+## 2. Features
+
+### 2.1 Project lifecycle
+
+- [ ] **F-1.1 Welcome screen** (v0 ✅) — Logo, app name, "New Project" and "Open Project". Shown whenever no project is open. Lists recent projects (v0 ⬜ for the recents list).
+- [ ] **F-1.2 Create project wizard** (v0 ✅) — Two steps: name, then format card picker (Novel / Epic / Web novel with description of each structure). Native save dialog chooses the location; default under Documents/Mythscribe. Creates the project folder, database, and assets directory.
+- [ ] **F-1.3 Seeded structure** (v0 ✅) — New projects get the three sections plus a starter skeleton: Part 1–2 → Chapter 1–3 → Scene 1 (Arc/Volume labels for webnovel). Format-specific default editor settings are seeded (see F-3.6).
+- [ ] **F-1.4 Open / close project** (v0 ✅) — Native open dialog; close asks for confirmation; closing flushes pending saves. Only one project open at a time. Opening an old single-file project migrates it to the folder layout.
+- [ ] **F-1.5 Project metadata** (v0 ✅) — Project name shown in the shell; format drives labels and defaults.
+
+### 2.2 Manuscript organizer (sidebar "Manuscript" tab)
+
+- [ ] **F-2.1 Document tree** (v0 ✅) — Nested, ordered tree of the three sections. Folders collapse/expand. Each level has its own icon and color (part, chapter, scene, generic; front/end matter documents in a distinct "gold" style). Word count shown next to every node. Active document highlighted.
+- [ ] **F-2.2 Create nodes** (v0 ✅) — Bottom buttons for Scene / Chapter / Part relative to the current selection, plus a right-click context menu that is section-aware: Manuscript offers Part, Chapter, Scene, Generic document, Generic folder; Front/End Matter offer a template submenu (F-2.6). New nodes are named "Untitled…" and immediately enter inline rename.
+- [ ] **F-2.3 Rename, duplicate, delete** (v0 ✅) — Inline rename (Enter/blur commit, Esc cancel). Duplicate copies content, notes, and recursively children. Delete asks for confirmation and cascades to children. Root sections cannot be renamed, deleted, or moved.
+- [ ] **F-2.4 Drag and drop** (v0 ✅) — Reorder and re-parent by dragging. Dropping on a folder nests; dropping on a scene makes a sibling. Moves are restricted to within a section. Visual drop indicator.
+- [ ] **F-2.5 Select folder = stacked view** (v0 ✅) — Selecting a part, chapter, or front/end matter folder opens all descendant documents stacked in the editor (see F-3.8).
+- [ ] **F-2.6 Front and end matter templates** (v0 ✅) — 14 templates with pre-filled, conventionally formatted content. Front: Title Page, Copyright Page, Dedication, Epigraph, Foreword, Preface, Table of Contents. End: Acknowledgments, About the Author, Author's Note, Afterword, Appendix, Glossary, Bibliography.
+- [ ] **F-2.7 Insert via menu and shortcuts** (v0 🟡 stubbed) — Insert › Scene/Chapter/Part (Ctrl+Shift+S/C/P) create relative to the current selection instead of showing "coming soon".
+- [ ] **F-2.8 Auto-tag from titles** (v0 ⬜) — Creating a chapter/scene/character titled "Fallen Creator" offers to create the tag `fallen-creator` so it can be referenced inline.
+
+### 2.3 Editor
+
+- [ ] **F-3.1 Rich text editing** (v0 ✅) — Bold, italic, underline, strikethrough, inline code; headings 1–3; paragraph alignment left/center/right/justify; block quote; scene-break block that renders the configured style (F-3.6). Toolbar buttons with active state plus Ctrl+B/I/U. Undo/redo.
+- [ ] **F-3.2 Autosave** (v0 ✅) — Debounced save ~1 s after the last keystroke; explicit Ctrl+S; word count cached to the database on save. Switching documents or closing the project never loses pending edits.
+- [ ] **F-3.3 Word counts** (v0 ✅) — Status bar at the bottom of the editor: document word count and session delta (`+123`). Folder views show the combined count of their scenes.
+- [ ] **F-3.4 Book-like column** (v0 ✅) — Text is centered in a column of configurable max width (default 700 px) with comfortable padding; responsive to window size.
+- [ ] **F-3.5 Empty state** (v0 ✅) — "Select a document to start writing" when nothing is selected.
+- [ ] **F-3.6 Formatting settings** (v0 ✅) — Per-project: font size 12–24 px, line height 1.0–2.5, paragraph spacing 0–2 em, first-line indent 0–3 em, max width 500–1000 px, scene break style (presets `* * *`, `***`, `###`, `~~~`, `---` or custom text). Live preview in Settings. Format defaults: novel/epic = manuscript style (no paragraph gap, 1.5 em indent, double-spaced, `* * *`); webnovel = web style (1 em gap, no indent, 1.6 line height, `~~~`). Changes apply without restarting the editor (v0 🟡 required reload).
+- [ ] **F-3.7 Per-document notes** (v0 ✅) — Every document and folder has a rich-text notes pane, toggled from the toolbar, shown as a resizable side panel next to the editor. Autosaves like content. Also available as a floating panel in focus mode (F-6.6); both views edit the same notes (v0 🟡 the floating view did not persist).
+- [ ] **F-3.8 Stacked scene editing** (v0 ✅) — When a folder is selected, every descendant document is shown in order as its own editable region with the scene-break style between manuscript scenes and a thin page-break line between front/end matter documents. Each region saves independently. Regions are keyed by document ID so identically named scenes never mix content. Empty folders show an invitation to add scenes.
+- [ ] **F-3.9 Typewriter scrolling** (v0 ✅ in focus mode only) — Optional mode that keeps the caret vertically centered while typing.
+- [ ] **F-3.10 Find and replace** (v0 ⬜) — In-document find with highlights, next/previous, replace/replace-all, case-sensitive and regex options (Ctrl+F / Ctrl+H).
+- [ ] **F-3.11 Spellcheck** (v0 ✅ browser default) — System spellcheck on; per-project custom dictionary (v0 ⬜).
+- [ ] **F-3.12 Compile views** (v0 ⬜) — Chapter view prints the chapter title as a heading above its scenes; scene view shows metadata header (location, time, POV, tags). Read-only "compiled" preview of the whole manuscript.
+
+### 2.4 Tags and metadata
+
+- [ ] **F-4.1 Tag bank** (v0 ✅) — Tags with name, category, color, usage count, optional parent. Default category colors: Characters red, Settings orange, World Building teal, Tone blue, Content green, Plot Threads purple, Custom gray. Names are kebab-case.
+- [ ] **F-4.2 Tag Manager** (v0 ✅) — Sidebar "Tags" tab: category tabs (All + 7), search, create (name + color picker, defaults to the category color), edit name/color, delete with confirmation (removes from all documents), detail view with usage count and dates.
+- [ ] **F-4.3 Tag templates** (v0 ✅) — Load a template into the tag bank with confirmation; existing tags are skipped. Seeded templates: Standard Fiction, Mystery, Fantasy, Sci-Fi (each with tags in all six categories). Creating and editing custom templates (v0 ⬜).
+- [ ] **F-4.4 Document tag bar** (v0 ✅) — Bar above the editor showing the document's tags as colored chips with remove buttons; "Add" opens a searchable picker of unassigned tags; inline tags used in the content are listed with occurrence counts. Bar is collapsible, has a draggable horizontal split between metadata and tags (30–70 %) and a draggable height (100 px–60 vh); layout persists.
+- [ ] **F-4.5 Scene metadata** (v0 ✅) — For scenes, chapters, and parts: Location (autocomplete from setting tags), POV character (autocomplete from character tags), Timeline position (free text until F-11.2). Debounced save.
+- [ ] **F-4.6 Inline tags** (v0 ✅) — Typing `#` in the editor opens an autocomplete anchored at the caret; typing filters; ↑/↓ navigate; Tab inserts the highlighted tag or creates a new custom tag from the typed text; Esc closes. The inserted tag is an atomic token rendered with the tag color at low opacity and a hover state; the space after it is unformatted. Insertion also links the tag to the document. Right-click on a token: edit, remove, open in Tag Manager (v0 ⬜).
+- [ ] **F-4.7 AI tag recommendations** (v0 ✅) — "Recommend" button in the tag bar (enabled at ≥50 characters of content) asks the AI for 3–8 tags from the existing bank; results shown as chips with per-tag accept, Accept All, Dismiss; already-applied tags filtered out. Background/automatic suggestions and batch tagging of existing content (v0 ⬜).
+- [ ] **F-4.8 Granular tagging** (v0 ⬜, schema existed) — Select text → tag the selection; ranges tracked as character offsets; margin/overlay indicators; overlapping ranges resolved; clear tags in selection.
+- [ ] **F-4.9 Tag bulk operations, import/export** (v0 ⬜) — Multi-select merge/recolor/delete; export and import a tag bank as JSON; shared tag bank across books in a series.
+- [ ] **F-4.10 Filter and search by tag** (v0 ⬜) — Filter the document tree by tag; list all documents carrying a tag from the Tag Manager.
+
+### 2.5 AI assistance
+
+- [ ] **F-5.1 Provider and key management** (v0 🟡 OpenAI only, key from `.env`) — Provider abstraction with at least one hosted provider; API key entered in Settings and stored in the OS keychain/safe storage; "Test connection" button; clear errors for missing key, invalid key, rate limit, and quota.
+- [ ] **F-5.2 Writing presets** (v0 ✅) — General, Action, Suspense/Mystery, Dialogue, Romance, World Building, and Custom. Each preset sets temperature, max suggestion length, a style instruction, and whether the AI may introduce new plot elements. Custom exposes instructions, temperature, max tokens, and the new-elements toggle. Persisted per project.
+- [ ] **F-5.3 VibeWrite ghost text** (v0 ✅) — Toggleable mode in the editor toolbar. After a configurable idle delay (0.5–5 s), the AI proposes a continuation (1–2 sentences) using the last ~500 characters plus reference notes as context. Shown as dimmed ghost text at the caret. Tab accepts all, Shift+Tab accepts one word, Esc dismisses, typing matching characters consumes the suggestion, typing anything else clears it. Requests are rate-limited.
+- [ ] **F-5.4 AI Assistant panel** (v0 ✅) — Docked, resizable panel (Ctrl+K) with two modes. **Plan**: conversational answers shown in chat. **Agent**: the response is placed in the editor as ghost text (with a "Tab to accept" notice) instead of the chat. Paragraph count selector 1–10. `#Name` in a message pulls that reference's notes into context; the active scene's text (truncated) is always included. Multiple conversation tabs, history persisted per project, clear conversation with confirmation. Enter sends, Shift+Enter newlines.
+- [ ] **F-5.5 AI settings** (v0 🟡 partly unpersisted) — Enable/disable AI, suggestion delay, creativity; all persisted.
+- [ ] **F-5.6 Scene summaries** (v0 ⬜, table existed) — Generate a ~100-token summary, key points, and characters present for a scene on save (debounced, background); cache and invalidate on edit; visible in scene metadata.
+- [ ] **F-5.7 Story Intelligence query mode** (v0 ⬜) — Third assistant mode ("Query"): parse the question, find candidate scenes via tags, metadata, and summaries, load full text only for the top matches within a token budget, answer with citations. Each citation opens the scene (optionally in a split view) and highlights the relevant passage; "Also mentioned in" list.
+- [ ] **F-5.8 Rename modes** (v0 ⬜) — Assistant modes become Query (default), Author (ghost-text edits), Plan (ideas and feedback).
+- [ ] **F-5.9 Token and cost visibility** (v0 ⬜) — Show tokens used per request and per session; configurable model per task.
+
+### 2.6 Focus mode
+
+- [ ] **F-6.1 Enter / exit** (v0 ✅) — F11 or toolbar button toggles OS fullscreen with the editor filling the screen; Esc exits. Sidebar, toolbar, and tag bar are hidden.
+- [ ] **F-6.2 Background images** (v0 ✅) — Upload images via file dialog, stored as project assets. Background Manager modal with thumbnails, "No background", select, delete. Current background persisted per project.
+- [ ] **F-6.3 Background rotation** (v0 ✅) — Optional automatic cycling through uploaded backgrounds on an interval (minutes), persisted.
+- [ ] **F-6.4 Writing overlay** (v0 ✅) — Centered writing area over the background with adjustable darkness (0–100 %) and width (35–100 %), persisted per project. Horizontal repositioning (v0 🟡 code present, not exposed).
+- [ ] **F-6.5 Control bar** (v0 ✅) — Auto-hiding bar at the bottom edge (appears when the mouse is near the bottom, hides after a short delay): Backgrounds, Rotate, VibeWrite, Notes, AI Assistant, darkness and width sliders, live word count, Exit.
+- [ ] **F-6.6 Floating panels** (v0 ✅) — Notes and AI Assistant open as draggable, resizable floating windows constrained to the viewport; position and size persisted.
+- [ ] **F-6.7 Typewriter mode** (v0 ✅) — See F-3.9; on by default in focus mode.
+
+### 2.7 Application shell and layout
+
+- [ ] **F-7.1 Menu bar** (v0 🟡 mostly stubbed) — Single menu definition drives both the native application menu (accelerators) and an in-app menu bar. File: New, Open, Save, Export…, Import…, Close. Edit: Undo, Redo, Cut, Copy, Paste, Find, Find & Replace. Insert: Scene, Chapter, Part, Character, Setting, World-building note, Scene break. View: Sidebar, Notes, AI Assistant, References, Focus mode. Tools: Word count, Statistics, Goals, Tags, Drafts, Snapshots, Settings. Help: Documentation, Keyboard shortcuts, About. Every item either works or is hidden; no "coming soon".
+- [ ] **F-7.2 Resizable panel layout** (v0 ✅) — Sidebar (15–35 %), editor (min 30 %), AI panel (20–50 %), references (15–35 %); drag handles with hover state; sizes persist across restarts; each panel toggleable.
+- [ ] **F-7.3 Tabbed sidebar** (v0 ✅ shell, tabs 🟡) — Tabs: Manuscript, Characters, Settings (locations), World, Outline, Timeline, Tags. Manuscript and Tags are functional; the others are implemented by F-9.x, F-10.x, F-11.x.
+- [ ] **F-7.4 References panel** (v0 ✅, to be replaced by F-9) — Right-side panel with Characters / Settings / World tabs; create by name, select, edit plain text, save; last-modified shown.
+- [ ] **F-7.5 Settings dialog** (v0 ✅) — Modal with Editor and AI tabs (Ctrl+,). Editor: F-3.6 with live preview. AI: key/connection, enable toggle, presets, behavior.
+- [ ] **F-7.6 Dialogs and notifications** (v0 🟡 some native `alert()` remained) — One themed dialog system: confirm (with danger variant), text input, toast notifications (success/error/warning/info, auto-dismiss). No native `alert`/`confirm`/`prompt` anywhere.
+- [ ] **F-7.7 Keyboard shortcuts reference** (v0 🟡 toast only) — Help › Keyboard Shortcuts opens a dialog listing every shortcut.
+- [ ] **F-7.8 Theme system** (v0 ⬜, dark only) — Design tokens for color/spacing/typography; Dark (default), Light, High contrast, Sepia; custom themes; switch from View menu; persisted.
+- [ ] **F-7.9 Window state** (v0 ⬜) — Remember window size/position and the last open project; optionally reopen it on launch.
+
+### 2.8 Persistence and data safety
+
+- [ ] **F-8.1 Project on disk** (v0 ✅) — `<Name>.mythscribe/` folder: `project.db` (SQLite), `assets/`. Portable; copying the folder copies the project.
+- [ ] **F-8.2 Versioned migrations** (v0 🟡 ad-hoc `ALTER TABLE` in try/catch) — Numbered schema migrations with a stored schema version; forward-only; run on open; tested.
+- [ ] **F-8.3 Crash safety** (v0 ⬜) — Write-ahead logging, save on window blur/close/quit, recover unsaved buffer after a crash.
+- [ ] **F-8.4 Automatic backups** (v0 ⬜) — Zip the project folder on a schedule and on close to a configurable location with retention; restore from backup; optional cloud folder sync.
+- [ ] **F-8.5 Drafts** (v0 ⬜) — Named drafts (Draft 1, Draft 2, Final) of the whole manuscript inside one project; switch, duplicate, compare (diff), revert.
+- [ ] **F-8.6 Snapshots** (v0 ⬜) — Manual and milestone snapshots of a document or the project with notes; compare and restore.
+
+### 2.9 Entities: characters, settings, world-building
+
+- [ ] **F-9.1 Entity model** (v0 ⬜, replaces References) — Characters, Settings (locations), and World-building items with either a structured template or a blank page. Character fields: name, age, gender, appearance, personality, background, goals/motivations, relationships, notes, image. Setting fields: name, type, description, atmosphere, features, associated characters, notes, image. World-building fields: category (magic system, culture, technology…), name, description, rules, impact on story, notes.
+- [ ] **F-9.2 Sidebar tabs** (v0 🟡 placeholders) — Characters, Settings, World tabs each with card/list view, search/filter, quick-add.
+- [ ] **F-9.3 Entity editor** (v0 ⬜) — Creation modal with template choice; full-page editor; image upload stored as assets.
+- [ ] **F-9.4 Entity ↔ tag link** (v0 ⬜) — Creating an entity creates its tag; the entity page lists every scene where the tag appears.
+- [ ] **F-9.5 Export / import entities** (v0 ⬜) — JSON/CSV export of each entity type; import with merge; reusable library across projects.
+- [ ] **F-9.6 Quick reference panel** (v0 ⬜) — Pin entities, notes, and images to a side panel; reorder pins; quick-view cards.
+
+### 2.10 Search, goals, and statistics
+
+- [ ] **F-10.1 Global search** (v0 ⬜) — Search all documents, notes, and entities; filter by type and tag; results with highlighted snippets; jump to result.
+- [ ] **F-10.2 Project-wide find and replace** (v0 ⬜) — Across selected or all documents with preview.
+- [ ] **F-10.3 Goals** (v0 ⬜) — Project word target with deadline and progress bar; daily target with streaks; per-scene/chapter targets with indicators in the tree; session time and words-per-hour.
+- [ ] **F-10.4 Word count dialog** (v0 ⬜) — Tools › Word Count: counts for selection, document, chapter, manuscript, with characters and estimated pages.
+- [ ] **F-10.5 Statistics dashboard** (v0 ⬜) — Writing heatmap calendar, words per day, productive hours, scene length distribution, POV distribution, character appearance frequency, setting usage.
+
+### 2.11 Outline and timeline
+
+- [ ] **F-11.1 Outline** (v0 ⬜) — Cork-board/index-card view of scenes with synopsis, status color, drag to reorder; outline tree; act/beat structure templates; plot-thread tracking.
+- [ ] **F-11.2 Timeline** (v0 ⬜) — Visual story timeline with events; timeline picker replaces the free-text field in F-4.5 and syncs back; character age tracking; continuity checks; character appearance and location usage logs.
+
+### 2.12 Export and import
+
+- [ ] **F-12.1 Export** (v0 🟡 menu stubs) — PDF (print-formatted), DOCX, EPUB, Markdown. Options: whole manuscript, selected chapters, single document; include/exclude front and back matter; formatting choices; progress indicator.
+- [ ] **F-12.2 Import** (v0 🟡 menu stubs) — DOCX, Markdown, plain text with chapter/scene detection and splitting options; import characters.
+
+### 2.13 Later horizons
+
+- [ ] **F-13.1 Series features** (v0 ⬜) — Link projects into a series; shared tag bank and entities; cross-book queries.
+- [ ] **F-13.2 Collaboration** (v0 ⬜) — Comments/annotations, track changes, share scenes with beta readers, export with comments.
+- [ ] **F-13.3 Mobile companion** (v0 ⬜) — Quick notes and reading mode that sync to the desktop project.
+- [ ] **F-13.4 Consistency checker** (v0 ⬜) — AI review of facts, names, dialogue tone across scenes.
+
+---
+
+## 3. Non-functional requirements
+
+- **Platforms:** Windows first (author's machine), macOS and Linux builds from the same code.
+- **Performance targets:** app start < 3 s; document open < 500 ms; typing latency imperceptible with autosave running; search < 1 s; smooth with 200,000-word projects and 500+ documents.
+- **Reliability:** no data loss on crash or power failure; schema migrations never break existing projects; every destructive action confirms.
+- **Privacy:** manuscript text leaves the machine only for explicit AI features; the user can disable AI entirely; API keys stored in OS secure storage.
+- **Accessibility:** full keyboard operation of the tree, editor, and dialogs; visible focus states; respects reduced motion.
+- **Quality gates:** typecheck, lint, unit tests, and an end-to-end smoke test (create project → write → reopen) pass before any feature is marked built.
+
+---
+
+## 4. Design decisions carried forward
+
+- Tags are `kebab-case` and color-coded by category; a tag's color follows it everywhere (tree, chips, inline tokens, metadata).
+- Hierarchy colors: parts blue, chapters orange, scenes teal, front/end matter gold, characters green, settings brown, world-building silver (tune within the theme tokens).
+- Inline tags are **atomic nodes** in the document model, not text with formatting marks.
+- AI calls happen in the main process behind a provider interface; the renderer never holds keys.
+- Panel layout, bar sizes, and conversation history persist per project; global preferences persist per user.
+- Images and other binaries live in `assets/` on disk; the database stores paths.
+- Every menu entry, button, and shortcut either works or does not exist.
+
+---
+
+## 5. Lessons from v0 (what the rebuild must avoid)
+
+1. **Editor library fought the tag feature.** Inserting an inline tag needed a ten-step sequence of transforms and mark-clearing, and documents were remounted to force refreshes. Choose an editor with first-class custom inline nodes and a suggestion/mention plugin.
+2. **Inline styles everywhere** made a theme system impossible and components 60 % styling noise. Use design tokens and a utility or module CSS approach from day one.
+3. **Untyped IPC.** Preload types drifted from handlers, leading to `(window.api as any)` throughout. Define one typed IPC contract shared by main, preload, and renderer, with runtime validation.
+4. **Ad-hoc migrations** (`ALTER TABLE` wrapped in try/catch, column existence probed by failure). Use numbered migrations with a stored version.
+5. **Reload loops.** Reloading the whole document list after every save caused editor resets and content-mixing bugs. Use a normalized store; update only the changed record.
+6. **Mixed dialog systems.** Native `alert`/`confirm` crept back in beside the themed dialogs. Route every dialog through one service.
+7. **Two menu definitions** (native and in-app) diverged. One definition renders both.
+8. **No tests at all.** Regressions were found by hand. Test the data layer and the editor commands from the start.
+9. **Base64 images in SQLite** bloated the database. Store files on disk.
+10. **Model and provider hard-coded** (`gpt-4o-mini` in three places). Abstract the provider; make the model a setting.
+11. **Duplicate state** (notes edited from two components with different save paths) produced silent data loss. One owner per piece of state.
+
+---
+
+## 6. Milestones (build order)
+
+Parity first, then the differentiator, then breadth.
+
+| Milestone | Goal | Features |
+|---|---|---|
+| **M0 Foundation** | Approved stack scaffolded; typed IPC; migrations; test harness; CI-style scripts; dialog service; design tokens | F-8.1, F-8.2, F-7.6 |
+| **M1 Write** | Create a project and write a novel in it | F-1.1–1.5, F-2.1–2.6, F-3.1–3.8, F-7.2, F-7.3 (shell), F-7.5 (editor tab) |
+| **M2 Organize and assist** | v0 parity: tags, AI, focus mode, references, menus | F-4.1–4.7, F-5.1–5.5, F-6.1–6.7, F-7.1, F-7.4, F-7.7, F-3.9, F-2.7 |
+| **M3 Story Intelligence** | The differentiator | F-5.6, F-5.7, F-5.8, F-5.9, F-4.8, F-4.10, F-2.8 |
+| **M4 Entities, search, goals** | Replace references; find anything; motivation | F-9.1–9.6, F-10.1–10.5, F-4.9, F-3.10, F-3.12 |
+| **M5 Safety and output** | Never lose words; get the book out | F-8.3–8.6, F-12.1, F-12.2, F-7.9 |
+| **M6 Polish** | Themes, outline, timeline | F-7.8, F-11.1, F-11.2, F-3.11 |
+| **Later** | Horizons | F-13.x |
