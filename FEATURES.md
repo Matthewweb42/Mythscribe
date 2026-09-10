@@ -131,15 +131,15 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 - [ ] **F-7.3 Tabbed sidebar** (v0 ✅ shell, tabs 🟡) — Tabs: Manuscript, Characters, Settings (locations), World, Outline, Timeline, Tags. Manuscript and Tags are functional; the others are implemented by F-9.x, F-10.x, F-11.x.
 - [ ] **F-7.4 References panel** (v0 ✅, to be replaced by F-9) — Right-side panel with Characters / Settings / World tabs; create by name, select, edit plain text, save; last-modified shown.
 - [ ] **F-7.5 Settings dialog** (v0 ✅) — Modal with Editor and AI tabs (Ctrl+,). Editor: F-3.6 with live preview. AI: key/connection, enable toggle, presets, behavior.
-- [ ] **F-7.6 Dialogs and notifications** (v0 🟡 some native `alert()` remained) — One themed dialog system: confirm (with danger variant), text input, toast notifications (success/error/warning/info, auto-dismiss). No native `alert`/`confirm`/`prompt` anywhere.
+- [ ] **F-7.6 Dialogs and notifications** (v0 🟡 some native `alert()` remained; M0: built and unit-tested, awaiting e2e) — One themed dialog system: confirm (with danger variant), text input, toast notifications (success/error/warning/info, auto-dismiss). No native `alert`/`confirm`/`prompt` anywhere.
 - [ ] **F-7.7 Keyboard shortcuts reference** (v0 🟡 toast only) — Help › Keyboard Shortcuts opens a dialog listing every shortcut.
 - [ ] **F-7.8 Theme system** (v0 ⬜, dark only) — Design tokens for color/spacing/typography; Dark (default), Light, High contrast, Sepia; custom themes; switch from View menu; persisted.
 - [ ] **F-7.9 Window state** (v0 ⬜) — Remember window size/position and the last open project; optionally reopen it on launch.
 
 ### 2.8 Persistence and data safety
 
-- [ ] **F-8.1 Project on disk** (v0 ✅) — `<Name>.mythscribe/` folder: `project.db` (SQLite), `assets/`. Portable; copying the folder copies the project.
-- [ ] **F-8.2 Versioned migrations** (v0 🟡 ad-hoc `ALTER TABLE` in try/catch) — Numbered schema migrations with a stored schema version; forward-only; run on open; tested.
+- [ ] **F-8.1 Project on disk** (v0 ✅; M0: built and unit-tested, awaiting e2e) — `<Name>.mythscribe/` folder: `project.db` (SQLite), `assets/`. Portable; copying the folder copies the project.
+- [ ] **F-8.2 Versioned migrations** (v0 🟡 ad-hoc `ALTER TABLE` in try/catch; M0: built and unit-tested, awaiting e2e) — Numbered schema migrations with a stored schema version; forward-only; run on open; tested.
 - [ ] **F-8.3 Crash safety** (v0 ⬜) — Write-ahead logging, save on window blur/close/quit, recover unsaved buffer after a crash.
 - [ ] **F-8.4 Automatic backups** (v0 ⬜) — Zip the project folder on a schedule and on close to a configurable location with retention; restore from backup; optional cloud folder sync.
 - [ ] **F-8.5 Drafts** (v0 ⬜) — Named drafts (Draft 1, Draft 2, Final) of the whole manuscript inside one project; switch, duplicate, compare (diff), revert.

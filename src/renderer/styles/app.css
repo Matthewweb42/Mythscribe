@@ -1,0 +1,55 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+@theme inline {
+  --color-bg: var(--ms-bg);
+  --color-surface: var(--ms-surface);
+  --color-surface-raised: var(--ms-surface-raised);
+  --color-overlay: var(--ms-surface-overlay);
+  --color-line: var(--ms-line);
+  --color-line-strong: var(--ms-line-strong);
+  --color-fg: var(--ms-fg);
+  --color-fg-muted: var(--ms-fg-muted);
+  --color-fg-subtle: var(--ms-fg-subtle);
+  --color-accent: var(--ms-accent);
+  --color-accent-hover: var(--ms-accent-hover);
+  --color-accent-fg: var(--ms-accent-fg);
+  --color-danger: var(--ms-danger);
+  --color-danger-fg: var(--ms-danger-fg);
+  --color-warning: var(--ms-warning);
+  --color-success: var(--ms-success);
+  --color-info: var(--ms-info);
+  --radius-md: var(--ms-radius);
+  --radius-lg: var(--ms-radius-lg);
+  --shadow-panel: var(--ms-shadow);
+  --font-ui: var(--ms-font-ui);
+  --font-prose: var(--ms-font-prose);
+  --font-mono: var(--ms-font-mono);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ms-bg);
+  color: var(--ms-fg);
+  font-family: var(--ms-font-ui);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ms-accent);
+  outline-offset: 2px;
+}

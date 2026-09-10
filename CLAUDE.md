@@ -22,7 +22,7 @@ The original prototype was deleted on purpose (git tag `v0-legacy`). Do not resu
 - **Business:** free desktop app; BYOK AI; paid MythScribe Cloud (subscription + credit packs); one-time Supporter license. Billing via **Lemon Squeezy** (merchant of record).
 - **AI provider:** **OpenAI-first** for both the default BYOK setup and Cloud, chosen for price. The provider interface stays generic; an Anthropic adapter is optional later. Local models (F-5.15) are deferred past launch.
 - **Name:** MythScribe. **Goal: launch as soon as possible.** Scope is cut toward the launch line in `FEATURES.md` §6, not expanded.
-- **Stack:** awaiting one-word approval of the proposal below. Until then, no scaffolding.
+- **Stack:** approved 2026-09-10 and scaffolded (see Stack below). M0 Foundation is built; its e2e smoke test needs the system libraries listed under Dev environment.
 
 ## Workflow
 
@@ -69,17 +69,35 @@ apply to all of `FEATURES.md` §2.5, §2.14, §2.15 and are checked in review.
 
 **Token efficiency in this repo (for Claude Code itself)**: do not re-read files already in context; grep before reading; delegate broad searches to `Explore`; keep agent prompts to the feature text and file list; one implementer at a time unless slices are independent.
 
+## Commands
+
+```
+npm install            # also rebuilds better-sqlite3 for Electron
+npm run dev            # run the app with HMR
+npm run typecheck      # main, renderer, and e2e tsconfigs
+npm run lint           # eslint, zero warnings allowed
+npm run test           # vitest: main (node) + renderer (jsdom) projects
+npm run test:e2e       # builds, then Playwright drives the real Electron app
+npm run db:generate -- --name <change>   # new numbered migration from src/main/db/schema.ts
+npm run build          # typecheck + production bundles in out/
+npm run build:win      # installer via electron-builder
+```
+
 ## Quality gates (must pass before a feature is "built")
 
-Once scaffolded these become real scripts; keep this list in sync with `package.json`:
-- `typecheck` — zero errors
-- `lint` — zero warnings
-- `test` — unit tests for the data layer, editor commands, prompt builders, post-processors
-- `test:e2e` — smoke test: create project → write → reopen → text is still there
+- `npm run typecheck` — zero errors
+- `npm run lint` — zero warnings
+- `npm run test` — unit tests for the data layer, editor commands, prompt builders, post-processors
+- `npm run test:e2e` — smoke test: create project → write → reopen → text is still there (M0 version: create → close → reopen)
 - `eval:ai` — prompt golden tests and fidelity/token report (once F-5.12 exists)
 - Manual check in the running app for anything visual
 
-## Proposed stack (awaiting approval)
+## Dev environment
+
+- The author develops on WSL2 (Ubuntu 24.04, arm64) with WSLg, so Electron can show a window. Electron needs these system packages once: `sudo apt-get install -y libnss3 libnspr4 libasound2t64`. Without them `npm run test:e2e` and `npm run dev` fail with `libnspr4.so: cannot open shared object file`.
+- The repo lives on `/mnt/c`, so installs and test startup are slow; that is the mount, not the code.
+
+## Stack (approved)
 
 | Concern | Recommendation | Why |
 |---|---|---|
@@ -97,9 +115,22 @@ Once scaffolded these become real scripts; keep this list in sync with `package.
 
 Alternatives considered: Lexical (fine, smaller mention ecosystem); Tauri (smaller binary, weaker Node/SQLite story here); keeping Slate (rejected).
 
-## Conventions (apply once scaffolded)
+## Architecture (as built in M0)
 
-- `src/main/` (db, ipc handlers, ai/{providers,prompts,context,postprocess}, menu, jobs), `src/preload/`, `src/renderer/features/<area>/` (manuscript, editor, tags, ai, focus, shell, account), `src/shared/` (types, ipc contract, constants). Tests beside code as `*.test.ts`.
+- `src/shared/ipc/contract.ts` — the IPC contract: every channel's zod input/output, main→renderer events, error codes. Add a channel here first; both sides are typed from it.
+- `src/main/ipc/registry.ts` — `register(channel, fn)` validates input and wraps errors; throw `AppError(code, message)` from handlers. `emit(windows, event, payload)` pushes events. Handlers live in `src/main/ipc/handlers.ts`.
+- `src/main/db/` — `schema.ts` (Drizzle), `migrations/` (generated SQL, numbered, committed, never edited), `migrate.ts` (runner with `schema_migrations` table), `connection.ts` (`openDatabase` applies pragmas and migrations).
+- `src/main/project/` — `projectStore.ts` creates/opens the `<Name>.mythscribe/` folder; `manager.ts` owns the single open project and notifies on change.
+- `src/preload/index.ts` — exposes `window.mythscribe` (`invoke`, `on`), restricted to contract channels. Sandbox and context isolation are on.
+- `src/renderer/lib/ipc.ts` — `ipc().invoke(channel, input)` typed client that validates outputs; `setIpcClient` for tests.
+- `src/renderer/features/shell/dialogs/` — the dialog service: `dialogs.confirm`, `dialogs.prompt`, `toast.*`, rendered by `<DialogHost/>`.
+- `src/renderer/features/project/projectStore.ts` — Zustand store for the open project; pattern for all renderer stores.
+- `src/renderer/styles/tokens.css` — every color/font/radius as `--ms-*` variables, mapped to Tailwind utilities in `app.css` via `@theme inline`. Components use utilities like `bg-surface`, `text-fg-muted`, `border-line`, `bg-accent`.
+- Tests beside code as `*.test.ts(x)`; vitest runs `main` (node) and `renderer` (jsdom) projects. E2E in `e2e/` drives the built app; native dialogs are bypassed by passing explicit paths through the bridge.
+
+## Conventions
+
+- Planned layout for later areas: `src/main/ai/{providers,prompts,context,postprocess}`, `src/main/jobs/`, `src/renderer/features/{manuscript,editor,tags,ai,focus,account}`.
 - Prompts: `src/main/ai/prompts/<feature>.v<N>.ts` with a golden test each.
 - No inline style objects except truly dynamic values.
 

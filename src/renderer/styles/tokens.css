@@ -1,0 +1,37 @@
+/*
+ * Design tokens. Every color, radius, and font the UI uses is defined here and nowhere else.
+ * Themes (FEATURES.md F-7.8) override these variables; components never hard-code values.
+ */
+:root {
+  color-scheme: dark;
+
+  --ms-bg: #1b1b1f;
+  --ms-surface: #232327;
+  --ms-surface-raised: #2b2b31;
+  --ms-surface-overlay: rgb(0 0 0 / 0.6);
+  --ms-line: #3a3a42;
+  --ms-line-strong: #4a4a54;
+
+  --ms-fg: #e6e6ea;
+  --ms-fg-muted: #9a9aa6;
+  --ms-fg-subtle: #6f6f7a;
+
+  --ms-accent: #6cc38f;
+  --ms-accent-hover: #83d1a3;
+  --ms-accent-fg: #0f1a13;
+
+  --ms-danger: #e5484d;
+  --ms-danger-fg: #ffffff;
+  --ms-warning: #f5a524;
+  --ms-success: #4ade80;
+  --ms-info: #60a5fa;
+
+  --ms-radius: 6px;
+  --ms-radius-lg: 10px;
+  --ms-shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+
+  --ms-font-ui:
+    Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --ms-font-prose: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', serif;
+  --ms-font-mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+}

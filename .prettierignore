@@ -4,8 +4,6 @@ dist
 coverage
 test-results
 playwright-report
-.eslintcache
-*.tsbuildinfo
-*.log*
-.DS_Store
-.env
+package-lock.json
+src/main/db/migrations
+*.md
