@@ -107,6 +107,12 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 - [ ] **F-5.7 Story Intelligence query mode** (v0 ⬜) — Third assistant mode ("Query"): parse the question, find candidate scenes via tags, metadata, and summaries, load full text only for the top matches within a token budget, answer with citations. Each citation opens the scene (optionally in a split view) and highlights the relevant passage; "Also mentioned in" list.
 - [ ] **F-5.8 Rename modes** (v0 ⬜) — Assistant modes become Query (default), Author (ghost-text edits), Plan (ideas and feedback).
 - [ ] **F-5.9 Token and cost visibility** (v0 ⬜) — Show tokens used per request and per session; configurable model per task.
+- [ ] **F-5.10 Streaming and cancel** (v0 ⬜) — Ghost text, chat, and rewrites stream tokens as they arrive; every request is cancellable; a visible in-flight indicator.
+- [ ] **F-5.11 Model tiers** (v0 ⬜) — Feature code requests a `fast` or `strong` tier, never a model name; tier-to-model mapping is a setting with defaults per provider.
+- [ ] **F-5.12 Versioned prompt templates** (v0 ⬜) — Prompts live as versioned files with golden-output tests; each proposal records its prompt version and model.
+- [ ] **F-5.13 Background job queue** (v0 ⬜) — Indexing (summaries, embeddings) runs in a resumable, rate-limited, cancellable queue with a status indicator; uses provider batch APIs when available.
+- [ ] **F-5.14 Usage ledger and budgets** (v0 ⬜) — Every request logs feature, model, tokens, and cost; per-feature budgets; per-day caps; ghost text has a minimum interval and minimum new-characters threshold; identical context hits a local cache.
+- [ ] **F-5.15 Local models** (v0 ⬜) — Ollama/OpenAI-compatible local endpoint as a provider; quality warning shown; nothing leaves the machine.
 
 ### 2.6 Focus mode
 
@@ -173,6 +179,31 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 - [ ] **F-13.3 Mobile companion** (v0 ⬜) — Quick notes and reading mode that sync to the desktop project.
 - [ ] **F-13.4 Consistency checker** (v0 ⬜) — AI review of facts, names, dialogue tone across scenes.
 
+### 2.14 Voice, intent, and control (see PLAN.md §2)
+
+- [ ] **F-14.1 Voice Profile** — Per project, with optional per-POV overrides: author-marked exemplar passages (6–12), locally computed stylometrics (sentence and paragraph length distributions, dialogue ratio, tense, person, adverb rate, punctuation habits, tag-verb habits, top verbs), and a "voice confidence" indicator that rises with manuscript size. Included in every generation and critique prompt; exemplars chosen by similarity to the current situation.
+- [ ] **F-14.2 Author rules and banned phrases** — Free-text style rules and a banned-phrases list seeded with common AI-isms; editable; enforced as prompt constraints and as a post-filter that flags or regenerates violations.
+- [ ] **F-14.3 Scene brief** — Optional scene metadata: goal, conflict, turn/outcome, emotional beat, what the reader knows after. AI can draft it from the text for the author to correct. Included in prompts for the current and neighboring scenes.
+- [ ] **F-14.4 AI dial and data-sharing panel** — Per-project level 0 Off / 1 Ask / 2 Suggest / 3 Draft (monotonic); per-feature toggles beneath it; a panel listing which features send which text to which provider. Installs at level 0.
+- [ ] **F-14.5 Proposal review** — Every AI output is a proposal (feature, prompt version, model, tokens, text, optional target range) rendered as ghost text, a diff, chat, or chips. Accept, accept part, edit then accept, reject, regenerate with a note. Rejection notes are kept as negative examples.
+- [ ] **F-14.6 Provenance ledger** — Accepted AI text is marked as AI-origin spans tied to the proposal; editing a span past a threshold clears the mark. Per-scene and per-project AI-origin percentage; exportable disclosure report.
+- [ ] **F-14.7 Voice fidelity check** — Every proposal is scored locally against the stylometric profile and rules before display; out-of-band results are regenerated once with the violation named, then shown with a warning badge. Whole-manuscript voice-consistency report to find drifting scenes.
+- [ ] **F-14.8 Editor and reader modes** — Editor's notes on a scene (pacing, clarity, show/tell, POV slips, filter words, proximity repeats, attribution clutter) with cited passages and diff-based fixes; "Is this scene doing what the brief says?"; beta-reader read-through up to a scene (what the reader knows, believes, expects; confusion; dropped threads); honesty setting from encouraging to brutal; praise must cite a passage.
+- [ ] **F-14.9 Story bible as ground truth** — Entities, tags, timeline, and scene summaries form the context for every AI task; summaries are derived and regenerated on edit; entity sheets win conflicts.
+- [ ] **F-14.10 Rewrite in my voice** — Select any passage (including AI-origin spans) and request a rewrite constrained by the voice profile, shown as a diff. The "de-AI" action.
+
+### 2.15 Accounts, billing, and distribution (see PLAN.md §4)
+
+- [ ] **F-15.1 Bring your own key** — OpenAI first; Anthropic, OpenRouter, and local endpoints later; configurable in Settings; keys in OS secure storage; per-provider test connection; per-tier model selection.
+- [ ] **F-15.2 MythScribe account** — Email magic link and Google/Apple sign-in; optional; never required for writing.
+- [ ] **F-15.3 Cloud subscription and credits** — Plans via a merchant of record; credit balance and plan shown in Settings; overage packs; webhook-driven entitlements.
+- [ ] **F-15.4 Cloud provider adapter** — Same provider interface, pointed at the MythScribe proxy; streaming; metering; content is never stored or logged server-side.
+- [ ] **F-15.5 Usage meter and caps** — Credits used this period, per-feature breakdown, projected run-out; soft warnings and hard caps.
+- [ ] **F-15.6 Entitlement cache** — Signed license token cached locally with an offline grace period; writing never blocks on the network.
+- [ ] **F-15.7 Signed builds and auto-update** — Code-signed Windows and notarized macOS builds; stable and beta channels; release notes in-app.
+- [ ] **F-15.8 Opt-in diagnostics** — Crash reports and anonymous usage counts, off by default, content-scrubbed, explained in plain language.
+- [ ] **F-15.9 Supporter license** — One-time purchase unlocking cosmetic extras for BYOK users.
+
 ---
 
 ## 3. Non-functional requirements
@@ -195,6 +226,10 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 - Panel layout, bar sizes, and conversation history persist per project; global preferences persist per user.
 - Images and other binaries live in `assets/` on disk; the database stores paths.
 - Every menu entry, button, and shortcut either works or does not exist.
+- AI output is always a proposal; nothing enters the manuscript without an explicit accept, and accepted AI text stays traceable (F-14.6).
+- Feature code asks for a model tier, never a model name; prompts are versioned files with tests.
+- The same provider interface serves the author's own keys, local models, and the paid MythScribe Cloud; app code cannot tell which is active.
+- AI is off at install (dial level 0). Voice and control features (2.14) ship before any AI feature larger than ghost text.
 
 ---
 
@@ -216,15 +251,18 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 
 ## 6. Milestones (build order)
 
-Parity first, then the differentiator, then breadth.
+Parity first, then voice and control, then the differentiator, then launch, then breadth. Rationale and the launch line in `PLAN.md` §6.
 
 | Milestone | Goal | Features |
 |---|---|---|
-| **M0 Foundation** | Approved stack scaffolded; typed IPC; migrations; test harness; CI-style scripts; dialog service; design tokens | F-8.1, F-8.2, F-7.6 |
-| **M1 Write** | Create a project and write a novel in it | F-1.1–1.5, F-2.1–2.6, F-3.1–3.8, F-7.2, F-7.3 (shell), F-7.5 (editor tab) |
-| **M2 Organize and assist** | v0 parity: tags, AI, focus mode, references, menus | F-4.1–4.7, F-5.1–5.5, F-6.1–6.7, F-7.1, F-7.4, F-7.7, F-3.9, F-2.7 |
-| **M3 Story Intelligence** | The differentiator | F-5.6, F-5.7, F-5.8, F-5.9, F-4.8, F-4.10, F-2.8 |
-| **M4 Entities, search, goals** | Replace references; find anything; motivation | F-9.1–9.6, F-10.1–10.5, F-4.9, F-3.10, F-3.12 |
+| **M0 Foundation** | Approved stack scaffolded; typed IPC; migrations; test harness; dialog service; design tokens | F-8.1, F-8.2, F-7.6 |
+| **M1 Write** | Create a project and write a novel in it, AI off | F-1.1–1.5, F-2.1–2.6, F-3.1–3.8, F-7.2, F-7.3 (shell), F-7.5 (editor tab) |
+| **M2 Organize and assist** | v0 parity with BYOK AI: tags, presets, ghost text, chat, focus mode, references, menus | F-4.1–4.7, F-5.1–5.5, F-5.10, F-5.11, F-5.12, F-5.14, F-15.1, F-6.1–6.7, F-7.1, F-7.4, F-7.7, F-3.9, F-2.7 |
+| **M2.5 Voice and control** | The AI keeps the author's voice, serves their intent, and never acts without consent | F-14.1–14.10 |
+| **M3 Story Intelligence** | Cited answers about the manuscript | F-5.6, F-5.7, F-5.8, F-5.9, F-5.13, F-4.10 |
+| **— LAUNCH v1 —** | Everything above ships; everything below is post-launch | |
+| **M-Cloud** | Paid managed AI | F-15.2–15.9 |
+| **M4 Entities, search, goals** | Structured story bible; find anything; motivation | F-9.1–9.6, F-10.1–10.5, F-4.9, F-3.10, F-3.12 |
 | **M5 Safety and output** | Never lose words; get the book out | F-8.3–8.6, F-12.1, F-12.2, F-7.9 |
-| **M6 Polish** | Themes, outline, timeline | F-7.8, F-11.1, F-11.2, F-3.11 |
-| **Later** | Horizons | F-13.x |
+| **M6 Polish** | Themes, outline, timeline, local models, reader features | F-7.8, F-11.1, F-11.2, F-3.11, F-5.15, F-13.4, F-4.8, F-2.8 |
+| **Later** | Horizons | F-13.1–13.3 |
