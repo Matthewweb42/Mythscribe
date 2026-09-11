@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, shell } from 'electron'
+import icon from '../../resources/icon.png?asset'
 import { join } from 'node:path'
 import { AppStateStore } from './appState/appStateStore'
 import { createDialogs } from './dialogs'
@@ -25,6 +26,8 @@ function createWindow(): BrowserWindow {
     show: false,
     autoHideMenuBar: true,
     backgroundColor: '#1b1b1f',
+    // macOS takes the icon from the bundle; Windows and Linux windows need it here.
+    ...(process.platform === 'darwin' ? {} : { icon }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

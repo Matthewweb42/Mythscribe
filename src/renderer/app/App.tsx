@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BookOpen, FolderOpen, FilePlus2 } from 'lucide-react'
+import { FolderOpen, FilePlus2 } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, levelLabel, sectionLabel } from '@shared/labels'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
@@ -52,7 +52,7 @@ export function App(): React.JSX.Element {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-11 items-center gap-2 border-b border-line bg-surface px-4 text-sm">
-        <BookOpen size={16} className="text-accent" />
+        <Logo size={16} />
         <span className="font-semibold">MythScribe</span>
         {current ? (
           <span className="text-fg-muted">
@@ -119,7 +119,7 @@ function WelcomeScreen(): React.JSX.Element {
       className={`flex flex-col items-center gap-6 text-center ${creating ? 'w-[520px]' : 'w-[440px]'}`}
     >
       <div className="flex flex-col items-center">
-        <Logo className="text-accent" />
+        <Logo />
         <h1 className="m-0 mt-3 text-3xl font-semibold tracking-tight">MythScribe</h1>
         <p className="mt-2 mb-0 text-sm text-fg-muted">Your book, your voice, on your machine.</p>
       </div>
