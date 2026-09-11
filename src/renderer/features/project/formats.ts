@@ -1,5 +1,5 @@
 import type { NovelFormat } from '@shared/ipc/contract'
-import { skeletonSummary } from '@shared/labels'
+import { formatLabel, skeletonSummary } from '@shared/labels'
 
 export interface ProjectFormatOption {
   id: NovelFormat
@@ -12,19 +12,19 @@ export interface ProjectFormatOption {
 export const PROJECT_FORMATS: readonly ProjectFormatOption[] = [
   {
     id: 'novel',
-    label: 'Novel',
+    label: formatLabel('novel'),
     summary: 'One standalone book.',
     structure: `${skeletonSummary('novel')}. Manuscript formatting: double-spaced, indented paragraphs, * * * scene breaks.`
   },
   {
     id: 'epic',
-    label: 'Epic',
+    label: formatLabel('epic'),
     summary: 'A multi-book series in one project.',
     structure: `${skeletonSummary('epic')}. Manuscript formatting, same as Novel.`
   },
   {
     id: 'webnovel',
-    label: 'Web novel',
+    label: formatLabel('webnovel'),
     summary: 'Serialized fiction posted chapter by chapter.',
     structure: `${skeletonSummary('webnovel')}. Web formatting: no indent, a blank line between paragraphs, ~~~ scene breaks.`
   }

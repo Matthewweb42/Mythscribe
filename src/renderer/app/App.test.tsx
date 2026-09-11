@@ -35,6 +35,7 @@ beforeEach(() => {
   resetPendingSaves()
   useProjectStore.setState({ current: null, ready: false, busy: false, recents: [] })
   useDialogStore.setState({ modals: [], toasts: [] })
+  document.title = ''
 })
 
 function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<typeof vi.fn> {
@@ -89,6 +90,25 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     expect(await screen.findByRole('button', { name: /new project/i })).toBeInTheDocument()
     expect(invoke).toHaveBeenCalledWith('project:close', undefined)
+  })
+
+  it('shows the project name and format in the shell header, window title, and card (F-1.5)', async () => {
+    install({ 'project:create': { ...info, name: 'Serial', format: 'webnovel' } })
+    render(<App />)
+    await fillWizard('Serial', /^web novel/i)
+    expect(await screen.findByTestId('project-name')).toHaveTextContent('Serial')
+    expect(screen.getByRole('banner')).toHaveTextContent('/ Serial · Web novel')
+    expect(document.title).toBe('Serial — MythScribe')
+    const card = within(screen.getByTestId('project-card'))
+    expect(card.getByText('Web novel')).toBeInTheDocument()
+    expect(card.getByText('Volume 1')).toBeInTheDocument()
+    expect(card.getByText('Arc')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /close project/i }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    await screen.findByRole('button', { name: /new project/i })
+    expect(document.title).toBe('MythScribe')
+    expect(screen.getByRole('banner')).toHaveTextContent(/^MythScribe$/)
   })
 
   it('Cancel in the close confirmation keeps the project open', async () => {

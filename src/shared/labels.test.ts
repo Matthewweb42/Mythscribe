@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { levelLabel, sectionLabel, skeletonSummary } from './labels'
+import { formatLabel, levelLabel, sectionLabel, skeletonSummary } from './labels'
+
+describe('formatLabel', () => {
+  it.each([
+    ['novel', 'Novel'],
+    ['epic', 'Epic'],
+    ['webnovel', 'Web novel']
+  ] as const)('%s → %s', (format, expected) => {
+    expect(formatLabel(format)).toBe(expected)
+  })
+})
 
 describe('sectionLabel', () => {
   it.each([

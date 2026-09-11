@@ -27,7 +27,9 @@ The original prototype was deleted on purpose (git tag `v0-legacy`). Do not resu
 ## Next up (keep this current; it is the handoff between sessions)
 
 1. M0 is complete: all four gates pass (typecheck, lint, unit, e2e) and F-7.6, F-8.1, F-8.2 are ticked.
-2. M1 is under way: F-1.1, F-1.2, F-1.3, and F-1.4 are done (the `node` table exists; the pending-save registry and window-close handshake are in place for F-3.2). Continue with `/feature F-1.5` (project metadata), then the manuscript tree (F-2.x) and editor (F-3.x) in milestone order. v0 import was split out as F-1.6 (post-launch).
+2. M1 is under way: F-1.1 through F-1.5 are done (the `node` table exists; the pending-save registry and window-close handshake are in place for F-3.2). Continue with `/feature F-2.1` (document tree), then the rest of F-2.x and the editor (F-3.x) in milestone order. v0 import was split out as F-1.6 (post-launch).
+   - Known e2e flake (2026-09-11, seen twice, only right after the 20-worker `npm run test` run): the wizard steps at the top of `e2e/smoke.spec.ts` fail under load (the empty-name alert missing, or the name shrinking after Back). Passes 3/3 idle. If it recurs, keep `test-results/**/trace.zip` and inspect before changing the test; do not add Playwright retries to hide it.
+   - Dev-machine note: projects created before F-1.3 (2026-09-10, e.g. `~/test.sqlite.mythscribe`) have no seeded sections, so `tree:list` returns nothing for them. They are throwaway; delete them rather than adding a repair path. F-2.1 must still render sanely for an empty tree.
 3. Small follow-up for F-8.3: `quitRequested` in `src/main/index.ts` is never reset, so on macOS an abandoned Cmd+Q (flush failed, user kept working) makes the next plain window close quit the app. Reset it when a close is cancelled.
 
 ## Workflow

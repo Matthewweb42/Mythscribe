@@ -1,10 +1,6 @@
 import { X } from 'lucide-react'
 import type { RecentProject } from '@shared/ipc/contract'
-import { PROJECT_FORMATS } from './formats'
-
-function formatLabel(id: RecentProject['format']): string {
-  return PROJECT_FORMATS.find((f) => f.id === id)?.label ?? id
-}
+import { formatLabel } from '@shared/labels'
 
 function formatLastOpened(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })

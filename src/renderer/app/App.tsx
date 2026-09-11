@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BookOpen, FolderOpen, FilePlus2 } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
+import { formatLabel, levelLabel, sectionLabel } from '@shared/labels'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { Logo } from '@renderer/features/shell/Logo'
@@ -33,12 +34,21 @@ export function App(): React.JSX.Element {
     })
   }, [])
 
+  // F-1.5: the OS window title follows the open project.
+  useEffect(() => {
+    document.title = current ? `${current.name} — MythScribe` : 'MythScribe'
+  }, [current])
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-11 items-center gap-2 border-b border-line bg-surface px-4 text-sm">
         <BookOpen size={16} className="text-accent" />
         <span className="font-semibold">MythScribe</span>
-        {current ? <span className="text-fg-muted">/ {current.name}</span> : null}
+        {current ? (
+          <span className="text-fg-muted">
+            / {current.name} · {formatLabel(current.format)}
+          </span>
+        ) : null}
       </header>
       <main className="flex flex-1 items-center justify-center overflow-auto">
         {!ready ? null : current ? <ProjectScreen /> : <WelcomeScreen />}
@@ -153,9 +163,13 @@ function ProjectScreen(): React.JSX.Element {
       <h1 className="m-0 text-2xl font-semibold" data-testid="project-name">
         {current.name}
       </h1>
-      <dl className="mt-4 grid grid-cols-[120px_1fr] gap-y-2 text-sm">
+      <dl className="mt-4 grid grid-cols-[120px_1fr] gap-y-2 text-sm" data-testid="project-card">
         <dt className="text-fg-muted">Format</dt>
-        <dd className="m-0">{current.format}</dd>
+        <dd className="m-0">{formatLabel(current.format)}</dd>
+        <dt className="text-fg-muted">Manuscript</dt>
+        <dd className="m-0">{sectionLabel(current.format, 'manuscript')}</dd>
+        <dt className="text-fg-muted">Parts labelled</dt>
+        <dd className="m-0">{levelLabel(current.format, 'part')}</dd>
         <dt className="text-fg-muted">Location</dt>
         <dd className="m-0 break-all font-mono text-xs">{current.path}</dd>
         <dt className="text-fg-muted">Schema</dt>

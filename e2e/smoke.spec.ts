@@ -66,6 +66,9 @@ test('create, close, reopen a project on disk', async () => {
   await wizard.getByRole('button', { name: 'Create' }).click()
 
   await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  // F-1.5: the shell header and window title carry the project name and format.
+  await expect(page).toHaveTitle('Smoke Novel — MythScribe')
+  await expect(page.locator('header')).toContainText('Web novel')
   expect(fs.existsSync(path.join(projectPath, 'project.db'))).toBe(true)
   expect(fs.existsSync(path.join(projectPath, 'assets'))).toBe(true)
 
@@ -92,6 +95,7 @@ test('create, close, reopen a project on disk', async () => {
   await page.getByRole('button', { name: 'Close project' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
+  await expect(page).toHaveTitle('MythScribe')
 
   // F-1.1: the welcome screen lists the project; clicking the row reopens it.
   const recents = page.getByRole('list', { name: 'Recent projects' })

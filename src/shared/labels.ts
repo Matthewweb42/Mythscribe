@@ -19,6 +19,12 @@ export const NODE_KINDS = ['folder', 'document'] as const
 export const NodeKind = z.enum(NODE_KINDS)
 export type NodeKind = z.infer<typeof NodeKind>
 
+const FORMAT_LABEL: Record<NovelFormat, string> = {
+  novel: 'Novel',
+  epic: 'Epic',
+  webnovel: 'Web novel'
+}
+
 const MANUSCRIPT_LABEL: Record<NovelFormat, string> = {
   novel: 'Manuscript',
   epic: 'Series',
@@ -29,6 +35,11 @@ const PART_LABEL: Record<NovelFormat, string> = {
   novel: 'Part',
   epic: 'Part',
   webnovel: 'Arc'
+}
+
+/** Display name of a project format (F-1.5), as shown in the wizard, recents, and the shell. */
+export function formatLabel(format: NovelFormat): string {
+  return FORMAT_LABEL[format]
 }
 
 /** Display name of one of the three root sections for the given format. */
