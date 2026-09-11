@@ -18,6 +18,7 @@ import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contrac
 let app: ElectronApplication
 let page: Page
 let tmp: string
+let exited = false
 
 test.beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-e2e-'))
@@ -26,11 +27,15 @@ test.beforeAll(async () => {
     args: ['.'],
     env: { ...process.env, NODE_ENV: 'test', MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData') }
   })
+  app.on('close', () => {
+    exited = true
+  })
   page = await app.firstWindow()
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  // The last step closes the window, which quits the app on Linux; only close it if still up.
+  if (!exited) await app?.close()
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -102,7 +107,43 @@ test('create, close, reopen a project on disk', async () => {
   if (reopened.ok && reopened.data) expect(reopened.data.id).toBe(created.data.id)
   expect(fs.existsSync(path.join(tmp, 'userData', 'app-state.json'))).toBe(true)
   expect(await listTree()).toHaveLength(17)
+
+  // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.
+  await closeProject()
+  await stubOpenDialog(path.join(projectPath, 'project.db'))
+  await page.getByRole('button', { name: 'Open project' }).click()
+  await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+
+  // F-1.4: choosing something that is not a project explains what to pick instead.
+  await closeProject()
+  const stray = path.join(tmp, 'not-a-project.txt')
+  fs.writeFileSync(stray, 'not a project')
+  await stubOpenDialog(stray)
+  await page.getByRole('button', { name: 'Open project' }).click()
+  await expect(page.getByRole('status')).toContainText('Not a MythScribe project')
+  await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
+
+  // F-1.4: closing the OS window with a project open lets the renderer flush first, then main
+  // closes the project and the window; with no windows left the app quits.
+  await recents.getByRole('button', { name: 'Smoke Novel', exact: true }).click()
+  await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  const closed = app.waitForEvent('close')
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
+  await closed
+  expect(exited).toBe(true)
 })
+
+async function closeProject(): Promise<void> {
+  await page.getByRole('button', { name: 'Close project' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
+}
+
+async function stubOpenDialog(filePath: string): Promise<void> {
+  await app.evaluate(({ dialog }, chosen) => {
+    dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] })
+  }, filePath)
+}
 
 async function listTree(): Promise<TreeNode[]> {
   const result = await page.evaluate<IpcResult<TreeNode[]>>(

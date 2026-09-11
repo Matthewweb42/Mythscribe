@@ -7,7 +7,7 @@ import { Logo } from '@renderer/features/shell/Logo'
 import { CreateProjectWizard } from '@renderer/features/project/CreateProjectWizard'
 import { RecentProjects } from '@renderer/features/project/RecentProjects'
 import { useProjectStore } from '@renderer/features/project/projectStore'
-import { IpcRequestError } from '@renderer/lib/ipc'
+import { ipc, IpcRequestError } from '@renderer/lib/ipc'
 
 function describeError(err: unknown): string {
   if (err instanceof IpcRequestError) return err.message
@@ -24,6 +24,13 @@ export function App(): React.JSX.Element {
       .getState()
       .init()
       .catch((err: unknown) => toast.error(describeError(err)))
+    // F-1.4: the OS close button flushes pending saves first; a failed flush keeps the window
+    // open with the error visible so no words are lost.
+    return ipc().on('window:close-requested', () => {
+      const store = useProjectStore.getState()
+      if (store.busy) return // a flush is already in flight; the first request will close the window
+      store.closeWindow().catch((err: unknown) => toast.error(describeError(err)))
+    })
   }, [])
 
   return (

@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import { AppStateStore } from './appState/appStateStore'
 import { createDialogs } from './dialogs'
 import { registerHandlers } from './ipc/handlers'
+import { emit } from './ipc/registry'
+import { installSingleInstance } from './lifecycle'
 import { ProjectManager } from './project/manager'
 
 const isDev = !app.isPackaged
@@ -10,6 +12,9 @@ const manager = new ProjectManager()
 
 /** Lets e2e tests isolate app-wide state (recents) from the developer's own. */
 if (process.env.MYTHSCRIBE_USER_DATA) app.setPath('userData', process.env.MYTHSCRIBE_USER_DATA)
+
+/** The lock lives in userData, so it must be requested after the override above. */
+const primaryInstance = installSingleInstance(app, () => BrowserWindow.getAllWindows()[0] ?? null)
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -29,6 +34,16 @@ function createWindow(): BrowserWindow {
   })
 
   win.once('ready-to-show', () => win.show())
+
+  // F-1.4: with a project open, the renderer flushes pending saves first and then invokes
+  // `window:close`, which closes the project so this guard lets the second close through.
+  win.on('close', (e) => {
+    if (!manager.current()) return
+    e.preventDefault()
+    emit([win], 'window:close-requested', null)
+  })
+  // A dead renderer can never flush, so do not let it wedge the window.
+  win.webContents.on('render-process-gone', () => manager.close())
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
@@ -50,25 +65,37 @@ function createWindow(): BrowserWindow {
   return win
 }
 
-void app.whenReady().then(() => {
-  Menu.setApplicationMenu(null)
-  const appState = new AppStateStore(join(app.getPath('userData'), 'app-state.json'))
-  registerHandlers({
-    manager,
-    appState,
-    dialogs: createDialogs(
-      () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
-    ),
-    windows: () => BrowserWindow.getAllWindows()
+if (!primaryInstance) {
+  app.quit()
+} else {
+  void app.whenReady().then(() => {
+    Menu.setApplicationMenu(null)
+    const appState = new AppStateStore(join(app.getPath('userData'), 'app-state.json'))
+    registerHandlers({
+      manager,
+      appState,
+      dialogs: createDialogs(
+        () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
+      ),
+      windows: () => BrowserWindow.getAllWindows()
+    })
+    createWindow()
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
   })
-  createWindow()
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
+}
+
+// A prevented window close (project open, renderer still flushing) cancels the in-flight quit.
+// Remember that a quit was asked for so macOS exits once the flushed window finally closes.
+let quitRequested = false
+app.on('before-quit', () => {
+  quitRequested = true
 })
 
-app.on('before-quit', () => manager.close())
+/** `will-quit`, not `before-quit`: the renderer must flush before the DB closes. */
+app.on('will-quit', () => manager.close())
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin' || quitRequested) app.quit()
 })

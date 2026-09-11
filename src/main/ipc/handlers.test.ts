@@ -15,7 +15,7 @@ import { AppStateStore } from '../appState/appStateStore'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
 import { projectFolderFor } from '../project/projectStore'
-import { registerHandlers } from './handlers'
+import { registerHandlers, type ClosableWindow } from './handlers'
 
 vi.mock('electron', () => ({
   app: { getVersion: () => '0.0.0' },
@@ -27,6 +27,7 @@ type Invoke = <C extends Channel>(channel: C, input: Input<C>) => Promise<Output
 let tmp: string
 let manager: ProjectManager
 let invoke: Invoke
+let fakeWin: ClosableWindow
 
 const dialogs: ProjectDialogs = {
   chooseProjectSavePath: async () => null,
@@ -37,11 +38,12 @@ beforeEach(() => {
   vi.mocked(ipcMain.handle).mockClear()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-handlers-'))
   manager = new ProjectManager()
+  fakeWin = { close: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } }
   registerHandlers({
     manager,
     appState: new AppStateStore(path.join(tmp, 'userData', 'app-state.json')),
     dialogs,
-    windows: () => []
+    windows: () => [fakeWin]
   })
   const handlers = new Map<string, (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>>()
   for (const [channel, fn] of vi.mocked(ipcMain.handle).mock.calls) {
@@ -121,5 +123,27 @@ describe('tree:list', () => {
     expect(rows.filter((r) => r.sectionType !== null)).toHaveLength(3)
     expect(rows.map((r) => r.title)).toContain('Arc 1')
     expect(rows.filter((r) => r.kind === 'document')).toHaveLength(6)
+  })
+})
+
+describe('window:close', () => {
+  it('closes the project and every window', async () => {
+    await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
+    expect(manager.current()).not.toBeNull()
+    await invoke('window:close', undefined)
+    expect(manager.current()).toBeNull()
+    expect(fakeWin.close).toHaveBeenCalledTimes(1)
+    expect(fakeWin.webContents.send).toHaveBeenLastCalledWith('project:changed', null)
+  })
+
+  it('closes the windows even when no project is open', async () => {
+    await invoke('window:close', undefined)
+    expect(fakeWin.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips windows that are already destroyed', async () => {
+    fakeWin.isDestroyed = () => true
+    await invoke('window:close', undefined)
+    expect(fakeWin.close).not.toHaveBeenCalled()
   })
 })

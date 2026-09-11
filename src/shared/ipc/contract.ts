@@ -82,7 +82,9 @@ export const contract = {
   'project:current': { input: z.undefined(), output: ProjectInfo.nullable() },
   'recents:list': { input: z.undefined(), output: z.array(RecentProject) },
   'recents:remove': { input: z.object({ path: z.string() }), output: z.array(RecentProject) },
-  'tree:list': { input: z.undefined(), output: z.array(TreeNode) }
+  'tree:list': { input: z.undefined(), output: z.array(TreeNode) },
+  /** Closes the project and every window once the renderer has flushed its pending saves. */
+  'window:close': { input: z.undefined(), output: z.null() }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract
@@ -93,7 +95,9 @@ export const channels = Object.keys(contract) as Channel[]
 
 /** Events pushed from main to the renderer. */
 export const events = {
-  'project:changed': ProjectInfo.nullable()
+  'project:changed': ProjectInfo.nullable(),
+  /** The OS asked to close the window while a project is open; the renderer flushes, then invokes `window:close`. */
+  'window:close-requested': z.null()
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

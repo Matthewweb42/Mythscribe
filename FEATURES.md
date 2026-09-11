@@ -54,8 +54,9 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 - [x] **F-1.1 Welcome screen** (v0 ✅; M1: built, unit-tested, e2e verified) — Logo, app name, "New Project" and "Open Project". Shown whenever no project is open. Lists recent projects (max 10, persisted in app-level state; missing folders show "Not found" with a remove action rather than being pruned).
 - [x] **F-1.2 Create project wizard** (v0 ✅; M1: built, unit-tested, e2e verified) — Two steps: name, then format card picker (Novel / Epic / Web novel with description of each structure). Native save dialog chooses the location; default under Documents/Mythscribe. Creates the project folder, database, and assets directory.
 - [x] **F-1.3 Seeded structure** (v0 ✅; M1: built, unit-tested, e2e verified; introduces the `node` table, migration `0001_nodes`) — New projects get the three sections plus a starter skeleton: Part 1–2 → Chapter 1–3 → Scene 1 (Arc/Volume labels for webnovel). Format-specific default editor settings are seeded (see F-3.6).
-- [ ] **F-1.4 Open / close project** (v0 ✅) — Native open dialog; close asks for confirmation; closing flushes pending saves. Only one project open at a time. Opening an old single-file project migrates it to the folder layout.
+- [x] **F-1.4 Open / close project** (v0 ✅; M1: built, unit-tested, e2e verified; single-instance checked manually) — Native open dialog (pick `project.db` inside the project folder; v0 files are recognised and refused with a clear message until F-1.6); close asks for confirmation; closing, opening, and quitting flush pending saves through the renderer's pending-save registry. Only one project open at a time, and only one app instance (a second launch focuses the first). A failed create leaves nothing on disk.
 - [ ] **F-1.5 Project metadata** (v0 ✅) — Project name shown in the shell; format drives labels and defaults.
+- [ ] **F-1.6 Import v0 project** (v0 n/a; deferred past launch 2026-09-10) — Opening a v0 single-file or folder project backs up the original, creates the v1 folder layout, maps `documents` to `node`, converts Slate content to Tiptap JSON, and carries over editor settings. Tags, references, summaries, and assets metadata stay in the backup for a later import. Build after F-3.1 so the converter can be validated against the real editor schema.
 
 ### 2.2 Manuscript organizer (sidebar "Manuscript" tab)
 
@@ -71,7 +72,7 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 ### 2.3 Editor
 
 - [ ] **F-3.1 Rich text editing** (v0 ✅) — Bold, italic, underline, strikethrough, inline code; headings 1–3; paragraph alignment left/center/right/justify; block quote; scene-break block that renders the configured style (F-3.6). Toolbar buttons with active state plus Ctrl+B/I/U. Undo/redo.
-- [ ] **F-3.2 Autosave** (v0 ✅) — Debounced save ~1 s after the last keystroke; explicit Ctrl+S; word count cached to the database on save. Switching documents or closing the project never loses pending edits.
+- [ ] **F-3.2 Autosave** (v0 ✅) — Debounced save ~1 s after the last keystroke; explicit Ctrl+S; word count cached to the database on save. Switching documents or closing the project never loses pending edits. Registers its flush with the pending-save registry from F-1.4 so close, open, and quit wait for it.
 - [ ] **F-3.3 Word counts** (v0 ✅) — Status bar at the bottom of the editor: document word count and session delta (`+123`). Folder views show the combined count of their scenes.
 - [ ] **F-3.4 Book-like column** (v0 ✅) — Text is centered in a column of configurable max width (default 700 px) with comfortable padding; responsive to window size.
 - [ ] **F-3.5 Empty state** (v0 ✅) — "Select a document to start writing" when nothing is selected.
@@ -264,5 +265,5 @@ Parity first, then voice and control, then the differentiator, then launch, then
 | **M-Cloud** | Paid managed AI | F-15.2–15.9 |
 | **M4 Entities, search, goals** | Structured story bible; find anything; motivation | F-9.1–9.6, F-10.1–10.5, F-4.9, F-3.10, F-3.12 |
 | **M5 Safety and output** | Never lose words; get the book out | F-8.3–8.6, F-12.1, F-12.2, F-7.9 |
-| **M6 Polish** | Themes, outline, timeline, local models, reader features | F-7.8, F-11.1, F-11.2, F-3.11, F-5.15, F-13.4, F-4.8, F-2.8 |
+| **M6 Polish** | Themes, outline, timeline, local models, reader features, v0 import | F-7.8, F-11.1, F-11.2, F-3.11, F-5.15, F-13.4, F-4.8, F-2.8, F-1.6 |
 | **Later** | Horizons | F-13.1–13.3 |

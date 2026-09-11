@@ -1,17 +1,22 @@
-import { app, type BrowserWindow } from 'electron'
+import { app } from 'electron'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
 import { listNodes, toTreeNode } from '../tree/treeStore'
-import { emit, register } from './registry'
+import { emit, register, type EmitTarget } from './registry'
+
+/** The parts of a BrowserWindow the handlers need; structural so tests can pass a fake. */
+export interface ClosableWindow extends EmitTarget {
+  close(): void
+}
 
 export interface HandlerDeps {
   manager: ProjectManager
   appState: AppStateStore
   dialogs: ProjectDialogs
-  windows: () => BrowserWindow[]
+  windows: () => ClosableWindow[]
 }
 
 export function registerHandlers({ manager, appState, dialogs, windows }: HandlerDeps): void {
@@ -46,6 +51,12 @@ export function registerHandlers({ manager, appState, dialogs, windows }: Handle
   })
 
   register('tree:list', () => listNodes(manager.require().connection.orm).map(toTreeNode))
+
+  register('window:close', () => {
+    manager.close()
+    for (const w of windows()) if (!w.isDestroyed()) w.close()
+    return null
+  })
 
   manager.onChange((info) => {
     if (info) {

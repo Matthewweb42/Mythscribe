@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectInfo, RecentProject } from '@shared/ipc/contract'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { registerPendingSave, resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { App } from './App'
 
@@ -26,7 +27,12 @@ const recent: RecentProject = {
   exists: true
 }
 
+/** Main→renderer event listeners captured by `install()`, keyed by event name. */
+const listeners = new Map<string, (payload: unknown) => void>()
+
 beforeEach(() => {
+  listeners.clear()
+  resetPendingSaves()
   useProjectStore.setState({ current: null, ready: false, busy: false, recents: [] })
   useDialogStore.setState({ modals: [], toasts: [] })
 })
@@ -41,8 +47,21 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'recents:list') return []
     return null
   })
-  setIpcClient({ invoke, on: () => () => {} } as unknown as IpcClient)
+  const on = (event: string, listener: (payload: unknown) => void): (() => void) => {
+    listeners.set(event, listener)
+    return () => {
+      listeners.delete(event)
+    }
+  }
+  setIpcClient({ invoke, on } as unknown as IpcClient)
   return invoke
+}
+
+/** Delivers a main→renderer event to the listener the app registered for it. */
+function fire(event: string, payload: unknown): void {
+  const listener = listeners.get(event)
+  if (!listener) throw new Error(`No listener registered for ${event}`)
+  act(() => listener(payload))
 }
 
 async function fillWizard(name: string, format: RegExp): Promise<void> {
@@ -70,6 +89,17 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     expect(await screen.findByRole('button', { name: /new project/i })).toBeInTheDocument()
     expect(invoke).toHaveBeenCalledWith('project:close', undefined)
+  })
+
+  it('Cancel in the close confirmation keeps the project open', async () => {
+    const invoke = install({ 'project:current': info })
+    render(<App />)
+    expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
+    await userEvent.click(screen.getByRole('button', { name: /close project/i }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByTestId('project-name')).toHaveTextContent('Smoke')
+    expect(invoke).not.toHaveBeenCalledWith('project:close', undefined)
   })
 
   it('surfaces create errors as toasts and keeps the wizard open', async () => {
@@ -148,5 +178,33 @@ describe('App', () => {
     expect(invoke).toHaveBeenCalledWith('recents:remove', { path: recent.path })
     expect(screen.queryByRole('button', { name: 'Smoke Novel' })).not.toBeInTheDocument()
     expect(screen.queryByRole('list', { name: 'Recent projects' })).not.toBeInTheDocument()
+  })
+
+  it('flushes pending saves and closes the window when the OS asks to close it', async () => {
+    const invoke = install({ 'project:current': info })
+    render(<App />)
+    expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
+    const flush = vi.fn(async () => {})
+    registerPendingSave(flush)
+    fire('window:close-requested', null)
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('window:close', undefined))
+    expect(flush).toHaveBeenCalledTimes(1)
+    const closeCall = invoke.mock.calls.findIndex(([c]) => c === 'window:close')
+    expect(flush.mock.invocationCallOrder[0]).toBeLessThan(
+      invoke.mock.invocationCallOrder[closeCall] ?? -1
+    )
+  })
+
+  it('keeps the window open with an error toast when a pending save fails', async () => {
+    const invoke = install({ 'project:current': info })
+    render(<App />)
+    expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
+    registerPendingSave(async () => {
+      throw new Error('Could not save Chapter 1')
+    })
+    fire('window:close-requested', null)
+    expect(await screen.findByRole('status')).toHaveTextContent('Could not save Chapter 1')
+    expect(invoke).not.toHaveBeenCalledWith('window:close', undefined)
+    expect(screen.getByTestId('project-name')).toHaveTextContent('Smoke')
   })
 })

@@ -1,4 +1,4 @@
-import { ipcMain, type BrowserWindow } from 'electron'
+import { ipcMain } from 'electron'
 import {
   contract,
   events,
@@ -48,8 +48,14 @@ export function register<C extends Channel>(channel: C, fn: Handler<C>): void {
   ipcMain.handle(channel, (_event, raw: unknown) => handler(raw))
 }
 
+/** The parts of a BrowserWindow `emit` needs; structural so tests can pass a fake. */
+export interface EmitTarget {
+  isDestroyed(): boolean
+  webContents: { send(channel: string, ...args: unknown[]): void }
+}
+
 export function emit<E extends EventName>(
-  windows: BrowserWindow[],
+  windows: EmitTarget[],
   event: E,
   payload: EventPayload<E>
 ): void {

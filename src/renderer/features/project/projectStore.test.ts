@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectInfo, RecentProject } from '@shared/ipc/contract'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { registerPendingSave, resetPendingSaves } from './pendingSaves'
 import { useProjectStore } from './projectStore'
 
 const info: ProjectInfo = {
@@ -46,6 +47,7 @@ function fakeClient(): {
 }
 
 beforeEach(() => {
+  resetPendingSaves()
   useProjectStore.setState({ current: null, ready: false, busy: false, recents: [] })
 })
 
@@ -82,6 +84,87 @@ describe('projectStore', () => {
     await expect(useProjectStore.getState().close()).rejects.toThrow('nope')
     expect(useProjectStore.getState().busy).toBe(false)
     expect(useProjectStore.getState().current).toEqual(info)
+  })
+
+  it('close awaits registered flushers before invoking project:close', async () => {
+    const { client, invoke } = fakeClient()
+    setIpcClient(client)
+    useProjectStore.setState({ current: info })
+    const order: string[] = []
+    let resolveFlush: () => void = () => {}
+    registerPendingSave(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFlush = () => {
+            order.push('flushed')
+            resolve()
+          }
+        })
+    )
+    invoke.mockImplementation(async (channel: string) => {
+      order.push(channel)
+      return null
+    })
+    const closing = useProjectStore.getState().close()
+    await Promise.resolve()
+    expect(invoke).not.toHaveBeenCalled()
+    resolveFlush()
+    await closing
+    expect(order).toEqual(['flushed', 'project:close'])
+    expect(useProjectStore.getState()).toMatchObject({ current: null, busy: false })
+  })
+
+  it('close does not invoke project:close when a flusher rejects', async () => {
+    const { client, invoke } = fakeClient()
+    setIpcClient(client)
+    useProjectStore.setState({ current: info })
+    registerPendingSave(async () => {
+      throw new Error('save failed')
+    })
+    await expect(useProjectStore.getState().close()).rejects.toThrow('save failed')
+    expect(invoke).not.toHaveBeenCalled()
+    expect(useProjectStore.getState()).toMatchObject({ current: info, busy: false })
+  })
+
+  it('closeWindow awaits registered flushers before invoking window:close', async () => {
+    const { client, invoke } = fakeClient()
+    setIpcClient(client)
+    useProjectStore.setState({ current: info })
+    const order: string[] = []
+    let resolveFlush: () => void = () => {}
+    registerPendingSave(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFlush = () => {
+            order.push('flushed')
+            resolve()
+          }
+        })
+    )
+    invoke.mockImplementation(async (channel: string) => {
+      order.push(channel)
+      return null
+    })
+    const closing = useProjectStore.getState().closeWindow()
+    await Promise.resolve()
+    expect(invoke).not.toHaveBeenCalled()
+    expect(useProjectStore.getState().busy).toBe(true)
+    resolveFlush()
+    await closing
+    expect(order).toEqual(['flushed', 'window:close'])
+    expect(useProjectStore.getState().busy).toBe(false)
+  })
+
+  it('closeWindow does not invoke window:close when a flusher rejects', async () => {
+    const { client, invoke } = fakeClient()
+    setIpcClient(client)
+    useProjectStore.setState({ current: info })
+    registerPendingSave(async () => {
+      throw new Error('save failed')
+    })
+    await expect(useProjectStore.getState().closeWindow()).rejects.toThrow('save failed')
+    expect(invoke).not.toHaveBeenCalled()
+    expect(useProjectStore.getState()).toMatchObject({ current: info, busy: false })
   })
 
   it('loadRecents fills recents without toggling busy', async () => {

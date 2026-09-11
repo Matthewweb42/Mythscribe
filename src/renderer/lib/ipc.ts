@@ -36,7 +36,7 @@ export function createIpcClient(bridge: IpcBridge): IpcClient {
     },
     on(event, listener) {
       return bridge.on(event, (payload) => {
-        listener(events[event].parse(payload))
+        listener(events[event].parse(payload) as EventPayload<typeof event>)
       })
     }
   }
