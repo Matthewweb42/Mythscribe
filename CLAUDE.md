@@ -27,7 +27,7 @@ The original prototype was deleted on purpose (git tag `v0-legacy`). Do not resu
 ## Next up (keep this current; it is the handoff between sessions)
 
 1. M0 is complete: all four gates pass (typecheck, lint, unit, e2e) and F-7.6, F-8.1, F-8.2 are ticked.
-2. M1 is under way: F-1.2 (create-project wizard) is done. Continue with `/feature F-1.1` (welcome screen with recents), then F-1.3, F-1.4, F-1.5, then the manuscript tree (F-2.x) and editor (F-3.x) in milestone order.
+2. M1 is under way: F-1.2 (create-project wizard) and F-1.1 (welcome screen with recents) are done. Continue with `/feature F-1.3` (seeded structure), then F-1.4, F-1.5, then the manuscript tree (F-2.x) and editor (F-3.x) in milestone order.
 
 ## Workflow
 
@@ -126,8 +126,10 @@ Alternatives considered: Lexical (fine, smaller mention ecosystem); Tauri (small
 - `src/main/ipc/registry.ts` — `register(channel, fn)` validates input and wraps errors; throw `AppError(code, message)` from handlers. `emit(windows, event, payload)` pushes events. Handlers live in `src/main/ipc/handlers.ts`.
 - `src/main/db/` — `schema.ts` (Drizzle), `migrations/` (generated SQL, numbered, committed, never edited), `migrate.ts` (runner with `schema_migrations` table), `connection.ts` (`openDatabase` applies pragmas and migrations).
 - `src/main/project/` — `projectStore.ts` creates/opens the `<Name>.mythscribe/` folder; `manager.ts` owns the single open project and notifies on change.
+- `src/main/appState/` — app-level (not per-project) state in `<userData>/app-state.json`: `appStateStore.ts` reads lazily, validates with zod, writes atomically; `recents.ts` holds the pure recents list operations. Recents are recorded on the `manager.onChange` hook in `handlers.ts`. F-7.9 window state belongs in the same file. `MYTHSCRIBE_USER_DATA` overrides the userData directory (used by e2e for isolation).
 - `src/preload/index.ts` — exposes `window.mythscribe` (`invoke`, `on`), restricted to contract channels. Sandbox and context isolation are on.
 - `src/renderer/lib/ipc.ts` — `ipc().invoke(channel, input)` typed client that validates outputs; `setIpcClient` for tests.
+- `src/renderer/features/shell/Logo.tsx` — the inline SVG brand mark in `currentColor`; swap its paths when a transparent asset lands in `resources/` (the current `resources/icon.png` and `build/icon.*` are the stock Electron atom, not the brand).
 - `src/renderer/features/shell/dialogs/` — the dialog service: `dialogs.confirm`, `dialogs.prompt`, `toast.*`, rendered by `<DialogHost/>`.
 - `src/renderer/features/project/projectStore.ts` — Zustand store for the open project; pattern for all renderer stores.
 - `src/renderer/features/project/formats.ts` — the format catalogue (label, summary, structure) for Novel / Epic / Web novel; one owner for format copy, which F-1.3 seeding and F-1.5 labels must keep in sync.

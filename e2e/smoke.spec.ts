@@ -21,7 +21,11 @@ let tmp: string
 
 test.beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-e2e-'))
-  app = await electron.launch({ args: ['.'], env: { ...process.env, NODE_ENV: 'test' } })
+  // Point app-level state (recents) at the temp dir so the developer's real userData is untouched.
+  app = await electron.launch({
+    args: ['.'],
+    env: { ...process.env, NODE_ENV: 'test', MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData') }
+  })
   page = await app.firstWindow()
 })
 
@@ -74,14 +78,17 @@ test('create, close, reopen a project on disk', async () => {
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
 
-  const reopened = await page.evaluate<IpcResult<ProjectInfo | null>, string>(
-    (p) =>
-      window.mythscribe.invoke('project:open', { path: p }) as Promise<
+  // F-1.1: the welcome screen lists the project; clicking the row reopens it.
+  const recents = page.getByRole('list', { name: 'Recent projects' })
+  await recents.getByRole('button', { name: 'Smoke Novel', exact: true }).click()
+  await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  const reopened = await page.evaluate<IpcResult<ProjectInfo | null>>(
+    () =>
+      window.mythscribe.invoke('project:current', undefined) as Promise<
         IpcResult<ProjectInfo | null>
-      >,
-    projectPath
+      >
   )
   expect(reopened.ok).toBe(true)
   if (reopened.ok && reopened.data) expect(reopened.data.id).toBe(created.data.id)
-  await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  expect(fs.existsSync(path.join(tmp, 'userData', 'app-state.json'))).toBe(true)
 })

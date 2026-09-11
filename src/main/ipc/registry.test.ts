@@ -14,6 +14,15 @@ describe('createHandler', () => {
     expect(fn).not.toHaveBeenCalled()
   })
 
+  it('rejects recents:remove without a path', async () => {
+    const fn = vi.fn()
+    const handler = createHandler('recents:remove', fn)
+    const result = await handler({})
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(fn).not.toHaveBeenCalled()
+  })
+
   it('passes parsed input to the handler and wraps the result', async () => {
     const handler = createHandler('app:info', async () => ({ version: '1.0.0', platform: 'linux' }))
     const result = await handler(undefined)

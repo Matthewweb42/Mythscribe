@@ -1,15 +1,18 @@
 import { create } from 'zustand'
-import type { NovelFormat, ProjectInfo } from '@shared/ipc/contract'
+import type { NovelFormat, ProjectInfo, RecentProject } from '@shared/ipc/contract'
 import { ipc } from '@renderer/lib/ipc'
 
 interface ProjectState {
   current: ProjectInfo | null
   ready: boolean
   busy: boolean
+  recents: RecentProject[]
   init: () => Promise<void>
   create: (name: string, format: NovelFormat, directory?: string) => Promise<ProjectInfo | null>
   open: (path?: string) => Promise<ProjectInfo | null>
   close: () => Promise<void>
+  loadRecents: () => Promise<void>
+  removeRecent: (path: string) => Promise<void>
 }
 
 let unsubscribe: (() => void) | null = null
@@ -27,6 +30,7 @@ export const useProjectStore = create<ProjectState>((set) => {
     current: null,
     ready: false,
     busy: false,
+    recents: [],
 
     async init() {
       unsubscribe?.()
@@ -56,6 +60,16 @@ export const useProjectStore = create<ProjectState>((set) => {
         await ipc().invoke('project:close', undefined)
         set({ current: null })
       })
+    },
+
+    async loadRecents() {
+      const recents = await ipc().invoke('recents:list', undefined)
+      set({ recents })
+    },
+
+    async removeRecent(path) {
+      const recents = await ipc().invoke('recents:remove', { path })
+      set({ recents })
     }
   }
 })

@@ -1,11 +1,15 @@
 import { app, BrowserWindow, Menu, shell } from 'electron'
 import { join } from 'node:path'
+import { AppStateStore } from './appState/appStateStore'
 import { createDialogs } from './dialogs'
 import { registerHandlers } from './ipc/handlers'
 import { ProjectManager } from './project/manager'
 
 const isDev = !app.isPackaged
 const manager = new ProjectManager()
+
+/** Lets e2e tests isolate app-wide state (recents) from the developer's own. */
+if (process.env.MYTHSCRIBE_USER_DATA) app.setPath('userData', process.env.MYTHSCRIBE_USER_DATA)
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -48,8 +52,10 @@ function createWindow(): BrowserWindow {
 
 void app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
+  const appState = new AppStateStore(join(app.getPath('userData'), 'app-state.json'))
   registerHandlers({
     manager,
+    appState,
     dialogs: createDialogs(
       () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
     ),

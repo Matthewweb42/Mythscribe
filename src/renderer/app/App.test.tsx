@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ProjectInfo } from '@shared/ipc/contract'
-import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import type { ProjectInfo, RecentProject } from '@shared/ipc/contract'
+import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { App } from './App'
@@ -18,8 +18,16 @@ const info: ProjectInfo = {
   schemaVersion: 1
 }
 
+const recent: RecentProject = {
+  path: '/tmp/Smoke Novel.mythscribe',
+  name: 'Smoke Novel',
+  format: 'novel',
+  lastOpened: '2026-09-10T12:00:00.000Z',
+  exists: true
+}
+
 beforeEach(() => {
-  useProjectStore.setState({ current: null, ready: false, busy: false })
+  useProjectStore.setState({ current: null, ready: false, busy: false, recents: [] })
   useDialogStore.setState({ modals: [], toasts: [] })
 })
 
@@ -30,6 +38,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
       if (v instanceof Error) throw v
       return v
     }
+    if (channel === 'recents:list') return []
     return null
   })
   setIpcClient({ invoke, on: () => () => {} } as unknown as IpcClient)
@@ -99,5 +108,45 @@ describe('App', () => {
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: /open project/i }))
     expect(await screen.findByRole('status')).toHaveTextContent('No MythScribe project at /x')
+  })
+
+  it('shows the logo and opens a recent project from the list', async () => {
+    const invoke = install({
+      'recents:list': [recent],
+      'project:open': { ...info, name: 'Smoke Novel', path: recent.path }
+    })
+    render(<App />)
+    expect(await screen.findByRole('img', { name: 'MythScribe' })).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', { name: 'Smoke Novel' }))
+    expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke Novel')
+    expect(invoke).toHaveBeenCalledWith('project:open', { path: recent.path })
+    expect(screen.getByRole('status')).toHaveTextContent('Opened "Smoke Novel"')
+  })
+
+  it('surfaces a failed recent open as a toast and refreshes the list', async () => {
+    const invoke = install({
+      'recents:list': [recent],
+      'project:open': new IpcRequestError({
+        code: 'NOT_FOUND',
+        message: 'No MythScribe project at /x'
+      })
+    })
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Smoke Novel' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('No MythScribe project at /x')
+    const listCalls = invoke.mock.calls.filter(([c]) => c === 'recents:list')
+    expect(listCalls.length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByRole('button', { name: 'Smoke Novel' })).toBeInTheDocument()
+  })
+
+  it('removes a recent project from the list', async () => {
+    const invoke = install({ 'recents:list': [recent], 'recents:remove': [] })
+    render(<App />)
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Remove Smoke Novel from recent projects' })
+    )
+    expect(invoke).toHaveBeenCalledWith('recents:remove', { path: recent.path })
+    expect(screen.queryByRole('button', { name: 'Smoke Novel' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Recent projects' })).not.toBeInTheDocument()
   })
 })

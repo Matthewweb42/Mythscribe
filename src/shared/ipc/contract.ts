@@ -24,6 +24,21 @@ export type ProjectInfo = z.infer<typeof ProjectInfo>
 /** Longest allowed project name; the create wizard validates against the same limit. */
 export const PROJECT_NAME_MAX = 200
 
+/** Maximum number of projects remembered on the welcome screen. */
+export const RECENTS_MAX = 10
+
+export const RecentProjectEntry = z.object({
+  path: z.string(),
+  name: z.string(),
+  format: NovelFormat,
+  lastOpened: z.string()
+})
+export type RecentProjectEntry = z.infer<typeof RecentProjectEntry>
+
+/** A recent entry as shown to the renderer; `exists` reflects whether the folder is still a project. */
+export const RecentProject = RecentProjectEntry.extend({ exists: z.boolean() })
+export type RecentProject = z.infer<typeof RecentProject>
+
 export const contract = {
   'app:info': {
     input: z.undefined(),
@@ -46,7 +61,9 @@ export const contract = {
     output: ProjectInfo.nullable()
   },
   'project:close': { input: z.undefined(), output: z.null() },
-  'project:current': { input: z.undefined(), output: ProjectInfo.nullable() }
+  'project:current': { input: z.undefined(), output: ProjectInfo.nullable() },
+  'recents:list': { input: z.undefined(), output: z.array(RecentProject) },
+  'recents:remove': { input: z.object({ path: z.string() }), output: z.array(RecentProject) }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract

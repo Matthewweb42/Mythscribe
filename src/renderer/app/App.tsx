@@ -3,7 +3,9 @@ import { BookOpen, FolderOpen, FilePlus2 } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { Logo } from '@renderer/features/shell/Logo'
 import { CreateProjectWizard } from '@renderer/features/project/CreateProjectWizard'
+import { RecentProjects } from '@renderer/features/project/RecentProjects'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { IpcRequestError } from '@renderer/lib/ipc'
 
@@ -43,7 +45,14 @@ function WelcomeScreen(): React.JSX.Element {
   const busy = useProjectStore((s) => s.busy)
   const create = useProjectStore((s) => s.create)
   const open = useProjectStore((s) => s.open)
+  const recents = useProjectStore((s) => s.recents)
+  const loadRecents = useProjectStore((s) => s.loadRecents)
+  const removeRecent = useProjectStore((s) => s.removeRecent)
   const [creating, setCreating] = useState(false)
+
+  useEffect(() => {
+    loadRecents().catch((err: unknown) => toast.error(describeError(err)))
+  }, [loadRecents])
 
   const onCreate = async (name: string, format: NovelFormat): Promise<void> => {
     try {
@@ -54,10 +63,21 @@ function WelcomeScreen(): React.JSX.Element {
     }
   }
 
-  const onOpen = async (): Promise<void> => {
+  /** Opens via the native dialog, or a recent project when `path` is given. */
+  const onOpen = async (path?: string): Promise<void> => {
     try {
-      const info = await open()
+      const info = await open(path)
       if (info) toast.success(`Opened "${info.name}"`)
+    } catch (err) {
+      toast.error(describeError(err))
+      // A vanished folder gets re-marked "Not found" on refresh.
+      loadRecents().catch((e: unknown) => toast.error(describeError(e)))
+    }
+  }
+
+  const onRemoveRecent = async (path: string): Promise<void> => {
+    try {
+      await removeRecent(path)
     } catch (err) {
       toast.error(describeError(err))
     }
@@ -65,10 +85,11 @@ function WelcomeScreen(): React.JSX.Element {
 
   return (
     <div
-      className={`flex flex-col items-center gap-6 text-center ${creating ? 'w-[520px]' : 'w-[360px]'}`}
+      className={`flex flex-col items-center gap-6 text-center ${creating ? 'w-[520px]' : 'w-[440px]'}`}
     >
-      <div>
-        <h1 className="m-0 text-3xl font-semibold tracking-tight">MythScribe</h1>
+      <div className="flex flex-col items-center">
+        <Logo className="text-accent" />
+        <h1 className="m-0 mt-3 text-3xl font-semibold tracking-tight">MythScribe</h1>
         <p className="mt-2 mb-0 text-sm text-fg-muted">Your book, your voice, on your machine.</p>
       </div>
       {creating ? (
@@ -91,6 +112,12 @@ function WelcomeScreen(): React.JSX.Element {
           >
             <FolderOpen size={16} /> Open project
           </button>
+          <RecentProjects
+            recents={recents}
+            busy={busy}
+            onOpen={(path) => void onOpen(path)}
+            onRemove={(path) => void onRemoveRecent(path)}
+          />
         </div>
       )}
     </div>
