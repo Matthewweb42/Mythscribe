@@ -24,6 +24,12 @@ The original prototype was deleted on purpose (git tag `v0-legacy`). Do not resu
 - **Name:** MythScribe. **Goal: launch as soon as possible.** Scope is cut toward the launch line in `FEATURES.md` §6, not expanded.
 - **Stack:** approved 2026-09-10 and scaffolded (see Stack below). M0 Foundation is built; its e2e smoke test needs the system libraries listed under Dev environment.
 
+## Next up (keep this current; it is the handoff between sessions)
+
+1. Install the Electron system libraries (see Dev environment), then `npm run test:e2e`.
+2. When it passes, tick F-7.6, F-8.1, F-8.2 in `FEATURES.md` and remove their "awaiting e2e" notes.
+3. Start M1 with `/feature F-1.2` (create-project wizard), then F-1.1, F-1.3, F-1.4, F-1.5, then the manuscript tree (F-2.x) and editor (F-3.x) in milestone order.
+
 ## Workflow
 
 - `/feature F-x.y` — implement one feature end to end (plan → build → review → verify → tick the box).
