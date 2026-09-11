@@ -12,6 +12,7 @@ import {
   deleteNode,
   duplicateNode,
   listNodes,
+  moveNode,
   renameNode,
   type TreeDb
 } from './treeStore'
@@ -462,5 +463,201 @@ describe('deleteNode', () => {
     expectCode(() => deleteNode(db, root('front').id), 'VALIDATION')
     expectCode(() => deleteNode(db, 'missing'), 'NOT_FOUND')
     expect(listNodes(db)).toHaveLength(17)
+  })
+})
+
+describe('moveNode', () => {
+  /** `[id, position]` per child, in list order, for asserting contiguity. */
+  const order = (parentId: string): [string, number][] =>
+    children(parentId).map((r) => [r.id, r.position])
+
+  it('moves a sibling one position down within the same parent (gap-close then shift)', () => {
+    const part = byLevel('part')
+    const [c1, c2, c3] = children(part.id)
+    if (!c1 || !c2 || !c3) throw new Error('no chapters')
+    const moved = moveNode(db, c1.id, part.id, c2.id)
+    expect(moved).toMatchObject({ id: c1.id, parentId: part.id, position: 1 })
+    expect(order(part.id)).toEqual([
+      [c2.id, 0],
+      [c1.id, 1],
+      [c3.id, 2]
+    ])
+  })
+
+  it('moves a sibling one position up within the same parent (after the head)', () => {
+    const part = byLevel('part')
+    const [c1, c2, c3] = children(part.id)
+    if (!c1 || !c2 || !c3) throw new Error('no chapters')
+    const moved = moveNode(db, c3.id, part.id, c1.id)
+    expect(moved.position).toBe(1)
+    expect(order(part.id)).toEqual([
+      [c1.id, 0],
+      [c3.id, 1],
+      [c2.id, 2]
+    ])
+  })
+
+  it('moves the last sibling to the head with afterId null', () => {
+    const part = byLevel('part')
+    const [c1, c2, c3] = children(part.id)
+    if (!c1 || !c2 || !c3) throw new Error('no chapters')
+    const moved = moveNode(db, c3.id, part.id, null)
+    expect(moved.position).toBe(0)
+    expect(order(part.id)).toEqual([
+      [c3.id, 0],
+      [c1.id, 1],
+      [c2.id, 2]
+    ])
+  })
+
+  it('moves the head to the tail when afterId is omitted', () => {
+    const part = byLevel('part')
+    const [c1, c2, c3] = children(part.id)
+    if (!c1 || !c2 || !c3) throw new Error('no chapters')
+    const moved = moveNode(db, c1.id, part.id, undefined)
+    expect(moved.position).toBe(2)
+    expect(order(part.id)).toEqual([
+      [c2.id, 0],
+      [c3.id, 1],
+      [c1.id, 2]
+    ])
+  })
+
+  it('leaves the order unchanged when moved after its own previous sibling', () => {
+    const part = byLevel('part')
+    const [c1, c2, c3] = children(part.id)
+    if (!c1 || !c2 || !c3) throw new Error('no chapters')
+    const moved = moveNode(db, c2.id, part.id, c1.id)
+    expect(moved.position).toBe(1)
+    expect(order(part.id)).toEqual([
+      [c1.id, 0],
+      [c2.id, 1],
+      [c3.id, 2]
+    ])
+  })
+
+  it('reparents a chapter into another part and keeps both parents contiguous', () => {
+    const manuscript = root('manuscript')
+    const [p1, p2] = children(manuscript.id)
+    if (!p1 || !p2) throw new Error('no parts')
+    const [a1, a2, a3] = children(p1.id)
+    const [b1, b2, b3] = children(p2.id)
+    if (!a1 || !a2 || !a3 || !b1 || !b2 || !b3) throw new Error('no chapters')
+    const moved = moveNode(db, a2.id, p2.id, b1.id)
+    expect(moved).toMatchObject({ id: a2.id, parentId: p2.id, position: 1 })
+    expect(order(p1.id)).toEqual([
+      [a1.id, 0],
+      [a3.id, 1]
+    ])
+    expect(order(p2.id)).toEqual([
+      [b1.id, 0],
+      [a2.id, 1],
+      [b2.id, 2],
+      [b3.id, 3]
+    ])
+    // The chapter's scene travels with it.
+    expect(children(a2.id)).toHaveLength(1)
+    expect(listNodes(db)).toHaveLength(17)
+  })
+
+  it('reparents a scene into another chapter as the last child', () => {
+    const part = byLevel('part')
+    const [c1, c2] = children(part.id)
+    if (!c1 || !c2) throw new Error('no chapters')
+    const [scene] = children(c1.id)
+    if (!scene) throw new Error('no scene')
+    const moved = moveNode(db, scene.id, c2.id, undefined)
+    expect(moved).toMatchObject({ parentId: c2.id, position: 1 })
+    expect(children(c1.id)).toEqual([])
+    expect(order(c2.id).map(([, p]) => p)).toEqual([0, 1])
+  })
+
+  it('reorders parts under the manuscript root', () => {
+    const manuscript = root('manuscript')
+    const [p1, p2] = children(manuscript.id)
+    if (!p1 || !p2) throw new Error('no parts')
+    moveNode(db, p2.id, manuscript.id, null)
+    expect(order(manuscript.id)).toEqual([
+      [p2.id, 0],
+      [p1.id, 1]
+    ])
+  })
+
+  it('updates the modified timestamp and keeps everything else', () => {
+    const part = byLevel('part')
+    const [c1, c2] = children(part.id)
+    if (!c1 || !c2) throw new Error('no chapters')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(Date.parse(c1.modified) + 60_000))
+    const moved = moveNode(db, c1.id, part.id, c2.id)
+    expect(Date.parse(moved.modified)).toBeGreaterThan(Date.parse(c1.modified))
+    expect(moved).toMatchObject({
+      created: c1.created,
+      title: c1.title,
+      kind: c1.kind,
+      hierarchyLevel: c1.hierarchyLevel
+    })
+    expect(listNodes(db).find((r) => r.id === c1.id)).toEqual(moved)
+  })
+
+  it('rejects moves across sections', () => {
+    const front = root('front')
+    const doc = createNode(db, 'novel', {
+      parentId: front.id,
+      kind: 'document',
+      hierarchyLevel: null
+    })
+    const chapter = byLevel('chapter')
+    expectCode(() => moveNode(db, doc.id, chapter.id, undefined), 'VALIDATION')
+    expectCode(() => moveNode(db, doc.id, root('end').id, undefined), 'VALIDATION')
+    expect(children(front.id).map((r) => r.id)).toEqual([doc.id])
+  })
+
+  it('rejects a node moved into itself or its own descendant', () => {
+    const part = byLevel('part')
+    const [chapter] = children(part.id)
+    if (!chapter) throw new Error('no chapter')
+    expectCode(() => moveNode(db, part.id, part.id, undefined), 'VALIDATION')
+    expectCode(() => moveNode(db, part.id, chapter.id, undefined), 'VALIDATION')
+    expectCode(() => moveNode(db, chapter.id, chapter.id, null), 'VALIDATION')
+    expect(listNodes(db).find((r) => r.id === part.id)?.parentId).toBe(root('manuscript').id)
+  })
+
+  it('rejects structural misplacement', () => {
+    const manuscript = root('manuscript')
+    const part = byLevel('part')
+    const chapter = byLevel('chapter')
+    const scene = byLevel('scene')
+    expectCode(() => moveNode(db, scene.id, part.id, undefined), 'VALIDATION')
+    expectCode(() => moveNode(db, scene.id, manuscript.id, undefined), 'VALIDATION')
+    expectCode(() => moveNode(db, chapter.id, manuscript.id, undefined), 'VALIDATION')
+    expect(listNodes(db).find((r) => r.id === scene.id)?.parentId).toBe(scene.parentId)
+    expect(listNodes(db).find((r) => r.id === chapter.id)?.parentId).toBe(chapter.parentId)
+  })
+
+  it('rejects section roots as the moved node, documents as the parent, and unknown ids', () => {
+    const manuscript = root('manuscript')
+    const scene = byLevel('scene')
+    const chapter = byLevel('chapter')
+    expectCode(() => moveNode(db, manuscript.id, root('front').id, undefined), 'VALIDATION')
+    expectCode(() => moveNode(db, chapter.id, scene.id, undefined), 'VALIDATION')
+    expectCode(() => moveNode(db, 'missing', chapter.id, undefined), 'NOT_FOUND')
+    expectCode(() => moveNode(db, scene.id, 'missing', undefined), 'NOT_FOUND')
+  })
+
+  it('rejects an afterId outside the target parent or equal to the moved node', () => {
+    const manuscript = root('manuscript')
+    const [p1, p2] = children(manuscript.id)
+    if (!p1 || !p2) throw new Error('no parts')
+    const [a1] = children(p1.id)
+    const [b1] = children(p2.id)
+    if (!a1 || !b1) throw new Error('no chapters')
+    expectCode(() => moveNode(db, a1.id, p2.id, a1.id), 'VALIDATION')
+    expectCode(() => moveNode(db, a1.id, p2.id, 'missing'), 'NOT_FOUND')
+    expectCode(() => moveNode(db, a1.id, p1.id, b1.id), 'NOT_FOUND')
+    // The failed transactions rolled back: nothing moved, positions intact.
+    expect(order(p1.id).map(([, p]) => p)).toEqual([0, 1, 2])
+    expect(order(p2.id).map(([, p]) => p)).toEqual([0, 1, 2])
+    expect(listNodes(db).find((r) => r.id === a1.id)?.parentId).toBe(p1.id)
   })
 })

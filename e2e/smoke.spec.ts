@@ -178,6 +178,13 @@ test('create, close, reopen a project on disk', async () => {
   await expect(chapter1.getByRole('treeitem')).toHaveText([/^Scene 1/, /^Opening/])
   await expect(opening).toHaveAttribute('aria-selected', 'true')
 
+  // F-2.4: dragging Opening onto the top edge of Scene 1 (the "before" zone of a 28px row)
+  // reorders it ahead of Scene 1; the selection stays on the moved row.
+  await opening.dragTo(scene1, { targetPosition: { x: 60, y: 4 } })
+  await expect(chapter1.getByRole('treeitem')).toHaveText([/^Opening/, /^Scene 1/])
+  await expect(opening).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('[data-drop]')).toHaveCount(0)
+
   await page.getByRole('button', { name: 'Close project' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
@@ -203,6 +210,14 @@ test('create, close, reopen a project on disk', async () => {
   expect(persisted.map((n) => n.title)).toContain('Opening')
   expect(persisted.map((n) => n.title)).not.toContain('Opening (Copy)')
   expect(persisted.filter((n) => n.title === 'Untitled Scene')).toHaveLength(1)
+  // F-2.4: the drag survived the close: Opening sits before Scene 1 in Chapter 1.
+  const openingRow = persisted.find((n) => n.title === 'Opening')
+  if (!openingRow) throw new Error('Opening was not persisted')
+  const chapter1Children = persisted
+    .filter((n) => n.parentId === openingRow.parentId)
+    .sort((a, b) => a.position - b.position)
+  expect(chapter1Children.map((n) => n.title)).toEqual(['Opening', 'Scene 1'])
+  expect(chapter1Children.map((n) => n.position)).toEqual([0, 1])
 
   // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.
   await closeProject()

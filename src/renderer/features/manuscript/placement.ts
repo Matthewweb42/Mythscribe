@@ -1,5 +1,5 @@
 import type { TreeNode } from '@shared/ipc/contract'
-import { HIERARCHY_LEVELS, type HierarchyLevel } from '@shared/labels'
+import { HIERARCHY_LEVELS, canPlaceLevel, type HierarchyLevel } from '@shared/labels'
 import type { TreeIndex } from './treeStore'
 
 /**
@@ -128,4 +128,68 @@ export function resolveGenericTarget(index: TreeIndex, targetId: string): Create
   if (!target) return null
   if (target.kind === 'folder') return { parentId: target.id }
   return target.parentId === null ? null : { parentId: target.parentId, afterId: target.id }
+}
+
+/** Where the pointer sits over a row while dragging (F-2.4). */
+export type DropZone = 'before' | 'after' | 'into'
+
+/** Where a dragged node lands (F-2.4); same tri-state `afterId` as `tree:move`. */
+export interface DropTarget {
+  parentId: string
+  /** Omitted → last child of `parentId`; null → first child; id → right after that sibling. */
+  afterId?: string | null
+}
+
+/** True when `ancestorId` is `id` or one of its ancestors. */
+function isWithin(index: TreeIndex, id: string, ancestorId: string): boolean {
+  let current: TreeNode | undefined = index.byId[id]
+  while (current) {
+    if (current.id === ancestorId) return true
+    current = current.parentId === null ? undefined : index.byId[current.parentId]
+  }
+  return false
+}
+
+/**
+ * Resolves where dropping `dragId` on `hoverId` in `zone` would land (F-2.4), or null when the
+ * drop is not allowed: onto itself or its own subtree, across sections, before/after a section
+ * root, into a document, where `canPlaceLevel` forbids the level, or where nothing would change.
+ * `before` and `after` make the node a sibling of the hovered row; `into` appends it as the
+ * hovered folder's last child.
+ */
+export function resolveDropTarget(
+  index: TreeIndex,
+  dragId: string,
+  hoverId: string,
+  zone: DropZone
+): DropTarget | null {
+  const dragged = index.byId[dragId]
+  const hovered = index.byId[hoverId]
+  if (!dragged || !hovered || dragged.parentId === null) return null
+  if (dragId === hoverId || isWithin(index, hoverId, dragId)) return null
+  if (index.sectionOf[dragId] !== index.sectionOf[hoverId]) return null
+
+  let target: DropTarget
+  if (zone === 'into') {
+    if (hovered.kind !== 'folder') return null
+    const siblings = index.childrenOf[hoverId] ?? []
+    if (siblings.at(-1) === dragId) return null
+    target = { parentId: hoverId }
+  } else {
+    if (hovered.parentId === null) return null
+    const siblings = index.childrenOf[hovered.parentId] ?? []
+    const at = siblings.indexOf(hoverId)
+    if (zone === 'before') {
+      const previous = siblings[at - 1] ?? null
+      if (previous === dragId) return null
+      target = { parentId: hovered.parentId, afterId: previous }
+    } else {
+      if (siblings[at + 1] === dragId) return null
+      target = { parentId: hovered.parentId, afterId: hoverId }
+    }
+  }
+
+  const parent = index.byId[target.parentId]
+  if (!parent || !canPlaceLevel(dragged.hierarchyLevel, parent)) return null
+  return target
 }

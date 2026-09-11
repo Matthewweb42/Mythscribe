@@ -15,6 +15,7 @@ import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ContextMenu } from './ContextMenu'
 import { treeContextMenuItems } from './contextMenuItems'
+import { resolveDropTarget, type DropZone } from './placement'
 import { useTreeStore, type TreeIndex } from './treeStore'
 
 interface VisibleRow {
@@ -139,6 +140,38 @@ interface MenuAnchor {
   y: number
 }
 
+/** The row under the pointer during a drag and the zone it would drop into (F-2.4). */
+interface DragOver {
+  id: string
+  zone: DropZone
+}
+
+/** Transient drag state (F-2.4): the node being dragged and, once a valid row is hovered, where it would land. */
+interface DragState {
+  id: string
+  over: DragOver | null
+}
+
+interface DragHandlers {
+  onStart: (id: string, event: React.DragEvent<HTMLDivElement>) => void
+  onOver: (id: string, event: React.DragEvent<HTMLDivElement>) => void
+  onDrop: (id: string, event: React.DragEvent<HTMLDivElement>) => void
+  onEnd: () => void
+}
+
+/**
+ * Which zone of a row the pointer is in (F-2.4): section roots take "into" only; documents split
+ * before/after at the top quarter; folders split before / into / after at 25% / 75%.
+ */
+function dropZoneAt(node: TreeNode, event: React.DragEvent<HTMLElement>): DropZone {
+  if (node.sectionType !== null) return 'into'
+  const rect = event.currentTarget.getBoundingClientRect()
+  const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
+  if (ratio < 0.25) return 'before'
+  if (node.kind === 'document' || ratio >= 0.75) return 'after'
+  return 'into'
+}
+
 interface TreeItemProps {
   id: string
   depth: number
@@ -146,6 +179,9 @@ interface TreeItemProps {
   activeId: string | null
   register: (id: string, element: HTMLLIElement | null) => void
   onContextMenu: (anchor: MenuAnchor) => void
+  /** The row currently hovered by a drag, if any; the matching row draws the indicator. */
+  over: DragOver | null
+  drag: DragHandlers
 }
 
 function TreeItem({
@@ -154,7 +190,9 @@ function TreeItem({
   format,
   activeId,
   register,
-  onContextMenu
+  onContextMenu,
+  over,
+  drag
 }: TreeItemProps): React.JSX.Element | null {
   const node = useTreeStore((s) => s.byId[id])
   const childIds = useTreeStore((s) => s.childrenOf[id])
@@ -163,6 +201,7 @@ function TreeItem({
   const collapsed = useTreeStore((s) => s.collapsed[id] === true)
   const selected = useTreeStore((s) => s.selectedId === id)
   const renaming = useTreeStore((s) => s.renamingId === id)
+  const busy = useTreeStore((s) => s.busy)
   const select = useTreeStore((s) => s.select)
   const toggle = useTreeStore((s) => s.toggle)
   if (!node) return null
@@ -172,6 +211,7 @@ function TreeItem({
   const expanded = isFolder && !collapsed
   const label = node.sectionType ? sectionLabel(format, node.sectionType) : node.title
   const isMatter = node.kind === 'document' && section !== 'manuscript'
+  const zone = over?.id === id ? over.zone : null
 
   return (
     <li
@@ -193,10 +233,18 @@ function TreeItem({
           event.stopPropagation()
           onContextMenu({ id, x: event.clientX, y: event.clientY })
         }}
+        draggable={!isSection && !renaming && !busy}
+        onDragStart={(event) => drag.onStart(id, event)}
+        onDragOver={(event) => drag.onOver(id, event)}
+        onDrop={(event) => drag.onDrop(id, event)}
+        onDragEnd={drag.onEnd}
+        data-drop={zone ?? undefined}
         style={{ paddingLeft: depth * 12 + 8 }}
-        className={`flex h-7 cursor-default items-center gap-1 rounded-md pr-2 text-sm select-none ${
+        className={`relative flex h-7 cursor-default items-center gap-1 rounded-md pr-2 text-sm select-none ${
           selected ? 'bg-accent/15 text-fg' : 'hover:bg-surface-raised'
-        } ${isSection ? 'font-medium tracking-wide uppercase text-xs text-fg-muted' : ''}`}
+        } ${isSection ? 'font-medium tracking-wide uppercase text-xs text-fg-muted' : ''} ${
+          zone === 'into' ? 'ring-2 ring-accent ring-inset' : ''
+        }`}
       >
         {isFolder ? (
           <button
@@ -227,6 +275,15 @@ function TreeItem({
         <span aria-hidden="true" className="ml-auto text-xs text-fg-subtle tabular-nums">
           {wordCount.toLocaleString()}
         </span>
+        {zone === 'before' || zone === 'after' ? (
+          <span
+            aria-hidden="true"
+            style={{ left: depth * 12 + 8 }}
+            className={`pointer-events-none absolute right-2 h-0.5 bg-accent ${
+              zone === 'before' ? 'top-0' : 'bottom-0'
+            }`}
+          />
+        ) : null}
       </div>
       {isFolder && expanded && childIds && childIds.length > 0 ? (
         <ul role="group" className="m-0 list-none p-0">
@@ -239,6 +296,8 @@ function TreeItem({
               activeId={activeId}
               register={register}
               onContextMenu={onContextMenu}
+              over={over}
+              drag={drag}
             />
           ))}
         </ul>
@@ -282,7 +341,8 @@ async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
  * collapse/expand, per-level icons and colors, rolled-up word counts, and the active document
  * highlighted. Reads `useTreeStore`; the parent decides when to `load()`. Rows open a
  * section-aware context menu and rename inline (F-2.2); the menu also renames, duplicates, and
- * deletes after confirmation (F-2.3).
+ * deletes after confirmation (F-2.3). Rows drag within their section (F-2.4): onto a folder to
+ * nest, onto a row's top or bottom edge to become its sibling; sections only accept nesting.
  */
 export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.Element | null {
   const loaded = useTreeStore((s) => s.loaded)
@@ -297,6 +357,7 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
   const toggle = useTreeStore((s) => s.toggle)
   const items = useRef(new Map<string, HTMLLIElement>())
   const [menu, setMenu] = useState<MenuAnchor | null>(null)
+  const [drag, setDrag] = useState<DragState | null>(null)
 
   const rows = useMemo(
     () => listVisibleRows(rootIds, childrenOf, collapsed),
@@ -335,6 +396,60 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
     () => (menu ? treeContextMenuItems(index, menu.id, format) : []),
     [index, menu, format]
   )
+
+  const setOver = (over: DragOver | null): void => {
+    setDrag((current) => {
+      if (!current) return current
+      if (current.over?.id === over?.id && current.over?.zone === over?.zone) return current
+      return { ...current, over }
+    })
+  }
+
+  const dragHandlers: DragHandlers = {
+    onStart(id, event) {
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('text/plain', id)
+      setDrag({ id, over: null })
+    },
+    onOver(id, event) {
+      const node = byId[id]
+      const target =
+        drag && node ? resolveDropTarget(index, drag.id, id, dropZoneAt(node, event)) : null
+      if (!target || !node) {
+        event.dataTransfer.dropEffect = 'none'
+        setOver(null)
+        return
+      }
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'move'
+      setOver({ id, zone: dropZoneAt(node, event) })
+    },
+    onDrop(id, event) {
+      event.preventDefault()
+      const node = byId[id]
+      const target =
+        drag && node ? resolveDropTarget(index, drag.id, id, dropZoneAt(node, event)) : null
+      setDrag(null)
+      if (!drag || !target) return
+      useTreeStore
+        .getState()
+        .move(drag.id, target.parentId, target.afterId)
+        .catch((err: unknown) => toast.error(describeError(err)))
+    },
+    onEnd() {
+      setDrag(null)
+    }
+  }
+
+  /** A drag hovering the tree's padding (no row under it) or leaving the tree drops the indicator. */
+  const onTreeDragOver = (event: React.DragEvent<HTMLUListElement>): void => {
+    if (!(event.target instanceof Element) || !event.target.closest('[data-node-id]')) setOver(null)
+  }
+  const onTreeDragLeave = (event: React.DragEvent<HTMLUListElement>): void => {
+    if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) {
+      setOver(null)
+    }
+  }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLUListElement>): void => {
     if (!(event.target instanceof HTMLElement)) return
@@ -385,6 +500,8 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
         role="tree"
         aria-label="Document tree"
         onKeyDown={onKeyDown}
+        onDragOver={onTreeDragOver}
+        onDragLeave={onTreeDragLeave}
         className="m-0 list-none p-1"
       >
         {rootIds.map((id) => (
@@ -396,6 +513,8 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
             activeId={activeId}
             register={register}
             onContextMenu={setMenu}
+            over={drag?.over ?? null}
+            drag={dragHandlers}
           />
         ))}
       </ul>

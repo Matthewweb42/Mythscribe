@@ -9,6 +9,7 @@ import {
   deleteNode,
   duplicateNode,
   listNodes,
+  moveNode,
   renameNode,
   toTreeNode
 } from '../tree/treeStore'
@@ -76,6 +77,10 @@ export function registerHandlers({ manager, appState, dialogs, windows }: Handle
     deleteNode(manager.require().connection.orm, id)
     return null
   })
+
+  register('tree:move', ({ id, parentId, afterId }) =>
+    toTreeNode(moveNode(manager.require().connection.orm, id, parentId, afterId))
+  )
 
   register('window:close', () => {
     manager.close()

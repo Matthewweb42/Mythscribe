@@ -23,7 +23,7 @@ interface TreeState extends TreeIndex {
   loaded: boolean
   /** The node whose title is being edited inline (F-2.2), if any. */
   renamingId: string | null
-  /** True while a create, rename, duplicate, or delete request is in flight; the create buttons disable on it. */
+  /** True while a create, rename, duplicate, delete, or move request is in flight; the create buttons disable on it. */
   busy: boolean
   load: () => Promise<void>
   /** Selects a document or folder. Section roots are not selectable. */
@@ -53,6 +53,12 @@ interface TreeState extends TreeIndex {
    * inside it, falls back per `planRemoval`. Errors propagate.
    */
   remove: (id: string) => Promise<void>
+  /**
+   * Moves a node with its subtree under `parentId` (F-2.4): `afterId` omitted → last child,
+   * null → first child, an id → right after that sibling. Expands the destination's ancestors;
+   * the selection is untouched. Errors propagate so the caller can show them.
+   */
+  move: (id: string, parentId: string, afterId?: string | null) => Promise<void>
 }
 
 const byPosition = (a: TreeNode, b: TreeNode): number => a.position - b.position
@@ -156,7 +162,11 @@ export interface Removal {
 }
 
 /** What deleting `id` takes with it and where the selection lands (F-2.3). Null for section roots and unknown ids. */
-export function planRemoval(index: TreeIndex, id: string, selectedId: string | null): Removal | null {
+export function planRemoval(
+  index: TreeIndex,
+  id: string,
+  selectedId: string | null
+): Removal | null {
   const node = index.byId[id]
   if (node?.parentId == null) return null
   const removed = subtreeIds(index, id)
@@ -186,6 +196,27 @@ export function removeFromIndex(index: TreeIndex, id: string): TreeIndex {
         : existing
     )
   }
+  return buildIndex(nodes)
+}
+
+/**
+ * Merges the row returned by `tree:move` into the index without a reload (F-2.4). The old
+ * siblings close the gap, the new siblings at or after the landing position shift down, and the
+ * index is rebuilt from the local rows so word-count rollups follow the moved words. Returns the
+ * index unchanged for section roots and unknown ids.
+ */
+export function moveInIndex(index: TreeIndex, moved: TreeNode): TreeIndex {
+  const before = index.byId[moved.id]
+  if (before?.parentId == null || moved.parentId === null) return index
+  const nodes: TreeNode[] = []
+  for (const existing of Object.values(index.byId)) {
+    if (existing.id === moved.id) continue
+    let position = existing.position
+    if (existing.parentId === before.parentId && position > before.position) position -= 1
+    if (existing.parentId === moved.parentId && position >= moved.position) position += 1
+    nodes.push(position === existing.position ? existing : { ...existing, position })
+  }
+  nodes.push(moved)
   return buildIndex(nodes)
 }
 
@@ -313,6 +344,18 @@ export const useTreeStore = create<TreeState>((set, get) => ({
           renamingId: s.renamingId !== null && plan.removed.has(s.renamingId) ? null : s.renamingId
         }
       })
+    } finally {
+      if (mine === generation) set({ busy: false })
+    }
+  },
+
+  async move(id, parentId, afterId) {
+    const mine = generation
+    set({ busy: true })
+    try {
+      const node = await ipc().invoke('tree:move', { id, parentId, afterId })
+      if (mine !== generation) return
+      set((s) => ({ ...moveInIndex(s, node), collapsed: expandAncestors(s, node.parentId) }))
     } finally {
       if (mine === generation) set({ busy: false })
     }

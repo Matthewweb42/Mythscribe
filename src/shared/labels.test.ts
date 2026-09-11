@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { defaultNodeTitle, formatLabel, levelLabel, sectionLabel, skeletonSummary } from './labels'
+import {
+  canPlaceLevel,
+  defaultNodeTitle,
+  formatLabel,
+  levelLabel,
+  sectionLabel,
+  skeletonSummary,
+  type HierarchyLevel,
+  type SectionType
+} from './labels'
 
 describe('formatLabel', () => {
   it.each([
@@ -66,5 +75,42 @@ describe('defaultNodeTitle', () => {
     ['webnovel', 'folder', null, 'Untitled folder']
   ] as const)('%s / %s / %s → %s', (format, kind, level, expected) => {
     expect(defaultNodeTitle(format, kind, level)).toBe(expected)
+  })
+})
+
+describe('canPlaceLevel', () => {
+  const parent = (
+    sectionType: SectionType | null,
+    hierarchyLevel: HierarchyLevel | null
+  ): { sectionType: SectionType | null; hierarchyLevel: HierarchyLevel | null } => ({
+    sectionType,
+    hierarchyLevel
+  })
+  const manuscript = parent('manuscript', null)
+  const front = parent('front', null)
+  const part = parent(null, 'part')
+  const chapter = parent(null, 'chapter')
+  const generic = parent(null, null)
+
+  it.each([
+    ['part', manuscript, true],
+    ['part', front, false],
+    ['part', part, false],
+    ['part', generic, false],
+    ['chapter', part, true],
+    ['chapter', manuscript, false],
+    ['chapter', chapter, false],
+    ['chapter', generic, false],
+    ['scene', chapter, true],
+    ['scene', part, false],
+    ['scene', manuscript, false],
+    ['scene', generic, false],
+    [null, manuscript, true],
+    [null, front, true],
+    [null, part, true],
+    [null, chapter, true],
+    [null, generic, true]
+  ] as const)('%s under %o → %s', (level, target, expected) => {
+    expect(canPlaceLevel(level, target)).toBe(expected)
   })
 })

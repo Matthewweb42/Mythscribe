@@ -6,6 +6,7 @@ import {
   buildIndex,
   duplicateIntoIndex,
   insertIntoIndex,
+  moveInIndex,
   planRemoval,
   removeFromIndex,
   useTreeStore
@@ -58,7 +59,31 @@ function duplicateRows(
   return rows
 }
 
-/** A client that answers `tree:create`, `tree:rename`, `tree:duplicate`, and `tree:delete` like main would, recording inputs. */
+/**
+ * What main returns for `tree:move`: the row under its new parent at the position resolved from
+ * the tri-state `afterId` against the gap-closed siblings (the node itself excluded).
+ */
+function movedRow(
+  index: { byId: Record<string, TreeNode>; childrenOf: Record<string, string[]> },
+  id: string,
+  parentId: string,
+  afterId: string | null | undefined
+): TreeNode {
+  const moving = index.byId[id]
+  if (!moving) throw new Error('missing')
+  const siblings = (index.childrenOf[parentId] ?? []).filter((childId) => childId !== id)
+  let position: number
+  if (afterId === undefined) position = siblings.length
+  else if (afterId === null) position = 0
+  else {
+    const at = siblings.indexOf(afterId)
+    if (at < 0) throw new Error('missing sibling')
+    position = at + 1
+  }
+  return { ...moving, parentId, position, modified: 'moved' }
+}
+
+/** A client that answers `tree:create`, `tree:rename`, `tree:duplicate`, `tree:delete`, and `tree:move` like main would, recording inputs. */
 function mutationClient(): { client: IpcClient; calls: [Channel, unknown][] } {
   const calls: [Channel, unknown][] = []
   const client: IpcClient = {
@@ -99,6 +124,10 @@ function mutationClient(): { client: IpcClient; calls: [Channel, unknown][] } {
         const req = contract['tree:delete'].input.parse(input)
         if (!state.byId[req.id]) throw new Error('missing')
         return null as Output<typeof channel>
+      }
+      if (channel === 'tree:move') {
+        const req = contract['tree:move'].input.parse(input)
+        return movedRow(state, req.id, req.parentId, req.afterId) as Output<typeof channel>
       }
       return contract[channel].output.parse(treeFixture) as Output<typeof channel>
     },
@@ -229,7 +258,9 @@ describe('planRemoval', () => {
 
   it('falls back from a selected descendant of the deleted folder', () => {
     const plan = planRemoval(index, 'arc-1', 'sc-2')
-    expect(plan?.removed).toEqual(new Set(['arc-1', 'ch-1', 'ch-2', 'ch-3', 'sc-1', 'sc-2', 'sc-3']))
+    expect(plan?.removed).toEqual(
+      new Set(['arc-1', 'ch-1', 'ch-2', 'ch-3', 'sc-1', 'sc-2', 'sc-3'])
+    )
     expect(plan?.selectedId).toBe('arc-2')
   })
 
@@ -272,6 +303,72 @@ describe('removeFromIndex', () => {
   it('returns the index unchanged for section roots and unknown ids', () => {
     expect(removeFromIndex(index, 'manuscript')).toBe(index)
     expect(removeFromIndex(index, 'missing')).toBe(index)
+  })
+})
+
+describe('moveInIndex', () => {
+  const index = buildIndex(treeFixture)
+
+  it('moves a sibling one position down within the same parent', () => {
+    const next = moveInIndex(index, movedRow(index, 'ch-1', 'arc-1', 'ch-2'))
+    expect(next.childrenOf['arc-1']).toEqual(['ch-2', 'ch-1', 'ch-3'])
+    expect(next.byId['ch-2']?.position).toBe(0)
+    expect(next.byId['ch-1']?.position).toBe(1)
+    expect(next.byId['ch-3']?.position).toBe(2)
+    expect(next.byId['ch-1']?.modified).toBe('moved')
+    // The subtree follows and the rollups are unchanged.
+    expect(next.childrenOf['ch-1']).toEqual(['sc-1'])
+    expect(next.wordCountRollup['arc-1']).toBe(2000)
+    // The source index is untouched.
+    expect(index.childrenOf['arc-1']).toEqual(['ch-1', 'ch-2', 'ch-3'])
+    expect(index.byId['ch-1']?.position).toBe(0)
+  })
+
+  it('moves the last sibling to the head with afterId null', () => {
+    const next = moveInIndex(index, movedRow(index, 'ch-3', 'arc-1', null))
+    expect(next.childrenOf['arc-1']).toEqual(['ch-3', 'ch-1', 'ch-2'])
+    expect(next.byId['ch-3']?.position).toBe(0)
+    expect(next.byId['ch-1']?.position).toBe(1)
+    expect(next.byId['ch-2']?.position).toBe(2)
+  })
+
+  it('moves the head to the tail when afterId is omitted', () => {
+    const next = moveInIndex(index, movedRow(index, 'ch-1', 'arc-1', undefined))
+    expect(next.childrenOf['arc-1']).toEqual(['ch-2', 'ch-3', 'ch-1'])
+    expect(next.byId['ch-1']?.position).toBe(2)
+  })
+
+  it('reparents a chapter, closes the old gap, opens the new one, and moves the words', () => {
+    const next = moveInIndex(index, movedRow(index, 'ch-1', 'arc-2', 'ch-4'))
+    expect(next.childrenOf['arc-1']).toEqual(['ch-2', 'ch-3'])
+    expect(next.byId['ch-2']?.position).toBe(0)
+    expect(next.byId['ch-3']?.position).toBe(1)
+    expect(next.childrenOf['arc-2']).toEqual(['ch-4', 'ch-1', 'ch-5', 'ch-6'])
+    expect(next.byId['ch-1']).toMatchObject({ parentId: 'arc-2', position: 1 })
+    expect(next.byId['ch-5']?.position).toBe(2)
+    expect(next.byId['ch-6']?.position).toBe(3)
+    expect(next.childrenOf['ch-1']).toEqual(['sc-1'])
+    expect(next.sectionOf['sc-1']).toBe('manuscript')
+    expect(next.wordCountRollup['arc-1']).toBe(800)
+    expect(next.wordCountRollup['arc-2']).toBe(4000)
+    expect(next.wordCountRollup.manuscript).toBe(4800)
+    expect(next.rootIds).toEqual(['front', 'manuscript', 'end'])
+  })
+
+  it('reparents a scene into an empty-looking chapter as its last child', () => {
+    const next = moveInIndex(index, movedRow(index, 'sc-1', 'ch-3', undefined))
+    expect(next.childrenOf['ch-1']).toBeUndefined() // buildIndex lists no entry for an empty folder
+    expect(next.childrenOf['ch-3']).toEqual(['sc-3', 'sc-1'])
+    expect(next.byId['sc-1']).toMatchObject({ parentId: 'ch-3', position: 1 })
+    expect(next.wordCountRollup['ch-1']).toBe(0)
+    expect(next.wordCountRollup['ch-3']).toBe(1200)
+  })
+
+  it('returns the index unchanged for section roots and unknown ids', () => {
+    const manuscript = index.byId.manuscript
+    if (!manuscript) throw new Error('missing')
+    expect(moveInIndex(index, { ...manuscript, parentId: 'front', position: 0 })).toBe(index)
+    expect(moveInIndex(index, newNode('ch-1', 0))).toBe(index)
   })
 })
 
@@ -605,6 +702,92 @@ describe('treeStore', () => {
     useTreeStore.setState({ ...index, loaded: true, selectedId: 'sc-1' })
     await expect(useTreeStore.getState().remove('sc-1')).rejects.toThrow(
       'Sections cannot be deleted'
+    )
+    const state = useTreeStore.getState()
+    expect(state.byId).toEqual(index.byId)
+    expect(state.childrenOf).toEqual(index.childrenOf)
+    expect(state.selectedId).toBe('sc-1')
+    expect(state.busy).toBe(false)
+  })
+
+  it('move merges the returned row, opens the destination ancestors, and keeps the selection', async () => {
+    const { client, calls } = mutationClient()
+    setIpcClient(client)
+    useTreeStore.setState({
+      ...buildIndex(treeFixture),
+      loaded: true,
+      selectedId: 'sc-2',
+      collapsed: { 'arc-2': true, 'ch-4': true, 'arc-1': true }
+    })
+    await useTreeStore.getState().move('ch-1', 'arc-2', 'ch-4')
+    expect(calls).toEqual([['tree:move', { id: 'ch-1', parentId: 'arc-2', afterId: 'ch-4' }]])
+    const state = useTreeStore.getState()
+    expect(state.childrenOf['arc-1']).toEqual(['ch-2', 'ch-3'])
+    expect(state.childrenOf['arc-2']).toEqual(['ch-4', 'ch-1', 'ch-5', 'ch-6'])
+    expect(state.byId['ch-1']).toMatchObject({ parentId: 'arc-2', position: 1, modified: 'moved' })
+    expect(state.wordCountRollup['arc-2']).toBe(4000)
+    expect(state.selectedId).toBe('sc-2')
+    expect(state.renamingId).toBeNull()
+    expect(state.collapsed).toEqual({
+      'arc-2': false,
+      'ch-4': true,
+      'arc-1': true,
+      manuscript: false
+    })
+    expect(state.busy).toBe(false)
+  })
+
+  it('move reorders within the same parent and sends a null afterId for "first"', async () => {
+    const { client, calls } = mutationClient()
+    setIpcClient(client)
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    await useTreeStore.getState().move('ch-3', 'arc-1', null)
+    expect(calls).toEqual([['tree:move', { id: 'ch-3', parentId: 'arc-1', afterId: null }]])
+    const state = useTreeStore.getState()
+    expect(state.childrenOf['arc-1']).toEqual(['ch-3', 'ch-1', 'ch-2'])
+    expect(state.byId['ch-1']?.position).toBe(1)
+    expect(state.byId['ch-2']?.position).toBe(2)
+  })
+
+  it('move sets busy while in flight and drops the response after clear', async () => {
+    let release = (): void => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const slow: IpcClient = {
+      async invoke(channel) {
+        await gate
+        return contract[channel].output.parse(
+          movedRow(buildIndex(treeFixture), 'ch-1', 'arc-2', undefined)
+        ) as Output<typeof channel>
+      },
+      on: () => () => {}
+    }
+    setIpcClient(slow)
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    const pending = useTreeStore.getState().move('ch-1', 'arc-2')
+    expect(useTreeStore.getState().busy).toBe(true)
+    useTreeStore.getState().clear()
+    release()
+    await pending
+    const state = useTreeStore.getState()
+    expect(state.loaded).toBe(false)
+    expect(state.byId).toEqual({})
+    expect(state.busy).toBe(false)
+  })
+
+  it('a rejected tree:move leaves the index and selection untouched and propagates the error', async () => {
+    const failing: IpcClient = {
+      async invoke() {
+        throw new Error('Moves are restricted to within a section')
+      },
+      on: () => () => {}
+    }
+    setIpcClient(failing)
+    const index = buildIndex(treeFixture)
+    useTreeStore.setState({ ...index, loaded: true, selectedId: 'sc-1' })
+    await expect(useTreeStore.getState().move('title-page', 'ch-1')).rejects.toThrow(
+      'Moves are restricted to within a section'
     )
     const state = useTreeStore.getState()
     expect(state.byId).toEqual(index.byId)

@@ -66,6 +66,27 @@ export function levelLabel(format: NovelFormat, level: HierarchyLevel): string {
   }
 }
 
+/**
+ * Where a hierarchy level may live (F-2.2 create, F-2.4 move): a part under the manuscript root,
+ * a chapter under a part, a scene under a chapter. Generic nodes (no level) may live in any folder.
+ * One owner for the structural rule; main validates with it and the renderer gates drops with it.
+ */
+export function canPlaceLevel(
+  level: HierarchyLevel | null,
+  parent: { sectionType: SectionType | null; hierarchyLevel: HierarchyLevel | null }
+): boolean {
+  switch (level) {
+    case null:
+      return true
+    case 'part':
+      return parent.sectionType === 'manuscript'
+    case 'chapter':
+      return parent.hierarchyLevel === 'part'
+    case 'scene':
+      return parent.hierarchyLevel === 'chapter'
+  }
+}
+
 /** Title given to a newly created node (F-2.2): "Untitled Arc", "Untitled Chapter", "Untitled document". */
 export function defaultNodeTitle(
   format: NovelFormat,

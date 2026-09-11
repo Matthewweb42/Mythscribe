@@ -106,6 +106,19 @@ export const contract = {
   'tree:duplicate': { input: z.object({ id: z.string() }), output: z.array(TreeNode) },
   /** Deletes a node and everything inside it (F-2.3); later siblings close the gap. */
   'tree:delete': { input: z.object({ id: z.string() }), output: z.null() },
+  /**
+   * Moves a node (with its subtree) under `parentId` within the same section (F-2.4). Old siblings
+   * close the gap, new siblings make room. Returns the moved row.
+   */
+  'tree:move': {
+    input: z.object({
+      id: z.string(),
+      parentId: z.string(),
+      /** Omitted → append as the parent's last child; null → insert first; id → after that sibling. */
+      afterId: z.string().nullable().optional()
+    }),
+    output: TreeNode
+  },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
@@ -117,6 +130,7 @@ export type Output<C extends Channel> = z.output<Contract[C]['output']>
 export const channels = Object.keys(contract) as Channel[]
 
 export type TreeCreateInput = Input<'tree:create'>
+export type TreeMoveInput = Input<'tree:move'>
 
 /** Events pushed from main to the renderer. */
 export const events = {

@@ -207,6 +207,77 @@ describe('tree:create / tree:rename / tree:duplicate / tree:delete', () => {
   })
 })
 
+describe('tree:move', () => {
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('tree:move', { id: 'x', parentId: 'y' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('moves a chapter into another arc and tree:list shows both parents contiguous', async () => {
+    await invoke('project:create', { name: 'Tree', format: 'webnovel', directory: tmp })
+    const before = await invoke('tree:list', undefined)
+    const manuscript = before.find((r) => r.sectionType === 'manuscript')
+    const arc1 = before.find((r) => r.parentId === manuscript?.id && r.position === 0)
+    const arc2 = before.find((r) => r.parentId === manuscript?.id && r.position === 1)
+    const chapter3 = before.find((r) => r.parentId === arc1?.id && r.position === 2)
+    const moved = await invoke('tree:move', {
+      id: chapter3?.id ?? '',
+      parentId: arc2?.id ?? '',
+      afterId: null
+    })
+    expect(moved).toMatchObject({ id: chapter3?.id, parentId: arc2?.id, position: 0 })
+    const after = await invoke('tree:list', undefined)
+    expect(after).toHaveLength(17)
+    // Each arc numbers its chapters 1–3, so assert by id rather than title.
+    const ids = (parentId: string | undefined): [string | undefined, number][] =>
+      after.filter((r) => r.parentId === parentId).map((r) => [r.id, r.position])
+    const arc1Before = before.filter((r) => r.parentId === arc1?.id).map((r) => r.id)
+    const arc2Before = before.filter((r) => r.parentId === arc2?.id).map((r) => r.id)
+    expect(ids(arc1?.id)).toEqual([
+      [arc1Before[0], 0],
+      [arc1Before[1], 1]
+    ])
+    expect(ids(arc2?.id)).toEqual([
+      [chapter3?.id, 0],
+      [arc2Before[0], 1],
+      [arc2Before[1], 2],
+      [arc2Before[2], 3]
+    ])
+    expect(after.filter((r) => r.parentId === chapter3?.id)).toHaveLength(1)
+  })
+
+  it('reorders within the same parent when afterId is a later sibling', async () => {
+    await invoke('project:create', { name: 'Tree', format: 'webnovel', directory: tmp })
+    const before = await invoke('tree:list', undefined)
+    const arc1 = before.find((r) => r.hierarchyLevel === 'part' && r.position === 0)
+    const chapters = before.filter((r) => r.parentId === arc1?.id)
+    const [c1, c2] = chapters
+    await invoke('tree:move', { id: c1?.id ?? '', parentId: arc1?.id ?? '', afterId: c2?.id })
+    const after = await invoke('tree:list', undefined)
+    expect(after.filter((r) => r.parentId === arc1?.id).map((r) => [r.title, r.position])).toEqual([
+      ['Chapter 2', 0],
+      ['Chapter 1', 1],
+      ['Chapter 3', 2]
+    ])
+  })
+
+  it('rejects a cross-section move with VALIDATION', async () => {
+    await invoke('project:create', { name: 'Tree', format: 'novel', directory: tmp })
+    const before = await invoke('tree:list', undefined)
+    const front = before.find((r) => r.sectionType === 'front')
+    const doc = await invoke('tree:create', {
+      parentId: front?.id ?? '',
+      kind: 'document',
+      hierarchyLevel: null
+    })
+    const chapter = before.find((r) => r.hierarchyLevel === 'chapter')
+    await expect(
+      invoke('tree:move', { id: doc.id, parentId: chapter?.id ?? '' })
+    ).rejects.toThrowError(/^VALIDATION: Moves are restricted to within a section/)
+  })
+})
+
 describe('window:close', () => {
   it('closes the project and every window', async () => {
     await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })

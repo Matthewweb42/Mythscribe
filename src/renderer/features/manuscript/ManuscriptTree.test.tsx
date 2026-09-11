@@ -1,4 +1,12 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TreeNode } from '@shared/ipc/contract'
@@ -18,10 +26,67 @@ const row = (name: string): Element => {
   return first
 }
 
+/** The slice of `DataTransfer` the tree touches; jsdom has no `DataTransfer` of its own. */
+interface DragData {
+  dropEffect: string
+  effectAllowed: string
+  data: Record<string, string>
+  setData(type: string, value: string): void
+  getData(type: string): string
+}
+
+const dragData = (): DragData => ({
+  dropEffect: 'none',
+  effectAllowed: 'uninitialized',
+  data: {},
+  setData(type, value) {
+    this.data[type] = value
+  },
+  getData(type) {
+    return this.data[type] ?? ''
+  }
+})
+
+/**
+ * Fires a drag event carrying `dataTransfer` at `clientY`. jsdom has no `DragEvent`, so the
+ * created event is a plain `Event` and the pointer position is defined on it by hand. Returns
+ * false when the handler called `preventDefault` (the native "drop allowed" signal).
+ */
+function dragEvent(
+  type: 'dragStart' | 'dragOver' | 'drop' | 'dragEnd',
+  element: Element,
+  dataTransfer: DragData,
+  clientY = 0
+): boolean {
+  const event = createEvent[type](element, { dataTransfer })
+  Object.defineProperty(event, 'clientY', { value: clientY })
+  return fireEvent(element, event)
+}
+
+/** Rows are laid out 28px tall from y=100, so 103 is the top quarter, 114 the middle, 125 the bottom quarter. */
+const rowTop = 100
+const rowHeight = 28
+const y = { before: rowTop + 3, middle: rowTop + 14, after: rowTop + 25 }
+
+/** Starts dragging `source` and hovers `target` at `clientY`; returns the transfer for assertions. */
+function dragOver(source: string, target: string, clientY: number): DragData {
+  const dataTransfer = dragData()
+  dragEvent('dragStart', row(source), dataTransfer)
+  const targetRow = row(target)
+  vi.spyOn(targetRow, 'getBoundingClientRect').mockReturnValue(
+    new DOMRect(0, rowTop, 200, rowHeight)
+  )
+  dragEvent('dragOver', targetRow, dataTransfer, clientY)
+  return dataTransfer
+}
+
+/** The drop indicator a row shows: the zone from `data-drop`, or null. */
+const indicator = (name: string): string | null => row(name).getAttribute('data-drop')
+
 /**
  * Answers `tree:create` with an "Untitled …" node after `afterId`, `tree:rename` with the new
- * title, `tree:duplicate` with a "<title> (Copy)" subtree (ids suffixed `-copy`), and
- * `tree:delete` with null.
+ * title, `tree:duplicate` with a "<title> (Copy)" subtree (ids suffixed `-copy`), `tree:delete`
+ * with null, and `tree:move` with the row re-parented at the gap-closed target position.
  */
 function install(): ReturnType<typeof vi.fn> {
   const invoke = vi.fn(async (channel: string, input: unknown) => {
@@ -80,6 +145,20 @@ function install(): ReturnType<typeof vi.fn> {
       const req = input as { id: string }
       if (!state.byId[req.id]) throw new Error('missing')
       return null
+    }
+    if (channel === 'tree:move') {
+      const req = input as { id: string; parentId: string; afterId?: string | null }
+      const node = state.byId[req.id]
+      if (!node) throw new Error('missing')
+      const siblings = (state.childrenOf[req.parentId] ?? []).filter((id) => id !== req.id)
+      const position =
+        req.afterId === undefined
+          ? siblings.length
+          : req.afterId === null
+            ? 0
+            : siblings.indexOf(req.afterId) + 1
+      const moved: TreeNode = { ...node, parentId: req.parentId, position }
+      return moved
     }
     throw new Error(`unexpected ${channel}`)
   })
@@ -650,5 +729,214 @@ describe('ManuscriptTree', () => {
     expect(await screen.findByRole('treeitem', { name: 'Scene 1' })).toBeInTheDocument()
     expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual(['Title is too long'])
     expect(screen.queryByRole('textbox', { name: 'Rename' })).not.toBeInTheDocument()
+  })
+
+  describe('drag and drop (F-2.4)', () => {
+    it('drags a chapter onto the top edge of its sibling and drops it before it', async () => {
+      const invoke = install()
+      render(<ManuscriptTree format="webnovel" />)
+      expect(row('Chapter 3')).toHaveAttribute('draggable', 'true')
+      const dataTransfer = dragOver('Chapter 3', 'Chapter 1', y.before)
+      expect(dataTransfer.effectAllowed).toBe('move')
+      expect(dataTransfer.getData('text/plain')).toBe('ch-3')
+      expect(dataTransfer.dropEffect).toBe('move')
+      expect(indicator('Chapter 1')).toBe('before')
+      expect(row('Chapter 1').querySelector('.bg-accent.top-0')).not.toBeNull()
+      expect(row('Chapter 1')).not.toHaveClass('ring-accent')
+      dragEvent('drop', row('Chapter 1'), dataTransfer, y.before)
+      expect(invoke).toHaveBeenCalledWith('tree:move', {
+        id: 'ch-3',
+        parentId: 'arc-1',
+        afterId: null
+      })
+      await waitFor(() =>
+        expect(treeNames().indexOf('Chapter 3')).toBe(treeNames().indexOf('Arc 1') + 1)
+      )
+      expect(treeNames().slice(3, 10)).toEqual([
+        'Arc 1',
+        'Chapter 3',
+        'Scene 3',
+        'Chapter 1',
+        'Scene 1',
+        'Chapter 2',
+        'Scene 2'
+      ])
+      expect(indicator('Chapter 1')).toBeNull()
+      expect(item('Chapter 3')).toHaveAttribute('aria-level', '3')
+    })
+
+    it('shows a line under a row for the bottom quarter and drops after it', async () => {
+      const invoke = install()
+      render(<ManuscriptTree format="webnovel" />)
+      const dataTransfer = dragOver('Chapter 1', 'Chapter 3', y.after)
+      expect(indicator('Chapter 3')).toBe('after')
+      expect(row('Chapter 3').querySelector('.bg-accent.bottom-0')).not.toBeNull()
+      dragEvent('drop', row('Chapter 3'), dataTransfer, y.after)
+      expect(invoke).toHaveBeenCalledWith('tree:move', {
+        id: 'ch-1',
+        parentId: 'arc-1',
+        afterId: 'ch-3'
+      })
+      await waitFor(() =>
+        expect(treeNames().indexOf('Chapter 1')).toBe(treeNames().indexOf('Scene 3') + 1)
+      )
+    })
+
+    it('drops a scene into the middle of a folder as its last child and moves its words', async () => {
+      const invoke = install()
+      render(<ManuscriptTree format="webnovel" />)
+      const dataTransfer = dragOver('Scene 1', 'Chapter 2', y.middle)
+      expect(indicator('Chapter 2')).toBe('into')
+      expect(row('Chapter 2')).toHaveClass('ring-accent')
+      expect(row('Chapter 2').querySelector('.bg-accent')).toBeNull()
+      dragEvent('drop', row('Chapter 2'), dataTransfer, y.middle)
+      expect(invoke).toHaveBeenCalledWith('tree:move', {
+        id: 'sc-1',
+        parentId: 'ch-2',
+        afterId: undefined
+      })
+      await waitFor(() =>
+        expect(
+          within(item('Chapter 2'))
+            .getAllByRole('treeitem')
+            .map((el) => el.getAttribute('aria-label'))
+        ).toEqual(['Scene 2', 'Scene 1'])
+      )
+      expect(within(item('Chapter 1')).queryByRole('treeitem')).toBeNull()
+      expect(row('Chapter 1').querySelector('.tabular-nums')).toHaveTextContent(/^0$/)
+      expect(row('Chapter 2')).toHaveTextContent((2000).toLocaleString())
+      expect(row('Arc 1')).toHaveTextContent((2000).toLocaleString())
+      expect(row('Chapter 2')).not.toHaveClass('ring-accent')
+    })
+
+    it('treats the middle of a document as "after" since documents cannot nest', () => {
+      install()
+      render(<ManuscriptTree format="webnovel" />)
+      dragOver('Scene 1', 'Scene 2', y.middle)
+      expect(indicator('Scene 2')).toBe('after')
+      expect(row('Scene 2')).not.toHaveClass('ring-accent')
+    })
+
+    it('sections are not draggable and only accept nesting', async () => {
+      const invoke = install()
+      render(<ManuscriptTree format="webnovel" />)
+      expect(row('Volume 1')).toHaveAttribute('draggable', 'false')
+      expect(row('Front Matter')).toHaveAttribute('draggable', 'false')
+      const dataTransfer = dragOver('Arc 1', 'Volume 1', y.before)
+      expect(indicator('Volume 1')).toBe('into')
+      expect(row('Volume 1')).toHaveClass('ring-accent')
+      dragEvent('drop', row('Volume 1'), dataTransfer, y.before)
+      expect(invoke).toHaveBeenCalledWith('tree:move', {
+        id: 'arc-1',
+        parentId: 'manuscript',
+        afterId: undefined
+      })
+      await waitFor(() =>
+        expect(treeNames().indexOf('Arc 2')).toBeLessThan(treeNames().indexOf('Arc 1'))
+      )
+    })
+
+    it('rejects a drop across sections: no indicator, no drop effect, nothing sent', () => {
+      const invoke = install()
+      render(<ManuscriptTree format="webnovel" />)
+      const dataTransfer = dragOver('Scene 1', 'Title Page', y.after)
+      expect(dataTransfer.dropEffect).toBe('none')
+      expect(indicator('Title Page')).toBeNull()
+      expect(row('Title Page').querySelector('.bg-accent')).toBeNull()
+      const before = treeNames()
+      dragEvent('drop', row('Title Page'), dataTransfer, y.after)
+      expect(invoke).not.toHaveBeenCalled()
+      expect(treeNames()).toEqual(before)
+    })
+
+    it('rejects dropping a folder onto itself or into its own subtree', () => {
+      const invoke = install()
+      render(<ManuscriptTree format="webnovel" />)
+      let dataTransfer = dragOver('Arc 1', 'Chapter 2', y.middle)
+      expect(dataTransfer.dropEffect).toBe('none')
+      expect(indicator('Chapter 2')).toBeNull()
+      dragEvent('drop', row('Chapter 2'), dataTransfer, y.middle)
+      dragEvent('dragEnd', row('Arc 1'), dataTransfer)
+      dataTransfer = dragOver('Arc 1', 'Arc 1', y.after)
+      expect(indicator('Arc 1')).toBeNull()
+      dragEvent('drop', row('Arc 1'), dataTransfer, y.after)
+      expect(invoke).not.toHaveBeenCalled()
+    })
+
+    it('rejects a scene dropped into an arc (level rule) with dragover left unhandled', () => {
+      const invoke = install()
+      render(<ManuscriptTree format="webnovel" />)
+      const dataTransfer = dragData()
+      dragEvent('dragStart', row('Scene 1'), dataTransfer)
+      const target = row('Arc 2')
+      vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(
+        new DOMRect(0, rowTop, 200, rowHeight)
+      )
+      expect(dragEvent('dragOver', target, dataTransfer, y.middle)).toBe(true)
+      expect(dataTransfer.dropEffect).toBe('none')
+      expect(indicator('Arc 2')).toBeNull()
+      expect(dragEvent('dragOver', row('Chapter 4'), dataTransfer, y.middle)).toBe(false)
+      expect(indicator('Chapter 4')).toBe('into')
+      expect(invoke).not.toHaveBeenCalled()
+    })
+
+    it('a collapsed folder expands after a nest-drop so the moved row is visible', async () => {
+      install()
+      useTreeStore.setState({ collapsed: { 'ch-2': true } })
+      render(<ManuscriptTree format="webnovel" />)
+      expect(screen.queryByRole('treeitem', { name: 'Scene 2' })).not.toBeInTheDocument()
+      const dataTransfer = dragOver('Scene 1', 'Chapter 2', y.middle)
+      dragEvent('drop', row('Chapter 2'), dataTransfer, y.middle)
+      await waitFor(() => expect(item('Chapter 2')).toHaveAttribute('aria-expanded', 'true'))
+      expect(
+        within(item('Chapter 2')).getByRole('treeitem', { name: 'Scene 1' })
+      ).toBeInTheDocument()
+    })
+
+    it('dragend without a drop clears the indicator', () => {
+      install()
+      render(<ManuscriptTree format="webnovel" />)
+      const dataTransfer = dragOver('Chapter 3', 'Chapter 1', y.before)
+      expect(indicator('Chapter 1')).toBe('before')
+      dragEvent('dragEnd', row('Chapter 3'), dataTransfer)
+      expect(indicator('Chapter 1')).toBeNull()
+      expect(document.querySelector('.bg-accent.top-0')).toBeNull()
+    })
+
+    it('a row being renamed is not draggable', () => {
+      install()
+      render(<ManuscriptTree format="webnovel" />)
+      act(() => useTreeStore.getState().startRename('sc-1'))
+      expect(row('Scene 1')).toHaveAttribute('draggable', 'false')
+    })
+
+    it('rows are not draggable while a mutation is in flight', () => {
+      install()
+      render(<ManuscriptTree format="webnovel" />)
+      expect(row('Scene 1')).toHaveAttribute('draggable', 'true')
+      act(() => useTreeStore.setState({ busy: true }))
+      expect(row('Scene 1')).toHaveAttribute('draggable', 'false')
+    })
+
+    it('surfaces a failed move as a toast and keeps the order', async () => {
+      const client: IpcClient = {
+        invoke: async () => {
+          throw new Error('Database is locked')
+        },
+        on: () => () => {}
+      }
+      setIpcClient(client)
+      render(<ManuscriptTree format="webnovel" />)
+      const before = treeNames()
+      const dataTransfer = dragOver('Chapter 3', 'Chapter 1', y.before)
+      dragEvent('drop', row('Chapter 1'), dataTransfer, y.before)
+      await waitFor(() =>
+        expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual([
+          'Database is locked'
+        ])
+      )
+      expect(treeNames()).toEqual(before)
+      expect(indicator('Chapter 1')).toBeNull()
+    })
   })
 })

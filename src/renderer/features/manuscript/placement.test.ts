@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { TreeNode } from '@shared/ipc/contract'
 import type { HierarchyLevel } from '@shared/labels'
-import { resolveCreateTarget, resolveGenericTarget, type CreateTarget } from './placement'
+import {
+  resolveCreateTarget,
+  resolveDropTarget,
+  resolveGenericTarget,
+  type CreateTarget,
+  type DropTarget,
+  type DropZone
+} from './placement'
 import { treeFixture } from './treeFixture'
 import { buildIndex } from './treeStore'
 
@@ -170,5 +177,181 @@ describe('resolveGenericTarget', () => {
 
   it('returns null for an unknown id', () => {
     expect(resolveGenericTarget(index, 'nope')).toBeNull()
+  })
+})
+
+describe('resolveDropTarget', () => {
+  const drops: {
+    name: string
+    drag: string
+    hover: string
+    zone: DropZone
+    expected: DropTarget | null
+  }[] = [
+    // Sibling reorders
+    {
+      name: 'before a sibling',
+      drag: 'ch-3',
+      hover: 'ch-1',
+      zone: 'before',
+      expected: { parentId: 'arc-1', afterId: null }
+    },
+    {
+      name: 'after a sibling',
+      drag: 'ch-1',
+      hover: 'ch-3',
+      zone: 'after',
+      expected: { parentId: 'arc-1', afterId: 'ch-3' }
+    },
+    {
+      name: 'before a later sibling',
+      drag: 'ch-1',
+      hover: 'ch-3',
+      zone: 'before',
+      expected: { parentId: 'arc-1', afterId: 'ch-2' }
+    },
+    // Re-parenting
+    {
+      name: 'into another chapter',
+      drag: 'sc-1',
+      hover: 'ch-2',
+      zone: 'into',
+      expected: { parentId: 'ch-2' }
+    },
+    {
+      name: 'after a scene in another chapter',
+      drag: 'sc-1',
+      hover: 'sc-2',
+      zone: 'after',
+      expected: { parentId: 'ch-2', afterId: 'sc-2' }
+    },
+    {
+      name: 'a chapter into the other arc',
+      drag: 'ch-1',
+      hover: 'arc-2',
+      zone: 'into',
+      expected: { parentId: 'arc-2' }
+    },
+    {
+      name: 'a part into the manuscript root',
+      drag: 'arc-1',
+      hover: 'manuscript',
+      zone: 'into',
+      expected: { parentId: 'manuscript' }
+    },
+    {
+      name: 'the last part into the manuscript root (no-op)',
+      drag: 'arc-2',
+      hover: 'manuscript',
+      zone: 'into',
+      expected: null
+    },
+    {
+      name: 'a part before its sibling',
+      drag: 'arc-2',
+      hover: 'arc-1',
+      zone: 'before',
+      expected: { parentId: 'manuscript', afterId: null }
+    },
+    // Rejections
+    { name: 'onto itself', drag: 'ch-1', hover: 'ch-1', zone: 'after', expected: null },
+    { name: 'into its own descendant', drag: 'arc-1', hover: 'ch-2', zone: 'into', expected: null },
+    {
+      name: 'beside its own descendant',
+      drag: 'arc-1',
+      hover: 'sc-2',
+      zone: 'after',
+      expected: null
+    },
+    { name: 'across sections', drag: 'sc-1', hover: 'title-page', zone: 'after', expected: null },
+    { name: 'into another section root', drag: 'sc-1', hover: 'end', zone: 'into', expected: null },
+    {
+      name: 'before a section root',
+      drag: 'arc-1',
+      hover: 'manuscript',
+      zone: 'before',
+      expected: null
+    },
+    {
+      name: 'after a section root',
+      drag: 'arc-1',
+      hover: 'manuscript',
+      zone: 'after',
+      expected: null
+    },
+    { name: 'into a document', drag: 'sc-1', hover: 'sc-2', zone: 'into', expected: null },
+    { name: 'a scene into a part', drag: 'sc-1', hover: 'arc-2', zone: 'into', expected: null },
+    {
+      name: 'a scene beside a chapter',
+      drag: 'sc-1',
+      hover: 'ch-4',
+      zone: 'after',
+      expected: null
+    },
+    {
+      name: 'a chapter into the manuscript root',
+      drag: 'ch-1',
+      hover: 'manuscript',
+      zone: 'into',
+      expected: null
+    },
+    { name: 'a chapter into a chapter', drag: 'ch-1', hover: 'ch-4', zone: 'into', expected: null },
+    { name: 'a section root', drag: 'front', hover: 'manuscript', zone: 'into', expected: null },
+    { name: 'an unknown node', drag: 'nope', hover: 'ch-1', zone: 'after', expected: null },
+    { name: 'onto an unknown node', drag: 'ch-1', hover: 'nope', zone: 'after', expected: null },
+    // No-ops
+    {
+      name: 'after its previous sibling',
+      drag: 'ch-2',
+      hover: 'ch-1',
+      zone: 'after',
+      expected: null
+    },
+    {
+      name: 'before its next sibling',
+      drag: 'ch-2',
+      hover: 'ch-3',
+      zone: 'before',
+      expected: null
+    },
+    {
+      name: 'into its parent when already last',
+      drag: 'ch-3',
+      hover: 'arc-1',
+      zone: 'into',
+      expected: null
+    },
+    {
+      name: 'into its parent when not last',
+      drag: 'ch-1',
+      hover: 'arc-1',
+      zone: 'into',
+      expected: { parentId: 'arc-1' }
+    }
+  ]
+
+  it.each(drops)('$name', ({ drag, hover, zone, expected }) => {
+    expect(resolveDropTarget(index, drag, hover, zone)).toEqual(expected)
+  })
+
+  it('lets generic nodes go anywhere within their section, but not beside a section root', () => {
+    const withGeneric = buildIndex([
+      ...treeFixture,
+      node('notes', 'manuscript', 2, 'folder', null),
+      node('note-1', 'notes', 0, 'document', null),
+      node('back-1', 'end', 0, 'document', null)
+    ])
+    expect(resolveDropTarget(withGeneric, 'note-1', 'ch-2', 'into')).toEqual({ parentId: 'ch-2' })
+    expect(resolveDropTarget(withGeneric, 'note-1', 'sc-4', 'before')).toEqual({
+      parentId: 'ch-4',
+      afterId: null
+    })
+    expect(resolveDropTarget(withGeneric, 'notes', 'arc-1', 'into')).toEqual({ parentId: 'arc-1' })
+    expect(resolveDropTarget(withGeneric, 'note-1', 'manuscript', 'into')).toEqual({
+      parentId: 'manuscript'
+    })
+    expect(resolveDropTarget(withGeneric, 'sc-1', 'notes', 'into')).toBeNull()
+    expect(resolveDropTarget(withGeneric, 'back-1', 'notes', 'into')).toBeNull()
+    expect(resolveDropTarget(withGeneric, 'back-1', 'end', 'before')).toBeNull()
   })
 })

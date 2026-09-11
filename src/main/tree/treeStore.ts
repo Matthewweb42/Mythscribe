@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type { RunResult } from 'better-sqlite3'
-import { and, asc, count, eq, gt, gte, sql } from 'drizzle-orm'
+import { and, asc, count, eq, gt, gte, ne, sql } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import type { NovelFormat, TreeCreateInput, TreeNode } from '@shared/ipc/contract'
-import { defaultNodeTitle, type HierarchyLevel, type NodeKind } from '@shared/labels'
+import { canPlaceLevel, defaultNodeTitle, type HierarchyLevel, type NodeKind } from '@shared/labels'
 import type * as schema from '../db/schema'
 import { node, type NodeInsert, type NodeRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
@@ -51,19 +51,26 @@ function assertKindMatchesLevel(kind: NodeKind, level: HierarchyLevel | null): v
   }
 }
 
-/** Where a level may live: part under the manuscript root, chapter under a part, scene under a chapter. */
+/** Where a level may live (`canPlaceLevel`): part under the manuscript root, chapter under a part, scene under a chapter. */
 function assertPlacement(parent: NodeRow, level: HierarchyLevel | null): void {
-  const ok =
-    level === null ||
-    (level === 'part' && parent.sectionType === 'manuscript') ||
-    (level === 'chapter' && parent.hierarchyLevel === 'part') ||
-    (level === 'scene' && parent.hierarchyLevel === 'chapter')
-  if (!ok) {
+  if (!canPlaceLevel(level, parent)) {
     throw new AppError('VALIDATION', `A ${level} cannot be created here`, {
       level,
       parentId: parent.id
     })
   }
+}
+
+/** `row` and every ancestor up to and including its section root. */
+function ancestorChain(db: TreeDb, row: NodeRow): NodeRow[] {
+  const chain = [row]
+  for (let current = row; current.parentId !== null;) {
+    const parent = getNode(db, current.parentId)
+    if (!parent) break
+    chain.push(parent)
+    current = parent
+  }
+  return chain
 }
 
 /**
@@ -200,5 +207,94 @@ export function deleteNode(db: TreeDb, id: string): void {
       .set({ position: sql`${node.position} - 1` })
       .where(and(eq(node.parentId, existing.parentId), gt(node.position, existing.position)))
       .run()
+  })
+}
+
+/**
+ * Moves a node with its subtree under `parentId` (F-2.4), within the same section only. `afterId`
+ * is tri-state: omitted → last child; null → first child; an id → right after that sibling.
+ * The old siblings close the gap first, then the new siblings make room (so a same-parent
+ * reorder resolves against the gap-closed positions), and finally the moved row is updated.
+ * Returns the moved row.
+ */
+export function moveNode(
+  db: TreeDb,
+  id: string,
+  parentId: string,
+  afterId: string | null | undefined
+): NodeRow {
+  return db.transaction((tx) => {
+    const moving = getNode(tx, id)
+    if (!moving) throw new AppError('NOT_FOUND', 'Node not found', { id })
+    if (moving.sectionType !== null || moving.parentId === null) {
+      throw new AppError('VALIDATION', 'Sections cannot be moved', { id })
+    }
+    const parent = getNode(tx, parentId)
+    if (!parent) throw new AppError('NOT_FOUND', 'Parent node not found', { id: parentId })
+    if (parent.kind !== 'folder') {
+      throw new AppError('VALIDATION', 'Nodes can only be moved into a folder', { parentId })
+    }
+    const parentChain = ancestorChain(tx, parent)
+    const movingChain = ancestorChain(tx, moving)
+    if (parentChain.at(-1)?.id !== movingChain.at(-1)?.id) {
+      throw new AppError('VALIDATION', 'Moves are restricted to within a section', {
+        id,
+        parentId
+      })
+    }
+    if (parentChain.some((ancestor) => ancestor.id === moving.id)) {
+      throw new AppError('VALIDATION', 'Cannot move a node into itself or its own descendant', {
+        id,
+        parentId
+      })
+    }
+    if (!canPlaceLevel(moving.hierarchyLevel, parent)) {
+      throw new AppError('VALIDATION', `A ${moving.hierarchyLevel} cannot be moved here`, {
+        level: moving.hierarchyLevel,
+        parentId
+      })
+    }
+    if (afterId === id) {
+      throw new AppError('VALIDATION', 'Cannot move a node after itself', { id })
+    }
+
+    // 1. Close the gap the node leaves among its old siblings.
+    tx.update(node)
+      .set({ position: sql`${node.position} - 1` })
+      .where(and(eq(node.parentId, moving.parentId), gt(node.position, moving.position)))
+      .run()
+
+    // 2. Resolve the target position against the gap-closed new siblings (excluding the node).
+    let position: number
+    if (afterId === undefined) {
+      const total = tx
+        .select({ n: count() })
+        .from(node)
+        .where(and(eq(node.parentId, parent.id), ne(node.id, id)))
+        .get()
+      position = total?.n ?? 0
+    } else if (afterId === null) {
+      position = 0
+    } else {
+      const after = getNode(tx, afterId)
+      if (after?.parentId !== parent.id) {
+        throw new AppError('NOT_FOUND', 'Sibling to move after not found', { afterId })
+      }
+      position = after.position + 1
+    }
+
+    // 3. Make room among the new siblings.
+    tx.update(node)
+      .set({ position: sql`${node.position} + 1` })
+      .where(and(eq(node.parentId, parent.id), gte(node.position, position), ne(node.id, id)))
+      .run()
+
+    // 4. Land the node; unconditional so a same-parent reorder overwrites its stale position.
+    return tx
+      .update(node)
+      .set({ parentId: parent.id, position, modified: new Date().toISOString() })
+      .where(eq(node.id, id))
+      .returning()
+      .get()
   })
 }
