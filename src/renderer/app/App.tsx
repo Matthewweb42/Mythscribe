@@ -1,7 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { BookOpen, FolderOpen, FilePlus2 } from 'lucide-react'
+import type { NovelFormat } from '@shared/ipc/contract'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { CreateProjectWizard } from '@renderer/features/project/CreateProjectWizard'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { IpcRequestError } from '@renderer/lib/ipc'
 
@@ -41,18 +43,11 @@ function WelcomeScreen(): React.JSX.Element {
   const busy = useProjectStore((s) => s.busy)
   const create = useProjectStore((s) => s.create)
   const open = useProjectStore((s) => s.open)
+  const [creating, setCreating] = useState(false)
 
-  const onNew = async (): Promise<void> => {
-    const name = await dialogs.prompt({
-      title: 'New project',
-      message: 'Name your novel. You can rename it later.',
-      placeholder: 'My Epic Novel',
-      confirmLabel: 'Create',
-      validate: (v) => (v.trim().length > 0 ? null : 'A name is required')
-    })
-    if (name === null) return
+  const onCreate = async (name: string, format: NovelFormat): Promise<void> => {
     try {
-      const info = await create(name, 'novel')
+      const info = await create(name, format)
       if (info) toast.success(`Created "${info.name}"`)
     } catch (err) {
       toast.error(describeError(err))
@@ -69,29 +64,35 @@ function WelcomeScreen(): React.JSX.Element {
   }
 
   return (
-    <div className="flex w-[360px] flex-col items-center gap-6 text-center">
+    <div
+      className={`flex flex-col items-center gap-6 text-center ${creating ? 'w-[520px]' : 'w-[360px]'}`}
+    >
       <div>
         <h1 className="m-0 text-3xl font-semibold tracking-tight">MythScribe</h1>
         <p className="mt-2 mb-0 text-sm text-fg-muted">Your book, your voice, on your machine.</p>
       </div>
-      <div className="flex w-full flex-col gap-2">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void onNew()}
-          className="flex items-center justify-center gap-2 rounded-md bg-accent px-4 py-2.5 font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60"
-        >
-          <FilePlus2 size={16} /> New project
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void onOpen()}
-          className="flex items-center justify-center gap-2 rounded-md border border-line bg-surface px-4 py-2.5 hover:bg-surface-raised disabled:opacity-60"
-        >
-          <FolderOpen size={16} /> Open project
-        </button>
-      </div>
+      {creating ? (
+        <CreateProjectWizard busy={busy} onCancel={() => setCreating(false)} onCreate={onCreate} />
+      ) : (
+        <div className="flex w-full flex-col gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setCreating(true)}
+            className="flex items-center justify-center gap-2 rounded-md bg-accent px-4 py-2.5 font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60"
+          >
+            <FilePlus2 size={16} /> New project
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void onOpen()}
+            className="flex items-center justify-center gap-2 rounded-md border border-line bg-surface px-4 py-2.5 hover:bg-surface-raised disabled:opacity-60"
+          >
+            <FolderOpen size={16} /> Open project
+          </button>
+        </div>
+      )}
     </div>
   )
 }

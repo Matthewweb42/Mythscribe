@@ -52,7 +52,7 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 ### 2.1 Project lifecycle
 
 - [ ] **F-1.1 Welcome screen** (v0 ✅) — Logo, app name, "New Project" and "Open Project". Shown whenever no project is open. Lists recent projects (v0 ⬜ for the recents list).
-- [ ] **F-1.2 Create project wizard** (v0 ✅) — Two steps: name, then format card picker (Novel / Epic / Web novel with description of each structure). Native save dialog chooses the location; default under Documents/Mythscribe. Creates the project folder, database, and assets directory.
+- [x] **F-1.2 Create project wizard** (v0 ✅; M1: built, unit-tested, e2e verified) — Two steps: name, then format card picker (Novel / Epic / Web novel with description of each structure). Native save dialog chooses the location; default under Documents/Mythscribe. Creates the project folder, database, and assets directory.
 - [ ] **F-1.3 Seeded structure** (v0 ✅) — New projects get the three sections plus a starter skeleton: Part 1–2 → Chapter 1–3 → Scene 1 (Arc/Volume labels for webnovel). Format-specific default editor settings are seeded (see F-3.6).
 - [ ] **F-1.4 Open / close project** (v0 ✅) — Native open dialog; close asks for confirmation; closing flushes pending saves. Only one project open at a time. Opening an old single-file project migrates it to the folder layout.
 - [ ] **F-1.5 Project metadata** (v0 ✅) — Project name shown in the shell; format drives labels and defaults.

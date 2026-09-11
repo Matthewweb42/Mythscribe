@@ -21,6 +21,9 @@ export const ProjectInfo = z.object({
 })
 export type ProjectInfo = z.infer<typeof ProjectInfo>
 
+/** Longest allowed project name; the create wizard validates against the same limit. */
+export const PROJECT_NAME_MAX = 200
+
 export const contract = {
   'app:info': {
     input: z.undefined(),
@@ -28,7 +31,7 @@ export const contract = {
   },
   'project:create': {
     input: z.object({
-      name: z.string().trim().min(1).max(200),
+      name: z.string().trim().min(1).max(PROJECT_NAME_MAX),
       format: NovelFormat,
       /** When omitted, main shows a native save dialog. */
       directory: z.string().optional()

@@ -27,7 +27,7 @@ The original prototype was deleted on purpose (git tag `v0-legacy`). Do not resu
 ## Next up (keep this current; it is the handoff between sessions)
 
 1. M0 is complete: all four gates pass (typecheck, lint, unit, e2e) and F-7.6, F-8.1, F-8.2 are ticked.
-2. Start M1 with `/feature F-1.2` (create-project wizard), then F-1.1, F-1.3, F-1.4, F-1.5, then the manuscript tree (F-2.x) and editor (F-3.x) in milestone order.
+2. M1 is under way: F-1.2 (create-project wizard) is done. Continue with `/feature F-1.1` (welcome screen with recents), then F-1.3, F-1.4, F-1.5, then the manuscript tree (F-2.x) and editor (F-3.x) in milestone order.
 
 ## Workflow
 
@@ -130,8 +130,9 @@ Alternatives considered: Lexical (fine, smaller mention ecosystem); Tauri (small
 - `src/renderer/lib/ipc.ts` — `ipc().invoke(channel, input)` typed client that validates outputs; `setIpcClient` for tests.
 - `src/renderer/features/shell/dialogs/` — the dialog service: `dialogs.confirm`, `dialogs.prompt`, `toast.*`, rendered by `<DialogHost/>`.
 - `src/renderer/features/project/projectStore.ts` — Zustand store for the open project; pattern for all renderer stores.
+- `src/renderer/features/project/formats.ts` — the format catalogue (label, summary, structure) for Novel / Epic / Web novel; one owner for format copy, which F-1.3 seeding and F-1.5 labels must keep in sync.
 - `src/renderer/styles/tokens.css` — every color/font/radius as `--ms-*` variables, mapped to Tailwind utilities in `app.css` via `@theme inline`. Components use utilities like `bg-surface`, `text-fg-muted`, `border-line`, `bg-accent`.
-- Tests beside code as `*.test.ts(x)`; vitest runs `main` (node) and `renderer` (jsdom) projects. E2E in `e2e/` drives the built app; native dialogs are bypassed by passing explicit paths through the bridge.
+- Tests beside code as `*.test.ts(x)`; vitest runs `main` (node) and `renderer` (jsdom) projects. E2E in `e2e/` drives the built app; native dialogs are stubbed from the main process via `app.evaluate` (see the save-dialog stub in `e2e/smoke.spec.ts`) or bypassed by passing explicit paths through the bridge.
 
 ## Conventions
 

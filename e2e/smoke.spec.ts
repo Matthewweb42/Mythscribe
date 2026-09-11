@@ -33,24 +33,42 @@ test.afterAll(async () => {
 test('create, close, reopen a project on disk', async () => {
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
 
-  // Native save dialogs cannot be driven, so create through the bridge with an explicit directory.
-  const created = await page.evaluate<IpcResult<ProjectInfo | null>, string>(
-    (dir) =>
-      window.mythscribe.invoke('project:create', {
-        name: 'Smoke Novel',
-        format: 'novel',
-        directory: dir
-      }) as Promise<IpcResult<ProjectInfo | null>>,
-    tmp
-  )
-  expect(created.ok).toBe(true)
-  if (!created.ok || !created.data) throw new Error('project was not created')
-  const projectPath = created.data.path
+  // The native save dialog cannot be driven, so stub it in the main process. `createDialogs`
+  // looks up `dialog.showSaveDialog` at call time, so the patch takes effect for the wizard.
+  const projectPath = path.join(tmp, 'Smoke Novel.mythscribe')
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
+  }, projectPath)
+
+  // F-1.2: two-step wizard — name, then format cards. Back keeps the name.
+  await page.getByRole('button', { name: 'New project' }).click()
+  const wizard = page.getByRole('dialog')
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await expect(wizard.getByRole('alert')).toHaveText('A name is required')
+  await wizard.getByRole('textbox', { name: 'Project name' }).fill('Smoke Novel')
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await expect(wizard.getByRole('radio', { name: /^novel/i })).toBeChecked()
+  // The radio is visually hidden; the card label is what the author clicks.
+  await wizard.getByText('Web novel', { exact: true }).click()
+  await expect(wizard.getByRole('radio', { name: /^web novel/i })).toBeChecked()
+  await wizard.getByRole('button', { name: 'Back' }).click()
+  await expect(wizard.getByRole('textbox', { name: 'Project name' })).toHaveValue('Smoke Novel')
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByRole('button', { name: 'Create' }).click()
+
+  await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
   expect(fs.existsSync(path.join(projectPath, 'project.db'))).toBe(true)
   expect(fs.existsSync(path.join(projectPath, 'assets'))).toBe(true)
 
-  // The UI learns about it through the project:changed event.
-  await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  const created = await page.evaluate<IpcResult<ProjectInfo | null>>(
+    () =>
+      window.mythscribe.invoke('project:current', undefined) as Promise<
+        IpcResult<ProjectInfo | null>
+      >
+  )
+  expect(created.ok).toBe(true)
+  if (!created.ok || !created.data) throw new Error('project was not created')
+  expect(created.data.path).toBe(projectPath)
 
   await page.getByRole('button', { name: 'Close project' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
