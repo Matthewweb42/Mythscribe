@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectInfo, RecentProject } from '@shared/ipc/contract'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { treeFixture } from '@renderer/features/manuscript/treeFixture'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { registerPendingSave, resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { App } from './App'
@@ -34,6 +36,7 @@ beforeEach(() => {
   listeners.clear()
   resetPendingSaves()
   useProjectStore.setState({ current: null, ready: false, busy: false, recents: [] })
+  useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
 })
@@ -46,6 +49,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
       return v
     }
     if (channel === 'recents:list') return []
+    if (channel === 'tree:list') return []
     return null
   })
   const on = (event: string, listener: (payload: unknown) => void): (() => void) => {
@@ -92,23 +96,60 @@ describe('App', () => {
     expect(invoke).toHaveBeenCalledWith('project:close', undefined)
   })
 
-  it('shows the project name and format in the shell header, window title, and card (F-1.5)', async () => {
-    install({ 'project:create': { ...info, name: 'Serial', format: 'webnovel' } })
+  it('shows the project name and format in the shell header, window title, and tree (F-1.5, F-2.1)', async () => {
+    install({
+      'project:create': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture
+    })
     render(<App />)
     await fillWizard('Serial', /^web novel/i)
     expect(await screen.findByTestId('project-name')).toHaveTextContent('Serial')
     expect(screen.getByRole('banner')).toHaveTextContent('/ Serial · Web novel')
     expect(document.title).toBe('Serial — MythScribe')
-    const card = within(screen.getByTestId('project-card'))
-    expect(card.getByText('Web novel')).toBeInTheDocument()
-    expect(card.getByText('Volume 1')).toBeInTheDocument()
-    expect(card.getByText('Arc')).toBeInTheDocument()
+    // The tree labels the manuscript section by format and starts with nothing selected.
+    expect(await screen.findByRole('treeitem', { name: 'Volume 1' })).toBeInTheDocument()
+    expect(screen.getByRole('treeitem', { name: 'Arc 1' })).toBeInTheDocument()
+    expect(screen.getByText('Select a document to start writing.')).toBeInTheDocument()
+    expect(screen.queryByTestId('selected-title')).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
     expect(document.title).toBe('MythScribe')
     expect(screen.getByRole('banner')).toHaveTextContent(/^MythScribe$/)
+    // Closing the project clears the tree store.
+    expect(screen.queryByRole('tree')).not.toBeInTheDocument()
+    expect(useTreeStore.getState().rootIds).toEqual([])
+    expect(useTreeStore.getState().loaded).toBe(false)
+  })
+
+  it('selecting a document in the tree shows it in the main pane (F-2.1)', async () => {
+    const invoke = install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture
+    })
+    render(<App />)
+    const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+    expect(invoke).toHaveBeenCalledWith('tree:list', undefined)
+    await userEvent.click(within(scene).getByText('Scene 1'))
+    expect(scene).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('selected-title')).toHaveTextContent('Scene 1')
+    expect(screen.getByText('Scene · Volume 1')).toBeInTheDocument()
+    expect(screen.getByText('The editor arrives with F-3.1.')).toBeInTheDocument()
+
+    await userEvent.click(
+      within(screen.getByRole('treeitem', { name: 'Arc 2' })).getByText('Arc 2')
+    )
+    expect(screen.getByTestId('selected-title')).toHaveTextContent('Arc 2')
+    expect(screen.getByText('Arc · Volume 1')).toBeInTheDocument()
+  })
+
+  it('surfaces a failed tree load as a toast', async () => {
+    install({ 'project:current': info, 'tree:list': new Error('Database is locked') })
+    render(<App />)
+    expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
+    expect(await screen.findByRole('status')).toHaveTextContent('Database is locked')
+    expect(screen.queryByRole('tree')).not.toBeInTheDocument()
   })
 
   it('Cancel in the close confirmation keeps the project open', async () => {

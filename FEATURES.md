@@ -60,7 +60,7 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 
 ### 2.2 Manuscript organizer (sidebar "Manuscript" tab)
 
-- [ ] **F-2.1 Document tree** (v0 ✅) — Nested, ordered tree of the three sections. Folders collapse/expand. Each level has its own icon and color (part, chapter, scene, generic; front/end matter documents in a distinct "gold" style). Word count shown next to every node. Active document highlighted.
+- [x] **F-2.1 Document tree** (v0 ✅; M1: built, unit-tested, e2e verified; fixed-width sidebar until F-7.2, collapse state in memory only) — Nested, ordered tree of the three sections. Folders collapse/expand. Each level has its own icon and color (part, chapter, scene, generic; front/end matter documents in a distinct "gold" style). Word count shown next to every node. Active document highlighted.
 - [ ] **F-2.2 Create nodes** (v0 ✅) — Bottom buttons for Scene / Chapter / Part relative to the current selection, plus a right-click context menu that is section-aware: Manuscript offers Part, Chapter, Scene, Generic document, Generic folder; Front/End Matter offer a template submenu (F-2.6). New nodes are named "Untitled…" and immediately enter inline rename.
 - [ ] **F-2.3 Rename, duplicate, delete** (v0 ✅) — Inline rename (Enter/blur commit, Esc cancel). Duplicate copies content, notes, and recursively children. Delete asks for confirmation and cascades to children. Root sections cannot be renamed, deleted, or moved.
 - [ ] **F-2.4 Drag and drop** (v0 ✅) — Reorder and re-parent by dragging. Dropping on a folder nests; dropping on a scene makes a sibling. Moves are restricted to within a section. Visual drop indicator.

@@ -92,6 +92,25 @@ test('create, close, reopen a project on disk', async () => {
   expect(titles.filter((t) => t.startsWith('Chapter'))).toHaveLength(6)
   expect(titles.filter((t) => t === 'Scene 1')).toHaveLength(6)
 
+  // F-2.1: the document tree shows the sections by format, collapses and expands a folder, and
+  // selecting a scene highlights it and shows it in the main pane.
+  const tree = page.getByRole('tree', { name: 'Document tree' })
+  await expect(tree.getByRole('treeitem', { name: 'Volume 1', exact: true })).toBeVisible()
+  const arc1 = tree.getByRole('treeitem', { name: 'Arc 1', exact: true })
+  await expect(arc1).toBeVisible()
+  await expect(tree.getByRole('treeitem', { name: 'Arc 2', exact: true })).toBeVisible()
+  const chapter1 = arc1.getByRole('treeitem', { name: 'Chapter 1', exact: true })
+  await expect(chapter1).toBeVisible()
+  await tree.getByRole('button', { name: 'Collapse Arc 1' }).click()
+  await expect(chapter1).toBeHidden()
+  await expect(arc1).toHaveAttribute('aria-expanded', 'false')
+  await tree.getByRole('button', { name: 'Expand Arc 1' }).click()
+  await expect(chapter1).toBeVisible()
+  const scene1 = chapter1.getByRole('treeitem', { name: 'Scene 1', exact: true })
+  await scene1.click()
+  await expect(scene1).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+
   await page.getByRole('button', { name: 'Close project' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()

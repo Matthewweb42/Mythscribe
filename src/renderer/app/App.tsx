@@ -5,6 +5,8 @@ import { formatLabel, levelLabel, sectionLabel } from '@shared/labels'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { Logo } from '@renderer/features/shell/Logo'
+import { ManuscriptTree } from '@renderer/features/manuscript/ManuscriptTree'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { CreateProjectWizard } from '@renderer/features/project/CreateProjectWizard'
 import { RecentProjects } from '@renderer/features/project/RecentProjects'
 import { useProjectStore } from '@renderer/features/project/projectStore'
@@ -19,6 +21,7 @@ function describeError(err: unknown): string {
 export function App(): React.JSX.Element {
   const ready = useProjectStore((s) => s.ready)
   const current = useProjectStore((s) => s.current)
+  const projectId = current?.id ?? null
 
   useEffect(() => {
     useProjectStore
@@ -39,6 +42,17 @@ export function App(): React.JSX.Element {
     document.title = current ? `${current.name} — MythScribe` : 'MythScribe'
   }, [current])
 
+  // F-2.1: the document tree follows the open project. App owns when it loads and clears, keyed
+  // on the project id so a refreshed `ProjectInfo` for the same project does not reload it.
+  useEffect(() => {
+    const tree = useTreeStore.getState()
+    if (projectId === null) {
+      tree.clear()
+      return
+    }
+    tree.load().catch((err: unknown) => toast.error(describeError(err)))
+  }, [projectId])
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-11 items-center gap-2 border-b border-line bg-surface px-4 text-sm">
@@ -46,12 +60,19 @@ export function App(): React.JSX.Element {
         <span className="font-semibold">MythScribe</span>
         {current ? (
           <span className="text-fg-muted">
-            / {current.name} · {formatLabel(current.format)}
+            / <span data-testid="project-name">{current.name}</span> · {formatLabel(current.format)}
           </span>
         ) : null}
+        {current ? <CloseProjectButton /> : null}
       </header>
-      <main className="flex flex-1 items-center justify-center overflow-auto">
-        {!ready ? null : current ? <ProjectScreen /> : <WelcomeScreen />}
+      <main
+        className={
+          current
+            ? 'flex min-h-0 flex-1 overflow-hidden'
+            : 'flex flex-1 items-center justify-center overflow-auto'
+        }
+      >
+        {!ready ? null : current ? <ProjectScreen format={current.format} /> : <WelcomeScreen />}
       </main>
       <DialogHost />
     </div>
@@ -138,11 +159,10 @@ function WelcomeScreen(): React.JSX.Element {
   )
 }
 
-function ProjectScreen(): React.JSX.Element {
-  const current = useProjectStore((s) => s.current)
+/** Header action: confirms, then closes the open project (everything is already saved). */
+function CloseProjectButton(): React.JSX.Element {
   const busy = useProjectStore((s) => s.busy)
   const close = useProjectStore((s) => s.close)
-  if (!current) return <></>
 
   const onClose = async (): Promise<void> => {
     const ok = await dialogs.confirm({
@@ -159,35 +179,55 @@ function ProjectScreen(): React.JSX.Element {
   }
 
   return (
-    <div className="w-[520px] rounded-lg border border-line bg-surface p-6">
-      <h1 className="m-0 text-2xl font-semibold" data-testid="project-name">
-        {current.name}
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => void onClose()}
+      className="ml-auto rounded-md border border-line px-2.5 py-1 text-xs hover:bg-surface-raised disabled:opacity-60"
+    >
+      Close project
+    </button>
+  )
+}
+
+/** F-2.1: the document tree beside the main pane; the editor takes the main pane with F-3.1. */
+function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
+  return (
+    <>
+      <aside className="flex w-72 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface">
+        <ManuscriptTree format={format} />
+      </aside>
+      <section className="flex-1 overflow-y-auto p-6">
+        <MainPane format={format} />
+      </section>
+    </>
+  )
+}
+
+function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
+  const node = useTreeStore((s) => (s.selectedId === null ? undefined : s.byId[s.selectedId]))
+  const section = useTreeStore((s) =>
+    s.selectedId === null ? undefined : s.sectionOf[s.selectedId]
+  )
+  if (!node) {
+    return <p className="m-0 text-sm text-fg-muted">Select a document to start writing.</p>
+  }
+  const kind =
+    node.hierarchyLevel !== null
+      ? levelLabel(format, node.hierarchyLevel)
+      : node.kind === 'folder'
+        ? 'Folder'
+        : 'Document'
+  return (
+    <div>
+      <h1 className="m-0 text-2xl font-semibold" data-testid="selected-title">
+        {node.title}
       </h1>
-      <dl className="mt-4 grid grid-cols-[120px_1fr] gap-y-2 text-sm" data-testid="project-card">
-        <dt className="text-fg-muted">Format</dt>
-        <dd className="m-0">{formatLabel(current.format)}</dd>
-        <dt className="text-fg-muted">Manuscript</dt>
-        <dd className="m-0">{sectionLabel(current.format, 'manuscript')}</dd>
-        <dt className="text-fg-muted">Parts labelled</dt>
-        <dd className="m-0">{levelLabel(current.format, 'part')}</dd>
-        <dt className="text-fg-muted">Location</dt>
-        <dd className="m-0 break-all font-mono text-xs">{current.path}</dd>
-        <dt className="text-fg-muted">Schema</dt>
-        <dd className="m-0">v{current.schemaVersion}</dd>
-      </dl>
-      <p className="mt-4 mb-0 text-sm text-fg-muted">
-        The manuscript editor arrives in milestone M1. This screen proves the project lives on disk.
+      <p className="mt-1 mb-0 text-sm text-fg-muted">
+        {kind}
+        {section ? ` · ${sectionLabel(format, section)}` : ''}
       </p>
-      <div className="mt-5 flex justify-end">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void onClose()}
-          className="rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface-raised disabled:opacity-60"
-        >
-          Close project
-        </button>
-      </div>
+      <p className="mt-4 mb-0 text-sm text-fg-muted">The editor arrives with F-3.1.</p>
     </div>
   )
 }

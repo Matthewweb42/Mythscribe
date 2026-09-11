@@ -26,6 +26,13 @@
   --ms-success: #4ade80;
   --ms-info: #60a5fa;
 
+  /* Document tree (F-2.1): one color per hierarchy level, gold for front/end matter documents. */
+  --ms-level-part: #a78bfa;
+  --ms-level-chapter: #7cb3f5;
+  --ms-level-scene: #5fb8b0;
+  --ms-level-generic: #9a9aa6;
+  --ms-matter: #d4a72c;
+
   --ms-radius: 6px;
   --ms-radius-lg: 10px;
   --ms-shadow: 0 10px 30px rgb(0 0 0 / 0.45);

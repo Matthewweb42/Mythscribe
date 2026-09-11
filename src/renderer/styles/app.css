@@ -19,6 +19,11 @@
   --color-warning: var(--ms-warning);
   --color-success: var(--ms-success);
   --color-info: var(--ms-info);
+  --color-level-part: var(--ms-level-part);
+  --color-level-chapter: var(--ms-level-chapter);
+  --color-level-scene: var(--ms-level-scene);
+  --color-level-generic: var(--ms-level-generic);
+  --color-matter: var(--ms-matter);
   --radius-md: var(--ms-radius);
   --radius-lg: var(--ms-radius-lg);
   --shadow-panel: var(--ms-shadow);
