@@ -57,7 +57,13 @@ export function CreateProjectWizard({
       setStep('format')
       return
     }
-    await onCreate(trimmed, format)
+    setError(null)
+    try {
+      await onCreate(trimmed, format)
+    } catch (err) {
+      // The author is looking at this form, so the failure belongs here, not in a toast.
+      setError(err instanceof Error ? err.message : 'Something went wrong')
+    }
   }
 
   return (
@@ -131,11 +137,19 @@ export function CreateProjectWizard({
           <p className="mt-3 mb-0 text-xs text-fg-muted">
             Next, choose where to save it (defaults to Documents/MythScribe).
           </p>
+          {error ? (
+            <p role="alert" className="mt-2 mb-0 text-sm text-danger">
+              {error}
+            </p>
+          ) : null}
           <div className="mt-5 flex justify-end gap-2">
             <button
               type="button"
               disabled={busy}
-              onClick={() => setStep('name')}
+              onClick={() => {
+                setError(null)
+                setStep('name')
+              }}
               className={SECONDARY_BUTTON}
             >
               Back

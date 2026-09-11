@@ -38,7 +38,10 @@ export function createHandler<C extends Channel>(
       const data = await fn(parsed.data as Input<C>)
       return { ok: true, data }
     } catch (err) {
-      return { ok: false, error: toIpcError(err) }
+      const error = toIpcError(err)
+      // Expected AppErrors are the renderer's to show; anything else is a bug worth a stack trace.
+      if (error.code === 'INTERNAL') console.error(`[ipc] ${channel} failed`, err)
+      return { ok: false, error }
     }
   }
 }

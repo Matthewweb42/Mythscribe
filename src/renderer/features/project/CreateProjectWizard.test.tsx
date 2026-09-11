@@ -92,6 +92,17 @@ describe('CreateProjectWizard', () => {
     expect(onCancel).toHaveBeenCalledTimes(4)
   })
 
+  it('shows a failed create inline and clears it on Back', async () => {
+    const { onCreate } = setup()
+    onCreate.mockRejectedValueOnce(new Error('A project already exists at /x'))
+    await goToFormatStep('My Book')
+    await userEvent.click(screen.getByRole('button', { name: 'Create' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('A project already exists at /x')
+    expect(screen.getByRole('dialog', { name: 'Choose a format' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('disables the format-step buttons and Escape while busy', async () => {
     const { onCancel } = setup(true)
     await goToFormatStep('My Book')

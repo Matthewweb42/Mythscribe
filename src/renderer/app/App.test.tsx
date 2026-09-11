@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectInfo, RecentProject } from '@shared/ipc/contract'
@@ -102,12 +102,13 @@ describe('App', () => {
     expect(invoke).not.toHaveBeenCalledWith('project:close', undefined)
   })
 
-  it('surfaces create errors as toasts and keeps the wizard open', async () => {
+  it('shows create errors inline in the wizard and keeps it open', async () => {
     install({ 'project:create': new Error('Folder is not empty: /x') })
     render(<App />)
     await fillWizard('Smoke', /^novel/i)
-    expect(await screen.findByRole('status')).toHaveTextContent('Folder is not empty: /x')
-    expect(screen.getByRole('dialog', { name: 'Choose a format' })).toBeInTheDocument()
+    const wizard = screen.getByRole('dialog', { name: 'Choose a format' })
+    expect(await within(wizard).findByRole('alert')).toHaveTextContent('Folder is not empty: /x')
+    expect(screen.getByRole('status')).toBeEmptyDOMElement()
   })
 
   it('keeps the wizard open without a toast when the save dialog is cancelled', async () => {

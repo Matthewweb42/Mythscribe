@@ -61,13 +61,10 @@ function WelcomeScreen(): React.JSX.Element {
     loadRecents().catch((err: unknown) => toast.error(describeError(err)))
   }, [loadRecents])
 
+  /** Failures propagate: the wizard shows them inline where the author is looking. */
   const onCreate = async (name: string, format: NovelFormat): Promise<void> => {
-    try {
-      const info = await create(name, format)
-      if (info) toast.success(`Created "${info.name}"`)
-    } catch (err) {
-      toast.error(describeError(err))
-    }
+    const info = await create(name, format)
+    if (info) toast.success(`Created "${info.name}"`)
   }
 
   /** Opens via the native dialog, or a recent project when `path` is given. */
