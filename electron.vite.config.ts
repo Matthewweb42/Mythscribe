@@ -11,7 +11,9 @@ export default defineConfig({
     resolve: { alias: shared }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    // Sandboxed preloads can only `require` Electron built-ins, so zod (pulled in via the IPC
+    // contract) must be bundled rather than externalized.
+    plugins: [externalizeDepsPlugin({ exclude: ['zod'] })],
     resolve: { alias: shared }
   },
   renderer: {
