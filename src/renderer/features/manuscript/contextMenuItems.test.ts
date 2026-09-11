@@ -14,7 +14,10 @@ describe('treeContextMenuItems', () => {
       { id: 'new-chapter', label: 'New Chapter' },
       { id: 'new-scene', label: 'New Scene' },
       { id: 'new-generic-document', label: 'New document' },
-      { id: 'new-generic-folder', label: 'New folder' }
+      { id: 'new-generic-folder', label: 'New folder' },
+      { id: 'rename', label: 'Rename' },
+      { id: 'duplicate', label: 'Duplicate' },
+      { id: 'delete', label: 'Delete' }
     ])
     expect(treeContextMenuItems(index, 'ch-1', 'novel')[0]?.label).toBe('New Part')
   })
@@ -25,7 +28,10 @@ describe('treeContextMenuItems', () => {
       'new-chapter',
       'new-scene',
       'new-generic-document',
-      'new-generic-folder'
+      'new-generic-folder',
+      'rename',
+      'duplicate',
+      'delete'
     ])
     expect(ids('manuscript')).toEqual([
       'new-part',
@@ -44,14 +50,31 @@ describe('treeContextMenuItems', () => {
       'new-part',
       'new-chapter',
       'new-generic-document',
-      'new-generic-folder'
+      'new-generic-folder',
+      'rename',
+      'duplicate',
+      'delete'
     ])
   })
 
-  it('offers only the generic items in front and end matter', () => {
-    expect(ids('title-page')).toEqual(['new-generic-document', 'new-generic-folder'])
+  it('offers only the generic items (plus rename, duplicate, and delete on documents) in front and end matter', () => {
+    expect(ids('title-page')).toEqual([
+      'new-generic-document',
+      'new-generic-folder',
+      'rename',
+      'duplicate',
+      'delete'
+    ])
     expect(ids('front')).toEqual(['new-generic-document', 'new-generic-folder'])
     expect(ids('end')).toEqual(['new-generic-document', 'new-generic-folder'])
+  })
+
+  it('never offers rename, duplicate, or delete on a section root (F-2.3)', () => {
+    for (const section of ['front', 'manuscript', 'end']) {
+      expect(ids(section)).not.toContain('rename')
+      expect(ids(section)).not.toContain('duplicate')
+      expect(ids(section)).not.toContain('delete')
+    }
   })
 
   it('returns nothing for an unknown row', () => {

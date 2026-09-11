@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import type { NovelFormat, TreeNode } from '@shared/ipc/contract'
 import { HierarchyLevel, sectionLabel, type SectionType } from '@shared/labels'
-import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ContextMenu } from './ContextMenu'
 import { treeContextMenuItems } from './contextMenuItems'
@@ -247,9 +247,30 @@ function TreeItem({
   )
 }
 
-/** Maps a context-menu item id to the store action that creates the node (F-2.2). */
+/** Delete asks first (F-2.3): folders warn that their contents go too; nothing is undoable. */
+async function confirmRemove(nodeId: string): Promise<void> {
+  const { byId, remove } = useTreeStore.getState()
+  const node = byId[nodeId]
+  if (!node) return
+  const ok = await dialogs.confirm({
+    title: `Delete '${node.title}'?`,
+    message:
+      node.kind === 'folder'
+        ? 'This also deletes everything inside it. This cannot be undone.'
+        : 'This cannot be undone.',
+    confirmLabel: 'Delete',
+    danger: true
+  })
+  if (!ok) return
+  await remove(nodeId)
+}
+
+/** Maps a context-menu item id to the store action for the row (F-2.2 create, F-2.3 rename/duplicate/delete). */
 async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
-  const { createLevel, createGeneric } = useTreeStore.getState()
+  const { createLevel, createGeneric, startRename, duplicate } = useTreeStore.getState()
+  if (itemId === 'rename') return startRename(nodeId)
+  if (itemId === 'duplicate') return duplicate(nodeId)
+  if (itemId === 'delete') return confirmRemove(nodeId)
   if (itemId === 'new-generic-document') return createGeneric('document', nodeId)
   if (itemId === 'new-generic-folder') return createGeneric('folder', nodeId)
   const level = HierarchyLevel.safeParse(itemId.replace(/^new-/, ''))
@@ -260,7 +281,8 @@ async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
  * The document tree (F-2.1): the three sections and their nested folders and documents, with
  * collapse/expand, per-level icons and colors, rolled-up word counts, and the active document
  * highlighted. Reads `useTreeStore`; the parent decides when to `load()`. Rows open a
- * section-aware context menu and rename inline (F-2.2).
+ * section-aware context menu and rename inline (F-2.2); the menu also renames, duplicates, and
+ * deletes after confirmation (F-2.3).
  */
 export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.Element | null {
   const loaded = useTreeStore((s) => s.loaded)

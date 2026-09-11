@@ -140,6 +140,44 @@ test('create, close, reopen a project on disk', async () => {
   await expect(untitled2).toBeVisible()
   await expect(chapter2.getByRole('treeitem')).toHaveText([/^Scene 1/, /^Untitled Scene/])
 
+  // F-2.3: Rename from the right-click menu opens the inline editor prefilled with the title;
+  // Escape keeps it.
+  const opening = chapter1.getByRole('treeitem', { name: 'Opening', exact: true })
+  await opening.click({ button: 'right' })
+  await menu.getByRole('menuitem', { name: 'Rename' }).click()
+  await expect(menu).toBeHidden()
+  const renameAgain = page.getByRole('textbox', { name: 'Rename' })
+  await expect(renameAgain).toBeFocused()
+  await expect(renameAgain).toHaveValue('Opening')
+  await page.keyboard.press('Escape')
+  await expect(renameAgain).toBeHidden()
+  await expect(opening).toBeVisible()
+
+  // F-2.3: Duplicate puts "<title> (Copy)" right after the original and selects it.
+  await opening.click({ button: 'right' })
+  await menu.getByRole('menuitem', { name: 'Duplicate' }).click()
+  await expect(menu).toBeHidden()
+  const openingCopy = chapter1.getByRole('treeitem', { name: 'Opening (Copy)', exact: true })
+  await expect(openingCopy).toBeVisible()
+  await expect(openingCopy).toHaveAttribute('aria-selected', 'true')
+  await expect(chapter1.getByRole('treeitem')).toHaveText([
+    /^Scene 1/,
+    /^Opening/,
+    /^Opening \(Copy\)/
+  ])
+
+  // F-2.3: Delete asks first; confirming removes the row and selects the previous sibling.
+  await openingCopy.click({ button: 'right' })
+  await menu.getByRole('menuitem', { name: 'Delete' }).click()
+  await expect(menu).toBeHidden()
+  const deleteDialog = page.getByRole('dialog', { name: "Delete 'Opening (Copy)'?" })
+  await expect(deleteDialog).toBeVisible()
+  await deleteDialog.getByRole('button', { name: 'Delete' }).click()
+  await expect(deleteDialog).toBeHidden()
+  await expect(openingCopy).toBeHidden()
+  await expect(chapter1.getByRole('treeitem')).toHaveText([/^Scene 1/, /^Opening/])
+  await expect(opening).toHaveAttribute('aria-selected', 'true')
+
   await page.getByRole('button', { name: 'Close project' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
@@ -158,10 +196,12 @@ test('create, close, reopen a project on disk', async () => {
   expect(reopened.ok).toBe(true)
   if (reopened.ok && reopened.data) expect(reopened.data.id).toBe(created.data.id)
   expect(fs.existsSync(path.join(tmp, 'userData', 'app-state.json'))).toBe(true)
-  // F-2.2: the two created scenes and the rename survived the close.
+  // F-2.2/F-2.3: the two created scenes and the rename survived the close; the duplicate was
+  // deleted again, so the count is back to 19.
   const persisted = await listTree()
   expect(persisted).toHaveLength(19)
   expect(persisted.map((n) => n.title)).toContain('Opening')
+  expect(persisted.map((n) => n.title)).not.toContain('Opening (Copy)')
   expect(persisted.filter((n) => n.title === 'Untitled Scene')).toHaveLength(1)
 
   // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.

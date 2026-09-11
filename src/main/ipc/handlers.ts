@@ -4,7 +4,14 @@ import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appStat
 import type { ProjectDialogs } from '../dialogs'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
-import { createNode, listNodes, renameNode, toTreeNode } from '../tree/treeStore'
+import {
+  createNode,
+  deleteNode,
+  duplicateNode,
+  listNodes,
+  renameNode,
+  toTreeNode
+} from '../tree/treeStore'
 import { emit, register, type EmitTarget } from './registry'
 
 /** The parts of a BrowserWindow the handlers need; structural so tests can pass a fake. */
@@ -60,6 +67,15 @@ export function registerHandlers({ manager, appState, dialogs, windows }: Handle
   register('tree:rename', ({ id, title }) =>
     toTreeNode(renameNode(manager.require().connection.orm, id, title))
   )
+
+  register('tree:duplicate', ({ id }) =>
+    duplicateNode(manager.require().connection.orm, id).map(toTreeNode)
+  )
+
+  register('tree:delete', ({ id }) => {
+    deleteNode(manager.require().connection.orm, id)
+    return null
+  })
 
   register('window:close', () => {
     manager.close()

@@ -2,7 +2,14 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { contract, type Channel, type Output, type TreeNode } from '@shared/ipc/contract'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { treeFixture } from './treeFixture'
-import { buildIndex, insertIntoIndex, useTreeStore } from './treeStore'
+import {
+  buildIndex,
+  duplicateIntoIndex,
+  insertIntoIndex,
+  planRemoval,
+  removeFromIndex,
+  useTreeStore
+} from './treeStore'
 
 /** Answers every channel with the fixture, validated by the channel's real output schema. */
 function fakeClient(): { client: IpcClient; calls: [Channel, unknown][] } {
@@ -17,7 +24,41 @@ function fakeClient(): { client: IpcClient; calls: [Channel, unknown][] } {
   return { client, calls }
 }
 
-/** A client that answers `tree:create` and `tree:rename` like main would, recording inputs. */
+/** What main returns for `tree:duplicate` on `id`: the copy (ids suffixed `-copy`) then its subtree. */
+function duplicateRows(
+  index: { byId: Record<string, TreeNode>; childrenOf: Record<string, string[]> },
+  id: string
+): TreeNode[] {
+  const rows: TreeNode[] = []
+  const copy = (
+    sourceId: string,
+    parentId: string | null,
+    position: number,
+    title: string
+  ): void => {
+    const source = index.byId[sourceId]
+    if (!source) throw new Error('missing')
+    const copied: TreeNode = {
+      ...source,
+      id: `${sourceId}-copy`,
+      parentId,
+      position,
+      title,
+      created: 'c',
+      modified: 'm'
+    }
+    rows.push(copied)
+    ;(index.childrenOf[sourceId] ?? []).forEach((childId, i) => {
+      copy(childId, copied.id, i, index.byId[childId]?.title ?? '')
+    })
+  }
+  const source = index.byId[id]
+  if (!source) throw new Error('missing')
+  copy(id, source.parentId, source.position + 1, `${source.title} (Copy)`)
+  return rows
+}
+
+/** A client that answers `tree:create`, `tree:rename`, `tree:duplicate`, and `tree:delete` like main would, recording inputs. */
 function mutationClient(): { client: IpcClient; calls: [Channel, unknown][] } {
   const calls: [Channel, unknown][] = []
   const client: IpcClient = {
@@ -49,6 +90,15 @@ function mutationClient(): { client: IpcClient; calls: [Channel, unknown][] } {
         const node = state.byId[req.id]
         if (!node) throw new Error('missing')
         return { ...node, title: req.title, modified: 'renamed' } as Output<typeof channel>
+      }
+      if (channel === 'tree:duplicate') {
+        const req = contract['tree:duplicate'].input.parse(input)
+        return duplicateRows(state, req.id) as Output<typeof channel>
+      }
+      if (channel === 'tree:delete') {
+        const req = contract['tree:delete'].input.parse(input)
+        if (!state.byId[req.id]) throw new Error('missing')
+        return null as Output<typeof channel>
       }
       return contract[channel].output.parse(treeFixture) as Output<typeof channel>
     },
@@ -107,6 +157,121 @@ describe('insertIntoIndex', () => {
     expect(next.wordCountRollup.new).toBe(0)
     expect(next.wordCountRollup['ch-1']).toBe(1200)
     expect(next.rootIds).toBe(index.rootIds)
+  })
+})
+
+describe('duplicateIntoIndex', () => {
+  const index = buildIndex(treeFixture)
+
+  it('places a copied scene after the original and adds its words to the rollups', () => {
+    const next = duplicateIntoIndex(index, duplicateRows(index, 'sc-1'))
+    expect(next.childrenOf['ch-1']).toEqual(['sc-1', 'sc-1-copy'])
+    expect(next.byId['sc-1-copy']).toMatchObject({
+      title: 'Scene 1 (Copy)',
+      position: 1,
+      wordCount: 1200
+    })
+    expect(next.sectionOf['sc-1-copy']).toBe('manuscript')
+    expect(next.wordCountRollup['ch-1']).toBe(2400)
+    expect(next.wordCountRollup['arc-1']).toBe(3200)
+    expect(next.wordCountRollup.manuscript).toBe(6000)
+    // The source index is untouched.
+    expect(index.childrenOf['ch-1']).toEqual(['sc-1'])
+    expect(index.wordCountRollup['ch-1']).toBe(1200)
+  })
+
+  it("shifts later siblings and lands a copied folder's subtree under the new parent ids", () => {
+    const next = duplicateIntoIndex(index, duplicateRows(index, 'ch-1'))
+    expect(next.childrenOf['arc-1']).toEqual(['ch-1', 'ch-1-copy', 'ch-2', 'ch-3'])
+    expect(next.byId['ch-1']?.position).toBe(0)
+    expect(next.byId['ch-1-copy']?.position).toBe(1)
+    expect(next.byId['ch-2']?.position).toBe(2)
+    expect(next.byId['ch-3']?.position).toBe(3)
+    expect(next.childrenOf['ch-1-copy']).toEqual(['sc-1-copy'])
+    expect(next.byId['sc-1-copy']).toMatchObject({
+      parentId: 'ch-1-copy',
+      title: 'Scene 1',
+      position: 0
+    })
+    expect(next.childrenOf['ch-1']).toEqual(['sc-1'])
+    expect(next.rootIds).toEqual(['front', 'manuscript', 'end'])
+    expect(next.byId['arc-2']?.position).toBe(1)
+  })
+
+  it('returns the index unchanged for an empty response', () => {
+    expect(duplicateIntoIndex(index, [])).toBe(index)
+  })
+})
+
+describe('planRemoval', () => {
+  const index = buildIndex(treeFixture)
+
+  it('keeps the selection when it is outside the deleted subtree', () => {
+    expect(planRemoval(index, 'ch-2', 'sc-1')).toEqual({
+      removed: new Set(['ch-2', 'sc-2']),
+      selectedId: 'sc-1'
+    })
+    expect(planRemoval(index, 'ch-2', null)?.selectedId).toBeNull()
+  })
+
+  it('falls back to the next sibling for a selected middle sibling', () => {
+    expect(planRemoval(index, 'ch-2', 'ch-2')?.selectedId).toBe('ch-3')
+  })
+
+  it('falls back to the previous sibling for a selected last child', () => {
+    expect(planRemoval(index, 'ch-3', 'ch-3')?.selectedId).toBe('ch-2')
+  })
+
+  it('falls back to the parent for a selected only child, unless the parent is a section', () => {
+    expect(planRemoval(index, 'sc-1', 'sc-1')?.selectedId).toBe('ch-1')
+    expect(planRemoval(index, 'title-page', 'title-page')?.selectedId).toBeNull()
+  })
+
+  it('falls back from a selected descendant of the deleted folder', () => {
+    const plan = planRemoval(index, 'arc-1', 'sc-2')
+    expect(plan?.removed).toEqual(new Set(['arc-1', 'ch-1', 'ch-2', 'ch-3', 'sc-1', 'sc-2', 'sc-3']))
+    expect(plan?.selectedId).toBe('arc-2')
+  })
+
+  it('returns null for section roots and unknown ids', () => {
+    expect(planRemoval(index, 'manuscript', 'sc-1')).toBeNull()
+    expect(planRemoval(index, 'missing', 'sc-1')).toBeNull()
+  })
+})
+
+describe('removeFromIndex', () => {
+  const index = buildIndex(treeFixture)
+
+  it('drops a middle sibling, closes the gap, and lowers the rollups', () => {
+    const next = removeFromIndex(index, 'ch-2')
+    expect(next.childrenOf['arc-1']).toEqual(['ch-1', 'ch-3'])
+    expect(next.byId['ch-2']).toBeUndefined()
+    expect(next.byId['sc-2']).toBeUndefined()
+    expect(next.byId['ch-1']?.position).toBe(0)
+    expect(next.byId['ch-3']?.position).toBe(1)
+    expect(next.sectionOf['sc-2']).toBeUndefined()
+    expect(next.wordCountRollup['arc-1']).toBe(1200)
+    expect(next.wordCountRollup.manuscript).toBe(4000)
+    // The source index is untouched.
+    expect(index.childrenOf['arc-1']).toEqual(['ch-1', 'ch-2', 'ch-3'])
+    expect(index.wordCountRollup['arc-1']).toBe(2000)
+  })
+
+  it('drops a folder with its whole subtree and leaves other branches alone', () => {
+    const next = removeFromIndex(index, 'arc-1')
+    expect(next.childrenOf.manuscript).toEqual(['arc-2'])
+    expect(next.byId['arc-2']?.position).toBe(0)
+    for (const id of ['arc-1', 'ch-1', 'ch-2', 'ch-3', 'sc-1', 'sc-2', 'sc-3']) {
+      expect(next.byId[id]).toBeUndefined()
+    }
+    expect(next.childrenOf['arc-2']).toEqual(['ch-4', 'ch-5', 'ch-6'])
+    expect(next.rootIds).toEqual(['front', 'manuscript', 'end'])
+    expect(next.wordCountRollup.manuscript).toBe(2800)
+  })
+
+  it('returns the index unchanged for section roots and unknown ids', () => {
+    expect(removeFromIndex(index, 'manuscript')).toBe(index)
+    expect(removeFromIndex(index, 'missing')).toBe(index)
   })
 })
 
@@ -308,6 +473,143 @@ describe('treeStore', () => {
     expect(state.byId['sc-1']?.modified).toBe('renamed')
     expect(state.childrenOf['ch-1']).toEqual(['sc-1'])
     expect(state.renamingId).toBeNull()
+    expect(state.busy).toBe(false)
+  })
+
+  it('duplicate merges the rows, selects the copy, and opens the ancestors without touching other collapse state', async () => {
+    const { client, calls } = mutationClient()
+    setIpcClient(client)
+    useTreeStore.setState({
+      ...buildIndex(treeFixture),
+      loaded: true,
+      selectedId: 'sc-2',
+      collapsed: { 'ch-1': true, 'arc-1': true, 'arc-2': true }
+    })
+    await useTreeStore.getState().duplicate('sc-1')
+    expect(calls).toEqual([['tree:duplicate', { id: 'sc-1' }]])
+    const state = useTreeStore.getState()
+    expect(state.childrenOf['ch-1']).toEqual(['sc-1', 'sc-1-copy'])
+    expect(state.byId['sc-1-copy']?.title).toBe('Scene 1 (Copy)')
+    expect(state.wordCountRollup['ch-1']).toBe(2400)
+    expect(state.selectedId).toBe('sc-1-copy')
+    expect(state.renamingId).toBeNull()
+    expect(state.collapsed).toEqual({
+      'ch-1': false,
+      'arc-1': false,
+      'arc-2': true,
+      manuscript: false
+    })
+    expect(state.busy).toBe(false)
+  })
+
+  it('duplicate of a folder lands its subtree under the new parent ids', async () => {
+    const { client } = mutationClient()
+    setIpcClient(client)
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    await useTreeStore.getState().duplicate('ch-1')
+    const state = useTreeStore.getState()
+    expect(state.childrenOf['arc-1']).toEqual(['ch-1', 'ch-1-copy', 'ch-2', 'ch-3'])
+    expect(state.childrenOf['ch-1-copy']).toEqual(['sc-1-copy'])
+    expect(state.byId['sc-1-copy']?.parentId).toBe('ch-1-copy')
+    expect(state.byId['ch-3']?.position).toBe(3)
+    expect(state.selectedId).toBe('ch-1-copy')
+    expect(state.wordCountRollup['arc-1']).toBe(3200)
+  })
+
+  it('a rejected tree:duplicate leaves the index and selection untouched and propagates the error', async () => {
+    const failing: IpcClient = {
+      async invoke() {
+        throw new Error('Sections cannot be duplicated')
+      },
+      on: () => () => {}
+    }
+    setIpcClient(failing)
+    const index = buildIndex(treeFixture)
+    useTreeStore.setState({ ...index, loaded: true, selectedId: 'sc-1' })
+    await expect(useTreeStore.getState().duplicate('sc-1')).rejects.toThrow(
+      'Sections cannot be duplicated'
+    )
+    const state = useTreeStore.getState()
+    expect(state.byId).toEqual(index.byId)
+    expect(state.childrenOf).toEqual(index.childrenOf)
+    expect(state.selectedId).toBe('sc-1')
+    expect(state.busy).toBe(false)
+  })
+
+  it('remove drops the subtree, moves the selection to the next sibling, and clears a removed renamingId', async () => {
+    const { client, calls } = mutationClient()
+    setIpcClient(client)
+    useTreeStore.setState({
+      ...buildIndex(treeFixture),
+      loaded: true,
+      selectedId: 'sc-2',
+      renamingId: 'sc-2',
+      collapsed: { 'ch-2': true, 'arc-2': true }
+    })
+    await useTreeStore.getState().remove('ch-2')
+    expect(calls).toEqual([['tree:delete', { id: 'ch-2' }]])
+    const state = useTreeStore.getState()
+    expect(state.childrenOf['arc-1']).toEqual(['ch-1', 'ch-3'])
+    expect(state.byId['ch-2']).toBeUndefined()
+    expect(state.byId['sc-2']).toBeUndefined()
+    expect(state.byId['ch-3']?.position).toBe(1)
+    expect(state.selectedId).toBe('ch-3')
+    expect(state.renamingId).toBeNull()
+    expect(state.collapsed).toEqual({ 'arc-2': true })
+    expect(state.wordCountRollup['arc-1']).toBe(1200)
+    expect(state.busy).toBe(false)
+  })
+
+  it('remove clears renamingId when the deleted node itself was mid-rename', async () => {
+    const { client } = mutationClient()
+    setIpcClient(client)
+    useTreeStore.setState({
+      ...buildIndex(treeFixture),
+      loaded: true,
+      selectedId: 'sc-1',
+      renamingId: 'sc-1'
+    })
+    await useTreeStore.getState().remove('sc-1')
+    const state = useTreeStore.getState()
+    expect(state.byId['sc-1']).toBeUndefined()
+    expect(state.renamingId).toBeNull()
+  })
+
+  it('remove keeps a selection outside the subtree and a renamingId elsewhere', async () => {
+    const { client } = mutationClient()
+    setIpcClient(client)
+    useTreeStore.setState({
+      ...buildIndex(treeFixture),
+      loaded: true,
+      selectedId: 'sc-4',
+      renamingId: 'sc-4'
+    })
+    await useTreeStore.getState().remove('sc-1')
+    const state = useTreeStore.getState()
+    expect(state.childrenOf['ch-1']).toBeUndefined() // buildIndex lists no entry for an empty folder
+    expect(state.byId['sc-1']).toBeUndefined()
+    expect(state.selectedId).toBe('sc-4')
+    expect(state.renamingId).toBe('sc-4')
+    expect(state.wordCountRollup['ch-1']).toBe(0)
+  })
+
+  it('a rejected tree:delete leaves the index and selection untouched and propagates the error', async () => {
+    const failing: IpcClient = {
+      async invoke() {
+        throw new Error('Sections cannot be deleted')
+      },
+      on: () => () => {}
+    }
+    setIpcClient(failing)
+    const index = buildIndex(treeFixture)
+    useTreeStore.setState({ ...index, loaded: true, selectedId: 'sc-1' })
+    await expect(useTreeStore.getState().remove('sc-1')).rejects.toThrow(
+      'Sections cannot be deleted'
+    )
+    const state = useTreeStore.getState()
+    expect(state.byId).toEqual(index.byId)
+    expect(state.childrenOf).toEqual(index.childrenOf)
+    expect(state.selectedId).toBe('sc-1')
     expect(state.busy).toBe(false)
   })
 

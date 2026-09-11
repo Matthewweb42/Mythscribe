@@ -102,6 +102,10 @@ export const contract = {
     input: z.object({ id: z.string(), title: z.string().trim().min(1).max(NODE_TITLE_MAX) }),
     output: TreeNode
   },
+  /** Copies a node and its subtree right after the original (F-2.3): the copy's root first, then its descendants. */
+  'tree:duplicate': { input: z.object({ id: z.string() }), output: z.array(TreeNode) },
+  /** Deletes a node and everything inside it (F-2.3); later siblings close the gap. */
+  'tree:delete': { input: z.object({ id: z.string() }), output: z.null() },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>

@@ -11,7 +11,8 @@ export interface MenuItem {
 /**
  * The right-click menu for a tree row (F-2.2), section-aware: manuscript rows offer the levels
  * that can be placed relative to them plus a generic document and folder; front and end matter
- * rows offer only the generic items.
+ * rows offer only the generic items. Documents and folders (never sections) also offer Rename,
+ * Duplicate, and Delete (F-2.3).
  */
 export function treeContextMenuItems(
   index: TreeIndex,
@@ -31,5 +32,10 @@ export function treeContextMenuItems(
     items.push({ id: 'new-generic-folder', label: 'New folder' })
   }
   // F-2.6: append the "From template…" group here.
+  if (index.byId[nodeId]?.sectionType === null) {
+    items.push({ id: 'rename', label: 'Rename' })
+    items.push({ id: 'duplicate', label: 'Duplicate' })
+    items.push({ id: 'delete', label: 'Delete' })
+  }
   return items
 }

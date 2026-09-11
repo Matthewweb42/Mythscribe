@@ -126,7 +126,7 @@ describe('tree:list', () => {
   })
 })
 
-describe('tree:create / tree:rename', () => {
+describe('tree:create / tree:rename / tree:duplicate / tree:delete', () => {
   it('reports NO_PROJECT when nothing is open', async () => {
     await expect(
       invoke('tree:create', { parentId: 'x', kind: 'document', hierarchyLevel: null })
@@ -161,6 +161,41 @@ describe('tree:create / tree:rename', () => {
     expect(renamed).toMatchObject({ id: scene?.id, title: 'Opening' })
     const listed = (await invoke('tree:list', undefined)).find((r) => r.id === scene?.id)
     expect(listed?.title).toBe('Opening')
+  })
+
+  it('duplicates a node and its subtree; tree:list shows the copy after the original', async () => {
+    await invoke('project:create', { name: 'Tree', format: 'webnovel', directory: tmp })
+    const before = await invoke('tree:list', undefined)
+    const chapter = before.find((r) => r.hierarchyLevel === 'chapter' && r.position === 0)
+    const rows = await invoke('tree:duplicate', { id: chapter?.id ?? '' })
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({ title: 'Chapter 1 (Copy)', parentId: chapter?.parentId })
+    expect(rows[1]).toMatchObject({ title: 'Scene 1', parentId: rows[0]?.id })
+    const after = await invoke('tree:list', undefined)
+    expect(after).toHaveLength(19)
+    const siblings = after.filter((r) => r.parentId === chapter?.parentId)
+    expect(siblings.map((r) => [r.title, r.position])).toEqual([
+      ['Chapter 1', 0],
+      ['Chapter 1 (Copy)', 1],
+      ['Chapter 2', 2],
+      ['Chapter 3', 3]
+    ])
+  })
+
+  it('deletes a node with its subtree and closes the sibling gap', async () => {
+    await invoke('project:create', { name: 'Tree', format: 'webnovel', directory: tmp })
+    const before = await invoke('tree:list', undefined)
+    const chapter = before.find((r) => r.hierarchyLevel === 'chapter' && r.position === 1)
+    expect(await invoke('tree:delete', { id: chapter?.id ?? '' })).toBeNull()
+    const after = await invoke('tree:list', undefined)
+    expect(after).toHaveLength(15)
+    expect(after.find((r) => r.id === chapter?.id)).toBeUndefined()
+    expect(after.filter((r) => r.parentId === chapter?.id)).toHaveLength(0)
+    const siblings = after.filter((r) => r.parentId === chapter?.parentId)
+    expect(siblings.map((r) => [r.title, r.position])).toEqual([
+      ['Chapter 1', 0],
+      ['Chapter 3', 1]
+    ])
   })
 
   it('rejects an empty title at the contract boundary', async () => {

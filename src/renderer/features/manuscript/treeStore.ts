@@ -23,7 +23,7 @@ interface TreeState extends TreeIndex {
   loaded: boolean
   /** The node whose title is being edited inline (F-2.2), if any. */
   renamingId: string | null
-  /** True while a create or rename request is in flight; the create buttons disable on it. */
+  /** True while a create, rename, duplicate, or delete request is in flight; the create buttons disable on it. */
   busy: boolean
   load: () => Promise<void>
   /** Selects a document or folder. Section roots are not selectable. */
@@ -43,6 +43,16 @@ interface TreeState extends TreeIndex {
   createGeneric: (kind: NodeKind, targetId: string) => Promise<void>
   /** Renames a node and ends its inline rename. Errors propagate. */
   rename: (id: string, title: string) => Promise<void>
+  /**
+   * Duplicates a node and its subtree right after it (F-2.3), then expands the ancestors and
+   * selects the copy. Errors propagate.
+   */
+  duplicate: (id: string) => Promise<void>
+  /**
+   * Deletes a node and its subtree (F-2.3; the caller confirms first). If the selection was
+   * inside it, falls back per `planRemoval`. Errors propagate.
+   */
+  remove: (id: string) => Promise<void>
 }
 
 const byPosition = (a: TreeNode, b: TreeNode): number => a.position - b.position
@@ -106,6 +116,77 @@ export function insertIntoIndex(index: TreeIndex, node: TreeNode): TreeIndex {
     sectionOf: { ...index.sectionOf, [node.id]: index.sectionOf[node.parentId] ?? 'manuscript' },
     wordCountRollup: { ...index.wordCountRollup, [node.id]: node.wordCount }
   }
+}
+
+/**
+ * Merges the rows returned by `tree:duplicate` (the copy's root first) into the index without a
+ * reload (F-2.3). Siblings after the original shift down by one; the index is rebuilt from the
+ * local rows plus the new ones so word-count rollups include the copied words.
+ */
+export function duplicateIntoIndex(index: TreeIndex, rows: TreeNode[]): TreeIndex {
+  const root = rows[0]
+  if (root?.parentId == null) return index
+  const nodes = Object.values(index.byId).map((existing) =>
+    existing.parentId === root.parentId && existing.position >= root.position
+      ? { ...existing, position: existing.position + 1 }
+      : existing
+  )
+  return buildIndex([...nodes, ...rows])
+}
+
+/** The node and every descendant, via `childrenOf`. */
+function subtreeIds(index: TreeIndex, id: string): Set<string> {
+  const ids = new Set<string>()
+  const walk = (current: string): void => {
+    ids.add(current)
+    for (const childId of index.childrenOf[current] ?? []) walk(childId)
+  }
+  walk(id)
+  return ids
+}
+
+export interface Removal {
+  /** The deleted node and every descendant. */
+  removed: Set<string>
+  /**
+   * The selection after the delete: unchanged when it was outside the subtree, otherwise the next
+   * sibling, then the previous sibling, then the parent unless it is a section root, else null.
+   */
+  selectedId: string | null
+}
+
+/** What deleting `id` takes with it and where the selection lands (F-2.3). Null for section roots and unknown ids. */
+export function planRemoval(index: TreeIndex, id: string, selectedId: string | null): Removal | null {
+  const node = index.byId[id]
+  if (node?.parentId == null) return null
+  const removed = subtreeIds(index, id)
+  if (selectedId === null || !removed.has(selectedId)) return { removed, selectedId }
+  const siblings = index.childrenOf[node.parentId] ?? []
+  const at = siblings.indexOf(id)
+  const parent = index.byId[node.parentId]
+  const fallback =
+    siblings[at + 1] ?? siblings[at - 1] ?? (parent?.sectionType === null ? parent.id : null)
+  return { removed, selectedId: fallback }
+}
+
+/**
+ * Drops `id` and its subtree from the index without a reload (F-2.3). Later siblings close the
+ * gap; the index is rebuilt from the remaining local rows so word-count rollups drop the deleted words.
+ */
+export function removeFromIndex(index: TreeIndex, id: string): TreeIndex {
+  const node = index.byId[id]
+  if (node?.parentId == null) return index
+  const removed = subtreeIds(index, id)
+  const nodes: TreeNode[] = []
+  for (const existing of Object.values(index.byId)) {
+    if (removed.has(existing.id)) continue
+    nodes.push(
+      existing.parentId === node.parentId && existing.position > node.position
+        ? { ...existing, position: existing.position - 1 }
+        : existing
+    )
+  }
+  return buildIndex(nodes)
 }
 
 const emptyIndex = (): TreeIndex => ({
@@ -194,8 +275,58 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     } finally {
       if (mine === generation) set({ busy: false })
     }
+  },
+
+  async duplicate(id) {
+    const mine = generation
+    set({ busy: true })
+    try {
+      const rows = await ipc().invoke('tree:duplicate', { id })
+      if (mine !== generation) return
+      const root = rows[0]
+      if (!root) return
+      set((s) => ({
+        ...duplicateIntoIndex(s, rows),
+        collapsed: expandAncestors(s, root.parentId),
+        selectedId: root.id
+      }))
+    } finally {
+      if (mine === generation) set({ busy: false })
+    }
+  },
+
+  async remove(id) {
+    const mine = generation
+    set({ busy: true })
+    try {
+      await ipc().invoke('tree:delete', { id })
+      if (mine !== generation) return
+      set((s) => {
+        const plan = planRemoval(s, id, s.selectedId)
+        if (!plan) return {}
+        const collapsed = { ...s.collapsed }
+        for (const removedId of plan.removed) delete collapsed[removedId]
+        return {
+          ...removeFromIndex(s, id),
+          collapsed,
+          selectedId: plan.selectedId,
+          renamingId: s.renamingId !== null && plan.removed.has(s.renamingId) ? null : s.renamingId
+        }
+      })
+    } finally {
+      if (mine === generation) set({ busy: false })
+    }
   }
 }))
+
+/** The collapse map with every ancestor from `parentId` up to the section root opened. */
+function expandAncestors(state: TreeState, parentId: string | null): Record<string, boolean> {
+  const collapsed = { ...state.collapsed }
+  for (let id = parentId; id !== null; id = state.byId[id]?.parentId ?? null) {
+    collapsed[id] = false
+  }
+  return collapsed
+}
 
 /** Shared tail of `createLevel` and `createGeneric`: invoke, merge, expand, select, rename. */
 async function createAt(
@@ -213,13 +344,12 @@ async function createAt(
       hierarchyLevel
     })
     if (mine !== generation) return // the project was closed while the request was in flight
-    useTreeStore.setState((s) => {
-      const collapsed = { ...s.collapsed }
-      for (let id: string | null = node.parentId; id !== null; id = s.byId[id]?.parentId ?? null) {
-        collapsed[id] = false
-      }
-      return { ...insertIntoIndex(s, node), collapsed, selectedId: node.id, renamingId: node.id }
-    })
+    useTreeStore.setState((s) => ({
+      ...insertIntoIndex(s, node),
+      collapsed: expandAncestors(s, node.parentId),
+      selectedId: node.id,
+      renamingId: node.id
+    }))
   } finally {
     if (mine === generation) useTreeStore.setState({ busy: false })
   }

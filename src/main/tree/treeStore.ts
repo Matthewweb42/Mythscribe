@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { RunResult } from 'better-sqlite3'
-import { and, asc, count, eq, gte, sql } from 'drizzle-orm'
+import { and, asc, count, eq, gt, gte, sql } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import type { NovelFormat, TreeCreateInput, TreeNode } from '@shared/ipc/contract'
 import { defaultNodeTitle, type HierarchyLevel, type NodeKind } from '@shared/labels'
@@ -134,4 +134,71 @@ export function renameNode(db: TreeDb, id: string, title: string): NodeRow {
     .where(eq(node.id, id))
     .returning()
     .get()
+}
+
+/**
+ * Copies a node and everything inside it (F-2.3). The copy lands right after the original among
+ * its siblings (later siblings shift by one), is titled "<title> (Copy)", and carries the
+ * original's content, notes, scene metadata, matter type, preset, and word count. Descendants
+ * keep their titles and get contiguous positions. Returns the new rows, the copy's root first.
+ */
+export function duplicateNode(db: TreeDb, id: string): NodeRow[] {
+  return db.transaction((tx) => {
+    const source = getNode(tx, id)
+    if (!source) throw new AppError('NOT_FOUND', 'Node not found', { id })
+    if (source.sectionType !== null || source.parentId === null) {
+      throw new AppError('VALIDATION', 'Sections cannot be duplicated', { id })
+    }
+
+    tx.update(node)
+      .set({ position: sql`${node.position} + 1` })
+      .where(and(eq(node.parentId, source.parentId), gt(node.position, source.position)))
+      .run()
+
+    const now = new Date().toISOString()
+    const rows: NodeRow[] = []
+    const copy = (row: NodeRow, parentId: string, position: number, title: string): void => {
+      const copied: NodeRow = {
+        ...row,
+        id: randomUUID(),
+        parentId,
+        sectionType: null,
+        title,
+        position,
+        created: now,
+        modified: now
+      }
+      rows.push(copied)
+      const children = tx
+        .select()
+        .from(node)
+        .where(eq(node.parentId, row.id))
+        .orderBy(asc(node.position), asc(node.id))
+        .all()
+      children.forEach((child, index) => copy(child, copied.id, index, child.title))
+    }
+    copy(source, source.parentId, source.position + 1, `${source.title} (Copy)`)
+    insertNodes(tx, rows)
+    return rows
+  })
+}
+
+/**
+ * Deletes a node and everything inside it (F-2.3). Descendants go through the schema's
+ * `ON DELETE CASCADE` (`foreign_keys` is on for every connection); later siblings shift up so
+ * positions stay contiguous. The three section roots cannot be deleted.
+ */
+export function deleteNode(db: TreeDb, id: string): void {
+  db.transaction((tx) => {
+    const existing = getNode(tx, id)
+    if (!existing) throw new AppError('NOT_FOUND', 'Node not found', { id })
+    if (existing.sectionType !== null || existing.parentId === null) {
+      throw new AppError('VALIDATION', 'Sections cannot be deleted', { id })
+    }
+    tx.delete(node).where(eq(node.id, id)).run()
+    tx.update(node)
+      .set({ position: sql`${node.position} - 1` })
+      .where(and(eq(node.parentId, existing.parentId), gt(node.position, existing.position)))
+      .run()
+  })
 }
