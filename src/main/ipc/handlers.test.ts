@@ -126,6 +126,52 @@ describe('tree:list', () => {
   })
 })
 
+describe('tree:create / tree:rename', () => {
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(
+      invoke('tree:create', { parentId: 'x', kind: 'document', hierarchyLevel: null })
+    ).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('creates a node that tree:list then shows at the expected position', async () => {
+    await invoke('project:create', { name: 'Tree', format: 'webnovel', directory: tmp })
+    const before = await invoke('tree:list', undefined)
+    const manuscript = before.find((r) => r.sectionType === 'manuscript')
+    const arc1 = before.find((r) => r.parentId === manuscript?.id && r.position === 0)
+    const created = await invoke('tree:create', {
+      parentId: manuscript?.id ?? '',
+      kind: 'folder',
+      hierarchyLevel: 'part',
+      afterId: arc1?.id
+    })
+    expect(created).toMatchObject({ title: 'Untitled Arc', position: 1, parentId: manuscript?.id })
+    const after = await invoke('tree:list', undefined)
+    const parts = after.filter((r) => r.parentId === manuscript?.id)
+    expect(parts.map((r) => [r.title, r.position])).toEqual([
+      ['Arc 1', 0],
+      ['Untitled Arc', 1],
+      ['Arc 2', 2]
+    ])
+  })
+
+  it('renames a node and the change shows in tree:list', async () => {
+    await invoke('project:create', { name: 'Tree', format: 'novel', directory: tmp })
+    const scene = (await invoke('tree:list', undefined)).find((r) => r.kind === 'document')
+    const renamed = await invoke('tree:rename', { id: scene?.id ?? '', title: '  Opening  ' })
+    expect(renamed).toMatchObject({ id: scene?.id, title: 'Opening' })
+    const listed = (await invoke('tree:list', undefined)).find((r) => r.id === scene?.id)
+    expect(listed?.title).toBe('Opening')
+  })
+
+  it('rejects an empty title at the contract boundary', async () => {
+    await invoke('project:create', { name: 'Tree', format: 'novel', directory: tmp })
+    const scene = (await invoke('tree:list', undefined)).find((r) => r.kind === 'document')
+    await expect(invoke('tree:rename', { id: scene?.id ?? '', title: '   ' })).rejects.toThrowError(
+      /^VALIDATION: /
+    )
+  })
+})
+
 describe('window:close', () => {
   it('closes the project and every window', async () => {
     await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })

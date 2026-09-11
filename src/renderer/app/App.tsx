@@ -5,18 +5,14 @@ import { formatLabel, levelLabel, sectionLabel } from '@shared/labels'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { Logo } from '@renderer/features/shell/Logo'
+import { CreateNodeBar } from '@renderer/features/manuscript/CreateNodeBar'
 import { ManuscriptTree } from '@renderer/features/manuscript/ManuscriptTree'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { CreateProjectWizard } from '@renderer/features/project/CreateProjectWizard'
 import { RecentProjects } from '@renderer/features/project/RecentProjects'
 import { useProjectStore } from '@renderer/features/project/projectStore'
-import { ipc, IpcRequestError } from '@renderer/lib/ipc'
-
-function describeError(err: unknown): string {
-  if (err instanceof IpcRequestError) return err.message
-  if (err instanceof Error) return err.message
-  return 'Something went wrong'
-}
+import { describeError } from '@renderer/lib/errors'
+import { ipc } from '@renderer/lib/ipc'
 
 export function App(): React.JSX.Element {
   const ready = useProjectStore((s) => s.ready)
@@ -190,12 +186,18 @@ function CloseProjectButton(): React.JSX.Element {
   )
 }
 
-/** F-2.1: the document tree beside the main pane; the editor takes the main pane with F-3.1. */
+/**
+ * F-2.1: the document tree beside the main pane, with the create buttons (F-2.2) pinned under
+ * it; the editor takes the main pane with F-3.1.
+ */
 function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
   return (
     <>
-      <aside className="flex w-72 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface">
-        <ManuscriptTree format={format} />
+      <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-surface">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <ManuscriptTree format={format} />
+        </div>
+        <CreateNodeBar format={format} />
       </aside>
       <section className="flex-1 overflow-y-auto p-6">
         <MainPane format={format} />

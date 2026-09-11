@@ -66,6 +66,15 @@ export function levelLabel(format: NovelFormat, level: HierarchyLevel): string {
   }
 }
 
+/** Title given to a newly created node (F-2.2): "Untitled Arc", "Untitled Chapter", "Untitled document". */
+export function defaultNodeTitle(
+  format: NovelFormat,
+  kind: NodeKind,
+  hierarchyLevel: HierarchyLevel | null
+): string {
+  return `Untitled ${hierarchyLevel ? levelLabel(format, hierarchyLevel) : kind}`
+}
+
 /** One-line description of the starter skeleton seeded into a new project (F-1.3). */
 export function skeletonSummary(format: NovelFormat): string {
   return `${sectionLabel(format, 'manuscript')} → ${levelLabel(format, 'part')} 1–2 → ${levelLabel(format, 'chapter')} 1–3 → ${levelLabel(format, 'scene')} 1`

@@ -27,7 +27,7 @@ The original prototype was deleted on purpose (git tag `v0-legacy`). Do not resu
 ## Next up (keep this current; it is the handoff between sessions)
 
 1. M0 is complete: all four gates pass (typecheck, lint, unit, e2e) and F-7.6, F-8.1, F-8.2 are ticked.
-2. M1 is under way: F-1.1 through F-1.5 and F-2.1 are done (the `node` table exists; the pending-save registry and window-close handshake are in place for F-3.2; the tree store owns selection and collapse state). Continue with `/feature F-2.2` (create nodes), then F-2.3–2.6 and the editor (F-3.x) in milestone order. v0 import was split out as F-1.6 (post-launch).
+2. M1 is under way: F-1.1 through F-1.5, F-2.1, and F-2.2 are done (the `node` table exists; `tree:create`/`tree:rename` are the first mutation channels; the tree store owns selection, collapse, and rename state). Continue with `/feature F-2.3` (rename/duplicate/delete; inline rename already exists from F-2.2), then F-2.4–2.6 and the editor (F-3.x) in milestone order. v0 import was split out as F-1.6 (post-launch).
    - Known e2e flake (2026-09-11, seen twice, only right after the 20-worker `npm run test` run): the wizard steps at the top of `e2e/smoke.spec.ts` fail under load (the empty-name alert missing, or the name shrinking after Back). Passes 3/3 idle. If it recurs, keep `test-results/**/trace.zip` and inspect before changing the test; do not add Playwright retries to hide it.
    - Dev-machine note: projects created before F-1.3 (2026-09-10, e.g. `~/test.sqlite.mythscribe`) have no seeded sections, so `tree:list` returns nothing for them. They are throwaway; delete them rather than adding a repair path. F-2.1 must still render sanely for an empty tree.
 3. Small follow-up for F-8.3: `quitRequested` in `src/main/index.ts` is never reset, so on macOS an abandoned Cmd+Q (flush failed, user kept working) makes the next plain window close quit the app. Reset it when a close is cancelled.
@@ -95,7 +95,7 @@ npm run build:win      # installer via electron-builder
 
 - `npm run typecheck` — zero errors
 - `npm run lint` — zero warnings
-- `npm run test` — unit tests for the data layer, editor commands, prompt builders, post-processors
+- `npm run test` — unit tests for the data layer, editor commands, prompt builders, post-processors (vitest runs 4 reused workers without per-file isolation, see `vitest.config.ts`; every test file must reset module state such as Zustand stores and the IPC client in `beforeEach`)
 - `npm run test:e2e` — smoke test: create project → write → reopen → text is still there (M0 version: create → close → reopen)
 - `eval:ai` — prompt golden tests and fidelity/token report (once F-5.12 exists)
 - Manual check in the running app for anything visual
@@ -140,6 +140,7 @@ Alternatives considered: Lexical (fine, smaller mention ecosystem); Tauri (small
 - `src/preload/index.ts` — exposes `window.mythscribe` (`invoke`, `on`), restricted to contract channels. Sandbox and context isolation are on.
 - `src/renderer/lib/ipc.ts` — `ipc().invoke(channel, input)` typed client that validates outputs; `setIpcClient` for tests.
 - `src/renderer/features/manuscript/` — `treeStore.ts` is the one owner of tree state: normalized `byId`/`childrenOf`/`rootIds`, derived `sectionOf` and `wordCountRollup` (rebuilt once per `load()` from `tree:list`), plus `selectedId` and in-memory `collapsed`. F-2.2–2.4 mutate it by updating the changed records, never by reloading the world. `ManuscriptTree.tsx` is an ARIA tree (roving tabindex, arrow keys); sections are labelled via `sectionLabel` and are not selectable; front/end-matter documents carry `data-matter` and the gold `text-matter` color. Per-level colors are tokens (`--ms-level-*`, `--ms-matter`) so themes (F-7.8) can override them. `App.tsx` loads/clears the store on project open/close and renders the fixed-width sidebar + main pane (F-7.2 adds resizing).
+- Tree mutations (F-2.2 pattern for F-2.3/F-2.4): main validates structure inside a transaction in `src/main/tree/treeStore.ts` (`createNode`, `renameNode`) and returns the row; the renderer store merges the returned record with a pure helper (`insertIntoIndex`) instead of reloading. `placement.ts` is the one place that turns "selection + level" into `{ parentId, afterId }` (bottom bar, context menu, and later Insert menu/shortcuts all use it). `contextMenuItems.ts` returns plain `{ id, label }` data so F-7.1 can render the same items natively; F-2.6 appends its template group there. Default titles come from `defaultNodeTitle` in `src/shared/labels.ts`.
 - `src/renderer/features/shell/Logo.tsx` — the inline SVG brand mark in `currentColor`; swap its paths when a transparent asset lands in `resources/` (the current `resources/icon.png` and `build/icon.*` are the stock Electron atom, not the brand).
 - `src/renderer/features/shell/dialogs/` — the dialog service: `dialogs.confirm`, `dialogs.prompt`, `toast.*`, rendered by `<DialogHost/>`.
 - `src/renderer/features/project/projectStore.ts` — Zustand store for the open project; pattern for all renderer stores.

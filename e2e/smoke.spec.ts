@@ -111,6 +111,35 @@ test('create, close, reopen a project on disk', async () => {
   await expect(scene1).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
 
+  // F-2.2: "New scene" from the bar inserts after the selected scene and opens inline rename;
+  // Enter commits the title and the row keeps its place right after Scene 1.
+  await page.getByRole('button', { name: 'New scene' }).click()
+  const untitled = chapter1.getByRole('treeitem', { name: 'Untitled Scene', exact: true })
+  await expect(untitled).toBeVisible()
+  const renameBox = page.getByRole('textbox', { name: 'Rename' })
+  await expect(renameBox).toBeFocused()
+  await renameBox.fill('Opening')
+  await renameBox.press('Enter')
+  await expect(renameBox).toBeHidden()
+  await expect(chapter1.getByRole('treeitem', { name: 'Opening', exact: true })).toBeVisible()
+  await expect(chapter1.getByRole('treeitem')).toHaveText([/^Scene 1/, /^Opening/])
+
+  // F-2.2: the right-click menu on a chapter offers a new scene under it; Escape cancels the
+  // rename and keeps the default title.
+  const chapter2 = arc1.getByRole('treeitem', { name: 'Chapter 2', exact: true })
+  await chapter2.click({ button: 'right' })
+  const menu = page.getByRole('menu')
+  await expect(menu).toBeVisible()
+  await menu.getByRole('menuitem', { name: 'New Scene' }).click()
+  await expect(menu).toBeHidden()
+  const untitled2 = chapter2.getByRole('treeitem', { name: 'Untitled Scene', exact: true })
+  await expect(untitled2).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Rename' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('textbox', { name: 'Rename' })).toBeHidden()
+  await expect(untitled2).toBeVisible()
+  await expect(chapter2.getByRole('treeitem')).toHaveText([/^Scene 1/, /^Untitled Scene/])
+
   await page.getByRole('button', { name: 'Close project' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
@@ -129,7 +158,11 @@ test('create, close, reopen a project on disk', async () => {
   expect(reopened.ok).toBe(true)
   if (reopened.ok && reopened.data) expect(reopened.data.id).toBe(created.data.id)
   expect(fs.existsSync(path.join(tmp, 'userData', 'app-state.json'))).toBe(true)
-  expect(await listTree()).toHaveLength(17)
+  // F-2.2: the two created scenes and the rename survived the close.
+  const persisted = await listTree()
+  expect(persisted).toHaveLength(19)
+  expect(persisted.map((n) => n.title)).toContain('Opening')
+  expect(persisted.filter((n) => n.title === 'Untitled Scene')).toHaveLength(1)
 
   // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.
   await closeProject()

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatLabel, levelLabel, sectionLabel, skeletonSummary } from './labels'
+import { defaultNodeTitle, formatLabel, levelLabel, sectionLabel, skeletonSummary } from './labels'
 
 describe('formatLabel', () => {
   it.each([
@@ -48,5 +48,23 @@ describe('skeletonSummary', () => {
     expect(skeletonSummary('novel')).toBe('Manuscript → Part 1–2 → Chapter 1–3 → Scene 1')
     expect(skeletonSummary('epic')).toBe('Series → Part 1–2 → Chapter 1–3 → Scene 1')
     expect(skeletonSummary('webnovel')).toBe('Volume 1 → Arc 1–2 → Chapter 1–3 → Scene 1')
+  })
+})
+
+describe('defaultNodeTitle', () => {
+  it.each([
+    ['novel', 'folder', 'part', 'Untitled Part'],
+    ['novel', 'folder', 'chapter', 'Untitled Chapter'],
+    ['novel', 'document', 'scene', 'Untitled Scene'],
+    ['epic', 'folder', 'part', 'Untitled Part'],
+    ['epic', 'folder', 'chapter', 'Untitled Chapter'],
+    ['epic', 'document', 'scene', 'Untitled Scene'],
+    ['webnovel', 'folder', 'part', 'Untitled Arc'],
+    ['webnovel', 'folder', 'chapter', 'Untitled Chapter'],
+    ['webnovel', 'document', 'scene', 'Untitled Scene'],
+    ['novel', 'document', null, 'Untitled document'],
+    ['webnovel', 'folder', null, 'Untitled folder']
+  ] as const)('%s / %s / %s → %s', (format, kind, level, expected) => {
+    expect(defaultNodeTitle(format, kind, level)).toBe(expected)
   })
 })

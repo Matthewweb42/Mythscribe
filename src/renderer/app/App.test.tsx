@@ -109,6 +109,14 @@ describe('App', () => {
     // The tree labels the manuscript section by format and starts with nothing selected.
     expect(await screen.findByRole('treeitem', { name: 'Volume 1' })).toBeInTheDocument()
     expect(screen.getByRole('treeitem', { name: 'Arc 1' })).toBeInTheDocument()
+    // F-2.2: the create buttons sit under the tree in the sidebar, labelled by format.
+    const aside = screen.getByRole('complementary')
+    expect(within(aside).getByRole('tree')).toBeInTheDocument()
+    const bar = within(aside).getByRole('button', { name: 'New arc' })
+    expect(bar).toBeInTheDocument()
+    expect(within(aside).getByRole('tree').compareDocumentPosition(bar)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
     expect(screen.getByText('Select a document to start writing.')).toBeInTheDocument()
     expect(screen.queryByTestId('selected-title')).not.toBeInTheDocument()
 

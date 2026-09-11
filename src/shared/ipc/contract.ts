@@ -57,6 +57,9 @@ export const TreeNode = z.object({
 })
 export type TreeNode = z.infer<typeof TreeNode>
 
+/** Longest allowed node title (F-2.2). */
+export const NODE_TITLE_MAX = 200
+
 export const contract = {
   'app:info': {
     input: z.undefined(),
@@ -83,6 +86,22 @@ export const contract = {
   'recents:list': { input: z.undefined(), output: z.array(RecentProject) },
   'recents:remove': { input: z.object({ path: z.string() }), output: z.array(RecentProject) },
   'tree:list': { input: z.undefined(), output: z.array(TreeNode) },
+  'tree:create': {
+    input: z.object({
+      parentId: z.string(),
+      kind: NodeKind,
+      hierarchyLevel: HierarchyLevel.nullable(),
+      /** Omitted → main fills in "Untitled <level|kind>" from the project's format. */
+      title: z.string().trim().min(1).max(NODE_TITLE_MAX).optional(),
+      /** Omitted → append as the parent's last child. */
+      afterId: z.string().optional()
+    }),
+    output: TreeNode
+  },
+  'tree:rename': {
+    input: z.object({ id: z.string(), title: z.string().trim().min(1).max(NODE_TITLE_MAX) }),
+    output: TreeNode
+  },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
@@ -92,6 +111,8 @@ export type Channel = keyof Contract
 export type Input<C extends Channel> = z.input<Contract[C]['input']>
 export type Output<C extends Channel> = z.output<Contract[C]['output']>
 export const channels = Object.keys(contract) as Channel[]
+
+export type TreeCreateInput = Input<'tree:create'>
 
 /** Events pushed from main to the renderer. */
 export const events = {

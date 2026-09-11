@@ -6,6 +6,12 @@ const alias = { '@shared': resolve('src/shared'), '@renderer': resolve('src/rend
 
 export default defineConfig({
   test: {
+    // The repo lives on a slow /mnt/c mount: spawning a fork per file in parallel makes worker
+    // startup time out ("Failed to start forks worker"), and full isolation triples the run.
+    // Workers are reused across files, so every test file must reset module state (stores,
+    // the IPC client, registries) in beforeEach.
+    maxWorkers: 4,
+    isolate: false,
     projects: [
       {
         resolve: { alias },

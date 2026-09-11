@@ -1,7 +1,10 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TreeNode } from '@shared/ipc/contract'
+import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { CreateNodeBar } from './CreateNodeBar'
 import { ManuscriptTree } from './ManuscriptTree'
 import { treeFixture } from './treeFixture'
 import { buildIndex, useTreeStore } from './treeStore'
@@ -14,8 +17,56 @@ const row = (name: string): Element => {
   return first
 }
 
+/** Answers `tree:create` with an "Untitled …" node after `afterId` and `tree:rename` with the new title. */
+function install(): ReturnType<typeof vi.fn> {
+  const invoke = vi.fn(async (channel: string, input: unknown) => {
+    const state = useTreeStore.getState()
+    if (channel === 'tree:create') {
+      const req = input as {
+        parentId: string
+        afterId?: string
+        kind: 'document' | 'folder'
+        hierarchyLevel: 'part' | 'chapter' | 'scene' | null
+      }
+      const after = req.afterId === undefined ? undefined : state.byId[req.afterId]
+      const node: TreeNode = {
+        id: `new-${invoke.mock.calls.length}`,
+        parentId: req.parentId,
+        sectionType: null,
+        kind: req.kind,
+        hierarchyLevel: req.hierarchyLevel,
+        title:
+          req.hierarchyLevel === 'scene'
+            ? 'Untitled Scene'
+            : `Untitled ${req.hierarchyLevel ?? req.kind}`,
+        position: after ? after.position + 1 : (state.childrenOf[req.parentId] ?? []).length,
+        wordCount: 0,
+        matterType: null,
+        preset: null,
+        created: 'c',
+        modified: 'm'
+      }
+      return node
+    }
+    if (channel === 'tree:rename') {
+      const req = input as { id: string; title: string }
+      const node = state.byId[req.id]
+      if (!node) throw new Error('missing')
+      return { ...node, title: req.title }
+    }
+    throw new Error(`unexpected ${channel}`)
+  })
+  const client: IpcClient = { invoke: invoke as IpcClient['invoke'], on: () => () => {} }
+  setIpcClient(client)
+  return invoke
+}
+
+const treeNames = (): (string | null)[] =>
+  screen.getAllByRole('treeitem').map((el) => el.getAttribute('aria-label'))
+
 beforeEach(() => {
   useTreeStore.getState().clear()
+  useDialogStore.setState({ modals: [], toasts: [] })
   useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
 })
 
@@ -181,5 +232,221 @@ describe('ManuscriptTree', () => {
     await userEvent.keyboard('{Enter}')
     expect(item('Volume 1')).toHaveAttribute('aria-expanded', 'false')
     expect(useTreeStore.getState().selectedId).toBe('ch-1')
+  })
+
+  it('New scene from the bar inserts after the selected scene and opens inline rename', async () => {
+    const invoke = install()
+    useTreeStore.setState({ selectedId: 'sc-1' })
+    render(
+      <>
+        <ManuscriptTree format="webnovel" />
+        <CreateNodeBar format="webnovel" />
+      </>
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'New scene' }))
+    expect(invoke).toHaveBeenCalledWith('tree:create', {
+      parentId: 'ch-1',
+      afterId: 'sc-1',
+      kind: 'document',
+      hierarchyLevel: 'scene'
+    })
+    const names = treeNames()
+    expect(names.indexOf('Untitled Scene')).toBe(names.indexOf('Scene 1') + 1)
+    expect(names.indexOf('Untitled Scene')).toBe(names.indexOf('Chapter 2') - 1)
+    const created = item('Untitled Scene')
+    expect(created).toHaveAttribute('aria-selected', 'true')
+    const input = within(created).getByRole('textbox', { name: 'Rename' })
+    expect(input).toHaveFocus()
+    expect(input).toHaveValue('Untitled Scene')
+  })
+
+  it('creating into a collapsed chapter expands it so the new row is visible', async () => {
+    install()
+    useTreeStore.setState({ selectedId: 'sc-1', collapsed: { 'ch-1': true, 'arc-1': true } })
+    render(
+      <>
+        <ManuscriptTree format="webnovel" />
+        <CreateNodeBar format="webnovel" />
+      </>
+    )
+    expect(screen.queryByRole('treeitem', { name: 'Scene 1' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'New scene' }))
+    expect(item('Chapter 1')).toHaveAttribute('aria-expanded', 'true')
+    expect(item('Untitled Scene')).toBeInTheDocument()
+  })
+
+  it('disables the three bar buttons with Front Matter content selected', () => {
+    useTreeStore.setState({ selectedId: 'title-page' })
+    render(
+      <>
+        <ManuscriptTree format="webnovel" />
+        <CreateNodeBar format="webnovel" />
+      </>
+    )
+    expect(screen.getByRole('button', { name: 'New scene' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'New chapter' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'New arc' })).toBeDisabled()
+  })
+
+  it('right-click on a chapter opens a menu with the levels and the generic items, no templates', async () => {
+    render(<ManuscriptTree format="webnovel" />)
+    fireEvent.contextMenu(row('Chapter 2'), { clientX: 40, clientY: 50 })
+    const menu = screen.getByRole('menu')
+    const labels = within(menu)
+      .getAllByRole('menuitem')
+      .map((el) => el.textContent)
+    expect(labels).toEqual(['New Arc', 'New Chapter', 'New Scene', 'New document', 'New folder'])
+    expect(within(menu).queryByText(/template/i)).not.toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: 'New Arc' })).toHaveFocus()
+    await userEvent.keyboard('{ArrowDown}')
+    expect(within(menu).getByRole('menuitem', { name: 'New Chapter' })).toHaveFocus()
+    await userEvent.keyboard('{ArrowUp}{ArrowUp}')
+    expect(within(menu).getByRole('menuitem', { name: 'New folder' })).toHaveFocus()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(item('Chapter 2')).toHaveFocus()
+  })
+
+  it('right-click on Title Page offers only the generic items', () => {
+    render(<ManuscriptTree format="webnovel" />)
+    fireEvent.contextMenu(row('Title Page'), { clientX: 40, clientY: 50 })
+    const labels = within(screen.getByRole('menu'))
+      .getAllByRole('menuitem')
+      .map((el) => el.textContent)
+    expect(labels).toEqual(['New document', 'New folder'])
+  })
+
+  it('choosing New Scene from the menu creates it under that chapter', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    fireEvent.contextMenu(row('Chapter 2'), { clientX: 40, clientY: 50 })
+    await userEvent.click(screen.getByRole('menuitem', { name: 'New Scene' }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(invoke).toHaveBeenCalledWith('tree:create', {
+      parentId: 'ch-2',
+      afterId: undefined,
+      kind: 'document',
+      hierarchyLevel: 'scene'
+    })
+    const names = treeNames()
+    expect(names.indexOf('Untitled Scene')).toBe(names.indexOf('Scene 2') + 1)
+    expect(within(item('Untitled Scene')).getByRole('textbox', { name: 'Rename' })).toHaveFocus()
+  })
+
+  it('choosing New folder from the menu creates a generic folder inside the row', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    fireEvent.contextMenu(row('Chapter 2'), { clientX: 40, clientY: 50 })
+    await userEvent.click(screen.getByRole('menuitem', { name: 'New folder' }))
+    expect(invoke).toHaveBeenCalledWith('tree:create', {
+      parentId: 'ch-2',
+      afterId: undefined,
+      kind: 'folder',
+      hierarchyLevel: null
+    })
+    expect(item('Untitled folder')).toHaveAttribute('aria-level', '4')
+  })
+
+  it('an outside click closes the menu without creating anything', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    fireEvent.contextMenu(row('Chapter 2'), { clientX: 40, clientY: 50 })
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    await userEvent.click(row('Arc 2'))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a failed menu create as a toast', async () => {
+    const client: IpcClient = {
+      invoke: async () => {
+        throw new Error('Database is locked')
+      },
+      on: () => () => {}
+    }
+    setIpcClient(client)
+    render(<ManuscriptTree format="webnovel" />)
+    fireEvent.contextMenu(row('Chapter 2'), { clientX: 40, clientY: 50 })
+    await userEvent.click(screen.getByRole('menuitem', { name: 'New Scene' }))
+    await waitFor(() =>
+      expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual(['Database is locked'])
+    )
+    expect(screen.queryByRole('treeitem', { name: 'Untitled Scene' })).not.toBeInTheDocument()
+  })
+
+  it('rename commits on Enter and updates the label', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    act(() => useTreeStore.getState().startRename('sc-1'))
+    const input = screen.getByRole('textbox', { name: 'Rename' })
+    expect(input).toHaveFocus()
+    await userEvent.keyboard('Opening{Enter}')
+    expect(invoke).toHaveBeenCalledWith('tree:rename', { id: 'sc-1', title: 'Opening' })
+    expect(screen.queryByRole('textbox', { name: 'Rename' })).not.toBeInTheDocument()
+    expect(item('Opening')).toBeInTheDocument()
+    expect(screen.queryByRole('treeitem', { name: 'Scene 1' })).not.toBeInTheDocument()
+    expect(useTreeStore.getState().renamingId).toBeNull()
+  })
+
+  it('rename commits on blur', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    act(() => useTreeStore.getState().startRename('sc-1'))
+    await userEvent.keyboard('Opening')
+    await userEvent.tab()
+    expect(invoke).toHaveBeenCalledWith('tree:rename', { id: 'sc-1', title: 'Opening' })
+    expect(item('Opening')).toBeInTheDocument()
+  })
+
+  it('Escape cancels the rename without IPC and leaves the tree key handler alone', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    act(() => useTreeStore.getState().startRename('sc-1'))
+    await userEvent.keyboard('Changed{Escape}')
+    expect(invoke).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: 'Rename' })).not.toBeInTheDocument()
+    expect(item('Scene 1')).toBeInTheDocument()
+    expect(useTreeStore.getState().renamingId).toBeNull()
+  })
+
+  it('an empty or unchanged title ends the rename without IPC', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    act(() => useTreeStore.getState().startRename('sc-1'))
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Rename' }))
+    await userEvent.keyboard('   {Enter}')
+    expect(invoke).not.toHaveBeenCalled()
+    expect(item('Scene 1')).toBeInTheDocument()
+    act(() => useTreeStore.getState().startRename('sc-1'))
+    await userEvent.keyboard('{Enter}')
+    expect(invoke).not.toHaveBeenCalled()
+    expect(item('Scene 1')).toBeInTheDocument()
+    expect(useTreeStore.getState().renamingId).toBeNull()
+  })
+
+  it('arrow keys typed in the rename input do not move the tree focus', async () => {
+    install()
+    render(<ManuscriptTree format="webnovel" />)
+    act(() => useTreeStore.getState().startRename('sc-1'))
+    const input = screen.getByRole('textbox', { name: 'Rename' })
+    await userEvent.keyboard('{ArrowDown}{ArrowUp}')
+    expect(input).toHaveFocus()
+    expect(item('Chapter 2')).not.toHaveFocus()
+  })
+
+  it('surfaces a failed rename as a toast and keeps the old label', async () => {
+    const client: IpcClient = {
+      invoke: async () => {
+        throw new Error('Title is too long')
+      },
+      on: () => () => {}
+    }
+    setIpcClient(client)
+    render(<ManuscriptTree format="webnovel" />)
+    act(() => useTreeStore.getState().startRename('sc-1'))
+    await userEvent.keyboard('Opening{Enter}')
+    expect(await screen.findByRole('treeitem', { name: 'Scene 1' })).toBeInTheDocument()
+    expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual(['Title is too long'])
+    expect(screen.queryByRole('textbox', { name: 'Rename' })).not.toBeInTheDocument()
   })
 })

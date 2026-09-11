@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   BookOpen,
   ChevronDown,
@@ -10,8 +10,12 @@ import {
   Layers
 } from 'lucide-react'
 import type { NovelFormat, TreeNode } from '@shared/ipc/contract'
-import { sectionLabel, type SectionType } from '@shared/labels'
-import { useTreeStore } from './treeStore'
+import { HierarchyLevel, sectionLabel, type SectionType } from '@shared/labels'
+import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { describeError } from '@renderer/lib/errors'
+import { ContextMenu } from './ContextMenu'
+import { treeContextMenuItems } from './contextMenuItems'
+import { useTreeStore, type TreeIndex } from './treeStore'
 
 interface VisibleRow {
   id: string
@@ -75,12 +79,73 @@ function LevelIcon({
   }
 }
 
+/** Inline title editor (F-2.2): Enter or blur commits, Escape cancels, empty or unchanged is a no-op. */
+function RenameInput({ id, title }: { id: string; title: string }): React.JSX.Element {
+  const rename = useTreeStore((s) => s.rename)
+  const endRename = useTreeStore((s) => s.endRename)
+  // Enter and Escape both unmount the input, which can fire one last blur; skip it.
+  const settled = useRef(false)
+
+  const commit = async (value: string): Promise<void> => {
+    if (settled.current) return
+    settled.current = true
+    const next = value.trim()
+    if (next.length === 0 || next === title) {
+      endRename()
+      return
+    }
+    try {
+      await rename(id, next)
+    } catch (err) {
+      toast.error(describeError(err))
+    } finally {
+      endRename()
+    }
+  }
+
+  const cancel = (): void => {
+    if (settled.current) return
+    settled.current = true
+    endRename()
+  }
+
+  return (
+    <input
+      aria-label="Rename"
+      defaultValue={title}
+      autoFocus
+      onFocus={(event) => event.currentTarget.select()}
+      onClick={(event) => event.stopPropagation()}
+      onBlur={(event) => void commit(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          event.stopPropagation()
+          void commit(event.currentTarget.value)
+        } else if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          cancel()
+        }
+      }}
+      className="min-w-0 flex-1 rounded border border-accent bg-bg px-1 text-sm text-fg outline-none"
+    />
+  )
+}
+
+interface MenuAnchor {
+  id: string
+  x: number
+  y: number
+}
+
 interface TreeItemProps {
   id: string
   depth: number
   format: NovelFormat
   activeId: string | null
   register: (id: string, element: HTMLLIElement | null) => void
+  onContextMenu: (anchor: MenuAnchor) => void
 }
 
 function TreeItem({
@@ -88,7 +153,8 @@ function TreeItem({
   depth,
   format,
   activeId,
-  register
+  register,
+  onContextMenu
 }: TreeItemProps): React.JSX.Element | null {
   const node = useTreeStore((s) => s.byId[id])
   const childIds = useTreeStore((s) => s.childrenOf[id])
@@ -96,6 +162,7 @@ function TreeItem({
   const wordCount = useTreeStore((s) => s.wordCountRollup[id] ?? 0)
   const collapsed = useTreeStore((s) => s.collapsed[id] === true)
   const selected = useTreeStore((s) => s.selectedId === id)
+  const renaming = useTreeStore((s) => s.renamingId === id)
   const select = useTreeStore((s) => s.select)
   const toggle = useTreeStore((s) => s.toggle)
   if (!node) return null
@@ -121,6 +188,11 @@ function TreeItem({
     >
       <div
         onClick={() => (isSection ? toggle(id) : select(id))}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          onContextMenu({ id, x: event.clientX, y: event.clientY })
+        }}
         style={{ paddingLeft: depth * 12 + 8 }}
         className={`flex h-7 cursor-default items-center gap-1 rounded-md pr-2 text-sm select-none ${
           selected ? 'bg-accent/15 text-fg' : 'hover:bg-surface-raised'
@@ -147,7 +219,11 @@ function TreeItem({
           expanded={expanded}
           className={`shrink-0 ${levelColor(node, section)}`}
         />
-        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {renaming ? (
+          <RenameInput id={id} title={node.title} />
+        ) : (
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+        )}
         <span aria-hidden="true" className="ml-auto text-xs text-fg-subtle tabular-nums">
           {wordCount.toLocaleString()}
         </span>
@@ -162,6 +238,7 @@ function TreeItem({
               format={format}
               activeId={activeId}
               register={register}
+              onContextMenu={onContextMenu}
             />
           ))}
         </ul>
@@ -170,10 +247,20 @@ function TreeItem({
   )
 }
 
+/** Maps a context-menu item id to the store action that creates the node (F-2.2). */
+async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
+  const { createLevel, createGeneric } = useTreeStore.getState()
+  if (itemId === 'new-generic-document') return createGeneric('document', nodeId)
+  if (itemId === 'new-generic-folder') return createGeneric('folder', nodeId)
+  const level = HierarchyLevel.safeParse(itemId.replace(/^new-/, ''))
+  if (level.success) return createLevel(level.data, nodeId)
+}
+
 /**
  * The document tree (F-2.1): the three sections and their nested folders and documents, with
  * collapse/expand, per-level icons and colors, rolled-up word counts, and the active document
- * highlighted. Reads `useTreeStore`; the parent decides when to `load()`.
+ * highlighted. Reads `useTreeStore`; the parent decides when to `load()`. Rows open a
+ * section-aware context menu and rename inline (F-2.2).
  */
 export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.Element | null {
   const loaded = useTreeStore((s) => s.loaded)
@@ -182,9 +269,12 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
   const collapsed = useTreeStore((s) => s.collapsed)
   const selectedId = useTreeStore((s) => s.selectedId)
   const byId = useTreeStore((s) => s.byId)
+  const sectionOf = useTreeStore((s) => s.sectionOf)
+  const wordCountRollup = useTreeStore((s) => s.wordCountRollup)
   const select = useTreeStore((s) => s.select)
   const toggle = useTreeStore((s) => s.toggle)
   const items = useRef(new Map<string, HTMLLIElement>())
+  const [menu, setMenu] = useState<MenuAnchor | null>(null)
 
   const rows = useMemo(
     () => listVisibleRows(rootIds, childrenOf, collapsed),
@@ -201,8 +291,32 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
     if (id) items.current.get(id)?.focus()
   }
 
+  const closeMenu = useCallback((): void => {
+    setMenu((open) => {
+      if (open) items.current.get(open.id)?.focus()
+      return null
+    })
+  }, [])
+
+  const onMenuSelect = (itemId: string): void => {
+    if (!menu) return
+    const nodeId = menu.id
+    setMenu(null)
+    runMenuItem(itemId, nodeId).catch((err: unknown) => toast.error(describeError(err)))
+  }
+
+  const index: TreeIndex = useMemo(
+    () => ({ byId, childrenOf, rootIds, sectionOf, wordCountRollup }),
+    [byId, childrenOf, rootIds, sectionOf, wordCountRollup]
+  )
+  const menuItems = useMemo(
+    () => (menu ? treeContextMenuItems(index, menu.id, format) : []),
+    [index, menu, format]
+  )
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLUListElement>): void => {
     if (!(event.target instanceof HTMLElement)) return
+    if (event.target instanceof HTMLInputElement) return // the rename input handles its own keys
     const id = event.target.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId
     if (!id) return
     const index = rows.findIndex((row) => row.id === id)
@@ -244,17 +358,34 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
     return <p className="m-0 p-3 text-sm text-fg-muted">This project has no sections yet.</p>
   }
   return (
-    <ul role="tree" aria-label="Document tree" onKeyDown={onKeyDown} className="m-0 list-none p-1">
-      {rootIds.map((id) => (
-        <TreeItem
-          key={id}
-          id={id}
-          depth={1}
-          format={format}
-          activeId={activeId}
-          register={register}
+    <>
+      <ul
+        role="tree"
+        aria-label="Document tree"
+        onKeyDown={onKeyDown}
+        className="m-0 list-none p-1"
+      >
+        {rootIds.map((id) => (
+          <TreeItem
+            key={id}
+            id={id}
+            depth={1}
+            format={format}
+            activeId={activeId}
+            register={register}
+            onContextMenu={setMenu}
+          />
+        ))}
+      </ul>
+      {menu && menuItems.length > 0 ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems}
+          onSelect={onMenuSelect}
+          onClose={closeMenu}
         />
-      ))}
-    </ul>
+      ) : null}
+    </>
   )
 }
