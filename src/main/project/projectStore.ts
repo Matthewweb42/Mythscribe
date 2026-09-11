@@ -4,8 +4,10 @@ import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import type { NovelFormat, ProjectInfo } from '@shared/ipc/contract'
 import { openDatabase, type Connection } from '../db/connection'
-import { project as projectTable } from '../db/schema'
+import { project as projectTable, settings } from '../db/schema'
 import { AppError } from '../ipc/errors'
+import { insertNodes } from '../tree/treeStore'
+import { seedSettings, seedSkeleton } from './seed'
 
 /**
  * A project is a folder `<Name>.mythscribe/` containing `project.db` and `assets/`.
@@ -85,7 +87,11 @@ export function createProject(folder: string, name: string, format: NovelFormat)
       modified: now,
       lastOpened: now
     }
-    connection.orm.insert(projectTable).values(row).run()
+    connection.orm.transaction((tx) => {
+      tx.insert(projectTable).values(row).run()
+      insertNodes(tx, seedSkeleton(format, now))
+      tx.insert(settings).values(seedSettings(format)).run()
+    })
     return new ProjectSession(folder, connection, toInfo(row, folder, connection.schemaVersion))
   } catch (err) {
     connection.close()

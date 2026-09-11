@@ -4,6 +4,7 @@ import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appStat
 import type { ProjectDialogs } from '../dialogs'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
+import { listNodes, toTreeNode } from '../tree/treeStore'
 import { emit, register } from './registry'
 
 export interface HandlerDeps {
@@ -43,6 +44,8 @@ export function registerHandlers({ manager, appState, dialogs, windows }: Handle
     const next = appState.update((s) => ({ ...s, recents: removeRecent(s.recents, path) }))
     return withExists(next.recents, isProjectFolder)
   })
+
+  register('tree:list', () => listNodes(manager.require().connection.orm).map(toTreeNode))
 
   manager.onChange((info) => {
     if (info) {

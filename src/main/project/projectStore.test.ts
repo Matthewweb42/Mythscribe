@@ -2,7 +2,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { EDITOR_SETTINGS_KEY, EditorSettings } from '@shared/editorSettings'
+import { eq } from 'drizzle-orm'
+import { settings } from '../db/schema'
 import { AppError } from '../ipc/errors'
+import { listNodes } from '../tree/treeStore'
 import {
   createProject,
   isProjectFolder,
@@ -60,7 +64,39 @@ describe('createProject', () => {
     fs.writeFileSync(path.join(busy, 'note.txt'), 'x')
     expect(() => createProject(busy, 'busy', 'novel')).toThrowError(/not empty/)
   })
+
+  it('seeds the starter skeleton and editor settings for a novel (F-1.3)', () => {
+    const session = createProject(projectFolderFor(tmp, 'Seeded'), 'Seeded', 'novel')
+    open.push(session)
+    const nodes = listNodes(session.connection.orm)
+    expect(nodes).toHaveLength(17)
+    expect(nodes.filter((n) => n.parentId === null).map((n) => n.sectionType)).toEqual([
+      'front',
+      'manuscript',
+      'end'
+    ])
+    expect(nodes.map((n) => n.title)).toContain('Part 1')
+    expect(editorSettings(session).sceneBreak).toBe('* * *')
+  })
+
+  it('seeds webnovel labels and defaults', () => {
+    const session = createProject(projectFolderFor(tmp, 'Web'), 'Web', 'webnovel')
+    open.push(session)
+    const titles = listNodes(session.connection.orm).map((n) => n.title)
+    expect(titles).toContain('Arc 1')
+    expect(titles).toContain('Arc 2')
+    expect(editorSettings(session).sceneBreak).toBe('~~~')
+  })
 })
+
+function editorSettings(session: ProjectSession): EditorSettings {
+  const row = session.connection.orm
+    .select()
+    .from(settings)
+    .where(eq(settings.key, EDITOR_SETTINGS_KEY))
+    .get()
+  return EditorSettings.parse(JSON.parse(row?.value ?? ''))
+}
 
 describe('openProject', () => {
   it('reopens a created project and bumps lastOpened', async () => {
@@ -73,6 +109,18 @@ describe('openProject', () => {
     expect(second.info.id).toBe(first.info.id)
     expect(second.info.format).toBe('webnovel')
     expect(second.info.lastOpened > first.info.lastOpened).toBe(true)
+  })
+
+  it('keeps the seeded skeleton across close and reopen', () => {
+    const folder = projectFolderFor(tmp, 'Keep')
+    const first = createProject(folder, 'Keep', 'novel')
+    const ids = listNodes(first.connection.orm).map((n) => n.id)
+    first.close()
+    const second = openProject(folder)
+    open.push(second)
+    const again = listNodes(second.connection.orm)
+    expect(again).toHaveLength(17)
+    expect(again.map((n) => n.id)).toEqual(ids)
   })
 
   it('accepts the project.db path', () => {

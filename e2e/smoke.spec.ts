@@ -8,7 +8,7 @@ import {
   type ElectronApplication,
   type Page
 } from '@playwright/test'
-import type { IpcResult, ProjectInfo } from '../src/shared/ipc/contract'
+import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contract'
 
 /**
  * Smoke test (CLAUDE.md quality gates): create a project → close it → reopen it → its data is
@@ -74,6 +74,16 @@ test('create, close, reopen a project on disk', async () => {
   if (!created.ok || !created.data) throw new Error('project was not created')
   expect(created.data.path).toBe(projectPath)
 
+  // F-1.3: the new project is seeded with the three sections and the starter skeleton.
+  const seeded = await listTree()
+  expect(seeded).toHaveLength(17)
+  expect(seeded.filter((n) => n.sectionType !== null)).toHaveLength(3)
+  const titles = seeded.map((n) => n.title)
+  expect(titles).toContain('Arc 1')
+  expect(titles).toContain('Arc 2')
+  expect(titles.filter((t) => t.startsWith('Chapter'))).toHaveLength(6)
+  expect(titles.filter((t) => t === 'Scene 1')).toHaveLength(6)
+
   await page.getByRole('button', { name: 'Close project' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
@@ -91,4 +101,13 @@ test('create, close, reopen a project on disk', async () => {
   expect(reopened.ok).toBe(true)
   if (reopened.ok && reopened.data) expect(reopened.data.id).toBe(created.data.id)
   expect(fs.existsSync(path.join(tmp, 'userData', 'app-state.json'))).toBe(true)
+  expect(await listTree()).toHaveLength(17)
 })
+
+async function listTree(): Promise<TreeNode[]> {
+  const result = await page.evaluate<IpcResult<TreeNode[]>>(
+    () => window.mythscribe.invoke('tree:list', undefined) as Promise<IpcResult<TreeNode[]>>
+  )
+  if (!result.ok) throw new Error(`tree:list failed: ${result.error.message}`)
+  return result.data
+}

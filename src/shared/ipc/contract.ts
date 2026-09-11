@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 
 /**
  * The single IPC contract shared by main, preload, and renderer.
@@ -39,6 +40,23 @@ export type RecentProjectEntry = z.infer<typeof RecentProjectEntry>
 export const RecentProject = RecentProjectEntry.extend({ exists: z.boolean() })
 export type RecentProject = z.infer<typeof RecentProject>
 
+/** One row of the document tree (F-1.3, F-2.1): structure and metadata, never content. */
+export const TreeNode = z.object({
+  id: z.string(),
+  parentId: z.string().nullable(),
+  sectionType: SectionType.nullable(),
+  kind: NodeKind,
+  hierarchyLevel: HierarchyLevel.nullable(),
+  title: z.string(),
+  position: z.number().int(),
+  wordCount: z.number().int(),
+  matterType: z.string().nullable(),
+  preset: z.string().nullable(),
+  created: z.string(),
+  modified: z.string()
+})
+export type TreeNode = z.infer<typeof TreeNode>
+
 export const contract = {
   'app:info': {
     input: z.undefined(),
@@ -63,7 +81,8 @@ export const contract = {
   'project:close': { input: z.undefined(), output: z.null() },
   'project:current': { input: z.undefined(), output: ProjectInfo.nullable() },
   'recents:list': { input: z.undefined(), output: z.array(RecentProject) },
-  'recents:remove': { input: z.object({ path: z.string() }), output: z.array(RecentProject) }
+  'recents:remove': { input: z.object({ path: z.string() }), output: z.array(RecentProject) },
+  'tree:list': { input: z.undefined(), output: z.array(TreeNode) }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract

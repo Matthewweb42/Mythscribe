@@ -27,7 +27,8 @@ The original prototype was deleted on purpose (git tag `v0-legacy`). Do not resu
 ## Next up (keep this current; it is the handoff between sessions)
 
 1. M0 is complete: all four gates pass (typecheck, lint, unit, e2e) and F-7.6, F-8.1, F-8.2 are ticked.
-2. M1 is under way: F-1.2 (create-project wizard) and F-1.1 (welcome screen with recents) are done. Continue with `/feature F-1.3` (seeded structure), then F-1.4, F-1.5, then the manuscript tree (F-2.x) and editor (F-3.x) in milestone order.
+2. M1 is under way: F-1.2 (create-project wizard), F-1.1 (welcome screen with recents), and F-1.3 (seeded structure; the `node` table now exists) are done. Continue with `/feature F-1.4` (open/close project), then F-1.5, then the manuscript tree (F-2.x) and editor (F-3.x) in milestone order.
+3. Known gap for F-1.4 or F-8.x: if `createProject` fails mid-transaction, the folder and an empty `project.db` stay on disk, so a retry hits `ALREADY_EXISTS`. Clean up the fresh folder in the catch.
 
 ## Workflow
 
@@ -126,6 +127,9 @@ Alternatives considered: Lexical (fine, smaller mention ecosystem); Tauri (small
 - `src/main/ipc/registry.ts` — `register(channel, fn)` validates input and wraps errors; throw `AppError(code, message)` from handlers. `emit(windows, event, payload)` pushes events. Handlers live in `src/main/ipc/handlers.ts`.
 - `src/main/db/` — `schema.ts` (Drizzle), `migrations/` (generated SQL, numbered, committed, never edited), `migrate.ts` (runner with `schema_migrations` table), `connection.ts` (`openDatabase` applies pragmas and migrations).
 - `src/main/project/` — `projectStore.ts` creates/opens the `<Name>.mythscribe/` folder; `manager.ts` owns the single open project and notifies on change.
+- `src/main/project/seed.ts` — pure `seedSkeleton(format)` (3 sections + Part/Chapter/Scene skeleton, 17 rows) and `seedSettings(format)`; run inside `createProject`'s transaction. `src/main/tree/treeStore.ts` — `insertNodes`, `listNodes` (ordered parent, position, id; roots first), `toTreeNode`; `TreeDb` accepts the orm or a transaction handle.
+- `src/shared/labels.ts` — `SectionType`/`HierarchyLevel`/`NodeKind` enums (one owner; Drizzle columns use the same tuples), `sectionLabel(format, section)`, `levelLabel(format, level)`, `skeletonSummary(format)`. Section rows store the canonical key (`front`/`manuscript`/`end`) as `title`; the UI must label roots via `sectionLabel`, never `title`.
+- `src/shared/editorSettings.ts` — zod `EditorSettings` and `defaultEditorSettings(format)` (F-3.6 defaults); stored in the project `settings` table under key `editor` as JSON.
 - `src/main/appState/` — app-level (not per-project) state in `<userData>/app-state.json`: `appStateStore.ts` reads lazily, validates with zod, writes atomically; `recents.ts` holds the pure recents list operations. Recents are recorded on the `manager.onChange` hook in `handlers.ts`. F-7.9 window state belongs in the same file. `MYTHSCRIBE_USER_DATA` overrides the userData directory (used by e2e for isolation).
 - `src/preload/index.ts` — exposes `window.mythscribe` (`invoke`, `on`), restricted to contract channels. Sandbox and context isolation are on.
 - `src/renderer/lib/ipc.ts` — `ipc().invoke(channel, input)` typed client that validates outputs; `setIpcClient` for tests.

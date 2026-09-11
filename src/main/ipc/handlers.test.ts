@@ -3,7 +3,14 @@ import os from 'node:os'
 import path from 'node:path'
 import { ipcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Channel, Input, IpcResult, Output } from '@shared/ipc/contract'
+import {
+  TreeNode,
+  type Channel,
+  type Input,
+  type IpcResult,
+  type Output
+} from '@shared/ipc/contract'
+import { z } from 'zod'
 import { AppStateStore } from '../appState/appStateStore'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
@@ -99,5 +106,20 @@ describe('recents handlers', () => {
     await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
     const fresh = new AppStateStore(path.join(tmp, 'userData', 'app-state.json'))
     expect(fresh.get().recents.map((r) => r.name)).toEqual(['A'])
+  })
+})
+
+describe('tree:list', () => {
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('tree:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('returns the seeded skeleton of the open project (F-1.3)', async () => {
+    await invoke('project:create', { name: 'Seeded', format: 'webnovel', directory: tmp })
+    const rows = z.array(TreeNode).parse(await invoke('tree:list', undefined))
+    expect(rows).toHaveLength(17)
+    expect(rows.filter((r) => r.sectionType !== null)).toHaveLength(3)
+    expect(rows.map((r) => r.title)).toContain('Arc 1')
+    expect(rows.filter((r) => r.kind === 'document')).toHaveLength(6)
   })
 })
