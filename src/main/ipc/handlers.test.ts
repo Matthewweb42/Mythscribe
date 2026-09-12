@@ -27,6 +27,7 @@ type Invoke = <C extends Channel>(channel: C, input: Input<C>) => Promise<Output
 let tmp: string
 let manager: ProjectManager
 let invoke: Invoke
+let handlerFor: (channel: Channel) => (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>
 let fakeWin: ClosableWindow
 
 const dialogs: ProjectDialogs = {
@@ -48,6 +49,11 @@ beforeEach(() => {
   const handlers = new Map<string, (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>>()
   for (const [channel, fn] of vi.mocked(ipcMain.handle).mock.calls) {
     handlers.set(channel, fn as (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>)
+  }
+  handlerFor = (channel) => {
+    const fn = handlers.get(channel)
+    if (!fn) throw new Error(`No handler registered for ${channel}`)
+    return fn
   }
   invoke = async (channel, input) => {
     const fn = handlers.get(channel)
@@ -296,6 +302,58 @@ describe('document:get', () => {
       /^VALIDATION: /
     )
     await expect(invoke('document:get', { id: 'missing' })).rejects.toThrowError(/^NOT_FOUND: /)
+  })
+})
+
+describe('document:save', () => {
+  const para = (text: string): Input<'document:save'>['content'] => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('document:save', { id: 'x', content: para('x') })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('saves a seeded scene so document:get and tree:list reflect it (F-3.2)', async () => {
+    await invoke('project:create', { name: 'Doc', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    const saved = await invoke('document:save', {
+      id: scene?.id ?? '',
+      content: para('The storm broke at dusk.')
+    })
+    expect(saved.wordCount).toBe(5)
+    expect(typeof saved.modified).toBe('string')
+    expect(await invoke('document:get', { id: scene?.id ?? '' })).toEqual({
+      id: scene?.id,
+      content: para('The storm broke at dusk.')
+    })
+    const listed = (await invoke('tree:list', undefined)).find((r) => r.id === scene?.id)
+    expect(listed).toMatchObject({ wordCount: 5, modified: saved.modified })
+  })
+
+  it('refuses folders with VALIDATION and unknown ids with NOT_FOUND', async () => {
+    await invoke('project:create', { name: 'Doc', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const chapter = rows.find((r) => r.hierarchyLevel === 'chapter')
+    await expect(
+      invoke('document:save', { id: chapter?.id ?? '', content: para('x') })
+    ).rejects.toThrowError(/^VALIDATION: /)
+    await expect(
+      invoke('document:save', { id: 'missing', content: para('x') })
+    ).rejects.toThrowError(/^NOT_FOUND: /)
+  })
+
+  it('rejects content that is not a Tiptap document at the contract boundary', async () => {
+    await invoke('project:create', { name: 'Doc', format: 'novel', directory: tmp })
+    const scene = (await invoke('tree:list', undefined)).find((r) => r.kind === 'document')
+    const raw = handlerFor('document:save')
+    const result = await raw(undefined, { id: scene?.id, content: { content: [] } })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
   })
 })
 

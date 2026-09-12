@@ -1,4 +1,4 @@
-import { canInsertNode, Node, type Extensions } from '@tiptap/core'
+import { canInsertNode, Extension, Node, type Extensions } from '@tiptap/core'
 import TextAlign from '@tiptap/extension-text-align'
 import { TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
@@ -6,7 +6,32 @@ import StarterKit from '@tiptap/starter-kit'
 export interface EditorSchemaOptions {
   /** The scene-break text from the editor settings (F-3.6); the scene-break node renders it. */
   sceneBreak: string
+  /** Runs on Ctrl/Cmd+S (F-3.2). */
+  onSave: () => void
 }
+
+export interface SaveShortcutOptions {
+  /** Runs on Ctrl/Cmd+S; null (unconfigured) still swallows the key. */
+  onSave: (() => void) | null
+}
+
+/** Ctrl/Cmd+S inside the editor saves now (F-3.2) instead of reaching the browser's save-page handler. */
+export const SaveShortcut = Extension.create<SaveShortcutOptions>({
+  name: 'saveShortcut',
+
+  addOptions() {
+    return { onSave: null }
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      'Mod-s': () => {
+        this.options.onSave?.()
+        return true
+      }
+    }
+  }
+})
 
 /** The heading levels the editor offers (F-3.1); the toolbar and the schema share this list. */
 export const HEADING_LEVELS = [1, 2, 3] as const
@@ -88,11 +113,11 @@ export const SceneBreak = Node.create<SceneBreakOptions>({
 /**
  * The one owner of the editor schema (F-3.1): StarterKit trimmed to what the spec lists (marks,
  * headings 1–3, block quote, hard break, undo/redo, cursors) plus text alignment on headings and
- * paragraphs and the scene-break block. Lists, links, code blocks, horizontal rules, and the
- * trailing node are off so the document model stays what the compile views (F-3.12) and the AI
- * post-processors expect.
+ * paragraphs, the scene-break block, and the Ctrl+S save shortcut (F-3.2). Lists, links, code
+ * blocks, horizontal rules, and the trailing node are off so the document model stays what the
+ * compile views (F-3.12) and the AI post-processors expect.
  */
-export function buildExtensions({ sceneBreak }: EditorSchemaOptions): Extensions {
+export function buildExtensions({ sceneBreak, onSave }: EditorSchemaOptions): Extensions {
   return [
     StarterKit.configure({
       heading: { levels: [...HEADING_LEVELS] },
@@ -109,6 +134,7 @@ export function buildExtensions({ sceneBreak }: EditorSchemaOptions): Extensions
       trailingNode: false
     }),
     TextAlign.configure({ types: ['heading', 'paragraph'], alignments: [...ALIGNMENTS] }),
-    SceneBreak.configure({ text: sceneBreak })
+    SceneBreak.configure({ text: sceneBreak }),
+    SaveShortcut.configure({ onSave })
   ]
 }

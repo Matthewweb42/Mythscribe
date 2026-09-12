@@ -1,13 +1,15 @@
 import { Editor } from '@tiptap/core'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TiptapNode } from '@shared/tiptap'
 import { buildExtensions } from './extensions'
 
 let editor: Editor
+let onSave: () => void
 
 beforeEach(() => {
+  onSave = vi.fn()
   editor = new Editor({
-    extensions: buildExtensions({ sceneBreak: '~~~' }),
+    extensions: buildExtensions({ sceneBreak: '~~~', onSave }),
     content: {
       type: 'doc',
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello' }] }]
@@ -50,7 +52,7 @@ describe('buildExtensions', () => {
     const parsed = TiptapNode.parse(json)
     expect(parsed).toEqual(json)
 
-    const reloaded = new Editor({ extensions: buildExtensions({ sceneBreak: '~~~' }) })
+    const reloaded = new Editor({ extensions: buildExtensions({ sceneBreak: '~~~', onSave }) })
     reloaded.commands.setContent(parsed)
     expect(reloaded.getJSON()).toEqual(json)
     reloaded.commands.setContent(editor.getHTML())
@@ -64,10 +66,23 @@ describe('buildExtensions', () => {
     const json = editor.getJSON()
     expect(json.content?.[1]).toEqual({ type: 'sceneBreak' })
 
-    const restyled = new Editor({ extensions: buildExtensions({ sceneBreak: '###' }) })
+    const restyled = new Editor({ extensions: buildExtensions({ sceneBreak: '###', onSave }) })
     restyled.commands.setContent(json)
     expect(restyled.getHTML()).toContain('class="scene-break">###</div>')
     restyled.destroy()
+  })
+
+  it('runs onSave for Mod-s and swallows the key (F-3.2)', () => {
+    const keydown = (key: string, init: KeyboardEventInit): boolean =>
+      editor.view.someProp('handleKeyDown', (f) =>
+        f(editor.view, new KeyboardEvent('keydown', { key, ...init }))
+      ) === true
+    // `Mod` resolves to Ctrl here (jsdom is not a Mac platform) and to Cmd on macOS.
+    expect(keydown('s', { ctrlKey: true })).toBe(true)
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(keydown('s', {})).toBe(false)
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(editor.getText()).toBe('Hello')
   })
 
   it('offers headings 1–3 only', () => {

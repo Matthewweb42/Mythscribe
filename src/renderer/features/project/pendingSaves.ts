@@ -1,7 +1,7 @@
 /**
  * Pending-save registry (F-1.4). Anything holding unsaved edits registers a flusher here so
  * closing, opening, or quitting waits for it. F-3.2 autosave wires in with
- * `registerPendingSave(() => saveNow())` when a document loads and unsubscribes on unload.
+ * `registerPendingSave(() => flush())` when the first document loads and unsubscribes on `clear()`.
  */
 type Flush = () => Promise<void>
 

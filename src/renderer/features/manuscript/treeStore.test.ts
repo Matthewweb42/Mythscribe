@@ -9,6 +9,7 @@ import {
   moveInIndex,
   planRemoval,
   removeFromIndex,
+  setWordCountInIndex,
   useTreeStore
 } from './treeStore'
 
@@ -369,6 +370,51 @@ describe('moveInIndex', () => {
     if (!manuscript) throw new Error('missing')
     expect(moveInIndex(index, { ...manuscript, parentId: 'front', position: 0 })).toBe(index)
     expect(moveInIndex(index, newNode('ch-1', 0))).toBe(index)
+  })
+})
+
+describe('setWordCountInIndex', () => {
+  const index = buildIndex(treeFixture)
+
+  it('replaces the own count and moves every ancestor rollup by the delta', () => {
+    const next = setWordCountInIndex(index, 'sc-2', 1000)
+    expect(next.byId['sc-2']?.wordCount).toBe(1000)
+    expect(next.wordCountRollup['sc-2']).toBe(1000)
+    expect(next.wordCountRollup['ch-2']).toBe(1000)
+    expect(next.wordCountRollup['arc-1']).toBe(2200)
+    expect(next.wordCountRollup.manuscript).toBe(5000)
+    const down = setWordCountInIndex(next, 'sc-2', 0)
+    expect(down.wordCountRollup['ch-2']).toBe(0)
+    expect(down.wordCountRollup['arc-1']).toBe(1200)
+    expect(down.wordCountRollup.manuscript).toBe(4000)
+  })
+
+  it('leaves other nodes, structure, and the previous index untouched', () => {
+    const next = setWordCountInIndex(index, 'sc-1', 1300)
+    expect(index.byId['sc-1']?.wordCount).toBe(1200)
+    expect(index.wordCountRollup.manuscript).toBe(4800)
+    expect(next.byId['sc-2']).toBe(index.byId['sc-2'])
+    expect(next.wordCountRollup['ch-2']).toBe(800)
+    expect(next.wordCountRollup['arc-2']).toBe(2800)
+    expect(next.wordCountRollup.front).toBe(12)
+    expect(next.childrenOf).toBe(index.childrenOf)
+    expect(next.rootIds).toBe(index.rootIds)
+    expect(next.sectionOf).toBe(index.sectionOf)
+  })
+
+  it('is a no-op for unknown ids and unchanged counts', () => {
+    expect(setWordCountInIndex(index, 'nope', 5)).toBe(index)
+    expect(setWordCountInIndex(index, 'sc-1', 1200)).toBe(index)
+  })
+
+  it('setWordCount applies it to the store', async () => {
+    setIpcClient(fakeClient().client)
+    await useTreeStore.getState().load()
+    useTreeStore.getState().setWordCount('title-page', 20)
+    const state = useTreeStore.getState()
+    expect(state.byId['title-page']?.wordCount).toBe(20)
+    expect(state.wordCountRollup.front).toBe(20)
+    expect(state.wordCountRollup.manuscript).toBe(4800)
   })
 })
 

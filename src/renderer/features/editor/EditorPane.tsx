@@ -15,7 +15,7 @@ import { Toolbar } from './Toolbar'
  * instance, created with the loaded content, so the undo history holds only the author's edits
  * to that document: loading never lands on the stack and undo can never walk into the previous
  * document. While the load is in flight a read-only, empty editor keeps the layout and the toolbar
- * is disabled. Saving arrives with F-3.2.
+ * is disabled. Every edit goes to the store, which autosaves it (F-3.2); Ctrl+S saves at once.
  */
 export function EditorPane({ id, format }: { id: string; format: NovelFormat }): React.JSX.Element {
   const content = useDocumentStore((s) => (s.id === id ? s.content : null))
@@ -43,8 +43,11 @@ function DocumentEditor({
   content: TiptapNodeT | null
   sceneBreak: string
 }): React.JSX.Element {
-  const setDirty = useDocumentStore((s) => s.setDirty)
-  const extensions = useMemo(() => buildExtensions({ sceneBreak }), [sceneBreak])
+  const edit = useDocumentStore((s) => s.edit)
+  const extensions = useMemo(
+    () => buildExtensions({ sceneBreak, onSave: () => void useDocumentStore.getState().saveNow() }),
+    [sceneBreak]
+  )
   const ready = content !== null
 
   const editor = useEditor(
@@ -60,7 +63,7 @@ function DocumentEditor({
           'aria-label': 'Document'
         }
       },
-      onUpdate: () => setDirty(true)
+      onUpdate: ({ editor }) => edit(editor.getJSON())
     },
     [extensions]
   )

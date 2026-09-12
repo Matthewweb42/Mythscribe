@@ -59,6 +59,8 @@ interface TreeState extends TreeIndex {
    * the selection is untouched. Errors propagate so the caller can show them.
    */
   move: (id: string, parentId: string, afterId?: string | null) => Promise<void>
+  /** Records a document's saved word count (F-3.2) and adjusts its ancestors' rollups by the delta. */
+  setWordCount: (id: string, wordCount: number) => void
 }
 
 const byPosition = (a: TreeNode, b: TreeNode): number => a.position - b.position
@@ -220,6 +222,28 @@ export function moveInIndex(index: TreeIndex, moved: TreeNode): TreeIndex {
   return buildIndex(nodes)
 }
 
+/**
+ * Patches a document's word count after a save (F-3.2) without a rebuild or a request: the node's
+ * own count and the rollup of the node and every ancestor move by the delta. Returns the index
+ * unchanged for unknown ids and when nothing changed.
+ */
+export function setWordCountInIndex(index: TreeIndex, id: string, wordCount: number): TreeIndex {
+  const node = index.byId[id]
+  if (!node) return index
+  const delta = wordCount - node.wordCount
+  if (delta === 0) return index
+  const wordCountRollup = { ...index.wordCountRollup }
+  for (let current: string | null = id; current !== null; ) {
+    wordCountRollup[current] = (wordCountRollup[current] ?? 0) + delta
+    current = index.byId[current]?.parentId ?? null
+  }
+  return {
+    ...index,
+    byId: { ...index.byId, [id]: { ...node, wordCount } },
+    wordCountRollup
+  }
+}
+
 const emptyIndex = (): TreeIndex => ({
   byId: {},
   childrenOf: {},
@@ -359,6 +383,10 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     } finally {
       if (mine === generation) set({ busy: false })
     }
+  },
+
+  setWordCount(id, wordCount) {
+    set((s) => setWordCountInIndex(s, id, wordCount))
   }
 }))
 

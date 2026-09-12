@@ -13,7 +13,7 @@ beforeEach(() => {
   document.body.appendChild(host)
   editor = new Editor({
     element: host,
-    extensions: buildExtensions({ sceneBreak: '* * *' }),
+    extensions: buildExtensions({ sceneBreak: '* * *', onSave: () => {} }),
     content: {
       type: 'doc',
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello' }] }]

@@ -122,11 +122,19 @@ export const contract = {
   },
   /**
    * The Tiptap JSON of one document (F-3.1); `content` is null until something is written to it.
-   * Folders and sections are refused with VALIDATION. The write path arrives with F-3.2.
+   * Folders and sections are refused with VALIDATION. `document:save` is the write path.
    */
   'document:get': {
     input: z.object({ id: z.string() }),
     output: z.object({ id: z.string(), content: TiptapNode.nullable() })
+  },
+  /**
+   * Replaces a document's content (F-3.2) and caches its word count on the row. Folders and
+   * sections are refused with VALIDATION. Returns the new count and the row's `modified` stamp.
+   */
+  'document:save': {
+    input: z.object({ id: z.string(), content: TiptapNode }),
+    output: z.object({ wordCount: z.number().int().nonnegative(), modified: z.string() })
   },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() }

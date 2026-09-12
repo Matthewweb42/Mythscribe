@@ -2,7 +2,7 @@ import { app } from 'electron'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
-import { getDocumentContent } from '../document/documentStore'
+import { getDocumentContent, saveDocument } from '../document/documentStore'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
 import {
@@ -84,6 +84,10 @@ export function registerHandlers({ manager, appState, dialogs, windows }: Handle
   )
 
   register('document:get', ({ id }) => getDocumentContent(manager.require().connection.orm, id))
+
+  register('document:save', ({ id, content }) =>
+    saveDocument(manager.require().connection.orm, id, content)
+  )
 
   register('window:close', () => {
     manager.close()

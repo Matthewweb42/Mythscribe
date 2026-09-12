@@ -20,9 +20,11 @@ export interface TiptapNodeT {
 
 const attrs = z.record(z.string(), z.unknown()).optional()
 
-export const TiptapMark: z.ZodType<TiptapMarkT> = z.object({ type: z.string(), attrs })
+export const TiptapMark: z.ZodType<TiptapMarkT, TiptapMarkT> = z.object({ type: z.string(), attrs })
 
-export const TiptapNode: z.ZodType<TiptapNodeT> = z.lazy(() =>
+// Both type parameters are given so `z.input` of a channel that carries a document (`document:save`)
+// is `TiptapNodeT` too, not `unknown`.
+export const TiptapNode: z.ZodType<TiptapNodeT, TiptapNodeT> = z.lazy(() =>
   z.object({
     type: z.string(),
     attrs,

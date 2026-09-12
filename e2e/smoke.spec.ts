@@ -9,11 +9,16 @@ import {
   type Page
 } from '@playwright/test'
 import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contract'
+import type { TiptapNodeT } from '../src/shared/tiptap'
 
 /**
- * Smoke test (CLAUDE.md quality gates): create a project → close it → reopen it → its data is
- * still there. M1 extends this with "write text → reopen → text is still there".
+ * Smoke test (CLAUDE.md quality gates): create a project → write text → close it → reopen it →
+ * the structure and the text are still there.
  */
+
+/** What Scene 1 reads after the F-3.1/F-3.2 steps; nine words, so the cached count is checked too. */
+const SENTENCE = 'The storm broke at dusk. Rain followed. Then silence.'
+const SENTENCE_WORDS = 9
 
 let app: ElectronApplication
 let page: Page
@@ -186,7 +191,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.locator('[data-drop]')).toHaveCount(0)
 
   // F-3.1: selecting a scene shows the editor; typing, Bold from the toolbar and Ctrl+B, the
-  // scene break in the web-novel style (F-3.6 default "~~~"), and undo. Persistence is F-3.2.
+  // scene break in the web-novel style (F-3.6 default "~~~"), and undo.
   await scene1.click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
   const editor = page.getByRole('textbox', { name: 'Document' })
@@ -194,7 +199,9 @@ test('create, close, reopen a project on disk', async () => {
   await editor.click()
   await page.keyboard.type('The storm broke at dusk.')
   await expect(editor.locator('p')).toHaveText('The storm broke at dusk.')
-  const bold = page.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Bold' })
+  const bold = page
+    .getByRole('toolbar', { name: 'Formatting' })
+    .getByRole('button', { name: 'Bold' })
   await expect(bold).toHaveAttribute('aria-pressed', 'false')
   await page.keyboard.press('Control+a')
   await bold.click()
@@ -211,6 +218,22 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('Control+z')
   await expect(sceneBreak).toHaveCount(0)
   await expect(editor.locator('p')).toHaveCount(1)
+
+  // F-3.2: the debounced autosave writes the text about a second after the last keystroke, and
+  // Ctrl+S writes it at once. Both are read back through `document:get`.
+  const rowsNow = await listTree()
+  const openingParent = rowsNow.find((n) => n.title === 'Opening')?.parentId
+  const scene1Row = rowsNow.find((n) => n.title === 'Scene 1' && n.parentId === openingParent)
+  if (!scene1Row) throw new Error('Scene 1 row not found')
+  await page.keyboard.press('End')
+  await page.keyboard.type(' Rain followed.')
+  await expect(editor.locator('p')).toHaveText('The storm broke at dusk. Rain followed.')
+  await expect
+    .poll(() => documentText(scene1Row.id), { timeout: 3000 })
+    .toBe('The storm broke at dusk. Rain followed.')
+  await page.keyboard.type(' Then silence.')
+  await page.keyboard.press('Control+s')
+  await expect.poll(() => documentText(scene1Row.id), { timeout: 3000 }).toBe(SENTENCE)
 
   await page.getByRole('button', { name: 'Close project' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
@@ -245,6 +268,12 @@ test('create, close, reopen a project on disk', async () => {
     .sort((a, b) => a.position - b.position)
   expect(chapter1Children.map((n) => n.title)).toEqual(['Opening', 'Scene 1'])
   expect(chapter1Children.map((n) => n.position)).toEqual([0, 1])
+  // F-3.2: the text survived the close and the cached word count matches it.
+  expect(chapter1Children.map((n) => n.wordCount)).toEqual([0, SENTENCE_WORDS])
+  await scene1.click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await expect(editor).toHaveAttribute('contenteditable', 'true')
+  await expect(editor.locator('p')).toHaveText(SENTENCE)
 
   // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.
   await closeProject()
@@ -281,6 +310,25 @@ async function stubOpenDialog(filePath: string): Promise<void> {
   await app.evaluate(({ dialog }, chosen) => {
     dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] })
   }, filePath)
+}
+
+/** The plain text of a saved document: paragraphs joined by newlines, or null when never written. */
+async function documentText(id: string): Promise<string | null> {
+  const result = await page.evaluate<
+    IpcResult<{ id: string; content: TiptapNodeT | null }>,
+    string
+  >(
+    (nodeId) =>
+      window.mythscribe.invoke('document:get', { id: nodeId }) as Promise<
+        IpcResult<{ id: string; content: TiptapNodeT | null }>
+      >,
+    id
+  )
+  if (!result.ok) throw new Error(`document:get failed: ${result.error.message}`)
+  if (!result.data.content) return null
+  const text = (n: TiptapNodeT): string =>
+    n.text ?? (n.content ?? []).map(text).join(n.type === 'doc' ? '\n' : '')
+  return text(result.data.content)
 }
 
 async function listTree(): Promise<TreeNode[]> {
