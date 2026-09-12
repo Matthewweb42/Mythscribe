@@ -9,7 +9,6 @@ import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { COLUMN, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
-import { EditorSettingsPanel } from './EditorSettingsPanel'
 import { buildExtensions } from './extensions'
 import { NotesToggleButton } from './NotesPanel'
 import { useEditorSettings } from './settingsStore'
@@ -119,15 +118,7 @@ function RegionEditor({
   if (!toolbar) return body
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={editorStyle(settings)}>
-      <Toolbar
-        editor={ready ? editor : null}
-        right={
-          <>
-            <NotesToggleButton />
-            <EditorSettingsPanel format={format} />
-          </>
-        }
-      />
+      <Toolbar editor={ready ? editor : null} right={<NotesToggleButton />} />
       <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
       <DocumentStatusBar id={id} editor={ready ? editor : null} />
     </div>

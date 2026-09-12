@@ -440,12 +440,52 @@ describe('App', () => {
     const pane = (await screen.findByRole('toolbar', { name: 'Formatting' })).parentElement
     expect(pane?.style.getPropertyValue('--ms-editor-font-size')).toBe('20px')
     expect(pane?.style.getPropertyValue('--ms-editor-max-width')).toBe('900px')
-    expect(screen.getByRole('button', { name: 'Formatting settings' })).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
     expect(useEditorSettingsStore.getState().settings).toBeNull()
+  })
+
+  it('opens the Settings dialog from the header button and shows the Editor tab (F-7.5)', async () => {
+    install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture,
+      'editorSettings:get': { ...defaultEditorSettings('webnovel'), fontSize: 20 }
+    })
+    render(<App />)
+    await screen.findByRole('treeitem', { name: 'Scene 1' })
+    await waitFor(() => expect(useEditorSettingsStore.getState().settings?.fontSize).toBe(20))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    const dialog = screen.getByRole('dialog', { name: 'Settings' })
+    expect(within(dialog).getByRole('tab', { name: 'Editor' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(within(dialog).getByRole('spinbutton', { name: 'Font size' })).toHaveValue(20)
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('opens the Settings dialog with Ctrl+, when a project is open (F-7.5)', async () => {
+    install({ 'project:current': info, 'tree:list': treeFixture })
+    render(<App />)
+    await screen.findByRole('treeitem', { name: 'Scene 1' })
+    await userEvent.keyboard('{Control>},{/Control}')
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' })
+    expect(within(dialog).getByRole('spinbutton', { name: 'Font size' })).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close settings' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not show the Settings button on the welcome screen, and Ctrl+, does nothing (F-7.5)', async () => {
+    install()
+    render(<App />)
+    await screen.findByRole('button', { name: /new project/i })
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument()
+    await userEvent.keyboard('{Control>},{/Control}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('surfaces a failed document load as a toast and keeps the editor read-only', async () => {

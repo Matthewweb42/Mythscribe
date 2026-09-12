@@ -229,7 +229,6 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     expect(
       screen.getAllByRole('separator', { name: 'Scene break' }).map((b) => b.textContent)
     ).toEqual(['###', '###'])
-    expect(button('Formatting settings')).toHaveAttribute('aria-expanded', 'false')
     act(() => useEditorSettingsStore.getState().update({ sceneBreak: '~~~' }))
     expect(
       screen.getAllByRole('separator', { name: 'Scene break' }).map((b) => b.textContent)

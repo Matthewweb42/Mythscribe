@@ -6,7 +6,7 @@ import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
-import { EditorSettingsPanel } from './EditorSettingsPanel'
+import { EditorSettingsTab } from './EditorSettingsTab'
 import { resetEditorSettingsStore, useEditorSettingsStore } from './settingsStore'
 
 /** Records every `editorSettings:set` and resolves it at once. */
@@ -30,12 +30,11 @@ let sets: EditorSettings[]
 const current = (): EditorSettings | null => useEditorSettingsStore.getState().settings
 const button = (name: string): HTMLElement => screen.getByRole('button', { name })
 const spin = (name: string): HTMLElement => screen.getByRole('spinbutton', { name })
-const panel = (): HTMLElement | null => screen.queryByRole('group', { name: 'Formatting settings' })
+const preview = (): HTMLElement => screen.getByTestId('editor-preview')
+const previewBreak = (): HTMLElement | null => preview().querySelector('[data-scene-break]')
 
-async function open(): Promise<void> {
-  render(<EditorSettingsPanel format="novel" />)
-  await userEvent.click(button('Formatting settings'))
-  expect(panel()).toBeInTheDocument()
+function open(): void {
+  render(<EditorSettingsTab format="novel" />)
 }
 
 beforeEach(() => {
@@ -48,39 +47,9 @@ beforeEach(() => {
   useEditorSettingsStore.setState({ settings: { ...novel } })
 })
 
-describe('EditorSettingsPanel', () => {
-  it('is closed until clicked, then closes on the button, Escape, and an outside click', async () => {
-    render(
-      <div>
-        <button type="button">Elsewhere</button>
-        <EditorSettingsPanel format="novel" />
-      </div>
-    )
-    expect(panel()).not.toBeInTheDocument()
-    expect(button('Formatting settings')).toHaveAttribute('aria-expanded', 'false')
-
-    await userEvent.click(button('Formatting settings'))
-    expect(panel()).toBeInTheDocument()
-    expect(button('Formatting settings')).toHaveAttribute('aria-expanded', 'true')
-    await userEvent.click(button('Formatting settings'))
-    expect(panel()).not.toBeInTheDocument()
-
-    await userEvent.click(button('Formatting settings'))
-    await userEvent.keyboard('{Escape}')
-    expect(panel()).not.toBeInTheDocument()
-
-    await userEvent.click(button('Formatting settings'))
-    await userEvent.click(button('Elsewhere'))
-    expect(panel()).not.toBeInTheDocument()
-
-    // A click inside keeps it open.
-    await userEvent.click(button('Formatting settings'))
-    await userEvent.click(spin('Font size'))
-    expect(panel()).toBeInTheDocument()
-  })
-
+describe('EditorSettingsTab (F-3.6, F-7.5)', () => {
   it('shows the store values and follows a change made elsewhere', async () => {
-    await open()
+    open()
     expect(spin('Font size')).toHaveValue(16)
     expect(spin('Line height')).toHaveValue(2)
     expect(spin('Paragraph spacing')).toHaveValue(0)
@@ -96,7 +65,7 @@ describe('EditorSettingsPanel', () => {
   })
 
   it('previews an in-range number as it is typed and clamps an out-of-range one on commit', async () => {
-    await open()
+    open()
     const fontSize = spin('Font size')
     await userEvent.clear(fontSize)
     expect(current()?.fontSize).toBe(16) // nothing committed for an empty field
@@ -127,7 +96,7 @@ describe('EditorSettingsPanel', () => {
   })
 
   it('updates each numeric setting with the right key', async () => {
-    await open()
+    open()
     await userEvent.clear(spin('Line height'))
     await userEvent.type(spin('Line height'), '1.2')
     await userEvent.clear(spin('Paragraph spacing'))
@@ -149,7 +118,7 @@ describe('EditorSettingsPanel', () => {
   })
 
   it('picks a scene-break preset, and Custom… reveals a field committed on Enter or blur', async () => {
-    await open()
+    open()
     const select = screen.getByRole('combobox', { name: 'Scene break' })
     await userEvent.selectOptions(select, '###')
     expect(current()?.sceneBreak).toBe('###')
@@ -186,13 +155,42 @@ describe('EditorSettingsPanel', () => {
     useEditorSettingsStore.setState({
       settings: { ...novel, fontSize: 22, maxWidth: 950, sceneBreak: '###' }
     })
-    render(<EditorSettingsPanel format="webnovel" />)
-    await userEvent.click(button('Formatting settings'))
+    render(<EditorSettingsTab format="webnovel" />)
     await userEvent.click(button('Reset to format defaults'))
     expect(current()).toEqual(defaultEditorSettings('webnovel'))
     expect(spin('Font size')).toHaveValue(16)
     expect(spin('Max width')).toHaveValue(700)
     expect(screen.getByRole('combobox', { name: 'Scene break' })).toHaveValue('~~~')
     await waitFor(() => expect(sets).toEqual([defaultEditorSettings('webnovel')]))
+  })
+
+  it('renders a live preview styled from the current settings (F-7.5)', async () => {
+    useEditorSettingsStore.setState({
+      settings: { ...novel, fontSize: 18, maxWidth: 800, sceneBreak: '###' }
+    })
+    open()
+    const box = preview()
+    expect(box).toHaveAccessibleName('Preview')
+    expect(box.style.getPropertyValue('--ms-editor-font-size')).toBe('18px')
+    expect(box.style.getPropertyValue('--ms-editor-max-width')).toBe('800px')
+    expect(box.style.getPropertyValue('--ms-editor-line-height')).toBe('2')
+    expect(box.style.getPropertyValue('--ms-editor-paragraph-spacing')).toBe('0em')
+    expect(box.style.getPropertyValue('--ms-editor-paragraph-indent')).toBe('1.5em')
+    // The sample uses the editor's own classes, so `app.css` styles it like the real pane.
+    const sample = box.querySelector('.ms-editor')
+    expect(sample).toHaveClass('max-w-(--ms-editor-max-width)', 'mx-auto', 'w-full')
+    expect(sample?.querySelectorAll('p').length).toBeGreaterThanOrEqual(3)
+    expect(previewBreak()).toHaveTextContent('###')
+    expect(previewBreak()).toHaveClass('scene-break')
+
+    // A control change restyles the same nodes; nothing remounts.
+    const sampleBreak = previewBreak()
+    await userEvent.clear(spin('Font size'))
+    await userEvent.type(spin('Font size'), '22')
+    expect(box.style.getPropertyValue('--ms-editor-font-size')).toBe('22px')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Scene break' }), '~~~')
+    expect(previewBreak()).toBe(sampleBreak)
+    expect(previewBreak()).toHaveTextContent('~~~')
+    expect(preview()).toBe(box)
   })
 })

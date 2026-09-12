@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, FilePlus2, PanelLeft } from 'lucide-react'
+import { FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, levelLabel, sectionLabel } from '@shared/labels'
 import { LAYOUT_LIMITS } from '@shared/layout'
@@ -8,6 +8,7 @@ import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { Logo } from '@renderer/features/shell/Logo'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
+import { SettingsDialog } from '@renderer/features/shell/SettingsDialog'
 import { SidebarTabs } from '@renderer/features/shell/SidebarTabs'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
@@ -82,7 +83,12 @@ export function App(): React.JSX.Element {
             / <span data-testid="project-name">{current.name}</span> · {formatLabel(current.format)}
           </span>
         ) : null}
-        {current ? <CloseProjectButton /> : null}
+        {current ? (
+          <div className="ml-auto flex items-center gap-2">
+            <SettingsButton format={current.format} />
+            <CloseProjectButton />
+          </div>
+        ) : null}
       </header>
       <main
         className={
@@ -202,7 +208,7 @@ function CloseProjectButton(): React.JSX.Element {
       type="button"
       disabled={busy}
       onClick={() => void onClose()}
-      className="ml-auto rounded-md border border-line px-2.5 py-1 text-xs hover:bg-surface-raised disabled:opacity-60"
+      className="rounded-md border border-line px-2.5 py-1 text-xs hover:bg-surface-raised disabled:opacity-60"
     >
       Close project
     </button>
@@ -224,6 +230,41 @@ function SidebarToggleButton(): React.JSX.Element {
     >
       <PanelLeft size={16} aria-hidden="true" />
     </button>
+  )
+}
+
+/**
+ * Header action (F-7.5): opens the Settings dialog, as does Ctrl+, (Cmd+, on macOS). Settings
+ * are per project, so the button, its shortcut listener, and the dialog exist only while a
+ * project is open: this component is the one owner of all three and is mounted only then.
+ */
+function SettingsButton({ format }: { format: NovelFormat }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === ',') {
+        event.preventDefault()
+        setOpen(true)
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Settings"
+        title="Settings (Ctrl+,)"
+        onClick={() => setOpen(true)}
+        className="rounded-md p-1.5 text-fg-muted hover:bg-surface-raised hover:text-fg"
+      >
+        <Settings2 size={16} aria-hidden="true" />
+      </button>
+      {open ? <SettingsDialog format={format} onClose={() => setOpen(false)} /> : null}
+    </>
   )
 }
 

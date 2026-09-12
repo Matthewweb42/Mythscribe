@@ -1,11 +1,11 @@
-import { useEffect, useId, useRef, useState } from 'react'
-import { Settings2 } from 'lucide-react'
+import { useState } from 'react'
 import {
   SCENE_BREAK_PRESETS,
   defaultEditorSettings,
   type EditorSettings
 } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
+import { COLUMN, editorStyle } from './column'
 import { useEditorSettings, useEditorSettingsStore } from './settingsStore'
 
 type NumberKey = Exclude<keyof EditorSettings, 'sceneBreak'>
@@ -33,83 +33,76 @@ const SCENE_BREAK_MAX = 20
 const isPreset = (text: string): boolean =>
   (SCENE_BREAK_PRESETS as readonly string[]).includes(text)
 
-const BUTTON =
-  'rounded-md p-1.5 text-fg-muted hover:bg-surface-raised hover:text-fg aria-expanded:bg-surface-raised aria-expanded:text-accent'
 const FIELD = 'w-24 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 const ROW = 'flex items-center justify-between gap-3'
 
 /**
- * The formatting settings (F-3.6) as a popover under a toolbar button. Every control updates
- * the settings store at once, so the editor previews the change live; the store debounces the
- * write. Out-of-range numbers are clamped when the field commits, so a half-typed value never
- * jumps under the author's fingers. F-7.5 moves these controls into the Settings dialog.
+ * The Editor tab of the Settings dialog (F-7.5): the formatting controls (F-3.6) above a live
+ * preview. Every control updates the settings store at once, so the preview and the real editor
+ * restyle together; the store debounces the write. Out-of-range numbers are clamped when the
+ * field commits, so a half-typed value never jumps under the author's fingers.
  */
-export function EditorSettingsPanel({ format }: { format: NovelFormat }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
+export function EditorSettingsTab({ format }: { format: NovelFormat }): React.JSX.Element {
   const settings = useEditorSettings(format)
   const update = useEditorSettingsStore((s) => s.update)
-  const root = useRef<HTMLDivElement>(null)
-  const panelId = useId()
-
-  useEffect(() => {
-    if (!open) return
-    const onMouseDown = (event: MouseEvent): void => {
-      if (event.target instanceof Node && root.current?.contains(event.target)) return
-      setOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onMouseDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onMouseDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open])
 
   return (
-    <div ref={root} className="relative">
-      <button
-        type="button"
-        aria-label="Formatting settings"
-        title="Formatting"
-        aria-expanded={open}
-        aria-controls={open ? panelId : undefined}
-        onClick={() => setOpen((v) => !v)}
-        className={BUTTON}
-      >
-        <Settings2 size={16} aria-hidden="true" />
-      </button>
-      {open ? (
-        <div
-          id={panelId}
-          role="group"
-          aria-label="Formatting settings"
-          className="absolute top-full right-0 z-30 mt-1 flex w-72 flex-col gap-2 rounded-md border border-line bg-surface-raised p-3 text-sm shadow-panel"
-        >
-          {NUMBER_CONTROLS.map((control) => (
-            <NumberField
-              key={control.key}
-              control={control}
-              value={settings[control.key]}
-              onCommit={(value) => update({ [control.key]: value })}
-            />
-          ))}
-          <SceneBreakField
-            value={settings.sceneBreak}
-            onCommit={(sceneBreak) => update({ sceneBreak })}
+    <div className="flex flex-col gap-4 text-sm">
+      <div className="flex flex-col gap-2">
+        {NUMBER_CONTROLS.map((control) => (
+          <NumberField
+            key={control.key}
+            control={control}
+            value={settings[control.key]}
+            onCommit={(value) => update({ [control.key]: value })}
           />
-          <button
-            type="button"
-            onClick={() => update(defaultEditorSettings(format))}
-            className="mt-1 self-start rounded-md border border-line px-2 py-1 hover:bg-surface"
-          >
-            Reset to format defaults
-          </button>
-        </div>
-      ) : null}
+        ))}
+        <SceneBreakField
+          value={settings.sceneBreak}
+          onCommit={(sceneBreak) => update({ sceneBreak })}
+        />
+        <button
+          type="button"
+          onClick={() => update(defaultEditorSettings(format))}
+          className="mt-1 self-start rounded-md border border-line px-2 py-1 hover:bg-surface"
+        >
+          Reset to format defaults
+        </button>
+      </div>
+      <EditorPreview settings={settings} />
     </div>
+  )
+}
+
+/**
+ * A static sample styled exactly like the editing pane: `editorStyle` sets the same custom
+ * properties and `.ms-editor` in `app.css` reads them, so a change restyles the sample in place.
+ * The scene break replicates the markup `SceneBreak.renderHTML` produces (`extensions.ts`).
+ */
+function EditorPreview({ settings }: { settings: EditorSettings }): React.JSX.Element {
+  return (
+    <section
+      aria-label="Preview"
+      data-testid="editor-preview"
+      className="rounded-md border border-line bg-bg p-4"
+      style={editorStyle(settings)}
+    >
+      <p className="mt-0 mb-2 text-xs font-medium text-fg-muted">Preview</p>
+      <div className={`${COLUMN} ms-editor ms-preview`}>
+        <p>
+          The lamp had burned low by the time she finished the letter, and the ink on the last line
+          was still wet when the knock came.
+        </p>
+        <p>
+          She folded the page twice, slid it under the ledger, and only then crossed the room to
+          answer.
+        </p>
+        <div data-scene-break="" className="scene-break">
+          {settings.sceneBreak}
+        </div>
+        <p>Morning found the harbor empty and the ledger gone.</p>
+      </div>
+    </section>
   )
 }
 

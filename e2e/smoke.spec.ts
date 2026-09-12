@@ -288,16 +288,30 @@ test('create, close, reopen a project on disk', async () => {
   expect(
     Math.abs(column.x - pane.x - (pane.x + pane.width - (column.x + column.width)))
   ).toBeLessThan(2)
-  // F-3.6: the Formatting popover applies a wider column and a larger font live; Escape closes it.
-  const formatting = page.getByRole('button', { name: 'Formatting settings' })
-  await formatting.click()
-  const formattingPanel = page.getByRole('group', { name: 'Formatting settings' })
-  await expect(formattingPanel).toBeVisible()
-  await formattingPanel.getByRole('spinbutton', { name: 'Max width' }).fill('900')
-  await formattingPanel.getByRole('spinbutton', { name: 'Font size' }).fill('20')
+  // F-7.5: Ctrl+, opens the Settings dialog on its Editor tab; F-3.6: its controls apply a wider
+  // column and a larger font live, and the preview follows; Escape closes the dialog.
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' })
+  await expect(settingsDialog).toHaveCount(0)
+  await page.keyboard.press('Control+,')
+  await expect(settingsDialog).toBeVisible()
+  await expect(settingsDialog.getByRole('tab', { name: 'Editor' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  await settingsDialog.getByRole('spinbutton', { name: 'Max width' }).fill('900')
+  await settingsDialog.getByRole('spinbutton', { name: 'Font size' }).fill('20')
+  await expect(settingsDialog.getByTestId('editor-preview').locator('p').nth(1)).toHaveCSS(
+    'font-size',
+    '20px'
+  )
   await page.keyboard.press('Escape')
-  await expect(formattingPanel).toBeHidden()
-  await expect(formatting).toHaveAttribute('aria-expanded', 'false')
+  await expect(settingsDialog).toHaveCount(0)
+  // The header button opens the same dialog; its close button dismisses it.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(settingsDialog).toBeVisible()
+  await expect(settingsDialog.getByRole('spinbutton', { name: 'Font size' })).toHaveValue('20')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
   await expect(editor).toHaveCSS('font-size', '20px')
   const widened = await editor.locator('..').boundingBox()
   if (!widened) throw new Error('editor column not laid out')

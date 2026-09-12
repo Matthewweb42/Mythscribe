@@ -91,6 +91,11 @@ select {
   text-indent: 0;
 }
 
+/* The Settings preview (F-7.5) is a short static sample: it shows the formatting, not a page. */
+.ms-editor.ms-preview {
+  min-height: 0;
+}
+
 /* Paragraph spacing and first-line indent follow the formatting settings (F-3.6); headings and quotes do not. */
 .ms-editor p {
   margin: 0 0 var(--ms-editor-paragraph-spacing);

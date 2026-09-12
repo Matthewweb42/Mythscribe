@@ -208,7 +208,7 @@ describe('EditorPane', () => {
     expect(pane?.style.getPropertyValue('--ms-editor-max-width')).toBe('700px')
   })
 
-  it('applies the formatting settings as custom properties and offers the Formatting popover (F-3.6)', async () => {
+  it('applies the formatting settings as custom properties (F-3.6)', async () => {
     useEditorSettingsStore.setState({
       settings: { ...defaultEditorSettings('novel'), fontSize: 20, lineHeight: 1.4, maxWidth: 800 }
     })
@@ -219,7 +219,6 @@ describe('EditorPane', () => {
     expect(pane?.style.getPropertyValue('--ms-editor-font-size')).toBe('20px')
     expect(pane?.style.getPropertyValue('--ms-editor-line-height')).toBe('1.4')
     expect(pane?.style.getPropertyValue('--ms-editor-paragraph-indent')).toBe('1.5em')
-    expect(button('Formatting settings')).toHaveAttribute('aria-expanded', 'false')
     // A change lands live, without a remount of the editor.
     const before = box()
     act(() => useEditorSettingsStore.getState().update({ fontSize: 22 }))
