@@ -58,3 +58,68 @@ select {
   outline: 2px solid var(--ms-accent);
   outline-offset: 2px;
 }
+
+/*
+ * Editor (F-3.1): prose styling inside the Tiptap content element. Sizes are the manuscript
+ * defaults until the Settings editor tab (F-3.6) drives them through variables.
+ */
+.ms-editor {
+  min-height: 60vh;
+  font-family: var(--ms-font-prose);
+  font-size: 16px;
+  line-height: 1.6;
+  outline: none;
+}
+
+.ms-editor p {
+  margin: 0 0 0.75em;
+}
+
+.ms-editor h1,
+.ms-editor h2,
+.ms-editor h3 {
+  margin: 1.2em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.ms-editor h1 {
+  font-size: 1.75em;
+}
+
+.ms-editor h2 {
+  font-size: 1.4em;
+}
+
+.ms-editor h3 {
+  font-size: 1.15em;
+}
+
+.ms-editor blockquote {
+  margin: 0.75em 0;
+  padding-left: 1em;
+  border-left: 3px solid var(--ms-line-strong);
+  color: var(--ms-fg-muted);
+}
+
+.ms-editor code {
+  padding: 0.1em 0.3em;
+  border-radius: var(--ms-radius);
+  background: var(--ms-surface-raised);
+  font-family: var(--ms-font-mono);
+  font-size: 0.9em;
+}
+
+/* The scene-break block (F-3.1) renders the configured text (F-3.6), centered and muted. */
+.ms-editor .scene-break {
+  margin: 1.5em 0;
+  color: var(--ms-fg-muted);
+  text-align: center;
+  letter-spacing: 0.25em;
+  user-select: none;
+}
+
+.ms-editor .scene-break.ProseMirror-selectednode {
+  border-radius: var(--ms-radius);
+  background: var(--ms-surface-raised);
+}

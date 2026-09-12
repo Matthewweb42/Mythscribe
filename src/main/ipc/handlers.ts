@@ -2,6 +2,7 @@ import { app } from 'electron'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
+import { getDocumentContent } from '../document/documentStore'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
 import {
@@ -81,6 +82,8 @@ export function registerHandlers({ manager, appState, dialogs, windows }: Handle
   register('tree:move', ({ id, parentId, afterId }) =>
     toTreeNode(moveNode(manager.require().connection.orm, id, parentId, afterId))
   )
+
+  register('document:get', ({ id }) => getDocumentContent(manager.require().connection.orm, id))
 
   register('window:close', () => {
     manager.close()

@@ -278,6 +278,27 @@ describe('tree:move', () => {
   })
 })
 
+describe('document:get', () => {
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('document:get', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('returns null content for a seeded scene and refuses folders (F-3.1)', async () => {
+    await invoke('project:create', { name: 'Doc', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    const chapter = rows.find((r) => r.hierarchyLevel === 'chapter')
+    expect(await invoke('document:get', { id: scene?.id ?? '' })).toEqual({
+      id: scene?.id,
+      content: null
+    })
+    await expect(invoke('document:get', { id: chapter?.id ?? '' })).rejects.toThrowError(
+      /^VALIDATION: /
+    )
+    await expect(invoke('document:get', { id: 'missing' })).rejects.toThrowError(/^NOT_FOUND: /)
+  })
+})
+
 describe('window:close', () => {
   it('closes the project and every window', async () => {
     await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })

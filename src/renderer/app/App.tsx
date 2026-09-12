@@ -5,6 +5,8 @@ import { formatLabel, levelLabel, sectionLabel } from '@shared/labels'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { Logo } from '@renderer/features/shell/Logo'
+import { EditorPane } from '@renderer/features/editor/EditorPane'
+import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { CreateNodeBar } from '@renderer/features/manuscript/CreateNodeBar'
 import { ManuscriptTree } from '@renderer/features/manuscript/ManuscriptTree'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -40,10 +42,12 @@ export function App(): React.JSX.Element {
 
   // F-2.1: the document tree follows the open project. App owns when it loads and clears, keyed
   // on the project id so a refreshed `ProjectInfo` for the same project does not reload it.
+  // F-3.1: the loaded document goes with it.
   useEffect(() => {
     const tree = useTreeStore.getState()
     if (projectId === null) {
       tree.clear()
+      useDocumentStore.getState().clear()
       return
     }
     tree.load().catch((err: unknown) => toast.error(describeError(err)))
@@ -188,7 +192,7 @@ function CloseProjectButton(): React.JSX.Element {
 
 /**
  * F-2.1: the document tree beside the main pane, with the create buttons (F-2.2) pinned under
- * it; the editor takes the main pane with F-3.1.
+ * it; the editor (F-3.1) takes the main pane for the selected document.
  */
 function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
   return (
@@ -199,7 +203,7 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
         </div>
         <CreateNodeBar format={format} />
       </aside>
-      <section className="flex-1 overflow-y-auto p-6">
+      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <MainPane format={format} />
       </section>
     </>
@@ -212,7 +216,7 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
     s.selectedId === null ? undefined : s.sectionOf[s.selectedId]
   )
   if (!node) {
-    return <p className="m-0 text-sm text-fg-muted">Select a document to start writing.</p>
+    return <p className="m-0 p-6 text-sm text-fg-muted">Select a document to start writing.</p>
   }
   const kind =
     node.hierarchyLevel !== null
@@ -221,15 +225,17 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
         ? 'Folder'
         : 'Document'
   return (
-    <div>
-      <h1 className="m-0 text-2xl font-semibold" data-testid="selected-title">
-        {node.title}
-      </h1>
-      <p className="mt-1 mb-0 text-sm text-fg-muted">
-        {kind}
-        {section ? ` · ${sectionLabel(format, section)}` : ''}
-      </p>
-      <p className="mt-4 mb-0 text-sm text-fg-muted">The editor arrives with F-3.1.</p>
-    </div>
+    <>
+      <div className="shrink-0 px-6 pt-6 pb-4">
+        <h1 className="m-0 text-2xl font-semibold" data-testid="selected-title">
+          {node.title}
+        </h1>
+        <p className="mt-1 mb-0 text-sm text-fg-muted">
+          {kind}
+          {section ? ` · ${sectionLabel(format, section)}` : ''}
+        </p>
+      </div>
+      {node.kind === 'document' ? <EditorPane id={node.id} format={format} /> : null}
+    </>
   )
 }

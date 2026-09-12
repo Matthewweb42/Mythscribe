@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
+import { TiptapNode } from '../tiptap'
 
 /**
  * The single IPC contract shared by main, preload, and renderer.
@@ -118,6 +119,14 @@ export const contract = {
       afterId: z.string().nullable().optional()
     }),
     output: TreeNode
+  },
+  /**
+   * The Tiptap JSON of one document (F-3.1); `content` is null until something is written to it.
+   * Folders and sections are refused with VALIDATION. The write path arrives with F-3.2.
+   */
+  'document:get': {
+    input: z.object({ id: z.string() }),
+    output: z.object({ id: z.string(), content: TiptapNode.nullable() })
   },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() }

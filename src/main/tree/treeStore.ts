@@ -39,7 +39,7 @@ export function toTreeNode(row: NodeRow): TreeNode {
   }
 }
 
-function getNode(db: TreeDb, id: string): NodeRow | undefined {
+export function getNode(db: TreeDb, id: string): NodeRow | undefined {
   return db.select().from(node).where(eq(node.id, id)).get()
 }
 

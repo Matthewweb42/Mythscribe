@@ -2,7 +2,9 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectInfo, RecentProject } from '@shared/ipc/contract'
+import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -37,12 +39,13 @@ beforeEach(() => {
   resetPendingSaves()
   useProjectStore.setState({ current: null, ready: false, busy: false, recents: [] })
   useTreeStore.getState().clear()
+  useDocumentStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
 })
 
 function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<typeof vi.fn> {
-  const invoke = vi.fn(async (channel: string) => {
+  const invoke = vi.fn(async (channel: string, input: unknown) => {
     if (channel in overrides) {
       const v = overrides[channel]
       if (v instanceof Error) throw v
@@ -50,6 +53,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     }
     if (channel === 'recents:list') return []
     if (channel === 'tree:list') return []
+    if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }
     return null
   })
   const on = (event: string, listener: (payload: unknown) => void): (() => void) => {
@@ -143,13 +147,70 @@ describe('App', () => {
     expect(scene).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByTestId('selected-title')).toHaveTextContent('Scene 1')
     expect(screen.getByText('Scene · Volume 1')).toBeInTheDocument()
-    expect(screen.getByText('The editor arrives with F-3.1.')).toBeInTheDocument()
+    // F-3.1: a document mounts the editor and its toolbar, loaded through document:get.
+    expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
+    const box = await screen.findByRole('textbox', { name: 'Document' })
+    expect(invoke).toHaveBeenCalledWith('document:get', { id: 'sc-1' })
+    await waitFor(() => expect(box).toHaveAttribute('contenteditable', 'true'))
 
     await userEvent.click(
       within(screen.getByRole('treeitem', { name: 'Arc 2' })).getByText('Arc 2')
     )
     expect(screen.getByTestId('selected-title')).toHaveTextContent('Arc 2')
     expect(screen.getByText('Arc · Volume 1')).toBeInTheDocument()
+    // Folders have no content: header only, no editor.
+    expect(screen.queryByRole('textbox', { name: 'Document' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
+  })
+
+  it('shows the stored document in the editor and drops it when the project closes (F-3.1)', async () => {
+    const hello: TiptapNodeT = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Once upon a ' },
+            { type: 'text', text: 'time', marks: [{ type: 'bold' }] }
+          ]
+        }
+      ]
+    }
+    install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture,
+      'document:get': { id: 'sc-1', content: hello }
+    })
+    render(<App />)
+    const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+    await userEvent.click(within(scene).getByText('Scene 1'))
+    const box = await screen.findByRole('textbox', { name: 'Document' })
+    await waitFor(() => expect(box).toHaveTextContent('Once upon a time'))
+    expect(box.querySelector('strong')).toHaveTextContent('time')
+    expect(useDocumentStore.getState()).toMatchObject({ id: 'sc-1', dirty: false })
+
+    await userEvent.click(screen.getByRole('button', { name: /close project/i }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    await screen.findByRole('button', { name: /new project/i })
+    expect(useDocumentStore.getState()).toMatchObject({ id: null, content: null })
+  })
+
+  it('surfaces a failed document load as a toast and keeps the editor read-only', async () => {
+    install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture,
+      'document:get': new Error('Stored document content is not valid JSON')
+    })
+    render(<App />)
+    const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+    await userEvent.click(within(scene).getByText('Scene 1'))
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Stored document content is not valid JSON'
+    )
+    expect(screen.getByRole('textbox', { name: 'Document' })).toHaveAttribute(
+      'contenteditable',
+      'false'
+    )
   })
 
   it('surfaces a failed tree load as a toast', async () => {
