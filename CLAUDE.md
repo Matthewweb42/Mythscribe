@@ -75,7 +75,7 @@ apply to all of `FEATURES.md` §2.5, §2.14, §2.15 and are checked in review.
 9. **Prompts are compact and versioned** (F-5.12): no restated instructions, no examples the retrieval already supplies, no reasoning dumps. Every prompt change runs the eval harness and reports token delta and fidelity delta in the PR.
 10. **Cost is visible.** Each proposal records model, tokens in/out, and cost; Settings shows the running total. A feature that cannot report its cost is not done.
 
-**Token efficiency in this repo (for Claude Code itself)**: do not re-read files already in context; grep before reading; delegate broad searches to `Explore`; keep agent prompts to the feature text and file list; one implementer at a time unless slices are independent.
+**Token efficiency in this repo (for Claude Code itself)**: do not re-read files already in context; grep before reading; delegate broad searches to `Explore`; keep agent prompts to the feature ID and a plan file path; one implementer per feature; the full gate suite runs at most twice per feature (see the global Delegation section), targeted checks otherwise.
 
 ## Commands
 
@@ -103,7 +103,7 @@ npm run build:win      # installer via electron-builder
 ## Dev environment
 
 - The author develops on WSL2 (Ubuntu 24.04, arm64) with WSLg, so Electron can show a window. Electron needs these system packages once: `sudo apt-get install -y libnss3 libnspr4 libasound2t64`. Without them `npm run test:e2e` and `npm run dev` fail with `libnspr4.so: cannot open shared object file`.
-- The repo lives on `/mnt/c`, so installs and test startup are slow; that is the mount, not the code.
+- The working clone is `~/code/mythscribe` on the WSL ext4 filesystem (moved 2026-09-11). The full gate suite runs in about 30 seconds there. Do not work from the old `/mnt/c/Coding/mythscribe` copy: on that mount every gate pass took minutes and Vitest workers timed out starting. Windows editors reach the clone through `\\wsl.localhost\Ubuntu\home\lostfromlight\code\mythscribe`.
 
 ## Stack (approved)
 
