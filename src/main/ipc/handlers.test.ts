@@ -16,6 +16,10 @@ import { defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
+import { AiKeyStore } from '../ai/keyStore'
+import { fakeSafeStorage } from '../ai/keyStoreFixture'
+import { AiProviderError, InvalidKeyError, type Provider } from '../ai/providers/types'
+import { AiProviderRegistry } from '../ai/registry'
 import { AppStateStore } from '../appState/appStateStore'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
@@ -35,6 +39,10 @@ let invoke: Invoke
 let handlerFor: (channel: Channel) => (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>
 let fakeWin: ClosableWindow
 let onCloseCancelled: ReturnType<typeof vi.fn<() => void>>
+let safe: ReturnType<typeof fakeSafeStorage>
+let keyFile: string
+/** What the fake provider's `testConnection` does; the registry builds it for any saved key. */
+let testConnection: ReturnType<typeof vi.fn<() => Promise<{ model: string }>>>
 
 const dialogs: ProjectDialogs = {
   chooseProjectSavePath: async () => null,
@@ -47,9 +55,23 @@ beforeEach(() => {
   manager = new ProjectManager()
   fakeWin = { close: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } }
   onCloseCancelled = vi.fn<() => void>()
+  safe = fakeSafeStorage()
+  keyFile = path.join(tmp, 'userData', 'ai-keys.json')
+  const keyStore = new AiKeyStore(keyFile, safe, 'win32')
+  testConnection = vi.fn<() => Promise<{ model: string }>>(() =>
+    Promise.resolve({ model: 'gpt-fake' })
+  )
+  const provider: Provider = {
+    id: 'openai',
+    complete: () => Promise.reject(new Error('not under test')),
+    stream: async function* () {},
+    testConnection
+  }
   registerHandlers({
     manager,
     appState: new AppStateStore(path.join(tmp, 'userData', 'app-state.json')),
+    keyStore,
+    ai: new AiProviderRegistry(keyStore, () => provider),
     dialogs,
     windows: () => [fakeWin],
     onCloseCancelled
@@ -842,5 +864,86 @@ describe('window:close-cancelled (F-8.3)', () => {
     expect(onCloseCancelled).toHaveBeenCalledTimes(1)
     expect(manager.current()).not.toBeNull()
     expect(fakeWin.close).not.toHaveBeenCalled()
+  })
+})
+
+describe('ai handlers (F-5.1)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+
+  it('reports no key and the encryption kind before anything is saved', async () => {
+    expect(await invoke('ai:getStatus', undefined)).toEqual({
+      provider: 'openai',
+      hasKey: false,
+      hint: null,
+      encryption: 'os'
+    })
+  })
+
+  it('stores a key, answers with a mask only, and never returns the key', async () => {
+    const status = await invoke('ai:setKey', { key: `  ${KEY}  ` })
+    expect(status).toEqual({ provider: 'openai', hasKey: true, hint: 'sk-…abcd', encryption: 'os' })
+    expect(JSON.stringify(status)).not.toContain(KEY)
+    expect(await invoke('ai:getStatus', undefined)).toEqual(status)
+    expect(fs.readFileSync(keyFile, 'utf8')).not.toContain(KEY)
+    expect(safe.encrypted).toEqual([KEY])
+  })
+
+  it('refuses a key outside the length bounds with VALIDATION', async () => {
+    const result = await handlerFor('ai:setKey')(undefined, { key: 'short' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(safe.encrypted).toEqual([])
+  })
+
+  it('refuses to store a key with IO when safe storage is unavailable', async () => {
+    safe.isEncryptionAvailable = () => false
+    expect(await invoke('ai:getStatus', undefined)).toMatchObject({ encryption: 'none' })
+    const result = await handlerFor('ai:setKey')(undefined, { key: KEY })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('IO')
+      expect(result.error.message).not.toContain(KEY)
+    }
+    expect(fs.existsSync(keyFile)).toBe(false)
+  })
+
+  it('clears the key and reports no key again', async () => {
+    await invoke('ai:setKey', { key: KEY })
+    expect(await invoke('ai:clearKey', undefined)).toMatchObject({ hasKey: false, hint: null })
+    expect(await invoke('ai:getStatus', undefined)).toMatchObject({ hasKey: false })
+  })
+
+  it('answers NO_KEY as data without asking the provider when no key is saved', async () => {
+    expect(await invoke('ai:testConnection', undefined)).toEqual({
+      ok: false,
+      code: 'NO_KEY',
+      message: 'No API key is saved.',
+      nextStep: 'Add a key above and save it.'
+    })
+    expect(testConnection).not.toHaveBeenCalled()
+  })
+
+  it('answers with the model on success and an expected failure as data with its next step', async () => {
+    await invoke('ai:setKey', { key: KEY })
+    expect(await invoke('ai:testConnection', undefined)).toEqual({ ok: true, model: 'gpt-fake' })
+
+    testConnection.mockRejectedValueOnce(new InvalidKeyError('OpenAI rejected the API key.'))
+    expect(await invoke('ai:testConnection', undefined)).toEqual({
+      ok: false,
+      code: 'INVALID_KEY',
+      message: 'OpenAI rejected the API key.',
+      nextStep: 'Check the key and try again.'
+    })
+  })
+
+  it('lets an unexpected failure reach the error envelope', async () => {
+    await invoke('ai:setKey', { key: KEY })
+    testConnection.mockRejectedValueOnce(new TypeError('boom'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const result = await handlerFor('ai:testConnection')(undefined, undefined)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('INTERNAL')
+    vi.restoreAllMocks()
+    expect(new InvalidKeyError('x')).toBeInstanceOf(AiProviderError)
   })
 })

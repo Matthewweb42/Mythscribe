@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AI_KEY_MAX, AI_KEY_MIN, AiStatus, AiTestConnectionResult } from '../ai'
 import { EditorSettings } from '../editorSettings'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
@@ -263,6 +264,27 @@ export const contract = {
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
   'layout:set': { input: Layout, output: Layout },
+  /**
+   * The AI provider status (F-5.1): whether a key is saved (with a masked hint, never the key)
+   * and how the key is protected. App-wide, no project needed.
+   */
+  'ai:getStatus': { input: z.undefined(), output: AiStatus },
+  /**
+   * Stores the key with the OS safe storage (F-5.1); the key is accepted once and never returned.
+   * A shape outside the length bounds is VALIDATION; a machine that cannot protect the key is IO.
+   */
+  'ai:setKey': {
+    input: z.object({ key: z.string().trim().min(AI_KEY_MIN).max(AI_KEY_MAX) }),
+    output: AiStatus
+  },
+  /** Forgets the stored key (F-5.1); a no-op when none is saved. */
+  'ai:clearKey': { input: z.undefined(), output: AiStatus },
+  /**
+   * Asks the provider a token-free question with the saved key (F-5.1). Expected failures (no
+   * key, invalid key, rate limit, quota, network, provider) come back as data with a next step,
+   * so the AI tab can show them inline; only an unexpected failure is an error.
+   */
+  'ai:testConnection': { input: z.undefined(), output: AiTestConnectionResult },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },
   /** The renderer could not flush, so the close it was asked for (and any quit behind it) is abandoned. */

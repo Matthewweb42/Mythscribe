@@ -14,15 +14,10 @@ import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { SettingsDialog } from './SettingsDialog'
 import type { SettingsDialogTab } from './settingsDialogTabs'
 
-/** Two fake tabs; the second id is not a real tab yet, so the type is widened for the test. */
+/** Two fake tabs with the real ids, so the dialog's tab handling is driven without the real panels. */
 const tabs: readonly [SettingsDialogTab, ...SettingsDialogTab[]] = [
   { id: 'editor', label: 'Editor', icon: Type, render: () => <p>formatting here</p> },
-  {
-    id: 'ai' as SettingsDialogTab['id'],
-    label: 'AI',
-    icon: Sparkles,
-    render: () => <p>keys here</p>
-  }
+  { id: 'ai', label: 'AI', icon: Sparkles, render: () => <p>keys here</p> }
 ]
 
 /** Accepts every `editorSettings:set`; anything else is unexpected here. */
@@ -54,7 +49,7 @@ describe('SettingsDialog (F-7.5)', () => {
     render(<SettingsDialog format="novel" onClose={vi.fn()} />)
     expect(dialog()).toHaveAttribute('aria-modal', 'true')
     expect(within(dialog()).getByRole('tablist', { name: 'Settings' })).toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Editor'])
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Editor', 'AI'])
     expect(tab('Editor')).toHaveAttribute('aria-selected', 'true')
     expect(tab('Editor')).toHaveFocus()
     expect(panel()).toHaveAccessibleName('Editor')

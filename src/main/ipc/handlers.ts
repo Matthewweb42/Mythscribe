@@ -1,4 +1,8 @@
 import { app } from 'electron'
+import { testConnectionFailure, type AiStatus, type AiTestConnectionResult } from '@shared/ai'
+import type { AiKeyStore } from '../ai/keyStore'
+import { AiProviderError, NoKeyError } from '../ai/providers/types'
+import type { AiProviderRegistry } from '../ai/registry'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
@@ -31,6 +35,8 @@ export interface ClosableWindow extends EmitTarget {
 export interface HandlerDeps {
   manager: ProjectManager
   appState: AppStateStore
+  keyStore: AiKeyStore
+  ai: AiProviderRegistry
   dialogs: ProjectDialogs
   windows: () => ClosableWindow[]
   /** The renderer abandoned a window close (its flush failed); forget any quit that asked for it. */
@@ -40,6 +46,8 @@ export interface HandlerDeps {
 export function registerHandlers({
   manager,
   appState,
+  keyStore,
+  ai,
   dialogs,
   windows,
   onCloseCancelled
@@ -160,6 +168,39 @@ export function registerHandlers({
       throw new AppError('VALIDATION', 'The panels leave the editor less than its minimum width')
     }
     return appState.update((s) => ({ ...s, layout })).layout
+  })
+
+  // F-5.1: the key is accepted by `ai:setKey` once and never returned; status carries a mask.
+  const aiStatus = (): AiStatus => ({
+    provider: 'openai',
+    hasKey: keyStore.hasKey('openai'),
+    hint: keyStore.getHint('openai'),
+    encryption: keyStore.encryption()
+  })
+
+  register('ai:getStatus', aiStatus)
+
+  register('ai:setKey', ({ key }) => {
+    keyStore.setKey('openai', key)
+    return aiStatus()
+  })
+
+  register('ai:clearKey', () => {
+    keyStore.clearKey('openai')
+    return aiStatus()
+  })
+
+  // Expected failures are data (the author acts on them inline); only a bug reaches the envelope.
+  register('ai:testConnection', async (): Promise<AiTestConnectionResult> => {
+    try {
+      const provider = ai.get()
+      if (!provider) throw new NoKeyError('No API key is saved.')
+      const { model } = await provider.testConnection()
+      return { ok: true, model }
+    } catch (err) {
+      if (err instanceof AiProviderError) return testConnectionFailure(err.code, err.message)
+      throw err
+    }
   })
 
   register('window:close', () => {

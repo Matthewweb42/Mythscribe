@@ -1,6 +1,8 @@
-import { app, BrowserWindow, Menu, shell } from 'electron'
+import { app, BrowserWindow, Menu, safeStorage, shell } from 'electron'
 import icon from '../../resources/icon.png?asset'
 import { join } from 'node:path'
+import { AiKeyStore } from './ai/keyStore'
+import { AiProviderRegistry } from './ai/registry'
 import { AppStateStore } from './appState/appStateStore'
 import { createDialogs } from './dialogs'
 import { registerHandlers } from './ipc/handlers'
@@ -13,6 +15,13 @@ const manager = new ProjectManager()
 
 /** Lets e2e tests isolate app-wide state (recents) from the developer's own. */
 if (process.env.MYTHSCRIBE_USER_DATA) app.setPath('userData', process.env.MYTHSCRIBE_USER_DATA)
+
+/**
+ * F-5.1: without a keyring Linux has no safe storage at all; this opts into Electron's
+ * obfuscating fallback so a key can still be saved. `ai:getStatus` reports it as `plain` and
+ * the AI tab warns. The method exists only on Linux.
+ */
+if (process.platform === 'linux') safeStorage.setUsePlainTextEncryption(true)
 
 /** The lock lives in userData, so it must be requested after the override above. */
 const primaryInstance = installSingleInstance(app, () => BrowserWindow.getAllWindows()[0] ?? null)
@@ -79,9 +88,12 @@ if (!primaryInstance) {
   void app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
     const appState = new AppStateStore(join(app.getPath('userData'), 'app-state.json'))
+    const keyStore = new AiKeyStore(join(app.getPath('userData'), 'ai-keys.json'), safeStorage)
     registerHandlers({
       manager,
       appState,
+      keyStore,
+      ai: new AiProviderRegistry(keyStore),
       dialogs: createDialogs(
         () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
       ),

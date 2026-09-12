@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import {
@@ -8,6 +9,7 @@ import {
   type ElectronApplication,
   type Page
 } from '@playwright/test'
+import type { AiStatus } from '../src/shared/ai'
 import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
 import { matterTemplate } from '../src/shared/matterTemplates'
@@ -17,7 +19,16 @@ import { countWords } from '../src/shared/wordCount'
 /**
  * Smoke test (CLAUDE.md quality gates): create a project → write text → close it → reopen it →
  * the structure and the text are still there.
+ *
+ * F-5.1: the AI steps never reach OpenAI. `OPENAI_BASE_URL` points the SDK in the main process
+ * at the fake server below, which rejects `REJECTED_KEY` with a 401 and answers any other key
+ * with a model, so both the failure and the success path are driven for real without a live
+ * key. Do not "complete" this with a real call.
  */
+
+/** The key the fake OpenAI server rejects; any other key is accepted. */
+const REJECTED_KEY = 'sk-test-1234abcd'
+const ACCEPTED_KEY = 'sk-live-5678wxyz'
 
 /** What Scene 1 reads after the F-3.1/F-3.2 steps; nine words, so the cached count is checked too. */
 const SENTENCE = 'The storm broke at dusk. Rain followed. Then silence.'
@@ -34,13 +45,52 @@ let app: ElectronApplication
 let page: Page
 let tmp: string
 let exited = false
+let fakeOpenAi: http.Server
+/** Every request the fake OpenAI server saw: the path and the Authorization header. */
+const openAiRequests: { url: string; auth: string | undefined }[] = []
+
+function startFakeOpenAi(): Promise<string> {
+  fakeOpenAi = http.createServer((req, res) => {
+    openAiRequests.push({ url: req.url ?? '', auth: req.headers.authorization })
+    res.setHeader('content-type', 'application/json')
+    if (req.headers.authorization === `Bearer ${REJECTED_KEY}`) {
+      res.statusCode = 401
+      res.end(
+        JSON.stringify({
+          error: {
+            message: 'Incorrect API key provided',
+            type: 'invalid_request_error',
+            code: 'invalid_api_key'
+          }
+        })
+      )
+      return
+    }
+    res.statusCode = 200
+    res.end(JSON.stringify({ id: 'gpt-5.4-mini', object: 'model', created: 0, owned_by: 'system' }))
+  })
+  return new Promise((resolve) => {
+    fakeOpenAi.listen(0, '127.0.0.1', () => {
+      const address = fakeOpenAi.address()
+      if (!address || typeof address === 'string') throw new Error('fake OpenAI server has no port')
+      resolve(`http://127.0.0.1:${address.port}/v1`)
+    })
+  })
+}
 
 test.beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-e2e-'))
-  // Point app-level state (recents) at the temp dir so the developer's real userData is untouched.
+  const openAiBaseUrl = await startFakeOpenAi()
+  // Point app-level state (recents, the AI key) at the temp dir so the developer's real userData
+  // is untouched, and the OpenAI SDK at the fake server so nothing leaves the machine.
   app = await electron.launch({
     args: ['.'],
-    env: { ...process.env, NODE_ENV: 'test', MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData') }
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData'),
+      OPENAI_BASE_URL: openAiBaseUrl
+    }
   })
   app.on('close', () => {
     exited = true
@@ -51,6 +101,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   // The last step closes the window, which quits the app on Linux; only close it if still up.
   if (!exited) await app?.close()
+  await new Promise<void>((resolve) => fakeOpenAi.close(() => resolve()))
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -343,6 +394,48 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
   await expect(editor).toHaveCSS('font-size', '20px')
+  // F-5.1: the AI tab stores a key with safe storage (only ciphertext lands in userData, the
+  // renderer only ever sees a mask) and tests the connection against the fake OpenAI server.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(settingsDialog).toBeVisible()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await expect(settingsDialog.getByRole('tab', { name: 'AI' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  await expect(settingsDialog.getByText('OpenAI', { exact: true })).toBeVisible()
+  const keyHint = settingsDialog.getByTestId('ai-key-hint')
+  const keyField = settingsDialog.getByLabel('API key', { exact: true })
+  const testResult = settingsDialog.getByTestId('ai-test-result')
+  await expect(keyHint).toHaveText('No key')
+  await expect(settingsDialog.getByRole('button', { name: 'Test connection' })).toBeDisabled()
+  await keyField.fill(REJECTED_KEY)
+  await settingsDialog.getByRole('button', { name: 'Save' }).click()
+  await expect(keyHint).toHaveText('Key saved: sk-…abcd')
+  await expect(keyField).toHaveValue('')
+  expect(await aiStatus()).toMatchObject({ hasKey: true, hint: 'sk-…abcd' })
+  const keyFile = path.join(tmp, 'userData', 'ai-keys.json')
+  expect(fs.existsSync(keyFile)).toBe(true)
+  expect(fs.readFileSync(keyFile, 'utf8')).not.toContain(REJECTED_KEY)
+  // The fake server rejects this key: the cause and the next step show inline.
+  await settingsDialog.getByRole('button', { name: 'Test connection' }).click()
+  await expect(testResult).toHaveText('OpenAI rejected the API key. Check the key and try again.')
+  // A key the server accepts: the answering model shows, and the old result was dropped.
+  await keyField.fill(ACCEPTED_KEY)
+  await settingsDialog.getByRole('button', { name: 'Save' }).click()
+  await expect(keyHint).toHaveText('Key saved: sk-…wxyz')
+  await expect(testResult).toHaveCount(0)
+  await settingsDialog.getByRole('button', { name: 'Test connection' }).click()
+  await expect(testResult).toHaveText('Connected. gpt-5.4-mini answered.')
+  expect(openAiRequests).toEqual([
+    { url: '/v1/models/gpt-5.4-mini', auth: `Bearer ${REJECTED_KEY}` },
+    { url: '/v1/models/gpt-5.4-mini', auth: `Bearer ${ACCEPTED_KEY}` }
+  ])
+  await settingsDialog.getByRole('button', { name: 'Clear' }).click()
+  await expect(keyHint).toHaveText('No key')
+  expect(await aiStatus()).toMatchObject({ hasKey: false, hint: null })
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
   const widened = await editor.locator('..').boundingBox()
   if (!widened) throw new Error('editor column not laid out')
   expect(widened.width).toBeGreaterThan(700)
@@ -777,6 +870,14 @@ async function notesText(id: string): Promise<string | null> {
 }
 
 /** The persisted panel layout (F-7.2) as main reports it. */
+async function aiStatus(): Promise<AiStatus> {
+  const result = await page.evaluate<IpcResult<AiStatus>>(
+    () => window.mythscribe.invoke('ai:getStatus', undefined) as Promise<IpcResult<AiStatus>>
+  )
+  if (!result.ok) throw new Error(result.error.message)
+  return result.data
+}
+
 async function getLayout(): Promise<Layout> {
   const result = await page.evaluate<IpcResult<Layout>>(
     () => window.mythscribe.invoke('layout:get', undefined) as Promise<IpcResult<Layout>>
