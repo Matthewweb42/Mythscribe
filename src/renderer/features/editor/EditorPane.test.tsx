@@ -42,6 +42,7 @@ function deferredClient(): {
         saves.push(save)
         return { wordCount: countWords(save.content), modified: 'm' } as Output<C>
       }
+      if (channel === 'documentTag:list') return [] as Output<C>
       if (channel !== 'document:get') throw new Error(`unexpected ${channel}`)
       const { id } = input as Input<'document:get'>
       return new Promise<Output<C>>((resolve) => {

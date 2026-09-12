@@ -8,6 +8,7 @@ import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
 import { getEditorSettings, setEditorSettings } from '../project/settingsStore'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
+import { addDocumentTag, listDocumentTags, removeDocumentTag } from '../tag/documentTagStore'
 import { createTag, deleteTag, listTags, loadTagTemplate, updateTag } from '../tag/tagStore'
 import {
   createNode,
@@ -130,6 +131,18 @@ export function registerHandlers({
 
   register('tag:loadTemplate', ({ template }) =>
     loadTagTemplate(manager.require().connection.orm, template)
+  )
+
+  register('documentTag:list', ({ nodeId }) =>
+    listDocumentTags(manager.require().connection.orm, nodeId)
+  )
+
+  register('documentTag:add', ({ nodeId, tagId }) =>
+    addDocumentTag(manager.require().connection.orm, nodeId, tagId)
+  )
+
+  register('documentTag:remove', ({ nodeId, tagId }) =>
+    removeDocumentTag(manager.require().connection.orm, nodeId, tagId)
   )
 
   // A hand-edited app-state file may squeeze the editor; reading normalizes, writing refuses.

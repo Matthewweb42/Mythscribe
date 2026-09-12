@@ -48,13 +48,14 @@ describe('AppStateStore', () => {
     expect(state.recents).toEqual([entry])
   })
 
-  it('parses a file written before F-7.3 (no sidebar tab) with the Manuscript tab', () => {
+  it('parses a file written before F-7.3 (no sidebar tab) and F-4.4 (no tag bar) with their defaults', () => {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     const layout = { sidebar: { open: false, size: 0.3 }, notes: { open: true, size: 0.4 } }
     fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [], layout }), 'utf8')
     expect(new AppStateStore(file).get().layout).toEqual({
       ...layout,
-      sidebar: { ...layout.sidebar, tab: 'manuscript' }
+      sidebar: { ...layout.sidebar, tab: 'manuscript' },
+      tagBar: { open: true, height: 120 }
     })
   })
 
@@ -70,7 +71,8 @@ describe('AppStateStore', () => {
     const store = new AppStateStore(file)
     const layout = {
       sidebar: { open: false, size: 0.3, tab: 'manuscript' as const },
-      notes: { open: true, size: 0.4 }
+      notes: { open: true, size: 0.4 },
+      tagBar: { open: false, height: 240 }
     }
     expect(store.update((s) => ({ ...s, layout })).layout).toEqual(layout)
     expect(new AppStateStore(file).get().layout).toEqual(layout)

@@ -304,14 +304,20 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
   await expect(editor).toHaveAttribute('contenteditable', 'true')
   await expect(page.getByTestId('empty-state')).toHaveCount(0)
-  // F-3.4: the text sits in a centered column no wider than the 700 px default.
+  // F-3.4: the text sits in a centered column no wider than the 700 px default. Centering is
+  // measured inside the scroll container's client box, so a vertical scrollbar (the editor's
+  // 60 vh minimum height under the F-4.4 tag bar overflows a 900 px window) does not skew it.
   const column = await editor.locator('..').boundingBox()
-  const pane = await page.getByRole('toolbar', { name: 'Formatting' }).boundingBox()
-  if (!column || !pane) throw new Error('editor column not laid out')
+  if (!column) throw new Error('editor column not laid out')
   expect(column.width).toBeLessThanOrEqual(700)
-  expect(
-    Math.abs(column.x - pane.x - (pane.x + pane.width - (column.x + column.width)))
-  ).toBeLessThan(2)
+  const offCenter = await editor.locator('..').evaluate((el) => {
+    const parent = el.parentElement
+    if (!parent) throw new Error('editor column has no scroll container')
+    const rect = el.getBoundingClientRect()
+    const left = rect.left - parent.getBoundingClientRect().left - parent.clientLeft
+    return Math.abs(left - (parent.clientWidth - left - rect.width))
+  })
+  expect(offCenter).toBeLessThan(2)
   // F-7.5: Ctrl+, opens the Settings dialog on its Editor tab; F-3.6: its controls apply a wider
   // column and a larger font live, and the preview follows; Escape closes the dialog.
   const settingsDialog = page.getByRole('dialog', { name: 'Settings' })
@@ -534,6 +540,54 @@ test('create, close, reopen a project on disk', async () => {
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
   await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
   await expect(tree).toBeVisible()
+
+  // F-4.4: the tag bar above Scene 1's editor starts without chips; "Add tag" opens a picker of
+  // the unassigned tags, searching "forest" narrows it to dark-forest (the template's plain
+  // "dark" tone tag would also match "dark"), Enter links it as a chip, and the Tags tab shows
+  // the usage at once; removing the chip returns it to 0. Collapsing hides the chips, the
+  // picker, and the handle, and the state persists in the layout.
+  await expect(scene1).toHaveAttribute('aria-selected', 'true')
+  const tagBar = page.getByRole('region', { name: 'Tags', exact: true })
+  await expect(tagBar).toBeVisible()
+  await expect(tagBar.getByRole('listitem')).toHaveCount(0)
+  await tagBar.getByRole('button', { name: 'Add tag' }).click()
+  const tagSearch = page.getByRole('searchbox', { name: 'Search tags' })
+  await expect(tagSearch).toBeFocused()
+  await tagSearch.fill('forest')
+  await expect(
+    page.getByRole('listbox', { name: 'Unassigned tags' }).getByRole('option')
+  ).toHaveText(['dark-forest'])
+  await tagSearch.press('Enter')
+  await expect(tagBar.getByRole('listitem')).toHaveText(['dark-forest'])
+  await expect(tagSearch).toHaveCount(0)
+  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await expect(tagRows.getByRole('button', { name: /^dark-forest/ })).toHaveText(
+    'dark-forest 1 use'
+  )
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await tagBar.getByRole('button', { name: 'Remove dark-forest' }).click()
+  await expect(tagBar.getByRole('listitem')).toHaveCount(0)
+  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await expect(tagRows.getByRole('button', { name: /^dark-forest/ })).toHaveText(
+    'dark-forest 0 uses'
+  )
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  const tagBarToggle = tagBar.getByRole('button', { name: /^Tags/ })
+  await expect(tagBarToggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(tagBar.getByRole('separator', { name: 'Resize tag bar' })).toHaveAttribute(
+    'aria-valuenow',
+    '120'
+  )
+  await tagBarToggle.click()
+  await expect(tagBarToggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(tagBar.getByRole('button', { name: 'Add tag' })).toHaveCount(0)
+  await expect(tagBar.getByRole('separator')).toHaveCount(0)
+  await expect
+    .poll(async () => (await getLayout()).tagBar, { timeout: 3000 })
+    .toEqual({ open: false, height: 120 })
+  await tagBarToggle.click()
+  await expect(tagBarToggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(tagBar.getByRole('button', { name: 'Add tag' })).toBeVisible()
 
   // F-2.5/F-3.8: selecting Chapter 1 stacks Opening and Scene 1 in tree order, each as its own
   // region with the web-novel scene break between them; typing into Opening leaves Scene 1

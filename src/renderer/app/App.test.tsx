@@ -81,6 +81,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'recents:list') return []
     if (channel === 'tree:list') return []
     if (channel === 'tag:list') return []
+    if (channel === 'documentTag:list') return []
     if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }
     if (channel === 'notes:get') return { id: (input as { id: string }).id, notes: null }
     if (channel === 'editorSettings:get') return defaultEditorSettings('novel')
@@ -359,7 +360,8 @@ describe('App', () => {
       'project:current': info,
       'layout:get': {
         sidebar: { open: true, size: 0.3, tab: 'manuscript' },
-        notes: { open: false, size: 0.25 }
+        notes: { open: false, size: 0.25 },
+        tagBar: { open: true, height: 120 }
       }
     })
     render(<App />)
@@ -406,7 +408,8 @@ describe('App', () => {
           size: useLayoutStore.getState().layout.sidebar.size,
           tab: 'manuscript'
         },
-        notes: { open: false, size: 0.25 }
+        notes: { open: false, size: 0.25 },
+        tagBar: { open: true, height: 120 }
       })
     } finally {
       vi.useRealTimers()

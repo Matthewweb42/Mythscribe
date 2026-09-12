@@ -108,6 +108,21 @@ describe('tagStore (F-4.2)', () => {
     expect(calls.filter(([channel]) => channel === 'tag:list')).toHaveLength(1)
   })
 
+  it('merge upserts a row without an IPC call: a count moves in place, a new id or name re-sorts (F-4.4)', async () => {
+    const { client, calls } = fakeClient()
+    setIpcClient(client)
+    await state().load()
+    const idsBefore = state().ids
+    state().merge({ ...tagFixture[2]!, usageCount: 4 })
+    expect(state().byId['t-moody']?.usageCount).toBe(4)
+    expect(state().ids).toBe(idsBefore)
+    state().merge({ ...tagFixture[2]!, id: 't-eerie', name: 'eerie' })
+    expect(state().ids).toEqual(['t-forest', 't-eerie', 't-mara', 't-moody'])
+    state().merge({ ...tagFixture[1]!, name: 'zed' })
+    expect(state().ids).toEqual(['t-forest', 't-eerie', 't-moody', 't-mara'])
+    expect(calls.map(([channel]) => channel)).toEqual(['tag:list'])
+  })
+
   it('remove drops the row', async () => {
     const { client, calls } = fakeClient({ 'tag:delete': () => null })
     setIpcClient(client)

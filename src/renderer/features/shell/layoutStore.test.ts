@@ -9,6 +9,7 @@ import {
   LAYOUT_SAVE_DELAY_MS,
   resetLayoutStore,
   resizePanelBy,
+  resizeTagBarBy,
   useLayout,
   useLayoutStore
 } from './layoutStore'
@@ -49,7 +50,8 @@ function deferredClient(stored: Layout): {
 
 const stored: Layout = {
   sidebar: { open: true, size: 0.3, tab: 'manuscript' },
-  notes: { open: true, size: 0.2 }
+  notes: { open: true, size: 0.2 },
+  tagBar: { open: true, height: 150 }
 }
 let sets: PendingSet[]
 let gets: (() => void)[]
@@ -79,6 +81,7 @@ beforeEach(() => {
   gets = deferred.gets
   setIpcClient(deferred.client)
   vi.stubGlobal('innerWidth', 1000)
+  vi.stubGlobal('innerHeight', 800)
 })
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -122,7 +125,8 @@ describe('useLayoutStore', () => {
     expect(sets).toHaveLength(1)
     expect(sets[0]?.value).toEqual({
       sidebar: { open: true, size: 0.26, tab: 'manuscript' },
-      notes: { open: false, size: 0.2 }
+      notes: { open: false, size: 0.2 },
+      tagBar: { open: true, height: 150 }
     })
   })
 
@@ -186,7 +190,8 @@ describe('useLayoutStore', () => {
     useLayoutStore.setState({
       layout: {
         sidebar: { open: true, size: 0.35, tab: 'manuscript' },
-        notes: { open: false, size: 0.5 }
+        notes: { open: false, size: 0.5 },
+        tagBar: { open: true, height: 120 }
       }
     })
     store().toggle('notes')
@@ -267,6 +272,58 @@ describe('resizePanelBy', () => {
     expect(store().layout.sidebar.size).toBeCloseTo(0.25)
     resizePanelBy('notes', 100)
     expect(store().layout.notes.size).toBeCloseTo(0.3)
+  })
+})
+
+describe('tag bar (F-4.4)', () => {
+  it('toggleTagBar flips the bar, keeps its height, and writes once after the debounce', async () => {
+    await load()
+    store().toggleTagBar()
+    expect(store().layout.tagBar).toEqual({ open: false, height: 150 })
+    store().toggleTagBar()
+    expect(store().layout.tagBar).toEqual({ open: true, height: 150 })
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(1)
+    expect(sets[0]?.value).toEqual(stored)
+  })
+
+  it('setTagBarHeight clamps to the floor and to 60 % of the window height', async () => {
+    await load()
+    store().setTagBarHeight(300)
+    expect(store().layout.tagBar.height).toBe(300)
+    store().setTagBarHeight(20)
+    expect(store().layout.tagBar.height).toBe(100)
+    store().setTagBarHeight(900)
+    expect(store().layout.tagBar.height).toBe(480) // 60 % of the stubbed 800
+    vi.stubGlobal('innerHeight', 400)
+    store().setTagBarHeight(900)
+    expect(store().layout.tagBar.height).toBe(240)
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(1)
+    expect(sets[0]?.value.tagBar).toEqual({ open: true, height: 240 })
+    expect(sets[0]?.value.sidebar).toEqual(stored.sidebar)
+  })
+
+  it('setTagBarHeight ignores a height that clamps to the current value without scheduling a write', async () => {
+    await load()
+    store().setTagBarHeight(150)
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(0)
+    store().setTagBarHeight(100)
+    store().setTagBarHeight(50) // clamps to 100, already there
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(1)
+    expect(sets[0]?.value.tagBar.height).toBe(100)
+  })
+
+  it('resizeTagBarBy adds the px delta to the height', async () => {
+    await load()
+    resizeTagBarBy(40)
+    expect(store().layout.tagBar.height).toBe(190)
+    resizeTagBarBy(-120)
+    expect(store().layout.tagBar.height).toBe(100)
+    resizeTagBarBy(1000)
+    expect(store().layout.tagBar.height).toBe(480)
   })
 })
 

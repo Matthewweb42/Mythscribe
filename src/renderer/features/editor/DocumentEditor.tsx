@@ -13,6 +13,7 @@ import { buildExtensions } from './extensions'
 import { NotesToggleButton } from './NotesPanel'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
+import { TagBar } from './TagBar'
 import { Toolbar } from './Toolbar'
 
 export interface DocumentEditorProps {
@@ -114,12 +115,16 @@ function RegionEditor({
     [extensions]
   )
 
-  const body = <EditorContent editor={editor} className={`${COLUMN} py-6`} />
-  if (!toolbar) return body
+  if (!toolbar) return <EditorContent editor={editor} className={`${COLUMN} py-6`} />
+  // The column and the surface inside it are flex items, so an empty document still fills the
+  // scroll container (click anywhere to write) without a viewport-relative minimum height.
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={editorStyle(settings)}>
       <Toolbar editor={ready ? editor : null} right={<NotesToggleButton />} />
-      <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
+      <TagBar id={id} />
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <EditorContent editor={editor} className={`${COLUMN} flex flex-1 flex-col py-6`} />
+      </div>
       <DocumentStatusBar id={id} editor={ready ? editor : null} />
     </div>
   )

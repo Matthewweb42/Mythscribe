@@ -24,10 +24,26 @@ const panelSchema = ([min, max]: readonly [number, number]): z.ZodObject<{
 
 const sidebarSchema = panelSchema(LAYOUT_LIMITS.sidebar)
 
+/**
+ * Floor of the draggable tag bar (F-4.4), in px. The ceiling is 60 % of the window height,
+ * enforced by the renderer against the live window (`clampTagBarHeight`) and by `max-height`
+ * at render, not by this schema: a static bound cannot express it, and unlike the width
+ * panels the height is stored in px rather than as a scale-invariant fraction.
+ */
+export const TAG_BAR_MIN_HEIGHT = 100
+/** The share of the window height the tag bar may take at most. */
+export const TAG_BAR_MAX_FRACTION = 0.6
+
+const tagBarSchema = z.object({ open: z.boolean(), height: z.number().min(TAG_BAR_MIN_HEIGHT) })
+
+const DEFAULT_TAG_BAR = { open: true, height: 120 } as const
+
 export const Layout = z.object({
   // F-7.3: the sidebar's active tab.
   sidebar: sidebarSchema.extend({ tab: SidebarTabId }),
-  notes: panelSchema(LAYOUT_LIMITS.notes)
+  notes: panelSchema(LAYOUT_LIMITS.notes),
+  // F-4.4: the document tag bar above the editor; a height, so it never joins LAYOUT_PANELS.
+  tagBar: tagBarSchema
 })
 export type Layout = z.infer<typeof Layout>
 
@@ -37,15 +53,27 @@ export type Layout = z.infer<typeof Layout>
  */
 export const StoredLayout = z.object({
   sidebar: sidebarSchema.extend({ tab: SidebarTabId.default('manuscript') }),
-  notes: Layout.shape.notes
+  notes: Layout.shape.notes,
+  // A layout written before F-4.4 has no tag bar and parses to the default one.
+  tagBar: Layout.shape.tagBar.default({ ...DEFAULT_TAG_BAR })
 })
 
-/** A fresh install: the Manuscript tab open at just under a quarter, the notes closed at a quarter. */
+/**
+ * A fresh install: the Manuscript tab open at just under a quarter, the notes closed at a
+ * quarter, the tag bar open at 120 px.
+ */
 export function defaultLayout(): Layout {
   return {
     sidebar: { open: true, size: 0.22, tab: 'manuscript' },
-    notes: { open: false, size: 0.25 }
+    notes: { open: false, size: 0.25 },
+    tagBar: { ...DEFAULT_TAG_BAR }
   }
+}
+
+/** The tag bar height clamped to `[TAG_BAR_MIN_HEIGHT, 60 % of the given window height]` (F-4.4). */
+export function clampTagBarHeight(height: number, windowInnerHeight: number): number {
+  const max = Math.max(TAG_BAR_MIN_HEIGHT, windowInnerHeight * TAG_BAR_MAX_FRACTION)
+  return Math.min(max, Math.max(TAG_BAR_MIN_HEIGHT, height))
 }
 
 /** `size` clamped to the panel's own `[min, max]`. */

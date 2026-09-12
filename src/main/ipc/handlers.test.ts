@@ -585,6 +585,67 @@ describe('tag:loadTemplate (F-4.3)', () => {
   })
 })
 
+describe('documentTag handlers (F-4.4)', () => {
+  /** The first seeded scene's id and the id of its chapter (a folder). */
+  async function seeded(): Promise<{ scene: string; folder: string; section: string }> {
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    const folder = rows.find((r) => r.kind === 'folder' && r.sectionType === null)
+    const section = rows.find((r) => r.sectionType !== null)
+    if (!scene || !folder || !section) throw new Error('skeleton not seeded')
+    return { scene: scene.id, folder: folder.id, section: section.id }
+  }
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('documentTag:list', { nodeId: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('documentTag:add', { nodeId: 'x', tagId: 'y' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+    await expect(invoke('documentTag:remove', { nodeId: 'x', tagId: 'y' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('links and unlinks a tag, moving the usage count tag:list reports, idempotently', async () => {
+    await invoke('project:create', { name: 'Tags', format: 'novel', directory: tmp })
+    const { scene } = await seeded()
+    const rain = await invoke('tag:create', { name: 'Rain', category: 'tone' })
+    expect(await invoke('documentTag:list', { nodeId: scene })).toEqual([])
+    const linked = await invoke('documentTag:add', { nodeId: scene, tagId: rain.id })
+    expect(linked).toEqual({ ...rain, usageCount: 1 })
+    expect(await invoke('documentTag:add', { nodeId: scene, tagId: rain.id })).toEqual(linked)
+    expect(await invoke('documentTag:list', { nodeId: scene })).toEqual([linked])
+    expect(await invoke('tag:list', undefined)).toEqual([linked])
+    const unlinked = await invoke('documentTag:remove', { nodeId: scene, tagId: rain.id })
+    expect(unlinked).toEqual({ ...rain, usageCount: 0 })
+    expect(await invoke('documentTag:remove', { nodeId: scene, tagId: rain.id })).toEqual(unlinked)
+    expect(await invoke('documentTag:list', { nodeId: scene })).toEqual([])
+    expect(await invoke('tag:list', undefined)).toEqual([unlinked])
+  })
+
+  it('surfaces NOT_FOUND and VALIDATION through the envelope', async () => {
+    await invoke('project:create', { name: 'Tags', format: 'novel', directory: tmp })
+    const { scene, folder, section } = await seeded()
+    const rain = await invoke('tag:create', { name: 'Rain', category: 'tone' })
+    await expect(invoke('documentTag:list', { nodeId: 'missing' })).rejects.toThrowError(
+      /^NOT_FOUND: /
+    )
+    await expect(invoke('documentTag:list', { nodeId: folder })).rejects.toThrowError(
+      /^VALIDATION: /
+    )
+    await expect(
+      invoke('documentTag:add', { nodeId: section, tagId: rain.id })
+    ).rejects.toThrowError(/^VALIDATION: /)
+    await expect(
+      invoke('documentTag:add', { nodeId: scene, tagId: 'missing' })
+    ).rejects.toThrowError(/^NOT_FOUND: /)
+    await expect(
+      invoke('documentTag:remove', { nodeId: scene, tagId: 'missing' })
+    ).rejects.toThrowError(/^NOT_FOUND: /)
+    expect(await invoke('tag:list', undefined)).toEqual([rain])
+  })
+})
+
 describe('layout:get / layout:set (F-7.2)', () => {
   it('returns the default layout before anything is saved, with no project needed', async () => {
     expect(await invoke('layout:get', undefined)).toEqual(defaultLayout())
@@ -593,7 +654,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
   it('persists a layout so get returns it, also from a fresh store over the same file', async () => {
     const next = {
       sidebar: { open: false, size: 0.3, tab: 'manuscript' as const },
-      notes: { open: true, size: 0.4 }
+      notes: { open: true, size: 0.4 },
+      tagBar: { open: true, height: 120 }
     }
     expect(await invoke('layout:set', next)).toEqual(next)
     expect(await invoke('layout:get', undefined)).toEqual(next)
@@ -605,7 +667,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
   it('refuses out-of-range or malformed layouts with VALIDATION and keeps the stored one', async () => {
     const stored = {
       sidebar: { open: true, size: 0.2, tab: 'manuscript' as const },
-      notes: { open: false, size: 0.25 }
+      notes: { open: false, size: 0.25 },
+      tagBar: { open: true, height: 120 }
     }
     await invoke('layout:set', stored)
     const raw = handlerFor('layout:set')
@@ -627,7 +690,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const created = await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
     const next = {
       sidebar: { open: true, size: 0.3, tab: 'manuscript' as const },
-      notes: { open: true, size: 0.3 }
+      notes: { open: true, size: 0.3 },
+      tagBar: { open: true, height: 120 }
     }
     await invoke('layout:set', next)
     const list = await invoke('recents:list', undefined)
@@ -641,7 +705,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
   it('refuses a layout that leaves the editor under its minimum even if each panel is individually in range', async () => {
     const bothMaxed = {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
-      notes: { open: true, size: 0.5 }
+      notes: { open: true, size: 0.5 },
+      tagBar: { open: true, height: 120 }
     }
     const raw = handlerFor('layout:set')
     const result = await raw(undefined, bothMaxed)
@@ -662,7 +727,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
         recents: [],
         layout: {
           sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
-          notes: { open: true, size: 0.5 }
+          notes: { open: true, size: 0.5 },
+          tagBar: { open: true, height: 120 }
         }
       })
     )

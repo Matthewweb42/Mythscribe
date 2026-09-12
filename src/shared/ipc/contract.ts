@@ -221,6 +221,28 @@ export const contract = {
     input: z.object({ template: TagTemplateId }),
     output: z.object({ created: z.array(Tag), skipped: z.array(z.string()) })
   },
+  /**
+   * The tags linked to a document (F-4.4), ordered by name. NOT_FOUND for an unknown node id;
+   * VALIDATION when the node is not a document.
+   */
+  'documentTag:list': { input: z.object({ nodeId: z.string() }), output: z.array(Tag) },
+  /**
+   * Links a tag to a document (F-4.4); linking an already-linked tag is a no-op. Returns the tag
+   * with its usage count after the link. Same refusals as `documentTag:list`, plus NOT_FOUND for
+   * an unknown tag id.
+   */
+  'documentTag:add': {
+    input: z.object({ nodeId: z.string(), tagId: z.string() }),
+    output: Tag
+  },
+  /**
+   * Removes a link (F-4.4); removing a link that is already gone is a no-op. Returns the tag with
+   * its usage count after the removal. Same refusals as `documentTag:add`.
+   */
+  'documentTag:remove': {
+    input: z.object({ nodeId: z.string(), tagId: z.string() }),
+    output: Tag
+  },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */

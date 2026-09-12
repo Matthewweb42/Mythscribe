@@ -1,5 +1,11 @@
 import { create } from 'zustand'
-import { clampForEditorMin, defaultLayout, type Layout, type LayoutPanel } from '@shared/layout'
+import {
+  clampForEditorMin,
+  clampTagBarHeight,
+  defaultLayout,
+  type Layout,
+  type LayoutPanel
+} from '@shared/layout'
 import type { SidebarTabId } from '@shared/sidebarTabs'
 import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -31,6 +37,13 @@ interface LayoutState {
   toggle: (panel: LayoutPanel) => void
   /** Shows a sidebar tab (F-7.3); a no-op for the tab already shown, so no write is scheduled. */
   setSidebarTab: (tab: SidebarTabId) => void
+  /** Collapses or expands the document tag bar (F-4.4); its height is kept either way. */
+  toggleTagBar: () => void
+  /**
+   * Sets the tag bar's height in px (F-4.4), clamped to its floor and to 60 % of the current
+   * window height, then schedules the write; a no-op when the clamp lands on the current value.
+   */
+  setTagBarHeight: (height: number) => void
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -116,6 +129,18 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     const base = get().layout
     if (base.sidebar.tab === tab) return
     schedule({ ...base, sidebar: { ...base.sidebar, tab } }, base)
+  },
+
+  toggleTagBar() {
+    const base = get().layout
+    schedule({ ...base, tagBar: { ...base.tagBar, open: !base.tagBar.open } }, base)
+  },
+
+  setTagBarHeight(height) {
+    const base = get().layout
+    const clamped = clampTagBarHeight(height, window.innerHeight)
+    if (clamped === base.tagBar.height) return
+    schedule({ ...base, tagBar: { ...base.tagBar, height: clamped } }, base)
   }
 }))
 
@@ -131,6 +156,12 @@ export function useLayout(): Layout {
 export function resizePanelBy(panel: LayoutPanel, deltaPx: number): void {
   const state = useLayoutStore.getState()
   state.setSize(panel, state.layout[panel].size + deltaPx / window.innerWidth)
+}
+
+/** Applies a drag or key step from the tag bar's `ResizeHandle` (F-4.4): the px delta is added to its height. */
+export function resizeTagBarBy(deltaPx: number): void {
+  const state = useLayoutStore.getState()
+  state.setTagBarHeight(state.layout.tagBar.height + deltaPx)
 }
 
 /** Drops the timer, the revert baseline, and the registration, then restores the defaults. For tests only. */

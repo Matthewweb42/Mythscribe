@@ -63,8 +63,13 @@ select {
  * Editor (F-3.1): prose styling inside the Tiptap content element. Sizes are the manuscript
  * defaults until the Settings editor tab (F-3.6) drives them through variables.
  */
+/*
+ * The single-document surface fills whatever height its scroll container has left (a flex
+ * item, so the bar and toolbar above it never force a scrollbar), then grows with the text.
+ */
 .ms-editor {
-  min-height: 60vh;
+  flex: 1 1 auto;
+  min-height: 0;
   font-family: var(--ms-font-prose);
   font-size: var(--ms-editor-font-size);
   line-height: var(--ms-editor-line-height);

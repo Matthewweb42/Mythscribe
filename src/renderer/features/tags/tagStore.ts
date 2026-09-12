@@ -23,6 +23,11 @@ interface TagState {
   remove: (id: string) => Promise<void>
   /** Loads a template (F-4.3) and merges every created tag in one update; resolves with main's counts. */
   loadTemplate: (template: TagTemplateId) => Promise<{ created: Tag[]; skipped: string[] }>
+  /**
+   * Upserts a row another channel returned (`documentTag:add`/`remove`/`list`, F-4.4), so a
+   * usage count moves without re-listing; a changed name re-sorts. No IPC call: the caller made one.
+   */
+  merge: (tag: Tag) => void
 }
 
 /** The `tag:list` order (name, then id, both by code unit, as SQLite's BINARY collation sorts them). */
@@ -86,6 +91,12 @@ export const useTagStore = create<TagState>((set, get) => ({
     const byId = { ...get().byId }
     delete byId[id]
     set({ byId, ids: get().ids.filter((other) => other !== id) })
+  },
+
+  merge(tag) {
+    const previous = get().byId[tag.id]
+    const byId = { ...get().byId, [tag.id]: tag }
+    set(previous?.name === tag.name ? { byId } : { byId, ids: orderedIds(byId) })
   },
 
   async loadTemplate(template) {
