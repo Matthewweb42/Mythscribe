@@ -71,6 +71,10 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** The stacked document regions (`<section>`), leaving out the folder's own tag bar region (F-4.5). */
+const documentRegions = (): HTMLElement[] =>
+  screen.getAllByRole('region').filter((r) => r.tagName === 'SECTION')
+
 function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<typeof vi.fn> {
   const invoke = vi.fn(async (channel: string, input: unknown) => {
     if (channel in overrides) {
@@ -82,6 +86,8 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'tree:list') return []
     if (channel === 'tag:list') return []
     if (channel === 'documentTag:list') return []
+    if (channel === 'sceneMeta:get')
+      return { id: (input as { id: string }).id, meta: { location: '', pov: '', timeline: '' } }
     if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }
     if (channel === 'notes:get') return { id: (input as { id: string }).id, notes: null }
     if (channel === 'editorSettings:get') return defaultEditorSettings('novel')
@@ -216,7 +222,7 @@ describe('App', () => {
     expect(screen.getByText('Arc · Volume 1')).toBeInTheDocument()
     // F-2.5/F-3.8: a folder stacks every descendant document in tree order under one toolbar,
     // each loaded under its own id; the single document was unloaded with its pane.
-    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual([
+    expect(documentRegions().map((r) => r.getAttribute('aria-label'))).toEqual([
       'Scene 4',
       'Scene 5',
       'Scene 6'
@@ -280,9 +286,7 @@ describe('App', () => {
     // selected folder; instead `createAt` (treeStore.ts) selects the new document, so `MainPane`
     // swaps the whole pane to a single-document `EditorPane` and the Chapter 1 stack disappears.
     await waitFor(() => expect(screen.getByTestId('selected-title')).toHaveTextContent('Chapter 1'))
-    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual([
-      'Untitled Scene'
-    ])
+    expect(documentRegions().map((r) => r.getAttribute('aria-label'))).toEqual(['Untitled Scene'])
   })
 
   it('shows the stored document in the editor and drops it when the project closes (F-3.1)', async () => {
@@ -341,9 +345,7 @@ describe('App', () => {
     const notes = await within(panel).findByRole('textbox', { name: 'Notes' })
     await waitFor(() => expect(notes).toHaveTextContent('Get them to the coast'))
     // Beside the stack, not among its regions: the regions are still the chapter's scenes.
-    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual([
-      'Scene 1'
-    ])
+    expect(documentRegions().map((r) => r.getAttribute('aria-label'))).toEqual(['Scene 1'])
     expect(toolbar.compareDocumentPosition(panel)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
     expect(Object.keys(useNotesStore.getState().docs)).toEqual(['ch-1'])
 
@@ -361,7 +363,7 @@ describe('App', () => {
       'layout:get': {
         sidebar: { open: true, size: 0.3, tab: 'manuscript' },
         notes: { open: false, size: 0.25 },
-        tagBar: { open: true, height: 120 }
+        tagBar: { open: true, height: 120, split: 0.4 }
       }
     })
     render(<App />)
@@ -409,7 +411,7 @@ describe('App', () => {
           tab: 'manuscript'
         },
         notes: { open: false, size: 0.25 },
-        tagBar: { open: true, height: 120 }
+        tagBar: { open: true, height: 120, split: 0.4 }
       })
     } finally {
       vi.useRealTimers()

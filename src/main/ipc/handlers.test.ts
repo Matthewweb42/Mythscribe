@@ -13,6 +13,7 @@ import {
 import { z } from 'zod'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultLayout } from '@shared/layout'
+import { EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
 import { AppStateStore } from '../appState/appStateStore'
@@ -438,6 +439,66 @@ describe('notes:get / notes:save', () => {
   })
 })
 
+describe('sceneMeta:get / sceneMeta:set (F-4.5)', () => {
+  const filled = { location: 'dark-forest', pov: 'mara', timeline: 'Day 3, after the storm' }
+
+  it('reports NO_PROJECT for both when nothing is open', async () => {
+    await expect(invoke('sceneMeta:get', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('sceneMeta:set', { id: 'x', meta: filled })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('round-trips scene and chapter metadata and stamps modified', async () => {
+    await invoke('project:create', { name: 'Meta', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.hierarchyLevel === 'scene')
+    const chapter = rows.find((r) => r.hierarchyLevel === 'chapter')
+    expect(await invoke('sceneMeta:get', { id: scene?.id ?? '' })).toEqual({
+      id: scene?.id,
+      meta: EMPTY_SCENE_META
+    })
+    const saved = await invoke('sceneMeta:set', { id: scene?.id ?? '', meta: filled })
+    expect(typeof saved.modified).toBe('string')
+    expect(await invoke('sceneMeta:get', { id: scene?.id ?? '' })).toEqual({
+      id: scene?.id,
+      meta: filled
+    })
+    await invoke('sceneMeta:set', {
+      id: chapter?.id ?? '',
+      meta: { ...EMPTY_SCENE_META, location: 'the coast' }
+    })
+    expect((await invoke('sceneMeta:get', { id: chapter?.id ?? '' })).meta).toEqual({
+      ...EMPTY_SCENE_META,
+      location: 'the coast'
+    })
+    const listed = (await invoke('tree:list', undefined)).find((r) => r.id === scene?.id)
+    expect(listed).toMatchObject({ modified: saved.modified })
+  })
+
+  it('surfaces VALIDATION for section roots and over-length fields, NOT_FOUND for unknown ids', async () => {
+    await invoke('project:create', { name: 'Meta', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const manuscript = rows.find((r) => r.sectionType === 'manuscript')
+    const scene = rows.find((r) => r.hierarchyLevel === 'scene')
+    await expect(invoke('sceneMeta:get', { id: manuscript?.id ?? '' })).rejects.toThrowError(
+      /^VALIDATION: /
+    )
+    await expect(
+      invoke('sceneMeta:set', { id: manuscript?.id ?? '', meta: filled })
+    ).rejects.toThrowError(/^VALIDATION: /)
+    await expect(invoke('sceneMeta:get', { id: 'missing' })).rejects.toThrowError(/^NOT_FOUND: /)
+    const raw = handlerFor('sceneMeta:set')
+    const result = await raw(undefined, {
+      id: scene?.id,
+      meta: { ...filled, location: 'x'.repeat(201) }
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect((await invoke('sceneMeta:get', { id: scene?.id ?? '' })).meta).toEqual(EMPTY_SCENE_META)
+  })
+})
+
 describe('editorSettings:get / editorSettings:set', () => {
   it('reports NO_PROJECT for both when nothing is open', async () => {
     await expect(invoke('editorSettings:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
@@ -623,14 +684,28 @@ describe('documentTag handlers (F-4.4)', () => {
     expect(await invoke('tag:list', undefined)).toEqual([unlinked])
   })
 
+  it('links a tag to a folder too (a chapter carries tags, F-4.5)', async () => {
+    await invoke('project:create', { name: 'Tags', format: 'novel', directory: tmp })
+    const { folder } = await seeded()
+    const rain = await invoke('tag:create', { name: 'Rain', category: 'tone' })
+    expect(await invoke('documentTag:list', { nodeId: folder })).toEqual([])
+    expect(await invoke('documentTag:add', { nodeId: folder, tagId: rain.id })).toEqual({
+      ...rain,
+      usageCount: 1
+    })
+    expect(await invoke('documentTag:list', { nodeId: folder })).toEqual([
+      { ...rain, usageCount: 1 }
+    ])
+  })
+
   it('surfaces NOT_FOUND and VALIDATION through the envelope', async () => {
     await invoke('project:create', { name: 'Tags', format: 'novel', directory: tmp })
-    const { scene, folder, section } = await seeded()
+    const { scene, section } = await seeded()
     const rain = await invoke('tag:create', { name: 'Rain', category: 'tone' })
     await expect(invoke('documentTag:list', { nodeId: 'missing' })).rejects.toThrowError(
       /^NOT_FOUND: /
     )
-    await expect(invoke('documentTag:list', { nodeId: folder })).rejects.toThrowError(
+    await expect(invoke('documentTag:list', { nodeId: section })).rejects.toThrowError(
       /^VALIDATION: /
     )
     await expect(
@@ -655,7 +730,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const next = {
       sidebar: { open: false, size: 0.3, tab: 'manuscript' as const },
       notes: { open: true, size: 0.4 },
-      tagBar: { open: true, height: 120 }
+      tagBar: { open: true, height: 120, split: 0.4 }
     }
     expect(await invoke('layout:set', next)).toEqual(next)
     expect(await invoke('layout:get', undefined)).toEqual(next)
@@ -668,7 +743,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const stored = {
       sidebar: { open: true, size: 0.2, tab: 'manuscript' as const },
       notes: { open: false, size: 0.25 },
-      tagBar: { open: true, height: 120 }
+      tagBar: { open: true, height: 120, split: 0.4 }
     }
     await invoke('layout:set', stored)
     const raw = handlerFor('layout:set')
@@ -691,7 +766,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const next = {
       sidebar: { open: true, size: 0.3, tab: 'manuscript' as const },
       notes: { open: true, size: 0.3 },
-      tagBar: { open: true, height: 120 }
+      tagBar: { open: true, height: 120, split: 0.4 }
     }
     await invoke('layout:set', next)
     const list = await invoke('recents:list', undefined)
@@ -706,7 +781,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const bothMaxed = {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
       notes: { open: true, size: 0.5 },
-      tagBar: { open: true, height: 120 }
+      tagBar: { open: true, height: 120, split: 0.4 }
     }
     const raw = handlerFor('layout:set')
     const result = await raw(undefined, bothMaxed)
@@ -728,7 +803,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
         layout: {
           sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
           notes: { open: true, size: 0.5 },
-          tagBar: { open: true, height: 120 }
+          tagBar: { open: true, height: 120, split: 0.4 }
         }
       })
     )

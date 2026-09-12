@@ -15,6 +15,7 @@ import { NotesPanel } from '@renderer/features/editor/NotesPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
+import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useEditorSettingsStore } from '@renderer/features/editor/settingsStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
@@ -59,13 +60,15 @@ export function App(): React.JSX.Element {
   // F-3.1: the loaded document goes with it. F-3.6: so do the formatting settings. F-3.7: and
   // the loaded notes (the panel layout is app-wide, F-7.2, so it stays). F-4.2: and the tag
   // bank, whose failure toasts on its own and never blocks the tree. F-4.4: and the document
-  // tag links, loaded per document by the tag bar.
+  // tag links, loaded per document by the tag bar. F-4.5: and the scene metadata, loaded per
+  // node by the metadata pane.
   useEffect(() => {
     const tree = useTreeStore.getState()
     if (projectId === null) {
       tree.clear()
       useDocumentStore.getState().clear()
       useNotesStore.getState().clear()
+      useSceneMetaStore.getState().clear()
       useEditorSettingsStore.getState().clear()
       useTagStore.getState().clear()
       useDocumentTagStore.getState().clear()

@@ -34,9 +34,17 @@ export const TAG_BAR_MIN_HEIGHT = 100
 /** The share of the window height the tag bar may take at most. */
 export const TAG_BAR_MAX_FRACTION = 0.6
 
-const tagBarSchema = z.object({ open: z.boolean(), height: z.number().min(TAG_BAR_MIN_HEIGHT) })
+/** The share of the tag bar's width the metadata pane may take (F-4.5), as `[min, max]`. */
+export const TAG_BAR_SPLIT_LIMITS = [0.3, 0.7] as const
 
-const DEFAULT_TAG_BAR = { open: true, height: 120 } as const
+const tagBarSchema = z.object({
+  open: z.boolean(),
+  height: z.number().min(TAG_BAR_MIN_HEIGHT),
+  // F-4.5: the metadata pane's share of the bar's width; a fraction of the bar, not the window.
+  split: z.number().min(TAG_BAR_SPLIT_LIMITS[0]).max(TAG_BAR_SPLIT_LIMITS[1])
+})
+
+const DEFAULT_TAG_BAR = { open: true, height: 120, split: 0.4 } as const
 
 export const Layout = z.object({
   // F-7.3: the sidebar's active tab.
@@ -54,13 +62,16 @@ export type Layout = z.infer<typeof Layout>
 export const StoredLayout = z.object({
   sidebar: sidebarSchema.extend({ tab: SidebarTabId.default('manuscript') }),
   notes: Layout.shape.notes,
-  // A layout written before F-4.4 has no tag bar and parses to the default one.
-  tagBar: Layout.shape.tagBar.default({ ...DEFAULT_TAG_BAR })
+  // A layout written before F-4.4 has no tag bar and parses to the default one; one written
+  // before F-4.5 has a tag bar without `split`, which parses to the default split on its own.
+  tagBar: tagBarSchema
+    .extend({ split: tagBarSchema.shape.split.default(DEFAULT_TAG_BAR.split) })
+    .default({ ...DEFAULT_TAG_BAR })
 })
 
 /**
  * A fresh install: the Manuscript tab open at just under a quarter, the notes closed at a
- * quarter, the tag bar open at 120 px.
+ * quarter, the tag bar open at 120 px with the metadata pane at 40 % of it.
  */
 export function defaultLayout(): Layout {
   return {
@@ -74,6 +85,12 @@ export function defaultLayout(): Layout {
 export function clampTagBarHeight(height: number, windowInnerHeight: number): number {
   const max = Math.max(TAG_BAR_MIN_HEIGHT, windowInnerHeight * TAG_BAR_MAX_FRACTION)
   return Math.min(max, Math.max(TAG_BAR_MIN_HEIGHT, height))
+}
+
+/** The metadata pane's share of the tag bar clamped to `TAG_BAR_SPLIT_LIMITS` (F-4.5). */
+export function clampTagBarSplit(split: number): number {
+  const [min, max] = TAG_BAR_SPLIT_LIMITS
+  return Math.min(max, Math.max(min, split))
 }
 
 /** `size` clamped to the panel's own `[min, max]`. */

@@ -4,6 +4,7 @@ import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appStat
 import type { ProjectDialogs } from '../dialogs'
 import { getDocumentContent, saveDocument } from '../document/documentStore'
 import { getNotes, saveNotes } from '../document/notesStore'
+import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
 import { getEditorSettings, setEditorSettings } from '../project/settingsStore'
@@ -106,6 +107,12 @@ export function registerHandlers({
   register('notes:get', ({ id }) => getNotes(manager.require().connection.orm, id))
 
   register('notes:save', ({ id, notes }) => saveNotes(manager.require().connection.orm, id, notes))
+
+  register('sceneMeta:get', ({ id }) => getSceneMeta(manager.require().connection.orm, id))
+
+  register('sceneMeta:set', ({ id, meta }) =>
+    setSceneMeta(manager.require().connection.orm, id, meta)
+  )
 
   register('editorSettings:get', () => {
     const session = manager.require()

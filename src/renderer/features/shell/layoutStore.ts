@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   clampForEditorMin,
   clampTagBarHeight,
+  clampTagBarSplit,
   defaultLayout,
   type Layout,
   type LayoutPanel
@@ -44,6 +45,11 @@ interface LayoutState {
    * window height, then schedules the write; a no-op when the clamp lands on the current value.
    */
   setTagBarHeight: (height: number) => void
+  /**
+   * Sets the metadata pane's share of the tag bar's width (F-4.5), clamped to 30–70 %, then
+   * schedules the write; a no-op when the clamp lands on the current value.
+   */
+  setTagBarSplit: (split: number) => void
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -141,6 +147,13 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     const clamped = clampTagBarHeight(height, window.innerHeight)
     if (clamped === base.tagBar.height) return
     schedule({ ...base, tagBar: { ...base.tagBar, height: clamped } }, base)
+  },
+
+  setTagBarSplit(split) {
+    const base = get().layout
+    const clamped = clampTagBarSplit(split)
+    if (clamped === base.tagBar.split) return
+    schedule({ ...base, tagBar: { ...base.tagBar, split: clamped } }, base)
   }
 }))
 
@@ -162,6 +175,18 @@ export function resizePanelBy(panel: LayoutPanel, deltaPx: number): void {
 export function resizeTagBarBy(deltaPx: number): void {
   const state = useLayoutStore.getState()
   state.setTagBarHeight(state.layout.tagBar.height + deltaPx)
+}
+
+/**
+ * Applies a drag or key step from the tag bar's split handle (F-4.5): the px delta becomes a
+ * fraction of the bar's own rendered width (`barWidthPx`, measured by the bar at drag time),
+ * not of the window, and is added to the metadata pane's share. Ignored while the bar has no
+ * width (not laid out yet).
+ */
+export function resizeTagBarSplitBy(deltaPx: number, barWidthPx: number): void {
+  if (barWidthPx <= 0) return
+  const state = useLayoutStore.getState()
+  state.setTagBarSplit(state.layout.tagBar.split + deltaPx / barWidthPx)
 }
 
 /** Drops the timer, the revert baseline, and the registration, then restores the defaults. For tests only. */

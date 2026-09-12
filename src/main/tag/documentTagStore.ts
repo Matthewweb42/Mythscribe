@@ -1,24 +1,22 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, eq } from 'drizzle-orm'
 import type { Tag } from '@shared/ipc/contract'
-import { documentTag, tag, type NodeRow } from '../db/schema'
+import { documentTag, tag } from '../db/schema'
 import { AppError } from '../ipc/errors'
-import { getNode } from '../tree/treeStore'
+import { requireContentTarget } from '../tree/contentTarget'
 import { getTag, getTagWithUsage, type TagDb } from './tagStore'
 
 /**
- * The document ↔ tag links (F-4.4) behind the tag bar. Every write returns the tag with its
- * fresh usage count, so the renderer can update the bank in place instead of re-listing.
+ * The node ↔ tag links (F-4.4) behind the tag bar. Documents and folders both carry tags (the
+ * bar mounts on scenes and, in the stacked view, on the chapter or part itself, F-4.5); only the
+ * section roots are refused, through the same `requireContentTarget` rule as notes and scene
+ * metadata. Every write returns the tag with its fresh usage count, so the renderer can update
+ * the bank in place instead of re-listing.
  */
 
-/** The row behind `nodeId` if it is a document; NOT_FOUND or VALIDATION otherwise. */
-function requireDocumentNode(db: TagDb, nodeId: string): NodeRow {
-  const row = getNode(db, nodeId)
-  if (!row) throw new AppError('NOT_FOUND', 'Document not found', { id: nodeId })
-  if (row.kind !== 'document') {
-    throw new AppError('VALIDATION', 'Only documents carry tags', { id: nodeId, kind: row.kind })
-  }
-  return row
+/** The row behind `nodeId` if it can carry tags; NOT_FOUND or VALIDATION otherwise. */
+function requireTaggable(db: TagDb, nodeId: string): void {
+  requireContentTarget(db, nodeId, 'tags')
 }
 
 /** The tag behind `tagId`; NOT_FOUND otherwise. */
@@ -42,9 +40,9 @@ function findLink(db: TagDb, nodeId: string, tagId: string): { id: string } | un
     .get()
 }
 
-/** The tags linked to a document (F-4.4), ordered by name, each with its usage count. */
+/** The tags linked to a node (F-4.4), ordered by name, each with its usage count. */
 export function listDocumentTags(db: TagDb, nodeId: string): Tag[] {
-  requireDocumentNode(db, nodeId)
+  requireTaggable(db, nodeId)
   const ids = db
     .select({ tagId: documentTag.tagId })
     .from(documentTag)
@@ -59,13 +57,13 @@ export function listDocumentTags(db: TagDb, nodeId: string): Tag[] {
 }
 
 /**
- * Links a tag to a document (F-4.4). Linking an already-linked pair is a no-op. The tag is
+ * Links a tag to a node (F-4.4). Linking an already-linked pair is a no-op. The tag is
  * checked before the insert so an unknown id is NOT_FOUND, not a raw foreign-key failure.
  * Returns the tag with its usage count after the link.
  */
 export function addDocumentTag(db: TagDb, nodeId: string, tagId: string): Tag {
   return db.transaction((tx) => {
-    requireDocumentNode(tx, nodeId)
+    requireTaggable(tx, nodeId)
     requireTag(tx, tagId)
     if (!findLink(tx, nodeId, tagId)) {
       tx.insert(documentTag)
@@ -77,12 +75,12 @@ export function addDocumentTag(db: TagDb, nodeId: string, tagId: string): Tag {
 }
 
 /**
- * Removes a document ↔ tag link (F-4.4). Removing a link that is already gone is a no-op.
+ * Removes a node ↔ tag link (F-4.4). Removing a link that is already gone is a no-op.
  * Returns the tag with its usage count after the removal.
  */
 export function removeDocumentTag(db: TagDb, nodeId: string, tagId: string): Tag {
   return db.transaction((tx) => {
-    requireDocumentNode(tx, nodeId)
+    requireTaggable(tx, nodeId)
     requireTag(tx, tagId)
     tx.delete(documentTag)
       .where(and(eq(documentTag.nodeId, nodeId), eq(documentTag.tagId, tagId)))

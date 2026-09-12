@@ -10,6 +10,7 @@ import {
   resetLayoutStore,
   resizePanelBy,
   resizeTagBarBy,
+  resizeTagBarSplitBy,
   useLayout,
   useLayoutStore
 } from './layoutStore'
@@ -51,7 +52,7 @@ function deferredClient(stored: Layout): {
 const stored: Layout = {
   sidebar: { open: true, size: 0.3, tab: 'manuscript' },
   notes: { open: true, size: 0.2 },
-  tagBar: { open: true, height: 150 }
+  tagBar: { open: true, height: 150, split: 0.4 }
 }
 let sets: PendingSet[]
 let gets: (() => void)[]
@@ -126,7 +127,7 @@ describe('useLayoutStore', () => {
     expect(sets[0]?.value).toEqual({
       sidebar: { open: true, size: 0.26, tab: 'manuscript' },
       notes: { open: false, size: 0.2 },
-      tagBar: { open: true, height: 150 }
+      tagBar: { open: true, height: 150, split: 0.4 }
     })
   })
 
@@ -191,7 +192,7 @@ describe('useLayoutStore', () => {
       layout: {
         sidebar: { open: true, size: 0.35, tab: 'manuscript' },
         notes: { open: false, size: 0.5 },
-        tagBar: { open: true, height: 120 }
+        tagBar: { open: true, height: 120, split: 0.4 }
       }
     })
     store().toggle('notes')
@@ -279,9 +280,9 @@ describe('tag bar (F-4.4)', () => {
   it('toggleTagBar flips the bar, keeps its height, and writes once after the debounce', async () => {
     await load()
     store().toggleTagBar()
-    expect(store().layout.tagBar).toEqual({ open: false, height: 150 })
+    expect(store().layout.tagBar).toEqual({ open: false, height: 150, split: 0.4 })
     store().toggleTagBar()
-    expect(store().layout.tagBar).toEqual({ open: true, height: 150 })
+    expect(store().layout.tagBar).toEqual({ open: true, height: 150, split: 0.4 })
     await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
     expect(sets).toHaveLength(1)
     expect(sets[0]?.value).toEqual(stored)
@@ -300,7 +301,7 @@ describe('tag bar (F-4.4)', () => {
     expect(store().layout.tagBar.height).toBe(240)
     await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
     expect(sets).toHaveLength(1)
-    expect(sets[0]?.value.tagBar).toEqual({ open: true, height: 240 })
+    expect(sets[0]?.value.tagBar).toEqual({ open: true, height: 240, split: 0.4 })
     expect(sets[0]?.value.sidebar).toEqual(stored.sidebar)
   })
 
@@ -324,6 +325,45 @@ describe('tag bar (F-4.4)', () => {
     expect(store().layout.tagBar.height).toBe(100)
     resizeTagBarBy(1000)
     expect(store().layout.tagBar.height).toBe(480)
+  })
+})
+
+describe('tag bar split (F-4.5)', () => {
+  it('setTagBarSplit clamps to 30–70 % of the bar and writes once after the debounce', async () => {
+    await load()
+    store().setTagBarSplit(0.5)
+    expect(store().layout.tagBar.split).toBe(0.5)
+    store().setTagBarSplit(0.1)
+    expect(store().layout.tagBar.split).toBe(0.3)
+    store().setTagBarSplit(0.9)
+    expect(store().layout.tagBar.split).toBe(0.7)
+    expect(sets).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(1)
+    expect(sets[0]?.value.tagBar).toEqual({ open: true, height: 150, split: 0.7 })
+    expect(sets[0]?.value.sidebar).toEqual(stored.sidebar)
+  })
+
+  it('setTagBarSplit ignores a split that clamps to the current value without scheduling a write', async () => {
+    await load()
+    store().setTagBarSplit(0.4)
+    store().setTagBarSplit(0.3)
+    store().setTagBarSplit(0.05) // clamps to 0.3, already there
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(1)
+    expect(sets[0]?.value.tagBar.split).toBe(0.3)
+  })
+
+  it("resizeTagBarSplitBy turns a px delta into a fraction of the bar's own width, not the window", async () => {
+    await load()
+    resizeTagBarSplitBy(50, 500)
+    expect(store().layout.tagBar.split).toBeCloseTo(0.5)
+    resizeTagBarSplitBy(-100, 500)
+    expect(store().layout.tagBar.split).toBeCloseTo(0.3)
+    resizeTagBarSplitBy(1000, 500)
+    expect(store().layout.tagBar.split).toBe(0.7)
+    resizeTagBarSplitBy(100, 0) // not laid out: ignored
+    expect(store().layout.tagBar.split).toBe(0.7)
   })
 })
 

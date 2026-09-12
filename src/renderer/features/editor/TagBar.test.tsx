@@ -10,7 +10,10 @@ import {
 } from '@renderer/features/tags/documentTagStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
+import { treeFixture } from '@renderer/features/manuscript/treeFixture'
+import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetSceneMetaStore } from './sceneMetaStore'
 import { TagBar } from './TagBar'
 
 type Handler = (input: unknown) => unknown
@@ -51,6 +54,10 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
         links[nodeId] = links[nodeId].filter((id) => id !== tagId)
         return { ...tag, usageCount: tag.usageCount - 1 } as Output<C>
       }
+      if (channel === 'sceneMeta:get') {
+        const { id } = input as Input<'sceneMeta:get'>
+        return { id, meta: { location: '', pov: '', timeline: '' } } as Output<C>
+      }
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -83,6 +90,8 @@ beforeEach(() => {
   resetTagStore()
   resetDocumentTagStore()
   resetLayoutStore()
+  resetSceneMetaStore()
+  useTreeStore.setState({ ...buildIndex([]), loaded: true })
   useDialogStore.setState({ modals: [], toasts: [] })
   vi.stubGlobal('innerHeight', 800)
 })
@@ -223,7 +232,11 @@ describe('TagBar (F-4.4)', () => {
     expect(within(bar()).getByRole('separator', { name: 'Resize tag bar' })).toBeInTheDocument()
     await userEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(useLayoutStore.getState().layout.tagBar).toEqual({ open: false, height: 120 })
+    expect(useLayoutStore.getState().layout.tagBar).toEqual({
+      open: false,
+      height: 120,
+      split: 0.4
+    })
     expect(chips()).toHaveLength(0)
     expect(within(bar()).queryByRole('button', { name: 'Add tag' })).not.toBeInTheDocument()
     expect(within(bar()).queryByRole('separator')).not.toBeInTheDocument()
@@ -263,5 +276,30 @@ describe('TagBar (F-4.4)', () => {
     expect(calls).toContainEqual(['documentTag:list', { nodeId: 'sc-2' }])
     expect(screen.queryByRole('searchbox', { name: 'Search tags' })).not.toBeInTheDocument()
     expect(chips()).toHaveLength(0)
+  })
+
+  it('shows the metadata pane behind a persisted split only for a node with a hierarchy level (F-4.5)', async () => {
+    install()
+    await mount()
+    expect(screen.queryByRole('group', { name: 'Scene metadata' })).toBeNull()
+    expect(screen.queryByRole('separator', { name: 'Resize metadata pane' })).toBeNull()
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    const pane = await screen.findByRole('group', { name: 'Scene metadata' })
+    expect(pane).toBeInTheDocument()
+    const split = screen.getByRole('separator', { name: 'Resize metadata pane' })
+    expect(split).toHaveAttribute('aria-valuenow', '40')
+    expect(split).toHaveAttribute('aria-valuemin', '30')
+    expect(split).toHaveAttribute('aria-valuemax', '70')
+    expect(chipNames()).toEqual(['Remove dark-forest'])
+    // jsdom lays nothing out: give the pane row a width so a key step becomes a fraction.
+    const toggle = screen.getByRole('button', { name: /^Tags/ })
+    const row = document.getElementById(toggle.getAttribute('aria-controls') ?? '')
+    if (!row) throw new Error('pane row not found')
+    Object.defineProperty(row, 'clientWidth', { value: 800, configurable: true })
+    await act(async () => {
+      fireEvent.keyDown(split, { key: 'ArrowLeft' })
+    })
+    expect(useLayoutStore.getState().layout.tagBar.split).toBeLessThan(0.4)
+    expect(useLayoutStore.getState().layout.tagBar.split).toBeGreaterThanOrEqual(0.3)
   })
 })

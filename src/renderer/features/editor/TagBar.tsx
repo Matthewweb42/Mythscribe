@@ -1,29 +1,40 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { TAG_BAR_MAX_FRACTION, TAG_BAR_MIN_HEIGHT } from '@shared/layout'
+import { TAG_BAR_MAX_FRACTION, TAG_BAR_MIN_HEIGHT, TAG_BAR_SPLIT_LIMITS } from '@shared/layout'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
-import { resizeTagBarBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
+import {
+  resizeTagBarBy,
+  resizeTagBarSplitBy,
+  useLayoutStore
+} from '@renderer/features/shell/layoutStore'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
+import { MetadataPane } from './MetadataPane'
 import { TagPicker } from './TagPicker'
 
 const BUTTON =
   'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-expanded:text-fg'
 
 /**
- * The document tag bar (F-4.4) above the single-document editor: the linked tags as colored
- * chips with a remove button each, an "Add tag" picker of the unassigned tags, a collapse
- * toggle, and a draggable height (100 px to 60 % of the window), both kept in the app-wide
- * layout. Takes only `id`: it loads the document's links itself and reads the tag records from
- * the bank by id, so a rename or recolor in the Tags tab shows here at once. The inline-tag
- * occurrence list arrives with F-4.6 and the metadata pane with F-4.5.
+ * The tag bar (F-4.4) above the editor of a document and, in the stacked view, of the chapter or
+ * part itself: the linked tags as colored chips with a remove button each, an "Add tag" picker
+ * of the unassigned tags, a collapse toggle, and a draggable height (100 px to 60 % of the
+ * window), both kept in the app-wide layout. For a node with a hierarchy level (scene, chapter,
+ * part) the metadata pane (F-4.5) sits to the left of the tags, behind a draggable split of
+ * 30–70 % of the bar's width, also in the layout. Takes only `id`: it loads the node's links
+ * itself and reads the tag records from the bank by id, so a rename or recolor in the Tags tab
+ * shows here at once. The inline-tag occurrence list arrives with F-4.6.
  */
 export function TagBar({ id }: { id: string }): React.JSX.Element {
   const tagBar = useLayoutStore((s) => s.layout.tagBar)
   const toggleTagBar = useLayoutStore((s) => s.toggleTagBar)
+  const withMetadata = useTreeStore((s) => (s.byId[id]?.hierarchyLevel ?? null) !== null)
+  /** The row holding both panes; the split drag is measured against its width. */
+  const panes = useRef<HTMLDivElement>(null)
   const ids = useDocumentTagStore((s) => s.tagIdsByNode[id])
   const load = useDocumentTagStore((s) => s.load)
   const add = useDocumentTagStore((s) => s.add)
@@ -95,26 +106,46 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
         ) : null}
       </div>
       {tagBar.open ? (
-        <div id={bodyId} className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
-          {linked.length === 0 ? (
-            <p className="m-0 text-xs text-fg-muted">No tags on this document.</p>
-          ) : (
-            <ul
-              role="list"
-              aria-label="Document tags"
-              className="m-0 flex list-none flex-wrap gap-1.5 p-0"
+        <div id={bodyId} ref={panes} className="flex min-h-0 flex-1">
+          {withMetadata ? (
+            <div
+              className="relative shrink-0 pr-3 pl-4"
+              style={{ width: `${tagBar.split * 100}%` }}
             >
-              {linked.map((tagId) => (
-                <TagChip
-                  key={tagId}
-                  id={tagId}
-                  onRemove={() => {
-                    remove(id, tagId).catch(report)
-                  }}
-                />
-              ))}
-            </ul>
-          )}
+              <MetadataPane id={id} />
+              <ResizeHandle
+                side="right"
+                value={tagBar.split}
+                min={TAG_BAR_SPLIT_LIMITS[0]}
+                max={TAG_BAR_SPLIT_LIMITS[1]}
+                ariaLabel="Resize metadata pane"
+                onChange={(deltaPx) =>
+                  resizeTagBarSplitBy(deltaPx, panes.current?.clientWidth ?? 0)
+                }
+              />
+            </div>
+          ) : null}
+          <div className="min-w-0 flex-1 overflow-y-auto px-4 pb-2">
+            {linked.length === 0 ? (
+              <p className="m-0 text-xs text-fg-muted">No tags on this document.</p>
+            ) : (
+              <ul
+                role="list"
+                aria-label="Document tags"
+                className="m-0 flex list-none flex-wrap gap-1.5 p-0"
+              >
+                {linked.map((tagId) => (
+                  <TagChip
+                    key={tagId}
+                    id={tagId}
+                    onRemove={() => {
+                      remove(id, tagId).catch(report)
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       ) : null}
       {tagBar.open ? (

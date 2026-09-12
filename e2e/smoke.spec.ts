@@ -584,17 +584,51 @@ test('create, close, reopen a project on disk', async () => {
   await expect(tagBar.getByRole('separator')).toHaveCount(0)
   await expect
     .poll(async () => (await getLayout()).tagBar, { timeout: 3000 })
-    .toEqual({ open: false, height: 120 })
+    .toEqual({ open: false, height: 120, split: 0.4 })
   await tagBarToggle.click()
   await expect(tagBarToggle).toHaveAttribute('aria-expanded', 'true')
   await expect(tagBar.getByRole('button', { name: 'Add tag' })).toBeVisible()
+
+  // F-4.5: the metadata pane sits beside the chips for a scene. Location autocompletes from the
+  // setting tags (typing "dark" offers dark-forest, Enter fills it in), POV and the timeline
+  // position are free text. Showing another scene flushes the edits and coming back reloads
+  // them from disk. The split between the panes moves from its handle and persists.
+  const metadata = tagBar.getByRole('group', { name: 'Scene metadata' })
+  const location = metadata.getByRole('combobox', { name: 'Location' })
+  await expect(location).toBeEnabled()
+  await location.fill('dark')
+  await expect(
+    metadata.getByRole('listbox', { name: 'Location suggestions' }).getByRole('option')
+  ).toHaveText(['dark-forest'])
+  await location.press('Enter')
+  await expect(location).toHaveValue('dark-forest')
+  await metadata.getByRole('combobox', { name: 'POV' }).fill('Mara')
+  await metadata.getByRole('textbox', { name: 'Timeline' }).fill('Day 3, after the storm')
+  await opening.getByText('Opening', { exact: true }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Opening')
+  await expect(metadata.getByRole('combobox', { name: 'Location' })).toHaveValue('')
+  await scene1.getByText('Scene 1', { exact: true }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await expect(metadata.getByRole('combobox', { name: 'Location' })).toHaveValue('dark-forest')
+  await expect(metadata.getByRole('combobox', { name: 'POV' })).toHaveValue('Mara')
+  await expect(metadata.getByRole('textbox', { name: 'Timeline' })).toHaveValue(
+    'Day 3, after the storm'
+  )
+  const splitHandle = tagBar.getByRole('separator', { name: 'Resize metadata pane' })
+  await expect(splitHandle).toHaveAttribute('aria-valuenow', '40')
+  await splitHandle.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect
+    .poll(async () => (await getLayout()).tagBar.split, { timeout: 3000 })
+    .toBeGreaterThan(0.4)
 
   // F-2.5/F-3.8: selecting Chapter 1 stacks Opening and Scene 1 in tree order, each as its own
   // region with the web-novel scene break between them; typing into Opening leaves Scene 1
   // untouched and autosaves under Opening's own id.
   await chapter1.getByText('Chapter 1', { exact: true }).click()
   await expect(page.getByTestId('selected-title')).toHaveText('Chapter 1')
-  const regions = page.getByRole('region')
+  // The folder's own tag bar (F-4.5) is a region too; the document regions are the sections.
+  const regions = page.locator('section[aria-label]')
   await expect(regions).toHaveCount(2)
   await expect(regions.nth(0)).toHaveAttribute('aria-label', 'Opening')
   await expect(regions.nth(1)).toHaveAttribute('aria-label', 'Scene 1')

@@ -55,7 +55,21 @@ describe('AppStateStore', () => {
     expect(new AppStateStore(file).get().layout).toEqual({
       ...layout,
       sidebar: { ...layout.sidebar, tab: 'manuscript' },
-      tagBar: { open: true, height: 120 }
+      tagBar: { open: true, height: 120, split: 0.4 }
+    })
+  })
+
+  it('parses a file written before F-4.5 (tag bar without a split) with the default split', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const layout = {
+      sidebar: { open: true, size: 0.25, tab: 'manuscript' },
+      notes: { open: false, size: 0.25 },
+      tagBar: { open: false, height: 240 }
+    }
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [], layout }), 'utf8')
+    expect(new AppStateStore(file).get().layout).toEqual({
+      ...layout,
+      tagBar: { open: false, height: 240, split: 0.4 }
     })
   })
 
@@ -72,7 +86,7 @@ describe('AppStateStore', () => {
     const layout = {
       sidebar: { open: false, size: 0.3, tab: 'manuscript' as const },
       notes: { open: true, size: 0.4 },
-      tagBar: { open: false, height: 240 }
+      tagBar: { open: false, height: 240, split: 0.55 }
     }
     expect(store.update((s) => ({ ...s, layout })).layout).toEqual(layout)
     expect(new AppStateStore(file).get().layout).toEqual(layout)

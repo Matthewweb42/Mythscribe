@@ -64,9 +64,13 @@ describe('listDocumentTags', () => {
     expect(listDocumentTags(db, second)[0]?.usageCount).toBe(2)
   })
 
-  it('refuses an unknown node and a non-document', () => {
+  it("lists a folder's tags too (a chapter carries tags, F-4.5), but refuses an unknown node and a section root", () => {
+    const chapter = nodeOfKind('folder')
+    const rain = createTag(db, { name: 'Rain', category: 'tone' })
+    expect(listDocumentTags(db, chapter)).toEqual([])
+    addDocumentTag(db, chapter, rain.id)
+    expect(listDocumentTags(db, chapter)).toEqual([{ ...rain, usageCount: 1 }])
     expectCode(() => listDocumentTags(db, 'missing'), 'NOT_FOUND')
-    expectCode(() => listDocumentTags(db, nodeOfKind('folder')), 'VALIDATION')
     expectCode(() => listDocumentTags(db, nodeOfKind('section')), 'VALIDATION')
   })
 })
@@ -81,10 +85,9 @@ describe('addDocumentTag', () => {
     expect(listTags(db)).toEqual([{ ...rain, usageCount: 1 }])
   })
 
-  it('refuses an unknown node, a non-document, and an unknown tag, and writes nothing', () => {
+  it('refuses an unknown node, a section root, and an unknown tag, and writes nothing', () => {
     const rain = createTag(db, { name: 'Rain', category: 'tone' })
     expectCode(() => addDocumentTag(db, 'missing', rain.id), 'NOT_FOUND')
-    expectCode(() => addDocumentTag(db, nodeOfKind('folder'), rain.id), 'VALIDATION')
     expectCode(() => addDocumentTag(db, nodeOfKind('section'), rain.id), 'VALIDATION')
     expectCode(() => addDocumentTag(db, nodeOfKind('document'), 'missing'), 'NOT_FOUND')
     expect(getTagWithUsage(db, rain.id)?.usageCount).toBe(0)
@@ -112,10 +115,10 @@ describe('removeDocumentTag', () => {
     expect(listDocumentTags(db, second)).toHaveLength(1)
   })
 
-  it('refuses an unknown node, a non-document, and an unknown tag', () => {
+  it('refuses an unknown node, a section root, and an unknown tag', () => {
     const rain = createTag(db, { name: 'Rain', category: 'tone' })
     expectCode(() => removeDocumentTag(db, 'missing', rain.id), 'NOT_FOUND')
-    expectCode(() => removeDocumentTag(db, nodeOfKind('folder'), rain.id), 'VALIDATION')
+    expectCode(() => removeDocumentTag(db, nodeOfKind('section'), rain.id), 'VALIDATION')
     expectCode(() => removeDocumentTag(db, nodeOfKind('document'), 'missing'), 'NOT_FOUND')
   })
 })

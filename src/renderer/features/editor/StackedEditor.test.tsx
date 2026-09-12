@@ -75,6 +75,11 @@ function fakeClient(): {
         }
         return created as Output<C>
       }
+      if (channel === 'documentTag:list') return [] as Output<C>
+      if (channel === 'sceneMeta:get') {
+        const { id } = input as Input<'sceneMeta:get'>
+        return { id, meta: { location: '', pov: '', timeline: '' } } as Output<C>
+      }
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -110,7 +115,9 @@ async function release(id: string, content: TiptapNodeT | null): Promise<void> {
   })
 }
 
-const regions = (): HTMLElement[] => screen.getAllByRole('region')
+/** The document regions (`<section>`); the folder's own tag bar (F-4.5) is a region too but not a document. */
+const regions = (): HTMLElement[] =>
+  screen.getAllByRole('region').filter((r) => r.tagName === 'SECTION')
 const regionNames = (): string[] => regions().map((r) => r.getAttribute('aria-label') ?? '')
 const boxIn = (region: HTMLElement): HTMLElement =>
   within(region).getByRole('textbox', { name: 'Document' })
@@ -350,7 +357,7 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     loadTree(['sc-1'])
     useTreeStore.getState().select('ch-1')
     render(<StackedEditor folderId="ch-1" format="novel" />)
-    expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('region').filter((r) => r.tagName === 'SECTION')).toEqual([])
     expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
     expect(screen.getByText('Nothing here yet. Add a scene to start writing.')).toBeInTheDocument()
 
@@ -386,6 +393,6 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     expect(
       screen.getByText('Nothing here yet. Add a chapter first, then a scene.')
     ).toBeInTheDocument()
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add a scene' })).not.toBeInTheDocument()
   })
 })

@@ -3,6 +3,7 @@ import { EditorSettings } from '../editorSettings'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
 import { MatterTemplateId } from '../matterTemplates'
+import { SceneMeta } from '../sceneMeta'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
 import { TagTemplateId } from '../tagTemplates'
 import { TiptapNode } from '../tiptap'
@@ -175,6 +176,20 @@ export const contract = {
     output: z.object({ modified: z.string() })
   },
   /**
+   * A node's scene metadata (F-4.5): location, POV, and timeline position; empty strings until
+   * something is written. Documents and folders both qualify (scenes, chapters, parts); section
+   * roots are refused with VALIDATION. `sceneMeta:set` is the write path.
+   */
+  'sceneMeta:get': {
+    input: z.object({ id: z.string() }),
+    output: z.object({ id: z.string(), meta: SceneMeta })
+  },
+  /** Replaces a node's scene metadata (F-4.5) and stamps the row's `modified`. Same refusals as `sceneMeta:get`. */
+  'sceneMeta:set': {
+    input: z.object({ id: z.string(), meta: SceneMeta }),
+    output: z.object({ modified: z.string() })
+  },
+  /**
    * The project's editor formatting (F-3.6). A missing or unreadable row answers with the
    * format's defaults, so the editor always has something to apply.
    */
@@ -222,12 +237,13 @@ export const contract = {
     output: z.object({ created: z.array(Tag), skipped: z.array(z.string()) })
   },
   /**
-   * The tags linked to a document (F-4.4), ordered by name. NOT_FOUND for an unknown node id;
-   * VALIDATION when the node is not a document.
+   * The tags linked to a node (F-4.4), ordered by name. Documents and folders both carry tags
+   * (the bar mounts on a chapter or part in the stacked view, F-4.5); NOT_FOUND for an unknown
+   * node id, VALIDATION for a section root.
    */
   'documentTag:list': { input: z.object({ nodeId: z.string() }), output: z.array(Tag) },
   /**
-   * Links a tag to a document (F-4.4); linking an already-linked tag is a no-op. Returns the tag
+   * Links a tag to a node (F-4.4); linking an already-linked tag is a no-op. Returns the tag
    * with its usage count after the link. Same refusals as `documentTag:list`, plus NOT_FOUND for
    * an unknown tag id.
    */
