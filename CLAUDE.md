@@ -103,7 +103,7 @@ npm run build:win      # installer via electron-builder
 ## Dev environment
 
 - The author develops on WSL2 (Ubuntu 24.04, arm64) with WSLg, so Electron can show a window. Electron needs these system packages once: `sudo apt-get install -y libnss3 libnspr4 libasound2t64`. Without them `npm run test:e2e` and `npm run dev` fail with `libnspr4.so: cannot open shared object file`.
-- The working clone is `~/code/mythscribe` on the WSL ext4 filesystem (moved 2026-09-11). The full gate suite runs in about 30 seconds there. Do not work from the old `/mnt/c/Coding/mythscribe` copy: on that mount every gate pass took minutes and Vitest workers timed out starting. Windows editors reach the clone through `\\wsl.localhost\Ubuntu\home\lostfromlight\code\mythscribe`.
+- The working clone is `~/coding/mythscribe` on the WSL ext4 filesystem (moved 2026-09-11). The full gate suite runs in about 30 seconds there. Do not work from the old `/mnt/c/Coding/mythscribe` copy: on that mount every gate pass took minutes and Vitest workers timed out starting. Windows editors reach the clone through `\\wsl.localhost\Ubuntu\home\lostfromlight\coding\mythscribe`.
 
 ## Stack (approved)
 
