@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { treeContextMenuItems } from './contextMenuItems'
+import { matterTemplatesFor } from '@shared/matterTemplates'
+import { templateIdOf, treeContextMenuItems } from './contextMenuItems'
 import { treeFixture } from './treeFixture'
 import { buildIndex } from './treeStore'
 
 const index = buildIndex(treeFixture)
 const ids = (nodeId: string): string[] =>
   treeContextMenuItems(index, nodeId, 'webnovel').map((item) => item.id)
+const labels = (nodeId: string): string[] =>
+  treeContextMenuItems(index, nodeId, 'webnovel').map((item) => item.label)
+const templateIds = (section: 'front' | 'end'): string[] =>
+  matterTemplatesFor(section).map((template) => `template:${template.id}`)
 
 describe('treeContextMenuItems', () => {
   it('offers every level plus the generic items on a chapter, labelled by format', () => {
@@ -57,16 +62,52 @@ describe('treeContextMenuItems', () => {
     ])
   })
 
-  it('offers only the generic items (plus rename, duplicate, and delete on documents) in front and end matter', () => {
+  it('offers the generic items, then the section templates, then rename, duplicate, and delete on a front-matter document (F-2.6)', () => {
     expect(ids('title-page')).toEqual([
       'new-generic-document',
       'new-generic-folder',
+      ...templateIds('front'),
       'rename',
       'duplicate',
       'delete'
     ])
-    expect(ids('front')).toEqual(['new-generic-document', 'new-generic-folder'])
-    expect(ids('end')).toEqual(['new-generic-document', 'new-generic-folder'])
+    expect(templateIds('front')).toHaveLength(7)
+  })
+
+  it('labels the templates "New <Title>" in spec order on the front and end roots (F-2.6)', () => {
+    expect(labels('front')).toEqual([
+      'New document',
+      'New folder',
+      'New Title Page',
+      'New Copyright Page',
+      'New Dedication',
+      'New Epigraph',
+      'New Foreword',
+      'New Preface',
+      'New Table of Contents'
+    ])
+    expect(labels('end')).toEqual([
+      'New document',
+      'New folder',
+      'New Acknowledgments',
+      'New About the Author',
+      "New Author's Note",
+      'New Afterword',
+      'New Appendix',
+      'New Glossary',
+      'New Bibliography'
+    ])
+    expect(ids('end')).toEqual([
+      'new-generic-document',
+      'new-generic-folder',
+      ...templateIds('end')
+    ])
+  })
+
+  it('offers no templates on manuscript rows (F-2.6)', () => {
+    for (const nodeId of ['manuscript', 'arc-1', 'ch-1', 'sc-1']) {
+      expect(ids(nodeId).filter((id) => id.startsWith('template:'))).toEqual([])
+    }
   })
 
   it('never offers rename, duplicate, or delete on a section root (F-2.3)', () => {
@@ -79,5 +120,18 @@ describe('treeContextMenuItems', () => {
 
   it('returns nothing for an unknown row', () => {
     expect(ids('missing')).toEqual([])
+  })
+})
+
+describe('templateIdOf', () => {
+  it('parses the template items the menu produces and nothing else', () => {
+    for (const template of matterTemplatesFor('front')) {
+      expect(templateIdOf(`template:${template.id}`)).toBe(template.id)
+    }
+    expect(templateIdOf('template:glossary')).toBe('glossary')
+    expect(templateIdOf('template:colophon')).toBeNull()
+    expect(templateIdOf('template:')).toBeNull()
+    expect(templateIdOf('rename')).toBeNull()
+    expect(templateIdOf('new-generic-document')).toBeNull()
   })
 })

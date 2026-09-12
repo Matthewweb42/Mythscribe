@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { contract, type Channel, type Output, type TreeNode } from '@shared/ipc/contract'
+import { matterTemplate } from '@shared/matterTemplates'
+import { countWords } from '@shared/wordCount'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { treeFixture } from './treeFixture'
 import {
@@ -96,16 +98,17 @@ function mutationClient(): { client: IpcClient; calls: [Channel, unknown][] } {
         const req = contract['tree:create'].input.parse(input)
         const after = req.afterId === undefined ? undefined : state.byId[req.afterId]
         const position = after ? after.position + 1 : (state.childrenOf[req.parentId] ?? []).length
+        const template = req.template === undefined ? null : matterTemplate(req.template)
         const created: TreeNode = {
           id: 'new',
           parentId: req.parentId,
           sectionType: null,
           kind: req.kind,
           hierarchyLevel: req.hierarchyLevel,
-          title: req.title ?? `Untitled ${req.hierarchyLevel ?? req.kind}`,
+          title: req.title ?? template?.title ?? `Untitled ${req.hierarchyLevel ?? req.kind}`,
           position,
-          wordCount: 0,
-          matterType: null,
+          wordCount: template ? countWords(template.content) : 0,
+          matterType: template?.id ?? null,
           preset: null,
           created: 'c',
           modified: 'm'
@@ -654,6 +657,100 @@ describe('treeStore', () => {
     expect(state.byId.new?.kind).toBe('folder')
     expect(state.selectedId).toBe('new')
     expect(state.renamingId).toBe('new')
+  })
+
+  it('createFromTemplate on the front root appends the templated document with its words, selects it, and skips rename (F-2.6)', async () => {
+    const { client, calls } = mutationClient()
+    setIpcClient(client)
+    const index = buildIndex(treeFixture)
+    useTreeStore.setState({
+      ...index,
+      loaded: true,
+      selectedId: 'sc-1',
+      collapsed: { front: true }
+    })
+    await useTreeStore.getState().createFromTemplate('dedication', 'front')
+    expect(calls).toEqual([
+      [
+        'tree:create',
+        {
+          parentId: 'front',
+          afterId: undefined,
+          kind: 'document',
+          hierarchyLevel: null,
+          template: 'dedication'
+        }
+      ]
+    ])
+    const words = countWords(matterTemplate('dedication').content)
+    expect(words).toBeGreaterThan(0)
+    const state = useTreeStore.getState()
+    expect(state.childrenOf.front).toEqual(['title-page', 'new'])
+    expect(state.byId.new).toMatchObject({
+      title: 'Dedication',
+      kind: 'document',
+      hierarchyLevel: null,
+      matterType: 'dedication',
+      wordCount: words,
+      position: 1
+    })
+    expect(state.sectionOf.new).toBe('front')
+    expect(state.wordCountRollup.new).toBe(words)
+    expect(state.wordCountRollup.front).toBe((index.wordCountRollup.front ?? 0) + words)
+    expect(state.wordCountRollup.manuscript).toBe(index.wordCountRollup.manuscript)
+    expect(state.collapsed).toEqual({ front: false })
+    expect(state.selectedId).toBe('new')
+    expect(state.renamingId).toBeNull()
+    expect(state.busy).toBe(false)
+  })
+
+  it('createFromTemplate inside a nested folder bumps every ancestor rollup and inserts after a document', async () => {
+    const { client, calls } = mutationClient()
+    setIpcClient(client)
+    const folder: TreeNode = {
+      ...newNode('front', 1),
+      id: 'fm-folder',
+      kind: 'folder',
+      hierarchyLevel: null,
+      title: 'Extras'
+    }
+    const index = buildIndex([...treeFixture, folder])
+    useTreeStore.setState({ ...index, loaded: true })
+    await useTreeStore.getState().createFromTemplate('epigraph', 'fm-folder')
+    const words = countWords(matterTemplate('epigraph').content)
+    let state = useTreeStore.getState()
+    expect(state.childrenOf['fm-folder']).toEqual(['new'])
+    expect(state.wordCountRollup['fm-folder']).toBe(words)
+    expect(state.wordCountRollup.front).toBe((index.wordCountRollup.front ?? 0) + words)
+
+    // Relative to a document: right after it, among its siblings.
+    await useTreeStore.getState().createFromTemplate('copyright-page', 'title-page')
+    expect(calls[1]).toEqual([
+      'tree:create',
+      {
+        parentId: 'front',
+        afterId: 'title-page',
+        kind: 'document',
+        hierarchyLevel: null,
+        template: 'copyright-page'
+      }
+    ])
+    state = useTreeStore.getState()
+    expect(state.childrenOf.front).toEqual(['title-page', 'new', 'fm-folder'])
+    expect(state.byId['fm-folder']?.position).toBe(2)
+  })
+
+  it('createFromTemplate does nothing for an unknown target', async () => {
+    const { client, calls } = mutationClient()
+    setIpcClient(client)
+    const index = buildIndex(treeFixture)
+    useTreeStore.setState({ ...index, loaded: true, selectedId: 'sc-1' })
+    await useTreeStore.getState().createFromTemplate('glossary', 'missing')
+    expect(calls).toEqual([])
+    const state = useTreeStore.getState()
+    expect(state.byId).toEqual(index.byId)
+    expect(state.selectedId).toBe('sc-1')
+    expect(state.renamingId).toBeNull()
   })
 
   it('rename replaces the record and clears a matching renamingId', async () => {

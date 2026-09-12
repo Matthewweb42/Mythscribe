@@ -4,6 +4,8 @@ import { and, asc, count, eq, gt, gte, ne, sql } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import type { NovelFormat, TreeCreateInput, TreeNode } from '@shared/ipc/contract'
 import { canPlaceLevel, defaultNodeTitle, type HierarchyLevel, type NodeKind } from '@shared/labels'
+import { matterTemplate } from '@shared/matterTemplates'
+import { countWords } from '@shared/wordCount'
 import type * as schema from '../db/schema'
 import { node, type NodeInsert, type NodeRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
@@ -75,7 +77,10 @@ function ancestorChain(db: TreeDb, row: NodeRow): NodeRow[] {
 
 /**
  * Creates a node under `parentId` (F-2.2). Placed after `afterId` when given, else appended as
- * the last child; later siblings shift so positions stay contiguous.
+ * the last child; later siblings shift so positions stay contiguous. With `template` (F-2.6)
+ * the document is filled from a front/end matter template: its title unless one is given, its
+ * content, the cached word count, and `matterType`; the parent must sit in the template's
+ * section.
  */
 export function createNode(db: TreeDb, format: NovelFormat, input: TreeCreateInput): NodeRow {
   return db.transaction((tx) => {
@@ -90,6 +95,23 @@ export function createNode(db: TreeDb, format: NovelFormat, input: TreeCreateInp
     }
     assertKindMatchesLevel(input.kind, input.hierarchyLevel)
     assertPlacement(parent, input.hierarchyLevel)
+    const template = input.template === undefined ? null : matterTemplate(input.template)
+    if (template) {
+      if (input.kind !== 'document') {
+        throw new AppError('VALIDATION', 'Templates create documents, not folders', {
+          template: template.id,
+          kind: input.kind
+        })
+      }
+      const section = ancestorChain(tx, parent).at(-1)?.sectionType
+      if (section !== template.section) {
+        throw new AppError(
+          'VALIDATION',
+          `The ${template.title} template belongs in ${template.section} matter`,
+          { template: template.id, parentId: parent.id }
+        )
+      }
+    }
 
     let position: number
     if (input.afterId !== undefined) {
@@ -118,9 +140,14 @@ export function createNode(db: TreeDb, format: NovelFormat, input: TreeCreateInp
       sectionType: null,
       kind: input.kind,
       hierarchyLevel: input.hierarchyLevel,
-      title: title.length > 0 ? title : defaultNodeTitle(format, input.kind, input.hierarchyLevel),
+      title:
+        title.length > 0
+          ? title
+          : (template?.title ?? defaultNodeTitle(format, input.kind, input.hierarchyLevel)),
       position,
-      wordCount: 0,
+      content: template ? JSON.stringify(template.content) : null,
+      wordCount: template ? countWords(template.content) : 0,
+      matterType: template?.id ?? null,
       created: now,
       modified: now
     }

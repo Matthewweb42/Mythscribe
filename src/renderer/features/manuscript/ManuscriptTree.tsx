@@ -14,7 +14,7 @@ import { HierarchyLevel, sectionLabel, type SectionType } from '@shared/labels'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ContextMenu } from './ContextMenu'
-import { treeContextMenuItems } from './contextMenuItems'
+import { templateIdOf, treeContextMenuItems } from './contextMenuItems'
 import { resolveDropTarget, type DropZone } from './placement'
 import { useTreeStore, type TreeIndex } from './treeStore'
 
@@ -324,14 +324,17 @@ async function confirmRemove(nodeId: string): Promise<void> {
   await remove(nodeId)
 }
 
-/** Maps a context-menu item id to the store action for the row (F-2.2 create, F-2.3 rename/duplicate/delete). */
+/** Maps a context-menu item id to the store action for the row (F-2.2 create, F-2.3 rename/duplicate/delete, F-2.6 templates). */
 async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
-  const { createLevel, createGeneric, startRename, duplicate } = useTreeStore.getState()
+  const { createLevel, createGeneric, createFromTemplate, startRename, duplicate } =
+    useTreeStore.getState()
   if (itemId === 'rename') return startRename(nodeId)
   if (itemId === 'duplicate') return duplicate(nodeId)
   if (itemId === 'delete') return confirmRemove(nodeId)
   if (itemId === 'new-generic-document') return createGeneric('document', nodeId)
   if (itemId === 'new-generic-folder') return createGeneric('folder', nodeId)
+  const template = templateIdOf(itemId)
+  if (template) return createFromTemplate(template, nodeId)
   const level = HierarchyLevel.safeParse(itemId.replace(/^new-/, ''))
   if (level.success) return createLevel(level.data, nodeId)
 }
@@ -341,7 +344,8 @@ async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
  * collapse/expand, per-level icons and colors, rolled-up word counts, and the active document
  * highlighted. Reads `useTreeStore`; the parent decides when to `load()`. Rows open a
  * section-aware context menu and rename inline (F-2.2); the menu also renames, duplicates, and
- * deletes after confirmation (F-2.3). Rows drag within their section (F-2.4): onto a folder to
+ * deletes after confirmation (F-2.3), and in front and end matter adds templated documents
+ * (F-2.6). Rows drag within their section (F-2.4): onto a folder to
  * nest, onto a row's top or bottom edge to become its sibling; sections only accept nesting.
  */
 export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.Element | null {

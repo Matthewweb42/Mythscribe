@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
+import { MatterTemplateId } from '../matterTemplates'
 import { TiptapNode } from '../tiptap'
 
 /**
@@ -95,7 +96,13 @@ export const contract = {
       /** Omitted → main fills in "Untitled <level|kind>" from the project's format. */
       title: z.string().trim().min(1).max(NODE_TITLE_MAX).optional(),
       /** Omitted → append as the parent's last child. */
-      afterId: z.string().optional()
+      afterId: z.string().optional(),
+      /**
+       * Fills the document from a front/end matter template (F-2.6): title (unless `title` is
+       * given), content, cached word count, and `matterType`. Only for `kind: 'document'` under
+       * the template's own section; anything else is refused with VALIDATION.
+       */
+      template: MatterTemplateId.optional()
     }),
     output: TreeNode
   },

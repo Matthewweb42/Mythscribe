@@ -10,6 +10,8 @@ import {
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TreeNode } from '@shared/ipc/contract'
+import { MatterTemplateId, matterTemplate } from '@shared/matterTemplates'
+import { countWords } from '@shared/wordCount'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -97,21 +99,25 @@ function install(): ReturnType<typeof vi.fn> {
         afterId?: string
         kind: 'document' | 'folder'
         hierarchyLevel: 'part' | 'chapter' | 'scene' | null
+        template?: string
       }
       const after = req.afterId === undefined ? undefined : state.byId[req.afterId]
+      const template =
+        req.template === undefined ? null : matterTemplate(MatterTemplateId.parse(req.template))
       const node: TreeNode = {
         id: `new-${invoke.mock.calls.length}`,
         parentId: req.parentId,
         sectionType: null,
         kind: req.kind,
         hierarchyLevel: req.hierarchyLevel,
-        title:
-          req.hierarchyLevel === 'scene'
+        title: template
+          ? template.title
+          : req.hierarchyLevel === 'scene'
             ? 'Untitled Scene'
             : `Untitled ${req.hierarchyLevel ?? req.kind}`,
         position: after ? after.position + 1 : (state.childrenOf[req.parentId] ?? []).length,
-        wordCount: 0,
-        matterType: null,
+        wordCount: template ? countWords(template.content) : 0,
+        matterType: template?.id ?? null,
         preset: null,
         created: 'c',
         modified: 'm'
@@ -422,13 +428,72 @@ describe('ManuscriptTree', () => {
     expect(item('Chapter 2')).toHaveFocus()
   })
 
-  it('right-click on Title Page offers only the generic items plus Rename, Duplicate, and Delete', () => {
+  it('right-click on Title Page offers the generic items, the seven front templates, then Rename, Duplicate, and Delete (F-2.6)', () => {
     render(<ManuscriptTree format="webnovel" />)
     fireEvent.contextMenu(row('Title Page'), { clientX: 40, clientY: 50 })
     const labels = within(screen.getByRole('menu'))
       .getAllByRole('menuitem')
       .map((el) => el.textContent)
-    expect(labels).toEqual(['New document', 'New folder', 'Rename', 'Duplicate', 'Delete'])
+    expect(labels).toEqual([
+      'New document',
+      'New folder',
+      'New Title Page',
+      'New Copyright Page',
+      'New Dedication',
+      'New Epigraph',
+      'New Foreword',
+      'New Preface',
+      'New Table of Contents',
+      'Rename',
+      'Duplicate',
+      'Delete'
+    ])
+  })
+
+  it('right-click on End Matter offers the seven end templates after the generic items (F-2.6)', () => {
+    render(<ManuscriptTree format="webnovel" />)
+    fireEvent.contextMenu(row('End Matter'), { clientX: 40, clientY: 50 })
+    const labels = within(screen.getByRole('menu'))
+      .getAllByRole('menuitem')
+      .map((el) => el.textContent)
+    expect(labels).toEqual([
+      'New document',
+      'New folder',
+      'New Acknowledgments',
+      'New About the Author',
+      "New Author's Note",
+      'New Afterword',
+      'New Appendix',
+      'New Glossary',
+      'New Bibliography'
+    ])
+  })
+
+  it('New Dedication on Front Matter adds the gold, selected, word-counted document with no rename box (F-2.6)', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    fireEvent.contextMenu(row('Front Matter'), { clientX: 40, clientY: 50 })
+    await userEvent.click(screen.getByRole('menuitem', { name: 'New Dedication' }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(invoke).toHaveBeenCalledWith('tree:create', {
+      parentId: 'front',
+      afterId: undefined,
+      kind: 'document',
+      hierarchyLevel: null,
+      template: 'dedication'
+    })
+    const dedication = item('Dedication')
+    expect(dedication).toHaveAttribute('data-matter', 'true')
+    expect(dedication).toHaveAttribute('aria-selected', 'true')
+    expect(dedication).toHaveAttribute('aria-level', '2')
+    expect(screen.queryByRole('textbox', { name: 'Rename' })).not.toBeInTheDocument()
+    const names = treeNames()
+    expect(names.indexOf('Dedication')).toBe(names.indexOf('Title Page') + 1)
+    const words = countWords(matterTemplate('dedication').content)
+    expect(words).toBeGreaterThan(0)
+    expect(row('Dedication')).toHaveTextContent(`Dedication${words}`)
+    // The section rollup grew by the template's words (Title Page carries 12 in the fixture).
+    expect(row('Front Matter')).toHaveTextContent(`Front Matter${12 + words}`)
   })
 
   it('right-click on a section never offers Rename, Duplicate, or Delete', () => {

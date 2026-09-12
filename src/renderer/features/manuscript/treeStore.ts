@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { TreeNode } from '@shared/ipc/contract'
 import type { HierarchyLevel, NodeKind, SectionType } from '@shared/labels'
+import type { MatterTemplateId } from '@shared/matterTemplates'
 import { ipc } from '@renderer/lib/ipc'
 import { resolveCreateTarget, resolveGenericTarget, type CreateTarget } from './placement'
 
@@ -41,6 +42,13 @@ interface TreeState extends TreeIndex {
   createLevel: (level: HierarchyLevel, targetId?: string, options?: CreateOptions) => Promise<void>
   /** Creates a generic document or folder relative to `targetId` per `resolveGenericTarget`. */
   createGeneric: (kind: NodeKind, targetId: string, options?: CreateOptions) => Promise<void>
+  /**
+   * Creates a front/end matter document from a template relative to `targetId` per
+   * `resolveGenericTarget` (F-2.6): merges the returned row, adds its words to every ancestor's
+   * rollup, expands the ancestors, and selects it. No inline rename: the template title is the
+   * real title. No-op when there is no valid placement. Errors propagate.
+   */
+  createFromTemplate: (templateId: MatterTemplateId, targetId: string) => Promise<void>
   /** Renames a node and ends its inline rename. Errors propagate. */
   rename: (id: string, title: string) => Promise<void>
   /**
@@ -66,6 +74,14 @@ interface TreeState extends TreeIndex {
 /** `keepSelection`: leave the current selection alone (the stacked view adds a region in place, F-3.8). */
 export interface CreateOptions {
   keepSelection?: boolean
+}
+
+/** What `createAt` adds on top of the public options. */
+interface CreateAtOptions extends CreateOptions {
+  /** Fill the document from a front/end matter template (F-2.6). */
+  template?: MatterTemplateId
+  /** Open inline rename on the new node; default true. Off for templates, whose title is meaningful. */
+  rename?: boolean
 }
 
 const byPosition = (a: TreeNode, b: TreeNode): number => a.position - b.position
@@ -238,7 +254,7 @@ export function setWordCountInIndex(index: TreeIndex, id: string, wordCount: num
   const delta = wordCount - node.wordCount
   if (delta === 0) return index
   const wordCountRollup = { ...index.wordCountRollup }
-  for (let current: string | null = id; current !== null; ) {
+  for (let current: string | null = id; current !== null;) {
     wordCountRollup[current] = (wordCountRollup[current] ?? 0) + delta
     current = index.byId[current]?.parentId ?? null
   }
@@ -341,6 +357,12 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     await createAt(target, kind, null, options)
   },
 
+  async createFromTemplate(templateId, targetId) {
+    const target = resolveGenericTarget(get(), targetId)
+    if (!target) return
+    await createAt(target, 'document', null, { template: templateId, rename: false })
+  },
+
   async rename(id, title) {
     const mine = generation
     set({ busy: true })
@@ -423,12 +445,32 @@ function expandAncestors(state: TreeState, parentId: string | null): Record<stri
   return collapsed
 }
 
-/** Shared tail of `createLevel` and `createGeneric`: invoke, merge, expand, select (unless kept), rename. */
+/**
+ * The rollup map with `delta` added to every ancestor from `parentId` up to the section root.
+ * `insertIntoIndex` assumes a new node has no words; a templated document (F-2.6) arrives with some.
+ */
+function addToAncestorRollups(
+  index: TreeIndex,
+  parentId: string | null,
+  delta: number
+): Record<string, number> {
+  if (delta === 0) return index.wordCountRollup
+  const wordCountRollup = { ...index.wordCountRollup }
+  for (let id = parentId; id !== null; id = index.byId[id]?.parentId ?? null) {
+    wordCountRollup[id] = (wordCountRollup[id] ?? 0) + delta
+  }
+  return wordCountRollup
+}
+
+/**
+ * Shared tail of `createLevel`, `createGeneric`, and `createFromTemplate`: invoke, merge (with
+ * the new node's words), expand, select (unless kept), rename (unless off).
+ */
 async function createAt(
   target: CreateTarget,
   kind: NodeKind,
   hierarchyLevel: HierarchyLevel | null,
-  options?: CreateOptions
+  options?: CreateAtOptions
 ): Promise<void> {
   const mine = generation
   useTreeStore.setState({ busy: true })
@@ -437,15 +479,20 @@ async function createAt(
       parentId: target.parentId,
       afterId: target.afterId,
       kind,
-      hierarchyLevel
+      hierarchyLevel,
+      ...(options?.template === undefined ? {} : { template: options.template })
     })
     if (mine !== generation) return // the project was closed while the request was in flight
-    useTreeStore.setState((s) => ({
-      ...insertIntoIndex(s, node),
-      collapsed: expandAncestors(s, node.parentId),
-      selectedId: options?.keepSelection ? s.selectedId : node.id,
-      renamingId: node.id
-    }))
+    useTreeStore.setState((s) => {
+      const merged = insertIntoIndex(s, node)
+      return {
+        ...merged,
+        wordCountRollup: addToAncestorRollups(merged, node.parentId, node.wordCount),
+        collapsed: expandAncestors(s, node.parentId),
+        selectedId: options?.keepSelection ? s.selectedId : node.id,
+        renamingId: options?.rename === false ? s.renamingId : node.id
+      }
+    })
   } finally {
     if (mine === generation) useTreeStore.setState({ busy: false })
   }

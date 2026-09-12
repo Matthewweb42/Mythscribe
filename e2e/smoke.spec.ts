@@ -9,7 +9,9 @@ import {
   type Page
 } from '@playwright/test'
 import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contract'
+import { matterTemplate } from '../src/shared/matterTemplates'
 import type { TiptapNodeT } from '../src/shared/tiptap'
+import { countWords } from '../src/shared/wordCount'
 
 /**
  * Smoke test (CLAUDE.md quality gates): create a project → write text → close it → reopen it →
@@ -19,6 +21,9 @@ import type { TiptapNodeT } from '../src/shared/tiptap'
 /** What Scene 1 reads after the F-3.1/F-3.2 steps; nine words, so the cached count is checked too. */
 const SENTENCE = 'The storm broke at dusk. Rain followed. Then silence.'
 const SENTENCE_WORDS = 9
+
+/** The Title Page template's word count (F-2.6), as the tree row and the persisted row must show it. */
+const TITLE_PAGE_WORDS = countWords(matterTemplate('title-page').content)
 
 let app: ElectronApplication
 let page: Page
@@ -190,11 +195,28 @@ test('create, close, reopen a project on disk', async () => {
   await expect(opening).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('[data-drop]')).toHaveCount(0)
 
+  // F-2.6: "New Title Page" from the Front Matter menu adds a gold, selected document filled from
+  // the template (no rename box); the row shows the template's words and the editor opens on it.
+  const frontMatter = tree.getByRole('treeitem', { name: 'Front Matter', exact: true })
+  await frontMatter.click({ button: 'right' })
+  await menu.getByRole('menuitem', { name: 'New Title Page' }).click()
+  await expect(menu).toBeHidden()
+  const titlePage = frontMatter.getByRole('treeitem', { name: 'Title Page', exact: true })
+  await expect(titlePage).toBeVisible()
+  await expect(titlePage).toHaveAttribute('data-matter', 'true')
+  await expect(titlePage).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('textbox', { name: 'Rename' })).toHaveCount(0)
+  expect(TITLE_PAGE_WORDS).toBeGreaterThan(0)
+  await expect(titlePage).toHaveText(`Title Page${TITLE_PAGE_WORDS}`)
+  await expect(page.getByTestId('selected-title')).toHaveText('Title Page')
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await expect(editor.locator('h1')).toHaveText('[Book Title]')
+  await expect(editor.locator('p', { hasText: '[Author Name]' })).toBeVisible()
+
   // F-3.1: selecting a scene shows the editor; typing, Bold from the toolbar and Ctrl+B, the
   // scene break in the web-novel style (F-3.6 default "~~~"), and undo.
   await scene1.click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
-  const editor = page.getByRole('textbox', { name: 'Document' })
   await expect(editor).toHaveAttribute('contenteditable', 'true')
   await editor.click()
   await page.keyboard.type('The storm broke at dusk.')
@@ -253,13 +275,21 @@ test('create, close, reopen a project on disk', async () => {
   expect(reopened.ok).toBe(true)
   if (reopened.ok && reopened.data) expect(reopened.data.id).toBe(created.data.id)
   expect(fs.existsSync(path.join(tmp, 'userData', 'app-state.json'))).toBe(true)
-  // F-2.2/F-2.3: the two created scenes and the rename survived the close; the duplicate was
-  // deleted again, so the count is back to 19.
+  // F-2.2/F-2.3/F-2.6: the two created scenes, the rename, and the Title Page survived the
+  // close; the duplicate was deleted again, so the count is 17 + 3.
   const persisted = await listTree()
-  expect(persisted).toHaveLength(19)
+  expect(persisted).toHaveLength(20)
   expect(persisted.map((n) => n.title)).toContain('Opening')
   expect(persisted.map((n) => n.title)).not.toContain('Opening (Copy)')
   expect(persisted.filter((n) => n.title === 'Untitled Scene')).toHaveLength(1)
+  // F-2.6: the templated document keeps its matter type, title, and cached word count.
+  const titlePageRow = persisted.find((n) => n.matterType === 'title-page')
+  expect(titlePageRow).toMatchObject({
+    title: 'Title Page',
+    kind: 'document',
+    wordCount: TITLE_PAGE_WORDS,
+    parentId: persisted.find((n) => n.sectionType === 'front')?.id
+  })
   // F-2.4: the drag survived the close: Opening sits before Scene 1 in Chapter 1.
   const openingRow = persisted.find((n) => n.title === 'Opening')
   if (!openingRow) throw new Error('Opening was not persisted')

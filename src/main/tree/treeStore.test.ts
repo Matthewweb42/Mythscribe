@@ -4,7 +4,10 @@ import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NovelFormat } from '@shared/ipc/contract'
+import { matterTemplate } from '@shared/matterTemplates'
+import { countWords } from '@shared/wordCount'
 import { node, type NodeRow } from '../db/schema'
+import { getDocumentContent } from '../document/documentStore'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import {
@@ -659,5 +662,107 @@ describe('moveNode', () => {
     expect(order(p1.id).map(([, p]) => p)).toEqual([0, 1, 2])
     expect(order(p2.id).map(([, p]) => p)).toEqual([0, 1, 2])
     expect(listNodes(db).find((r) => r.id === a1.id)?.parentId).toBe(p1.id)
+  })
+})
+
+describe('createNode from a template (F-2.6)', () => {
+  it('fills title, content, matterType, and word count from a front template and round-trips the content', () => {
+    const front = root('front')
+    const created = createNode(db, 'novel', {
+      parentId: front.id,
+      kind: 'document',
+      hierarchyLevel: null,
+      template: 'title-page'
+    })
+    const template = matterTemplate('title-page')
+    expect(created).toMatchObject({
+      parentId: front.id,
+      kind: 'document',
+      hierarchyLevel: null,
+      title: 'Title Page',
+      matterType: 'title-page',
+      position: 0,
+      wordCount: countWords(template.content)
+    })
+    expect(created.wordCount).toBeGreaterThan(0)
+    expect(created.preset).toBeNull()
+    expect(JSON.parse(created.content ?? '')).toEqual(template.content)
+    expect(getDocumentContent(db, created.id)).toEqual({
+      id: created.id,
+      content: template.content
+    })
+    expect(listNodes(db).find((r) => r.id === created.id)).toEqual(created)
+  })
+
+  it('accepts an end template anywhere inside end matter, including a nested folder', () => {
+    const end = root('end')
+    const folder = createNode(db, 'novel', {
+      parentId: end.id,
+      kind: 'folder',
+      hierarchyLevel: null
+    })
+    const glossary = createNode(db, 'novel', {
+      parentId: folder.id,
+      kind: 'document',
+      hierarchyLevel: null,
+      template: 'glossary'
+    })
+    expect(glossary).toMatchObject({
+      parentId: folder.id,
+      title: 'Glossary',
+      matterType: 'glossary'
+    })
+    expect(JSON.parse(glossary.content ?? '')).toEqual(matterTemplate('glossary').content)
+  })
+
+  it('refuses a template outside its own section', () => {
+    expectCode(
+      () =>
+        createNode(db, 'novel', {
+          parentId: root('end').id,
+          kind: 'document',
+          hierarchyLevel: null,
+          template: 'dedication'
+        }),
+      'VALIDATION'
+    )
+    expectCode(
+      () =>
+        createNode(db, 'novel', {
+          parentId: byLevel('chapter').id,
+          kind: 'document',
+          hierarchyLevel: null,
+          template: 'glossary'
+        }),
+      'VALIDATION'
+    )
+    expect(children(root('end').id)).toEqual([])
+    expect(listNodes(db)).toHaveLength(17)
+  })
+
+  it('refuses a template for a folder', () => {
+    expectCode(
+      () =>
+        createNode(db, 'novel', {
+          parentId: root('front').id,
+          kind: 'folder',
+          hierarchyLevel: null,
+          template: 'title-page'
+        }),
+      'VALIDATION'
+    )
+    expect(children(root('front').id)).toEqual([])
+  })
+
+  it('keeps an explicit title over the template title', () => {
+    const created = createNode(db, 'novel', {
+      parentId: root('front').id,
+      kind: 'document',
+      hierarchyLevel: null,
+      title: '  For Mum  ',
+      template: 'dedication'
+    })
+    expect(created).toMatchObject({ title: 'For Mum', matterType: 'dedication' })
+    expect(JSON.parse(created.content ?? '')).toEqual(matterTemplate('dedication').content)
   })
 })

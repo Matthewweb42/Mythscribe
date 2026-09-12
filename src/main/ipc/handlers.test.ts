@@ -204,6 +204,32 @@ describe('tree:create / tree:rename / tree:duplicate / tree:delete', () => {
     ])
   })
 
+  it('rejects an unknown template id at the contract boundary and fills a known one (F-2.6)', async () => {
+    await invoke('project:create', { name: 'Tree', format: 'novel', directory: tmp })
+    const front = (await invoke('tree:list', undefined)).find((r) => r.sectionType === 'front')
+    const raw = handlerFor('tree:create')
+    const result = await raw(undefined, {
+      parentId: front?.id,
+      kind: 'document',
+      hierarchyLevel: null,
+      template: 'colophon'
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    const created = await invoke('tree:create', {
+      parentId: front?.id ?? '',
+      kind: 'document',
+      hierarchyLevel: null,
+      template: 'title-page'
+    })
+    expect(created).toMatchObject({ title: 'Title Page', matterType: 'title-page', position: 0 })
+    expect(created.wordCount).toBeGreaterThan(0)
+    const doc = await invoke('document:get', { id: created.id })
+    expect(doc.content?.type).toBe('doc')
+    const listed = (await invoke('tree:list', undefined)).find((r) => r.id === created.id)
+    expect(listed).toMatchObject({ matterType: 'title-page', wordCount: created.wordCount })
+  })
+
   it('rejects an empty title at the contract boundary', async () => {
     await invoke('project:create', { name: 'Tree', format: 'novel', directory: tmp })
     const scene = (await invoke('tree:list', undefined)).find((r) => r.kind === 'document')
