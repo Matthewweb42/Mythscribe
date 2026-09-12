@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultEditorSettings, type EditorSettings } from '@shared/editorSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -45,6 +45,10 @@ beforeEach(() => {
   sets = recording.sets
   setIpcClient(recording.client)
   useEditorSettingsStore.setState({ settings: { ...novel } })
+})
+// The store's debounced write outlives a test: cancel it here so it cannot fire into the next file's fake client.
+afterEach(() => {
+  resetEditorSettingsStore()
 })
 
 describe('EditorSettingsTab (F-3.6, F-7.5)', () => {

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Sparkles, Type } from 'lucide-react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import {
@@ -42,6 +42,10 @@ beforeEach(() => {
   useDialogStore.setState({ modals: [], toasts: [] })
   setIpcClient(client)
   useEditorSettingsStore.setState({ settings: { ...defaultEditorSettings('novel') } })
+})
+// The store's debounced write outlives a test: cancel it here so it cannot fire into the next file's fake client.
+afterEach(() => {
+  resetEditorSettingsStore()
 })
 
 describe('SettingsDialog (F-7.5)', () => {

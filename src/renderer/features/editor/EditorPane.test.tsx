@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Editor } from '@tiptap/core'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
@@ -66,6 +66,10 @@ beforeEach(() => {
   pending = deferred.pending
   saves = deferred.saves
   setIpcClient(deferred.client)
+})
+// The store's debounced write outlives a test: cancel it here so it cannot fire into the next file's fake client.
+afterEach(() => {
+  resetEditorSettingsStore()
 })
 
 /** The text of the first paragraph of a saved document, whatever the caret position was. */

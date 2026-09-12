@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   contract,
   type Channel,
@@ -136,6 +136,10 @@ beforeEach(() => {
   saves = fake.saves
   creates = fake.creates
   setIpcClient(fake.client)
+})
+// The store's debounced write outlives a test: cancel it here so it cannot fire into the next file's fake client.
+afterEach(() => {
+  resetEditorSettingsStore()
 })
 
 describe('StackedEditor (F-3.8, F-2.5)', () => {
