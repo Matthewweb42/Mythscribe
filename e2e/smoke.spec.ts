@@ -275,6 +275,27 @@ test('create, close, reopen a project on disk', async () => {
   await expect(editor).toHaveAttribute('contenteditable', 'true')
   await expect(editor.locator('p')).toHaveText(SENTENCE)
 
+  // F-2.5/F-3.8: selecting Chapter 1 stacks Opening and Scene 1 in tree order, each as its own
+  // region with the web-novel scene break between them; typing into Opening leaves Scene 1
+  // untouched and autosaves under Opening's own id.
+  await chapter1.getByText('Chapter 1', { exact: true }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Chapter 1')
+  const regions = page.getByRole('region')
+  await expect(regions).toHaveCount(2)
+  await expect(regions.nth(0)).toHaveAttribute('aria-label', 'Opening')
+  await expect(regions.nth(1)).toHaveAttribute('aria-label', 'Scene 1')
+  await expect(page.getByRole('separator', { name: 'Scene break' })).toHaveText('~~~')
+  const openingBox = regions.nth(0).getByRole('textbox', { name: 'Document' })
+  const scene1Box = regions.nth(1).getByRole('textbox', { name: 'Document' })
+  await expect(scene1Box.locator('p')).toHaveText(SENTENCE)
+  await expect(openingBox).toHaveAttribute('contenteditable', 'true')
+  await openingBox.click()
+  await page.keyboard.type('Before the storm.')
+  await expect(openingBox.locator('p')).toHaveText('Before the storm.')
+  await expect(scene1Box.locator('p')).toHaveText(SENTENCE)
+  await expect.poll(() => documentText(openingRow.id), { timeout: 3000 }).toBe('Before the storm.')
+  expect(await documentText(scene1Row.id)).toBe(SENTENCE)
+
   // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.
   await closeProject()
   await stubOpenDialog(path.join(projectPath, 'project.db'))

@@ -71,6 +71,11 @@ select {
   outline: none;
 }
 
+/* A region in the stacked view (F-3.8) is as tall as its text; the stack scrolls, not the region. */
+.ms-editor.ms-editor-region {
+  min-height: 6em;
+}
+
 .ms-editor p {
   margin: 0 0 0.75em;
 }

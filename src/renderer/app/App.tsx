@@ -6,6 +6,7 @@ import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { Logo } from '@renderer/features/shell/Logo'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
+import { StackedEditor } from '@renderer/features/editor/StackedEditor'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { CreateNodeBar } from '@renderer/features/manuscript/CreateNodeBar'
 import { ManuscriptTree } from '@renderer/features/manuscript/ManuscriptTree'
@@ -192,7 +193,8 @@ function CloseProjectButton(): React.JSX.Element {
 
 /**
  * F-2.1: the document tree beside the main pane, with the create buttons (F-2.2) pinned under
- * it; the editor (F-3.1) takes the main pane for the selected document.
+ * it; the editor (F-3.1) takes the main pane for the selected document, or every document of
+ * the selected folder stacked (F-2.5, F-3.8).
  */
 function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
   return (
@@ -235,7 +237,11 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
           {section ? ` · ${sectionLabel(format, section)}` : ''}
         </p>
       </div>
-      {node.kind === 'document' ? <EditorPane id={node.id} format={format} /> : null}
+      {node.kind === 'document' ? (
+        <EditorPane id={node.id} format={format} />
+      ) : (
+        <StackedEditor folderId={node.id} format={format} />
+      )}
     </>
   )
 }

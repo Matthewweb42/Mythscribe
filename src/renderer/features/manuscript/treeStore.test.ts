@@ -4,6 +4,7 @@ import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { treeFixture } from './treeFixture'
 import {
   buildIndex,
+  descendantDocuments,
   duplicateIntoIndex,
   insertIntoIndex,
   moveInIndex,
@@ -455,6 +456,44 @@ describe('buildIndex', () => {
   })
 })
 
+describe('descendantDocuments (F-3.8)', () => {
+  const index = buildIndex(treeFixture)
+
+  it('lists every document under a folder depth-first in position order, across chapters', () => {
+    expect(descendantDocuments(index, 'arc-1')).toEqual(['sc-1', 'sc-2', 'sc-3'])
+    expect(descendantDocuments(index, 'manuscript')).toEqual([
+      'sc-1',
+      'sc-2',
+      'sc-3',
+      'sc-4',
+      'sc-5',
+      'sc-6'
+    ])
+    expect(descendantDocuments(index, 'front')).toEqual(['title-page'])
+  })
+
+  it('follows position order, not insertion order, when siblings are reordered', () => {
+    const reordered = buildIndex([
+      ...treeFixture.filter((n) => n.id !== 'ch-1' && n.id !== 'ch-3'),
+      { ...treeFixture.find((n) => n.id === 'ch-1')!, position: 2 },
+      { ...treeFixture.find((n) => n.id === 'ch-3')!, position: 0 }
+    ])
+    expect(descendantDocuments(reordered, 'arc-1')).toEqual(['sc-3', 'sc-2', 'sc-1'])
+  })
+
+  it('yields nothing for an empty folder or an unknown id', () => {
+    expect(descendantDocuments(index, 'end')).toEqual([])
+    const emptied = removeFromIndex(index, 'sc-1')
+    expect(descendantDocuments(emptied, 'ch-1')).toEqual([])
+    expect(descendantDocuments(index, 'missing')).toEqual([])
+  })
+
+  it('yields a document itself', () => {
+    expect(descendantDocuments(index, 'sc-4')).toEqual(['sc-4'])
+    expect(descendantDocuments(index, 'title-page')).toEqual(['title-page'])
+  })
+})
+
 describe('treeStore', () => {
   it('load fetches tree:list, rebuilds the index and marks loaded', async () => {
     const { client, calls } = fakeClient()
@@ -575,6 +614,18 @@ describe('treeStore', () => {
     expect(state.renamingId).toBe('new')
     expect(state.collapsed).toEqual({ 'ch-1': false, 'arc-1': false, manuscript: false })
     expect(state.busy).toBe(false)
+  })
+
+  it('createLevel with keepSelection leaves the selection on the folder and still opens rename', async () => {
+    const { client, calls } = mutationClient()
+    setIpcClient(client)
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true, selectedId: 'ch-1' })
+    await useTreeStore.getState().createLevel('scene', 'ch-1', { keepSelection: true })
+    expect(calls).toHaveLength(1)
+    const state = useTreeStore.getState()
+    expect(state.childrenOf['ch-1']).toContain('new')
+    expect(state.selectedId).toBe('ch-1')
+    expect(state.renamingId).toBe('new')
   })
 
   it('createLevel does nothing when there is no valid placement', async () => {

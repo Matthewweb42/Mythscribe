@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import type { Editor } from '@tiptap/core'
 import { useEditorState } from '@tiptap/react'
 import {
@@ -209,7 +210,11 @@ function snapshot(editor: Editor | null): Record<string, ToolState> {
  * Mouse-down is swallowed so the editor keeps its selection while the command applies.
  */
 export function Toolbar({ editor }: { editor: Editor | null }): React.JSX.Element {
-  const states = useEditorState({ editor, selector: ({ editor: e }) => snapshot(e) })
+  // Snapshot the editor from the prop, not from the hook's context: `useEditorState` only
+  // refreshes its context on a transaction, so a toolbar handed a different editor (the stacked
+  // view, F-3.8) would otherwise show the previous editor's state until the author types.
+  const selector = useCallback(() => snapshot(editor), [editor])
+  const states = useEditorState({ editor, selector })
   return (
     <div
       role="toolbar"

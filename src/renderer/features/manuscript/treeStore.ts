@@ -38,9 +38,9 @@ interface TreeState extends TreeIndex {
    * `resolveCreateTarget`, then selects the new node and opens inline rename. No-op when there is
    * no valid placement. Errors propagate so the caller can show them.
    */
-  createLevel: (level: HierarchyLevel, targetId?: string) => Promise<void>
+  createLevel: (level: HierarchyLevel, targetId?: string, options?: CreateOptions) => Promise<void>
   /** Creates a generic document or folder relative to `targetId` per `resolveGenericTarget`. */
-  createGeneric: (kind: NodeKind, targetId: string) => Promise<void>
+  createGeneric: (kind: NodeKind, targetId: string, options?: CreateOptions) => Promise<void>
   /** Renames a node and ends its inline rename. Errors propagate. */
   rename: (id: string, title: string) => Promise<void>
   /**
@@ -61,6 +61,11 @@ interface TreeState extends TreeIndex {
   move: (id: string, parentId: string, afterId?: string | null) => Promise<void>
   /** Records a document's saved word count (F-3.2) and adjusts its ancestors' rollups by the delta. */
   setWordCount: (id: string, wordCount: number) => void
+}
+
+/** `keepSelection`: leave the current selection alone (the stacked view adds a region in place, F-3.8). */
+export interface CreateOptions {
+  keepSelection?: boolean
 }
 
 const byPosition = (a: TreeNode, b: TreeNode): number => a.position - b.position
@@ -244,6 +249,25 @@ export function setWordCountInIndex(index: TreeIndex, id: string, wordCount: num
   }
 }
 
+/**
+ * Every document under `id`, depth-first in position order (F-3.8): the documents a folder
+ * shows stacked. A document id yields itself; an empty folder or unknown id yields nothing.
+ */
+export function descendantDocuments(index: TreeIndex, id: string): string[] {
+  const ids: string[] = []
+  const walk = (current: string): void => {
+    const node = index.byId[current]
+    if (!node) return
+    if (node.kind === 'document') {
+      ids.push(current)
+      return
+    }
+    for (const childId of index.childrenOf[current] ?? []) walk(childId)
+  }
+  walk(id)
+  return ids
+}
+
 const emptyIndex = (): TreeIndex => ({
   byId: {},
   childrenOf: {},
@@ -304,17 +328,17 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     set({ renamingId: null })
   },
 
-  async createLevel(level, targetId) {
+  async createLevel(level, targetId, options) {
     const state = get()
     const target = resolveCreateTarget(state, targetId ?? state.selectedId, level)
     if (!target) return
-    await createAt(target, level === 'scene' ? 'document' : 'folder', level)
+    await createAt(target, level === 'scene' ? 'document' : 'folder', level, options)
   },
 
-  async createGeneric(kind, targetId) {
+  async createGeneric(kind, targetId, options) {
     const target = resolveGenericTarget(get(), targetId)
     if (!target) return
-    await createAt(target, kind, null)
+    await createAt(target, kind, null, options)
   },
 
   async rename(id, title) {
@@ -399,11 +423,12 @@ function expandAncestors(state: TreeState, parentId: string | null): Record<stri
   return collapsed
 }
 
-/** Shared tail of `createLevel` and `createGeneric`: invoke, merge, expand, select, rename. */
+/** Shared tail of `createLevel` and `createGeneric`: invoke, merge, expand, select (unless kept), rename. */
 async function createAt(
   target: CreateTarget,
   kind: NodeKind,
-  hierarchyLevel: HierarchyLevel | null
+  hierarchyLevel: HierarchyLevel | null,
+  options?: CreateOptions
 ): Promise<void> {
   const mine = generation
   useTreeStore.setState({ busy: true })
@@ -418,7 +443,7 @@ async function createAt(
     useTreeStore.setState((s) => ({
       ...insertIntoIndex(s, node),
       collapsed: expandAncestors(s, node.parentId),
-      selectedId: node.id,
+      selectedId: options?.keepSelection ? s.selectedId : node.id,
       renamingId: node.id
     }))
   } finally {

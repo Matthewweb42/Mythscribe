@@ -37,6 +37,33 @@ describe('Toolbar', () => {
     expect(button('Undo')).not.toHaveAttribute('aria-pressed')
   })
 
+  it('follows a changed editor prop at once, before any transaction (F-3.8)', () => {
+    const { rerender } = render(<Toolbar editor={null} />)
+    expect(button('Bold')).toBeDisabled()
+    rerender(<Toolbar editor={editor} />)
+    expect(button('Bold')).toBeEnabled()
+    editor.commands.focus('end')
+    editor.commands.toggleBold()
+    const other = document.createElement('div')
+    document.body.appendChild(other)
+    const second = new Editor({
+      element: other,
+      extensions: buildExtensions({ sceneBreak: '* * *', onSave: () => {} }),
+      content: { type: 'doc', content: [{ type: 'heading', attrs: { level: 2 }, content: [] }] }
+    })
+    try {
+      rerender(<Toolbar editor={second} />)
+      expect(button('Heading 2')).toHaveAttribute('aria-pressed', 'true')
+      expect(button('Bold')).toHaveAttribute('aria-pressed', 'false')
+      rerender(<Toolbar editor={null} />)
+      expect(button('Bold')).toBeDisabled()
+      expect(button('Heading 2')).toHaveAttribute('aria-pressed', 'false')
+    } finally {
+      second.destroy()
+      other.remove()
+    }
+  })
+
   it('labels each button with its shortcut', () => {
     render(<Toolbar editor={editor} />)
     expect(button('Bold')).toHaveAttribute('title', 'Bold (Ctrl+B)')

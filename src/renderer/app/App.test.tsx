@@ -158,9 +158,77 @@ describe('App', () => {
     )
     expect(screen.getByTestId('selected-title')).toHaveTextContent('Arc 2')
     expect(screen.getByText('Arc · Volume 1')).toBeInTheDocument()
-    // Folders have no content: header only, no editor.
-    expect(screen.queryByRole('textbox', { name: 'Document' })).not.toBeInTheDocument()
+    // F-2.5/F-3.8: a folder stacks every descendant document in tree order under one toolbar,
+    // each loaded under its own id; the single document was unloaded with its pane.
+    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual([
+      'Scene 4',
+      'Scene 5',
+      'Scene 6'
+    ])
+    expect(screen.getAllByRole('toolbar', { name: 'Formatting' })).toHaveLength(1)
+    expect(screen.getAllByRole('textbox', { name: 'Document' })).toHaveLength(3)
+    expect(screen.getAllByRole('separator', { name: 'Scene break' })).toHaveLength(2)
+    for (const id of ['sc-4', 'sc-5', 'sc-6']) {
+      expect(invoke).toHaveBeenCalledWith('document:get', { id })
+    }
+    await waitFor(() =>
+      expect(Object.keys(useDocumentStore.getState().docs).sort()).toEqual(['sc-4', 'sc-5', 'sc-6'])
+    )
+  })
+
+  it('invites the author to add a scene to an empty chapter (F-3.8)', async () => {
+    install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture.filter((n) => n.id !== 'sc-1')
+    })
+    render(<App />)
+    const chapter = await screen.findByRole('treeitem', { name: 'Chapter 1' })
+    await userEvent.click(within(chapter).getByText('Chapter 1'))
+    expect(screen.getByTestId('selected-title')).toHaveTextContent('Chapter 1')
+    expect(screen.getByText('Nothing here yet. Add a scene to start writing.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add a scene' })).toBeInTheDocument()
     expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Document' })).not.toBeInTheDocument()
+  })
+
+  it('stays on the folder after adding a scene from its empty-folder invitation (F-3.8)', async () => {
+    const invoke = install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture.filter((n) => n.id !== 'sc-1'),
+      'tree:create': {
+        id: 'new-sc',
+        parentId: 'ch-1',
+        sectionType: null,
+        kind: 'document',
+        hierarchyLevel: 'scene',
+        title: 'Untitled Scene',
+        position: 0,
+        wordCount: 0,
+        matterType: null,
+        preset: null,
+        created: 'c',
+        modified: 'm'
+      }
+    })
+    render(<App />)
+    const chapter = await screen.findByRole('treeitem', { name: 'Chapter 1' })
+    await userEvent.click(within(chapter).getByText('Chapter 1'))
+    await userEvent.click(screen.getByRole('button', { name: 'Add a scene' }))
+    expect(invoke).toHaveBeenCalledWith('tree:create', {
+      parentId: 'ch-1',
+      afterId: undefined,
+      kind: 'document',
+      hierarchyLevel: 'scene'
+    })
+    // The plan (S4+S5) calls for the new region to mount inside the still-visible stack for the
+    // selected folder; instead `createAt` (treeStore.ts) selects the new document, so `MainPane`
+    // swaps the whole pane to a single-document `EditorPane` and the Chapter 1 stack disappears.
+    await waitFor(() =>
+      expect(screen.getByTestId('selected-title')).toHaveTextContent('Chapter 1')
+    )
+    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual([
+      'Untitled Scene'
+    ])
   })
 
   it('shows the stored document in the editor and drops it when the project closes (F-3.1)', async () => {
@@ -187,12 +255,12 @@ describe('App', () => {
     const box = await screen.findByRole('textbox', { name: 'Document' })
     await waitFor(() => expect(box).toHaveTextContent('Once upon a time'))
     expect(box.querySelector('strong')).toHaveTextContent('time')
-    expect(useDocumentStore.getState()).toMatchObject({ id: 'sc-1', dirty: false })
+    expect(useDocumentStore.getState().docs['sc-1']?.dirty).toBe(false)
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
-    expect(useDocumentStore.getState()).toMatchObject({ id: null, content: null })
+    expect(useDocumentStore.getState().docs).toEqual({})
   })
 
   it('surfaces a failed document load as a toast and keeps the editor read-only', async () => {

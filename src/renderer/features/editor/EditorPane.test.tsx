@@ -1,11 +1,13 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Editor } from '@tiptap/core'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { DocumentEditor } from './DocumentEditor'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { EditorPane } from './EditorPane'
 
@@ -92,12 +94,12 @@ describe('EditorPane', () => {
     await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
 
     expect(button('Undo')).toBeDisabled()
-    expect(useDocumentStore.getState().dirty).toBe(false)
+    expect(useDocumentStore.getState().docs['sc-1']?.dirty).toBe(false)
 
     await userEvent.click(box())
     await userEvent.keyboard('!')
     await waitFor(() => expect(button('Undo')).toBeEnabled())
-    expect(useDocumentStore.getState().dirty).toBe(true)
+    expect(useDocumentStore.getState().docs['sc-1']?.dirty).toBe(true)
 
     // Undoing the author's edit restores the loaded text and stops there: the load is not a step.
     await userEvent.click(button('Undo'))
@@ -120,7 +122,8 @@ describe('EditorPane', () => {
     await release(1, doc('Second scene'))
     await waitFor(() => expect(box()).toHaveTextContent('Second scene'))
     expect(button('Undo')).toBeDisabled()
-    expect(useDocumentStore.getState()).toMatchObject({ id: 'sc-2', dirty: false })
+    expect(Object.keys(useDocumentStore.getState().docs)).toEqual(['sc-2'])
+    expect(useDocumentStore.getState().docs['sc-2']?.dirty).toBe(false)
   })
 
   it('Ctrl+S saves the typed text at once (F-3.2)', async () => {
@@ -129,7 +132,7 @@ describe('EditorPane', () => {
     await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
     await userEvent.click(box())
     await userEvent.keyboard('again')
-    expect(useDocumentStore.getState().dirty).toBe(true)
+    expect(useDocumentStore.getState().docs['sc-1']?.dirty).toBe(true)
     expect(saves).toHaveLength(0)
 
     await userEvent.keyboard('{Control>}s{/Control}')
@@ -138,7 +141,7 @@ describe('EditorPane', () => {
     expect(saves[0]?.content.type).toBe('doc')
     expect(firstParagraphText(saves[0]?.content)).toContain('again')
     expect(firstParagraphText(saves[0]?.content)).toContain('Once upon a time')
-    await waitFor(() => expect(useDocumentStore.getState().dirty).toBe(false))
+    await waitFor(() => expect(useDocumentStore.getState().docs['sc-1']?.dirty).toBe(false))
   })
 
   it('switching documents saves the previous document under its own id (F-3.2)', async () => {
@@ -156,8 +159,22 @@ describe('EditorPane', () => {
     expect(firstParagraphText(saves[0]?.content)).toContain('First scene')
     await release(1, doc('Second scene'))
     await waitFor(() => expect(box()).toHaveTextContent('Second scene'))
-    expect(useDocumentStore.getState()).toMatchObject({ id: 'sc-2', dirty: false })
+    expect(Object.keys(useDocumentStore.getState().docs)).toEqual(['sc-2'])
+    expect(useDocumentStore.getState().docs['sc-2']?.dirty).toBe(false)
     expect(saves).toHaveLength(1)
+  })
+
+  it('unmounting saves the pending edit and forgets the document (F-3.8)', async () => {
+    const { unmount } = render(<EditorPane id="sc-1" format="novel" />)
+    await release(0, doc('First scene'))
+    await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
+    await userEvent.click(box())
+    await userEvent.keyboard('edited')
+    unmount()
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0]?.id).toBe('sc-1')
+    expect(firstParagraphText(saves[0]?.content)).toContain('edited')
+    expect(useDocumentStore.getState().docs).toEqual({})
   })
 
   it('loads a never-written document as an empty paragraph', async () => {
@@ -167,5 +184,30 @@ describe('EditorPane', () => {
     expect(box().querySelectorAll('p')).toHaveLength(1)
     expect(box()).toHaveTextContent('')
     expect(button('Undo')).toBeDisabled()
+  })
+})
+
+describe('DocumentEditor as a stacked region (F-3.8)', () => {
+  it('renders no toolbar and no scroll box of its own with toolbar={false}', async () => {
+    render(<DocumentEditor id="sc-1" format="novel" toolbar={false} />)
+    expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
+    await release(0, doc('Region text'))
+    await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
+    expect(box()).toHaveTextContent('Region text')
+    expect(box()).toHaveClass('ms-editor-region')
+    expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
+  })
+
+  it('reports its editor through onFocus when clicked', async () => {
+    const onFocus = vi.fn<(editor: Editor) => void>()
+    render(<DocumentEditor id="sc-1" format="novel" toolbar={false} onFocus={onFocus} />)
+    await release(0, doc('Region text'))
+    await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
+    expect(onFocus).not.toHaveBeenCalled()
+    await userEvent.click(box())
+    await waitFor(() => expect(onFocus).toHaveBeenCalled())
+    const editor = onFocus.mock.calls[0]?.[0]
+    expect(editor?.getText()).toBe('Region text')
+    expect(editor?.view.dom).toBe(box())
   })
 })
