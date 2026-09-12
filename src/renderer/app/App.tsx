@@ -17,6 +17,7 @@ import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useEditorSettingsStore } from '@renderer/features/editor/settingsStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { useTagStore } from '@renderer/features/tags/tagStore'
 import { CreateProjectWizard } from '@renderer/features/project/CreateProjectWizard'
 import { RecentProjects } from '@renderer/features/project/RecentProjects'
 import { useProjectStore } from '@renderer/features/project/projectStore'
@@ -55,7 +56,8 @@ export function App(): React.JSX.Element {
   // F-2.1: the document tree follows the open project. App owns when it loads and clears, keyed
   // on the project id so a refreshed `ProjectInfo` for the same project does not reload it.
   // F-3.1: the loaded document goes with it. F-3.6: so do the formatting settings. F-3.7: and
-  // the loaded notes (the panel layout is app-wide, F-7.2, so it stays).
+  // the loaded notes (the panel layout is app-wide, F-7.2, so it stays). F-4.2: and the tag
+  // bank, whose failure toasts on its own and never blocks the tree.
   useEffect(() => {
     const tree = useTreeStore.getState()
     if (projectId === null) {
@@ -63,10 +65,15 @@ export function App(): React.JSX.Element {
       useDocumentStore.getState().clear()
       useNotesStore.getState().clear()
       useEditorSettingsStore.getState().clear()
+      useTagStore.getState().clear()
       return
     }
     tree.load().catch((err: unknown) => toast.error(describeError(err)))
     useEditorSettingsStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    useTagStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))

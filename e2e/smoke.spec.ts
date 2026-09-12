@@ -198,10 +198,10 @@ test('create, close, reopen a project on disk', async () => {
     .poll(async () => (await getLayout()).sidebar, { timeout: 3000 })
     .toEqual({ open: true, size: sidebarFinal, tab: 'manuscript' })
 
-  // F-7.3: the sidebar is a tab bar; only the built Manuscript tab is listed (no placeholders),
-  // it is selected, and its panel holds the tree.
+  // F-7.3: the sidebar is a tab bar; only the built Manuscript and Tags tabs are listed (no
+  // placeholders), Manuscript is selected, and its panel holds the tree.
   const sidebarTabs = page.getByRole('tablist', { name: 'Sidebar' })
-  await expect(sidebarTabs.getByRole('tab')).toHaveText(['Manuscript'])
+  await expect(sidebarTabs.getByRole('tab')).toHaveText(['Manuscript', 'Tags'])
   const manuscriptTab = sidebarTabs.getByRole('tab', { name: 'Manuscript' })
   await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('tabpanel', { name: 'Manuscript' }).getByRole('tree')).toBeVisible()
@@ -470,6 +470,59 @@ test('create, close, reopen a project on disk', async () => {
   if (!persistedColumn) throw new Error('editor column not laid out')
   expect(persistedColumn.width).toBeGreaterThan(700)
   expect(persistedColumn.width).toBeLessThanOrEqual(900)
+
+  // F-4.2: the Tags tab lists the tag created through the bridge (it survived the close and the
+  // store loaded it on reopen) under All and under its category, creates one through the form
+  // (the color pre-fills from the chosen category), opens its detail view, renames it inline,
+  // and deletes it after a confirmation.
+  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  const tagsPanel = page.getByRole('tabpanel', { name: 'Tags' })
+  const categories = tagsPanel.getByRole('tablist', { name: 'Tag categories' })
+  await expect(categories.getByRole('tab')).toHaveText([
+    'All',
+    'Characters',
+    'Settings',
+    'World Building',
+    'Tone',
+    'Content',
+    'Plot Threads',
+    'Custom'
+  ])
+  const tagRows = tagsPanel.getByRole('list', { name: 'Tags' })
+  await expect(tagRows.getByRole('button')).toHaveText(['dark-forest 0 uses'])
+  await expect(
+    tagRows.getByRole('button', { name: /^dark-forest/ }).locator('span[aria-hidden]')
+  ).toHaveCSS('background-color', 'rgb(234, 88, 12)')
+  await categories.getByRole('tab', { name: 'Settings' }).click()
+  await expect(tagRows.getByRole('button')).toHaveText(['dark-forest 0 uses'])
+  await categories.getByRole('tab', { name: 'Tone' }).click()
+  await expect(tagsPanel.getByText('No tags match.')).toBeVisible()
+  const tagForm = tagsPanel.getByRole('form', { name: 'New tag' })
+  await expect(tagForm.getByRole('combobox', { name: 'Category' })).toHaveValue('tone')
+  await expect(tagForm.getByLabel('Color')).toHaveValue('#2563eb')
+  await tagForm.getByRole('textbox', { name: 'Tag name' }).fill('Moody')
+  await tagForm.getByRole('button', { name: 'Create tag' }).click()
+  await expect(tagRows.getByRole('button')).toHaveText(['moody 0 uses'])
+  await expect(tagForm.getByRole('textbox', { name: 'Tag name' })).toHaveValue('')
+  await tagRows.getByRole('button', { name: /^moody/ }).click()
+  const tagName = tagsPanel.getByRole('textbox', { name: 'Tag name' })
+  await expect(tagName).toHaveValue('moody')
+  await expect(tagsPanel.getByLabel('Color')).toHaveValue('#2563eb')
+  await expect(tagsPanel.getByText('Used in 0 documents')).toBeVisible()
+  await tagName.fill('Melancholy')
+  await tagName.press('Enter')
+  await expect(tagName).toHaveValue('melancholy')
+  await tagsPanel.getByRole('button', { name: 'Delete tag' }).click()
+  const deleteTagDialog = page.getByRole('dialog', { name: 'Delete "melancholy"?' })
+  await expect(deleteTagDialog).toBeVisible()
+  await deleteTagDialog.getByRole('button', { name: 'Delete' }).click()
+  await expect(deleteTagDialog).toBeHidden()
+  await expect(tagsPanel.getByText('No tags match.')).toBeVisible()
+  await categories.getByRole('tab', { name: 'All' }).click()
+  await expect(tagRows.getByRole('button')).toHaveText(['dark-forest 0 uses'])
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
+  await expect(tree).toBeVisible()
 
   // F-2.5/F-3.8: selecting Chapter 1 stacks Opening and Scene 1 in tree order, each as its own
   // region with the web-novel scene break between them; typing into Opening leaves Scene 1

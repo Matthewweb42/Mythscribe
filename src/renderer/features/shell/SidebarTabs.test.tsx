@@ -63,9 +63,9 @@ describe('SidebarTabs (F-7.3)', () => {
     expect(tab('Manuscript')).toHaveAttribute('aria-controls', panel().id)
   })
 
-  it('ships only the Manuscript tab by default, so there is no placeholder to click', () => {
+  it('ships only the built Manuscript and Tags tabs by default, so there is no placeholder to click', () => {
     render(<SidebarTabs format="novel" />)
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Manuscript'])
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Manuscript', 'Tags'])
     expect(panel()).toHaveAccessibleName('Manuscript')
   })
 

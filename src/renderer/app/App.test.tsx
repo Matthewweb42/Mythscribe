@@ -24,6 +24,8 @@ import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { tagFixture } from '@renderer/features/tags/tagFixture'
+import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { registerPendingSave, resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { App } from './App'
@@ -59,6 +61,7 @@ beforeEach(() => {
   useNotesStore.getState().clear()
   resetLayoutStore()
   resetEditorSettingsStore()
+  resetTagStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -77,6 +80,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     }
     if (channel === 'recents:list') return []
     if (channel === 'tree:list') return []
+    if (channel === 'tag:list') return []
     if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }
     if (channel === 'notes:get') return { id: (input as { id: string }).id, notes: null }
     if (channel === 'editorSettings:get') return defaultEditorSettings('novel')
@@ -139,7 +143,8 @@ describe('App', () => {
   it('shows the project name and format in the shell header, window title, and tree (F-1.5, F-2.1)', async () => {
     install({
       'project:create': { ...info, name: 'Serial', format: 'webnovel' },
-      'tree:list': treeFixture
+      'tree:list': treeFixture,
+      'tag:list': tagFixture
     })
     render(<App />)
     await fillWizard('Serial', /^web novel/i)
@@ -162,6 +167,14 @@ describe('App', () => {
       'Select a document to start writing.'
     )
     expect(screen.queryByTestId('selected-title')).not.toBeInTheDocument()
+    // F-4.2: the tag bank loads with the project and the Tags tab is registered beside Manuscript.
+    await waitFor(() => expect(useTagStore.getState().loaded).toBe(true))
+    expect(useTagStore.getState().ids).toEqual(['t-forest', 't-mara', 't-moody'])
+    expect(
+      within(aside)
+        .getAllByRole('tab')
+        .map((t) => t.textContent)
+    ).toEqual(['Manuscript', 'Tags'])
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
@@ -172,6 +185,9 @@ describe('App', () => {
     expect(screen.queryByRole('tree')).not.toBeInTheDocument()
     expect(useTreeStore.getState().rootIds).toEqual([])
     expect(useTreeStore.getState().loaded).toBe(false)
+    // F-4.2: and the tag store.
+    expect(useTagStore.getState().ids).toEqual([])
+    expect(useTagStore.getState().loaded).toBe(false)
   })
 
   it('selecting a document in the tree shows it in the main pane (F-2.1)', async () => {
