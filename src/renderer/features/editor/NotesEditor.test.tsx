@@ -5,10 +5,10 @@ import type { Channel, Input, Output } from '@shared/ipc/contract'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetLayoutStore } from '@renderer/features/shell/layoutStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetDocumentStore } from './documentStore'
 import { NotesEditor } from './NotesEditor'
-import { resetNotesPanelStore } from './notesPanelStore'
 import { AUTOSAVE_DELAY_MS, resetNotesStore, useNotesStore } from './notesStore'
 
 const doc = (text: string): TiptapNodeT => ({
@@ -60,7 +60,7 @@ const text = (saved: Input<'notes:save'> | undefined): string =>
 beforeEach(() => {
   resetNotesStore()
   resetDocumentStore()
-  resetNotesPanelStore()
+  resetLayoutStore()
   resetPendingSaves()
   useDialogStore.setState({ modals: [], toasts: [] })
   const deferred = deferredClient()

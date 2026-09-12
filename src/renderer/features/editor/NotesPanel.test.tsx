@@ -2,18 +2,14 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
+import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetDocumentStore } from './documentStore'
 import { NotesPanel, NotesToggleButton } from './NotesPanel'
-import {
-  DEFAULT_WIDTH,
-  MIN_WIDTH,
-  resetNotesPanelStore,
-  useNotesPanelStore
-} from './notesPanelStore'
 import { resetNotesStore } from './notesStore'
 
 const doc = (text: string): TiptapNodeT => ({
@@ -50,21 +46,18 @@ function client(stored: Record<string, TiptapNodeT>): {
   }
 }
 
-/** jsdom has no layout and no ResizeObserver; the test controls the container width directly. */
-let containerWidth = 1000
-class FakeResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-const clientWidth = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')
+/** jsdom has no layout; the window width the drag deltas are divided by is stubbed. */
+const WINDOW_WIDTH = 1000
+const DEFAULT_SIZE = defaultLayout().notes.size
 
 let gets: string[]
 let saves: Input<'notes:save'>[]
 
 const handle = (): HTMLElement => screen.getByRole('separator', { name: 'Resize notes' })
-const width = (): number => Number(handle().getAttribute('aria-valuenow'))
+/** The stored fraction, as the source of truth the `vw` width and the ARIA percent derive from. */
+const size = (): number => useLayoutStore.getState().layout.notes.size
 const panel = (): HTMLElement => screen.getByTestId('notes-panel')
+const openNotes = (): void => act(() => useLayoutStore.getState().toggle('notes'))
 
 function Host({ id }: { id: string }): React.JSX.Element {
   return (
@@ -79,13 +72,8 @@ function Host({ id }: { id: string }): React.JSX.Element {
 }
 
 beforeEach(() => {
-  containerWidth = 1000
-  vi.stubGlobal('ResizeObserver', FakeResizeObserver)
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => containerWidth
-  })
-  resetNotesPanelStore()
+  vi.stubGlobal('innerWidth', WINDOW_WIDTH)
+  resetLayoutStore()
   resetNotesStore()
   resetDocumentStore()
   resetPendingSaves()
@@ -97,8 +85,6 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.unstubAllGlobals()
-  Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (clientWidth) Object.defineProperty(Element.prototype, 'clientWidth', clientWidth)
 })
 
 describe('NotesPanel (F-3.7)', () => {
@@ -120,7 +106,7 @@ describe('NotesPanel (F-3.7)', () => {
   })
 
   it('loads the notes for the id it is given and follows an id change', async () => {
-    act(() => useNotesPanelStore.getState().toggle())
+    openNotes()
     const { rerender } = render(<Host id="sc-1" />)
     // The editor remounts once the load lands, so the textbox is queried fresh each time.
     await waitFor(() =>
@@ -135,53 +121,57 @@ describe('NotesPanel (F-3.7)', () => {
     expect(saves).toHaveLength(0)
   })
 
-  it('opens at the default width and the arrow keys resize it, clamped to the minimum and half the container', async () => {
-    act(() => useNotesPanelStore.getState().toggle())
+  it('opens at the stored fraction of the window and the arrow keys resize it, clamped to its limits (F-7.2)', async () => {
+    openNotes()
     render(<Host id="sc-1" />)
-    expect(width()).toBe(DEFAULT_WIDTH)
-    expect(panel().style.width).toBe(`${DEFAULT_WIDTH}px`)
+    expect(size()).toBe(DEFAULT_SIZE)
+    expect(panel().style.width).toBe(`${DEFAULT_SIZE * 100}vw`)
     expect(handle()).toHaveAttribute('aria-orientation', 'vertical')
-    expect(handle()).toHaveAttribute('aria-valuemin', String(MIN_WIDTH))
-    expect(handle()).toHaveAttribute('aria-valuemax', '500')
+    expect(handle()).toHaveAttribute('aria-valuenow', String(Math.round(DEFAULT_SIZE * 100)))
+    expect(handle()).toHaveAttribute('aria-valuemin', '15')
+    expect(handle()).toHaveAttribute('aria-valuemax', '50')
 
     handle().focus()
     await userEvent.keyboard('{ArrowLeft}')
-    expect(width()).toBe(DEFAULT_WIDTH + 16)
-    expect(panel().style.width).toBe(`${DEFAULT_WIDTH + 16}px`)
+    expect(size()).toBeCloseTo(DEFAULT_SIZE + 16 / WINDOW_WIDTH)
+    expect(panel().style.width).toBe(`${(DEFAULT_SIZE + 16 / WINDOW_WIDTH) * 100}vw`)
     await userEvent.keyboard('{ArrowRight}{ArrowRight}')
-    expect(width()).toBe(DEFAULT_WIDTH - 16)
+    expect(size()).toBeCloseTo(DEFAULT_SIZE - 16 / WINDOW_WIDTH)
 
     for (let i = 0; i < 20; i++) await userEvent.keyboard('{ArrowRight}')
-    expect(width()).toBe(MIN_WIDTH)
-    expect(useNotesPanelStore.getState().width).toBe(MIN_WIDTH)
+    expect(size()).toBe(LAYOUT_LIMITS.notes[0])
+    expect(handle()).toHaveAttribute('aria-valuenow', '15')
 
-    for (let i = 0; i < 30; i++) await userEvent.keyboard('{ArrowLeft}')
-    expect(width()).toBe(500)
+    // The sidebar is open at its default, so the editor minimum caps the notes under their own maximum.
+    for (let i = 0; i < 40; i++) await userEvent.keyboard('{ArrowLeft}')
+    expect(size()).toBeCloseTo(1 - LAYOUT_LIMITS.editorMin - defaultLayout().sidebar.size)
+    expect(handle()).toHaveAttribute('aria-valuenow', '48')
   })
 
   it('a pointer drag on the handle changes the width: left widens, right narrows', () => {
-    act(() => useNotesPanelStore.getState().toggle())
+    openNotes()
     render(<Host id="sc-1" />)
-    fireEvent.pointerDown(handle(), { clientX: 600 })
+    fireEvent.pointerDown(handle(), { clientX: 600, button: 0 })
     fireEvent.pointerMove(window, { clientX: 550 })
-    expect(width()).toBe(DEFAULT_WIDTH + 50)
+    expect(size()).toBeCloseTo(DEFAULT_SIZE + 50 / WINDOW_WIDTH)
     fireEvent.pointerMove(window, { clientX: 640 })
-    expect(width()).toBe(DEFAULT_WIDTH - 40)
+    expect(size()).toBeCloseTo(DEFAULT_SIZE - 40 / WINDOW_WIDTH)
     fireEvent.pointerUp(window, { clientX: 640 })
     // After release, movement no longer resizes.
     fireEvent.pointerMove(window, { clientX: 300 })
-    expect(width()).toBe(DEFAULT_WIDTH - 40)
-    expect(useNotesPanelStore.getState().width).toBe(DEFAULT_WIDTH - 40)
+    expect(size()).toBeCloseTo(DEFAULT_SIZE - 40 / WINDOW_WIDTH)
+    expect(panel().style.width).toBe(`${size() * 100}vw`)
   })
 
-  it('keeps the width across a close and reopen within the session', async () => {
-    act(() => useNotesPanelStore.getState().toggle())
+  it('keeps the width across a close and reopen', async () => {
+    openNotes()
     render(<Host id="sc-1" />)
     handle().focus()
     await userEvent.keyboard('{ArrowLeft}')
     const button = screen.getByRole('button', { name: 'Notes' })
     await userEvent.click(button)
+    expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument()
     await userEvent.click(button)
-    expect(width()).toBe(DEFAULT_WIDTH + 16)
+    expect(size()).toBeCloseTo(DEFAULT_SIZE + 16 / WINDOW_WIDTH)
   })
 })

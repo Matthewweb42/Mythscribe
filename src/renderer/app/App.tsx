@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, FilePlus2 } from 'lucide-react'
+import { FolderOpen, FilePlus2, PanelLeft } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, levelLabel, sectionLabel } from '@shared/labels'
+import { LAYOUT_LIMITS } from '@shared/layout'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { Logo } from '@renderer/features/shell/Logo'
+import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
@@ -30,6 +33,11 @@ export function App(): React.JSX.Element {
       .getState()
       .init()
       .catch((err: unknown) => toast.error(describeError(err)))
+    // F-7.2: the panel layout is app-wide; it loads once here, before any project opens.
+    useLayoutStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
     // F-1.4: the OS close button flushes pending saves first; a failed flush keeps the window
     // open with the error visible so no words are lost.
     return ipc().on('window:close-requested', () => {
@@ -47,7 +55,7 @@ export function App(): React.JSX.Element {
   // F-2.1: the document tree follows the open project. App owns when it loads and clears, keyed
   // on the project id so a refreshed `ProjectInfo` for the same project does not reload it.
   // F-3.1: the loaded document goes with it. F-3.6: so do the formatting settings. F-3.7: and
-  // the loaded notes (the panel's open state and width are per session, not per project).
+  // the loaded notes (the panel layout is app-wide, F-7.2, so it stays).
   useEffect(() => {
     const tree = useTreeStore.getState()
     if (projectId === null) {
@@ -67,6 +75,7 @@ export function App(): React.JSX.Element {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-11 items-center gap-2 border-b border-line bg-surface px-4 text-sm">
+        {current ? <SidebarToggleButton /> : null}
         <Logo size={16} />
         <span className="font-semibold">MythScribe</span>
         {current ? (
@@ -201,20 +210,54 @@ function CloseProjectButton(): React.JSX.Element {
   )
 }
 
+/** Header action (F-7.2): shows or hides the sidebar; `aria-pressed` reflects whether it is open. */
+function SidebarToggleButton(): React.JSX.Element {
+  const open = useLayoutStore((s) => s.layout.sidebar.open)
+  const toggle = useLayoutStore((s) => s.toggle)
+  return (
+    <button
+      type="button"
+      aria-label="Sidebar"
+      title="Sidebar"
+      aria-pressed={open}
+      onClick={() => toggle('sidebar')}
+      className="-ml-1.5 rounded-md p-1.5 text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:text-fg"
+    >
+      <PanelLeft size={16} aria-hidden="true" />
+    </button>
+  )
+}
+
 /**
  * F-2.1: the document tree beside the main pane, with the create buttons (F-2.2) pinned under
  * it; the editor (F-3.1) takes the main pane for the selected document, or every document of
  * the selected folder stacked (F-2.5, F-3.8), with the notes panel (F-3.7) beside it when open.
+ * F-7.2: the sidebar's open state and width come from the layout store; the width is a fraction
+ * of the window rendered in `vw`, resized by the handle on its right edge.
  */
 function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
+  const sidebar = useLayoutStore((s) => s.layout.sidebar)
   return (
     <>
-      <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-surface">
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <ManuscriptTree format={format} />
-        </div>
-        <CreateNodeBar format={format} />
-      </aside>
+      {sidebar.open ? (
+        <aside
+          className="relative flex shrink-0 flex-col border-r border-line bg-surface"
+          style={{ width: `${sidebar.size * 100}vw` }}
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <ManuscriptTree format={format} />
+          </div>
+          <CreateNodeBar format={format} />
+          <ResizeHandle
+            side="right"
+            value={sidebar.size}
+            min={LAYOUT_LIMITS.sidebar[0]}
+            max={LAYOUT_LIMITS.sidebar[1]}
+            ariaLabel="Resize sidebar"
+            onChange={(deltaPx) => resizePanelBy('sidebar', deltaPx)}
+          />
+        </aside>
+      ) : null}
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <MainPane format={format} />
       </section>

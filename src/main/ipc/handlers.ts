@@ -7,6 +7,7 @@ import { getNotes, saveNotes } from '../document/notesStore'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
 import { getEditorSettings, setEditorSettings } from '../project/settingsStore'
+import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import {
   createNode,
   deleteNode,
@@ -16,6 +17,7 @@ import {
   renameNode,
   toTreeNode
 } from '../tree/treeStore'
+import { AppError } from './errors'
 import { emit, register, type EmitTarget } from './registry'
 
 /** The parts of a BrowserWindow the handlers need; structural so tests can pass a fake. */
@@ -103,6 +105,16 @@ export function registerHandlers({ manager, appState, dialogs, windows }: Handle
   register('editorSettings:set', (value) =>
     setEditorSettings(manager.require().connection.orm, value)
   )
+
+  // A hand-edited app-state file may squeeze the editor; reading normalizes, writing refuses.
+  register('layout:get', () => normalizeLayout(appState.get().layout))
+
+  register('layout:set', (layout) => {
+    if (!fitsEditorMin(layout)) {
+      throw new AppError('VALIDATION', 'The panels leave the editor less than its minimum width')
+    }
+    return appState.update((s) => ({ ...s, layout })).layout
+  })
 
   register('window:close', () => {
     manager.close()

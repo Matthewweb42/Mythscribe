@@ -2,15 +2,18 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { RecentProjectEntry } from '@shared/ipc/contract'
+import { Layout, defaultLayout } from '@shared/layout'
 
 /** Persistent, app-wide state (not project state) kept as one JSON file in userData. */
 export const AppState = z.object({
   version: z.literal(1),
-  recents: z.array(RecentProjectEntry)
+  recents: z.array(RecentProjectEntry),
+  /** F-7.2; defaulted so files written before it parse to the same layout as a fresh install. */
+  layout: Layout.default(defaultLayout)
 })
 export type AppState = z.infer<typeof AppState>
 
-export const EMPTY_APP_STATE: AppState = { version: 1, recents: [] }
+export const EMPTY_APP_STATE: AppState = { version: 1, recents: [], layout: defaultLayout() }
 
 export class AppStateStore {
   private cache: AppState | null = null

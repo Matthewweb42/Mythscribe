@@ -9,6 +9,7 @@ import {
   type Page
 } from '@playwright/test'
 import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contract'
+import type { Layout } from '../src/shared/layout'
 import { matterTemplate } from '../src/shared/matterTemplates'
 import type { TiptapNodeT } from '../src/shared/tiptap'
 import { countWords } from '../src/shared/wordCount'
@@ -126,6 +127,52 @@ test('create, close, reopen a project on disk', async () => {
   await scene1.click()
   await expect(scene1).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+
+  // F-7.2: the arrow keys on the sidebar handle widen it; the new fraction is written to
+  // app-state.json (so it survives a restart), and the header button hides and shows the tree.
+  const sidebarHandle = page.getByRole('separator', { name: 'Resize sidebar' })
+  const sidebarBefore = (await getLayout()).sidebar.size
+  await sidebarHandle.focus()
+  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight')
+  // The renderer resizes at once; main learns of it after the 150 ms debounce.
+  await expect
+    .poll(async () => (await getLayout()).sidebar.size, { timeout: 3000 })
+    .toBeGreaterThan(sidebarBefore)
+  const sidebarAfter = (await getLayout()).sidebar.size
+  await expect(sidebarHandle).toHaveAttribute(
+    'aria-valuenow',
+    String(Math.round(sidebarAfter * 100))
+  )
+  // Back the other way, so the later column-width checks (F-3.4/F-3.6) keep the room they assume.
+  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight')
+  for (let i = 0; i < 10; i++) await page.keyboard.press('ArrowLeft')
+  await expect
+    .poll(async () => (await getLayout()).sidebar.size, { timeout: 3000 })
+    .toBeLessThan(sidebarAfter)
+  const sidebarFinal = (await getLayout()).sidebar.size
+  expect(sidebarFinal).toBeCloseTo(sidebarBefore)
+  const appStateFile = path.join(tmp, 'userData', 'app-state.json')
+  await expect
+    .poll(() => (fs.existsSync(appStateFile) ? fs.readFileSync(appStateFile, 'utf8') : ''), {
+      timeout: 3000
+    })
+    .toContain('"layout"')
+  expect((JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { layout: Layout }).layout).toEqual(
+    await getLayout()
+  )
+  const sidebarToggle = page.getByRole('button', { name: 'Sidebar', exact: true })
+  await expect(sidebarToggle).toHaveAttribute('aria-pressed', 'true')
+  await sidebarToggle.click()
+  await expect(sidebarToggle).toHaveAttribute('aria-pressed', 'false')
+  await expect(tree).toBeHidden()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await sidebarToggle.click()
+  await expect(sidebarToggle).toHaveAttribute('aria-pressed', 'true')
+  await expect(tree).toBeVisible()
+  await expect(scene1).toHaveAttribute('aria-selected', 'true')
+  await expect
+    .poll(async () => (await getLayout()).sidebar, { timeout: 3000 })
+    .toEqual({ open: true, size: sidebarFinal })
 
   // F-2.2: "New scene" from the bar inserts after the selected scene and opens inline rename;
   // Enter commits the title and the row keeps its place right after Scene 1.
@@ -471,6 +518,15 @@ async function notesText(id: string): Promise<string | null> {
   )
   if (!result.ok) throw new Error(`notes:get failed: ${result.error.message}`)
   return result.data.notes ? plainText(result.data.notes) : null
+}
+
+/** The persisted panel layout (F-7.2) as main reports it. */
+async function getLayout(): Promise<Layout> {
+  const result = await page.evaluate<IpcResult<Layout>>(
+    () => window.mythscribe.invoke('layout:get', undefined) as Promise<IpcResult<Layout>>
+  )
+  if (!result.ok) throw new Error(`layout:get failed: ${result.error.message}`)
+  return result.data
 }
 
 async function listTree(): Promise<TreeNode[]> {

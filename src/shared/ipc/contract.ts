@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { EditorSettings } from '../editorSettings'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
+import { Layout } from '../layout'
 import { MatterTemplateId } from '../matterTemplates'
 import { TiptapNode } from '../tiptap'
 
@@ -165,6 +166,10 @@ export const contract = {
   'editorSettings:get': { input: z.undefined(), output: EditorSettings },
   /** Replaces the project's editor formatting (F-3.6); out-of-range values are refused with VALIDATION. */
   'editorSettings:set': { input: EditorSettings, output: EditorSettings },
+  /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
+  'layout:get': { input: z.undefined(), output: Layout },
+  /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
+  'layout:set': { input: Layout, output: Layout },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>

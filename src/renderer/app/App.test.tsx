@@ -1,6 +1,6 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type {
   Channel,
@@ -11,16 +11,17 @@ import type {
   ProjectInfo,
   RecentProject
 } from '@shared/ipc/contract'
+import { defaultLayout } from '@shared/layout'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
-import { resetNotesPanelStore, useNotesPanelStore } from '@renderer/features/editor/notesPanelStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import {
   resetEditorSettingsStore,
   useEditorSettingsStore
 } from '@renderer/features/editor/settingsStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { registerPendingSave, resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -56,18 +57,15 @@ beforeEach(() => {
   useTreeStore.getState().clear()
   useDocumentStore.getState().clear()
   useNotesStore.getState().clear()
-  resetNotesPanelStore()
+  resetLayoutStore()
   resetEditorSettingsStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
-  vi.stubGlobal(
-    'ResizeObserver',
-    class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    }
-  )
+  // jsdom has no layout; the drag deltas of the resize handles are divided by this.
+  vi.stubGlobal('innerWidth', 1000)
+})
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<typeof vi.fn> {
@@ -82,6 +80,8 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }
     if (channel === 'notes:get') return { id: (input as { id: string }).id, notes: null }
     if (channel === 'editorSettings:get') return defaultEditorSettings('novel')
+    if (channel === 'layout:get') return defaultLayout()
+    if (channel === 'layout:set') return input
     return null
   })
   const on = <E extends EventName>(
@@ -334,8 +334,90 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
     expect(useNotesStore.getState().docs).toEqual({})
-    // The panel's open state is per session, so it is still open for the next project.
-    expect(useNotesPanelStore.getState().open).toBe(true)
+    // The panel's open state is app-wide (F-7.2), so it is still open for the next project.
+    expect(useLayoutStore.getState().layout.notes.open).toBe(true)
+  })
+
+  it('loads the layout at start and sizes the sidebar from it in vw (F-7.2)', async () => {
+    const invoke = install({
+      'project:current': info,
+      'layout:get': { sidebar: { open: true, size: 0.3 }, notes: { open: false, size: 0.25 } }
+    })
+    render(<App />)
+    expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
+    expect(invoke).toHaveBeenCalledWith('layout:get', undefined)
+    await waitFor(() => expect(useLayoutStore.getState().layout.sidebar.size).toBe(0.3))
+    const aside = screen.getByRole('complementary')
+    expect(aside.style.width).toBe('30vw')
+    const handle = within(aside).getByRole('separator', { name: 'Resize sidebar' })
+    expect(handle).toHaveAttribute('aria-valuenow', '30')
+    expect(handle).toHaveAttribute('aria-valuemin', '15')
+    expect(handle).toHaveAttribute('aria-valuemax', '35')
+  })
+
+  it('the sidebar handle resizes it by drag and by arrow keys, and the size is written (F-7.2)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const invoke = install({
+        'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+        'tree:list': treeFixture
+      })
+      render(<App />)
+      await screen.findByRole('treeitem', { name: 'Volume 1' })
+      const aside = screen.getByRole('complementary')
+      expect(aside.style.width).toBe('22vw')
+      const handle = within(aside).getByRole('separator', { name: 'Resize sidebar' })
+      handle.focus()
+      await userEvent.keyboard('{ArrowRight}')
+      // 16 px of a 1000 px window: 0.22 → 0.236.
+      expect(useLayoutStore.getState().layout.sidebar.size).toBeCloseTo(0.236)
+      expect(aside.style.width).toBe(`${0.236 * 100}vw`)
+      expect(handle).toHaveAttribute('aria-valuenow', '24')
+      fireEvent.pointerDown(handle, { clientX: 236, button: 0 })
+      fireEvent.pointerMove(window, { clientX: 300 })
+      fireEvent.pointerUp(window, { clientX: 300 })
+      expect(useLayoutStore.getState().layout.sidebar.size).toBeCloseTo(0.3)
+      expect(aside.style.width).toBe(`${useLayoutStore.getState().layout.sidebar.size * 100}vw`)
+      await act(() => vi.advanceTimersByTimeAsync(200))
+      const writes = invoke.mock.calls.filter(([c]) => c === 'layout:set')
+      expect(writes).toHaveLength(1)
+      expect(writes[0]?.[1]).toEqual({
+        sidebar: { open: true, size: useLayoutStore.getState().layout.sidebar.size },
+        notes: { open: false, size: 0.25 }
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the header button hides and shows the sidebar (F-7.2)', async () => {
+    install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture
+    })
+    render(<App />)
+    await screen.findByRole('treeitem', { name: 'Volume 1' })
+    const toggle = screen.getByRole('button', { name: 'Sidebar' })
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByRole('tree')).not.toBeInTheDocument()
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
+    expect(screen.queryByRole('separator', { name: 'Resize sidebar' })).not.toBeInTheDocument()
+    expect(useLayoutStore.getState().layout.sidebar.open).toBe(false)
+    // The main pane is still there for the author.
+    expect(screen.getByTestId('empty-state')).toBeInTheDocument()
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('tree')).toBeInTheDocument()
+    expect(screen.getByRole('complementary').style.width).toBe('22vw')
+  })
+
+  it('does not show the sidebar button on the welcome screen', async () => {
+    install()
+    render(<App />)
+    await screen.findByRole('button', { name: /new project/i })
+    expect(screen.queryByRole('button', { name: 'Sidebar' })).not.toBeInTheDocument()
   })
 
   it('loads the formatting settings with the project, applies them to the editor, and drops them on close (F-3.6)', async () => {

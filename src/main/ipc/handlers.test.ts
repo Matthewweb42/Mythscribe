@@ -12,6 +12,7 @@ import {
 } from '@shared/ipc/contract'
 import { z } from 'zod'
 import { defaultEditorSettings } from '@shared/editorSettings'
+import { defaultLayout } from '@shared/layout'
 import { AppStateStore } from '../appState/appStateStore'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
@@ -467,6 +468,78 @@ describe('editorSettings:get / editorSettings:set', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     expect(await invoke('editorSettings:get', undefined)).toEqual(defaultEditorSettings('novel'))
+  })
+})
+
+describe('layout:get / layout:set (F-7.2)', () => {
+  it('returns the default layout before anything is saved, with no project needed', async () => {
+    expect(await invoke('layout:get', undefined)).toEqual(defaultLayout())
+  })
+
+  it('persists a layout so get returns it, also from a fresh store over the same file', async () => {
+    const next = { sidebar: { open: false, size: 0.3 }, notes: { open: true, size: 0.4 } }
+    expect(await invoke('layout:set', next)).toEqual(next)
+    expect(await invoke('layout:get', undefined)).toEqual(next)
+    const reread = new AppStateStore(path.join(tmp, 'userData', 'app-state.json')).get()
+    expect(reread.layout).toEqual(next)
+    expect(reread.recents).toEqual([])
+  })
+
+  it('refuses out-of-range or malformed layouts with VALIDATION and keeps the stored one', async () => {
+    const stored = { sidebar: { open: true, size: 0.2 }, notes: { open: false, size: 0.25 } }
+    await invoke('layout:set', stored)
+    const raw = handlerFor('layout:set')
+    for (const bad of [
+      { ...stored, sidebar: { open: true, size: 0.5 } },
+      { ...stored, notes: { open: true, size: 0.1 } },
+      { sidebar: { open: true, size: 0.2 } },
+      { ...stored, sidebar: { open: 'yes', size: 0.2 } },
+      null
+    ]) {
+      const result = await raw(undefined, bad)
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    }
+    expect(await invoke('layout:get', undefined)).toEqual(stored)
+  })
+
+  it('keeps the recents when the layout changes and vice versa', async () => {
+    const created = await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
+    const next = { sidebar: { open: true, size: 0.3 }, notes: { open: true, size: 0.3 } }
+    await invoke('layout:set', next)
+    const list = await invoke('recents:list', undefined)
+    expect(list.map((r) => r.path)).toEqual([created?.path])
+    await invoke('recents:remove', { path: created?.path ?? '' })
+    expect(await invoke('layout:get', undefined)).toEqual(next)
+  })
+
+  // The spec's "editor keeps at least 30 %" is enforced jointly here, not only by the renderer's
+  // clampForEditorMin: each size may be in range while both together squeeze the editor.
+  it('refuses a layout that leaves the editor under its minimum even if each panel is individually in range', async () => {
+    const bothMaxed = { sidebar: { open: true, size: 0.35 }, notes: { open: true, size: 0.5 } }
+    const raw = handlerFor('layout:set')
+    const result = await raw(undefined, bothMaxed)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    // A closed panel does not count.
+    const notesClosed = { ...bothMaxed, notes: { open: false, size: 0.5 } }
+    expect(await invoke('layout:set', notesClosed)).toEqual(notesClosed)
+  })
+
+  it('layout:get normalizes an over-wide layout from a hand-edited app-state file', async () => {
+    const file = path.join(tmp, 'userData', 'app-state.json')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        recents: [],
+        layout: { sidebar: { open: true, size: 0.35 }, notes: { open: true, size: 0.5 } }
+      })
+    )
+    const got = await invoke('layout:get', undefined)
+    expect(got.sidebar.size).toBe(0.35)
+    expect(got.notes.size).toBeCloseTo(0.35, 9)
   })
 })
 
