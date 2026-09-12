@@ -47,7 +47,10 @@ function deferredClient(stored: Layout): {
   return { client, sets, gets }
 }
 
-const stored: Layout = { sidebar: { open: true, size: 0.3 }, notes: { open: true, size: 0.2 } }
+const stored: Layout = {
+  sidebar: { open: true, size: 0.3, tab: 'manuscript' },
+  notes: { open: true, size: 0.2 }
+}
 let sets: PendingSet[]
 let gets: (() => void)[]
 
@@ -98,7 +101,10 @@ describe('useLayoutStore', () => {
     expect(sets).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(1)
     expect(sets).toHaveLength(1)
-    expect(sets[0]?.value).toEqual({ ...stored, sidebar: { open: true, size: 0.25 } })
+    expect(sets[0]?.value).toEqual({
+      ...stored,
+      sidebar: { open: true, size: 0.25, tab: 'manuscript' }
+    })
     sets[0]?.resolve()
     await settle()
     expect(store().layout.sidebar.size).toBe(0.25)
@@ -115,7 +121,7 @@ describe('useLayoutStore', () => {
     await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
     expect(sets).toHaveLength(1)
     expect(sets[0]?.value).toEqual({
-      sidebar: { open: true, size: 0.26 },
+      sidebar: { open: true, size: 0.26, tab: 'manuscript' },
       notes: { open: false, size: 0.2 }
     })
   })
@@ -154,17 +160,34 @@ describe('useLayoutStore', () => {
   it('toggle flips a panel and keeps its size', async () => {
     await load()
     store().toggle('sidebar')
-    expect(store().layout.sidebar).toEqual({ open: false, size: 0.3 })
+    expect(store().layout.sidebar).toEqual({ open: false, size: 0.3, tab: 'manuscript' })
     store().toggle('sidebar')
-    expect(store().layout.sidebar).toEqual({ open: true, size: 0.3 })
+    expect(store().layout.sidebar).toEqual({ open: true, size: 0.3, tab: 'manuscript' })
     await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
     expect(sets).toHaveLength(1)
     expect(sets[0]?.value).toEqual(stored)
   })
 
+  it('setSidebarTab records the tab with one debounced write and ignores the tab already shown (F-7.3)', async () => {
+    await load()
+    store().setSidebarTab('manuscript')
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(0)
+    store().setSidebarTab('tags')
+    expect(store().layout.sidebar.tab).toBe('tags')
+    store().setSidebarTab('characters')
+    expect(store().layout.sidebar.tab).toBe('characters')
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(1)
+    expect(sets[0]?.value).toEqual({ ...stored, sidebar: { ...stored.sidebar, tab: 'characters' } })
+  })
+
   it('a panel opening gives way so the editor keeps its minimum', async () => {
     useLayoutStore.setState({
-      layout: { sidebar: { open: true, size: 0.35 }, notes: { open: false, size: 0.5 } }
+      layout: {
+        sidebar: { open: true, size: 0.35, tab: 'manuscript' },
+        notes: { open: false, size: 0.5 }
+      }
     })
     store().toggle('notes')
     expect(store().layout.notes.open).toBe(true)

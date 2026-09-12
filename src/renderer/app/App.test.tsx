@@ -341,7 +341,10 @@ describe('App', () => {
   it('loads the layout at start and sizes the sidebar from it in vw (F-7.2)', async () => {
     const invoke = install({
       'project:current': info,
-      'layout:get': { sidebar: { open: true, size: 0.3 }, notes: { open: false, size: 0.25 } }
+      'layout:get': {
+        sidebar: { open: true, size: 0.3, tab: 'manuscript' },
+        notes: { open: false, size: 0.25 }
+      }
     })
     render(<App />)
     expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
@@ -382,7 +385,11 @@ describe('App', () => {
       const writes = invoke.mock.calls.filter(([c]) => c === 'layout:set')
       expect(writes).toHaveLength(1)
       expect(writes[0]?.[1]).toEqual({
-        sidebar: { open: true, size: useLayoutStore.getState().layout.sidebar.size },
+        sidebar: {
+          open: true,
+          size: useLayoutStore.getState().layout.sidebar.size,
+          tab: 'manuscript'
+        },
         notes: { open: false, size: 0.25 }
       })
     } finally {

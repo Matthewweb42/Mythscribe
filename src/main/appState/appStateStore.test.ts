@@ -48,6 +48,16 @@ describe('AppStateStore', () => {
     expect(state.recents).toEqual([entry])
   })
 
+  it('parses a file written before F-7.3 (no sidebar tab) with the Manuscript tab', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const layout = { sidebar: { open: false, size: 0.3 }, notes: { open: true, size: 0.4 } }
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [], layout }), 'utf8')
+    expect(new AppStateStore(file).get().layout).toEqual({
+      ...layout,
+      sidebar: { ...layout.sidebar, tab: 'manuscript' }
+    })
+  })
+
   it('the missing-file and corrupt-file fallbacks carry the default layout too', () => {
     expect(EMPTY_APP_STATE.layout).toEqual(defaultLayout())
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
@@ -58,11 +68,17 @@ describe('AppStateStore', () => {
 
   it('round-trips a changed layout and refuses one outside the panel limits', () => {
     const store = new AppStateStore(file)
-    const layout = { sidebar: { open: false, size: 0.3 }, notes: { open: true, size: 0.4 } }
+    const layout = {
+      sidebar: { open: false, size: 0.3, tab: 'manuscript' as const },
+      notes: { open: true, size: 0.4 }
+    }
     expect(store.update((s) => ({ ...s, layout })).layout).toEqual(layout)
     expect(new AppStateStore(file).get().layout).toEqual(layout)
     expect(() =>
-      store.update((s) => ({ ...s, layout: { ...layout, sidebar: { open: true, size: 0.5 } } }))
+      store.update((s) => ({
+        ...s,
+        layout: { ...layout, sidebar: { open: true, size: 0.5, tab: 'manuscript' as const } }
+      }))
     ).toThrow()
     expect(new AppStateStore(file).get().layout).toEqual(layout)
   })

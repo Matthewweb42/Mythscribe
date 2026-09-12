@@ -8,14 +8,13 @@ import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { Logo } from '@renderer/features/shell/Logo'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
+import { SidebarTabs } from '@renderer/features/shell/SidebarTabs'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useEditorSettingsStore } from '@renderer/features/editor/settingsStore'
-import { CreateNodeBar } from '@renderer/features/manuscript/CreateNodeBar'
-import { ManuscriptTree } from '@renderer/features/manuscript/ManuscriptTree'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { CreateProjectWizard } from '@renderer/features/project/CreateProjectWizard'
 import { RecentProjects } from '@renderer/features/project/RecentProjects'
@@ -229,11 +228,12 @@ function SidebarToggleButton(): React.JSX.Element {
 }
 
 /**
- * F-2.1: the document tree beside the main pane, with the create buttons (F-2.2) pinned under
- * it; the editor (F-3.1) takes the main pane for the selected document, or every document of
- * the selected folder stacked (F-2.5, F-3.8), with the notes panel (F-3.7) beside it when open.
- * F-7.2: the sidebar's open state and width come from the layout store; the width is a fraction
- * of the window rendered in `vw`, resized by the handle on its right edge.
+ * F-7.3: the tabbed sidebar beside the main pane; its Manuscript tab holds the document tree
+ * (F-2.1) with the create buttons (F-2.2) pinned under it. The editor (F-3.1) takes the main
+ * pane for the selected document, or every document of the selected folder stacked (F-2.5,
+ * F-3.8), with the notes panel (F-3.7) beside it when open. F-7.2: the sidebar's open state
+ * and width come from the layout store; the width is a fraction of the window rendered in
+ * `vw`, resized by the handle on its right edge.
  */
 function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
   const sidebar = useLayoutStore((s) => s.layout.sidebar)
@@ -244,10 +244,7 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
           className="relative flex shrink-0 flex-col border-r border-line bg-surface"
           style={{ width: `${sidebar.size * 100}vw` }}
         >
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <ManuscriptTree format={format} />
-          </div>
-          <CreateNodeBar format={format} />
+          <SidebarTabs format={format} />
           <ResizeHandle
             side="right"
             value={sidebar.size}

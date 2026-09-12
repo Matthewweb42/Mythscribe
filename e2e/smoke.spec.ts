@@ -172,7 +172,15 @@ test('create, close, reopen a project on disk', async () => {
   await expect(scene1).toHaveAttribute('aria-selected', 'true')
   await expect
     .poll(async () => (await getLayout()).sidebar, { timeout: 3000 })
-    .toEqual({ open: true, size: sidebarFinal })
+    .toEqual({ open: true, size: sidebarFinal, tab: 'manuscript' })
+
+  // F-7.3: the sidebar is a tab bar; only the built Manuscript tab is listed (no placeholders),
+  // it is selected, and its panel holds the tree.
+  const sidebarTabs = page.getByRole('tablist', { name: 'Sidebar' })
+  await expect(sidebarTabs.getByRole('tab')).toHaveText(['Manuscript'])
+  const manuscriptTab = sidebarTabs.getByRole('tab', { name: 'Manuscript' })
+  await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('tabpanel', { name: 'Manuscript' }).getByRole('tree')).toBeVisible()
 
   // F-2.2: "New scene" from the bar inserts after the selected scene and opens inline rename;
   // Enter commits the title and the row keeps its place right after Scene 1.

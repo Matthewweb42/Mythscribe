@@ -2,14 +2,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { RecentProjectEntry } from '@shared/ipc/contract'
-import { Layout, defaultLayout } from '@shared/layout'
+import { StoredLayout, defaultLayout } from '@shared/layout'
 
 /** Persistent, app-wide state (not project state) kept as one JSON file in userData. */
 export const AppState = z.object({
   version: z.literal(1),
   recents: z.array(RecentProjectEntry),
-  /** F-7.2; defaulted so files written before it parse to the same layout as a fresh install. */
-  layout: Layout.default(defaultLayout)
+  /**
+   * F-7.2; defaulted so files written before it parse to the same layout as a fresh install,
+   * and read leniently so a file from before F-7.3 (no sidebar tab) still loads.
+   */
+  layout: StoredLayout.default(defaultLayout)
 })
 export type AppState = z.infer<typeof AppState>
 

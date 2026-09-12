@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SidebarTabId } from './sidebarTabs'
 
 /**
  * The resizable panel layout (F-7.2). Every size is a fraction of the window width, so a
@@ -21,15 +22,30 @@ const panelSchema = ([min, max]: readonly [number, number]): z.ZodObject<{
   size: z.ZodNumber
 }> => z.object({ open: z.boolean(), size: z.number().min(min).max(max) })
 
+const sidebarSchema = panelSchema(LAYOUT_LIMITS.sidebar)
+
 export const Layout = z.object({
-  sidebar: panelSchema(LAYOUT_LIMITS.sidebar),
+  // F-7.3: the sidebar's active tab.
+  sidebar: sidebarSchema.extend({ tab: SidebarTabId }),
   notes: panelSchema(LAYOUT_LIMITS.notes)
 })
 export type Layout = z.infer<typeof Layout>
 
-/** A fresh install: the tree open at just under a quarter, the notes closed at a quarter. */
+/**
+ * `Layout` as read from the app-state file: a layout written before F-7.3 has no tab and parses
+ * to Manuscript. The IPC contract uses the strict `Layout`, so the input and output types match.
+ */
+export const StoredLayout = z.object({
+  sidebar: sidebarSchema.extend({ tab: SidebarTabId.default('manuscript') }),
+  notes: Layout.shape.notes
+})
+
+/** A fresh install: the Manuscript tab open at just under a quarter, the notes closed at a quarter. */
 export function defaultLayout(): Layout {
-  return { sidebar: { open: true, size: 0.22 }, notes: { open: false, size: 0.25 } }
+  return {
+    sidebar: { open: true, size: 0.22, tab: 'manuscript' },
+    notes: { open: false, size: 0.25 }
+  }
 }
 
 /** `size` clamped to the panel's own `[min, max]`. */

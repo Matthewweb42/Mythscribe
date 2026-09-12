@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { clampForEditorMin, defaultLayout, type Layout, type LayoutPanel } from '@shared/layout'
+import type { SidebarTabId } from '@shared/sidebarTabs'
 import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -28,6 +29,8 @@ interface LayoutState {
   setSize: (panel: LayoutPanel, size: number) => void
   /** Opens or closes a panel; a panel opening gives way first if the editor would get too little. */
   toggle: (panel: LayoutPanel) => void
+  /** Shows a sidebar tab (F-7.3); a no-op for the tab already shown, so no write is scheduled. */
+  setSidebarTab: (tab: SidebarTabId) => void
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -106,7 +109,13 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     const base = get().layout
     const current = base[panel]
     const size = current.open ? current.size : clampForEditorMin(base, panel, current.size)
-    schedule({ ...base, [panel]: { open: !current.open, size } }, base)
+    schedule({ ...base, [panel]: { ...current, open: !current.open, size } }, base)
+  },
+
+  setSidebarTab(tab) {
+    const base = get().layout
+    if (base.sidebar.tab === tab) return
+    schedule({ ...base, sidebar: { ...base.sidebar, tab } }, base)
   }
 }))
 

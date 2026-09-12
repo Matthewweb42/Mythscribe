@@ -27,8 +27,12 @@ describe('defaultLayout', () => {
 describe('Layout schema', () => {
   it('refuses sizes outside the panel limits', () => {
     const base = defaultLayout()
-    expect(Layout.safeParse({ ...base, sidebar: { open: true, size: 0.1 } }).success).toBe(false)
-    expect(Layout.safeParse({ ...base, sidebar: { open: true, size: 0.36 } }).success).toBe(false)
+    expect(
+      Layout.safeParse({ ...base, sidebar: { open: true, size: 0.1, tab: 'manuscript' } }).success
+    ).toBe(false)
+    expect(
+      Layout.safeParse({ ...base, sidebar: { open: true, size: 0.36, tab: 'manuscript' } }).success
+    ).toBe(false)
     expect(Layout.safeParse({ ...base, notes: { open: false, size: 0.51 } }).success).toBe(false)
     expect(Layout.safeParse({ ...base, notes: { open: false, size: 0.5 } }).success).toBe(true)
   })
@@ -50,7 +54,7 @@ describe('clampForEditorMin', () => {
     const layout = defaultLayout() // notes closed at 0.25
     expect(clampForEditorMin(layout, 'sidebar', 0.5)).toBe(0.35)
     const notesOnly: Layout = {
-      sidebar: { open: false, size: 0.35 },
+      sidebar: { open: false, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.25 }
     }
     expect(clampForEditorMin(notesOnly, 'notes', 0.9)).toBe(0.5)
@@ -58,7 +62,7 @@ describe('clampForEditorMin', () => {
 
   it('stops the dragged panel where the editor would drop under its minimum', () => {
     const layout: Layout = {
-      sidebar: { open: true, size: 0.3 },
+      sidebar: { open: true, size: 0.3, tab: 'manuscript' },
       notes: { open: true, size: 0.3 }
     }
     // Growing the sidebar: 1 - 0.3 (editor) - 0.3 (notes) leaves 0.4, capped by its own max.
@@ -68,7 +72,7 @@ describe('clampForEditorMin', () => {
     expect(clampForEditorMin(layout, 'notes', 0.35)).toBe(0.35)
     expect(clampForEditorMin(layout, 'notes', 0.45)).toBeCloseTo(0.4)
     const wide: Layout = {
-      sidebar: { open: true, size: 0.35 },
+      sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.5 }
     }
     expect(clampForEditorMin(wide, 'notes', 0.5)).toBeCloseTo(0.35)
@@ -77,7 +81,7 @@ describe('clampForEditorMin', () => {
 
   it('shrinking is only limited by the panel minimum, in both directions', () => {
     const layout: Layout = {
-      sidebar: { open: true, size: 0.3 },
+      sidebar: { open: true, size: 0.3, tab: 'manuscript' },
       notes: { open: true, size: 0.3 }
     }
     expect(clampForEditorMin(layout, 'sidebar', 0.1)).toBe(0.15)
@@ -87,19 +91,22 @@ describe('clampForEditorMin', () => {
 
   it('does not change the other panel', () => {
     const layout: Layout = {
-      sidebar: { open: true, size: 0.35 },
+      sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.5 }
     }
     clampForEditorMin(layout, 'notes', 0.5)
     expect(layout).toEqual({
-      sidebar: { open: true, size: 0.35 },
+      sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.5 }
     })
   })
 })
 
 describe('editor minimum across panels', () => {
-  const wide: Layout = { sidebar: { open: true, size: 0.35 }, notes: { open: true, size: 0.5 } }
+  const wide: Layout = {
+    sidebar: { open: true, size: 0.35, tab: 'manuscript' },
+    notes: { open: true, size: 0.5 }
+  }
 
   it('fitsEditorMin counts only open panels', () => {
     expect(fitsEditorMin(wide)).toBe(false)
@@ -116,8 +123,14 @@ describe('editor minimum across panels', () => {
     expect(fixed.notes.size).toBeCloseTo(0.35, 9)
     expect(fitsEditorMin(fixed)).toBe(true)
     // Notes at their minimum cannot give enough; the sidebar shrinks too.
-    const tight: Layout = { sidebar: { open: true, size: 0.35 }, notes: { open: true, size: 0.15 } }
-    const still = normalizeLayout({ ...tight, sidebar: { open: true, size: 0.35 } })
+    const tight: Layout = {
+      sidebar: { open: true, size: 0.35, tab: 'manuscript' },
+      notes: { open: true, size: 0.15 }
+    }
+    const still = normalizeLayout({
+      ...tight,
+      sidebar: { open: true, size: 0.35, tab: 'manuscript' }
+    })
     expect(fitsEditorMin(still)).toBe(true)
   })
 })

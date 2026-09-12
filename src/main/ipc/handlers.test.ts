@@ -477,7 +477,10 @@ describe('layout:get / layout:set (F-7.2)', () => {
   })
 
   it('persists a layout so get returns it, also from a fresh store over the same file', async () => {
-    const next = { sidebar: { open: false, size: 0.3 }, notes: { open: true, size: 0.4 } }
+    const next = {
+      sidebar: { open: false, size: 0.3, tab: 'manuscript' as const },
+      notes: { open: true, size: 0.4 }
+    }
     expect(await invoke('layout:set', next)).toEqual(next)
     expect(await invoke('layout:get', undefined)).toEqual(next)
     const reread = new AppStateStore(path.join(tmp, 'userData', 'app-state.json')).get()
@@ -486,13 +489,16 @@ describe('layout:get / layout:set (F-7.2)', () => {
   })
 
   it('refuses out-of-range or malformed layouts with VALIDATION and keeps the stored one', async () => {
-    const stored = { sidebar: { open: true, size: 0.2 }, notes: { open: false, size: 0.25 } }
+    const stored = {
+      sidebar: { open: true, size: 0.2, tab: 'manuscript' as const },
+      notes: { open: false, size: 0.25 }
+    }
     await invoke('layout:set', stored)
     const raw = handlerFor('layout:set')
     for (const bad of [
-      { ...stored, sidebar: { open: true, size: 0.5 } },
+      { ...stored, sidebar: { open: true, size: 0.5, tab: 'manuscript' as const } },
       { ...stored, notes: { open: true, size: 0.1 } },
-      { sidebar: { open: true, size: 0.2 } },
+      { sidebar: { open: true, size: 0.2, tab: 'manuscript' as const } },
       { ...stored, sidebar: { open: 'yes', size: 0.2 } },
       null
     ]) {
@@ -505,7 +511,10 @@ describe('layout:get / layout:set (F-7.2)', () => {
 
   it('keeps the recents when the layout changes and vice versa', async () => {
     const created = await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
-    const next = { sidebar: { open: true, size: 0.3 }, notes: { open: true, size: 0.3 } }
+    const next = {
+      sidebar: { open: true, size: 0.3, tab: 'manuscript' as const },
+      notes: { open: true, size: 0.3 }
+    }
     await invoke('layout:set', next)
     const list = await invoke('recents:list', undefined)
     expect(list.map((r) => r.path)).toEqual([created?.path])
@@ -516,7 +525,10 @@ describe('layout:get / layout:set (F-7.2)', () => {
   // The spec's "editor keeps at least 30 %" is enforced jointly here, not only by the renderer's
   // clampForEditorMin: each size may be in range while both together squeeze the editor.
   it('refuses a layout that leaves the editor under its minimum even if each panel is individually in range', async () => {
-    const bothMaxed = { sidebar: { open: true, size: 0.35 }, notes: { open: true, size: 0.5 } }
+    const bothMaxed = {
+      sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
+      notes: { open: true, size: 0.5 }
+    }
     const raw = handlerFor('layout:set')
     const result = await raw(undefined, bothMaxed)
     expect(result.ok).toBe(false)
@@ -534,7 +546,10 @@ describe('layout:get / layout:set (F-7.2)', () => {
       JSON.stringify({
         version: 1,
         recents: [],
-        layout: { sidebar: { open: true, size: 0.35 }, notes: { open: true, size: 0.5 } }
+        layout: {
+          sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
+          notes: { open: true, size: 0.5 }
+        }
       })
     )
     const got = await invoke('layout:get', undefined)
