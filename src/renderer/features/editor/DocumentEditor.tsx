@@ -1,21 +1,25 @@
-import { useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { Editor } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
+import { countWords } from '@shared/wordCount'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { useDocumentStore } from './documentStore'
 import { buildExtensions } from './extensions'
+import { StatusBar } from './StatusBar'
 import { Toolbar } from './Toolbar'
 
 export interface DocumentEditorProps {
   id: string
   format: NovelFormat
   /**
-   * Own toolbar and scroll container (the single-document pane, F-3.1), or bare content for a
-   * region in a stack whose toolbar and scrolling belong to the stack (F-3.8).
+   * Own toolbar, scroll container, and status bar (the single-document pane, F-3.1, F-3.3), or
+   * bare content for a region in a stack whose toolbar, scrolling, and status belong to the
+   * stack (F-3.8).
    */
   toolbar?: boolean
   /** Fires when the editor gains focus, so a stack can point its shared toolbar at this region. */
@@ -106,6 +110,50 @@ function RegionEditor({
     <div className="flex min-h-0 flex-1 flex-col">
       <Toolbar editor={ready ? editor : null} />
       <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
+      <DocumentStatusBar id={id} editor={ready ? editor : null} />
     </div>
   )
+}
+
+/**
+ * The status bar of a single document (F-3.3): counts the editor's current content live, with
+ * the same `countWords` main caches on save, so the figure never waits for the autosave. While
+ * the document is still loading the tree's saved count stands in. The session delta is measured
+ * from the tree's baseline, so a document created this session counts as all new.
+ */
+function DocumentStatusBar({ id, editor }: { id: string; editor: Editor | null }): React.JSX.Element {
+  const saved = useTreeStore((s) => s.wordCountRollup[id] ?? 0)
+  const baseline = useTreeStore((s) => s.sessionBaseline[id] ?? 0)
+  const live = useLiveWordCount(editor)
+  const words = live ?? saved
+  return <StatusBar words={words} delta={words - baseline} />
+}
+
+/**
+ * The editor's word count, recounted only when the document changes: the snapshot is cached by
+ * the ProseMirror document's identity, which selection-only transactions leave untouched, so a
+ * long scene is never re-serialized on a caret move. Null without an editor.
+ */
+function useLiveWordCount(editor: Editor | null): number | null {
+  const cache = useRef<{ doc: unknown; count: number } | null>(null)
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      if (!editor) return () => undefined
+      editor.on('update', notify)
+      return () => {
+        editor.off('update', notify)
+      }
+    },
+    [editor]
+  )
+  const getSnapshot = useCallback(() => {
+    if (!editor) return null
+    const doc: unknown = editor.state.doc
+    const hit = cache.current
+    if (hit !== null && hit.doc === doc) return hit.count
+    const fresh = { doc, count: countWords(editor.getJSON()) }
+    cache.current = fresh
+    return fresh.count
+  }, [editor])
+  return useSyncExternalStore(subscribe, getSnapshot)
 }

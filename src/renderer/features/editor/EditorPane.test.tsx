@@ -5,6 +5,7 @@ import type { Editor } from '@tiptap/core'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { DocumentEditor } from './DocumentEditor'
@@ -56,6 +57,7 @@ let saves: Input<'document:save'>[]
 beforeEach(() => {
   resetDocumentStore()
   resetPendingSaves()
+  useTreeStore.getState().clear()
   const deferred = deferredClient()
   pending = deferred.pending
   saves = deferred.saves
@@ -175,6 +177,23 @@ describe('EditorPane', () => {
     expect(saves[0]?.id).toBe('sc-1')
     expect(firstParagraphText(saves[0]?.content)).toContain('edited')
     expect(useDocumentStore.getState().docs).toEqual({})
+  })
+
+  it('shows a live word count and the session delta under the document (F-3.3)', async () => {
+    useTreeStore.setState({ wordCountRollup: { 'sc-1': 4 }, sessionBaseline: { 'sc-1': 4 } })
+    render(<EditorPane id="sc-1" format="novel" />)
+    // While loading, the tree's saved count stands in.
+    expect(screen.getByTestId('status-words')).toHaveTextContent('4 words')
+    expect(screen.getByTestId('status-delta')).toHaveTextContent('+0 this session')
+    await release(0, doc('Once upon a time'))
+    await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
+    expect(screen.getByTestId('status-words')).toHaveTextContent('4 words')
+    await userEvent.click(box())
+    await userEvent.keyboard(' far away ') // padded, so the count is the same wherever the caret landed
+    // Counted from the editor at once, before any save.
+    expect(saves).toHaveLength(0)
+    expect(screen.getByTestId('status-words')).toHaveTextContent('6 words')
+    expect(screen.getByTestId('status-delta')).toHaveTextContent('+2 this session')
   })
 
   it('loads a never-written document as an empty paragraph', async () => {

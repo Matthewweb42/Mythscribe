@@ -152,6 +152,23 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     expect(Object.keys(useDocumentStore.getState().docs).sort()).toEqual(['sc-1', 'sc-2', 'sc-3'])
   })
 
+  it('shows the folder\'s combined saved count, without a session delta, in the status bar (F-3.3)', async () => {
+    loadTree()
+    const rollup = useTreeStore.getState().wordCountRollup
+    const before = rollup['arc-1'] ?? 0
+    render(<StackedEditor folderId="arc-1" format="webnovel" />)
+    expect(screen.getByTestId('status-words')).toHaveTextContent(`${before.toLocaleString()} words`)
+    expect(screen.queryByTestId('status-delta')).not.toBeInTheDocument()
+    // A region's save updates the rollup, and the bar follows it.
+    await release('sc-1', doc('one'))
+    await act(async () => {
+      useTreeStore.getState().setWordCount('sc-1', (rollup['sc-1'] ?? 0) + 10)
+    })
+    expect(screen.getByTestId('status-words')).toHaveTextContent(
+      `${(before + 10).toLocaleString()} words`
+    )
+  })
+
   it('separates manuscript scenes with the scene-break text of the format', () => {
     loadTree()
     render(<StackedEditor folderId="arc-1" format="webnovel" />)

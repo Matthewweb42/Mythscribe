@@ -9,6 +9,7 @@ import { descendantDocuments, useTreeStore } from '@renderer/features/manuscript
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { DocumentEditor } from './DocumentEditor'
+import { StatusBar } from './StatusBar'
 import { Toolbar } from './Toolbar'
 
 const COLUMN = 'mx-auto max-w-[700px] px-6'
@@ -28,7 +29,9 @@ const ADD_BUTTON =
  * One toolbar serves the stack and targets the region that last gained focus; Ctrl+S anywhere
  * saves every pending region. The separator between regions follows the folder's section: the
  * format's scene-break text (F-3.6) inside the manuscript, a thin page-break line in front and
- * end matter. An empty folder invites the author to add the first document.
+ * end matter. An empty folder invites the author to add the first document. The status bar
+ * shows the folder's combined saved count (F-3.3), so it follows each region's autosave; no
+ * session delta, because a folder's rollup also moves when scenes are moved or deleted.
  */
 export function StackedEditor({
   folderId,
@@ -40,6 +43,7 @@ export function StackedEditor({
   const docIds = useTreeStore(useShallow((s) => descendantDocuments(s, folderId)))
   const section = useTreeStore((s) => s.sectionOf[folderId] ?? 'manuscript')
   const [active, setActive] = useState<ActiveRegion | null>(null)
+  const words = useTreeStore((s) => s.wordCountRollup[folderId] ?? 0)
   // A region that leaves the stack (deleted, moved out) takes its editor with it; the toolbar
   // must not keep pointing at it. Membership is decided here, at render, because Tiptap destroys
   // an unmounted editor on a timer, so `isDestroyed` alone would lag behind.
@@ -62,6 +66,7 @@ export function StackedEditor({
           </Fragment>
         ))}
       </div>
+      <StatusBar words={words} />
     </div>
   )
 }

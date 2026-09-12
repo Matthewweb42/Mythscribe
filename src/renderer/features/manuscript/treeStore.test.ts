@@ -13,7 +13,8 @@ import {
   planRemoval,
   removeFromIndex,
   setWordCountInIndex,
-  useTreeStore
+  useTreeStore,
+  sessionDelta
 } from './treeStore'
 
 /** Answers every channel with the fixture, validated by the channel's real output schema. */
@@ -510,6 +511,35 @@ describe('treeStore', () => {
     expect(state.wordCountRollup.manuscript).toBe(4800)
     expect(state.selectedId).toBeNull()
     expect(state.collapsed).toEqual({})
+    // F-3.3: the session baseline is a copy of the rollup at load time.
+    expect(state.sessionBaseline).toEqual(state.wordCountRollup)
+    expect(state.sessionBaseline).not.toBe(state.wordCountRollup)
+  })
+
+  it('sessionDelta measures from the baseline and treats new nodes as all-new words (F-3.3)', () => {
+    const state = {
+      wordCountRollup: { 'sc-1': 1300, 'ch-1': 1300, manuscript: 5100, fresh: 40 },
+      sessionBaseline: { 'sc-1': 1200, 'ch-1': 1200, manuscript: 4800 }
+    }
+    expect(sessionDelta(state, 'sc-1')).toBe(100)
+    expect(sessionDelta(state, 'manuscript')).toBe(300)
+    expect(sessionDelta(state, 'fresh')).toBe(40)
+    expect(sessionDelta(state, 'missing')).toBe(0)
+  })
+
+  // F-3.3 bug: sessionBaseline is a snapshot per node id taken at load, but a folder's rollup
+  // also moves when a document is reparented under it (or out of it), even though no words were
+  // written. The folder's session delta should stay at 0; instead it jumps by the moved
+  // subtree's word count in both directions.
+  it('a moved document keeps its own session delta; folders carry none (only documents show one)', () => {
+    const index = buildIndex(treeFixture)
+    const baseline = { ...index.wordCountRollup } // snapshot as of "load"
+    const next = moveInIndex(index, movedRow(index, 'ch-1', 'arc-2', 'ch-4')) // moves sc-1 (1200 words)
+    const state = { wordCountRollup: next.wordCountRollup, sessionBaseline: baseline }
+    expect(sessionDelta(state, 'sc-1')).toBe(0)
+    // A folder's rollup shifts with structure (here by the moved 1200 words), which is why the
+    // stacked view shows a folder's combined count without a delta.
+    expect(next.wordCountRollup['arc-1']).toBe((baseline['arc-1'] ?? 0) - 1200)
   })
 
   it('drops a load response that arrives after clear or a newer load', async () => {
@@ -565,6 +595,7 @@ describe('treeStore', () => {
       ...buildIndex(treeFixture),
       selectedId: 'sc-1',
       collapsed: { front: true },
+      sessionBaseline: { 'sc-1': 5 },
       loaded: true,
       renamingId: 'sc-1',
       busy: true
@@ -576,6 +607,7 @@ describe('treeStore', () => {
       rootIds: [],
       sectionOf: {},
       wordCountRollup: {},
+      sessionBaseline: {},
       selectedId: null,
       collapsed: {},
       loaded: false,

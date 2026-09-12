@@ -19,6 +19,8 @@ export interface TreeIndex {
 }
 
 interface TreeState extends TreeIndex {
+  /** `wordCountRollup` as it was when the project loaded; the session delta (F-3.3) is measured from it. */
+  sessionBaseline: Record<string, number>
   selectedId: string | null
   collapsed: Record<string, boolean>
   loaded: boolean
@@ -297,6 +299,7 @@ let generation = 0
 
 export const useTreeStore = create<TreeState>((set, get) => ({
   ...emptyIndex(),
+  sessionBaseline: {},
   selectedId: null,
   collapsed: {},
   loaded: false,
@@ -307,7 +310,15 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     const mine = ++generation
     const nodes = await ipc().invoke('tree:list', undefined)
     if (mine !== generation) return // cleared or reloaded while this request was in flight
-    set({ ...buildIndex(nodes), selectedId: null, collapsed: {}, renamingId: null, loaded: true })
+    const index = buildIndex(nodes)
+    set({
+      ...index,
+      sessionBaseline: { ...index.wordCountRollup },
+      selectedId: null,
+      collapsed: {},
+      renamingId: null,
+      loaded: true
+    })
   },
 
   select(id) {
@@ -327,6 +338,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     generation++
     set({
       ...emptyIndex(),
+      sessionBaseline: {},
       selectedId: null,
       collapsed: {},
       loaded: false,
@@ -435,6 +447,17 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     set((s) => setWordCountInIndex(s, id, wordCount))
   }
 }))
+
+/**
+ * Words added to (or removed from) a node since the project was opened (F-3.3). A node created
+ * this session has no baseline, so its whole count is new.
+ */
+export function sessionDelta(
+  state: Pick<TreeState, 'wordCountRollup' | 'sessionBaseline'>,
+  id: string
+): number {
+  return (state.wordCountRollup[id] ?? 0) - (state.sessionBaseline[id] ?? 0)
+}
 
 /** The collapse map with every ancestor from `parentId` up to the section root opened. */
 function expandAncestors(state: TreeState, parentId: string | null): Record<string, boolean> {

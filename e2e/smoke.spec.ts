@@ -254,6 +254,9 @@ test('create, close, reopen a project on disk', async () => {
     .poll(() => documentText(scene1Row.id), { timeout: 3000 })
     .toBe('The storm broke at dusk. Rain followed.')
   await page.keyboard.type(' Then silence.')
+  // F-3.3: the status bar counts the editor live, before the save lands.
+  await expect(page.getByTestId('status-words')).toHaveText(`${SENTENCE_WORDS} words`)
+  await expect(page.getByTestId('status-delta')).toHaveText(`+${SENTENCE_WORDS} this session`)
   await page.keyboard.press('Control+s')
   await expect.poll(() => documentText(scene1Row.id), { timeout: 3000 }).toBe(SENTENCE)
 
@@ -325,6 +328,9 @@ test('create, close, reopen a project on disk', async () => {
   await expect(scene1Box.locator('p')).toHaveText(SENTENCE)
   await expect.poll(() => documentText(openingRow.id), { timeout: 3000 }).toBe('Before the storm.')
   expect(await documentText(scene1Row.id)).toBe(SENTENCE)
+  // F-3.3: the folder's status bar shows the combined saved count and no session delta.
+  await expect(page.getByTestId('status-words')).toHaveText(`${SENTENCE_WORDS + 3} words`)
+  await expect(page.getByTestId('status-delta')).toHaveCount(0)
 
   // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.
   await closeProject()
