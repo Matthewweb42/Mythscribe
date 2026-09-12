@@ -36,7 +36,12 @@ function createWindow(): BrowserWindow {
     }
   })
 
-  win.once('ready-to-show', () => win.show())
+  // Under the e2e harness the window must not steal the desktop's keyboard focus: on WSLg a
+  // shown window takes focus, and anything typed on the machine lands in the test's inputs.
+  win.once('ready-to-show', () => {
+    if (process.env.NODE_ENV === 'test') win.showInactive()
+    else win.show()
+  })
 
   // F-1.4: with a project open, the renderer flushes pending saves first and then invokes
   // `window:close`, which closes the project so this guard lets the second close through.
