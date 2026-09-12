@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
+import { AiModels, defaultAiModels } from '@shared/ai'
 import { RecentProjectEntry } from '@shared/ipc/contract'
 import { StoredLayout, defaultLayout } from '@shared/layout'
 
@@ -12,11 +13,18 @@ export const AppState = z.object({
    * F-7.2; defaulted so files written before it parse to the same layout as a fresh install,
    * and read leniently so a file from before F-7.3 (no sidebar tab) still loads.
    */
-  layout: StoredLayout.default(defaultLayout)
+  layout: StoredLayout.default(defaultLayout),
+  /** F-5.11: the tier → model mapping per provider; defaulted so older files load unchanged. */
+  models: AiModels.default(defaultAiModels)
 })
 export type AppState = z.infer<typeof AppState>
 
-export const EMPTY_APP_STATE: AppState = { version: 1, recents: [], layout: defaultLayout() }
+export const EMPTY_APP_STATE: AppState = {
+  version: 1,
+  recents: [],
+  layout: defaultLayout(),
+  models: defaultAiModels()
+}
 
 export class AppStateStore {
   private cache: AppState | null = null

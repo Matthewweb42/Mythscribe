@@ -1,5 +1,5 @@
 import OpenAI, { APIConnectionError, APIError, AuthenticationError, RateLimitError } from 'openai'
-import { DEFAULT_MODELS } from '@shared/ai'
+import { DEFAULT_MODELS, type Tier } from '@shared/ai'
 import {
   AiFallbackError,
   AiNetworkError,
@@ -18,6 +18,11 @@ export type FetchLike = (input: string | URL | Request, init?: RequestInit) => P
 
 export interface OpenAiProviderOptions {
   fetch?: FetchLike
+  /**
+   * The tier → model mapping, asked on every request so a Settings change (F-5.11) applies
+   * to the next call without rebuilding the client. Defaults to `DEFAULT_MODELS`.
+   */
+  resolveModel?: (tier: Tier) => string
 }
 
 /**
@@ -28,9 +33,10 @@ export interface OpenAiProviderOptions {
  */
 export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions = {}): Provider {
   const client = new OpenAI({ apiKey: key, fetch: options.fetch, maxRetries: 0 })
+  const resolveModel = options.resolveModel ?? ((tier: Tier): string => DEFAULT_MODELS[tier])
 
   const params = (request: CompletionRequest): OpenAI.ChatCompletionCreateParamsNonStreaming => ({
-    model: DEFAULT_MODELS[request.tier],
+    model: resolveModel(request.tier),
     messages: request.messages,
     max_completion_tokens: request.maxTokens,
     ...(request.json ? { response_format: { type: 'json_object' as const } } : {})
@@ -70,7 +76,7 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
     async testConnection(): Promise<{ model: string }> {
       try {
         // A plain authenticated GET: costs no tokens, still answers 401 / 429 like a completion.
-        const model = await client.models.retrieve(DEFAULT_MODELS.fast)
+        const model = await client.models.retrieve(resolveModel('fast'))
         return { model: model.id }
       } catch (err) {
         throw mapOpenAiError(err)

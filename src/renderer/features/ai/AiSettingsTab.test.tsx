@@ -1,15 +1,27 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { AiErrorCode, AiStatus, AiTestConnectionResult } from '@shared/ai'
+import {
+  DEFAULT_MODELS,
+  type AiErrorCode,
+  type AiModelMap,
+  type AiStatus,
+  type AiTestConnectionResult
+} from '@shared/ai'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, IpcRequestError, type IpcClient } from '@renderer/lib/ipc'
 import { AiSettingsTab } from './AiSettingsTab'
 import { resetAiStore, useAiStore } from './aiStore'
 
-const NO_KEY: AiStatus = { provider: 'openai', hasKey: false, hint: null, encryption: 'os' }
-const WITH_KEY: AiStatus = { provider: 'openai', hasKey: true, hint: 'sk-…abcd', encryption: 'os' }
+const NO_KEY: AiStatus = {
+  provider: 'openai',
+  hasKey: false,
+  hint: null,
+  encryption: 'os',
+  models: DEFAULT_MODELS
+}
+const WITH_KEY: AiStatus = { ...NO_KEY, hasKey: true, hint: 'sk-…abcd' }
 
 interface Fake {
   client: IpcClient
@@ -17,6 +29,8 @@ interface Fake {
   status: AiStatus
   testAnswer: () => AiTestConnectionResult
   setKeyAnswer: () => AiStatus
+  /** What `ai:setModels` answers; by default the status with the sent mapping. */
+  setModelsAnswer: (models: AiModelMap) => AiStatus
 }
 
 /** Answers with the fake's current `status`; `ai:setKey` flips it to `WITH_KEY` unless told otherwise. */
@@ -27,6 +41,7 @@ function fakeClient(initial: AiStatus): Fake {
     status: initial,
     testAnswer: () => ({ ok: true, model: 'gpt-fake' }),
     setKeyAnswer: () => ({ ...WITH_KEY, encryption: fake.status.encryption }),
+    setModelsAnswer: (models) => ({ ...fake.status, models }),
     client: {
       async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
         calls.push({ channel, input })
@@ -38,6 +53,9 @@ function fakeClient(initial: AiStatus): Fake {
             return fake.status as Output<C>
           case 'ai:clearKey':
             fake.status = { ...NO_KEY, encryption: fake.status.encryption }
+            return fake.status as Output<C>
+          case 'ai:setModels':
+            fake.status = fake.setModelsAnswer((input as { models: AiModelMap }).models)
             return fake.status as Output<C>
           case 'ai:testConnection':
             return fake.testAnswer() as Output<C>
@@ -55,6 +73,8 @@ let fake: Fake
 const button = (name: string): HTMLElement => screen.getByRole('button', { name })
 const keyField = (): HTMLElement => screen.getByLabelText('API key', { selector: 'input' })
 const hint = (): HTMLElement => screen.getByTestId('ai-key-hint')
+const modelField = (label: string): HTMLElement =>
+  screen.getByLabelText(label, { selector: 'input' })
 const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.message)
 
 async function open(initial: AiStatus = NO_KEY): Promise<void> {
@@ -178,5 +198,84 @@ describe('AiSettingsTab (F-5.1)', () => {
     await waitFor(() => expect(toasts()).toEqual(['Disk is read-only']))
     expect(keyField()).toHaveValue('sk-test-1234abcd')
     expect(hint()).toHaveTextContent('No key')
+  })
+})
+
+describe('AiSettingsTab models (F-5.11)', () => {
+  const NANO = { fast: 'gpt-5.4-nano', strong: DEFAULT_MODELS.strong }
+
+  it('shows the effective models with their uses, and Reset is disabled at the defaults', async () => {
+    await open()
+    expect(modelField('Fast tier')).toHaveValue('gpt-5.4-mini')
+    expect(modelField('Strong tier')).toHaveValue('gpt-5.4')
+    expect(modelField('Fast tier')).toHaveAccessibleDescription(/Ghost text, tags, summaries/)
+    expect(modelField('Strong tier')).toHaveAccessibleDescription(/Author mode, critique/)
+    expect(button('Reset to defaults')).toBeDisabled()
+  })
+
+  it('saves the fast model, trimmed, on blur and drops the old test result', async () => {
+    await open(WITH_KEY)
+    await userEvent.click(button('Test connection'))
+    await waitFor(() => expect(screen.getByTestId('ai-test-result')).toBeInTheDocument())
+    await userEvent.clear(modelField('Fast tier'))
+    await userEvent.type(modelField('Fast tier'), '  gpt-5.4-nano  ')
+    await userEvent.tab()
+    await waitFor(() => expect(modelField('Fast tier')).toHaveValue('gpt-5.4-nano'))
+    expect(fake.calls.filter((c) => c.channel === 'ai:setModels')).toEqual([
+      { channel: 'ai:setModels', input: { provider: 'openai', models: NANO } }
+    ])
+    expect(screen.queryByTestId('ai-test-result')).not.toBeInTheDocument()
+    expect(button('Reset to defaults')).toBeEnabled()
+  })
+
+  it('saves the strong model on Enter', async () => {
+    await open()
+    await userEvent.clear(modelField('Strong tier'))
+    await userEvent.type(modelField('Strong tier'), 'gpt-5.4-pro{Enter}')
+    await waitFor(() =>
+      expect(fake.calls.filter((c) => c.channel === 'ai:setModels')).toEqual([
+        {
+          channel: 'ai:setModels',
+          input: {
+            provider: 'openai',
+            models: { fast: DEFAULT_MODELS.fast, strong: 'gpt-5.4-pro' }
+          }
+        }
+      ])
+    )
+    expect(modelField('Strong tier')).toHaveValue('gpt-5.4-pro')
+  })
+
+  it('restores the saved value without a write when the commit is blank or unchanged', async () => {
+    await open()
+    await userEvent.clear(modelField('Fast tier'))
+    await userEvent.tab()
+    expect(modelField('Fast tier')).toHaveValue('gpt-5.4-mini')
+    await userEvent.type(modelField('Fast tier'), ' {Enter}')
+    expect(modelField('Fast tier')).toHaveValue('gpt-5.4-mini')
+    expect(fake.calls.filter((c) => c.channel === 'ai:setModels')).toEqual([])
+  })
+
+  it('resets both tiers to the defaults through one save', async () => {
+    await open({ ...NO_KEY, models: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-pro' } })
+    expect(modelField('Fast tier')).toHaveValue('gpt-5.4-nano')
+    await userEvent.click(button('Reset to defaults'))
+    await waitFor(() => expect(modelField('Fast tier')).toHaveValue('gpt-5.4-mini'))
+    expect(modelField('Strong tier')).toHaveValue('gpt-5.4')
+    expect(fake.calls.filter((c) => c.channel === 'ai:setModels')).toEqual([
+      { channel: 'ai:setModels', input: { provider: 'openai', models: DEFAULT_MODELS } }
+    ])
+    expect(button('Reset to defaults')).toBeDisabled()
+  })
+
+  it('toasts a refused save and shows the saved model again', async () => {
+    await open()
+    fake.setModelsAnswer = () => {
+      throw new IpcRequestError({ code: 'VALIDATION', message: 'Model name is too long' })
+    }
+    await userEvent.clear(modelField('Fast tier'))
+    await userEvent.type(modelField('Fast tier'), 'gpt-5.4-nano{Enter}')
+    await waitFor(() => expect(toasts()).toEqual(['Model name is too long']))
+    await waitFor(() => expect(modelField('Fast tier')).toHaveValue('gpt-5.4-mini'))
   })
 })

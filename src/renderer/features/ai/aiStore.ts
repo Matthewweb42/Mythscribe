@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AiStatus, AiTestConnectionResult } from '@shared/ai'
+import type { AiModelMap, AiStatus, AiTestConnectionResult } from '@shared/ai'
 import { ipc } from '@renderer/lib/ipc'
 
 /**
@@ -18,6 +18,8 @@ interface AiState {
   /** Sends the key once; a fresh status (with the mask) comes back and any old test result is dropped. */
   setKey: (key: string) => Promise<void>
   clearKey: () => Promise<void>
+  /** Replaces the tier → model mapping (F-5.11); the last test result named the old model, so it is dropped. */
+  setModels: (models: AiModelMap) => Promise<void>
   test: () => Promise<void>
 }
 
@@ -46,6 +48,13 @@ export const useAiStore = create<AiState>((set) => ({
   async clearKey() {
     const mine = generation
     const status = await ipc().invoke('ai:clearKey', undefined)
+    if (mine !== generation) return
+    set({ status, testResult: null })
+  },
+
+  async setModels(models) {
+    const mine = generation
+    const status = await ipc().invoke('ai:setModels', { provider: 'openai', models })
     if (mine !== generation) return
     set({ status, testResult: null })
   },

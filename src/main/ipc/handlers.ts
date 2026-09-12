@@ -175,7 +175,8 @@ export function registerHandlers({
     provider: 'openai',
     hasKey: keyStore.hasKey('openai'),
     hint: keyStore.getHint('openai'),
-    encryption: keyStore.encryption()
+    encryption: keyStore.encryption(),
+    models: appState.get().models.openai
   })
 
   register('ai:getStatus', aiStatus)
@@ -187,6 +188,12 @@ export function registerHandlers({
 
   register('ai:clearKey', () => {
     keyStore.clearKey('openai')
+    return aiStatus()
+  })
+
+  // F-5.11: the registry reads the mapping live, so no provider rebuild follows a change.
+  register('ai:setModels', ({ provider, models }) => {
+    appState.update((s) => ({ ...s, models: { ...s.models, [provider]: models } }))
     return aiStatus()
   })
 

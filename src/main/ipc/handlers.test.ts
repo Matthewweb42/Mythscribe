@@ -11,6 +11,7 @@ import {
   type Output
 } from '@shared/ipc/contract'
 import { z } from 'zod'
+import { DEFAULT_MODELS } from '@shared/ai'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_META } from '@shared/sceneMeta'
@@ -67,11 +68,16 @@ beforeEach(() => {
     stream: async function* () {},
     testConnection
   }
+  const appState = new AppStateStore(path.join(tmp, 'userData', 'app-state.json'))
   registerHandlers({
     manager,
-    appState: new AppStateStore(path.join(tmp, 'userData', 'app-state.json')),
+    appState,
     keyStore,
-    ai: new AiProviderRegistry(keyStore, () => provider),
+    ai: new AiProviderRegistry(
+      keyStore,
+      () => appState.get().models,
+      () => provider
+    ),
     dialogs,
     windows: () => [fakeWin],
     onCloseCancelled
@@ -875,13 +881,20 @@ describe('ai handlers (F-5.1)', () => {
       provider: 'openai',
       hasKey: false,
       hint: null,
-      encryption: 'os'
+      encryption: 'os',
+      models: DEFAULT_MODELS
     })
   })
 
   it('stores a key, answers with a mask only, and never returns the key', async () => {
     const status = await invoke('ai:setKey', { key: `  ${KEY}  ` })
-    expect(status).toEqual({ provider: 'openai', hasKey: true, hint: 'sk-…abcd', encryption: 'os' })
+    expect(status).toEqual({
+      provider: 'openai',
+      hasKey: true,
+      hint: 'sk-…abcd',
+      encryption: 'os',
+      models: DEFAULT_MODELS
+    })
     expect(JSON.stringify(status)).not.toContain(KEY)
     expect(await invoke('ai:getStatus', undefined)).toEqual(status)
     expect(fs.readFileSync(keyFile, 'utf8')).not.toContain(KEY)
@@ -945,5 +958,33 @@ describe('ai handlers (F-5.1)', () => {
     if (!result.ok) expect(result.error.code).toBe('INTERNAL')
     vi.restoreAllMocks()
     expect(new InvalidKeyError('x')).toBeInstanceOf(AiProviderError)
+  })
+})
+
+describe('ai:setModels (F-5.11)', () => {
+  const models = { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-pro' }
+
+  it('persists the mapping, trimmed, and a fresh status carries it', async () => {
+    const status = await invoke('ai:setModels', {
+      provider: 'openai',
+      models: { fast: ' gpt-5.4-nano ', strong: 'gpt-5.4-pro' }
+    })
+    expect(status.models).toEqual(models)
+    expect(await invoke('ai:getStatus', undefined)).toMatchObject({ models })
+    const file = path.join(tmp, 'userData', 'app-state.json')
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({ models: { openai: models } })
+  })
+
+  it('refuses an empty or over-long model id with VALIDATION and keeps the stored mapping', async () => {
+    await invoke('ai:setModels', { provider: 'openai', models })
+    for (const fast of ['', '   ', 'x'.repeat(101)]) {
+      const result = await handlerFor('ai:setModels')(undefined, {
+        provider: 'openai',
+        models: { fast, strong: 'gpt-5.4' }
+      })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    }
+    expect(await invoke('ai:getStatus', undefined)).toMatchObject({ models })
   })
 })

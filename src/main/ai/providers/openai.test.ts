@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { DEFAULT_MODELS } from '@shared/ai'
+import { describe, expect, it, vi } from 'vitest'
+import { DEFAULT_MODELS, type Tier } from '@shared/ai'
 import { buildOpenAiProvider, mapOpenAiError, type FetchLike } from './openai'
 import { AiProviderError, type CompletionRequest } from './types'
 
@@ -100,6 +100,21 @@ describe('buildOpenAiProvider.complete (F-5.1)', () => {
     expect(body.response_format).toEqual({ type: 'json_object' })
   })
 
+  it('asks resolveModel for the tier model on every request (F-5.11)', async () => {
+    const { fetch, calls } = answering(() => json(200, completion))
+    let fast = 'gpt-5.4-nano'
+    const resolveModel = vi.fn((tier: Tier) => (tier === 'fast' ? fast : 'gpt-5.4-pro'))
+    const provider = buildOpenAiProvider(KEY, { fetch, resolveModel })
+    await provider.complete(request)
+    expect(bodyOf(calls[0]).model).toBe('gpt-5.4-nano')
+    await provider.complete({ ...request, tier: 'strong' })
+    expect(bodyOf(calls[1]).model).toBe('gpt-5.4-pro')
+    fast = 'gpt-5.4-micro'
+    await provider.complete(request)
+    expect(bodyOf(calls[2]).model).toBe('gpt-5.4-micro')
+    expect(resolveModel.mock.calls.map(([tier]) => tier)).toEqual(['fast', 'strong', 'fast'])
+  })
+
   it('maps a 401 to INVALID_KEY without echoing the key', async () => {
     const err = await failure(answering(() => apiError(401, 'invalid_api_key', `bad ${KEY}`)).fetch)
     expect(err.code).toBe('INVALID_KEY')
@@ -171,6 +186,17 @@ describe('buildOpenAiProvider.testConnection', () => {
     })
     expect(calls[0]?.url).toMatch(new RegExp(`/models/${DEFAULT_MODELS.fast}$`))
     expect(calls[0]?.init?.method).toBe('GET')
+  })
+
+  it('retrieves the configured fast model (F-5.11)', async () => {
+    const { fetch, calls } = answering(() =>
+      json(200, { id: 'gpt-5.4-nano', object: 'model', created: 0, owned_by: 'system' })
+    )
+    const resolveModel = (tier: Tier): string => (tier === 'fast' ? 'gpt-5.4-nano' : 'gpt-5.4')
+    await expect(
+      buildOpenAiProvider(KEY, { fetch, resolveModel }).testConnection()
+    ).resolves.toEqual({ model: 'gpt-5.4-nano' })
+    expect(calls[0]?.url).toMatch(/\/models\/gpt-5\.4-nano$/)
   })
 
   it.each([

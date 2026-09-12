@@ -93,7 +93,7 @@ if (!primaryInstance) {
       manager,
       appState,
       keyStore,
-      ai: new AiProviderRegistry(keyStore),
+      ai: new AiProviderRegistry(keyStore, () => appState.get().models),
       dialogs: createDialogs(
         () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
       ),

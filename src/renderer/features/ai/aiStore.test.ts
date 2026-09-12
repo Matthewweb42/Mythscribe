@@ -1,11 +1,22 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { AiStatus, AiTestConnectionResult } from '@shared/ai'
+import {
+  DEFAULT_MODELS,
+  type AiModelMap,
+  type AiStatus,
+  type AiTestConnectionResult
+} from '@shared/ai'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAiStore, useAiStore } from './aiStore'
 
-const NO_KEY: AiStatus = { provider: 'openai', hasKey: false, hint: null, encryption: 'os' }
-const WITH_KEY: AiStatus = { provider: 'openai', hasKey: true, hint: 'sk-…abcd', encryption: 'os' }
+const NO_KEY: AiStatus = {
+  provider: 'openai',
+  hasKey: false,
+  hint: null,
+  encryption: 'os',
+  models: DEFAULT_MODELS
+}
+const WITH_KEY: AiStatus = { ...NO_KEY, hasKey: true, hint: 'sk-…abcd' }
 
 interface Fake {
   client: IpcClient
@@ -29,6 +40,8 @@ function fakeClient(): Fake {
             return WITH_KEY as Output<C>
           case 'ai:clearKey':
             return NO_KEY as Output<C>
+          case 'ai:setModels':
+            return { ...WITH_KEY, models: (input as { models: AiModelMap }).models } as Output<C>
           case 'ai:testConnection':
             return fake.testAnswer() as Output<C>
           default:
@@ -71,6 +84,15 @@ describe('aiStore (F-5.1)', () => {
     useAiStore.setState({ status: WITH_KEY, testResult: { ok: true, model: 'old' } })
     await store().clearKey()
     expect(store().status).toEqual(NO_KEY)
+    expect(store().testResult).toBeNull()
+  })
+
+  it('sends the model mapping for the provider and drops the stale test result (F-5.11)', async () => {
+    useAiStore.setState({ status: WITH_KEY, testResult: { ok: true, model: 'old' } })
+    const models = { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' }
+    await store().setModels(models)
+    expect(fake.calls).toEqual([{ channel: 'ai:setModels', input: { provider: 'openai', models } }])
+    expect(store().status).toEqual({ ...WITH_KEY, models })
     expect(store().testResult).toBeNull()
   })
 

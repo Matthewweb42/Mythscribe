@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defaultAiModels } from '@shared/ai'
 import { defaultLayout } from '@shared/layout'
 import { AppStateStore, EMPTY_APP_STATE } from './appStateStore'
 
@@ -36,7 +37,8 @@ describe('AppStateStore', () => {
     expect(new AppStateStore(file).get()).toEqual({
       version: 1,
       recents: [entry],
-      layout: defaultLayout()
+      layout: defaultLayout(),
+      models: defaultAiModels()
     })
   })
 
@@ -97,6 +99,44 @@ describe('AppStateStore', () => {
       }))
     ).toThrow()
     expect(new AppStateStore(file).get().layout).toEqual(layout)
+  })
+
+  it('parses a file written before F-5.11 (no models) to the default model mapping', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().models).toEqual(defaultAiModels())
+    expect(EMPTY_APP_STATE.models).toEqual(defaultAiModels())
+  })
+
+  it('round-trips a changed model mapping, trimmed, and refuses an empty or over-long model', () => {
+    const store = new AppStateStore(file)
+    const models = { openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' } }
+    expect(
+      store.update((s) => ({
+        ...s,
+        models: { openai: { ...models.openai, fast: ' gpt-5.4-nano ' } }
+      })).models
+    ).toEqual(models)
+    expect(new AppStateStore(file).get().models).toEqual(models)
+    expect(() =>
+      store.update((s) => ({ ...s, models: { openai: { fast: '', strong: 'gpt-5.4' } } }))
+    ).toThrow()
+    expect(() =>
+      store.update((s) => ({
+        ...s,
+        models: { openai: { fast: 'x'.repeat(101), strong: 'gpt-5.4' } }
+      }))
+    ).toThrow()
+    expect(new AppStateStore(file).get().models).toEqual(models)
+  })
+
+  it('warns and falls back to the empty state when the stored model mapping is invalid', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const models = { openai: { fast: '', strong: 'gpt-5.4' } }
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry], models }), 'utf8')
+    expect(new AppStateStore(file).get()).toEqual(EMPTY_APP_STATE)
+    expect(warn).toHaveBeenCalledOnce()
   })
 
   it('warns once and returns the empty state for corrupt JSON', () => {

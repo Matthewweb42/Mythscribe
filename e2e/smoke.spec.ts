@@ -66,8 +66,11 @@ function startFakeOpenAi(): Promise<string> {
       )
       return
     }
+    // `GET /v1/models/<id>` echoes the requested id, so the AI tab's "answered" line names the
+    // model the fast tier is configured with (F-5.11).
+    const id = (req.url ?? '').split('/').pop() ?? ''
     res.statusCode = 200
-    res.end(JSON.stringify({ id: 'gpt-5.4-mini', object: 'model', created: 0, owned_by: 'system' }))
+    res.end(JSON.stringify({ id, object: 'model', created: 0, owned_by: 'system' }))
   })
   return new Promise((resolve) => {
     fakeOpenAi.listen(0, '127.0.0.1', () => {
@@ -431,6 +434,36 @@ test('create, close, reopen a project on disk', async () => {
     { url: '/v1/models/gpt-5.4-mini', auth: `Bearer ${REJECTED_KEY}` },
     { url: '/v1/models/gpt-5.4-mini', auth: `Bearer ${ACCEPTED_KEY}` }
   ])
+  // F-5.11: the fast tier's model is a setting; the provider reads it live, so the next test
+  // connection asks for the new model, and it persists in app-state.json across the dialog.
+  const fastTier = settingsDialog.getByLabel('Fast tier', { exact: true })
+  const resetModels = settingsDialog.getByRole('button', { name: 'Reset to defaults' })
+  await expect(fastTier).toHaveValue('gpt-5.4-mini')
+  await expect(settingsDialog.getByLabel('Strong tier', { exact: true })).toHaveValue('gpt-5.4')
+  await expect(resetModels).toBeDisabled()
+  await fastTier.fill('gpt-5.4-nano')
+  await fastTier.blur()
+  await expect(resetModels).toBeEnabled()
+  await expect(testResult).toHaveCount(0)
+  await settingsDialog.getByRole('button', { name: 'Test connection' }).click()
+  await expect(testResult).toHaveText('Connected. gpt-5.4-nano answered.')
+  expect(openAiRequests[2]).toEqual({
+    url: '/v1/models/gpt-5.4-nano',
+    auth: `Bearer ${ACCEPTED_KEY}`
+  })
+  expect((await aiStatus()).models).toEqual({ fast: 'gpt-5.4-nano', strong: 'gpt-5.4' })
+  expect(
+    (JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { models: AiStatus['models'] }).models
+  ).toEqual({ openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' } })
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await expect(fastTier).toHaveValue('gpt-5.4-nano')
+  await resetModels.click()
+  await expect(fastTier).toHaveValue('gpt-5.4-mini')
+  await expect(resetModels).toBeDisabled()
+  expect((await aiStatus()).models).toEqual({ fast: 'gpt-5.4-mini', strong: 'gpt-5.4' })
   await settingsDialog.getByRole('button', { name: 'Clear' }).click()
   await expect(keyHint).toHaveText('No key')
   expect(await aiStatus()).toMatchObject({ hasKey: false, hint: null })

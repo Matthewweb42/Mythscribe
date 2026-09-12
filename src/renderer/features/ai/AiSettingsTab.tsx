@@ -1,5 +1,14 @@
-import { useEffect, useState } from 'react'
-import { AI_KEY_MAX, AI_PROVIDER_LABEL, type AiStatus } from '@shared/ai'
+import { useEffect, useId, useState } from 'react'
+import {
+  AI_KEY_MAX,
+  AI_MODEL_MAX,
+  AI_PROVIDER_LABEL,
+  DEFAULT_MODELS,
+  TIER_USE,
+  type AiModelMap,
+  type AiStatus,
+  type Tier
+} from '@shared/ai'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { useAiStore } from './aiStore'
@@ -24,12 +33,18 @@ const report = (err: unknown): void => {
   toast.error(describeError(err))
 }
 
+const TIER_LABEL: Record<Tier, string> = { fast: 'Fast tier', strong: 'Strong tier' }
+
+const atDefaults = (models: AiModelMap): boolean =>
+  models.fast === DEFAULT_MODELS.fast && models.strong === DEFAULT_MODELS.strong
+
 /**
  * The AI tab of the Settings dialog (F-5.1): the provider, the key field with Save and Clear,
- * the masked hint once a key is saved, "Test connection" with its result inline, the privacy
- * line, and a warning when the key can only be obfuscated (no keyring) or not stored at all.
- * The uncommitted key lives in local state and is dropped as soon as it is saved, so it is
- * never shown again; the store holds only what main answers (a mask, never the key).
+ * the masked hint once a key is saved, the model per tier with "Reset to defaults" (F-5.11),
+ * "Test connection" with its result inline, the privacy line, and a warning when the key can
+ * only be obfuscated (no keyring) or not stored at all. The uncommitted key lives in local
+ * state and is dropped as soon as it is saved, so it is never shown again; the store holds
+ * only what main answers (a mask, never the key).
  */
 export function AiSettingsTab(): React.JSX.Element {
   const status = useAiStore((s) => s.status)
@@ -38,6 +53,7 @@ export function AiSettingsTab(): React.JSX.Element {
   const load = useAiStore((s) => s.load)
   const setKey = useAiStore((s) => s.setKey)
   const clearKey = useAiStore((s) => s.clearKey)
+  const setModels = useAiStore((s) => s.setModels)
   const test = useAiStore((s) => s.test)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -66,6 +82,12 @@ export function AiSettingsTab(): React.JSX.Element {
     run(async () => {
       await setKey(trimmed)
       setDraft('')
+    })
+
+  const models = status?.models ?? null
+  const saveModel = (tier: Tier, model: string): Promise<void> =>
+    run(async () => {
+      if (models) await setModels({ ...models, [tier]: model })
     })
 
   return (
@@ -127,6 +149,29 @@ export function AiSettingsTab(): React.JSX.Element {
         </p>
       ) : null}
 
+      <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
+        <div className="flex items-center justify-between gap-3">
+          <legend className="float-left p-0 font-medium">Models</legend>
+          <button
+            type="button"
+            disabled={models === null || atDefaults(models) || busy}
+            onClick={() => void run(() => setModels({ ...DEFAULT_MODELS }))}
+            className={BUTTON}
+          >
+            Reset to defaults
+          </button>
+        </div>
+        {(['fast', 'strong'] as const).map((tier) => (
+          <ModelField
+            key={tier}
+            tier={tier}
+            value={models?.[tier] ?? ''}
+            disabled={models === null || busy}
+            onCommit={(model) => saveModel(tier, model)}
+          />
+        ))}
+      </fieldset>
+
       <div className="flex flex-col gap-1.5">
         <button
           type="button"
@@ -150,6 +195,71 @@ export function AiSettingsTab(): React.JSX.Element {
       </div>
 
       <p className="m-0 text-xs text-fg-muted">{privacyCopy(status?.encryption)}</p>
+    </div>
+  )
+}
+
+/**
+ * One tier's model id, committed on blur or Enter (F-5.11). `draft` holds only text that is not
+ * (yet) the saved value and is dropped when the value changes underneath (a save or a reset),
+ * so the field always follows the store; a blank or unchanged commit restores the value without
+ * a write, and a refused one shows the saved value again once the toast is up.
+ */
+function ModelField({
+  tier,
+  value,
+  disabled,
+  onCommit
+}: {
+  tier: Tier
+  value: string
+  disabled: boolean
+  onCommit: (model: string) => Promise<void>
+}): React.JSX.Element {
+  const hintId = useId()
+  const [draft, setDraft] = useState<string | null>(null)
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(null)
+  }
+
+  const commit = (): void => {
+    if (draft === null) return
+    const text = draft.trim()
+    if (text === '' || text === value) {
+      setDraft(null)
+      return
+    }
+    void onCommit(text).then(() => setDraft(null))
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="flex items-center gap-3">
+        <span className="w-24 shrink-0">{TIER_LABEL[tier]}</span>
+        <input
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          maxLength={AI_MODEL_MAX}
+          aria-describedby={hintId}
+          value={draft ?? value}
+          disabled={disabled}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              commit()
+            }
+          }}
+          className={FIELD}
+        />
+      </label>
+      <p id={hintId} className="m-0 pl-27 text-xs text-fg-muted">
+        {TIER_USE[tier]}
+      </p>
     </div>
   )
 }

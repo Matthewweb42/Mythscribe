@@ -15,12 +15,35 @@ export const AI_PROVIDER_LABEL: Record<AiProviderId, string> = { openai: 'OpenAI
 export const Tier = z.enum(['fast', 'strong'])
 export type Tier = z.infer<typeof Tier>
 
+/** What each tier serves (CLAUDE.md, token efficiency rule 1); shown under the model fields in Settings. */
+export const TIER_USE: Record<Tier, string> = {
+  fast: 'Ghost text, tags, summaries, and classification.',
+  strong: 'Author mode, critique, and Story Intelligence queries.'
+}
+
 /**
- * The one owner of the tier → model mapping until F-5.11 makes it a setting. `fast` serves
- * ghost text, tags, summaries, and classification; `strong` serves Author mode, critique, and
- * queries. Snapshots and `-chat-latest` aliases are avoided so golden tests stay stable.
+ * The default tier → model mapping; the effective one is the `models` setting (F-5.11), read
+ * live by the provider on every request. Snapshots and `-chat-latest` aliases are avoided so
+ * golden tests stay stable.
  */
 export const DEFAULT_MODELS: Record<Tier, string> = { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' }
+
+export const AI_MODEL_MAX = 100
+/** A model id as entered in Settings (F-5.11); non-empty, trimmed, bounded. */
+export const ModelName = z.string().trim().min(1).max(AI_MODEL_MAX)
+/** The tier → model mapping for one provider; feature code never sees this, only the tier. */
+export const AiModelMap = z.object({ fast: ModelName, strong: ModelName })
+export type AiModelMap = z.infer<typeof AiModelMap>
+/**
+ * One map per provider id. zod's enum-keyed record is exhaustive: a new `AiProviderId` member
+ * is a parse and type error here until `defaultAiModels` gets defaults for it too.
+ */
+export const AiModels = z.record(AiProviderId, AiModelMap)
+export type AiModels = z.infer<typeof AiModels>
+
+export function defaultAiModels(): AiModels {
+  return { openai: { ...DEFAULT_MODELS } }
+}
 
 /** Length bounds for a key as entered; a shape outside them is refused with VALIDATION. */
 export const AI_KEY_MIN = 10
@@ -63,7 +86,9 @@ export const AiStatus = z.object({
   hasKey: z.boolean(),
   /** The masked key while one is saved, null otherwise. */
   hint: z.string().nullable(),
-  encryption: AiKeyEncryption
+  encryption: AiKeyEncryption,
+  /** The effective tier → model mapping for `provider` (F-5.11). */
+  models: AiModelMap
 })
 export type AiStatus = z.infer<typeof AiStatus>
 

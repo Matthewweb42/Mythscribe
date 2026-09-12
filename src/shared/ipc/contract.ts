@@ -1,5 +1,12 @@
 import { z } from 'zod'
-import { AI_KEY_MAX, AI_KEY_MIN, AiStatus, AiTestConnectionResult } from '../ai'
+import {
+  AI_KEY_MAX,
+  AI_KEY_MIN,
+  AiModelMap,
+  AiProviderId,
+  AiStatus,
+  AiTestConnectionResult
+} from '../ai'
 import { EditorSettings } from '../editorSettings'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
@@ -285,6 +292,14 @@ export const contract = {
    * so the AI tab can show them inline; only an unexpected failure is an error.
    */
   'ai:testConnection': { input: z.undefined(), output: AiTestConnectionResult },
+  /**
+   * Replaces the tier → model mapping for a provider (F-5.11); the provider reads it live, so
+   * the next request uses it. An empty or over-long model id is VALIDATION.
+   */
+  'ai:setModels': {
+    input: z.object({ provider: AiProviderId, models: AiModelMap }),
+    output: AiStatus
+  },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },
   /** The renderer could not flush, so the close it was asked for (and any quit behind it) is abandoned. */
