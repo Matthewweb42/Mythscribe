@@ -169,6 +169,31 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     )
   })
 
+  it('sets the column width once for the whole stack (F-3.4)', () => {
+    loadTree()
+    render(<StackedEditor folderId="arc-1" format="webnovel" />)
+    const pane = screen.getByRole('toolbar', { name: 'Formatting' }).parentElement
+    expect(pane?.style.getPropertyValue('--ms-editor-max-width')).toBe('700px')
+    for (const region of regions()) {
+      expect(boxIn(region).parentElement).toHaveClass('max-w-(--ms-editor-max-width)', 'mx-auto')
+    }
+    // Each region's title heading also sits inside the shared column, not full width.
+    for (const heading of screen.getAllByRole('heading', { level: 2 })) {
+      expect(heading).toHaveClass('max-w-(--ms-editor-max-width)', 'mx-auto')
+    }
+    // The scene-break separator between regions follows the same column.
+    for (const sep of screen.getAllByRole('separator', { name: 'Scene break' })) {
+      expect(sep).toHaveClass('max-w-(--ms-editor-max-width)', 'mx-auto')
+    }
+  })
+
+  it('sets the same column class on the page-break separator between matter documents (F-3.4)', () => {
+    loadTree([], [dedication])
+    render(<StackedEditor folderId="front" format="novel" />)
+    const line = screen.getByRole('separator', { name: 'Page break' })
+    expect(line).toHaveClass('max-w-(--ms-editor-max-width)', 'mx-auto')
+  })
+
   it('separates manuscript scenes with the scene-break text of the format', () => {
     loadTree()
     render(<StackedEditor folderId="arc-1" format="webnovel" />)

@@ -105,6 +105,8 @@ test('create, close, reopen a project on disk', async () => {
   // F-2.1: the document tree shows the sections by format, collapses and expands a folder, and
   // selecting a scene highlights it and shows it in the main pane.
   const tree = page.getByRole('tree', { name: 'Document tree' })
+  // F-3.5: nothing is selected yet, so the main pane shows the empty state.
+  await expect(page.getByTestId('empty-state')).toHaveText('Select a document to start writing.')
   await expect(tree.getByRole('treeitem', { name: 'Volume 1', exact: true })).toBeVisible()
   const arc1 = tree.getByRole('treeitem', { name: 'Arc 1', exact: true })
   await expect(arc1).toBeVisible()
@@ -218,6 +220,15 @@ test('create, close, reopen a project on disk', async () => {
   await scene1.click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
   await expect(editor).toHaveAttribute('contenteditable', 'true')
+  await expect(page.getByTestId('empty-state')).toHaveCount(0)
+  // F-3.4: the text sits in a centered column no wider than the 700 px default.
+  const column = await editor.locator('..').boundingBox()
+  const pane = await page.getByRole('toolbar', { name: 'Formatting' }).boundingBox()
+  if (!column || !pane) throw new Error('editor column not laid out')
+  expect(column.width).toBeLessThanOrEqual(700)
+  expect(
+    Math.abs(column.x - pane.x - (pane.x + pane.width - (column.x + column.width)))
+  ).toBeLessThan(2)
   await editor.click()
   await page.keyboard.type('The storm broke at dusk.')
   await expect(editor.locator('p')).toHaveText('The storm broke at dusk.')

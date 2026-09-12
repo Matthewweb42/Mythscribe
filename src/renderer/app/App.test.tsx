@@ -121,7 +121,8 @@ describe('App', () => {
     expect(within(aside).getByRole('tree').compareDocumentPosition(bar)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     )
-    expect(screen.getByText('Select a document to start writing.')).toBeInTheDocument()
+    // F-3.5: the empty state fills the pane until something is selected.
+    expect(screen.getByTestId('empty-state')).toHaveTextContent('Select a document to start writing.')
     expect(screen.queryByTestId('selected-title')).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))

@@ -8,6 +8,7 @@ import { countWords } from '@shared/wordCount'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
+import { COLUMN, columnStyle } from './column'
 import { useDocumentStore } from './documentStore'
 import { buildExtensions } from './extensions'
 import { StatusBar } from './StatusBar'
@@ -44,7 +45,7 @@ export function DocumentEditor({
   const content = useDocumentStore((s) => s.docs[id]?.content ?? null)
   const load = useDocumentStore((s) => s.load)
   const unload = useDocumentStore((s) => s.unload)
-  const sceneBreak = defaultEditorSettings(format).sceneBreak
+  const { sceneBreak, maxWidth } = defaultEditorSettings(format)
 
   useEffect(() => {
     load(id).catch((err: unknown) => toast.error(describeError(err)))
@@ -57,6 +58,7 @@ export function DocumentEditor({
       id={id}
       content={content}
       sceneBreak={sceneBreak}
+      maxWidth={maxWidth}
       toolbar={toolbar}
       onFocus={onFocus}
     />
@@ -68,12 +70,14 @@ function RegionEditor({
   id,
   content,
   sceneBreak,
+  maxWidth,
   toolbar,
   onFocus
 }: {
   id: string
   content: TiptapNodeT | null
   sceneBreak: string
+  maxWidth: number
   toolbar: boolean
   onFocus: ((editor: Editor) => void) | undefined
 }): React.JSX.Element {
@@ -104,10 +108,10 @@ function RegionEditor({
     [extensions]
   )
 
-  const body = <EditorContent editor={editor} className="mx-auto max-w-[700px] px-6 py-6" />
+  const body = <EditorContent editor={editor} className={`${COLUMN} py-6`} />
   if (!toolbar) return body
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col" style={columnStyle(maxWidth)}>
       <Toolbar editor={ready ? editor : null} />
       <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
       <DocumentStatusBar id={id} editor={ready ? editor : null} />

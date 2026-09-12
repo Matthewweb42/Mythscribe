@@ -8,11 +8,10 @@ import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { descendantDocuments, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
+import { COLUMN, columnStyle } from './column'
 import { DocumentEditor } from './DocumentEditor'
 import { StatusBar } from './StatusBar'
 import { Toolbar } from './Toolbar'
-
-const COLUMN = 'mx-auto max-w-[700px] px-6'
 
 /** The region that last gained focus: the shared toolbar's target. */
 interface ActiveRegion {
@@ -56,7 +55,10 @@ export function StackedEditor({
     return <EmptyFolder folderId={folderId} format={format} section={section} />
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      style={columnStyle(defaultEditorSettings(format).maxWidth)}
+    >
       <Toolbar editor={editor} />
       <div className="min-h-0 flex-1 overflow-y-auto pb-12">
         {docIds.map((id, index) => (

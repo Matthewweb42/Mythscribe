@@ -196,6 +196,15 @@ describe('EditorPane', () => {
     expect(screen.getByTestId('status-delta')).toHaveTextContent('+2 this session')
   })
 
+  it('lays the text out in the book-like column sized by the format default (F-3.4)', async () => {
+    render(<EditorPane id="sc-1" format="novel" />)
+    await release(0, doc('Once'))
+    const column = box().parentElement
+    expect(column).toHaveClass('max-w-(--ms-editor-max-width)', 'mx-auto', 'w-full', 'px-6')
+    const pane = screen.getByRole('toolbar', { name: 'Formatting' }).parentElement
+    expect(pane?.style.getPropertyValue('--ms-editor-max-width')).toBe('700px')
+  })
+
   it('loads a never-written document as an empty paragraph', async () => {
     render(<EditorPane id="sc-1" format="webnovel" />)
     await release(0, null)

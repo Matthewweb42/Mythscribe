@@ -218,7 +218,12 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
     s.selectedId === null ? undefined : s.sectionOf[s.selectedId]
   )
   if (!node) {
-    return <p className="m-0 p-6 text-sm text-fg-muted">Select a document to start writing.</p>
+    // F-3.5: the empty state, centered in the pane.
+    return (
+      <div className="flex flex-1 items-center justify-center p-6" data-testid="empty-state">
+        <p className="m-0 text-sm text-fg-muted">Select a document to start writing.</p>
+      </div>
+    )
   }
   const kind =
     node.hierarchyLevel !== null
