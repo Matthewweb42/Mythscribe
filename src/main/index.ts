@@ -80,7 +80,10 @@ if (!primaryInstance) {
       dialogs: createDialogs(
         () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
       ),
-      windows: () => BrowserWindow.getAllWindows()
+      windows: () => BrowserWindow.getAllWindows(),
+      onCloseCancelled: () => {
+        quitRequested = false
+      }
     })
     createWindow()
     app.on('activate', () => {
@@ -90,7 +93,9 @@ if (!primaryInstance) {
 }
 
 // A prevented window close (project open, renderer still flushing) cancels the in-flight quit.
-// Remember that a quit was asked for so macOS exits once the flushed window finally closes.
+// Remember that a quit was asked for so macOS exits once the flushed window finally closes;
+// `window:close-cancelled` (flush failed, author kept working) forgets it again, so a later
+// plain window close does not quit the app.
 let quitRequested = false
 app.on('before-quit', () => {
   quitRequested = true

@@ -12,7 +12,11 @@ interface ProjectState {
   create: (name: string, format: NovelFormat, directory?: string) => Promise<ProjectInfo | null>
   open: (path?: string) => Promise<ProjectInfo | null>
   close: () => Promise<void>
-  /** Answers `window:close-requested`: flushes pending saves, then lets main close the window. */
+  /**
+   * Answers `window:close-requested`: flushes pending saves, then lets main close the window.
+   * A failed flush tells main the close is abandoned (so a quit behind it is forgotten) and
+   * rethrows so the caller can show the cause.
+   */
   closeWindow: () => Promise<void>
   loadRecents: () => Promise<void>
   removeRecent: (path: string) => Promise<void>
@@ -70,7 +74,12 @@ export const useProjectStore = create<ProjectState>((set) => {
 
     closeWindow() {
       return run(async () => {
-        await flushPendingSaves()
+        try {
+          await flushPendingSaves()
+        } catch (err) {
+          await ipc().invoke('window:close-cancelled', undefined)
+          throw err
+        }
         await ipc().invoke('window:close', undefined)
       })
     },

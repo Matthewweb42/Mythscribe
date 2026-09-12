@@ -164,7 +164,7 @@ describe('projectStore', () => {
     expect(useProjectStore.getState().busy).toBe(false)
   })
 
-  it('closeWindow does not invoke window:close when a flusher rejects', async () => {
+  it('closeWindow reports a cancelled close instead of window:close when a flusher rejects', async () => {
     const { client, invoke } = fakeClient()
     setIpcClient(client)
     useProjectStore.setState({ current: info })
@@ -172,7 +172,8 @@ describe('projectStore', () => {
       throw new Error('save failed')
     })
     await expect(useProjectStore.getState().closeWindow()).rejects.toThrow('save failed')
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(invoke).toHaveBeenCalledWith('window:close-cancelled', undefined)
     expect(useProjectStore.getState()).toMatchObject({ current: info, busy: false })
   })
 

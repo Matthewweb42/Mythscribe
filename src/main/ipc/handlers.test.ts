@@ -31,6 +31,7 @@ let manager: ProjectManager
 let invoke: Invoke
 let handlerFor: (channel: Channel) => (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>
 let fakeWin: ClosableWindow
+let onCloseCancelled: ReturnType<typeof vi.fn<() => void>>
 
 const dialogs: ProjectDialogs = {
   chooseProjectSavePath: async () => null,
@@ -42,11 +43,13 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-handlers-'))
   manager = new ProjectManager()
   fakeWin = { close: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } }
+  onCloseCancelled = vi.fn<() => void>()
   registerHandlers({
     manager,
     appState: new AppStateStore(path.join(tmp, 'userData', 'app-state.json')),
     dialogs,
-    windows: () => [fakeWin]
+    windows: () => [fakeWin],
+    onCloseCancelled
   })
   const handlers = new Map<string, (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>>()
   for (const [channel, fn] of vi.mocked(ipcMain.handle).mock.calls) {
@@ -576,6 +579,16 @@ describe('window:close', () => {
   it('skips windows that are already destroyed', async () => {
     fakeWin.isDestroyed = () => true
     await invoke('window:close', undefined)
+    expect(fakeWin.close).not.toHaveBeenCalled()
+  })
+})
+
+describe('window:close-cancelled (F-8.3)', () => {
+  it('tells main the close was abandoned and leaves the project and windows alone', async () => {
+    await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
+    expect(await invoke('window:close-cancelled', undefined)).toBeNull()
+    expect(onCloseCancelled).toHaveBeenCalledTimes(1)
+    expect(manager.current()).not.toBeNull()
     expect(fakeWin.close).not.toHaveBeenCalled()
   })
 })

@@ -171,7 +171,9 @@ export const contract = {
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
   'layout:set': { input: Layout, output: Layout },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
-  'window:close': { input: z.undefined(), output: z.null() }
+  'window:close': { input: z.undefined(), output: z.null() },
+  /** The renderer could not flush, so the close it was asked for (and any quit behind it) is abandoned. */
+  'window:close-cancelled': { input: z.undefined(), output: z.null() }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract

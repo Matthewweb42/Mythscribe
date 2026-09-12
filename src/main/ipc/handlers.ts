@@ -30,9 +30,17 @@ export interface HandlerDeps {
   appState: AppStateStore
   dialogs: ProjectDialogs
   windows: () => ClosableWindow[]
+  /** The renderer abandoned a window close (its flush failed); forget any quit that asked for it. */
+  onCloseCancelled: () => void
 }
 
-export function registerHandlers({ manager, appState, dialogs, windows }: HandlerDeps): void {
+export function registerHandlers({
+  manager,
+  appState,
+  dialogs,
+  windows,
+  onCloseCancelled
+}: HandlerDeps): void {
   register('app:info', () => ({ version: app.getVersion(), platform: process.platform }))
 
   register('project:create', async ({ name, format, directory }) => {
@@ -119,6 +127,11 @@ export function registerHandlers({ manager, appState, dialogs, windows }: Handle
   register('window:close', () => {
     manager.close()
     for (const w of windows()) if (!w.isDestroyed()) w.close()
+    return null
+  })
+
+  register('window:close-cancelled', () => {
+    onCloseCancelled()
     return null
   })
 
