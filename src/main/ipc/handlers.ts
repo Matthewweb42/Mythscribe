@@ -5,6 +5,7 @@ import type { ProjectDialogs } from '../dialogs'
 import { getDocumentContent, saveDocument } from '../document/documentStore'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
+import { getEditorSettings, setEditorSettings } from '../project/settingsStore'
 import {
   createNode,
   deleteNode,
@@ -87,6 +88,15 @@ export function registerHandlers({ manager, appState, dialogs, windows }: Handle
 
   register('document:save', ({ id, content }) =>
     saveDocument(manager.require().connection.orm, id, content)
+  )
+
+  register('editorSettings:get', () => {
+    const session = manager.require()
+    return getEditorSettings(session.connection.orm, session.info.format)
+  })
+
+  register('editorSettings:set', (value) =>
+    setEditorSettings(manager.require().connection.orm, value)
   )
 
   register('window:close', () => {

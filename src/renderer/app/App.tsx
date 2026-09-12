@@ -8,6 +8,7 @@ import { Logo } from '@renderer/features/shell/Logo'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
+import { useEditorSettingsStore } from '@renderer/features/editor/settingsStore'
 import { CreateNodeBar } from '@renderer/features/manuscript/CreateNodeBar'
 import { ManuscriptTree } from '@renderer/features/manuscript/ManuscriptTree'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -43,15 +44,20 @@ export function App(): React.JSX.Element {
 
   // F-2.1: the document tree follows the open project. App owns when it loads and clears, keyed
   // on the project id so a refreshed `ProjectInfo` for the same project does not reload it.
-  // F-3.1: the loaded document goes with it.
+  // F-3.1: the loaded document goes with it. F-3.6: so do the formatting settings.
   useEffect(() => {
     const tree = useTreeStore.getState()
     if (projectId === null) {
       tree.clear()
       useDocumentStore.getState().clear()
+      useEditorSettingsStore.getState().clear()
       return
     }
     tree.load().catch((err: unknown) => toast.error(describeError(err)))
+    useEditorSettingsStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
   }, [projectId])
 
   return (

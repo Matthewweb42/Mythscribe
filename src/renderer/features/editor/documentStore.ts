@@ -11,7 +11,11 @@ export const AUTOSAVE_DELAY_MS = 1000
 
 /** One loaded document (F-3.1). */
 export interface LoadedDocument {
-  /** The document as loaded; null until `document:get` resolves. A never-written node loads as `EMPTY_DOC`. */
+  /**
+   * The latest content: null until `document:get` resolves (a never-written node loads as
+   * `EMPTY_DOC`), then every edit as the editor reports it, so an editor rebuilt mid-session
+   * (a scene-break change, F-3.6) starts from the author's latest text, never from the load.
+   */
   content: TiptapNodeT | null
   /** True once the editor has changed the document since it loaded and the change is not yet saved. */
   dirty: boolean
@@ -33,7 +37,7 @@ interface DocumentState {
   load: (id: string) => Promise<void>
   /** Saves any pending edit to `id` at once (without waiting), then forgets the document. */
   unload: (id: string) => void
-  /** Records the latest editor state of `id` and (re)starts its debounce timer. Ignored for ids that are not loaded. */
+  /** Records the latest editor state of `id` (on the record and as the pending save) and (re)starts its debounce timer. Ignored for ids that are not loaded. */
   edit: (id: string, content: TiptapNodeT) => void
   /**
    * Writes every pending edit (one job per document, so a failed save for one document survives
@@ -163,7 +167,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     const doc = get().docs[id]
     if (!doc) return
     pending.set(id, { id, content })
-    if (!doc.dirty) set((s) => ({ docs: { ...s.docs, [id]: { ...doc, dirty: true } } }))
+    set((s) => ({ docs: { ...s.docs, [id]: { content, dirty: true } } }))
     cancelTimer(id)
     timers.set(
       id,

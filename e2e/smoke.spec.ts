@@ -229,6 +229,21 @@ test('create, close, reopen a project on disk', async () => {
   expect(
     Math.abs(column.x - pane.x - (pane.x + pane.width - (column.x + column.width)))
   ).toBeLessThan(2)
+  // F-3.6: the Formatting popover applies a wider column and a larger font live; Escape closes it.
+  const formatting = page.getByRole('button', { name: 'Formatting settings' })
+  await formatting.click()
+  const formattingPanel = page.getByRole('group', { name: 'Formatting settings' })
+  await expect(formattingPanel).toBeVisible()
+  await formattingPanel.getByRole('spinbutton', { name: 'Max width' }).fill('900')
+  await formattingPanel.getByRole('spinbutton', { name: 'Font size' }).fill('20')
+  await page.keyboard.press('Escape')
+  await expect(formattingPanel).toBeHidden()
+  await expect(formatting).toHaveAttribute('aria-expanded', 'false')
+  await expect(editor).toHaveCSS('font-size', '20px')
+  const widened = await editor.locator('..').boundingBox()
+  if (!widened) throw new Error('editor column not laid out')
+  expect(widened.width).toBeGreaterThan(700)
+  expect(widened.width).toBeLessThanOrEqual(900)
   await editor.click()
   await page.keyboard.type('The storm broke at dusk.')
   await expect(editor.locator('p')).toHaveText('The storm broke at dusk.')
@@ -318,6 +333,12 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
   await expect(editor).toHaveAttribute('contenteditable', 'true')
   await expect(editor.locator('p')).toHaveText(SENTENCE)
+  // F-3.6: the formatting settings survived the close too.
+  await expect(editor).toHaveCSS('font-size', '20px')
+  const persistedColumn = await editor.locator('..').boundingBox()
+  if (!persistedColumn) throw new Error('editor column not laid out')
+  expect(persistedColumn.width).toBeGreaterThan(700)
+  expect(persistedColumn.width).toBeLessThanOrEqual(900)
 
   // F-2.5/F-3.8: selecting Chapter 1 stacks Opening and Scene 1 in tree order, each as its own
   // region with the web-novel scene break between them; typing into Opening leaves Scene 1

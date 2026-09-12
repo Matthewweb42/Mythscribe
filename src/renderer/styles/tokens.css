@@ -33,8 +33,12 @@
   --ms-level-generic: #9a9aa6;
   --ms-matter: #d4a72c;
 
-  /* Editor column (F-3.4): the pane sets it from the project's formatting settings (F-3.6). */
+  /* Editor text (F-3.4, F-3.6): the pane sets these from the project's formatting settings. */
   --ms-editor-max-width: 700px;
+  --ms-editor-font-size: 16px;
+  --ms-editor-line-height: 1.6;
+  --ms-editor-paragraph-spacing: 0.75em;
+  --ms-editor-paragraph-indent: 0em;
 
   --ms-radius: 6px;
   --ms-radius-lg: 10px;

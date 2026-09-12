@@ -1,15 +1,16 @@
 import { Fragment, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Editor } from '@tiptap/core'
-import { defaultEditorSettings } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { levelLabel, type SectionType } from '@shared/labels'
 import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { descendantDocuments, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
-import { COLUMN, columnStyle } from './column'
+import { COLUMN, editorStyle } from './column'
 import { DocumentEditor } from './DocumentEditor'
+import { EditorSettingsPanel } from './EditorSettingsPanel'
+import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
 import { Toolbar } from './Toolbar'
 
@@ -43,6 +44,7 @@ export function StackedEditor({
   const section = useTreeStore((s) => s.sectionOf[folderId] ?? 'manuscript')
   const [active, setActive] = useState<ActiveRegion | null>(null)
   const words = useTreeStore((s) => s.wordCountRollup[folderId] ?? 0)
+  const settings = useEditorSettings(format)
   // A region that leaves the stack (deleted, moved out) takes its editor with it; the toolbar
   // must not keep pointing at it. Membership is decided here, at render, because Tiptap destroys
   // an unmounted editor on a timer, so `isDestroyed` alone would lag behind.
@@ -55,15 +57,14 @@ export function StackedEditor({
     return <EmptyFolder folderId={folderId} format={format} section={section} />
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col"
-      style={columnStyle(defaultEditorSettings(format).maxWidth)}
-    >
-      <Toolbar editor={editor} />
+    <div className="flex min-h-0 flex-1 flex-col" style={editorStyle(settings)}>
+      <Toolbar editor={editor} right={<EditorSettingsPanel format={format} />} />
       <div className="min-h-0 flex-1 overflow-y-auto pb-12">
         {docIds.map((id, index) => (
           <Fragment key={id}>
-            {index > 0 ? <RegionSeparator format={format} section={section} /> : null}
+            {index > 0 ? (
+              <RegionSeparator sceneBreak={settings.sceneBreak} section={section} />
+            ) : null}
             <Region id={id} format={format} onFocus={setActive} />
           </Fragment>
         ))}
@@ -99,10 +100,10 @@ function Region({
 
 /** Between manuscript scenes: the scene-break text, static. Between matter documents: a page-break line. */
 function RegionSeparator({
-  format,
+  sceneBreak,
   section
 }: {
-  format: NovelFormat
+  sceneBreak: string
   section: SectionType
 }): React.JSX.Element {
   if (section === 'manuscript') {
@@ -112,7 +113,7 @@ function RegionSeparator({
         aria-label="Scene break"
         className={`${COLUMN} py-2 text-center tracking-[0.25em] text-fg-muted select-none`}
       >
-        {defaultEditorSettings(format).sceneBreak}
+        {sceneBreak}
       </div>
     )
   }

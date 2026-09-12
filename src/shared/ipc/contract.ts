@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { EditorSettings } from '../editorSettings'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { MatterTemplateId } from '../matterTemplates'
 import { TiptapNode } from '../tiptap'
@@ -143,6 +144,13 @@ export const contract = {
     input: z.object({ id: z.string(), content: TiptapNode }),
     output: z.object({ wordCount: z.number().int().nonnegative(), modified: z.string() })
   },
+  /**
+   * The project's editor formatting (F-3.6). A missing or unreadable row answers with the
+   * format's defaults, so the editor always has something to apply.
+   */
+  'editorSettings:get': { input: z.undefined(), output: EditorSettings },
+  /** Replaces the project's editor formatting (F-3.6); out-of-range values are refused with VALIDATION. */
+  'editorSettings:set': { input: EditorSettings, output: EditorSettings },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>

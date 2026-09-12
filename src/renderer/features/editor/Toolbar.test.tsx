@@ -64,6 +64,16 @@ describe('Toolbar', () => {
     }
   })
 
+  it('renders `right` at the far end and nothing extra without it (F-3.6)', () => {
+    const { rerender } = render(<Toolbar editor={editor} />)
+    expect(screen.getAllByRole('button')).toHaveLength(16)
+    rerender(<Toolbar editor={editor} right={<button type="button">Extra</button>} />)
+    const extra = screen.getByRole('button', { name: 'Extra' })
+    expect(extra.parentElement).toHaveClass('ml-auto')
+    expect(screen.getByRole('toolbar', { name: 'Formatting' })).toContainElement(extra)
+    expect(screen.getAllByRole('button')).toHaveLength(17)
+  })
+
   it('labels each button with its shortcut', () => {
     render(<Toolbar editor={editor} />)
     expect(button('Bold')).toHaveAttribute('title', 'Bold (Ctrl+B)')

@@ -11,6 +11,7 @@ import {
   type Output
 } from '@shared/ipc/contract'
 import { z } from 'zod'
+import { defaultEditorSettings } from '@shared/editorSettings'
 import { AppStateStore } from '../appState/appStateStore'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
@@ -380,6 +381,39 @@ describe('document:save', () => {
     const result = await raw(undefined, { id: scene?.id, content: { content: [] } })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+  })
+})
+
+describe('editorSettings:get / editorSettings:set', () => {
+  it('reports NO_PROJECT for both when nothing is open', async () => {
+    await expect(invoke('editorSettings:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(
+      invoke('editorSettings:set', defaultEditorSettings('novel'))
+    ).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it("returns the seeded defaults for the project's format (F-3.6)", async () => {
+    await invoke('project:create', { name: 'Serial', format: 'webnovel', directory: tmp })
+    expect(await invoke('editorSettings:get', undefined)).toEqual(defaultEditorSettings('webnovel'))
+  })
+
+  it('persists a change so get returns it, also after a reopen', async () => {
+    const created = await invoke('project:create', { name: 'Fmt', format: 'novel', directory: tmp })
+    const next = { ...defaultEditorSettings('novel'), fontSize: 20, maxWidth: 900, sceneBreak: '###' }
+    expect(await invoke('editorSettings:set', next)).toEqual(next)
+    expect(await invoke('editorSettings:get', undefined)).toEqual(next)
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    expect(await invoke('editorSettings:get', undefined)).toEqual(next)
+  })
+
+  it('refuses out-of-range values with VALIDATION and keeps the stored value', async () => {
+    await invoke('project:create', { name: 'Fmt', format: 'novel', directory: tmp })
+    const raw = handlerFor('editorSettings:set')
+    const result = await raw(undefined, { ...defaultEditorSettings('novel'), fontSize: 40 })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(await invoke('editorSettings:get', undefined)).toEqual(defaultEditorSettings('novel'))
   })
 })
 

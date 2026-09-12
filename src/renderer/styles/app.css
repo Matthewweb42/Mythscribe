@@ -66,8 +66,8 @@ select {
 .ms-editor {
   min-height: 60vh;
   font-family: var(--ms-font-prose);
-  font-size: 16px;
-  line-height: 1.6;
+  font-size: var(--ms-editor-font-size);
+  line-height: var(--ms-editor-line-height);
   outline: none;
 }
 
@@ -76,8 +76,10 @@ select {
   min-height: 6em;
 }
 
+/* Paragraph spacing and first-line indent follow the formatting settings (F-3.6); headings and quotes do not. */
 .ms-editor p {
-  margin: 0 0 0.75em;
+  margin: 0 0 var(--ms-editor-paragraph-spacing);
+  text-indent: var(--ms-editor-paragraph-indent);
 }
 
 .ms-editor h1,

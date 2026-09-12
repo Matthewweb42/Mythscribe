@@ -181,6 +181,19 @@ describe('useDocumentStore autosave (F-3.2)', () => {
     expect(dirty('scene-1')).toBe(false)
   })
 
+  it('keeps the latest content on the record, so a rebuilt editor starts from it (F-3.6)', async () => {
+    await loaded('scene-1')
+    expect(doc('scene-1')?.content).toEqual(hello)
+    edit('scene-1', 'Hello w')
+    expect(doc('scene-1')).toEqual({ content: para('Hello w'), dirty: true })
+    edit('scene-1', 'Hello wo')
+    expect(doc('scene-1')?.content).toEqual(para('Hello wo'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    saves[0]?.resolve(2)
+    await settle()
+    expect(doc('scene-1')).toEqual({ content: para('Hello wo'), dirty: false })
+  })
+
   it('coalesces edits within the debounce window into one save with the latest content', async () => {
     await loaded('scene-1')
     edit('scene-1', 'a')

@@ -8,6 +8,7 @@ import {
   type Output,
   type TreeNode
 } from '@shared/ipc/contract'
+import { defaultEditorSettings } from '@shared/editorSettings'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
@@ -16,6 +17,7 @@ import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
+import { resetEditorSettingsStore, useEditorSettingsStore } from './settingsStore'
 import { StackedEditor } from './StackedEditor'
 
 const doc = (text: string): TiptapNodeT => ({
@@ -118,6 +120,7 @@ const firstParagraphText = (saved: TiptapNodeT | undefined): string =>
 
 beforeEach(() => {
   resetDocumentStore()
+  resetEditorSettingsStore()
   resetPendingSaves()
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
@@ -206,6 +209,26 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     const [first, second] = regions()
     expect(first!.compareDocumentPosition(breaks[0]!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
     expect(breaks[0]!.compareDocumentPosition(second!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
+  it('follows the project settings for the column, the text, and the separator (F-3.6)', () => {
+    loadTree()
+    useEditorSettingsStore.setState({
+      settings: { ...defaultEditorSettings('webnovel'), maxWidth: 640, fontSize: 18, sceneBreak: '###' }
+    })
+    render(<StackedEditor folderId="arc-1" format="webnovel" />)
+    const pane = screen.getByRole('toolbar', { name: 'Formatting' }).parentElement
+    expect(pane?.style.getPropertyValue('--ms-editor-max-width')).toBe('640px')
+    expect(pane?.style.getPropertyValue('--ms-editor-font-size')).toBe('18px')
+    expect(pane?.style.getPropertyValue('--ms-editor-paragraph-spacing')).toBe('1em')
+    expect(
+      screen.getAllByRole('separator', { name: 'Scene break' }).map((b) => b.textContent)
+    ).toEqual(['###', '###'])
+    expect(button('Formatting settings')).toHaveAttribute('aria-expanded', 'false')
+    act(() => useEditorSettingsStore.getState().update({ sceneBreak: '~~~' }))
+    expect(
+      screen.getAllByRole('separator', { name: 'Scene break' }).map((b) => b.textContent)
+    ).toEqual(['~~~', '~~~'])
   })
 
   it('separates front-matter documents with a page-break line', () => {

@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Editor } from '@tiptap/core'
+import { defaultEditorSettings } from '@shared/editorSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
@@ -11,6 +12,7 @@ import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { DocumentEditor } from './DocumentEditor'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { EditorPane } from './EditorPane'
+import { resetEditorSettingsStore, useEditorSettingsStore } from './settingsStore'
 
 const doc = (text: string): TiptapNodeT => ({
   type: 'doc',
@@ -56,6 +58,7 @@ let saves: Input<'document:save'>[]
 
 beforeEach(() => {
   resetDocumentStore()
+  resetEditorSettingsStore()
   resetPendingSaves()
   useTreeStore.getState().clear()
   const deferred = deferredClient()
@@ -203,6 +206,60 @@ describe('EditorPane', () => {
     expect(column).toHaveClass('max-w-(--ms-editor-max-width)', 'mx-auto', 'w-full', 'px-6')
     const pane = screen.getByRole('toolbar', { name: 'Formatting' }).parentElement
     expect(pane?.style.getPropertyValue('--ms-editor-max-width')).toBe('700px')
+  })
+
+  it('applies the formatting settings as custom properties and offers the Formatting popover (F-3.6)', async () => {
+    useEditorSettingsStore.setState({
+      settings: { ...defaultEditorSettings('novel'), fontSize: 20, lineHeight: 1.4, maxWidth: 800 }
+    })
+    render(<EditorPane id="sc-1" format="novel" />)
+    await release(0, doc('Once'))
+    const pane = screen.getByRole('toolbar', { name: 'Formatting' }).parentElement
+    expect(pane?.style.getPropertyValue('--ms-editor-max-width')).toBe('800px')
+    expect(pane?.style.getPropertyValue('--ms-editor-font-size')).toBe('20px')
+    expect(pane?.style.getPropertyValue('--ms-editor-line-height')).toBe('1.4')
+    expect(pane?.style.getPropertyValue('--ms-editor-paragraph-indent')).toBe('1.5em')
+    expect(button('Formatting settings')).toHaveAttribute('aria-expanded', 'false')
+    // A change lands live, without a remount of the editor.
+    const before = box()
+    act(() => useEditorSettingsStore.getState().update({ fontSize: 22 }))
+    expect(pane?.style.getPropertyValue('--ms-editor-font-size')).toBe('22px')
+    expect(box()).toBe(before)
+  })
+
+  it('keeps unsaved typing when a scene-break change rebuilds the editor (F-3.6)', async () => {
+    render(<EditorPane id="sc-1" format="novel" />)
+    await release(0, doc('Once upon a time'))
+    await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
+    await userEvent.click(box())
+    await userEvent.keyboard('typed ')
+    expect(box()).toHaveTextContent('typed')
+    expect(saves).toHaveLength(0)
+
+    act(() =>
+      useEditorSettingsStore.setState({
+        settings: { ...defaultEditorSettings('novel'), sceneBreak: '###' }
+      })
+    )
+    await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
+    expect(box()).toHaveTextContent('typed')
+    expect(box()).toHaveTextContent('Once upon a time')
+    expect(useDocumentStore.getState().docs['sc-1']?.dirty).toBe(true)
+
+    await userEvent.click(button('Scene break'))
+    await waitFor(() =>
+      expect(box().querySelector('[data-scene-break]')).toHaveTextContent('###')
+    )
+    // The rebuilt editor keeps reporting edits under the same id.
+    await userEvent.click(box())
+    await userEvent.keyboard('more ')
+    expect(JSON.stringify(useDocumentStore.getState().docs['sc-1']?.content)).toContain('more')
+    await userEvent.keyboard('{Control>}s{/Control}')
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0]?.id).toBe('sc-1')
+    expect(saves[0]?.content.content?.map((n) => n.type)).toContain('sceneBreak')
+    expect(JSON.stringify(saves[0]?.content)).toContain('typed')
+    expect(JSON.stringify(saves[0]?.content)).toContain('more')
   })
 
   it('loads a never-written document as an empty paragraph', async () => {

@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { Editor } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
-import { defaultEditorSettings } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
-import { COLUMN, columnStyle } from './column'
+import { COLUMN, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
+import { EditorSettingsPanel } from './EditorSettingsPanel'
 import { buildExtensions } from './extensions'
+import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
 import { Toolbar } from './Toolbar'
 
@@ -45,7 +46,6 @@ export function DocumentEditor({
   const content = useDocumentStore((s) => s.docs[id]?.content ?? null)
   const load = useDocumentStore((s) => s.load)
   const unload = useDocumentStore((s) => s.unload)
-  const { sceneBreak, maxWidth } = defaultEditorSettings(format)
 
   useEffect(() => {
     load(id).catch((err: unknown) => toast.error(describeError(err)))
@@ -57,31 +57,37 @@ export function DocumentEditor({
       key={`${id}:${content === null ? 'loading' : 'ready'}`}
       id={id}
       content={content}
-      sceneBreak={sceneBreak}
-      maxWidth={maxWidth}
+      format={format}
       toolbar={toolbar}
       onFocus={onFocus}
     />
   )
 }
 
-/** One editor instance for one loaded document; `content === null` is the read-only loading state. */
+/**
+ * One editor instance for one loaded document; `content === null` is the read-only loading
+ * state. The formatting settings (F-3.6) apply live: five of them are custom properties on the
+ * pane (no remount); the scene-break text is an extension option, so changing it rebuilds the
+ * editor instance. `content` is the store's latest text (every edit lands there), and
+ * `useEditor` reads it only when it constructs an instance, so the rebuild starts from the
+ * author's unsaved typing and a keystroke never resets the editor.
+ */
 function RegionEditor({
   id,
   content,
-  sceneBreak,
-  maxWidth,
+  format,
   toolbar,
   onFocus
 }: {
   id: string
   content: TiptapNodeT | null
-  sceneBreak: string
-  maxWidth: number
+  format: NovelFormat
   toolbar: boolean
   onFocus: ((editor: Editor) => void) | undefined
 }): React.JSX.Element {
   const edit = useDocumentStore((s) => s.edit)
+  const settings = useEditorSettings(format)
+  const { sceneBreak } = settings
   const extensions = useMemo(
     () => buildExtensions({ sceneBreak, onSave: () => void useDocumentStore.getState().saveNow() }),
     [sceneBreak]
@@ -111,8 +117,11 @@ function RegionEditor({
   const body = <EditorContent editor={editor} className={`${COLUMN} py-6`} />
   if (!toolbar) return body
   return (
-    <div className="flex min-h-0 flex-1 flex-col" style={columnStyle(maxWidth)}>
-      <Toolbar editor={ready ? editor : null} />
+    <div className="flex min-h-0 flex-1 flex-col" style={editorStyle(settings)}>
+      <Toolbar
+        editor={ready ? editor : null}
+        right={<EditorSettingsPanel format={format} />}
+      />
       <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
       <DocumentStatusBar id={id} editor={ready ? editor : null} />
     </div>

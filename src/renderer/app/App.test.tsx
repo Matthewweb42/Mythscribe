@@ -1,10 +1,15 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { defaultEditorSettings } from '@shared/editorSettings'
 import type { ProjectInfo, RecentProject } from '@shared/ipc/contract'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
+import {
+  resetEditorSettingsStore,
+  useEditorSettingsStore
+} from '@renderer/features/editor/settingsStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -40,6 +45,7 @@ beforeEach(() => {
   useProjectStore.setState({ current: null, ready: false, busy: false, recents: [] })
   useTreeStore.getState().clear()
   useDocumentStore.getState().clear()
+  resetEditorSettingsStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
 })
@@ -54,6 +60,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'recents:list') return []
     if (channel === 'tree:list') return []
     if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }
+    if (channel === 'editorSettings:get') return defaultEditorSettings('novel')
     return null
   })
   const on = (event: string, listener: (payload: unknown) => void): (() => void) => {
@@ -262,6 +269,27 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
     expect(useDocumentStore.getState().docs).toEqual({})
+  })
+
+  it('loads the formatting settings with the project, applies them to the editor, and drops them on close (F-3.6)', async () => {
+    install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture,
+      'editorSettings:get': { ...defaultEditorSettings('webnovel'), fontSize: 20, maxWidth: 900 }
+    })
+    render(<App />)
+    const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+    await waitFor(() => expect(useEditorSettingsStore.getState().settings?.fontSize).toBe(20))
+    await userEvent.click(within(scene).getByText('Scene 1'))
+    const pane = (await screen.findByRole('toolbar', { name: 'Formatting' })).parentElement
+    expect(pane?.style.getPropertyValue('--ms-editor-font-size')).toBe('20px')
+    expect(pane?.style.getPropertyValue('--ms-editor-max-width')).toBe('900px')
+    expect(screen.getByRole('button', { name: 'Formatting settings' })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /close project/i }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    await screen.findByRole('button', { name: /new project/i })
+    expect(useEditorSettingsStore.getState().settings).toBeNull()
   })
 
   it('surfaces a failed document load as a toast and keeps the editor read-only', async () => {

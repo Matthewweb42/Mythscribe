@@ -207,9 +207,17 @@ function snapshot(editor: Editor | null): Record<string, ToolState> {
 /**
  * The formatting toolbar (F-3.1). Buttons mirror the editor's keyboard shortcuts, show their
  * active state via `aria-pressed`, and disable when the command cannot run (or with no editor).
- * Mouse-down is swallowed so the editor keeps its selection while the command applies.
+ * Mouse-down is swallowed so the editor keeps its selection while the command applies. `right`
+ * is rendered at the far end, for controls that are not editor commands (the formatting
+ * settings, F-3.6).
  */
-export function Toolbar({ editor }: { editor: Editor | null }): React.JSX.Element {
+export function Toolbar({
+  editor,
+  right
+}: {
+  editor: Editor | null
+  right?: React.ReactNode
+}): React.JSX.Element {
   // Snapshot the editor from the prop, not from the hook's context: `useEditorState` only
   // refreshes its context on a transaction, so a toolbar handed a different editor (the stacked
   // view, F-3.8) would otherwise show the previous editor's state until the author types.
@@ -252,6 +260,7 @@ export function Toolbar({ editor }: { editor: Editor | null }): React.JSX.Elemen
           })}
         </div>
       ))}
+      {right !== undefined ? <div className="ml-auto flex items-center">{right}</div> : null}
     </div>
   )
 }
