@@ -6,7 +6,9 @@ import { z } from 'zod'
  * shows. The key itself never crosses this boundary: status carries only `hasKey` and a mask.
  */
 
-export const AiProviderId = z.enum(['openai'])
+/** The provider ids as a tuple, so Drizzle enum columns and the zod enum share one owner. */
+export const AI_PROVIDER_IDS = ['openai'] as const
+export const AiProviderId = z.enum(AI_PROVIDER_IDS)
 export type AiProviderId = z.infer<typeof AiProviderId>
 
 export const AI_PROVIDER_LABEL: Record<AiProviderId, string> = { openai: 'OpenAI' }
@@ -60,7 +62,8 @@ export const AiErrorCode = z.enum([
   'RATE_LIMIT',
   'QUOTA',
   'NETWORK',
-  'PROVIDER'
+  'PROVIDER',
+  'BUDGET'
 ])
 export type AiErrorCode = z.infer<typeof AiErrorCode>
 
@@ -71,7 +74,8 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
   RATE_LIMIT: 'Wait a moment and retry.',
   QUOTA: 'Add credit to your OpenAI account.',
   NETWORK: 'Check your internet connection and retry.',
-  PROVIDER: 'Try again in a moment.'
+  PROVIDER: 'Try again in a moment.',
+  BUDGET: 'Raise the daily cap in Settings or wait until tomorrow.'
 }
 
 /**
@@ -101,3 +105,97 @@ export type AiTestConnectionResult = z.infer<typeof AiTestConnectionResult>
 export function testConnectionFailure(code: AiErrorCode, message: string): AiTestConnectionResult {
   return { ok: false, code, message, nextStep: AI_NEXT_STEP[code] }
 }
+
+/**
+ * The AI features that spend tokens (F-5.14). Each member is a ledger key and a budget line;
+ * a feature joins this enum, `FEATURE_BUDGETS`, and `FEATURE_INPUT_BUDGETS` in the change that
+ * builds it (F-5.3 ghost text, F-4.7 tags, F-5.6 summaries), never before.
+ */
+export const AiFeature = z.enum(['ghostText', 'tags', 'summary'])
+export type AiFeature = z.infer<typeof AiFeature>
+
+/** How the Usage block names each feature; a ledger key from a newer build shows as itself. */
+export const AI_FEATURE_LABEL: Record<AiFeature, string> = {
+  ghostText: 'Ghost text',
+  tags: 'Tags',
+  summary: 'Summaries'
+}
+
+/** Hard cap on `max_tokens` per feature (CLAUDE.md, token efficiency rule 6); the request path clamps to it. */
+export const FEATURE_BUDGETS: Record<AiFeature, number> = { ghostText: 60, tags: 200, summary: 150 }
+
+/**
+ * Hard cap on the estimated prompt tokens per feature (CLAUDE.md, token efficiency rule 8):
+ * ghost text sends ~500 characters at the caret plus a short brief; tags and summaries send one
+ * scene (a long scene runs ~4 000 words) plus the bible context. A request over its cap is
+ * refused with `BUDGET` before anything is sent; trimming to fit is the context builder's job.
+ */
+export const FEATURE_INPUT_BUDGETS: Record<AiFeature, number> = {
+  ghostText: 1_500,
+  tags: 8_000,
+  summary: 8_000
+}
+
+/** USD per million tokens for one model; `priced: false` marks a model this table does not know. */
+export interface ModelPrice {
+  inUsdPerM: number
+  outUsdPerM: number
+  priced: boolean
+}
+
+/**
+ * Published OpenAI rates (USD per million tokens, standard tier, no batch discount), keyed by
+ * the exact model id since the tier → model mapping is a setting. Copied from OpenAI's pricing
+ * page; nothing fetches it, so keep it current by hand when a default model changes. A model
+ * outside this table costs 0 with `priced: false` (the ledger never invents a price).
+ */
+export const MODEL_PRICING: Record<string, ModelPrice> = {
+  'gpt-5.4': { inUsdPerM: 1.25, outUsdPerM: 10, priced: true },
+  'gpt-5.4-mini': { inUsdPerM: 0.25, outUsdPerM: 2, priced: true },
+  'gpt-5.4-nano': { inUsdPerM: 0.05, outUsdPerM: 0.4, priced: true }
+}
+
+const UNPRICED: ModelPrice = { inUsdPerM: 0, outUsdPerM: 0, priced: false }
+
+/** The cost of `inTok` prompt and `outTok` completion tokens on `model`; 0 and unpriced for an unknown model. */
+export function priceFor(
+  model: string,
+  inTok: number,
+  outTok: number
+): { costUsd: number; priced: boolean } {
+  const price = MODEL_PRICING[model] ?? UNPRICED
+  return {
+    costUsd: (inTok * price.inUsdPerM + outTok * price.outUsdPerM) / 1_000_000,
+    priced: price.priced
+  }
+}
+
+/**
+ * A local token estimate (about four characters per token for English prose), used only for
+ * the pre-flight budget and cap guards, never logged: the ledger records the provider's count.
+ */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4)
+}
+
+/** Bounds for the app-wide daily spend cap (USD); 0 pauses AI for the day. */
+export const DAILY_CAP_MIN = 0
+export const DAILY_CAP_MAX = 500
+export const DEFAULT_DAILY_CAP_USD = 2
+export const DailyCapUsd = z.number().min(DAILY_CAP_MIN).max(DAILY_CAP_MAX)
+
+const UsageTotals = z.object({ requests: z.number(), tokens: z.number(), costUsd: z.number() })
+export type UsageTotals = z.infer<typeof UsageTotals>
+
+/**
+ * What the AI tab's Usage block shows (F-5.14). `today` and `dailyCapUsd` are app-wide (every
+ * project opened today spends against one cap); `total` and `byFeature` are the open project's
+ * ledger since it was created.
+ */
+export const AiUsageSummary = z.object({
+  today: UsageTotals,
+  total: UsageTotals,
+  byFeature: z.array(UsageTotals.extend({ feature: z.string() })),
+  dailyCapUsd: DailyCapUsd
+})
+export type AiUsageSummary = z.infer<typeof AiUsageSummary>

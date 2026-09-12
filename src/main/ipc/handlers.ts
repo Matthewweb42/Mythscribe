@@ -1,8 +1,15 @@
 import { app } from 'electron'
-import { testConnectionFailure, type AiStatus, type AiTestConnectionResult } from '@shared/ai'
+import {
+  testConnectionFailure,
+  type AiStatus,
+  type AiTestConnectionResult,
+  type AiUsageSummary
+} from '@shared/ai'
+import { dayOf, rollIfNewDay } from '../ai/dailyCap'
 import type { AiKeyStore } from '../ai/keyStore'
 import { AiProviderError, NoKeyError } from '../ai/providers/types'
 import type { AiProviderRegistry } from '../ai/registry'
+import { ledgerSummary } from '../ai/usageStore'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
@@ -208,6 +215,26 @@ export function registerHandlers({
       if (err instanceof AiProviderError) return testConnectionFailure(err.code, err.message)
       throw err
     }
+  })
+
+  // F-5.14: today's tally and the cap are app-wide (rolled to the current day on read, never
+  // written here); the totals are the open project's ledger.
+  const usageSummary = (): AiUsageSummary => {
+    const { total, byFeature } = ledgerSummary(manager.require().connection.orm)
+    const day = rollIfNewDay(appState.get().aiUsage, dayOf(new Date()))
+    return {
+      today: { requests: day.requestsToday, tokens: day.tokensToday, costUsd: day.spentTodayUsd },
+      total,
+      byFeature,
+      dailyCapUsd: day.dailyCapUsd
+    }
+  }
+
+  register('ai:usageSummary', usageSummary)
+
+  register('ai:setDailyCap', ({ dailyCapUsd }) => {
+    appState.update((s) => ({ ...s, aiUsage: { ...s.aiUsage, dailyCapUsd } }))
+    return usageSummary()
   })
 
   register('window:close', () => {

@@ -1,17 +1,23 @@
 import { useEffect, useId, useState } from 'react'
 import {
+  AI_FEATURE_LABEL,
   AI_KEY_MAX,
   AI_MODEL_MAX,
   AI_PROVIDER_LABEL,
+  AiFeature,
+  DAILY_CAP_MAX,
+  DAILY_CAP_MIN,
   DEFAULT_MODELS,
   TIER_USE,
   type AiModelMap,
   type AiStatus,
+  type AiUsageSummary,
   type Tier
 } from '@shared/ai'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { useAiStore } from './aiStore'
+import { describeTotals, formatCount, formatUsd } from './usageFormat'
 
 const FIELD = 'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 const BUTTON =
@@ -38,13 +44,18 @@ const TIER_LABEL: Record<Tier, string> = { fast: 'Fast tier', strong: 'Strong ti
 const atDefaults = (models: AiModelMap): boolean =>
   models.fast === DEFAULT_MODELS.fast && models.strong === DEFAULT_MODELS.strong
 
+const featureLabel = (feature: string): string => {
+  const parsed = AiFeature.safeParse(feature)
+  return parsed.success ? AI_FEATURE_LABEL[parsed.data] : feature
+}
+
 /**
  * The AI tab of the Settings dialog (F-5.1): the provider, the key field with Save and Clear,
  * the masked hint once a key is saved, the model per tier with "Reset to defaults" (F-5.11),
- * "Test connection" with its result inline, the privacy line, and a warning when the key can
- * only be obfuscated (no keyring) or not stored at all. The uncommitted key lives in local
- * state and is dropped as soon as it is saved, so it is never shown again; the store holds
- * only what main answers (a mask, never the key).
+ * "Test connection" with its result inline, the Usage block with the daily cap (F-5.14), the
+ * privacy line, and a warning when the key can only be obfuscated (no keyring) or not stored
+ * at all. The uncommitted key lives in local state and is dropped as soon as it is saved, so
+ * it is never shown again; the store holds only what main answers (a mask, never the key).
  */
 export function AiSettingsTab(): React.JSX.Element {
   const status = useAiStore((s) => s.status)
@@ -55,12 +66,16 @@ export function AiSettingsTab(): React.JSX.Element {
   const clearKey = useAiStore((s) => s.clearKey)
   const setModels = useAiStore((s) => s.setModels)
   const test = useAiStore((s) => s.test)
+  const usage = useAiStore((s) => s.usage)
+  const loadUsage = useAiStore((s) => s.loadUsage)
+  const setDailyCap = useAiStore((s) => s.setDailyCap)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     load().catch(report)
-  }, [load])
+    loadUsage().catch(report)
+  }, [load, loadUsage])
 
   const trimmed = draft.trim()
   const hasKey = status?.hasKey ?? false
@@ -194,7 +209,145 @@ export function AiSettingsTab(): React.JSX.Element {
         ) : null}
       </div>
 
+      <UsageBlock
+        usage={usage}
+        disabled={busy}
+        onCommitCap={(usd) => run(() => setDailyCap(usd))}
+      />
+
       <p className="m-0 text-xs text-fg-muted">{privacyCopy(status?.encryption)}</p>
+    </div>
+  )
+}
+
+/**
+ * The Usage block (F-5.14): today's spend across every project (the day and the cap are
+ * app-wide), this project's ledger since it was created with a per-feature breakdown, and the
+ * daily cap field. Nothing renders until the summary has loaded.
+ */
+function UsageBlock({
+  usage,
+  disabled,
+  onCommitCap
+}: {
+  usage: AiUsageSummary | null
+  disabled: boolean
+  onCommitCap: (usd: number) => Promise<void>
+}): React.JSX.Element | null {
+  if (usage === null) return null
+  return (
+    <fieldset data-testid="ai-usage" className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
+      <legend className="float-left p-0 font-medium">Usage</legend>
+      <div className="flex items-center justify-between gap-3">
+        <span>Spent today, all projects</span>
+        <span data-testid="ai-usage-today" className="font-medium">
+          {formatUsd(usage.today.costUsd)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span>This project, all time</span>
+        <span data-testid="ai-usage-total">{describeTotals(usage.total)}</span>
+      </div>
+      {usage.byFeature.length > 0 ? (
+        <table aria-label="This project by feature" className="w-full text-xs">
+          <thead className="text-fg-muted">
+            <tr>
+              <th scope="col" className="text-left font-normal">
+                Feature
+              </th>
+              <th scope="col" className="text-right font-normal">
+                Requests
+              </th>
+              <th scope="col" className="text-right font-normal">
+                Tokens
+              </th>
+              <th scope="col" className="text-right font-normal">
+                Cost
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {usage.byFeature.map((row) => (
+              <tr key={row.feature}>
+                <th scope="row" className="text-left font-normal">
+                  {featureLabel(row.feature)}
+                </th>
+                <td className="text-right tabular-nums">{formatCount(row.requests)}</td>
+                <td className="text-right tabular-nums">{formatCount(row.tokens)}</td>
+                <td className="text-right tabular-nums">{formatUsd(row.costUsd)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="m-0 text-xs text-fg-muted">No AI requests in this project yet.</p>
+      )}
+      <DailyCapField value={usage.dailyCapUsd} disabled={disabled} onCommit={onCommitCap} />
+    </fieldset>
+  )
+}
+
+/**
+ * The app-wide daily cap in USD, committed on blur or Enter like `ModelField`: a blank,
+ * unparsable, or unchanged commit restores the saved value without a write; a refused one
+ * shows the saved value again once the toast is up.
+ */
+function DailyCapField({
+  value,
+  disabled,
+  onCommit
+}: {
+  value: number
+  disabled: boolean
+  onCommit: (usd: number) => Promise<void>
+}): React.JSX.Element {
+  const hintId = useId()
+  const [draft, setDraft] = useState<string | null>(null)
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(null)
+  }
+
+  const commit = (): void => {
+    if (draft === null) return
+    const text = draft.trim()
+    const usd = Number(text)
+    if (text === '' || !Number.isFinite(usd) || usd === value) {
+      setDraft(null)
+      return
+    }
+    void onCommit(usd).then(() => setDraft(null))
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="flex items-center gap-3">
+        <span className="w-24 shrink-0">Daily cap (USD)</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          min={DAILY_CAP_MIN}
+          max={DAILY_CAP_MAX}
+          step="0.5"
+          aria-describedby={hintId}
+          value={draft ?? value.toFixed(2)}
+          disabled={disabled}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              commit()
+            }
+          }}
+          className={FIELD}
+        />
+      </label>
+      <p id={hintId} className="m-0 pl-27 text-xs text-fg-muted">
+        Every project spends against this cap. A request that would go over it is refused until
+        tomorrow; 0 pauses AI for the day.
+      </p>
     </div>
   )
 }

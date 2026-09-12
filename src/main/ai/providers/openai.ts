@@ -44,6 +44,7 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
 
   return {
     id: 'openai',
+    resolveModel,
 
     async complete(request): Promise<CompletionResult> {
       try {

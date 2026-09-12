@@ -21,6 +21,7 @@ import { AiKeyStore } from '../ai/keyStore'
 import { fakeSafeStorage } from '../ai/keyStoreFixture'
 import { AiProviderError, InvalidKeyError, type Provider } from '../ai/providers/types'
 import { AiProviderRegistry } from '../ai/registry'
+import { insertUsage } from '../ai/usageStore'
 import { AppStateStore } from '../appState/appStateStore'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
@@ -64,6 +65,7 @@ beforeEach(() => {
   )
   const provider: Provider = {
     id: 'openai',
+    resolveModel: () => 'gpt-fake',
     complete: () => Promise.reject(new Error('not under test')),
     stream: async function* () {},
     testConnection
@@ -958,6 +960,62 @@ describe('ai handlers (F-5.1)', () => {
     if (!result.ok) expect(result.error.code).toBe('INTERNAL')
     vi.restoreAllMocks()
     expect(new InvalidKeyError('x')).toBeInstanceOf(AiProviderError)
+  })
+})
+
+describe('ai:usageSummary / ai:setDailyCap (F-5.14)', () => {
+  const zero = { requests: 0, tokens: 0, costUsd: 0 }
+
+  it('needs an open project', async () => {
+    await expect(invoke('ai:usageSummary', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers the default cap and an empty ledger for a fresh project', async () => {
+    await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
+    expect(await invoke('ai:usageSummary', undefined)).toEqual({
+      today: zero,
+      total: zero,
+      byFeature: [],
+      dailyCapUsd: 2
+    })
+  })
+
+  it('sums the project ledger per feature and reports the app-wide day from app state', async () => {
+    await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
+    const row = {
+      at: '2026-09-12T10:00:00.000Z',
+      tier: 'fast' as const,
+      model: 'gpt-5.4-mini',
+      provider: 'openai' as const,
+      promptTokens: 100,
+      completionTokens: 20,
+      cached: false,
+      contextHash: 'ctx'
+    }
+    insertUsage(manager.require().connection.orm, { ...row, feature: 'tags', costUsd: 0.001 })
+    insertUsage(manager.require().connection.orm, { ...row, feature: 'summary', costUsd: 0.002 })
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['summary', 'tags'])
+    expect(summary.total).toMatchObject({ requests: 2, tokens: 240 })
+    expect(summary.total.costUsd).toBeCloseTo(0.003, 8)
+    // The day is app-wide: nothing in this project's ledger moves it.
+    expect(summary.today).toEqual(zero)
+  })
+
+  it('persists a new cap, answers the summary with it, and refuses one outside 0–500', async () => {
+    await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
+    expect((await invoke('ai:setDailyCap', { dailyCapUsd: 5 })).dailyCapUsd).toBe(5)
+    expect((await invoke('ai:usageSummary', undefined)).dailyCapUsd).toBe(5)
+    const file = path.join(tmp, 'userData', 'app-state.json')
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({
+      aiUsage: { dailyCapUsd: 5 }
+    })
+    for (const dailyCapUsd of [-1, 500.5]) {
+      const result = await handlerFor('ai:setDailyCap')(undefined, { dailyCapUsd })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    }
+    expect((await invoke('ai:usageSummary', undefined)).dailyCapUsd).toBe(5)
   })
 })
 

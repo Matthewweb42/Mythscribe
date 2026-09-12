@@ -3,7 +3,8 @@ import {
   DEFAULT_MODELS,
   type AiModelMap,
   type AiStatus,
-  type AiTestConnectionResult
+  type AiTestConnectionResult,
+  type AiUsageSummary
 } from '@shared/ai'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -17,6 +18,8 @@ const NO_KEY: AiStatus = {
   models: DEFAULT_MODELS
 }
 const WITH_KEY: AiStatus = { ...NO_KEY, hasKey: true, hint: 'sk-…abcd' }
+const ZERO = { requests: 0, tokens: 0, costUsd: 0 }
+const USAGE: AiUsageSummary = { today: ZERO, total: ZERO, byFeature: [], dailyCapUsd: 2 }
 
 interface Fake {
   client: IpcClient
@@ -44,6 +47,13 @@ function fakeClient(): Fake {
             return { ...WITH_KEY, models: (input as { models: AiModelMap }).models } as Output<C>
           case 'ai:testConnection':
             return fake.testAnswer() as Output<C>
+          case 'ai:usageSummary':
+            return USAGE as Output<C>
+          case 'ai:setDailyCap':
+            return {
+              ...USAGE,
+              dailyCapUsd: (input as { dailyCapUsd: number }).dailyCapUsd
+            } as Output<C>
           default:
             throw new Error(`unexpected ${channel}`)
         }
@@ -131,5 +141,27 @@ describe('aiStore (F-5.1)', () => {
     resetAiStore()
     await pending
     expect(store().status).toBeNull()
+  })
+})
+
+describe('aiStore usage (F-5.14)', () => {
+  it('starts without a summary and loads it', async () => {
+    expect(store().usage).toBeNull()
+    await store().loadUsage()
+    expect(store().usage).toEqual(USAGE)
+    expect(fake.calls).toEqual([{ channel: 'ai:usageSummary', input: undefined }])
+  })
+
+  it('sends the new cap and keeps the summary answered', async () => {
+    await store().setDailyCap(5)
+    expect(fake.calls).toEqual([{ channel: 'ai:setDailyCap', input: { dailyCapUsd: 5 } }])
+    expect(store().usage).toEqual({ ...USAGE, dailyCapUsd: 5 })
+  })
+
+  it('drops a usage response that arrives after a reset', async () => {
+    const pending = store().loadUsage()
+    resetAiStore()
+    await pending
+    expect(store().usage).toBeNull()
   })
 })

@@ -112,7 +112,13 @@ describe('buildOpenAiProvider.complete (F-5.1)', () => {
     fast = 'gpt-5.4-micro'
     await provider.complete(request)
     expect(bodyOf(calls[2]).model).toBe('gpt-5.4-micro')
-    expect(resolveModel.mock.calls.map(([tier]) => tier)).toEqual(['fast', 'strong', 'fast'])
+    expect(provider.resolveModel('fast')).toBe('gpt-5.4-micro')
+    expect(resolveModel.mock.calls.map(([tier]) => tier)).toEqual([
+      'fast',
+      'strong',
+      'fast',
+      'fast'
+    ])
   })
 
   it('maps a 401 to INVALID_KEY without echoing the key', async () => {

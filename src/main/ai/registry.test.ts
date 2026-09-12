@@ -12,6 +12,7 @@ import { AiProviderRegistry, type BuildProvider } from './registry'
 function fakeProvider(key: string, resolveModel: (tier: Tier) => string): Provider {
   return {
     id: 'openai',
+    resolveModel,
     complete: (request) =>
       Promise.resolve({
         text: key,
@@ -79,6 +80,7 @@ describe('AiProviderRegistry (F-5.1)', () => {
     await expect(provider.testConnection()).resolves.toEqual({ model: 'gpt-5.4-nano' })
     const request = { tier: 'strong' as const, messages: [], maxTokens: 1 }
     await expect(provider.complete(request)).resolves.toMatchObject({ model: 'gpt-5.4-pro' })
+    expect(provider.resolveModel('strong')).toBe('gpt-5.4-pro')
     expect(registry.get()).toBe(provider)
     expect(build).toHaveBeenCalledTimes(1)
   })

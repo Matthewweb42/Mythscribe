@@ -5,7 +5,9 @@ import {
   AiModelMap,
   AiProviderId,
   AiStatus,
-  AiTestConnectionResult
+  AiTestConnectionResult,
+  AiUsageSummary,
+  DailyCapUsd
 } from '../ai'
 import { EditorSettings } from '../editorSettings'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
@@ -300,6 +302,13 @@ export const contract = {
     input: z.object({ provider: AiProviderId, models: AiModelMap }),
     output: AiStatus
   },
+  /**
+   * The AI spend (F-5.14): today's tally and the cap are app-wide, the totals and the
+   * per-feature list are the open project's ledger. NO_PROJECT without one.
+   */
+  'ai:usageSummary': { input: z.undefined(), output: AiUsageSummary },
+  /** Replaces the app-wide daily spend cap (F-5.14); outside 0–500 USD is VALIDATION. */
+  'ai:setDailyCap': { input: z.object({ dailyCapUsd: DailyCapUsd }), output: AiUsageSummary },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },
   /** The renderer could not flush, so the close it was asked for (and any quit behind it) is abandoned. */

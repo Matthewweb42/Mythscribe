@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiModels } from '@shared/ai'
 import { defaultLayout } from '@shared/layout'
+import { defaultAiUsageState } from '../ai/dailyCap'
 import { AppStateStore, EMPTY_APP_STATE } from './appStateStore'
 
 let tmp: string
@@ -38,7 +39,8 @@ describe('AppStateStore', () => {
       version: 1,
       recents: [entry],
       layout: defaultLayout(),
-      models: defaultAiModels()
+      models: defaultAiModels(),
+      aiUsage: defaultAiUsageState()
     })
   })
 
@@ -128,6 +130,33 @@ describe('AppStateStore', () => {
       }))
     ).toThrow()
     expect(new AppStateStore(file).get().models).toEqual(models)
+  })
+
+  it('parses a file written before F-5.14 (no aiUsage) to the default cap with no tally', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().aiUsage).toEqual(defaultAiUsageState())
+    expect(EMPTY_APP_STATE.aiUsage).toEqual(defaultAiUsageState())
+  })
+
+  it('round-trips the daily cap and tally and refuses a cap outside 0–500', () => {
+    const store = new AppStateStore(file)
+    const aiUsage = {
+      dailyCapUsd: 5,
+      spentDate: '2026-09-12',
+      spentTodayUsd: 0.25,
+      requestsToday: 3,
+      tokensToday: 900
+    }
+    expect(store.update((s) => ({ ...s, aiUsage })).aiUsage).toEqual(aiUsage)
+    expect(new AppStateStore(file).get().aiUsage).toEqual(aiUsage)
+    expect(() =>
+      store.update((s) => ({ ...s, aiUsage: { ...aiUsage, dailyCapUsd: 501 } }))
+    ).toThrow()
+    expect(() =>
+      store.update((s) => ({ ...s, aiUsage: { ...aiUsage, dailyCapUsd: -1 } }))
+    ).toThrow()
+    expect(new AppStateStore(file).get().aiUsage).toEqual(aiUsage)
   })
 
   it('warns and falls back to the empty state when the stored model mapping is invalid', () => {

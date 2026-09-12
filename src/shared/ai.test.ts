@@ -1,0 +1,69 @@
+import { describe, expect, it } from 'vitest'
+import {
+  AiFeature,
+  AiUsageSummary,
+  DEFAULT_MODELS,
+  DailyCapUsd,
+  FEATURE_BUDGETS,
+  FEATURE_INPUT_BUDGETS,
+  MODEL_PRICING,
+  estimateTokens,
+  priceFor
+} from './ai'
+
+describe('priceFor (F-5.14)', () => {
+  it('prices a known model per million tokens in and out', () => {
+    const price = MODEL_PRICING['gpt-5.4-mini']
+    if (!price) throw new Error('gpt-5.4-mini must be priced')
+    const { costUsd, priced } = priceFor('gpt-5.4-mini', 1_000_000, 500_000)
+    expect(priced).toBe(true)
+    expect(costUsd).toBeCloseTo(price.inUsdPerM + price.outUsdPerM / 2, 8)
+  })
+
+  it('costs nothing for zero tokens', () => {
+    expect(priceFor('gpt-5.4', 0, 0)).toEqual({ costUsd: 0, priced: true })
+  })
+
+  it('answers 0 and unpriced for a model the table does not know', () => {
+    expect(priceFor('gpt-unknown', 10_000, 10_000)).toEqual({ costUsd: 0, priced: false })
+  })
+
+  it('prices both default tier models, so a fresh install reports cost', () => {
+    for (const model of Object.values(DEFAULT_MODELS)) {
+      expect(priceFor(model, 1, 1).priced).toBe(true)
+    }
+  })
+})
+
+describe('estimateTokens', () => {
+  it('estimates about four characters per token, rounding up, and 0 for empty text', () => {
+    expect(estimateTokens('')).toBe(0)
+    expect(estimateTokens('a')).toBe(1)
+    expect(estimateTokens('x'.repeat(400))).toBe(100)
+    expect(estimateTokens('x'.repeat(401))).toBe(101)
+  })
+})
+
+describe('budgets', () => {
+  it('give every feature an output cap and an input cap', () => {
+    for (const feature of AiFeature.options) {
+      expect(FEATURE_BUDGETS[feature]).toBeGreaterThan(0)
+      expect(FEATURE_INPUT_BUDGETS[feature]).toBeGreaterThan(FEATURE_BUDGETS[feature])
+    }
+    expect(FEATURE_BUDGETS).toEqual({ ghostText: 60, tags: 200, summary: 150 })
+  })
+
+  it('bound the daily cap to 0–500 USD', () => {
+    expect(DailyCapUsd.safeParse(0).success).toBe(true)
+    expect(DailyCapUsd.safeParse(500).success).toBe(true)
+    expect(DailyCapUsd.safeParse(-0.01).success).toBe(false)
+    expect(DailyCapUsd.safeParse(500.01).success).toBe(false)
+  })
+
+  it('AiUsageSummary refuses a cap outside the bounds', () => {
+    const zero = { requests: 0, tokens: 0, costUsd: 0 }
+    const summary = { today: zero, total: zero, byFeature: [], dailyCapUsd: 2 }
+    expect(AiUsageSummary.safeParse(summary).success).toBe(true)
+    expect(AiUsageSummary.safeParse({ ...summary, dailyCapUsd: 501 }).success).toBe(false)
+  })
+})

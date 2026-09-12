@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AiModelMap, AiStatus, AiTestConnectionResult } from '@shared/ai'
+import type { AiModelMap, AiStatus, AiTestConnectionResult, AiUsageSummary } from '@shared/ai'
 import { ipc } from '@renderer/lib/ipc'
 
 /**
@@ -8,13 +8,20 @@ import { ipc } from '@renderer/lib/ipc'
  * connection test. App-wide, not per project, so nothing clears it on project close. `load`,
  * `setKey`, and `clearKey` let unexpected errors propagate for the caller to toast; `test`
  * stores the expected failures the channel answers as data and only throws for a real error.
+ * `usage` (F-5.14) mixes the app-wide day with the open project's ledger, so the tab reloads
+ * it on every mount instead of trusting a figure from another project.
  */
 interface AiState {
   /** null until the first `load` resolves. */
   status: AiStatus | null
   testResult: AiTestConnectionResult | null
   testing: boolean
+  /** null until the first `loadUsage` resolves. */
+  usage: AiUsageSummary | null
   load: () => Promise<void>
+  loadUsage: () => Promise<void>
+  /** Replaces the app-wide daily spend cap (F-5.14); the summary answered carries it. */
+  setDailyCap: (dailyCapUsd: number) => Promise<void>
   /** Sends the key once; a fresh status (with the mask) comes back and any old test result is dropped. */
   setKey: (key: string) => Promise<void>
   clearKey: () => Promise<void>
@@ -30,12 +37,27 @@ export const useAiStore = create<AiState>((set) => ({
   status: null,
   testResult: null,
   testing: false,
+  usage: null,
 
   async load() {
     const mine = generation
     const status = await ipc().invoke('ai:getStatus', undefined)
     if (mine !== generation) return
     set({ status })
+  },
+
+  async loadUsage() {
+    const mine = generation
+    const usage = await ipc().invoke('ai:usageSummary', undefined)
+    if (mine !== generation) return
+    set({ usage })
+  },
+
+  async setDailyCap(dailyCapUsd) {
+    const mine = generation
+    const usage = await ipc().invoke('ai:setDailyCap', { dailyCapUsd })
+    if (mine !== generation) return
+    set({ usage })
   },
 
   async setKey(key) {
@@ -75,5 +97,5 @@ export const useAiStore = create<AiState>((set) => ({
 /** Empties the store and invalidates in-flight requests. For tests only. */
 export function resetAiStore(): void {
   generation++
-  useAiStore.setState({ status: null, testResult: null, testing: false })
+  useAiStore.setState({ status: null, testResult: null, testing: false, usage: null })
 }

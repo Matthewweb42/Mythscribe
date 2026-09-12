@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { AiModels, defaultAiModels } from '@shared/ai'
 import { RecentProjectEntry } from '@shared/ipc/contract'
 import { StoredLayout, defaultLayout } from '@shared/layout'
+import { AiUsageState, defaultAiUsageState } from '../ai/dailyCap'
 
 /** Persistent, app-wide state (not project state) kept as one JSON file in userData. */
 export const AppState = z.object({
@@ -15,7 +16,9 @@ export const AppState = z.object({
    */
   layout: StoredLayout.default(defaultLayout),
   /** F-5.11: the tier → model mapping per provider; defaulted so older files load unchanged. */
-  models: AiModels.default(defaultAiModels)
+  models: AiModels.default(defaultAiModels),
+  /** F-5.14: the app-wide daily spend cap and the day's tally; defaulted for older files. */
+  aiUsage: AiUsageState.default(defaultAiUsageState)
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -23,7 +26,8 @@ export const EMPTY_APP_STATE: AppState = {
   version: 1,
   recents: [],
   layout: defaultLayout(),
-  models: defaultAiModels()
+  models: defaultAiModels(),
+  aiUsage: defaultAiUsageState()
 }
 
 export class AppStateStore {

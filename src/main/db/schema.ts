@@ -3,12 +3,14 @@ import {
   check,
   index,
   integer,
+  real,
   sqliteTable,
   text,
   uniqueIndex,
   type AnySQLiteColumn
 } from 'drizzle-orm/sqlite-core'
 // Relative on purpose: drizzle-kit loads this file without the `@shared` path alias.
+import { AI_PROVIDER_IDS } from '../../shared/ai'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
 import { TAG_CATEGORIES } from '../../shared/tags'
 
@@ -116,3 +118,53 @@ export const documentTag = sqliteTable(
 )
 export type DocumentTagRow = typeof documentTag.$inferSelect
 export type DocumentTagInsert = typeof documentTag.$inferInsert
+
+/**
+ * One row per completed AI request (F-5.14). Written after the provider answers, or after a
+ * cache hit (`cached` true, cost 0, the cached usage so token totals stay honest). Refusals
+ * (BUDGET) and provider failures are never logged: nothing was spent.
+ */
+export const aiUsage = sqliteTable(
+  'ai_usage',
+  {
+    id: text('id').primaryKey(),
+    /** ISO timestamp. */
+    at: text('at').notNull(),
+    /** An `AiFeature`. */
+    feature: text('feature').notNull(),
+    tier: text('tier', { enum: ['fast', 'strong'] }).notNull(),
+    model: text('model').notNull(),
+    provider: text('provider', { enum: AI_PROVIDER_IDS }).notNull(),
+    promptTokens: integer('prompt_tokens').notNull(),
+    completionTokens: integer('completion_tokens').notNull(),
+    /** null when the provider does not report prompt-cache hits. */
+    cachedTokens: integer('cached_tokens'),
+    costUsd: real('cost_usd').notNull(),
+    cached: integer('cached', { mode: 'boolean' }).notNull(),
+    /** null until F-5.12 versions the prompts. */
+    promptVersion: text('prompt_version'),
+    contextHash: text('context_hash').notNull()
+  },
+  (t) => [index('ai_usage_at_idx').on(t.at), index('ai_usage_feature_idx').on(t.feature)]
+)
+export type AiUsageRow = typeof aiUsage.$inferSelect
+export type AiUsageInsert = typeof aiUsage.$inferInsert
+
+/**
+ * Local response cache (CLAUDE.md, token efficiency rule 4). Keyed by the request path's own
+ * hash of feature, prompt version, model, and context, never by a caller's raw context hash
+ * alone. Invalidated by content, never by time; bounded to 500 rows, oldest evicted on write.
+ */
+export const aiCache = sqliteTable('ai_cache', {
+  contextHash: text('context_hash').primaryKey(),
+  feature: text('feature').notNull(),
+  promptVersion: text('prompt_version'),
+  model: text('model').notNull(),
+  /** The completion text. */
+  response: text('response').notNull(),
+  /** JSON: `{ inputTokens, outputTokens }`. */
+  usage: text('usage').notNull(),
+  createdAt: text('created_at').notNull()
+})
+export type AiCacheRow = typeof aiCache.$inferSelect
+export type AiCacheInsert = typeof aiCache.$inferInsert

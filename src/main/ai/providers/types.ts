@@ -39,6 +39,11 @@ export interface StreamChunk {
 
 export interface Provider {
   readonly id: AiProviderId
+  /**
+   * The model a tier maps to right now (F-5.11), so the request path (F-5.14) can hash the
+   * cache key and estimate the cost before the call; `complete` resolves it again itself.
+   */
+  resolveModel(tier: Tier): string
   /** Throws an `AiProviderError` subclass for every expected failure. */
   complete(request: CompletionRequest): Promise<CompletionResult>
   /** Same errors as `complete`, thrown from the first `next()` or mid-stream. */
@@ -75,4 +80,8 @@ export class AiNetworkError extends AiProviderError {
 }
 export class AiFallbackError extends AiProviderError {
   readonly code = 'PROVIDER' as const
+}
+/** The request path refused before sending anything (F-5.14): over the feature budget or the daily cap. */
+export class AiBudgetError extends AiProviderError {
+  readonly code = 'BUDGET' as const
 }

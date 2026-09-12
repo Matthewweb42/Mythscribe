@@ -9,7 +9,7 @@ import {
   type ElectronApplication,
   type Page
 } from '@playwright/test'
-import type { AiStatus } from '../src/shared/ai'
+import type { AiStatus, AiUsageSummary } from '../src/shared/ai'
 import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
 import { matterTemplate } from '../src/shared/matterTemplates'
@@ -464,6 +464,33 @@ test('create, close, reopen a project on disk', async () => {
   await expect(fastTier).toHaveValue('gpt-5.4-mini')
   await expect(resetModels).toBeDisabled()
   expect((await aiStatus()).models).toEqual({ fast: 'gpt-5.4-mini', strong: 'gpt-5.4' })
+  // F-5.14: the Usage block shows nothing spent (no feature can spend yet) and the default
+  // daily cap; a new cap lands in app-state.json and survives closing the dialog.
+  const usageToday = settingsDialog.getByTestId('ai-usage-today')
+  const usageTotal = settingsDialog.getByTestId('ai-usage-total')
+  const dailyCap = settingsDialog.getByLabel('Daily cap (USD)', { exact: true })
+  await expect(usageToday).toHaveText('$0.00')
+  await expect(usageTotal).toHaveText('$0.00 · 0 requests · 0 tokens')
+  await expect(settingsDialog.getByText('No AI requests in this project yet.')).toBeVisible()
+  await expect(dailyCap).toHaveValue('2.00')
+  await dailyCap.fill('5')
+  await dailyCap.blur()
+  await expect(dailyCap).toHaveValue('5.00')
+  expect(await usageSummary()).toEqual({
+    today: { requests: 0, tokens: 0, costUsd: 0 },
+    total: { requests: 0, tokens: 0, costUsd: 0 },
+    byFeature: [],
+    dailyCapUsd: 5
+  })
+  expect(
+    (JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { aiUsage: { dailyCapUsd: number } })
+      .aiUsage.dailyCapUsd
+  ).toBe(5)
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await expect(dailyCap).toHaveValue('5.00')
   await settingsDialog.getByRole('button', { name: 'Clear' }).click()
   await expect(keyHint).toHaveText('No key')
   expect(await aiStatus()).toMatchObject({ hasKey: false, hint: null })
@@ -908,6 +935,16 @@ async function aiStatus(): Promise<AiStatus> {
     () => window.mythscribe.invoke('ai:getStatus', undefined) as Promise<IpcResult<AiStatus>>
   )
   if (!result.ok) throw new Error(result.error.message)
+  return result.data
+}
+
+/** The AI spend summary (F-5.14) as main reports it. */
+async function usageSummary(): Promise<AiUsageSummary> {
+  const result = await page.evaluate<IpcResult<AiUsageSummary>>(
+    () =>
+      window.mythscribe.invoke('ai:usageSummary', undefined) as Promise<IpcResult<AiUsageSummary>>
+  )
+  if (!result.ok) throw new Error(`ai:usageSummary failed: ${result.error.message}`)
   return result.data
 }
 
