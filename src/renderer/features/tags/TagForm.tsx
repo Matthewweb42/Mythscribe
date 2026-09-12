@@ -60,12 +60,13 @@ export function TagForm({ filter }: { filter: CategoryFilter }): React.JSX.Eleme
         onChange={(event) => setName(event.target.value)}
         className={FIELD}
       />
-      <div className="flex gap-1.5">
+      {/* Wraps so the button drops to its own line at the sidebar minimum instead of overflowing. */}
+      <div className="flex flex-wrap gap-1.5">
         <select
           aria-label="Category"
           value={category}
           onChange={(event) => setCategory(TagCategory.parse(event.target.value))}
-          className={`${FIELD} flex-1`}
+          className={`${FIELD} min-w-24 flex-1`}
         >
           {TAG_CATEGORIES.map((c) => (
             <option key={c} value={c}>
@@ -83,7 +84,7 @@ export function TagForm({ filter }: { filter: CategoryFilter }): React.JSX.Eleme
         <button
           type="submit"
           disabled={trimmed.length === 0 || busy}
-          className="shrink-0 rounded-md border border-line px-2 py-1 text-xs hover:bg-surface-raised disabled:opacity-50 disabled:hover:bg-transparent"
+          className="ml-auto shrink-0 rounded-md border border-line px-2 py-1 text-xs hover:bg-surface-raised disabled:opacity-50 disabled:hover:bg-transparent"
         >
           Create tag
         </button>
