@@ -88,7 +88,7 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 
 - [x] **F-4.1 Tag bank** (v0 ✅; M2: built, unit-tested, e2e verified via the bridge; `tag` and `document_tag` tables in migration `0002_tags`, `tag:list`/`tag:create`/`tag:update`/`tag:delete`; usage count derived from `document_tag`, never stored; names unique after kebab normalization in `src/shared/tags.ts`; deleting a tag drops its links and re-parents its children to the top level; UI arrives with F-4.2) — Tags with name, category, color, usage count, optional parent. Default category colors: Characters red, Settings orange, World Building teal, Tone blue, Content green, Plot Threads purple, Custom gray. Names are kebab-case.
 - [x] **F-4.2 Tag Manager** (v0 ✅; M2: built, unit-tested, e2e verified; renderer store in `src/renderer/features/tags/tagStore.ts` merges every returned row, never re-lists; `TagsTab.tsx` with `categoryFilter.ts`, `TagList.tsx`, `TagForm.tsx`, `TagDetail.tsx`; entry appended to `SIDEBAR_TABS`; "All" is a UI-only filter; nesting UI not in scope) — Sidebar "Tags" tab: category tabs (All + 7), search, create (name + color picker, defaults to the category color), edit name/color, delete with confirmation (removes from all documents), detail view with usage count and dates.
-- [ ] **F-4.3 Tag templates** (v0 ✅) — Load a template into the tag bank with confirmation; existing tags are skipped. Seeded templates: Standard Fiction, Mystery, Fantasy, Sci-Fi (each with tags in all six categories). Creating and editing custom templates (v0 ⬜).
+- [x] **F-4.3 Tag templates** (v0 ✅; M2: built, unit-tested, e2e verified; catalogue in `src/shared/tagTemplates.ts`; `tag:loadTemplate` is transactional and skips by normalized name across the whole bank; template tags take the category color and load top-level; `TemplateLoader.tsx` sits above the search in the Tags tab; custom templates split out as F-4.11) — Load a template into the tag bank with confirmation; existing tags are skipped. Seeded templates: Standard Fiction, Mystery, Fantasy, Sci-Fi (each with tags in all six categories). Creating and editing custom templates split out as **F-4.11** (v0 ⬜).
 - [ ] **F-4.4 Document tag bar** (v0 ✅) — Bar above the editor showing the document's tags as colored chips with remove buttons; "Add" opens a searchable picker of unassigned tags; inline tags used in the content are listed with occurrence counts. Bar is collapsible, has a draggable horizontal split between metadata and tags (30–70 %) and a draggable height (100 px–60 vh); layout persists.
 - [ ] **F-4.5 Scene metadata** (v0 ✅) — For scenes, chapters, and parts: Location (autocomplete from setting tags), POV character (autocomplete from character tags), Timeline position (free text until F-11.2). Debounced save.
 - [ ] **F-4.6 Inline tags** (v0 ✅) — Typing `#` in the editor opens an autocomplete anchored at the caret; typing filters; ↑/↓ navigate; Tab inserts the highlighted tag or creates a new custom tag from the typed text; Esc closes. The inserted tag is an atomic token rendered with the tag color at low opacity and a hover state; the space after it is unformatted. Insertion also links the tag to the document. Right-click on a token: edit, remove, open in Tag Manager (v0 ⬜).
@@ -96,6 +96,7 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 - [ ] **F-4.8 Granular tagging** (v0 ⬜, schema existed) — Select text → tag the selection; ranges tracked as character offsets; margin/overlay indicators; overlapping ranges resolved; clear tags in selection.
 - [ ] **F-4.9 Tag bulk operations, import/export** (v0 ⬜) — Multi-select merge/recolor/delete; export and import a tag bank as JSON; shared tag bank across books in a series.
 - [ ] **F-4.10 Filter and search by tag** (v0 ⬜) — Filter the document tree by tag; list all documents carrying a tag from the Tag Manager.
+- [ ] **F-4.11 Custom tag templates** (v0 ⬜) — Save the current tag bank (or a selection) as a named, reusable template stored at the app level; edit and delete saved templates; list them alongside the four seeded ones in the loader.
 
 ### 2.5 AI assistance
 
@@ -263,7 +264,7 @@ Parity first, then voice and control, then the differentiator, then launch, then
 | **M3 Story Intelligence** | Cited answers about the manuscript | F-5.6, F-5.7, F-5.8, F-5.9, F-5.13, F-4.10 |
 | **— LAUNCH v1 —** | Everything above ships; everything below is post-launch | |
 | **M-Cloud** | Paid managed AI | F-15.2–15.9 |
-| **M4 Entities, search, goals** | Structured story bible; find anything; motivation | F-9.1–9.6, F-10.1–10.5, F-4.9, F-3.10, F-3.12 |
+| **M4 Entities, search, goals** | Structured story bible; find anything; motivation | F-9.1–9.6, F-10.1–10.5, F-4.9, F-4.11, F-3.10, F-3.12 |
 | **M5 Safety and output** | Never lose words; get the book out | F-8.3–8.6, F-12.1, F-12.2, F-7.9 |
 | **M6 Polish** | Themes, outline, timeline, local models, reader features, v0 import | F-7.8, F-11.1, F-11.2, F-3.11, F-5.15, F-13.4, F-4.8, F-2.8, F-1.6 |
 | **Later** | Horizons | F-13.1–13.3 |

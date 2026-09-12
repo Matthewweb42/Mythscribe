@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultLayout } from '@shared/layout'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
+import { TAG_TEMPLATES } from '@shared/tagTemplates'
 import { AppStateStore } from '../appState/appStateStore'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
@@ -547,6 +548,40 @@ describe('tag handlers (F-4.1)', () => {
       if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     }
     expect((await invoke('tag:list', undefined)).map((t) => t.name)).toEqual(['rain'])
+  })
+})
+
+describe('tag:loadTemplate (F-4.3)', () => {
+  const standard = TAG_TEMPLATES.find((t) => t.id === 'standard-fiction')!
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('tag:loadTemplate', { template: 'fantasy' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('creates the template tags once, then skips them all on a reload', async () => {
+    await invoke('project:create', { name: 'Tags', format: 'novel', directory: tmp })
+    const first = await invoke('tag:loadTemplate', { template: 'standard-fiction' })
+    expect(first.skipped).toEqual([])
+    expect(first.created).toHaveLength(standard.tags.length)
+    expect(first.created[0]).toMatchObject({
+      name: 'protagonist',
+      category: 'character',
+      color: DEFAULT_CATEGORY_COLOR.character,
+      usageCount: 0
+    })
+    expect(await invoke('tag:list', undefined)).toHaveLength(standard.tags.length)
+
+    const again = await invoke('tag:loadTemplate', { template: 'standard-fiction' })
+    expect(again.created).toEqual([])
+    expect(again.skipped).toEqual(standard.tags.map((t) => t.name))
+    expect(await invoke('tag:list', undefined)).toHaveLength(standard.tags.length)
+
+    // Contract boundary: an unknown template id never reaches the store.
+    const result = await handlerFor('tag:loadTemplate')(undefined, { template: 'western' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
   })
 })
 

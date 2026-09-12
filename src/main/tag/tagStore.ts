@@ -4,6 +4,7 @@ import { and, asc, count, eq, ne, type SQL } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import type { Tag, TagCreateInput, TagUpdateInput } from '@shared/ipc/contract'
 import { DEFAULT_CATEGORY_COLOR, toTagName } from '@shared/tags'
+import { tagTemplateById, type TagTemplateId } from '@shared/tagTemplates'
 import type * as schema from '../db/schema'
 import { documentTag, tag, type TagInsert, type TagRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
@@ -55,19 +56,24 @@ function normalizeName(input: string): string {
   return name
 }
 
-/** Refuses a name another tag (than `exceptId`) already carries. */
-function assertNameFree(db: TagDb, name: string, exceptId?: string): void {
-  const clash = db
+/** The id of the tag (other than `exceptId`) that carries `name`, or undefined when it is free. */
+function findByName(db: TagDb, name: string, exceptId?: string): string | undefined {
+  return db
     .select({ id: tag.id })
     .from(tag)
     .where(
       exceptId === undefined ? eq(tag.name, name) : and(eq(tag.name, name), ne(tag.id, exceptId))
     )
-    .get()
-  if (clash) {
+    .get()?.id
+}
+
+/** Refuses a name another tag (than `exceptId`) already carries. */
+function assertNameFree(db: TagDb, name: string, exceptId?: string): void {
+  const clash = findByName(db, name, exceptId)
+  if (clash !== undefined) {
     throw new AppError('ALREADY_EXISTS', `A tag named "${name}" already exists`, {
       name,
-      id: clash.id
+      id: clash
     })
   }
 }
@@ -106,18 +112,50 @@ export function createTag(db: TagDb, input: TagCreateInput): Tag {
     assertNameFree(tx, name)
     const parentId = input.parentId ?? null
     if (parentId !== null) assertParentExists(tx, parentId)
-    const now = new Date().toISOString()
-    const row: TagInsert = {
-      id: randomUUID(),
-      name,
-      category: input.category,
-      color: input.color ?? DEFAULT_CATEGORY_COLOR[input.category],
-      parentId,
-      created: now,
-      modified: now
+    return insertTag(tx, { ...input, name, parentId })
+  })
+}
+
+/** The one insert: a validated, normalized name and a checked parent go in; the row comes back. */
+function insertTag(
+  db: TagDb,
+  input: { name: string; category: Tag['category']; color?: string; parentId: string | null }
+): Tag {
+  const now = new Date().toISOString()
+  const row: TagInsert = {
+    id: randomUUID(),
+    name: input.name,
+    category: input.category,
+    color: input.color ?? DEFAULT_CATEGORY_COLOR[input.category],
+    parentId: input.parentId,
+    created: now,
+    modified: now
+  }
+  const inserted = db.insert(tag).values(row).returning().get()
+  return { ...inserted, usageCount: 0 }
+}
+
+/**
+ * Loads a tag template (F-4.3) in one transaction: every template tag whose name is not yet in
+ * the bank is created top-level with the category's default color; a name already taken (by any
+ * tag, whatever its category) is skipped. `created` holds the new rows and `skipped` the taken
+ * names, both in template order.
+ */
+export function loadTagTemplate(
+  db: TagDb,
+  templateId: TagTemplateId
+): { created: Tag[]; skipped: string[] } {
+  const template = tagTemplateById(templateId)
+  if (!template) throw new AppError('NOT_FOUND', 'Tag template not found', { id: templateId })
+  return db.transaction((tx) => {
+    const created: Tag[] = []
+    const skipped: string[] = []
+    for (const entry of template.tags) {
+      const name = normalizeName(entry.name)
+      if (findByName(tx, name) !== undefined) skipped.push(entry.name)
+      else created.push(insertTag(tx, { name, category: entry.category, parentId: null }))
     }
-    const inserted = tx.insert(tag).values(row).returning().get()
-    return { ...inserted, usageCount: 0 }
+    return { created, skipped }
   })
 }
 

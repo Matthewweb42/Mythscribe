@@ -5,6 +5,7 @@ import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
+import { TAG_TEMPLATES } from '@shared/tagTemplates'
 import { documentTag, node, tag } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
@@ -15,6 +16,7 @@ import {
   getTag,
   getTagWithUsage,
   listTags,
+  loadTagTemplate,
   updateTag,
   type TagDb
 } from './tagStore'
@@ -207,5 +209,56 @@ describe('deleteTag', () => {
 
   it('refuses an unknown id', () => {
     expectCode(() => deleteTag(db, 'missing'), 'NOT_FOUND')
+  })
+})
+
+describe('loadTagTemplate (F-4.3)', () => {
+  const fantasy = TAG_TEMPLATES.find((t) => t.id === 'fantasy')!
+
+  it('creates every tag of the template top-level with the category color and no usage', () => {
+    vi.useFakeTimers({ now: new Date('2026-09-12T10:00:00.000Z') })
+    const { created, skipped } = loadTagTemplate(db, 'fantasy')
+    expect(skipped).toEqual([])
+    expect(created.map((t) => [t.name, t.category])).toEqual(
+      fantasy.tags.map((t) => [t.name, t.category])
+    )
+    for (const row of created) {
+      expect(row).toMatchObject({
+        color: DEFAULT_CATEGORY_COLOR[row.category],
+        parentId: null,
+        usageCount: 0,
+        created: '2026-09-12T10:00:00.000Z',
+        modified: '2026-09-12T10:00:00.000Z'
+      })
+    }
+    const listed = listTags(db)
+    expect(listed).toHaveLength(fantasy.tags.length)
+    expect(new Set(listed.map((t) => t.id))).toEqual(new Set(created.map((t) => t.id)))
+  })
+
+  it('skips every name on a second load and creates nothing', () => {
+    loadTagTemplate(db, 'fantasy')
+    const again = loadTagTemplate(db, 'fantasy')
+    expect(again.created).toEqual([])
+    expect(again.skipped).toEqual(fantasy.tags.map((t) => t.name))
+    expect(listTags(db)).toHaveLength(fantasy.tags.length)
+  })
+
+  it('skips only the names already in the bank, matched after normalization across categories', () => {
+    const existing = createTag(db, { name: 'Magic System!', category: 'custom' })
+    const { created, skipped } = loadTagTemplate(db, 'fantasy')
+    expect(skipped).toEqual(['magic-system'])
+    expect(created).toHaveLength(fantasy.tags.length - 1)
+    expect(created.map((t) => t.name)).not.toContain('magic-system')
+    expect(getTag(db, existing.id)).toMatchObject({ name: 'magic-system', category: 'custom' })
+    expect(listTags(db)).toHaveLength(fantasy.tags.length)
+  })
+
+  it('skips a name a previously loaded template already brought in', () => {
+    loadTagTemplate(db, 'standard-fiction')
+    const sciFi = TAG_TEMPLATES.find((t) => t.id === 'sci-fi')!
+    const { created, skipped } = loadTagTemplate(db, 'sci-fi')
+    expect(skipped).toEqual(['technology', 'mystery'])
+    expect(created).toHaveLength(sciFi.tags.length - 2)
   })
 })

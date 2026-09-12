@@ -4,15 +4,17 @@ import { CATEGORY_FILTERS, filterLabel, type CategoryFilter } from './categoryFi
 import { TagDetail } from './TagDetail'
 import { TagForm } from './TagForm'
 import { TagList } from './TagList'
+import { TemplateLoader } from './TemplateLoader'
 import { useTagStore } from './tagStore'
 
 const filterElementId = (filter: CategoryFilter): string => `tag-category-${filter}`
 
 /**
- * The Tags tab of the sidebar (F-4.2): the category strip on top, then either the search, the
- * filtered list, and the create form, or the selected tag's detail view. The filter, the query,
- * and the selection are local: nothing else in the app reads them. Picking a category closes
- * the detail view so the selection can never point outside the visible list.
+ * The Tags tab of the sidebar (F-4.2): the category strip on top, then either the template row
+ * (F-4.3), the search, the filtered list, and the create form, or the selected tag's detail
+ * view. The filter, the query, and the selection are local: nothing else in the app reads them.
+ * Picking a category closes the detail view so the selection can never point outside the
+ * visible list.
  */
 export function TagsTab(): React.JSX.Element {
   const [filter, setFilter] = useState<CategoryFilter>('all')
@@ -106,6 +108,7 @@ export function TagsTab(): React.JSX.Element {
           />
         ) : (
           <>
+            <TemplateLoader />
             <div className="shrink-0 px-2 pt-2">
               <input
                 type="search"

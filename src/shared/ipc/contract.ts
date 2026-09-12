@@ -4,6 +4,7 @@ import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
 import { MatterTemplateId } from '../matterTemplates'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
+import { TagTemplateId } from '../tagTemplates'
 import { TiptapNode } from '../tiptap'
 
 /**
@@ -212,6 +213,14 @@ export const contract = {
   },
   /** Deletes a tag (F-4.1): its document links go with it, its child tags become top-level. */
   'tag:delete': { input: z.object({ id: z.string() }), output: z.null() },
+  /**
+   * Loads a tag template (F-4.3): creates every template tag whose normalized name is not already
+   * in the bank, using the category's default color; existing names are skipped, not overwritten.
+   */
+  'tag:loadTemplate': {
+    input: z.object({ template: TagTemplateId }),
+    output: z.object({ created: z.array(Tag), skipped: z.array(z.string()) })
+  },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
@@ -232,6 +241,7 @@ export type TreeCreateInput = Input<'tree:create'>
 export type TreeMoveInput = Input<'tree:move'>
 export type TagCreateInput = Input<'tag:create'>
 export type TagUpdateInput = Input<'tag:update'>
+export type TagLoadTemplateInput = Input<'tag:loadTemplate'>
 
 /** Events pushed from main to the renderer. */
 export const events = {

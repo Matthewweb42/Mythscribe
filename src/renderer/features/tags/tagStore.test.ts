@@ -135,6 +135,60 @@ describe('tagStore (F-4.2)', () => {
     expect(state().ids).toBe(before.ids)
   })
 
+  it('loadTemplate merges every created tag in one update, in name order, without re-listing', async () => {
+    const created: Tag[] = [
+      { ...tagFixture[2]!, id: 't-zeal', name: 'zeal', category: 'tone', usageCount: 0 },
+      { ...tagFixture[2]!, id: 't-alpha', name: 'alpha', category: 'tone', usageCount: 0 }
+    ]
+    const answer = { created, skipped: ['moody'] }
+    const { client, calls } = fakeClient({ 'tag:loadTemplate': () => answer })
+    setIpcClient(client)
+    await state().load()
+    let updates = 0
+    const unsubscribe = useTagStore.subscribe(() => updates++)
+    const result = await state().loadTemplate('fantasy')
+    unsubscribe()
+    expect(result).toEqual(answer)
+    expect(updates).toBe(1)
+    expect(state().ids).toEqual(['t-alpha', 't-forest', 't-mara', 't-moody', 't-zeal'])
+    expect(state().byId['t-zeal']).toEqual(created[0])
+    expect(calls.at(-1)).toEqual(['tag:loadTemplate', { template: 'fantasy' }])
+    expect(calls.filter(([channel]) => channel === 'tag:list')).toHaveLength(1)
+  })
+
+  it('loadTemplate with nothing created leaves the store untouched', async () => {
+    setIpcClient(fakeClient({ 'tag:loadTemplate': () => ({ created: [], skipped: ['a'] }) }).client)
+    await state().load()
+    const before = state()
+    await expect(state().loadTemplate('mystery')).resolves.toEqual({ created: [], skipped: ['a'] })
+    expect(state().byId).toBe(before.byId)
+    expect(state().ids).toBe(before.ids)
+  })
+
+  it('a failed loadTemplate propagates and leaves the store untouched', async () => {
+    setIpcClient(fakeClient({ 'tag:loadTemplate': failure }).client)
+    await state().load()
+    const before = state()
+    await expect(state().loadTemplate('sci-fi')).rejects.toBeInstanceOf(IpcRequestError)
+    expect(state().byId).toBe(before.byId)
+    expect(state().ids).toBe(before.ids)
+  })
+
+  it('a loadTemplate that resolves after clear does not repopulate the store', async () => {
+    const created: Tag = { ...tagFixture[2]!, id: 't-late', name: 'late' }
+    let release: (value: { created: Tag[]; skipped: string[] }) => void = () => {}
+    const slow = new Promise<{ created: Tag[]; skipped: string[] }>((resolve) => {
+      release = resolve
+    })
+    setIpcClient(fakeClient({ 'tag:loadTemplate': () => slow }).client)
+    await state().load()
+    const pending = state().loadTemplate('fantasy')
+    state().clear()
+    release({ created: [created], skipped: [] })
+    await expect(pending).resolves.toEqual({ created: [created], skipped: [] })
+    expect(state().ids).toEqual([])
+  })
+
   it('a mutation that resolves after clear does not repopulate the store', async () => {
     const created: Tag = { ...tagFixture[2]!, id: 't-late', name: 'late' }
     let release: (tag: Tag) => void = () => {}

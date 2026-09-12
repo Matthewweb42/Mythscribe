@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Tag, TagCreateInput, TagUpdateInput } from '@shared/ipc/contract'
+import type { TagTemplateId } from '@shared/tagTemplates'
 import { ipc } from '@renderer/lib/ipc'
 
 /**
@@ -20,6 +21,8 @@ interface TagState {
   update: (id: string, patch: Omit<TagUpdateInput, 'id'>) => Promise<Tag>
   /** Deletes a tag and drops it from the list. */
   remove: (id: string) => Promise<void>
+  /** Loads a template (F-4.3) and merges every created tag in one update; resolves with main's counts. */
+  loadTemplate: (template: TagTemplateId) => Promise<{ created: Tag[]; skipped: string[] }>
 }
 
 /** The `tag:list` order (name, then id, both by code unit, as SQLite's BINARY collation sorts them). */
@@ -83,6 +86,17 @@ export const useTagStore = create<TagState>((set, get) => ({
     const byId = { ...get().byId }
     delete byId[id]
     set({ byId, ids: get().ids.filter((other) => other !== id) })
+  },
+
+  async loadTemplate(template) {
+    const mine = generation
+    const result = await ipc().invoke('tag:loadTemplate', { template })
+    if (mine === generation && result.created.length > 0) {
+      const byId = { ...get().byId }
+      for (const tag of result.created) byId[tag.id] = tag
+      set({ byId, ids: orderedIds(byId) })
+    }
+    return result
   }
 }))
 
