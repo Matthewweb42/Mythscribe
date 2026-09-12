@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
@@ -216,6 +216,30 @@ describe('TagsTab (F-4.2)', () => {
     expect(screen.getByText(formatDate(tagFixture[0]!.modified))).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Back' }))
     expect(rowNames()).toEqual(['dark-forest', 'mara', 'moody'])
+  })
+
+  it('a selection request opens that tag\u2019s detail view under All and is consumed (F-4.6)', async () => {
+    const user = userEvent.setup()
+    await renderLoaded()
+    await user.click(categoryTab('Tone'))
+    expect(rowNames()).toEqual(['moody'])
+    act(() => {
+      useTagStore.getState().requestSelection('t-mara')
+    })
+    expect(screen.getByRole('textbox', { name: 'Tag name' })).toHaveValue('mara')
+    expect(categoryTab('All')).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(useTagStore.getState().pendingSelection).toBeNull())
+    // Back returns to the full list; a remount does not replay the request.
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    expect(rowNames()).toEqual(['dark-forest', 'mara', 'moody'])
+    cleanup()
+    render(<TagsTab />)
+    expect(rowNames()).toEqual(['dark-forest', 'mara', 'moody'])
+    // A repeat request for the same tag, while its detail is already closed, opens it again.
+    act(() => {
+      useTagStore.getState().requestSelection('t-mara')
+    })
+    expect(screen.getByRole('textbox', { name: 'Tag name' })).toHaveValue('mara')
   })
 
   it('picking a category tab closes the detail view', async () => {

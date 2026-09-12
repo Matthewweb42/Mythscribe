@@ -155,3 +155,25 @@ select {
   border-radius: var(--ms-radius);
   background: var(--ms-surface-raised);
 }
+
+/*
+ * Inline tag tokens (F-4.6): the tag's color (`--tag-color`, painted per token from the bank) as
+ * a tint behind the name and as the text color; a deleted tag falls back to muted. Stronger on
+ * hover, outlined while selected as a node.
+ */
+.ms-editor .inline-tag {
+  padding: 0 0.3em;
+  border-radius: var(--ms-radius);
+  background: color-mix(in srgb, var(--tag-color, var(--ms-fg-muted)) 18%, transparent);
+  color: var(--tag-color, var(--ms-fg-muted));
+  font-size: 0.92em;
+  white-space: nowrap;
+}
+
+.ms-editor .inline-tag:hover {
+  background: color-mix(in srgb, var(--tag-color, var(--ms-fg-muted)) 32%, transparent);
+}
+
+.ms-editor .inline-tag.ProseMirror-selectednode {
+  outline: 1px solid var(--tag-color, var(--ms-fg-muted));
+}

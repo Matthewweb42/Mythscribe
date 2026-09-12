@@ -13,6 +13,7 @@ import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { resetSceneMetaStore } from './sceneMetaStore'
 import { TagBar } from './TagBar'
 
@@ -91,6 +92,7 @@ beforeEach(() => {
   resetDocumentTagStore()
   resetLayoutStore()
   resetSceneMetaStore()
+  resetDocumentStore()
   useTreeStore.setState({ ...buildIndex([]), loaded: true })
   useDialogStore.setState({ modals: [], toasts: [] })
   vi.stubGlobal('innerHeight', 800)
@@ -276,6 +278,47 @@ describe('TagBar (F-4.4)', () => {
     expect(calls).toContainEqual(['documentTag:list', { nodeId: 'sc-2' }])
     expect(screen.queryByRole('searchbox', { name: 'Search tags' })).not.toBeInTheDocument()
     expect(chips()).toHaveLength(0)
+  })
+
+  it('lists the inline tags of the document\u2019s live content with occurrence counts (F-4.6)', async () => {
+    install()
+    await mount()
+    expect(within(bar()).queryByRole('list', { name: 'Inline tags' })).not.toBeInTheDocument()
+    const token = (id: string) => ({ type: 'inlineTag', attrs: { id, name: id } })
+    act(() => {
+      useDocumentStore.setState({
+        docs: {
+          'sc-1': {
+            content: {
+              type: 'doc',
+              content: [
+                { type: 'paragraph', content: [token('t-moody'), token('t-forest')] },
+                { type: 'paragraph', content: [token('t-moody'), token('t-deleted')] }
+              ]
+            },
+            dirty: false
+          }
+        }
+      })
+    })
+    const rows = within(within(bar()).getByRole('list', { name: 'Inline tags' })).getAllByRole(
+      'listitem'
+    )
+    // Order of first appearance; a token whose tag left the bank is not listed.
+    expect(rows.map((row) => row.textContent)).toEqual(['moody ×2', 'dark-forest ×1'])
+    expect(rows[0]!.querySelector('span[aria-hidden]')).toHaveStyle({ backgroundColor: '#2563eb' })
+    // Chips are the explicit links only: an inline occurrence adds no chip by itself.
+    expect(
+      within(within(bar()).getByRole('list', { name: 'Document tags' })).getAllByRole('listitem')
+    ).toHaveLength(1)
+    act(() => {
+      useDocumentStore.setState({
+        docs: {
+          'sc-1': { content: { type: 'doc', content: [{ type: 'paragraph' }] }, dirty: true }
+        }
+      })
+    })
+    expect(within(bar()).queryByRole('list', { name: 'Inline tags' })).not.toBeInTheDocument()
   })
 
   it('shows the metadata pane behind a persisted split only for a node with a hierarchy level (F-4.5)', async () => {

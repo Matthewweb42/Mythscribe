@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { CATEGORY_FILTERS, filterLabel, type CategoryFilter } from './categoryFilter'
 import { TagDetail } from './TagDetail'
@@ -14,12 +14,24 @@ const filterElementId = (filter: CategoryFilter): string => `tag-category-${filt
  * (F-4.3), the search, the filtered list, and the create form, or the selected tag's detail
  * view. The filter, the query, and the selection are local: nothing else in the app reads them.
  * Picking a category closes the detail view so the selection can never point outside the
- * visible list.
+ * visible list. A selection request from the store (F-4.6, "Open in Tag Manager" on a token)
+ * opens that tag's detail view under All, then is consumed, so a later remount of the tab does
+ * not replay it.
  */
 export function TagsTab(): React.JSX.Element {
   const [filter, setFilter] = useState<CategoryFilter>('all')
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const pending = useTagStore((s) => s.pendingSelection)
+  const [seenToken, setSeenToken] = useState(0)
+  if (pending !== null && pending.token !== seenToken) {
+    setSeenToken(pending.token)
+    setSelectedId(pending.id)
+    setFilter('all')
+  }
+  useEffect(() => {
+    if (pending !== null) useTagStore.getState().clearSelectionRequest()
+  }, [pending])
   const buttons = useRef(new Map<CategoryFilter, HTMLButtonElement>())
   const selected = useTagStore((s) => (selectedId === null ? undefined : s.byId[selectedId]))
   const needle = query.trim().toLowerCase()

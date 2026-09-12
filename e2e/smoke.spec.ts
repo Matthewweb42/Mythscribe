@@ -647,11 +647,69 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('status-words')).toHaveText(`${SENTENCE_WORDS + 3} words`)
   await expect(page.getByTestId('status-delta')).toHaveCount(0)
 
+  // F-4.6: inline tags. Back in Scene 1, `#` at the end of the text opens a suggestion list at
+  // the caret, filtered by what follows it (the template's "dark" tone tag and dark-forest);
+  // ArrowDown and Tab insert the highlighted tag as a token colored from the bank, followed by
+  // a plain space, and link it, so its chip returns and the Inline tags list counts it. Text
+  // that names no tag offers to create one: `#stormfront` becomes a custom tag, listed under
+  // Custom with its one use. Each token counts as one word (F-3.3). Right-click on a token
+  // opens that tag in the Tag Manager, or removes the token alone: its chip stays.
+  await scene1.click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await expect(editor.locator('p')).toHaveText(SENTENCE)
+  await editor.click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' #dark')
+  const suggestions = page.getByRole('listbox', { name: 'Tag suggestions' })
+  await expect(suggestions.getByRole('option')).toHaveText(['dark', 'dark-forest'])
+  await page.keyboard.press('ArrowDown')
+  await expect(suggestions.getByRole('option', { selected: true })).toHaveText('dark-forest')
+  await page.keyboard.press('Tab')
+  await expect(suggestions).toHaveCount(0)
+  const tokens = editor.locator('[data-inline-tag]')
+  await expect(tokens).toHaveText(['#dark-forest'])
+  expect(await tokens.first().evaluate((el) => el.style.getPropertyValue('--tag-color'))).toBe(
+    '#ea580c'
+  )
+  const chipList = tagBar.getByRole('list', { name: 'Document tags' })
+  const inlineList = tagBar.getByRole('list', { name: 'Inline tags' })
+  await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest'])
+  await expect(inlineList.getByRole('listitem')).toHaveText(['dark-forest ×1'])
+  await page.keyboard.type('and #stormfront')
+  await expect(suggestions.getByRole('option')).toHaveText(['Create #stormfront'])
+  await page.keyboard.press('Tab')
+  await expect(tokens).toHaveText(['#dark-forest', '#stormfront'])
+  await expect(inlineList.getByRole('listitem')).toHaveText(['dark-forest ×1', 'stormfront ×1'])
+  await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest', 'stormfront'])
+  await expect(page.getByTestId('status-words')).toHaveText(`${SENTENCE_WORDS + 3} words`)
+  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await categories.getByRole('tab', { name: 'Custom' }).click()
+  await expect(tagRows.getByRole('button')).toHaveText(['stormfront 1 use'])
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await tokens.first().click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Open in Tag Manager' }).click()
+  await expect(sidebarTabs.getByRole('tab', { name: 'Tags' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  await expect(tagsPanel.getByRole('textbox', { name: 'Tag name' })).toHaveValue('dark-forest')
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await tokens.last().click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Remove' }).click()
+  await expect(tokens).toHaveText(['#dark-forest'])
+  await expect(inlineList.getByRole('listitem')).toHaveText(['dark-forest ×1'])
+  await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest', 'stormfront'])
+  await expect(page.getByTestId('status-words')).toHaveText(`${SENTENCE_WORDS + 2} words`)
+
   // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.
   await closeProject()
   await stubOpenDialog(path.join(projectPath, 'project.db'))
   await page.getByRole('button', { name: 'Open project' }).click()
   await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  // F-4.6: the token survived the close as stored JSON and is counted again from it.
+  await scene1.click()
+  await expect(tokens).toHaveText(['#dark-forest'])
+  await expect(inlineList.getByRole('listitem')).toHaveText(['dark-forest ×1'])
 
   // F-1.4: choosing something that is not a project explains what to pick instead.
   await closeProject()

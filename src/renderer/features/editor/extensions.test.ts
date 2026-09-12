@@ -102,6 +102,13 @@ describe('buildExtensions', () => {
     for (const name of ['paragraph', 'heading', 'blockquote', 'hardBreak', 'sceneBreak']) {
       expect(nodes[name], name).toBeDefined()
     }
+    // The inline tag token (F-4.6) joins only with a document to link to.
+    expect(nodes.inlineTag).toBeUndefined()
+    const tagged = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave, inlineTagNodeId: 'sc-1' })
+    })
+    expect(tagged.schema.nodes.inlineTag).toBeDefined()
+    tagged.destroy()
     for (const name of ['bold', 'italic', 'underline', 'strike', 'code']) {
       expect(marks[name], name).toBeDefined()
     }

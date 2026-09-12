@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Editor } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
+import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
+import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
+import type { MenuItem } from '@renderer/features/manuscript/contextMenuItems'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
 import { COLUMN, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
 import { buildExtensions } from './extensions'
+import { INLINE_TAG_SELECTOR, resyncInlineTags } from './InlineTag'
 import { NotesToggleButton } from './NotesPanel'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
@@ -65,13 +71,29 @@ export function DocumentEditor({
   )
 }
 
+/** A right-click on an inline tag token (F-4.6): where the menu opens, the node's position, and its tag. */
+interface TokenMenu {
+  x: number
+  y: number
+  pos: number
+  tagId: string
+}
+
+const TOKEN_MENU_ITEMS: MenuItem[] = [
+  { id: 'remove', label: 'Remove' },
+  { id: 'open-in-tag-manager', label: 'Open in Tag Manager' }
+]
+
 /**
  * One editor instance for one loaded document; `content === null` is the read-only loading
  * state. The formatting settings (F-3.6) apply live: five of them are custom properties on the
  * pane (no remount); the scene-break text is an extension option, so changing it rebuilds the
  * editor instance. `content` is the store's latest text (every edit lands there), and
  * `useEditor` reads it only when it constructs an instance, so the rebuild starts from the
- * author's unsaved typing and a keystroke never resets the editor.
+ * author's unsaved typing and a keystroke never resets the editor. Inline tag tokens (F-4.6)
+ * are repainted from the bank whenever it changes (the resync pass; the `#` suggestion lives in
+ * the extension), and a right-click on one opens the Remove / Open in Tag Manager menu. Remove
+ * deletes the token only: links are the author's explicit choice and stay.
  */
 function RegionEditor({
   id,
@@ -90,10 +112,17 @@ function RegionEditor({
   const settings = useEditorSettings(format)
   const { sceneBreak } = settings
   const extensions = useMemo(
-    () => buildExtensions({ sceneBreak, onSave: () => void useDocumentStore.getState().saveNow() }),
-    [sceneBreak]
+    () =>
+      buildExtensions({
+        sceneBreak,
+        onSave: () => void useDocumentStore.getState().saveNow(),
+        inlineTagNodeId: id
+      }),
+    [sceneBreak, id]
   )
   const ready = content !== null
+  const tagsById = useTagStore((s) => s.byId)
+  const [menu, setMenu] = useState<TokenMenu | null>(null)
 
   const editor = useEditor(
     {
@@ -115,7 +144,66 @@ function RegionEditor({
     [extensions]
   )
 
-  if (!toolbar) return <EditorContent editor={editor} className={`${COLUMN} py-6`} />
+  useEffect(() => {
+    resyncInlineTags(editor.view.dom, tagsById)
+  }, [editor, tagsById])
+
+  useEffect(() => {
+    const dom = editor.view.dom
+    const onContextMenu = (event: MouseEvent): void => {
+      const token =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>(INLINE_TAG_SELECTOR)
+          : null
+      if (!token) return
+      event.preventDefault()
+      setMenu({
+        x: event.clientX,
+        y: event.clientY,
+        pos: editor.view.posAtDOM(token, 0),
+        tagId: token.dataset.id ?? ''
+      })
+    }
+    dom.addEventListener('contextmenu', onContextMenu)
+    return () => dom.removeEventListener('contextmenu', onContextMenu)
+  }, [editor])
+
+  const onMenuSelect = (itemId: string): void => {
+    if (!menu) return
+    setMenu(null)
+    if (itemId === 'remove') {
+      const node = editor.state.doc.nodeAt(menu.pos)
+      if (node?.type.name !== INLINE_TAG_NODE_TYPE) return
+      editor
+        .chain()
+        .focus()
+        .deleteRange({ from: menu.pos, to: menu.pos + node.nodeSize })
+        .run()
+    } else if (itemId === 'open-in-tag-manager') {
+      const layout = useLayoutStore.getState()
+      if (!layout.layout.sidebar.open) layout.toggle('sidebar')
+      layout.setSidebarTab('tags')
+      useTagStore.getState().requestSelection(menu.tagId)
+    }
+  }
+
+  const tokenMenu = menu ? (
+    <ContextMenu
+      x={menu.x}
+      y={menu.y}
+      items={TOKEN_MENU_ITEMS}
+      onSelect={onMenuSelect}
+      onClose={() => setMenu(null)}
+    />
+  ) : null
+
+  if (!toolbar)
+    return (
+      <>
+        <EditorContent editor={editor} className={`${COLUMN} py-6`} />
+        {tokenMenu}
+      </>
+    )
   // The column and the surface inside it are flex items, so an empty document still fills the
   // scroll container (click anywhere to write) without a viewport-relative minimum height.
   return (
@@ -126,6 +214,7 @@ function RegionEditor({
         <EditorContent editor={editor} className={`${COLUMN} flex flex-1 flex-col py-6`} />
       </div>
       <DocumentStatusBar id={id} editor={ready ? editor : null} />
+      {tokenMenu}
     </div>
   )
 }

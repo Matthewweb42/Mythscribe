@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
+import { countInlineTags } from '@shared/inlineTags'
 import { TAG_BAR_MAX_FRACTION, TAG_BAR_MIN_HEIGHT, TAG_BAR_SPLIT_LIMITS } from '@shared/layout'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -13,6 +14,7 @@ import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
+import { useDocumentStore } from './documentStore'
 import { MetadataPane } from './MetadataPane'
 import { TagPicker } from './TagPicker'
 
@@ -27,7 +29,9 @@ const BUTTON =
  * part) the metadata pane (F-4.5) sits to the left of the tags, behind a draggable split of
  * 30–70 % of the bar's width, also in the layout. Takes only `id`: it loads the node's links
  * itself and reads the tag records from the bank by id, so a rename or recolor in the Tags tab
- * shows here at once. The inline-tag occurrence list arrives with F-4.6.
+ * shows here at once. Below the chips, the inline tags used in the text (F-4.6) are listed with
+ * their occurrence counts, taken from the document's live content, so they follow the typing
+ * before any save; a folder is never loaded as a document, so its bar has no such list.
  */
 export function TagBar({ id }: { id: string }): React.JSX.Element {
   const tagBar = useLayoutStore((s) => s.layout.tagBar)
@@ -39,6 +43,9 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   const load = useDocumentTagStore((s) => s.load)
   const add = useDocumentTagStore((s) => s.add)
   const remove = useDocumentTagStore((s) => s.remove)
+  const content = useDocumentStore((s) => s.docs[id]?.content ?? null)
+  const inlineCounts = useMemo(() => (content ? countInlineTags(content) : {}), [content])
+  const inlineIds = Object.keys(inlineCounts)
   /** The node id the picker is open for, so a document switch closes it without an effect. */
   const [pickingFor, setPickingFor] = useState<string | null>(null)
   const picking = pickingFor === id
@@ -145,6 +152,20 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
                 ))}
               </ul>
             )}
+            {inlineIds.length > 0 ? (
+              <>
+                <p className="mt-2 mb-1 text-xs text-fg-subtle">Inline tags</p>
+                <ul
+                  role="list"
+                  aria-label="Inline tags"
+                  className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
+                >
+                  {inlineIds.map((tagId) => (
+                    <InlineTagRow key={tagId} id={tagId} count={inlineCounts[tagId] ?? 0} />
+                  ))}
+                </ul>
+              </>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -187,6 +208,23 @@ function TagChip({ id, onRemove }: { id: string; onRemove: () => void }): React.
       >
         <X size={12} aria-hidden="true" />
       </button>
+    </li>
+  )
+}
+
+/** One inline tag of the text (F-4.6): the bank's color dot and name, and how often it occurs. Nothing if the tag is gone. */
+function InlineTagRow({ id, count }: { id: string; count: number }): React.JSX.Element | null {
+  const tag = useTagStore(useShallow((s) => s.byId[id]))
+  if (!tag) return null
+  return (
+    <li role="listitem" className="flex items-center gap-1.5 text-xs">
+      <span
+        aria-hidden="true"
+        style={{ backgroundColor: tag.color }}
+        className="size-2.5 shrink-0 rounded-full"
+      />
+      <span className="max-w-48 truncate">{tag.name}</span>{' '}
+      <span className="text-fg-subtle tabular-nums">×{count}</span>
     </li>
   )
 }

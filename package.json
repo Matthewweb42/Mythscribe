@@ -28,6 +28,7 @@
     "@tiptap/extension-text-align": "3.31.3",
     "@tiptap/react": "3.31.3",
     "@tiptap/starter-kit": "3.31.3",
+    "@tiptap/suggestion": "3.31.3",
     "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.2",
     "lucide-react": "1.44.0",

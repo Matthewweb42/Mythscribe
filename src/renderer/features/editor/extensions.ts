@@ -2,12 +2,18 @@ import { canInsertNode, Extension, Node, type Extensions } from '@tiptap/core'
 import TextAlign from '@tiptap/extension-text-align'
 import { TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
+import { InlineTag } from './InlineTag'
 
 export interface EditorSchemaOptions {
   /** The scene-break text from the editor settings (F-3.6); the scene-break node renders it. */
   sceneBreak: string
   /** Runs on Ctrl/Cmd+S (F-3.2). */
   onSave: () => void
+  /**
+   * The manuscript document the editor shows (F-4.6): adds the inline tag token and its `#`
+   * suggestion, which links picked tags to this node. Left out for notes, which never get tags.
+   */
+  inlineTagNodeId?: string
 }
 
 export interface SaveShortcutOptions {
@@ -113,12 +119,17 @@ export const SceneBreak = Node.create<SceneBreakOptions>({
 /**
  * The one owner of the editor schema (F-3.1): StarterKit trimmed to what the spec lists (marks,
  * headings 1–3, block quote, hard break, undo/redo, cursors) plus text alignment on headings and
- * paragraphs, the scene-break block, and the Ctrl+S save shortcut (F-3.2). Lists, links, code
- * blocks, horizontal rules, and the trailing node are off so the document model stays what the
- * compile views (F-3.12) and the AI post-processors expect.
+ * paragraphs, the scene-break block, the Ctrl+S save shortcut (F-3.2), and, for a manuscript
+ * document, the inline tag token with its `#` suggestion (F-4.6). Lists, links, code blocks,
+ * horizontal rules, and the trailing node are off so the document model stays what the compile
+ * views (F-3.12) and the AI post-processors expect.
  */
-export function buildExtensions({ sceneBreak, onSave }: EditorSchemaOptions): Extensions {
-  return [
+export function buildExtensions({
+  sceneBreak,
+  onSave,
+  inlineTagNodeId
+}: EditorSchemaOptions): Extensions {
+  const extensions: Extensions = [
     StarterKit.configure({
       heading: { levels: [...HEADING_LEVELS] },
       link: false,
@@ -137,4 +148,8 @@ export function buildExtensions({ sceneBreak, onSave }: EditorSchemaOptions): Ex
     SceneBreak.configure({ text: sceneBreak }),
     SaveShortcut.configure({ onSave })
   ]
+  if (inlineTagNodeId !== undefined) {
+    extensions.push(InlineTag.configure({ nodeId: inlineTagNodeId }))
+  }
+  return extensions
 }

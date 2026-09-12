@@ -28,6 +28,13 @@ interface TagState {
    * usage count moves without re-listing; a changed name re-sorts. No IPC call: the caller made one.
    */
   merge: (tag: Tag) => void
+  /**
+   * A request from outside the Tags tab to show one tag's detail view (F-4.6, "Open in Tag
+   * Manager"); `token` makes a repeat request for the same tag distinct. The tab consumes it.
+   */
+  pendingSelection: { id: string; token: number } | null
+  requestSelection: (id: string) => void
+  clearSelectionRequest: () => void
 }
 
 /** The `tag:list` order (name, then id, both by code unit, as SQLite's BINARY collation sorts them). */
@@ -48,6 +55,7 @@ export const useTagStore = create<TagState>((set, get) => ({
   byId: {},
   ids: [],
   loaded: false,
+  pendingSelection: null,
 
   async load() {
     const mine = ++generation
@@ -60,7 +68,7 @@ export const useTagStore = create<TagState>((set, get) => ({
 
   clear() {
     generation++
-    set({ byId: {}, ids: [], loaded: false })
+    set({ byId: {}, ids: [], loaded: false, pendingSelection: null })
   },
 
   async create(input) {
@@ -97,6 +105,14 @@ export const useTagStore = create<TagState>((set, get) => ({
     const previous = get().byId[tag.id]
     const byId = { ...get().byId, [tag.id]: tag }
     set(previous?.name === tag.name ? { byId } : { byId, ids: orderedIds(byId) })
+  },
+
+  requestSelection(id) {
+    set({ pendingSelection: { id, token: (get().pendingSelection?.token ?? 0) + 1 } })
+  },
+
+  clearSelectionRequest() {
+    if (get().pendingSelection !== null) set({ pendingSelection: null })
   },
 
   async loadTemplate(template) {

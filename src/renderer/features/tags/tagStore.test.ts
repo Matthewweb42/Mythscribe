@@ -123,6 +123,20 @@ describe('tagStore (F-4.2)', () => {
     expect(calls.map(([channel]) => channel)).toEqual(['tag:list'])
   })
 
+  it('requestSelection bumps the token for a repeat of the same tag; clear and clearSelectionRequest drop it (F-4.6)', () => {
+    expect(state().pendingSelection).toBeNull()
+    state().requestSelection('t-mara')
+    expect(state().pendingSelection).toEqual({ id: 't-mara', token: 1 })
+    state().requestSelection('t-mara')
+    expect(state().pendingSelection).toEqual({ id: 't-mara', token: 2 })
+    state().clearSelectionRequest()
+    expect(state().pendingSelection).toBeNull()
+    state().requestSelection('t-forest')
+    expect(state().pendingSelection).toEqual({ id: 't-forest', token: 1 })
+    state().clear()
+    expect(state().pendingSelection).toBeNull()
+  })
+
   it('remove drops the row', async () => {
     const { client, calls } = fakeClient({ 'tag:delete': () => null })
     setIpcClient(client)
