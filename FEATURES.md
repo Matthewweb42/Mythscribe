@@ -97,6 +97,7 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 - [ ] **F-4.9 Tag bulk operations, import/export** (v0 ⬜) — Multi-select merge/recolor/delete; export and import a tag bank as JSON; shared tag bank across books in a series.
 - [ ] **F-4.10 Filter and search by tag** (v0 ⬜) — Filter the document tree by tag; list all documents carrying a tag from the Tag Manager.
 - [ ] **F-4.11 Custom tag templates** (v0 ⬜) — Save the current tag bank (or a selection) as a named, reusable template stored at the app level; edit and delete saved templates; list them alongside the four seeded ones in the loader.
+- [ ] **F-4.12 Automatic mentions** (v0 ⬜; requested 2026-09-12) — On every save, scan the document for the names of existing tags (character names first) and record each mention with its location, silently; nothing is inserted into the text and no text leaves the machine. The tag detail view and the tag bar show "mentioned in N documents" separately from explicit links, with jump-to. A per-tag toggle turns tracking off. Runs through the job queue (F-5.13) and reuses the `document_tag` links of F-4.4; post-launch.
 
 ### 2.5 AI assistance
 
@@ -264,7 +265,7 @@ Parity first, then voice and control, then the differentiator, then launch, then
 | **M3 Story Intelligence** | Cited answers about the manuscript | F-5.6, F-5.7, F-5.8, F-5.9, F-5.13, F-4.10 |
 | **— LAUNCH v1 —** | Everything above ships; everything below is post-launch | |
 | **M-Cloud** | Paid managed AI | F-15.2–15.9 |
-| **M4 Entities, search, goals** | Structured story bible; find anything; motivation | F-9.1–9.6, F-10.1–10.5, F-4.9, F-4.11, F-3.10, F-3.12 |
+| **M4 Entities, search, goals** | Structured story bible; find anything; motivation | F-9.1–9.6, F-10.1–10.5, F-4.9, F-4.11, F-4.12, F-3.10, F-3.12 |
 | **M5 Safety and output** | Never lose words; get the book out | F-8.3–8.6, F-12.1, F-12.2, F-7.9 |
 | **M6 Polish** | Themes, outline, timeline, local models, reader features, v0 import | F-7.8, F-11.1, F-11.2, F-3.11, F-5.15, F-13.4, F-4.8, F-2.8, F-1.6 |
 | **Later** | Horizons | F-13.1–13.3 |
