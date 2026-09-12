@@ -3,6 +3,7 @@ import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
 import { getDocumentContent, saveDocument } from '../document/documentStore'
+import { getNotes, saveNotes } from '../document/notesStore'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
 import { getEditorSettings, setEditorSettings } from '../project/settingsStore'
@@ -89,6 +90,10 @@ export function registerHandlers({ manager, appState, dialogs, windows }: Handle
   register('document:save', ({ id, content }) =>
     saveDocument(manager.require().connection.orm, id, content)
   )
+
+  register('notes:get', ({ id }) => getNotes(manager.require().connection.orm, id))
+
+  register('notes:save', ({ id, notes }) => saveNotes(manager.require().connection.orm, id, notes))
 
   register('editorSettings:get', () => {
     const session = manager.require()

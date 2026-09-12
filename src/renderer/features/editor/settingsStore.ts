@@ -53,7 +53,8 @@ async function write(): Promise<void> {
     await ipc().invoke('editorSettings:set', value)
   } catch (err) {
     if (mine !== generation) return // the project closed meanwhile; nothing to revert
-    if (persisted !== null) persisted = revertTo // a newer change is pending; it inherits the baseline
+    if (persisted !== null)
+      persisted = revertTo // a newer change is pending; it inherits the baseline
     else useEditorSettingsStore.setState({ settings: revertTo })
     throw err
   }

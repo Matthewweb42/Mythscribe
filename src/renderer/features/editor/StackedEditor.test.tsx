@@ -155,7 +155,7 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     expect(Object.keys(useDocumentStore.getState().docs).sort()).toEqual(['sc-1', 'sc-2', 'sc-3'])
   })
 
-  it('shows the folder\'s combined saved count, without a session delta, in the status bar (F-3.3)', async () => {
+  it("shows the folder's combined saved count, without a session delta, in the status bar (F-3.3)", async () => {
     loadTree()
     const rollup = useTreeStore.getState().wordCountRollup
     const before = rollup['arc-1'] ?? 0
@@ -214,7 +214,12 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
   it('follows the project settings for the column, the text, and the separator (F-3.6)', () => {
     loadTree()
     useEditorSettingsStore.setState({
-      settings: { ...defaultEditorSettings('webnovel'), maxWidth: 640, fontSize: 18, sceneBreak: '###' }
+      settings: {
+        ...defaultEditorSettings('webnovel'),
+        maxWidth: 640,
+        fontSize: 18,
+        sceneBreak: '###'
+      }
     })
     render(<StackedEditor folderId="arc-1" format="webnovel" />)
     const pane = screen.getByRole('toolbar', { name: 'Formatting' }).parentElement

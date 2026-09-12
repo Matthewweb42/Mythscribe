@@ -76,6 +76,21 @@ select {
   min-height: 6em;
 }
 
+/*
+ * Notes (F-3.7) are working text, not manuscript: a fixed, smaller size, no first-line indent,
+ * and no minimum height, ignoring the formatting variables on purpose.
+ */
+.ms-editor.ms-notes {
+  min-height: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.ms-editor.ms-notes p {
+  margin-bottom: 0.5em;
+  text-indent: 0;
+}
+
 /* Paragraph spacing and first-line indent follow the formatting settings (F-3.6); headings and quotes do not. */
 .ms-editor p {
   margin: 0 0 var(--ms-editor-paragraph-spacing);

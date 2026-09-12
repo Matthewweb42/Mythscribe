@@ -2,10 +2,20 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultEditorSettings } from '@shared/editorSettings'
-import type { ProjectInfo, RecentProject } from '@shared/ipc/contract'
+import type {
+  Channel,
+  EventName,
+  EventPayload,
+  Input,
+  Output,
+  ProjectInfo,
+  RecentProject
+} from '@shared/ipc/contract'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
+import { resetNotesPanelStore, useNotesPanelStore } from '@renderer/features/editor/notesPanelStore'
+import { useNotesStore } from '@renderer/features/editor/notesStore'
 import {
   resetEditorSettingsStore,
   useEditorSettingsStore
@@ -37,7 +47,7 @@ const recent: RecentProject = {
 }
 
 /** Main→renderer event listeners captured by `install()`, keyed by event name. */
-const listeners = new Map<string, (payload: unknown) => void>()
+const listeners = new Map<string, (payload: never) => void>()
 
 beforeEach(() => {
   listeners.clear()
@@ -45,9 +55,19 @@ beforeEach(() => {
   useProjectStore.setState({ current: null, ready: false, busy: false, recents: [] })
   useTreeStore.getState().clear()
   useDocumentStore.getState().clear()
+  useNotesStore.getState().clear()
+  resetNotesPanelStore()
   resetEditorSettingsStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+  )
 })
 
 function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<typeof vi.fn> {
@@ -60,24 +80,33 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'recents:list') return []
     if (channel === 'tree:list') return []
     if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }
+    if (channel === 'notes:get') return { id: (input as { id: string }).id, notes: null }
     if (channel === 'editorSettings:get') return defaultEditorSettings('novel')
     return null
   })
-  const on = (event: string, listener: (payload: unknown) => void): (() => void) => {
+  const on = <E extends EventName>(
+    event: E,
+    listener: (payload: EventPayload<E>) => void
+  ): (() => void) => {
     listeners.set(event, listener)
     return () => {
       listeners.delete(event)
     }
   }
-  setIpcClient({ invoke, on } as unknown as IpcClient)
+  const client: IpcClient = {
+    invoke: <C extends Channel>(channel: C, input: Input<C>) =>
+      invoke(channel, input) as Promise<Output<C>>,
+    on
+  }
+  setIpcClient(client)
   return invoke
 }
 
 /** Delivers a main→renderer event to the listener the app registered for it. */
-function fire(event: string, payload: unknown): void {
+function fire<E extends EventName>(event: E, payload: EventPayload<E>): void {
   const listener = listeners.get(event)
   if (!listener) throw new Error(`No listener registered for ${event}`)
-  act(() => listener(payload))
+  act(() => listener(payload as never))
 }
 
 async function fillWizard(name: string, format: RegExp): Promise<void> {
@@ -129,7 +158,9 @@ describe('App', () => {
       Node.DOCUMENT_POSITION_FOLLOWING
     )
     // F-3.5: the empty state fills the pane until something is selected.
-    expect(screen.getByTestId('empty-state')).toHaveTextContent('Select a document to start writing.')
+    expect(screen.getByTestId('empty-state')).toHaveTextContent(
+      'Select a document to start writing.'
+    )
     expect(screen.queryByTestId('selected-title')).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
@@ -231,9 +262,7 @@ describe('App', () => {
     // The plan (S4+S5) calls for the new region to mount inside the still-visible stack for the
     // selected folder; instead `createAt` (treeStore.ts) selects the new document, so `MainPane`
     // swaps the whole pane to a single-document `EditorPane` and the Chapter 1 stack disappears.
-    await waitFor(() =>
-      expect(screen.getByTestId('selected-title')).toHaveTextContent('Chapter 1')
-    )
+    await waitFor(() => expect(screen.getByTestId('selected-title')).toHaveTextContent('Chapter 1'))
     expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual([
       'Untitled Scene'
     ])
@@ -269,6 +298,44 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
     expect(useDocumentStore.getState().docs).toEqual({})
+  })
+
+  it('shows the notes panel beside a folder stack when Notes is open, and clears the notes on close (F-3.7)', async () => {
+    const chapterNotes: TiptapNodeT = {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Get them to the coast' }] }]
+    }
+    const invoke = install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture,
+      'notes:get': { id: 'ch-1', notes: chapterNotes }
+    })
+    render(<App />)
+    const chapter = await screen.findByRole('treeitem', { name: 'Chapter 1' })
+    await userEvent.click(within(chapter).getByText('Chapter 1'))
+    expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument()
+    // The stack's shared toolbar carries the toggle next to the formatting settings.
+    const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
+    const toggle = within(toolbar).getByRole('button', { name: 'Notes' })
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    const panel = screen.getByTestId('notes-panel')
+    expect(invoke).toHaveBeenCalledWith('notes:get', { id: 'ch-1' })
+    const notes = await within(panel).findByRole('textbox', { name: 'Notes' })
+    await waitFor(() => expect(notes).toHaveTextContent('Get them to the coast'))
+    // Beside the stack, not among its regions: the regions are still the chapter's scenes.
+    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual([
+      'Scene 1'
+    ])
+    expect(toolbar.compareDocumentPosition(panel)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(Object.keys(useNotesStore.getState().docs)).toEqual(['ch-1'])
+
+    await userEvent.click(screen.getByRole('button', { name: /close project/i }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    await screen.findByRole('button', { name: /new project/i })
+    expect(useNotesStore.getState().docs).toEqual({})
+    // The panel's open state is per session, so it is still open for the next project.
+    expect(useNotesPanelStore.getState().open).toBe(true)
   })
 
   it('loads the formatting settings with the project, applies them to the editor, and drops them on close (F-3.6)', async () => {

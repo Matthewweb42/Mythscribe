@@ -151,9 +151,7 @@ describe('node table (0001_nodes)', () => {
 
   it('allows each section type only once', () => {
     insert({ id: 'a', parentId: null, sectionType: 'manuscript' })
-    expect(() => insert({ id: 'b', parentId: null, sectionType: 'manuscript' })).toThrow(
-      /UNIQUE/
-    )
+    expect(() => insert({ id: 'b', parentId: null, sectionType: 'manuscript' })).toThrow(/UNIQUE/)
   })
 
   it('deletes descendants when a parent is deleted', () => {

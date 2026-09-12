@@ -145,6 +145,20 @@ export const contract = {
     output: z.object({ wordCount: z.number().int().nonnegative(), modified: z.string() })
   },
   /**
+   * The Tiptap JSON of a node's notes (F-3.7); `notes` is null until something is written.
+   * Documents and folders both have notes; section roots are refused with VALIDATION.
+   * `notes:save` is the write path.
+   */
+  'notes:get': {
+    input: z.object({ id: z.string() }),
+    output: z.object({ id: z.string(), notes: TiptapNode.nullable() })
+  },
+  /** Replaces a node's notes (F-3.7) and stamps the row's `modified`. Same refusals as `notes:get`. */
+  'notes:save': {
+    input: z.object({ id: z.string(), notes: TiptapNode }),
+    output: z.object({ modified: z.string() })
+  },
+  /**
    * The project's editor formatting (F-3.6). A missing or unreadable row answers with the
    * format's defaults, so the editor always has something to apply.
    */

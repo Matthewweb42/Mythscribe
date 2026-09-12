@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ProjectInfo, RecentProject } from '@shared/ipc/contract'
+import type {
+  Channel,
+  EventName,
+  EventPayload,
+  Input,
+  Output,
+  ProjectInfo,
+  RecentProject
+} from '@shared/ipc/contract'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { registerPendingSave, resetPendingSaves } from './pendingSaves'
 import { useProjectStore } from './projectStore'
@@ -29,20 +37,21 @@ function fakeClient(): {
   fire: (p: unknown) => void
 } {
   let listener: ((p: never) => void) | undefined
-  const invoke = vi.fn(async (channel: string) => {
+  const invoke = vi.fn(async (channel: string, _input?: unknown) => {
     if (channel === 'project:current') return null
     if (channel === 'project:create' || channel === 'project:open') return info
     if (channel === 'recents:list') return [recent]
     if (channel === 'recents:remove') return []
     return null
   })
-  const client = {
-    invoke,
-    on: (_e: string, l: (p: never) => void) => {
+  const client: IpcClient = {
+    invoke: <C extends Channel>(channel: C, input: Input<C>) =>
+      invoke(channel, input) as Promise<Output<C>>,
+    on: <E extends EventName>(_e: E, l: (p: EventPayload<E>) => void) => {
       listener = l
       return () => {}
     }
-  } as unknown as IpcClient
+  }
   return { client, invoke, fire: (p) => listener?.(p as never) }
 }
 

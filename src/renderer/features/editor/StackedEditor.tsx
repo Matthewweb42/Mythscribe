@@ -10,6 +10,7 @@ import { describeError } from '@renderer/lib/errors'
 import { COLUMN, editorStyle } from './column'
 import { DocumentEditor } from './DocumentEditor'
 import { EditorSettingsPanel } from './EditorSettingsPanel'
+import { NotesToggleButton } from './NotesPanel'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
 import { Toolbar } from './Toolbar'
@@ -57,8 +58,16 @@ export function StackedEditor({
     return <EmptyFolder folderId={folderId} format={format} section={section} />
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" style={editorStyle(settings)}>
-      <Toolbar editor={editor} right={<EditorSettingsPanel format={format} />} />
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={editorStyle(settings)}>
+      <Toolbar
+        editor={editor}
+        right={
+          <>
+            <NotesToggleButton />
+            <EditorSettingsPanel format={format} />
+          </>
+        }
+      />
       <div className="min-h-0 flex-1 overflow-y-auto pb-12">
         {docIds.map((id, index) => (
           <Fragment key={id}>

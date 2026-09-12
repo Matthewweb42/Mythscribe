@@ -22,6 +22,10 @@ import { countWords } from '../src/shared/wordCount'
 const SENTENCE = 'The storm broke at dusk. Rain followed. Then silence.'
 const SENTENCE_WORDS = 9
 
+/** The notes typed into the panel (F-3.7): one on Scene 1, one on Chapter 1 (a folder). */
+const SCENE_NOTE = 'Ends on the cliff.'
+const CHAPTER_NOTE = 'Get them to the coast.'
+
 /** The Title Page template's word count (F-2.6), as the tree row and the persisted row must show it. */
 const TITLE_PAGE_WORDS = countWords(matterTemplate('title-page').content)
 
@@ -286,6 +290,33 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('Control+s')
   await expect.poll(() => documentText(scene1Row.id), { timeout: 3000 }).toBe(SENTENCE)
 
+  // F-3.7: Notes from the toolbar opens a side panel beside the editor with the scene's notes;
+  // selecting Chapter 1 swaps in the chapter's own notes and saves the scene's at once. The
+  // chapter note is still pending when the project closes, so the close flushes it.
+  const chapter1Row = rowsNow.find((n) => n.id === openingParent)
+  if (!chapter1Row) throw new Error('Chapter 1 row not found')
+  const notesToggle = page.getByRole('button', { name: 'Notes', exact: true })
+  await expect(page.getByTestId('notes-panel')).toHaveCount(0)
+  await expect(notesToggle).toHaveAttribute('aria-pressed', 'false')
+  await notesToggle.click()
+  await expect(notesToggle).toHaveAttribute('aria-pressed', 'true')
+  const notes = page.getByTestId('notes-panel').getByRole('textbox', { name: 'Notes' })
+  await expect(notes).toHaveAttribute('contenteditable', 'true')
+  await expect(notes.locator('p')).toHaveText('')
+  await notes.click()
+  await page.keyboard.type(SCENE_NOTE)
+  await expect(notes.locator('p')).toHaveText(SCENE_NOTE)
+  await expect(editor.locator('p')).toHaveText(SENTENCE)
+  await chapter1.getByText('Chapter 1', { exact: true }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Chapter 1')
+  await expect(notes.locator('p')).toHaveText('')
+  await expect(notes).toHaveAttribute('contenteditable', 'true')
+  await expect.poll(() => notesText(scene1Row.id), { timeout: 3000 }).toBe(SCENE_NOTE)
+  await notes.click()
+  await page.keyboard.type(CHAPTER_NOTE)
+  await expect(notes.locator('p')).toHaveText(CHAPTER_NOTE)
+  expect(await notesText(chapter1Row.id)).toBeNull()
+
   await page.getByRole('button', { name: 'Close project' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
@@ -329,10 +360,17 @@ test('create, close, reopen a project on disk', async () => {
   expect(chapter1Children.map((n) => n.position)).toEqual([0, 1])
   // F-3.2: the text survived the close and the cached word count matches it.
   expect(chapter1Children.map((n) => n.wordCount)).toEqual([0, SENTENCE_WORDS])
+  // F-3.7: both notes survived the close: the scene's through the switch away from it, the
+  // chapter's through the flush on closing the project.
+  expect(await notesText(scene1Row.id)).toBe(SCENE_NOTE)
+  expect(await notesText(chapter1Row.id)).toBe(CHAPTER_NOTE)
   await scene1.click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
   await expect(editor).toHaveAttribute('contenteditable', 'true')
   await expect(editor.locator('p')).toHaveText(SENTENCE)
+  // F-3.7: the panel stayed open across the reopen and shows the scene's note again.
+  await expect(notesToggle).toHaveAttribute('aria-pressed', 'true')
+  await expect(notes.locator('p')).toHaveText(SCENE_NOTE)
   // F-3.6: the formatting settings survived the close too.
   await expect(editor).toHaveCSS('font-size', '20px')
   const persistedColumn = await editor.locator('..').boundingBox()
@@ -401,7 +439,12 @@ async function stubOpenDialog(filePath: string): Promise<void> {
   }, filePath)
 }
 
-/** The plain text of a saved document: paragraphs joined by newlines, or null when never written. */
+/** The plain text of a Tiptap document: paragraphs joined by newlines. */
+function plainText(n: TiptapNodeT): string {
+  return n.text ?? (n.content ?? []).map(plainText).join(n.type === 'doc' ? '\n' : '')
+}
+
+/** The plain text of a saved document, or null when never written. */
 async function documentText(id: string): Promise<string | null> {
   const result = await page.evaluate<
     IpcResult<{ id: string; content: TiptapNodeT | null }>,
@@ -414,10 +457,20 @@ async function documentText(id: string): Promise<string | null> {
     id
   )
   if (!result.ok) throw new Error(`document:get failed: ${result.error.message}`)
-  if (!result.data.content) return null
-  const text = (n: TiptapNodeT): string =>
-    n.text ?? (n.content ?? []).map(text).join(n.type === 'doc' ? '\n' : '')
-  return text(result.data.content)
+  return result.data.content ? plainText(result.data.content) : null
+}
+
+/** The plain text of a node's saved notes (F-3.7), or null when never written. */
+async function notesText(id: string): Promise<string | null> {
+  const result = await page.evaluate<IpcResult<{ id: string; notes: TiptapNodeT | null }>, string>(
+    (nodeId) =>
+      window.mythscribe.invoke('notes:get', { id: nodeId }) as Promise<
+        IpcResult<{ id: string; notes: TiptapNodeT | null }>
+      >,
+    id
+  )
+  if (!result.ok) throw new Error(`notes:get failed: ${result.error.message}`)
+  return result.data.notes ? plainText(result.data.notes) : null
 }
 
 async function listTree(): Promise<TreeNode[]> {

@@ -247,9 +247,7 @@ describe('EditorPane', () => {
     expect(useDocumentStore.getState().docs['sc-1']?.dirty).toBe(true)
 
     await userEvent.click(button('Scene break'))
-    await waitFor(() =>
-      expect(box().querySelector('[data-scene-break]')).toHaveTextContent('###')
-    )
+    await waitFor(() => expect(box().querySelector('[data-scene-break]')).toHaveTextContent('###'))
     // The rebuilt editor keeps reporting edits under the same id.
     await userEvent.click(box())
     await userEvent.keyboard('more ')

@@ -384,12 +384,60 @@ describe('document:save', () => {
   })
 })
 
+describe('notes:get / notes:save', () => {
+  const para = (text: string): Input<'notes:save'>['notes'] => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+  })
+
+  it('reports NO_PROJECT for both when nothing is open', async () => {
+    await expect(invoke('notes:get', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('notes:save', { id: 'x', notes: para('x') })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('round-trips folder notes and leaves the document content alone (F-3.7)', async () => {
+    await invoke('project:create', { name: 'Notes', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const chapter = rows.find((r) => r.hierarchyLevel === 'chapter')
+    expect(await invoke('notes:get', { id: chapter?.id ?? '' })).toEqual({
+      id: chapter?.id,
+      notes: null
+    })
+    const saved = await invoke('notes:save', { id: chapter?.id ?? '', notes: para('Chapter goal') })
+    expect(typeof saved.modified).toBe('string')
+    expect(await invoke('notes:get', { id: chapter?.id ?? '' })).toEqual({
+      id: chapter?.id,
+      notes: para('Chapter goal')
+    })
+    const listed = (await invoke('tree:list', undefined)).find((r) => r.id === chapter?.id)
+    expect(listed).toMatchObject({ wordCount: 0, modified: saved.modified })
+    await expect(invoke('document:get', { id: chapter?.id ?? '' })).rejects.toThrowError(
+      /^VALIDATION: /
+    )
+  })
+
+  it('refuses section roots with VALIDATION and unknown ids with NOT_FOUND', async () => {
+    await invoke('project:create', { name: 'Notes', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const manuscript = rows.find((r) => r.sectionType === 'manuscript')
+    await expect(invoke('notes:get', { id: manuscript?.id ?? '' })).rejects.toThrowError(
+      /^VALIDATION: /
+    )
+    await expect(
+      invoke('notes:save', { id: manuscript?.id ?? '', notes: para('x') })
+    ).rejects.toThrowError(/^VALIDATION: /)
+    await expect(invoke('notes:get', { id: 'missing' })).rejects.toThrowError(/^NOT_FOUND: /)
+  })
+})
+
 describe('editorSettings:get / editorSettings:set', () => {
   it('reports NO_PROJECT for both when nothing is open', async () => {
     await expect(invoke('editorSettings:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
-    await expect(
-      invoke('editorSettings:set', defaultEditorSettings('novel'))
-    ).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('editorSettings:set', defaultEditorSettings('novel'))).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
   })
 
   it("returns the seeded defaults for the project's format (F-3.6)", async () => {
@@ -399,7 +447,12 @@ describe('editorSettings:get / editorSettings:set', () => {
 
   it('persists a change so get returns it, also after a reopen', async () => {
     const created = await invoke('project:create', { name: 'Fmt', format: 'novel', directory: tmp })
-    const next = { ...defaultEditorSettings('novel'), fontSize: 20, maxWidth: 900, sceneBreak: '###' }
+    const next = {
+      ...defaultEditorSettings('novel'),
+      fontSize: 20,
+      maxWidth: 900,
+      sceneBreak: '###'
+    }
     expect(await invoke('editorSettings:set', next)).toEqual(next)
     expect(await invoke('editorSettings:get', undefined)).toEqual(next)
     await invoke('project:close', undefined)

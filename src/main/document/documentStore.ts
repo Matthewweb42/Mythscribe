@@ -34,7 +34,10 @@ function requireDocument(db: TreeDb, id: string): NodeRow {
  */
 export function getDocumentContent(db: TreeDb, id: string): DocumentContent {
   const row = requireDocument(db, id)
-  return { id, content: row.content === null ? null : parseContent(row.content, id) }
+  return {
+    id,
+    content: row.content === null ? null : parseStoredTiptap(row.content, id, 'document content')
+  }
 }
 
 /**
@@ -53,16 +56,20 @@ export function saveDocument(db: TreeDb, id: string, content: TiptapNodeT): Save
   return { wordCount, modified }
 }
 
-function parseContent(raw: string, id: string): TiptapNodeT {
+/**
+ * Parses a stored Tiptap JSON column (content, or notes for F-3.7) and reports a corrupt value as
+ * INTERNAL; `what` names the column in the message.
+ */
+export function parseStoredTiptap(raw: string, id: string, what: string): TiptapNodeT {
   let json: unknown
   try {
     json = JSON.parse(raw)
   } catch {
-    throw new AppError('INTERNAL', 'Stored document content is not valid JSON', { id })
+    throw new AppError('INTERNAL', `Stored ${what} is not valid JSON`, { id })
   }
   const parsed = TiptapNode.safeParse(json)
   if (!parsed.success) {
-    throw new AppError('INTERNAL', 'Stored document content is not a Tiptap document', {
+    throw new AppError('INTERNAL', `Stored ${what} is not a Tiptap document`, {
       id,
       issues: parsed.error.issues
     })

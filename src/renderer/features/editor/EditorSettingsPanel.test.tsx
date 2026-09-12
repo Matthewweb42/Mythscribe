@@ -30,8 +30,7 @@ let sets: EditorSettings[]
 const current = (): EditorSettings | null => useEditorSettingsStore.getState().settings
 const button = (name: string): HTMLElement => screen.getByRole('button', { name })
 const spin = (name: string): HTMLElement => screen.getByRole('spinbutton', { name })
-const panel = (): HTMLElement | null =>
-  screen.queryByRole('group', { name: 'Formatting settings' })
+const panel = (): HTMLElement | null => screen.queryByRole('group', { name: 'Formatting settings' })
 
 async function open(): Promise<void> {
   render(<EditorSettingsPanel format="novel" />)

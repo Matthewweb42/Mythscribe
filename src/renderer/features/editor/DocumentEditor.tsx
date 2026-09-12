@@ -11,6 +11,7 @@ import { COLUMN, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
 import { EditorSettingsPanel } from './EditorSettingsPanel'
 import { buildExtensions } from './extensions'
+import { NotesToggleButton } from './NotesPanel'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
 import { Toolbar } from './Toolbar'
@@ -117,10 +118,15 @@ function RegionEditor({
   const body = <EditorContent editor={editor} className={`${COLUMN} py-6`} />
   if (!toolbar) return body
   return (
-    <div className="flex min-h-0 flex-1 flex-col" style={editorStyle(settings)}>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={editorStyle(settings)}>
       <Toolbar
         editor={ready ? editor : null}
-        right={<EditorSettingsPanel format={format} />}
+        right={
+          <>
+            <NotesToggleButton />
+            <EditorSettingsPanel format={format} />
+          </>
+        }
       />
       <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
       <DocumentStatusBar id={id} editor={ready ? editor : null} />
@@ -134,7 +140,13 @@ function RegionEditor({
  * the document is still loading the tree's saved count stands in. The session delta is measured
  * from the tree's baseline, so a document created this session counts as all new.
  */
-function DocumentStatusBar({ id, editor }: { id: string; editor: Editor | null }): React.JSX.Element {
+function DocumentStatusBar({
+  id,
+  editor
+}: {
+  id: string
+  editor: Editor | null
+}): React.JSX.Element {
   const saved = useTreeStore((s) => s.wordCountRollup[id] ?? 0)
   const baseline = useTreeStore((s) => s.sessionBaseline[id] ?? 0)
   const live = useLiveWordCount(editor)
