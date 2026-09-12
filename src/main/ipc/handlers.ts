@@ -8,6 +8,7 @@ import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
 import { getEditorSettings, setEditorSettings } from '../project/settingsStore'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
+import { createTag, deleteTag, listTags, updateTag } from '../tag/tagStore'
 import {
   createNode,
   deleteNode,
@@ -113,6 +114,19 @@ export function registerHandlers({
   register('editorSettings:set', (value) =>
     setEditorSettings(manager.require().connection.orm, value)
   )
+
+  register('tag:list', () => listTags(manager.require().connection.orm))
+
+  register('tag:create', (input) => createTag(manager.require().connection.orm, input))
+
+  register('tag:update', ({ id, ...patch }) =>
+    updateTag(manager.require().connection.orm, id, patch)
+  )
+
+  register('tag:delete', ({ id }) => {
+    deleteTag(manager.require().connection.orm, id)
+    return null
+  })
 
   // A hand-edited app-state file may squeeze the editor; reading normalizes, writing refuses.
   register('layout:get', () => normalizeLayout(appState.get().layout))

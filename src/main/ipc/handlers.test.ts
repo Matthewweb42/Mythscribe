@@ -13,6 +13,7 @@ import {
 import { z } from 'zod'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultLayout } from '@shared/layout'
+import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { AppStateStore } from '../appState/appStateStore'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
@@ -471,6 +472,81 @@ describe('editorSettings:get / editorSettings:set', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     expect(await invoke('editorSettings:get', undefined)).toEqual(defaultEditorSettings('novel'))
+  })
+})
+
+describe('tag handlers (F-4.1)', () => {
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('tag:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('tag:create', { name: 'x', category: 'custom' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('creates a tag that tag:list then shows with the category color and no usage', async () => {
+    await invoke('project:create', { name: 'Tags', format: 'novel', directory: tmp })
+    const created = await invoke('tag:create', { name: 'Dark Forest', category: 'setting' })
+    expect(created).toMatchObject({
+      name: 'dark-forest',
+      category: 'setting',
+      color: DEFAULT_CATEGORY_COLOR.setting,
+      parentId: null,
+      usageCount: 0
+    })
+    expect(await invoke('tag:list', undefined)).toEqual([created])
+  })
+
+  it('recolors and renames through tag:update and removes through tag:delete', async () => {
+    await invoke('project:create', { name: 'Tags', format: 'novel', directory: tmp })
+    const created = await invoke('tag:create', { name: 'Rain', category: 'tone' })
+    const updated = await invoke('tag:update', {
+      id: created.id,
+      color: '#112233',
+      name: 'Heavy Rain'
+    })
+    expect(updated).toMatchObject({ id: created.id, color: '#112233', name: 'heavy-rain' })
+    expect((await invoke('tag:list', undefined)).map((t) => t.name)).toEqual(['heavy-rain'])
+    expect(await invoke('tag:delete', { id: created.id })).toBeNull()
+    expect(await invoke('tag:list', undefined)).toEqual([])
+  })
+
+  it('survives a reopen', async () => {
+    const project = await invoke('project:create', {
+      name: 'Tags',
+      format: 'novel',
+      directory: tmp
+    })
+    const created = await invoke('tag:create', { name: 'Rain', category: 'tone' })
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: project?.path ?? '' })
+    expect(await invoke('tag:list', undefined)).toEqual([created])
+  })
+
+  it('surfaces VALIDATION, ALREADY_EXISTS, and NOT_FOUND through the envelope', async () => {
+    await invoke('project:create', { name: 'Tags', format: 'novel', directory: tmp })
+    await invoke('tag:create', { name: 'Rain', category: 'tone' })
+    await expect(invoke('tag:create', { name: '—', category: 'tone' })).rejects.toThrowError(
+      /^VALIDATION: /
+    )
+    await expect(invoke('tag:create', { name: 'rain!', category: 'custom' })).rejects.toThrowError(
+      /^ALREADY_EXISTS: /
+    )
+    await expect(invoke('tag:update', { id: 'missing', color: '#000000' })).rejects.toThrowError(
+      /^NOT_FOUND: /
+    )
+    await expect(invoke('tag:delete', { id: 'missing' })).rejects.toThrowError(/^NOT_FOUND: /)
+    // Contract boundary: a bad color or category never reaches the store.
+    const raw = handlerFor('tag:create')
+    for (const bad of [
+      { name: 'x', category: 'tone', color: '#FFF' },
+      { name: 'x', category: 'plot-thread' },
+      { name: '   ', category: 'tone' }
+    ]) {
+      const result = await raw(undefined, bad)
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    }
+    expect((await invoke('tag:list', undefined)).map((t) => t.name)).toEqual(['rain'])
   })
 })
 

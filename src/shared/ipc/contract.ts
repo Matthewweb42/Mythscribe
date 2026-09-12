@@ -3,6 +3,7 @@ import { EditorSettings } from '../editorSettings'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
 import { MatterTemplateId } from '../matterTemplates'
+import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
 import { TiptapNode } from '../tiptap'
 
 /**
@@ -63,6 +64,19 @@ export type TreeNode = z.infer<typeof TreeNode>
 
 /** Longest allowed node title (F-2.2). */
 export const NODE_TITLE_MAX = 200
+
+/** One tag of the tag bank (F-4.1); `usageCount` is derived from `document_tag`, never stored. */
+export const Tag = z.object({
+  id: z.string(),
+  name: z.string(),
+  category: TagCategory,
+  color: z.string().regex(HEX_COLOR),
+  parentId: z.string().nullable(),
+  usageCount: z.number().int().nonnegative(),
+  created: z.string(),
+  modified: z.string()
+})
+export type Tag = z.infer<typeof Tag>
 
 export const contract = {
   'app:info': {
@@ -166,6 +180,38 @@ export const contract = {
   'editorSettings:get': { input: z.undefined(), output: EditorSettings },
   /** Replaces the project's editor formatting (F-3.6); out-of-range values are refused with VALIDATION. */
   'editorSettings:set': { input: EditorSettings, output: EditorSettings },
+  /** Every tag of the open project (F-4.1), ordered by name. */
+  'tag:list': { input: z.undefined(), output: z.array(Tag) },
+  /**
+   * Creates a tag (F-4.1). The name is kebab-cased (`toTagName`); a name that empties or collides
+   * after normalization is refused with VALIDATION or ALREADY_EXISTS. A missing parent is NOT_FOUND.
+   */
+  'tag:create': {
+    input: z.object({
+      name: z.string().trim().min(1).max(TAG_NAME_MAX),
+      category: TagCategory,
+      /** Omitted → the category's default color. */
+      color: z.string().regex(HEX_COLOR).optional(),
+      parentId: z.string().nullable().optional()
+    }),
+    output: Tag
+  },
+  /**
+   * Patches the given fields of a tag (F-4.1); omitted fields keep their value. Same refusals as
+   * `tag:create`, plus VALIDATION for a parent that is the tag itself or one of its descendants.
+   */
+  'tag:update': {
+    input: z.object({
+      id: z.string(),
+      name: z.string().trim().min(1).max(TAG_NAME_MAX).optional(),
+      category: TagCategory.optional(),
+      color: z.string().regex(HEX_COLOR).optional(),
+      parentId: z.string().nullable().optional()
+    }),
+    output: Tag
+  },
+  /** Deletes a tag (F-4.1): its document links go with it, its child tags become top-level. */
+  'tag:delete': { input: z.object({ id: z.string() }), output: z.null() },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
@@ -184,6 +230,8 @@ export const channels = Object.keys(contract) as Channel[]
 
 export type TreeCreateInput = Input<'tree:create'>
 export type TreeMoveInput = Input<'tree:move'>
+export type TagCreateInput = Input<'tag:create'>
+export type TagUpdateInput = Input<'tag:update'>
 
 /** Events pushed from main to the renderer. */
 export const events = {

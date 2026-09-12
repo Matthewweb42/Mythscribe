@@ -10,6 +10,7 @@ import {
 } from 'drizzle-orm/sqlite-core'
 // Relative on purpose: drizzle-kit loads this file without the `@shared` path alias.
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
+import { TAG_CATEGORIES } from '../../shared/tags'
 
 /**
  * Drizzle schema. Migrations are generated from this file with `npm run db:generate`
@@ -70,3 +71,48 @@ export const node = sqliteTable(
 )
 export type NodeRow = typeof node.$inferSelect
 export type NodeInsert = typeof node.$inferInsert
+
+/**
+ * Tag bank (F-4.1). Names are kebab-case and unique across the project; `parent_id` nests a tag
+ * under another and is cleared (not cascaded) when the parent goes. Usage counts are derived
+ * from `document_tag`, never stored here.
+ */
+export const tag = sqliteTable(
+  'tag',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    category: text('category', { enum: TAG_CATEGORIES }).notNull(),
+    /** Lowercase `#rrggbb`. */
+    color: text('color').notNull(),
+    parentId: text('parent_id').references((): AnySQLiteColumn => tag.id, {
+      onDelete: 'set null'
+    }),
+    created: text('created').notNull(),
+    modified: text('modified').notNull()
+  },
+  (t) => [uniqueIndex('tag_name_uq').on(t.name)]
+)
+export type TagRow = typeof tag.$inferSelect
+export type TagInsert = typeof tag.$inferInsert
+
+/** A tag applied to a document (F-4.4, F-4.6 write it); both ends cascade on delete. */
+export const documentTag = sqliteTable(
+  'document_tag',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    tagId: text('tag_id')
+      .notNull()
+      .references(() => tag.id, { onDelete: 'cascade' }),
+    created: text('created').notNull()
+  },
+  (t) => [
+    uniqueIndex('document_tag_node_tag_uq').on(t.nodeId, t.tagId),
+    index('document_tag_tag_idx').on(t.tagId)
+  ]
+)
+export type DocumentTagRow = typeof documentTag.$inferSelect
+export type DocumentTagInsert = typeof documentTag.$inferInsert

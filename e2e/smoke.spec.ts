@@ -8,7 +8,7 @@ import {
   type ElectronApplication,
   type Page
 } from '@playwright/test'
-import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contract'
+import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
 import { matterTemplate } from '../src/shared/matterTemplates'
 import type { TiptapNodeT } from '../src/shared/tiptap'
@@ -106,6 +106,30 @@ test('create, close, reopen a project on disk', async () => {
   expect(titles).toContain('Arc 2')
   expect(titles.filter((t) => t.startsWith('Chapter'))).toHaveLength(6)
   expect(titles.filter((t) => t === 'Scene 1')).toHaveLength(6)
+
+  // F-4.1: the tag bank works through the bridge (the Tags tab arrives with F-4.2): a created
+  // tag comes back kebab-cased with its category's default color and no usage yet.
+  const tagCreated = await page.evaluate<IpcResult<Tag>>(
+    () =>
+      window.mythscribe.invoke('tag:create', {
+        name: 'Dark Forest',
+        category: 'setting'
+      }) as Promise<IpcResult<Tag>>
+  )
+  expect(tagCreated.ok).toBe(true)
+  if (!tagCreated.ok) throw new Error(`tag:create failed: ${tagCreated.error.message}`)
+  expect(tagCreated.data).toMatchObject({
+    name: 'dark-forest',
+    category: 'setting',
+    color: '#ea580c',
+    parentId: null,
+    usageCount: 0
+  })
+  const tagList = await page.evaluate<IpcResult<Tag[]>>(
+    () => window.mythscribe.invoke('tag:list', undefined) as Promise<IpcResult<Tag[]>>
+  )
+  expect(tagList.ok).toBe(true)
+  if (tagList.ok) expect(tagList.data).toEqual([tagCreated.data])
 
   // F-2.1: the document tree shows the sections by format, collapses and expands a folder, and
   // selecting a scene highlights it and shows it in the main pane.
