@@ -177,3 +177,14 @@ select {
 .ms-editor .inline-tag.ProseMirror-selectednode {
   outline: 1px solid var(--tag-color, var(--ms-fg-muted));
 }
+
+/*
+ * Ghost text (F-5.3): the AI's proposed continuation as a dimmed widget at the caret. Not part
+ * of the document; inert to the pointer and to selection so it can never be copied or clicked.
+ */
+.ms-editor .ghost-text {
+  color: var(--ms-fg-muted);
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+}

@@ -15,12 +15,14 @@ import { describeError } from '@renderer/lib/errors'
 import { COLUMN, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
 import { buildExtensions } from './extensions'
+import { useGhostTextController } from './ghostTextController'
 import { INLINE_TAG_SELECTOR, resyncInlineTags } from './InlineTag'
 import { NotesToggleButton } from './NotesPanel'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
 import { TagBar } from './TagBar'
 import { Toolbar } from './Toolbar'
+import { VibeWriteToggle } from './VibeWriteToggle'
 
 export interface DocumentEditorProps {
   id: string
@@ -93,7 +95,9 @@ const TOKEN_MENU_ITEMS: MenuItem[] = [
  * author's unsaved typing and a keystroke never resets the editor. Inline tag tokens (F-4.6)
  * are repainted from the bank whenever it changes (the resync pass; the `#` suggestion lives in
  * the extension), and a right-click on one opens the Remove / Open in Tag Manager menu. Remove
- * deletes the token only: links are the author's explicit choice and stay.
+ * deletes the token only: links are the author's explicit choice and stay. VibeWrite (F-5.3)
+ * runs only in the single-document view: the controller arms itself there and the toggle sits
+ * in the toolbar's right slot, so a stacked region never shows ghost text.
  */
 function RegionEditor({
   id,
@@ -147,6 +151,12 @@ function RegionEditor({
   useEffect(() => {
     resyncInlineTags(editor.view.dom, tagsById)
   }, [editor, tagsById])
+
+  const { error: ghostError } = useGhostTextController({
+    editor,
+    nodeId: id,
+    active: toolbar && ready
+  })
 
   useEffect(() => {
     const dom = editor.view.dom
@@ -208,7 +218,15 @@ function RegionEditor({
   // scroll container (click anywhere to write) without a viewport-relative minimum height.
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={editorStyle(settings)}>
-      <Toolbar editor={ready ? editor : null} right={<NotesToggleButton />} />
+      <Toolbar
+        editor={ready ? editor : null}
+        right={
+          <>
+            <VibeWriteToggle error={ghostError} />
+            <NotesToggleButton />
+          </>
+        }
+      />
       <TagBar id={id} />
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <EditorContent editor={editor} className={`${COLUMN} flex flex-1 flex-col py-6`} />

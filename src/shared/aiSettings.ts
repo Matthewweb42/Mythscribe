@@ -24,12 +24,37 @@ export const AI_DIAL_MEANING: Record<AiDial, string> = {
   3: 'Adds multi-paragraph drafting proposals.'
 }
 
+/** Bounds for the ghost-text idle delay (F-5.3): the spec's 0.5–5 s, stored in milliseconds. */
+export const GHOST_IDLE_MS_MIN = 500
+export const GHOST_IDLE_MS_MAX = 5_000
+export const DEFAULT_GHOST_IDLE_MS = 1_500
+
+/**
+ * The VibeWrite mode (F-5.3), per project. `enabled` is the toolbar toggle's state, the
+ * author's moment-to-moment "write with me" switch; it is independent of `features.ghostText`,
+ * the dial's per-feature gate (F-14.4), which decides whether ghost text may ever run. Both
+ * must be on (and the dial at Suggest) before a request leaves.
+ */
+export const GhostTextSettings = z.object({
+  enabled: z.boolean(),
+  idleMs: z.number().int().min(GHOST_IDLE_MS_MIN).max(GHOST_IDLE_MS_MAX)
+})
+export type GhostTextSettings = z.infer<typeof GhostTextSettings>
+
+export function defaultGhostTextSettings(): GhostTextSettings {
+  return { enabled: false, idleMs: DEFAULT_GHOST_IDLE_MS }
+}
+
 export const AiSettings = z.object({
   dial: AiDial,
   /** One toggle per feature; exhaustive, so a stored row from before a feature existed falls back to the defaults. */
-  features: z.record(AiFeatureId, z.boolean())
+  features: z.record(AiFeatureId, z.boolean()),
+  /** Defaulted, so a row stored before F-5.3 (no `ghostText` key) still parses instead of falling back wholesale. */
+  ghostText: GhostTextSettings.default(defaultGhostTextSettings)
 })
 export type AiSettings = z.infer<typeof AiSettings>
+/** The shape before parsing: `ghostText` may be absent (a row stored before F-5.3). */
+export type AiSettingsInput = z.input<typeof AiSettings>
 
 /** Installs at Off (F-14.4) with every toggle on, so raising the dial is the one act that enables anything. */
 export function defaultAiSettings(): AiSettings {
@@ -44,7 +69,8 @@ export function defaultAiSettings(): AiSettings {
       query: true,
       critique: true,
       embeddings: true
-    }
+    },
+    ghostText: defaultGhostTextSettings()
   }
 }
 
@@ -97,7 +123,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   },
   ghostText: {
     label: 'Ghost text',
-    sends: 'The last ~500 characters of text at the caret.',
+    sends:
+      'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes ' +
+      'and metadata (location, POV, timeline).',
     minDial: 2
   },
   authorMode: {

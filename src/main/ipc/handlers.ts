@@ -6,8 +6,9 @@ import {
   type AiTestConnectionResult,
   type AiUsageSummary
 } from '@shared/ai'
-import type { AiRecommendTagsResult } from '@shared/ipc/contract'
+import type { AiGhostTextResult, AiRecommendTagsResult } from '@shared/ipc/contract'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
+import { generateGhostText } from '../ai/ghostText'
 import type { AiKeyStore } from '../ai/keyStore'
 import { AiProviderError, NoKeyError } from '../ai/providers/types'
 import { recommendTags } from '../ai/recommendTags'
@@ -268,6 +269,28 @@ export function registerHandlers({
       throw err
     }
   })
+
+  // F-5.3: same envelope as `ai:recommendTags`, with the caller's `requestId` on both branches
+  // so the renderer can drop an answer that arrived after the caret moved on.
+  register(
+    'ai:ghostText',
+    async ({ nodeId, before, after, requestId }): Promise<AiGhostTextResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const { text, usage, costUsd, cached, model } = await generateGhostText(db, deps, {
+          nodeId,
+          before,
+          after
+        })
+        return { ok: true, text, usage, costUsd, cached, model, requestId }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
 
   register('window:close', () => {
     manager.close()

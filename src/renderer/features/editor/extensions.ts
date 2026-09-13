@@ -2,6 +2,7 @@ import { canInsertNode, Extension, Node, type Extensions } from '@tiptap/core'
 import TextAlign from '@tiptap/extension-text-align'
 import { TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
+import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
 
 export interface EditorSchemaOptions {
@@ -11,7 +12,8 @@ export interface EditorSchemaOptions {
   onSave: () => void
   /**
    * The manuscript document the editor shows (F-4.6): adds the inline tag token and its `#`
-   * suggestion, which links picked tags to this node. Left out for notes, which never get tags.
+   * suggestion, which links picked tags to this node, and the ghost-text decoration (F-5.3).
+   * Left out for notes, which never get tags or suggestions.
    */
   inlineTagNodeId?: string
 }
@@ -120,7 +122,8 @@ export const SceneBreak = Node.create<SceneBreakOptions>({
  * The one owner of the editor schema (F-3.1): StarterKit trimmed to what the spec lists (marks,
  * headings 1–3, block quote, hard break, undo/redo, cursors) plus text alignment on headings and
  * paragraphs, the scene-break block, the Ctrl+S save shortcut (F-3.2), and, for a manuscript
- * document, the inline tag token with its `#` suggestion (F-4.6). Lists, links, code blocks,
+ * document, the inline tag token with its `#` suggestion (F-4.6) and the ghost-text decoration
+ * (F-5.3, always in the schema so toggling VibeWrite never rebuilds the editor). Lists, links, code blocks,
  * horizontal rules, and the trailing node are off so the document model stays what the compile
  * views (F-3.12) and the AI post-processors expect.
  */
@@ -149,7 +152,7 @@ export function buildExtensions({
     SaveShortcut.configure({ onSave })
   ]
   if (inlineTagNodeId !== undefined) {
-    extensions.push(InlineTag.configure({ nodeId: inlineTagNodeId }))
+    extensions.push(InlineTag.configure({ nodeId: inlineTagNodeId }), GhostText)
   }
   return extensions
 }

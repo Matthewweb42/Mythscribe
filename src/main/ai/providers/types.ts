@@ -24,6 +24,8 @@ export interface CompletionRequest {
   maxTokens: number
   /** Ask for a JSON object so tags, summaries, and critique parse exactly. */
   json?: boolean
+  /** Sampling temperature (the writing preset's, F-5.2); the provider's default when absent. */
+  temperature?: number
 }
 
 /** `usage` is on every result so the ledger (F-5.14) can price it. */

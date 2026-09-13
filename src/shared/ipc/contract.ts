@@ -9,7 +9,9 @@ import {
   AiTestConnectionResult,
   AiUsage,
   AiUsageSummary,
-  DailyCapUsd
+  DailyCapUsd,
+  GHOST_AFTER_CHARS,
+  GHOST_BEFORE_CHARS
 } from '../ai'
 import { AiSettings } from '../aiSettings'
 import { EditorSettings } from '../editorSettings'
@@ -112,6 +114,31 @@ export const AiRecommendTagsResult = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(false), code: AiErrorCode, message: z.string(), nextStep: z.string() })
 ])
 export type AiRecommendTagsResult = z.infer<typeof AiRecommendTagsResult>
+
+/**
+ * What `ai:ghostText` answers (F-5.3): the continuation to show at the caret (`''` for "no
+ * suggestion"), what it cost, and the caller's `requestId` echoed back so a stale answer is
+ * dropped; or an expected AI failure as data with its next step, also carrying the id.
+ */
+export const AiGhostTextResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    text: z.string(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiGhostTextResult = z.infer<typeof AiGhostTextResult>
 
 export const contract = {
   'app:info': {
@@ -347,6 +374,22 @@ export const contract = {
    * come back as data with a next step so the tag bar shows them inline.
    */
   'ai:recommendTags': { input: z.object({ nodeId: z.string() }), output: AiRecommendTagsResult },
+  /**
+   * Asks the AI to continue the passage at the caret (F-5.3, VibeWrite): the text before and
+   * after the caret (bounded; over the bound is VALIDATION) plus the document's notes and
+   * metadata, read in main. Nothing is inserted: the renderer shows the answer as ghost text
+   * until the author accepts it. NOT_FOUND for an unknown id; the AI failures (dial, no key,
+   * budget, ...) come back as data with a next step and the echoed `requestId`.
+   */
+  'ai:ghostText': {
+    input: z.object({
+      nodeId: z.string(),
+      before: z.string().max(GHOST_BEFORE_CHARS),
+      after: z.string().max(GHOST_AFTER_CHARS),
+      requestId: z.string()
+    }),
+    output: AiGhostTextResult
+  },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },
   /** The renderer could not flush, so the close it was asked for (and any quit behind it) is abandoned. */

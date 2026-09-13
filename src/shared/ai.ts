@@ -127,6 +127,15 @@ export type AiUsage = z.infer<typeof AiUsage>
 export const TAGS_MIN_CHARS = 50
 
 /**
+ * The caret window ghost text sends (F-5.3; CLAUDE.md, token efficiency rule 2): at most this
+ * many characters of manuscript text before the caret and after it. One owner for the IPC
+ * contract's bounds, the prompt, and the renderer's slicer, so the data-sharing panel's line
+ * stays true.
+ */
+export const GHOST_BEFORE_CHARS = 500
+export const GHOST_AFTER_CHARS = 100
+
+/**
  * Every AI feature, built or not (F-5.14, F-14.4), as a tuple so the ledger's `feature` column,
  * the dial's per-feature toggles, and the data-sharing registry (`AI_DATA_SHARING` in
  * `aiSettings.ts`) share one owner. The string values are stored in project settings and ledger

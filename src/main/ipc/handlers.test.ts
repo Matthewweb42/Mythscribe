@@ -601,6 +601,7 @@ describe('aiSettings:get / aiSettings:set (F-14.4)', () => {
     })
     expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
     const next = {
+      ...defaultAiSettings(),
       dial: 2 as const,
       features: { ...defaultAiSettings().features, ghostText: false }
     }
@@ -1155,6 +1156,109 @@ describe('ai:recommendTags (F-4.7)', () => {
     const unknown = await handlerFor('ai:recommendTags')(undefined, { nodeId: 'nope' })
     expect(unknown.ok).toBe(false)
     if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    expect(complete).not.toHaveBeenCalled()
+  })
+})
+
+describe('ai:ghostText (F-5.3)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const BEFORE = 'The storm broke at dusk over the dark forest. Mara counted the lightning gaps.'
+
+  /** A project with the dial at Suggest and a scene to continue. */
+  async function ready(): Promise<{ scene: string }> {
+    await invoke('project:create', { name: 'Ghost', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    complete.mockResolvedValue({
+      text: 'Somewhere ahead the river was rising.',
+      model: 'gpt-fake',
+      usage: { inputTokens: 120, outputTokens: 12 }
+    })
+    return { scene: scene.id }
+  }
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(
+      invoke('ai:ghostText', { nodeId: 'x', before: 'a', after: '', requestId: '1' })
+    ).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers the continuation with the cost and the echoed requestId, and logs one ledger row', async () => {
+    const { scene } = await ready()
+    await invoke('ai:setKey', { key: KEY })
+    const result = await invoke('ai:ghostText', {
+      nodeId: scene,
+      before: BEFORE,
+      after: '',
+      requestId: 'req-7'
+    })
+    expect(result).toEqual({
+      ok: true,
+      text: ' Somewhere ahead the river was rising.',
+      usage: { inputTokens: 120, outputTokens: 12 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      requestId: 'req-7'
+    })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(complete.mock.calls[0]![0]).toMatchObject({ tier: 'fast', maxTokens: 40 })
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.total.requests).toBe(1)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['ghostText'])
+  })
+
+  it('answers each expected AI failure as data with its next step and the requestId', async () => {
+    const { scene } = await ready()
+    const input = { nodeId: scene, before: BEFORE, after: '', requestId: 'req-8' }
+    expect(await invoke('ai:ghostText', input)).toEqual({
+      ok: false,
+      code: 'NO_KEY',
+      message: 'No API key is saved.',
+      nextStep: 'Add a key above and save it.',
+      requestId: 'req-8'
+    })
+    await invoke('ai:setKey', { key: KEY })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    expect(await invoke('ai:ghostText', input)).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Ghost text needs the AI dial at Suggest or higher (it is at Ask).',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      requestId: 'req-8'
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    complete.mockRejectedValueOnce(new InvalidKeyError('OpenAI rejected the API key.'))
+    expect(await invoke('ai:ghostText', input)).toEqual({
+      ok: false,
+      code: 'INVALID_KEY',
+      message: 'OpenAI rejected the API key.',
+      nextStep: 'Check the key and try again.',
+      requestId: 'req-8'
+    })
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets an unknown id and an over-long window reach the error envelope as NOT_FOUND and VALIDATION', async () => {
+    await ready()
+    const unknown = await handlerFor('ai:ghostText')(undefined, {
+      nodeId: 'nope',
+      before: BEFORE,
+      after: '',
+      requestId: '1'
+    })
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    const long = await handlerFor('ai:ghostText')(undefined, {
+      nodeId: 'nope',
+      before: 'x'.repeat(501),
+      after: '',
+      requestId: '1'
+    })
+    expect(long.ok).toBe(false)
+    if (!long.ok) expect(long.error.code).toBe('VALIDATION')
     expect(complete).not.toHaveBeenCalled()
   })
 })

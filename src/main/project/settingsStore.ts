@@ -1,5 +1,10 @@
 import { eq } from 'drizzle-orm'
-import { AI_SETTINGS_KEY, AiSettings, defaultAiSettings } from '@shared/aiSettings'
+import {
+  AI_SETTINGS_KEY,
+  AiSettings,
+  defaultAiSettings,
+  type AiSettingsInput
+} from '@shared/aiSettings'
 import { EDITOR_SETTINGS_KEY, EditorSettings, defaultEditorSettings } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
@@ -55,8 +60,11 @@ export function getAiSettings(db: TreeDb): AiSettings {
   return parsed.success ? parsed.data : defaultAiSettings()
 }
 
-/** Replaces the project's AI settings (upsert on the settings key) and returns what was stored. */
-export function setAiSettings(db: TreeDb, value: AiSettings): AiSettings {
+/**
+ * Replaces the project's AI settings (upsert on the settings key) and returns what was stored.
+ * Takes the pre-parse shape so a caller without the F-5.3 `ghostText` block gets the default.
+ */
+export function setAiSettings(db: TreeDb, value: AiSettingsInput): AiSettings {
   const stored = AiSettings.parse(value)
   const serialized = JSON.stringify(stored)
   db.insert(settings)

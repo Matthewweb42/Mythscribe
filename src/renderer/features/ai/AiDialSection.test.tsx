@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AI_FEATURE_IDS, DEFAULT_MODELS, type AiStatus } from '@shared/ai'
-import { AI_DATA_SHARING, defaultAiSettings, type AiSettings } from '@shared/aiSettings'
+import { AI_DATA_SHARING, AiSettings, defaultAiSettings } from '@shared/aiSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, IpcRequestError, type IpcClient } from '@renderer/lib/ipc'
@@ -39,7 +39,7 @@ function fakeClient(initial: AiSettings): Fake {
           case 'aiSettings:get':
             return fake.settings as Output<C>
           case 'aiSettings:set':
-            fake.settings = fake.setAnswer(input as Input<'aiSettings:set'>)
+            fake.settings = fake.setAnswer(AiSettings.parse(input))
             return fake.settings as Output<C>
           case 'ai:getStatus':
             return STATUS as Output<C>
@@ -57,9 +57,7 @@ let fake: Fake
 const radio = (name: string): HTMLElement => screen.getByRole('radio', { name })
 const checkbox = (name: RegExp | string): HTMLElement => screen.getByRole('checkbox', { name })
 const sets = (): AiSettings[] =>
-  fake.calls
-    .filter((c) => c.channel === 'aiSettings:set')
-    .map((c) => c.input as Input<'aiSettings:set'>)
+  fake.calls.filter((c) => c.channel === 'aiSettings:set').map((c) => AiSettings.parse(c.input))
 const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.message)
 
 /** Renders the section with `initial` loaded, the way `App.tsx` loads it with the project. */
@@ -160,6 +158,7 @@ describe('AiDialSection (F-14.4)', () => {
     expect(checkbox('Ghost text')).not.toBeChecked()
     await waitFor(() => expect(sets()).toHaveLength(1))
     expect(sets()[0]).toEqual({
+      ...defaultAiSettings(),
       dial: 2,
       features: { ...defaultAiSettings().features, ghostText: false }
     })
@@ -178,6 +177,37 @@ describe('AiDialSection (F-14.4)', () => {
     expect(radio('Draft')).toHaveAttribute('aria-checked', 'true')
     await waitFor(() => expect(toasts()).toEqual(['Disk is read-only']))
     expect(radio('Off')).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('shows the ghost-text idle delay in seconds and commits a clamped value on blur or Enter (F-5.3)', async () => {
+    await open({ ...defaultAiSettings(), ghostText: { enabled: true, idleMs: 1500 } })
+    const field = screen.getByLabelText('Ghost text idle delay (s)', { selector: 'input' })
+    expect(field).toHaveValue(1.5)
+    expect(field).toHaveAccessibleDescription(/How long VibeWrite waits/)
+    await userEvent.clear(field)
+    await userEvent.type(field, '0.5')
+    await userEvent.tab()
+    await waitFor(() => expect(sets()).toHaveLength(1))
+    expect(sets()[0]?.ghostText).toEqual({ enabled: true, idleMs: 500 })
+    expect(field).toHaveValue(0.5)
+    await userEvent.clear(field)
+    await userEvent.type(field, '9{Enter}')
+    await waitFor(() => expect(sets()).toHaveLength(2))
+    expect(sets()[1]?.ghostText.idleMs).toBe(5000)
+    expect(field).toHaveValue(5)
+    await userEvent.clear(field)
+    await userEvent.type(field, '0.1')
+    await userEvent.tab()
+    await waitFor(() => expect(sets()).toHaveLength(3))
+    expect(sets()[2]?.ghostText.idleMs).toBe(500)
+    // A blank or unchanged commit writes nothing and shows the saved value again.
+    await userEvent.clear(field)
+    await userEvent.tab()
+    expect(field).toHaveValue(0.5)
+    await userEvent.clear(field)
+    await userEvent.type(field, '0.5{Enter}')
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(sets()).toHaveLength(3)
   })
 
   it('lists every feature in the data-sharing table with what it sends, the provider, and the level', async () => {

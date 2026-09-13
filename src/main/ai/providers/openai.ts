@@ -39,7 +39,8 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
     model: resolveModel(request.tier),
     messages: request.messages,
     max_completion_tokens: request.maxTokens,
-    ...(request.json ? { response_format: { type: 'json_object' as const } } : {})
+    ...(request.json ? { response_format: { type: 'json_object' as const } } : {}),
+    ...(request.temperature === undefined ? {} : { temperature: request.temperature })
   })
 
   return {

@@ -3,6 +3,9 @@ import { AI_FEATURE_IDS } from './ai'
 import {
   AI_DATA_SHARING,
   AI_DIAL_LABEL,
+  DEFAULT_GHOST_IDLE_MS,
+  GHOST_IDLE_MS_MAX,
+  GHOST_IDLE_MS_MIN,
   AI_DIAL_LEVELS,
   AI_DIAL_MEANING,
   AI_FEATURES_BY_LEVEL,
@@ -29,6 +32,27 @@ describe('defaultAiSettings (F-14.4)', () => {
     )
     expect(AiSettings.safeParse({ dial: 0, features: missingOne }).success).toBe(false)
   })
+
+  it('starts VibeWrite off with the default idle delay (F-5.3)', () => {
+    expect(defaultAiSettings().ghostText).toEqual({ enabled: false, idleMs: DEFAULT_GHOST_IDLE_MS })
+  })
+
+  it('fills the ghost-text defaults into a row stored before F-5.3 and bounds the idle delay', () => {
+    const { ghostText: _ghostText, ...old } = defaultAiSettings()
+    const parsed = AiSettings.safeParse({ ...old, dial: 2 })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.ghostText).toEqual({ enabled: false, idleMs: DEFAULT_GHOST_IDLE_MS })
+      expect(parsed.data.dial).toBe(2)
+    }
+    const withIdle = (idleMs: number): boolean =>
+      AiSettings.safeParse({ ...defaultAiSettings(), ghostText: { enabled: true, idleMs } }).success
+    expect(withIdle(GHOST_IDLE_MS_MIN)).toBe(true)
+    expect(withIdle(GHOST_IDLE_MS_MAX)).toBe(true)
+    expect(withIdle(GHOST_IDLE_MS_MIN - 1)).toBe(false)
+    expect(withIdle(GHOST_IDLE_MS_MAX + 1)).toBe(false)
+    expect(withIdle(750.5)).toBe(false)
+  })
 })
 
 describe('AI_DATA_SHARING', () => {
@@ -42,6 +66,13 @@ describe('AI_DATA_SHARING', () => {
       expect(entry.minDial).toBeGreaterThan(0) // nothing runs at Off
     }
     expect(Object.keys(AI_DATA_SHARING).sort()).toEqual([...AI_FEATURE_IDS].sort())
+  })
+
+  it('names everything ghost text sends: the caret window, the notes, and the metadata (F-5.3)', () => {
+    expect(AI_DATA_SHARING.ghostText.sends).toBe(
+      'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes ' +
+        'and metadata (location, POV, timeline).'
+    )
   })
 
   it("places ghost text at Suggest and Author mode at Draft, per PLAN.md §2.3's table", () => {

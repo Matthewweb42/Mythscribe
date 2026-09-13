@@ -1,3 +1,14 @@
+/** New characters the author must type between two ghost-text requests (F-5.3). */
+export const GHOST_MIN_NEW_CHARS = 12
+/**
+ * The soft per-day request cap for ghost text (F-5.3), counted in the renderer for the session
+ * (not persisted; a restart loosens it at most). The persisted, app-wide USD cap in the request
+ * path (F-5.14) is the real backstop.
+ */
+export const GHOST_MAX_PER_DAY = 200
+/** No ghost-text request leaves for this long after one fails (rate limit, network, provider). */
+export const GHOST_BACKOFF_MS = 30_000
+
 /**
  * The ghost-text trigger discipline (F-5.14; CLAUDE.md, token efficiency rule 5): a request
  * may leave only after a minimum idle interval, once enough new characters were typed since

@@ -32,6 +32,9 @@ import { countWords } from '../src/shared/wordCount'
 const REJECTED_KEY = 'sk-test-1234abcd'
 const ACCEPTED_KEY = 'sk-live-5678wxyz'
 
+/** The continuation the fake server answers every plain-text (ghost text, F-5.3) chat request with. */
+const GHOST_CONTINUATION = 'The wind picked up before anyone spoke.'
+
 /** What Scene 1 reads after the F-3.1/F-3.2 steps; nine words, so the cached count is checked too. */
 const SENTENCE = 'The storm broke at dusk. Rain followed. Then silence.'
 const SENTENCE_WORDS = 9
@@ -68,27 +71,41 @@ function startFakeOpenAi(): Promise<string> {
       )
       return
     }
-    // `POST /v1/chat/completions` (F-4.7) answers every prompt with the same two bank tags:
-    // dark-forest is already linked to Scene 1 by then, so only protagonist becomes a chip.
+    // `POST /v1/chat/completions` answers by mode: a JSON-mode request (F-4.7 tags) gets the
+    // same two bank tags every time (dark-forest is already linked to Scene 1 by then, so only
+    // protagonist becomes a chip); a plain request (F-5.3 ghost text) gets one fixed sentence.
     if (req.method === 'POST' && (req.url ?? '').endsWith('/chat/completions')) {
-      req.resume()
-      res.statusCode = 200
-      res.end(
-        JSON.stringify({
-          id: 'chatcmpl-fake',
-          object: 'chat.completion',
-          created: 0,
-          model: 'gpt-5.4-mini',
-          choices: [
-            {
-              index: 0,
-              message: { role: 'assistant', content: '{"tags":["dark-forest","protagonist"]}' },
-              finish_reason: 'stop'
-            }
-          ],
-          usage: { prompt_tokens: 400, completion_tokens: 12, total_tokens: 412 }
-        })
-      )
+      let body = ''
+      req.setEncoding('utf8')
+      req.on('data', (chunk: string) => {
+        body += chunk
+      })
+      req.on('end', () => {
+        const request = JSON.parse(body) as { response_format?: { type?: string } }
+        const json = request.response_format?.type === 'json_object'
+        res.statusCode = 200
+        res.end(
+          JSON.stringify({
+            id: 'chatcmpl-fake',
+            object: 'chat.completion',
+            created: 0,
+            model: 'gpt-5.4-mini',
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: json ? '{"tags":["dark-forest","protagonist"]}' : GHOST_CONTINUATION
+                },
+                finish_reason: 'stop'
+              }
+            ],
+            usage: json
+              ? { prompt_tokens: 400, completion_tokens: 12, total_tokens: 412 }
+              : { prompt_tokens: 300, completion_tokens: 9, total_tokens: 309 }
+          })
+        )
+      })
       return
     }
     // `GET /v1/models/<id>` echoes the requested id, so the AI tab's "answered" line names the
@@ -1017,6 +1034,62 @@ test('create, close, reopen a project on disk', async () => {
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   await expect(usageTotal).toHaveText('<$0.01 · 1 request · 412 tokens')
+
+  // F-5.3: VibeWrite. Suggest unlocks ghost text; the idle delay drops to 0.5 s in the AI tab
+  // and lands in the settings table. The toolbar toggle arms the mode (persisted per project).
+  // Typing into Scene 1 and pausing brings the fake server's continuation as ghost text at the
+  // caret (a widget, not document text); Tab accepts it into the document and the ledger gains
+  // a ghostText request. A second suggestion is dismissed with Escape and inserts nothing.
+  // The mode is turned off again before the dial and the key are restored below.
+  await dial.getByRole('radio', { name: 'Suggest' }).click()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(2)
+  const idleDelay = settingsDialog.getByLabel('Ghost text idle delay (s)', { exact: true })
+  await expect(idleDelay).toHaveValue('1.5')
+  await idleDelay.fill('0.5')
+  await idleDelay.blur()
+  await expect(idleDelay).toHaveValue('0.5')
+  await expect.poll(async () => (await aiSettings()).ghostText.idleMs).toBe(500)
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  const vibeWrite = page.getByRole('button', { name: 'VibeWrite' })
+  await expect(vibeWrite).toBeEnabled()
+  await expect(vibeWrite).toHaveAttribute('aria-pressed', 'false')
+  await vibeWrite.click()
+  await expect(vibeWrite).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(async () => (await aiSettings()).ghostText.enabled).toBe(true)
+  const ghost = editor.locator('.ghost-text')
+  const beforeGhost = openAiRequests.length
+  await editor.click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' Mara waited on the ridge.')
+  await expect(ghost).toHaveText(GHOST_CONTINUATION)
+  expect(openAiRequests).toHaveLength(beforeGhost + 1)
+  expect(openAiRequests.at(-1)).toEqual({
+    url: '/v1/chat/completions',
+    auth: `Bearer ${ACCEPTED_KEY}`
+  })
+  // A widget only: the editor's text without the ghost span does not carry the continuation.
+  expect(await documentTextWithoutGhost()).not.toContain(GHOST_CONTINUATION)
+  await page.keyboard.press('Tab')
+  await expect(ghost).toHaveCount(0)
+  await expect(editor).toContainText(`Mara waited on the ridge. ${GHOST_CONTINUATION}`)
+  const afterGhost = await usageSummary()
+  expect(afterGhost.total.requests).toBe(2)
+  expect(afterGhost.byFeature.find((f) => f.feature === 'ghostText')).toMatchObject({
+    requests: 1,
+    tokens: 309
+  })
+  await page.keyboard.type(' Nobody answered him.')
+  await expect(ghost).toHaveText(GHOST_CONTINUATION)
+  await page.keyboard.press('Escape')
+  await expect(ghost).toHaveCount(0)
+  await expect(editor).toContainText('Nobody answered him.')
+  expect(((await editor.textContent()) ?? '').split(GHOST_CONTINUATION)).toHaveLength(2)
+  await vibeWrite.click()
+  await expect(vibeWrite).toHaveAttribute('aria-pressed', 'false')
+  await expect.poll(async () => (await aiSettings()).ghostText.enabled).toBe(false)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   // Back to Off and no key, as the steps above left them.
   await dial.getByRole('radio', { name: 'Off' }).click()
   await expect.poll(async () => (await aiSettings()).dial).toBe(0)
@@ -1043,6 +1116,15 @@ test('create, close, reopen a project on disk', async () => {
   await closed
   expect(exited).toBe(true)
 })
+
+/** The single-document editor's text with the ghost-text widget (F-5.3) left out. */
+async function documentTextWithoutGhost(): Promise<string> {
+  return page.getByRole('textbox', { name: 'Document' }).evaluate((element) => {
+    const clone = element.cloneNode(true) as HTMLElement
+    clone.querySelectorAll('.ghost-text').forEach((ghost) => ghost.remove())
+    return clone.textContent ?? ''
+  })
+}
 
 async function closeProject(): Promise<void> {
   await page.getByRole('button', { name: 'Close project' }).click()

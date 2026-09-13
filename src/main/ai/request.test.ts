@@ -148,6 +148,14 @@ describe('runAiRequest (F-5.14)', () => {
     expect(f.spends).toEqual([{ costUsd: expected.costUsd, tokens: 50 }])
   })
 
+  it('forwards the temperature to the provider and leaves it out when absent (F-5.3)', async () => {
+    const f = fakes()
+    await runAiRequest(f.deps, { ...input, temperature: 0.7 })
+    expect(f.complete.mock.calls[0]?.[0].temperature).toBe(0.7)
+    await runAiRequest(f.deps, { ...input, contextHash: 'ctx-2' })
+    expect('temperature' in (f.complete.mock.calls[1]?.[0] ?? {})).toBe(false)
+  })
+
   it('clamps maxTokens to the feature budget instead of refusing', async () => {
     const f = fakes()
     await runAiRequest(f.deps, { ...input, maxTokens: 10_000 })

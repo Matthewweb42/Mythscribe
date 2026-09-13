@@ -40,6 +40,8 @@ export interface AiRequestInput {
   /** The feature's own cap; clamped to `outputBudget(feature)`. */
   maxTokens: number
   json?: boolean
+  /** Sampling temperature, forwarded to the provider; the preset's for prose features (F-5.2). */
+  temperature?: number
   /** From the context builder: a hash of everything that shaped `messages`. */
   contextHash: string
   /** The prompt template version (F-5.12); undefined until prompts are versioned. */
@@ -130,7 +132,8 @@ export async function runAiRequest(
     tier: input.tier,
     messages: input.messages,
     maxTokens,
-    json: input.json
+    json: input.json,
+    ...(input.temperature === undefined ? {} : { temperature: input.temperature })
   })
   const { costUsd, priced } = deps.price(model, result.usage.inputTokens, result.usage.outputTokens)
   const at = deps.now().toISOString()

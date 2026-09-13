@@ -92,6 +92,17 @@ describe('buildOpenAiProvider.complete (F-5.1)', () => {
     expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe(`Bearer ${KEY}`)
   })
 
+  it('forwards the temperature when given and leaves the field out otherwise (F-5.3)', async () => {
+    const { fetch, calls } = answering(() => json(200, completion))
+    const provider = buildOpenAiProvider(KEY, { fetch })
+    await provider.complete({ ...request, temperature: 0.9 })
+    expect(bodyOf(calls[0]).temperature).toBe(0.9)
+    await provider.complete({ ...request, temperature: 0 })
+    expect(bodyOf(calls[1]).temperature).toBe(0)
+    await provider.complete(request)
+    expect('temperature' in bodyOf(calls[2])).toBe(false)
+  })
+
   it('uses the strong model and JSON mode when asked', async () => {
     const { fetch, calls } = answering(() => json(200, completion))
     await buildOpenAiProvider(KEY, { fetch }).complete({ ...request, tier: 'strong', json: true })

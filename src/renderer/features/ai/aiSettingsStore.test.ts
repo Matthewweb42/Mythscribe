@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
+import { AiSettings, defaultAiSettings } from '@shared/aiSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { SETTINGS_SAVE_DELAY_MS } from '@renderer/features/editor/settingsStore'
 import { flushPendingSaves, resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -20,7 +20,7 @@ function deferredClient(stored: AiSettings): { client: IpcClient; sets: PendingS
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
       if (channel === 'aiSettings:get') return stored as Output<C>
       if (channel === 'aiSettings:set') {
-        const value = input as Input<'aiSettings:set'>
+        const value = AiSettings.parse(input)
         return new Promise<Output<C>>((resolve, reject) => {
           sets.push({ value, resolve: () => resolve(value as Output<C>), reject })
         })
@@ -90,6 +90,7 @@ describe('useAiSettingsStore (F-14.4)', () => {
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(1)
     expect(sets[0]?.value).toEqual({
+      ...defaults,
       dial: 3,
       features: { ...defaults.features, ghostText: false, chat: false }
     })

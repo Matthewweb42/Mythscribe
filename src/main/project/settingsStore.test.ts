@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { AI_SETTINGS_KEY, defaultAiSettings } from '@shared/aiSettings'
+import { AI_SETTINGS_KEY, defaultAiSettings, defaultGhostTextSettings } from '@shared/aiSettings'
 import { EDITOR_SETTINGS_KEY, defaultEditorSettings } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { WRITING_PRESETS_KEY, builtinParams, defaultWritingPresets } from '@shared/presets'
@@ -144,6 +144,18 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
     expect(getAiSettings(db)).toEqual(defaultAiSettings())
     setRaw(JSON.stringify({ dial: 3, features: { ghostText: true } }), AI_SETTINGS_KEY)
     expect(getAiSettings(db)).toEqual(defaultAiSettings())
+  })
+
+  it('fills the VibeWrite defaults into a row stored before F-5.3 and keeps the rest', () => {
+    open('novel')
+    const { ghostText: _ghostText, ...old } = defaultAiSettings()
+    setRaw(JSON.stringify({ ...old, dial: 2 }), AI_SETTINGS_KEY)
+    expect(getAiSettings(db)).toEqual({ ...old, dial: 2, ghostText: defaultGhostTextSettings() })
+    // The write path takes the same shape and stores the filled-in block.
+    expect(setAiSettings(db, { ...old, dial: 1 }).ghostText).toEqual(defaultGhostTextSettings())
+    expect(getAiSettings(db).ghostText).toEqual(defaultGhostTextSettings())
+    setAiSettings(db, { ...old, dial: 2, ghostText: { enabled: true, idleMs: 700 } })
+    expect(getAiSettings(db).ghostText).toEqual({ enabled: true, idleMs: 700 })
   })
 })
 
