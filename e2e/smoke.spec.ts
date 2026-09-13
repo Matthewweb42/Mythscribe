@@ -13,6 +13,7 @@ import type { AiStatus, AiUsageSummary } from '../src/shared/ai'
 import type { AiSettings } from '../src/shared/aiSettings'
 import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
+import { PRESETS, type WritingPresets } from '../src/shared/presets'
 import { matterTemplate } from '../src/shared/matterTemplates'
 import type { TiptapNodeT } from '../src/shared/tiptap'
 import { countWords } from '../src/shared/wordCount'
@@ -458,6 +459,50 @@ test('create, close, reopen a project on disk', async () => {
   await dial.getByRole('radio', { name: 'Off' }).click()
   await expect(ghostTextToggle).toBeDisabled()
   await expect.poll(async () => (await aiSettings()).dial).toBe(0)
+  // F-5.2: the writing presets start on General; Suspense/Mystery lands in the settings table
+  // and survives closing the dialog, with its parameters shown read-only; Custom exposes the
+  // fields and a new instruction persists; back to General so nothing below depends on it.
+  const presets = settingsDialog.getByRole('radiogroup', { name: 'Writing preset' })
+  await expect(presets.getByRole('radio', { name: 'General' })).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  expect((await writingPresets()).active).toBe('general')
+  await presets.getByRole('radio', { name: 'Suspense/Mystery' }).click()
+  await expect(presets.getByRole('radio', { name: 'Suspense/Mystery' })).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  await expect.poll(async () => (await writingPresets()).active).toBe('suspense')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await expect(presets.getByRole('radio', { name: 'Suspense/Mystery' })).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  await expect(settingsDialog.getByTestId('preset-params')).toContainText(
+    PRESETS.suspense.styleInstruction
+  )
+  await presets.getByRole('radio', { name: 'Custom' }).click()
+  const instructionField = settingsDialog.getByRole('textbox', { name: 'Style instruction' })
+  await expect(instructionField).toHaveValue(PRESETS.general.styleInstruction)
+  await instructionField.fill('Keep every sentence under ten words.')
+  await instructionField.blur()
+  await expect
+    .poll(async () => await writingPresets())
+    .toEqual({
+      active: 'custom',
+      custom: {
+        temperature: PRESETS.general.temperature,
+        maxSuggestionTokens: PRESETS.general.maxSuggestionTokens,
+        allowNewElements: PRESETS.general.allowNewElements,
+        styleInstruction: 'Keep every sentence under ten words.'
+      }
+    })
+  await presets.getByRole('radio', { name: 'General' }).click()
+  await expect.poll(async () => (await writingPresets()).active).toBe('general')
   await expect(settingsDialog.getByText('OpenAI', { exact: true }).first()).toBeVisible()
   const keyHint = settingsDialog.getByTestId('ai-key-hint')
   const keyField = settingsDialog.getByLabel('API key', { exact: true })
@@ -1060,6 +1105,15 @@ async function aiSettings(): Promise<AiSettings> {
     () => window.mythscribe.invoke('aiSettings:get', undefined) as Promise<IpcResult<AiSettings>>
   )
   if (!result.ok) throw new Error(`aiSettings:get failed: ${result.error.message}`)
+  return result.data
+}
+
+/** The project's writing presets (F-5.2) as main reads them from the settings table. */
+async function writingPresets(): Promise<WritingPresets> {
+  const result = await page.evaluate<IpcResult<WritingPresets>>(
+    () => window.mythscribe.invoke('presets:get', undefined) as Promise<IpcResult<WritingPresets>>
+  )
+  if (!result.ok) throw new Error(`presets:get failed: ${result.error.message}`)
   return result.data
 }
 

@@ -17,6 +17,7 @@ import { AI_DATA_SHARING } from '@shared/aiSettings'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { AiDialSection } from './AiDialSection'
+import { WritingPresetsSection } from './WritingPresetsSection'
 import { useAiStore } from './aiStore'
 import { describeTotals, formatCount, formatUsd } from './usageFormat'
 
@@ -53,7 +54,8 @@ const featureLabel = (feature: string): string => {
 
 /**
  * The AI tab of the Settings dialog (F-5.1): the project's AI dial, toggles, and data-sharing
- * table first (F-14.4, loaded with the project by `App.tsx`), then the provider, the key field with Save and Clear,
+ * table first (F-14.4, loaded with the project by `App.tsx`), the writing presets (F-5.2,
+ * loaded the same way), then the provider, the key field with Save and Clear,
  * the masked hint once a key is saved, the model per tier with "Reset to defaults" (F-5.11),
  * "Test connection" with its result inline, the Usage block with the daily cap (F-5.14), the
  * privacy line, and a warning when the key can only be obfuscated (no keyring) or not stored
@@ -111,6 +113,8 @@ export function AiSettingsTab(): React.JSX.Element {
   return (
     <div className="flex flex-col gap-4 text-sm">
       <AiDialSection />
+
+      <WritingPresetsSection />
 
       <div className="flex items-center justify-between gap-3">
         <span>Provider</span>

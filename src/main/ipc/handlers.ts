@@ -25,8 +25,10 @@ import { isProjectFolder, projectFolderFor } from '../project/projectStore'
 import {
   getAiSettings,
   getEditorSettings,
+  getWritingPresets,
   setAiSettings,
-  setEditorSettings
+  setEditorSettings,
+  setWritingPresets
 } from '../project/settingsStore'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import { addDocumentTag, listDocumentTags, removeDocumentTag } from '../tag/documentTagStore'
@@ -150,6 +152,10 @@ export function registerHandlers({
   register('aiSettings:get', () => getAiSettings(manager.require().connection.orm))
 
   register('aiSettings:set', (value) => setAiSettings(manager.require().connection.orm, value))
+
+  register('presets:get', () => getWritingPresets(manager.require().connection.orm))
+
+  register('presets:set', (value) => setWritingPresets(manager.require().connection.orm, value))
 
   register('tag:list', () => listTags(manager.require().connection.orm))
 

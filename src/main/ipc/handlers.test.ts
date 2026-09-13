@@ -14,6 +14,7 @@ import {
 import { z } from 'zod'
 import { DEFAULT_MODELS } from '@shared/ai'
 import { defaultAiSettings } from '@shared/aiSettings'
+import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_META } from '@shared/sceneMeta'
@@ -617,6 +618,46 @@ describe('aiSettings:get / aiSettings:set (F-14.4)', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
+  })
+})
+
+describe('presets:get / presets:set (F-5.2)', () => {
+  it('reports NO_PROJECT for both when nothing is open', async () => {
+    await expect(invoke('presets:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('presets:set', defaultWritingPresets())).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('answers the defaults (General) for a new project, then what set wrote, also after a reopen', async () => {
+    const created = await invoke('project:create', {
+      name: 'Presets',
+      format: 'novel',
+      directory: tmp
+    })
+    expect(await invoke('presets:get', undefined)).toEqual(defaultWritingPresets())
+    const next = {
+      active: 'custom' as const,
+      custom: { ...builtinParams('dialogue'), styleInstruction: 'Keep it clipped.' }
+    }
+    expect(await invoke('presets:set', next)).toEqual(next)
+    expect(await invoke('presets:get', undefined)).toEqual(next)
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    expect(await invoke('presets:get', undefined)).toEqual(next)
+  })
+
+  it('refuses a temperature outside 0–1.5 with VALIDATION and keeps the stored value', async () => {
+    await invoke('project:create', { name: 'Presets', format: 'novel', directory: tmp })
+    const raw = handlerFor('presets:set')
+    const defaults = defaultWritingPresets()
+    const result = await raw(undefined, {
+      ...defaults,
+      custom: { ...defaults.custom, temperature: 4 }
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(await invoke('presets:get', undefined)).toEqual(defaults)
   })
 })
 

@@ -16,6 +16,7 @@ import { EditorSettings } from '../editorSettings'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
 import { MatterTemplateId } from '../matterTemplates'
+import { WritingPresets } from '../presets'
 import { SceneMeta } from '../sceneMeta'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
 import { TagTemplateId } from '../tagTemplates'
@@ -232,6 +233,10 @@ export const contract = {
   'aiSettings:get': { input: z.undefined(), output: AiSettings },
   /** Replaces the project's AI settings (F-14.4); a value outside the schema is refused with VALIDATION. */
   'aiSettings:set': { input: AiSettings, output: AiSettings },
+  /** The project's writing presets (F-5.2); a missing or unreadable row answers with the defaults (General). */
+  'presets:get': { input: z.undefined(), output: WritingPresets },
+  /** Replaces the project's writing presets (F-5.2); a value outside the schema is refused with VALIDATION. */
+  'presets:set': { input: WritingPresets, output: WritingPresets },
   /** Every tag of the open project (F-4.1), ordered by name. */
   'tag:list': { input: z.undefined(), output: z.array(Tag) },
   /**

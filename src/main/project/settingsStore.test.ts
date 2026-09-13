@@ -6,10 +6,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AI_SETTINGS_KEY, defaultAiSettings } from '@shared/aiSettings'
 import { EDITOR_SETTINGS_KEY, defaultEditorSettings } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
+import { WRITING_PRESETS_KEY, builtinParams, defaultWritingPresets } from '@shared/presets'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
 import { createProject, projectFolderFor, type ProjectSession } from './projectStore'
-import { getAiSettings, getEditorSettings, setAiSettings, setEditorSettings } from './settingsStore'
+import {
+  getAiSettings,
+  getEditorSettings,
+  getWritingPresets,
+  setAiSettings,
+  setEditorSettings,
+  setWritingPresets
+} from './settingsStore'
 
 let tmp: string
 let session: ProjectSession
@@ -136,5 +144,58 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
     expect(getAiSettings(db)).toEqual(defaultAiSettings())
     setRaw(JSON.stringify({ dial: 3, features: { ghostText: true } }), AI_SETTINGS_KEY)
     expect(getAiSettings(db)).toEqual(defaultAiSettings())
+  })
+})
+
+describe('getWritingPresets / setWritingPresets (F-5.2)', () => {
+  it('answers the defaults (General active, Custom a copy of General) for a new project, which seeds no row', () => {
+    open('novel')
+    expect(rows(WRITING_PRESETS_KEY)).toHaveLength(0)
+    expect(getWritingPresets(db)).toEqual(defaultWritingPresets())
+  })
+
+  it('round-trips a value and overwrites the single row', () => {
+    open('epic')
+    const next = {
+      active: 'custom' as const,
+      custom: { ...builtinParams('action'), styleInstruction: 'Be terse.', temperature: 1.2 }
+    }
+    expect(setWritingPresets(db, next)).toEqual(next)
+    expect(getWritingPresets(db)).toEqual(next)
+    setWritingPresets(db, { ...next, active: 'suspense' })
+    expect(rows(WRITING_PRESETS_KEY)).toHaveLength(1)
+    expect(getWritingPresets(db).active).toBe('suspense')
+  })
+
+  it('refuses an out-of-range value and keeps the stored one', () => {
+    open('novel')
+    const defaults = defaultWritingPresets()
+    expect(() =>
+      setWritingPresets(db, { ...defaults, custom: { ...defaults.custom, temperature: 4 } })
+    ).toThrow()
+    expect(getWritingPresets(db)).toEqual(defaults)
+  })
+
+  it('falls back when the stored value is not JSON', () => {
+    open('novel')
+    setRaw('{not json', WRITING_PRESETS_KEY)
+    expect(getWritingPresets(db)).toEqual(defaultWritingPresets())
+  })
+
+  it('falls back when the stored JSON no longer fits the schema', () => {
+    open('novel')
+    setRaw(
+      JSON.stringify({ active: 'horror', custom: builtinParams('general') }),
+      WRITING_PRESETS_KEY
+    )
+    expect(getWritingPresets(db)).toEqual(defaultWritingPresets())
+    setRaw(
+      JSON.stringify({
+        active: 'custom',
+        custom: { ...builtinParams('general'), maxSuggestionTokens: 500 }
+      }),
+      WRITING_PRESETS_KEY
+    )
+    expect(getWritingPresets(db)).toEqual(defaultWritingPresets())
   })
 })
