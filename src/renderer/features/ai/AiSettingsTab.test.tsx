@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_MODELS,
   type AiErrorCode,
@@ -9,10 +9,12 @@ import {
   type AiTestConnectionResult,
   type AiUsageSummary
 } from '@shared/ai'
+import { defaultAiSettings } from '@shared/aiSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, IpcRequestError, type IpcClient } from '@renderer/lib/ipc'
 import { AiSettingsTab } from './AiSettingsTab'
+import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
 import { resetAiStore, useAiStore } from './aiStore'
 
 const NO_KEY: AiStatus = {
@@ -81,6 +83,10 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
           case 'ai:setDailyCap':
             fake.usage = fake.setDailyCapAnswer((input as { dailyCapUsd: number }).dailyCapUsd)
             return fake.usage as Output<C>
+          case 'aiSettings:get':
+            return defaultAiSettings() as Output<C>
+          case 'aiSettings:set':
+            return input as Output<C>
           default:
             throw new Error(`unexpected ${channel}`)
         }
@@ -104,6 +110,8 @@ const capField = (): HTMLElement => screen.getByLabelText('Daily cap (USD)', { s
 async function open(initial: AiStatus = NO_KEY, usage: AiUsageSummary = NO_USAGE): Promise<void> {
   fake = fakeClient(initial, usage)
   setIpcClient(fake.client)
+  // App.tsx loads the project's AI settings with the tree; the tab only reads them.
+  await useAiSettingsStore.getState().load()
   render(<AiSettingsTab />)
   await waitFor(() => expect(useAiStore.getState().status).not.toBeNull())
   await waitFor(() => expect(useAiStore.getState().usage).not.toBeNull())
@@ -111,17 +119,22 @@ async function open(initial: AiStatus = NO_KEY, usage: AiUsageSummary = NO_USAGE
 
 beforeEach(() => {
   resetAiStore()
+  resetAiSettingsStore()
   useDialogStore.setState({ modals: [], toasts: [] })
+})
+afterEach(() => {
+  resetAiSettingsStore()
 })
 
 describe('AiSettingsTab (F-5.1)', () => {
   it('loads the status on mount and shows the provider, no key, disabled Test and Clear, and the privacy line', async () => {
     await open()
     expect(fake.calls).toEqual([
+      { channel: 'aiSettings:get', input: undefined },
       { channel: 'ai:getStatus', input: undefined },
       { channel: 'ai:usageSummary', input: undefined }
     ])
-    expect(screen.getByText('OpenAI')).toBeInTheDocument()
+    expect(screen.getAllByText('OpenAI').length).toBeGreaterThan(0)
     expect(hint()).toHaveTextContent('No key')
     expect(keyField()).toHaveAttribute('type', 'password')
     expect(keyField()).toBeEnabled()
@@ -138,7 +151,7 @@ describe('AiSettingsTab (F-5.1)', () => {
     expect(button('Save')).toBeEnabled()
     await userEvent.click(button('Save'))
     await waitFor(() => expect(hint()).toHaveTextContent('Key saved: sk-…abcd'))
-    expect(fake.calls[2]).toEqual({ channel: 'ai:setKey', input: { key: 'sk-test-1234abcd' } })
+    expect(fake.calls[3]).toEqual({ channel: 'ai:setKey', input: { key: 'sk-test-1234abcd' } })
     expect(keyField()).toHaveValue('')
     expect(button('Clear')).toBeEnabled()
     expect(button('Test connection')).toBeEnabled()
@@ -148,7 +161,7 @@ describe('AiSettingsTab (F-5.1)', () => {
     await open()
     await userEvent.type(keyField(), '  sk-test-1234abcd  {Enter}')
     await waitFor(() => expect(hint()).toHaveTextContent('Key saved: sk-…abcd'))
-    expect(fake.calls[2]).toEqual({ channel: 'ai:setKey', input: { key: 'sk-test-1234abcd' } })
+    expect(fake.calls[3]).toEqual({ channel: 'ai:setKey', input: { key: 'sk-test-1234abcd' } })
   })
 
   it('clears the key and goes back to no key', async () => {
@@ -156,7 +169,7 @@ describe('AiSettingsTab (F-5.1)', () => {
     expect(hint()).toHaveTextContent('Key saved: sk-…abcd')
     await userEvent.click(button('Clear'))
     await waitFor(() => expect(hint()).toHaveTextContent('No key'))
-    expect(fake.calls[2]).toEqual({ channel: 'ai:clearKey', input: undefined })
+    expect(fake.calls[3]).toEqual({ channel: 'ai:clearKey', input: undefined })
     expect(button('Test connection')).toBeDisabled()
   })
 
@@ -314,7 +327,7 @@ describe('AiSettingsTab usage (F-5.14)', () => {
     expect(screen.getByTestId('ai-usage-today')).toHaveTextContent('$0.00')
     expect(screen.getByTestId('ai-usage-total')).toHaveTextContent('$0.00 · 0 requests · 0 tokens')
     expect(screen.getByText('No AI requests in this project yet.')).toBeInTheDocument()
-    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    expect(screen.queryByRole('table', { name: 'This project by feature' })).not.toBeInTheDocument()
     expect(capField()).toHaveValue(2)
     expect(capField()).toHaveAccessibleDescription(/Every project spends against this cap/)
     expect(screen.getByText('Spent today, all projects')).toBeInTheDocument()
@@ -331,7 +344,7 @@ describe('AiSettingsTab usage (F-5.14)', () => {
     const rows = within(table).getAllByRole('row').slice(1)
     expect(rows.map((row) => row.textContent)).toEqual([
       'Ghost text101,400<$0.01',
-      'Tags214,000$0.75'
+      'Tag suggestions214,000$0.75'
     ])
     expect(capField()).toHaveValue(3.5)
   })

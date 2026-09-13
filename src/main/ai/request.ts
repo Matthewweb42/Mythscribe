@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto'
 import {
-  FEATURE_BUDGETS,
-  FEATURE_INPUT_BUDGETS,
   estimateTokens,
+  inputBudget,
+  outputBudget,
   priceFor,
-  type AiFeature,
+  type AiFeatureId,
   type Tier
 } from '@shared/ai'
 import type { AppStateStore } from '../appState/appStateStore'
@@ -34,10 +34,10 @@ import { insertUsage, type AiDb, type UsageEntry } from './usageStore'
  * new one, but it cannot tell whether the caller's context changed underneath the same hash.
  */
 export interface AiRequestInput {
-  feature: AiFeature
+  feature: AiFeatureId
   tier: Tier
   messages: AiMessage[]
-  /** The feature's own cap; clamped to `FEATURE_BUDGETS[feature]`. */
+  /** The feature's own cap; clamped to `outputBudget(feature)`. */
   maxTokens: number
   json?: boolean
   /** From the context builder: a hash of everything that shaped `messages`. */
@@ -81,14 +81,14 @@ export async function runAiRequest(
 ): Promise<AiRequestResult> {
   const provider = deps.providers.get()
   if (!provider) throw new NoKeyError('No API key is saved.')
-  const maxTokens = Math.min(input.maxTokens, FEATURE_BUDGETS[input.feature])
+  const maxTokens = Math.min(input.maxTokens, outputBudget(input.feature))
   const model = provider.resolveModel(input.tier)
 
   const estimatedIn = estimateTokens(input.messages.map((m) => m.content).join('\n'))
-  const inputBudget = FEATURE_INPUT_BUDGETS[input.feature]
-  if (estimatedIn > inputBudget) {
+  const promptBudget = inputBudget(input.feature)
+  if (estimatedIn > promptBudget) {
     throw new AiBudgetError(
-      `This request is over the ${input.feature} budget (about ${estimatedIn} of ${inputBudget} tokens).`
+      `This request is over the ${input.feature} budget (about ${estimatedIn} of ${promptBudget} tokens).`
     )
   }
 

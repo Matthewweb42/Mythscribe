@@ -12,6 +12,7 @@ import {
 } from '@shared/ipc/contract'
 import { z } from 'zod'
 import { DEFAULT_MODELS } from '@shared/ai'
+import { defaultAiSettings } from '@shared/aiSettings'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_META } from '@shared/sceneMeta'
@@ -564,6 +565,42 @@ describe('editorSettings:get / editorSettings:set', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     expect(await invoke('editorSettings:get', undefined)).toEqual(defaultEditorSettings('novel'))
+  })
+})
+
+describe('aiSettings:get / aiSettings:set (F-14.4)', () => {
+  it('reports NO_PROJECT for both when nothing is open', async () => {
+    await expect(invoke('aiSettings:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('aiSettings:set', defaultAiSettings())).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('answers the defaults (dial Off) for a new project, then what set wrote, also after a reopen', async () => {
+    const created = await invoke('project:create', {
+      name: 'Dial',
+      format: 'novel',
+      directory: tmp
+    })
+    expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
+    const next = {
+      dial: 2 as const,
+      features: { ...defaultAiSettings().features, ghostText: false }
+    }
+    expect(await invoke('aiSettings:set', next)).toEqual(next)
+    expect(await invoke('aiSettings:get', undefined)).toEqual(next)
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    expect(await invoke('aiSettings:get', undefined)).toEqual(next)
+  })
+
+  it('refuses a dial outside 0–3 with VALIDATION and keeps the stored value', async () => {
+    await invoke('project:create', { name: 'Dial', format: 'novel', directory: tmp })
+    const raw = handlerFor('aiSettings:set')
+    const result = await raw(undefined, { ...defaultAiSettings(), dial: 4 })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
   })
 })
 

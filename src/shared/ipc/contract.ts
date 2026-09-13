@@ -9,6 +9,7 @@ import {
   AiUsageSummary,
   DailyCapUsd
 } from '../ai'
+import { AiSettings } from '../aiSettings'
 import { EditorSettings } from '../editorSettings'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
@@ -206,6 +207,10 @@ export const contract = {
   'editorSettings:get': { input: z.undefined(), output: EditorSettings },
   /** Replaces the project's editor formatting (F-3.6); out-of-range values are refused with VALIDATION. */
   'editorSettings:set': { input: EditorSettings, output: EditorSettings },
+  /** The project's AI dial and per-feature toggles (F-14.4); a missing or unreadable row answers with the defaults (dial Off). */
+  'aiSettings:get': { input: z.undefined(), output: AiSettings },
+  /** Replaces the project's AI settings (F-14.4); a value outside the schema is refused with VALIDATION. */
+  'aiSettings:set': { input: AiSettings, output: AiSettings },
   /** Every tag of the open project (F-4.1), ordered by name. */
   'tag:list': { input: z.undefined(), output: z.array(Tag) },
   /**

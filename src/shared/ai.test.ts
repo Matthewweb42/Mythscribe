@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
-  AiFeature,
+  AI_FEATURE_IDS,
   AiUsageSummary,
+  DEFAULT_INPUT_BUDGET,
   DEFAULT_MODELS,
+  DEFAULT_OUTPUT_BUDGET,
   DailyCapUsd,
   FEATURE_BUDGETS,
   FEATURE_INPUT_BUDGETS,
   MODEL_PRICING,
   estimateTokens,
+  inputBudget,
+  outputBudget,
   priceFor
 } from './ai'
 
@@ -45,12 +49,24 @@ describe('estimateTokens', () => {
 })
 
 describe('budgets', () => {
-  it('give every feature an output cap and an input cap', () => {
-    for (const feature of AiFeature.options) {
-      expect(FEATURE_BUDGETS[feature]).toBeGreaterThan(0)
-      expect(FEATURE_INPUT_BUDGETS[feature]).toBeGreaterThan(FEATURE_BUDGETS[feature])
-    }
+  it('give every built feature an output cap and a larger input cap', () => {
     expect(FEATURE_BUDGETS).toEqual({ ghostText: 60, tags: 200, summary: 150 })
+    expect(Object.keys(FEATURE_INPUT_BUDGETS).sort()).toEqual(Object.keys(FEATURE_BUDGETS).sort())
+    for (const feature of AI_FEATURE_IDS) {
+      const out = FEATURE_BUDGETS[feature]
+      if (out === undefined) continue
+      expect(out).toBeGreaterThan(0)
+      expect(FEATURE_INPUT_BUDGETS[feature]).toBeGreaterThan(out)
+    }
+  })
+
+  it('answer a positive default for a feature without its own line, and the line when it exists', () => {
+    expect(DEFAULT_OUTPUT_BUDGET).toBeGreaterThan(0)
+    expect(DEFAULT_INPUT_BUDGET).toBeGreaterThan(DEFAULT_OUTPUT_BUDGET)
+    expect(outputBudget('ghostText')).toBe(60)
+    expect(inputBudget('ghostText')).toBe(1_500)
+    expect(outputBudget('chat')).toBe(DEFAULT_OUTPUT_BUDGET)
+    expect(inputBudget('chat')).toBe(DEFAULT_INPUT_BUDGET)
   })
 
   it('bound the daily cap to 0–500 USD', () => {

@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm'
+import { AI_SETTINGS_KEY, AiSettings, defaultAiSettings } from '@shared/aiSettings'
 import { EDITOR_SETTINGS_KEY, EditorSettings, defaultEditorSettings } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { settings } from '../db/schema'
@@ -29,6 +30,36 @@ export function setEditorSettings(db: TreeDb, value: EditorSettings): EditorSett
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: EDITOR_SETTINGS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the project's AI dial and per-feature toggles (F-14.4) from the `settings` row under
+ * `AI_SETTINGS_KEY`. A missing row, unparsable JSON, or a value that no longer fits the schema
+ * all answer with `defaultAiSettings()` (dial Off): nothing is seeded at creation because the
+ * defaults do not vary by format, and a refused row can never turn a feature on.
+ */
+export function getAiSettings(db: TreeDb): AiSettings {
+  const row = db.select().from(settings).where(eq(settings.key, AI_SETTINGS_KEY)).get()
+  if (!row) return defaultAiSettings()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultAiSettings()
+  }
+  const parsed = AiSettings.safeParse(json)
+  return parsed.success ? parsed.data : defaultAiSettings()
+}
+
+/** Replaces the project's AI settings (upsert on the settings key) and returns what was stored. */
+export function setAiSettings(db: TreeDb, value: AiSettings): AiSettings {
+  const stored = AiSettings.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: AI_SETTINGS_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

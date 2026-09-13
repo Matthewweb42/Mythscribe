@@ -1,0 +1,118 @@
+import { z } from 'zod'
+import { AI_FEATURE_IDS, AiFeatureId } from './ai'
+
+/** Settings-table key under which the AI dial and toggles (F-14.4) are stored as JSON. */
+export const AI_SETTINGS_KEY = 'ai'
+
+/** The AI dial (PLAN.md §2.3), monotonic: each level includes everything below it. */
+export const AiDial = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
+export type AiDial = z.infer<typeof AiDial>
+export const AI_DIAL_LEVELS: readonly AiDial[] = [0, 1, 2, 3]
+
+export const AI_DIAL_LABEL: Record<AiDial, string> = {
+  0: 'Off',
+  1: 'Ask',
+  2: 'Suggest',
+  3: 'Draft'
+}
+
+/** One-line meaning per level (PLAN.md §2.3's table); shown under each radio. */
+export const AI_DIAL_MEANING: Record<AiDial, string> = {
+  0: 'Nothing leaves this machine.',
+  1: 'Queries, summaries, tag suggestions, and critique, on request.',
+  2: 'Adds ghost text and rewrite-in-my-voice.',
+  3: 'Adds multi-paragraph drafting proposals.'
+}
+
+export const AiSettings = z.object({
+  dial: AiDial,
+  /** One toggle per feature; exhaustive, so a stored row from before a feature existed falls back to the defaults. */
+  features: z.record(AiFeatureId, z.boolean())
+})
+export type AiSettings = z.infer<typeof AiSettings>
+
+/** Installs at Off (F-14.4) with every toggle on, so raising the dial is the one act that enables anything. */
+export function defaultAiSettings(): AiSettings {
+  return {
+    dial: 0,
+    features: {
+      ghostText: true,
+      tags: true,
+      summary: true,
+      chat: true,
+      authorMode: true,
+      query: true,
+      critique: true,
+      embeddings: true
+    }
+  }
+}
+
+export interface AiDataSharing {
+  /** How Settings names the feature, in the toggles, the data-sharing table, and the Usage block. */
+  label: string
+  /** Exactly what leaves the machine when the feature runs; the rule "no text the panel does not list" refers to this. */
+  sends: string
+  /** The lowest dial level at which the feature may run. */
+  minDial: AiDial
+}
+
+/**
+ * The one registry of what each feature sends and the dial level it needs (CLAUDE.md, author
+ * control rule 3). `isFeatureAllowed` and the panel's disabled state read the same `minDial`,
+ * so the table can never disagree with the gate. Exhaustive over `AiFeatureId` by type and by
+ * test. `chat` is Plan-mode conversation that drafts nothing into the manuscript, so it sits at
+ * Ask with the other cited, on-request features.
+ */
+export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
+  tags: {
+    label: 'Tag suggestions',
+    sends: "The current document's text and the existing tag names.",
+    minDial: 1
+  },
+  summary: {
+    label: 'Scene summaries',
+    sends: "A scene's text, to generate its summary.",
+    minDial: 1
+  },
+  query: {
+    label: 'Story Intelligence',
+    sends: 'Your question, scene summaries, and the full text of the top matching scenes.',
+    minDial: 1
+  },
+  critique: {
+    label: "Editor's notes",
+    sends: "The scene's text and its scene brief.",
+    minDial: 1
+  },
+  chat: {
+    label: 'Assistant chat',
+    sends: "The active scene's text, any notes pulled in with #Name, and your message.",
+    minDial: 1
+  },
+  embeddings: {
+    label: 'Search indexing',
+    sends: 'Chunks of scene text, to compute embeddings for search.',
+    minDial: 1
+  },
+  ghostText: {
+    label: 'Ghost text',
+    sends: 'The last ~500 characters of text at the caret.',
+    minDial: 2
+  },
+  authorMode: {
+    label: 'Author mode',
+    sends: "The active scene's text, referenced notes, the scene brief, and your instruction.",
+    minDial: 3
+  }
+}
+
+/** The features in display order: by the level they need, then as `AI_FEATURE_IDS` lists them. */
+export const AI_FEATURES_BY_LEVEL: readonly AiFeatureId[] = [...AI_FEATURE_IDS].sort(
+  (a, b) => AI_DATA_SHARING[a].minDial - AI_DATA_SHARING[b].minDial
+)
+
+/** True only when the dial is high enough for `feature` and its own toggle is on. */
+export function isFeatureAllowed(settings: AiSettings, feature: AiFeatureId): boolean {
+  return settings.dial >= AI_DATA_SHARING[feature].minDial && settings.features[feature]
+}

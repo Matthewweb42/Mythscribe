@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FEATURE_BUDGETS, FEATURE_INPUT_BUDGETS, priceFor } from '@shared/ai'
+import { FEATURE_BUDGETS, inputBudget, priceFor } from '@shared/ai'
 import { AppStateStore } from '../appState/appStateStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { getCached, type CacheEntry, type CachedResponse } from './cacheStore'
@@ -163,7 +163,7 @@ describe('runAiRequest (F-5.14)', () => {
 
   it('refuses a prompt over the feature input budget with BUDGET before calling anything', async () => {
     const f = fakes()
-    const huge = 'x'.repeat((FEATURE_INPUT_BUDGETS.tags + 1) * 4)
+    const huge = 'x'.repeat((inputBudget('tags') + 1) * 4)
     await expect(
       runAiRequest(f.deps, { ...input, messages: [{ role: 'user', content: huge }] })
     ).rejects.toMatchObject({ code: 'BUDGET', message: /over the tags budget/ })

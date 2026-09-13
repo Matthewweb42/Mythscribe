@@ -18,7 +18,12 @@ import { getNotes, saveNotes } from '../document/notesStore'
 import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor } from '../project/projectStore'
-import { getEditorSettings, setEditorSettings } from '../project/settingsStore'
+import {
+  getAiSettings,
+  getEditorSettings,
+  setAiSettings,
+  setEditorSettings
+} from '../project/settingsStore'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import { addDocumentTag, listDocumentTags, removeDocumentTag } from '../tag/documentTagStore'
 import { createTag, deleteTag, listTags, loadTagTemplate, updateTag } from '../tag/tagStore'
@@ -137,6 +142,10 @@ export function registerHandlers({
   register('editorSettings:set', (value) =>
     setEditorSettings(manager.require().connection.orm, value)
   )
+
+  register('aiSettings:get', () => getAiSettings(manager.require().connection.orm))
+
+  register('aiSettings:set', (value) => setAiSettings(manager.require().connection.orm, value))
 
   register('tag:list', () => listTags(manager.require().connection.orm))
 

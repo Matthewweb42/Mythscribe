@@ -85,3 +85,10 @@ export class AiFallbackError extends AiProviderError {
 export class AiBudgetError extends AiProviderError {
   readonly code = 'BUDGET' as const
 }
+/**
+ * The AI dial or the feature's own toggle refused the request before anything was sent
+ * (F-14.4, `assertFeatureAllowed`); the next step names the Settings tab that changes it.
+ */
+export class AiDisabledError extends AiProviderError {
+  readonly code = 'DISABLED' as const
+}

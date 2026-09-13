@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defaultAiSettings } from '@shared/aiSettings'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type {
   Channel,
@@ -14,6 +15,7 @@ import type {
 import { defaultLayout } from '@shared/layout'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import {
@@ -61,6 +63,7 @@ beforeEach(() => {
   useNotesStore.getState().clear()
   resetLayoutStore()
   resetEditorSettingsStore()
+  resetAiSettingsStore()
   resetTagStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
@@ -68,6 +71,7 @@ beforeEach(() => {
   vi.stubGlobal('innerWidth', 1000)
 })
 afterEach(() => {
+  resetAiSettingsStore()
   vi.unstubAllGlobals()
 })
 
@@ -91,6 +95,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }
     if (channel === 'notes:get') return { id: (input as { id: string }).id, notes: null }
     if (channel === 'editorSettings:get') return defaultEditorSettings('novel')
+    if (channel === 'aiSettings:get') return defaultAiSettings()
     if (channel === 'layout:get') return defaultLayout()
     if (channel === 'layout:set') return input
     return null
@@ -466,6 +471,21 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
     expect(useEditorSettingsStore.getState().settings).toBeNull()
+  })
+
+  it('loads the AI dial with the project and drops it on close (F-14.4)', async () => {
+    install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture,
+      'aiSettings:get': { ...defaultAiSettings(), dial: 2 }
+    })
+    render(<App />)
+    await screen.findByRole('treeitem', { name: 'Scene 1' })
+    await waitFor(() => expect(useAiSettingsStore.getState().settings?.dial).toBe(2))
+    await userEvent.click(screen.getByRole('button', { name: /close project/i }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    await screen.findByRole('button', { name: /new project/i })
+    expect(useAiSettingsStore.getState().settings).toBeNull()
   })
 
   it('opens the Settings dialog from the header button and shows the Editor tab (F-7.5)', async () => {

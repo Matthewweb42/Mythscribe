@@ -10,6 +10,7 @@ import {
   type Page
 } from '@playwright/test'
 import type { AiStatus, AiUsageSummary } from '../src/shared/ai'
+import type { AiSettings } from '../src/shared/aiSettings'
 import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
 import { matterTemplate } from '../src/shared/matterTemplates'
@@ -406,7 +407,35 @@ test('create, close, reopen a project on disk', async () => {
     'aria-selected',
     'true'
   )
-  await expect(settingsDialog.getByText('OpenAI', { exact: true })).toBeVisible()
+  // F-14.4: the project's AI dial installs at Off, so every feature toggle is locked; Suggest
+  // unlocks ghost text, the level lands in the project's settings table, and it survives
+  // closing the dialog. Back to Off before the key steps so nothing below depends on it.
+  const dial = settingsDialog.getByRole('radiogroup', { name: 'AI dial' })
+  const ghostTextToggle = settingsDialog.getByRole('checkbox', { name: /^Ghost text/ })
+  await expect(dial.getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true')
+  await expect(ghostTextToggle).toBeDisabled()
+  await expect(ghostTextToggle).toHaveAccessibleName('Ghost text (needs Suggest)')
+  expect((await aiSettings()).dial).toBe(0)
+  await dial.getByRole('radio', { name: 'Suggest' }).click()
+  await expect(dial.getByRole('radio', { name: 'Suggest' })).toHaveAttribute('aria-checked', 'true')
+  await expect(ghostTextToggle).toBeEnabled()
+  await expect(ghostTextToggle).toHaveAccessibleName('Ghost text')
+  await expect.poll(async () => (await aiSettings()).dial).toBe(2)
+  await expect(
+    settingsDialog.getByRole('table', { name: 'What each AI feature sends' }).getByRole('row', {
+      name: /^Ghost text /
+    })
+  ).toContainText('OpenAI')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await expect(dial.getByRole('radio', { name: 'Suggest' })).toHaveAttribute('aria-checked', 'true')
+  await expect(ghostTextToggle).toBeEnabled()
+  await dial.getByRole('radio', { name: 'Off' }).click()
+  await expect(ghostTextToggle).toBeDisabled()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(0)
+  await expect(settingsDialog.getByText('OpenAI', { exact: true }).first()).toBeVisible()
   const keyHint = settingsDialog.getByTestId('ai-key-hint')
   const keyField = settingsDialog.getByLabel('API key', { exact: true })
   const testResult = settingsDialog.getByTestId('ai-test-result')
@@ -935,6 +964,15 @@ async function aiStatus(): Promise<AiStatus> {
     () => window.mythscribe.invoke('ai:getStatus', undefined) as Promise<IpcResult<AiStatus>>
   )
   if (!result.ok) throw new Error(result.error.message)
+  return result.data
+}
+
+/** The project's AI dial and toggles (F-14.4) as main reads them from the settings table. */
+async function aiSettings(): Promise<AiSettings> {
+  const result = await page.evaluate<IpcResult<AiSettings>>(
+    () => window.mythscribe.invoke('aiSettings:get', undefined) as Promise<IpcResult<AiSettings>>
+  )
+  if (!result.ok) throw new Error(`aiSettings:get failed: ${result.error.message}`)
   return result.data
 }
 

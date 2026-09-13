@@ -63,7 +63,8 @@ export const AiErrorCode = z.enum([
   'QUOTA',
   'NETWORK',
   'PROVIDER',
-  'BUDGET'
+  'BUDGET',
+  'DISABLED'
 ])
 export type AiErrorCode = z.infer<typeof AiErrorCode>
 
@@ -75,7 +76,8 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
   QUOTA: 'Add credit to your OpenAI account.',
   NETWORK: 'Check your internet connection and retry.',
   PROVIDER: 'Try again in a moment.',
-  BUDGET: 'Raise the daily cap in Settings or wait until tomorrow.'
+  BUDGET: 'Raise the daily cap in Settings or wait until tomorrow.',
+  DISABLED: 'Turn the AI dial up in Settings, or enable the feature there.'
 }
 
 /**
@@ -107,33 +109,62 @@ export function testConnectionFailure(code: AiErrorCode, message: string): AiTes
 }
 
 /**
- * The AI features that spend tokens (F-5.14). Each member is a ledger key and a budget line;
- * a feature joins this enum, `FEATURE_BUDGETS`, and `FEATURE_INPUT_BUDGETS` in the change that
- * builds it (F-5.3 ghost text, F-4.7 tags, F-5.6 summaries), never before.
+ * Every AI feature, built or not (F-5.14, F-14.4), as a tuple so the ledger's `feature` column,
+ * the dial's per-feature toggles, and the data-sharing registry (`AI_DATA_SHARING` in
+ * `aiSettings.ts`) share one owner. The string values are stored in project settings and ledger
+ * rows, so a member is never renamed. A feature's budget lines join `FEATURE_BUDGETS` and
+ * `FEATURE_INPUT_BUDGETS` in the change that builds it (F-5.3 ghost text, F-4.7 tags, F-5.6
+ * summaries, F-5.4 chat, F-5.5 Author mode, F-5.7 queries, F-14.8 critique, F-5.8 embeddings).
  */
-export const AiFeature = z.enum(['ghostText', 'tags', 'summary'])
-export type AiFeature = z.infer<typeof AiFeature>
-
-/** How the Usage block names each feature; a ledger key from a newer build shows as itself. */
-export const AI_FEATURE_LABEL: Record<AiFeature, string> = {
-  ghostText: 'Ghost text',
-  tags: 'Tags',
-  summary: 'Summaries'
-}
-
-/** Hard cap on `max_tokens` per feature (CLAUDE.md, token efficiency rule 6); the request path clamps to it. */
-export const FEATURE_BUDGETS: Record<AiFeature, number> = { ghostText: 60, tags: 200, summary: 150 }
+export const AI_FEATURE_IDS = [
+  'ghostText',
+  'tags',
+  'summary',
+  'chat',
+  'authorMode',
+  'query',
+  'critique',
+  'embeddings'
+] as const
+export const AiFeatureId = z.enum(AI_FEATURE_IDS)
+export type AiFeatureId = z.infer<typeof AiFeatureId>
 
 /**
- * Hard cap on the estimated prompt tokens per feature (CLAUDE.md, token efficiency rule 8):
+ * The output cap for a feature with no `FEATURE_BUDGETS` line yet: short, so a feature that
+ * reaches the request path before its budget is set cannot run long. Not a licence to skip the
+ * line (CLAUDE.md, token efficiency rule 6).
+ */
+export const DEFAULT_OUTPUT_BUDGET = 150
+/** The prompt cap for a feature with no `FEATURE_INPUT_BUDGETS` line yet: one long scene plus the bible context. */
+export const DEFAULT_INPUT_BUDGET = 8_000
+
+/** Hard cap on `max_tokens` per built feature (CLAUDE.md, token efficiency rule 6); the request path clamps to `outputBudget`. */
+export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
+  ghostText: 60,
+  tags: 200,
+  summary: 150
+}
+
+/**
+ * Hard cap on the estimated prompt tokens per built feature (CLAUDE.md, token efficiency rule 8):
  * ghost text sends ~500 characters at the caret plus a short brief; tags and summaries send one
  * scene (a long scene runs ~4 000 words) plus the bible context. A request over its cap is
  * refused with `BUDGET` before anything is sent; trimming to fit is the context builder's job.
  */
-export const FEATURE_INPUT_BUDGETS: Record<AiFeature, number> = {
+export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   ghostText: 1_500,
   tags: 8_000,
   summary: 8_000
+}
+
+/** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */
+export function outputBudget(feature: AiFeatureId): number {
+  return FEATURE_BUDGETS[feature] ?? DEFAULT_OUTPUT_BUDGET
+}
+
+/** The feature's prompt-token cap, or `DEFAULT_INPUT_BUDGET` until its line exists. */
+export function inputBudget(feature: AiFeatureId): number {
+  return FEATURE_INPUT_BUDGETS[feature] ?? DEFAULT_INPUT_BUDGET
 }
 
 /** USD per million tokens for one model; `priced: false` marks a model this table does not know. */
