@@ -4,6 +4,10 @@ import type { UsageTotals } from '@shared/ai'
 export const formatUsd = (usd: number): string =>
   usd > 0 && usd < 0.005 ? '<$0.01' : `$${usd.toFixed(2)}`
 
+/** One request's cost (F-4.7's note): four decimals, since a single fast-tier call is well under a cent. */
+export const formatRequestCost = (usd: number): string =>
+  usd > 0 && usd < 0.00005 ? '<$0.0001' : `$${usd.toFixed(4)}`
+
 /** A thousands-grouped count, with the unit pluralized when one is given. */
 export const formatCount = (n: number, unit?: string): string => {
   const digits = n.toLocaleString('en-US')

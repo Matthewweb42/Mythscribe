@@ -104,9 +104,27 @@ export const AiTestConnectionResult = z.discriminatedUnion('ok', [
 ])
 export type AiTestConnectionResult = z.infer<typeof AiTestConnectionResult>
 
-export function testConnectionFailure(code: AiErrorCode, message: string): AiTestConnectionResult {
+/** The failure branch every `ai:*` channel answers as data: the code, its message, and the next step. */
+export function aiFailure(
+  code: AiErrorCode,
+  message: string
+): { ok: false; code: AiErrorCode; message: string; nextStep: string } {
   return { ok: false, code, message, nextStep: AI_NEXT_STEP[code] }
 }
+
+export function testConnectionFailure(code: AiErrorCode, message: string): AiTestConnectionResult {
+  return aiFailure(code, message)
+}
+
+/** The provider's token count for one request, as the result of a feature channel carries it. */
+export const AiUsage = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative()
+})
+export type AiUsage = z.infer<typeof AiUsage>
+
+/** Characters of plain text a document needs before tag suggestions can be asked for (F-4.7). */
+export const TAGS_MIN_CHARS = 50
 
 /**
  * Every AI feature, built or not (F-5.14, F-14.4), as a tuple so the ledger's `feature` column,

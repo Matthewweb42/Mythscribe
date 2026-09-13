@@ -9,10 +9,13 @@ import {
   FEATURE_BUDGETS,
   FEATURE_INPUT_BUDGETS,
   MODEL_PRICING,
+  TAGS_MIN_CHARS,
+  aiFailure,
   estimateTokens,
   inputBudget,
   outputBudget,
-  priceFor
+  priceFor,
+  testConnectionFailure
 } from './ai'
 
 describe('priceFor (F-5.14)', () => {
@@ -81,5 +84,20 @@ describe('budgets', () => {
     const summary = { today: zero, total: zero, byFeature: [], dailyCapUsd: 2 }
     expect(AiUsageSummary.safeParse(summary).success).toBe(true)
     expect(AiUsageSummary.safeParse({ ...summary, dailyCapUsd: 501 }).success).toBe(false)
+  })
+})
+
+describe('aiFailure', () => {
+  it('pairs the code and message with the next step, and testConnectionFailure is the same shape', () => {
+    expect(aiFailure('DISABLED', 'Tag suggestions is turned off for this project.')).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Tag suggestions is turned off for this project.',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.'
+    })
+    expect(testConnectionFailure('NO_KEY', 'No API key is saved.')).toEqual(
+      aiFailure('NO_KEY', 'No API key is saved.')
+    )
+    expect(TAGS_MIN_CHARS).toBe(50)
   })
 })

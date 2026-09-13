@@ -1,14 +1,18 @@
 import { app } from 'electron'
 import {
+  aiFailure,
   testConnectionFailure,
   type AiStatus,
   type AiTestConnectionResult,
   type AiUsageSummary
 } from '@shared/ai'
+import type { AiRecommendTagsResult } from '@shared/ipc/contract'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
 import type { AiKeyStore } from '../ai/keyStore'
 import { AiProviderError, NoKeyError } from '../ai/providers/types'
+import { recommendTags } from '../ai/recommendTags'
 import type { AiProviderRegistry } from '../ai/registry'
+import { buildAiRequestDeps } from '../ai/request'
 import { ledgerSummary } from '../ai/usageStore'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
@@ -244,6 +248,19 @@ export function registerHandlers({
   register('ai:setDailyCap', ({ dailyCapUsd }) => {
     appState.update((s) => ({ ...s, aiUsage: { ...s.aiUsage, dailyCapUsd } }))
     return usageSummary()
+  })
+
+  // F-4.7: the AI failures are data with a next step, like `ai:testConnection`; NOT_FOUND and
+  // VALIDATION (unknown id, folder, too little text) are `AppError`s and take the envelope.
+  register('ai:recommendTags', async ({ nodeId }): Promise<AiRecommendTagsResult> => {
+    try {
+      const db = manager.require().connection.orm
+      const deps = buildAiRequestDeps({ db, providers: ai, appState })
+      return { ok: true, ...(await recommendTags(db, deps, nodeId)) }
+    } catch (err) {
+      if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
+      throw err
+    }
   })
 
   register('window:close', () => {

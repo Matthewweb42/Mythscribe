@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`tags.v1 prompt (F-4.7) > matches the golden messages for the fixture and asks for the tags output budget 1`] = `
+[
+  {
+    "content": "You are tagging a scene for a fiction writer's tag bank. Pick 3 to 8 tag names from the bank that best fit the passage; never invent a name that is not in the bank. If fewer than 3 genuinely fit, return only the ones that do. Reply with JSON only: {"tags": ["name", ...]}.",
+    "role": "system",
+  },
+  {
+    "content": "Tag bank: dark-forest, protagonist, melancholy
+
+Passage:
+The storm broke at dusk over the dark forest. Mara pulled her cloak tight and counted the lightning gaps, each one shorter than the last. Somewhere ahead, past the black trunks, the river she had to cross was rising.",
+    "role": "user",
+  },
+]
+`;

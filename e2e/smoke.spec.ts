@@ -67,6 +67,29 @@ function startFakeOpenAi(): Promise<string> {
       )
       return
     }
+    // `POST /v1/chat/completions` (F-4.7) answers every prompt with the same two bank tags:
+    // dark-forest is already linked to Scene 1 by then, so only protagonist becomes a chip.
+    if (req.method === 'POST' && (req.url ?? '').endsWith('/chat/completions')) {
+      req.resume()
+      res.statusCode = 200
+      res.end(
+        JSON.stringify({
+          id: 'chatcmpl-fake',
+          object: 'chat.completion',
+          created: 0,
+          model: 'gpt-5.4-mini',
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: '{"tags":["dark-forest","protagonist"]}' },
+              finish_reason: 'stop'
+            }
+          ],
+          usage: { prompt_tokens: 400, completion_tokens: 12, total_tokens: 412 }
+        })
+      )
+      return
+    }
     // `GET /v1/models/<id>` echoes the requested id, so the AI tab's "answered" line names the
     // model the fast tier is configured with (F-5.11).
     const id = (req.url ?? '').split('/').pop() ?? ''
@@ -892,6 +915,70 @@ test('create, close, reopen a project on disk', async () => {
   await scene1.click()
   await expect(tokens).toHaveText(['#dark-forest'])
   await expect(inlineList.getByRole('listitem')).toHaveText(['dark-forest ×1'])
+
+  // F-4.7: Recommend. Scene 1 already carries more than 50 characters; a sentence typed now
+  // is flushed by the click, so the request sends the live text. With the dial at Off the
+  // request is refused before anything leaves and the reason and next step show inline. At
+  // Ask, with the key saved again, the fake server names dark-forest (linked, so filtered)
+  // and protagonist; accepting the one chip links it, and the Usage block shows one request.
+  const recommend = tagBar.getByRole('button', { name: 'Recommend' })
+  await editor.click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' The river she had to cross was rising fast.')
+  await expect(recommend).toBeEnabled()
+  const requestsBefore = openAiRequests.length
+  await recommend.click()
+  const recommendResult = tagBar.getByTestId('tag-recommend-result')
+  await expect(recommendResult).toHaveText(
+    'Tag suggestions needs the AI dial at Ask or higher (it is at Off). Turn the AI dial up in Settings, or enable the feature there.'
+  )
+  expect(openAiRequests).toHaveLength(requestsBefore)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await dial.getByRole('radio', { name: 'Ask' }).click()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(1)
+  await keyField.fill(ACCEPTED_KEY)
+  await settingsDialog.getByRole('button', { name: 'Save' }).click()
+  await expect(keyHint).toHaveText('Key saved: sk-…wxyz')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await recommend.click()
+  const suggestedList = tagBar.getByRole('list', { name: 'Suggested tags' })
+  await expect(suggestedList.getByRole('listitem')).toHaveText(['protagonist'])
+  await expect(recommendResult).toHaveCount(0)
+  await expect(tagBar.getByTestId('tag-recommend-cost')).toHaveText('gpt-5.4-mini · $0.0001')
+  expect(openAiRequests.at(-1)).toEqual({
+    url: '/v1/chat/completions',
+    auth: `Bearer ${ACCEPTED_KEY}`
+  })
+  await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest', 'stormfront'])
+  await tagBar.getByRole('button', { name: 'Accept protagonist' }).click()
+  await expect(chipList.getByRole('listitem')).toHaveText([
+    'dark-forest',
+    'stormfront',
+    'protagonist'
+  ])
+  await expect(suggestedList).toHaveCount(0)
+  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await categories.getByRole('tab', { name: 'All' }).click()
+  await expect(tagRows.getByRole('button', { name: /^protagonist/ })).toHaveText(
+    'protagonist 1 use'
+  )
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  const spent = await usageSummary()
+  expect(spent.total).toMatchObject({ requests: 1, tokens: 412 })
+  expect(spent.total.costUsd).toBeGreaterThan(0)
+  expect(spent.byFeature).toEqual([{ feature: 'tags', ...spent.total }])
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await expect(usageTotal).toHaveText('<$0.01 · 1 request · 412 tokens')
+  // Back to Off and no key, as the steps above left them.
+  await dial.getByRole('radio', { name: 'Off' }).click()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(0)
+  await settingsDialog.getByRole('button', { name: 'Clear' }).click()
+  await expect(keyHint).toHaveText('No key')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
 
   // F-1.4: choosing something that is not a project explains what to pick instead.
   await closeProject()

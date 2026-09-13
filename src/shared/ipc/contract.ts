@@ -2,10 +2,12 @@ import { z } from 'zod'
 import {
   AI_KEY_MAX,
   AI_KEY_MIN,
+  AiErrorCode,
   AiModelMap,
   AiProviderId,
   AiStatus,
   AiTestConnectionResult,
+  AiUsage,
   AiUsageSummary,
   DailyCapUsd
 } from '../ai'
@@ -90,6 +92,25 @@ export const Tag = z.object({
   modified: z.string()
 })
 export type Tag = z.infer<typeof Tag>
+
+/**
+ * What `ai:recommendTags` answers (F-4.7): the bank tags the model picked that are not yet on
+ * the document, with what the request cost (`cached` when the local cache answered), or an
+ * expected AI failure as data with its next step, like `AiTestConnectionResult`.
+ */
+export const AiRecommendTagsResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    suggestions: z.array(Tag),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    promptVersion: z.string()
+  }),
+  z.object({ ok: z.literal(false), code: AiErrorCode, message: z.string(), nextStep: z.string() })
+])
+export type AiRecommendTagsResult = z.infer<typeof AiRecommendTagsResult>
 
 export const contract = {
   'app:info': {
@@ -314,6 +335,13 @@ export const contract = {
   'ai:usageSummary': { input: z.undefined(), output: AiUsageSummary },
   /** Replaces the app-wide daily spend cap (F-5.14); outside 0–500 USD is VALIDATION. */
   'ai:setDailyCap': { input: z.object({ dailyCapUsd: DailyCapUsd }), output: AiUsageSummary },
+  /**
+   * Asks the AI for tags from the bank that fit a document's text (F-4.7); nothing is linked
+   * until the author accepts a suggestion. NOT_FOUND for an unknown id, VALIDATION for a folder
+   * or a document under `TAGS_MIN_CHARS` of text; the AI failures (no key, dial, budget, ...)
+   * come back as data with a next step so the tag bar shows them inline.
+   */
+  'ai:recommendTags': { input: z.object({ nodeId: z.string() }), output: AiRecommendTagsResult },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },
   /** The renderer could not flush, so the close it was asked for (and any quit behind it) is abandoned. */

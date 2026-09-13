@@ -8,7 +8,8 @@ import {
   type Channel,
   type Input,
   type IpcResult,
-  type Output
+  type Output,
+  type Tag
 } from '@shared/ipc/contract'
 import { z } from 'zod'
 import { DEFAULT_MODELS } from '@shared/ai'
@@ -20,7 +21,13 @@ import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
 import { AiKeyStore } from '../ai/keyStore'
 import { fakeSafeStorage } from '../ai/keyStoreFixture'
-import { AiProviderError, InvalidKeyError, type Provider } from '../ai/providers/types'
+import {
+  AiProviderError,
+  InvalidKeyError,
+  type CompletionRequest,
+  type CompletionResult,
+  type Provider
+} from '../ai/providers/types'
 import { AiProviderRegistry } from '../ai/registry'
 import { insertUsage } from '../ai/usageStore'
 import { AppStateStore } from '../appState/appStateStore'
@@ -46,6 +53,8 @@ let safe: ReturnType<typeof fakeSafeStorage>
 let keyFile: string
 /** What the fake provider's `testConnection` does; the registry builds it for any saved key. */
 let testConnection: ReturnType<typeof vi.fn<() => Promise<{ model: string }>>>
+/** What the fake provider's `complete` answers (F-4.7); tests replace it per case. */
+let complete: ReturnType<typeof vi.fn<(request: CompletionRequest) => Promise<CompletionResult>>>
 
 const dialogs: ProjectDialogs = {
   chooseProjectSavePath: async () => null,
@@ -64,10 +73,17 @@ beforeEach(() => {
   testConnection = vi.fn<() => Promise<{ model: string }>>(() =>
     Promise.resolve({ model: 'gpt-fake' })
   )
+  complete = vi.fn<(request: CompletionRequest) => Promise<CompletionResult>>(() =>
+    Promise.resolve({
+      text: '{"tags":["dark-forest","protagonist"]}',
+      model: 'gpt-fake',
+      usage: { inputTokens: 40, outputTokens: 10 }
+    })
+  )
   const provider: Provider = {
     id: 'openai',
     resolveModel: () => 'gpt-fake',
-    complete: () => Promise.reject(new Error('not under test')),
+    complete,
     stream: async function* () {},
     testConnection
   }
@@ -997,6 +1013,108 @@ describe('ai handlers (F-5.1)', () => {
     if (!result.ok) expect(result.error.code).toBe('INTERNAL')
     vi.restoreAllMocks()
     expect(new InvalidKeyError('x')).toBeInstanceOf(AiProviderError)
+  })
+})
+
+describe('ai:recommendTags (F-4.7)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const LONG = 'The storm broke at dusk over the dark forest, and Mara counted the lightning gaps.'
+
+  /** A project with a scene of enough text, the dial at Ask, and two bank tags. */
+  async function ready(): Promise<{ scene: string; folder: string; forest: Tag; hero: Tag }> {
+    await invoke('project:create', { name: 'Rec', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    const folder = rows.find((r) => r.kind === 'folder' && r.sectionType === null)
+    if (!scene || !folder) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: LONG }] }]
+      }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    const forest = await invoke('tag:create', { name: 'Dark Forest', category: 'setting' })
+    const hero = await invoke('tag:create', { name: 'Protagonist', category: 'character' })
+    return { scene: scene.id, folder: folder.id, forest, hero }
+  }
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('ai:recommendTags', { nodeId: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers the unlinked bank tags the model named, with the cost, and logs one ledger row', async () => {
+    const { scene, forest, hero } = await ready()
+    await invoke('ai:setKey', { key: KEY })
+    await invoke('documentTag:add', { nodeId: scene, tagId: forest.id })
+    const result = await invoke('ai:recommendTags', { nodeId: scene })
+    expect(result).toEqual({
+      ok: true,
+      suggestions: [hero],
+      usage: { inputTokens: 40, outputTokens: 10 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      promptVersion: 'tags.v1'
+    })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(complete.mock.calls[0]![0]).toMatchObject({ tier: 'fast', json: true, maxTokens: 200 })
+    expect((await invoke('ai:usageSummary', undefined)).total.requests).toBe(1)
+    // Nothing was linked by the suggestion itself.
+    expect(await invoke('documentTag:list', { nodeId: scene })).toEqual([
+      { ...forest, usageCount: 1 }
+    ])
+  })
+
+  it('answers each expected AI failure as data with its next step', async () => {
+    const { scene } = await ready()
+    expect(await invoke('ai:recommendTags', { nodeId: scene })).toEqual({
+      ok: false,
+      code: 'NO_KEY',
+      message: 'No API key is saved.',
+      nextStep: 'Add a key above and save it.'
+    })
+    await invoke('ai:setKey', { key: KEY })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 0 })
+    expect(await invoke('ai:recommendTags', { nodeId: scene })).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Tag suggestions needs the AI dial at Ask or higher (it is at Off).',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.'
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    complete.mockRejectedValueOnce(new InvalidKeyError('OpenAI rejected the API key.'))
+    expect(await invoke('ai:recommendTags', { nodeId: scene })).toEqual({
+      ok: false,
+      code: 'INVALID_KEY',
+      message: 'OpenAI rejected the API key.',
+      nextStep: 'Check the key and try again.'
+    })
+    // A provider failure writes nothing, so the next call reaches the provider again.
+    complete.mockResolvedValueOnce({
+      text: 'not json',
+      model: 'gpt-fake',
+      usage: { inputTokens: 1, outputTokens: 1 }
+    })
+    expect(await invoke('ai:recommendTags', { nodeId: scene })).toEqual({
+      ok: false,
+      code: 'PROVIDER',
+      message: 'The model did not answer in the expected format.',
+      nextStep: 'Try again in a moment.'
+    })
+    expect(complete).toHaveBeenCalledTimes(2)
+  })
+
+  it('lets a folder and an unknown id reach the error envelope as VALIDATION and NOT_FOUND', async () => {
+    const { folder } = await ready()
+    const onFolder = await handlerFor('ai:recommendTags')(undefined, { nodeId: folder })
+    expect(onFolder.ok).toBe(false)
+    if (!onFolder.ok) expect(onFolder.error.code).toBe('VALIDATION')
+    const unknown = await handlerFor('ai:recommendTags')(undefined, { nodeId: 'nope' })
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    expect(complete).not.toHaveBeenCalled()
   })
 })
 

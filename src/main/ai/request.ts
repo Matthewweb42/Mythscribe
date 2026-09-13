@@ -175,7 +175,8 @@ export function cacheKey(
   )
 }
 
-function sha256(text: string): string {
+/** Hex SHA-256; the cache key and the callers' `contextHash` share it. */
+export function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }
 

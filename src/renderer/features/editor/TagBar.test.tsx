@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
+import type { AiRecommendTagsResult, Channel, Input, Output, Tag } from '@shared/ipc/contract'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import {
@@ -78,6 +78,37 @@ const options = (): string[] =>
     .getAllByRole('option')
     .map((o) => o.textContent ?? '')
 const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.message)
+
+/** A document of `n` characters in one paragraph, put in the document store for `id`. */
+function loadText(id: string, n: number): void {
+  act(() => {
+    useDocumentStore.setState({
+      docs: {
+        [id]: {
+          content: {
+            type: 'doc',
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x'.repeat(n) }] }]
+          },
+          dirty: false
+        }
+      }
+    })
+  })
+}
+const recommendButton = (): HTMLElement => within(bar()).getByRole('button', { name: 'Recommend' })
+const suggestionNames = (): string[] =>
+  within(within(bar()).getByRole('list', { name: 'Suggested tags' }))
+    .getAllByRole('listitem')
+    .map((chip) => chip.querySelector('span:not([aria-hidden])')?.textContent ?? '')
+const suggested = (...ids: string[]): AiRecommendTagsResult => ({
+  ok: true,
+  suggestions: ids.map((id) => tagFixture.find((t) => t.id === id)!),
+  usage: { inputTokens: 40, outputTokens: 10 },
+  costUsd: 0.0012,
+  cached: false,
+  model: 'gpt-5.4-mini',
+  promptVersion: 'tags.v1'
+})
 
 /** Renders the bar for `id` once the bank is loaded, and waits for its links. */
 async function mount(id = 'sc-1'): Promise<ReturnType<typeof render>> {
@@ -344,5 +375,203 @@ describe('TagBar (F-4.4)', () => {
     })
     expect(useLayoutStore.getState().layout.tagBar.split).toBeLessThan(0.4)
     expect(useLayoutStore.getState().layout.tagBar.split).toBeGreaterThanOrEqual(0.3)
+  })
+
+  describe('Recommend (F-4.7)', () => {
+    it('is disabled with a title until the live text has 50 characters; a folder never has any', async () => {
+      install()
+      await mount()
+      expect(recommendButton()).toBeDisabled()
+      expect(recommendButton()).toHaveAttribute(
+        'title',
+        'Add at least 50 characters to get tag suggestions'
+      )
+      loadText('sc-1', 49)
+      expect(recommendButton()).toBeDisabled()
+      loadText('sc-1', 50)
+      expect(recommendButton()).toBeEnabled()
+      expect(recommendButton()).not.toHaveAttribute('title')
+    })
+
+    it('asks main once, shows a spinner while pending, then chips for the unlinked bank tags with the cost note', async () => {
+      let resolve: (result: AiRecommendTagsResult) => void = () => {}
+      const calls = install({
+        'ai:recommendTags': () =>
+          new Promise<AiRecommendTagsResult>((r) => {
+            resolve = r
+          })
+      })
+      await mount()
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      expect(recommendButton()).toBeDisabled()
+      expect(recommendButton().querySelector('.animate-spin')).not.toBeNull()
+      expect(within(bar()).getByRole('status')).toHaveTextContent('Asking for tag suggestions…')
+      expect(calls.filter(([channel]) => channel === 'ai:recommendTags')).toEqual([
+        ['ai:recommendTags', { nodeId: 'sc-1' }]
+      ])
+      await act(async () => {
+        resolve(suggested('t-mara', 't-moody'))
+      })
+      expect(recommendButton()).toBeEnabled()
+      expect(suggestionNames()).toEqual(['mara', 'moody'])
+      expect(screen.getByTestId('tag-recommend-cost')).toHaveTextContent('gpt-5.4-mini · $0.0012')
+      expect(screen.getByTestId('tag-recommend-cost')).not.toHaveTextContent('cached')
+      // The linked chips are untouched: nothing enters the document without an accept.
+      expect(chipNames().filter((n) => n.startsWith('Remove'))).toEqual(['Remove dark-forest'])
+      expect(calls.filter(([channel]) => channel === 'documentTag:add')).toHaveLength(0)
+    })
+
+    it('accepting a chip links it and removes the chip; the last accept clears the result', async () => {
+      const calls = install({ 'ai:recommendTags': () => suggested('t-mara', 't-moody') })
+      await mount()
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara', 'moody']))
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Accept moody' }))
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara']))
+      expect(calls.at(-1)).toEqual(['documentTag:add', { nodeId: 'sc-1', tagId: 't-moody' }])
+      expect(
+        within(within(bar()).getByRole('list', { name: 'Document tags' })).getAllByRole('listitem')
+      ).toHaveLength(2)
+      expect(useTagStore.getState().byId['t-moody']?.usageCount).toBe(1)
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Accept mara' }))
+      await waitFor(() =>
+        expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      )
+      expect(useDocumentTagStore.getState().tagIdsByNode['sc-1']).toEqual([
+        't-forest',
+        't-moody',
+        't-mara'
+      ])
+    })
+
+    it('Accept all links every remaining chip and clears the result; Dismiss clears without linking', async () => {
+      const calls = install({ 'ai:recommendTags': () => suggested('t-mara', 't-moody') })
+      await mount()
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara', 'moody']))
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Dismiss' }))
+      expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      expect(calls.filter(([channel]) => channel === 'documentTag:add')).toHaveLength(0)
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara', 'moody']))
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Accept all' }))
+      await waitFor(() =>
+        expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      )
+      expect(calls.filter(([channel]) => channel === 'documentTag:add')).toEqual([
+        ['documentTag:add', { nodeId: 'sc-1', tagId: 't-mara' }],
+        ['documentTag:add', { nodeId: 'sc-1', tagId: 't-moody' }]
+      ])
+      expect(useDocumentTagStore.getState().tagIdsByNode['sc-1']).toEqual([
+        't-forest',
+        't-mara',
+        't-moody'
+      ])
+    })
+
+    it('a failed link toasts and keeps the chip', async () => {
+      install({
+        'ai:recommendTags': () => suggested('t-mara'),
+        'documentTag:add': () => {
+          throw new IpcRequestError({ code: 'NOT_FOUND', message: 'Tag not found' })
+        }
+      })
+      await mount()
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara']))
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Accept mara' }))
+      await waitFor(() => expect(toasts()).toEqual(['Tag not found']))
+      expect(suggestionNames()).toEqual(['mara'])
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Accept all' }))
+      await waitFor(() => expect(toasts()).toEqual(['Tag not found', 'Tag not found']))
+      expect(suggestionNames()).toEqual(['mara'])
+    })
+
+    it('shows an expected failure inline with its next step, "No new tags fit." with the cached note, and toasts a transport error', async () => {
+      const results: AiRecommendTagsResult[] = [
+        {
+          ok: false,
+          code: 'DISABLED',
+          message: 'Tag suggestions is turned off for this project.',
+          nextStep: 'Turn the AI dial up in Settings, or enable the feature there.'
+        },
+        {
+          ok: true,
+          suggestions: [],
+          usage: { inputTokens: 0, outputTokens: 0 },
+          costUsd: 0,
+          cached: true,
+          model: 'gpt-5.4-mini',
+          promptVersion: 'tags.v1'
+        }
+      ]
+      install({
+        'ai:recommendTags': () => {
+          const next = results.shift()
+          if (!next) throw new IpcRequestError({ code: 'INTERNAL', message: 'bridge down' })
+          return next
+        }
+      })
+      await mount()
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      await waitFor(() =>
+        expect(screen.getByTestId('tag-recommend-result')).toHaveTextContent(
+          'Tag suggestions is turned off for this project. Turn the AI dial up in Settings, or enable the feature there.'
+        )
+      )
+      expect(screen.getByTestId('tag-recommend-result')).toHaveClass('text-danger')
+      await userEvent.click(recommendButton())
+      await waitFor(() =>
+        expect(screen.getByTestId('tag-recommend-result')).toHaveTextContent('No new tags fit.')
+      )
+      expect(screen.getByTestId('tag-recommend-cost')).toHaveTextContent(
+        'gpt-5.4-mini · $0.0000 · cached'
+      )
+      expect(within(bar()).queryByRole('button', { name: 'Accept all' })).not.toBeInTheDocument()
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(toasts()).toEqual(['bridge down']))
+      expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      expect(recommendButton()).toBeEnabled()
+    })
+
+    it('flushes unsaved typing before asking, so main sends what the author sees', async () => {
+      const calls = install({
+        'ai:recommendTags': () => suggested('t-mara'),
+        'document:save': () => ({ wordCount: 1, modified: '2026-09-13T10:00:00.000Z' })
+      })
+      await mount()
+      loadText('sc-1', 80)
+      act(() => {
+        useDocumentStore.getState().edit('sc-1', {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'y'.repeat(80) }] }]
+        })
+      })
+      expect(useDocumentStore.getState().docs['sc-1']?.dirty).toBe(true)
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara']))
+      const order = calls.map(([channel]) => channel)
+      expect(order.indexOf('document:save')).toBeGreaterThan(-1)
+      expect(order.indexOf('document:save')).toBeLessThan(order.indexOf('ai:recommendTags'))
+      expect(useDocumentStore.getState().docs['sc-1']?.dirty).toBe(false)
+    })
+
+    it('switching documents drops the result without a new request', async () => {
+      const calls = install({ 'ai:recommendTags': () => suggested('t-mara') })
+      const view = await mount()
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara']))
+      view.rerender(<TagBar id="sc-2" />)
+      await waitFor(() => expect(useDocumentTagStore.getState().tagIdsByNode['sc-2']).toEqual([]))
+      expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      expect(recommendButton()).toBeDisabled()
+      expect(calls.filter(([channel]) => channel === 'ai:recommendTags')).toHaveLength(1)
+    })
   })
 })
