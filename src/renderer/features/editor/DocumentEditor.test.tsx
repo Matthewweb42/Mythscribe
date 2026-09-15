@@ -190,6 +190,41 @@ afterEach(() => {
   resetVoiceStore()
 })
 
+describe('DocumentEditor status bar AI share (F-14.6)', () => {
+  const markedDoc = (): TiptapNodeT => ({
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Into the' },
+          {
+            type: 'text',
+            text: ' dark',
+            marks: [{ type: 'aiOrigin', attrs: { proposalId: 'p1', accepted: 5 } }]
+          }
+        ]
+      }
+    ]
+  })
+
+  it('shows the live percentage of AI-origin characters, and nothing for a document without any', async () => {
+    await mountReady({ 'document:get': () => ({ id: 'sc-1', content: markedDoc() }) })
+    expect(screen.getByTestId('status-ai')).toHaveTextContent('38% AI')
+    expect(box().querySelectorAll('.ai-origin[data-proposal-id="p1"]')).toHaveLength(1)
+    await userEvent.keyboard(' woods')
+    await waitFor(() => expect(screen.getByTestId('status-ai')).toHaveTextContent('26% AI'))
+    expect(screen.getByTestId('status-words')).toHaveTextContent('4 words')
+  })
+
+  it('shows no share for a document without AI text', async () => {
+    await mountReady()
+    expect(screen.queryByTestId('status-ai')).not.toBeInTheDocument()
+    await userEvent.keyboard(' woods')
+    expect(screen.queryByTestId('status-ai')).not.toBeInTheDocument()
+  })
+})
+
 describe('DocumentEditor inline tags (F-4.6)', () => {
   it('typing # opens the suggestions at the caret; Tab inserts the token plus a space and links the tag', async () => {
     const calls = await mountReady()

@@ -1174,6 +1174,11 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('Tab')
   await expect(ghost).toHaveCount(0)
   await expect(editor).toContainText(`Mara waited on the ridge. ${GHOST_CONTINUATION}`)
+  // F-14.6: the accepted text carries the proposal it came from and the status bar shows the
+  // scene's AI share.
+  const aiSpan = editor.locator('.ai-origin[data-proposal-id]')
+  await expect(aiSpan).toHaveText(GHOST_CONTINUATION)
+  await expect(page.getByTestId('status-ai')).toHaveText(/^[1-9]\d*% AI$/)
   const afterGhost = await usageSummary()
   expect(afterGhost.total.requests).toBe(3)
   expect(afterGhost.byFeature.find((f) => f.feature === 'ghostText')).toMatchObject({
@@ -1186,6 +1191,8 @@ test('create, close, reopen a project on disk', async () => {
   await expect(ghost).toHaveCount(0)
   await expect(editor).toContainText('Nobody answered him.')
   expect(((await editor.textContent()) ?? '').split(GHOST_CONTINUATION)).toHaveLength(2)
+  // F-14.6: text typed at the span's edge is the author's; the span is unchanged.
+  await expect(aiSpan).toHaveText(GHOST_CONTINUATION)
 
   // F-14.7: the fidelity check. The passage now ends with the sentinel the fake server answers
   // in present tense, first person; the manuscript is past, third, so the answer is scored off-voice locally,
@@ -1241,6 +1248,34 @@ test('create, close, reopen a project on disk', async () => {
     /[1-9]\d* scenes under 200 words were skipped\./
   )
   expect(openAiRequests).toHaveLength(requestsBeforeReport)
+  // F-14.6: the Provenance section counts the accepted continuation in Scene 1 and nothing
+  // else; the disclosure report is written where the (stubbed) save dialog points. No request
+  // leaves for either.
+  const provenance = settingsDialog.getByTestId('provenance-section')
+  await expect(provenance.getByTestId('provenance-percent')).toContainText(
+    /[1-9]\d*% of the manuscript is AI-origin/
+  )
+  const aiScenes = provenance
+    .getByRole('list', { name: 'AI origin by scene' })
+    .getByRole('listitem')
+  await expect(aiScenes).toHaveCount(1)
+  await expect(aiScenes.first()).toContainText('Scene 1')
+  await expect(aiScenes.first()).toContainText('1 proposal')
+  const disclosurePath = path.join(tmp, 'disclosure.md')
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
+  }, disclosurePath)
+  await provenance.getByRole('button', { name: 'Export disclosure report' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Saved to' })).toContainText(
+    `Saved to ${disclosurePath}`
+  )
+  const disclosure = fs.readFileSync(disclosurePath, 'utf8')
+  expect(disclosure).toContain('# AI disclosure: Smoke Novel')
+  // The accepted text is the continuation plus the two spaces the join at the caret added.
+  expect(disclosure).toMatch(
+    new RegExp(`\\| Scene 1 \\| ${GHOST_CONTINUATION.length + 2} \\| [\\d,]+ \\| [1-9]\\d*% \\|`)
+  )
+  expect(openAiRequests).toHaveLength(requestsBeforeReport)
   // Back to Off and no key, as the steps above left them.
   await dial.getByRole('radio', { name: 'Off' }).click()
   await expect.poll(async () => (await aiSettings()).dial).toBe(0)
@@ -1248,6 +1283,29 @@ test('create, close, reopen a project on disk', async () => {
   await expect(keyHint).toHaveText('No key')
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
+
+  // F-14.6: once the author has rewritten more than half of what they accepted, what is left
+  // is theirs: the mark goes and the status bar share with it. The span may wrap across lines,
+  // so the selection is set on its text node directly (ProseMirror reads the DOM selection on
+  // `selectionchange`), and one Delete removes 25 of the 41 accepted characters.
+  await editor.click()
+  await aiSpan.evaluate((el) => {
+    const text = el.firstChild
+    if (!(text instanceof Text)) throw new Error('expected the span to hold a text node')
+    const range = document.createRange()
+    range.setStart(text, 0)
+    range.setEnd(text, 25)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  })
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+    .toBe(` ${GHOST_CONTINUATION}`.slice(0, 25))
+  await page.keyboard.press('Delete')
+  await expect(aiSpan).toHaveCount(0)
+  await expect(page.getByTestId('status-ai')).toHaveCount(0)
+  await expect(editor).toContainText(GHOST_CONTINUATION.slice(25))
 
   // F-1.4: choosing something that is not a project explains what to pick instead.
   await closeProject()

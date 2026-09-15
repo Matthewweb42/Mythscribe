@@ -26,4 +26,13 @@ describe('StatusBar (F-3.3)', () => {
     expect(screen.getByTestId('status-words')).toHaveTextContent('1,200 words')
     expect(screen.queryByTestId('status-delta')).not.toBeInTheDocument()
   })
+
+  it('shows the AI share only above zero (F-14.6)', () => {
+    const { unmount } = render(<StatusBar words={9} aiPercent={38} />)
+    expect(screen.getByTestId('status-ai')).toHaveTextContent('38% AI')
+    unmount()
+    render(<StatusBar words={9} aiPercent={0} />)
+    expect(screen.queryByTestId('status-ai')).not.toBeInTheDocument()
+    expect(screen.getByTestId('status-words')).toHaveTextContent('9 words')
+  })
 })

@@ -7,6 +7,15 @@ export interface ProjectDialogs {
   chooseProjectSavePath: (name: string) => Promise<string | null>
   /** Returns the project folder (or project.db) the user chose, or null if cancelled. */
   chooseProjectToOpen: () => Promise<string | null>
+  /**
+   * Returns the file path the user chose for an export (F-14.6), or null if cancelled.
+   * `defaultName` lands in `directory` when given, else the MythScribe documents folder.
+   */
+  chooseExportPath: (
+    defaultName: string,
+    filters: Electron.FileFilter[],
+    directory?: string
+  ) => Promise<string | null>
 }
 
 export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDialogs {
@@ -31,6 +40,20 @@ export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDia
       )
       if (result.canceled) return null
       return result.filePaths[0] ?? null
+    },
+    async chooseExportPath(defaultName, filters, directory) {
+      const options: Electron.SaveDialogOptions = {
+        title: 'Export',
+        defaultPath: path.join(directory ?? defaultDir(), defaultName),
+        buttonLabel: 'Export',
+        filters,
+        properties: ['createDirectory', 'showOverwriteConfirmation']
+      }
+      const result = await show((win) =>
+        win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options)
+      )
+      if (result.canceled || !result.filePath) return null
+      return result.filePath
     }
   }
 }

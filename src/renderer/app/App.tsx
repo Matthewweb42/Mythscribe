@@ -18,6 +18,7 @@ import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { usePresetsStore } from '@renderer/features/ai/presetsStore'
+import { useProvenanceStore } from '@renderer/features/ai/provenanceStore'
 import { useVoiceStore } from '@renderer/features/ai/voiceStore'
 import { useEditorSettingsStore } from '@renderer/features/editor/settingsStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -65,7 +66,8 @@ export function App(): React.JSX.Element {
   // bank, whose failure toasts on its own and never blocks the tree. F-4.4: and the document
   // tag links, loaded per document by the tag bar. F-4.5: and the scene metadata, loaded per
   // node by the metadata pane. F-14.4: and the AI dial and toggles. F-5.2: and the writing
-  // presets. F-14.1: and the voice exemplars (the toolbar button needs the count).
+  // presets. F-14.1: and the voice exemplars (the toolbar button needs the count). F-14.6: the
+  // provenance report is loaded by its section on demand and only cleared here.
   useEffect(() => {
     const tree = useTreeStore.getState()
     if (projectId === null) {
@@ -77,6 +79,7 @@ export function App(): React.JSX.Element {
       useAiSettingsStore.getState().clear()
       usePresetsStore.getState().clear()
       useVoiceStore.getState().clear()
+      useProvenanceStore.getState().clear()
       useTagStore.getState().clear()
       useDocumentTagStore.getState().clear()
       return

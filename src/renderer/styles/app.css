@@ -189,6 +189,16 @@ select {
   user-select: none;
 }
 
+/*
+ * Provenance (F-14.6): text accepted from an AI proposal. A dotted underline in the subtle
+ * tone, nothing louder: the manuscript is the author's.
+ */
+.ms-editor .ai-origin {
+  text-decoration: underline dotted var(--ms-fg-subtle);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 0.2em;
+}
+
 /* F-14.7: a suggestion that failed the voice fidelity check. */
 .ms-editor .ghost-text[data-flagged='true'] {
   text-decoration: underline wavy var(--ms-warning);

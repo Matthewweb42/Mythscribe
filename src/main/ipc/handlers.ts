@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { app } from 'electron'
 import {
   aiFailure,
@@ -23,7 +25,9 @@ import { getDocumentContent, saveDocument } from '../document/documentStore'
 import { getNotes, saveNotes } from '../document/notesStore'
 import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
 import type { ProjectManager } from '../project/manager'
-import { isProjectFolder, projectFolderFor } from '../project/projectStore'
+import { isProjectFolder, projectFolderFor, sanitizeName } from '../project/projectStore'
+import { renderDisclosure } from '../provenance/disclosure'
+import { buildProvenanceReport } from '../provenance/report'
 import {
   getAiSettings,
   getEditorSettings,
@@ -374,6 +378,23 @@ export function registerHandlers({
     buildConsistencyReport(manager.require().connection.orm, { pov })
   )
 
+  // F-14.6: the provenance ledger, read from the saved documents; local and on demand.
+  register('provenance:report', () => buildProvenanceReport(manager.require().connection.orm))
+
+  register('provenance:export', async () => {
+    const session = manager.require()
+    const report = buildProvenanceReport(session.connection.orm)
+    const text = renderDisclosure(report, { projectName: session.info.name, date: new Date() })
+    const chosen = await dialogs.chooseExportPath(
+      `${sanitizeName(session.info.name)}-ai-disclosure.md`,
+      [{ name: 'Markdown', extensions: ['md'] }],
+      path.dirname(session.folder)
+    )
+    if (chosen === null) return null
+    writeTextAtomic(chosen, text)
+    return { path: chosen }
+  })
+
   register('window:close', () => {
     manager.close()
     for (const w of windows()) if (!w.isDestroyed()) w.close()
@@ -397,4 +418,11 @@ export function registerHandlers({
     }
     emit(windows(), 'project:changed', info)
   })
+}
+
+/** Writes through a sibling temp file and renames, as the app-state store does, so a failed write leaves no half file. */
+function writeTextAtomic(file: string, text: string): void {
+  const tmp = `${file}.tmp`
+  fs.writeFileSync(tmp, text, 'utf8')
+  fs.renameSync(tmp, file)
 }

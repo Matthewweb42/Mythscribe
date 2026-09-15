@@ -202,6 +202,30 @@ export const VoiceConsistencyReport = z.object({
 })
 export type VoiceConsistencyReport = z.infer<typeof VoiceConsistencyReport>
 
+/**
+ * The provenance ledger (F-14.6) as `provenance:report` answers it: how much of the manuscript
+ * carries the `aiOrigin` mark, counted in characters of text (`src/shared/provenance.ts` is the
+ * one owner of the counting), per manuscript document in tree order and for the project.
+ */
+export const ProvenanceReport = z.object({
+  /** `aiChars / totalChars` of the whole manuscript as a whole percent; 0 for an empty one. */
+  projectPercent: z.number().int().min(0).max(100),
+  aiChars: z.number().int().nonnegative(),
+  totalChars: z.number().int().nonnegative(),
+  documents: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      aiChars: z.number().int().nonnegative(),
+      totalChars: z.number().int().nonnegative(),
+      percent: z.number().int().min(0).max(100),
+      /** Distinct proposals with text still marked in this document. */
+      proposals: z.number().int().nonnegative()
+    })
+  )
+})
+export type ProvenanceReport = z.infer<typeof ProvenanceReport>
+
 export const contract = {
   'app:info': {
     input: z.undefined(),
@@ -506,6 +530,18 @@ export const contract = {
     input: z.object({ pov: z.string().optional() }),
     output: VoiceConsistencyReport
   },
+  /**
+   * The provenance report (F-14.6): every manuscript document's AI-origin characters and the
+   * project total, read from the saved documents (the renderer flushes first). Local, on
+   * demand, no AI call.
+   */
+  'provenance:report': { input: z.undefined(), output: ProvenanceReport },
+  /**
+   * Writes the disclosure report (F-14.6) as Markdown where the author picks through a save
+   * dialog (default `<Project>-ai-disclosure.md` beside the project folder) and answers the
+   * path; null when the dialog is cancelled.
+   */
+  'provenance:export': { input: z.undefined(), output: z.object({ path: z.string() }).nullable() },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },
   /** The renderer could not flush, so the close it was asked for (and any quit behind it) is abandoned. */

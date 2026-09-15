@@ -1,7 +1,9 @@
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state'
+import { AddMarkStep, RemoveMarkStep } from '@tiptap/pm/transform'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { SettledStatus } from '@shared/proposal'
+import { markAiOrigin } from './aiOrigin'
 
 /**
  * The suggestion while it is showing (F-5.3): the text still to accept and the document
@@ -19,6 +21,10 @@ export interface GhostState {
   flagged: boolean
   /** The first violation in plain language when flagged ("switches to present tense"), else null. */
   violation: string | null
+  /** The proposal behind the suggestion (F-14.5); accepted text is marked with it (F-14.6). Null inserts unmarked. */
+  proposalId: string | null
+  /** Characters accepted through Tab or Shift+Tab so far: the `accepted` baseline the mark carries (F-14.6). */
+  acceptedChars: number
 }
 
 /**
@@ -57,8 +63,14 @@ interface GhostPluginState {
 const EMPTY: GhostPluginState = { ghost: null, exit: null }
 
 type GhostMeta =
-  | { type: 'set'; text: string; flagged: boolean; violation: string | null }
-  | { type: 'advance'; text: string; from: number }
+  | {
+      type: 'set'
+      text: string
+      flagged: boolean
+      violation: string | null
+      proposalId: string | null
+    }
+  | { type: 'advance'; text: string; from: number; acceptedChars: number }
   | { type: 'accept' }
   | { type: 'clear' }
 
@@ -74,9 +86,15 @@ declare module '@tiptap/core' {
     ghostText: {
       /**
        * Show `text` at the caret; false for empty text. `flagged` with the `violation` marks a
-       * suggestion that failed the voice fidelity check (F-14.7) so the widget shows the badge.
+       * suggestion that failed the voice fidelity check (F-14.7) so the widget shows the badge;
+       * `proposalId` is what accepted text is marked with (F-14.6), null inserts it unmarked.
        */
-      setGhost: (text: string, flagged?: boolean, violation?: string | null) => ReturnType
+      setGhost: (
+        text: string,
+        flagged?: boolean,
+        violation?: string | null,
+        proposalId?: string | null
+      ) => ReturnType
       /** Drop the suggestion without inserting anything; false when none is showing. */
       clearGhost: () => ReturnType
       /** Insert the whole remaining suggestion as plain text with the caret's marks (Tab). */
@@ -131,7 +149,9 @@ function applyMeta(tr: Transaction, meta: GhostMeta, ghost: GhostState | null): 
           full: meta.text,
           from: tr.selection.from,
           flagged: meta.flagged,
-          violation: meta.violation
+          violation: meta.violation,
+          proposalId: meta.proposalId,
+          acceptedChars: 0
         },
         exit
       }
@@ -139,7 +159,15 @@ function applyMeta(tr: Transaction, meta: GhostMeta, ghost: GhostState | null): 
     case 'advance':
       return ghost === null
         ? EMPTY
-        : { ghost: { ...ghost, text: meta.text, from: meta.from }, exit: null }
+        : {
+            ghost: {
+              ...ghost,
+              text: meta.text,
+              from: meta.from,
+              acceptedChars: meta.acceptedChars
+            },
+            exit: null
+          }
     case 'accept':
       return ghost === null ? EMPTY : ended(ghost, true)
     case 'clear':
@@ -162,6 +190,11 @@ function apply(tr: Transaction, value: GhostPluginState): GhostPluginState {
   if (meta !== undefined) return applyMeta(tr, meta, ghost)
   if (ghost === null) return value.exit === null ? value : EMPTY
   if (tr.docChanged) {
+    // A mark-only change (the provenance plugin stripping a mark, F-14.6) neither types nor
+    // moves anything: the suggestion stays.
+    if (tr.steps.every((step) => step instanceof AddMarkStep || step instanceof RemoveMarkStep)) {
+      return value.exit === null ? value : { ghost, exit: null }
+    }
     if (!tr.selection.empty) return ended(ghost, false)
     // Map the anchor to stay before text inserted exactly there (assoc -1), so what was typed
     // at it lies between the anchor and the caret.
@@ -201,6 +234,20 @@ function renderGhost(ghost: GhostState): HTMLElement {
 const NEXT_WORD = /^(\s*\S+)(\s?)/
 
 /**
+ * Inserts `text` at the suggestion's anchor and, when it belongs to a proposal, marks it as
+ * AI-origin with the running total of what the author has accepted from it (F-14.6).
+ */
+function insertAccepted(tr: Transaction, ghost: GhostState, text: string): void {
+  tr.insertText(text, ghost.from)
+  if (ghost.proposalId !== null) {
+    markAiOrigin(tr, ghost.from, ghost.from + text.length, {
+      proposalId: ghost.proposalId,
+      accepted: ghost.acceptedChars + text.length
+    })
+  }
+}
+
+/**
  * VibeWrite's ghost text (F-5.3): a widget decoration at the caret holding the AI's proposed
  * continuation, entirely in plugin state; a suggestion the fidelity check flagged (F-14.7)
  * renders with a warning badge that names the violation and keeps it through word-by-word
@@ -209,8 +256,9 @@ const NEXT_WORD = /^(\s*\S+)(\s?)/
  * clears it, as does moving the caret, leaving the editor, or starting an IME composition
  * (a composed insert lands in one step and cannot be matched character by character). The
  * accept commands insert plain text through an ordinary transaction, so the document store,
- * autosave, and undo treat the accepted text like typing. Nothing here decides when to ask
- * for a suggestion: the controller does, and it calls `setGhost`.
+ * autosave, and undo treat the accepted text like typing; what they insert carries the
+ * AI-origin mark of the suggestion's proposal (F-14.6), text the author types along does not.
+ * Nothing here decides when to ask for a suggestion: the controller does, and it calls `setGhost`.
  *
  * Every shown suggestion is a proposal (F-14.5): whichever path takes it off the screen (an
  * accept, Escape, blur, a composition, a mismatching edit, a moved caret, a replacement, or
@@ -226,11 +274,11 @@ export const GhostText = Extension.create<Record<string, never>, GhostTextStorag
   addCommands() {
     return {
       setGhost:
-        (text, flagged = false, violation = null) =>
+        (text, flagged = false, violation = null, proposalId = null) =>
         ({ tr, dispatch }) => {
           if (!text) return false
           if (dispatch) {
-            const meta: GhostMeta = { type: 'set', text, flagged, violation }
+            const meta: GhostMeta = { type: 'set', text, flagged, violation, proposalId }
             tr.setMeta(GHOST_TEXT_KEY, meta)
           }
           return true
@@ -248,7 +296,7 @@ export const GhostText = Extension.create<Record<string, never>, GhostTextStorag
           const ghost = ghostOf(state)
           if (ghost === null) return false
           if (dispatch) {
-            tr.insertText(ghost.text, ghost.from)
+            insertAccepted(tr, ghost, ghost.text)
             tr.setMeta(GHOST_TEXT_KEY, { type: 'accept' } satisfies GhostMeta)
             tr.scrollIntoView()
           }
@@ -264,9 +312,14 @@ export const GhostText = Extension.create<Record<string, never>, GhostTextStorag
           const chunk = `${match[1] ?? ''}${match[2] ?? ''}`
           const remaining = ghost.text.slice(chunk.length)
           if (dispatch) {
-            tr.insertText(chunk, ghost.from)
+            insertAccepted(tr, ghost, chunk)
             const meta: GhostMeta = remaining
-              ? { type: 'advance', text: remaining, from: ghost.from + chunk.length }
+              ? {
+                  type: 'advance',
+                  text: remaining,
+                  from: ghost.from + chunk.length,
+                  acceptedChars: ghost.acceptedChars + chunk.length
+                }
               : { type: 'accept' }
             tr.setMeta(GHOST_TEXT_KEY, meta)
             tr.scrollIntoView()

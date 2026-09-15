@@ -443,12 +443,20 @@ describe('useGhostTextController (F-5.3)', () => {
       expect(ghostText()).toBe(text ?? ' Rain followed.')
     }
 
-    it('Tab settles accepted, once, with no note', async () => {
+    it('Tab settles accepted, once, with no note, and the text carries the proposal (F-14.6)', async () => {
       mount()
       await show()
       press('Tab')
       expect(editor.getText()).toBe(`${CONTENT}${ENOUGH} Rain followed.`)
       expect(settles).toEqual([{ id: 'prop-1', status: 'accepted', note: null }])
+      expect(editor.getJSON().content?.[0]?.content).toEqual([
+        { type: 'text', text: `${CONTENT}${ENOUGH}` },
+        {
+          type: 'text',
+          text: ' Rain followed.',
+          marks: [{ type: 'aiOrigin', attrs: { proposalId: 'prop-1', accepted: 15 } }]
+        }
+      ])
       type('zz')
       press('Escape')
       expect(settles).toHaveLength(1)
@@ -490,13 +498,21 @@ describe('useGhostTextController (F-5.3)', () => {
       ])
     })
 
-    it('an answer without a proposal id has nothing to settle', async () => {
+    it('an answer without a proposal id has nothing to settle, and its text is inserted unmarked', async () => {
       mount()
       type(ENOUGH)
       await idle()
       await answer(ok('1', '', undefined, null))
       expect(ghostText()).toBeNull()
       press('Escape')
+      expect(settles).toEqual([])
+      type('b'.repeat(GHOST_MIN_NEW_CHARS))
+      await idle()
+      await answer(ok('2', ' Wind rose.', undefined, null))
+      press('Tab')
+      expect(editor.getJSON().content?.[0]?.content).toEqual([
+        { type: 'text', text: `${CONTENT}${ENOUGH}${'b'.repeat(GHOST_MIN_NEW_CHARS)} Wind rose.` }
+      ])
       expect(settles).toEqual([])
     })
   })

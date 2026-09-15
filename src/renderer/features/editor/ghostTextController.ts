@@ -103,7 +103,8 @@ interface GhostSessionDeps {
  *
  * A shown suggestion is a proposal (F-14.5): the session keeps its id while it shows and
  * settles it (never with a note; Escape stays silent) when the extension reports how it left
- * the screen. Answers without a proposal id (an empty suggestion) have nothing to settle.
+ * the screen; the extension marks what it inserts with the same id (F-14.6). Answers without
+ * a proposal id (an empty suggestion) have nothing to settle.
  */
 function startGhostSession(deps: GhostSessionDeps): () => void {
   const { editor, nodeId, now } = deps
@@ -164,7 +165,10 @@ function startGhostSession(deps: GhostSessionDeps): () => void {
     }
     deps.onError(null)
     // Set the id after the command: a suggestion this one replaces settles under its own id first.
-    if (result.text && editor.commands.setGhost(result.text, result.flagged, result.violation)) {
+    if (
+      result.text &&
+      editor.commands.setGhost(result.text, result.flagged, result.violation, result.proposalId)
+    ) {
       shownProposalId = result.proposalId
     }
   }

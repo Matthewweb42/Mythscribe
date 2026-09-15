@@ -3,6 +3,7 @@ import type { Editor } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
 import type { NovelFormat } from '@shared/ipc/contract'
+import { aiOriginPercent, aiOriginStats } from '@shared/provenance'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
 import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
@@ -244,7 +245,8 @@ function RegionEditor({
  * The status bar of a single document (F-3.3): counts the editor's current content live, with
  * the same `countWords` main caches on save, so the figure never waits for the autosave. While
  * the document is still loading the tree's saved count stands in. The session delta is measured
- * from the tree's baseline, so a document created this session counts as all new.
+ * from the tree's baseline, so a document created this session counts as all new. The AI share
+ * (F-14.6) comes from the same live count and shows only once the document is loaded.
  */
 function DocumentStatusBar({
   id,
@@ -255,18 +257,24 @@ function DocumentStatusBar({
 }): React.JSX.Element {
   const saved = useTreeStore((s) => s.wordCountRollup[id] ?? 0)
   const baseline = useTreeStore((s) => s.sessionBaseline[id] ?? 0)
-  const live = useLiveWordCount(editor)
-  const words = live ?? saved
-  return <StatusBar words={words} delta={words - baseline} />
+  const live = useLiveDocStats(editor)
+  const words = live?.words ?? saved
+  return <StatusBar words={words} delta={words - baseline} aiPercent={live?.aiPercent} />
+}
+
+/** What the status bar reads live from the editor: the word count and the AI-origin share (F-14.6). */
+interface LiveDocStats {
+  words: number
+  aiPercent: number
 }
 
 /**
- * The editor's word count, recounted only when the document changes: the snapshot is cached by
- * the ProseMirror document's identity, which selection-only transactions leave untouched, so a
- * long scene is never re-serialized on a caret move. Null without an editor.
+ * The editor's word count and AI-origin share, recounted only when the document changes: the
+ * snapshot is cached by the ProseMirror document's identity, which selection-only transactions
+ * leave untouched, so a long scene is never re-serialized on a caret move. Null without an editor.
  */
-function useLiveWordCount(editor: Editor | null): number | null {
-  const cache = useRef<{ doc: unknown; count: number } | null>(null)
+function useLiveDocStats(editor: Editor | null): LiveDocStats | null {
+  const cache = useRef<{ doc: unknown; stats: LiveDocStats } | null>(null)
   const subscribe = useCallback(
     (notify: () => void) => {
       if (!editor) return () => undefined
@@ -281,10 +289,14 @@ function useLiveWordCount(editor: Editor | null): number | null {
     if (!editor) return null
     const doc: unknown = editor.state.doc
     const hit = cache.current
-    if (hit !== null && hit.doc === doc) return hit.count
-    const fresh = { doc, count: countWords(editor.getJSON()) }
+    if (hit !== null && hit.doc === doc) return hit.stats
+    const json = editor.getJSON()
+    const fresh = {
+      doc,
+      stats: { words: countWords(json), aiPercent: aiOriginPercent(aiOriginStats(json)) }
+    }
     cache.current = fresh
-    return fresh.count
+    return fresh.stats
   }, [editor])
   return useSyncExternalStore(subscribe, getSnapshot)
 }

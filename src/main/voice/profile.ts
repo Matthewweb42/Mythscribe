@@ -2,7 +2,7 @@ import { docToText } from '@shared/docText'
 import type { VoiceExemplar, VoiceProfile } from '@shared/ipc/contract'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import { computeStylometrics, renderVoiceRules } from '@shared/stylometry'
-import { TiptapNode } from '@shared/tiptap'
+import { TiptapNode, type TiptapNodeT } from '@shared/tiptap'
 import { voiceConfidence } from '@shared/voice'
 import type { NodeRow } from '../db/schema'
 import { listNodes, type TreeDb } from '../tree/treeStore'
@@ -86,15 +86,21 @@ export function manuscriptDocuments(db: TreeDb): NodeRow[] {
 
 /** The plain text of a stored document; '' for an empty or unreadable row, never a throw (one corrupt row must not break every request). */
 export function documentText(row: NodeRow): string {
-  if (row.content === null) return ''
+  const json = documentJson(row)
+  return json === null ? '' : docToText(json)
+}
+
+/** The stored document as Tiptap JSON; null for an empty or unreadable row, never a throw. The provenance report (F-14.6) parses the same way. */
+export function documentJson(row: NodeRow): TiptapNodeT | null {
+  if (row.content === null) return null
   let json: unknown
   try {
     json = JSON.parse(row.content)
   } catch {
-    return ''
+    return null
   }
   const parsed = TiptapNode.safeParse(json)
-  return parsed.success ? docToText(parsed.data) : ''
+  return parsed.success ? parsed.data : null
 }
 
 /** POV-matching exemplars first (when a POV was asked for), insertion order otherwise; stable. */

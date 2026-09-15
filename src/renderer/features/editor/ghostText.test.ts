@@ -1,4 +1,5 @@
 import { Editor } from '@tiptap/core'
+import { closeHistory } from '@tiptap/pm/history'
 import { Plugin } from '@tiptap/pm/state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
@@ -59,7 +60,9 @@ describe('GhostText extension (F-5.3)', () => {
       full: SUGGESTION,
       from: CONTENT.length + 1,
       flagged: false,
-      violation: null
+      violation: null,
+      proposalId: null,
+      acceptedChars: 0
     })
     expect(widget()?.dataset.flagged).toBe('false')
     expect(widget()?.querySelector(`.${GHOST_TEXT_FLAG_CLASS}`)).toBeNull()
@@ -92,9 +95,11 @@ describe('GhostText extension (F-5.3)', () => {
     expect(widget()?.textContent).toBe('followed. Then silence.')
     expect(ghostOf(editor.state)?.from).toBe(editor.state.selection.from)
     expect(ghostOf(editor.state)?.full).toBe(SUGGESTION)
+    expect(ghostOf(editor.state)?.acceptedChars).toBe(' Rain '.length)
     press('Tab', true)
     expect(text()).toBe(`${CONTENT} Rain followed. `)
     expect(widget()?.textContent).toBe('Then silence.')
+    expect(ghostOf(editor.state)?.acceptedChars).toBe(' Rain followed. '.length)
     press('Tab', true)
     press('Tab', true)
     expect(text()).toBe(CONTENT + SUGGESTION)
@@ -109,7 +114,9 @@ describe('GhostText extension (F-5.3)', () => {
       full: SUGGESTION,
       from: CONTENT.length + 1,
       flagged: true,
-      violation
+      violation,
+      proposalId: null,
+      acceptedChars: 0
     })
     expect(widget()?.dataset.flagged).toBe('true')
     const flag = widget()?.querySelector<HTMLElement>(`.${GHOST_TEXT_FLAG_CLASS}`)
@@ -135,6 +142,30 @@ describe('GhostText extension (F-5.3)', () => {
     expect(
       widget()?.querySelector<HTMLElement>(`.${GHOST_TEXT_FLAG_CLASS}`)?.getAttribute('aria-label')
     ).toBe('Voice warning: does not match the voice profile')
+  })
+
+  it('carries the proposal id, and accepted text is marked with it (F-14.6); typing along is not', () => {
+    expect(editor.commands.setGhost(SUGGESTION, false, null, 'prop-1')).toBe(true)
+    expect(ghostOf(editor.state)).toMatchObject({ proposalId: 'prop-1', acceptedChars: 0 })
+    editor.commands.insertContent(' Rain')
+    expect(ghostOf(editor.state)).toMatchObject({
+      text: ' followed. Then silence.',
+      acceptedChars: 0
+    })
+    // History groups adjacent edits within 500 ms; end the group so the accept is its own undo step.
+    editor.view.dispatch(closeHistory(editor.state.tr))
+    press('Tab')
+    expect(text()).toBe(CONTENT + SUGGESTION)
+    expect(editor.getJSON().content?.[0]?.content).toEqual([
+      { type: 'text', text: `${CONTENT} Rain` },
+      {
+        type: 'text',
+        text: ' followed. Then silence.',
+        marks: [{ type: 'aiOrigin', attrs: { proposalId: 'prop-1', accepted: 24 } }]
+      }
+    ])
+    editor.commands.undo()
+    expect(text()).toBe(`${CONTENT} Rain`)
   })
 
   it('Escape clears without inserting; Tab and Escape fall through when nothing is showing', () => {

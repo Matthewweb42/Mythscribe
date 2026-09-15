@@ -59,14 +59,25 @@ let testConnection: ReturnType<typeof vi.fn<() => Promise<{ model: string }>>>
 /** What the fake provider's `complete` answers (F-4.7); tests replace it per case. */
 let complete: ReturnType<typeof vi.fn<(request: CompletionRequest) => Promise<CompletionResult>>>
 
+/** What the fake export dialog answers (F-14.6); null cancels. Tests set it per case. */
+let exportPath: string | null
+/** The default name and directory the last export dialog was asked for. */
+let exportAsked: { defaultName: string; directory: string | undefined } | null
+
 const dialogs: ProjectDialogs = {
   chooseProjectSavePath: async () => null,
-  chooseProjectToOpen: async () => null
+  chooseProjectToOpen: async () => null,
+  chooseExportPath: async (defaultName, _filters, directory) => {
+    exportAsked = { defaultName, directory }
+    return exportPath
+  }
 }
 
 beforeEach(() => {
   vi.mocked(ipcMain.handle).mockClear()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-handlers-'))
+  exportPath = null
+  exportAsked = null
   manager = new ProjectManager()
   fakeWin = { close: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } }
   onCloseCancelled = vi.fn<() => void>()
@@ -1610,5 +1621,76 @@ describe('voice handlers (F-14.1)', () => {
     await invoke('project:close', undefined)
     await ready('Second')
     expect((await invoke('voice:profile', {})).exemplars).toEqual([])
+  })
+})
+
+describe('provenance handlers (F-14.6)', () => {
+  const marked = (mine: string, theirs: string): Input<'document:save'>['content'] => ({
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: mine },
+          {
+            type: 'text',
+            text: theirs,
+            marks: [{ type: 'aiOrigin', attrs: { proposalId: 'p1', accepted: theirs.length } }]
+          }
+        ]
+      }
+    ]
+  })
+
+  async function ready(name = 'Ledger'): Promise<string> {
+    await invoke('project:create', { name, format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    return scene.id
+  }
+
+  it('reports NO_PROJECT for both when nothing is open', async () => {
+    await expect(invoke('provenance:report', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('provenance:export', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('reports the marked characters of the saved documents in tree order', async () => {
+    const scene = await ready()
+    await invoke('document:save', { id: scene, content: marked('Mine. ', 'Theirs, kept.') })
+    const report = await invoke('provenance:report', undefined)
+    const rows = await invoke('tree:list', undefined)
+    const manuscriptDocs = rows.filter((r) => r.kind === 'document' && r.hierarchyLevel !== null)
+    expect(report.documents.map((d) => d.id)).toEqual(manuscriptDocs.map((r) => r.id))
+    expect(report.documents.find((d) => d.id === scene)).toEqual({
+      id: scene,
+      title: 'Scene 1',
+      aiChars: 13,
+      totalChars: 19,
+      percent: 68,
+      proposals: 1
+    })
+    expect(report).toMatchObject({ projectPercent: 68, aiChars: 13, totalChars: 19 })
+  })
+
+  it('exports the disclosure to the chosen path, defaulting beside the project folder', async () => {
+    const scene = await ready('My Book')
+    await invoke('document:save', { id: scene, content: marked('Mine. ', 'Theirs, kept.') })
+    exportPath = path.join(tmp, 'out', 'disclosure.md')
+    fs.mkdirSync(path.dirname(exportPath), { recursive: true })
+    expect(await invoke('provenance:export', undefined)).toEqual({ path: exportPath })
+    expect(exportAsked).toEqual({ defaultName: 'My Book-ai-disclosure.md', directory: tmp })
+    const text = fs.readFileSync(exportPath, 'utf8')
+    expect(text).toContain('# AI disclosure: My Book')
+    expect(text).toContain('| Scene 1 | 13 | 19 | 68% |')
+    expect(text).toContain('**AI-origin text:** 68% of the manuscript (13 of 19 characters).')
+    expect(fs.existsSync(`${exportPath}.tmp`)).toBe(false)
+  })
+
+  it('answers null and writes nothing when the dialog is cancelled', async () => {
+    await ready()
+    expect(await invoke('provenance:export', undefined)).toBeNull()
+    expect(exportAsked?.defaultName).toBe('Ledger-ai-disclosure.md')
+    expect(fs.readdirSync(tmp).filter((f) => f.endsWith('.md'))).toEqual([])
   })
 })
