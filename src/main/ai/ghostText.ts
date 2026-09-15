@@ -6,6 +6,8 @@ import { getSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
 import { getAiSettings, getWritingPresets } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
+import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
+import { voiceBlock } from '../voice/voiceBlock'
 import { assertFeatureAllowed } from './dial'
 import { buildGhostTextPrompt } from './prompts/ghostText.v1'
 import type { CompletionUsage } from './providers/types'
@@ -32,14 +34,17 @@ export interface GhostTextResult {
 /**
  * The ghost-text use case (F-5.3): checks the AI dial first (nothing is read or sent below
  * Suggest or with the feature toggled off), gathers the scene's notes and metadata as the
- * context the data-sharing panel lists, builds `ghostText.v1` with the active writing preset
- * (F-5.2), runs it through the one request path (`fast` tier, the preset's temperature, at
- * most 60 tokens), and post-processes the answer into a one-or-two-sentence continuation.
- * The voice profile slot is empty until F-14.1; the fidelity check (F-14.7) is not built yet.
+ * context the data-sharing panel lists, builds the voice block (F-14.1: the locally computed
+ * profile for the scene's POV, with the exemplars closest to the passage at the caret), builds
+ * `ghostText.v1` with the active writing preset (F-5.2), runs it through the one request path
+ * (`fast` tier, the preset's temperature, at most 60 tokens), and post-processes the answer
+ * into a one-or-two-sentence continuation. The fidelity check (F-14.7) is not built yet.
  *
  * The context hash covers everything that shaped the messages: the caret window, the notes,
- * the metadata, and the preset, so a change to any of them misses the cache. A caret window
- * over the shared bounds is VALIDATION (the contract refuses it first; this is the backstop).
+ * the metadata, the preset, and the voice profile's version (the version stands in for the
+ * block: it moves on every save and exemplar write, so a changed profile misses the cache
+ * while an unchanged one keeps hitting it). A caret window over the shared bounds is
+ * VALIDATION (the contract refuses it first; this is the backstop).
  */
 export async function generateGhostText(
   db: TreeDb,
@@ -60,17 +65,27 @@ export async function generateGhostText(
   const { meta: sceneMeta } = getSceneMeta(db, input.nodeId)
   const meta = sceneMeta.location || sceneMeta.pov || sceneMeta.timeline ? sceneMeta : null
   const preset = resolvePreset(getWritingPresets(db))
+  const pov = sceneMeta.pov.trim()
+  const profile = buildVoiceProfile(db, { pov: pov || undefined })
+  const voice = voiceBlock(profile, { text: input.before, pov: pov || null })
 
   const prompt = buildGhostTextPrompt({
     before: input.before,
     after: input.after,
     notes,
     meta,
-    voice: null,
+    voice,
     preset
   })
   const contextHash = sha256(
-    JSON.stringify({ before: input.before, after: input.after, notes, meta, preset })
+    JSON.stringify({
+      before: input.before,
+      after: input.after,
+      notes,
+      meta,
+      preset,
+      voiceVersion: voiceProfileVersion()
+    })
   )
 
   const result = await runAiRequest(deps, {

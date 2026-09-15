@@ -53,6 +53,8 @@ let exited = false
 let fakeOpenAi: http.Server
 /** Every request the fake OpenAI server saw: the path and the Authorization header. */
 const openAiRequests: { url: string; auth: string | undefined }[] = []
+/** The parsed body of every chat request, so a step can assert on what a prompt carried. */
+const openAiChatBodies: { messages: { role: string; content: string }[] }[] = []
 
 function startFakeOpenAi(): Promise<string> {
   fakeOpenAi = http.createServer((req, res) => {
@@ -81,7 +83,11 @@ function startFakeOpenAi(): Promise<string> {
         body += chunk
       })
       req.on('end', () => {
-        const request = JSON.parse(body) as { response_format?: { type?: string } }
+        const request = JSON.parse(body) as {
+          response_format?: { type?: string }
+          messages: { role: string; content: string }[]
+        }
+        openAiChatBodies.push({ messages: request.messages })
         const json = request.response_format?.type === 'json_object'
         res.statusCode = 200
         res.end(
@@ -1035,6 +1041,35 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   await expect(usageTotal).toHaveText('<$0.01 · 1 request · 412 tokens')
 
+  // F-14.1: the voice profile. The AI tab's Voice section starts with no exemplars. Back in
+  // Scene 1, selecting the whole text and marking it stores a plain-text snapshot with Scene
+  // 1's POV and toasts the count; the section then lists it and reports the words the profile
+  // was built from. The ghost-text request below carries the profile in its system turn.
+  const voiceSection = settingsDialog.getByTestId('voice-section')
+  await expect(voiceSection.getByTestId('voice-words')).toContainText('0 of 12 exemplars')
+  await expect(voiceSection).toContainText('No exemplars marked yet.')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  const markExemplar = page.getByRole('button', { name: 'Mark voice exemplar' })
+  await expect(markExemplar).toBeDisabled()
+  await editor.click()
+  await page.keyboard.press('Control+a')
+  await expect(markExemplar).toBeEnabled()
+  await markExemplar.click()
+  await expect(page.getByRole('status')).toContainText('Added to your voice profile (1 of 12)')
+  await page.keyboard.press('End')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  const exemplarRows = voiceSection
+    .getByRole('list', { name: 'Voice exemplars' })
+    .getByRole('listitem')
+  await expect(exemplarRows).toHaveCount(1)
+  await expect(exemplarRows.first()).toContainText('Mixed · POV Mara')
+  await expect(exemplarRows.first()).toContainText('The storm broke at dusk. Rain followed.')
+  await expect(voiceSection.getByTestId('voice-words')).toContainText(
+    /Built from [1-9]\d* words of manuscript and 1 of 12 exemplars/
+  )
+
   // F-5.3: VibeWrite. Suggest unlocks ghost text; the idle delay drops to 0.5 s in the AI tab
   // and lands in the settings table. The toolbar toggle arms the mode (persisted per project).
   // Typing into Scene 1 and pausing brings the fake server's continuation as ghost text at the
@@ -1068,6 +1103,11 @@ test('create, close, reopen a project on disk', async () => {
     url: '/v1/chat/completions',
     auth: `Bearer ${ACCEPTED_KEY}`
   })
+  // F-14.1: the system turn carries the voice block with the marked exemplar.
+  const ghostSystem = openAiChatBodies.at(-1)?.messages[0]
+  expect(ghostSystem?.role).toBe('system')
+  expect(ghostSystem?.content).toContain("Match the author's voice:")
+  expect(ghostSystem?.content).toContain('Example in this voice:\n"""\nThe storm broke at dusk.')
   // A widget only: the editor's text without the ghost span does not carry the continuation.
   expect(await documentTextWithoutGhost()).not.toContain(GHOST_CONTINUATION)
   await page.keyboard.press('Tab')

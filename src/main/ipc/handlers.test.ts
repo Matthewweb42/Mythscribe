@@ -1346,3 +1346,74 @@ describe('ai:setModels (F-5.11)', () => {
     expect(await invoke('ai:getStatus', undefined)).toMatchObject({ models })
   })
 })
+
+describe('voice handlers (F-14.1)', () => {
+  const PASSAGE =
+    'Mara turned from the window and looked at the ridge, where the storm had settled for the ' +
+    'night. She knew she was tired, and she thought about the river and what it wanted from her.'
+  const para = (text: string): Input<'document:save'>['content'] => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+  })
+
+  /** A project with its first scene's id. */
+  async function ready(name = 'Voice'): Promise<string> {
+    await invoke('project:create', { name, format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    return scene.id
+  }
+
+  it('reports NO_PROJECT for all four when nothing is open', async () => {
+    await expect(invoke('voice:listExemplars', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('voice:addExemplar', { nodeId: 'x', text: PASSAGE })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+    await expect(invoke('voice:removeExemplar', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('voice:profile', {})).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('adds, lists, and removes exemplars; the profile carries them and follows document saves', async () => {
+    const scene = await ready()
+    await invoke('sceneMeta:set', { id: scene, meta: { location: '', pov: 'Mara', timeline: '' } })
+    const added = await invoke('voice:addExemplar', { nodeId: scene, text: `  ${PASSAGE}  ` })
+    expect(added).toMatchObject({ nodeId: scene, text: PASSAGE, pov: 'Mara', kind: 'mixed' })
+    expect(await invoke('voice:listExemplars', undefined)).toEqual([added])
+    const empty = await invoke('voice:profile', {})
+    expect(empty).toMatchObject({ rules: [], exemplars: [added], wordCount: 0, confidence: 0 })
+    await invoke('document:save', { id: scene, content: para(PASSAGE) })
+    const saved = await invoke('voice:profile', { pov: 'Mara' })
+    expect(saved.wordCount).toBeGreaterThan(0)
+    expect(saved.confidence).toBeGreaterThan(0)
+    expect(await invoke('voice:removeExemplar', { id: added.id })).toBeNull()
+    expect(await invoke('voice:listExemplars', undefined)).toEqual([])
+    expect((await invoke('voice:profile', {})).exemplars).toEqual([])
+  })
+
+  it('lets a short text, an unknown node, and an unknown id reach the envelope as VALIDATION and NOT_FOUND', async () => {
+    const scene = await ready()
+    const short = await handlerFor('voice:addExemplar')(undefined, { nodeId: scene, text: 'short' })
+    expect(short.ok).toBe(false)
+    if (!short.ok) expect(short.error.code).toBe('VALIDATION')
+    const unknown = await handlerFor('voice:addExemplar')(undefined, {
+      nodeId: 'nope',
+      text: PASSAGE
+    })
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    const gone = await handlerFor('voice:removeExemplar')(undefined, { id: 'nope' })
+    expect(gone.ok).toBe(false)
+    if (!gone.ok) expect(gone.error.code).toBe('NOT_FOUND')
+    expect(await invoke('voice:listExemplars', undefined)).toEqual([])
+  })
+
+  it('never serves the profile of a previous project', async () => {
+    const scene = await ready('First')
+    await invoke('voice:addExemplar', { nodeId: scene, text: PASSAGE })
+    expect((await invoke('voice:profile', {})).exemplars).toHaveLength(1)
+    await invoke('project:close', undefined)
+    await ready('Second')
+    expect((await invoke('voice:profile', {})).exemplars).toEqual([])
+  })
+})

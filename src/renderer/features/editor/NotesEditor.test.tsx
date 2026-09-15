@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -67,6 +67,12 @@ beforeEach(() => {
   gets = deferred.gets
   saves = deferred.saves
   setIpcClient(deferred.client)
+})
+afterEach(() => {
+  resetNotesStore()
+  resetDocumentStore()
+  resetLayoutStore()
+  resetPendingSaves()
 })
 
 describe('NotesEditor (F-3.7)', () => {

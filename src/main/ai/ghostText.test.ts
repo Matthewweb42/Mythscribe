@@ -6,12 +6,15 @@ import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS, outputBudget, priceFor } from '@
 import { defaultAiSettings } from '@shared/aiSettings'
 import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import type { TiptapNodeT } from '@shared/tiptap'
+import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
 import { setAiSettings, setWritingPresets } from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
+import { addExemplar } from '../voice/exemplarStore'
+import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { generateGhostText, postProcessGhostText } from './ghostText'
 import {
@@ -66,7 +69,15 @@ async function failure(
   throw new Error('expected a failure')
 }
 
+/** One paragraph of third-person past narration with four dialogue tags; six of them trip the tense, person, and tag rules. */
+const VOICE_PARAGRAPH =
+  'Mara turned from the window and looked at the ridge, where the storm had settled for the ' +
+  'night. "We should go," she said. "Not yet," Tomas replied. He knew she was tired, and he was ' +
+  'tired too. They walked to the door and she pulled it open. "The river is rising," she said. ' +
+  '"Then we wait," he said.'
+
 beforeEach(() => {
+  resetVoiceProfileCache()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-ghost-'))
   session = createProject(projectFolderFor(tmp, 'Ghost'), 'Ghost', 'novel')
   db = session.connection.orm
@@ -168,6 +179,36 @@ describe('generateGhostText (F-5.3)', () => {
     setSceneMeta(db, scene, { location: 'Cliff', pov: '', timeline: '' })
     await ask()
     expect(complete).toHaveBeenCalledTimes(4)
+  })
+
+  it('folds the voice profile into the system turn after the rules and misses the cache when the profile version moves (F-14.1)', async () => {
+    saveDocument(db, scene, doc(Array(6).fill(VOICE_PARAGRAPH).join(' ')))
+    const first = addExemplar(db, scene, VOICE_PARAGRAPH)
+    await ask()
+    const system = complete.mock.calls[0]![0].messages[0]?.content ?? ''
+    const voiceAt = system.indexOf("Match the author's voice:")
+    expect(voiceAt).toBeGreaterThan(0)
+    expect(system).toContain('- Narration is in past tense.')
+    expect(system).toContain('- Narration is in third person.')
+    expect(system).toContain("- Dialogue tags are 'said' or 'asked' 75% of the time.")
+    expect(system).toContain(`Example in this voice:\n"""\n${first.text}\n"""`)
+    // The stable prefix order: rules, then the voice, then the preset's instruction.
+    expect(voiceAt).toBeGreaterThan(system.indexOf('ghost-text continuation feature'))
+    expect(voiceAt).toBeLessThan(system.indexOf(builtinParams('general').styleInstruction))
+    const hashBefore = ledger[0]!.contextHash
+    await ask()
+    expect(complete).toHaveBeenCalledTimes(1) // same version: the cache answered
+    bumpVoiceVersion()
+    await ask()
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(ledger[2]!.contextHash).not.toBe(hashBefore)
+  })
+
+  it('leaves the voice slot empty for a project with no rules and no exemplars', async () => {
+    await ask()
+    expect(complete.mock.calls[0]![0].messages[0]?.content).not.toContain(
+      "Match the author's voice"
+    )
   })
 
   it('never asks for more than the ghost-text output budget', async () => {

@@ -17,6 +17,7 @@ import { useDocumentStore } from './documentStore'
 import { buildExtensions } from './extensions'
 import { useGhostTextController } from './ghostTextController'
 import { INLINE_TAG_SELECTOR, resyncInlineTags } from './InlineTag'
+import { MarkVoiceExemplarButton } from './MarkVoiceExemplarButton'
 import { NotesToggleButton } from './NotesPanel'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
@@ -97,7 +98,8 @@ const TOKEN_MENU_ITEMS: MenuItem[] = [
  * the extension), and a right-click on one opens the Remove / Open in Tag Manager menu. Remove
  * deletes the token only: links are the author's explicit choice and stay. VibeWrite (F-5.3)
  * runs only in the single-document view: the controller arms itself there and the toggle sits
- * in the toolbar's right slot, so a stacked region never shows ghost text.
+ * in the toolbar's right slot, so a stacked region never shows ghost text. The voice exemplar
+ * button (F-14.1) sits beside it, for the same reason.
  */
 function RegionEditor({
   id,
@@ -222,6 +224,7 @@ function RegionEditor({
         editor={ready ? editor : null}
         right={
           <>
+            <MarkVoiceExemplarButton editor={ready ? editor : null} nodeId={id} />
             <VibeWriteToggle error={ghostError} />
             <NotesToggleButton />
           </>

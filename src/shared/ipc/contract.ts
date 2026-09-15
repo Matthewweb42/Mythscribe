@@ -20,9 +20,11 @@ import { Layout } from '../layout'
 import { MatterTemplateId } from '../matterTemplates'
 import { WritingPresets } from '../presets'
 import { SceneMeta } from '../sceneMeta'
+import { Stylometrics } from '../stylometry'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
 import { TagTemplateId } from '../tagTemplates'
 import { TiptapNode } from '../tiptap'
+import { VOICE_EXEMPLAR_TEXT_MAX, VOICE_EXEMPLAR_TEXT_MIN, VoiceExemplarKind } from '../voice'
 
 /**
  * The single IPC contract shared by main, preload, and renderer.
@@ -139,6 +141,32 @@ export const AiGhostTextResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiGhostTextResult = z.infer<typeof AiGhostTextResult>
+
+/** An author-marked voice exemplar (F-14.1): a plain-text passage with the POV and kind it was filed under. */
+export const VoiceExemplar = z.object({
+  id: z.string(),
+  /** The node it was marked in; null once that node is gone. */
+  nodeId: z.string().nullable(),
+  text: z.string(),
+  pov: z.string().nullable(),
+  kind: VoiceExemplarKind,
+  created: z.string()
+})
+export type VoiceExemplar = z.infer<typeof VoiceExemplar>
+
+/**
+ * The voice profile (F-14.1) as `voice:profile` answers it: the plain-language rules a prompt
+ * carries, the stylometrics behind them, every exemplar (POV-matching first when a POV was
+ * asked for), the confidence, and the words of manuscript the profile was built from.
+ */
+export const VoiceProfile = z.object({
+  rules: z.array(z.string()),
+  stats: Stylometrics,
+  exemplars: z.array(VoiceExemplar),
+  confidence: z.number().min(0).max(1),
+  wordCount: z.number().int().nonnegative()
+})
+export type VoiceProfile = z.infer<typeof VoiceProfile>
 
 export const contract = {
   'app:info': {
@@ -390,6 +418,29 @@ export const contract = {
     }),
     output: AiGhostTextResult
   },
+  /** Every voice exemplar of the open project (F-14.1), oldest first. */
+  'voice:listExemplars': { input: z.undefined(), output: z.array(VoiceExemplar) },
+  /**
+   * Marks a passage as a voice exemplar (F-14.1): the text is trimmed and bounded (outside the
+   * bounds is VALIDATION), the POV comes from the node's scene metadata, the kind from
+   * `classifyKind`. NOT_FOUND for an unknown node, VALIDATION for one that is not a document
+   * or once the project holds `VOICE_EXEMPLAR_MAX` exemplars.
+   */
+  'voice:addExemplar': {
+    input: z.object({
+      nodeId: z.string(),
+      text: z.string().trim().min(VOICE_EXEMPLAR_TEXT_MIN).max(VOICE_EXEMPLAR_TEXT_MAX)
+    }),
+    output: VoiceExemplar
+  },
+  /** Removes an exemplar (F-14.1); NOT_FOUND for an unknown id. */
+  'voice:removeExemplar': { input: z.object({ id: z.string() }), output: z.null() },
+  /**
+   * The voice profile (F-14.1), built locally from the manuscript and the exemplars and cached
+   * until something is saved. With `pov`, the stylometrics come from the documents whose scene
+   * metadata names that POV when they hold at least 2,000 words, else from the whole manuscript.
+   */
+  'voice:profile': { input: z.object({ pov: z.string().optional() }), output: VoiceProfile },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },
   /** The renderer could not flush, so the close it was asked for (and any quit behind it) is abandoned. */

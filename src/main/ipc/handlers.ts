@@ -43,6 +43,9 @@ import {
   renameNode,
   toTreeNode
 } from '../tree/treeStore'
+import { addExemplar, listExemplars, removeExemplar } from '../voice/exemplarStore'
+import { buildVoiceProfile } from '../voice/profile'
+import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { AppError } from './errors'
 import { emit, register, type EmitTarget } from './registry'
 
@@ -127,9 +130,13 @@ export function registerHandlers({
 
   register('document:get', ({ id }) => getDocumentContent(manager.require().connection.orm, id))
 
-  register('document:save', ({ id, content }) =>
-    saveDocument(manager.require().connection.orm, id, content)
-  )
+  // F-14.1: every save moves the voice profile's version (a cheap integer; checking whether the
+  // document is under the manuscript would cost a lookup on the hot path for nothing).
+  register('document:save', ({ id, content }) => {
+    const saved = saveDocument(manager.require().connection.orm, id, content)
+    bumpVoiceVersion()
+    return saved
+  })
 
   register('notes:get', ({ id }) => getNotes(manager.require().connection.orm, id))
 
@@ -292,6 +299,22 @@ export function registerHandlers({
     }
   )
 
+  // F-14.1: the exemplars and the locally built profile; nothing here calls the provider.
+  register('voice:listExemplars', () => listExemplars(manager.require().connection.orm))
+
+  register('voice:addExemplar', ({ nodeId, text }) =>
+    addExemplar(manager.require().connection.orm, nodeId, text)
+  )
+
+  register('voice:removeExemplar', ({ id }) => {
+    removeExemplar(manager.require().connection.orm, id)
+    return null
+  })
+
+  register('voice:profile', ({ pov }) =>
+    buildVoiceProfile(manager.require().connection.orm, { pov })
+  )
+
   register('window:close', () => {
     manager.close()
     for (const w of windows()) if (!w.isDestroyed()) w.close()
@@ -304,6 +327,8 @@ export function registerHandlers({
   })
 
   manager.onChange((info) => {
+    // Open, create, and close all land here: a profile built for one project never answers for another.
+    resetVoiceProfileCache()
     if (info) {
       try {
         appState.update((s) => ({ ...s, recents: touchRecent(s.recents, toRecentEntry(info)) }))

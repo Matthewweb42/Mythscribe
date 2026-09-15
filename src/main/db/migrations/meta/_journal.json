@@ -29,6 +29,13 @@
       "when": 1789253175309,
       "tag": "0003_ai_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789432753752,
+      "tag": "0004_voice",
+      "breakpoints": true
     }
   ]
 }

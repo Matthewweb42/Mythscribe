@@ -68,10 +68,11 @@ describe('AI_DATA_SHARING', () => {
     expect(Object.keys(AI_DATA_SHARING).sort()).toEqual([...AI_FEATURE_IDS].sort())
   })
 
-  it('names everything ghost text sends: the caret window, the notes, and the metadata (F-5.3)', () => {
+  it('names everything ghost text sends: the caret window, the notes, the metadata (F-5.3), and the voice profile (F-14.1)', () => {
     expect(AI_DATA_SHARING.ghostText.sends).toBe(
       'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes ' +
-        'and metadata (location, POV, timeline).'
+        'and metadata (location, POV, timeline), and the voice profile (stylometric rules and up ' +
+        'to 3 exemplar passages).'
     )
   })
 
