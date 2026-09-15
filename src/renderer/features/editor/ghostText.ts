@@ -12,23 +12,32 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 export interface GhostState {
   text: string
   from: number
+  /** The suggestion failed the voice fidelity check (F-14.7): the widget carries a warning badge. */
+  flagged: boolean
+  /** The first violation in plain language when flagged ("switches to present tense"), else null. */
+  violation: string | null
 }
 
 type GhostMeta =
-  | { type: 'set'; text: string }
-  | { type: 'advance'; text: string; from: number }
+  | { type: 'set'; text: string; flagged: boolean; violation: string | null }
+  | { type: 'advance'; text: string; from: number; flagged: boolean; violation: string | null }
   | { type: 'clear' }
 
 export const GHOST_TEXT_KEY = new PluginKey<GhostState | null>('ghostText')
 
 /** The class the widget carries; the stylesheet dims it and the e2e test reads it. */
 export const GHOST_TEXT_CLASS = 'ghost-text'
+/** The class of the warning badge inside a flagged widget (F-14.7). */
+export const GHOST_TEXT_FLAG_CLASS = 'ghost-text-flag'
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     ghostText: {
-      /** Show `text` at the caret; false for empty text. */
-      setGhost: (text: string) => ReturnType
+      /**
+       * Show `text` at the caret; false for empty text. `flagged` with the `violation` marks a
+       * suggestion that failed the voice fidelity check (F-14.7) so the widget shows the badge.
+       */
+      setGhost: (text: string, flagged?: boolean, violation?: string | null) => ReturnType
       /** Drop the suggestion without inserting anything; false when none is showing. */
       clearGhost: () => ReturnType
       /** Insert the whole remaining suggestion as plain text with the caret's marks (Tab). */
@@ -55,8 +64,10 @@ function apply(tr: Transaction, value: GhostState | null): GhostState | null {
   const meta = tr.getMeta(GHOST_TEXT_KEY) as GhostMeta | undefined
   if (meta !== undefined) {
     if (meta.type === 'clear') return null
-    if (meta.type === 'set') return meta.text ? { text: meta.text, from: tr.selection.from } : null
-    return meta.text ? { text: meta.text, from: meta.from } : null
+    const { text, flagged, violation } = meta
+    if (!text) return null
+    const from = meta.type === 'set' ? tr.selection.from : meta.from
+    return { text, from, flagged, violation }
   }
   if (value === null) return null
   if (tr.docChanged) {
@@ -69,17 +80,27 @@ function apply(tr: Transaction, value: GhostState | null): GhostState | null {
     const typed = tr.doc.textBetween(mapped, caret)
     if (!typed || !value.text.startsWith(typed)) return null
     const rest = value.text.slice(typed.length)
-    return rest ? { text: rest, from: caret } : null
+    return rest ? { ...value, text: rest, from: caret } : null
   }
   if (tr.selectionSet && (!tr.selection.empty || tr.selection.from !== value.from)) return null
   return value
 }
 
-function renderGhost(text: string): HTMLElement {
+function renderGhost(ghost: GhostState): HTMLElement {
   const span = document.createElement('span')
   span.className = GHOST_TEXT_CLASS
   span.setAttribute('aria-hidden', 'true')
-  span.textContent = text
+  span.textContent = ghost.text
+  span.dataset.flagged = ghost.flagged ? 'true' : 'false'
+  if (ghost.flagged) {
+    const flag = document.createElement('span')
+    flag.className = GHOST_TEXT_FLAG_CLASS
+    const violation = ghost.violation ?? 'does not match the voice profile'
+    flag.title = violation
+    flag.setAttribute('aria-label', `Voice warning: ${violation}`)
+    flag.textContent = '⚠'
+    span.appendChild(flag)
+  }
   return span
 }
 
@@ -88,7 +109,9 @@ const NEXT_WORD = /^(\s*\S+)(\s?)/
 
 /**
  * VibeWrite's ghost text (F-5.3): a widget decoration at the caret holding the AI's proposed
- * continuation, entirely in plugin state. Tab accepts everything, Shift+Tab one word, Escape
+ * continuation, entirely in plugin state; a suggestion the fidelity check flagged (F-14.7)
+ * renders with a warning badge that names the violation and keeps it through word-by-word
+ * acceptance. Tab accepts everything, Shift+Tab one word, Escape
  * dismisses; typing the suggestion's own next character consumes it, typing anything else
  * clears it, as does moving the caret, leaving the editor, or starting an IME composition
  * (a composed insert lands in one step and cannot be matched character by character). The
@@ -102,10 +125,13 @@ export const GhostText = Extension.create({
   addCommands() {
     return {
       setGhost:
-        (text) =>
+        (text, flagged = false, violation = null) =>
         ({ tr, dispatch }) => {
           if (!text) return false
-          if (dispatch) tr.setMeta(GHOST_TEXT_KEY, { type: 'set', text } satisfies GhostMeta)
+          if (dispatch) {
+            const meta: GhostMeta = { type: 'set', text, flagged, violation }
+            tr.setMeta(GHOST_TEXT_KEY, meta)
+          }
           return true
         },
       clearGhost:
@@ -139,7 +165,13 @@ export const GhostText = Extension.create({
           if (dispatch) {
             tr.insertText(chunk, ghost.from)
             const meta: GhostMeta = remaining
-              ? { type: 'advance', text: remaining, from: ghost.from + chunk.length }
+              ? {
+                  type: 'advance',
+                  text: remaining,
+                  from: ghost.from + chunk.length,
+                  flagged: ghost.flagged,
+                  violation: ghost.violation
+                }
               : { type: 'clear' }
             tr.setMeta(GHOST_TEXT_KEY, meta)
             tr.scrollIntoView()
@@ -173,7 +205,7 @@ export const GhostText = Extension.create({
             const ghost = ghostOf(state)
             if (ghost === null) return DecorationSet.empty
             return DecorationSet.create(state.doc, [
-              Decoration.widget(ghost.from, () => renderGhost(ghost.text), {
+              Decoration.widget(ghost.from, () => renderGhost(ghost), {
                 side: 1,
                 ignoreSelection: true
               })

@@ -2,7 +2,7 @@ import { Editor } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
 import { buildExtensions } from './extensions'
-import { GHOST_TEXT_CLASS, ghostOf } from './ghostText'
+import { GHOST_TEXT_CLASS, GHOST_TEXT_FLAG_CLASS, ghostOf } from './ghostText'
 
 let editor: Editor
 const CONTENT = 'The storm broke at dusk.'
@@ -48,7 +48,14 @@ describe('GhostText extension (F-5.3)', () => {
     expect(editor.commands.setGhost(SUGGESTION)).toBe(true)
     expect(widget()?.textContent).toBe(SUGGESTION)
     expect(widget()?.getAttribute('aria-hidden')).toBe('true')
-    expect(ghostOf(editor.state)).toEqual({ text: SUGGESTION, from: CONTENT.length + 1 })
+    expect(ghostOf(editor.state)).toEqual({
+      text: SUGGESTION,
+      from: CONTENT.length + 1,
+      flagged: false,
+      violation: null
+    })
+    expect(widget()?.dataset.flagged).toBe('false')
+    expect(widget()?.querySelector(`.${GHOST_TEXT_FLAG_CLASS}`)).toBeNull()
     expect(editor.getJSON()).toEqual(before)
     expect(text()).toBe(CONTENT)
     expect(editor.commands.setGhost('')).toBe(false)
@@ -84,6 +91,41 @@ describe('GhostText extension (F-5.3)', () => {
     press('Tab', true)
     expect(text()).toBe(CONTENT + SUGGESTION)
     expect(widget()).toBeNull()
+  })
+
+  it('renders a flagged suggestion with a badge naming the violation and keeps the flag while it is consumed (F-14.7)', () => {
+    const violation = 'switches to present tense'
+    expect(editor.commands.setGhost(SUGGESTION, true, violation)).toBe(true)
+    expect(ghostOf(editor.state)).toEqual({
+      text: SUGGESTION,
+      from: CONTENT.length + 1,
+      flagged: true,
+      violation
+    })
+    expect(widget()?.dataset.flagged).toBe('true')
+    const flag = widget()?.querySelector<HTMLElement>(`.${GHOST_TEXT_FLAG_CLASS}`)
+    expect(flag?.title).toBe(violation)
+    expect(flag?.getAttribute('aria-label')).toBe(`Voice warning: ${violation}`)
+    // Accepting one word keeps the flag on what is left, as does typing the next character.
+    press('Tab', true)
+    expect(ghostOf(editor.state)).toMatchObject({
+      text: 'followed. Then silence.',
+      flagged: true,
+      violation
+    })
+    expect(widget()?.dataset.flagged).toBe('true')
+    editor.commands.insertContent('f')
+    expect(ghostOf(editor.state)).toMatchObject({ text: 'ollowed. Then silence.', flagged: true })
+    // Accepting the rest inserts the text only, never the badge.
+    press('Tab')
+    expect(widget()).toBeNull()
+    expect(text()).toBe(CONTENT + SUGGESTION)
+    expect(editor.view.dom.textContent).toBe(CONTENT + SUGGESTION)
+    // A flag without a violation still names the check.
+    editor.commands.setGhost(SUGGESTION, true)
+    expect(
+      widget()?.querySelector<HTMLElement>(`.${GHOST_TEXT_FLAG_CLASS}`)?.getAttribute('aria-label')
+    ).toBe('Voice warning: does not match the voice profile')
   })
 
   it('Escape clears without inserting; Tab and Escape fall through when nothing is showing', () => {

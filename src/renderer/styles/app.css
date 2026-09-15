@@ -188,3 +188,17 @@ select {
   pointer-events: none;
   user-select: none;
 }
+
+/* F-14.7: a suggestion that failed the voice fidelity check. */
+.ms-editor .ghost-text[data-flagged='true'] {
+  text-decoration: underline wavy var(--ms-warning);
+  text-underline-offset: 0.2em;
+}
+
+.ms-editor .ghost-text-flag {
+  margin-left: 0.25em;
+  color: var(--ms-warning);
+  font-size: 0.85em;
+  text-decoration: none;
+  vertical-align: baseline;
+}

@@ -40,12 +40,14 @@ export function normalizePov(pov: string | null | undefined): string {
 }
 
 function compute(db: TreeDb, pov: string): VoiceProfile {
-  const documents = manuscriptDocuments(listNodes(db))
+  const documents = manuscriptDocuments(db)
   let corpus = documents
   if (pov.length > 0) {
     // Each document's own scene_meta.pov, no ancestor walk: a folder-kind scene's POV covers
     // only documents that carry their own metadata, which is the seeded (document-kind) shape.
-    const group = documents.filter((row) => normalizePov(parseStoredSceneMeta(row.sceneMeta).pov) === pov)
+    const group = documents.filter(
+      (row) => normalizePov(parseStoredSceneMeta(row.sceneMeta).pov) === pov
+    )
     const words = group.reduce((sum, row) => sum + row.wordCount, 0)
     if (words >= POV_MIN_WORDS) corpus = group
   }
@@ -64,8 +66,9 @@ function compute(db: TreeDb, pov: string): VoiceProfile {
   }
 }
 
-/** The document rows under the manuscript root, in tree order. */
-function manuscriptDocuments(rows: NodeRow[]): NodeRow[] {
+/** The document rows under the manuscript root, in tree order; the consistency report (F-14.7) walks the same rows. */
+export function manuscriptDocuments(db: TreeDb): NodeRow[] {
+  const rows = listNodes(db)
   const root = rows.find((row) => row.parentId === null && row.sectionType === 'manuscript')
   if (!root) return []
   const byId = new Map(rows.map((row) => [row.id, row]))
@@ -82,7 +85,7 @@ function manuscriptDocuments(rows: NodeRow[]): NodeRow[] {
 }
 
 /** The plain text of a stored document; '' for an empty or unreadable row, never a throw (one corrupt row must not break every request). */
-function documentText(row: NodeRow): string {
+export function documentText(row: NodeRow): string {
   if (row.content === null) return ''
   let json: unknown
   try {

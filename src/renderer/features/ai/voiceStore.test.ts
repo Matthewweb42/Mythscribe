@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Channel, Input, Output, VoiceExemplar, VoiceProfile } from '@shared/ipc/contract'
+import type {
+  Channel,
+  Input,
+  Output,
+  VoiceConsistencyReport,
+  VoiceExemplar,
+  VoiceProfile
+} from '@shared/ipc/contract'
 import { computeStylometrics } from '@shared/stylometry'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetVoiceStore, useVoiceStore } from './voiceStore'
@@ -20,6 +27,11 @@ const profileOf = (exemplars: VoiceExemplar[]): VoiceProfile => ({
   confidence: 0.2,
   wordCount: 2_000
 })
+
+const REPORT: VoiceConsistencyReport = {
+  profileWordCount: 2_000,
+  documents: [{ id: 'scene-1', title: 'Scene 1', wordCount: 2_000, status: 'ok', violations: [] }]
+}
 
 interface Fake {
   client: IpcClient
@@ -49,6 +61,9 @@ function fakeClient(initial: VoiceExemplar[]): Fake {
             return fake.exemplars as Output<C>
           case 'voice:profile':
             return profileOf(fake.exemplars) as Output<C>
+          case 'voice:consistencyReport':
+            await new Promise<void>((resolve) => pending.push(resolve))
+            return REPORT as Output<C>
           case 'voice:addExemplar': {
             const { text } = input as Input<'voice:addExemplar'>
             const added = exemplar(`e${fake.exemplars.length + 1}`, text)
@@ -128,6 +143,21 @@ describe('voiceStore (F-14.1)', () => {
     await expect(store().add('scene-1', 'x')).rejects.toThrow('nope')
     await expect(store().remove('e1')).rejects.toThrow('nope')
     expect(store().exemplars).toBeNull()
+  })
+
+  it('loads the consistency report on demand and drops it with clear (F-14.7)', async () => {
+    expect(store().report).toBeNull()
+    const loading = store().loadReport()
+    fake.releaseList()
+    await loading
+    expect(store().report).toEqual(REPORT)
+    expect(fake.calls).toEqual([{ channel: 'voice:consistencyReport', input: {} }])
+    const late = store().loadReport()
+    store().clear()
+    expect(store().report).toBeNull()
+    fake.releaseList()
+    await late
+    expect(store().report).toBeNull()
   })
 
   it('clear empties the store and drops a response that arrives afterwards', async () => {

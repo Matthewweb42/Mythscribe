@@ -61,13 +61,18 @@ const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   ...over
 })
 
-const ok = (requestId: string, text = ' Rain followed.'): AiGhostTextResult => ({
+const ok = (
+  requestId: string,
+  text = ' Rain followed.',
+  fidelity: { flagged: boolean; violation: string | null } = { flagged: false, violation: null }
+): AiGhostTextResult => ({
   ok: true,
   text,
   usage: { inputTokens: 100, outputTokens: 5 },
   costUsd: 0.0001,
   cached: false,
   model: 'gpt-fake',
+  ...fidelity,
   requestId
 })
 const fail = (
@@ -184,6 +189,19 @@ describe('useGhostTextController (F-5.3)', () => {
     })
     await answer(ok('1'))
     expect(ghostText()).toBe(' Rain followed.')
+  })
+
+  it('hands a flagged answer and its violation to the widget (F-14.7)', async () => {
+    mount()
+    type(ENOUGH)
+    await idle()
+    await answer(ok('1', undefined, { flagged: true, violation: 'switches to first person' }))
+    expect(ghostOf(editor.state)).toMatchObject({
+      text: ' Rain followed.',
+      flagged: true,
+      violation: 'switches to first person'
+    })
+    expect(editor.view.dom.querySelector('.ghost-text[data-flagged="true"]')).not.toBeNull()
   })
 
   it('does not ask below the minimum new characters, while a suggestion shows, or while one is pending', async () => {

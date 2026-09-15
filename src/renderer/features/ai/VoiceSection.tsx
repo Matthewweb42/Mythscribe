@@ -1,10 +1,13 @@
-import { useEffect, useId } from 'react'
+import { useEffect, useId, useState } from 'react'
+import type { VoiceConsistencyReport } from '@shared/ipc/contract'
+import { RULE_MIN_WORDS } from '@shared/stylometry'
 import {
   EXEMPLAR_KIND_LABEL,
   VOICE_EXEMPLAR_MAX,
   VOICE_EXEMPLAR_TEXT_MAX,
   VOICE_EXEMPLAR_TEXT_MIN
 } from '@shared/voice'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { useVoiceStore } from './voiceStore'
@@ -27,19 +30,32 @@ const preview = (text: string): string =>
  * confidence (a meter with the words it was built from and how to raise it), the rules the
  * profile currently renders into prompts, and the exemplar list with Remove. The profile is
  * loaded on mount (local, cached in main) and nothing renders until it lands; the exemplars
- * come from the store the project loaded, so a mark from the toolbar shows here at once.
+ * come from the store the project loaded, so a mark from the toolbar shows here at once. The
+ * consistency report (F-14.7) is on demand: the button scores every scene against the profile
+ * and lists the drifting ones first; a title selects that scene in the tree.
  */
 export function VoiceSection(): React.JSX.Element | null {
   const profile = useVoiceStore((s) => s.profile)
   const exemplars = useVoiceStore((s) => s.exemplars)
+  const consistency = useVoiceStore((s) => s.report)
   const loadProfile = useVoiceStore((s) => s.loadProfile)
+  const loadReport = useVoiceStore((s) => s.loadReport)
   const remove = useVoiceStore((s) => s.remove)
+  const select = useTreeStore((s) => s.select)
+  const [checking, setChecking] = useState(false)
   const headingId = useId()
   const confidenceId = useId()
 
   useEffect(() => {
     loadProfile().catch(report)
   }, [loadProfile])
+
+  const check = (): void => {
+    setChecking(true)
+    loadReport()
+      .catch(report)
+      .finally(() => setChecking(false))
+  }
 
   if (profile === null) return null
   const list = exemplars ?? profile.exemplars
@@ -129,6 +145,91 @@ export function VoiceSection(): React.JSX.Element | null {
           the editor and use Mark voice exemplar in the toolbar. Up to {VOICE_EXEMPLAR_MAX}.
         </p>
       </div>
+
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="font-medium">Consistency</span>
+          <button type="button" onClick={check} disabled={checking} className={BUTTON}>
+            Check voice consistency
+          </button>
+        </div>
+        <p className="m-0 text-xs text-fg-muted">
+          Scores every scene against the profile, on this machine, to find the ones that drift.
+        </p>
+        {consistency !== null ? <ConsistencyList report={consistency} onOpen={select} /> : null}
+      </div>
     </section>
+  )
+}
+
+/** The report's scored documents, drifting ones first, with the skipped short scenes as one line. */
+function ConsistencyList({
+  report: result,
+  onOpen
+}: {
+  report: VoiceConsistencyReport
+  onOpen: (id: string) => void
+}): React.JSX.Element {
+  const scored = result.documents.filter((doc) => doc.status !== 'short')
+  const ordered = [
+    ...scored.filter((doc) => doc.status === 'drift'),
+    ...scored.filter((doc) => doc.status === 'ok')
+  ]
+  const skipped = result.documents.length - scored.length
+  return (
+    <div data-testid="voice-consistency" className="flex flex-col gap-1">
+      {ordered.length > 0 ? (
+        <ul
+          role="list"
+          aria-label="Voice consistency"
+          className="m-0 flex list-none flex-col gap-1.5 p-0"
+        >
+          {ordered.map((doc) => (
+            <li
+              key={doc.id}
+              data-status={doc.status}
+              className="flex min-w-0 flex-col gap-0.5 rounded-md border border-line px-2 py-1.5"
+            >
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpen(doc.id)}
+                  className="min-w-0 truncate text-left text-xs font-medium hover:underline"
+                >
+                  {doc.title}
+                </button>
+                <span
+                  className={`shrink-0 text-xs ${doc.status === 'drift' ? 'text-warning' : 'text-fg-muted'}`}
+                >
+                  {doc.status === 'drift' ? 'Drifts' : 'Matches'} · {doc.wordCount.toLocaleString()}{' '}
+                  words
+                </span>
+              </div>
+              {doc.violations.length > 0 ? (
+                <ul
+                  aria-label={`Drift in ${doc.title}`}
+                  className="m-0 flex list-disc flex-col gap-0.5 pl-5 text-xs"
+                >
+                  {doc.violations.map((violation) => (
+                    <li key={violation}>{violation}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="m-0 text-xs text-fg-muted">
+          Nothing to score yet: every scene is under {RULE_MIN_WORDS} words.
+        </p>
+      )}
+      {skipped > 0 ? (
+        <p data-testid="voice-consistency-skipped" className="m-0 text-xs text-fg-muted">
+          {skipped === 1
+            ? `1 scene under ${RULE_MIN_WORDS} words was skipped.`
+            : `${skipped} scenes under ${RULE_MIN_WORDS} words were skipped.`}
+        </p>
+      ) : null}
+    </div>
   )
 }

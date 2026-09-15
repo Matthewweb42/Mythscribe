@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { VoiceExemplar, VoiceProfile } from '@shared/ipc/contract'
+import type { VoiceConsistencyReport, VoiceExemplar, VoiceProfile } from '@shared/ipc/contract'
 import { ipc } from '@renderer/lib/ipc'
 
 /**
@@ -7,16 +7,21 @@ import { ipc } from '@renderer/lib/ipc'
  * project by `App.tsx`, so the toolbar button knows the count before the AI tab ever opens)
  * and the last built profile (loaded by the Voice section on mount; it is cheap and local, and
  * main caches it). `add` and `remove` merge main's answer into the list instead of re-listing,
- * then refresh the profile if one is held, since the exemplars are part of it. Per project:
- * `clear` on close. The generation counter drops a response from a superseded request.
+ * then refresh the profile if one is held, since the exemplars are part of it. The consistency
+ * report (F-14.7) is loaded on demand by the section's button and held until the next load or
+ * the project closes. Per project: `clear` on close. The generation counter drops a response
+ * from a superseded request.
  */
 interface VoiceState {
   /** null until the first `load` resolves. */
   exemplars: VoiceExemplar[] | null
   /** null until the first `loadProfile` resolves. */
   profile: VoiceProfile | null
+  /** null until the first `loadReport` resolves (F-14.7). */
+  report: VoiceConsistencyReport | null
   load: () => Promise<void>
   loadProfile: () => Promise<void>
+  loadReport: () => Promise<void>
   /** Marks a passage; resolves to the new exemplar once the list holds it, so the caller can toast the count. */
   add: (nodeId: string, text: string) => Promise<VoiceExemplar>
   remove: (id: string) => Promise<void>
@@ -29,6 +34,7 @@ let generation = 0
 export const useVoiceStore = create<VoiceState>((set, get) => ({
   exemplars: null,
   profile: null,
+  report: null,
 
   async load() {
     const mine = generation
@@ -42,6 +48,13 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     const profile = await ipc().invoke('voice:profile', {})
     if (mine !== generation) return
     set({ profile })
+  },
+
+  async loadReport() {
+    const mine = generation
+    const report = await ipc().invoke('voice:consistencyReport', {})
+    if (mine !== generation) return
+    set({ report })
   },
 
   async add(nodeId, text) {
@@ -64,7 +77,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   clear() {
     generation++
-    set({ exemplars: null, profile: null })
+    set({ exemplars: null, profile: null, report: null })
   }
 }))
 

@@ -1201,6 +1201,8 @@ describe('ai:ghostText (F-5.3)', () => {
       costUsd: 0,
       cached: false,
       model: 'gpt-fake',
+      flagged: false,
+      violation: null,
       requestId: 'req-7'
     })
     expect(complete).toHaveBeenCalledTimes(1)
@@ -1372,6 +1374,25 @@ describe('voice handlers (F-14.1)', () => {
     )
     await expect(invoke('voice:removeExemplar', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
     await expect(invoke('voice:profile', {})).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('voice:consistencyReport', {})).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('scores every manuscript document against the profile in the consistency report (F-14.7)', async () => {
+    const scene = await ready()
+    await invoke('document:save', { id: scene, content: para(Array(6).fill(PASSAGE).join(' ')) })
+    const report = await invoke('voice:consistencyReport', {})
+    expect(report.profileWordCount).toBeGreaterThan(0)
+    const rows = await invoke('tree:list', undefined)
+    const manuscriptDocs = rows.filter((r) => r.kind === 'document' && r.hierarchyLevel !== null)
+    expect(report.documents.map((d) => d.id)).toEqual(manuscriptDocs.map((r) => r.id))
+    expect(report.documents.find((d) => d.id === scene)).toMatchObject({
+      title: 'Scene 1',
+      status: 'ok',
+      violations: []
+    })
+    for (const entry of report.documents.filter((d) => d.id !== scene)) {
+      expect(entry).toMatchObject({ wordCount: 0, status: 'short', violations: [] })
+    }
   })
 
   it('adds, lists, and removes exemplars; the profile carries them and follows document saves', async () => {

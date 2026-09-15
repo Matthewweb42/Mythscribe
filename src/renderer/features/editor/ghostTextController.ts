@@ -148,7 +148,7 @@ function startGhostSession(deps: GhostSessionDeps): () => void {
       return
     }
     deps.onError(null)
-    if (result.text) editor.commands.setGhost(result.text)
+    if (result.text) editor.commands.setGhost(result.text, result.flagged, result.violation)
   }
 
   const check = (): void => {

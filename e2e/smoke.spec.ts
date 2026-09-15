@@ -34,6 +34,19 @@ const ACCEPTED_KEY = 'sk-live-5678wxyz'
 
 /** The continuation the fake server answers every plain-text (ghost text, F-5.3) chat request with. */
 const GHOST_CONTINUATION = 'The wind picked up before anyone spoke.'
+/**
+ * F-14.7: a ghost-text request whose passage carries this line is answered off-voice (present
+ * tense and first person against a past-tense third-person manuscript, with five markers of
+ * each so the classifier resolves both; tense is checked first, so it is the one named), for
+ * both the first try and the regenerate, so the badge shows.
+ */
+const OFF_VOICE_SENTINEL = 'She counted the lanterns on the far bank.'
+const OFF_VOICE_CONTINUATION =
+  'I am running now, and I know we are lost, and my hands are cold, and I am tired.'
+/** Third-person past narration typed into Scene 1 five times, so the profile resolves tense and person and crosses 200 words. */
+const VOICE_PARAGRAPH =
+  ' She turned from the window and looked at the ridge, where the storm had settled for the ' +
+  'night. He knew she was tired, and he was tired too. They walked to the door and she pulled it open.'
 
 /** What Scene 1 reads after the F-3.1/F-3.2 steps; nine words, so the cached count is checked too. */
 const SENTENCE = 'The storm broke at dusk. Rain followed. Then silence.'
@@ -89,6 +102,9 @@ function startFakeOpenAi(): Promise<string> {
         }
         openAiChatBodies.push({ messages: request.messages })
         const json = request.response_format?.type === 'json_object'
+        const offVoice = request.messages.some(
+          (m) => m.role === 'user' && m.content.includes(OFF_VOICE_SENTINEL)
+        )
         res.statusCode = 200
         res.end(
           JSON.stringify({
@@ -101,7 +117,11 @@ function startFakeOpenAi(): Promise<string> {
                 index: 0,
                 message: {
                   role: 'assistant',
-                  content: json ? '{"tags":["dark-forest","protagonist"]}' : GHOST_CONTINUATION
+                  content: json
+                    ? '{"tags":["dark-forest","protagonist"]}'
+                    : offVoice
+                      ? OFF_VOICE_CONTINUATION
+                      : GHOST_CONTINUATION
                 },
                 finish_reason: 'stop'
               }
@@ -1086,6 +1106,17 @@ test('create, close, reopen a project on disk', async () => {
   await expect.poll(async () => (await aiSettings()).ghostText.idleMs).toBe(500)
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
+  // F-14.7: enough third-person past narration for the profile to resolve tense and person
+  // (five markers each) and cross the 200-word gate; saved before any ghost-text request
+  // leaves, since main builds the profile from the stored rows.
+  await editor.click()
+  await page.keyboard.press('End')
+  for (let i = 0; i < 5; i++) await page.keyboard.type(VOICE_PARAGRAPH)
+  await expect
+    .poll(async () => ((await documentText(scene1Row.id)) ?? '').split('pulled it open').length, {
+      timeout: 3000
+    })
+    .toBe(6)
   const vibeWrite = page.getByRole('button', { name: 'VibeWrite' })
   await expect(vibeWrite).toBeEnabled()
   await expect(vibeWrite).toHaveAttribute('aria-pressed', 'false')
@@ -1125,11 +1156,61 @@ test('create, close, reopen a project on disk', async () => {
   await expect(ghost).toHaveCount(0)
   await expect(editor).toContainText('Nobody answered him.')
   expect(((await editor.textContent()) ?? '').split(GHOST_CONTINUATION)).toHaveLength(2)
+
+  // F-14.7: the fidelity check. The passage now ends with the sentinel the fake server answers
+  // in present tense, first person; the manuscript is past, third, so the answer is scored off-voice locally,
+  // sent back once with the violation named in the system turn, and shown with the warning
+  // badge when the second try is off-voice too. Both calls reach the ledger. Escape drops it
+  // like any suggestion; nothing entered the document.
+  const bodiesBefore = openAiChatBodies.length
+  const ghostRequestsBefore =
+    (await usageSummary()).byFeature.find((f) => f.feature === 'ghostText')?.requests ?? 0
+  await page.keyboard.type(` ${OFF_VOICE_SENTINEL}`)
+  const flaggedGhost = editor.locator('.ghost-text[data-flagged="true"]')
+  await expect(flaggedGhost).toContainText(OFF_VOICE_CONTINUATION)
+  await expect(flaggedGhost.locator('.ghost-text-flag')).toHaveAttribute(
+    'title',
+    'switches to present tense'
+  )
+  await expect(flaggedGhost.locator('.ghost-text-flag')).toHaveAttribute(
+    'aria-label',
+    'Voice warning: switches to present tense'
+  )
+  expect(openAiChatBodies).toHaveLength(bodiesBefore + 2)
+  expect(openAiChatBodies.at(-2)?.messages[0]?.content).not.toContain('Your last attempt')
+  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain(
+    'Your last attempt switches to present tense.'
+  )
+  expect(openAiChatBodies.at(-1)?.messages[1]?.content).toBe(
+    openAiChatBodies.at(-2)?.messages[1]?.content
+  )
+  await expect
+    .poll(
+      async () =>
+        (await usageSummary()).byFeature.find((f) => f.feature === 'ghostText')?.requests ?? 0
+    )
+    .toBe(ghostRequestsBefore + 2)
+  await page.keyboard.press('Escape')
+  await expect(flaggedGhost).toHaveCount(0)
+  expect(await documentTextWithoutGhost()).not.toContain('I am running')
   await vibeWrite.click()
   await expect(vibeWrite).toHaveAttribute('aria-pressed', 'false')
   await expect.poll(async () => (await aiSettings()).ghostText.enabled).toBe(false)
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  // F-14.7: the consistency report scores every scene locally against the profile. Scene 1 is
+  // the only scene over 200 words and it is most of the manuscript, so it matches; the rest
+  // are summarised as skipped. No request leaves.
+  const requestsBeforeReport = openAiRequests.length
+  await voiceSection.getByRole('button', { name: 'Check voice consistency' }).click()
+  const consistency = voiceSection.getByRole('list', { name: 'Voice consistency' })
+  await expect(consistency.getByRole('listitem')).toHaveCount(1)
+  await expect(consistency.getByRole('listitem')).toContainText('Scene 1')
+  await expect(consistency.getByRole('listitem')).toContainText('Matches')
+  await expect(voiceSection.getByTestId('voice-consistency-skipped')).toContainText(
+    /[1-9]\d* scenes under 200 words were skipped\./
+  )
+  expect(openAiRequests).toHaveLength(requestsBeforeReport)
   // Back to Off and no key, as the steps above left them.
   await dial.getByRole('radio', { name: 'Off' }).click()
   await expect.poll(async () => (await aiSettings()).dial).toBe(0)

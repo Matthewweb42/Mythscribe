@@ -1,8 +1,17 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Channel, Input, Output, VoiceExemplar, VoiceProfile } from '@shared/ipc/contract'
+import type {
+  Channel,
+  Input,
+  Output,
+  TreeNode,
+  VoiceConsistencyReport,
+  VoiceExemplar,
+  VoiceProfile
+} from '@shared/ipc/contract'
 import { computeStylometrics } from '@shared/stylometry'
+import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { VoiceSection } from './VoiceSection'
@@ -39,10 +48,45 @@ const profile = (over: Partial<VoiceProfile> = {}): VoiceProfile => ({
   ...over
 })
 
+const REPORT: VoiceConsistencyReport = {
+  profileWordCount: 2_560,
+  documents: [
+    { id: 'scene-1', title: 'Scene 1', wordCount: 900, status: 'ok', violations: [] },
+    { id: 'scene-2', title: 'Scene 2', wordCount: 40, status: 'short', violations: [] },
+    {
+      id: 'scene-3',
+      title: 'Scene 3',
+      wordCount: 1_620,
+      status: 'drift',
+      violations: [
+        'Narrated in present tense; the manuscript is in past tense.',
+        "Sentences run a median of 30 words; the manuscript's is 9."
+      ]
+    }
+  ]
+}
+
+const node = (id: string, title: string, over: Partial<TreeNode> = {}): TreeNode => ({
+  id,
+  parentId: 'ms',
+  sectionType: null,
+  kind: 'document',
+  hierarchyLevel: 'scene',
+  title,
+  position: 0,
+  wordCount: 0,
+  matterType: null,
+  preset: null,
+  created: '2026-09-14T08:00:00.000Z',
+  modified: '2026-09-14T08:00:00.000Z',
+  ...over
+})
+
 interface Fake {
   client: IpcClient
   calls: { channel: Channel; input: unknown }[]
   profile: VoiceProfile
+  report: () => VoiceConsistencyReport
   removeAnswer: () => null
 }
 
@@ -51,6 +95,7 @@ function fakeClient(initial: VoiceProfile): Fake {
   const fake: Fake = {
     calls,
     profile: initial,
+    report: () => REPORT,
     removeAnswer: () => null,
     client: {
       async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
@@ -58,6 +103,8 @@ function fakeClient(initial: VoiceProfile): Fake {
         switch (channel) {
           case 'voice:profile':
             return fake.profile as Output<C>
+          case 'voice:consistencyReport':
+            return fake.report() as Output<C>
           case 'voice:removeExemplar': {
             const answer = fake.removeAnswer()
             const { id } = input as Input<'voice:removeExemplar'>
@@ -92,6 +139,7 @@ async function open(initial: VoiceProfile = profile()): Promise<void> {
 beforeEach(() => {
   resetVoiceStore()
   useDialogStore.setState({ modals: [], toasts: [] })
+  useTreeStore.getState().clear()
 })
 
 describe('VoiceSection (F-14.1)', () => {
@@ -152,6 +200,70 @@ describe('VoiceSection (F-14.1)', () => {
     expect(fake.calls[1]?.input).toEqual({ id: 'e1' })
     expect(useVoiceStore.getState().exemplars?.map((e) => e.id)).toEqual(['e2'])
     await waitFor(() => expect(screen.getByTestId('voice-words')).toHaveTextContent('1 of 12'))
+  })
+
+  it('checks voice consistency on demand: drifting scenes first with their lines, short ones summarised, a title selects the scene (F-14.7)', async () => {
+    await open()
+    useTreeStore.setState({
+      ...buildIndex([
+        node('ms', 'manuscript', {
+          parentId: null,
+          sectionType: 'manuscript',
+          kind: 'folder',
+          hierarchyLevel: null
+        }),
+        node('scene-1', 'Scene 1'),
+        node('scene-3', 'Scene 3', { position: 1 })
+      ]),
+      loaded: true
+    })
+    expect(screen.queryByTestId('voice-consistency')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Check voice consistency' }))
+    await waitFor(() => expect(screen.getByTestId('voice-consistency')).toBeInTheDocument())
+    expect(fake.calls.at(-1)).toEqual({ channel: 'voice:consistencyReport', input: {} })
+    const list = screen.getByRole('list', { name: 'Voice consistency' })
+    const rows = [...list.querySelectorAll(':scope > li')]
+    expect(rows.map((row) => row.getAttribute('data-status'))).toEqual(['drift', 'ok'])
+    expect(rows[0]).toHaveTextContent('Scene 3')
+    expect(rows[0]).toHaveTextContent('Drifts · 1,620 words')
+    expect(
+      within(screen.getByRole('list', { name: 'Drift in Scene 3' }))
+        .getAllByRole('listitem')
+        .map((li) => li.textContent)
+    ).toEqual(REPORT.documents[2]?.violations)
+    expect(rows[1]).toHaveTextContent('Scene 1')
+    expect(rows[1]).toHaveTextContent('Matches · 900 words')
+    expect(screen.getByTestId('voice-consistency-skipped')).toHaveTextContent(
+      '1 scene under 200 words was skipped.'
+    )
+    await userEvent.click(within(list).getByRole('button', { name: 'Scene 3' }))
+    expect(useTreeStore.getState().selectedId).toBe('scene-3')
+  })
+
+  it('explains a report with nothing to score, and toasts a failed check', async () => {
+    await open()
+    fake.report = () => ({
+      profileWordCount: 0,
+      documents: [
+        { id: 'a', title: 'A', wordCount: 0, status: 'short', violations: [] },
+        { id: 'b', title: 'B', wordCount: 12, status: 'short', violations: [] }
+      ]
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Check voice consistency' }))
+    await waitFor(() => expect(screen.getByTestId('voice-consistency')).toBeInTheDocument())
+    expect(screen.queryByRole('list', { name: 'Voice consistency' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('voice-consistency')).toHaveTextContent(
+      'Nothing to score yet: every scene is under 200 words.'
+    )
+    expect(screen.getByTestId('voice-consistency-skipped')).toHaveTextContent(
+      '2 scenes under 200 words were skipped.'
+    )
+    fake.report = () => {
+      throw new IpcRequestError({ code: 'NO_PROJECT', message: 'No project is open' })
+    }
+    await userEvent.click(screen.getByRole('button', { name: 'Check voice consistency' }))
+    await waitFor(() => expect(toasts()).toEqual(['No project is open']))
+    expect(screen.getByRole('button', { name: 'Check voice consistency' })).toBeEnabled()
   })
 
   it('toasts a refused removal and keeps the row', async () => {

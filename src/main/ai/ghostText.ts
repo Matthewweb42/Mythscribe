@@ -1,6 +1,7 @@
 import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS } from '@shared/ai'
 import { docToText } from '@shared/docText'
 import { resolvePreset } from '@shared/presets'
+import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { getNotes } from '../document/notesStore'
 import { getSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
@@ -10,8 +11,9 @@ import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
 import { voiceBlock } from '../voice/voiceBlock'
 import { assertFeatureAllowed } from './dial'
 import { buildGhostTextPrompt } from './prompts/ghostText.v1'
+import { buildGhostTextRegenPrompt } from './prompts/ghostTextRegen.v1'
 import type { CompletionUsage } from './providers/types'
-import { runAiRequest, sha256, type AiRequestDeps } from './request'
+import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from './request'
 
 export interface GhostTextInput {
   nodeId: string
@@ -24,11 +26,20 @@ export interface GhostTextInput {
 export interface GhostTextResult {
   /** The continuation to show at the caret; '' when post-processing left nothing (no suggestion). */
   text: string
+  /** Both calls' tokens when the answer was regenerated (F-14.7). */
   usage: CompletionUsage
+  /** Both calls' cost when the answer was regenerated. */
   costUsd: number
+  /** Whether the call that produced `text` was answered from the cache. */
   cached: boolean
+  /** The model of the call that produced `text`. */
   model: string
+  /** The prompt version of the call that produced `text`. */
   promptVersion: string
+  /** True when `text` still fails the fidelity check after the one regenerate (F-14.7). */
+  flagged: boolean
+  /** The first violation's message when flagged, for the warning badge; null otherwise. */
+  violation: string | null
 }
 
 /**
@@ -38,7 +49,13 @@ export interface GhostTextResult {
  * profile for the scene's POV, with the exemplars closest to the passage at the caret), builds
  * `ghostText.v1` with the active writing preset (F-5.2), runs it through the one request path
  * (`fast` tier, the preset's temperature, at most 60 tokens), and post-processes the answer
- * into a one-or-two-sentence continuation. The fidelity check (F-14.7) is not built yet.
+ * into a one-or-two-sentence continuation. Then the fidelity check (F-14.7): the answer is
+ * scored locally against the profile's stylometrics; an off-voice answer is regenerated once
+ * through `ghostTextRegen.v1` with the first violation named, re-scored, and shown flagged
+ * when it still fails. A regenerate that fails for any reason (provider, budget, cap) falls
+ * back to the first answer, flagged: the author always gets the suggestion that exists. A
+ * project with neither rules nor exemplars (the same gate `voiceBlock` uses) skips the check,
+ * so a fresh project never warns.
  *
  * The context hash covers everything that shaped the messages: the caret window, the notes,
  * the metadata, the preset, and the voice profile's version (the version stands in for the
@@ -69,42 +86,78 @@ export async function generateGhostText(
   const profile = buildVoiceProfile(db, { pov: pov || undefined })
   const voice = voiceBlock(profile, { text: input.before, pov: pov || null })
 
-  const prompt = buildGhostTextPrompt({
+  const promptInput = { before: input.before, after: input.after, notes, meta, voice, preset }
+  const prompt = buildGhostTextPrompt(promptInput)
+  const context = {
     before: input.before,
     after: input.after,
     notes,
     meta,
-    voice,
-    preset
-  })
-  const contextHash = sha256(
-    JSON.stringify({
-      before: input.before,
-      after: input.after,
-      notes,
-      meta,
-      preset,
-      voiceVersion: voiceProfileVersion()
-    })
-  )
+    preset,
+    voiceVersion: voiceProfileVersion()
+  }
 
-  const result = await runAiRequest(deps, {
+  const first = await runAiRequest(deps, {
     feature: 'ghostText',
     tier: 'fast',
     messages: prompt.messages,
     maxTokens: prompt.maxTokens,
     temperature: prompt.temperature,
-    contextHash,
+    contextHash: sha256(JSON.stringify(context)),
     promptVersion: prompt.version
   })
+  const firstText = postProcessGhostText(first.text, input.before, input.after)
+  const shown = (call: AiRequestResult, text: string, version: string): GhostTextResult => ({
+    text,
+    usage: call.usage,
+    costUsd: call.costUsd,
+    cached: call.cached,
+    model: call.model,
+    promptVersion: version,
+    flagged: false,
+    violation: null
+  })
 
+  // The fidelity check (F-14.7): skipped for a fresh project (no voice block) or no suggestion.
+  if (voice === null || !firstText) return shown(first, firstText, prompt.version)
+  const violation = checkGhostTextFidelity(profile.stats, firstText).violations[0]
+  if (violation === undefined) return shown(first, firstText, prompt.version)
+
+  const regen = buildGhostTextRegenPrompt({ ...promptInput, violation: violation.message })
+  const flaggedFirst: GhostTextResult = {
+    ...shown(first, firstText, prompt.version),
+    flagged: true,
+    violation: violation.message
+  }
+  let second: AiRequestResult
+  try {
+    second = await runAiRequest(deps, {
+      feature: 'ghostText',
+      tier: 'fast',
+      messages: regen.messages,
+      maxTokens: regen.maxTokens,
+      temperature: regen.temperature,
+      contextHash: sha256(JSON.stringify({ ...context, violation: violation.code })),
+      promptVersion: regen.version
+    })
+  } catch {
+    return flaggedFirst
+  }
+  const combined = {
+    usage: {
+      inputTokens: first.usage.inputTokens + second.usage.inputTokens,
+      outputTokens: first.usage.outputTokens + second.usage.outputTokens
+    },
+    costUsd: first.costUsd + second.costUsd
+  }
+  const secondText = postProcessGhostText(second.text, input.before, input.after)
+  if (!secondText) return { ...flaggedFirst, ...combined }
+  const recheck = checkGhostTextFidelity(profile.stats, secondText)
   return {
-    text: postProcessGhostText(result.text, input.before, input.after),
-    usage: result.usage,
-    costUsd: result.costUsd,
-    cached: result.cached,
-    model: result.model,
-    promptVersion: prompt.version
+    ...shown(second, secondText, regen.version),
+    ...combined,
+    flagged: !recheck.ok,
+    violation: recheck.violations[0]?.message ?? null
   }
 }
 

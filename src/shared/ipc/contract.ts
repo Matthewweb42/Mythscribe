@@ -121,6 +121,9 @@ export type AiRecommendTagsResult = z.infer<typeof AiRecommendTagsResult>
  * What `ai:ghostText` answers (F-5.3): the continuation to show at the caret (`''` for "no
  * suggestion"), what it cost, and the caller's `requestId` echoed back so a stale answer is
  * dropped; or an expected AI failure as data with its next step, also carrying the id.
+ * `flagged` (F-14.7) is true when the text still fails the local fidelity check after one
+ * regenerate, with the first violation in `violation` for the warning badge; `usage` and
+ * `costUsd` then cover both calls.
  */
 export const AiGhostTextResult = z.discriminatedUnion('ok', [
   z.object({
@@ -130,6 +133,8 @@ export const AiGhostTextResult = z.discriminatedUnion('ok', [
     costUsd: z.number(),
     cached: z.boolean(),
     model: z.string(),
+    flagged: z.boolean(),
+    violation: z.string().nullable(),
     requestId: z.string()
   }),
   z.object({
@@ -167,6 +172,30 @@ export const VoiceProfile = z.object({
   wordCount: z.number().int().nonnegative()
 })
 export type VoiceProfile = z.infer<typeof VoiceProfile>
+
+/** One manuscript document in the voice consistency report (F-14.7): `short` under 200 words (not scored), `drift` with violations, else `ok`. */
+export const VoiceConsistencyStatus = z.enum(['ok', 'drift', 'short'])
+export type VoiceConsistencyStatus = z.infer<typeof VoiceConsistencyStatus>
+
+/**
+ * The whole-manuscript voice consistency report (F-14.7) as `voice:consistencyReport` answers
+ * it: every manuscript document in tree order, scored locally against the profile's
+ * stylometrics, with each violation as a report line.
+ */
+export const VoiceConsistencyReport = z.object({
+  /** The words the profile was built from. */
+  profileWordCount: z.number().int().nonnegative(),
+  documents: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      wordCount: z.number().int().nonnegative(),
+      status: VoiceConsistencyStatus,
+      violations: z.array(z.string())
+    })
+  )
+})
+export type VoiceConsistencyReport = z.infer<typeof VoiceConsistencyReport>
 
 export const contract = {
   'app:info': {
@@ -441,6 +470,15 @@ export const contract = {
    * metadata names that POV when they hold at least 2,000 words, else from the whole manuscript.
    */
   'voice:profile': { input: z.object({ pov: z.string().optional() }), output: VoiceProfile },
+  /**
+   * The voice consistency report (F-14.7): every manuscript document scored locally against the
+   * profile (built as `voice:profile` builds it, `pov` included), in tree order. On demand, never
+   * cached, no AI call.
+   */
+  'voice:consistencyReport': {
+    input: z.object({ pov: z.string().optional() }),
+    output: VoiceConsistencyReport
+  },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },
   /** The renderer could not flush, so the close it was asked for (and any quit behind it) is abandoned. */

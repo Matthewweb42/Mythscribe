@@ -44,6 +44,7 @@ import {
   toTreeNode
 } from '../tree/treeStore'
 import { addExemplar, listExemplars, removeExemplar } from '../voice/exemplarStore'
+import { buildConsistencyReport } from '../voice/consistency'
 import { buildVoiceProfile } from '../voice/profile'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { AppError } from './errors'
@@ -285,12 +286,12 @@ export function registerHandlers({
       try {
         const db = manager.require().connection.orm
         const deps = buildAiRequestDeps({ db, providers: ai, appState })
-        const { text, usage, costUsd, cached, model } = await generateGhostText(db, deps, {
-          nodeId,
-          before,
-          after
-        })
-        return { ok: true, text, usage, costUsd, cached, model, requestId }
+        const { text, usage, costUsd, cached, model, flagged, violation } = await generateGhostText(
+          db,
+          deps,
+          { nodeId, before, after }
+        )
+        return { ok: true, text, usage, costUsd, cached, model, flagged, violation, requestId }
       } catch (err) {
         if (err instanceof AiProviderError)
           return { ...aiFailure(err.code, err.message), requestId }
@@ -313,6 +314,11 @@ export function registerHandlers({
 
   register('voice:profile', ({ pov }) =>
     buildVoiceProfile(manager.require().connection.orm, { pov })
+  )
+
+  // F-14.7: the whole-manuscript report, local and on demand.
+  register('voice:consistencyReport', ({ pov }) =>
+    buildConsistencyReport(manager.require().connection.orm, { pov })
   )
 
   register('window:close', () => {
