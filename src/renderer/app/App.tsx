@@ -26,6 +26,8 @@ import { useProvenanceStore } from '@renderer/features/ai/provenanceStore'
 import { useVoiceStore } from '@renderer/features/ai/voiceStore'
 import { useEditorSettingsStore } from '@renderer/features/editor/settingsStore'
 import { FocusBackdrop } from '@renderer/features/focus/FocusBackdrop'
+import { BackgroundRotation } from '@renderer/features/focus/rotation'
+import { OVERLAY_DARKNESS } from '@shared/focus'
 import { useBackgroundStore, useCurrentBackground } from '@renderer/features/focus/backgroundStore'
 import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
 import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
@@ -142,6 +144,9 @@ export function App(): React.JSX.Element {
   // F-6.2: the current background sits behind the editor in focus mode; `isolate` keeps the
   // fixed layer under the main pane's content.
   const background = useCurrentBackground()
+  const darkness = useBackgroundStore(
+    (s) => s.settings?.overlay.darkness ?? OVERLAY_DARKNESS.default
+  )
 
   return (
     <div className="flex h-full flex-col">
@@ -175,7 +180,8 @@ export function App(): React.JSX.Element {
             : 'flex flex-1 items-center justify-center overflow-auto'
         }
       >
-        {focus && background ? <FocusBackdrop url={background.url} /> : null}
+        {focus && background ? <FocusBackdrop url={background.url} darkness={darkness} /> : null}
+        {focus ? <BackgroundRotation /> : null}
         {!ready ? null : current ? <ProjectScreen format={current.format} /> : <WelcomeScreen />}
       </main>
       <DialogHost />

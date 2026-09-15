@@ -1,3 +1,4 @@
+import { defaultFocusSettings } from '@shared/focus'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -733,9 +734,9 @@ describe('focusSettings and backgrounds (F-6.2)', () => {
 
   it('reports NO_PROJECT for every channel when nothing is open', async () => {
     await expect(invoke('focusSettings:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
-    await expect(invoke('focusSettings:set', { backgroundId: null })).rejects.toThrowError(
-      /^NO_PROJECT: /
-    )
+    await expect(
+      invoke('focusSettings:set', { ...defaultFocusSettings(), backgroundId: null })
+    ).rejects.toThrowError(/^NO_PROJECT: /)
     await expect(invoke('background:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
     await expect(invoke('background:add', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
     await expect(invoke('background:remove', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
@@ -747,14 +748,22 @@ describe('focusSettings and backgrounds (F-6.2)', () => {
       format: 'novel',
       directory: tmp
     })
-    expect(await invoke('focusSettings:get', undefined)).toEqual({ backgroundId: null })
+    expect(await invoke('focusSettings:get', undefined)).toEqual({
+      ...defaultFocusSettings(),
+      backgroundId: null
+    })
     expect(await invoke('background:list', undefined)).toEqual([])
-    expect(await invoke('focusSettings:set', { backgroundId: 'bg' })).toEqual({
+    expect(
+      await invoke('focusSettings:set', { ...defaultFocusSettings(), backgroundId: 'bg' })
+    ).toEqual({
       backgroundId: 'bg'
     })
     await invoke('project:close', undefined)
     await invoke('project:open', { path: created?.path ?? '' })
-    expect(await invoke('focusSettings:get', undefined)).toEqual({ backgroundId: 'bg' })
+    expect(await invoke('focusSettings:get', undefined)).toEqual({
+      ...defaultFocusSettings(),
+      backgroundId: 'bg'
+    })
   })
 
   it('refuses a non-string id with VALIDATION and keeps the stored value', async () => {
@@ -762,7 +771,10 @@ describe('focusSettings and backgrounds (F-6.2)', () => {
     const result = await handlerFor('focusSettings:set')(undefined, { backgroundId: 3 })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
-    expect(await invoke('focusSettings:get', undefined)).toEqual({ backgroundId: null })
+    expect(await invoke('focusSettings:get', undefined)).toEqual({
+      ...defaultFocusSettings(),
+      backgroundId: null
+    })
   })
 
   it('copies the chosen images into the project folder, skipping refused ones by name', async () => {
@@ -807,11 +819,17 @@ describe('focusSettings and backgrounds (F-6.2)', () => {
     const added = (await invoke('background:add', undefined))?.added ?? []
     const [a, b] = added
     if (!a || !b) throw new Error('two backgrounds expected')
-    await invoke('focusSettings:set', { backgroundId: a.id })
+    await invoke('focusSettings:set', { ...defaultFocusSettings(), backgroundId: a.id })
     expect(await invoke('background:remove', { id: b.id })).toBeNull()
-    expect(await invoke('focusSettings:get', undefined)).toEqual({ backgroundId: a.id })
+    expect(await invoke('focusSettings:get', undefined)).toEqual({
+      ...defaultFocusSettings(),
+      backgroundId: a.id
+    })
     expect(await invoke('background:remove', { id: a.id })).toBeNull()
-    expect(await invoke('focusSettings:get', undefined)).toEqual({ backgroundId: null })
+    expect(await invoke('focusSettings:get', undefined)).toEqual({
+      ...defaultFocusSettings(),
+      backgroundId: null
+    })
     expect(await invoke('background:list', undefined)).toEqual([])
     expect(fs.readdirSync(backgroundsDir(created?.path ?? ''))).toEqual([])
     await expect(invoke('background:remove', { id: a.id })).rejects.toThrowError(/^NOT_FOUND: /)

@@ -41,7 +41,7 @@
   --ms-editor-paragraph-indent: 0em;
 
   /* Focus mode (F-6.2): the scrim over a background image and the panel behind the column. */
-  --ms-focus-scrim: rgb(0 0 0 / 0.6);
+  --ms-focus-scrim: rgb(0 0 0);
   --ms-focus-surface: rgb(27 27 31 / 0.72);
 
   --ms-radius: 6px;

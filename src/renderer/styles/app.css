@@ -233,7 +233,9 @@ select {
   content: '';
   position: absolute;
   inset: 0;
+  /* F-6.4: the darkness setting drives the scrim; the token is the fallback. */
   background: var(--ms-focus-scrim);
+  opacity: var(--ms-focus-darkness, 1);
 }
 
 .focus-surface {

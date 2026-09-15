@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { defaultFocusSettings } from '@shared/focus'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultEditorSettings, type EditorSettings } from '@shared/editorSettings'
@@ -218,7 +219,7 @@ describe('EditorSettingsTab focus-mode group (F-6.2)', () => {
   it('names the current background and opens the Background Manager', async () => {
     useBackgroundStore.setState({
       backgrounds: [{ id: 'a', name: 'a.png', url: 'mythscribe-asset://backgrounds/a.png' }],
-      settings: { backgroundId: null }
+      settings: { ...defaultFocusSettings(), backgroundId: null }
     })
     open()
     const group = within(screen.getByRole('region', { name: 'Focus mode' }))
@@ -230,5 +231,23 @@ describe('EditorSettingsTab focus-mode group (F-6.2)', () => {
     expect(screen.getByTestId('focus-background-name')).toHaveTextContent('a.png')
     await userEvent.click(within(manager).getByRole('button', { name: 'Close backgrounds' }))
     expect(screen.queryByRole('dialog', { name: 'Backgrounds' })).not.toBeInTheDocument()
+  })
+
+  it('rotation and overlay controls patch the focus settings (F-6.3, F-6.4)', async () => {
+    resetBackgroundStore()
+    useBackgroundStore.setState({ settings: defaultFocusSettings() })
+    open()
+    const group = within(screen.getByRole('region', { name: 'Focus mode' }))
+    const minutes = group.getByRole('spinbutton', { name: 'Every (minutes)' })
+    expect(minutes).toBeDisabled()
+    await userEvent.click(group.getByRole('checkbox', { name: /Rotate backgrounds/ }))
+    expect(useBackgroundStore.getState().settings?.rotation.enabled).toBe(true)
+    expect(minutes).toBeEnabled()
+    fireEvent.change(minutes, { target: { value: '90' } })
+    expect(useBackgroundStore.getState().settings?.rotation.intervalMinutes).toBe(60)
+    fireEvent.change(group.getByRole('slider', { name: /^Darkness/ }), { target: { value: '25' } })
+    fireEvent.change(group.getByRole('slider', { name: /^Width/ }), { target: { value: '55' } })
+    expect(useBackgroundStore.getState().settings?.overlay).toEqual({ darkness: 25, width: 55 })
+    resetBackgroundStore()
   })
 })

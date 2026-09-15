@@ -6,7 +6,14 @@ import {
 } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { BackgroundManager } from '@renderer/features/focus/BackgroundManager'
-import { useCurrentBackground } from '@renderer/features/focus/backgroundStore'
+import { useBackgroundStore, useCurrentBackground } from '@renderer/features/focus/backgroundStore'
+import {
+  OVERLAY_DARKNESS,
+  OVERLAY_WIDTH,
+  ROTATION_MINUTES,
+  clampInt,
+  defaultFocusSettings
+} from '@shared/focus'
 import { COLUMN, editorStyle } from './column'
 import { useEditorSettings, useEditorSettingsStore } from './settingsStore'
 
@@ -96,6 +103,9 @@ export function EditorSettingsTab({ format }: { format: NovelFormat }): React.JS
  */
 function FocusModeGroup(): React.JSX.Element {
   const background = useCurrentBackground()
+  const focusSettings = useBackgroundStore((s) => s.settings) ?? defaultFocusSettings()
+  const setRotation = useBackgroundStore((s) => s.setRotation)
+  const setOverlay = useBackgroundStore((s) => s.setOverlay)
   const [managerOpen, setManagerOpen] = useState(false)
   return (
     <section aria-label="Focus mode" className="flex flex-col gap-2 border-t border-line pt-4">
@@ -112,6 +122,70 @@ function FocusModeGroup(): React.JSX.Element {
           Backgrounds…
         </button>
       </div>
+      <label className={ROW}>
+        <span>
+          Rotate backgrounds
+          <span className="block text-xs text-fg-muted">
+            Cycle through the uploaded images while in focus mode.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          checked={focusSettings.rotation.enabled}
+          onChange={(event) => setRotation({ enabled: event.target.checked })}
+        />
+      </label>
+      <label className={ROW}>
+        <span>Every (minutes)</span>
+        <input
+          type="number"
+          className={FIELD}
+          min={ROTATION_MINUTES.min}
+          max={ROTATION_MINUTES.max}
+          step={1}
+          value={focusSettings.rotation.intervalMinutes}
+          disabled={!focusSettings.rotation.enabled}
+          onChange={(event) =>
+            setRotation({ intervalMinutes: clampInt(Number(event.target.value), ROTATION_MINUTES) })
+          }
+        />
+      </label>
+      <label className={ROW}>
+        <span>
+          Darkness
+          <span className="block text-xs text-fg-muted">
+            How much the image is dimmed behind the text ({focusSettings.overlay.darkness} %).
+          </span>
+        </span>
+        <input
+          type="range"
+          min={OVERLAY_DARKNESS.min}
+          max={OVERLAY_DARKNESS.max}
+          step={1}
+          value={focusSettings.overlay.darkness}
+          onChange={(event) =>
+            setOverlay({ darkness: clampInt(Number(event.target.value), OVERLAY_DARKNESS) })
+          }
+        />
+      </label>
+      <label className={ROW}>
+        <span>
+          Width
+          <span className="block text-xs text-fg-muted">
+            The writing area as a share of the screen ({focusSettings.overlay.width} %).
+          </span>
+        </span>
+        <input
+          type="range"
+          min={OVERLAY_WIDTH.min}
+          max={OVERLAY_WIDTH.max}
+          step={1}
+          value={focusSettings.overlay.width}
+          onChange={(event) =>
+            setOverlay({ width: clampInt(Number(event.target.value), OVERLAY_WIDTH) })
+          }
+        />
+      </label>
       {managerOpen ? <BackgroundManager onClose={() => setManagerOpen(false)} /> : null}
     </section>
   )

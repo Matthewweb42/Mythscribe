@@ -6,7 +6,9 @@ import {
   backgroundUrl,
   defaultFocusSettings,
   backgroundDisplayName,
-  backgroundFileName
+  backgroundFileName,
+  clampInt,
+  OVERLAY_WIDTH
 } from './focus'
 
 describe('FocusSettings (F-6.2)', () => {
@@ -60,5 +62,37 @@ describe('background names (F-6.2)', () => {
     expect(backgroundDisplayName('Sunset-over-harbor.abcdef12.png')).toBe('Sunset-over-harbor.png')
     expect(backgroundDisplayName('a.png')).toBe('a.png')
     expect(backgroundDisplayName('notes.v2.abcdef12.jpg')).toBe('notes.v2.jpg')
+  })
+})
+
+describe('rotation and overlay (F-6.3, F-6.4)', () => {
+  it('fills a row written before them with the defaults, and keeps what is there', () => {
+    expect(FocusSettings.parse({ backgroundId: 'a' })).toEqual({
+      ...defaultFocusSettings(),
+      backgroundId: 'a'
+    })
+    expect(
+      FocusSettings.parse({
+        backgroundId: null,
+        rotation: { enabled: true, intervalMinutes: 12 },
+        overlay: { darkness: 5, width: 100 }
+      })
+    ).toEqual({
+      backgroundId: null,
+      rotation: { enabled: true, intervalMinutes: 12 },
+      overlay: { darkness: 5, width: 100 }
+    })
+  })
+
+  it('refuses values outside the ranges and clamps for the controls', () => {
+    expect(FocusSettings.safeParse({ overlay: { darkness: 101, width: 70 } }).success).toBe(false)
+    expect(FocusSettings.safeParse({ overlay: { darkness: 0, width: 34 } }).success).toBe(false)
+    expect(
+      FocusSettings.safeParse({ rotation: { enabled: true, intervalMinutes: 0 } }).success
+    ).toBe(false)
+    expect(clampInt(120, OVERLAY_WIDTH)).toBe(100)
+    expect(clampInt(10.6, OVERLAY_WIDTH)).toBe(35)
+    expect(clampInt(Number.NaN, OVERLAY_WIDTH)).toBe(35)
+    expect(clampInt(49.5, OVERLAY_WIDTH)).toBe(50)
   })
 })

@@ -19,12 +19,63 @@ export const BACKGROUND_MAX_BYTES = 20 * 1024 * 1024
  * for none. Later fields (F-6.3 rotation, F-6.4 overlay) join with `.default` so a row written
  * before them keeps parsing.
  */
-export const FocusSettings = z.object({ backgroundId: z.string().nullable().default(null) })
+export const ROTATION_MINUTES = { min: 1, max: 60, default: 5 } as const
+export const OVERLAY_DARKNESS = { min: 0, max: 100, default: 60 } as const
+export const OVERLAY_WIDTH = { min: 35, max: 100, default: 70 } as const
+
+/** F-6.3: cycle through the uploaded backgrounds every `intervalMinutes` while in focus mode. */
+export const FocusRotation = z.object({
+  enabled: z.boolean().default(false),
+  intervalMinutes: z
+    .number()
+    .int()
+    .min(ROTATION_MINUTES.min)
+    .max(ROTATION_MINUTES.max)
+    .default(ROTATION_MINUTES.default)
+})
+export type FocusRotation = z.infer<typeof FocusRotation>
+
+/** F-6.4: the writing area over the background: scrim darkness in percent and column width in percent of the pane. */
+export const FocusOverlay = z.object({
+  darkness: z
+    .number()
+    .int()
+    .min(OVERLAY_DARKNESS.min)
+    .max(OVERLAY_DARKNESS.max)
+    .default(OVERLAY_DARKNESS.default),
+  width: z
+    .number()
+    .int()
+    .min(OVERLAY_WIDTH.min)
+    .max(OVERLAY_WIDTH.max)
+    .default(OVERLAY_WIDTH.default)
+})
+export type FocusOverlay = z.infer<typeof FocusOverlay>
+
+export const FocusSettings = z.object({
+  backgroundId: z.string().nullable().default(null),
+  // zod 4: `.default` takes the output shape, so the full defaults are spelled out.
+  rotation: FocusRotation.default({ enabled: false, intervalMinutes: ROTATION_MINUTES.default }),
+  overlay: FocusOverlay.default({
+    darkness: OVERLAY_DARKNESS.default,
+    width: OVERLAY_WIDTH.default
+  })
+})
 export type FocusSettings = z.infer<typeof FocusSettings>
 export type FocusSettingsInput = z.input<typeof FocusSettings>
 
 export function defaultFocusSettings(): FocusSettings {
-  return { backgroundId: null }
+  return {
+    backgroundId: null,
+    rotation: { enabled: false, intervalMinutes: ROTATION_MINUTES.default },
+    overlay: { darkness: OVERLAY_DARKNESS.default, width: OVERLAY_WIDTH.default }
+  }
+}
+
+/** Clamps a number into a `{ min, max }` range, rounding to an integer; NaN becomes `min`. */
+export function clampInt(value: number, range: { min: number; max: number }): number {
+  if (!Number.isFinite(value)) return range.min
+  return Math.min(range.max, Math.max(range.min, Math.round(value)))
 }
 
 /**

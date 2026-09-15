@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Background, FocusSettings } from '@shared/focus'
+import { type Background, FocusSettings, defaultFocusSettings } from '@shared/focus'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { SETTINGS_SAVE_DELAY_MS } from '@renderer/features/editor/settingsStore'
 import { flushPendingSaves, resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -43,7 +43,7 @@ function client(): IpcClient {
         const value = input as Input<'focusSettings:set'>
         return new Promise<Output<Ch>>((resolve, reject) => {
           sets.push({
-            value: { backgroundId: value.backgroundId ?? null },
+            value: FocusSettings.parse(value),
             resolve: () => resolve(value as Output<Ch>),
             reject
           })
@@ -67,7 +67,7 @@ beforeEach(() => {
   resetBackgroundStore()
   resetPendingSaves()
   useDialogStore.setState({ modals: [], toasts: [] })
-  stored = { backgroundId: 'b' }
+  stored = { ...defaultFocusSettings(), backgroundId: 'b' }
   listed = [A, B]
   addAnswer = null
   sets = []
@@ -85,13 +85,13 @@ describe('useBackgroundStore (F-6.2)', () => {
     expect(store().backgrounds).toEqual([])
     expect(currentBackground(store())).toBeNull()
     await store().load()
-    expect(store().settings).toEqual({ backgroundId: 'b' })
+    expect(store().settings).toEqual({ ...defaultFocusSettings(), backgroundId: 'b' })
     expect(store().backgrounds).toEqual([A, B])
     expect(currentBackground(store())).toEqual(B)
   })
 
   it('answers no current background when the selected id has no file', async () => {
-    stored = { backgroundId: 'gone' }
+    stored = { ...defaultFocusSettings(), backgroundId: 'gone' }
     await store().load()
     expect(currentBackground(store())).toBeNull()
   })
@@ -104,12 +104,12 @@ describe('useBackgroundStore (F-6.2)', () => {
     expect(sets).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(1)
     expect(sets).toHaveLength(1)
-    expect(sets[0]?.value).toEqual({ backgroundId: 'a' })
+    expect(sets[0]?.value).toEqual({ ...defaultFocusSettings(), backgroundId: 'a' })
     sets[0]?.resolve()
     await settle()
     store().select(null)
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
-    expect(sets[1]?.value).toEqual({ backgroundId: null })
+    expect(sets[1]?.value).toEqual({ ...defaultFocusSettings(), backgroundId: null })
   })
 
   it('coalesces rapid selections into one write', async () => {
@@ -121,7 +121,7 @@ describe('useBackgroundStore (F-6.2)', () => {
     store().select('a')
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(1)
-    expect(sets[0]?.value).toEqual({ backgroundId: 'a' })
+    expect(sets[0]?.value).toEqual({ ...defaultFocusSettings(), backgroundId: 'a' })
   })
 
   it('reverts to the value before the failed write and toasts', async () => {
@@ -134,7 +134,7 @@ describe('useBackgroundStore (F-6.2)', () => {
     sets[0]?.resolve()
     sets[1]?.reject(new Error('disk full'))
     await settle()
-    expect(store().settings).toEqual({ backgroundId: 'a' })
+    expect(store().settings).toEqual({ ...defaultFocusSettings(), backgroundId: 'a' })
     expect(toasts()).toEqual(['disk full'])
   })
 
@@ -168,10 +168,10 @@ describe('useBackgroundStore (F-6.2)', () => {
     await store().remove('a')
     expect(removed).toEqual(['a'])
     expect(store().backgrounds).toEqual([B])
-    expect(store().settings).toEqual({ backgroundId: 'b' })
+    expect(store().settings).toEqual({ ...defaultFocusSettings(), backgroundId: 'b' })
     await store().remove('b')
     expect(store().backgrounds).toEqual([])
-    expect(store().settings).toEqual({ backgroundId: null })
+    expect(store().settings).toEqual({ ...defaultFocusSettings(), backgroundId: null })
     expect(currentBackground(store())).toBeNull()
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(0)
@@ -196,7 +196,7 @@ describe('useBackgroundStore (F-6.2)', () => {
     await settle()
     sets[0]?.reject(new Error('read-only'))
     await expect(flushing).rejects.toThrow('read-only')
-    expect(store().settings).toEqual({ backgroundId: 'b' })
+    expect(store().settings).toEqual({ ...defaultFocusSettings(), backgroundId: 'b' })
   })
 
   it('clear empties the store and cancels the pending write; a superseded load is dropped', async () => {

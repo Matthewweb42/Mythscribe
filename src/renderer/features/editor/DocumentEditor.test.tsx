@@ -24,6 +24,8 @@ import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { resetSceneMetaStore } from './sceneMetaStore'
 import { resetVoiceStore } from '@renderer/features/ai/voiceStore'
 import { defaultEditorSettings } from '@shared/editorSettings'
+import { defaultFocusSettings } from '@shared/focus'
+import { resetBackgroundStore, useBackgroundStore } from '@renderer/features/focus/backgroundStore'
 import { resetEditorSettingsStore, useEditorSettingsStore } from './settingsStore'
 
 type Handler = (input: unknown) => unknown
@@ -217,6 +219,23 @@ describe('DocumentEditor focus mode (F-6.1)', () => {
     act(() => useFocusStore.setState({ active: false }))
     expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
     expect(bar()).toBeInTheDocument()
+  })
+})
+
+describe('DocumentEditor focus column width (F-6.4)', () => {
+  it('sizes the column as a share of the pane only in focus mode', async () => {
+    resetBackgroundStore()
+    useBackgroundStore.setState({
+      settings: { ...defaultFocusSettings(), overlay: { darkness: 40, width: 55 } }
+    })
+    await mountReady()
+    const pane = (): string => box().closest('[style]')?.getAttribute('style') ?? ''
+    expect(pane()).not.toContain('--ms-editor-max-width: 55%')
+    act(() => useFocusStore.setState({ active: true }))
+    expect(pane()).toContain('--ms-editor-max-width: 55%')
+    act(() => useFocusStore.setState({ active: false }))
+    expect(pane()).not.toContain('55%')
+    resetBackgroundStore()
   })
 })
 

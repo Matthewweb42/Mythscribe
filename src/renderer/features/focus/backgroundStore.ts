@@ -1,5 +1,10 @@
 import { create } from 'zustand'
-import { FocusSettings, type Background } from '@shared/focus'
+import {
+  FocusSettings,
+  type Background,
+  type FocusOverlay,
+  type FocusRotation
+} from '@shared/focus'
 import { SETTINGS_SAVE_DELAY_MS } from '@renderer/features/editor/settingsStore'
 import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -26,6 +31,10 @@ interface BackgroundState {
   remove: (id: string) => Promise<void>
   /** Makes `id` (or none) the current background at once and schedules the write. */
   select: (id: string | null) => void
+  /** F-6.3: merges a rotation patch (clamped by the schema) and schedules the write. */
+  setRotation: (patch: Partial<FocusRotation>) => void
+  /** F-6.4: merges an overlay patch (clamped by the schema) and schedules the write. */
+  setOverlay: (patch: Partial<FocusOverlay>) => void
   /** Cancels any pending write, unregisters from the registry, and empties the store. */
   clear: () => void
 }
@@ -36,6 +45,20 @@ let persisted: FocusSettings | null = null
 /** Bumped by every load() and clear() so a response from a superseded request is dropped. */
 let generation = 0
 let unregister: (() => void) | null = null
+
+/** Merges `patch` into the loaded settings at once (refused by the schema → ignored) and schedules one write. */
+function patchSettings(patch: Partial<FocusSettings>): void {
+  const base = useBackgroundStore.getState().settings
+  if (base === null) return
+  const next = FocusSettings.safeParse({ ...base, ...patch })
+  if (!next.success) return
+  persisted ??= base
+  useBackgroundStore.setState({ settings: next.data })
+  cancelTimer()
+  timer = setTimeout(() => {
+    write().catch(reportFailure)
+  }, SETTINGS_SAVE_DELAY_MS)
+}
 
 function cancelTimer(): void {
   if (timer !== null) {
@@ -117,16 +140,17 @@ export const useBackgroundStore = create<BackgroundState>((set, get) => ({
   },
 
   select(id) {
+    patchSettings({ backgroundId: id })
+  },
+
+  setRotation(patch) {
     const base = get().settings
-    if (base === null) return
-    const next = FocusSettings.safeParse({ ...base, backgroundId: id })
-    if (!next.success) return
-    persisted ??= base
-    set({ settings: next.data })
-    cancelTimer()
-    timer = setTimeout(() => {
-      write().catch(reportFailure)
-    }, SETTINGS_SAVE_DELAY_MS)
+    if (base !== null) patchSettings({ rotation: { ...base.rotation, ...patch } })
+  },
+
+  setOverlay(patch) {
+    const base = get().settings
+    if (base !== null) patchSettings({ overlay: { ...base.overlay, ...patch } })
   },
 
   clear() {

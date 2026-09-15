@@ -284,18 +284,21 @@ describe('getFocusSettings / setFocusSettings (F-6.2)', () => {
 
   it('round-trips a value and overwrites the single row', () => {
     open('epic')
-    expect(setFocusSettings(db, { backgroundId: 'bg-1' })).toEqual({ backgroundId: 'bg-1' })
-    expect(getFocusSettings(db)).toEqual({ backgroundId: 'bg-1' })
-    setFocusSettings(db, { backgroundId: null })
+    expect(setFocusSettings(db, { ...defaultFocusSettings(), backgroundId: 'bg-1' })).toEqual({
+      ...defaultFocusSettings(),
+      backgroundId: 'bg-1'
+    })
+    expect(getFocusSettings(db)).toEqual({ ...defaultFocusSettings(), backgroundId: 'bg-1' })
+    setFocusSettings(db, { ...defaultFocusSettings(), backgroundId: null })
     expect(rows(FOCUS_SETTINGS_KEY)).toHaveLength(1)
-    expect(getFocusSettings(db)).toEqual({ backgroundId: null })
+    expect(getFocusSettings(db)).toEqual({ ...defaultFocusSettings(), backgroundId: null })
   })
 
   it('fills the background field into a row written without it', () => {
     open('novel')
     setRaw('{}', FOCUS_SETTINGS_KEY)
-    expect(getFocusSettings(db)).toEqual({ backgroundId: null })
-    expect(setFocusSettings(db, {})).toEqual({ backgroundId: null })
+    expect(getFocusSettings(db)).toEqual({ ...defaultFocusSettings(), backgroundId: null })
+    expect(setFocusSettings(db, {})).toEqual({ ...defaultFocusSettings(), backgroundId: null })
   })
 
   it('falls back when the stored value is not JSON or no longer fits the schema', () => {

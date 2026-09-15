@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Editor } from '@tiptap/core'
+import type { CSSProperties } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
 import type { NovelFormat } from '@shared/ipc/contract'
@@ -8,7 +9,8 @@ import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
 import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
 import type { MenuItem } from '@renderer/features/manuscript/contextMenuItems'
-import { useCurrentBackground } from '@renderer/features/focus/backgroundStore'
+import { useBackgroundStore, useCurrentBackground } from '@renderer/features/focus/backgroundStore'
+import { OVERLAY_WIDTH } from '@shared/focus'
 import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -142,6 +144,7 @@ function RegionEditor({
   const typewriter = focus || settings.typewriter
   // F-6.2: over a background image the column gets a translucent panel so the text stays legible.
   const background = useCurrentBackground()
+  const focusWidth = useBackgroundStore((s) => s.settings?.overlay.width ?? OVERLAY_WIDTH.default)
   const surface = focus && background !== null
   const [menu, setMenu] = useState<TokenMenu | null>(null)
 
@@ -248,7 +251,18 @@ function RegionEditor({
   // The column and the surface inside it are flex items, so an empty document still fills the
   // scroll container (click anywhere to write) without a viewport-relative minimum height.
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={editorStyle(settings)}>
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
+      // F-6.4: in focus mode the column is a share of the pane instead of the settings' pixels.
+      style={
+        focus
+          ? ({
+              ...editorStyle(settings),
+              '--ms-editor-max-width': `${focusWidth}%`
+            } as CSSProperties)
+          : editorStyle(settings)
+      }
+    >
       {focus ? null : (
         <Toolbar
           editor={ready ? editor : null}

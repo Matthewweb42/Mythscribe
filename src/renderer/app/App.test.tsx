@@ -1,3 +1,4 @@
+import { defaultFocusSettings } from '@shared/focus'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -109,7 +110,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'layout:set') return input
     if (channel === 'window:setFullScreen') return input // the fake window does what it is asked
     if (channel === 'conversations:get') return { active: null, items: [] }
-    if (channel === 'focusSettings:get') return { backgroundId: null }
+    if (channel === 'focusSettings:get') return { ...defaultFocusSettings(), backgroundId: null }
     if (channel === 'background:list') return []
     return null
   })
@@ -814,7 +815,7 @@ describe('App', () => {
       install({
         'project:current': info,
         'tree:list': treeFixture,
-        'focusSettings:get': { backgroundId: 'b1' },
+        'focusSettings:get': { ...defaultFocusSettings(), backgroundId: 'b1' },
         'background:list': [{ id: 'b1', name: 'b1.png', url }]
       })
       render(<App />)

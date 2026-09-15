@@ -1528,6 +1528,44 @@ test('create, close, reopen a project on disk', async () => {
   await expect.poll(isFullScreen).toBe(false)
   await expect(formatting).toBeVisible()
 
+  // F-6.3 / F-6.4: rotation and the writing overlay persist under the focus settings; the
+  // overlay width sizes the focus-mode column as a share of the pane (no background is
+  // selected here, so darkness has nothing to dim). Rotation's timer is unit-tested.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const focusGroup = settingsDialog.getByRole('region', { name: 'Focus mode' })
+  await focusGroup.getByRole('checkbox', { name: /Rotate backgrounds/ }).check()
+  await focusGroup.getByRole('spinbutton', { name: 'Every (minutes)' }).fill('3')
+  await focusGroup.getByRole('slider', { name: /^Darkness/ }).fill('30')
+  await focusGroup.getByRole('slider', { name: /^Width/ }).fill('50')
+  await expect
+    .poll(async () => (await focusSettings()).rotation)
+    .toEqual({
+      enabled: true,
+      intervalMinutes: 3
+    })
+  expect((await focusSettings()).overlay).toEqual({ darkness: 30, width: 50 })
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await page.keyboard.press('F11')
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const box = document.querySelector('.ProseMirror')
+        const pane = box?.closest<HTMLElement>('[style*="--ms-editor-max-width"]')
+        return pane?.style.getPropertyValue('--ms-editor-max-width').trim() ?? null
+      })
+    )
+    .toBe('50%')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('toolbar', { name: 'Formatting' })).toBeVisible()
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await focusGroup.getByRole('checkbox', { name: /Rotate backgrounds/ }).uncheck()
+  await focusGroup.getByRole('slider', { name: /^Darkness/ }).fill('60')
+  await focusGroup.getByRole('slider', { name: /^Width/ }).fill('70')
+  await expect.poll(async () => (await focusSettings()).rotation.enabled).toBe(false)
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+
   // F-5.4: the assistant panel. Ctrl+K opens it (the dial is still at Suggest with the key
   // saved). A Plan question streams its answer into the chat with the cost line, and the
   // request carries the scene's text; the tab takes the question as its title. Agent mode

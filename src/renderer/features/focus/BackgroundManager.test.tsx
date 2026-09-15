@@ -1,3 +1,4 @@
+import { defaultFocusSettings } from '@shared/focus'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -45,7 +46,10 @@ beforeEach(() => {
   removed = []
   onClose = vi.fn<() => void>()
   setIpcClient(client())
-  useBackgroundStore.setState({ backgrounds: [A, B], settings: { backgroundId: 'b' } })
+  useBackgroundStore.setState({
+    backgrounds: [A, B],
+    settings: { ...defaultFocusSettings(), backgroundId: 'b' }
+  })
 })
 afterEach(() => {
   resetBackgroundStore()
@@ -67,11 +71,17 @@ describe('BackgroundManager (F-6.2)', () => {
   it('selects a tile and "No background"', async () => {
     open()
     await userEvent.click(tile('a.png'))
-    expect(useBackgroundStore.getState().settings).toEqual({ backgroundId: 'a' })
+    expect(useBackgroundStore.getState().settings).toEqual({
+      ...defaultFocusSettings(),
+      backgroundId: 'a'
+    })
     expect(tile('a.png')).toHaveAttribute('aria-pressed', 'true')
     expect(tile('b.jpg')).toHaveAttribute('aria-pressed', 'false')
     await userEvent.click(tile('No background'))
-    expect(useBackgroundStore.getState().settings).toEqual({ backgroundId: null })
+    expect(useBackgroundStore.getState().settings).toEqual({
+      ...defaultFocusSettings(),
+      backgroundId: null
+    })
     expect(tile('No background')).toHaveAttribute('aria-pressed', 'true')
   })
 
