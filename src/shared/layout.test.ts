@@ -36,8 +36,8 @@ describe('defaultLayout', () => {
     expect(defaultLayout().tagBar).not.toBe(defaultLayout().tagBar)
   })
 
-  it('opens the tag bar at 120 px (F-4.4) with the metadata pane at 40 % (F-4.5)', () => {
-    expect(defaultLayout().tagBar).toEqual({ open: true, height: 120, split: 0.4 })
+  it('opens the tag bar at 180 px (F-4.4, raised for the F-14.3 Brief row) with the metadata pane at 40 % (F-4.5)', () => {
+    expect(defaultLayout().tagBar).toEqual({ open: true, height: 180, split: 0.4 })
   })
 
   it('starts with the assistant panel closed at 0.3 (F-5.4)', () => {

@@ -9,6 +9,7 @@ import { createProject, projectFolderFor, type ProjectSession } from '../project
 import { deleteNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { addExemplar, listExemplars, removeExemplar } from './exemplarStore'
 import { currentVoiceVersion } from './versionCache'
+import { EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
 
 let tmp: string
 let session: ProjectSession
@@ -50,7 +51,7 @@ afterEach(() => {
 describe('addExemplar', () => {
   it('stores the trimmed text with the document POV, the kind, and a timestamp, and bumps the version', () => {
     const scene = nodeOfKind('document')
-    setSceneMeta(db, scene, { location: '', pov: ' Mara ', timeline: '' })
+    setSceneMeta(db, scene, { location: '', pov: ' Mara ', timeline: '', brief: EMPTY_SCENE_BRIEF })
     const before = currentVoiceVersion()
     const added = addExemplar(db, scene, `  ${PASSAGE}\n`)
     expect(added).toMatchObject({ nodeId: scene, text: PASSAGE, pov: 'Mara', kind: 'mixed' })

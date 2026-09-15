@@ -145,7 +145,7 @@ export const GHOST_AFTER_CHARS = 100
  * rows, so a member is never renamed. A feature's budget lines join `FEATURE_BUDGETS` and
  * `FEATURE_INPUT_BUDGETS` in the change that builds it (F-5.3 ghost text, F-4.7 tags, F-5.6
  * summaries, F-5.4 chat, F-5.5 Author mode, F-5.7 queries, F-14.8 critique, F-5.8 embeddings,
- * F-14.10 rewrite).
+ * F-14.10 rewrite, F-14.3 brief).
  */
 export const AI_FEATURE_IDS = [
   'ghostText',
@@ -157,7 +157,9 @@ export const AI_FEATURE_IDS = [
   'critique',
   'embeddings',
   // F-14.10: rewrite-in-my-voice on a selection.
-  'rewrite'
+  'rewrite',
+  // F-14.3: drafting a scene's brief from its text.
+  'brief'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -181,7 +183,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-14.10: a 4,000-character passage (~1,000 tokens) rewritten at up to 1.5× its length.
   rewrite: 1_500,
   // F-14.8: up to 8 editor's notes as JSON, each with a quote, a reason, and an optional fix.
-  critique: 1_500
+  critique: 1_500,
+  // F-14.3: five one-line brief fields as JSON.
+  brief: 200
 }
 
 /**
@@ -191,15 +195,18 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
  * refused with `BUDGET` before anything is sent; trimming to fit is the context builder's job.
  */
 export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
-  ghostText: 1_500,
+  // F-14.3 raised it from 1,500: the scene brief block (its own and the neighbours' lines) rides along.
+  ghostText: 2_000,
   tags: 8_000,
   summary: 8_000,
   // F-5.4: one scene head-truncated to 6 000 characters, the voice block, referenced notes, and ten turns of history.
   chat: 8_000,
   // F-14.10: the passage (≤ 4,000 characters), 300 characters of context each side, the metadata, and the voice block.
   rewrite: 3_000,
-  // F-14.8: one scene head-truncated to 20,000 characters, its notes, the metadata, and the voice block.
-  critique: 8_000
+  // F-14.8: one scene head-truncated to 20,000 characters, the brief, the metadata, and the voice block.
+  critique: 8_000,
+  // F-14.3: one scene head-truncated to 20,000 characters and its metadata line.
+  brief: 6_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

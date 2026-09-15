@@ -5,6 +5,7 @@ import type { SceneMeta } from '@shared/sceneMeta'
 import { documentTag, node } from '../../db/schema'
 import { getDocumentContent, parseStoredTiptap } from '../../document/documentStore'
 import { getSceneMeta } from '../../document/sceneMetaStore'
+import { sceneBriefBlock } from '../../document/sceneNeighbours'
 import { listTags } from '../../tag/tagStore'
 import type { TreeDb } from '../../tree/treeStore'
 
@@ -27,6 +28,12 @@ export interface ChatContext {
   sceneText: string
   /** The scene's metadata when any field is set, else null (Agent mode folds it in). */
   sceneMeta: SceneMeta | null
+  /**
+   * The scene brief block (F-14.3) for the active document — its own lines with the previous
+   * scene's reader-knows-after line and the next scene's goal — or null with no scene open or
+   * no brief anywhere near it. Agent mode folds it in.
+   */
+  brief: string | null
   /** The references that resolved to a tag with at least one linked note, in message order. */
   refs: ChatRef[]
   /** Every reference that resolved to a bank tag, notes or not; an unknown name is dropped. */
@@ -35,7 +42,8 @@ export interface ChatContext {
 
 /**
  * The context an assistant turn carries (F-5.4), exactly what the data-sharing panel lists:
- * the active scene's text (head-truncated, the same cut as tags), its metadata, and, for each
+ * the active scene's text (head-truncated, the same cut as tags), its metadata, its brief
+ * (F-14.3, `sceneBriefBlock`), and, for each
  * `#name` in the message that names a bank tag, the notes (F-3.7) of the documents linked to
  * that tag (F-4.4) as plain text, the whole notes budget shared evenly across the references
  * that have any. Nothing else of the manuscript is read. A `nodeId` that is not a document
@@ -45,11 +53,13 @@ export interface ChatContext {
 export function buildChatContext(db: TreeDb, input: ChatContextInput): ChatContext {
   let sceneText = ''
   let sceneMeta: SceneMeta | null = null
+  let brief: string | null = null
   if (input.nodeId !== null) {
     const { content } = getDocumentContent(db, input.nodeId)
     sceneText = headTruncate(content ? docToText(content).trim() : '', CHAT_SCENE_CHAR_BUDGET)
     const { meta } = getSceneMeta(db, input.nodeId)
     sceneMeta = meta.location || meta.pov || meta.timeline ? meta : null
+    brief = sceneBriefBlock(db, input.nodeId)
   }
 
   const names = parseTagRefs(input.message)
@@ -66,6 +76,7 @@ export function buildChatContext(db: TreeDb, input: ChatContextInput): ChatConte
   return {
     sceneText,
     sceneMeta,
+    brief,
     refs: withNotes.map(({ name, notes }) => ({ name, notes: headTruncate(notes, share) })),
     refNames: matched.map(({ name }) => name)
   }

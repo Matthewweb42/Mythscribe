@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiRecommendTagsResult, Channel, Input, Output, Tag } from '@shared/ipc/contract'
+import { emptySceneMeta } from '@shared/sceneMeta'
 import { resetAiActivityStore, useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
@@ -60,7 +61,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       }
       if (channel === 'sceneMeta:get') {
         const { id } = input as Input<'sceneMeta:get'>
-        return { id, meta: { location: '', pov: '', timeline: '' } } as Output<C>
+        return { id, meta: emptySceneMeta() } as Output<C>
       }
       if (channel === 'proposal:settle') return null as Output<C>
       if (channel === 'ai:cancel') return { cancelled: true } as Output<C>
@@ -302,13 +303,13 @@ describe('TagBar (F-4.4)', () => {
     await mount()
     const toggle = within(bar()).getByRole('button', { name: /^Tags/ })
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(bar().style.height).toBe('120px')
+    expect(bar().style.height).toBe('180px')
     expect(within(bar()).getByRole('separator', { name: 'Resize tag bar' })).toBeInTheDocument()
     await userEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(useLayoutStore.getState().layout.tagBar).toEqual({
       open: false,
-      height: 120,
+      height: 180,
       split: 0.4
     })
     expect(chips()).toHaveLength(0)
@@ -325,13 +326,13 @@ describe('TagBar (F-4.4)', () => {
     await mount()
     const handle = within(bar()).getByRole('separator', { name: 'Resize tag bar' })
     expect(handle).toHaveAttribute('aria-orientation', 'horizontal')
-    expect(handle).toHaveAttribute('aria-valuenow', '120')
+    expect(handle).toHaveAttribute('aria-valuenow', '180')
     expect(handle).toHaveAttribute('aria-valuemin', '100')
     expect(handle).toHaveAttribute('aria-valuemax', '480')
     fireEvent.pointerDown(handle, { clientY: 300, button: 0 })
     fireEvent.pointerMove(window, { clientY: 380 })
-    expect(useLayoutStore.getState().layout.tagBar.height).toBe(200)
-    expect(bar().style.height).toBe('200px')
+    expect(useLayoutStore.getState().layout.tagBar.height).toBe(260)
+    expect(bar().style.height).toBe('260px')
     fireEvent.pointerMove(window, { clientY: 1380 })
     expect(useLayoutStore.getState().layout.tagBar.height).toBe(480)
     fireEvent.pointerMove(window, { clientY: 0 })

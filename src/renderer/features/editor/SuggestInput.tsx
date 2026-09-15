@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 
 interface SuggestInputProps {
   /** The visible label text; also the input's accessible name. */
@@ -25,6 +25,8 @@ const INPUT =
  * the text, ArrowDown/ArrowUp move the active option, Enter fills it in and closes, Escape and
  * blur close. Free text stays allowed: the value is whatever the input holds, and an option is
  * only a shortcut to it. Combobox ARIA, so the listbox and the active option are announced.
+ * The listbox is fixed-positioned under the input, measured when it opens and again on typing,
+ * scrolling, and resizing, so the scrolling metadata pane (F-14.3) never clips it.
  */
 export function SuggestInput({
   label,
@@ -36,10 +38,36 @@ export function SuggestInput({
 }: SuggestInputProps): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  /** Where the open listbox sits in the viewport: just under the input, as wide as it. */
+  const [anchor, setAnchor] = useState({ top: 0, left: 0, width: 0 })
   const inputId = useId()
   const listId = useId()
   const matches = open ? suggestions(options, value) : []
   const expanded = matches.length > 0
+
+  // Measured when the list opens and re-measured on every keystroke, scroll (any ancestor:
+  // the metadata pane scrolls, F-14.3), and resize, so the fixed list stays under the input.
+  useLayoutEffect(() => {
+    if (!expanded) return
+    const measure = (): void => {
+      const rect = inputRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const next = { top: rect.bottom + 2, left: rect.left, width: rect.width }
+      setAnchor((current) =>
+        current.top === next.top && current.left === next.left && current.width === next.width
+          ? current
+          : next
+      )
+    }
+    measure()
+    window.addEventListener('scroll', measure, true)
+    window.addEventListener('resize', measure)
+    return () => {
+      window.removeEventListener('scroll', measure, true)
+      window.removeEventListener('resize', measure)
+    }
+  }, [expanded, value])
   const activeIndex = expanded ? Math.min(active, matches.length - 1) : -1
   const optionId = (index: number): string => `${listId}-${index}`
 
@@ -70,12 +98,13 @@ export function SuggestInput({
   }
 
   return (
-    <div className="relative flex items-center gap-2">
+    <div className="flex items-center gap-2">
       <label htmlFor={inputId} className="w-16 shrink-0 text-xs text-fg-muted">
         {label}
       </label>
       <input
         id={inputId}
+        ref={inputRef}
         type="text"
         role="combobox"
         aria-autocomplete="list"
@@ -100,7 +129,8 @@ export function SuggestInput({
           id={listId}
           role="listbox"
           aria-label={`${label} suggestions`}
-          className="absolute top-full right-0 left-18 z-30 m-0 mt-0.5 max-h-40 list-none overflow-y-auto rounded-md border border-line bg-surface-raised p-1 text-xs shadow-panel"
+          style={anchor}
+          className="fixed z-30 m-0 max-h-40 list-none overflow-y-auto rounded-md border border-line bg-surface-raised p-1 text-xs shadow-panel"
         >
           {matches.map((name, index) => (
             <li

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Channel, Input, Output } from '@shared/ipc/contract'
+import type { Channel, Input, Output, ParsedInput } from '@shared/ipc/contract'
 import { EMPTY_SCENE_META, type SceneMeta } from '@shared/sceneMeta'
 import { flushPendingSaves, resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -34,7 +34,7 @@ function deferredClient(): { client: IpcClient; gets: PendingGet[]; sets: Pendin
         })
       }
       if (channel === 'sceneMeta:set') {
-        const { id, meta } = input as Input<'sceneMeta:set'>
+        const { id, meta } = input as ParsedInput<'sceneMeta:set'>
         return new Promise<Output<C>>((resolve, reject) => {
           sets.push({ id, meta, resolve: () => resolve({ modified: 'm' } as Output<C>), reject })
         })

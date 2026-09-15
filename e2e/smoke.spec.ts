@@ -17,6 +17,7 @@ import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/co
 import type { Layout } from '../src/shared/layout'
 import { PRESETS, type WritingPresets } from '../src/shared/presets'
 import { matterTemplate } from '../src/shared/matterTemplates'
+import type { SceneMeta } from '../src/shared/sceneMeta'
 import type { TiptapNodeT } from '../src/shared/tiptap'
 import { countWords } from '../src/shared/wordCount'
 
@@ -98,6 +99,20 @@ const CRITIQUE_ANSWER = JSON.stringify({
       fix: null
     }
   ]
+})
+/**
+ * F-14.3: the opening of the brief prompt's system turn (`BRIEF_RULES` in
+ * `src/main/ai/prompts/brief.v1.ts`; main is outside the e2e tsconfig, so it is repeated here).
+ * A JSON request carrying it gets the canned brief below.
+ */
+const BRIEF_SENTINEL = 'You are the scene-brief feature inside a novel-writing app.'
+const BRIEF_GOAL = 'Mara wants to cross the river tonight.'
+const BRIEF_ANSWER = JSON.stringify({
+  goal: BRIEF_GOAL,
+  conflict: 'The river is up and Tomas will not row.',
+  turn: 'She decides to wait for morning.',
+  beat: 'Dread giving way to resolve.',
+  after: 'The crossing is off until dawn.'
 })
 /** F-14.2: the rule the author writes and the phrase they ban; the canned continuation uses the phrase. */
 const AUTHOR_RULE = 'Mara never swears.'
@@ -184,6 +199,10 @@ function startFakeOpenAi(): Promise<string> {
           const critique = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(CRITIQUE_SENTINEL)
           )
+          // F-14.3: a brief draft comes back as the five JSON lines.
+          const brief = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(BRIEF_SENTINEL)
+          )
           // F-5.4: a Plan turn streams (server-sent events in the shape the SDK parses: content
           // deltas, one usage-only chunk, then [DONE]); an Agent turn is a plain completion.
           if (request.stream) {
@@ -239,9 +258,11 @@ function startFakeOpenAi(): Promise<string> {
                     content: json
                       ? critique
                         ? CRITIQUE_ANSWER
-                        : regen
-                          ? '{"tags":["antagonist","protagonist"]}'
-                          : '{"tags":["dark-forest","protagonist"]}'
+                        : brief
+                          ? BRIEF_ANSWER
+                          : regen
+                            ? '{"tags":["antagonist","protagonist"]}'
+                            : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -998,7 +1019,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(tagBarToggle).toHaveAttribute('aria-expanded', 'true')
   await expect(tagBar.getByRole('separator', { name: 'Resize tag bar' })).toHaveAttribute(
     'aria-valuenow',
-    '120'
+    '180'
   )
   await tagBarToggle.click()
   await expect(tagBarToggle).toHaveAttribute('aria-expanded', 'false')
@@ -1006,7 +1027,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(tagBar.getByRole('separator')).toHaveCount(0)
   await expect
     .poll(async () => (await getLayout()).tagBar, { timeout: 3000 })
-    .toEqual({ open: false, height: 120, split: 0.4 })
+    .toEqual({ open: false, height: 180, split: 0.4 })
   await tagBarToggle.click()
   await expect(tagBarToggle).toHaveAttribute('aria-expanded', 'true')
   await expect(tagBar.getByRole('button', { name: 'Add tag' })).toBeVisible()
@@ -1255,13 +1276,31 @@ test('create, close, reopen a project on disk', async () => {
   // (five markers each) and cross the 200-word gate; saved before any ghost-text request
   // leaves, since main builds the profile from the stored rows.
   await editor.click()
-  await page.keyboard.press('End')
+  await page.keyboard.press('Control+End')
   for (let i = 0; i < 5; i++) await page.keyboard.type(VOICE_PARAGRAPH)
   await expect
     .poll(async () => ((await documentText(scene1Row.id)) ?? '').split('pulled it open').length, {
       timeout: 3000
     })
     .toBe(6)
+  // F-14.3: the scene brief. The metadata pane's Brief disclosure holds the five lines and,
+  // for a document, "Draft with AI" asks main for them (the dial is at Suggest and the key is
+  // set by now, and Scene 1 is well past the 200-character floor). The draft is a proposal:
+  // Use draft fills the fields, which autosave like the rest of the metadata, so the
+  // ghost-text request below carries the brief.
+  const briefRequestsBefore = openAiRequests.length
+  await metadata.getByRole('button', { name: 'Brief' }).click()
+  await metadata.getByRole('button', { name: 'Draft with AI' }).click()
+  const briefDraft = metadata.getByRole('group', { name: 'Brief draft' })
+  await expect(briefDraft).toContainText(`Goal: ${BRIEF_GOAL}`)
+  expect(openAiRequests).toHaveLength(briefRequestsBefore + 1)
+  await briefDraft.getByRole('button', { name: 'Use draft' }).click()
+  await expect(briefDraft).toHaveCount(0)
+  await expect(metadata.getByRole('textbox', { name: 'Goal' })).toHaveValue(BRIEF_GOAL)
+  await expect
+    .poll(async () => (await sceneMetaOf(scene1Row.id)).brief.goal, { timeout: 3000 })
+    .toBe(BRIEF_GOAL)
+
   const vibeWrite = page.getByRole('button', { name: 'VibeWrite' })
   await expect(vibeWrite).toBeEnabled()
   await expect(vibeWrite).toHaveAttribute('aria-pressed', 'false')
@@ -1271,7 +1310,7 @@ test('create, close, reopen a project on disk', async () => {
   const ghost = editor.locator('.ghost-text')
   const beforeGhost = openAiRequests.length
   await editor.click()
-  await page.keyboard.press('End')
+  await page.keyboard.press('Control+End')
   await page.keyboard.type(' Mara waited on the ridge.')
   await expect(ghost).toHaveText(GHOST_CONTINUATION)
   expect(openAiRequests).toHaveLength(beforeGhost + 1)
@@ -1284,6 +1323,10 @@ test('create, close, reopen a project on disk', async () => {
   expect(ghostSystem?.role).toBe('system')
   expect(ghostSystem?.content).toContain("Match the author's voice:")
   expect(ghostSystem?.content).toContain('Example in this voice:\n"""\nThe storm broke at dusk.')
+  // F-14.3: and the user turn carries the brief the author just accepted.
+  const ghostUser = openAiChatBodies.at(-1)?.messages.at(-1)
+  expect(ghostUser?.content).toContain('Scene brief:')
+  expect(ghostUser?.content).toContain(`- Goal: ${BRIEF_GOAL}`)
   // A widget only: the editor's text without the ghost span does not carry the continuation.
   expect(await documentTextWithoutGhost()).not.toContain(GHOST_CONTINUATION)
   await page.keyboard.press('Tab')
@@ -1295,7 +1338,8 @@ test('create, close, reopen a project on disk', async () => {
   await expect(aiSpan).toHaveText(GHOST_CONTINUATION)
   await expect(page.getByTestId('status-ai')).toHaveText(/^[1-9]\d*% AI$/)
   const afterGhost = await usageSummary()
-  expect(afterGhost.total.requests).toBe(3)
+  // Two tags requests (F-4.7), the brief draft (F-14.3), and this ghost text.
+  expect(afterGhost.total.requests).toBe(4)
   expect(afterGhost.byFeature.find((f) => f.feature === 'ghostText')).toMatchObject({
     requests: 1,
     tokens: 309
@@ -1386,9 +1430,10 @@ test('create, close, reopen a project on disk', async () => {
   )
   const disclosure = fs.readFileSync(disclosurePath, 'utf8')
   expect(disclosure).toContain('# AI disclosure: Smoke Novel')
-  // The accepted text is the continuation plus the two spaces the join at the caret added.
+  // The accepted text is the continuation plus the one space the join at the caret added
+  // before it (the caret was at the document end, so nothing followed it).
   expect(disclosure).toMatch(
-    new RegExp(`\\| Scene 1 \\| ${GHOST_CONTINUATION.length + 2} \\| [\\d,]+ \\| [1-9]\\d*% \\|`)
+    new RegExp(`\\| Scene 1 \\| ${GHOST_CONTINUATION.length + 1} \\| [\\d,]+ \\| [1-9]\\d*% \\|`)
   )
   expect(openAiRequests).toHaveLength(requestsBeforeReport)
   // F-14.2: the author's rules. The section starts with the seeded phrases and no rules text;
@@ -1453,7 +1498,7 @@ test('create, close, reopen a project on disk', async () => {
   // F-14.6: once the author has rewritten more than half of what they accepted, what is left
   // is theirs: the mark goes and the status bar share with it. The span may wrap across lines,
   // so the selection is set on its text node directly (ProseMirror reads the DOM selection on
-  // `selectionchange`), and one Delete removes 25 of the 41 accepted characters.
+  // `selectionchange`), and one Delete removes 25 of the 40 accepted characters.
   await editor.click()
   await aiSpan.evaluate((el) => {
     const text = el.firstChild
@@ -1941,8 +1986,11 @@ test('create, close, reopen a project on disk', async () => {
   expect(critiqueSystem?.content.startsWith(CRITIQUE_SENTINEL)).toBe(true)
   // The honesty setting is at its default, "specific and direct".
   expect(critiqueSystem?.content).toContain('Be specific and direct')
-  // The scene's own notes (F-3.7) are the brief until F-14.3.
-  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toContain(SCENE_NOTE)
+  // F-14.3: the scene brief accepted above is the intent block `critique.v2` carries.
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toContain(
+    "Scene brief (the author's intent):"
+  )
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toContain(`- Goal: ${BRIEF_GOAL}`)
   await critiquePanel.getByTestId('critique-apply').first().click()
   await expect(critiquePanel.getByTestId('critique-apply').first()).toHaveText('Applied')
   await expect(editor.locator('p').first()).toContainText(CRITIQUE_FIX)
@@ -2153,6 +2201,19 @@ async function notesText(id: string): Promise<string | null> {
   )
   if (!result.ok) throw new Error(`notes:get failed: ${result.error.message}`)
   return result.data.notes ? plainText(result.data.notes) : null
+}
+
+/** A node's saved scene metadata (F-4.5) including its brief (F-14.3), as main reports it. */
+async function sceneMetaOf(id: string): Promise<SceneMeta> {
+  const result = await page.evaluate<IpcResult<{ id: string; meta: SceneMeta }>, string>(
+    (nodeId) =>
+      window.mythscribe.invoke('sceneMeta:get', { id: nodeId }) as Promise<
+        IpcResult<{ id: string; meta: SceneMeta }>
+      >,
+    id
+  )
+  if (!result.ok) throw new Error(`sceneMeta:get failed: ${result.error.message}`)
+  return result.data.meta
 }
 
 /** The persisted panel layout (F-7.2) as main reports it. */

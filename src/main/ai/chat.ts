@@ -17,8 +17,9 @@ import { buildChatContext } from './context/chatContext'
 import { assertFeatureAllowed } from './dial'
 import { stripWrappingQuotes } from './ghostText'
 import { regenRequestId } from './inflight'
-import { buildChatPrompt, type BuildChatPromptInput, type ChatTurn } from './prompts/chat.v1'
-import { buildChatRegenPrompt } from './prompts/chatRegen.v1'
+import type { ChatTurn } from './prompts/chat.v1'
+import { buildChatPromptV2, type BuildChatPromptV2Input } from './prompts/chat.v2'
+import { buildChatRegenPromptV2 } from './prompts/chatRegen.v2'
 import { AiCancelledError, AiDisabledError, type CompletionUsage } from './providers/types'
 import {
   runAiRequest,
@@ -69,22 +70,22 @@ export const CHAT_FRAGMENT_MAX_WORDS = 200
  * The assistant use case (F-5.4). The gate first: `chat` must be allowed (Ask), and Agent mode
  * additionally needs the dial at the ghost-text level (Suggest), since its draft renders
  * through ghost text; the toggle for ghost text itself does not apply, so the level is checked
- * directly. Then the context (`buildChatContext`: the scene's text and metadata, the notes
- * behind the message's `#name` references), and, in Agent mode, the voice block (F-14.1) and
- * the active preset (F-5.2). The prompt is `chat.v1`; when its estimate is over the chat
+ * directly. Then the context (`buildChatContext`: the scene's text, metadata, and brief
+ * (F-14.3, Agent mode only), the notes behind the message's `#name` references), and, in Agent mode, the voice block (F-14.1) and
+ * the active preset (F-5.2). The prompt is `chat.v2`; when its estimate is over the chat
  * input budget, the oldest history turns are dropped first (CLAUDE.md, token rule 8) before
  * the request path makes its own check. Plan mode streams through `runAiStream` and hands
  * every delta to `onDelta`; Agent mode completes as a whole, is post-processed (trim, strip
  * wrapping quotes), and runs the fidelity check (F-14.7): a fragment under
  * `CHAT_FRAGMENT_MAX_WORDS` words through `checkGhostTextFidelity`, a longer draft through
- * `scoreDocumentDrift`; an off-voice draft is regenerated once through `chatRegen.v1` with
+ * `scoreDocumentDrift`; an off-voice draft is regenerated once through `chatRegen.v2` with
  * the violation named, re-scored, and shown flagged when it still fails; a regenerate that
  * fails for any reason falls back to the first draft, flagged, except a cancel (F-5.10),
  * which propagates as CANCELLED from either call. Plan answers are never flagged. Both tiers
  * are `fast`.
  *
  * The context hash covers everything that shaped the messages: the scene text, the metadata,
- * the references, the (trimmed) history, the message, the mode, the paragraph count, the
+ * the brief, the references, the (trimmed) history, the message, the mode, the paragraph count, the
  * preset, and the voice profile's version (which the author's rules bump too); the regenerate
  * adds the violation's message, which names the banned phrase, so two phrases never share a
  * cached regenerate.
@@ -113,26 +114,28 @@ export async function runChat(
   const profile = agent ? buildVoiceProfile(db, { pov: pov || undefined }) : null
   const voice = profile ? voiceBlock(profile, { text: context.sceneText, pov: pov || null }) : null
 
-  const base: Omit<BuildChatPromptInput, 'history'> = {
+  const base: Omit<BuildChatPromptV2Input, 'history'> = {
     mode: input.mode,
     paragraphs: input.paragraphs,
     sceneText: context.sceneText,
     sceneMeta: context.sceneMeta,
+    brief: context.brief,
     refs: context.refs,
     message: input.message,
     voice,
     preset
   }
   let history = input.history
-  let prompt = buildChatPrompt({ ...base, history })
+  let prompt = buildChatPromptV2({ ...base, history })
   while (history.length > 0 && estimate(prompt.messages) > inputBudget('chat')) {
     history = history.slice(1)
-    prompt = buildChatPrompt({ ...base, history })
+    prompt = buildChatPromptV2({ ...base, history })
   }
-  const promptInput: BuildChatPromptInput = { ...base, history }
+  const promptInput: BuildChatPromptV2Input = { ...base, history }
   const hashed = {
     sceneText: context.sceneText,
     sceneMeta: context.sceneMeta,
+    brief: context.brief,
     refs: context.refs,
     history,
     message: input.message,
@@ -183,7 +186,7 @@ export async function runChat(
   const violation = checkChatFidelity(profile.stats, firstText, banned)[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
-  const regen = buildChatRegenPrompt({ ...promptInput, violation: violation.message })
+  const regen = buildChatRegenPromptV2({ ...promptInput, violation: violation.message })
   const flaggedFirst: ChatResult = {
     ...shown(first, firstText, prompt.version),
     flagged: true,

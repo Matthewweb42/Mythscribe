@@ -69,7 +69,13 @@ function compute(db: TreeDb, pov: string): VoiceProfile {
   }
 }
 
-/** The document rows under the manuscript root, in tree order; the consistency report (F-14.7) walks the same rows. */
+/**
+ * The document rows under the manuscript root, in reading order: sorted by each row's chain of
+ * positions from the root (the order the tree shows), since `listNodes` sorts by parent id and
+ * position, which is reading order inside one chapter but not across chapters. The consistency
+ * report (F-14.7), the provenance report (F-14.6), and the scene neighbours (F-14.3) all walk
+ * these rows, so "the previous scene" and every per-scene table agree with the tree.
+ */
 export function manuscriptDocuments(db: TreeDb): NodeRow[] {
   const rows = listNodes(db)
   const root = rows.find((row) => row.parentId === null && row.sectionType === 'manuscript')
@@ -84,7 +90,28 @@ export function manuscriptDocuments(db: TreeDb): NodeRow[] {
     under.set(id, result)
     return result
   }
-  return rows.filter((row) => row.kind === 'document' && isUnder(row.id))
+  const paths = new Map<string, number[]>()
+  const pathOf = (row: NodeRow): number[] => {
+    const known = paths.get(row.id)
+    if (known !== undefined) return known
+    const parent = row.parentId === null ? undefined : byId.get(row.parentId)
+    const path = parent === undefined ? [row.position] : [...pathOf(parent), row.position]
+    paths.set(row.id, path)
+    return path
+  }
+  return rows
+    .filter((row) => row.kind === 'document' && isUnder(row.id))
+    .sort((a, b) => comparePaths(pathOf(a), pathOf(b)))
+}
+
+/** Lexicographic order over position chains; a shorter chain (an ancestor) sorts first. */
+function comparePaths(a: number[], b: number[]): number {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const left = a[i] ?? -1
+    const right = b[i] ?? -1
+    if (left !== right) return left - right
+  }
+  return 0
 }
 
 /** The plain text of a stored document; '' for an empty or unreadable row, never a throw (one corrupt row must not break every request). */

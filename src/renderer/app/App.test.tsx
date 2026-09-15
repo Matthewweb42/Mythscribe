@@ -407,7 +407,7 @@ describe('App', () => {
       'layout:get': {
         sidebar: { open: true, size: 0.3, tab: 'manuscript' },
         notes: { open: false, size: 0.25 },
-        tagBar: { open: true, height: 120, split: 0.4 },
+        tagBar: { open: true, height: 180, split: 0.4 },
         assistant: { open: false, size: 0.3 },
         floating: defaultFloating()
       }
@@ -457,7 +457,7 @@ describe('App', () => {
           tab: 'manuscript'
         },
         notes: { open: false, size: 0.25 },
-        tagBar: { open: true, height: 120, split: 0.4 },
+        tagBar: { open: true, height: 180, split: 0.4 },
         assistant: { open: false, size: 0.3 },
         floating: defaultFloating()
       })

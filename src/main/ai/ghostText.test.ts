@@ -28,6 +28,7 @@ import {
 } from './providers/types'
 import type { AiRequestDeps } from './request'
 import type { UsageEntry } from './usageStore'
+import { EMPTY_SCENE_BRIEF, emptySceneMeta } from '@shared/sceneMeta'
 
 const NOW = new Date(2026, 8, 13, 10, 0, 0)
 type Complete = (request: CompletionRequest) => Promise<CompletionResult>
@@ -127,7 +128,7 @@ afterEach(() => {
 })
 
 describe('generateGhostText (F-5.3)', () => {
-  it('sends the caret window as ghostText.v1 on the fast tier with the preset temperature and cap, and logs one row', async () => {
+  it('sends the caret window as ghostText.v2 on the fast tier with the preset temperature and cap, and logs one row', async () => {
     const result = await ask(BEFORE, 'The ferry would not wait.')
     expect(result).toEqual({
       text: ' Somewhere ahead the river was rising. ',
@@ -135,7 +136,7 @@ describe('generateGhostText (F-5.3)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'ghostText.v1',
+      promptVersion: 'ghostText.v2',
       flagged: false,
       violation: null
     })
@@ -159,7 +160,7 @@ describe('generateGhostText (F-5.3)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'ghostText',
       tier: 'fast',
-      promptVersion: 'ghostText.v1',
+      promptVersion: 'ghostText.v2',
       cached: false
     })
     expect(ledger[0]!.contextHash).toMatch(/^[0-9a-f]{64}$/)
@@ -167,12 +168,42 @@ describe('generateGhostText (F-5.3)', () => {
 
   it('folds the scene notes and metadata into the user turn, and nothing else of the document', async () => {
     saveNotes(db, scene, doc('Ends on the cliff.'))
-    setSceneMeta(db, scene, { location: 'Ferry landing', pov: 'Mara', timeline: '' })
+    setSceneMeta(db, scene, {
+      location: 'Ferry landing',
+      pov: 'Mara',
+      timeline: '',
+      brief: EMPTY_SCENE_BRIEF
+    })
     await ask()
     expect(complete.mock.calls[0]![0].messages[1]?.content).toBe(
       'Scene: location Ferry landing, POV Mara, timeline —.\nNotes: Ends on the cliff.\n\n' +
         `Passage so far:\n"""\n${BEFORE}\n"""\n\nContinue exactly at the cursor.`
     )
+  })
+
+  it('folds the scene brief (F-14.3) in after the metadata line and before the notes, and misses the cache when it changes', async () => {
+    saveNotes(db, scene, doc('Ends on the cliff.'))
+    setSceneMeta(db, scene, {
+      ...emptySceneMeta(),
+      location: 'Ferry landing',
+      brief: { ...EMPTY_SCENE_BRIEF, goal: 'Mara wants to cross tonight.' }
+    })
+    await ask()
+    expect(complete.mock.calls[0]![0].messages[1]?.content).toBe(
+      'Scene: location Ferry landing, POV —, timeline —.\n' +
+        'Scene brief:\n- Goal: Mara wants to cross tonight.\n' +
+        'Notes: Ends on the cliff.\n\n' +
+        `Passage so far:\n"""\n${BEFORE}\n"""\n\nContinue exactly at the cursor.`
+    )
+    await ask()
+    expect(complete).toHaveBeenCalledTimes(1)
+    setSceneMeta(db, scene, {
+      ...emptySceneMeta(),
+      location: 'Ferry landing',
+      brief: { ...EMPTY_SCENE_BRIEF, goal: 'Mara wants to wait for morning.' }
+    })
+    await ask()
+    expect(complete).toHaveBeenCalledTimes(2)
   })
 
   it('uses the active preset and misses the cache when the preset, notes, or metadata change', async () => {
@@ -192,7 +223,7 @@ describe('generateGhostText (F-5.3)', () => {
     saveNotes(db, scene, doc('New note.'))
     await ask()
     expect(complete).toHaveBeenCalledTimes(3)
-    setSceneMeta(db, scene, { location: 'Cliff', pov: '', timeline: '' })
+    setSceneMeta(db, scene, { location: 'Cliff', pov: '', timeline: '', brief: EMPTY_SCENE_BRIEF })
     await ask()
     expect(complete).toHaveBeenCalledTimes(4)
   })
@@ -342,7 +373,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       tier: 'fast',
       maxTokens: builtinParams('general').maxSuggestionTokens
     })
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['ghostText.v1', 'ghostTextRegen.v1'])
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['ghostText.v2', 'ghostTextRegen.v2'])
     expect(ledger[0]!.contextHash).not.toBe(ledger[1]!.contextHash)
     expect(result).toEqual({
       text: ` ${CLEAN}`,
@@ -350,7 +381,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd * 2,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'ghostTextRegen.v1',
+      promptVersion: 'ghostTextRegen.v2',
       flagged: false,
       violation: null
     })
@@ -365,7 +396,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       text: ` ${OFF_VOICE}`,
       flagged: true,
       violation: 'switches to present tense',
-      promptVersion: 'ghostTextRegen.v1',
+      promptVersion: 'ghostTextRegen.v2',
       usage: { inputTokens: 240, outputTokens: 24 }
     })
   })
@@ -382,7 +413,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'ghostText.v1',
+      promptVersion: 'ghostText.v2',
       flagged: true,
       violation: 'switches to present tense'
     })
@@ -415,7 +446,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
     expect(result).toMatchObject({
       text: ` ${OFF_VOICE}`,
       flagged: true,
-      promptVersion: 'ghostText.v1'
+      promptVersion: 'ghostText.v2'
     })
     expect(result.usage).toEqual({ inputTokens: 240, outputTokens: 24 })
   })
@@ -464,7 +495,7 @@ describe('generateGhostText author rules (F-14.2)', () => {
       text: ` ${CLEAN}`,
       flagged: false,
       violation: null,
-      promptVersion: 'ghostTextRegen.v1'
+      promptVersion: 'ghostTextRegen.v2'
     })
   })
 

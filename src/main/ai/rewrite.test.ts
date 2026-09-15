@@ -28,6 +28,7 @@ import {
 import type { AiRequestDeps } from './request'
 import { runRewrite, type RewriteInput } from './rewrite'
 import type { UsageEntry } from './usageStore'
+import { EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
 
 const NOW = new Date(2026, 8, 15, 10, 0, 0)
 type Complete = (request: CompletionRequest) => Promise<CompletionResult>
@@ -215,7 +216,7 @@ describe('runRewrite (F-14.10)', () => {
 
   it('sends the voice block and the scene line system-side and the context each side of the passage in the user turn', async () => {
     strongProfile()
-    setSceneMeta(db, scene, { location: 'Ferry landing', pov: 'Mara', timeline: '' })
+    setSceneMeta(db, scene, { location: 'Ferry landing', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF })
     await rewrite({ before: BEFORE, after: AFTER })
     const messages = stream.mock.calls[0]![0].messages
     expect(messages).toHaveLength(2)

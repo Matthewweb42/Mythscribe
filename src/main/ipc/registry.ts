@@ -5,13 +5,13 @@ import {
   type Channel,
   type EventName,
   type EventPayload,
-  type Input,
   type IpcResult,
+  type ParsedInput,
   type Output
 } from '@shared/ipc/contract'
 import { toIpcError } from './errors'
 
-export type Handler<C extends Channel> = (input: Input<C>) => Promise<Output<C>> | Output<C>
+export type Handler<C extends Channel> = (input: ParsedInput<C>) => Promise<Output<C>> | Output<C>
 
 /**
  * Wraps a handler with input validation and error envelope. Pure, so it is unit-testable
@@ -35,7 +35,7 @@ export function createHandler<C extends Channel>(
       }
     }
     try {
-      const data = await fn(parsed.data as Input<C>)
+      const data = await fn(parsed.data as ParsedInput<C>)
       return { ok: true, data }
     } catch (err) {
       const error = toIpcError(err)

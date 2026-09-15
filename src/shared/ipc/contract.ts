@@ -34,7 +34,7 @@ import { EditRole, MenuItemId } from '../menu'
 import { WritingPresets } from '../presets'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../rewrite'
-import { SceneMeta } from '../sceneMeta'
+import { SceneBrief, SceneMeta } from '../sceneMeta'
 import { Stylometrics } from '../stylometry'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
 import { TagTemplateId } from '../tagTemplates'
@@ -232,6 +232,34 @@ export const AiCritiqueResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiCritiqueResult = z.infer<typeof AiCritiqueResult>
+
+/**
+ * What `ai:draftBrief` answers (F-14.3): the five brief lines the model drafted from the scene
+ * (an empty string where the scene does not show one), whether the scene was head-truncated,
+ * what it cost, and the proposal it became (F-14.5); or an expected AI failure as data.
+ * Nothing is stored: the renderer fills the fields only when the author clicks Use draft.
+ */
+export const AiDraftBriefResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    brief: SceneBrief,
+    truncated: z.boolean(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    proposalId: z.string(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiDraftBriefResult = z.infer<typeof AiDraftBriefResult>
 
 /** An author-marked voice exemplar (F-14.1): a plain-text passage with the POV and kind it was filed under. */
 export const VoiceExemplar = z.object({
@@ -666,6 +694,18 @@ export const contract = {
     }),
     output: AiCritiqueResult
   },
+  /**
+   * Drafts a scene's brief from its text (F-14.3). The renderer sends only the node; main reads
+   * the document (head-truncated to `BRIEF_SCENE_CHAR_BUDGET`) and its metadata, asks the fast
+   * tier for JSON, and answers the five lines. Nothing is stored: the metadata pane fills the
+   * fields only on Use draft, through `sceneMeta:set`. NOT_FOUND for an unknown id, VALIDATION
+   * for a folder or a document under `BRIEF_TEXT_MIN` characters; the AI failures come back as
+   * data with the echoed `requestId`.
+   */
+  'ai:draftBrief': {
+    input: z.object({ nodeId: z.string(), requestId: z.string() }),
+    output: AiDraftBriefResult
+  },
   /** The project's conversations (F-5.4), stored as JSON under the settings key `conversations`; a fresh project has none. */
   'conversations:get': { input: z.undefined(), output: Conversations },
   /** Replaces the project's conversations (F-5.4); a value outside the schema is refused with VALIDATION. */
@@ -755,6 +795,8 @@ export const contract = {
 export type Contract = typeof contract
 export type Channel = keyof Contract
 export type Input<C extends Channel> = z.input<Contract[C]['input']>
+/** A channel's input after validation (defaults filled), which is what a main handler receives. */
+export type ParsedInput<C extends Channel> = z.output<Contract[C]['input']>
 export type Output<C extends Channel> = z.output<Contract[C]['output']>
 export const channels = Object.keys(contract) as Channel[]
 

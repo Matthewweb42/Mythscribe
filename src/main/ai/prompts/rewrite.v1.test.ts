@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { estimateTokens, inputBudget, outputBudget } from '@shared/ai'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX } from '@shared/rewrite'
 import { buildRewritePrompt, REWRITE_RULES, type BuildRewritePromptInput } from './rewrite.v1'
+import { EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
 
 const PASSAGE =
   'The storm broke at dusk over the dark forest. Mara counted the lightning gaps, each one ' +
@@ -60,7 +61,7 @@ describe('rewrite.v1 prompt (F-14.10)', () => {
       ...bare,
       before: 'She set the lantern down on the post.',
       after: 'She did not wait to see his face.',
-      meta: { location: 'Ferry landing', pov: 'Mara', timeline: '' },
+      meta: { location: 'Ferry landing', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF },
       voice: "Match the author's voice:\n- Narration is in past tense."
     })
     expect(built.messages[0]?.content).toBe(
@@ -103,7 +104,7 @@ describe('rewrite.v1 prompt (F-14.10)', () => {
       text: 't'.repeat(REWRITE_TEXT_MAX),
       before: 'b'.repeat(REWRITE_CONTEXT_CHARS),
       after: 'a'.repeat(REWRITE_CONTEXT_CHARS),
-      meta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500) },
+      meta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500), brief: EMPTY_SCENE_BRIEF },
       voice: 'v'.repeat(2_400)
     })
     const estimate = estimateTokens(promptText(built.messages))

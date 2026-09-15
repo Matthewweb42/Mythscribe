@@ -52,6 +52,31 @@ import {
 } from '../prompts/ghostText.v1'
 import { buildGhostTextRegenPrompt, GHOST_REGEN_PROMPT_VERSION } from '../prompts/ghostTextRegen.v1'
 import {
+  buildGhostTextPromptV2,
+  GHOST_PROMPT_V2_VERSION,
+  type BuildGhostTextPromptV2Input
+} from '../prompts/ghostText.v2'
+import {
+  buildGhostTextRegenPromptV2,
+  GHOST_REGEN_PROMPT_V2_VERSION
+} from '../prompts/ghostTextRegen.v2'
+import {
+  buildChatPromptV2,
+  CHAT_PROMPT_V2_VERSION,
+  type BuildChatPromptV2Input
+} from '../prompts/chat.v2'
+import { buildChatRegenPromptV2, CHAT_REGEN_PROMPT_V2_VERSION } from '../prompts/chatRegen.v2'
+import {
+  buildCritiquePromptV2,
+  CRITIQUE_PROMPT_V2_VERSION,
+  type BuildCritiquePromptV2Input
+} from '../prompts/critique.v2'
+import {
+  buildCritiqueRegenPromptV2,
+  CRITIQUE_REGEN_PROMPT_V2_VERSION
+} from '../prompts/critiqueRegen.v2'
+import { buildBriefPrompt, BRIEF_PROMPT_VERSION } from '../prompts/brief.v1'
+import {
   buildRewritePrompt,
   REWRITE_PROMPT_VERSION,
   type BuildRewritePromptInput
@@ -59,6 +84,13 @@ import {
 import { buildRewriteRegenPrompt, REWRITE_REGEN_PROMPT_VERSION } from '../prompts/rewriteRegen.v1'
 import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../prompts/tags.v1'
 import { buildTagsRegenPrompt, TAGS_REGEN_PROMPT_VERSION } from '../prompts/tagsRegen.v1'
+import {
+  BRIEF_SCENE_CHAR_BUDGET,
+  EMPTY_SCENE_BRIEF,
+  renderSceneBriefBlock,
+  SCENE_BRIEF_FIELD_MAX,
+  type SceneBrief
+} from '@shared/sceneMeta'
 
 /**
  * The eval harness's fixtures (F-5.12): one manuscript passage, the voice profile it yields,
@@ -144,7 +176,41 @@ const CARET_BEFORE = FIXTURE_PASSAGE.slice(0, FIXTURE_PASSAGE.lastIndexOf('\n\n'
 )
 const CARET_AFTER = 'She did not wait to see his face.'
 const NOTES = 'Mara confronts Tomas at the ferry. Ends with the reveal about the elm.'
-const META = { location: 'Ferry landing', pov: 'Mara', timeline: 'Night, first thaw' }
+const META = {
+  location: 'Ferry landing',
+  pov: 'Mara',
+  timeline: 'Night, first thaw',
+  brief: EMPTY_SCENE_BRIEF
+}
+
+/** The brief an author writes for the fixture scene, with the two neighbouring lines (F-14.3). */
+const BRIEF_BLOCK =
+  renderSceneBriefBlock({
+    current: {
+      goal: 'Mara wants Tomas to say what he actually wants for the ledger.',
+      conflict: 'The river is up, Tomas came empty-handed, and neither will leave first.',
+      turn: 'She stops bargaining and tells him where her brother is.',
+      beat: 'Wary patience hardening into cruelty.',
+      after: 'Tomas killed her brother, and Mara has known it the whole scene.'
+    },
+    previous: { ...EMPTY_SCENE_BRIEF, after: 'Her brother copied the mill ledger and vanished.' },
+    next: { ...EMPTY_SCENE_BRIEF, goal: 'Tomas wants to reach the elm before the thaw.' }
+  }) ?? ''
+
+/** Every line of the block at its cap: five own fields plus the two neighbour lines. */
+const maxedLine = (char: string): string => char.repeat(SCENE_BRIEF_FIELD_MAX)
+const MAXED_BRIEF_BLOCK =
+  renderSceneBriefBlock({
+    current: {
+      goal: maxedLine('g'),
+      conflict: maxedLine('c'),
+      turn: maxedLine('t'),
+      beat: maxedLine('b'),
+      after: maxedLine('a')
+    } satisfies SceneBrief,
+    previous: { ...EMPTY_SCENE_BRIEF, after: maxedLine('p') },
+    next: { ...EMPTY_SCENE_BRIEF, goal: maxedLine('n') }
+  }) ?? ''
 
 /** The Standard Fiction template names: the bank a new project loads first. */
 export const FIXTURE_BANK: string[] = (TAG_TEMPLATES[0]?.tags ?? []).map((tag) => tag.name)
@@ -173,6 +239,8 @@ export interface EvalCase {
     | { kind: 'chat'; profile: Stylometrics | null }
     /** Editor's notes: the answer must parse and every note must quote the scene that was sent. */
     | { kind: 'critique'; sceneText: string }
+    /** A scene brief (F-14.3): the answer must parse to the five string lines the prompt asks for. */
+    | { kind: 'brief' }
 }
 
 const general = builtinParams('general')
@@ -297,7 +365,12 @@ const agentMaxed: BuildChatPromptInput = {
   mode: 'agent',
   paragraphs: CHAT_PARAGRAPHS_MAX,
   sceneText: `${FIXTURE_PASSAGE.repeat(6).slice(0, CHAT_SCENE_CHAR_BUDGET)}…`,
-  sceneMeta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500) },
+  sceneMeta: {
+    location: 'L'.repeat(200),
+    pov: 'P'.repeat(200),
+    timeline: 'T'.repeat(500),
+    brief: EMPTY_SCENE_BRIEF
+  },
   refs: Array.from({ length: CHAT_MAX_REFS }, (_, i) => ({
     name: `ref-${i + 1}`,
     notes: `${FIXTURE_PASSAGE.slice(0, CHAT_REF_NOTES_CHAR_BUDGET / CHAT_MAX_REFS)}…`
@@ -362,7 +435,12 @@ const rewriteMaxed: BuildRewritePromptInput = {
   text: rewriteMaxedText,
   before: FIXTURE_PASSAGE.slice(-REWRITE_CONTEXT_CHARS),
   after: FIXTURE_PASSAGE.slice(0, REWRITE_CONTEXT_CHARS),
-  meta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500) },
+  meta: {
+    location: 'L'.repeat(200),
+    pov: 'P'.repeat(200),
+    timeline: 'T'.repeat(500),
+    brief: EMPTY_SCENE_BRIEF
+  },
   voice: voiceBlock(MAXED_PROFILE, { text: rewriteMaxedText, pov: 'Mara' })
 }
 
@@ -403,7 +481,12 @@ const critiqueMaxedScene = `${FIXTURE_PASSAGE.repeat(20).slice(0, CRITIQUE_SCENE
 const critiqueMaxed: BuildCritiquePromptInput = {
   sceneText: critiqueMaxedScene,
   notes: `${FIXTURE_PASSAGE.slice(0, CRITIQUE_NOTES_CHAR_CAP)}\u2026`,
-  meta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500) },
+  meta: {
+    location: 'L'.repeat(200),
+    pov: 'P'.repeat(200),
+    timeline: 'T'.repeat(500),
+    brief: EMPTY_SCENE_BRIEF
+  },
   voice: voiceBlock(MAXED_PROFILE, { text: critiqueMaxedScene, pov: 'Mara' }),
   honesty: 'brutal'
 }
@@ -428,6 +511,124 @@ function critiqueCase(
   }
 }
 
+const ghostFreshV2: BuildGhostTextPromptV2Input = { ...fresh, brief: null }
+const ghostFullV2: BuildGhostTextPromptV2Input = { ...full, brief: BRIEF_BLOCK }
+const ghostMaxedV2: BuildGhostTextPromptV2Input = { ...maxed, brief: MAXED_BRIEF_BLOCK }
+
+function ghostCaseV2(
+  name: string,
+  note: string,
+  input: BuildGhostTextPromptV2Input,
+  violation: string | null
+): EvalCase {
+  const built =
+    violation === null
+      ? buildGhostTextPromptV2(input)
+      : buildGhostTextRegenPromptV2({ ...input, violation })
+  return {
+    version: violation === null ? GHOST_PROMPT_V2_VERSION : GHOST_REGEN_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    temperature: built.temperature,
+    scoring: {
+      kind: 'prose',
+      before: input.before,
+      after: input.after,
+      profile: input.voice === null ? null : FIXTURE_STATS
+    }
+  }
+}
+
+const planFreshV2: BuildChatPromptV2Input = { ...planFresh, brief: null }
+const planFullV2: BuildChatPromptV2Input = { ...planFull, brief: BRIEF_BLOCK }
+const agentFullV2: BuildChatPromptV2Input = { ...agentFull, brief: BRIEF_BLOCK }
+const agentMaxedV2: BuildChatPromptV2Input = { ...agentMaxed, brief: MAXED_BRIEF_BLOCK }
+
+function chatCaseV2(
+  name: string,
+  note: string,
+  input: BuildChatPromptV2Input,
+  violation: string | null
+): EvalCase {
+  const built =
+    violation === null ? buildChatPromptV2(input) : buildChatRegenPromptV2({ ...input, violation })
+  return {
+    version: violation === null ? CHAT_PROMPT_V2_VERSION : CHAT_REGEN_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
+const critiqueFreshV2: BuildCritiquePromptV2Input = {
+  sceneText: FIXTURE_PASSAGE,
+  brief: null,
+  meta: null,
+  voice: null,
+  honesty: DEFAULT_HONESTY
+}
+const critiqueFullV2: BuildCritiquePromptV2Input = {
+  ...critiqueFreshV2,
+  brief: BRIEF_BLOCK,
+  meta: META,
+  voice: voiceBlock(FIXTURE_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' })
+}
+const critiqueMaxedV2: BuildCritiquePromptV2Input = {
+  sceneText: critiqueMaxedScene,
+  brief: MAXED_BRIEF_BLOCK,
+  meta: {
+    location: 'L'.repeat(200),
+    pov: 'P'.repeat(200),
+    timeline: 'T'.repeat(500),
+    brief: EMPTY_SCENE_BRIEF
+  },
+  voice: voiceBlock(MAXED_PROFILE, { text: critiqueMaxedScene, pov: 'Mara' }),
+  honesty: 'brutal'
+}
+
+function critiqueCaseV2(
+  name: string,
+  note: string,
+  input: BuildCritiquePromptV2Input,
+  regenNote: string | null | undefined
+): EvalCase {
+  const built =
+    regenNote === undefined
+      ? buildCritiquePromptV2(input)
+      : buildCritiqueRegenPromptV2({ ...input, note: regenNote })
+  return {
+    version:
+      regenNote === undefined ? CRITIQUE_PROMPT_V2_VERSION : CRITIQUE_REGEN_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'critique', sceneText: input.sceneText }
+  }
+}
+
+function briefCase(
+  name: string,
+  note: string,
+  sceneText: string,
+  meta: typeof META | null
+): EvalCase {
+  const built = buildBriefPrompt({ sceneText, meta })
+  return {
+    version: BRIEF_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'brief' }
+  }
+}
+
 /** Every case, grouped by version in catalogue order. */
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
@@ -445,6 +646,31 @@ export const EVAL_CASES: EvalCase[] = [
   ),
   ghostCase('full', 'the full case regenerated after a tense violation', full, VIOLATION),
   ghostCase('maxed', 'the maxed case regenerated after a tense violation', maxed, VIOLATION),
+  ghostCaseV2(
+    'fresh',
+    'no voice block, no brief, notes, or metadata, General preset',
+    ghostFreshV2,
+    null
+  ),
+  ghostCaseV2(
+    'full',
+    'voice rules and one exemplar, the scene brief with both neighbour lines, notes, metadata, text after the caret, Suspense preset',
+    ghostFullV2,
+    null
+  ),
+  ghostCaseV2(
+    'maxed',
+    'every cap at its limit: the caret window, the notes, long metadata, a brief at every line cap, a voice block at its budget',
+    ghostMaxedV2,
+    null
+  ),
+  ghostCaseV2('full', 'the full case regenerated after a tense violation', ghostFullV2, VIOLATION),
+  ghostCaseV2(
+    'maxed',
+    'the maxed case regenerated after a tense violation',
+    ghostMaxedV2,
+    VIOLATION
+  ),
   tagsCase(
     'fixture',
     'the fixture scene against the Standard Fiction bank',
@@ -509,6 +735,42 @@ export const EVAL_CASES: EvalCase[] = [
     agentMaxed,
     VIOLATION
   ),
+  chatCaseV2(
+    'plan fresh',
+    'Plan mode with no scene open, no references, no history',
+    planFreshV2,
+    null
+  ),
+  chatCaseV2(
+    'plan full',
+    'Plan mode over the fixture scene with one #reference and two turns of history (Plan mode carries no brief)',
+    planFullV2,
+    null
+  ),
+  chatCaseV2(
+    'agent full',
+    'Agent mode, 3 paragraphs: voice rules and one exemplar, Suspense preset, metadata, the scene brief, one #reference, two turns',
+    agentFullV2,
+    null
+  ),
+  chatCaseV2(
+    'agent maxed',
+    'every cap at its limit: the scene, four references, long metadata, a brief at every line cap, a voice block at its budget, ten history turns, a message at the limit, 10 paragraphs',
+    agentMaxedV2,
+    null
+  ),
+  chatCaseV2(
+    'agent full',
+    'the agent full case regenerated after a tense violation',
+    agentFullV2,
+    VIOLATION
+  ),
+  chatCaseV2(
+    'agent maxed',
+    'the agent maxed case regenerated after a tense violation',
+    agentMaxedV2,
+    VIOLATION
+  ),
   rewriteCase('fresh', 'no voice block, no context either side, no metadata', rewriteFresh, null),
   rewriteCase(
     'full',
@@ -567,5 +829,52 @@ export const EVAL_CASES: EvalCase[] = [
     'the maxed case regenerated with an author note at the length limit',
     critiqueMaxed,
     'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
+  critiqueCaseV2(
+    'fresh',
+    'no voice block, no brief, no metadata, the default honesty line',
+    critiqueFreshV2,
+    undefined
+  ),
+  critiqueCaseV2(
+    'full',
+    "voice rules and one exemplar, the scene's brief with both neighbour lines, metadata",
+    critiqueFullV2,
+    undefined
+  ),
+  critiqueCaseV2(
+    'maxed',
+    'every cap at its limit: a 20,000-character scene, a brief at every line cap, long metadata, a voice block at its budget, the brutal honesty line',
+    critiqueMaxedV2,
+    undefined
+  ),
+  critiqueCaseV2(
+    'full note',
+    'the full case regenerated with an author note at the length limit',
+    critiqueFullV2,
+    'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
+  critiqueCaseV2(
+    'maxed note',
+    'the maxed case regenerated with an author note at the length limit',
+    critiqueMaxedV2,
+    'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
+  briefCase(
+    'fresh',
+    'the fixture scene with no metadata: the shape a new project sends',
+    FIXTURE_PASSAGE,
+    null
+  ),
+  briefCase(
+    'maxed',
+    'a scene at the character budget with long metadata: the most a brief draft can cost',
+    `${FIXTURE_PASSAGE.repeat(20).slice(0, BRIEF_SCENE_CHAR_BUDGET)}\u2026`,
+    {
+      location: 'L'.repeat(200),
+      pov: 'P'.repeat(200),
+      timeline: 'T'.repeat(500),
+      brief: EMPTY_SCENE_BRIEF
+    }
   )
 ]

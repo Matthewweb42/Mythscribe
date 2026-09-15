@@ -7,7 +7,6 @@ import { defaultAiSettings } from '@shared/aiSettings'
 import {
   CRITIQUE_FIX_MAX,
   CRITIQUE_MAX_NOTES,
-  CRITIQUE_NOTES_CHAR_CAP,
   CRITIQUE_QUOTE_MAX,
   CRITIQUE_SCENE_CHAR_BUDGET,
   CRITIQUE_TEXT_MIN,
@@ -17,6 +16,7 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
+import { manuscriptDocuments } from '../voice/profile'
 import { AppError } from '../ipc/errors'
 import { setAiSettings, setAuthorRules } from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
@@ -35,6 +35,7 @@ import {
 } from './providers/types'
 import type { AiRequestDeps } from './request'
 import type { UsageEntry } from './usageStore'
+import { EMPTY_SCENE_BRIEF, emptySceneMeta } from '@shared/sceneMeta'
 
 const NOW = new Date(2026, 8, 15, 10, 0, 0)
 type Complete = (request: CompletionRequest) => Promise<CompletionResult>
@@ -46,6 +47,8 @@ let complete: ReturnType<typeof vi.fn<Complete>>
 let deps: AiRequestDeps
 let ledger: UsageEntry[]
 let scene: string
+/** The next manuscript document in reading order: its brief rides along with the scene's (F-14.3). */
+let nextScene: string
 let folder: string
 let dailyCapUsd: number
 
@@ -151,10 +154,11 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-critique-'))
   session = createProject(projectFolderFor(tmp, 'Critique'), 'Critique', 'novel')
   db = session.connection.orm
-  const rows = listNodes(db)
-  scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')?.id ?? ''
-  folder = rows.find((r) => r.kind === 'folder' && r.sectionType === null)?.id ?? ''
-  if (!scene || !folder) throw new Error('skeleton not seeded')
+  const documents = manuscriptDocuments(db)
+  scene = documents[0]?.id ?? ''
+  nextScene = documents[1]?.id ?? ''
+  folder = listNodes(db).find((r) => r.kind === 'folder' && r.sectionType === null)?.id ?? ''
+  if (!scene || !nextScene || !folder) throw new Error('skeleton not seeded')
   saveDocument(db, scene, doc(SCENE))
   setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
   complete = vi.fn<Complete>()
@@ -190,7 +194,7 @@ afterEach(() => {
 })
 
 describe('runCritique (F-14.8)', () => {
-  it('sends the scene as JSON to the strong tier under critique.v1 and answers the cited notes', async () => {
+  it('sends the scene as JSON to the strong tier under critique.v2 and answers the cited notes', async () => {
     const result = await critique()
     expect(result).toEqual({
       notes: [
@@ -210,7 +214,7 @@ describe('runCritique (F-14.8)', () => {
       costUsd: priceFor('gpt-5.4', 900, 120).costUsd,
       cached: false,
       model: 'gpt-5.4',
-      promptVersion: 'critique.v1'
+      promptVersion: 'critique.v2'
     })
     const request = complete.mock.calls[0]![0]
     expect(request).toMatchObject({ tier: 'strong', json: true, maxTokens: 1_500 })
@@ -219,7 +223,7 @@ describe('runCritique (F-14.8)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'critique',
       tier: 'strong',
-      promptVersion: 'critique.v1',
+      promptVersion: 'critique.v2',
       cached: false
     })
     expect(ledger[0]!.contextHash).toMatch(/^[0-9a-f]{64}$/)
@@ -262,22 +266,37 @@ describe('runCritique (F-14.8)', () => {
     expect(scenePart).toHaveLength(CRITIQUE_SCENE_CHAR_BUDGET + 1)
   })
 
-  it("carries the scene's notes as the brief, cut to the cap, only when it has any", async () => {
+  it('carries the scene brief (F-14.3) as the intent, the neighbours included, only when one is written', async () => {
+    saveNotes(db, scene, doc('The notes are no longer the brief.'))
     await critique()
     expect(sent().user).toBe(`Scene text:\n"""\n${SCENE}\n"""\n\nGive your editor's notes.`)
-    saveNotes(db, scene, doc('n'.repeat(CRITIQUE_NOTES_CHAR_CAP + 50)))
+    setSceneMeta(db, scene, {
+      ...emptySceneMeta(),
+      brief: { ...EMPTY_SCENE_BRIEF, goal: 'Mara wants the ledger back.' }
+    })
+    setSceneMeta(db, nextScene, {
+      ...emptySceneMeta(),
+      brief: { ...EMPTY_SCENE_BRIEF, goal: 'Tomas counts what the mill owes.' }
+    })
     answers([issue()])
     await critique()
     const user = sent(1).user
     expect(user).toContain(
-      `Author's notes for this scene (its intent):\n"""\n${'n'.repeat(CRITIQUE_NOTES_CHAR_CAP)}…`
+      `Scene brief (the author's intent):\n"""\nScene brief:\n- Goal: Mara wants the ledger ` +
+        `back.\nNext scene's goal: Tomas counts what the mill owes.\n"""`
     )
     expect(user).toContain('Include one "intent" note')
+    expect(user).not.toContain('The notes are no longer the brief.')
   })
 
   it('sends the honesty line the project is set to, plus the voice block and the scene line', async () => {
     strongProfile()
-    setSceneMeta(db, scene, { location: 'Ferry landing', pov: 'Mara', timeline: '' })
+    setSceneMeta(db, scene, {
+      location: 'Ferry landing',
+      pov: 'Mara',
+      timeline: '',
+      brief: EMPTY_SCENE_BRIEF
+    })
     const settings = defaultAiSettings()
     setAiSettings(db, { ...settings, dial: 1, critique: { honesty: 'brutal' } })
     await critique()
@@ -420,7 +439,7 @@ describe('runCritique citations and parsing (F-14.8)', () => {
 })
 
 describe('runCritique regenerate (F-14.5)', () => {
-  it('sends critiqueRegen.v1 with the note clause and misses the cache on the note and the predecessor', async () => {
+  it('sends critiqueRegen.v2 with the note clause and misses the cache on the note and the predecessor', async () => {
     await critique()
     expect(complete).toHaveBeenCalledTimes(1)
     const note = 'Less about pacing, more about the dialogue.'
@@ -428,15 +447,15 @@ describe('runCritique regenerate (F-14.5)', () => {
     const again = await critique({ note, regeneratedFrom: 'p-1' })
     expect(complete).toHaveBeenCalledTimes(2)
     expect(sent(1).system).toContain(`The writer asked for different notes and said: "${note}".`)
-    expect(again.promptVersion).toBe('critiqueRegen.v1')
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['critique.v1', 'critiqueRegen.v1'])
+    expect(again.promptVersion).toBe('critiqueRegen.v2')
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['critique.v2', 'critiqueRegen.v2'])
     // A predecessor with no note is its own request; a blank note with no predecessor is not one at all.
     answers([issue()])
     await critique({ regeneratedFrom: 'p-2' })
     expect(complete).toHaveBeenCalledTimes(3)
     const plain = await critique({ note: '   ' })
     expect(complete).toHaveBeenCalledTimes(3)
-    expect(plain.promptVersion).toBe('critique.v1')
+    expect(plain.promptVersion).toBe('critique.v2')
   })
 })
 

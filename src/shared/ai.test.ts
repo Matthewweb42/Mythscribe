@@ -59,7 +59,8 @@ describe('budgets', () => {
       summary: 150,
       chat: 1_200,
       rewrite: 1_500,
-      critique: 1_500
+      critique: 1_500,
+      brief: 200
     })
     expect(Object.keys(FEATURE_INPUT_BUDGETS).sort()).toEqual(Object.keys(FEATURE_BUDGETS).sort())
     for (const feature of AI_FEATURE_IDS) {
@@ -74,7 +75,7 @@ describe('budgets', () => {
     expect(DEFAULT_OUTPUT_BUDGET).toBeGreaterThan(0)
     expect(DEFAULT_INPUT_BUDGET).toBeGreaterThan(DEFAULT_OUTPUT_BUDGET)
     expect(outputBudget('ghostText')).toBe(60)
-    expect(inputBudget('ghostText')).toBe(1_500)
+    expect(inputBudget('ghostText')).toBe(2_000)
     expect(outputBudget('query')).toBe(DEFAULT_OUTPUT_BUDGET)
     expect(inputBudget('query')).toBe(DEFAULT_INPUT_BUDGET)
   })

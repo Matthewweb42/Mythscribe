@@ -12,6 +12,7 @@ import { addDocumentTag } from '../../tag/documentTagStore'
 import { createTag } from '../../tag/tagStore'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
 import { buildChatContext } from './chatContext'
+import { EMPTY_SCENE_BRIEF, emptySceneMeta } from '@shared/sceneMeta'
 
 let tmp: string
 let session: ProjectSession
@@ -44,19 +45,32 @@ afterEach(() => {
 describe('buildChatContext (F-5.4)', () => {
   it('carries the scene text and its metadata, and nothing with no scene open', () => {
     saveDocument(db, scene, doc('The storm broke at dusk.'))
-    setSceneMeta(db, scene, { location: 'Ridge', pov: '', timeline: '' })
+    setSceneMeta(db, scene, { location: 'Ridge', pov: '', timeline: '', brief: EMPTY_SCENE_BRIEF })
     expect(buildChatContext(db, { nodeId: scene, message: 'Why?' })).toEqual({
       sceneText: 'The storm broke at dusk.',
-      sceneMeta: { location: 'Ridge', pov: '', timeline: '' },
+      sceneMeta: { location: 'Ridge', pov: '', timeline: '', brief: EMPTY_SCENE_BRIEF },
+      brief: null,
       refs: [],
       refNames: []
     })
     expect(buildChatContext(db, { nodeId: null, message: 'Why?' })).toEqual({
       sceneText: '',
       sceneMeta: null,
+      brief: null,
       refs: [],
       refNames: []
     })
+  })
+
+  it('carries the scene brief block (F-14.3), the neighbouring scenes included, when one is written', () => {
+    saveDocument(db, scene, doc('The storm broke at dusk.'))
+    setSceneMeta(db, scene, {
+      ...emptySceneMeta(),
+      brief: { ...EMPTY_SCENE_BRIEF, goal: 'Mara wants the ledger back.' }
+    })
+    expect(buildChatContext(db, { nodeId: scene, message: 'Why?' }).brief).toBe(
+      'Scene brief:\n- Goal: Mara wants the ledger back.'
+    )
   })
 
   it('answers an empty scene text and null metadata for a scene with nothing written', () => {

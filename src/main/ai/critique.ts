@@ -4,7 +4,6 @@ import {
   CRITIQUE_CATEGORIES,
   CRITIQUE_FIX_MAX,
   CRITIQUE_MAX_NOTES,
-  CRITIQUE_NOTES_CHAR_CAP,
   CRITIQUE_QUOTE_MAX,
   CRITIQUE_SCENE_CHAR_BUDGET,
   CRITIQUE_TEXT_MIN,
@@ -17,8 +16,8 @@ import { docToText } from '@shared/docText'
 import { normalizeProposalNote } from '@shared/proposal'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { getDocumentContent } from '../document/documentStore'
-import { getNotes } from '../document/notesStore'
 import { getSceneMeta } from '../document/sceneMetaStore'
+import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
@@ -27,11 +26,14 @@ import { voiceBlock } from '../voice/voiceBlock'
 import { headTruncate } from './context/chatContext'
 import { assertFeatureAllowed } from './dial'
 import {
-  buildCritiquePrompt,
-  type BuildCritiquePromptInput,
-  type BuiltCritiquePrompt
-} from './prompts/critique.v1'
-import { buildCritiqueRegenPrompt, type BuiltCritiqueRegenPrompt } from './prompts/critiqueRegen.v1'
+  buildCritiquePromptV2,
+  type BuildCritiquePromptV2Input,
+  type BuiltCritiquePromptV2
+} from './prompts/critique.v2'
+import {
+  buildCritiqueRegenPromptV2,
+  type BuiltCritiqueRegenPromptV2
+} from './prompts/critiqueRegen.v2'
 import { AiFallbackError, type AiMessage, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -39,7 +41,7 @@ import { runAiRequest, sha256, type AiRequestDeps } from './request'
 export const CRITIQUE_SHRINK_CHARS = 2_000
 
 export interface CritiqueInput {
-  /** The scene to read; its notes, metadata, and POV ride along. */
+  /** The scene to read; its brief, metadata, and POV ride along. */
   nodeId: string
   /** The author's note from Ask again… (F-14.5); blank or absent is none. */
   note?: string | null
@@ -85,10 +87,11 @@ const BAD_FORMAT = 'The model did not answer in the expected format.'
  * read or sent below Ask or with the feature toggled off), then the node must be a document
  * holding at least `CRITIQUE_TEXT_MIN` characters (NOT_FOUND / VALIDATION as everywhere
  * else), then exactly the context the data-sharing panel lists: the scene's text
- * head-truncated to `CRITIQUE_SCENE_CHAR_BUDGET`, its notes (the brief stand-in until F-14.3)
- * cut to `CRITIQUE_NOTES_CHAR_CAP`, its metadata, and, through the scene's POV, the voice
+ * head-truncated to `CRITIQUE_SCENE_CHAR_BUDGET`, its brief (F-14.3: its own five lines, the
+ * previous scene's reader-knows-after line, and the next scene's goal — the notes were the
+ * stand-in for it until then), its metadata, and, through the scene's POV, the voice
  * profile block (F-14.1). The honesty setting picks the prompt's tone line. If the prompt is
- * still over `inputBudget('critique')` — a long voice block and long notes on a long scene —
+ * still over `inputBudget('critique')` — a long voice block and a long brief on a long scene —
  * the scene text is shrunk `CRITIQUE_SHRINK_CHARS` at a time until it fits (CLAUDE.md, token
  * efficiency rule 8) rather than failing or overspending; either cut sets `truncated`.
  *
@@ -101,9 +104,9 @@ const BAD_FORMAT = 'The model did not answer in the expected format.'
  * regenerate, since a retry would redo the whole critique.
  *
  * A regenerate (F-14.5: a note, a predecessor proposal, or both) goes through
- * `critiqueRegen.v1`, and the note and the predecessor join the context hash, so asking again
+ * `critiqueRegen.v2`, and the note and the predecessor join the context hash, so asking again
  * never answers from the cache with the notes the author just turned down. The hash otherwise
- * covers everything that shaped the messages: the scene text as sent, the notes, the metadata,
+ * covers everything that shaped the messages: the scene text as sent, the brief, the metadata,
  * the honesty setting, and the voice profile's version.
  */
 export async function runCritique(
@@ -124,9 +127,7 @@ export async function runCritique(
     )
   }
 
-  const notesDoc = getNotes(db, input.nodeId).notes
-  const notesText = notesDoc ? docToText(notesDoc).trim() : ''
-  const notes = notesText ? headTruncate(notesText, CRITIQUE_NOTES_CHAR_CAP) : null
+  const brief = sceneBriefBlock(db, input.nodeId)
   const { meta: sceneMeta } = getSceneMeta(db, input.nodeId)
   const meta = sceneMeta.location || sceneMeta.pov || sceneMeta.timeline ? sceneMeta : null
   const pov = sceneMeta.pov.trim()
@@ -143,9 +144,11 @@ export async function runCritique(
   const note = normalizeProposalNote(input.note)
   const regeneratedFrom = input.regeneratedFrom ?? null
   const isRegenerate = note !== null || regeneratedFrom !== null
-  const build = (text: string): BuiltCritiquePrompt | BuiltCritiqueRegenPrompt => {
-    const base: BuildCritiquePromptInput = { sceneText: text, notes, meta, voice, honesty }
-    return isRegenerate ? buildCritiqueRegenPrompt({ ...base, note }) : buildCritiquePrompt(base)
+  const build = (text: string): BuiltCritiquePromptV2 | BuiltCritiqueRegenPromptV2 => {
+    const base: BuildCritiquePromptV2Input = { sceneText: text, brief, meta, voice, honesty }
+    return isRegenerate
+      ? buildCritiqueRegenPromptV2({ ...base, note })
+      : buildCritiquePromptV2(base)
   }
 
   // Token rule 8: count before sending, and trim the scene rather than overspend or fail.
@@ -165,7 +168,7 @@ export async function runCritique(
     contextHash: sha256(
       JSON.stringify({
         sceneText,
-        notes,
+        brief,
         meta,
         honesty,
         note,

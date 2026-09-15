@@ -4,6 +4,7 @@ import { resolvePreset } from '@shared/presets'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { getNotes } from '../document/notesStore'
 import { getSceneMeta } from '../document/sceneMetaStore'
+import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { AppError } from '../ipc/errors'
 import { getAiSettings, getWritingPresets } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
@@ -11,8 +12,8 @@ import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
 import { voiceBlock } from '../voice/voiceBlock'
 import { assertFeatureAllowed } from './dial'
 import { regenRequestId } from './inflight'
-import { buildGhostTextPrompt } from './prompts/ghostText.v1'
-import { buildGhostTextRegenPrompt } from './prompts/ghostTextRegen.v1'
+import { buildGhostTextPromptV2 } from './prompts/ghostText.v2'
+import { buildGhostTextRegenPromptV2 } from './prompts/ghostTextRegen.v2'
 import { AiCancelledError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from './request'
 
@@ -51,15 +52,16 @@ export interface GhostTextResult {
 
 /**
  * The ghost-text use case (F-5.3): checks the AI dial first (nothing is read or sent below
- * Suggest or with the feature toggled off), gathers the scene's notes and metadata as the
- * context the data-sharing panel lists, builds the voice block (F-14.1: the locally computed
+ * Suggest or with the feature toggled off), gathers the scene's notes, metadata, and brief
+ * (F-14.3: its own five lines, the previous scene's reader-knows-after line, and the next
+ * scene's goal) as the context the data-sharing panel lists, builds the voice block (F-14.1: the locally computed
  * profile for the scene's POV, with the exemplars closest to the passage at the caret), builds
- * `ghostText.v1` with the active writing preset (F-5.2), runs it through the one request path
+ * `ghostText.v2` with the active writing preset (F-5.2), runs it through the one request path
  * (`fast` tier, the preset's temperature, at most 60 tokens), and post-processes the answer
  * into a one-or-two-sentence continuation. Then the fidelity check (F-14.7): the answer is
  * scored locally against the profile's stylometrics and against the author's banned phrases
  * (F-14.2, which come first, so a banned phrase is what the regenerate names); an off-voice
- * answer is regenerated once through `ghostTextRegen.v1` with the first violation named,
+ * answer is regenerated once through `ghostTextRegen.v2` with the first violation named,
  * re-scored, and shown flagged
  * when it still fails. A regenerate that fails for any reason (provider, budget, cap) falls
  * back to the first answer, flagged: the author always gets the suggestion that exists. A
@@ -67,7 +69,7 @@ export interface GhostTextResult {
  * author rules) skips the check, so a fresh project only ever warns about a banned phrase.
  *
  * The context hash covers everything that shaped the messages: the caret window, the notes,
- * the metadata, the preset, the author's rules, and the voice profile's version (the version
+ * the metadata, the brief, the preset, the author's rules, and the voice profile's version (the version
  * stands in for the stylometrics and the exemplars: it moves on every save and exemplar write,
  * so a changed profile misses the cache while an unchanged one keeps hitting it); the
  * regenerate adds the violation's message, which names the banned phrase, so two phrases never
@@ -94,18 +96,28 @@ export async function generateGhostText(
   const notes = notesText ? notesText : null
   const { meta: sceneMeta } = getSceneMeta(db, input.nodeId)
   const meta = sceneMeta.location || sceneMeta.pov || sceneMeta.timeline ? sceneMeta : null
+  const brief = sceneBriefBlock(db, input.nodeId)
   const preset = resolvePreset(getWritingPresets(db))
   const pov = sceneMeta.pov.trim()
   const profile = buildVoiceProfile(db, { pov: pov || undefined })
   const voice = voiceBlock(profile, { text: input.before, pov: pov || null })
 
-  const promptInput = { before: input.before, after: input.after, notes, meta, voice, preset }
-  const prompt = buildGhostTextPrompt(promptInput)
+  const promptInput = {
+    before: input.before,
+    after: input.after,
+    notes,
+    meta,
+    brief,
+    voice,
+    preset
+  }
+  const prompt = buildGhostTextPromptV2(promptInput)
   const context = {
     before: input.before,
     after: input.after,
     notes,
     meta,
+    brief,
     preset,
     authorRules: profile.authorRules,
     voiceVersion: voiceProfileVersion()
@@ -140,7 +152,7 @@ export async function generateGhostText(
   const violation = checkGhostTextFidelity(profile.stats, firstText, banned).violations[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
-  const regen = buildGhostTextRegenPrompt({ ...promptInput, violation: violation.message })
+  const regen = buildGhostTextRegenPromptV2({ ...promptInput, violation: violation.message })
   const flaggedFirst: GhostTextResult = {
     ...shown(first, firstText, prompt.version),
     flagged: true,

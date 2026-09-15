@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { EMPTY_SCENE_META, type SceneMeta } from '@shared/sceneMeta'
+import { EMPTY_SCENE_META, type SceneMeta, EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
 import { node, type NodeRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
@@ -51,7 +51,7 @@ function getRow(id: string): NodeRow {
   return row
 }
 
-const filled: SceneMeta = { location: 'dark-forest', pov: 'mara', timeline: 'Day 3, after the storm' }
+const filled: SceneMeta = { location: 'dark-forest', pov: 'mara', timeline: 'Day 3, after the storm', brief: EMPTY_SCENE_BRIEF }
 
 function expectCode(fn: () => unknown, code: AppError['code']): void {
   try {

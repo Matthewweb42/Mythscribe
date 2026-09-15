@@ -59,7 +59,7 @@ describe('AppStateStore', () => {
     expect(new AppStateStore(file).get().layout).toEqual({
       ...layout,
       sidebar: { ...layout.sidebar, tab: 'manuscript' },
-      tagBar: { open: true, height: 120, split: 0.4 },
+      tagBar: { open: true, height: 180, split: 0.4 },
       assistant: { open: false, size: 0.3 },
       floating: defaultFloating()
     })

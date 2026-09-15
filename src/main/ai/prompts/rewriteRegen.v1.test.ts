@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { REGEN_CLAUSE_PREFIX } from './ghostTextRegen.v1'
 import { buildRewritePrompt, type BuildRewritePromptInput } from './rewrite.v1'
 import { buildRewriteRegenPrompt } from './rewriteRegen.v1'
+import { EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
 
 const PASSAGE = 'The storm broke at dusk over the dark forest. Mara counted the lightning gaps.'
 const base: BuildRewritePromptInput = {
   text: PASSAGE,
   before: 'She set the lantern down on the post.',
   after: '',
-  meta: { location: 'Ferry landing', pov: 'Mara', timeline: '' },
+  meta: { location: 'Ferry landing', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF },
   voice: "Match the author's voice:\n- Narration is in past tense."
 }
 const VIOLATION = 'switches to present tense'

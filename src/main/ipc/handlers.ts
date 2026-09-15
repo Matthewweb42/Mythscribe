@@ -12,6 +12,7 @@ import type { Background } from '@shared/focus'
 import type {
   AiChatResult,
   AiCritiqueResult,
+  AiDraftBriefResult,
   AiGhostTextResult,
   AiRecommendTagsResult,
   AiRewriteResult
@@ -19,6 +20,7 @@ import type {
 import { runChat } from '../ai/chat'
 import { runCritique } from '../ai/critique'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
+import { draftBrief } from '../ai/draftBrief'
 import { generateGhostText } from '../ai/ghostText'
 import { cancelInflight, regenRequestId } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
@@ -594,6 +596,46 @@ export function registerHandlers({
       }
     }
   )
+
+  // F-14.3: the scene brief drafted from the scene's text, JSON from the fast tier, not
+  // streamed (five short lines are only useful whole). Nothing is stored on the node: the
+  // draft is a pending proposal (F-14.5) the metadata pane offers as Use draft, which writes
+  // the fields through `sceneMeta:set` like any other edit.
+  register('ai:draftBrief', async ({ nodeId, requestId }): Promise<AiDraftBriefResult> => {
+    try {
+      const db = manager.require().connection.orm
+      const deps = buildAiRequestDeps({ db, providers: ai, appState })
+      const result = await draftBrief(db, deps, { nodeId, requestId })
+      const { brief, usage, costUsd, cached, model } = result
+      const proposal = createProposal(db, {
+        feature: 'brief',
+        nodeId,
+        promptVersion: result.promptVersion,
+        model,
+        promptTokens: usage.inputTokens,
+        completionTokens: usage.outputTokens,
+        costUsd,
+        cached,
+        content: JSON.stringify(brief),
+        flagged: false,
+        violation: null
+      })
+      return {
+        ok: true,
+        brief,
+        truncated: result.truncated,
+        usage,
+        costUsd,
+        cached,
+        model,
+        proposalId: proposal.id,
+        requestId
+      }
+    } catch (err) {
+      if (err instanceof AiProviderError) return { ...aiFailure(err.code, err.message), requestId }
+      throw err
+    }
+  })
 
   // F-5.10: aborts the request registered under the id, or its fidelity regenerate (F-14.7)
   // when the second call is the one in flight. Needs no project: the registry is process-wide.

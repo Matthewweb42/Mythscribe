@@ -123,9 +123,17 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   critique: {
     label: "Editor's notes",
     sends:
-      "The scene's text (the first 20,000 characters), its notes and metadata as the brief, " +
-      'the voice profile (stylometric rules and up to 3 exemplar passages), and your author ' +
-      'rules and banned phrases.',
+      "The scene's text (the first 20,000 characters), its metadata, its brief plus the " +
+      "previous scene's reader-knows-after line and the next scene's goal, the voice profile " +
+      '(stylometric rules and up to 3 exemplar passages), and your author rules and banned ' +
+      'phrases.',
+    minDial: 1
+  },
+  brief: {
+    label: 'Scene brief drafts',
+    sends:
+      "The scene's text (the first 20,000 characters) and its metadata (location, POV, " +
+      'timeline), to draft the five brief lines for you to correct.',
     minDial: 1
   },
   chat: {
@@ -133,8 +141,10 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       "The active scene's text (head-truncated), the notes of documents tagged with any #name " +
       'you mention, the recent turns of the conversation, and your message. In Agent mode, ' +
-      'which needs Suggest, the voice profile, your author rules and banned phrases, and the ' +
-      'scene metadata go too, and an off-voice answer is sent back once with the rule it broke.',
+      'which needs Suggest, the voice profile, your author rules and banned phrases, the ' +
+      "scene metadata, and the scene brief (plus the previous scene's reader-knows-after line " +
+      "and the next scene's goal) go too, and an off-voice answer is sent back once with the " +
+      'rule it broke.',
     minDial: 1
   },
   embeddings: {
@@ -145,9 +155,10 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   ghostText: {
     label: 'Ghost text',
     sends:
-      'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes ' +
-      'and metadata (location, POV, timeline), the voice profile (stylometric rules and up ' +
-      'to 3 exemplar passages), and your author rules and banned phrases. An answer that breaks ' +
+      'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes, ' +
+      "its metadata (location, POV, timeline), its brief plus the previous scene's " +
+      "reader-knows-after line and the next scene's goal, the voice profile (stylometric rules " +
+      'and up to 3 exemplar passages), and your author rules and banned phrases. An answer that breaks ' +
       'the voice profile or uses a banned phrase is sent back once, with the same context plus ' +
       'the rule it broke, for a second try.',
     minDial: 2

@@ -13,6 +13,7 @@ import {
   HONESTY_INSTRUCTION,
   type BuildCritiquePromptInput
 } from './critique.v1'
+import { EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
 
 const SCENE =
   'The ferry landing was empty when Mara reached it. The rope hung slack in the water and the ' +
@@ -87,7 +88,7 @@ describe('critique.v1 prompt (F-14.8)', () => {
     const built = buildCritiquePrompt({
       ...bare,
       notes: NOTES,
-      meta: { location: 'Ferry landing', pov: 'Mara', timeline: '' },
+      meta: { location: 'Ferry landing', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF },
       voice: VOICE
     })
     expect(built.messages[0]?.content).toBe(
@@ -116,7 +117,7 @@ describe('critique.v1 prompt (F-14.8)', () => {
     const built = buildCritiquePrompt({
       sceneText: 's'.repeat(CRITIQUE_SCENE_CHAR_BUDGET),
       notes: 'n'.repeat(CRITIQUE_NOTES_CHAR_CAP),
-      meta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500) },
+      meta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500), brief: EMPTY_SCENE_BRIEF },
       voice: 'v'.repeat(2_400),
       honesty: 'brutal'
     })

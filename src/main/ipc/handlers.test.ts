@@ -24,7 +24,7 @@ import { defaultConversations, type Conversations } from '@shared/chat'
 import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultFloating, defaultLayout } from '@shared/layout'
-import { EMPTY_SCENE_META } from '@shared/sceneMeta'
+import { EMPTY_SCENE_BRIEF, EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
 import { registerInflight, resetInflight } from '../ai/inflight'
@@ -198,6 +198,21 @@ afterEach(() => {
   manager.close()
   fs.rmSync(tmp, { recursive: true, force: true })
 })
+
+/**
+ * The manuscript's document ids in reading order (depth-first from the manuscript root, siblings
+ * by position): what the per-scene reports walk since F-14.3. `tree:list` itself is ordered by
+ * parent id, which is not reading order across chapters.
+ */
+function manuscriptReadingOrder(rows: TreeNode[]): string[] {
+  const root = rows.find((r) => r.parentId === null && r.sectionType === 'manuscript')
+  const walk = (parentId: string): string[] =>
+    rows
+      .filter((r) => r.parentId === parentId)
+      .sort((a, b) => a.position - b.position)
+      .flatMap((r) => (r.kind === 'document' ? [r.id] : walk(r.id)))
+  return root ? walk(root.id) : []
+}
 
 describe('recents handlers', () => {
   it('records created and opened projects newest first', async () => {
@@ -563,7 +578,12 @@ describe('notes:get / notes:save', () => {
 })
 
 describe('sceneMeta:get / sceneMeta:set (F-4.5)', () => {
-  const filled = { location: 'dark-forest', pov: 'mara', timeline: 'Day 3, after the storm' }
+  const filled = {
+    location: 'dark-forest',
+    pov: 'mara',
+    timeline: 'Day 3, after the storm',
+    brief: { ...EMPTY_SCENE_BRIEF, goal: 'Cross the river tonight.' }
+  }
 
   it('reports NO_PROJECT for both when nothing is open', async () => {
     await expect(invoke('sceneMeta:get', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
@@ -976,7 +996,7 @@ describe('ai:chat (F-5.4)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'chat',
       nodeId: scene,
-      promptVersion: 'chat.v1',
+      promptVersion: 'chat.v2',
       model: 'gpt-fake',
       promptTokens: 90,
       completionTokens: 8,
@@ -1291,7 +1311,7 @@ describe('ai:critique (F-14.8)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'critique',
       nodeId: scene,
-      promptVersion: 'critique.v1',
+      promptVersion: 'critique.v2',
       content: JSON.stringify(result.notes),
       flagged: false,
       violation: null,
@@ -1302,7 +1322,7 @@ describe('ai:critique (F-14.8)', () => {
     expect(summary.byFeature.map((f) => f.feature)).toEqual(['critique'])
   })
 
-  it('a regenerate goes through critiqueRegen.v1 and its proposal names the one it replaces', async () => {
+  it('a regenerate goes through critiqueRegen.v2 and its proposal names the one it replaces', async () => {
     const { scene } = await ready()
     const first = await invoke('ai:critique', ask(scene, 'cq-8'))
     if (!first.ok) throw new Error(first.message)
@@ -1316,7 +1336,7 @@ describe('ai:critique (F-14.8)', () => {
     expect(again.notes[0]?.why).toBe('Still slack, and now twice.')
     expect(getProposal(manager.require().connection.orm, again.proposalId)).toMatchObject({
       feature: 'critique',
-      promptVersion: 'critiqueRegen.v1',
+      promptVersion: 'critiqueRegen.v2',
       regeneratedFrom: first.proposalId
     })
   })
@@ -1343,6 +1363,119 @@ describe('ai:critique (F-14.8)', () => {
       }
     })
     const short = await handlerFor('ai:critique')(undefined, ask(scene))
+    expect(short.ok).toBe(false)
+    if (!short.ok) expect(short.error.code).toBe('VALIDATION')
+  })
+})
+
+describe('ai:draftBrief (F-14.3)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const SCENE =
+    'The ferry landing was empty when Mara reached it. The rope hung slack in the water and ' +
+    'the bell had lost its clapper years ago. She set the lantern down on the post and waited. ' +
+    '"You came alone," a voice said behind her.'
+  const DRAFT = {
+    goal: 'Mara wants to cross the river tonight.',
+    conflict: 'The river is up and Tomas will not row.',
+    turn: 'She decides to wait for morning.',
+    beat: 'Dread giving way to resolve.',
+    after: 'The crossing is off until dawn.'
+  }
+
+  /** A project with the dial at Ask, a key, and a scene long enough to draft a brief from. */
+  async function ready(dial: AiDial = 1): Promise<{ scene: string; folder: string }> {
+    await invoke('project:create', { name: 'Brief', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    const folder = rows.find((r) => r.kind === 'folder' && r.hierarchyLevel === 'chapter')
+    if (!scene || !folder) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: SCENE }] }]
+      }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+    await invoke('ai:setKey', { key: KEY })
+    answersWith(DRAFT)
+    return { scene: scene.id, folder: folder.id }
+  }
+
+  /** The next provider answer, as the JSON the brief prompt asks for. */
+  function answersWith(answer: unknown): void {
+    complete.mockResolvedValue({
+      text: JSON.stringify(answer),
+      model: 'gpt-fake',
+      usage: { inputTokens: 500, outputTokens: 70 }
+    })
+  }
+
+  const ask = (scene: string, requestId = 'br-1'): Input<'ai:draftBrief'> => ({
+    nodeId: scene,
+    requestId
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('ai:draftBrief', ask('x'))).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers the five lines and records them as one pending proposal with a ledger row', async () => {
+    const { scene } = await ready()
+    const result = await invoke('ai:draftBrief', ask(scene, 'br-7'))
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toEqual({
+      ok: true,
+      brief: DRAFT,
+      truncated: false,
+      usage: { inputTokens: 500, outputTokens: 70 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      proposalId: result.proposalId,
+      requestId: 'br-7'
+    })
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'brief',
+      nodeId: scene,
+      promptVersion: 'brief.v1',
+      content: JSON.stringify(DRAFT),
+      flagged: false,
+      violation: null,
+      regeneratedFrom: null,
+      status: 'pending'
+    })
+    // Nothing is written to the node: the author fills the fields on Use draft.
+    expect((await invoke('sceneMeta:get', { id: scene })).meta.brief).toEqual(EMPTY_SCENE_BRIEF)
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['brief'])
+  })
+
+  it('answers an expected AI failure as data with the requestId, and a folder, an unknown node, or too little text through the error envelope', async () => {
+    const { scene, folder } = await ready(0)
+    expect(await invoke('ai:draftBrief', ask(scene, 'br-3'))).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Scene brief drafts needs the AI dial at Ask or higher (it is at Off).',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      requestId: 'br-3'
+    })
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    const unknown = await handlerFor('ai:draftBrief')(undefined, ask('nope'))
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    const onFolder = await handlerFor('ai:draftBrief')(undefined, ask(folder))
+    expect(onFolder.ok).toBe(false)
+    if (!onFolder.ok) expect(onFolder.error.code).toBe('VALIDATION')
+    await invoke('document:save', {
+      id: scene,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Too short.' }] }]
+      }
+    })
+    const short = await handlerFor('ai:draftBrief')(undefined, ask(scene))
     expect(short.ok).toBe(false)
     if (!short.ok) expect(short.error.code).toBe('VALIDATION')
   })
@@ -2074,7 +2207,7 @@ describe('ai:ghostText (F-5.3)', () => {
     expect(getProposal(db, shown.proposalId)).toMatchObject({
       feature: 'ghostText',
       nodeId: scene,
-      promptVersion: 'ghostText.v1',
+      promptVersion: 'ghostText.v2',
       model: 'gpt-fake',
       promptTokens: 120,
       completionTokens: 12,
@@ -2429,8 +2562,7 @@ describe('voice handlers (F-14.1)', () => {
     const report = await invoke('voice:consistencyReport', {})
     expect(report.profileWordCount).toBeGreaterThan(0)
     const rows = await invoke('tree:list', undefined)
-    const manuscriptDocs = rows.filter((r) => r.kind === 'document' && r.hierarchyLevel !== null)
-    expect(report.documents.map((d) => d.id)).toEqual(manuscriptDocs.map((r) => r.id))
+    expect(report.documents.map((d) => d.id)).toEqual(manuscriptReadingOrder(rows))
     expect(report.documents.find((d) => d.id === scene)).toMatchObject({
       title: 'Scene 1',
       status: 'ok',
@@ -2521,8 +2653,7 @@ describe('provenance handlers (F-14.6)', () => {
     await invoke('document:save', { id: scene, content: marked('Mine. ', 'Theirs, kept.') })
     const report = await invoke('provenance:report', undefined)
     const rows = await invoke('tree:list', undefined)
-    const manuscriptDocs = rows.filter((r) => r.kind === 'document' && r.hierarchyLevel !== null)
-    expect(report.documents.map((d) => d.id)).toEqual(manuscriptDocs.map((r) => r.id))
+    expect(report.documents.map((d) => d.id)).toEqual(manuscriptReadingOrder(rows))
     expect(report.documents.find((d) => d.id === scene)).toEqual({
       id: scene,
       title: 'Scene 1',

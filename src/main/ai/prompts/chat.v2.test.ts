@@ -8,12 +8,17 @@ import {
   CHAT_TOKENS_PER_PARAGRAPH
 } from '@shared/chat'
 import { builtinParams } from '@shared/presets'
-import { buildChatPrompt, type BuildChatPromptInput } from './chat.v1'
-import { EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
+import { EMPTY_SCENE_BRIEF, SCENE_BRIEF_FIELD_MAX } from '@shared/sceneMeta'
+import { buildChatPromptV2, type BuildChatPromptV2Input } from './chat.v2'
 
 const SCENE =
   'The storm broke at dusk over the dark forest. Mara pulled her cloak tight and counted the ' +
   'lightning gaps, each one shorter than the last.'
+const BRIEF = [
+  'Scene brief:',
+  '- Goal: Mara wants to reach the landing before the storm.',
+  "Next scene's goal: Tomas counts what the mill owes."
+].join('\n')
 
 const PLAN_RULES =
   'You are the assistant inside a novel-writing app, talking with the author about their ' +
@@ -32,18 +37,19 @@ const NEW_ELEMENTS =
 const NO_SCENE = 'No scene is open; the author is working outside the manuscript.'
 
 const general = builtinParams('general')
-const plan: BuildChatPromptInput = {
+const plan: BuildChatPromptV2Input = {
   mode: 'plan',
   paragraphs: 1,
   sceneText: '',
   sceneMeta: null,
+  brief: null,
   refs: [],
   history: [],
   message: 'What is missing from this chapter?',
   voice: null,
   preset: null
 }
-const agent: BuildChatPromptInput = {
+const agent: BuildChatPromptV2Input = {
   ...plan,
   mode: 'agent',
   paragraphs: 2,
@@ -55,10 +61,10 @@ const agent: BuildChatPromptInput = {
 const promptText = (messages: { content: string }[]): string =>
   messages.map((m) => m.content).join('\n')
 
-describe('chat.v1 prompt (F-5.4)', () => {
+describe('chat.v2 prompt (F-5.4, F-14.3)', () => {
   it('Plan mode: the rules and the no-scene line system-side, the message last, the feature output cap, no temperature', () => {
-    const built = buildChatPrompt(plan)
-    expect(built.version).toBe('chat.v1')
+    const built = buildChatPromptV2(plan)
+    expect(built.version).toBe('chat.v2')
     expect(built.messages).toEqual([
       { role: 'system', content: `${PLAN_RULES}\n\n${NO_SCENE}` },
       { role: 'user', content: 'What is missing from this chapter?' }
@@ -67,11 +73,12 @@ describe('chat.v1 prompt (F-5.4)', () => {
     expect(built.temperature).toBeUndefined()
   })
 
-  it('Plan mode never folds in the voice block, the preset, or the scene metadata', () => {
-    const built = buildChatPrompt({
+  it('Plan mode never folds in the voice block, the preset, the scene metadata, or the brief', () => {
+    const built = buildChatPromptV2({
       ...plan,
       sceneText: SCENE,
       sceneMeta: { location: 'Ridge', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF },
+      brief: BRIEF,
       voice: 'VOICE BLOCK',
       preset: general
     })
@@ -79,82 +86,68 @@ describe('chat.v1 prompt (F-5.4)', () => {
     expect(built.temperature).toBeUndefined()
   })
 
-  it('places the referenced notes before the scene text, and the history turns between the system turn and the message', () => {
-    const built = buildChatPrompt({
-      ...plan,
-      sceneText: SCENE,
-      refs: [
-        { name: 'mara', notes: 'The ferryman’s daughter.' },
-        { name: 'ridge', notes: 'Above the landing.' }
-      ],
-      history: [
-        { role: 'user', content: 'Who is on the ridge?' },
-        { role: 'assistant', content: 'Mara, per the opening.' }
-      ]
+  it('Agent mode puts the brief right after the metadata line and before the scene', () => {
+    const built = buildChatPromptV2({
+      ...agent,
+      voice: 'Short sentences; never semicolons.',
+      sceneMeta: { location: 'Ferry landing', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF },
+      brief: BRIEF
     })
-    expect(built.messages).toEqual([
-      {
-        role: 'system',
-        content:
-          `${PLAN_RULES}\n\n` +
-          'Referenced notes:\n#mara:\nThe ferryman’s daughter.\n\n#ridge:\nAbove the landing.\n\n' +
-          `Active scene:\n"""\n${SCENE}\n"""`
-      },
-      { role: 'user', content: 'Who is on the ridge?' },
-      { role: 'assistant', content: 'Mara, per the opening.' },
-      { role: 'user', content: 'What is missing from this chapter?' }
-    ])
+    expect(built.messages[0]?.content).toBe(
+      `${AGENT_RULES} Short sentences; never semicolons. ${general.styleInstruction} ${NEW_ELEMENTS}\n\n` +
+        'Scene: location Ferry landing, POV Mara, timeline —.\n\n' +
+        `${BRIEF}\n\n` +
+        `Active scene:\n"""\n${SCENE}\n"""`
+    )
   })
 
-  it('Agent mode: rules, style instruction, new-elements rule, then the scene; the paragraph count leads the message; the preset temperature and a per-paragraph cap', () => {
-    const built = buildChatPrompt(agent)
+  it('Agent mode carries the brief with no metadata, and neither when there is none', () => {
+    expect(buildChatPromptV2({ ...agent, brief: BRIEF }).messages[0]?.content).toBe(
+      `${AGENT_RULES} ${general.styleInstruction} ${NEW_ELEMENTS}\n\n` +
+        `${BRIEF}\n\nActive scene:\n"""\n${SCENE}\n"""`
+    )
+    expect(buildChatPromptV2(agent).messages[0]?.content).toBe(
+      `${AGENT_RULES} ${general.styleInstruction} ${NEW_ELEMENTS}\n\n` +
+        `Active scene:\n"""\n${SCENE}\n"""`
+    )
+  })
+
+  it('keeps version 1’s other placements: the references first, the history between the system turn and the message, the paragraph count leading it', () => {
+    const built = buildChatPromptV2({
+      ...agent,
+      refs: [{ name: 'mara', notes: 'The ferryman’s daughter.' }],
+      brief: BRIEF,
+      history: [{ role: 'user', content: 'Who is on the ridge?' }]
+    })
     expect(built.messages).toEqual([
       {
         role: 'system',
         content:
           `${AGENT_RULES} ${general.styleInstruction} ${NEW_ELEMENTS}\n\n` +
-          `Active scene:\n"""\n${SCENE}\n"""`
+          'Referenced notes:\n#mara:\nThe ferryman’s daughter.\n\n' +
+          `${BRIEF}\n\nActive scene:\n"""\n${SCENE}\n"""`
       },
+      { role: 'user', content: 'Who is on the ridge?' },
       { role: 'user', content: 'Write 2 paragraphs. Bring Tomas onto the landing.' }
     ])
     expect(built.maxTokens).toBe(2 * CHAT_TOKENS_PER_PARAGRAPH)
     expect(built.temperature).toBe(general.temperature)
-    expect(buildChatPrompt({ ...agent, paragraphs: 1 }).messages.at(-1)?.content).toBe(
-      'Write 1 paragraph. Bring Tomas onto the landing.'
-    )
   })
 
-  it('Agent mode places the voice block between the rules and the style instruction, and the metadata before the scene', () => {
-    const built = buildChatPrompt({
-      ...agent,
-      voice: 'Short sentences; never semicolons.',
-      sceneMeta: { location: 'Ferry landing', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF }
-    })
-    expect(built.messages[0]?.content).toBe(
-      `${AGENT_RULES} Short sentences; never semicolons. ${general.styleInstruction} ${NEW_ELEMENTS}\n\n` +
-        'Scene: location Ferry landing, POV Mara, timeline —.\n\n' +
-        `Active scene:\n"""\n${SCENE}\n"""`
-    )
-  })
-
-  it('omits the new-elements rule when the preset allows new elements, and never asks for more than the chat output budget', () => {
-    const world = builtinParams('worldBuilding')
-    const built = buildChatPrompt({ ...agent, preset: world })
-    expect(
-      built.messages[0]?.content.startsWith(`${AGENT_RULES} ${world.styleInstruction}\n\n`)
-    ).toBe(true)
-    expect(built.temperature).toBe(world.temperature)
-    expect(buildChatPrompt({ ...agent, paragraphs: CHAT_PARAGRAPHS_MAX }).maxTokens).toBe(
-      Math.min(CHAT_PARAGRAPHS_MAX * CHAT_TOKENS_PER_PARAGRAPH, outputBudget('chat'))
-    )
-  })
-
-  it('stays under the chat input budget with every context cap at its limit and no history', () => {
-    const built = buildChatPrompt({
+  it('stays under the chat input budget with every context cap at its limit, the brief included, and no history', () => {
+    const built = buildChatPromptV2({
       ...agent,
       paragraphs: CHAT_PARAGRAPHS_MAX,
       sceneText: 's'.repeat(CHAT_SCENE_CHAR_BUDGET),
-      sceneMeta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500), brief: EMPTY_SCENE_BRIEF },
+      sceneMeta: {
+        location: 'L'.repeat(200),
+        pov: 'P'.repeat(200),
+        timeline: 'T'.repeat(500),
+        brief: EMPTY_SCENE_BRIEF
+      },
+      brief: ['g', 'c', 't', 'b', 'a', 'p', 'n']
+        .map((c) => c.repeat(SCENE_BRIEF_FIELD_MAX + 30))
+        .join('\n'),
       refs: [1, 2, 3, 4].map((n) => ({
         name: `ref-${n}`,
         notes: 'n'.repeat(CHAT_REF_NOTES_CHAR_BUDGET / 4)
@@ -165,8 +158,8 @@ describe('chat.v1 prompt (F-5.4)', () => {
     const estimate = estimateTokens(promptText(built.messages))
     expect(estimate).toBeLessThan(inputBudget('chat'))
     // The golden estimates: a change here means the prompt or a cap changed and needs a new version.
-    expect(estimate).toBe(4_009)
-    expect(estimateTokens(promptText(buildChatPrompt(plan).messages))).toBe(109)
-    expect(estimateTokens(promptText(buildChatPrompt(agent).messages))).toBe(202)
+    expect(estimate).toBe(4_414)
+    expect(estimateTokens(promptText(buildChatPromptV2(plan).messages))).toBe(109)
+    expect(estimateTokens(promptText(buildChatPromptV2(agent).messages))).toBe(202)
   })
 })

@@ -36,6 +36,12 @@ const sidebarSchema = panelSchema(LAYOUT_LIMITS.sidebar)
 export const TAG_BAR_MIN_HEIGHT = 100
 /** The share of the window height the tag bar may take at most. */
 export const TAG_BAR_MAX_FRACTION = 0.6
+/**
+ * The height the tag bar grows to when the scene brief (F-14.3) is opened below it, if it is
+ * shorter: the three metadata rows, the Brief row, and the five brief lines. Only ever grows
+ * the bar; the author's own taller height stays.
+ */
+export const TAG_BAR_BRIEF_HEIGHT = 300
 
 /** The share of the tag bar's width the metadata pane may take (F-4.5), as `[min, max]`. */
 export const TAG_BAR_SPLIT_LIMITS = [0.3, 0.7] as const
@@ -47,7 +53,9 @@ const tagBarSchema = z.object({
   split: z.number().min(TAG_BAR_SPLIT_LIMITS[0]).max(TAG_BAR_SPLIT_LIMITS[1])
 })
 
-const DEFAULT_TAG_BAR = { open: true, height: 120, split: 0.4 } as const
+// 180 px since F-14.3 (was 120): the metadata pane's three rows plus the Brief row (128 px)
+// fit under the bar's own header row without a scrollbar.
+const DEFAULT_TAG_BAR = { open: true, height: 180, split: 0.4 } as const
 /** The assistant panel (F-5.4) starts closed; Ctrl+K opens it at just under a third. */
 const DEFAULT_ASSISTANT = { open: false, size: 0.3 } as const
 
@@ -128,7 +136,7 @@ export const StoredLayout = z.object({
 
 /**
  * A fresh install: the Manuscript tab open at just under a quarter, the notes closed at a
- * quarter, the tag bar open at 120 px with the metadata pane at 40 % of it, the assistant
+ * quarter, the tag bar open at 180 px with the metadata pane at 40 % of it, the assistant
  * closed at just under a third, the floating windows at their default geometry.
  */
 export function defaultLayout(): Layout {

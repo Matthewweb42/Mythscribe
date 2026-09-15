@@ -105,14 +105,24 @@ describe('AI_DATA_SHARING', () => {
     expect(Object.keys(AI_DATA_SHARING).sort()).toEqual([...AI_FEATURE_IDS].sort())
   })
 
-  it('names everything ghost text sends: the caret window, the notes, the metadata (F-5.3), the voice profile (F-14.1), the author rules (F-14.2), and the one regenerate (F-14.7)', () => {
+  it('names everything ghost text sends: the caret window, the notes, the metadata (F-5.3), the brief and the neighbours’ lines (F-14.3), the voice profile (F-14.1), the author rules (F-14.2), and the one regenerate (F-14.7)', () => {
     expect(AI_DATA_SHARING.ghostText.sends).toBe(
-      'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes ' +
-        'and metadata (location, POV, timeline), the voice profile (stylometric rules and up ' +
-        'to 3 exemplar passages), and your author rules and banned phrases. An answer that breaks ' +
+      'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes, ' +
+        "its metadata (location, POV, timeline), its brief plus the previous scene's " +
+        "reader-knows-after line and the next scene's goal, the voice profile (stylometric rules " +
+        'and up to 3 exemplar passages), and your author rules and banned phrases. An answer that breaks ' +
         'the voice profile or uses a banned phrase is sent back once, with the same context plus ' +
         'the rule it broke, for a second try.'
     )
+  })
+
+  it('names what a brief draft sends (F-14.3) and gates it at Ask', () => {
+    expect(AI_DATA_SHARING.brief.minDial).toBe(1)
+    expect(AI_DATA_SHARING.brief.sends).toMatch(/20,000 characters/)
+    expect(AI_DATA_SHARING.brief.sends).toMatch(/metadata/)
+    for (const feature of ['ghostText', 'chat', 'critique'] as const) {
+      expect(AI_DATA_SHARING[feature].sends).toMatch(/brief/)
+    }
   })
 
   it('discloses author rules and banned phrases for every feature that carries the voice block (F-14.2)', () => {

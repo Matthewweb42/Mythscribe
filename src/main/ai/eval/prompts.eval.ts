@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { inputBudget, outputBudget, priceFor } from '@shared/ai'
 import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote } from '@shared/critique'
+import { SCENE_BRIEF_FIELD_MAX } from '@shared/sceneMeta'
 import { toTagName } from '@shared/tags'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { checkChatFidelity, postProcessChatText } from '../chat'
@@ -113,6 +114,41 @@ function scoreCritique(sceneText: string, answer: string): LiveResult['verdict']
     : { kind: 'json', ok: false, problem: `${uncited} of ${result.data.notes.length} uncited` }
 }
 
+const BriefAnswer = z.object({
+  goal: z.string(),
+  conflict: z.string(),
+  turn: z.string(),
+  beat: z.string(),
+  after: z.string()
+})
+
+/**
+ * A scene brief (F-14.3) scores like the other JSON answers: it must parse to the five string
+ * lines the prompt asks for, and no line may run past the field cap the pane stores.
+ */
+function scoreBrief(answer: string): LiveResult['verdict'] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(answer)
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not JSON' }
+  }
+  const result = BriefAnswer.safeParse(parsed)
+  if (!result.success) {
+    return { kind: 'json', ok: false, problem: 'not { goal, conflict, turn, beat, after }' }
+  }
+  const over = Object.entries(result.data)
+    .filter(([, line]) => line.length > SCENE_BRIEF_FIELD_MAX)
+    .map(([field]) => field)
+  return over.length === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : {
+        kind: 'json',
+        ok: false,
+        problem: `over ${SCENE_BRIEF_FIELD_MAX} characters: ${over.join(', ')}`
+      }
+}
+
 describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
   it('sends every case once, scores the answers, and writes the fidelity report', async () => {
     const key = process.env.OPENAI_API_KEY
@@ -152,6 +188,10 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           answer: reply.text,
           verdict: scoreCritique(c.scoring.sceneText, reply.text)
         })
+        continue
+      }
+      if (c.scoring.kind === 'brief') {
+        results.push({ ...base, answer: reply.text, verdict: scoreBrief(reply.text) })
         continue
       }
       const answer =

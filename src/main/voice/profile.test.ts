@@ -12,6 +12,7 @@ import { createNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { addExemplar } from './exemplarStore'
 import { POV_MIN_WORDS, buildVoiceProfile } from './profile'
 import { bumpVoiceVersion, resetVoiceProfileCache } from './versionCache'
+import { EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
 
 let tmp: string
 let session: ProjectSession
@@ -95,7 +96,7 @@ describe('buildVoiceProfile', () => {
   it('narrows to the POV group when it holds 2,000 words and falls back to the manuscript below that', () => {
     fill(scenes[0]!, PAST_THIRD, 2_500)
     fill(scenes[1]!, PRESENT_FIRST, POV_MIN_WORDS)
-    setSceneMeta(db, scenes[1]!, { location: '', pov: 'Mara', timeline: '' })
+    setSceneMeta(db, scenes[1]!, { location: '', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF })
     const all = buildVoiceProfile(db)
     expect(all.rules).toContain('Narration is in past tense.')
     const mara = buildVoiceProfile(db, { pov: ' mara ' })
@@ -111,8 +112,8 @@ describe('buildVoiceProfile', () => {
   })
 
   it('lists every exemplar, POV-matching first when a POV is asked for, and adds the bonus at six', () => {
-    setSceneMeta(db, scenes[0]!, { location: '', pov: 'Tomas', timeline: '' })
-    setSceneMeta(db, scenes[1]!, { location: '', pov: 'Mara', timeline: '' })
+    setSceneMeta(db, scenes[0]!, { location: '', pov: 'Tomas', timeline: '', brief: EMPTY_SCENE_BRIEF })
+    setSceneMeta(db, scenes[1]!, { location: '', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF })
     const tomas = addExemplar(db, scenes[0]!, `${PAST_THIRD} one`)
     const mara = addExemplar(db, scenes[1]!, `${PAST_THIRD} two`)
     expect(buildVoiceProfile(db).exemplars.map((e) => e.id)).toEqual([tomas.id, mara.id])
