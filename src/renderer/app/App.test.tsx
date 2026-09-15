@@ -778,7 +778,7 @@ describe('App', () => {
       await waitFor(() => expect(useFocusStore.getState().active).toBe(true))
       expect(screen.queryByRole('banner')).not.toBeInTheDocument()
       expect(asides()).toEqual([])
-      expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
+      expect(screen.queryByRole('toolbar', { name: 'Formatting' })).not.toBeInTheDocument()
       expect(screen.queryByRole('region', { name: 'Tags' })).not.toBeInTheDocument()
       // The editor and its status bar stay; the layout store did not move.
       expect(screen.getByRole('textbox', { name: 'Document' })).toHaveAttribute(
@@ -871,7 +871,9 @@ describe('App', () => {
       expect(button).toHaveAttribute('aria-pressed', 'false')
       await userEvent.click(button)
       expect(invoke).toHaveBeenLastCalledWith('window:setFullScreen', { on: true })
-      await waitFor(() => expect(screen.queryByRole('toolbar')).not.toBeInTheDocument())
+      await waitFor(() =>
+        expect(screen.queryByRole('toolbar', { name: 'Formatting' })).not.toBeInTheDocument()
+      )
       await userEvent.keyboard('{F11}')
       expect(fullScreenCalls(invoke)).toEqual([{ on: true }, { on: false }])
       expect(await screen.findByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
@@ -942,7 +944,9 @@ describe('App', () => {
       await userEvent.click(within(scene).getByText('Scene 1'))
       await screen.findByRole('toolbar', { name: 'Formatting' })
       await userEvent.keyboard('{F11}')
-      await waitFor(() => expect(screen.queryByRole('toolbar')).not.toBeInTheDocument())
+      await waitFor(() =>
+        expect(screen.queryByRole('toolbar', { name: 'Formatting' })).not.toBeInTheDocument()
+      )
       // The window manager left fullscreen (the OS shortcut, a workspace change): no request, the chrome returns.
       fire('window:fullScreenChanged', { on: false })
       expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
@@ -956,6 +960,71 @@ describe('App', () => {
         expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual(['No window'])
       )
       expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
+    })
+
+    it('mounts the control bar only in focus mode, and Exit leaves it (F-6.5)', async () => {
+      const invoke = install({ 'project:current': info, 'tree:list': treeFixture })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      await screen.findByRole('toolbar', { name: 'Formatting' })
+      expect(screen.queryByRole('toolbar', { name: 'Focus controls' })).not.toBeInTheDocument()
+
+      await userEvent.keyboard('{F11}')
+      const bar = await screen.findByRole('toolbar', { name: 'Focus controls' })
+      // The intro shows it on entry, inside <main>, outside the editor's scroll container.
+      expect(bar).toHaveAttribute('data-visible', 'true')
+      expect(screen.getByRole('main')).toContainElement(bar)
+      expect(
+        screen.getByRole('textbox', { name: 'Document' }).closest('.overflow-y-auto')
+      ).not.toContainElement(bar)
+      await waitFor(() =>
+        expect(screen.getByTestId('focus-words')).toHaveTextContent(/^\d[\d,]* words?$/)
+      )
+
+      await userEvent.click(within(bar).getByRole('button', { name: 'Exit focus mode' }))
+      expect(fullScreenCalls(invoke)).toEqual([{ on: true }, { on: false }])
+      await waitFor(() => expect(useFocusStore.getState().active).toBe(false))
+      expect(screen.queryByRole('toolbar', { name: 'Focus controls' })).not.toBeInTheDocument()
+      expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
+    })
+
+    it("shows the notes and assistant panels in focus mode only on the bar's flags, closed on exit, layout untouched (F-6.5)", async () => {
+      install({ 'project:current': info, 'tree:list': treeFixture })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      await screen.findByRole('toolbar', { name: 'Formatting' })
+      expect(useLayoutStore.getState().layout.notes.open).toBe(false)
+      expect(useLayoutStore.getState().layout.assistant.open).toBe(false)
+
+      await userEvent.keyboard('{F11}')
+      const bar = await screen.findByRole('toolbar', { name: 'Focus controls' })
+      expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('assistant-panel')).not.toBeInTheDocument()
+
+      const notes = within(bar).getByRole('button', { name: 'Notes' })
+      const assistant = within(bar).getByRole('button', { name: 'AI assistant' })
+      await userEvent.click(notes)
+      expect(notes).toHaveAttribute('aria-pressed', 'true')
+      expect(await screen.findByTestId('notes-panel')).toBeInTheDocument()
+      await userEvent.click(assistant)
+      expect(assistant).toHaveAttribute('aria-pressed', 'true')
+      expect(await screen.findByTestId('assistant-panel')).toBeInTheDocument()
+      // The persisted layout did not move: these are the focus store's session flags.
+      expect(useLayoutStore.getState().layout.notes.open).toBe(false)
+      expect(useLayoutStore.getState().layout.assistant.open).toBe(false)
+      await userEvent.click(notes)
+      expect(notes).toHaveAttribute('aria-pressed', 'false')
+      await waitFor(() => expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument())
+      expect(screen.getByTestId('assistant-panel')).toBeInTheDocument()
+
+      // Leaving focus mode closes the focus-mode panels; the normal screen follows the layout (both closed).
+      await userEvent.click(within(bar).getByRole('button', { name: 'Exit focus mode' }))
+      await waitFor(() => expect(useFocusStore.getState().active).toBe(false))
+      expect(screen.queryByTestId('assistant-panel')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument()
+      expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
     })
   })
 

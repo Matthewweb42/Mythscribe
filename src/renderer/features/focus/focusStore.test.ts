@@ -112,12 +112,57 @@ describe('focusStore (F-6.1)', () => {
     expect(useFocusStore.getState().active).toBe(false)
   })
 
-  it('resets to windowed and drops the subscription', () => {
+  it('resets to windowed with the panels closed and drops the subscription', () => {
     install()
     useFocusStore.getState().subscribe()
-    useFocusStore.setState({ active: true })
+    useFocusStore.setState({ active: true, panels: { notes: true, assistant: true } })
     resetFocusStore()
     expect(useFocusStore.getState().active).toBe(false)
+    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
     expect(listeners.size).toBe(0)
+  })
+})
+
+describe('focusStore panels (F-6.5)', () => {
+  it('starts with both panels closed and toggles each on its own', async () => {
+    install()
+    await useFocusStore.getState().enter()
+    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
+    useFocusStore.getState().togglePanel('notes')
+    expect(useFocusStore.getState().panels).toEqual({ notes: true, assistant: false })
+    useFocusStore.getState().togglePanel('assistant')
+    expect(useFocusStore.getState().panels).toEqual({ notes: true, assistant: true })
+    useFocusStore.getState().togglePanel('notes')
+    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: true })
+  })
+
+  it('closes both panels on exit, so the next entry starts with the editor alone', async () => {
+    install()
+    await useFocusStore.getState().enter()
+    useFocusStore.getState().togglePanel('notes')
+    useFocusStore.getState().togglePanel('assistant')
+    await useFocusStore.getState().exit()
+    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
+    await useFocusStore.getState().enter()
+    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
+  })
+
+  it('closes both panels when the window leaves fullscreen on its own', () => {
+    install()
+    useFocusStore.getState().subscribe()
+    fire(true)
+    useFocusStore.getState().togglePanel('notes')
+    fire(false)
+    expect(useFocusStore.getState().active).toBe(false)
+    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
+  })
+
+  it('keeps the panels when a refused exit leaves focus mode active', async () => {
+    install((on) => (on ? true : new IpcRequestError({ code: 'INTERNAL', message: 'No window' })))
+    await useFocusStore.getState().enter()
+    useFocusStore.getState().togglePanel('assistant')
+    await useFocusStore.getState().exit()
+    expect(useFocusStore.getState().active).toBe(true)
+    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: true })
   })
 })

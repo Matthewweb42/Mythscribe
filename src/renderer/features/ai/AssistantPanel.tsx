@@ -74,11 +74,13 @@ export function AssistantToggleButton(): React.JSX.Element {
  * answers in the chat (streamed); Agent mode places the answer in the active editor as ghost
  * text and the chat shows a notice. Every assistant turn shows what it cost. The open state
  * and width live in the layout store (F-7.2); the conversations in `useAssistantStore`.
- * Renders nothing while closed.
+ * Renders nothing while closed. F-6.5: `open` overrides the layout's flag (focus mode keeps
+ * its own session flag in the focus store, so the persisted layout is never touched); the
+ * width stays the layout's.
  */
-export function AssistantPanel(): React.JSX.Element | null {
+export function AssistantPanel({ open }: { open?: boolean } = {}): React.JSX.Element | null {
   const assistant = useLayoutStore((s) => s.layout.assistant)
-  if (!assistant.open) return null
+  if (!(open ?? assistant.open)) return null
   return (
     <aside
       aria-label="Assistant"

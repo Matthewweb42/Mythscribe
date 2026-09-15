@@ -31,10 +31,12 @@ export function NotesToggleButton(): React.JSX.Element {
  * Its open state and width live in the layout store (F-7.2), as a fraction of the window
  * rendered in `vw`, so it follows a window resize on its own and is back after a restart.
  * Renders nothing while closed, so the editor gets the whole pane and no notes are loaded.
+ * F-6.5: `open` overrides the layout's flag (focus mode keeps its own session flag in the focus
+ * store, so the persisted layout is never touched); the width stays the layout's.
  */
-export function NotesPanel({ id }: { id: string }): React.JSX.Element | null {
+export function NotesPanel({ id, open }: { id: string; open?: boolean }): React.JSX.Element | null {
   const notes = useLayoutStore((s) => s.layout.notes)
-  if (!notes.open) return null
+  if (!(open ?? notes.open)) return null
   return (
     <div
       data-testid="notes-panel"

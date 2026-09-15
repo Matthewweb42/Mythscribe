@@ -1,7 +1,8 @@
+import { resetLayoutStore } from '@renderer/features/shell/layoutStore'
 import { createRef } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
@@ -54,8 +55,13 @@ const selected = (): string[] =>
 const options = (): string[] => screen.getAllByRole('option').map((o) => o.textContent ?? '')
 
 beforeEach(() => {
+  // A neighbouring file's debounced layout write must not land in this file's IPC fake.
+  resetLayoutStore()
   resetTagStore()
   useDialogStore.setState({ modals: [], toasts: [] })
+})
+afterEach(() => {
+  resetLayoutStore()
 })
 
 describe('InlineTagSuggestList (F-4.6)', () => {

@@ -43,6 +43,8 @@
   /* Focus mode (F-6.2): the scrim over a background image and the panel behind the column. */
   --ms-focus-scrim: rgb(0 0 0);
   --ms-focus-surface: rgb(27 27 31 / 0.72);
+  /* F-6.5: the control bar over the editor's bottom edge. */
+  --ms-focus-bar: rgb(35 35 39 / 0.85);
 
   --ms-radius: 6px;
   --ms-radius-lg: 10px;

@@ -1436,13 +1436,45 @@ test('create, close, reopen a project on disk', async () => {
   await expect(scene1).toHaveAttribute('aria-selected', 'true')
   await expect(tagBar).toBeVisible()
   await expect(editor).toContainText('In focus.')
+  const notesPanelsBefore = await page.getByTestId('notes-panel').count()
   await focusButton.click()
   await expect.poll(isFullScreen).toBe(true)
   await expect(formatting).toHaveCount(0)
-  await page.keyboard.press('Escape')
+
+  // F-6.5: the control bar. It shows on entry (the intro, 2 s, checked in the unit tests: the
+  // fullscreen transition can outlast it here) and hides once the pointer is away from the
+  // bottom edge; near the edge it comes back. Its word count is the document's live count;
+  // Notes opens the notes panel in focus mode (the persisted layout never moves) and closes it
+  // again; moving away hides the bar after the delay; Exit leaves focus mode.
+  const controlBar = page.getByTestId('focus-control-bar')
+  await expect(controlBar).toHaveCount(1)
+  const screenSize = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  await page.mouse.move(screenSize.w / 2, screenSize.h / 2)
+  await expect(controlBar).toHaveAttribute('data-visible', 'false', { timeout: 10_000 })
+  await page.mouse.move(screenSize.w / 2, screenSize.h - 8)
+  await expect(controlBar).toHaveAttribute('data-visible', 'true')
+  await expect(page.getByTestId('focus-words')).toHaveText(
+    await page.getByTestId('status-words').innerText()
+  )
+  expect(await page.getByTestId('focus-words').innerText()).toMatch(/^\d[\d,]* words?$/)
+  await expect(page.getByTestId('notes-panel')).toHaveCount(0)
+  const focusNotes = controlBar.getByRole('button', { name: 'Notes' })
+  await focusNotes.click()
+  await expect(focusNotes).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('notes-panel')).toBeVisible()
+  await focusNotes.click()
+  await expect(page.getByTestId('notes-panel')).toHaveCount(0)
+  await page.mouse.move(screenSize.w / 2, screenSize.h / 2)
+  await expect(controlBar).toHaveAttribute('data-visible', 'false', { timeout: 10_000 })
+  await page.mouse.move(screenSize.w / 2, screenSize.h - 8)
+  await expect(controlBar).toHaveAttribute('data-visible', 'true')
+  await controlBar.getByRole('button', { name: 'Exit focus mode' }).click()
   await expect.poll(isFullScreen).toBe(false)
+  await expect(controlBar).toHaveCount(0)
   await expect(formatting).toBeVisible()
   await expect(focusButton).toHaveAttribute('aria-pressed', 'false')
+  // The normal screen follows the persisted layout again (the F-3.7 step left the panel open).
+  await expect(page.getByTestId('notes-panel')).toHaveCount(notesPanelsBefore)
 
   // F-6.2: background images. The stubbed open dialog answers a 1×1 PNG written into the temp
   // dir; "Add images…" copies it into the project's `assets/backgrounds/`, the tile appears and

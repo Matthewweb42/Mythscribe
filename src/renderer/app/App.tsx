@@ -26,6 +26,7 @@ import { useProvenanceStore } from '@renderer/features/ai/provenanceStore'
 import { useVoiceStore } from '@renderer/features/ai/voiceStore'
 import { useEditorSettingsStore } from '@renderer/features/editor/settingsStore'
 import { FocusBackdrop } from '@renderer/features/focus/FocusBackdrop'
+import { FocusControlBar } from '@renderer/features/focus/FocusControlBar'
 import { BackgroundRotation } from '@renderer/features/focus/rotation'
 import { OVERLAY_DARKNESS } from '@shared/focus'
 import { useBackgroundStore, useCurrentBackground } from '@renderer/features/focus/backgroundStore'
@@ -183,6 +184,7 @@ export function App(): React.JSX.Element {
         {focus && background ? <FocusBackdrop url={background.url} darkness={darkness} /> : null}
         {focus ? <BackgroundRotation /> : null}
         {!ready ? null : current ? <ProjectScreen format={current.format} /> : <WelcomeScreen />}
+        {focus ? <FocusControlBar /> : null}
       </main>
       <DialogHost />
     </div>
@@ -424,11 +426,13 @@ function SettingsButton({ format }: { format: NovelFormat }): React.JSX.Element 
  * `vw`, resized by the handle on its right edge. F-5.4: the assistant panel docks at the right
  * edge, full height, whatever is selected (Plan mode works without a scene). F-6.1: focus mode
  * hides the sidebar and both side panels without touching the layout store, so they come back
- * as they were on exit.
+ * as they were on exit. F-6.5: in focus mode the panels follow the focus store's own flags
+ * (the control bar toggles them; both close on exit) and dock exactly as they do outside it.
  */
 function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
   const sidebar = useLayoutStore((s) => s.layout.sidebar)
   const focus = useFocusStore((s) => s.active)
+  const assistantInFocus = useFocusStore((s) => s.panels.assistant)
   return (
     <>
       {sidebar.open && !focus ? (
@@ -450,13 +454,14 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <MainPane format={format} />
       </section>
-      {focus ? null : <AssistantPanel />}
+      <AssistantPanel open={focus ? assistantInFocus : undefined} />
     </>
   )
 }
 
 function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
   const focus = useFocusStore((s) => s.active)
+  const notesInFocus = useFocusStore((s) => s.panels.notes)
   const node = useTreeStore((s) => (s.selectedId === null ? undefined : s.byId[s.selectedId]))
   const section = useTreeStore((s) =>
     s.selectedId === null ? undefined : s.sectionOf[s.selectedId]
@@ -492,7 +497,7 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
         ) : (
           <StackedEditor folderId={node.id} format={format} />
         )}
-        {focus ? null : <NotesPanel id={node.id} />}
+        <NotesPanel id={node.id} open={focus ? notesInFocus : undefined} />
       </div>
     </>
   )

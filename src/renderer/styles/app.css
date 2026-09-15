@@ -243,3 +243,30 @@ select {
   background: var(--ms-focus-surface);
   padding-inline: 2rem;
 }
+
+/*
+ * Focus-mode control bar (F-6.5): fixed to the bottom edge over the editor, slid off-screen
+ * while hidden (`data-visible="false"`; it stays in the tree so Tab can reach it, which shows
+ * it again) and inert to the pointer there, so the show zone under it is the document's.
+ */
+.focus-control-bar {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 1rem;
+  border-top: 1px solid var(--ms-line);
+  background: var(--ms-focus-bar);
+  backdrop-filter: blur(8px);
+  transform: translateY(0);
+  transition: transform 200ms ease;
+}
+
+.focus-control-bar[data-visible='false'] {
+  transform: translateY(100%);
+  pointer-events: none;
+}
