@@ -755,9 +755,7 @@ describe('focusSettings and backgrounds (F-6.2)', () => {
     expect(await invoke('background:list', undefined)).toEqual([])
     expect(
       await invoke('focusSettings:set', { ...defaultFocusSettings(), backgroundId: 'bg' })
-    ).toEqual({
-      backgroundId: 'bg'
-    })
+    ).toEqual({ ...defaultFocusSettings(), backgroundId: 'bg' })
     await invoke('project:close', undefined)
     await invoke('project:open', { path: created?.path ?? '' })
     expect(await invoke('focusSettings:get', undefined)).toEqual({

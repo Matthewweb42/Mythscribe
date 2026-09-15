@@ -13,9 +13,12 @@ import {
 
 describe('FocusSettings (F-6.2)', () => {
   it('defaults to no background and fills the field into an older row', () => {
-    expect(defaultFocusSettings()).toEqual({ backgroundId: null })
-    expect(FocusSettings.parse({})).toEqual({ backgroundId: null })
-    expect(FocusSettings.parse({ backgroundId: 'abc' })).toEqual({ backgroundId: 'abc' })
+    expect(defaultFocusSettings().backgroundId).toBeNull()
+    expect(FocusSettings.parse({})).toEqual(defaultFocusSettings())
+    expect(FocusSettings.parse({ backgroundId: 'abc' })).toEqual({
+      ...defaultFocusSettings(),
+      backgroundId: 'abc'
+    })
   })
 
   it('refuses a non-string id', () => {
