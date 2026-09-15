@@ -1,0 +1,14 @@
+# MythScribe Cloud proxy (F-15.4): the Worker the app talks to when a project uses MythScribe's
+# key instead of the author's own (F-15.11). It validates the session, checks credits, streams
+# from the provider, meters tokens, and stores no manuscript content. `main` is added when
+# F-15.4 is built; until then this file exists so the secret has a home (see README.md).
+name = "mythscribe-api"
+account_id = "dcc26cac35ac537e749bfab8672bd8d3"
+compatibility_date = "2026-09-01"
+workers_dev = false
+
+routes = [{ pattern = "api.mythscribe.app", custom_domain = true }]
+
+# Secrets (never in this file, never in the repo):
+#   OPENAI_API_KEY   the operator's OpenAI key   -> `npx wrangler secret put OPENAI_API_KEY`
+# Local runs read them from ./.dev.vars (git-ignored); copy .dev.vars.example to start.

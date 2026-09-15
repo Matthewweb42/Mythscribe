@@ -1,0 +1,2 @@
+# Copy to cloud/.dev.vars (git-ignored) for `wrangler dev`. Production uses `wrangler secret put`.
+OPENAI_API_KEY=sk-replace-me

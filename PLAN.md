@@ -192,6 +192,11 @@ Design rules:
 
 Both paths ship. BYOK is the trust story ("we never need to see your book"); Cloud is the money.
 
+**The author chooses at project setup (F-15.11, decided 2026-09-15).** Creating a project asks
+"Use your own key, or MythScribe's?" and the AI tab lets them switch any time. Own key: paste it,
+nothing is paid to us. MythScribe's key: sign in, buy credits, and every request is charged at the
+rate of the model that answered, so the author sees what the strong tier costs before choosing it.
+
 ### 4.2 Pricing shape (numbers are starting points, validate with early users)
 
 - **App**: free to download and use for writing with AI off or BYOK. This maximizes the top of the
@@ -203,6 +208,10 @@ Both paths ship. BYOK is the trust story ("we never need to see your book"); Clo
   tier for queries and critique with a monthly cap.
 - **Cloud Pro** (~$19/mo): larger credit pool, strong-tier models everywhere, priority indexing,
   beta-reader and continuity passes on the full manuscript.
+- **Usage pricing by model (decided 2026-09-15, replaces plans as the first thing on sale):** a
+  prepaid credit balance, metered per request at the answering model's rate (provider price plus a
+  margin), one published rate per model, shown in the app. The Scribe/Pro plans above are a later,
+  second way to buy the same credits, not a prerequisite.
 - **Credit packs** for overage, non-expiring within 12 months.
 - Annual plans at ~2 months free.
 
@@ -228,6 +237,9 @@ Deliberately small; a solo side business cannot run a big service:
   `AIProvider` operations; validates the session, checks credits, streams from the provider,
   meters tokens, writes a usage row. **No manuscript content is stored or logged.** State this in
   the privacy policy and enforce it in code review.
+  The operator's provider key is a Worker secret (`OPENAI_API_KEY` in `cloud/`, set with
+  `wrangler secret put`; `cloud/.dev.vars` locally); it never ships in the desktop app, which
+  only ever holds the author's own key or a MythScribe session token.
 - **Entitlements**: signed license token cached in the app with an offline grace period (say 14
   days) so writing never blocks on the network.
 - **Ops**: uptime monitor, error tracking (Sentry, content-scrubbed), a status page, a support

@@ -10,3 +10,6 @@ playwright-report
 .DS_Store
 .env
 .wrangler/
+
+# Cloudflare Worker local secrets (cloud/.dev.vars)
+.dev.vars
