@@ -6,7 +6,12 @@ import {
   type AiSettingsInput
 } from '@shared/aiSettings'
 import { CONVERSATIONS_KEY, Conversations, parseStoredConversations } from '@shared/chat'
-import { EDITOR_SETTINGS_KEY, EditorSettings, defaultEditorSettings } from '@shared/editorSettings'
+import {
+  EDITOR_SETTINGS_KEY,
+  EditorSettings,
+  defaultEditorSettings,
+  type EditorSettingsInput
+} from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
 import { settings } from '../db/schema'
@@ -32,7 +37,7 @@ export function getEditorSettings(db: TreeDb, format: NovelFormat): EditorSettin
 }
 
 /** Replaces the project's editor formatting (upsert on the settings key) and returns what was stored. */
-export function setEditorSettings(db: TreeDb, value: EditorSettings): EditorSettings {
+export function setEditorSettings(db: TreeDb, value: EditorSettingsInput): EditorSettings {
   const stored = EditorSettings.parse(value)
   const serialized = JSON.stringify(stored)
   db.insert(settings)

@@ -137,6 +137,8 @@ function RegionEditor({
   const ready = content !== null
   const tagsById = useTagStore((s) => s.byId)
   const focus = useFocusStore((s) => s.active)
+  // F-3.9 / F-6.7: typewriter scrolling follows the setting, and focus mode turns it on.
+  const typewriter = focus || settings.typewriter
   const [menu, setMenu] = useState<TokenMenu | null>(null)
 
   const editor = useEditor(
@@ -172,6 +174,10 @@ function RegionEditor({
   useEffect(() => {
     resyncInlineTags(editor.view.dom, tagsById)
   }, [editor, tagsById])
+
+  useEffect(() => {
+    editor?.commands.setTypewriter(typewriter)
+  }, [editor, typewriter])
 
   const { error: ghostError } = useGhostTextController({
     editor,
@@ -254,7 +260,10 @@ function RegionEditor({
       )}
       {focus ? null : <TagBar id={id} />}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <EditorContent editor={editor} className={`${COLUMN} flex flex-1 flex-col py-6`} />
+        <EditorContent
+          editor={editor}
+          className={`${COLUMN} flex flex-1 flex-col py-6 ${typewriter ? 'pb-[50vh]' : ''}`}
+        />
       </div>
       <DocumentStatusBar id={id} editor={ready ? editor : null} />
       {tokenMenu}

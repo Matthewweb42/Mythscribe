@@ -10,8 +10,8 @@ import { EditorSettingsTab } from './EditorSettingsTab'
 import { resetEditorSettingsStore, useEditorSettingsStore } from './settingsStore'
 
 /** Records every `editorSettings:set` and resolves it at once. */
-function recordingClient(): { client: IpcClient; sets: EditorSettings[] } {
-  const sets: EditorSettings[] = []
+function recordingClient(): { client: IpcClient; sets: Input<'editorSettings:set'>[] } {
+  const sets: Input<'editorSettings:set'>[] = []
   const client: IpcClient = {
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
       if (channel !== 'editorSettings:set') throw new Error(`unexpected ${channel}`)
@@ -25,7 +25,7 @@ function recordingClient(): { client: IpcClient; sets: EditorSettings[] } {
 }
 
 const novel = defaultEditorSettings('novel')
-let sets: EditorSettings[]
+let sets: Input<'editorSettings:set'>[]
 
 const current = (): EditorSettings | null => useEditorSettingsStore.getState().settings
 const button = (name: string): HTMLElement => screen.getByRole('button', { name })
@@ -153,6 +153,18 @@ describe('EditorSettingsTab (F-3.6, F-7.5)', () => {
     await userEvent.selectOptions(select, '* * *')
     expect(current()?.sceneBreak).toBe('* * *')
     expect(screen.queryByRole('textbox', { name: 'Custom scene break' })).not.toBeInTheDocument()
+  })
+
+  it('turns typewriter scrolling on and off (F-3.9)', async () => {
+    open()
+    const box = screen.getByRole('checkbox', { name: /Typewriter scrolling/ })
+    expect(box).not.toBeChecked()
+    await userEvent.click(box)
+    expect(current()).toEqual({ ...novel, typewriter: true })
+    await waitFor(() => expect(sets).toHaveLength(1))
+    expect(sets[0]).toEqual({ ...novel, typewriter: true })
+    await userEvent.click(box)
+    expect(current()?.typewriter).toBe(false)
   })
 
   it('resets every setting to the format defaults', async () => {

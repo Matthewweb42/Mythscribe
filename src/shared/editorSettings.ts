@@ -17,9 +17,13 @@ export const EditorSettings = z.object({
   paragraphIndent: z.number().min(0).max(3),
   /** px, editor column (F-3.4) */
   maxWidth: z.number().min(500).max(1000),
-  sceneBreak: z.string().trim().min(1).max(20)
+  sceneBreak: z.string().trim().min(1).max(20),
+  /** F-3.9: keep the caret at the middle of the screen while typing; defaulted so stored rows without it still parse. */
+  typewriter: z.boolean().default(false)
 })
 export type EditorSettings = z.infer<typeof EditorSettings>
+/** What a caller may send: `typewriter` is optional on the way in and always present on the way out. */
+export type EditorSettingsInput = z.input<typeof EditorSettings>
 
 /** Format-specific defaults seeded into a new project (F-1.3, F-3.6). */
 export function defaultEditorSettings(format: NovelFormat): EditorSettings {
@@ -30,7 +34,8 @@ export function defaultEditorSettings(format: NovelFormat): EditorSettings {
       paragraphSpacing: 1,
       paragraphIndent: 0,
       maxWidth: 700,
-      sceneBreak: '~~~'
+      sceneBreak: '~~~',
+      typewriter: false
     }
   }
   return {
@@ -39,6 +44,7 @@ export function defaultEditorSettings(format: NovelFormat): EditorSettings {
     paragraphSpacing: 0,
     paragraphIndent: 1.5,
     maxWidth: 700,
-    sceneBreak: '* * *'
+    sceneBreak: '* * *',
+    typewriter: false
   }
 }

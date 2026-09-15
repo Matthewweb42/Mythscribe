@@ -8,7 +8,7 @@ import type { NovelFormat } from '@shared/ipc/contract'
 import { COLUMN, editorStyle } from './column'
 import { useEditorSettings, useEditorSettingsStore } from './settingsStore'
 
-type NumberKey = Exclude<keyof EditorSettings, 'sceneBreak'>
+type NumberKey = Exclude<keyof EditorSettings, 'sceneBreak' | 'typewriter'>
 
 interface NumberControl {
   key: NumberKey
@@ -61,6 +61,19 @@ export function EditorSettingsTab({ format }: { format: NovelFormat }): React.JS
           value={settings.sceneBreak}
           onCommit={(sceneBreak) => update({ sceneBreak })}
         />
+        <label className={ROW}>
+          <span>
+            Typewriter scrolling
+            <span className="block text-xs text-fg-muted">
+              Keeps the line you are typing in the middle of the screen. Always on in focus mode.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={settings.typewriter}
+            onChange={(event) => update({ typewriter: event.target.checked })}
+          />
+        </label>
         <button
           type="button"
           onClick={() => update(defaultEditorSettings(format))}

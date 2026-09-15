@@ -23,7 +23,8 @@ import { DocumentEditor } from './DocumentEditor'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { resetSceneMetaStore } from './sceneMetaStore'
 import { resetVoiceStore } from '@renderer/features/ai/voiceStore'
-import { resetEditorSettingsStore } from './settingsStore'
+import { defaultEditorSettings } from '@shared/editorSettings'
+import { resetEditorSettingsStore, useEditorSettingsStore } from './settingsStore'
 
 type Handler = (input: unknown) => unknown
 
@@ -216,6 +217,27 @@ describe('DocumentEditor focus mode (F-6.1)', () => {
     act(() => useFocusStore.setState({ active: false }))
     expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
     expect(bar()).toBeInTheDocument()
+  })
+})
+
+describe('DocumentEditor typewriter (F-3.9, F-6.7)', () => {
+  it('follows the setting and focus mode without rebuilding the editor', async () => {
+    const editor = await mountReadyWithEditor()
+    expect(editor.storage.typewriter?.enabled).toBe(false)
+    expect(box().parentElement?.className).not.toContain('pb-[50vh]')
+    act(() => useFocusStore.setState({ active: true }))
+    expect(editor.storage.typewriter?.enabled).toBe(true)
+    expect(box().parentElement?.className).toContain('pb-[50vh]')
+    act(() => useFocusStore.setState({ active: false }))
+    expect(editor.storage.typewriter?.enabled).toBe(false)
+    // `update` only patches loaded settings; the store is empty here, so seed it as `load` would.
+    act(() =>
+      useEditorSettingsStore.setState({
+        settings: { ...defaultEditorSettings('novel'), typewriter: true }
+      })
+    )
+    expect(editor.storage.typewriter?.enabled).toBe(true)
+    expect(screen.getByRole('textbox', { name: 'Document' })).toBe(box())
   })
 })
 

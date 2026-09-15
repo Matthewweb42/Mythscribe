@@ -617,7 +617,8 @@ describe('editorSettings:get / editorSettings:set', () => {
       ...defaultEditorSettings('novel'),
       fontSize: 20,
       maxWidth: 900,
-      sceneBreak: '###'
+      sceneBreak: '###',
+      typewriter: false
     }
     expect(await invoke('editorSettings:set', next)).toEqual(next)
     expect(await invoke('editorSettings:get', undefined)).toEqual(next)

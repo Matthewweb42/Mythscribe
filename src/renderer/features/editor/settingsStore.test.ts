@@ -13,7 +13,7 @@ import {
 } from './settingsStore'
 
 interface PendingSet {
-  value: EditorSettings
+  value: Input<'editorSettings:set'>
   resolve: () => void
   reject: (err: Error) => void
 }

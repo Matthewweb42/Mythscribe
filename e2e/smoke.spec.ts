@@ -1372,6 +1372,33 @@ test('create, close, reopen a project on disk', async () => {
   await scene1.getByText('Scene 1', { exact: true }).click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
 
+  // F-3.9: typewriter scrolling. Off by default; once on in Settings → Editor, typing at the
+  // end of Scene 1 keeps the caret near the middle of the scroll container (the column gains
+  // room below so the last line can sit there too). Off again afterwards.
+  const caretOffset = async (): Promise<number | null> =>
+    page.evaluate(() => {
+      const range = document.getSelection()?.getRangeAt(0)
+      const scroller = document.querySelector('.ProseMirror')?.closest('.overflow-y-auto')
+      const caret = range?.getBoundingClientRect()
+      const box = scroller?.getBoundingClientRect()
+      if (!caret || !box || box.height === 0) return null
+      return Math.abs(caret.top + caret.height / 2 - (box.top + box.height / 2)) / box.height
+    })
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const typewriterBox = settingsDialog.getByRole('checkbox', { name: /Typewriter scrolling/ })
+  await expect(typewriterBox).not.toBeChecked()
+  await typewriterBox.check()
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  for (let i = 0; i < 14; i += 1) await page.keyboard.type('\nThe typewriter line rolls on.')
+  await expect.poll(caretOffset).toBeLessThan(0.34)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await typewriterBox.uncheck()
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+
   // F-6.1: focus mode. F11 puts the window in OS fullscreen (the flag Electron tracks, read
   // from main) and hides the chrome: the header, the sidebar, the toolbar, and the tag bar; the
   // editor stays editable and keeps its status bar. Escape leaves it and everything comes back

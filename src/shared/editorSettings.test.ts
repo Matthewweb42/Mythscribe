@@ -14,7 +14,8 @@ describe('defaultEditorSettings', () => {
       paragraphSpacing: 0,
       paragraphIndent: 1.5,
       maxWidth: 700,
-      sceneBreak: '* * *'
+      sceneBreak: '* * *',
+      typewriter: false
     }
     expect(defaultEditorSettings('novel')).toEqual(expected)
     expect(defaultEditorSettings('epic')).toEqual(expected)
@@ -27,7 +28,8 @@ describe('defaultEditorSettings', () => {
       paragraphSpacing: 1,
       paragraphIndent: 0,
       maxWidth: 700,
-      sceneBreak: '~~~'
+      sceneBreak: '~~~',
+      typewriter: false
     })
   })
 
@@ -53,5 +55,12 @@ describe('EditorSettings schema', () => {
 
   it('stores under a stable settings key', () => {
     expect(EDITOR_SETTINGS_KEY).toBe('editor')
+  })
+
+  it('reads a row stored before F-3.9 with typewriter scrolling off', () => {
+    const stored = { ...defaultEditorSettings('novel') } as Record<string, unknown>
+    delete stored.typewriter
+    expect(EditorSettings.parse(stored)).toEqual(defaultEditorSettings('novel'))
+    expect(EditorSettings.parse({ ...stored, typewriter: true }).typewriter).toBe(true)
   })
 })

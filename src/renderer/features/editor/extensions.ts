@@ -5,6 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { AiOrigin } from './aiOrigin'
 import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
+import { Typewriter } from './typewriter'
 
 export interface EditorSchemaOptions {
   /** The scene-break text from the editor settings (F-3.6); the scene-break node renders it. */
@@ -189,7 +190,12 @@ export function buildExtensions({
     SaveShortcut.configure({ onSave })
   ]
   if (inlineTagNodeId !== undefined) {
-    extensions.push(InlineTag.configure({ nodeId: inlineTagNodeId }), AiOrigin, GhostText)
+    extensions.push(
+      InlineTag.configure({ nodeId: inlineTagNodeId }),
+      AiOrigin,
+      GhostText,
+      Typewriter
+    )
   }
   if (onEscape) extensions.push(EscapeShortcut.configure({ onEscape }))
   return extensions
