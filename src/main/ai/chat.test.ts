@@ -12,7 +12,7 @@ import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
-import { setAiSettings, setWritingPresets } from '../project/settingsStore'
+import { setAiSettings, setAuthorRules, setWritingPresets } from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { addDocumentTag } from '../tag/documentTagStore'
 import { createTag } from '../tag/tagStore'
@@ -426,7 +426,23 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
     })
   })
 
-  it('never regenerates for a project with no rules and no exemplars, and misses the cache when the voice version moves', async () => {
+  it('regenerates an Agent draft that uses a banned phrase, naming it (F-14.2)', async () => {
+    const banned = 'They walked back to the ferry and did not delve into it again.'
+    setAuthorRules(db, { rules: '', bannedPhrases: ['delve'] })
+    bumpVoiceVersion()
+    answers(banned, CLEAN)
+    const result = await ask(agent())
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(complete.mock.calls[0]![0].messages[0]?.content).toContain(
+      'Never use these phrases: delve.'
+    )
+    expect(complete.mock.calls[1]![0].messages[0]?.content).toContain(
+      'Your last attempt uses the phrase \u201Cdelve\u201D, which the author has banned.'
+    )
+    expect(result).toMatchObject({ text: CLEAN, flagged: false, violation: null })
+  })
+
+  it('never regenerates on a stylometric signal for a project with no rules and no exemplars, and misses the cache when the voice version moves', async () => {
     saveDocument(db, scene, doc(SCENE))
     answers(OFF_VOICE)
     const result = await ask(agent())
@@ -478,5 +494,19 @@ describe('checkChatFidelity', () => {
       'Narrated in present tense; the manuscript is in past tense.'
     )
     expect(checkChatFidelity(profile, CLEAN)).toEqual([])
+  })
+
+  it('checks the banned phrases at either length and puts them first (F-14.2)', () => {
+    const profile = computeStylometrics(Array(6).fill(VOICE_PARAGRAPH).join(' '))
+    const message = 'uses the phrase \u201Cdelve\u201D, which the author has banned'
+    expect(checkChatFidelity(profile, `${CLEAN} She would not delve further.`, ['delve'])).toEqual([
+      { code: 'bannedPhrase', message }
+    ])
+    const long = `${Array(30).fill(OFF_VOICE).join(' ')} I will not delve into it.`
+    expect(checkChatFidelity(profile, long, ['delve'])[0]).toEqual({
+      code: 'bannedPhrase',
+      message
+    })
+    expect(checkChatFidelity(profile, CLEAN, ['delve'])).toEqual([])
   })
 })

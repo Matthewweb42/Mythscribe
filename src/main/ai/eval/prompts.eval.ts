@@ -3,6 +3,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { inputBudget, outputBudget, priceFor } from '@shared/ai'
+import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote } from '@shared/critique'
 import { toTagName } from '@shared/tags'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
@@ -33,11 +34,21 @@ describe('prompt eval harness (F-5.12)', () => {
     expect(covered).toEqual([...PROMPT_VERSIONS])
   })
 
-  it('the fixture profile carries voice rules and an exemplar, so the voice block is exercised', () => {
+  it('the fixture profile carries voice rules, an exemplar, and author rules, so the whole voice block is exercised', () => {
     expect(FIXTURE_PROFILE.rules.length).toBeGreaterThan(0)
     expect(FIXTURE_PROFILE.exemplars).toHaveLength(1)
+    expect(FIXTURE_PROFILE.authorRules.bannedPhrases.length).toBeGreaterThan(0)
     const full = EVAL_CASES.find((c) => c.version === 'ghostText.v1' && c.name === 'full')
-    expect(full?.messages[0]?.content).toContain("Match the author's voice:")
+    const system = full?.messages[0]?.content ?? ''
+    expect(system).toContain("Match the author's voice:")
+    // F-14.2: the author's rules sit between the stylometric rules and the exemplars.
+    expect(system.indexOf(AUTHOR_RULES_HEADER)).toBeGreaterThan(
+      system.indexOf("Match the author's voice:")
+    )
+    expect(system.indexOf(AUTHOR_RULES_HEADER)).toBeLessThan(
+      system.indexOf('Example in this voice:')
+    )
+    expect(system).toContain('Never use these phrases: ')
   })
 
   it('every case fits its feature input budget and never asks for more than the output cap', () => {
@@ -152,10 +163,13 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
         results.push({ ...base, answer, verdict: { kind: 'unscored' } })
         continue
       }
+      // The features score against the author's banned phrases too (F-14.2); every case that
+      // carries a voice block carries the fixture's author rules with it.
+      const banned = FIXTURE_PROFILE.authorRules.bannedPhrases
       const violations =
         c.scoring.kind === 'chat'
-          ? checkChatFidelity(profile, answer)
-          : checkGhostTextFidelity(profile, answer).violations
+          ? checkChatFidelity(profile, answer, banned)
+          : checkGhostTextFidelity(profile, answer, banned).violations
       results.push({
         ...base,
         answer,

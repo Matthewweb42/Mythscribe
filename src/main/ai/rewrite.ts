@@ -56,9 +56,9 @@ export type RewriteResult = ChatResult
  * The first draft streams (F-5.10) through `runAiStream`, so the panel can show it arriving,
  * and every delta goes to `onDelta`. Then, before the author is offered anything to accept
  * (author-control rule 2), the draft is post-processed (`postProcessChatText`: trim, strip
- * wrapping quotes) and scored with `checkChatFidelity` (F-14.7) — skipped for a project with
- * neither rules nor exemplars, the same gate `voiceBlock` uses, so a fresh project never
- * warns. An off-voice draft is regenerated once through `rewriteRegen.v1` with the violation
+ * wrapping quotes) and scored with `checkChatFidelity` (F-14.7), the author's banned phrases
+ * (F-14.2) first — skipped only when there is no voice block at all, the same gate
+ * `voiceBlock` uses, so a fresh project warns about a banned phrase and nothing else. An off-voice draft is regenerated once through `rewriteRegen.v1` with the violation
  * named, not streamed (the panel is already past its drafting state), re-scored, and shown
  * flagged when it still fails; a regenerate that fails for any reason falls back to the first
  * draft, flagged, except a cancel, which propagates as CANCELLED from either call.
@@ -142,9 +142,11 @@ export async function runRewrite(
     onDelta
   )
   const firstText = postProcessChatText(first.text)
-  // The fidelity check (F-14.7): skipped for a fresh project (no voice block) or an empty draft.
+  // The fidelity check (F-14.7): skipped with nothing to check against (no voice block at all)
+  // or an empty draft; the banned phrases (F-14.2) alone make the block non-null.
   if (voice === null || !firstText) return shown(first, firstText, prompt.version)
-  const violation = checkChatFidelity(profile.stats, firstText)[0]
+  const banned = profile.authorRules.bannedPhrases
+  const violation = checkChatFidelity(profile.stats, firstText, banned)[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
   const regen = buildRewriteRegenPrompt({ ...base, note, violation: violation.message })
@@ -159,7 +161,7 @@ export async function runRewrite(
       ...request,
       ...regenId,
       messages: regen.messages,
-      contextHash: sha256(JSON.stringify({ ...hashed, violation: violation.code })),
+      contextHash: sha256(JSON.stringify({ ...hashed, violation: violation.message })),
       promptVersion: regen.version
     })
   } catch (err) {
@@ -175,7 +177,7 @@ export async function runRewrite(
   }
   const secondText = postProcessChatText(second.text)
   if (!secondText) return { ...flaggedFirst, ...combined }
-  const recheck = checkChatFidelity(profile.stats, secondText)
+  const recheck = checkChatFidelity(profile.stats, secondText, banned)
   return {
     ...shown(second, secondText, regen.version),
     ...combined,

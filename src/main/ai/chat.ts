@@ -4,6 +4,7 @@ import type { ChatMode } from '@shared/chat'
 import { resolvePreset } from '@shared/presets'
 import { computeStylometrics, type Stylometrics } from '@shared/stylometry'
 import {
+  checkBannedPhrases,
   checkGhostTextFidelity,
   scoreDocumentDrift,
   type FidelityViolation
@@ -84,7 +85,9 @@ export const CHAT_FRAGMENT_MAX_WORDS = 200
  *
  * The context hash covers everything that shaped the messages: the scene text, the metadata,
  * the references, the (trimmed) history, the message, the mode, the paragraph count, the
- * preset, and the voice profile's version.
+ * preset, and the voice profile's version (which the author's rules bump too); the regenerate
+ * adds the violation's message, which names the banned phrase, so two phrases never share a
+ * cached regenerate.
  */
 export async function runChat(
   db: TreeDb,
@@ -171,11 +174,13 @@ export async function runChat(
     promptVersion: prompt.version
   })
   const firstText = postProcessChatText(first.text)
-  // The fidelity check (F-14.7): skipped for a fresh project (no voice block) or an empty draft.
+  // The fidelity check (F-14.7): skipped with nothing to check against (no voice block at all)
+  // or an empty draft; the banned phrases (F-14.2) alone make the block non-null.
   if (profile === null || voice === null || !firstText) {
     return shown(first, firstText, prompt.version)
   }
-  const violation = checkChatFidelity(profile.stats, firstText)[0]
+  const banned = profile.authorRules.bannedPhrases
+  const violation = checkChatFidelity(profile.stats, firstText, banned)[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
   const regen = buildChatRegenPrompt({ ...promptInput, violation: violation.message })
@@ -190,7 +195,7 @@ export async function runChat(
       ...request,
       ...regenId,
       messages: regen.messages,
-      contextHash: sha256(JSON.stringify({ ...hashed, violation: violation.code })),
+      contextHash: sha256(JSON.stringify({ ...hashed, violation: violation.message })),
       promptVersion: regen.version
     })
   } catch (err) {
@@ -206,7 +211,7 @@ export async function runChat(
   }
   const secondText = postProcessChatText(second.text)
   if (!secondText) return { ...flaggedFirst, ...combined }
-  const recheck = checkChatFidelity(profile.stats, secondText)
+  const recheck = checkChatFidelity(profile.stats, secondText, banned)
   return {
     ...shown(second, secondText, regen.version),
     ...combined,
@@ -227,14 +232,23 @@ export function postProcessChatText(raw: string): string {
 
 /**
  * The fidelity check for a draft of any length (F-14.7): a fragment is scored like ghost
- * text, a longer draft like a document in the consistency report. Shared with the eval
- * harness so the live run scores as the feature does.
+ * text, a longer draft like a document in the consistency report. The author's banned phrases
+ * (F-14.2) are checked at either length and come first, since they are hard constraints rather
+ * than a stylometric signal. Shared with the rewrite use case (F-14.10) and the eval harness so
+ * every prose feature and the live run score the same way.
  */
-export function checkChatFidelity(profile: Stylometrics, text: string): FidelityViolation[] {
+export function checkChatFidelity(
+  profile: Stylometrics,
+  text: string,
+  banned: readonly string[] = []
+): FidelityViolation[] {
   const words = text.split(/\s+/).filter(Boolean).length
   return words < CHAT_FRAGMENT_MAX_WORDS
-    ? checkGhostTextFidelity(profile, text).violations
-    : scoreDocumentDrift(profile, computeStylometrics(text)).violations
+    ? checkGhostTextFidelity(profile, text, banned).violations
+    : [
+        ...checkBannedPhrases(banned, text),
+        ...scoreDocumentDrift(profile, computeStylometrics(text)).violations
+      ]
 }
 
 function estimate(messages: { content: string }[]): number {

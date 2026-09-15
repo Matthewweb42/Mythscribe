@@ -4,6 +4,12 @@ import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AI_SETTINGS_KEY, defaultAiSettings, defaultGhostTextSettings } from '@shared/aiSettings'
+import {
+  AUTHOR_RULES_KEY,
+  BANNED_PHRASES_MAX,
+  DEFAULT_BANNED_PHRASES,
+  defaultAuthorRules
+} from '@shared/authorRules'
 import { CONVERSATIONS_KEY, defaultConversations } from '@shared/chat'
 import { EDITOR_SETTINGS_KEY, defaultEditorSettings } from '@shared/editorSettings'
 import { FOCUS_SETTINGS_KEY, defaultFocusSettings } from '@shared/focus'
@@ -14,11 +20,13 @@ import type { TreeDb } from '../tree/treeStore'
 import { createProject, projectFolderFor, type ProjectSession } from './projectStore'
 import {
   getAiSettings,
+  getAuthorRules,
   getConversations,
   getEditorSettings,
   getFocusSettings,
   getWritingPresets,
   setAiSettings,
+  setAuthorRules,
   setConversations,
   setEditorSettings,
   setFocusSettings,
@@ -318,5 +326,55 @@ describe('getFocusSettings / setFocusSettings (F-6.2)', () => {
     setRaw(JSON.stringify({ backgroundId: 7 }), FOCUS_SETTINGS_KEY)
     expect(getFocusSettings(db)).toEqual(defaultFocusSettings())
     expect(() => setFocusSettings(db, { backgroundId: 7 as unknown as string })).toThrow()
+  })
+})
+
+describe('getAuthorRules / setAuthorRules (F-14.2)', () => {
+  it('answers the seeded phrases and no rules text for a new project, which seeds no row', () => {
+    open('novel')
+    expect(rows(AUTHOR_RULES_KEY)).toHaveLength(0)
+    expect(getAuthorRules(db)).toEqual(defaultAuthorRules())
+    expect(getAuthorRules(db).bannedPhrases).toEqual([...DEFAULT_BANNED_PHRASES])
+  })
+
+  it('round-trips a value, overwrites the single row, and keeps a removed seeded phrase removed', () => {
+    open('epic')
+    const kept = DEFAULT_BANNED_PHRASES.filter((phrase) => phrase !== 'delve')
+    expect(setAuthorRules(db, { rules: 'No rhetorical questions.', bannedPhrases: kept })).toEqual({
+      rules: 'No rhetorical questions.',
+      bannedPhrases: kept
+    })
+    expect(rows(AUTHOR_RULES_KEY)).toHaveLength(1)
+    expect(getAuthorRules(db).bannedPhrases).not.toContain('delve')
+    setAuthorRules(db, { rules: '', bannedPhrases: [] })
+    expect(rows(AUTHOR_RULES_KEY)).toHaveLength(1)
+    expect(getAuthorRules(db)).toEqual({ rules: '', bannedPhrases: [] })
+  })
+
+  it('normalises the phrases it stores and fills a field the caller left out', () => {
+    open('novel')
+    expect(
+      setAuthorRules(db, { bannedPhrases: ['  Delve  ', 'delve', 'tapestry', '   '] })
+    ).toEqual({ rules: '', bannedPhrases: ['Delve', 'tapestry'] })
+    expect(getAuthorRules(db)).toEqual({ rules: '', bannedPhrases: ['Delve', 'tapestry'] })
+    expect(setAuthorRules(db, { rules: 'British spelling.' }).bannedPhrases).toEqual([
+      ...DEFAULT_BANNED_PHRASES
+    ])
+    expect(
+      setAuthorRules(db, {
+        bannedPhrases: Array.from({ length: BANNED_PHRASES_MAX + 10 }, (_, i) => `phrase ${i}`)
+      }).bannedPhrases
+    ).toHaveLength(BANNED_PHRASES_MAX)
+  })
+
+  it('falls back to the defaults when the stored value is not JSON or no longer fits the schema', () => {
+    open('novel')
+    setRaw('{not json', AUTHOR_RULES_KEY)
+    expect(getAuthorRules(db)).toEqual(defaultAuthorRules())
+    setRaw(JSON.stringify({ rules: 7 }), AUTHOR_RULES_KEY)
+    expect(getAuthorRules(db)).toEqual(defaultAuthorRules())
+    setRaw(JSON.stringify({ rules: 'r'.repeat(401) }), AUTHOR_RULES_KEY)
+    expect(getAuthorRules(db)).toEqual(defaultAuthorRules())
+    expect(() => setAuthorRules(db, { rules: 'r'.repeat(401) })).toThrow()
   })
 })

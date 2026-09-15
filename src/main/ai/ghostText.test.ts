@@ -10,7 +10,7 @@ import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
-import { setAiSettings, setWritingPresets } from '../project/settingsStore'
+import { setAiSettings, setAuthorRules, setWritingPresets } from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { addExemplar } from '../voice/exemplarStore'
@@ -420,11 +420,76 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
     expect(result.usage).toEqual({ inputTokens: 240, outputTokens: 24 })
   })
 
-  it('never regenerates for a project with no rules and no exemplars, whatever the answer', async () => {
+  it('never regenerates on a stylometric signal for a project with no rules and no exemplars', async () => {
     answers(OFF_VOICE)
     const result = await ask()
     expect(complete).toHaveBeenCalledTimes(1)
     expect(result).toMatchObject({ text: ` ${OFF_VOICE}`, flagged: false, violation: null })
+  })
+})
+
+describe('generateGhostText author rules (F-14.2)', () => {
+  /** Clean against the stylometrics, but it uses a seeded AI-ism. */
+  const BANNED = 'She turned back to the ridge and did not delve into it again.'
+  const CLEAN = 'She turned back to the ridge and he followed, and the door closed behind them.'
+  const BANNED_MESSAGE = 'uses the phrase \u201Cdelve\u201D, which the author has banned'
+  const answers = (...texts: string[]): void => {
+    for (const text of texts) {
+      complete.mockResolvedValueOnce({
+        text,
+        model: 'gpt-5.4-mini',
+        usage: { inputTokens: 120, outputTokens: 12 }
+      })
+    }
+  }
+
+  it("sends the author's rules in the system turn, seeded phrases and all, on a fresh project", async () => {
+    setAuthorRules(db, { rules: 'British spelling.', bannedPhrases: ['delve', 'tapestry'] })
+    bumpVoiceVersion()
+    await ask()
+    const system = complete.mock.calls[0]![0].messages[0]?.content ?? ''
+    expect(system).toContain("The author's rules (hard constraints):\nBritish spelling.")
+    expect(system).toContain('Never use these phrases: delve; tapestry.')
+    expect(system).not.toContain("Match the author's voice:") // no manuscript, no exemplars yet
+  })
+
+  it('regenerates a banned phrase with the phrase named and shows a clean second answer unflagged', async () => {
+    answers(BANNED, CLEAN)
+    const result = await ask()
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(complete.mock.calls[1]![0].messages[0]?.content).toContain(
+      `Your last attempt ${BANNED_MESSAGE}.`
+    )
+    expect(result).toMatchObject({
+      text: ` ${CLEAN}`,
+      flagged: false,
+      violation: null,
+      promptVersion: 'ghostTextRegen.v1'
+    })
+  })
+
+  it('flags a second answer that still uses the phrase', async () => {
+    answers(BANNED, BANNED)
+    const result = await ask()
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({
+      text: ` ${BANNED}`,
+      flagged: true,
+      violation: BANNED_MESSAGE
+    })
+  })
+
+  it('leaves a phrase the author removed alone, and misses the cache after the list changes', async () => {
+    answers(BANNED)
+    expect((await ask()).flagged).toBe(false) // regenerated into the default (clean) answer
+    expect(complete).toHaveBeenCalledTimes(2)
+    complete.mockClear()
+    setAuthorRules(db, { rules: '', bannedPhrases: ['tapestry'] })
+    bumpVoiceVersion()
+    answers(BANNED)
+    const result = await ask()
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ text: ` ${BANNED}`, flagged: false, violation: null })
   })
 })
 

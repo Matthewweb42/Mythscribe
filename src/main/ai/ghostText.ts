@@ -57,17 +57,21 @@ export interface GhostTextResult {
  * `ghostText.v1` with the active writing preset (F-5.2), runs it through the one request path
  * (`fast` tier, the preset's temperature, at most 60 tokens), and post-processes the answer
  * into a one-or-two-sentence continuation. Then the fidelity check (F-14.7): the answer is
- * scored locally against the profile's stylometrics; an off-voice answer is regenerated once
- * through `ghostTextRegen.v1` with the first violation named, re-scored, and shown flagged
+ * scored locally against the profile's stylometrics and against the author's banned phrases
+ * (F-14.2, which come first, so a banned phrase is what the regenerate names); an off-voice
+ * answer is regenerated once through `ghostTextRegen.v1` with the first violation named,
+ * re-scored, and shown flagged
  * when it still fails. A regenerate that fails for any reason (provider, budget, cap) falls
  * back to the first answer, flagged: the author always gets the suggestion that exists. A
- * project with neither rules nor exemplars (the same gate `voiceBlock` uses) skips the check,
- * so a fresh project never warns.
+ * project with nothing to send (the same gate `voiceBlock` uses: no rules, no exemplars, no
+ * author rules) skips the check, so a fresh project only ever warns about a banned phrase.
  *
  * The context hash covers everything that shaped the messages: the caret window, the notes,
- * the metadata, the preset, and the voice profile's version (the version stands in for the
- * block: it moves on every save and exemplar write, so a changed profile misses the cache
- * while an unchanged one keeps hitting it). A caret window over the shared bounds is
+ * the metadata, the preset, the author's rules, and the voice profile's version (the version
+ * stands in for the stylometrics and the exemplars: it moves on every save and exemplar write,
+ * so a changed profile misses the cache while an unchanged one keeps hitting it); the
+ * regenerate adds the violation's message, which names the banned phrase, so two phrases never
+ * share a cached regenerate. A caret window over the shared bounds is
  * VALIDATION (the contract refuses it first; this is the backstop). A cancel (F-5.10) during
  * either call propagates as CANCELLED: it never falls back to the first answer, since the
  * author asked for nothing to be shown.
@@ -103,6 +107,7 @@ export async function generateGhostText(
     notes,
     meta,
     preset,
+    authorRules: profile.authorRules,
     voiceVersion: voiceProfileVersion()
   }
 
@@ -128,9 +133,11 @@ export async function generateGhostText(
     violation: null
   })
 
-  // The fidelity check (F-14.7): skipped for a fresh project (no voice block) or no suggestion.
+  // The fidelity check (F-14.7): skipped with nothing to check against (no voice block at all)
+  // or no suggestion; the banned phrases (F-14.2) alone make the block non-null.
   if (voice === null || !firstText) return shown(first, firstText, prompt.version)
-  const violation = checkGhostTextFidelity(profile.stats, firstText).violations[0]
+  const banned = profile.authorRules.bannedPhrases
+  const violation = checkGhostTextFidelity(profile.stats, firstText, banned).violations[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
   const regen = buildGhostTextRegenPrompt({ ...promptInput, violation: violation.message })
@@ -147,7 +154,7 @@ export async function generateGhostText(
       messages: regen.messages,
       maxTokens: regen.maxTokens,
       temperature: regen.temperature,
-      contextHash: sha256(JSON.stringify({ ...context, violation: violation.code })),
+      contextHash: sha256(JSON.stringify({ ...context, violation: violation.message })),
       promptVersion: regen.version,
       ...(input.requestId === undefined ? {} : { requestId: regenRequestId(input.requestId) })
     })
@@ -164,7 +171,7 @@ export async function generateGhostText(
   }
   const secondText = postProcessGhostText(second.text, input.before, input.after)
   if (!secondText) return { ...flaggedFirst, ...combined }
-  const recheck = checkGhostTextFidelity(profile.stats, secondText)
+  const recheck = checkGhostTextFidelity(profile.stats, secondText, banned)
   return {
     ...shown(second, secondText, regen.version),
     ...combined,

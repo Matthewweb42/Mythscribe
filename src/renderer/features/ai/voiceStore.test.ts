@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { defaultAuthorRules } from '@shared/authorRules'
 import type {
   Channel,
   Input,
@@ -25,7 +26,8 @@ const profileOf = (exemplars: VoiceExemplar[]): VoiceProfile => ({
   stats: computeStylometrics(''),
   exemplars,
   confidence: 0.2,
-  wordCount: 2_000
+  wordCount: 2_000,
+  authorRules: defaultAuthorRules()
 })
 
 const REPORT: VoiceConsistencyReport = {

@@ -2,10 +2,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { DEFAULT_BANNED_PHRASES, defaultAuthorRules } from '@shared/authorRules'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { setAuthorRules } from '../project/settingsStore'
 import { createNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { addExemplar } from './exemplarStore'
 import { POV_MIN_WORDS, buildVoiceProfile } from './profile'
@@ -35,7 +37,15 @@ const doc = (text: string): TiptapNodeT => ({
 /** A document with at least `words` words of `sentence`, repeated. */
 function fill(id: string, sentence: string, words: number): void {
   const per = sentence.split(/\s+/).length
-  saveDocument(db, id, doc(Array(Math.ceil(words / per)).fill(sentence).join(' ')))
+  saveDocument(
+    db,
+    id,
+    doc(
+      Array(Math.ceil(words / per))
+        .fill(sentence)
+        .join(' ')
+    )
+  )
 }
 
 beforeEach(() => {
@@ -44,7 +54,9 @@ beforeEach(() => {
   session = createProject(projectFolderFor(tmp, 'Profile'), 'Profile', 'novel')
   db = session.connection.orm
   const rows = listNodes(db)
-  scenes = rows.filter((r) => r.kind === 'document' && r.hierarchyLevel === 'scene').map((r) => r.id)
+  scenes = rows
+    .filter((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    .map((r) => r.id)
   const front = rows.find((r) => r.sectionType === 'front')
   if (!front || scenes.length < 2) throw new Error('skeleton not seeded')
   frontDoc = createNode(db, 'novel', {
@@ -125,6 +137,19 @@ describe('buildVoiceProfile', () => {
     const second = buildVoiceProfile(db)
     expect(second).not.toBe(first)
     expect(second.wordCount).toBeGreaterThan(0)
+  })
+
+  it('carries the author rules (F-14.2), the seeded ones until they are written', () => {
+    expect(buildVoiceProfile(db).authorRules).toEqual(defaultAuthorRules())
+    const kept = DEFAULT_BANNED_PHRASES.filter((phrase) => phrase !== 'delve')
+    setAuthorRules(db, { rules: 'British spelling.', bannedPhrases: kept })
+    expect(buildVoiceProfile(db).authorRules).toEqual(defaultAuthorRules()) // the cache still answers
+    bumpVoiceVersion() // what the `authorRules:set` handler does after the write
+    expect(buildVoiceProfile(db).authorRules).toEqual({
+      rules: 'British spelling.',
+      bannedPhrases: kept
+    })
+    expect(buildVoiceProfile(db, { pov: 'Mara' }).authorRules.rules).toBe('British spelling.')
   })
 
   it('skips an unreadable document instead of failing the whole profile', () => {

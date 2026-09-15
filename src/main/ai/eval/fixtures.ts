@@ -1,4 +1,5 @@
 import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS } from '@shared/ai'
+import { AUTHOR_RULES_TEXT_MAX, defaultAuthorRules } from '@shared/authorRules'
 import {
   CHAT_HISTORY_TURNS,
   CHAT_MAX_REFS,
@@ -104,21 +105,36 @@ const exemplar = (id: string, text: string): VoiceProfile['exemplars'][number] =
   created: '2026-09-15T00:00:00.000Z'
 })
 
+/** Two lines of style rules over the seeded banned phrases: what an author who edited the section has (F-14.2). */
+const FIXTURE_AUTHOR_RULES = {
+  ...defaultAuthorRules(),
+  rules: 'No rhetorical questions in narration.\nMara never swears.'
+}
+
 /** The profile a project holding `FIXTURE_PASSAGE` with its opening marked as an exemplar has. */
 export const FIXTURE_PROFILE: VoiceProfile = {
   rules: renderVoiceRules(FIXTURE_STATS),
   stats: FIXTURE_STATS,
   exemplars: [exemplar('ex-1', FIXTURE_PASSAGE.split('\n\n').slice(0, 5).join('\n\n'))],
+  authorRules: FIXTURE_AUTHOR_RULES,
   confidence: voiceConfidence(FIXTURE_STATS.wordCount, 1),
   wordCount: FIXTURE_STATS.wordCount
 }
 
-/** The same profile at the exemplar ceiling: three exemplars at the maximum length, so the voice block hits its budget. */
+/**
+ * The same profile at the exemplar ceiling: three exemplars at the maximum length, so the voice
+ * block hits its budget, and the author's rules text at its own character cap, so the author
+ * block hits `AUTHOR_RULES_TOKEN_BUDGET` too.
+ */
 const MAXED_PROFILE: VoiceProfile = {
   ...FIXTURE_PROFILE,
   exemplars: [1, 2, 3].map((n) =>
     exemplar(`ex-${n}`, FIXTURE_PASSAGE.repeat(3).slice(0, VOICE_EXEMPLAR_TEXT_MAX))
   ),
+  authorRules: {
+    ...defaultAuthorRules(),
+    rules: FIXTURE_PASSAGE.slice(0, AUTHOR_RULES_TEXT_MAX)
+  },
   confidence: voiceConfidence(FIXTURE_STATS.wordCount, 3)
 }
 

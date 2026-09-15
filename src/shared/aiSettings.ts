@@ -56,10 +56,7 @@ export function defaultCritiqueSettings(): CritiqueSettings {
 
 /** Every toggle on: raising the dial is the one act that enables anything (F-14.4). */
 export function defaultFeatureToggles(): Record<AiFeatureId, boolean> {
-  return Object.fromEntries(AI_FEATURE_IDS.map((id) => [id, true])) as Record<
-    AiFeatureId,
-    boolean
-  >
+  return Object.fromEntries(AI_FEATURE_IDS.map((id) => [id, true])) as Record<AiFeatureId, boolean>
 }
 
 export const AiSettings = z.object({
@@ -127,7 +124,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     label: "Editor's notes",
     sends:
       "The scene's text (the first 20,000 characters), its notes and metadata as the brief, " +
-      'and the voice profile (stylometric rules and up to 3 exemplar passages).',
+      'the voice profile (stylometric rules and up to 3 exemplar passages), and your author ' +
+      'rules and banned phrases.',
     minDial: 1
   },
   chat: {
@@ -135,8 +133,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       "The active scene's text (head-truncated), the notes of documents tagged with any #name " +
       'you mention, the recent turns of the conversation, and your message. In Agent mode, ' +
-      'which needs Suggest, the voice profile and the scene metadata go too, and an off-voice ' +
-      'answer is sent back once with the rule it broke.',
+      'which needs Suggest, the voice profile, your author rules and banned phrases, and the ' +
+      'scene metadata go too, and an off-voice answer is sent back once with the rule it broke.',
     minDial: 1
   },
   embeddings: {
@@ -148,18 +146,20 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     label: 'Ghost text',
     sends:
       'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes ' +
-      'and metadata (location, POV, timeline), and the voice profile (stylometric rules and up ' +
-      'to 3 exemplar passages). An answer that breaks the voice profile is sent back once, with ' +
-      'the same context plus the rule it broke, for a second try.',
+      'and metadata (location, POV, timeline), the voice profile (stylometric rules and up ' +
+      'to 3 exemplar passages), and your author rules and banned phrases. An answer that breaks ' +
+      'the voice profile or uses a banned phrase is sent back once, with the same context plus ' +
+      'the rule it broke, for a second try.',
     minDial: 2
   },
   rewrite: {
     label: 'Rewrite in my voice',
     sends:
       'The selected passage (up to 4,000 characters), up to 300 characters of manuscript text ' +
-      'before and after it, the scene metadata (location, POV, timeline), and the voice profile ' +
-      '(stylometric rules and up to 3 exemplar passages). An off-voice rewrite is sent back once ' +
-      'with the rule it broke; a regenerate carries your note.',
+      'before and after it, the scene metadata (location, POV, timeline), the voice profile ' +
+      '(stylometric rules and up to 3 exemplar passages), and your author rules and banned ' +
+      'phrases. An off-voice rewrite is sent back once with the rule it broke; a regenerate ' +
+      'carries your note.',
     minDial: 2
   },
   authorMode: {

@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { estimateTokens } from '@shared/ai'
+import {
+  AUTHOR_RULES_HEADER,
+  AUTHOR_RULES_TEXT_MAX,
+  AUTHOR_RULES_TOKEN_BUDGET,
+  DEFAULT_BANNED_PHRASES,
+  defaultAuthorRules,
+  renderAuthorRulesBlock,
+  type AuthorRules
+} from '@shared/authorRules'
 import type { VoiceExemplar, VoiceProfile } from '@shared/ipc/contract'
 import { computeStylometrics } from '@shared/stylometry'
 import { VOICE_BLOCK_TOKEN_BUDGET } from '@shared/voice'
@@ -21,11 +30,19 @@ function exemplar(over: Partial<VoiceExemplar>): VoiceExemplar {
   }
 }
 
-function profile(rules: string[], exemplars: VoiceExemplar[]): VoiceProfile {
+/** No author rules unless a test asks for them, so the F-14.1 assertions read as they did. */
+const NO_AUTHOR_RULES: AuthorRules = { rules: '', bannedPhrases: [] }
+
+function profile(
+  rules: string[],
+  exemplars: VoiceExemplar[],
+  authorRules: AuthorRules = NO_AUTHOR_RULES
+): VoiceProfile {
   return {
     rules,
     stats: computeStylometrics(''),
     exemplars,
+    authorRules,
     confidence: 0,
     wordCount: 0
   }
@@ -45,7 +62,9 @@ describe('voiceBlock', () => {
         text: '',
         pov: null
       })
-    ).toBe("Match the author's voice:\n- Narration is in past tense.\n- Short sentences, median 9 words.")
+    ).toBe(
+      "Match the author's voice:\n- Narration is in past tense.\n- Short sentences, median 9 words."
+    )
   })
 
   it('appends up to three exemplars, same kind as the passage first, then same POV, then profile order', () => {
@@ -94,5 +113,66 @@ describe('voiceBlock', () => {
     const rules = Array.from({ length: 8 }, () => `Rule: ${words(70)}.`) // ~2,400 chars ≈ 600 tokens
     const block = voiceBlock(profile(rules, [exemplar({})]), { text: '', pov: null })
     expect(block).not.toContain('Example in this voice')
+  })
+})
+
+describe('voiceBlock author rules (F-14.2)', () => {
+  const seeded = defaultAuthorRules()
+
+  it('renders the author block on its own, without the voice heading, for a fresh project', () => {
+    const block = voiceBlock(profile([], [], seeded), { text: DIALOGUE, pov: null })
+    expect(block).not.toBeNull()
+    expect(block).not.toContain("Match the author's voice:")
+    expect(block?.startsWith(AUTHOR_RULES_HEADER)).toBe(true)
+    expect(block).toContain('Never use these phrases: ')
+    expect(block).toContain(DEFAULT_BANNED_PHRASES[0])
+  })
+
+  it('is null only when there are no rules, no exemplars, and no author rules', () => {
+    expect(voiceBlock(profile([], [], NO_AUTHOR_RULES), { text: '', pov: null })).toBeNull()
+    expect(
+      voiceBlock(profile([], [], { rules: 'British spelling.', bannedPhrases: [] }), {
+        text: '',
+        pov: null
+      })
+    ).toBe(`${AUTHOR_RULES_HEADER}\nBritish spelling.`)
+  })
+
+  it('places the author block after the stylometric rules and before the exemplars', () => {
+    const one = exemplar({})
+    const block =
+      voiceBlock(profile(['Narration is in past tense.'], [one], seeded), {
+        text: '',
+        pov: null
+      }) ?? ''
+    expect(block.indexOf(AUTHOR_RULES_HEADER)).toBeGreaterThan(
+      block.indexOf('- Narration is in past tense.')
+    )
+    expect(block.indexOf(AUTHOR_RULES_HEADER)).toBeLessThan(block.indexOf('Example in this voice'))
+    expect(block).toBe(
+      `Match the author's voice:\n- Narration is in past tense.\n\n` +
+        `${renderAuthorRulesBlock(seeded)}\n\nExample in this voice:\n"""\n${one.text}\n"""`
+    )
+  })
+
+  it('keeps its own budget: the author block never costs an exemplar its place', () => {
+    const rules = ['Narration is in past tense.']
+    const long = exemplar({ text: words(300) })
+    const another = exemplar({ text: words(300, 'other') })
+    const maxed: AuthorRules = {
+      rules: 'r '.repeat(AUTHOR_RULES_TEXT_MAX / 2).slice(0, AUTHOR_RULES_TEXT_MAX),
+      bannedPhrases: [...DEFAULT_BANNED_PHRASES]
+    }
+    const withAuthor = voiceBlock(profile(rules, [long, another], maxed), { text: '', pov: null })
+    const without = voiceBlock(profile(rules, [long, another]), { text: '', pov: null })
+    expect(withAuthor).toContain(long.text)
+    expect(withAuthor).not.toContain(another.text)
+    const author = renderAuthorRulesBlock(maxed) ?? ''
+    expect(estimateTokens(author)).toBeLessThanOrEqual(AUTHOR_RULES_TOKEN_BUDGET)
+    expect(estimateTokens(withAuthor ?? '')).toBeLessThanOrEqual(
+      VOICE_BLOCK_TOKEN_BUDGET + AUTHOR_RULES_TOKEN_BUDGET
+    )
+    // The exemplar section is unchanged: the author block is budgeted apart from it.
+    expect((withAuthor ?? '').replace(`\n\n${author}`, '')).toBe(without)
   })
 })

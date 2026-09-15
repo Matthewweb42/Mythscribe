@@ -15,7 +15,6 @@ import {
 } from '@shared/critique'
 import { docToText } from '@shared/docText'
 import { normalizeProposalNote } from '@shared/proposal'
-import type { Stylometrics } from '@shared/stylometry'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { getDocumentContent } from '../document/documentStore'
 import { getNotes } from '../document/notesStore'
@@ -23,7 +22,7 @@ import { getSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
-import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
+import { buildVoiceProfile, voiceProfileVersion, type VoiceProfile } from '../voice/profile'
 import { voiceBlock } from '../voice/voiceBlock'
 import { headTruncate } from './context/chatContext'
 import { assertFeatureAllowed } from './dial'
@@ -180,7 +179,7 @@ export async function runCritique(
 
   const { notes: parsed, dropped } = parseCritiqueAnswer(result.text, sceneText)
   return {
-    notes: parsed.map((entry) => score(entry, voice === null ? null : profile.stats)),
+    notes: parsed.map((entry) => score(entry, voice === null ? null : profile)),
     truncated,
     dropped,
     usage: result.usage,
@@ -217,10 +216,15 @@ function promptTokens(messages: AiMessage[]): number {
   return estimateTokens(messages.map((message) => message.content).join('\n'))
 }
 
-/** The fidelity check (F-14.7) on a fix, skipped for a fresh project (no voice block) or no fix. */
-function score(note: ParsedNote, stats: Stylometrics | null): CritiqueNote {
-  if (stats === null || note.fix === null) return { ...note, flagged: false, violation: null }
-  const violation = checkGhostTextFidelity(stats, note.fix).violations[0]
+/**
+ * The fidelity check (F-14.7) on a fix, skipped with no voice block or no fix. The author's
+ * banned phrases (F-14.2) are checked first, so a fix that uses one is flagged by name even
+ * on a project whose profile is too thin for a stylometric signal.
+ */
+function score(note: ParsedNote, profile: VoiceProfile | null): CritiqueNote {
+  if (profile === null || note.fix === null) return { ...note, flagged: false, violation: null }
+  const banned = profile.authorRules.bannedPhrases
+  const violation = checkGhostTextFidelity(profile.stats, note.fix, banned).violations[0]
   return {
     ...note,
     flagged: violation !== undefined,

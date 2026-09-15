@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { defaultAuthorRules } from '@shared/authorRules'
 import type {
   Channel,
   Input,
@@ -45,6 +46,7 @@ const profile = (over: Partial<VoiceProfile> = {}): VoiceProfile => ({
   exemplars,
   confidence: 0.256,
   wordCount: 2_560,
+  authorRules: defaultAuthorRules(),
   ...over
 })
 

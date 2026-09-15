@@ -15,6 +15,11 @@ import {
 import { z } from 'zod'
 import { DEFAULT_MODELS } from '@shared/ai'
 import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
+import {
+  AUTHOR_RULES_TEXT_MAX,
+  DEFAULT_BANNED_PHRASES,
+  defaultAuthorRules
+} from '@shared/authorRules'
 import { defaultConversations, type Conversations } from '@shared/chat'
 import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import { defaultEditorSettings } from '@shared/editorSettings'
@@ -2335,6 +2340,58 @@ describe('ai:setModels (F-5.11)', () => {
       if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     }
     expect(await invoke('ai:getStatus', undefined)).toMatchObject({ models })
+  })
+})
+
+describe('authorRules handlers (F-14.2)', () => {
+  it('reports NO_PROJECT for both when nothing is open', async () => {
+    await expect(invoke('authorRules:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('authorRules:set', { rules: '', bannedPhrases: [] })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('answers the seeded phrases for a new project, round-trips a write, and survives a reopen', async () => {
+    const created = await invoke('project:create', {
+      name: 'Rules',
+      format: 'novel',
+      directory: tmp
+    })
+    expect(await invoke('authorRules:get', undefined)).toEqual(defaultAuthorRules())
+    const kept = DEFAULT_BANNED_PHRASES.filter((phrase) => phrase !== 'delve')
+    expect(
+      await invoke('authorRules:set', { rules: 'British spelling.', bannedPhrases: [...kept] })
+    ).toEqual({ rules: 'British spelling.', bannedPhrases: kept })
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    const stored = await invoke('authorRules:get', undefined)
+    expect(stored.rules).toBe('British spelling.')
+    expect(stored.bannedPhrases).not.toContain('delve')
+  })
+
+  it('bumps the voice version so the profile carries the new rules at once', async () => {
+    await invoke('project:create', { name: 'Rules', format: 'novel', directory: tmp })
+    expect((await invoke('voice:profile', {})).authorRules).toEqual(defaultAuthorRules())
+    await invoke('authorRules:set', { rules: 'No rhetorical questions.', bannedPhrases: ['delve'] })
+    expect((await invoke('voice:profile', {})).authorRules).toEqual({
+      rules: 'No rhetorical questions.',
+      bannedPhrases: ['delve']
+    })
+  })
+
+  it('refuses rules text over the limit with VALIDATION and keeps the stored value', async () => {
+    await invoke('project:create', { name: 'Rules', format: 'novel', directory: tmp })
+    await invoke('authorRules:set', { rules: 'Kept.', bannedPhrases: [] })
+    const result = await handlerFor('authorRules:set')(undefined, {
+      rules: 'r'.repeat(AUTHOR_RULES_TEXT_MAX + 1),
+      bannedPhrases: []
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(await invoke('authorRules:get', undefined)).toEqual({
+      rules: 'Kept.',
+      bannedPhrases: []
+    })
   })
 })
 

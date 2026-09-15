@@ -23,6 +23,7 @@ import {
   ChatRole,
   Conversations
 } from '../chat'
+import { AuthorRules } from '../authorRules'
 import { CritiqueNotes } from '../critique'
 import { EditorSettings } from '../editorSettings'
 import { Background, FocusSettings } from '../focus'
@@ -247,14 +248,17 @@ export type VoiceExemplar = z.infer<typeof VoiceExemplar>
 /**
  * The voice profile (F-14.1) as `voice:profile` answers it: the plain-language rules a prompt
  * carries, the stylometrics behind them, every exemplar (POV-matching first when a POV was
- * asked for), the confidence, and the words of manuscript the profile was built from.
+ * asked for), the confidence, the words of manuscript the profile was built from, and the
+ * author's rules (F-14.2).
  */
 export const VoiceProfile = z.object({
   rules: z.array(z.string()),
   stats: Stylometrics,
   exemplars: z.array(VoiceExemplar),
   confidence: z.number().min(0).max(1),
-  wordCount: z.number().int().nonnegative()
+  wordCount: z.number().int().nonnegative(),
+  /** The author's rules and banned phrases (F-14.2), the profile's third source. */
+  authorRules: AuthorRules
 })
 export type VoiceProfile = z.infer<typeof VoiceProfile>
 
@@ -434,6 +438,10 @@ export const contract = {
   'focusSettings:get': { input: z.undefined(), output: FocusSettings },
   /** Replaces the project's focus-mode settings (F-6.2); a value outside the schema is refused with VALIDATION. */
   'focusSettings:set': { input: FocusSettings, output: FocusSettings },
+  /** The author's rules and banned phrases (F-14.2); a missing or unreadable row answers with the defaults (no rules, the seeded phrases). */
+  'authorRules:get': { input: z.undefined(), output: AuthorRules },
+  /** Replaces the author's rules (F-14.2); phrases are normalised and deduplicated, a value outside the schema is refused with VALIDATION. */
+  'authorRules:set': { input: AuthorRules, output: AuthorRules },
   /** Every focus-mode background of the open project (F-6.2): the files in `assets/backgrounds/`, by name. */
   'background:list': { input: z.undefined(), output: z.array(Background) },
   /**

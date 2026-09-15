@@ -136,7 +136,13 @@
               </tr>
               <tr>
                 <th scope="row">Assistant chat</th>
-                <td>The active scene's text (head-truncated), the notes of documents tagged with any #name you mention, the recent turns of the conversation, and your message. In Agent mode, which needs Suggest, the voice profile and the scene metadata go too, and an off-voice answer is sent back once with the rule it broke.</td>
+                <td>
+                  The active scene's text (head-truncated), the notes of documents tagged with any
+                  #name you mention, the recent turns of the conversation, and your message. In
+                  Agent mode, which needs Suggest, the voice profile, your author rules and banned
+                  phrases, and the scene metadata go too, and an off-voice answer is sent back once
+                  with the rule it broke.
+                </td>
                 <td>Ask</td>
               </tr>
               <tr>
@@ -150,7 +156,8 @@
                 <th scope="row">Editor's notes</th>
                 <td>
                   The scene's text (the first 20,000 characters), its notes and metadata as the
-                  brief, and the voice profile (stylometric rules and up to 3 exemplar passages).
+                  brief, the voice profile (stylometric rules and up to 3 exemplar passages), and
+                  your author rules and banned phrases.
                 </td>
                 <td>Ask</td>
               </tr>
@@ -163,9 +170,10 @@
                 <th scope="row">Ghost text</th>
                 <td>
                   Up to 500 characters of text before the cursor and 100 after it, plus the scene’s
-                  notes and metadata (location, POV, timeline), and the voice profile (stylometric
-                  rules and up to 3 exemplar passages). An answer that breaks the voice profile is
-                  sent back once, with the same context plus the rule it broke, for a second try.
+                  notes and metadata (location, POV, timeline), the voice profile (stylometric rules
+                  and up to 3 exemplar passages), and your author rules and banned phrases. An
+                  answer that breaks the voice profile or uses a banned phrase is sent back once,
+                  with the same context plus the rule it broke, for a second try.
                 </td>
                 <td>Suggest</td>
               </tr>
@@ -173,9 +181,10 @@
                 <th scope="row">Rewrite in my voice</th>
                 <td>
                   The selected passage (up to 4,000 characters), up to 300 characters of manuscript
-                  text before and after it, the scene metadata (location, POV, timeline), and the
-                  voice profile (stylometric rules and up to 3 exemplar passages). An off-voice
-                  rewrite is sent back once with the rule it broke; a regenerate carries your note.
+                  text before and after it, the scene metadata (location, POV, timeline), the voice
+                  profile (stylometric rules and up to 3 exemplar passages), and your author rules
+                  and banned phrases. An off-voice rewrite is sent back once with the rule it broke;
+                  a regenerate carries your note.
                 </td>
                 <td>Suggest</td>
               </tr>

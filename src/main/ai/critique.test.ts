@@ -18,7 +18,7 @@ import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
-import { setAiSettings } from '../project/settingsStore'
+import { setAiSettings, setAuthorRules } from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
@@ -380,6 +380,28 @@ describe('runCritique citations and parsing (F-14.8)', () => {
     expect(flagged.notes[0]).toMatchObject({
       flagged: true,
       violation: 'switches to present tense'
+    })
+  })
+
+  it('flags a fix that uses a banned phrase by name, even on a thin profile (F-14.2)', async () => {
+    saveDocument(db, scene, doc(NEUTRAL))
+    setAuthorRules(db, { rules: '', bannedPhrases: ['delve'] })
+    bumpVoiceVersion()
+    complete.mockReset()
+    answers([
+      {
+        kind: 'issue',
+        category: 'clarity',
+        quote: NEUTRAL.slice(0, 40),
+        why: WHY,
+        fix: 'Rope, lantern, bell: she did not delve into the water.'
+      }
+    ])
+    const result = await critique()
+    expect(sent().system).toContain('Never use these phrases: delve.')
+    expect(result.notes[0]).toMatchObject({
+      flagged: true,
+      violation: 'uses the phrase “delve”, which the author has banned'
     })
   })
 
