@@ -11,6 +11,7 @@ import {
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
+import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -129,6 +130,7 @@ beforeEach(() => {
   resetDocumentStore()
   resetEditorSettingsStore()
   resetPendingSaves()
+  resetFocusStore()
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
   const fake = fakeClient()
@@ -355,6 +357,35 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     await waitFor(() => expect(regionNames()).toEqual(['Scene 1', 'Scene 2']))
     await waitFor(() => expect(button('Bold')).toBeDisabled())
     expect(useDocumentStore.getState().docs['sc-3']).toBeUndefined()
+  })
+
+  it('carries the Focus mode button in the shared toolbar and drops the toolbar and tag bar while active (F-6.1)', async () => {
+    loadTree()
+    render(<StackedEditor folderId="ch-1" format="novel" />)
+    const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
+    expect(within(toolbar).getByRole('button', { name: 'Focus mode' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    )
+    expect(screen.getByRole('region', { name: 'Tags' })).toBeInTheDocument()
+
+    act(() => useFocusStore.setState({ active: true }))
+    expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Tags' })).not.toBeInTheDocument()
+    expect(regionNames()).toEqual(['Scene 1'])
+    expect(screen.getByTestId('status-words')).toBeInTheDocument()
+
+    act(() => useFocusStore.setState({ active: false }))
+    expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Tags' })).toBeInTheDocument()
+  })
+
+  it('drops the tag bar of an empty folder while focus mode is active (F-6.1)', () => {
+    loadTree(['sc-1'])
+    useFocusStore.setState({ active: true })
+    render(<StackedEditor folderId="ch-1" format="novel" />)
+    expect(screen.queryByRole('region', { name: 'Tags' })).not.toBeInTheDocument()
+    expect(screen.getByText('Nothing here yet. Add a scene to start writing.')).toBeInTheDocument()
   })
 
   it('invites the author to add a scene to an empty chapter and mounts the new region', async () => {

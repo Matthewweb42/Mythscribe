@@ -25,6 +25,7 @@ import { usePresetsStore } from '@renderer/features/ai/presetsStore'
 import { useProvenanceStore } from '@renderer/features/ai/provenanceStore'
 import { useVoiceStore } from '@renderer/features/ai/voiceStore'
 import { useEditorSettingsStore } from '@renderer/features/editor/settingsStore'
+import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
 import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
@@ -52,11 +53,17 @@ export function App(): React.JSX.Element {
       .catch((err: unknown) => toast.error(describeError(err)))
     // F-1.4: the OS close button flushes pending saves first; a failed flush keeps the window
     // open with the error visible so no words are lost.
-    return ipc().on('window:close-requested', () => {
+    const offClose = ipc().on('window:close-requested', () => {
       const store = useProjectStore.getState()
       if (store.busy) return // a flush is already in flight; the first request will close the window
       store.closeWindow().catch((err: unknown) => toast.error(describeError(err)))
     })
+    // F-6.1: focus mode follows the window's real fullscreen state.
+    const offFocus = useFocusStore.getState().subscribe()
+    return () => {
+      offClose()
+      offFocus()
+    }
   }, [])
 
   // F-1.5: the OS window title follows the open project.
@@ -73,10 +80,13 @@ export function App(): React.JSX.Element {
   // node by the metadata pane. F-14.4: and the AI dial and toggles. F-5.2: and the writing
   // presets. F-14.1: and the voice exemplars (the toolbar button needs the count). F-14.6: the
   // provenance report is loaded by its section on demand and only cleared here. F-5.4: and the
-  // assistant conversations.
+  // assistant conversations. F-6.1: a project closed in focus mode leaves it, so the welcome
+  // screen is windowed.
   useEffect(() => {
     const tree = useTreeStore.getState()
     if (projectId === null) {
+      const focus = useFocusStore.getState()
+      if (focus.active) void focus.exit()
       tree.clear()
       useDocumentStore.getState().clear()
       useNotesStore.getState().clear()
@@ -118,27 +128,36 @@ export function App(): React.JSX.Element {
       .catch((err: unknown) => toast.error(describeError(err)))
   }, [projectId])
 
+  // F-6.1: focus mode hides the header with the rest of the chrome; the header's shortcut
+  // listeners (Ctrl+, / Ctrl+K / Insert) go with it, `FocusShortcuts` stays so F11 and Escape
+  // are always a way out.
+  const focus = useFocusStore((s) => s.active) && current !== null
+
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-11 items-center gap-2 border-b border-line bg-surface px-4 text-sm">
-        {current ? <SidebarToggleButton /> : null}
-        <Logo size={16} />
-        <span className="font-semibold">MythScribe</span>
-        {current ? (
-          <span className="text-fg-muted">
-            / <span data-testid="project-name">{current.name}</span> · {formatLabel(current.format)}
-          </span>
-        ) : null}
-        {current ? (
-          <div className="ml-auto flex items-center gap-2">
-            <AiActivityIndicator />
-            <AssistantToggleButton />
-            <SettingsButton format={current.format} />
-            <InsertShortcuts format={current.format} />
-            <CloseProjectButton />
-          </div>
-        ) : null}
-      </header>
+      {focus ? null : (
+        <header className="flex h-11 items-center gap-2 border-b border-line bg-surface px-4 text-sm">
+          {current ? <SidebarToggleButton /> : null}
+          <Logo size={16} />
+          <span className="font-semibold">MythScribe</span>
+          {current ? (
+            <span className="text-fg-muted">
+              / <span data-testid="project-name">{current.name}</span> ·{' '}
+              {formatLabel(current.format)}
+            </span>
+          ) : null}
+          {current ? (
+            <div className="ml-auto flex items-center gap-2">
+              <AiActivityIndicator />
+              <AssistantToggleButton />
+              <SettingsButton format={current.format} />
+              <CloseProjectButton />
+            </div>
+          ) : null}
+        </header>
+      )}
+      {current ? <FocusShortcuts /> : null}
+      {current ? <InsertShortcuts format={current.format} /> : null}
       <main
         className={
           current
@@ -320,6 +339,31 @@ function InsertShortcuts({ format }: { format: NovelFormat }): null {
 }
 
 /**
+ * Focus mode shortcuts (F-6.1): F11 toggles it; Escape leaves it, but only when nothing closer
+ * to the keystroke claimed the key (the dialogs and popups handle their own Escape and prevent
+ * default), so the listener runs in the bubble phase. Inside the editor ProseMirror prevents
+ * default on every Escape, so there the editor's own `EscapeShortcut` hands a bare Escape to
+ * `escapeFocusMode` and this listener sees it as claimed: one exit either way. Mounted only
+ * while a project is open, outside the header, so it survives the chrome being hidden;
+ * renders nothing.
+ */
+function FocusShortcuts(): null {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (matchesShortcut(event, APP_SHORTCUTS.focusMode.chord)) {
+        event.preventDefault()
+        void useFocusStore.getState().toggle()
+      } else if (event.key === 'Escape' && !event.defaultPrevented) {
+        escapeFocusMode()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
+  return null
+}
+
+/**
  * Header action (F-7.5): opens the Settings dialog, as does Ctrl+, (Cmd+, on macOS). Settings
  * are per project, so the button, its shortcut listener, and the dialog exist only while a
  * project is open: this component is the one owner of all three and is mounted only then.
@@ -361,13 +405,16 @@ function SettingsButton({ format }: { format: NovelFormat }): React.JSX.Element 
  * F-3.8), with the notes panel (F-3.7) beside it when open. F-7.2: the sidebar's open state
  * and width come from the layout store; the width is a fraction of the window rendered in
  * `vw`, resized by the handle on its right edge. F-5.4: the assistant panel docks at the right
- * edge, full height, whatever is selected (Plan mode works without a scene).
+ * edge, full height, whatever is selected (Plan mode works without a scene). F-6.1: focus mode
+ * hides the sidebar and both side panels without touching the layout store, so they come back
+ * as they were on exit.
  */
 function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
   const sidebar = useLayoutStore((s) => s.layout.sidebar)
+  const focus = useFocusStore((s) => s.active)
   return (
     <>
-      {sidebar.open ? (
+      {sidebar.open && !focus ? (
         <aside
           className="relative flex shrink-0 flex-col border-r border-line bg-surface"
           style={{ width: `${sidebar.size * 100}vw` }}
@@ -386,12 +433,13 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <MainPane format={format} />
       </section>
-      <AssistantPanel />
+      {focus ? null : <AssistantPanel />}
     </>
   )
 }
 
 function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
+  const focus = useFocusStore((s) => s.active)
   const node = useTreeStore((s) => (s.selectedId === null ? undefined : s.byId[s.selectedId]))
   const section = useTreeStore((s) =>
     s.selectedId === null ? undefined : s.sectionOf[s.selectedId]
@@ -427,7 +475,7 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
         ) : (
           <StackedEditor folderId={node.id} format={format} />
         )}
-        <NotesPanel id={node.id} />
+        {focus ? null : <NotesPanel id={node.id} />}
       </div>
     </>
   )

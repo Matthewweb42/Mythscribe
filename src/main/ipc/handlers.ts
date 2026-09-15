@@ -63,6 +63,8 @@ import { emit, register, type EmitTarget } from './registry'
 /** The parts of a BrowserWindow the handlers need; structural so tests can pass a fake. */
 export interface ClosableWindow extends EmitTarget {
   close(): void
+  setFullScreen(on: boolean): void
+  isFullScreen(): boolean
 }
 
 export interface HandlerDeps {
@@ -475,6 +477,15 @@ export function registerHandlers({
   register('window:close-cancelled', () => {
     onCloseCancelled()
     return null
+  })
+
+  // F-6.1: the answer is what the window reports, not what was asked for; a window manager
+  // that refuses fullscreen leaves the renderer windowed and honest about it.
+  register('window:setFullScreen', ({ on }) => {
+    const win = windows().find((w) => !w.isDestroyed())
+    if (!win) return { on: false }
+    win.setFullScreen(on)
+    return { on: win.isFullScreen() }
   })
 
   manager.onChange((info) => {

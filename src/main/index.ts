@@ -61,6 +61,9 @@ function createWindow(): BrowserWindow {
   })
   // A dead renderer can never flush, so do not let it wedge the window.
   win.webContents.on('render-process-gone', () => manager.close())
+  // F-6.1: focus mode mirrors the window's real fullscreen state, whoever changed it.
+  win.on('enter-full-screen', () => emit([win], 'window:fullScreenChanged', { on: true }))
+  win.on('leave-full-screen', () => emit([win], 'window:fullScreenChanged', { on: false }))
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)

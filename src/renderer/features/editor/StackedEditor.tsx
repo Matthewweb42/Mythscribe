@@ -3,12 +3,14 @@ import { useShallow } from 'zustand/react/shallow'
 import type { Editor } from '@tiptap/core'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { levelLabel, type SectionType } from '@shared/labels'
+import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { descendantDocuments, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { COLUMN, editorStyle } from './column'
 import { DocumentEditor } from './DocumentEditor'
+import { FocusModeButton } from './FocusModeButton'
 import { NotesToggleButton } from './NotesPanel'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
@@ -35,7 +37,7 @@ const ADD_BUTTON =
  * session delta, because a folder's rollup also moves when scenes are moved or deleted. The tag
  * bar (F-4.4) mounts once at the top for the folder itself, so a chapter or part carries its
  * own tags and metadata (F-4.5); it is there for an empty folder too, since metadata can be set
- * before the first scene exists.
+ * before the first scene exists. Focus mode (F-6.1) drops the toolbar and the tag bar.
  */
 export function StackedEditor({
   folderId,
@@ -49,6 +51,8 @@ export function StackedEditor({
   // Every non-root node carries tags; a section root never reaches here from the tree (not
   // selectable), but the guard keeps a stray id from asking main for links it refuses.
   const taggable = useTreeStore((s) => (s.byId[folderId]?.parentId ?? null) !== null)
+  const focus = useFocusStore((s) => s.active)
+  const tagBar = taggable && !focus
   const [active, setActive] = useState<ActiveRegion | null>(null)
   const words = useTreeStore((s) => s.wordCountRollup[folderId] ?? 0)
   const settings = useEditorSettings(format)
@@ -63,15 +67,25 @@ export function StackedEditor({
   if (docIds.length === 0)
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {taggable ? <TagBar id={folderId} /> : null}
+        {tagBar ? <TagBar id={folderId} /> : null}
         <EmptyFolder folderId={folderId} format={format} section={section} />
       </div>
     )
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={editorStyle(settings)}>
-      <Toolbar editor={editor} right={<NotesToggleButton />} />
-      {taggable ? <TagBar id={folderId} /> : null}
+      {focus ? null : (
+        <Toolbar
+          editor={editor}
+          right={
+            <>
+              <NotesToggleButton />
+              <FocusModeButton />
+            </>
+          }
+        />
+      )}
+      {tagBar ? <TagBar id={folderId} /> : null}
       <div className="min-h-0 flex-1 overflow-y-auto pb-12">
         {docIds.map((id, index) => (
           <Fragment key={id}>

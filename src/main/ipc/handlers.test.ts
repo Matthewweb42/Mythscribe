@@ -55,6 +55,8 @@ let manager: ProjectManager
 let invoke: Invoke
 let handlerFor: (channel: Channel) => (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>
 let fakeWin: ClosableWindow
+/** The fake window's fullscreen flag (F-6.1); `setFullScreen` writes it unless a test pins it. */
+let fullScreen: boolean
 let onCloseCancelled: ReturnType<typeof vi.fn<() => void>>
 let safe: ReturnType<typeof fakeSafeStorage>
 let keyFile: string
@@ -100,7 +102,16 @@ beforeEach(() => {
   exportPath = null
   exportAsked = null
   manager = new ProjectManager()
-  fakeWin = { close: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } }
+  fullScreen = false
+  fakeWin = {
+    close: vi.fn(),
+    isDestroyed: () => false,
+    webContents: { send: vi.fn() },
+    setFullScreen: vi.fn((on: boolean) => {
+      fullScreen = on
+    }),
+    isFullScreen: () => fullScreen
+  }
   onCloseCancelled = vi.fn<() => void>()
   safe = fakeSafeStorage()
   keyFile = path.join(tmp, 'userData', 'ai-keys.json')
@@ -1244,6 +1255,33 @@ describe('window:close', () => {
     fakeWin.isDestroyed = () => true
     await invoke('window:close', undefined)
     expect(fakeWin.close).not.toHaveBeenCalled()
+  })
+})
+
+describe('window:setFullScreen (F-6.1)', () => {
+  it('asks the first live window and answers the state it reports', async () => {
+    expect(await invoke('window:setFullScreen', { on: true })).toEqual({ on: true })
+    expect(fakeWin.setFullScreen).toHaveBeenLastCalledWith(true)
+    expect(await invoke('window:setFullScreen', { on: false })).toEqual({ on: false })
+    expect(fakeWin.setFullScreen).toHaveBeenLastCalledWith(false)
+  })
+
+  it('answers what the window reports, not what was asked, when the window manager refuses', async () => {
+    fakeWin.isFullScreen = () => false
+    expect(await invoke('window:setFullScreen', { on: true })).toEqual({ on: false })
+    expect(fakeWin.setFullScreen).toHaveBeenCalledWith(true)
+  })
+
+  it('skips a destroyed window and answers windowed', async () => {
+    fakeWin.isDestroyed = () => true
+    expect(await invoke('window:setFullScreen', { on: true })).toEqual({ on: false })
+    expect(fakeWin.setFullScreen).not.toHaveBeenCalled()
+  })
+
+  it('rejects a malformed input', async () => {
+    const result = await handlerFor('window:setFullScreen')(null, { on: 'yes' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
   })
 })
 

@@ -12,6 +12,13 @@ export interface EditorSchemaOptions {
   /** Runs on Ctrl/Cmd+S (F-3.2). */
   onSave: () => void
   /**
+   * Runs on an Escape nothing closer claimed (F-6.1): ghost text and the `#` popup see the key
+   * first. Answers whether it was used. ProseMirror prevents default on every Escape in a
+   * focused editor, so a document-level listener cannot tell a bare Escape from a claimed one;
+   * this is how the editor hands it on.
+   */
+  onEscape?: () => boolean
+  /**
    * The manuscript document the editor shows (F-4.6): adds the inline tag token and its `#`
    * suggestion, which links picked tags to this node, the ghost-text decoration (F-5.3), and
    * the AI-origin mark its accepted text carries (F-14.6). Left out for notes, which never get
@@ -39,6 +46,31 @@ export const SaveShortcut = Extension.create<SaveShortcutOptions>({
         this.options.onSave?.()
         return true
       }
+    }
+  }
+})
+
+export interface EscapeShortcutOptions {
+  /** Runs on an otherwise unclaimed Escape; null (unconfigured) leaves the key to ProseMirror. */
+  onEscape: (() => boolean) | null
+}
+
+/**
+ * Escape inside the editor, after every other binding (F-6.1): the priority puts this keymap
+ * last, so ghost text (`clearGhost`) and the `#` suggestion popup keep first refusal and only a
+ * bare Escape reaches the callback.
+ */
+export const EscapeShortcut = Extension.create<EscapeShortcutOptions>({
+  name: 'escapeShortcut',
+  priority: 50,
+
+  addOptions() {
+    return { onEscape: null }
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      Escape: () => this.options.onEscape?.() ?? false
     }
   }
 })
@@ -126,13 +158,15 @@ export const SceneBreak = Node.create<SceneBreakOptions>({
  * paragraphs, the scene-break block, the Ctrl+S save shortcut (F-3.2), and, for a manuscript
  * document, the inline tag token with its `#` suggestion (F-4.6), the AI-origin mark (F-14.6,
  * wherever ghost text can insert), and the ghost-text decoration (F-5.3, always in the schema
- * so toggling VibeWrite never rebuilds the editor). Lists, links, code blocks, horizontal
- * rules, and the trailing node are off so the document model stays what the compile views
- * (F-3.12) and the AI post-processors expect.
+ * so toggling VibeWrite never rebuilds the editor), and the Escape hand-off (F-6.1) when the
+ * caller wants one. Lists, links, code blocks, horizontal rules, and the trailing node are off
+ * so the document model stays what the compile views (F-3.12) and the AI post-processors
+ * expect.
  */
 export function buildExtensions({
   sceneBreak,
   onSave,
+  onEscape,
   inlineTagNodeId
 }: EditorSchemaOptions): Extensions {
   const extensions: Extensions = [
@@ -157,5 +191,6 @@ export function buildExtensions({
   if (inlineTagNodeId !== undefined) {
     extensions.push(InlineTag.configure({ nodeId: inlineTagNodeId }), AiOrigin, GhostText)
   }
+  if (onEscape) extensions.push(EscapeShortcut.configure({ onEscape }))
   return extensions
 }

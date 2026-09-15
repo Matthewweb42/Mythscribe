@@ -43,9 +43,19 @@ describe('shortcuts (F-2.7)', () => {
     ).toBe(false)
   })
 
+  it('F11 alone is focus mode (F-6.1); a modifier makes it something else', () => {
+    const chord = APP_SHORTCUTS.focusMode.chord
+    expect(chord).toEqual({ key: 'F11' })
+    expect(APP_SHORTCUTS.focusMode.group).toBe('app')
+    expect(matchesShortcut(event('F11'), chord)).toBe(true)
+    expect(matchesShortcut(event('F11', { ctrlKey: true }), chord)).toBe(false)
+    expect(matchesShortcut(event('F11', { shiftKey: true }), chord)).toBe(false)
+    expect(matchesShortcut(event('F1'), chord)).toBe(false)
+  })
+
   it('formats a chord for display', () => {
     expect(formatShortcut(APP_SHORTCUTS.insertScene.chord)).toBe('Ctrl+Shift+S')
     expect(formatShortcut(APP_SHORTCUTS.settings.chord)).toBe('Ctrl+,')
-    expect(formatShortcut({ key: 'F11' })).toBe('F11')
+    expect(formatShortcut(APP_SHORTCUTS.focusMode.chord)).toBe('F11')
   })
 })

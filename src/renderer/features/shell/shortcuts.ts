@@ -25,6 +25,7 @@ export interface Shortcut {
 export const SHORTCUT_IDS = [
   'settings',
   'assistant',
+  'focusMode',
   'insertScene',
   'insertChapter',
   'insertPart'
@@ -39,6 +40,7 @@ export const APP_SHORTCUTS: Record<ShortcutId, Shortcut> = {
     chord: { key: 'k', ctrl: true },
     group: 'app'
   },
+  focusMode: { id: 'focusMode', label: 'Focus mode', chord: { key: 'F11' }, group: 'app' },
   insertScene: {
     id: 'insertScene',
     label: 'Insert scene',

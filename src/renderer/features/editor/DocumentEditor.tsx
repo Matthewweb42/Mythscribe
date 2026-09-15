@@ -8,6 +8,7 @@ import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
 import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
 import type { MenuItem } from '@renderer/features/manuscript/contextMenuItems'
+import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -21,6 +22,7 @@ import { useGhostTextController } from './ghostTextController'
 import { INLINE_TAG_SELECTOR, resyncInlineTags } from './InlineTag'
 import { MarkVoiceExemplarButton } from './MarkVoiceExemplarButton'
 import { NotesToggleButton } from './NotesPanel'
+import { FocusModeButton } from './FocusModeButton'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
 import { TagBar } from './TagBar'
@@ -103,7 +105,8 @@ const TOKEN_MENU_ITEMS: MenuItem[] = [
  * in the toolbar's right slot, so a stacked region never shows ghost text. The voice exemplar
  * button (F-14.1) sits beside it, for the same reason. Once ready, the instance registers as
  * the active editor (F-5.4; again on focus, so the last-focused region of a stack wins) and
- * releases itself on unmount, which is how the assistant panel reaches the caret.
+ * releases itself on unmount, which is how the assistant panel reaches the caret. Focus mode
+ * (F-6.1) drops the toolbar and the tag bar; the status bar stays.
  */
 function RegionEditor({
   id,
@@ -126,12 +129,14 @@ function RegionEditor({
       buildExtensions({
         sceneBreak,
         onSave: () => void useDocumentStore.getState().saveNow(),
+        onEscape: escapeFocusMode,
         inlineTagNodeId: id
       }),
     [sceneBreak, id]
   )
   const ready = content !== null
   const tagsById = useTagStore((s) => s.byId)
+  const focus = useFocusStore((s) => s.active)
   const [menu, setMenu] = useState<TokenMenu | null>(null)
 
   const editor = useEditor(
@@ -234,17 +239,20 @@ function RegionEditor({
   // scroll container (click anywhere to write) without a viewport-relative minimum height.
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={editorStyle(settings)}>
-      <Toolbar
-        editor={ready ? editor : null}
-        right={
-          <>
-            <MarkVoiceExemplarButton editor={ready ? editor : null} nodeId={id} />
-            <VibeWriteToggle error={ghostError} />
-            <NotesToggleButton />
-          </>
-        }
-      />
-      <TagBar id={id} />
+      {focus ? null : (
+        <Toolbar
+          editor={ready ? editor : null}
+          right={
+            <>
+              <MarkVoiceExemplarButton editor={ready ? editor : null} nodeId={id} />
+              <VibeWriteToggle error={ghostError} />
+              <NotesToggleButton />
+              <FocusModeButton />
+            </>
+          }
+        />
+      )}
+      {focus ? null : <TagBar id={id} />}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <EditorContent editor={editor} className={`${COLUMN} flex flex-1 flex-col py-6`} />
       </div>

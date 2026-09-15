@@ -6,6 +6,7 @@ import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
 import { toTagName } from '@shared/tags'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
+import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -173,6 +174,7 @@ beforeEach(() => {
   resetEditorSettingsStore()
   resetPendingSaves()
   resetTagStore()
+  resetFocusStore()
   resetDocumentTagStore()
   resetLayoutStore()
   resetSceneMetaStore()
@@ -191,6 +193,30 @@ afterEach(() => {
   resetSceneMetaStore()
   resetVoiceStore()
   resetActiveEditorStore()
+})
+
+describe('DocumentEditor focus mode (F-6.1)', () => {
+  it('carries the Focus mode button in the toolbar and drops the toolbar and tag bar while active', async () => {
+    await mountReady()
+    const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
+    expect(within(toolbar).getByRole('button', { name: 'Focus mode' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    )
+    expect(bar()).toBeInTheDocument()
+
+    act(() => useFocusStore.setState({ active: true }))
+    expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Tags' })).not.toBeInTheDocument()
+    // The surface and the status bar stay, and the document is still the same instance.
+    expect(box()).toHaveAttribute('contenteditable', 'true')
+    expect(box()).toHaveTextContent('Into the')
+    expect(screen.getByTestId('status-words')).toBeInTheDocument()
+
+    act(() => useFocusStore.setState({ active: false }))
+    expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
+    expect(bar()).toBeInTheDocument()
+  })
 })
 
 describe('DocumentEditor active editor (F-5.4)', () => {

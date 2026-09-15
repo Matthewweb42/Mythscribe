@@ -617,7 +617,16 @@ export const contract = {
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },
   /** The renderer could not flush, so the close it was asked for (and any quit behind it) is abandoned. */
-  'window:close-cancelled': { input: z.undefined(), output: z.null() }
+  'window:close-cancelled': { input: z.undefined(), output: z.null() },
+  /**
+   * Focus mode (F-6.1): asks the window to enter or leave OS fullscreen and answers the state
+   * the window reports afterwards, which is what the renderer shows (the window manager may
+   * refuse or take its time; `window:fullScreenChanged` follows up).
+   */
+  'window:setFullScreen': {
+    input: z.object({ on: z.boolean() }),
+    output: z.object({ on: z.boolean() })
+  }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract
@@ -638,7 +647,9 @@ export const events = {
   /** The OS asked to close the window while a project is open; the renderer flushes, then invokes `window:close`. */
   'window:close-requested': z.null(),
   /** A streamed piece of a Plan-mode answer (F-5.4); the renderer appends it to the turn with this `requestId`. */
-  'ai:chatDelta': z.object({ requestId: z.string(), delta: z.string() })
+  'ai:chatDelta': z.object({ requestId: z.string(), delta: z.string() }),
+  /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
+  'window:fullScreenChanged': z.object({ on: z.boolean() })
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

@@ -1,7 +1,9 @@
 import { Editor } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TiptapNode } from '@shared/tiptap'
+import { resetTagStore } from '@renderer/features/tags/tagStore'
 import { buildExtensions } from './extensions'
+import { ghostOf } from './ghostText'
 
 let editor: Editor
 let onSave: () => void
@@ -83,6 +85,66 @@ describe('buildExtensions', () => {
     expect(keydown('s', {})).toBe(false)
     expect(onSave).toHaveBeenCalledTimes(1)
     expect(editor.getText()).toBe('Hello')
+  })
+
+  describe('Escape hand-off (F-6.1)', () => {
+    /** A real keydown on the editor, with the keyCode ProseMirror's own Escape capture reads; answers whether default was prevented. */
+    const escape = (view: Editor): boolean =>
+      !view.view.dom.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          keyCode: 27,
+          bubbles: true,
+          cancelable: true
+        })
+      )
+
+    it('is left out unless the caller asks for it', () => {
+      expect(editor.extensionManager.extensions.some((e) => e.name === 'escapeShortcut')).toBe(
+        false
+      )
+    })
+
+    it('hands a bare Escape to the callback and reports its answer', () => {
+      const onEscape = vi.fn<() => boolean>(() => false)
+      const view = new Editor({
+        extensions: buildExtensions({ sceneBreak: '~~~', onSave, onEscape }),
+        content: { type: 'doc', content: [{ type: 'paragraph' }] }
+      })
+      view.commands.focus()
+      // Unused by the callback: ProseMirror still captures Escape, so the key is prevented either way.
+      expect(escape(view)).toBe(true)
+      expect(onEscape).toHaveBeenCalledTimes(1)
+      onEscape.mockReturnValue(true)
+      expect(escape(view)).toBe(true)
+      expect(onEscape).toHaveBeenCalledTimes(2)
+      view.destroy()
+    })
+
+    it('runs after ghost text: Escape clears a showing suggestion first, the next one reaches the callback', () => {
+      resetTagStore()
+      const onEscape = vi.fn<() => boolean>(() => true)
+      const view = new Editor({
+        extensions: buildExtensions({
+          sceneBreak: '~~~',
+          onSave,
+          onEscape,
+          inlineTagNodeId: 'sc-1'
+        }),
+        content: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'The storm' }] }]
+        }
+      })
+      view.commands.focus('end')
+      expect(view.commands.setGhost(' broke at dusk.')).toBe(true)
+      expect(escape(view)).toBe(true)
+      expect(ghostOf(view.state)).toBeNull()
+      expect(onEscape).not.toHaveBeenCalled()
+      expect(escape(view)).toBe(true)
+      expect(onEscape).toHaveBeenCalledTimes(1)
+      view.destroy()
+    })
   })
 
   it('offers headings 1–3 only', () => {

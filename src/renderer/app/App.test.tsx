@@ -24,6 +24,7 @@ import {
   resetEditorSettingsStore,
   useEditorSettingsStore
 } from '@renderer/features/editor/settingsStore'
+import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
@@ -68,6 +69,7 @@ beforeEach(() => {
   resetAiSettingsStore()
   resetAssistantStore()
   resetTagStore()
+  resetFocusStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -102,6 +104,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'aiSettings:get') return defaultAiSettings()
     if (channel === 'layout:get') return defaultLayout()
     if (channel === 'layout:set') return input
+    if (channel === 'window:setFullScreen') return input // the fake window does what it is asked
     if (channel === 'conversations:get') return { active: null, items: [] }
     return null
   })
@@ -741,6 +744,165 @@ describe('App', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Could not save Chapter 1')
     expect(invoke).not.toHaveBeenCalledWith('window:close', undefined)
     expect(screen.getByTestId('project-name')).toHaveTextContent('Smoke')
+  })
+
+  describe('focus mode (F-6.1)', () => {
+    const asides = (): HTMLElement[] => screen.queryAllByRole('complementary')
+    /** What was asked of the window, in order (leaving fullscreen remounts the tag bar, whose own calls follow). */
+    const fullScreenCalls = (invoke: ReturnType<typeof vi.fn>): unknown[] =>
+      invoke.mock.calls
+        .filter(([c]) => c === 'window:setFullScreen')
+        .map(([, input]: unknown[]): unknown => input)
+
+    it('F11 enters OS fullscreen and hides the chrome; Escape leaves it with the layout intact', async () => {
+      const invoke = install({
+        'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+        'tree:list': treeFixture
+      })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      const editor = await screen.findByRole('textbox', { name: 'Document' })
+      await waitFor(() => expect(editor).toHaveAttribute('contenteditable', 'true'))
+      expect(screen.getByRole('region', { name: 'Tags' })).toBeInTheDocument()
+      editor.focus()
+
+      await userEvent.keyboard('{F11}')
+      expect(invoke).toHaveBeenLastCalledWith('window:setFullScreen', { on: true })
+      await waitFor(() => expect(useFocusStore.getState().active).toBe(true))
+      expect(screen.queryByRole('banner')).not.toBeInTheDocument()
+      expect(asides()).toEqual([])
+      expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
+      expect(screen.queryByRole('region', { name: 'Tags' })).not.toBeInTheDocument()
+      // The editor and its status bar stay; the layout store did not move.
+      expect(screen.getByRole('textbox', { name: 'Document' })).toHaveAttribute(
+        'contenteditable',
+        'true'
+      )
+      expect(screen.getByTestId('status-words')).toBeInTheDocument()
+      expect(useLayoutStore.getState().layout.sidebar.open).toBe(true)
+
+      // The caret is in the editor, where ProseMirror claims every Escape: the editor's own
+      // binding hands the bare one on, and the document listener sees it as claimed (one call).
+      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Document' }))
+      fireEvent.keyDown(document.activeElement ?? document.body, {
+        key: 'Escape',
+        keyCode: 27
+      })
+      expect(fullScreenCalls(invoke)).toEqual([{ on: true }, { on: false }])
+      await waitFor(() => expect(useFocusStore.getState().active).toBe(false))
+      expect(screen.getByRole('banner')).toBeInTheDocument()
+      expect(screen.getByRole('complementary')).toBeInTheDocument()
+      expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
+      expect(screen.getByRole('region', { name: 'Tags' })).toBeInTheDocument()
+      expect(screen.getByRole('treeitem', { name: 'Scene 1' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      )
+      // Escape while windowed asks nothing.
+      await userEvent.keyboard('{Escape}')
+      expect(fullScreenCalls(invoke)).toHaveLength(2)
+    })
+
+    it('the toolbar button enters focus mode, and F11 toggles back out', async () => {
+      const invoke = install({
+        'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+        'tree:list': treeFixture
+      })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      const toolbar = await screen.findByRole('toolbar', { name: 'Formatting' })
+      const button = within(toolbar).getByRole('button', { name: 'Focus mode' })
+      expect(button).toHaveAttribute('aria-pressed', 'false')
+      await userEvent.click(button)
+      expect(invoke).toHaveBeenLastCalledWith('window:setFullScreen', { on: true })
+      await waitFor(() => expect(screen.queryByRole('toolbar')).not.toBeInTheDocument())
+      await userEvent.keyboard('{F11}')
+      expect(fullScreenCalls(invoke)).toEqual([{ on: true }, { on: false }])
+      expect(await screen.findByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
+    })
+
+    it('hides the notes and assistant panels while active and brings them back on exit', async () => {
+      install({
+        'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+        'tree:list': treeFixture
+      })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      const toolbar = await screen.findByRole('toolbar', { name: 'Formatting' })
+      await userEvent.click(within(toolbar).getByRole('button', { name: 'Notes' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+      expect(screen.getByTestId('notes-panel')).toBeInTheDocument()
+      expect(screen.getByTestId('assistant-panel')).toBeInTheDocument()
+
+      await userEvent.keyboard('{F11}')
+      await waitFor(() => expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument())
+      expect(screen.queryByTestId('assistant-panel')).not.toBeInTheDocument()
+      expect(useLayoutStore.getState().layout.notes.open).toBe(true)
+      expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
+
+      await userEvent.keyboard('{Escape}')
+      expect(await screen.findByTestId('notes-panel')).toBeInTheDocument()
+      expect(screen.getByTestId('assistant-panel')).toBeInTheDocument()
+    })
+
+    it('leaves Escape alone when something closer already claimed it', async () => {
+      const invoke = install({
+        'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+        'tree:list': treeFixture
+      })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      await screen.findByRole('toolbar', { name: 'Formatting' })
+      await userEvent.keyboard('{F11}')
+      await waitFor(() => expect(useFocusStore.getState().active).toBe(true))
+      // A popup or dialog handles its own Escape and prevents default before the bubble reaches App.
+      const claim = (event: KeyboardEvent): void => {
+        if (event.key === 'Escape') event.preventDefault()
+      }
+      document.addEventListener('keydown', claim, true)
+      try {
+        await userEvent.keyboard('{Escape}')
+      } finally {
+        document.removeEventListener('keydown', claim, true)
+      }
+      expect(invoke).not.toHaveBeenCalledWith('window:setFullScreen', { on: false })
+      expect(useFocusStore.getState().active).toBe(true)
+      // With focus outside the editor a bare Escape reaches the document listener and leaves.
+      document.body.focus()
+      await userEvent.keyboard('{Escape}')
+      expect(fullScreenCalls(invoke)).toEqual([{ on: true }, { on: false }])
+      await waitFor(() => expect(useFocusStore.getState().active).toBe(false))
+    })
+
+    it('follows the window when fullscreen ends on its own, and reports a refused request', async () => {
+      const invoke = install({
+        'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+        'tree:list': treeFixture
+      })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      await screen.findByRole('toolbar', { name: 'Formatting' })
+      await userEvent.keyboard('{F11}')
+      await waitFor(() => expect(screen.queryByRole('toolbar')).not.toBeInTheDocument())
+      // The window manager left fullscreen (the OS shortcut, a workspace change): no request, the chrome returns.
+      fire('window:fullScreenChanged', { on: false })
+      expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
+      expect(fullScreenCalls(invoke)).toEqual([{ on: true }])
+
+      invoke.mockImplementationOnce(() =>
+        Promise.reject(new IpcRequestError({ code: 'INTERNAL', message: 'No window' }))
+      )
+      await userEvent.keyboard('{F11}')
+      await waitFor(() =>
+        expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual(['No window'])
+      )
+      expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
+    })
   })
 
   describe('insert shortcuts (F-2.7)', () => {

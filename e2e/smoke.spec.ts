@@ -1372,6 +1372,50 @@ test('create, close, reopen a project on disk', async () => {
   await scene1.getByText('Scene 1', { exact: true }).click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
 
+  // F-6.1: focus mode. F11 puts the window in OS fullscreen (the flag Electron tracks, read
+  // from main) and hides the chrome: the header, the sidebar, the toolbar, and the tag bar; the
+  // editor stays editable and keeps its status bar. Escape leaves it and everything comes back
+  // as it was (the layout store never moved). The toolbar button enters it too.
+  const isFullScreen = (): Promise<boolean> =>
+    app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFullScreen() ?? false)
+  const focusButton = page.getByRole('button', { name: 'Focus mode' })
+
+  const formatting = page.getByRole('toolbar', { name: 'Formatting' })
+  expect(await isFullScreen()).toBe(false)
+  await expect(focusButton).toHaveAttribute('aria-pressed', 'false')
+  await expect(tagBar).toBeVisible()
+  const asidesBefore = await page.locator('aside').count()
+  expect(asidesBefore).toBeGreaterThan(0)
+  await editor.click()
+  await page.keyboard.press('F11')
+  await expect.poll(isFullScreen).toBe(true)
+  await expect(formatting).toHaveCount(0)
+  await expect(page.locator('header')).toHaveCount(0)
+  await expect(page.locator('aside')).toHaveCount(0)
+  await expect(tagBar).toHaveCount(0)
+  await expect(tree).toHaveCount(0)
+  await expect(page.getByTestId('status-words')).toBeVisible()
+  await editor.click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' In focus.')
+  await expect(editor).toContainText('In focus.')
+  await page.keyboard.press('Escape')
+  await expect.poll(isFullScreen).toBe(false)
+  await expect(formatting).toBeVisible()
+  await expect(page.locator('header')).toHaveCount(1)
+  await expect(page.locator('aside')).toHaveCount(asidesBefore)
+  await expect(tree).toBeVisible()
+  await expect(scene1).toHaveAttribute('aria-selected', 'true')
+  await expect(tagBar).toBeVisible()
+  await expect(editor).toContainText('In focus.')
+  await focusButton.click()
+  await expect.poll(isFullScreen).toBe(true)
+  await expect(formatting).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect.poll(isFullScreen).toBe(false)
+  await expect(formatting).toBeVisible()
+  await expect(focusButton).toHaveAttribute('aria-pressed', 'false')
+
   // F-5.4: the assistant panel. Ctrl+K opens it (the dial is still at Suggest with the key
   // saved). A Plan question streams its answer into the chat with the cost line, and the
   // request carries the scene's text; the tab takes the question as its title. Agent mode
