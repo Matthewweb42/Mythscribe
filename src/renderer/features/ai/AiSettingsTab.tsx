@@ -17,6 +17,7 @@ import { AI_DATA_SHARING } from '@shared/aiSettings'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { AiDialSection } from './AiDialSection'
+import { AuthorRulesSection } from './AuthorRulesSection'
 import { ProvenanceSection } from './ProvenanceSection'
 import { VoiceSection } from './VoiceSection'
 import { WritingPresetsSection } from './WritingPresetsSection'
@@ -57,7 +58,7 @@ const featureLabel = (feature: string): string => {
 /**
  * The AI tab of the Settings dialog (F-5.1): the project's AI dial, toggles, and data-sharing
  * table first (F-14.4, loaded with the project by `App.tsx`), the writing presets (F-5.2,
- * loaded the same way), the voice profile (F-14.1), the provenance ledger (F-14.6), then the
+ * loaded the same way), the voice profile (F-14.1), the author rules (F-14.2), the provenance ledger (F-14.6), then the
  * provider, the key field with Save and Clear, the masked hint once a key is saved, the model
  * per tier with "Reset to defaults" (F-5.11),
  * "Test connection" with its result inline, the Usage block with the daily cap (F-5.14), the
@@ -120,6 +121,8 @@ export function AiSettingsTab(): React.JSX.Element {
       <WritingPresetsSection />
 
       <VoiceSection />
+
+      <AuthorRulesSection />
 
       <ProvenanceSection />
 

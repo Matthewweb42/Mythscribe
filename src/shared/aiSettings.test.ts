@@ -84,13 +84,24 @@ describe('AI_DATA_SHARING', () => {
     expect(Object.keys(AI_DATA_SHARING).sort()).toEqual([...AI_FEATURE_IDS].sort())
   })
 
-  it('names everything ghost text sends: the caret window, the notes, the metadata (F-5.3), the voice profile (F-14.1), and the one regenerate (F-14.7)', () => {
+  it('names everything ghost text sends: the caret window, the notes, the metadata (F-5.3), the voice profile (F-14.1), the author rules (F-14.2), and the one regenerate (F-14.7)', () => {
     expect(AI_DATA_SHARING.ghostText.sends).toBe(
       'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes ' +
-        'and metadata (location, POV, timeline), and the voice profile (stylometric rules and up ' +
-        'to 3 exemplar passages). An answer that breaks the voice profile is sent back once, with ' +
-        'the same context plus the rule it broke, for a second try.'
+        'and metadata (location, POV, timeline), the voice profile (stylometric rules and up ' +
+        'to 3 exemplar passages), and your author rules and banned phrases. An answer that breaks ' +
+        'the voice profile or uses a banned phrase is sent back once, with the same context plus ' +
+        'the rule it broke, for a second try.'
     )
+  })
+
+  it('discloses author rules and banned phrases for every feature that carries the voice block (F-14.2)', () => {
+    // Agent-mode chat (src/main/ai/chat.ts) and rewrite (src/main/ai/rewrite.ts) both call
+    // voiceBlock(profile, ...), which now embeds renderAuthorRulesBlock(profile.authorRules)
+    // (src/main/voice/voiceBlock.ts). The data-sharing panel must name everything a feature
+    // sends (CLAUDE.md, AI feature rules #3), so their `sends` copy should mention the author's
+    // rules and banned phrases the way ghostText's already does.
+    expect(AI_DATA_SHARING.chat.sends).toMatch(/author rules|banned phrase/)
+    expect(AI_DATA_SHARING.rewrite.sends).toMatch(/author rules|banned phrase/)
   })
 
   it("places ghost text at Suggest and Author mode at Draft, per PLAN.md §2.3's table", () => {

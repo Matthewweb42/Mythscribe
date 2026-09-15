@@ -9,7 +9,7 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
-import { setAiSettings } from '../project/settingsStore'
+import { setAiSettings, setAuthorRules } from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
@@ -367,7 +367,24 @@ describe('runRewrite fidelity check (F-14.7)', () => {
     })
   })
 
-  it('never regenerates for a project with neither rules nor exemplars', async () => {
+  it('regenerates a draft that uses a banned phrase, naming it, on a fresh project (F-14.2)', async () => {
+    const banned = 'She turned back to the ridge and did not delve into it again.'
+    setAuthorRules(db, { rules: '', bannedPhrases: ['delve'] })
+    bumpVoiceVersion()
+    streams(banned)
+    answers(CLEAN)
+    const result = await rewrite()
+    expect(stream.mock.calls[0]![0].messages[0]?.content).toContain(
+      'Never use these phrases: delve.'
+    )
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(complete.mock.calls[0]![0].messages[0]?.content).toContain(
+      `${REGEN_CLAUSE_PREFIX} uses the phrase \u201Cdelve\u201D, which the author has banned.`
+    )
+    expect(result).toMatchObject({ text: CLEAN, flagged: false, violation: null })
+  })
+
+  it('never regenerates on a stylometric signal for a project with neither rules nor exemplars', async () => {
     streams(OFF_VOICE)
     const result = await rewrite()
     expect(complete).not.toHaveBeenCalled()

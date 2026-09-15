@@ -1,3 +1,4 @@
+import { findBannedPhrases } from './authorRules'
 import {
   computeStylometrics,
   RULE_MIN_DIALOGUE_CHARS,
@@ -18,6 +19,7 @@ import {
  */
 
 export const FIDELITY_CODES = [
+  'bannedPhrase',
   'tense',
   'person',
   'dialogueTag',
@@ -63,14 +65,32 @@ const resolved = (value: string): value is 'past' | 'present' | 'first' | 'third
   value === 'past' || value === 'present' || value === 'first' || value === 'third'
 
 /**
- * Scores a ghost-text fragment against the profile's stylometrics. Signals a short fragment
- * cannot carry (dialogue ratio, paragraph length, top verbs, comma and question rates) are not
- * checked; the rest each need their own evidence on the profile side, so a thin profile never
- * flags anything. `ok` is true when there are no violations.
+ * The author-rules post-filter (F-14.2): one violation per banned phrase the text uses, in
+ * order of appearance. Deterministic and ungated: a banned phrase is banned however thin the
+ * profile is, which is why a fresh project (seeded phrases, no stylometrics yet) can flag.
  */
-export function checkGhostTextFidelity(profile: Stylometrics, fragment: string): FidelityResult {
+export function checkBannedPhrases(banned: readonly string[], text: string): FidelityViolation[] {
+  return findBannedPhrases(banned, text).map((phrase) => ({
+    code: 'bannedPhrase',
+    message: `uses the phrase “${phrase}”, which the author has banned`
+  }))
+}
+
+/**
+ * Scores a ghost-text fragment against the profile's stylometrics. The banned phrases come
+ * first (F-14.2: the hard constraints, so a regenerate names the phrase before any stylometric
+ * signal). Signals a short fragment cannot carry (dialogue ratio, paragraph length, top verbs,
+ * comma and question rates) are not checked; the rest each need their own evidence on the
+ * profile side, so a thin profile never flags on stylometrics. `ok` is true when there are no
+ * violations.
+ */
+export function checkGhostTextFidelity(
+  profile: Stylometrics,
+  fragment: string,
+  banned: readonly string[] = []
+): FidelityResult {
   const stats = computeStylometrics(fragment)
-  const violations: FidelityViolation[] = []
+  const violations: FidelityViolation[] = checkBannedPhrases(banned, fragment)
   const enough = profile.wordCount >= RULE_MIN_WORDS
 
   if (resolved(stats.tense) && resolved(profile.tense) && stats.tense !== profile.tense) {

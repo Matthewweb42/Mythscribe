@@ -11,6 +11,7 @@ import {
 } from '@playwright/test'
 import type { AiStatus, AiUsageSummary } from '../src/shared/ai'
 import type { AiSettings } from '../src/shared/aiSettings'
+import type { AuthorRules } from '../src/shared/authorRules'
 import type { FocusSettings } from '../src/shared/focus'
 import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
@@ -59,6 +60,9 @@ const AGENT_SENTINEL = 'You are drafting inside a novel-writing app'
 const REWRITE_SENTINEL = 'You are the rewrite feature inside a novel-writing app.'
 /** What the fake server answers a rewrite with: past tense, third person, so the local voice check passes. */
 const REWRITE_ANSWER = 'The storm came down at dusk. Rain followed it, and then the quiet held.'
+/** F-14.2: the rule the author writes and the phrase they ban; the canned continuation uses the phrase. */
+const AUTHOR_RULE = 'Mara never swears.'
+const BANNED_PHRASE = 'picked up'
 /** F-5.10: a request whose body carries this waits before answering, so a Stop can land. */
 const SLOW_SENTINEL = 'SLOW'
 const SLOW_DELAY_MS = 3_000
@@ -1341,6 +1345,62 @@ test('create, close, reopen a project on disk', async () => {
     new RegExp(`\\| Scene 1 \\| ${GHOST_CONTINUATION.length + 2} \\| [\\d,]+ \\| [1-9]\\d*% \\|`)
   )
   expect(openAiRequests).toHaveLength(requestsBeforeReport)
+  // F-14.2: the author's rules. The section starts with the seeded phrases and no rules text;
+  // the author writes a rule and bans a phrase the fake server's canned continuation uses.
+  // Both persist through the debounced write. No request leaves.
+  const authorRulesSection = settingsDialog.getByTestId('author-rules-section')
+  const bannedList = authorRulesSection.getByRole('list', { name: 'Banned phrases' })
+  await expect(bannedList).toContainText('a testament to')
+  const seededCount = await bannedList.getByRole('listitem').count()
+  expect(seededCount).toBeGreaterThan(10)
+  await authorRulesSection.getByLabel('Style rules').fill(AUTHOR_RULE)
+  const newPhrase = authorRulesSection.getByLabel('New banned phrase')
+  await newPhrase.fill(BANNED_PHRASE)
+  await newPhrase.press('Enter')
+  await expect(bannedList.getByRole('listitem')).toHaveCount(seededCount + 1)
+  await expect(bannedList).toContainText(BANNED_PHRASE)
+  await expect.poll(async () => (await authorRules()).rules).toBe(AUTHOR_RULE)
+  await expect.poll(async () => (await authorRules()).bannedPhrases).toContain(BANNED_PHRASE)
+  expect(openAiRequests).toHaveLength(requestsBeforeReport)
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+
+  // F-14.2: the canned continuation uses the banned phrase, so it is scored off-rules locally,
+  // sent back once with the phrase named in the system turn, and shown flagged when the second
+  // try uses it too. The system turn carries the rules block with the author's rule and the
+  // phrase. Escape drops it; nothing entered the document.
+  const bodiesBeforeRules = openAiChatBodies.length
+  await vibeWrite.click()
+  await expect(vibeWrite).toHaveAttribute('aria-pressed', 'true')
+  await editor.click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' The lamp burned low.')
+  const bannedGhost = editor.locator('.ghost-text[data-flagged="true"]')
+  await expect(bannedGhost).toContainText(GHOST_CONTINUATION)
+  await expect(bannedGhost.locator('.ghost-text-flag')).toHaveAttribute(
+    'title',
+    `uses the phrase “${BANNED_PHRASE}”, which the author has banned`
+  )
+  expect(openAiChatBodies).toHaveLength(bodiesBeforeRules + 2)
+  const rulesSystem = openAiChatBodies.at(-2)?.messages[0]?.content ?? ''
+  expect(rulesSystem).toContain("The author's rules (hard constraints):")
+  expect(rulesSystem).toContain(AUTHOR_RULE)
+  expect(rulesSystem).toContain(BANNED_PHRASE)
+  expect(rulesSystem).not.toContain('Your last attempt')
+  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain(
+    `Your last attempt uses the phrase “${BANNED_PHRASE}”, which the author has banned.`
+  )
+  await page.keyboard.press('Escape')
+  await expect(bannedGhost).toHaveCount(0)
+  await vibeWrite.click()
+  await expect(vibeWrite).toHaveAttribute('aria-pressed', 'false')
+  expect(((await editor.textContent()) ?? '').split(GHOST_CONTINUATION)).toHaveLength(2)
+  // Removing the phrase persists too, and leaves the seeded list as it was.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await authorRulesSection.getByRole('button', { name: `Remove phrase ${BANNED_PHRASE}` }).click()
+  await expect(bannedList.getByRole('listitem')).toHaveCount(seededCount)
+  await expect.poll(async () => (await authorRules()).bannedPhrases).not.toContain(BANNED_PHRASE)
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
 
@@ -2037,6 +2097,15 @@ async function aiSettings(): Promise<AiSettings> {
     () => window.mythscribe.invoke('aiSettings:get', undefined) as Promise<IpcResult<AiSettings>>
   )
   if (!result.ok) throw new Error(`aiSettings:get failed: ${result.error.message}`)
+  return result.data
+}
+
+/** The project's author rules (F-14.2) as main reads them from the settings table. */
+async function authorRules(): Promise<AuthorRules> {
+  const result = await page.evaluate<IpcResult<AuthorRules>>(
+    () => window.mythscribe.invoke('authorRules:get', undefined) as Promise<IpcResult<AuthorRules>>
+  )
+  if (!result.ok) throw new Error(`authorRules:get failed: ${result.error.message}`)
   return result.data
 }
 

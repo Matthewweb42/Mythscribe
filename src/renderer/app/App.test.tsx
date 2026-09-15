@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiSettings } from '@shared/aiSettings'
+import { defaultAuthorRules } from '@shared/authorRules'
 import type { Conversations } from '@shared/chat'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type {
@@ -18,6 +19,7 @@ import { defaultFloating, defaultLayout } from '@shared/layout'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { resetAuthorRulesStore, useAuthorRulesStore } from '@renderer/features/ai/authorRulesStore'
 import { resetAssistantStore, useAssistantStore } from '@renderer/features/ai/assistantStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
@@ -71,6 +73,7 @@ beforeEach(() => {
   resetLayoutStore()
   resetEditorSettingsStore()
   resetAiSettingsStore()
+  resetAuthorRulesStore()
   resetAssistantStore()
   resetTagStore()
   resetFocusStore()
@@ -84,6 +87,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   resetAiSettingsStore()
+  resetAuthorRulesStore()
   resetAssistantStore()
   resetBackgroundStore()
   vi.unstubAllGlobals()
@@ -110,6 +114,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'notes:get') return { id: (input as { id: string }).id, notes: null }
     if (channel === 'editorSettings:get') return defaultEditorSettings('novel')
     if (channel === 'aiSettings:get') return defaultAiSettings()
+    if (channel === 'authorRules:get') return defaultAuthorRules()
     if (channel === 'layout:get') return defaultLayout()
     if (channel === 'layout:set') return input
     if (channel === 'window:setFullScreen') return input // the fake window does what it is asked
@@ -524,6 +529,23 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
     expect(useAiSettingsStore.getState().settings).toBeNull()
+  })
+
+  it('loads the author rules with the project and drops them on close (F-14.2)', async () => {
+    install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture,
+      'authorRules:get': { rules: 'British spelling.', bannedPhrases: ['delve'] }
+    })
+    render(<App />)
+    await screen.findByRole('treeitem', { name: 'Scene 1' })
+    await waitFor(() =>
+      expect(useAuthorRulesStore.getState().settings?.bannedPhrases).toEqual(['delve'])
+    )
+    await userEvent.click(screen.getByRole('button', { name: /close project/i }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    await screen.findByRole('button', { name: /new project/i })
+    expect(useAuthorRulesStore.getState().settings).toBeNull()
   })
 
   it('opens the Settings dialog from the header button and shows the Editor tab (F-7.5)', async () => {

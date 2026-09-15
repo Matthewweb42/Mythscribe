@@ -10,6 +10,7 @@ import {
   type AiUsageSummary
 } from '@shared/ai'
 import { defaultAiSettings } from '@shared/aiSettings'
+import { defaultAuthorRules } from '@shared/authorRules'
 import type { Channel, Input, Output, ProvenanceReport, VoiceProfile } from '@shared/ipc/contract'
 import { computeStylometrics } from '@shared/stylometry'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -110,7 +111,8 @@ const EMPTY_PROFILE: VoiceProfile = {
   stats: computeStylometrics(''),
   exemplars: [],
   confidence: 0,
-  wordCount: 0
+  wordCount: 0,
+  authorRules: defaultAuthorRules()
 }
 
 /** What `provenance:report` answers for a fresh project (F-14.6); the Provenance section is its own test. */

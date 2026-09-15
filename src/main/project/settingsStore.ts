@@ -5,6 +5,12 @@ import {
   defaultAiSettings,
   type AiSettingsInput
 } from '@shared/aiSettings'
+import {
+  AUTHOR_RULES_KEY,
+  AuthorRules,
+  defaultAuthorRules,
+  type AuthorRulesInput
+} from '@shared/authorRules'
 import { CONVERSATIONS_KEY, Conversations, parseStoredConversations } from '@shared/chat'
 import {
   EDITOR_SETTINGS_KEY,
@@ -173,6 +179,41 @@ export function setFocusSettings(db: TreeDb, value: FocusSettingsInput): FocusSe
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: FOCUS_SETTINGS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the project's author rules (F-14.2) from the `settings` row under `AUTHOR_RULES_KEY`.
+ * A missing row, unparsable JSON, or a value that no longer fits the schema all answer with
+ * `defaultAuthorRules()` (no rules text, the seeded AI-isms): nothing is written at creation,
+ * so a fresh project carries the seeded banned phrases without a row, and removing a seeded
+ * phrase is what stores the list.
+ */
+export function getAuthorRules(db: TreeDb): AuthorRules {
+  const row = db.select().from(settings).where(eq(settings.key, AUTHOR_RULES_KEY)).get()
+  if (!row) return defaultAuthorRules()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultAuthorRules()
+  }
+  const parsed = AuthorRules.safeParse(json)
+  return parsed.success ? parsed.data : defaultAuthorRules()
+}
+
+/**
+ * Replaces the project's author rules (upsert on the settings key) and returns what was
+ * stored: the phrases normalised by the schema (trimmed, deduplicated, capped). Takes the
+ * pre-parse shape, so a caller that sends only one of the two fields gets the other's default.
+ */
+export function setAuthorRules(db: TreeDb, value: AuthorRulesInput): AuthorRules {
+  const stored = AuthorRules.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: AUTHOR_RULES_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

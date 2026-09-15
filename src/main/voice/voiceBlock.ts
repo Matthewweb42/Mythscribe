@@ -1,4 +1,5 @@
 import { estimateTokens } from '@shared/ai'
+import { renderAuthorRulesBlock } from '@shared/authorRules'
 import type { VoiceProfile } from '@shared/ipc/contract'
 import { classifyKind } from '@shared/stylometry'
 import { VOICE_BLOCK_TOKEN_BUDGET } from '@shared/voice'
@@ -17,19 +18,24 @@ export interface VoiceSituation {
 }
 
 /**
- * The voice block a prompt carries (F-14.1), pure: the rules as a list, then up to three
- * exemplars chosen for the situation (same kind as the passage first, then same POV, then the
- * profile's order), whole, while the block stays under `VOICE_BLOCK_TOKEN_BUDGET` estimated
- * tokens. When even the first exemplar would blow the budget it is cut at a word boundary so at
- * least one example goes out; a later one that does not fit is dropped, never cut. Null when
- * the profile has neither rules nor exemplars (a fresh project), which leaves the prompt's
- * voice slot empty as before.
+ * The voice block a prompt carries (F-14.1), pure: the stylometric rules as a list, then the
+ * author's rules (F-14.2) as their own paragraph, then up to three exemplars chosen for the
+ * situation (same kind as the passage first, then same POV, then the profile's order), whole,
+ * while the rules and exemplars stay under `VOICE_BLOCK_TOKEN_BUDGET` estimated tokens. The
+ * author block is budgeted separately (`AUTHOR_RULES_TOKEN_BUDGET`): they are hard constraints,
+ * so an exemplar never crowds them out and they never cost an exemplar its place. When even the
+ * first exemplar would blow the budget it is cut at a word boundary so at least one example
+ * goes out; a later one that does not fit is dropped, never cut. Null only when there is
+ * nothing at all to send; a fresh project still has the seeded banned phrases, so its block is
+ * the author's rules alone, without the "Match the author's voice" heading.
  */
 export function voiceBlock(profile: VoiceProfile, situation: VoiceSituation): string | null {
-  if (profile.rules.length === 0 && profile.exemplars.length === 0) return null
-  let block = ["Match the author's voice:", ...profile.rules.map((rule) => `- ${rule}`)].join(
+  const author = renderAuthorRulesBlock(profile.authorRules)
+  if (profile.rules.length === 0 && profile.exemplars.length === 0) return author
+  const rules = ["Match the author's voice:", ...profile.rules.map((rule) => `- ${rule}`)].join(
     '\n'
   )
+  let block = rules
   const kind = classifyKind(situation.text)
   const pov = normalizePov(situation.pov)
   const ranked = profile.exemplars
@@ -58,7 +64,8 @@ export function voiceBlock(profile: VoiceProfile, situation: VoiceSituation): st
     }
     break
   }
-  return block
+  const examples = block.slice(rules.length)
+  return author === null ? block : `${rules}\n\n${author}${examples}`
 }
 
 function example(text: string): string {

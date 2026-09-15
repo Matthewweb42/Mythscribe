@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeStylometrics, RULE_MIN_PARAGRAPHS, RULE_MIN_WORDS } from './stylometry'
 import {
+  checkBannedPhrases,
   checkGhostTextFidelity,
   FIDELITY_SENTENCE_FACTOR,
   FIDELITY_SENTENCE_FLOOR,
@@ -242,5 +243,38 @@ describe('scoreDocumentDrift (F-14.7)', () => {
     const empty = computeStylometrics('')
     expect(scoreDocumentDrift(profile, empty)).toEqual({ violations: [] })
     expect(scoreDocumentDrift(empty, profile)).toEqual({ violations: [] })
+  })
+})
+
+describe('banned phrases in the fidelity check (F-14.2)', () => {
+  it('flags a banned phrase first, ungated, with the phrase named', () => {
+    const thin = computeStylometrics('Short.')
+    const result = checkGhostTextFidelity(thin, `${PRESENT} It was a testament to her.`, [
+      'a testament to'
+    ])
+    expect(result.ok).toBe(false)
+    expect(result.violations[0]).toEqual({
+      code: 'bannedPhrase',
+      message: 'uses the phrase “a testament to”, which the author has banned'
+    })
+    expect(checkGhostTextFidelity(profile, CLEAN, ['a testament to']).ok).toBe(true)
+    expect(checkGhostTextFidelity(profile, CLEAN).ok).toBe(true)
+  })
+
+  it('lists the banned phrases before the stylometric signals', () => {
+    const codes = checkGhostTextFidelity(profile, `${PRESENT} Delve in.`, ['delve']).violations.map(
+      (v) => v.code
+    )
+    expect(codes[0]).toBe('bannedPhrase')
+    expect(codes).toContain('tense')
+  })
+
+  it('checkBannedPhrases returns one violation per phrase in order of appearance', () => {
+    expect(
+      checkBannedPhrases(['delve', 'tapestry'], 'A tapestry to delve into.').map((v) => v.message)
+    ).toEqual([
+      'uses the phrase “tapestry”, which the author has banned',
+      'uses the phrase “delve”, which the author has banned'
+    ])
   })
 })

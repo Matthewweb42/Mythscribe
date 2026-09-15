@@ -40,11 +40,13 @@ import { renderDisclosure } from '../provenance/disclosure'
 import { buildProvenanceReport } from '../provenance/report'
 import {
   getAiSettings,
+  getAuthorRules,
   getConversations,
   getEditorSettings,
   getFocusSettings,
   getWritingPresets,
   setAiSettings,
+  setAuthorRules,
   setConversations,
   setEditorSettings,
   setFocusSettings,
@@ -202,6 +204,15 @@ export function registerHandlers({
   register('focusSettings:set', (value) =>
     setFocusSettings(manager.require().connection.orm, value)
   )
+
+  // F-14.2: the author's rules are part of the voice profile, so a write invalidates its cache.
+  register('authorRules:get', () => getAuthorRules(manager.require().connection.orm))
+
+  register('authorRules:set', (value) => {
+    const stored = setAuthorRules(manager.require().connection.orm, value)
+    bumpVoiceVersion()
+    return stored
+  })
 
   // F-6.2: the backgrounds are the files in the project's `assets/backgrounds/` folder.
   register('background:list', () => listBackgrounds(manager.require().folder))
