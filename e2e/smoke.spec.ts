@@ -1739,8 +1739,115 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
 
+  // F-7.1: the menu bar. The in-app bar is rendered from the same definition as the native
+  // menu: Insert › Scene adds a scene after the selection (with inline rename, like the F-2.7
+  // chord), View › Notes toggles the panel, Tools › Settings opens the dialog; Help › Keyboard
+  // shortcuts (F-7.7) lists every chord and Help › About shows the package version. A menu
+  // item's name is its label alone; the chord is decoration. The native menu cannot be clicked
+  // from here, so it is checked through Electron: the six top-level labels, File › Save
+  // enabled with its accelerator while a project is open, and a native click arriving as a
+  // `menu:action` that opens the same dialog.
+  const menuBar = page.getByRole('menubar', { name: 'Application menu' })
+  await expect(menuBar.getByRole('menuitem')).toHaveText([
+    'File',
+    'Edit',
+    'Insert',
+    'View',
+    'Tools',
+    'Help'
+  ])
+  await scene1.getByText('Scene 1', { exact: true }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  const scenesBefore = (await listTree()).filter((n) => n.hierarchyLevel === 'scene').length
+  await menuBar.getByRole('menuitem', { name: 'Insert' }).click()
+  const insertMenu = page.getByRole('menu', { name: 'Insert' })
+  // A web novel calls its parts arcs; the chord text rides along in the text, not the name.
+  await expect(insertMenu.getByRole('menuitem')).toHaveText([
+    'SceneCtrl+Shift+S',
+    'ChapterCtrl+Shift+C',
+    'ArcCtrl+Shift+P',
+    'Scene break'
+  ])
+  await expect(insertMenu.getByRole('menuitem', { name: 'Scene', exact: true })).toHaveAttribute(
+    'aria-keyshortcuts',
+    'Ctrl+Shift+S'
+  )
+  await insertMenu.getByRole('menuitem', { name: 'Scene', exact: true }).click()
+  await expect(insertMenu).toBeHidden()
+  await expect(page.getByRole('textbox', { name: 'Rename' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect
+    .poll(async () => (await listTree()).filter((n) => n.hierarchyLevel === 'scene').length)
+    .toBe(scenesBefore + 1)
+  const notesPanel = page.getByTestId('notes-panel')
+  const notesOpenBefore = await notesPanel.isVisible()
+  await menuBar.getByRole('menuitem', { name: 'View' }).click()
+  await page.getByRole('menu', { name: 'View' }).getByRole('menuitem', { name: 'Notes' }).click()
+  await expect(notesPanel).toBeVisible({ visible: !notesOpenBefore })
+  await expect.poll(async () => (await getLayout()).notes.open).toBe(!notesOpenBefore)
+  await menuBar.getByRole('menuitem', { name: 'View' }).click()
+  await page.getByRole('menu', { name: 'View' }).getByRole('menuitem', { name: 'Notes' }).click()
+  await expect(notesPanel).toBeVisible({ visible: notesOpenBefore })
+  await menuBar.getByRole('menuitem', { name: 'Tools' }).click()
+  await page
+    .getByRole('menu', { name: 'Tools' })
+    .getByRole('menuitem', { name: 'Settings' })
+    .click()
+  await expect(settingsDialog).toBeVisible()
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await menuBar.getByRole('menuitem', { name: 'Help' }).click()
+  await page
+    .getByRole('menu', { name: 'Help' })
+    .getByRole('menuitem', { name: 'Keyboard shortcuts' })
+    .click()
+  const shortcutsDialog = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
+  await expect(shortcutsDialog.getByRole('row', { name: /^Insert scene / })).toContainText(
+    'Ctrl+Shift+S'
+  )
+  await expect(shortcutsDialog.getByRole('row', { name: /^Focus mode / })).toContainText('F11')
+  await page.keyboard.press('Escape')
+  await expect(shortcutsDialog).toHaveCount(0)
+  await menuBar.getByRole('menuitem', { name: 'Help' }).click()
+  await page
+    .getByRole('menu', { name: 'Help' })
+    .getByRole('menuitem', { name: 'About MythScribe' })
+    .click()
+  const aboutDialog = page.getByRole('dialog', { name: 'About MythScribe' })
+  const packageVersion = (
+    JSON.parse(fs.readFileSync('package.json', 'utf8')) as { version: string }
+  ).version
+  await expect(aboutDialog.getByTestId('about-version')).toHaveText(`Version ${packageVersion}`)
+  await aboutDialog.getByRole('button', { name: 'OK' }).click()
+  await expect(aboutDialog).toHaveCount(0)
+  const nativeMenu = (): Promise<{
+    labels: (string | undefined)[]
+    save: { enabled: boolean; accelerator: string | null } | null
+  }> =>
+    app.evaluate(({ Menu }) => {
+      const menu = Menu.getApplicationMenu()
+      const save = menu?.getMenuItemById('saveDocument')
+      return {
+        labels: menu?.items.map((item) => item.label) ?? [],
+        save: save ? { enabled: save.enabled, accelerator: save.accelerator ?? null } : null
+      }
+    })
+  expect(await nativeMenu()).toEqual({
+    labels: ['File', 'Edit', 'Insert', 'View', 'Tools', 'Help'],
+    save: { enabled: true, accelerator: 'CmdOrCtrl+S' }
+  })
+  await app.evaluate(({ Menu }) => {
+    // `MenuItem.click` is typed as `Function` by Electron; the block keeps the return out of it.
+    Menu.getApplicationMenu()?.getMenuItemById('openShortcuts')?.click()
+  })
+  await expect(shortcutsDialog).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(shortcutsDialog).toHaveCount(0)
+
   // F-1.4: choosing something that is not a project explains what to pick instead.
   await closeProject()
+  // F-7.1: the native menu followed the close: File › Save is disabled again.
+  expect((await nativeMenu()).save?.enabled).toBe(false)
   const stray = path.join(tmp, 'not-a-project.txt')
   fs.writeFileSync(stray, 'not a project')
   await stubOpenDialog(stray)

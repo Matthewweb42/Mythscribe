@@ -28,6 +28,7 @@ import { Background, FocusSettings } from '../focus'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
 import { MatterTemplateId } from '../matterTemplates'
+import { EditRole, MenuItemId } from '../menu'
 import { WritingPresets } from '../presets'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
 import { SceneMeta } from '../sceneMeta'
@@ -644,7 +645,17 @@ export const contract = {
   'window:setFullScreen': {
     input: z.object({ on: z.boolean() }),
     output: z.object({ on: z.boolean() })
-  }
+  },
+  /**
+   * Menu bar (F-7.1): an Edit item of the in-app bar runs the same `webContents` edit command
+   * the native role does, on the focused window, so both bars edit whatever has the focus.
+   */
+  'menu:edit': { input: z.object({ role: EditRole }), output: z.null() },
+  /**
+   * Help › Documentation (F-7.1): opens the page in the default browser. Only `https` URLs on
+   * mythscribe.app are accepted (`isAllowedExternalUrl`); anything else is VALIDATION.
+   */
+  'menu:openExternal': { input: z.object({ url: z.string() }), output: z.null() }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract
@@ -667,7 +678,9 @@ export const events = {
   /** A streamed piece of a Plan-mode answer (F-5.4); the renderer appends it to the turn with this `requestId`. */
   'ai:chatDelta': z.object({ requestId: z.string(), delta: z.string() }),
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
-  'window:fullScreenChanged': z.object({ on: z.boolean() })
+  'window:fullScreenChanged': z.object({ on: z.boolean() }),
+  /** A native menu item was clicked or its accelerator pressed (F-7.1); the renderer runs the action. */
+  'menu:action': z.object({ id: MenuItemId })
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

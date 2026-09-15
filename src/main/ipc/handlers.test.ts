@@ -59,6 +59,9 @@ let fakeWin: ClosableWindow
 /** The fake window's fullscreen flag (F-6.1); `setFullScreen` writes it unless a test pins it. */
 let fullScreen: boolean
 let onCloseCancelled: ReturnType<typeof vi.fn<() => void>>
+/** The window `menu:edit` should use (F-7.1); null means none has the focus. */
+let focusedWindow: ClosableWindow | null
+let openExternal: ReturnType<typeof vi.fn<(url: string) => Promise<void>>>
 let safe: ReturnType<typeof fakeSafeStorage>
 let keyFile: string
 /** What the fake provider's `testConnection` does; the registry builds it for any saved key. */
@@ -111,13 +114,22 @@ beforeEach(() => {
   fakeWin = {
     close: vi.fn(),
     isDestroyed: () => false,
-    webContents: { send: vi.fn() },
+    webContents: {
+      send: vi.fn(),
+      undo: vi.fn(),
+      redo: vi.fn(),
+      cut: vi.fn(),
+      copy: vi.fn(),
+      paste: vi.fn()
+    },
     setFullScreen: vi.fn((on: boolean) => {
       fullScreen = on
     }),
     isFullScreen: () => fullScreen
   }
   onCloseCancelled = vi.fn<() => void>()
+  focusedWindow = null
+  openExternal = vi.fn<(url: string) => Promise<void>>(() => Promise.resolve())
   safe = fakeSafeStorage()
   keyFile = path.join(tmp, 'userData', 'ai-keys.json')
   const keyStore = new AiKeyStore(keyFile, safe, 'win32')
@@ -156,6 +168,8 @@ beforeEach(() => {
     ),
     dialogs,
     windows: () => [fakeWin],
+    focusedWindow: () => focusedWindow,
+    openExternal,
     onCloseCancelled
   })
   const handlers = new Map<string, (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>>()
@@ -1418,6 +1432,44 @@ describe('window:close-cancelled (F-8.3)', () => {
     expect(onCloseCancelled).toHaveBeenCalledTimes(1)
     expect(manager.current()).not.toBeNull()
     expect(fakeWin.close).not.toHaveBeenCalled()
+  })
+})
+
+describe('menu:edit / menu:openExternal (F-7.1)', () => {
+  it('runs the edit command on the focused window', async () => {
+    const other: ClosableWindow = {
+      ...fakeWin,
+      webContents: { ...fakeWin.webContents, paste: vi.fn() }
+    }
+    focusedWindow = other
+    expect(await invoke('menu:edit', { role: 'paste' })).toBeNull()
+    expect(other.webContents.paste).toHaveBeenCalledTimes(1)
+    expect(fakeWin.webContents.paste).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the first live window when none has the focus', async () => {
+    await invoke('menu:edit', { role: 'undo' })
+    expect(fakeWin.webContents.undo).toHaveBeenCalledTimes(1)
+    fakeWin.isDestroyed = () => true
+    await invoke('menu:edit', { role: 'redo' })
+    expect(fakeWin.webContents.redo).not.toHaveBeenCalled()
+  })
+
+  it('rejects a role that is not an edit command', async () => {
+    const result = await handlerFor('menu:edit')(null, { role: 'selectAll' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+  })
+
+  it('opens documentation on mythscribe.app and refuses every other host', async () => {
+    expect(await invoke('menu:openExternal', { url: 'https://mythscribe.app/docs/' })).toBeNull()
+    expect(openExternal).toHaveBeenCalledWith('https://mythscribe.app/docs/')
+    for (const url of ['https://example.com/', 'http://mythscribe.app/', 'file:///etc/passwd']) {
+      const result = await handlerFor('menu:openExternal')(null, { url })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    }
+    expect(openExternal).toHaveBeenCalledTimes(1)
   })
 })
 

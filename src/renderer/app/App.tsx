@@ -1,14 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, levelLabel, sectionLabel, type HierarchyLevel } from '@shared/labels'
 import { LAYOUT_LIMITS } from '@shared/layout'
+import { AboutDialog } from '@renderer/features/shell/AboutDialog'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
-import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { Logo } from '@renderer/features/shell/Logo'
+import { MenuBar } from '@renderer/features/shell/MenuBar'
+import {
+  closeProjectWithConfirm,
+  insertLevel,
+  runMenuAction
+} from '@renderer/features/shell/menuActions'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { SettingsDialog } from '@renderer/features/shell/SettingsDialog'
+import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
+import { ShortcutsDialog } from '@renderer/features/shell/ShortcutsDialog'
 import { APP_SHORTCUTS, matchesShortcut, type Chord } from '@renderer/features/shell/shortcuts'
 import { SidebarTabs } from '@renderer/features/shell/SidebarTabs'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
@@ -32,13 +41,13 @@ import { BackgroundRotation } from '@renderer/features/focus/rotation'
 import { OVERLAY_DARKNESS } from '@shared/focus'
 import { useBackgroundStore, useCurrentBackground } from '@renderer/features/focus/backgroundStore'
 import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
-import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { CreateProjectWizard } from '@renderer/features/project/CreateProjectWizard'
 import { RecentProjects } from '@renderer/features/project/RecentProjects'
 import { useProjectStore } from '@renderer/features/project/projectStore'
+import { useWelcomeStore } from '@renderer/features/project/welcomeStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 
@@ -66,9 +75,14 @@ export function App(): React.JSX.Element {
     })
     // F-6.1: focus mode follows the window's real fullscreen state.
     const offFocus = useFocusStore.getState().subscribe()
+    // F-7.1: a native menu click or accelerator runs the same action as the in-app bar.
+    const offMenu = ipc().on('menu:action', ({ id }) => {
+      void runMenuAction(id)
+    })
     return () => {
       offClose()
       offFocus()
+      offMenu()
     }
   }, [])
 
@@ -103,6 +117,8 @@ export function App(): React.JSX.Element {
       useVoiceStore.getState().clear()
       useProvenanceStore.getState().clear()
       useAssistantStore.getState().clear()
+      // F-7.1: a shell dialog left open over the closing project must not reappear over the next one.
+      useShellDialogStore.getState().close()
       useTagStore.getState().clear()
       useDocumentTagStore.getState().clear()
       useBackgroundStore.getState().clear()
@@ -157,6 +173,7 @@ export function App(): React.JSX.Element {
           {current ? <SidebarToggleButton /> : null}
           <Logo size={16} />
           <span className="font-semibold">MythScribe</span>
+          <MenuBar />
           {current ? (
             <span className="text-fg-muted">
               / <span data-testid="project-name">{current.name}</span> ·{' '}
@@ -167,13 +184,14 @@ export function App(): React.JSX.Element {
             <div className="ml-auto flex items-center gap-2">
               <AiActivityIndicator />
               <AssistantToggleButton />
-              <SettingsButton format={current.format} />
+              <SettingsButton />
               <CloseProjectButton />
             </div>
           ) : null}
         </header>
       )}
       {current ? <FocusShortcuts /> : null}
+      {current ? <SettingsShortcut /> : null}
       {current ? <InsertShortcuts format={current.format} /> : null}
       <main
         className={
@@ -187,9 +205,31 @@ export function App(): React.JSX.Element {
         {!ready ? null : current ? <ProjectScreen format={current.format} /> : <WelcomeScreen />}
         {focus ? <FocusControlBar /> : null}
       </main>
+      {/* The dialog service last, so a confirm from inside a shell dialog stacks above it. */}
+      <ShellDialogs format={current?.format ?? null} />
       <DialogHost />
     </div>
   )
+}
+
+/**
+ * The app-level dialogs (F-7.1): Settings (F-7.5, a project's settings, so only with one open),
+ * the shortcuts reference (F-7.7), and About, one at a time from the shell dialog store, which
+ * the header button, Ctrl+, the in-app bar, and the native menu all open through.
+ */
+function ShellDialogs({ format }: { format: NovelFormat | null }): React.JSX.Element | null {
+  const open = useShellDialogStore((s) => s.open)
+  const close = useShellDialogStore((s) => s.close)
+  switch (open) {
+    case 'settings':
+      return format ? <SettingsDialog format={format} onClose={close} /> : null
+    case 'shortcuts':
+      return <ShortcutsDialog onClose={close} />
+    case 'about':
+      return <AboutDialog onClose={close} />
+    case null:
+      return null
+  }
 }
 
 function WelcomeScreen(): React.JSX.Element {
@@ -199,11 +239,15 @@ function WelcomeScreen(): React.JSX.Element {
   const recents = useProjectStore((s) => s.recents)
   const loadRecents = useProjectStore((s) => s.loadRecents)
   const removeRecent = useProjectStore((s) => s.removeRecent)
-  const [creating, setCreating] = useState(false)
+  // F-7.1: File › New project opens the wizard through the store; a reopened welcome screen
+  // starts on the buttons again.
+  const creating = useWelcomeStore((s) => s.creating)
+  const setCreating = useWelcomeStore((s) => s.setCreating)
 
   useEffect(() => {
     loadRecents().catch((err: unknown) => toast.error(describeError(err)))
   }, [loadRecents])
+  useEffect(() => () => setCreating(false), [setCreating])
 
   /** Failures propagate: the wizard shows them inline where the author is looking. */
   const onCreate = async (name: string, format: NovelFormat): Promise<void> => {
@@ -272,30 +316,15 @@ function WelcomeScreen(): React.JSX.Element {
   )
 }
 
-/** Header action: confirms, then closes the open project (everything is already saved). */
+/** Header action: confirms, then closes the open project (everything is already saved); File › Close project does the same. */
 function CloseProjectButton(): React.JSX.Element {
   const busy = useProjectStore((s) => s.busy)
-  const close = useProjectStore((s) => s.close)
-
-  const onClose = async (): Promise<void> => {
-    const ok = await dialogs.confirm({
-      title: 'Close project',
-      message: 'Everything is saved automatically. Close it now?',
-      confirmLabel: 'Close'
-    })
-    if (!ok) return
-    try {
-      await close()
-    } catch (err) {
-      toast.error(describeError(err))
-    }
-  }
 
   return (
     <button
       type="button"
       disabled={busy}
-      onClick={() => void onClose()}
+      onClick={() => void closeProjectWithConfirm()}
       className="rounded-md border border-line px-2.5 py-1 text-xs hover:bg-surface-raised disabled:opacity-60"
     >
       Close project
@@ -329,11 +358,10 @@ const INSERT_CHORDS: [Chord, HierarchyLevel][] = [
 
 /**
  * Insert shortcuts (F-2.7): Ctrl+Shift+S / C / P create a scene, chapter, or part relative to
- * the current selection through the same placement rule as the create bar (`createLevel`
- * resolves against `selectedId`). The listener runs in the capture phase and stops the event,
- * so the editor never sees the chord (its own Mod-Shift-S is strikethrough). When the selection
- * cannot take that level (front or end matter, nothing selected in an empty manuscript) a toast
- * says what to select. Mounted only while a project is open; renders nothing.
+ * the current selection through `insertLevel`, which the Insert menu (F-7.1) shares. The
+ * listener runs in the capture phase and stops the event, so the editor never sees the chord
+ * (its own Mod-Shift-S is strikethrough). Mounted only while a project is open; renders
+ * nothing.
  */
 function InsertShortcuts({ format }: { format: NovelFormat }): null {
   useEffect(() => {
@@ -342,15 +370,7 @@ function InsertShortcuts({ format }: { format: NovelFormat }): null {
       if (!hit) return
       event.preventDefault()
       event.stopPropagation()
-      const level = hit[1]
-      const tree = useTreeStore.getState()
-      if (!resolveCreateTarget(tree, tree.selectedId, level)) {
-        toast.warning(
-          `Select something in the manuscript to insert the ${levelLabel(format, level).toLowerCase()} after it.`
-        )
-        return
-      }
-      tree.createLevel(level).catch((err: unknown) => toast.error(describeError(err)))
+      insertLevel(hit[1], format)
     }
     document.addEventListener('keydown', onKeyDown, true)
     return () => document.removeEventListener('keydown', onKeyDown, true)
@@ -384,37 +404,37 @@ function FocusShortcuts(): null {
 }
 
 /**
- * Header action (F-7.5): opens the Settings dialog, as does Ctrl+, (Cmd+, on macOS). Settings
- * are per project, so the button, its shortcut listener, and the dialog exist only while a
- * project is open: this component is the one owner of all three and is mounted only then.
+ * Ctrl+, (Cmd+, on macOS) opens the Settings dialog (F-7.5). Settings are per project, so the
+ * listener is mounted only while one is open; it sits beside `FocusShortcuts`, outside the
+ * header, so it works in focus mode too (F-7.1). Renders nothing.
  */
-function SettingsButton({ format }: { format: NovelFormat }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-
+function SettingsShortcut(): null {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (matchesShortcut(event, APP_SHORTCUTS.settings.chord)) {
         event.preventDefault()
-        setOpen(true)
+        useShellDialogStore.getState().show('settings')
       }
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [])
+  return null
+}
 
+/** Header action (F-7.5): opens the Settings dialog, which `ShellDialogs` renders. */
+function SettingsButton(): React.JSX.Element {
+  const show = useShellDialogStore((s) => s.show)
   return (
-    <>
-      <button
-        type="button"
-        aria-label="Settings"
-        title="Settings (Ctrl+,)"
-        onClick={() => setOpen(true)}
-        className="rounded-md p-1.5 text-fg-muted hover:bg-surface-raised hover:text-fg"
-      >
-        <Settings2 size={16} aria-hidden="true" />
-      </button>
-      {open ? <SettingsDialog format={format} onClose={() => setOpen(false)} /> : null}
-    </>
+    <button
+      type="button"
+      aria-label="Settings"
+      title="Settings (Ctrl+,)"
+      onClick={() => show('settings')}
+      className="rounded-md p-1.5 text-fg-muted hover:bg-surface-raised hover:text-fg"
+    >
+      <Settings2 size={16} aria-hidden="true" />
+    </button>
   )
 }
 

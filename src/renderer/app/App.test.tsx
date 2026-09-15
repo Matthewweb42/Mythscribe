@@ -27,7 +27,7 @@ import {
 } from '@renderer/features/editor/settingsStore'
 import { resetBackgroundStore } from '@renderer/features/focus/backgroundStore'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
-import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { dialogs, useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -35,6 +35,8 @@ import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { registerPendingSave, resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
+import { resetWelcomeStore } from '@renderer/features/project/welcomeStore'
+import { resetShellDialogStore } from '@renderer/features/shell/shellDialogStore'
 import { App } from './App'
 
 const info: ProjectInfo = {
@@ -73,6 +75,8 @@ beforeEach(() => {
   resetTagStore()
   resetFocusStore()
   resetBackgroundStore()
+  resetShellDialogStore()
+  resetWelcomeStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -221,7 +225,8 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
     expect(document.title).toBe('MythScribe')
-    expect(screen.getByRole('banner')).toHaveTextContent(/^MythScribe$/)
+    // F-7.1: the menu bar stays; the project segment is gone.
+    expect(screen.getByRole('banner')).toHaveTextContent(/^MythScribeFileEditInsertViewToolsHelp$/)
     // Closing the project clears the tree store.
     expect(screen.queryByRole('tree')).not.toBeInTheDocument()
     expect(useTreeStore.getState().rootIds).toEqual([])
@@ -1131,6 +1136,188 @@ describe('App', () => {
       } finally {
         vi.useRealTimers()
       }
+    })
+  })
+
+  describe('menu bar (F-7.1, F-7.7)', () => {
+    it('shows the bar on the welcome screen with the project items disabled, and File › New project opens the wizard', async () => {
+      install()
+      render(<App />)
+      await screen.findByRole('button', { name: /new project/i })
+      const bar = screen.getByRole('menubar', { name: 'Application menu' })
+      expect(
+        within(bar)
+          .getAllByRole('menuitem')
+          .map((m) => m.textContent)
+      ).toEqual(['File', 'Edit', 'Insert', 'View', 'Tools', 'Help'])
+      await userEvent.click(within(bar).getByRole('menuitem', { name: 'File' }))
+      const file = screen.getByRole('menu', { name: 'File' })
+      expect(within(file).getByRole('menuitem', { name: 'Save' })).toHaveAttribute(
+        'aria-disabled',
+        'true'
+      )
+      await userEvent.click(within(file).getByRole('menuitem', { name: 'New project' }))
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+      expect(await screen.findByRole('textbox', { name: 'Project name' })).toBeInTheDocument()
+      // Cancel returns to the buttons, and the flag does not leak into the next welcome screen.
+      await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(screen.getByRole('button', { name: /new project/i })).toBeInTheDocument()
+    })
+
+    it('a native menu action arrives as an event and runs: Help › Keyboard shortcuts lists the chords, About shows the version', async () => {
+      install({ 'app:info': { version: '9.9.9', platform: 'linux' } })
+      render(<App />)
+      await screen.findByRole('button', { name: /new project/i })
+      fire('menu:action', { id: 'openShortcuts' })
+      const reference = await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })
+      expect(within(reference).getByRole('row', { name: /Insert scene/ })).toHaveTextContent(
+        'Ctrl+Shift+S'
+      )
+      await userEvent.keyboard('{Escape}')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      fire('menu:action', { id: 'openAbout' })
+      const about = await screen.findByRole('dialog', { name: 'About MythScribe' })
+      await waitFor(() =>
+        expect(within(about).getByTestId('about-version')).toHaveTextContent('Version 9.9.9')
+      )
+      await userEvent.click(within(about).getByRole('button', { name: 'OK' }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('a project item from the native menu without a project toasts instead of running', async () => {
+      const invoke = install()
+      render(<App />)
+      await screen.findByRole('button', { name: /new project/i })
+      fire('menu:action', { id: 'saveDocument' })
+      await waitFor(() =>
+        expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual([
+          'Open a project first.'
+        ])
+      )
+      expect(invoke).not.toHaveBeenCalledWith('document:save', expect.anything())
+    })
+
+    it('Insert › Scene from the bar creates after the selection; View › Notes toggles the panel; Tools › Settings opens the dialog', async () => {
+      const invoke = install({
+        'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+        'tree:list': treeFixture,
+        'tree:create': createdScene
+      })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      await screen.findByRole('textbox', { name: 'Document' })
+      const bar = screen.getByRole('menubar', { name: 'Application menu' })
+
+      await userEvent.click(within(bar).getByRole('menuitem', { name: 'Insert' }))
+      const insert = screen.getByRole('menu', { name: 'Insert' })
+      // Web novel labels the top level "Arc"; the scene item carries its chord.
+      expect(
+        within(insert)
+          .getAllByRole('menuitem')
+          .map((m) => m.textContent)
+      ).toEqual(['SceneCtrl+Shift+S', 'ChapterCtrl+Shift+C', 'ArcCtrl+Shift+P', 'Scene break'])
+      expect(within(insert).getByRole('menuitem', { name: 'Scene' })).toHaveAttribute(
+        'aria-keyshortcuts',
+        'Ctrl+Shift+S'
+      )
+      await userEvent.click(within(insert).getByRole('menuitem', { name: 'Scene' }))
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith('tree:create', {
+          parentId: 'ch-1',
+          afterId: 'sc-1',
+          kind: 'document',
+          hierarchyLevel: 'scene'
+        })
+      )
+
+      expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument()
+      await userEvent.click(within(bar).getByRole('menuitem', { name: 'View' }))
+      await userEvent.click(
+        within(screen.getByRole('menu', { name: 'View' })).getByRole('menuitem', { name: 'Notes' })
+      )
+      expect(useLayoutStore.getState().layout.notes.open).toBe(true)
+
+      await userEvent.click(within(bar).getByRole('menuitem', { name: 'Tools' }))
+      await userEvent.click(
+        within(screen.getByRole('menu', { name: 'Tools' })).getByRole('menuitem', {
+          name: 'Settings'
+        })
+      )
+      expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: 'Close settings' }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('a confirm raised from inside a shell dialog renders after it, so it stacks on top', async () => {
+      install({ 'project:current': info, 'tree:list': treeFixture })
+      render(<App />)
+      await screen.findByRole('treeitem', { name: 'Scene 1' })
+      fire('menu:action', { id: 'openSettings' })
+      const settings = await screen.findByRole('dialog', { name: 'Settings' })
+      void dialogs.confirm({ title: 'Delete it?', message: 'Sure?' })
+      const confirm = await screen.findByRole('dialog', { name: 'Delete it?' })
+      expect(
+        settings.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    })
+
+    it('File › Close project confirms like the header button', async () => {
+      const invoke = install({ 'project:current': info, 'tree:list': treeFixture })
+      render(<App />)
+      await screen.findByRole('treeitem', { name: 'Scene 1' })
+      fire('menu:action', { id: 'closeProject' })
+      await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+      expect(await screen.findByRole('button', { name: /new project/i })).toBeInTheDocument()
+      expect(invoke).toHaveBeenCalledWith('project:close', undefined)
+    })
+
+    it('Ctrl+, opens Settings in focus mode too, and the native View › AI assistant floats the panel there (F-6.1 gap)', async () => {
+      install({ 'project:current': info, 'tree:list': treeFixture })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      const editor = await screen.findByRole('textbox', { name: 'Document' })
+      editor.focus()
+      await userEvent.keyboard('{F11}')
+      await waitFor(() => expect(useFocusStore.getState().active).toBe(true))
+      expect(screen.queryByRole('banner')).not.toBeInTheDocument()
+      await userEvent.keyboard('{Control>},{/Control}')
+      expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+      await userEvent.keyboard('{Escape}')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      // The dialog's Escape was claimed, so focus mode stayed.
+      expect(useFocusStore.getState().active).toBe(true)
+      fire('menu:action', { id: 'toggleAssistant' })
+      expect(await screen.findByTestId('floating-assistant')).toBeInTheDocument()
+      expect(useLayoutStore.getState().layout.assistant.open).toBe(false)
+    })
+
+    // Regression (verifier finding, F-7.1): `shellDialogStore.open` is never cleared when the
+    // project closes. The DOM overlay blocks the header and the in-app bar while a shell dialog
+    // is up, but the native OS menu is not part of the DOM, so File › Close project (or its
+    // native accelerator-free click) still reaches `closeProjectWithConfirm` behind an open
+    // Settings dialog. `ShellDialogs` then renders null only because `format` is briefly null
+    // (no project); once any project becomes current again, `open` is still `'settings'` and
+    // the dialog reappears unrequested.
+    it('closing the project behind an open Settings dialog does not resurrect it on the next project (currently fails)', async () => {
+      install({ 'project:current': info, 'tree:list': treeFixture })
+      render(<App />)
+      await screen.findByTestId('project-name')
+      fire('menu:action', { id: 'openSettings' })
+      expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+
+      // The native File › Close project menu reaches the app even though the DOM overlay of
+      // the open dialog would block the header button and the in-app bar underneath it.
+      fire('menu:action', { id: 'closeProject' })
+      await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+      await screen.findByRole('button', { name: /new project/i })
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+      // A second project becomes current (opened or created); Settings must stay closed.
+      useProjectStore.setState({ current: { ...info, id: '2', name: 'Second' } })
+      await screen.findByTestId('project-name')
+      expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument()
     })
   })
 

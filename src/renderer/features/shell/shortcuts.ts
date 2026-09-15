@@ -1,65 +1,23 @@
+import type { Chord } from '@shared/shortcuts'
+
 /**
- * The one registry of app-level keyboard shortcuts (F-2.7): every listener reads its chord
- * from here, the Insert menu (F-7.1) and the shortcuts reference (F-7.7) will read the same
- * table. `ctrl` means Ctrl on Windows and Linux and Cmd on macOS. Editor-internal chords
- * (bold, undo, Ctrl+S) belong to the Tiptap extensions and are not listed.
+ * The renderer's entry to the shortcut registry (F-2.7): the chords themselves live in
+ * `@shared/shortcuts` (the menu, F-7.1, renders them as native accelerators from main), this
+ * file adds what needs the platform: matching a keyboard event and rendering a chord for
+ * display. Editor-internal chords belong to the Tiptap extensions and are listed, not bound,
+ * in `EDITOR_SHORTCUTS`.
  */
-export interface Chord {
-  /** Compared case-insensitively against `KeyboardEvent.key`. */
-  key: string
-  ctrl?: boolean
-  shift?: boolean
-  alt?: boolean
-}
-
-export const SHORTCUT_GROUPS = ['app', 'insert'] as const
-export type ShortcutGroup = (typeof SHORTCUT_GROUPS)[number]
-
-export interface Shortcut {
-  id: ShortcutId
-  label: string
-  chord: Chord
-  group: ShortcutGroup
-}
-
-export const SHORTCUT_IDS = [
-  'settings',
-  'assistant',
-  'focusMode',
-  'insertScene',
-  'insertChapter',
-  'insertPart'
-] as const
-export type ShortcutId = (typeof SHORTCUT_IDS)[number]
-
-export const APP_SHORTCUTS: Record<ShortcutId, Shortcut> = {
-  settings: { id: 'settings', label: 'Settings', chord: { key: ',', ctrl: true }, group: 'app' },
-  assistant: {
-    id: 'assistant',
-    label: 'AI assistant',
-    chord: { key: 'k', ctrl: true },
-    group: 'app'
-  },
-  focusMode: { id: 'focusMode', label: 'Focus mode', chord: { key: 'F11' }, group: 'app' },
-  insertScene: {
-    id: 'insertScene',
-    label: 'Insert scene',
-    chord: { key: 's', ctrl: true, shift: true },
-    group: 'insert'
-  },
-  insertChapter: {
-    id: 'insertChapter',
-    label: 'Insert chapter',
-    chord: { key: 'c', ctrl: true, shift: true },
-    group: 'insert'
-  },
-  insertPart: {
-    id: 'insertPart',
-    label: 'Insert part',
-    chord: { key: 'p', ctrl: true, shift: true },
-    group: 'insert'
-  }
-}
+export {
+  APP_SHORTCUTS,
+  EDITOR_SHORTCUTS,
+  SHORTCUT_GROUPS,
+  SHORTCUT_IDS,
+  type Chord,
+  type EditorShortcut,
+  type Shortcut,
+  type ShortcutGroup,
+  type ShortcutId
+} from '@shared/shortcuts'
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 

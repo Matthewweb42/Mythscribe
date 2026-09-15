@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, net, protocol, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, net, protocol, safeStorage, shell } from 'electron'
 import icon from '../../resources/icon.png?asset'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -11,6 +11,7 @@ import { createDialogs } from './dialogs'
 import { registerHandlers } from './ipc/handlers'
 import { emit } from './ipc/registry'
 import { installSingleInstance } from './lifecycle'
+import { installApplicationMenu } from './menu'
 import { assetPathFor } from './project/assetUrl'
 import { ProjectManager } from './project/manager'
 
@@ -103,7 +104,13 @@ if (!primaryInstance) {
   app.quit()
 } else {
   void app.whenReady().then(() => {
-    Menu.setApplicationMenu(null)
+    // F-7.1: the native menu from the shared definition; on Windows and Linux the window's
+    // `autoHideMenuBar` keeps it behind Alt, the in-app bar being the visible one.
+    installApplicationMenu({
+      manager,
+      platform: process.platform,
+      target: () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
+    })
     // No project open, a URL outside the backgrounds folder, or a file that is gone: 404.
     protocol.handle(ASSET_SCHEME, (request) => {
       const folder = manager.current()?.path
@@ -122,6 +129,8 @@ if (!primaryInstance) {
         () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
       ),
       windows: () => BrowserWindow.getAllWindows(),
+      focusedWindow: () => BrowserWindow.getFocusedWindow(),
+      openExternal: (url) => shell.openExternal(url),
       onCloseCancelled: () => {
         quitRequested = false
       }

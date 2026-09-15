@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { APP_SHORTCUTS, SHORTCUT_IDS, formatShortcut, matchesShortcut } from './shortcuts'
+import {
+  APP_SHORTCUTS,
+  EDITOR_SHORTCUTS,
+  SHORTCUT_IDS,
+  formatShortcut,
+  matchesShortcut
+} from './shortcuts'
 
 const event = (
   key: string,
@@ -57,5 +63,31 @@ describe('shortcuts (F-2.7)', () => {
     expect(formatShortcut(APP_SHORTCUTS.insertScene.chord)).toBe('Ctrl+Shift+S')
     expect(formatShortcut(APP_SHORTCUTS.settings.chord)).toBe('Ctrl+,')
     expect(formatShortcut(APP_SHORTCUTS.focusMode.chord)).toBe('F11')
+  })
+})
+
+describe('shortcuts additions for the menu and the reference (F-7.1, F-7.7)', () => {
+  it('lists Save as a display chord in the app group', () => {
+    expect(APP_SHORTCUTS.save).toEqual({
+      id: 'save',
+      label: 'Save',
+      chord: { key: 's', ctrl: true },
+      group: 'app'
+    })
+    expect(formatShortcut(APP_SHORTCUTS.save.chord)).toBe('Ctrl+S')
+  })
+
+  it('lists the editor chords with a label each and no duplicates of label and chord', () => {
+    expect(EDITOR_SHORTCUTS.length).toBeGreaterThan(10)
+    const seen = new Set<string>()
+    for (const shortcut of EDITOR_SHORTCUTS) {
+      expect(shortcut.label.length).toBeGreaterThan(0)
+      const key = `${shortcut.label}:${formatShortcut(shortcut.chord)}`
+      expect(seen.has(key)).toBe(false)
+      seen.add(key)
+    }
+    expect(EDITOR_SHORTCUTS.map((s) => s.label)).toContain('Accept the ghost text')
+    // Strikethrough has no chord: Ctrl+Shift+S is Insert scene (F-2.7).
+    expect(EDITOR_SHORTCUTS.map((s) => formatShortcut(s.chord))).not.toContain('Ctrl+Shift+S')
   })
 })

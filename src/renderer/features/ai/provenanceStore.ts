@@ -22,13 +22,25 @@ interface ProvenanceState {
 /** Bumped by every clear so a response from a superseded request is dropped. */
 let generation = 0
 
+/** The report as main computes it after the pending saves are flushed (main reads saved rows). */
+async function loadReport(): Promise<ProvenanceReport> {
+  await flushPendingSaves()
+  return await ipc().invoke('provenance:report', undefined)
+}
+
 export const useProvenanceStore = create<ProvenanceState>((set) => ({
   report: null,
 
   async load() {
     const mine = generation
-    await flushPendingSaves()
-    const report = await ipc().invoke('provenance:report', undefined)
+    let report: ProvenanceReport
+    try {
+      report = await loadReport()
+    } catch (err) {
+      // A request the project close or a reset superseded must not surface as a toast.
+      if (mine !== generation) return
+      throw err
+    }
     if (mine !== generation) return
     set({ report })
   },

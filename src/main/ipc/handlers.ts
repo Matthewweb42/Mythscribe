@@ -45,6 +45,7 @@ import {
   setWritingPresets
 } from '../project/settingsStore'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
+import { EXTERNAL_HOST, isAllowedExternalUrl, type EditRole } from '@shared/menu'
 import { normalizeProposalNote } from '@shared/proposal'
 import { addDocumentTag, listDocumentTags, removeDocumentTag } from '../tag/documentTagStore'
 import { createTag, deleteTag, listTags, loadTagTemplate, updateTag } from '../tag/tagStore'
@@ -69,6 +70,8 @@ export interface ClosableWindow extends EmitTarget {
   close(): void
   setFullScreen(on: boolean): void
   isFullScreen(): boolean
+  /** `send` for events, plus the edit commands the in-app Edit menu runs (F-7.1). */
+  webContents: EmitTarget['webContents'] & Record<EditRole, () => void>
 }
 
 export interface HandlerDeps {
@@ -78,6 +81,10 @@ export interface HandlerDeps {
   ai: AiProviderRegistry
   dialogs: ProjectDialogs
   windows: () => ClosableWindow[]
+  /** The window with keyboard focus, for the edit commands (F-7.1); null when none has it. */
+  focusedWindow: () => ClosableWindow | null
+  /** Opens a URL in the default browser (F-7.1); `shell.openExternal` in the app. */
+  openExternal: (url: string) => Promise<void>
   /** The renderer abandoned a window close (its flush failed); forget any quit that asked for it. */
   onCloseCancelled: () => void
 }
@@ -89,6 +96,8 @@ export function registerHandlers({
   ai,
   dialogs,
   windows,
+  focusedWindow,
+  openExternal,
   onCloseCancelled
 }: HandlerDeps): void {
   register('app:info', () => ({ version: app.getVersion(), platform: process.platform }))
@@ -527,6 +536,22 @@ export function registerHandlers({
     if (!win) return { on: false }
     win.setFullScreen(on)
     return { on: win.isFullScreen() }
+  })
+
+  // F-7.1: the in-app Edit menu edits whatever has the focus, like the native roles do. A click
+  // on the bar does not move the focus (the bar prevents it), so the editor or input keeps it.
+  register('menu:edit', ({ role }) => {
+    const win = focusedWindow() ?? windows().find((w) => !w.isDestroyed())
+    if (win && !win.isDestroyed()) win.webContents[role]()
+    return null
+  })
+
+  register('menu:openExternal', async ({ url }) => {
+    if (!isAllowedExternalUrl(url)) {
+      throw new AppError('VALIDATION', `Only pages on ${EXTERNAL_HOST} can be opened`)
+    }
+    await openExternal(url)
+    return null
   })
 
   manager.onChange((info) => {
