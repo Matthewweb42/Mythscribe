@@ -16,6 +16,7 @@ import { LAYOUT_LIMITS } from '@shared/layout'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
+import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { useAiSettingsStore } from './aiSettingsStore'
 import { AGENT_NOTICE, useActiveConversation, useAssistantStore } from './assistantStore'
 import { formatRequestCost } from './usageFormat'
@@ -44,12 +45,7 @@ export function AssistantToggleButton(): React.JSX.Element {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (
-        (event.ctrlKey || event.metaKey) &&
-        !event.altKey &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === 'k'
-      ) {
+      if (matchesShortcut(event, APP_SHORTCUTS.assistant.chord)) {
         event.preventDefault()
         useLayoutStore.getState().toggle('assistant')
       }

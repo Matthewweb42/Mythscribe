@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
-import { formatLabel, levelLabel, sectionLabel } from '@shared/labels'
+import { formatLabel, levelLabel, sectionLabel, type HierarchyLevel } from '@shared/labels'
 import { LAYOUT_LIMITS } from '@shared/layout'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -9,6 +9,7 @@ import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutSt
 import { Logo } from '@renderer/features/shell/Logo'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { SettingsDialog } from '@renderer/features/shell/SettingsDialog'
+import { APP_SHORTCUTS, matchesShortcut, type Chord } from '@renderer/features/shell/shortcuts'
 import { SidebarTabs } from '@renderer/features/shell/SidebarTabs'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
@@ -24,6 +25,7 @@ import { usePresetsStore } from '@renderer/features/ai/presetsStore'
 import { useProvenanceStore } from '@renderer/features/ai/provenanceStore'
 import { useVoiceStore } from '@renderer/features/ai/voiceStore'
 import { useEditorSettingsStore } from '@renderer/features/editor/settingsStore'
+import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
@@ -132,6 +134,7 @@ export function App(): React.JSX.Element {
             <AiActivityIndicator />
             <AssistantToggleButton />
             <SettingsButton format={current.format} />
+            <InsertShortcuts format={current.format} />
             <CloseProjectButton />
           </div>
         ) : null}
@@ -279,6 +282,43 @@ function SidebarToggleButton(): React.JSX.Element {
   )
 }
 
+const INSERT_CHORDS: [Chord, HierarchyLevel][] = [
+  [APP_SHORTCUTS.insertScene.chord, 'scene'],
+  [APP_SHORTCUTS.insertChapter.chord, 'chapter'],
+  [APP_SHORTCUTS.insertPart.chord, 'part']
+]
+
+/**
+ * Insert shortcuts (F-2.7): Ctrl+Shift+S / C / P create a scene, chapter, or part relative to
+ * the current selection through the same placement rule as the create bar (`createLevel`
+ * resolves against `selectedId`). The listener runs in the capture phase and stops the event,
+ * so the editor never sees the chord (its own Mod-Shift-S is strikethrough). When the selection
+ * cannot take that level (front or end matter, nothing selected in an empty manuscript) a toast
+ * says what to select. Mounted only while a project is open; renders nothing.
+ */
+function InsertShortcuts({ format }: { format: NovelFormat }): null {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const hit = INSERT_CHORDS.find(([chord]) => matchesShortcut(event, chord))
+      if (!hit) return
+      event.preventDefault()
+      event.stopPropagation()
+      const level = hit[1]
+      const tree = useTreeStore.getState()
+      if (!resolveCreateTarget(tree, tree.selectedId, level)) {
+        toast.warning(
+          `Select something in the manuscript to insert the ${levelLabel(format, level).toLowerCase()} after it.`
+        )
+        return
+      }
+      tree.createLevel(level).catch((err: unknown) => toast.error(describeError(err)))
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [format])
+  return null
+}
+
 /**
  * Header action (F-7.5): opens the Settings dialog, as does Ctrl+, (Cmd+, on macOS). Settings
  * are per project, so the button, its shortcut listener, and the dialog exist only while a
@@ -289,7 +329,7 @@ function SettingsButton({ format }: { format: NovelFormat }): React.JSX.Element 
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === ',') {
+      if (matchesShortcut(event, APP_SHORTCUTS.settings.chord)) {
         event.preventDefault()
         setOpen(true)
       }

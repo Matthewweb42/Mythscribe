@@ -1352,6 +1352,26 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('status-ai')).toHaveCount(0)
   await expect(editor).toContainText(GHOST_CONTINUATION.slice(25))
 
+  // F-2.7: Insert shortcuts. With Scene 1 selected and the caret in its editor, Ctrl+Shift+S
+  // adds a scene right after it (inline rename opens; Escape keeps the default title) and the
+  // editor did not strike anything through; Ctrl+Shift+C adds a chapter after Chapter 1. Both
+  // land through the same placement rule as the create bar.
+  await editor.click()
+  await page.keyboard.press('Control+Shift+s')
+  const insertedScene = chapter1.getByRole('treeitem', { name: 'Untitled Scene', exact: true })
+  await expect(insertedScene).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(chapter1.getByRole('treeitem', { name: /^(Scene 1|Untitled Scene)$/ })).toHaveCount(
+    2
+  )
+  expect(await editor.locator('s').count()).toBe(0)
+  await page.keyboard.press('Control+Shift+c')
+  const insertedChapter = arc1.getByRole('treeitem', { name: 'Untitled Chapter', exact: true })
+  await expect(insertedChapter).toBeVisible()
+  await page.keyboard.press('Escape')
+  await scene1.getByText('Scene 1', { exact: true }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+
   // F-5.4: the assistant panel. Ctrl+K opens it (the dial is still at Suggest with the key
   // saved). A Plan question streams its answer into the chat with the cost line, and the
   // request carries the scene's text; the tab takes the question as its title. Agent mode

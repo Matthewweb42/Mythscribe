@@ -138,6 +138,21 @@ async function fillWizard(name: string, format: RegExp): Promise<void> {
   await userEvent.click(screen.getByRole('button', { name: 'Create' }))
 }
 
+const createdScene = {
+  id: 'new-sc',
+  parentId: 'ch-1',
+  sectionType: null,
+  kind: 'document',
+  hierarchyLevel: 'scene',
+  title: 'Untitled Scene',
+  position: 1,
+  wordCount: 0,
+  matterType: null,
+  preset: null,
+  created: 'c',
+  modified: 'm'
+} as const
+
 describe('App', () => {
   it('shows the welcome screen, creates a project through the wizard, then closes it', async () => {
     const invoke = install({ 'project:create': { ...info, format: 'epic' } })
@@ -726,5 +741,76 @@ describe('App', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Could not save Chapter 1')
     expect(invoke).not.toHaveBeenCalledWith('window:close', undefined)
     expect(screen.getByTestId('project-name')).toHaveTextContent('Smoke')
+  })
+
+  describe('insert shortcuts (F-2.7)', () => {
+    it('Ctrl+Shift+S inserts a scene after the selected scene, captured before the editor', async () => {
+      const invoke = install({
+        'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+        'tree:list': treeFixture,
+        'tree:create': createdScene
+      })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      const editor = await screen.findByRole('textbox', { name: 'Document' })
+      editor.focus()
+      await userEvent.keyboard('{Control>}{Shift>}S{/Shift}{/Control}')
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith('tree:create', {
+          parentId: 'ch-1',
+          afterId: 'sc-1',
+          kind: 'document',
+          hierarchyLevel: 'scene'
+        })
+      )
+      // The editor's own Mod-Shift-S (strikethrough) did not fire for the chord.
+      expect(editor.querySelector('s')).toBeNull()
+    })
+
+    it('Ctrl+Shift+C inserts a chapter after the enclosing chapter', async () => {
+      const invoke = install({
+        'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+        'tree:list': treeFixture,
+        'tree:create': {
+          ...createdScene,
+          id: 'new-ch',
+          parentId: 'arc-1',
+          kind: 'folder',
+          hierarchyLevel: 'chapter',
+          title: 'Untitled Chapter'
+        }
+      })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      await userEvent.keyboard('{Control>}{Shift>}C{/Shift}{/Control}')
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith('tree:create', {
+          parentId: 'arc-1',
+          afterId: 'ch-1',
+          kind: 'folder',
+          hierarchyLevel: 'chapter'
+        })
+      )
+    })
+
+    it('explains itself when the selection cannot take the level', async () => {
+      const invoke = install({
+        'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+        'tree:list': treeFixture
+      })
+      render(<App />)
+      const page = await screen.findByRole('treeitem', { name: 'Title Page' })
+      await userEvent.click(within(page).getByText('Title Page'))
+      await userEvent.keyboard('{Control>}{Shift>}P{/Shift}{/Control}')
+      // Web novel labels the top level "Arc"; front matter is outside every manuscript level.
+      await waitFor(() =>
+        expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual([
+          'Select something in the manuscript to insert the arc after it.'
+        ])
+      )
+      expect(invoke).not.toHaveBeenCalledWith('tree:create', expect.anything())
+    })
   })
 })
