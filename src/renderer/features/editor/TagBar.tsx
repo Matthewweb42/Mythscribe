@@ -1,14 +1,16 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Loader2, Plus, Sparkles, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, Plus, RefreshCw, Sparkles, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { TAGS_MIN_CHARS } from '@shared/ai'
 import { docToText } from '@shared/docText'
 import { countInlineTags } from '@shared/inlineTags'
 import type { Tag } from '@shared/ipc/contract'
 import { TAG_BAR_MAX_FRACTION, TAG_BAR_MIN_HEIGHT, TAG_BAR_SPLIT_LIMITS } from '@shared/layout'
+import { PROPOSAL_NOTE_MAX, normalizeProposalNote } from '@shared/proposal'
+import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { formatRequestCost } from '@renderer/features/ai/usageFormat'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
-import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import {
   resizeTagBarBy,
   resizeTagBarSplitBy,
@@ -31,18 +33,28 @@ const LINK_BUTTON = 'rounded px-1 text-xs text-fg-muted hover:bg-surface-raised 
  * One Recommend request (F-4.7), keyed by the node it was made for so a document switch drops
  * it without an effect (the `pickingFor` idiom); the suggestions are bank tags, rendered live
  * from the bank by id, and leave the list only when accepted, so a failed link keeps its chip.
+ * A `done` result is the proposal (F-14.5) the author settles: `acceptedCount` is how many of
+ * its chips were linked, which decides between accepted in part and rejected on Dismiss.
  */
 type RecommendState =
   | { nodeId: string; status: 'pending' }
   | {
       nodeId: string
       status: 'done'
+      proposalId: string
       suggestions: Tag[]
+      acceptedCount: number
       model: string
       costUsd: number
       cached: boolean
     }
   | { nodeId: string; status: 'error'; message: string; nextStep: string }
+
+/** What Regenerate… sends beside the node: the author's note and the proposal it replaces. */
+interface RegenerateOptions {
+  note: string | null
+  regeneratedFrom: string
+}
 
 /**
  * The tag bar (F-4.4) above the editor of a document and, in the stacked view, of the chapter or
@@ -58,7 +70,10 @@ type RecommendState =
  * "Recommend" (F-4.7) asks main for bank tags that fit the live text once it has 50 characters
  * (a folder never does, so there it stays disabled) and shows them as chips the author accepts
  * one at a time, all at once, or dismisses; nothing is linked until accepted, and the note
- * under the chips says which model answered and what it cost.
+ * under the chips says which model answered and what it cost. Each answer is a proposal
+ * (F-14.5): accepting every chip settles it accepted, Dismiss settles it accepted in part or
+ * rejected (one click, no note), and "Regenerate…" asks what was off, settles it regenerated
+ * with that note, and asks again with the note and the proposal id in the request.
  */
 export function TagBar({ id }: { id: string }): React.JSX.Element {
   const tagBar = useLayoutStore((s) => s.layout.tagBar)
@@ -81,7 +96,20 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   const [pickingFor, setPickingFor] = useState<string | null>(null)
   const picking = pickingFor === id
   const [recommend, setRecommend] = useState<RecommendState | null>(null)
-  const mine = recommend?.nodeId === id ? recommend : null
+  const result = recommend?.nodeId === id ? recommend : null
+  /**
+   * A result drained by acceptance (no suggestions left, at least one linked) is finished: it
+   * renders as no result and the effect below settles its proposal accepted. An empty answer
+   * has `acceptedCount` 0 and stays visible as "No new tags fit." until dismissed.
+   */
+  const drained =
+    result?.status === 'done' && result.suggestions.length === 0 && result.acceptedCount > 0
+      ? result
+      : null
+  const mine = drained ? null : result
+  useEffect(() => {
+    if (drained) void proposalStore.settle(drained.proposalId, 'accepted')
+  }, [drained])
   const pending = mine?.status === 'pending'
   const bodyId = useId()
 
@@ -100,18 +128,26 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
 
   // Main reads the saved row, so unsaved typing is flushed first: the request carries what
   // the author sees, and the 50-character gate here and in main agree.
-  const askForTags = (): void => {
-    const nodeId = id
+  const askForTags = (nodeId: string, regenerate?: RegenerateOptions): void => {
     setRecommend({ nodeId, status: 'pending' })
     flush()
-      .then(() => ipc().invoke('ai:recommendTags', { nodeId }))
+      .then(() =>
+        ipc().invoke(
+          'ai:recommendTags',
+          regenerate
+            ? { nodeId, note: regenerate.note, regeneratedFrom: regenerate.regeneratedFrom }
+            : { nodeId }
+        )
+      )
       .then((result) => {
         if (result.ok) {
           for (const tag of result.suggestions) merge(tag)
           setRecommend({
             nodeId,
             status: 'done',
+            proposalId: result.proposalId,
             suggestions: result.suggestions,
+            acceptedCount: 0,
             model: result.model,
             costUsd: result.costUsd,
             cached: result.cached
@@ -130,17 +166,18 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
         report(err)
       })
   }
-  /** Drops accepted suggestions from the result; the result goes with the last one. */
-  const settle = (nodeId: string, acceptedIds: string[]): void => {
+  /** Drops accepted suggestions from the result; draining it is settled by the effect above. */
+  const dropAccepted = (nodeId: string, acceptedIds: string[]): void => {
     setRecommend((current) => {
       if (current?.nodeId !== nodeId || current.status !== 'done') return current
       const suggestions = current.suggestions.filter((tag) => !acceptedIds.includes(tag.id))
-      return suggestions.length === 0 ? null : { ...current, suggestions }
+      const acceptedCount = current.acceptedCount + current.suggestions.length - suggestions.length
+      return { ...current, suggestions, acceptedCount }
     })
   }
   const accept = (tagId: string): void => {
     const nodeId = id
-    add(nodeId, tagId).then(() => settle(nodeId, [tagId]), report)
+    add(nodeId, tagId).then(() => dropAccepted(nodeId, [tagId]), report)
   }
   const acceptAll = (): void => {
     if (mine?.status !== 'done') return
@@ -154,9 +191,41 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
         if (outcome.status === 'fulfilled') accepted.push(outcome.value)
         else failure ??= outcome.reason
       }
-      settle(nodeId, accepted)
+      dropAccepted(nodeId, accepted)
       if (failure !== null) report(failure)
     })
+  }
+  /** One click: the proposal is accepted in part when any chip was linked, rejected otherwise. */
+  const dismiss = (): void => {
+    if (mine?.status !== 'done') return
+    void proposalStore.settle(mine.proposalId, mine.acceptedCount > 0 ? 'acceptedPart' : 'rejected')
+    setRecommend(null)
+  }
+  /**
+   * Asks what was off (optional, bounded like the stored note), settles the shown proposal
+   * regenerated with the note, and asks again for the same node with the note and the
+   * proposal id, so main can build the regenerate prompt and link the rows.
+   */
+  const regenerate = (): void => {
+    if (mine?.status !== 'done') return
+    const { nodeId, proposalId } = mine
+    void dialogs
+      .prompt({
+        title: "What's off about these?",
+        message: 'Optional. Your note goes into the next request and stays with this suggestion.',
+        placeholder: 'e.g. too generic, the scene is about the crossing',
+        confirmLabel: 'Regenerate',
+        validate: (value) =>
+          value.trim().length > PROPOSAL_NOTE_MAX
+            ? `Keep the note under ${PROPOSAL_NOTE_MAX} characters.`
+            : null
+      })
+      .then((answer) => {
+        if (answer === null) return
+        const note = normalizeProposalNote(answer)
+        void proposalStore.settle(proposalId, 'regenerated', note)
+        askForTags(nodeId, { note, regeneratedFrom: proposalId })
+      })
   }
 
   return (
@@ -187,7 +256,7 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
           <div className="ml-auto flex items-center gap-1">
             <button
               type="button"
-              onClick={askForTags}
+              onClick={() => askForTags(id)}
               disabled={!canRecommend || pending}
               title={
                 canRecommend
@@ -298,11 +367,11 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
                           Accept all
                         </button>
                       ) : null}
-                      <button
-                        type="button"
-                        onClick={() => setRecommend(null)}
-                        className={LINK_BUTTON}
-                      >
+                      <button type="button" onClick={regenerate} className={LINK_BUTTON}>
+                        <RefreshCw size={11} aria-hidden="true" className="mr-1 inline" />
+                        Regenerate…
+                      </button>
+                      <button type="button" onClick={dismiss} className={LINK_BUTTON}>
                         Dismiss
                       </button>
                     </p>

@@ -1,16 +1,19 @@
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import type { SettledStatus } from '@shared/proposal'
 
 /**
- * The plugin state while a suggestion is showing (F-5.3): the text still to accept and the
- * document position it hangs at (the caret when it was set, moved along as the author
- * accepts or types it). Null when nothing is showing. Never part of the document: the
- * suggestion renders as a widget decoration, so `getJSON`, autosave, and undo never see it
- * until the author accepts it.
+ * The suggestion while it is showing (F-5.3): the text still to accept and the document
+ * position it hangs at (the caret when it was set, moved along as the author accepts or
+ * types it). Never part of the document: the suggestion renders as a widget decoration, so
+ * `getJSON`, autosave, and undo never see it until the author accepts it.
  */
 export interface GhostState {
+  /** What is still showing: `full` minus what the author has accepted or typed so far. */
   text: string
+  /** The whole suggestion as it was shown, set once; the settlement is measured against it (F-14.5). */
+  full: string
   from: number
   /** The suggestion failed the voice fidelity check (F-14.7): the widget carries a warning badge. */
   flagged: boolean
@@ -18,12 +21,48 @@ export interface GhostState {
   violation: string | null
 }
 
+/**
+ * How a shown suggestion left the screen (F-14.5): `accepted` when all of it entered the
+ * manuscript (Tab, Shift+Tab to the end, or typing it through), `acceptedPart` when some of it
+ * did before anything else ended it, `rejected` when none did.
+ */
+export type GhostSettleStatus = Extract<SettledStatus, 'accepted' | 'acceptedPart' | 'rejected'>
+
+/** Reports one shown suggestion's settlement; `consumed` is the prefix of `full` that entered the manuscript. */
+export type GhostSettleHandler = (status: GhostSettleStatus, consumed: string) => void
+
+/**
+ * The extension's per-editor storage: the settlement hook, set by the ghost-text controller
+ * (it knows which proposal the suggestion belongs to) and null while nobody is listening.
+ */
+export interface GhostTextStorage {
+  onSettle: GhostSettleHandler | null
+}
+
+interface GhostExit {
+  status: GhostSettleStatus
+  consumed: string
+}
+
+/**
+ * The plugin state: the suggestion showing (null when none) and, on the transaction that
+ * ended one, how it ended. The plugin view reports each `exit` once, so the hook fires exactly
+ * once per shown suggestion whatever path took it off the screen.
+ */
+interface GhostPluginState {
+  ghost: GhostState | null
+  exit: GhostExit | null
+}
+
+const EMPTY: GhostPluginState = { ghost: null, exit: null }
+
 type GhostMeta =
   | { type: 'set'; text: string; flagged: boolean; violation: string | null }
-  | { type: 'advance'; text: string; from: number; flagged: boolean; violation: string | null }
+  | { type: 'advance'; text: string; from: number }
+  | { type: 'accept' }
   | { type: 'clear' }
 
-export const GHOST_TEXT_KEY = new PluginKey<GhostState | null>('ghostText')
+export const GHOST_TEXT_KEY = new PluginKey<GhostPluginState>('ghostText')
 
 /** The class the widget carries; the stylesheet dims it and the e2e test reads it. */
 export const GHOST_TEXT_CLASS = 'ghost-text'
@@ -46,44 +85,98 @@ declare module '@tiptap/core' {
       acceptGhostWord: () => ReturnType
     }
   }
+
+  interface Storage {
+    /** Present only for editors built with the ghost-text extension (manuscript documents). */
+    ghostText?: GhostTextStorage
+  }
 }
 
 /** The current suggestion, if any. */
 export function ghostOf(state: EditorState): GhostState | null {
-  return GHOST_TEXT_KEY.getState(state) ?? null
+  return GHOST_TEXT_KEY.getState(state)?.ghost ?? null
+}
+
+/**
+ * The settlement of `ghost` leaving the screen: all of it when the rest was just inserted,
+ * otherwise whatever the author had accepted or typed along before this.
+ */
+function exitOf(ghost: GhostState, restInserted: boolean): GhostExit {
+  const consumed = restInserted
+    ? ghost.full
+    : ghost.full.slice(0, ghost.full.length - ghost.text.length)
+  const status: GhostSettleStatus =
+    consumed.length === ghost.full.length
+      ? 'accepted'
+      : consumed.length > 0
+        ? 'acceptedPart'
+        : 'rejected'
+  return { status, consumed }
+}
+
+const ended = (ghost: GhostState, restInserted: boolean): GhostPluginState => ({
+  ghost: null,
+  exit: exitOf(ghost, restInserted)
+})
+
+function applyMeta(tr: Transaction, meta: GhostMeta, ghost: GhostState | null): GhostPluginState {
+  switch (meta.type) {
+    case 'set': {
+      // A suggestion replaced while showing ended without the rest: settle it on its own.
+      const exit = ghost === null ? null : exitOf(ghost, false)
+      if (!meta.text) return { ghost: null, exit }
+      return {
+        ghost: {
+          text: meta.text,
+          full: meta.text,
+          from: tr.selection.from,
+          flagged: meta.flagged,
+          violation: meta.violation
+        },
+        exit
+      }
+    }
+    case 'advance':
+      return ghost === null
+        ? EMPTY
+        : { ghost: { ...ghost, text: meta.text, from: meta.from }, exit: null }
+    case 'accept':
+      return ghost === null ? EMPTY : ended(ghost, true)
+    case 'clear':
+      return ghost === null ? EMPTY : ended(ghost, false)
+  }
 }
 
 /**
  * The next state for a transaction. Our own metadata wins outright; otherwise a change to the
  * document keeps the suggestion only when the author typed exactly its next characters at its
- * anchor (the typed prefix is consumed, so the widget shrinks), and a moved caret or a range
- * selection drops it. Anything else (a deletion, a paste, an edit elsewhere) drops it too:
- * the spec says typing anything but the suggestion clears it.
+ * anchor (the typed prefix is consumed, so the widget shrinks; typing it through to the end
+ * counts as accepting it), and a moved caret or a range selection drops it. Anything else (a
+ * deletion, a paste, an edit elsewhere) drops it too: the spec says typing anything but the
+ * suggestion clears it. Whatever ends a suggestion records its `exit` on this state only; the
+ * next transaction starts clean.
  */
-function apply(tr: Transaction, value: GhostState | null): GhostState | null {
+function apply(tr: Transaction, value: GhostPluginState): GhostPluginState {
   const meta = tr.getMeta(GHOST_TEXT_KEY) as GhostMeta | undefined
-  if (meta !== undefined) {
-    if (meta.type === 'clear') return null
-    const { text, flagged, violation } = meta
-    if (!text) return null
-    const from = meta.type === 'set' ? tr.selection.from : meta.from
-    return { text, from, flagged, violation }
-  }
-  if (value === null) return null
+  const ghost = value.ghost
+  if (meta !== undefined) return applyMeta(tr, meta, ghost)
+  if (ghost === null) return value.exit === null ? value : EMPTY
   if (tr.docChanged) {
-    if (!tr.selection.empty) return null
+    if (!tr.selection.empty) return ended(ghost, false)
     // Map the anchor to stay before text inserted exactly there (assoc -1), so what was typed
     // at it lies between the anchor and the caret.
-    const mapped = tr.mapping.map(value.from, -1)
+    const mapped = tr.mapping.map(ghost.from, -1)
     const caret = tr.selection.from
-    if (caret <= mapped) return null
+    if (caret <= mapped) return ended(ghost, false)
     const typed = tr.doc.textBetween(mapped, caret)
-    if (!typed || !value.text.startsWith(typed)) return null
-    const rest = value.text.slice(typed.length)
-    return rest ? { ...value, text: rest, from: caret } : null
+    if (!typed || !ghost.text.startsWith(typed)) return ended(ghost, false)
+    const rest = ghost.text.slice(typed.length)
+    return rest ? { ghost: { ...ghost, text: rest, from: caret }, exit: null } : ended(ghost, true)
   }
-  if (tr.selectionSet && (!tr.selection.empty || tr.selection.from !== value.from)) return null
-  return value
+  if (tr.selectionSet && (!tr.selection.empty || tr.selection.from !== ghost.from)) {
+    return ended(ghost, false)
+  }
+  return value.exit === null ? value : { ghost, exit: null }
 }
 
 function renderGhost(ghost: GhostState): HTMLElement {
@@ -118,9 +211,17 @@ const NEXT_WORD = /^(\s*\S+)(\s?)/
  * accept commands insert plain text through an ordinary transaction, so the document store,
  * autosave, and undo treat the accepted text like typing. Nothing here decides when to ask
  * for a suggestion: the controller does, and it calls `setGhost`.
+ *
+ * Every shown suggestion is a proposal (F-14.5): whichever path takes it off the screen (an
+ * accept, Escape, blur, a composition, a mismatching edit, a moved caret, a replacement, or
+ * the editor being torn down) reports its settlement once through `storage.onSettle`.
  */
-export const GhostText = Extension.create({
+export const GhostText = Extension.create<Record<string, never>, GhostTextStorage>({
   name: 'ghostText',
+
+  addStorage() {
+    return { onSettle: null }
+  },
 
   addCommands() {
     return {
@@ -148,7 +249,7 @@ export const GhostText = Extension.create({
           if (ghost === null) return false
           if (dispatch) {
             tr.insertText(ghost.text, ghost.from)
-            tr.setMeta(GHOST_TEXT_KEY, { type: 'clear' } satisfies GhostMeta)
+            tr.setMeta(GHOST_TEXT_KEY, { type: 'accept' } satisfies GhostMeta)
             tr.scrollIntoView()
           }
           return true
@@ -165,14 +266,8 @@ export const GhostText = Extension.create({
           if (dispatch) {
             tr.insertText(chunk, ghost.from)
             const meta: GhostMeta = remaining
-              ? {
-                  type: 'advance',
-                  text: remaining,
-                  from: ghost.from + chunk.length,
-                  flagged: ghost.flagged,
-                  violation: ghost.violation
-                }
-              : { type: 'clear' }
+              ? { type: 'advance', text: remaining, from: ghost.from + chunk.length }
+              : { type: 'accept' }
             tr.setMeta(GHOST_TEXT_KEY, meta)
             tr.scrollIntoView()
           }
@@ -190,6 +285,10 @@ export const GhostText = Extension.create({
   },
 
   addProseMirrorPlugins() {
+    const storage = this.storage
+    const report = (exit: GhostExit): void => {
+      storage.onSettle?.(exit.status, exit.consumed)
+    }
     const clear = (view: { state: EditorState; dispatch: (tr: Transaction) => void }): false => {
       if (ghostOf(view.state) !== null) {
         view.dispatch(view.state.tr.setMeta(GHOST_TEXT_KEY, { type: 'clear' } satisfies GhostMeta))
@@ -197,9 +296,25 @@ export const GhostText = Extension.create({
       return false
     }
     return [
-      new Plugin<GhostState | null>({
+      new Plugin<GhostPluginState>({
         key: GHOST_TEXT_KEY,
-        state: { init: () => null, apply },
+        state: { init: () => EMPTY, apply },
+        view: (editorView) => {
+          // A reconfigured plugin set recreates this view while the suggestion lives on in the
+          // new state; only a view destroyed with its own plugins in place is the editor going.
+          const plugins = editorView.state.plugins
+          return {
+            update: (view, prevState) => {
+              const exit = GHOST_TEXT_KEY.getState(view.state)?.exit ?? null
+              if (exit !== null && exit !== GHOST_TEXT_KEY.getState(prevState)?.exit) report(exit)
+            },
+            destroy: () => {
+              if (editorView.state.plugins !== plugins) return
+              const ghost = ghostOf(editorView.state)
+              if (ghost !== null) report(exitOf(ghost, false))
+            }
+          }
+        },
         props: {
           decorations(state) {
             const ghost = ghostOf(state)

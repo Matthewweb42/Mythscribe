@@ -35,6 +35,14 @@ const ACCEPTED_KEY = 'sk-live-5678wxyz'
 /** The continuation the fake server answers every plain-text (ghost text, F-5.3) chat request with. */
 const GHOST_CONTINUATION = 'The wind picked up before anyone spoke.'
 /**
+ * F-14.5: the clause `tagsRegen.v1` appends to the system turn (`TAGS_REGEN_CLAUSE_PREFIX` in
+ * `src/main/ai/prompts/tagsRegen.v1.ts`; main is outside the e2e tsconfig, so it is repeated
+ * here). A tags request carrying it is a Regenerate… and gets a different canned set.
+ */
+const TAGS_REGEN_SENTINEL = 'The writer asked for a different set'
+/** The note typed into the Regenerate… dialog; the fake server's regenerate request must quote it. */
+const REGEN_NOTE = 'Too generic; the scene is about the crossing.'
+/**
  * F-14.7: a ghost-text request whose passage carries this line is answered off-voice (present
  * tense and first person against a past-tense third-person manuscript, with five markers of
  * each so the classifier resolves both; tense is checked first, so it is the one named), for
@@ -88,7 +96,8 @@ function startFakeOpenAi(): Promise<string> {
     }
     // `POST /v1/chat/completions` answers by mode: a JSON-mode request (F-4.7 tags) gets the
     // same two bank tags every time (dark-forest is already linked to Scene 1 by then, so only
-    // protagonist becomes a chip); a plain request (F-5.3 ghost text) gets one fixed sentence.
+    // protagonist becomes a chip), or a different pair when its system turn carries the
+    // regenerate clause (F-14.5); a plain request (F-5.3 ghost text) gets one fixed sentence.
     if (req.method === 'POST' && (req.url ?? '').endsWith('/chat/completions')) {
       let body = ''
       req.setEncoding('utf8')
@@ -102,6 +111,9 @@ function startFakeOpenAi(): Promise<string> {
         }
         openAiChatBodies.push({ messages: request.messages })
         const json = request.response_format?.type === 'json_object'
+        const regen = request.messages.some(
+          (m) => m.role === 'system' && m.content.includes(TAGS_REGEN_SENTINEL)
+        )
         const offVoice = request.messages.some(
           (m) => m.role === 'user' && m.content.includes(OFF_VOICE_SENTINEL)
         )
@@ -118,7 +130,9 @@ function startFakeOpenAi(): Promise<string> {
                 message: {
                   role: 'assistant',
                   content: json
-                    ? '{"tags":["dark-forest","protagonist"]}'
+                    ? regen
+                      ? '{"tags":["antagonist","protagonist"]}'
+                      : '{"tags":["dark-forest","protagonist"]}'
                     : offVoice
                       ? OFF_VOICE_CONTINUATION
                       : GHOST_CONTINUATION
@@ -1040,12 +1054,28 @@ test('create, close, reopen a project on disk', async () => {
     auth: `Bearer ${ACCEPTED_KEY}`
   })
   await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest', 'stormfront'])
+  // F-14.5: Regenerate… asks what was off; the note reaches the model in the system turn of
+  // a second request (the fake server answers it with a different set), the chips follow, and
+  // nothing was linked by asking. Accepting one chip and dismissing the rest settles that
+  // second proposal as accepted in part (one click, no note).
+  await tagBar.getByRole('button', { name: 'Regenerate…' }).click()
+  const regenDialog = page.getByRole('dialog', { name: "What's off about these?" })
+  await regenDialog.getByRole('textbox', { name: "What's off about these?" }).fill(REGEN_NOTE)
+  await regenDialog.getByRole('button', { name: 'Regenerate' }).click()
+  await expect(regenDialog).toHaveCount(0)
+  await expect(suggestedList.getByRole('listitem')).toHaveText(['antagonist', 'protagonist'])
+  const regenSystem = openAiChatBodies.at(-1)?.messages.find((m) => m.role === 'system')
+  expect(regenSystem?.content).toContain(TAGS_REGEN_SENTINEL)
+  expect(regenSystem?.content).toContain(`"${REGEN_NOTE}"`)
+  await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest', 'stormfront'])
   await tagBar.getByRole('button', { name: 'Accept protagonist' }).click()
   await expect(chipList.getByRole('listitem')).toHaveText([
     'dark-forest',
     'stormfront',
     'protagonist'
   ])
+  await expect(suggestedList.getByRole('listitem')).toHaveText(['antagonist'])
+  await tagBar.getByRole('button', { name: 'Dismiss' }).click()
   await expect(suggestedList).toHaveCount(0)
   await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
   await categories.getByRole('tab', { name: 'All' }).click()
@@ -1054,12 +1084,12 @@ test('create, close, reopen a project on disk', async () => {
   )
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
   const spent = await usageSummary()
-  expect(spent.total).toMatchObject({ requests: 1, tokens: 412 })
+  expect(spent.total).toMatchObject({ requests: 2, tokens: 824 })
   expect(spent.total.costUsd).toBeGreaterThan(0)
   expect(spent.byFeature).toEqual([{ feature: 'tags', ...spent.total }])
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await expect(usageTotal).toHaveText('<$0.01 · 1 request · 412 tokens')
+  await expect(usageTotal).toHaveText('<$0.01 · 2 requests · 824 tokens')
 
   // F-14.1: the voice profile. The AI tab's Voice section starts with no exemplars. Back in
   // Scene 1, selecting the whole text and marking it stores a plain-text snapshot with Scene
@@ -1145,7 +1175,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(ghost).toHaveCount(0)
   await expect(editor).toContainText(`Mara waited on the ridge. ${GHOST_CONTINUATION}`)
   const afterGhost = await usageSummary()
-  expect(afterGhost.total.requests).toBe(2)
+  expect(afterGhost.total.requests).toBe(3)
   expect(afterGhost.byFeature.find((f) => f.feature === 'ghostText')).toMatchObject({
     requests: 1,
     tokens: 309

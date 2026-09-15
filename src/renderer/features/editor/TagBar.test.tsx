@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiRecommendTagsResult, Channel, Input, Output, Tag } from '@shared/ipc/contract'
+import { resetProposalStore } from '@renderer/features/ai/proposalStore'
+import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import {
@@ -59,6 +61,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
         const { id } = input as Input<'sceneMeta:get'>
         return { id, meta: { location: '', pov: '', timeline: '' } } as Output<C>
       }
+      if (channel === 'proposal:settle') return null as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -107,8 +110,29 @@ const suggested = (...ids: string[]): AiRecommendTagsResult => ({
   costUsd: 0.0012,
   cached: false,
   model: 'gpt-5.4-mini',
-  promptVersion: 'tags.v1'
+  promptVersion: 'tags.v1',
+  proposalId: 'prop-1'
 })
+/** The same result as a different proposal, so a test can settle two in a row (the store guards per id). */
+const asProposal = (result: AiRecommendTagsResult, proposalId: string): AiRecommendTagsResult =>
+  result.ok ? { ...result, proposalId } : result
+/** Answers each Recommend request with the next result; a run past the end is a test error. */
+const answerInOrder = (...results: AiRecommendTagsResult[]): (() => AiRecommendTagsResult) => {
+  const queue = [...results]
+  return () => {
+    const next = queue.shift()
+    if (!next) throw new Error('no more canned results')
+    return next
+  }
+}
+const settlements = (calls: [Channel, unknown][]): unknown[] =>
+  calls.filter(([channel]) => channel === 'proposal:settle').map(([, input]) => input)
+const recommendInputs = (calls: [Channel, unknown][]): unknown[] =>
+  calls.filter(([channel]) => channel === 'ai:recommendTags').map(([, input]) => input)
+const regenerateButton = (): HTMLElement =>
+  within(bar()).getByRole('button', { name: 'Regenerate…' })
+const noteDialog = (): HTMLElement =>
+  screen.getByRole('dialog', { name: "What's off about these?" })
 
 /** Renders the bar for `id` once the bank is loaded, and waits for its links. */
 async function mount(id = 'sc-1'): Promise<ReturnType<typeof render>> {
@@ -124,11 +148,13 @@ beforeEach(() => {
   resetLayoutStore()
   resetSceneMetaStore()
   resetDocumentStore()
+  resetProposalStore()
   useTreeStore.setState({ ...buildIndex([]), loaded: true })
   useDialogStore.setState({ modals: [], toasts: [] })
   vi.stubGlobal('innerHeight', 800)
 })
 afterEach(() => {
+  resetProposalStore()
   vi.unstubAllGlobals()
 })
 
@@ -506,7 +532,8 @@ describe('TagBar (F-4.4)', () => {
           costUsd: 0,
           cached: true,
           model: 'gpt-5.4-mini',
-          promptVersion: 'tags.v1'
+          promptVersion: 'tags.v1',
+          proposalId: 'prop-2'
         }
       ]
       install({
@@ -572,6 +599,159 @@ describe('TagBar (F-4.4)', () => {
       expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
       expect(recommendButton()).toBeDisabled()
       expect(calls.filter(([channel]) => channel === 'ai:recommendTags')).toHaveLength(1)
+    })
+  })
+
+  describe('Proposal review (F-14.5)', () => {
+    it('Dismiss settles the proposal rejected when no chip was linked, accepted in part when one was', async () => {
+      const calls = install({
+        'ai:recommendTags': answerInOrder(
+          suggested('t-mara', 't-moody'),
+          asProposal(suggested('t-mara', 't-moody'), 'prop-2'),
+          asProposal(suggested(), 'prop-3')
+        )
+      })
+      await mount()
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara', 'moody']))
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Dismiss' }))
+      expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      expect(settlements(calls)).toEqual([{ id: 'prop-1', status: 'rejected', note: null }])
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara', 'moody']))
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Accept moody' }))
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara']))
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Dismiss' }))
+      expect(settlements(calls)).toEqual([
+        { id: 'prop-1', status: 'rejected', note: null },
+        { id: 'prop-2', status: 'acceptedPart', note: null }
+      ])
+      // An empty answer ("No new tags fit.") dismissed is rejected too: nothing was linked.
+      await userEvent.click(recommendButton())
+      await waitFor(() =>
+        expect(screen.getByTestId('tag-recommend-result')).toHaveTextContent('No new tags fit.')
+      )
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Dismiss' }))
+      expect(settlements(calls).at(-1)).toEqual({ id: 'prop-3', status: 'rejected', note: null })
+    })
+
+    it('accepting every chip, one at a time or with Accept all, settles the proposal accepted', async () => {
+      const calls = install({
+        'ai:recommendTags': answerInOrder(
+          suggested('t-mara', 't-moody'),
+          asProposal(suggested('t-mara', 't-moody'), 'prop-2')
+        )
+      })
+      await mount()
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara', 'moody']))
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Accept mara' }))
+      await waitFor(() => expect(suggestionNames()).toEqual(['moody']))
+      expect(settlements(calls)).toEqual([])
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Accept moody' }))
+      await waitFor(() =>
+        expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      )
+      expect(settlements(calls)).toEqual([{ id: 'prop-1', status: 'accepted', note: null }])
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara', 'moody']))
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Accept all' }))
+      await waitFor(() =>
+        expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      )
+      expect(settlements(calls)).toEqual([
+        { id: 'prop-1', status: 'accepted', note: null },
+        { id: 'prop-2', status: 'accepted', note: null }
+      ])
+    })
+
+    it('Regenerate… asks for a note, settles the proposal regenerated with it, and carries the note and the proposal id into the next request', async () => {
+      const calls = install({
+        'ai:recommendTags': answerInOrder(
+          suggested('t-mara', 't-moody'),
+          asProposal(suggested('t-moody'), 'prop-2'),
+          asProposal(suggested('t-mara'), 'prop-3')
+        )
+      })
+      await useTagStore.getState().load()
+      render(
+        <>
+          <TagBar id="sc-1" />
+          <DialogHost />
+        </>
+      )
+      await waitFor(() => expect(useDocumentTagStore.getState().tagIdsByNode['sc-1']).toBeDefined())
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara', 'moody']))
+      await userEvent.click(regenerateButton())
+      const dialog = noteDialog()
+      expect(dialog).toHaveTextContent('Optional.')
+      const input = within(dialog).getByRole('textbox', { name: "What's off about these?" })
+      expect(input).toHaveFocus()
+      // Over the stored bound the dialog refuses and nothing leaves.
+      await userEvent.paste('x'.repeat(301))
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Regenerate' }))
+      expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        'Keep the note under 300 characters.'
+      )
+      expect(settlements(calls)).toEqual([])
+      await userEvent.clear(input)
+      await userEvent.type(input, '  Too generic for this scene.  ')
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Regenerate' }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      await waitFor(() => expect(suggestionNames()).toEqual(['moody']))
+      expect(settlements(calls)).toEqual([
+        { id: 'prop-1', status: 'regenerated', note: 'Too generic for this scene.' }
+      ])
+      expect(recommendInputs(calls)).toEqual([
+        { nodeId: 'sc-1' },
+        { nodeId: 'sc-1', note: 'Too generic for this scene.', regeneratedFrom: 'prop-1' }
+      ])
+      // Nothing was linked by asking again.
+      expect(calls.filter(([channel]) => channel === 'documentTag:add')).toHaveLength(0)
+      // A blank note is sent as none, and the chain points at the proposal just replaced.
+      await userEvent.click(regenerateButton())
+      await userEvent.click(within(noteDialog()).getByRole('button', { name: 'Regenerate' }))
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara']))
+      expect(settlements(calls).at(-1)).toEqual({ id: 'prop-2', status: 'regenerated', note: null })
+      expect(recommendInputs(calls).at(-1)).toEqual({
+        nodeId: 'sc-1',
+        note: null,
+        regeneratedFrom: 'prop-2'
+      })
+    })
+
+    it('cancelling the note keeps the chips and sends nothing', async () => {
+      const calls = install({ 'ai:recommendTags': () => suggested('t-mara', 't-moody') })
+      await useTagStore.getState().load()
+      render(
+        <>
+          <TagBar id="sc-1" />
+          <DialogHost />
+        </>
+      )
+      await waitFor(() => expect(useDocumentTagStore.getState().tagIdsByNode['sc-1']).toBeDefined())
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara', 'moody']))
+      await userEvent.click(regenerateButton())
+      await userEvent.type(
+        within(noteDialog()).getByRole('textbox', { name: "What's off about these?" }),
+        'never mind'
+      )
+      await userEvent.click(within(noteDialog()).getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(suggestionNames()).toEqual(['mara', 'moody'])
+      expect(settlements(calls)).toEqual([])
+      expect(recommendInputs(calls)).toEqual([{ nodeId: 'sc-1' }])
+      await userEvent.click(regenerateButton())
+      await userEvent.keyboard('{Escape}')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(settlements(calls)).toEqual([])
+      expect(recommendInputs(calls)).toHaveLength(1)
     })
   })
 })

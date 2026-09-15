@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { TAGS_MIN_CHARS } from '@shared/ai'
 import { docToText } from '@shared/docText'
 import type { Tag } from '@shared/ipc/contract'
+import { normalizeProposalNote } from '@shared/proposal'
 import { toTagName } from '@shared/tags'
 import { getDocumentContent } from '../document/documentStore'
 import { AppError } from '../ipc/errors'
@@ -10,6 +11,7 @@ import { listDocumentTags } from '../tag/documentTagStore'
 import { listTags, type TagDb } from '../tag/tagStore'
 import { assertFeatureAllowed } from './dial'
 import { buildTagsPrompt } from './prompts/tags.v1'
+import { buildTagsRegenPrompt } from './prompts/tagsRegen.v1'
 import { AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -28,11 +30,21 @@ export interface RecommendTagsResult {
 
 const ModelAnswer = z.object({ tags: z.array(z.string()) })
 
+/** A regenerate (F-14.5): the proposal being replaced and the author's note, either may be missing. */
+export interface TagsRegenerate {
+  note?: string | null
+  regeneratedFrom?: string | null
+}
+
 /**
  * The tag-recommendation use case (F-4.7): reads a document's text, checks the 50-character
  * gate and the AI dial, sends the text and the bank's names through the one request path
  * (`fast` tier, JSON mode, `tags.v1`), and maps the model's names back to bank tags. Nothing
  * is linked here: the author accepts each suggestion in the tag bar.
+ *
+ * A regenerate (F-14.5: a note, a predecessor proposal, or both) goes through `tagsRegen.v1`
+ * instead, and the note and the predecessor join the context hash so asking again never
+ * answers from the cache with the set the author just turned down.
  *
  * Refusals: NOT_FOUND / VALIDATION (`AppError`) for an unknown id, a folder, or too little
  * text; `AiDisabledError` below the dial; the request path's own errors; and an answer that
@@ -43,7 +55,8 @@ const ModelAnswer = z.object({ tags: z.array(z.string()) })
 export async function recommendTags(
   db: TagDb,
   deps: AiRequestDeps,
-  nodeId: string
+  nodeId: string,
+  regenerate: TagsRegenerate = {}
 ): Promise<RecommendTagsResult> {
   const { content } = getDocumentContent(db, nodeId)
   const text = content ? docToText(content) : ''
@@ -59,8 +72,16 @@ export async function recommendTags(
   const bank = listTags(db)
   const linkedIds = new Set(listDocumentTags(db, nodeId).map((tag) => tag.id))
   const tagNames = bank.map((tag) => tag.name)
-  const prompt = buildTagsPrompt({ text, tagNames })
-  const contextHash = sha256(`${text}|${[...tagNames].sort().join(',')}`)
+  const note = normalizeProposalNote(regenerate.note)
+  const regeneratedFrom = regenerate.regeneratedFrom ?? null
+  const isRegenerate = note !== null || regeneratedFrom !== null
+  const prompt = isRegenerate
+    ? buildTagsRegenPrompt({ text, tagNames, note })
+    : buildTagsPrompt({ text, tagNames })
+  const context = `${text}|${[...tagNames].sort().join(',')}`
+  const contextHash = sha256(
+    isRegenerate ? `${context}|regenerate:${regeneratedFrom ?? ''}|${note ?? ''}` : context
+  )
 
   const result = await runAiRequest(deps, {
     feature: 'tags',

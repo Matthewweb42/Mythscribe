@@ -1,0 +1,33 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`tagsRegen.v1 prompt (F-14.5) > is tags.v1 with the note clause appended to the system turn, the user turn untouched 1`] = `
+[
+  {
+    "content": "You are tagging a scene for a fiction writer's tag bank. Pick 3 to 8 tag names from the bank that best fit the passage; never invent a name that is not in the bank. If fewer than 3 genuinely fit, return only the ones that do. Reply with JSON only: {"tags": ["name", ...]}. The writer asked for a different set and said: "Too much about the setting; this scene is about Mara.". Pick again with that in mind; every name still comes from the bank.",
+    "role": "system",
+  },
+  {
+    "content": "Tag bank: dark-forest, protagonist, melancholy
+
+Passage:
+The storm broke at dusk over the dark forest. Mara pulled her cloak tight and counted the lightning gaps, each one shorter than the last. Somewhere ahead, past the black trunks, the river she had to cross was rising.",
+    "role": "user",
+  },
+]
+`;
+
+exports[`tagsRegen.v1 prompt (F-14.5) > says only that a different set was asked for when the note is blank 1`] = `
+[
+  {
+    "content": "You are tagging a scene for a fiction writer's tag bank. Pick 3 to 8 tag names from the bank that best fit the passage; never invent a name that is not in the bank. If fewer than 3 genuinely fit, return only the ones that do. Reply with JSON only: {"tags": ["name", ...]}. The writer asked for a different set. Pick again with that in mind; every name still comes from the bank.",
+    "role": "system",
+  },
+  {
+    "content": "Tag bank: dark-forest, protagonist, melancholy
+
+Passage:
+The storm broke at dusk over the dark forest. Mara pulled her cloak tight and counted the lightning gaps, each one shorter than the last. Somewhere ahead, past the black trunks, the river she had to cross was rising.",
+    "role": "user",
+  },
+]
+`;

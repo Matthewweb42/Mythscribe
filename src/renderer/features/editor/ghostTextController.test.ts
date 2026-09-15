@@ -5,6 +5,7 @@ import { AiSettings, defaultAiSettings } from '@shared/aiSettings'
 import { GHOST_BACKOFF_MS, GHOST_MAX_PER_DAY, GHOST_MIN_NEW_CHARS } from '@shared/aiThrottle'
 import type { AiGhostTextResult, Channel, Input, Output } from '@shared/ipc/contract'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
@@ -30,6 +31,7 @@ const ENOUGH = 'a'.repeat(GHOST_MIN_NEW_CHARS)
 let editor: Editor
 let requests: PendingRequest[]
 let settingsWrites: AiSettings[]
+let settles: Input<'proposal:settle'>[]
 
 function fakeClient(): IpcClient {
   return {
@@ -48,6 +50,10 @@ function fakeClient(): IpcClient {
         settingsWrites.push(value)
         return value as Output<C>
       }
+      if (channel === 'proposal:settle') {
+        settles.push(input as Input<'proposal:settle'>)
+        return null as Output<C>
+      }
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -64,7 +70,8 @@ const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
 const ok = (
   requestId: string,
   text = ' Rain followed.',
-  fidelity: { flagged: boolean; violation: string | null } = { flagged: false, violation: null }
+  fidelity: { flagged: boolean; violation: string | null } = { flagged: false, violation: null },
+  proposalId: string | null = `prop-${requestId}`
 ): AiGhostTextResult => ({
   ok: true,
   text,
@@ -73,6 +80,7 @@ const ok = (
   cached: false,
   model: 'gpt-fake',
   ...fidelity,
+  proposalId,
   requestId
 })
 const fail = (
@@ -105,6 +113,14 @@ const answer = async (result: AiGhostTextResult, index = requests.length - 1): P
   })
 }
 const ghostText = (): string | null => ghostOf(editor.state)?.text ?? null
+/** A real keydown on the editor, as the browser sends it. */
+const press = (key: string, shiftKey = false): void => {
+  act(() => {
+    editor.view.dom.dispatchEvent(
+      new KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true })
+    )
+  })
+}
 const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.message)
 const mount = (
   props: { nodeId: string; active: boolean } = { nodeId: 'sc-1', active: true }
@@ -118,11 +134,13 @@ beforeEach(() => {
   vi.setSystemTime(new Date(2026, 8, 13, 10, 0, 0))
   resetGhostTextController()
   resetAiSettingsStore()
+  resetProposalStore()
   resetPendingSaves()
   resetTagStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   requests = []
   settingsWrites = []
+  settles = []
   setIpcClient(fakeClient())
   useAiSettingsStore.setState({ settings: settings() })
   editor = new Editor({
@@ -138,6 +156,7 @@ afterEach(() => {
   editor.destroy()
   resetAiSettingsStore()
   resetGhostTextController()
+  resetProposalStore()
   vi.useRealTimers()
 })
 
@@ -307,6 +326,7 @@ describe('useGhostTextController (F-5.3)', () => {
       })
     })
     expect(ghostText()).toBeNull()
+    expect(settles).toEqual([{ id: 'prop-1', status: 'rejected', note: null }])
     act(() => {
       useAiSettingsStore.setState({ settings: settings() })
     })
@@ -316,6 +336,10 @@ describe('useGhostTextController (F-5.3)', () => {
     expect(ghostText()).toBe(' Rain followed.')
     hook.rerender({ nodeId: 'sc-2', active: true })
     expect(ghostText()).toBeNull()
+    expect(settles).toEqual([
+      { id: 'prop-1', status: 'rejected', note: null },
+      { id: 'prop-2', status: 'rejected', note: null }
+    ])
   })
 
   it('turns VibeWrite off with one toast on DISABLED, NO_KEY, or INVALID_KEY, whatever the answer’s age', async () => {
@@ -409,5 +433,71 @@ describe('useGhostTextController (F-5.3)', () => {
     expect(editor.getText()).toBe(`${CONTENT}${ENOUGH} Rain followed.`)
     await idle()
     expect(requests).toHaveLength(1) // accepting is not typing: no new request
+  })
+
+  describe('settles the proposal behind a shown suggestion (F-14.5)', () => {
+    const show = async (requestId = '1', text?: string): Promise<void> => {
+      type(ENOUGH)
+      await idle()
+      await answer(ok(requestId, text))
+      expect(ghostText()).toBe(text ?? ' Rain followed.')
+    }
+
+    it('Tab settles accepted, once, with no note', async () => {
+      mount()
+      await show()
+      press('Tab')
+      expect(editor.getText()).toBe(`${CONTENT}${ENOUGH} Rain followed.`)
+      expect(settles).toEqual([{ id: 'prop-1', status: 'accepted', note: null }])
+      type('zz')
+      press('Escape')
+      expect(settles).toHaveLength(1)
+    })
+
+    it('Shift+Tab through the last word settles accepted', async () => {
+      mount()
+      await show()
+      press('Tab', true)
+      expect(settles).toEqual([])
+      press('Tab', true)
+      expect(ghostText()).toBeNull()
+      expect(settles).toEqual([{ id: 'prop-1', status: 'accepted', note: null }])
+    })
+
+    it('Escape settles rejected, silently', async () => {
+      mount()
+      await show()
+      press('Escape')
+      expect(settles).toEqual([{ id: 'prop-1', status: 'rejected', note: null }])
+      expect(toasts()).toEqual([])
+      expect(useDialogStore.getState().modals).toEqual([])
+    })
+
+    it('a mismatching keystroke settles rejected, or acceptedPart after typing along', async () => {
+      mount()
+      await show()
+      type('x')
+      expect(settles).toEqual([{ id: 'prop-1', status: 'rejected', note: null }])
+      type('b'.repeat(GHOST_MIN_NEW_CHARS))
+      await idle()
+      await answer(ok('2'))
+      type(' R')
+      type('x')
+      expect(ghostText()).toBeNull()
+      expect(settles).toEqual([
+        { id: 'prop-1', status: 'rejected', note: null },
+        { id: 'prop-2', status: 'acceptedPart', note: null }
+      ])
+    })
+
+    it('an answer without a proposal id has nothing to settle', async () => {
+      mount()
+      type(ENOUGH)
+      await idle()
+      await answer(ok('1', '', undefined, null))
+      expect(ghostText()).toBeNull()
+      press('Escape')
+      expect(settles).toEqual([])
+    })
   })
 })

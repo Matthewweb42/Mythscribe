@@ -10,6 +10,7 @@ import type { AiGhostTextResult, AiRecommendTagsResult } from '@shared/ipc/contr
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
 import { generateGhostText } from '../ai/ghostText'
 import type { AiKeyStore } from '../ai/keyStore'
+import { createProposal, settleProposal } from '../ai/proposalStore'
 import { AiProviderError, NoKeyError } from '../ai/providers/types'
 import { recommendTags } from '../ai/recommendTags'
 import type { AiProviderRegistry } from '../ai/registry'
@@ -32,6 +33,7 @@ import {
   setWritingPresets
 } from '../project/settingsStore'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
+import { normalizeProposalNote } from '@shared/proposal'
 import { addDocumentTag, listDocumentTags, removeDocumentTag } from '../tag/documentTagStore'
 import { createTag, deleteTag, listTags, loadTagTemplate, updateTag } from '../tag/tagStore'
 import {
@@ -267,16 +269,36 @@ export function registerHandlers({
 
   // F-4.7: the AI failures are data with a next step, like `ai:testConnection`; NOT_FOUND and
   // VALIDATION (unknown id, folder, too little text) are `AppError`s and take the envelope.
-  register('ai:recommendTags', async ({ nodeId }): Promise<AiRecommendTagsResult> => {
-    try {
-      const db = manager.require().connection.orm
-      const deps = buildAiRequestDeps({ db, providers: ai, appState })
-      return { ok: true, ...(await recommendTags(db, deps, nodeId)) }
-    } catch (err) {
-      if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
-      throw err
+  // The batch is one proposal (F-14.5); its content is the suggested names as a historical
+  // snapshot (what was offered, not what was linked: linking is the tag bar's accept).
+  register(
+    'ai:recommendTags',
+    async ({ nodeId, note, regeneratedFrom }): Promise<AiRecommendTagsResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const result = await recommendTags(db, deps, nodeId, { note, regeneratedFrom })
+        const proposal = createProposal(db, {
+          feature: 'tags',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model: result.model,
+          promptTokens: result.usage.inputTokens,
+          completionTokens: result.usage.outputTokens,
+          costUsd: result.costUsd,
+          cached: result.cached,
+          content: JSON.stringify(result.suggestions.map((tag) => tag.name)),
+          flagged: null,
+          violation: null,
+          regeneratedFrom: regeneratedFrom ?? null
+        })
+        return { ok: true, ...result, proposalId: proposal.id }
+      } catch (err) {
+        if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
+        throw err
+      }
     }
-  })
+  )
 
   // F-5.3: same envelope as `ai:recommendTags`, with the caller's `requestId` on both branches
   // so the renderer can drop an answer that arrived after the caret moved on.
@@ -286,12 +308,37 @@ export function registerHandlers({
       try {
         const db = manager.require().connection.orm
         const deps = buildAiRequestDeps({ db, providers: ai, appState })
-        const { text, usage, costUsd, cached, model, flagged, violation } = await generateGhostText(
-          db,
-          deps,
-          { nodeId, before, after }
-        )
-        return { ok: true, text, usage, costUsd, cached, model, flagged, violation, requestId }
+        const result = await generateGhostText(db, deps, { nodeId, before, after })
+        const { text, usage, costUsd, cached, model, flagged, violation } = result
+        // F-14.5: a shown suggestion is a proposal; "no suggestion" has nothing to settle.
+        const proposalId =
+          text === ''
+            ? null
+            : createProposal(db, {
+                feature: 'ghostText',
+                nodeId,
+                promptVersion: result.promptVersion,
+                model,
+                promptTokens: usage.inputTokens,
+                completionTokens: usage.outputTokens,
+                costUsd,
+                cached,
+                content: text,
+                flagged,
+                violation
+              }).id
+        return {
+          ok: true,
+          text,
+          usage,
+          costUsd,
+          cached,
+          model,
+          flagged,
+          violation,
+          proposalId,
+          requestId
+        }
       } catch (err) {
         if (err instanceof AiProviderError)
           return { ...aiFailure(err.code, err.message), requestId }
@@ -299,6 +346,12 @@ export function registerHandlers({
       }
     }
   )
+
+  // F-14.5: idempotent in the store (only a pending row changes); a blank note is stored as none.
+  register('proposal:settle', ({ id, status, note }) => {
+    settleProposal(manager.require().connection.orm, id, status, normalizeProposalNote(note))
+    return null
+  })
 
   // F-14.1: the exemplars and the locally built profile; nothing here calls the provider.
   register('voice:listExemplars', () => listExemplars(manager.require().connection.orm))

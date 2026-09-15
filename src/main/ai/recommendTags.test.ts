@@ -157,6 +157,46 @@ describe('recommendTags (F-4.7)', () => {
     expect(complete).toHaveBeenCalledTimes(1)
   })
 
+  it('sends a regenerate through tagsRegen.v1 with the note, and never answers it from the plain request cache', async () => {
+    createTag(db, { name: 'Dark Forest', category: 'setting' })
+    createTag(db, { name: 'Protagonist', category: 'character' })
+    await recommendTags(db, deps, scene)
+    answer('{"tags":["protagonist"]}')
+    const regen = await recommendTags(db, deps, scene, {
+      note: '  Too much setting.  ',
+      regeneratedFrom: 'p1'
+    })
+    expect(regen).toMatchObject({
+      cached: false,
+      promptVersion: 'tagsRegen.v1',
+      suggestions: [{ name: 'protagonist' }]
+    })
+    expect(complete).toHaveBeenCalledTimes(2)
+    const request = complete.mock.calls[1]![0]
+    expect(request.messages[0]?.content).toContain(
+      'The writer asked for a different set and said: "Too much setting.".'
+    )
+    expect(request.messages[1]).toEqual(complete.mock.calls[0]![0].messages[1])
+    expect(ledger[1]).toMatchObject({ feature: 'tags', promptVersion: 'tagsRegen.v1' })
+    expect(ledger[1]!.contextHash).not.toBe(ledger[0]!.contextHash)
+    // The same regenerate asked twice is one request: the note and the predecessor key the cache.
+    expect(
+      await recommendTags(db, deps, scene, { note: 'Too much setting.', regeneratedFrom: 'p1' })
+    ).toMatchObject({ cached: true })
+    expect(complete).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats a blank note with a predecessor as a regenerate without a note, and a blank note alone as a plain request', async () => {
+    createTag(db, { name: 'Dark Forest', category: 'setting' })
+    await recommendTags(db, deps, scene, { note: '   ', regeneratedFrom: 'p1' })
+    expect(complete.mock.calls[0]![0].messages[0]?.content).toContain(
+      'The writer asked for a different set. Pick again'
+    )
+    expect(ledger[0]).toMatchObject({ promptVersion: 'tagsRegen.v1' })
+    await recommendTags(db, deps, scene, { note: '   ', regeneratedFrom: null })
+    expect(ledger[1]).toMatchObject({ promptVersion: 'tags.v1' })
+  })
+
   it('maps an answer that is not JSON, or not { tags: string[] }, to PROVIDER with a message naming the problem', async () => {
     createTag(db, { name: 'Dark Forest', category: 'setting' })
     const expected = {

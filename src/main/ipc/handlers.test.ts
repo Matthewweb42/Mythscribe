@@ -30,7 +30,9 @@ import {
   type Provider
 } from '../ai/providers/types'
 import { AiProviderRegistry } from '../ai/registry'
+import { getProposal } from '../ai/proposalStore'
 import { insertUsage } from '../ai/usageStore'
+import { aiProposal } from '../db/schema'
 import { AppStateStore } from '../appState/appStateStore'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
@@ -1091,6 +1093,8 @@ describe('ai:recommendTags (F-4.7)', () => {
     await invoke('ai:setKey', { key: KEY })
     await invoke('documentTag:add', { nodeId: scene, tagId: forest.id })
     const result = await invoke('ai:recommendTags', { nodeId: scene })
+    if (!result.ok) throw new Error(result.message)
+    expect(result.proposalId).toMatch(/^[0-9a-f-]{36}$/)
     expect(result).toEqual({
       ok: true,
       suggestions: [hero],
@@ -1098,7 +1102,8 @@ describe('ai:recommendTags (F-4.7)', () => {
       costUsd: 0,
       cached: false,
       model: 'gpt-fake',
-      promptVersion: 'tags.v1'
+      promptVersion: 'tags.v1',
+      proposalId: result.proposalId
     })
     expect(complete).toHaveBeenCalledTimes(1)
     expect(complete.mock.calls[0]![0]).toMatchObject({ tier: 'fast', json: true, maxTokens: 200 })
@@ -1148,6 +1153,64 @@ describe('ai:recommendTags (F-4.7)', () => {
     expect(complete).toHaveBeenCalledTimes(2)
   })
 
+  it('records the batch as one pending proposal holding the offered names, and a regenerate with its note and predecessor (F-14.5)', async () => {
+    const { scene, hero } = await ready()
+    await invoke('ai:setKey', { key: KEY })
+    const first = await invoke('ai:recommendTags', { nodeId: scene })
+    if (!first.ok) throw new Error(first.message)
+    const db = manager.require().connection.orm
+    expect(getProposal(db, first.proposalId)).toMatchObject({
+      feature: 'tags',
+      nodeId: scene,
+      promptVersion: 'tags.v1',
+      model: 'gpt-fake',
+      promptTokens: 40,
+      completionTokens: 10,
+      cached: false,
+      content: JSON.stringify(['dark-forest', 'protagonist']),
+      flagged: null,
+      violation: null,
+      status: 'pending',
+      regeneratedFrom: null
+    })
+    complete.mockResolvedValueOnce({
+      text: '{"tags":["protagonist"]}',
+      model: 'gpt-fake',
+      usage: { inputTokens: 44, outputTokens: 6 }
+    })
+    const again = await invoke('ai:recommendTags', {
+      nodeId: scene,
+      note: 'Less setting.',
+      regeneratedFrom: first.proposalId
+    })
+    expect(again).toMatchObject({
+      ok: true,
+      suggestions: [hero],
+      promptVersion: 'tagsRegen.v1',
+      cached: false
+    })
+    if (!again.ok) throw new Error(again.message)
+    expect(getProposal(db, again.proposalId)).toMatchObject({
+      promptVersion: 'tagsRegen.v1',
+      content: JSON.stringify(['protagonist']),
+      regeneratedFrom: first.proposalId
+    })
+    expect(complete.mock.calls[1]![0].messages[0]?.content).toContain('said: "Less setting."')
+    expect(db.select().from(aiProposal).all()).toHaveLength(2)
+  })
+
+  it('refuses a note over the limit as VALIDATION before touching the provider', async () => {
+    const { scene } = await ready()
+    await invoke('ai:setKey', { key: KEY })
+    const result = await handlerFor('ai:recommendTags')(undefined, {
+      nodeId: scene,
+      note: 'n'.repeat(301)
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(complete).not.toHaveBeenCalled()
+  })
+
   it('lets a folder and an unknown id reach the error envelope as VALIDATION and NOT_FOUND', async () => {
     const { folder } = await ready()
     const onFolder = await handlerFor('ai:recommendTags')(undefined, { nodeId: folder })
@@ -1194,6 +1257,8 @@ describe('ai:ghostText (F-5.3)', () => {
       after: '',
       requestId: 'req-7'
     })
+    if (!result.ok) throw new Error(result.message)
+    expect(result.proposalId).toMatch(/^[0-9a-f-]{36}$/)
     expect(result).toEqual({
       ok: true,
       text: ' Somewhere ahead the river was rising.',
@@ -1203,6 +1268,7 @@ describe('ai:ghostText (F-5.3)', () => {
       model: 'gpt-fake',
       flagged: false,
       violation: null,
+      proposalId: result.proposalId,
       requestId: 'req-7'
     })
     expect(complete).toHaveBeenCalledTimes(1)
@@ -1210,6 +1276,47 @@ describe('ai:ghostText (F-5.3)', () => {
     const summary = await invoke('ai:usageSummary', undefined)
     expect(summary.total.requests).toBe(1)
     expect(summary.byFeature.map((f) => f.feature)).toEqual(['ghostText'])
+  })
+
+  it('records a shown suggestion as a pending proposal and no row for an empty answer (F-14.5)', async () => {
+    const { scene } = await ready()
+    await invoke('ai:setKey', { key: KEY })
+    const shown = await invoke('ai:ghostText', {
+      nodeId: scene,
+      before: BEFORE,
+      after: '',
+      requestId: 'req-9'
+    })
+    if (!shown.ok || shown.proposalId === null) throw new Error('expected a proposal')
+    const db = manager.require().connection.orm
+    expect(getProposal(db, shown.proposalId)).toMatchObject({
+      feature: 'ghostText',
+      nodeId: scene,
+      promptVersion: 'ghostText.v1',
+      model: 'gpt-fake',
+      promptTokens: 120,
+      completionTokens: 12,
+      cached: false,
+      content: ' Somewhere ahead the river was rising.',
+      flagged: false,
+      violation: null,
+      status: 'pending',
+      note: null,
+      settledAt: null
+    })
+    complete.mockResolvedValueOnce({
+      text: '   ',
+      model: 'gpt-fake',
+      usage: { inputTokens: 120, outputTokens: 1 }
+    })
+    const empty = await invoke('ai:ghostText', {
+      nodeId: scene,
+      before: `${BEFORE} More.`,
+      after: '',
+      requestId: 'req-10'
+    })
+    expect(empty).toMatchObject({ ok: true, text: '', proposalId: null })
+    expect(db.select().from(aiProposal).all()).toHaveLength(1)
   })
 
   it('answers each expected AI failure as data with its next step and the requestId', async () => {
@@ -1262,6 +1369,73 @@ describe('ai:ghostText (F-5.3)', () => {
     expect(long.ok).toBe(false)
     if (!long.ok) expect(long.error.code).toBe('VALIDATION')
     expect(complete).not.toHaveBeenCalled()
+  })
+})
+
+describe('proposal:settle (F-14.5)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+
+  /** A project with the dial at Suggest, a key, and one pending ghost-text proposal. */
+  async function ready(): Promise<string> {
+    await invoke('project:create', { name: 'Settle', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    await invoke('ai:setKey', { key: KEY })
+    complete.mockResolvedValue({
+      text: 'Somewhere ahead the river was rising.',
+      model: 'gpt-fake',
+      usage: { inputTokens: 120, outputTokens: 12 }
+    })
+    const result = await invoke('ai:ghostText', {
+      nodeId: scene.id,
+      before: 'The storm broke at dusk over the dark forest.',
+      after: '',
+      requestId: '1'
+    })
+    if (!result.ok || result.proposalId === null) throw new Error('expected a proposal')
+    return result.proposalId
+  }
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('proposal:settle', { id: 'x', status: 'rejected' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('settles a pending proposal once with the status and a trimmed note; a second settlement is a no-op', async () => {
+    const id = await ready()
+    expect(
+      await invoke('proposal:settle', { id, status: 'regenerated', note: '  Too purple. ' })
+    ).toBeNull()
+    const db = manager.require().connection.orm
+    const settled = getProposal(db, id)
+    expect(settled).toMatchObject({ status: 'regenerated', note: 'Too purple.' })
+    expect(settled?.settledAt).toEqual(expect.any(String))
+    expect(await invoke('proposal:settle', { id, status: 'accepted' })).toBeNull()
+    expect(getProposal(db, id)).toEqual(settled)
+    // An unknown id is a silent no-op too.
+    expect(await invoke('proposal:settle', { id: 'gone', status: 'accepted' })).toBeNull()
+  })
+
+  it('stores a blank note as none and refuses pending as a status or a note over the limit', async () => {
+    const id = await ready()
+    await invoke('proposal:settle', { id, status: 'acceptedPart', note: '   ' })
+    expect(getProposal(manager.require().connection.orm, id)).toMatchObject({
+      status: 'acceptedPart',
+      note: null
+    })
+    const pending = await handlerFor('proposal:settle')(undefined, { id, status: 'pending' })
+    expect(pending.ok).toBe(false)
+    if (!pending.ok) expect(pending.error.code).toBe('VALIDATION')
+    const long = await handlerFor('proposal:settle')(undefined, {
+      id,
+      status: 'rejected',
+      note: 'n'.repeat(301)
+    })
+    expect(long.ok).toBe(false)
+    if (!long.ok) expect(long.error.code).toBe('VALIDATION')
   })
 })
 

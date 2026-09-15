@@ -1,8 +1,14 @@
 import { Editor } from '@tiptap/core'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { Plugin } from '@tiptap/pm/state'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
 import { buildExtensions } from './extensions'
-import { GHOST_TEXT_CLASS, GHOST_TEXT_FLAG_CLASS, ghostOf } from './ghostText'
+import {
+  GHOST_TEXT_CLASS,
+  GHOST_TEXT_FLAG_CLASS,
+  ghostOf,
+  type GhostSettleHandler
+} from './ghostText'
 
 let editor: Editor
 const CONTENT = 'The storm broke at dusk.'
@@ -50,6 +56,7 @@ describe('GhostText extension (F-5.3)', () => {
     expect(widget()?.getAttribute('aria-hidden')).toBe('true')
     expect(ghostOf(editor.state)).toEqual({
       text: SUGGESTION,
+      full: SUGGESTION,
       from: CONTENT.length + 1,
       flagged: false,
       violation: null
@@ -84,6 +91,7 @@ describe('GhostText extension (F-5.3)', () => {
     expect(text()).toBe(`${CONTENT} Rain `)
     expect(widget()?.textContent).toBe('followed. Then silence.')
     expect(ghostOf(editor.state)?.from).toBe(editor.state.selection.from)
+    expect(ghostOf(editor.state)?.full).toBe(SUGGESTION)
     press('Tab', true)
     expect(text()).toBe(`${CONTENT} Rain followed. `)
     expect(widget()?.textContent).toBe('Then silence.')
@@ -98,6 +106,7 @@ describe('GhostText extension (F-5.3)', () => {
     expect(editor.commands.setGhost(SUGGESTION, true, violation)).toBe(true)
     expect(ghostOf(editor.state)).toEqual({
       text: SUGGESTION,
+      full: SUGGESTION,
       from: CONTENT.length + 1,
       flagged: true,
       violation
@@ -191,5 +200,157 @@ describe('GhostText extension (F-5.3)', () => {
     editor.commands.setGhost(SUGGESTION)
     editor.view.dom.dispatchEvent(new CompositionEvent('compositionstart'))
     expect(widget()).toBeNull()
+  })
+})
+
+describe('GhostText settlement (F-14.5)', () => {
+  let onSettle: ReturnType<typeof vi.fn<GhostSettleHandler>>
+
+  /** The storage slot the controller fills in the app; here a spy listens instead. */
+  const listen = (target: Editor = editor): void => {
+    target.storage.ghostText!.onSettle = onSettle
+  }
+
+  beforeEach(() => {
+    onSettle = vi.fn<GhostSettleHandler>()
+    listen()
+  })
+
+  it('ships an empty hook slot, so an editor nobody listens to settles silently', () => {
+    const quiet = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-2' })
+    })
+    expect(quiet.storage.ghostText).toEqual({ onSettle: null })
+    quiet.commands.setGhost(SUGGESTION)
+    expect(() => quiet.commands.clearGhost()).not.toThrow()
+    quiet.destroy()
+  })
+
+  it('Tab settles accepted with the whole text, once', () => {
+    editor.commands.setGhost(SUGGESTION)
+    expect(onSettle).not.toHaveBeenCalled()
+    press('Tab')
+    expect(onSettle).toHaveBeenCalledExactlyOnceWith('accepted', SUGGESTION)
+    editor.commands.insertContent('x')
+    editor.commands.setTextSelection(2)
+    expect(onSettle).toHaveBeenCalledTimes(1)
+  })
+
+  it('Shift+Tab settles nothing until the last word, then accepted', () => {
+    editor.commands.setGhost(SUGGESTION)
+    press('Tab', true)
+    press('Tab', true)
+    press('Tab', true)
+    expect(onSettle).not.toHaveBeenCalled()
+    press('Tab', true)
+    expect(widget()).toBeNull()
+    expect(onSettle).toHaveBeenCalledExactlyOnceWith('accepted', SUGGESTION)
+  })
+
+  it('typing the suggestion through to its end settles accepted', () => {
+    editor.commands.setGhost(SUGGESTION)
+    editor.commands.insertContent(' Rain')
+    expect(onSettle).not.toHaveBeenCalled()
+    editor.commands.insertContent(' followed. Then silence.')
+    expect(onSettle).toHaveBeenCalledExactlyOnceWith('accepted', SUGGESTION)
+  })
+
+  it('Escape settles rejected when nothing was taken, acceptedPart after a word', () => {
+    editor.commands.setGhost(SUGGESTION)
+    press('Escape')
+    expect(onSettle).toHaveBeenCalledExactlyOnceWith('rejected', '')
+    press('Escape')
+    expect(onSettle).toHaveBeenCalledTimes(1)
+
+    editor.commands.setGhost(SUGGESTION)
+    press('Tab', true)
+    press('Escape')
+    expect(onSettle).toHaveBeenCalledTimes(2)
+    expect(onSettle).toHaveBeenLastCalledWith('acceptedPart', ' Rain ')
+  })
+
+  it('a mismatching keystroke settles rejected, or acceptedPart with what was typed along', () => {
+    editor.commands.setGhost(SUGGESTION)
+    editor.commands.insertContent('x')
+    expect(onSettle).toHaveBeenCalledExactlyOnceWith('rejected', '')
+
+    editor.commands.setGhost(SUGGESTION)
+    editor.commands.insertContent(' R')
+    expect(onSettle).toHaveBeenCalledTimes(1)
+    editor.commands.insertContent('x')
+    expect(onSettle).toHaveBeenCalledTimes(2)
+    expect(onSettle).toHaveBeenLastCalledWith('acceptedPart', ' R')
+    expect(text()).toBe(`${CONTENT}x Rx`)
+  })
+
+  it('a deletion, a caret move, and a range selection settle rejected', () => {
+    editor.commands.setGhost(SUGGESTION)
+    editor.commands.deleteRange({
+      from: editor.state.selection.from - 1,
+      to: editor.state.selection.from
+    })
+    expect(onSettle).toHaveBeenCalledExactlyOnceWith('rejected', '')
+
+    editor.commands.focus('end')
+    editor.commands.setGhost(SUGGESTION)
+    editor.commands.setTextSelection(3)
+    expect(onSettle).toHaveBeenCalledTimes(2)
+    expect(onSettle).toHaveBeenLastCalledWith('rejected', '')
+
+    editor.commands.focus('end')
+    editor.commands.setGhost(SUGGESTION)
+    editor.commands.setTextSelection({ from: 1, to: CONTENT.length + 1 })
+    expect(onSettle).toHaveBeenCalledTimes(3)
+    expect(onSettle).toHaveBeenLastCalledWith('rejected', '')
+  })
+
+  it('blur and the start of an IME composition settle rejected', () => {
+    editor.commands.setGhost(SUGGESTION)
+    editor.view.dom.dispatchEvent(new FocusEvent('blur'))
+    expect(onSettle).toHaveBeenCalledExactlyOnceWith('rejected', '')
+
+    editor.commands.focus('end')
+    editor.commands.setGhost(SUGGESTION)
+    editor.view.dom.dispatchEvent(new CompositionEvent('compositionstart'))
+    expect(onSettle).toHaveBeenCalledTimes(2)
+    expect(onSettle).toHaveBeenLastCalledWith('rejected', '')
+  })
+
+  it('a replacement settles the old suggestion on its own and lets the new one settle later', () => {
+    editor.commands.setGhost(SUGGESTION)
+    press('Tab', true)
+    editor.commands.setGhost(' Wind rose.')
+    expect(onSettle).toHaveBeenCalledExactlyOnceWith('acceptedPart', ' Rain ')
+    expect(ghostOf(editor.state)).toMatchObject({ text: ' Wind rose.', full: ' Wind rose.' })
+    press('Tab')
+    expect(onSettle).toHaveBeenCalledTimes(2)
+    expect(onSettle).toHaveBeenLastCalledWith('accepted', ' Wind rose.')
+  })
+
+  it('an unrelated transaction and a plugin reconfigure leave the suggestion and settle nothing', () => {
+    editor.commands.setGhost(SUGGESTION)
+    editor.view.dispatch(editor.state.tr.setMeta('unrelated', true))
+    editor.registerPlugin(new Plugin({}))
+    expect(widget()?.textContent).toBe(SUGGESTION)
+    expect(onSettle).not.toHaveBeenCalled()
+    press('Escape')
+    expect(onSettle).toHaveBeenCalledExactlyOnceWith('rejected', '')
+  })
+
+  it('an editor torn down with a suggestion showing settles it rejected, once', () => {
+    const leaving = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-3' }),
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: CONTENT }] }]
+      }
+    })
+    leaving.commands.focus('end')
+    listen(leaving)
+    leaving.commands.setGhost(SUGGESTION)
+    leaving.commands.insertContent(' R')
+    leaving.destroy()
+    expect(onSettle).toHaveBeenCalledExactlyOnceWith('acceptedPart', ' R')
+    // Our own editor has nothing showing: destroying it in afterEach settles nothing.
   })
 })

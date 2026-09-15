@@ -13,10 +13,11 @@ import {
 import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
 import type { AiGhostTextResult } from '@shared/ipc/contract'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
-import { GHOST_TEXT_KEY, ghostOf } from './ghostText'
+import { GHOST_TEXT_KEY, ghostOf, type GhostSettleHandler } from './ghostText'
 
 /** The failures that turn VibeWrite off: nothing will succeed until the author acts in Settings. */
 const TURN_OFF_CODES: ReadonlySet<AiErrorCode> = new Set(['DISABLED', 'NO_KEY', 'INVALID_KEY'])
@@ -99,6 +100,10 @@ interface GhostSessionDeps {
  * focused. Failures are handled whatever their age: DISABLED, NO_KEY, and INVALID_KEY turn
  * VibeWrite off with one toast (nothing will succeed until Settings change); anything else
  * goes to the toolbar indicator and backs off for `GHOST_BACKOFF_MS`.
+ *
+ * A shown suggestion is a proposal (F-14.5): the session keeps its id while it shows and
+ * settles it (never with a note; Escape stays silent) when the extension reports how it left
+ * the screen. Answers without a proposal id (an empty suggestion) have nothing to settle.
  */
 function startGhostSession(deps: GhostSessionDeps): () => void {
   const { editor, nodeId, now } = deps
@@ -110,6 +115,16 @@ function startGhostSession(deps: GhostSessionDeps): () => void {
   let editedSinceSend = false
   let focused = editor.isFocused
   let disposed = false
+  /** The proposal behind the suggestion showing; null while none shows or it came without one. */
+  let shownProposalId: string | null = null
+
+  const onSettle: GhostSettleHandler = (status) => {
+    const id = shownProposalId
+    shownProposalId = null
+    if (id !== null) void proposalStore.settle(id, status, null)
+  }
+  const storage = editor.storage.ghostText
+  if (storage) storage.onSettle = onSettle
 
   const clearTimer = (): void => {
     if (timer !== null) {
@@ -148,7 +163,10 @@ function startGhostSession(deps: GhostSessionDeps): () => void {
       return
     }
     deps.onError(null)
-    if (result.text) editor.commands.setGhost(result.text, result.flagged, result.violation)
+    // Set the id after the command: a suggestion this one replaces settles under its own id first.
+    if (result.text && editor.commands.setGhost(result.text, result.flagged, result.violation)) {
+      shownProposalId = result.proposalId
+    }
   }
 
   const check = (): void => {
@@ -222,6 +240,7 @@ function startGhostSession(deps: GhostSessionDeps): () => void {
     editor.off('focus', onFocus)
     editor.off('blur', onBlur)
     if (!editor.isDestroyed && ghostOf(editor.state) !== null) editor.commands.clearGhost()
+    if (storage?.onSettle === onSettle) storage.onSettle = null
   }
 }
 

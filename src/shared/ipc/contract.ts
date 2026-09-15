@@ -19,6 +19,7 @@ import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
 import { MatterTemplateId } from '../matterTemplates'
 import { WritingPresets } from '../presets'
+import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
 import { SceneMeta } from '../sceneMeta'
 import { Stylometrics } from '../stylometry'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
@@ -101,7 +102,8 @@ export type Tag = z.infer<typeof Tag>
 /**
  * What `ai:recommendTags` answers (F-4.7): the bank tags the model picked that are not yet on
  * the document, with what the request cost (`cached` when the local cache answered), or an
- * expected AI failure as data with its next step, like `AiTestConnectionResult`.
+ * expected AI failure as data with its next step, like `AiTestConnectionResult`. The batch is
+ * one proposal (F-14.5); the tag bar settles `proposalId` once the author is done with it.
  */
 export const AiRecommendTagsResult = z.discriminatedUnion('ok', [
   z.object({
@@ -111,7 +113,8 @@ export const AiRecommendTagsResult = z.discriminatedUnion('ok', [
     costUsd: z.number(),
     cached: z.boolean(),
     model: z.string(),
-    promptVersion: z.string()
+    promptVersion: z.string(),
+    proposalId: z.string()
   }),
   z.object({ ok: z.literal(false), code: AiErrorCode, message: z.string(), nextStep: z.string() })
 ])
@@ -123,7 +126,8 @@ export type AiRecommendTagsResult = z.infer<typeof AiRecommendTagsResult>
  * dropped; or an expected AI failure as data with its next step, also carrying the id.
  * `flagged` (F-14.7) is true when the text still fails the local fidelity check after one
  * regenerate, with the first violation in `violation` for the warning badge; `usage` and
- * `costUsd` then cover both calls.
+ * `costUsd` then cover both calls. `proposalId` (F-14.5) is the row the ghost-text widget
+ * settles when the suggestion leaves the screen; null when there is no suggestion.
  */
 export const AiGhostTextResult = z.discriminatedUnion('ok', [
   z.object({
@@ -135,6 +139,7 @@ export const AiGhostTextResult = z.discriminatedUnion('ok', [
     model: z.string(),
     flagged: z.boolean(),
     violation: z.string().nullable(),
+    proposalId: z.string().nullable(),
     requestId: z.string()
   }),
   z.object({
@@ -428,9 +433,18 @@ export const contract = {
    * Asks the AI for tags from the bank that fit a document's text (F-4.7); nothing is linked
    * until the author accepts a suggestion. NOT_FOUND for an unknown id, VALIDATION for a folder
    * or a document under `TAGS_MIN_CHARS` of text; the AI failures (no key, dial, budget, ...)
-   * come back as data with a next step so the tag bar shows them inline.
+   * come back as data with a next step so the tag bar shows them inline. A regenerate
+   * (F-14.5) names the proposal it replaces in `regeneratedFrom` and may carry the author's
+   * `note` on what was off; both reach the model through `tagsRegen.v1`.
    */
-  'ai:recommendTags': { input: z.object({ nodeId: z.string() }), output: AiRecommendTagsResult },
+  'ai:recommendTags': {
+    input: z.object({
+      nodeId: z.string(),
+      note: z.string().max(PROPOSAL_NOTE_MAX).nullable().optional(),
+      regeneratedFrom: z.string().nullable().optional()
+    }),
+    output: AiRecommendTagsResult
+  },
   /**
    * Asks the AI to continue the passage at the caret (F-5.3, VibeWrite): the text before and
    * after the caret (bounded; over the bound is VALIDATION) plus the document's notes and
@@ -446,6 +460,19 @@ export const contract = {
       requestId: z.string()
     }),
     output: AiGhostTextResult
+  },
+  /**
+   * Records how the author settled a proposal (F-14.5): accepted, accepted in part, rejected,
+   * or regenerated, with an optional note (a blank one is stored as none). Idempotent: only a
+   * pending proposal changes; a second settlement or an evicted id is a silent no-op.
+   */
+  'proposal:settle': {
+    input: z.object({
+      id: z.string(),
+      status: SettledStatus,
+      note: z.string().max(PROPOSAL_NOTE_MAX).nullable().optional()
+    }),
+    output: z.null()
   },
   /** Every voice exemplar of the open project (F-14.1), oldest first. */
   'voice:listExemplars': { input: z.undefined(), output: z.array(VoiceExemplar) },

@@ -11,6 +11,7 @@ import {
 } from 'drizzle-orm/sqlite-core'
 // Relative on purpose: drizzle-kit loads this file without the `@shared` path alias.
 import { AI_PROVIDER_IDS } from '../../shared/ai'
+import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
 import { TAG_CATEGORIES } from '../../shared/tags'
 import { EXEMPLAR_KINDS } from '../../shared/voice'
@@ -192,3 +193,51 @@ export const voiceExemplar = sqliteTable(
 )
 export type VoiceExemplarRow = typeof voiceExemplar.$inferSelect
 export type VoiceExemplarInsert = typeof voiceExemplar.$inferInsert
+
+/**
+ * One AI output the author can act on (F-14.5): what produced it, what it cost, the text, and
+ * how the author settled it. `content` is the proposal text (ghost text) or a historical
+ * snapshot (tag recommendations store the names as JSON); `flagged`/`violation` are set only
+ * by prose-generating features (the F-14.7 fidelity check); `target_from`/`target_to` are the
+ * document range a rewrite would replace (F-14.10 fills them). The node reference is cleared,
+ * not cascaded, when the node goes; `regenerated_from` links a regenerate to the proposal it
+ * replaced and is cleared when that row is evicted.
+ */
+export const aiProposal = sqliteTable(
+  'ai_proposal',
+  {
+    id: text('id').primaryKey(),
+    /** ISO timestamp. */
+    createdAt: text('created_at').notNull(),
+    /** An `AiFeatureId`. */
+    feature: text('feature').notNull(),
+    nodeId: text('node_id').references(() => node.id, { onDelete: 'set null' }),
+    promptVersion: text('prompt_version').notNull(),
+    model: text('model').notNull(),
+    promptTokens: integer('prompt_tokens').notNull(),
+    completionTokens: integer('completion_tokens').notNull(),
+    costUsd: real('cost_usd').notNull(),
+    cached: integer('cached', { mode: 'boolean' }).notNull(),
+    /** The proposal text; not `text`, which is the column builder's name. */
+    content: text('content').notNull(),
+    /** null when the feature runs no fidelity check. */
+    flagged: integer('flagged', { mode: 'boolean' }),
+    violation: text('violation'),
+    targetFrom: integer('target_from'),
+    targetTo: integer('target_to'),
+    status: text('status', { enum: PROPOSAL_STATUSES }).notNull().default('pending'),
+    /** The author's note on a rejection or a regenerate; a negative example for later features. */
+    note: text('note'),
+    /** ISO timestamp; null while pending. */
+    settledAt: text('settled_at'),
+    regeneratedFrom: text('regenerated_from').references((): AnySQLiteColumn => aiProposal.id, {
+      onDelete: 'set null'
+    })
+  },
+  (t) => [
+    index('ai_proposal_created_at_idx').on(t.createdAt),
+    index('ai_proposal_node_idx').on(t.nodeId)
+  ]
+)
+export type AiProposalRow = typeof aiProposal.$inferSelect
+export type AiProposalInsert = typeof aiProposal.$inferInsert
