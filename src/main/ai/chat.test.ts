@@ -21,7 +21,7 @@ import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { checkChatFidelity, postProcessChatText, runChat, type ChatInput } from './chat'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
-import type { ChatTurn } from './prompts/chat.v1'
+import type { ChatTurn } from './prompts/chat.v2'
 import {
   AiCancelledError,
   AiProviderError,
@@ -172,7 +172,7 @@ afterEach(() => {
 })
 
 describe('runChat, Plan mode (F-5.4)', () => {
-  it('streams the answer through onDelta, resolves the whole text, and logs one fast-tier chat.v1 row with no temperature', async () => {
+  it('streams the answer through onDelta, resolves the whole text, and logs one fast-tier chat.v2 row with no temperature', async () => {
     const seen: string[] = []
     const result = await ask({}, (delta) => void seen.push(delta))
     expect(seen).toEqual(['The storm, ', 'per the opening.'])
@@ -182,7 +182,7 @@ describe('runChat, Plan mode (F-5.4)', () => {
       costUsd: priceFor('gpt-5.4-mini', 90, 8).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'chat.v1',
+      promptVersion: 'chat.v2',
       flagged: false,
       violation: null
     })
@@ -196,7 +196,7 @@ describe('runChat, Plan mode (F-5.4)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'chat',
       tier: 'fast',
-      promptVersion: 'chat.v1',
+      promptVersion: 'chat.v2',
       cached: false
     })
     expect(ledger[0]!.contextHash).toMatch(/^[0-9a-f]{64}$/)
@@ -360,11 +360,11 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'chat.v1',
+      promptVersion: 'chat.v2',
       flagged: false,
       violation: null
     })
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['chat.v1'])
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['chat.v2'])
   })
 
   it('post-processes the draft: trims and strips wrapping quotes, keeping paragraph breaks', async () => {
@@ -375,7 +375,7 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
     expect(postProcessChatText('  ')).toBe('')
   })
 
-  it('regenerates an off-voice draft once through chatRegen.v1 with the violation named, and shows the clean second draft with both calls summed', async () => {
+  it('regenerates an off-voice draft once through chatRegen.v2 with the violation named, and shows the clean second draft with both calls summed', async () => {
     strongProfile()
     answers(OFF_VOICE, CLEAN)
     const result = await ask(agent())
@@ -385,7 +385,7 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
       "Your last attempt switches to present tense. Write a different draft that keeps the manuscript's voice."
     )
     expect(second.messages.slice(1)).toEqual(complete.mock.calls[0]![0].messages.slice(1))
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['chat.v1', 'chatRegen.v1'])
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['chat.v2', 'chatRegen.v2'])
     expect(ledger[0]!.contextHash).not.toBe(ledger[1]!.contextHash)
     expect(result).toEqual({
       text: CLEAN,
@@ -393,7 +393,7 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd * 2,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'chatRegen.v1',
+      promptVersion: 'chatRegen.v2',
       flagged: false,
       violation: null
     })
@@ -406,7 +406,7 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
       text: OFF_VOICE,
       flagged: true,
       violation: 'switches to present tense',
-      promptVersion: 'chatRegen.v1'
+      promptVersion: 'chatRegen.v2'
     })
     answers(OFF_VOICE)
     complete.mockRejectedValueOnce(new AiRateLimitError('Slow down.'))
@@ -414,14 +414,14 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
       text: OFF_VOICE,
       flagged: true,
       violation: 'switches to present tense',
-      promptVersion: 'chat.v1',
+      promptVersion: 'chat.v2',
       usage: { inputTokens: 120, outputTokens: 12 }
     })
     answers(OFF_VOICE, '""')
     expect(await ask(agent({ message: 'Once more.' }))).toMatchObject({
       text: OFF_VOICE,
       flagged: true,
-      promptVersion: 'chat.v1',
+      promptVersion: 'chat.v2',
       usage: { inputTokens: 240, outputTokens: 24 }
     })
   })

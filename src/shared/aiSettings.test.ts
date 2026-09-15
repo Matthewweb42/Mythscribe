@@ -83,9 +83,9 @@ describe('defaultAiSettings (F-14.4)', () => {
       expect(parsed.data.critique).toEqual({ honesty: DEFAULT_HONESTY })
       expect(parsed.data.dial).toBe(1)
     }
-    expect(AiSettings.safeParse({ ...defaultAiSettings(), critique: { honesty: 'brutal' } }).success).toBe(
-      true
-    )
+    expect(
+      AiSettings.safeParse({ ...defaultAiSettings(), critique: { honesty: 'brutal' } }).success
+    ).toBe(true)
     expect(
       AiSettings.safeParse({ ...defaultAiSettings(), critique: { honesty: 'harsh' } }).success
     ).toBe(false)
@@ -105,14 +105,21 @@ describe('AI_DATA_SHARING', () => {
     expect(Object.keys(AI_DATA_SHARING).sort()).toEqual([...AI_FEATURE_IDS].sort())
   })
 
-  it('names everything ghost text sends: the caret window, the notes, the metadata (F-5.3), the voice profile (F-14.1), the author rules (F-14.2), and the one regenerate (F-14.7)', () => {
+  it('names everything ghost text sends: the caret window, the notes, the metadata (F-5.3), the voice profile (F-14.1), the author rules (F-14.2), the story bible (F-14.9), and the one regenerate (F-14.7)', () => {
     expect(AI_DATA_SHARING.ghostText.sends).toBe(
       'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes ' +
         'and metadata (location, POV, timeline), the voice profile (stylometric rules and up ' +
-        'to 3 exemplar passages), and your author rules and banned phrases. An answer that breaks ' +
-        'the voice profile or uses a banned phrase is sent back once, with the same context plus ' +
-        'the rule it broke, for a second try.'
+        'to 3 exemplar passages), your author rules and banned phrases, and the story bible ' +
+        "(your tag names by category, the scene's tags, and the titles and metadata of the " +
+        'scenes either side of it). An answer that breaks the voice profile or uses a banned ' +
+        'phrase is sent back once, with the same context plus the rule it broke, for a second try.'
     )
+  })
+
+  it('discloses the story bible for every feature whose prompt carries it (F-14.9)', () => {
+    for (const id of ['ghostText', 'chat', 'critique', 'rewrite'] as const) {
+      expect(AI_DATA_SHARING[id].sends).toContain('the story bible')
+    }
   })
 
   it('discloses author rules and banned phrases for every feature that carries the voice block (F-14.2)', () => {

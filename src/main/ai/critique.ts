@@ -15,6 +15,7 @@ import {
 } from '@shared/critique'
 import { docToText } from '@shared/docText'
 import { normalizeProposalNote } from '@shared/proposal'
+import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { getDocumentContent } from '../document/documentStore'
 import { getNotes } from '../document/notesStore'
@@ -30,8 +31,9 @@ import {
   buildCritiquePrompt,
   type BuildCritiquePromptInput,
   type BuiltCritiquePrompt
-} from './prompts/critique.v1'
-import { buildCritiqueRegenPrompt, type BuiltCritiqueRegenPrompt } from './prompts/critiqueRegen.v1'
+} from './prompts/critique.v2'
+import { buildStoryBible } from './context/storyBible'
+import { buildCritiqueRegenPrompt, type BuiltCritiqueRegenPrompt } from './prompts/critiqueRegen.v2'
 import { AiFallbackError, type AiMessage, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -101,7 +103,7 @@ const BAD_FORMAT = 'The model did not answer in the expected format.'
  * regenerate, since a retry would redo the whole critique.
  *
  * A regenerate (F-14.5: a note, a predecessor proposal, or both) goes through
- * `critiqueRegen.v1`, and the note and the predecessor join the context hash, so asking again
+ * `critiqueRegen.v2`, and the note and the predecessor join the context hash, so asking again
  * never answers from the cache with the notes the author just turned down. The hash otherwise
  * covers everything that shaped the messages: the scene text as sent, the notes, the metadata,
  * the honesty setting, and the voice profile's version.
@@ -140,11 +142,20 @@ export async function runCritique(
     pov: pov || null
   })
 
+  const bible = buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+
   const note = normalizeProposalNote(input.note)
   const regeneratedFrom = input.regeneratedFrom ?? null
   const isRegenerate = note !== null || regeneratedFrom !== null
   const build = (text: string): BuiltCritiquePrompt | BuiltCritiqueRegenPrompt => {
-    const base: BuildCritiquePromptInput = { sceneText: text, notes, meta, voice, honesty }
+    const base: BuildCritiquePromptInput = {
+      sceneText: text,
+      notes,
+      meta,
+      voice,
+      bible,
+      honesty
+    }
     return isRegenerate ? buildCritiqueRegenPrompt({ ...base, note }) : buildCritiquePrompt(base)
   }
 
@@ -167,6 +178,7 @@ export async function runCritique(
         sceneText,
         notes,
         meta,
+        bible,
         honesty,
         note,
         regeneratedFrom: isRegenerate ? regeneratedFrom : null,

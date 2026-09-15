@@ -74,7 +74,7 @@ describe('budgets', () => {
     expect(DEFAULT_OUTPUT_BUDGET).toBeGreaterThan(0)
     expect(DEFAULT_INPUT_BUDGET).toBeGreaterThan(DEFAULT_OUTPUT_BUDGET)
     expect(outputBudget('ghostText')).toBe(60)
-    expect(inputBudget('ghostText')).toBe(1_500)
+    expect(inputBudget('ghostText')).toBe(1_700)
     expect(outputBudget('query')).toBe(DEFAULT_OUTPUT_BUDGET)
     expect(inputBudget('query')).toBe(DEFAULT_INPUT_BUDGET)
   })

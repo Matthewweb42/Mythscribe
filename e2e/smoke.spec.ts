@@ -17,6 +17,7 @@ import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/co
 import type { Layout } from '../src/shared/layout'
 import { PRESETS, type WritingPresets } from '../src/shared/presets'
 import { matterTemplate } from '../src/shared/matterTemplates'
+import { STORY_BIBLE_HEADING } from '../src/shared/storyBible'
 import type { TiptapNodeT } from '../src/shared/tiptap'
 import { countWords } from '../src/shared/wordCount'
 
@@ -1284,6 +1285,19 @@ test('create, close, reopen a project on disk', async () => {
   expect(ghostSystem?.role).toBe('system')
   expect(ghostSystem?.content).toContain("Match the author's voice:")
   expect(ghostSystem?.content).toContain('Example in this voice:\n"""\nThe storm broke at dusk.')
+  // F-14.9: after the voice block, the story bible: the bank's story tags by category, Scene
+  // 1's place in Chapter 1 with the tags linked to it, and the scene after it as a neighbour.
+  expect(ghostSystem?.content.indexOf(STORY_BIBLE_HEADING)).toBeGreaterThan(
+    ghostSystem?.content.indexOf("Match the author's voice:") ?? -1
+  )
+  expect(ghostSystem?.content).toMatch(/\nCharacters: [^\n]*protagonist/)
+  expect(ghostSystem?.content).toMatch(/\nSettings: [^\n]*dark-forest/)
+  // Scene 1 follows the "Opening" scene inserted after it and renamed (F-2.2), so it is the
+  // second of two in Chapter 1, with "Opening" before it and Chapter 2's scene after it.
+  expect(ghostSystem?.content).toContain(
+    '\nThis scene: "Scene 1", in "Chapter 1", in "Arc 1", scene 2 of 2; tagged dark-forest, protagonist, stormfront.\n' +
+      'Previous scene: "Opening".\nNext scene: "Scene 1".'
+  )
   // A widget only: the editor's text without the ghost span does not carry the continuation.
   expect(await documentTextWithoutGhost()).not.toContain(GHOST_CONTINUATION)
   await page.keyboard.press('Tab')
@@ -1828,6 +1842,7 @@ test('create, close, reopen a project on disk', async () => {
     'Write 2 paragraphs. Continue the scene.'
   )
   expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain("Match the author's voice:")
+  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain(STORY_BIBLE_HEADING)
   const agentGhost = editor.locator('.ghost-text')
   await expect(agentGhost).toContainText(AGENT_FIRST)
   await expect(agentGhost).toContainText(AGENT_SECOND)
@@ -1901,6 +1916,7 @@ test('create, close, reopen a project on disk', async () => {
   expect(rewriteSystem?.role).toBe('system')
   expect(rewriteSystem?.content.startsWith(REWRITE_SENTINEL)).toBe(true)
   expect(rewriteSystem?.content).toContain("Match the author's voice:")
+  expect(rewriteSystem?.content).toContain(STORY_BIBLE_HEADING)
   expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toContain(SENTENCE)
   await rewritePanel.getByTestId('rewrite-accept').click()
   await expect(rewritePanel).toHaveCount(0)
@@ -1941,6 +1957,7 @@ test('create, close, reopen a project on disk', async () => {
   expect(critiqueSystem?.content.startsWith(CRITIQUE_SENTINEL)).toBe(true)
   // The honesty setting is at its default, "specific and direct".
   expect(critiqueSystem?.content).toContain('Be specific and direct')
+  expect(critiqueSystem?.content).toContain(STORY_BIBLE_HEADING)
   // The scene's own notes (F-3.7) are the brief until F-14.3.
   expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toContain(SCENE_NOTE)
   await critiquePanel.getByTestId('critique-apply').first().click()
