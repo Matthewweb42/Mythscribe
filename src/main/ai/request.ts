@@ -17,6 +17,7 @@ import {
   type CompletionUsage,
   type Provider
 } from './providers/types'
+import type { PromptVersion } from './prompts/catalogue'
 import { insertUsage, type AiDb, type UsageEntry } from './usageStore'
 
 /**
@@ -44,8 +45,8 @@ export interface AiRequestInput {
   temperature?: number
   /** From the context builder: a hash of everything that shaped `messages`. */
   contextHash: string
-  /** The prompt template version (F-5.12); undefined until prompts are versioned. */
-  promptVersion?: string
+  /** The catalogued prompt version the messages were built from (F-5.12); the ledger and the proposal record it. */
+  promptVersion: PromptVersion
 }
 
 export interface AiRequestResult {
@@ -102,7 +103,7 @@ export async function runAiRequest(
     )
   }
 
-  const promptVersion = input.promptVersion ?? null
+  const { promptVersion } = input
   const key = cacheKey(input, model)
   const base = {
     feature: input.feature,
@@ -169,7 +170,7 @@ export function cacheKey(
   return sha256(
     [
       input.feature,
-      input.promptVersion ?? '',
+      input.promptVersion,
       model,
       input.contextHash,
       messages,
