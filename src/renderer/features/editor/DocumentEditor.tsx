@@ -23,6 +23,9 @@ import { useGhostTextController } from './ghostTextController'
 import { INLINE_TAG_SELECTOR, resyncInlineTags } from './InlineTag'
 import { useLiveDocStats } from './liveDocStats'
 import { MarkVoiceExemplarButton } from './MarkVoiceExemplarButton'
+import { CritiqueButton } from './CritiqueButton'
+import { CritiquePanel } from './CritiquePanel'
+import { useCritiqueStore } from './critiqueStore'
 import { NotesToggleButton } from './NotesPanel'
 import { RewriteButton } from './RewriteButton'
 import { RewritePanel } from './RewritePanel'
@@ -108,10 +111,11 @@ const TOKEN_MENU_ITEMS: MenuItem[] = [
  * deletes the token only: links are the author's explicit choice and stay. VibeWrite (F-5.3)
  * runs only in the single-document view: the controller arms itself there and the toggle sits
  * in the toolbar's right slot, so a stacked region never shows ghost text. The voice exemplar
- * button (F-14.1) and the rewrite button (F-14.10) sit beside it, for the same reason; the
- * rewrite panel shows between the tag bar and the text while this document's rewrite runs,
- * and the rewrite is dismissed when the instance goes (unmount, switch, or rebuild). Once
- * ready, the instance registers as the active editor (F-5.4; again on focus, so the
+ * button (F-14.1), the rewrite button (F-14.10), and the editor's-notes button (F-14.8) sit
+ * beside it, for the same reason; the rewrite panel shows between the tag bar and the text
+ * while this document's rewrite runs, with the editor's-notes panel under it while its
+ * critique runs, and both are dismissed when the instance goes (unmount, switch, or rebuild).
+ * Once ready, the instance registers as the active editor (F-5.4; again on focus, so the
  * last-focused region of a stack wins) and releases itself on unmount, which is how the
  * assistant panel reaches the caret. Focus mode (F-6.1) drops the toolbar and the tag bar;
  * the status bar stays.
@@ -188,6 +192,8 @@ function RegionEditor({
   }, [editor, tagsById])
 
   useEffect(() => () => useRewriteStore.getState().dismissFor(id), [editor, id])
+
+  useEffect(() => () => useCritiqueStore.getState().dismissFor(id), [editor, id])
 
   useEffect(() => {
     editor?.commands.setTypewriter(typewriter)
@@ -275,6 +281,7 @@ function RegionEditor({
           editor={ready ? editor : null}
           right={
             <>
+              <CritiqueButton editor={ready ? editor : null} nodeId={id} />
               <RewriteButton editor={ready ? editor : null} nodeId={id} />
               <MarkVoiceExemplarButton editor={ready ? editor : null} nodeId={id} />
               <VibeWriteToggle error={ghostError} />
@@ -286,6 +293,7 @@ function RegionEditor({
       )}
       {focus ? null : <TagBar id={id} />}
       {focus ? null : <RewritePanel id={id} editor={ready ? editor : null} />}
+      {focus ? null : <CritiquePanel id={id} editor={ready ? editor : null} />}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <EditorContent
           editor={editor}

@@ -89,7 +89,11 @@ function linkedNotes(db: TreeDb, tagId: string): string {
     .join('\n\n')
 }
 
-/** The first `max` characters with an ellipsis marking the cut, like the tags prompt's passage. */
-function headTruncate(text: string, max: number): string {
+/**
+ * The first `max` characters with an ellipsis marking the cut, like the tags prompt's passage.
+ * Shared with the features that send one scene (F-14.8 critique), so every head cut looks the
+ * same to the model and to the quote matching that runs over the text as sent.
+ */
+export function headTruncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text
 }

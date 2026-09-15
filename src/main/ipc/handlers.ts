@@ -11,11 +11,13 @@ import {
 import type { Background } from '@shared/focus'
 import type {
   AiChatResult,
+  AiCritiqueResult,
   AiGhostTextResult,
   AiRecommendTagsResult,
   AiRewriteResult
 } from '@shared/ipc/contract'
 import { runChat } from '../ai/chat'
+import { runCritique } from '../ai/critique'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
 import { generateGhostText } from '../ai/ghostText'
 import { cancelInflight, regenRequestId } from '../ai/inflight'
@@ -523,6 +525,54 @@ export function registerHandlers({
           model,
           flagged,
           violation,
+          proposalId: proposal.id,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
+
+  // F-14.8: editor's notes on one scene, JSON from the strong tier, not streamed (the notes
+  // are only useful whole). The reply carries the notes as main located them — every quote is
+  // in the text that was sent, `dropped` counts the ones that were not — and the proposal
+  // (F-14.5) holds them as JSON, flagged when any fix failed the fidelity check (F-14.7).
+  // Nothing enters the manuscript here: the renderer applies a fix only on Apply.
+  register(
+    'ai:critique',
+    async ({ nodeId, requestId, note, regeneratedFrom }): Promise<AiCritiqueResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const result = await runCritique(db, deps, { nodeId, note, regeneratedFrom, requestId })
+        const { notes, usage, costUsd, cached, model } = result
+        const flaggedNote = notes.find((entry) => entry.flagged)
+        const proposal = createProposal(db, {
+          feature: 'critique',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model,
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          costUsd,
+          cached,
+          content: JSON.stringify(notes),
+          flagged: flaggedNote !== undefined,
+          violation: flaggedNote?.violation ?? null,
+          regeneratedFrom: regeneratedFrom ?? null
+        })
+        return {
+          ok: true,
+          notes,
+          truncated: result.truncated,
+          dropped: result.dropped,
+          usage,
+          costUsd,
+          cached,
+          model,
           proposalId: proposal.id,
           requestId
         }

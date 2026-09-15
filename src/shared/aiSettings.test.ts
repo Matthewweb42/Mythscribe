@@ -13,6 +13,7 @@ import {
   defaultAiSettings,
   isFeatureAllowed
 } from './aiSettings'
+import { DEFAULT_HONESTY } from './critique'
 
 describe('defaultAiSettings (F-14.4)', () => {
   it('installs at Off with every feature toggle on', () => {
@@ -68,6 +69,26 @@ describe('defaultAiSettings (F-14.4)', () => {
     expect(withIdle(GHOST_IDLE_MS_MIN - 1)).toBe(false)
     expect(withIdle(GHOST_IDLE_MS_MAX + 1)).toBe(false)
     expect(withIdle(750.5)).toBe(false)
+  })
+
+  it('starts the honesty setting at "specific and direct" (F-14.8)', () => {
+    expect(defaultAiSettings().critique).toEqual({ honesty: DEFAULT_HONESTY })
+  })
+
+  it('fills the critique defaults into a row stored before F-14.8', () => {
+    const { critique: _critique, ...old } = defaultAiSettings()
+    const parsed = AiSettings.safeParse({ ...old, dial: 1 })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.critique).toEqual({ honesty: DEFAULT_HONESTY })
+      expect(parsed.data.dial).toBe(1)
+    }
+    expect(AiSettings.safeParse({ ...defaultAiSettings(), critique: { honesty: 'brutal' } }).success).toBe(
+      true
+    )
+    expect(
+      AiSettings.safeParse({ ...defaultAiSettings(), critique: { honesty: 'harsh' } }).success
+    ).toBe(false)
   })
 })
 

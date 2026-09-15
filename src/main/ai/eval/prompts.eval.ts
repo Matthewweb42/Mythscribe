@@ -3,6 +3,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { inputBudget, outputBudget, priceFor } from '@shared/ai'
+import { findQuote } from '@shared/critique'
 import { toTagName } from '@shared/tags'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { checkChatFidelity, postProcessChatText } from '../chat'
@@ -77,6 +78,30 @@ function scoreJson(
     : { kind: 'json', ok: false, problem: `not in the bank: ${unknown.join(', ')}` }
 }
 
+const CritiqueAnswer = z.object({
+  notes: z.array(z.object({ quote: z.string() }))
+})
+
+/**
+ * An editor's-notes answer (F-14.8) scores like the JSON one: it must parse to the shape the
+ * prompt asks for, and — the rule the feature turns on — every note must quote the scene that
+ * was sent, matched exactly as `runCritique` matches it.
+ */
+function scoreCritique(sceneText: string, answer: string): LiveResult['verdict'] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(answer)
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not JSON' }
+  }
+  const result = CritiqueAnswer.safeParse(parsed)
+  if (!result.success) return { kind: 'json', ok: false, problem: 'not { notes: [{ quote }] }' }
+  const uncited = result.data.notes.filter((note) => !findQuote(sceneText, note.quote)).length
+  return uncited === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `${uncited} of ${result.data.notes.length} uncited` }
+}
+
 describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
   it('sends every case once, scores the answers, and writes the fidelity report', async () => {
     const key = process.env.OPENAI_API_KEY
@@ -107,6 +132,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreJson({ ...c, scoring: c.scoring }, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'critique') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreCritique(c.scoring.sceneText, reply.text)
         })
         continue
       }

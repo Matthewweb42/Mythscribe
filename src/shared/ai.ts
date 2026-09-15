@@ -179,7 +179,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-5.4: ten paragraphs at ~120 tokens each in Agent mode; Plan answers share the cap.
   chat: 1_200,
   // F-14.10: a 4,000-character passage (~1,000 tokens) rewritten at up to 1.5× its length.
-  rewrite: 1_500
+  rewrite: 1_500,
+  // F-14.8: up to 8 editor's notes as JSON, each with a quote, a reason, and an optional fix.
+  critique: 1_500
 }
 
 /**
@@ -195,7 +197,9 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-5.4: one scene head-truncated to 6 000 characters, the voice block, referenced notes, and ten turns of history.
   chat: 8_000,
   // F-14.10: the passage (≤ 4,000 characters), 300 characters of context each side, the metadata, and the voice block.
-  rewrite: 3_000
+  rewrite: 3_000,
+  // F-14.8: one scene head-truncated to 20,000 characters, its notes, the metadata, and the voice block.
+  critique: 8_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

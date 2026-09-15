@@ -1212,6 +1212,137 @@ describe('ai:rewrite (F-14.10)', () => {
   })
 })
 
+describe('ai:critique (F-14.8)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const SCENE =
+    'The ferry landing was empty when Mara reached it. The rope hung slack in the water and ' +
+    'the bell had lost its clapper years ago. She set the lantern down on the post and waited. ' +
+    '"You came alone," a voice said behind her.'
+  const QUOTE = 'The rope hung slack in the water'
+  const NOTE = {
+    kind: 'issue',
+    category: 'pacing',
+    quote: QUOTE,
+    why: 'The image lands, but the sentence runs on past its beat.',
+    fix: 'The rope hung slack in the water.'
+  }
+
+  /** A project with the dial at Ask, a key, a scene long enough to critique, and one note waiting. */
+  async function ready(dial: AiDial = 1): Promise<{ scene: string }> {
+    await invoke('project:create', { name: 'Critique', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: SCENE }] }]
+      }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+    await invoke('ai:setKey', { key: KEY })
+    answersWith({ notes: [NOTE] })
+    return { scene: scene.id }
+  }
+
+  /** The next provider answer, as the JSON the critique prompt asks for. */
+  function answersWith(answer: unknown): void {
+    complete.mockResolvedValue({
+      text: JSON.stringify(answer),
+      model: 'gpt-fake',
+      usage: { inputTokens: 900, outputTokens: 120 }
+    })
+  }
+
+  const ask = (scene: string, requestId = 'cq-1'): Input<'ai:critique'> => ({
+    nodeId: scene,
+    requestId
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('ai:critique', ask('x'))).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers the cited notes, drops an uncited one, and records them as one pending proposal', async () => {
+    const { scene } = await ready()
+    answersWith({
+      notes: [NOTE, { ...NOTE, kind: 'praise', quote: 'The dragon circled the keep.', fix: null }]
+    })
+    const result = await invoke('ai:critique', ask(scene, 'cq-7'))
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toEqual({
+      ok: true,
+      notes: [{ ...NOTE, flagged: false, violation: null }],
+      truncated: false,
+      dropped: 1,
+      usage: { inputTokens: 900, outputTokens: 120 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      proposalId: result.proposalId,
+      requestId: 'cq-7'
+    })
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'critique',
+      nodeId: scene,
+      promptVersion: 'critique.v1',
+      content: JSON.stringify(result.notes),
+      flagged: false,
+      violation: null,
+      regeneratedFrom: null,
+      status: 'pending'
+    })
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['critique'])
+  })
+
+  it('a regenerate goes through critiqueRegen.v1 and its proposal names the one it replaces', async () => {
+    const { scene } = await ready()
+    const first = await invoke('ai:critique', ask(scene, 'cq-8'))
+    if (!first.ok) throw new Error(first.message)
+    answersWith({ notes: [{ ...NOTE, why: 'Still slack, and now twice.' }] })
+    const again = await invoke('ai:critique', {
+      ...ask(scene, 'cq-9'),
+      note: 'Less about pacing, more about the dialogue.',
+      regeneratedFrom: first.proposalId
+    })
+    if (!again.ok) throw new Error(again.message)
+    expect(again.notes[0]?.why).toBe('Still slack, and now twice.')
+    expect(getProposal(manager.require().connection.orm, again.proposalId)).toMatchObject({
+      feature: 'critique',
+      promptVersion: 'critiqueRegen.v1',
+      regeneratedFrom: first.proposalId
+    })
+  })
+
+  it('answers an expected AI failure as data with the requestId, and an unknown or too-short node through the error envelope', async () => {
+    const { scene } = await ready(0)
+    expect(await invoke('ai:critique', ask(scene, 'cq-3'))).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: "Editor's notes needs the AI dial at Ask or higher (it is at Off).",
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      requestId: 'cq-3'
+    })
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    const unknown = await handlerFor('ai:critique')(undefined, ask('nope'))
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    await invoke('document:save', {
+      id: scene,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Too short.' }] }]
+      }
+    })
+    const short = await handlerFor('ai:critique')(undefined, ask(scene))
+    expect(short.ok).toBe(false)
+    if (!short.ok) expect(short.error.code).toBe('VALIDATION')
+  })
+})
+
 describe('tag handlers (F-4.1)', () => {
   it('reports NO_PROJECT when nothing is open', async () => {
     await expect(invoke('tag:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)

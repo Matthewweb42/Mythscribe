@@ -59,6 +59,45 @@ const AGENT_SENTINEL = 'You are drafting inside a novel-writing app'
 const REWRITE_SENTINEL = 'You are the rewrite feature inside a novel-writing app.'
 /** What the fake server answers a rewrite with: past tense, third person, so the local voice check passes. */
 const REWRITE_ANSWER = 'The storm came down at dusk. Rain followed it, and then the quiet held.'
+/**
+ * F-14.8: the opening of the critique prompt's system turn (`CRITIQUE_RULES` in
+ * `src/main/ai/prompts/critique.v1.ts`; main is outside the e2e tsconfig, so it is repeated
+ * here). A JSON request carrying it gets canned editor's notes.
+ */
+const CRITIQUE_SENTINEL = 'You are the editor feature inside a novel-writing app.'
+/** The passage the canned issue note cites: the tail of the accepted rewrite, so it is in Scene 1. */
+const CRITIQUE_QUOTE = 'Rain followed it, and then the quiet held.'
+/** What Applying that note puts in its place. */
+const CRITIQUE_FIX = 'Rain followed it, and the quiet held after.'
+/** The passage the canned praise cites: one of the typed voice paragraphs. */
+const CRITIQUE_PRAISE_QUOTE = 'She turned from the window and looked at the ridge'
+/** A passage that is nowhere in the scene: main must drop this note, so no uncited praise shows. */
+const CRITIQUE_FABRICATED_QUOTE = 'The lighthouse blinked twice and went dark.'
+const CRITIQUE_ANSWER = JSON.stringify({
+  notes: [
+    {
+      kind: 'issue',
+      category: 'pacing',
+      quote: CRITIQUE_QUOTE,
+      why: 'The beat stalls on a second clause.',
+      fix: CRITIQUE_FIX
+    },
+    {
+      kind: 'praise',
+      category: 'clarity',
+      quote: CRITIQUE_PRAISE_QUOTE,
+      why: 'The look outward carries the mood without naming it.',
+      fix: null
+    },
+    {
+      kind: 'praise',
+      category: 'pov',
+      quote: CRITIQUE_FABRICATED_QUOTE,
+      why: 'Never written; the app must drop this one.',
+      fix: null
+    }
+  ]
+})
 /** F-5.10: a request whose body carries this waits before answering, so a Stop can land. */
 const SLOW_SENTINEL = 'SLOW'
 const SLOW_DELAY_MS = 3_000
@@ -136,6 +175,11 @@ function startFakeOpenAi(): Promise<string> {
           const rewrite = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(REWRITE_SENTINEL)
           )
+          // F-14.8: editor's notes come back as JSON with three cited notes, one of them
+          // quoting a passage that is not in the scene, so the drop rule is exercised.
+          const critique = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(CRITIQUE_SENTINEL)
+          )
           // F-5.4: a Plan turn streams (server-sent events in the shape the SDK parses: content
           // deltas, one usage-only chunk, then [DONE]); an Agent turn is a plain completion.
           if (request.stream) {
@@ -189,9 +233,11 @@ function startFakeOpenAi(): Promise<string> {
                   message: {
                     role: 'assistant',
                     content: json
-                      ? regen
-                        ? '{"tags":["antagonist","protagonist"]}'
-                        : '{"tags":["dark-forest","protagonist"]}'
+                      ? critique
+                        ? CRITIQUE_ANSWER
+                        : regen
+                          ? '{"tags":["antagonist","protagonist"]}'
+                          : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -1813,6 +1859,47 @@ test('create, close, reopen a project on disk', async () => {
   expect(afterRewrite.byFeature.find((f) => f.feature === 'rewrite')).toMatchObject({
     requests: 1
   })
+
+  // F-14.8: editor's notes. The toolbar button asks main for a critique of Scene 1; the fake
+  // server answers three notes, one of them citing a passage that was never written, and main
+  // drops it, so only the two cited notes reach the panel (no uncited praise). Apply replaces
+  // exactly the quoted passage with the fix through the editor, as AI-origin text that
+  // autosaves, and the ledger gains a critique request. Close settles the proposal.
+  const critiqueButton = page.getByRole('button', { name: "Editor's notes" })
+  const critiqueBodiesBefore = openAiChatBodies.length
+  await expect(critiqueButton).toBeEnabled()
+  await critiqueButton.click()
+  const critiquePanel = page.getByTestId('critique-panel')
+  await expect(critiquePanel).toBeVisible()
+  await expect(critiquePanel.getByTestId('critique-note')).toHaveCount(2)
+  await expect(critiquePanel.getByTestId('critique-quote').first()).toHaveText(CRITIQUE_QUOTE)
+  await expect(critiquePanel.getByTestId('critique-quote').nth(1)).toHaveText(CRITIQUE_PRAISE_QUOTE)
+  await expect(critiquePanel).not.toContainText(CRITIQUE_FABRICATED_QUOTE)
+  expect(openAiChatBodies).toHaveLength(critiqueBodiesBefore + 1)
+  const critiqueSystem = openAiChatBodies.at(-1)?.messages[0]
+  expect(critiqueSystem?.role).toBe('system')
+  expect(critiqueSystem?.content.startsWith(CRITIQUE_SENTINEL)).toBe(true)
+  // The honesty setting is at its default, "specific and direct".
+  expect(critiqueSystem?.content).toContain('Be specific and direct')
+  // The scene's own notes (F-3.7) are the brief until F-14.3.
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toContain(SCENE_NOTE)
+  await critiquePanel.getByTestId('critique-apply').first().click()
+  await expect(critiquePanel.getByTestId('critique-apply').first()).toHaveText('Applied')
+  await expect(editor.locator('p').first()).toContainText(CRITIQUE_FIX)
+  await expect(
+    editor.locator('.ai-origin[data-proposal-id]').filter({ hasText: CRITIQUE_FIX })
+  ).toHaveCount(1)
+  await expect
+    .poll(async () => ((await documentText(scene1Row.id)) ?? '').includes(CRITIQUE_FIX), {
+      timeout: 3000
+    })
+    .toBe(true)
+  const afterCritique = await usageSummary()
+  expect(afterCritique.byFeature.find((f) => f.feature === 'critique')).toMatchObject({
+    requests: 1
+  })
+  await critiquePanel.getByTestId('critique-close').click()
+  await expect(critiquePanel).toHaveCount(0)
 
   // Back to Off and no key, as the steps above left them.
   await page.getByRole('button', { name: 'Settings' }).click()

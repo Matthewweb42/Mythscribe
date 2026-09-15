@@ -23,6 +23,7 @@ import {
   ChatRole,
   Conversations
 } from '../chat'
+import { CritiqueNotes } from '../critique'
 import { EditorSettings } from '../editorSettings'
 import { Background, FocusSettings } from '../focus'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
@@ -201,6 +202,35 @@ export type AiChatResult = z.infer<typeof AiChatResult>
  */
 export const AiRewriteResult = AiChatResult
 export type AiRewriteResult = z.infer<typeof AiRewriteResult>
+
+/**
+ * What `ai:critique` answers (F-14.8): the editor's notes, every one citing a passage main
+ * located in the scene text it sent (`dropped` counts the notes whose quote was not found, so
+ * uncited praise never reaches the author), whether the scene was head-truncated, what it
+ * cost, and the proposal it became (F-14.5); or an expected AI failure as data.
+ */
+export const AiCritiqueResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    notes: CritiqueNotes,
+    truncated: z.boolean(),
+    dropped: z.number().int().nonnegative(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    proposalId: z.string(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiCritiqueResult = z.infer<typeof AiCritiqueResult>
 
 /** An author-marked voice exemplar (F-14.1): a plain-text passage with the POV and kind it was filed under. */
 export const VoiceExemplar = z.object({
@@ -607,6 +637,26 @@ export const contract = {
       regeneratedFrom: z.string().nullable().optional()
     }),
     output: AiRewriteResult
+  },
+  /**
+   * Editor's notes on one scene (F-14.8). The renderer sends only the node; main reads the
+   * document (head-truncated to `CRITIQUE_SCENE_CHAR_BUDGET`), its notes and metadata as the
+   * brief, the honesty setting, and the voice profile, asks the strong tier for JSON, and
+   * drops every note whose quote it cannot find in the text it sent. Nothing is changed: each
+   * fix is applied by the renderer only when the author clicks Apply. A regenerate (F-14.5)
+   * names the proposal it replaces in `regeneratedFrom` and may carry the author's `note`.
+   * NOT_FOUND for an unknown id, VALIDATION for a folder or a document under
+   * `CRITIQUE_TEXT_MIN` characters; the AI failures come back as data with the echoed
+   * `requestId`.
+   */
+  'ai:critique': {
+    input: z.object({
+      nodeId: z.string(),
+      requestId: z.string(),
+      note: z.string().max(PROPOSAL_NOTE_MAX).nullable().optional(),
+      regeneratedFrom: z.string().nullable().optional()
+    }),
+    output: AiCritiqueResult
   },
   /** The project's conversations (F-5.4), stored as JSON under the settings key `conversations`; a fresh project has none. */
   'conversations:get': { input: z.undefined(), output: Conversations },

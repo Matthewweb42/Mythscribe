@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { AI_FEATURE_IDS, AiFeatureId } from './ai'
+import { DEFAULT_HONESTY, Honesty } from './critique'
 
 /** Settings-table key under which the AI dial and toggles (F-14.4) are stored as JSON. */
 export const AI_SETTINGS_KEY = 'ai'
@@ -45,6 +46,14 @@ export function defaultGhostTextSettings(): GhostTextSettings {
   return { enabled: false, idleMs: DEFAULT_GHOST_IDLE_MS }
 }
 
+/** The editor's-notes settings (F-14.8), per project: how blunt the critique is. */
+export const CritiqueSettings = z.object({ honesty: Honesty })
+export type CritiqueSettings = z.infer<typeof CritiqueSettings>
+
+export function defaultCritiqueSettings(): CritiqueSettings {
+  return { honesty: DEFAULT_HONESTY }
+}
+
 /** Every toggle on: raising the dial is the one act that enables anything (F-14.4). */
 export function defaultFeatureToggles(): Record<AiFeatureId, boolean> {
   return Object.fromEntries(AI_FEATURE_IDS.map((id) => [id, true])) as Record<
@@ -64,7 +73,9 @@ export const AiSettings = z.object({
     .partialRecord(AiFeatureId, z.boolean())
     .transform((stored) => ({ ...defaultFeatureToggles(), ...stored })),
   /** Defaulted, so a row stored before F-5.3 (no `ghostText` key) still parses instead of falling back wholesale. */
-  ghostText: GhostTextSettings.default(defaultGhostTextSettings)
+  ghostText: GhostTextSettings.default(defaultGhostTextSettings),
+  /** Defaulted likewise for a row stored before F-14.8. */
+  critique: CritiqueSettings.default(defaultCritiqueSettings)
 })
 export type AiSettings = z.infer<typeof AiSettings>
 /** The shape before parsing: `ghostText` may be absent (a row stored before F-5.3) and `features` may lack newer ids. */
@@ -75,7 +86,8 @@ export function defaultAiSettings(): AiSettings {
   return {
     dial: 0,
     features: defaultFeatureToggles(),
-    ghostText: defaultGhostTextSettings()
+    ghostText: defaultGhostTextSettings(),
+    critique: defaultCritiqueSettings()
   }
 }
 
@@ -113,7 +125,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   },
   critique: {
     label: "Editor's notes",
-    sends: "The scene's text and its scene brief.",
+    sends:
+      "The scene's text (the first 20,000 characters), its notes and metadata as the brief, " +
+      'and the voice profile (stylometric rules and up to 3 exemplar passages).',
     minDial: 1
   },
   chat: {

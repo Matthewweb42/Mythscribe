@@ -7,6 +7,11 @@ import {
   CHAT_REF_NOTES_CHAR_BUDGET,
   CHAT_SCENE_CHAR_BUDGET
 } from '@shared/chat'
+import {
+  CRITIQUE_NOTES_CHAR_CAP,
+  CRITIQUE_SCENE_CHAR_BUDGET,
+  DEFAULT_HONESTY
+} from '@shared/critique'
 import type { VoiceProfile } from '@shared/ipc/contract'
 import { builtinParams } from '@shared/presets'
 import { PROPOSAL_NOTE_MAX } from '@shared/proposal'
@@ -29,6 +34,15 @@ import {
   type ChatTurn
 } from '../prompts/chat.v1'
 import { buildChatRegenPrompt, CHAT_REGEN_PROMPT_VERSION } from '../prompts/chatRegen.v1'
+import {
+  buildCritiquePrompt,
+  CRITIQUE_PROMPT_VERSION,
+  type BuildCritiquePromptInput
+} from '../prompts/critique.v1'
+import {
+  buildCritiqueRegenPrompt,
+  CRITIQUE_REGEN_PROMPT_VERSION
+} from '../prompts/critiqueRegen.v1'
 import {
   buildGhostTextPrompt,
   GHOST_NOTES_CHAR_CAP,
@@ -141,6 +155,8 @@ export interface EvalCase {
     | { kind: 'json'; bank: string[] }
     /** A chat answer: post-processed like an Agent draft and, when a voice block went out, checked at any length (`checkChatFidelity`). */
     | { kind: 'chat'; profile: Stylometrics | null }
+    /** Editor's notes: the answer must parse and every note must quote the scene that was sent. */
+    | { kind: 'critique'; sceneText: string }
 }
 
 const general = builtinParams('general')
@@ -352,6 +368,50 @@ function rewriteCase(
   }
 }
 
+/** The scene an author asks for notes on: the fixture as `docToText` yields it. */
+const critiqueFresh: BuildCritiquePromptInput = {
+  sceneText: FIXTURE_PASSAGE,
+  notes: null,
+  meta: null,
+  voice: null,
+  honesty: DEFAULT_HONESTY
+}
+const critiqueFull: BuildCritiquePromptInput = {
+  ...critiqueFresh,
+  notes: NOTES,
+  meta: META,
+  voice: voiceBlock(FIXTURE_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' })
+}
+/** Every critique cap at its limit: the scene at its character budget, the notes at theirs, long metadata, a voice block at its budget, the bluntest honesty line. */
+const critiqueMaxedScene = `${FIXTURE_PASSAGE.repeat(20).slice(0, CRITIQUE_SCENE_CHAR_BUDGET)}\u2026`
+const critiqueMaxed: BuildCritiquePromptInput = {
+  sceneText: critiqueMaxedScene,
+  notes: `${FIXTURE_PASSAGE.slice(0, CRITIQUE_NOTES_CHAR_CAP)}\u2026`,
+  meta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500) },
+  voice: voiceBlock(MAXED_PROFILE, { text: critiqueMaxedScene, pov: 'Mara' }),
+  honesty: 'brutal'
+}
+
+function critiqueCase(
+  name: string,
+  note: string,
+  input: BuildCritiquePromptInput,
+  regenNote: string | null | undefined
+): EvalCase {
+  const built =
+    regenNote === undefined
+      ? buildCritiquePrompt(input)
+      : buildCritiqueRegenPrompt({ ...input, note: regenNote })
+  return {
+    version: regenNote === undefined ? CRITIQUE_PROMPT_VERSION : CRITIQUE_REGEN_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'critique', sceneText: input.sceneText }
+  }
+}
+
 /** Every case, grouped by version in catalogue order. */
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
@@ -461,5 +521,35 @@ export const EVAL_CASES: EvalCase[] = [
     'the maxed case regenerated with an author note at the length limit and a tense violation',
     rewriteMaxed,
     { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: VIOLATION }
+  ),
+  critiqueCase(
+    'fresh',
+    'no voice block, no notes as the brief, no metadata, the default honesty line',
+    critiqueFresh,
+    undefined
+  ),
+  critiqueCase(
+    'full',
+    "voice rules and one exemplar, the scene's notes as the brief, metadata",
+    critiqueFull,
+    undefined
+  ),
+  critiqueCase(
+    'maxed',
+    'every cap at its limit: a 20,000-character scene, the notes at their cap, long metadata, a voice block at its budget, the brutal honesty line',
+    critiqueMaxed,
+    undefined
+  ),
+  critiqueCase(
+    'full note',
+    'the full case regenerated with an author note at the length limit',
+    critiqueFull,
+    'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
+  critiqueCase(
+    'maxed note',
+    'the maxed case regenerated with an author note at the length limit',
+    critiqueMaxed,
+    'n'.repeat(PROPOSAL_NOTE_MAX)
   )
 ]

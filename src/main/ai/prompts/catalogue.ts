@@ -1,6 +1,8 @@
 import type { AiFeatureId, Tier } from '@shared/ai'
 import { CHAT_PROMPT_VERSION } from './chat.v1'
 import { CHAT_REGEN_PROMPT_VERSION } from './chatRegen.v1'
+import { CRITIQUE_PROMPT_VERSION } from './critique.v1'
+import { CRITIQUE_REGEN_PROMPT_VERSION } from './critiqueRegen.v1'
 import { GHOST_PROMPT_VERSION } from './ghostText.v1'
 import { GHOST_REGEN_PROMPT_VERSION } from './ghostTextRegen.v1'
 import { REWRITE_PROMPT_VERSION } from './rewrite.v1'
@@ -28,7 +30,9 @@ export const PROMPT_VERSIONS = [
   CHAT_PROMPT_VERSION,
   CHAT_REGEN_PROMPT_VERSION,
   REWRITE_PROMPT_VERSION,
-  REWRITE_REGEN_PROMPT_VERSION
+  REWRITE_REGEN_PROMPT_VERSION,
+  CRITIQUE_PROMPT_VERSION,
+  CRITIQUE_REGEN_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -61,6 +65,18 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'text',
     since: 'F-14.10'
+  },
+  [CRITIQUE_PROMPT_VERSION]: {
+    feature: 'critique',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-14.8'
+  },
+  [CRITIQUE_REGEN_PROMPT_VERSION]: {
+    feature: 'critique',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-14.8'
   }
 }
 
