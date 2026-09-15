@@ -22,6 +22,16 @@ export default defineConfig({
         }
       },
       {
+        resolve: { alias },
+        test: {
+          name: 'eval',
+          environment: 'node',
+          // The prompt eval harness (F-5.12): offline by default (token report against the
+          // committed baseline), live against the provider with MYTHSCRIBE_EVAL_LIVE=1.
+          include: ['src/main/ai/eval/**/*.eval.ts']
+        }
+      },
+      {
         plugins: [react()],
         resolve: { alias },
         test: {

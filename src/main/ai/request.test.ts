@@ -34,7 +34,8 @@ const input: AiRequestInput = {
   ],
   maxTokens: 120,
   json: true,
-  contextHash: 'ctx-1'
+  contextHash: 'ctx-1',
+  promptVersion: 'tags.v1'
 }
 
 type Complete = (request: CompletionRequest) => Promise<CompletionResult>
@@ -124,7 +125,7 @@ describe('runAiRequest (F-5.14)', () => {
         tier: 'fast',
         model: 'gpt-5.4-mini',
         provider: 'openai',
-        promptVersion: null,
+        promptVersion: 'tags.v1',
         contextHash: 'ctx-1',
         at: NOW.toISOString(),
         promptTokens: 40,
@@ -138,7 +139,7 @@ describe('runAiRequest (F-5.14)', () => {
       {
         key: cacheKey(input, 'gpt-5.4-mini'),
         feature: 'tags',
-        promptVersion: null,
+        promptVersion: 'tags.v1',
         model: 'gpt-5.4-mini',
         text: '{"tags":["dark-forest"]}',
         usage: { inputTokens: 40, outputTokens: 10 },
@@ -223,7 +224,7 @@ describe('runAiRequest (F-5.14)', () => {
     await runAiRequest(f.deps, { ...input, contextHash: 'ctx-2' })
     await runAiRequest(f.deps, { ...input, messages: [{ role: 'user', content: 'Other.' }] })
     await runAiRequest(f.deps, { ...input, tier: 'strong' })
-    await runAiRequest(f.deps, { ...input, promptVersion: 'tags.v2' })
+    await runAiRequest(f.deps, { ...input, promptVersion: 'tagsRegen.v1' })
     await runAiRequest(f.deps, { ...input, json: false })
     expect(f.complete).toHaveBeenCalledTimes(6)
     expect(f.cache.size).toBe(6)
@@ -252,9 +253,9 @@ describe('runAiRequest (F-5.14)', () => {
 
   it('carries the prompt version into the ledger and the cache row', async () => {
     const f = fakes()
-    await runAiRequest(f.deps, { ...input, promptVersion: 'tags.v1' })
-    expect(f.ledger[0]?.promptVersion).toBe('tags.v1')
-    expect([...f.cache.values()][0]?.promptVersion).toBe('tags.v1')
+    await runAiRequest(f.deps, { ...input, promptVersion: 'tagsRegen.v1' })
+    expect(f.ledger[0]?.promptVersion).toBe('tagsRegen.v1')
+    expect([...f.cache.values()][0]?.promptVersion).toBe('tagsRegen.v1')
   })
 })
 
