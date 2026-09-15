@@ -1,4 +1,5 @@
 import { estimateTokens, inputBudget } from '@shared/ai'
+import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
 import { AI_DATA_SHARING, AI_DIAL_LABEL } from '@shared/aiSettings'
 import type { ChatMode } from '@shared/chat'
 import { resolvePreset } from '@shared/presets'
@@ -14,12 +15,13 @@ import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
 import { voiceBlock } from '../voice/voiceBlock'
 import { buildChatContext } from './context/chatContext'
+import { buildStoryBible } from './context/storyBible'
 import { assertFeatureAllowed } from './dial'
 import { stripWrappingQuotes } from './ghostText'
 import { regenRequestId } from './inflight'
 import type { ChatTurn } from './prompts/chat.v1'
-import { buildChatPromptV2, type BuildChatPromptV2Input } from './prompts/chat.v2'
-import { buildChatRegenPromptV2 } from './prompts/chatRegen.v2'
+import { buildChatPromptV3, type BuildChatPromptV3Input } from './prompts/chat.v3'
+import { buildChatRegenPromptV3 } from './prompts/chatRegen.v3'
 import { AiCancelledError, AiDisabledError, type CompletionUsage } from './providers/types'
 import {
   runAiRequest,
@@ -72,13 +74,13 @@ export const CHAT_FRAGMENT_MAX_WORDS = 200
  * through ghost text; the toggle for ghost text itself does not apply, so the level is checked
  * directly. Then the context (`buildChatContext`: the scene's text, metadata, and brief
  * (F-14.3, Agent mode only), the notes behind the message's `#name` references), and, in Agent mode, the voice block (F-14.1) and
- * the active preset (F-5.2). The prompt is `chat.v2`; when its estimate is over the chat
+ * the active preset (F-5.2). The prompt is `chat.v3`; when its estimate is over the chat
  * input budget, the oldest history turns are dropped first (CLAUDE.md, token rule 8) before
  * the request path makes its own check. Plan mode streams through `runAiStream` and hands
  * every delta to `onDelta`; Agent mode completes as a whole, is post-processed (trim, strip
  * wrapping quotes), and runs the fidelity check (F-14.7): a fragment under
  * `CHAT_FRAGMENT_MAX_WORDS` words through `checkGhostTextFidelity`, a longer draft through
- * `scoreDocumentDrift`; an off-voice draft is regenerated once through `chatRegen.v2` with
+ * `scoreDocumentDrift`; an off-voice draft is regenerated once through `chatRegen.v3` with
  * the violation named, re-scored, and shown flagged when it still fails; a regenerate that
  * fails for any reason falls back to the first draft, flagged, except a cancel (F-5.10),
  * which propagates as CANCELLED from either call. Plan answers are never flagged. Both tiers
@@ -113,8 +115,9 @@ export async function runChat(
   const pov = context.sceneMeta?.pov.trim() ?? ''
   const profile = agent ? buildVoiceProfile(db, { pov: pov || undefined }) : null
   const voice = profile ? voiceBlock(profile, { text: context.sceneText, pov: pov || null }) : null
+  const bible = buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
 
-  const base: Omit<BuildChatPromptV2Input, 'history'> = {
+  const base: Omit<BuildChatPromptV3Input, 'history'> = {
     mode: input.mode,
     paragraphs: input.paragraphs,
     sceneText: context.sceneText,
@@ -123,20 +126,22 @@ export async function runChat(
     refs: context.refs,
     message: input.message,
     voice,
+    bible,
     preset
   }
   let history = input.history
-  let prompt = buildChatPromptV2({ ...base, history })
+  let prompt = buildChatPromptV3({ ...base, history })
   while (history.length > 0 && estimate(prompt.messages) > inputBudget('chat')) {
     history = history.slice(1)
-    prompt = buildChatPromptV2({ ...base, history })
+    prompt = buildChatPromptV3({ ...base, history })
   }
-  const promptInput: BuildChatPromptV2Input = { ...base, history }
+  const promptInput: BuildChatPromptV3Input = { ...base, history }
   const hashed = {
     sceneText: context.sceneText,
     sceneMeta: context.sceneMeta,
     brief: context.brief,
     refs: context.refs,
+    bible,
     history,
     message: input.message,
     mode: input.mode,
@@ -186,7 +191,7 @@ export async function runChat(
   const violation = checkChatFidelity(profile.stats, firstText, banned)[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
-  const regen = buildChatRegenPromptV2({ ...promptInput, violation: violation.message })
+  const regen = buildChatRegenPromptV3({ ...promptInput, violation: violation.message })
   const flaggedFirst: ChatResult = {
     ...shown(first, firstText, prompt.version),
     flagged: true,

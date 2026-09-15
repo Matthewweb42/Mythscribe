@@ -996,7 +996,7 @@ describe('ai:chat (F-5.4)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'chat',
       nodeId: scene,
-      promptVersion: 'chat.v2',
+      promptVersion: 'chat.v3',
       model: 'gpt-fake',
       promptTokens: 90,
       completionTokens: 8,
@@ -1184,7 +1184,7 @@ describe('ai:rewrite (F-14.10)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'rewrite',
       nodeId: scene,
-      promptVersion: 'rewrite.v1',
+      promptVersion: 'rewrite.v2',
       content: 'The storm broke at dusk. Mara counted the gaps.',
       flagged: false,
       violation: null,
@@ -1211,7 +1211,7 @@ describe('ai:rewrite (F-14.10)', () => {
     expect(again.text).toBe('Dusk, and the storm over the forest.')
     expect(getProposal(manager.require().connection.orm, again.proposalId)).toMatchObject({
       feature: 'rewrite',
-      promptVersion: 'rewriteRegen.v1',
+      promptVersion: 'rewriteRegen.v2',
       regeneratedFrom: first.proposalId
     })
   })
@@ -1311,7 +1311,7 @@ describe('ai:critique (F-14.8)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'critique',
       nodeId: scene,
-      promptVersion: 'critique.v2',
+      promptVersion: 'critique.v3',
       content: JSON.stringify(result.notes),
       flagged: false,
       violation: null,
@@ -1322,7 +1322,7 @@ describe('ai:critique (F-14.8)', () => {
     expect(summary.byFeature.map((f) => f.feature)).toEqual(['critique'])
   })
 
-  it('a regenerate goes through critiqueRegen.v2 and its proposal names the one it replaces', async () => {
+  it('a regenerate goes through critiqueRegen.v3 and its proposal names the one it replaces', async () => {
     const { scene } = await ready()
     const first = await invoke('ai:critique', ask(scene, 'cq-8'))
     if (!first.ok) throw new Error(first.message)
@@ -1336,7 +1336,7 @@ describe('ai:critique (F-14.8)', () => {
     expect(again.notes[0]?.why).toBe('Still slack, and now twice.')
     expect(getProposal(manager.require().connection.orm, again.proposalId)).toMatchObject({
       feature: 'critique',
-      promptVersion: 'critiqueRegen.v2',
+      promptVersion: 'critiqueRegen.v3',
       regeneratedFrom: first.proposalId
     })
   })
@@ -2207,7 +2207,7 @@ describe('ai:ghostText (F-5.3)', () => {
     expect(getProposal(db, shown.proposalId)).toMatchObject({
       feature: 'ghostText',
       nodeId: scene,
-      promptVersion: 'ghostText.v2',
+      promptVersion: 'ghostText.v3',
       model: 'gpt-fake',
       promptTokens: 120,
       completionTokens: 12,

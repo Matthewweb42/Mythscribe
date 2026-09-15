@@ -104,6 +104,14 @@ export interface AiDataSharing {
  * test. `chat` is Plan-mode conversation that drafts nothing into the manuscript, so it sits at
  * Ask with the other cited, on-request features.
  */
+/**
+ * What the story bible block (F-14.9, `renderStoryBible`) carries, phrased once for every
+ * feature whose prompt includes it, so the panel and the block can never drift apart.
+ */
+export const STORY_BIBLE_SENDS =
+  "the story bible (your tag names by category, the scene's tags, and the titles and " +
+  'metadata of the scenes either side of it)'
+
 export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   tags: {
     label: 'Tag suggestions',
@@ -125,8 +133,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       "The scene's text (the first 20,000 characters), its metadata, its brief plus the " +
       "previous scene's reader-knows-after line and the next scene's goal, the voice profile " +
-      '(stylometric rules and up to 3 exemplar passages), and your author rules and banned ' +
-      'phrases.',
+      '(stylometric rules and up to 3 exemplar passages), your author rules and banned ' +
+      `phrases, and ${STORY_BIBLE_SENDS}.`,
     minDial: 1
   },
   brief: {
@@ -140,11 +148,11 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     label: 'Assistant chat',
     sends:
       "The active scene's text (head-truncated), the notes of documents tagged with any #name " +
-      'you mention, the recent turns of the conversation, and your message. In Agent mode, ' +
-      'which needs Suggest, the voice profile, your author rules and banned phrases, the ' +
-      "scene metadata, and the scene brief (plus the previous scene's reader-knows-after line " +
-      "and the next scene's goal) go too, and an off-voice answer is sent back once with the " +
-      'rule it broke.',
+      `you mention, ${STORY_BIBLE_SENDS}, the recent turns of the conversation, and your ` +
+      'message. In Agent mode, which needs Suggest, the voice profile, your author rules and ' +
+      "banned phrases, the scene metadata, and the scene brief (plus the previous scene's " +
+      "reader-knows-after line and the next scene's goal) go too, and an off-voice answer is " +
+      'sent back once with the rule it broke.',
     minDial: 1
   },
   embeddings: {
@@ -158,9 +166,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes, ' +
       "its metadata (location, POV, timeline), its brief plus the previous scene's " +
       "reader-knows-after line and the next scene's goal, the voice profile (stylometric rules " +
-      'and up to 3 exemplar passages), and your author rules and banned phrases. An answer that breaks ' +
-      'the voice profile or uses a banned phrase is sent back once, with the same context plus ' +
-      'the rule it broke, for a second try.',
+      'and up to 3 exemplar passages), your author rules and banned phrases, and ' +
+      `${STORY_BIBLE_SENDS}. An answer that breaks the voice profile or uses a banned phrase is ` +
+      'sent back once, with the same context plus the rule it broke, for a second try.',
     minDial: 2
   },
   rewrite: {
@@ -168,9 +176,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       'The selected passage (up to 4,000 characters), up to 300 characters of manuscript text ' +
       'before and after it, the scene metadata (location, POV, timeline), the voice profile ' +
-      '(stylometric rules and up to 3 exemplar passages), and your author rules and banned ' +
-      'phrases. An off-voice rewrite is sent back once with the rule it broke; a regenerate ' +
-      'carries your note.',
+      '(stylometric rules and up to 3 exemplar passages), your author rules and banned ' +
+      `phrases, and ${STORY_BIBLE_SENDS}. An off-voice rewrite is sent back once with the rule ` +
+      'it broke; a regenerate carries your note.',
     minDial: 2
   },
   authorMode: {

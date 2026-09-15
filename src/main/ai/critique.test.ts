@@ -194,7 +194,7 @@ afterEach(() => {
 })
 
 describe('runCritique (F-14.8)', () => {
-  it('sends the scene as JSON to the strong tier under critique.v2 and answers the cited notes', async () => {
+  it('sends the scene as JSON to the strong tier under critique.v3 and answers the cited notes', async () => {
     const result = await critique()
     expect(result).toEqual({
       notes: [
@@ -214,7 +214,7 @@ describe('runCritique (F-14.8)', () => {
       costUsd: priceFor('gpt-5.4', 900, 120).costUsd,
       cached: false,
       model: 'gpt-5.4',
-      promptVersion: 'critique.v2'
+      promptVersion: 'critique.v3'
     })
     const request = complete.mock.calls[0]![0]
     expect(request).toMatchObject({ tier: 'strong', json: true, maxTokens: 1_500 })
@@ -223,7 +223,7 @@ describe('runCritique (F-14.8)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'critique',
       tier: 'strong',
-      promptVersion: 'critique.v2',
+      promptVersion: 'critique.v3',
       cached: false
     })
     expect(ledger[0]!.contextHash).toMatch(/^[0-9a-f]{64}$/)
@@ -439,7 +439,7 @@ describe('runCritique citations and parsing (F-14.8)', () => {
 })
 
 describe('runCritique regenerate (F-14.5)', () => {
-  it('sends critiqueRegen.v2 with the note clause and misses the cache on the note and the predecessor', async () => {
+  it('sends critiqueRegen.v3 with the note clause and misses the cache on the note and the predecessor', async () => {
     await critique()
     expect(complete).toHaveBeenCalledTimes(1)
     const note = 'Less about pacing, more about the dialogue.'
@@ -447,15 +447,15 @@ describe('runCritique regenerate (F-14.5)', () => {
     const again = await critique({ note, regeneratedFrom: 'p-1' })
     expect(complete).toHaveBeenCalledTimes(2)
     expect(sent(1).system).toContain(`The writer asked for different notes and said: "${note}".`)
-    expect(again.promptVersion).toBe('critiqueRegen.v2')
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['critique.v2', 'critiqueRegen.v2'])
+    expect(again.promptVersion).toBe('critiqueRegen.v3')
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['critique.v3', 'critiqueRegen.v3'])
     // A predecessor with no note is its own request; a blank note with no predecessor is not one at all.
     answers([issue()])
     await critique({ regeneratedFrom: 'p-2' })
     expect(complete).toHaveBeenCalledTimes(3)
     const plain = await critique({ note: '   ' })
     expect(complete).toHaveBeenCalledTimes(3)
-    expect(plain.promptVersion).toBe('critique.v2')
+    expect(plain.promptVersion).toBe('critique.v3')
   })
 })
 

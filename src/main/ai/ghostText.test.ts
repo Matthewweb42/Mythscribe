@@ -2,7 +2,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS, outputBudget, priceFor } from '@shared/ai'
+import {
+  estimateTokens,
+  GHOST_AFTER_CHARS,
+  GHOST_BEFORE_CHARS,
+  outputBudget,
+  priceFor
+} from '@shared/ai'
+import { STORY_BIBLE_GHOST_TOKEN_BUDGET, STORY_BIBLE_HEADING } from '@shared/storyBible'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import type { TiptapNodeT } from '@shared/tiptap'
@@ -12,6 +19,8 @@ import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
 import { setAiSettings, setAuthorRules, setWritingPresets } from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { addDocumentTag } from '../tag/documentTagStore'
+import { createTag } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { addExemplar } from '../voice/exemplarStore'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
@@ -128,7 +137,7 @@ afterEach(() => {
 })
 
 describe('generateGhostText (F-5.3)', () => {
-  it('sends the caret window as ghostText.v2 on the fast tier with the preset temperature and cap, and logs one row', async () => {
+  it('sends the caret window as ghostText.v3 on the fast tier with the preset temperature and cap, and logs one row', async () => {
     const result = await ask(BEFORE, 'The ferry would not wait.')
     expect(result).toEqual({
       text: ' Somewhere ahead the river was rising. ',
@@ -136,7 +145,7 @@ describe('generateGhostText (F-5.3)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'ghostText.v2',
+      promptVersion: 'ghostText.v3',
       flagged: false,
       violation: null
     })
@@ -160,7 +169,7 @@ describe('generateGhostText (F-5.3)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'ghostText',
       tier: 'fast',
-      promptVersion: 'ghostText.v2',
+      promptVersion: 'ghostText.v3',
       cached: false
     })
     expect(ledger[0]!.contextHash).toMatch(/^[0-9a-f]{64}$/)
@@ -226,6 +235,37 @@ describe('generateGhostText (F-5.3)', () => {
     setSceneMeta(db, scene, { location: 'Cliff', pov: '', timeline: '', brief: EMPTY_SCENE_BRIEF })
     await ask()
     expect(complete).toHaveBeenCalledTimes(4)
+  })
+
+  it('folds the story bible into the system turn after the preset, at the ghost budget, and misses the cache when the bank or the tags change (F-14.9)', async () => {
+    await ask()
+    const fresh = complete.mock.calls[0]![0].messages[0]?.content ?? ''
+    // A fresh project's scene has no bank, but its neighbours in the seeded skeleton (the
+    // `scene` picked here is whichever chapter's `listNodes` lists first).
+    expect(fresh).toMatch(
+      new RegExp(
+        `\\n\\n${STORY_BIBLE_HEADING.replace(/[()]/g, '\\$&')}\\nThis scene: "Scene 1", in "Chapter \\d", in "Part \\d", scene 1 of 1\\.\\n(Previous|Next) scene: "Scene 1"`
+      )
+    )
+    expect(fresh.indexOf(STORY_BIBLE_HEADING)).toBeGreaterThan(
+      fresh.indexOf(builtinParams('general').styleInstruction)
+    )
+    const mara = createTag(db, { name: 'Mara', category: 'character', color: '#112233' })
+    await ask()
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(complete.mock.calls[1]![0].messages[0]?.content).toContain('\nCharacters: mara\n')
+    addDocumentTag(db, scene, mara.id)
+    await ask()
+    expect(complete).toHaveBeenCalledTimes(3)
+    expect(complete.mock.calls[2]![0].messages[0]?.content).toContain('; tagged mara.')
+    for (let i = 0; i < 80; i++) {
+      createTag(db, { name: `person-${i}`, category: 'character', color: '#112233' })
+    }
+    await ask()
+    const system = complete.mock.calls[3]![0].messages[0]?.content ?? ''
+    const bible = system.slice(system.indexOf(STORY_BIBLE_HEADING))
+    expect(estimateTokens(bible)).toBeLessThanOrEqual(STORY_BIBLE_GHOST_TOKEN_BUDGET)
+    expect(bible).toMatch(/Characters: .* … and \d+ more\n/)
   })
 
   it('folds the voice profile into the system turn after the rules and misses the cache when the profile version moves (F-14.1)', async () => {
@@ -373,7 +413,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       tier: 'fast',
       maxTokens: builtinParams('general').maxSuggestionTokens
     })
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['ghostText.v2', 'ghostTextRegen.v2'])
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['ghostText.v3', 'ghostTextRegen.v3'])
     expect(ledger[0]!.contextHash).not.toBe(ledger[1]!.contextHash)
     expect(result).toEqual({
       text: ` ${CLEAN}`,
@@ -381,7 +421,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd * 2,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'ghostTextRegen.v2',
+      promptVersion: 'ghostTextRegen.v3',
       flagged: false,
       violation: null
     })
@@ -396,7 +436,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       text: ` ${OFF_VOICE}`,
       flagged: true,
       violation: 'switches to present tense',
-      promptVersion: 'ghostTextRegen.v2',
+      promptVersion: 'ghostTextRegen.v3',
       usage: { inputTokens: 240, outputTokens: 24 }
     })
   })
@@ -413,7 +453,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'ghostText.v2',
+      promptVersion: 'ghostText.v3',
       flagged: true,
       violation: 'switches to present tense'
     })
@@ -446,7 +486,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
     expect(result).toMatchObject({
       text: ` ${OFF_VOICE}`,
       flagged: true,
-      promptVersion: 'ghostText.v2'
+      promptVersion: 'ghostText.v3'
     })
     expect(result.usage).toEqual({ inputTokens: 240, outputTokens: 24 })
   })
@@ -495,7 +535,7 @@ describe('generateGhostText author rules (F-14.2)', () => {
       text: ` ${CLEAN}`,
       flagged: false,
       violation: null,
-      promptVersion: 'ghostTextRegen.v2'
+      promptVersion: 'ghostTextRegen.v3'
     })
   })
 

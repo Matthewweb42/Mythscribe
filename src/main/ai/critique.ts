@@ -14,6 +14,7 @@ import {
 } from '@shared/critique'
 import { docToText } from '@shared/docText'
 import { normalizeProposalNote } from '@shared/proposal'
+import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { getDocumentContent } from '../document/documentStore'
 import { getSceneMeta } from '../document/sceneMetaStore'
@@ -24,16 +25,17 @@ import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, voiceProfileVersion, type VoiceProfile } from '../voice/profile'
 import { voiceBlock } from '../voice/voiceBlock'
 import { headTruncate } from './context/chatContext'
+import { buildStoryBible } from './context/storyBible'
 import { assertFeatureAllowed } from './dial'
 import {
-  buildCritiquePromptV2,
-  type BuildCritiquePromptV2Input,
-  type BuiltCritiquePromptV2
-} from './prompts/critique.v2'
+  buildCritiquePromptV3,
+  type BuildCritiquePromptV3Input,
+  type BuiltCritiquePromptV3
+} from './prompts/critique.v3'
 import {
-  buildCritiqueRegenPromptV2,
-  type BuiltCritiqueRegenPromptV2
-} from './prompts/critiqueRegen.v2'
+  buildCritiqueRegenPromptV3,
+  type BuiltCritiqueRegenPromptV3
+} from './prompts/critiqueRegen.v3'
 import { AiFallbackError, type AiMessage, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -104,7 +106,7 @@ const BAD_FORMAT = 'The model did not answer in the expected format.'
  * regenerate, since a retry would redo the whole critique.
  *
  * A regenerate (F-14.5: a note, a predecessor proposal, or both) goes through
- * `critiqueRegen.v2`, and the note and the predecessor join the context hash, so asking again
+ * `critiqueRegen.v3`, and the note and the predecessor join the context hash, so asking again
  * never answers from the cache with the notes the author just turned down. The hash otherwise
  * covers everything that shaped the messages: the scene text as sent, the brief, the metadata,
  * the honesty setting, and the voice profile's version.
@@ -141,14 +143,16 @@ export async function runCritique(
     pov: pov || null
   })
 
+  const bible = buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+
   const note = normalizeProposalNote(input.note)
   const regeneratedFrom = input.regeneratedFrom ?? null
   const isRegenerate = note !== null || regeneratedFrom !== null
-  const build = (text: string): BuiltCritiquePromptV2 | BuiltCritiqueRegenPromptV2 => {
-    const base: BuildCritiquePromptV2Input = { sceneText: text, brief, meta, voice, honesty }
+  const build = (text: string): BuiltCritiquePromptV3 | BuiltCritiqueRegenPromptV3 => {
+    const base: BuildCritiquePromptV3Input = { sceneText: text, brief, meta, voice, bible, honesty }
     return isRegenerate
-      ? buildCritiqueRegenPromptV2({ ...base, note })
-      : buildCritiquePromptV2(base)
+      ? buildCritiqueRegenPromptV3({ ...base, note })
+      : buildCritiquePromptV3(base)
   }
 
   // Token rule 8: count before sending, and trim the scene rather than overspend or fail.
@@ -170,6 +174,7 @@ export async function runCritique(
         sceneText,
         brief,
         meta,
+        bible,
         honesty,
         note,
         regeneratedFrom: isRegenerate ? regeneratedFrom : null,

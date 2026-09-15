@@ -1,4 +1,5 @@
 import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS } from '@shared/ai'
+import { STORY_BIBLE_GHOST_TOKEN_BUDGET } from '@shared/storyBible'
 import { docToText } from '@shared/docText'
 import { resolvePreset } from '@shared/presets'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
@@ -12,8 +13,9 @@ import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
 import { voiceBlock } from '../voice/voiceBlock'
 import { assertFeatureAllowed } from './dial'
 import { regenRequestId } from './inflight'
-import { buildGhostTextPromptV2 } from './prompts/ghostText.v2'
-import { buildGhostTextRegenPromptV2 } from './prompts/ghostTextRegen.v2'
+import { buildStoryBible } from './context/storyBible'
+import { buildGhostTextPromptV3 } from './prompts/ghostText.v3'
+import { buildGhostTextRegenPromptV3 } from './prompts/ghostTextRegen.v3'
 import { AiCancelledError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from './request'
 
@@ -56,12 +58,12 @@ export interface GhostTextResult {
  * (F-14.3: its own five lines, the previous scene's reader-knows-after line, and the next
  * scene's goal) as the context the data-sharing panel lists, builds the voice block (F-14.1: the locally computed
  * profile for the scene's POV, with the exemplars closest to the passage at the caret), builds
- * `ghostText.v2` with the active writing preset (F-5.2), runs it through the one request path
+ * `ghostText.v3` with the active writing preset (F-5.2), runs it through the one request path
  * (`fast` tier, the preset's temperature, at most 60 tokens), and post-processes the answer
  * into a one-or-two-sentence continuation. Then the fidelity check (F-14.7): the answer is
  * scored locally against the profile's stylometrics and against the author's banned phrases
  * (F-14.2, which come first, so a banned phrase is what the regenerate names); an off-voice
- * answer is regenerated once through `ghostTextRegen.v2` with the first violation named,
+ * answer is regenerated once through `ghostTextRegen.v3` with the first violation named,
  * re-scored, and shown flagged
  * when it still fails. A regenerate that fails for any reason (provider, budget, cap) falls
  * back to the first answer, flagged: the author always gets the suggestion that exists. A
@@ -101,6 +103,10 @@ export async function generateGhostText(
   const pov = sceneMeta.pov.trim()
   const profile = buildVoiceProfile(db, { pov: pov || undefined })
   const voice = voiceBlock(profile, { text: input.before, pov: pov || null })
+  const bible = buildStoryBible(db, {
+    nodeId: input.nodeId,
+    maxTokens: STORY_BIBLE_GHOST_TOKEN_BUDGET
+  })
 
   const promptInput = {
     before: input.before,
@@ -109,15 +115,17 @@ export async function generateGhostText(
     meta,
     brief,
     voice,
+    bible,
     preset
   }
-  const prompt = buildGhostTextPromptV2(promptInput)
+  const prompt = buildGhostTextPromptV3(promptInput)
   const context = {
     before: input.before,
     after: input.after,
     notes,
     meta,
     brief,
+    bible,
     preset,
     authorRules: profile.authorRules,
     voiceVersion: voiceProfileVersion()
@@ -152,7 +160,7 @@ export async function generateGhostText(
   const violation = checkGhostTextFidelity(profile.stats, firstText, banned).violations[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
-  const regen = buildGhostTextRegenPromptV2({ ...promptInput, violation: violation.message })
+  const regen = buildGhostTextRegenPromptV3({ ...promptInput, violation: violation.message })
   const flaggedFirst: GhostTextResult = {
     ...shown(first, firstText, prompt.version),
     flagged: true,

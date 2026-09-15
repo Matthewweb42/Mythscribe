@@ -1,5 +1,6 @@
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '@shared/rewrite'
 import { normalizeProposalNote } from '@shared/proposal'
+import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
 import { requireDocument } from '../document/documentStore'
 import { getSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
@@ -10,8 +11,9 @@ import { voiceBlock } from '../voice/voiceBlock'
 import { checkChatFidelity, postProcessChatText, type ChatResult } from './chat'
 import { assertFeatureAllowed } from './dial'
 import { regenRequestId } from './inflight'
-import { buildRewritePrompt, type BuildRewritePromptInput } from './prompts/rewrite.v1'
-import { buildRewriteRegenPrompt } from './prompts/rewriteRegen.v1'
+import { buildStoryBible } from './context/storyBible'
+import { buildRewritePromptV2, type BuildRewritePromptV2Input } from './prompts/rewrite.v2'
+import { buildRewriteRegenPromptV2 } from './prompts/rewriteRegen.v2'
 import { AiCancelledError } from './providers/types'
 import {
   runAiRequest,
@@ -58,13 +60,13 @@ export type RewriteResult = ChatResult
  * (author-control rule 2), the draft is post-processed (`postProcessChatText`: trim, strip
  * wrapping quotes) and scored with `checkChatFidelity` (F-14.7), the author's banned phrases
  * (F-14.2) first — skipped only when there is no voice block at all, the same gate
- * `voiceBlock` uses, so a fresh project warns about a banned phrase and nothing else. An off-voice draft is regenerated once through `rewriteRegen.v1` with the violation
+ * `voiceBlock` uses, so a fresh project warns about a banned phrase and nothing else. An off-voice draft is regenerated once through `rewriteRegen.v2` with the violation
  * named, not streamed (the panel is already past its drafting state), re-scored, and shown
  * flagged when it still fails; a regenerate that fails for any reason falls back to the first
  * draft, flagged, except a cancel, which propagates as CANCELLED from either call.
  *
  * An author regenerate (F-14.5: a note, a predecessor proposal, or both) sends
- * `rewriteRegen.v1` from the start, with the note clause and, if the fidelity check fires on
+ * `rewriteRegen.v2` from the start, with the note clause and, if the fidelity check fires on
  * that attempt, the violation clause too. The note and the predecessor join the context hash,
  * so asking again never answers from the cache with the rewrite the author just turned down.
  * The hash otherwise covers everything that shaped the messages: the passage, both context
@@ -98,25 +100,28 @@ export async function runRewrite(
   const pov = sceneMeta.pov.trim()
   const profile = buildVoiceProfile(db, { pov: pov || undefined })
   const voice = voiceBlock(profile, { text: input.text, pov: pov || null })
+  const bible = buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
 
-  const base: BuildRewritePromptInput = {
+  const base: BuildRewritePromptV2Input = {
     text: input.text,
     before: input.before,
     after: input.after,
     meta,
-    voice
+    voice,
+    bible
   }
   const note = normalizeProposalNote(input.note)
   const regeneratedFrom = input.regeneratedFrom ?? null
   const authorRegenerate = note !== null || regeneratedFrom !== null
   const prompt = authorRegenerate
-    ? buildRewriteRegenPrompt({ ...base, note, violation: null })
-    : buildRewritePrompt(base)
+    ? buildRewriteRegenPromptV2({ ...base, note, violation: null })
+    : buildRewritePromptV2(base)
   const hashed = {
     text: input.text,
     before: input.before,
     after: input.after,
     meta,
+    bible,
     note,
     regeneratedFrom: authorRegenerate ? regeneratedFrom : null,
     voiceVersion: voiceProfileVersion()
@@ -149,7 +154,7 @@ export async function runRewrite(
   const violation = checkChatFidelity(profile.stats, firstText, banned)[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
-  const regen = buildRewriteRegenPrompt({ ...base, note, violation: violation.message })
+  const regen = buildRewriteRegenPromptV2({ ...base, note, violation: violation.message })
   const flaggedFirst: RewriteResult = {
     ...shown(first, firstText, prompt.version),
     flagged: true,

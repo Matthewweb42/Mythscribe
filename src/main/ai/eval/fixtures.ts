@@ -18,70 +18,112 @@ import { builtinParams } from '@shared/presets'
 import { PROPOSAL_NOTE_MAX } from '@shared/proposal'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX } from '@shared/rewrite'
 import {
+  renderStoryBible,
+  STORY_BIBLE_CATEGORIES,
+  STORY_BIBLE_GHOST_TOKEN_BUDGET,
+  STORY_BIBLE_TOKEN_BUDGET,
+  type StoryBibleCategory,
+  type StoryBibleFacts
+} from '@shared/storyBible'
+import {
   classifyKind,
   computeStylometrics,
   renderVoiceRules,
   type Stylometrics
 } from '@shared/stylometry'
-import { TAG_TEMPLATES } from '@shared/tagTemplates'
+import type { TagCategory } from '@shared/tags'
+import { TAG_TEMPLATES, type TagTemplateTag } from '@shared/tagTemplates'
 import { voiceConfidence, VOICE_EXEMPLAR_TEXT_MAX } from '@shared/voice'
 import { voiceBlock } from '../../voice/voiceBlock'
 import type { AiMessage } from '../providers/types'
 import type { PromptVersion } from '../prompts/catalogue'
+import { buildBriefPrompt, BRIEF_PROMPT_VERSION } from '../prompts/brief.v1'
 import {
   buildChatPrompt,
   CHAT_PROMPT_VERSION,
   type BuildChatPromptInput,
   type ChatTurn
 } from '../prompts/chat.v1'
+import {
+  buildChatPromptV2,
+  CHAT_PROMPT_V2_VERSION,
+  type BuildChatPromptV2Input
+} from '../prompts/chat.v2'
+import {
+  buildChatPromptV3,
+  CHAT_PROMPT_V3_VERSION,
+  type BuildChatPromptV3Input
+} from '../prompts/chat.v3'
 import { buildChatRegenPrompt, CHAT_REGEN_PROMPT_VERSION } from '../prompts/chatRegen.v1'
+import { buildChatRegenPromptV2, CHAT_REGEN_PROMPT_V2_VERSION } from '../prompts/chatRegen.v2'
+import { buildChatRegenPromptV3, CHAT_REGEN_PROMPT_V3_VERSION } from '../prompts/chatRegen.v3'
 import {
   buildCritiquePrompt,
   CRITIQUE_PROMPT_VERSION,
   type BuildCritiquePromptInput
 } from '../prompts/critique.v1'
 import {
+  buildCritiquePromptV2,
+  CRITIQUE_PROMPT_V2_VERSION,
+  type BuildCritiquePromptV2Input
+} from '../prompts/critique.v2'
+import {
+  buildCritiquePromptV3,
+  CRITIQUE_PROMPT_V3_VERSION,
+  type BuildCritiquePromptV3Input
+} from '../prompts/critique.v3'
+import {
   buildCritiqueRegenPrompt,
   CRITIQUE_REGEN_PROMPT_VERSION
 } from '../prompts/critiqueRegen.v1'
+import {
+  buildCritiqueRegenPromptV2,
+  CRITIQUE_REGEN_PROMPT_V2_VERSION
+} from '../prompts/critiqueRegen.v2'
+import {
+  buildCritiqueRegenPromptV3,
+  CRITIQUE_REGEN_PROMPT_V3_VERSION
+} from '../prompts/critiqueRegen.v3'
 import {
   buildGhostTextPrompt,
   GHOST_NOTES_CHAR_CAP,
   GHOST_PROMPT_VERSION,
   type BuildGhostTextPromptInput
 } from '../prompts/ghostText.v1'
-import { buildGhostTextRegenPrompt, GHOST_REGEN_PROMPT_VERSION } from '../prompts/ghostTextRegen.v1'
 import {
   buildGhostTextPromptV2,
   GHOST_PROMPT_V2_VERSION,
   type BuildGhostTextPromptV2Input
 } from '../prompts/ghostText.v2'
 import {
+  buildGhostTextPromptV3,
+  GHOST_PROMPT_V3_VERSION,
+  type BuildGhostTextPromptV3Input
+} from '../prompts/ghostText.v3'
+import { buildGhostTextRegenPrompt, GHOST_REGEN_PROMPT_VERSION } from '../prompts/ghostTextRegen.v1'
+import {
   buildGhostTextRegenPromptV2,
   GHOST_REGEN_PROMPT_V2_VERSION
 } from '../prompts/ghostTextRegen.v2'
 import {
-  buildChatPromptV2,
-  CHAT_PROMPT_V2_VERSION,
-  type BuildChatPromptV2Input
-} from '../prompts/chat.v2'
-import { buildChatRegenPromptV2, CHAT_REGEN_PROMPT_V2_VERSION } from '../prompts/chatRegen.v2'
-import {
-  buildCritiquePromptV2,
-  CRITIQUE_PROMPT_V2_VERSION,
-  type BuildCritiquePromptV2Input
-} from '../prompts/critique.v2'
-import {
-  buildCritiqueRegenPromptV2,
-  CRITIQUE_REGEN_PROMPT_V2_VERSION
-} from '../prompts/critiqueRegen.v2'
-import { buildBriefPrompt, BRIEF_PROMPT_VERSION } from '../prompts/brief.v1'
+  buildGhostTextRegenPromptV3,
+  GHOST_REGEN_PROMPT_V3_VERSION
+} from '../prompts/ghostTextRegen.v3'
 import {
   buildRewritePrompt,
   REWRITE_PROMPT_VERSION,
   type BuildRewritePromptInput
 } from '../prompts/rewrite.v1'
+import {
+  buildRewritePromptV2,
+  REWRITE_PROMPT_V2_VERSION,
+  type BuildRewritePromptV2Input
+} from '../prompts/rewrite.v2'
 import { buildRewriteRegenPrompt, REWRITE_REGEN_PROMPT_VERSION } from '../prompts/rewriteRegen.v1'
+import {
+  buildRewriteRegenPromptV2,
+  REWRITE_REGEN_PROMPT_V2_VERSION
+} from '../prompts/rewriteRegen.v2'
 import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../prompts/tags.v1'
 import { buildTagsRegenPrompt, TAGS_REGEN_PROMPT_VERSION } from '../prompts/tagsRegen.v1'
 import {
@@ -219,6 +261,68 @@ const MAXED_BANK: string[] = [
   ...new Set(TAG_TEMPLATES.flatMap((t) => t.tags.map((tag) => tag.name)))
 ]
 
+const isStoryCategory = (category: TagCategory): category is StoryBibleCategory =>
+  (STORY_BIBLE_CATEGORIES as readonly TagCategory[]).includes(category)
+
+/** The template tags that state story facts, deduplicated by name, as the bible's bank (F-14.9). */
+function storyBank(tags: readonly TagTemplateTag[]): StoryBibleFacts['bank'] {
+  const seen = new Set<string>()
+  return tags.flatMap(({ category, name }) => {
+    if (!isStoryCategory(category) || seen.has(name)) return []
+    seen.add(name)
+    return [{ category, name }]
+  })
+}
+
+/** The facts a project holding the fixture scene in the middle of a chapter states (F-14.9). */
+const FIXTURE_FACTS: StoryBibleFacts = {
+  bank: storyBank(TAG_TEMPLATES[0]?.tags ?? []),
+  scene: {
+    title: 'The ferry landing',
+    ancestors: ['Chapter 2', 'Part One'],
+    index: 2,
+    count: 4,
+    tags: ['protagonist', 'antagonist', 'primary-location', 'main-plot']
+  },
+  previous: {
+    title: 'The mill ledger',
+    location: 'The mill',
+    pov: 'Mara',
+    timeline: 'Two days before'
+  },
+  next: { title: 'The north pasture', location: 'North pasture', pov: 'Mara', timeline: 'Dawn' }
+}
+/** Every template's story facts, with long titles and a heavily tagged scene: the bible at its cap. */
+const MAXED_FACTS: StoryBibleFacts = {
+  bank: storyBank(TAG_TEMPLATES.flatMap((t) => t.tags)),
+  scene: {
+    title: 'The ferry landing, the ledger, and what the river gave back',
+    ancestors: ['Chapter 12: The thaw and the ledger', 'Part Three: What the river gave back'],
+    index: 12,
+    count: 40,
+    tags: MAXED_BANK.slice(0, 12)
+  },
+  previous: {
+    title: 'The mill ledger, copied twice',
+    location: 'The mill on the north bank',
+    pov: 'Mara',
+    timeline: 'Two days before the thaw'
+  },
+  next: {
+    title: 'The north pasture, under the elm',
+    location: 'The north pasture',
+    pov: 'Tomas',
+    timeline: 'Dawn after the thaw'
+  }
+}
+
+/** The bible a full request carries, per budget: the chat/critique/rewrite one and the ghost one. */
+export const FIXTURE_BIBLE = renderStoryBible(FIXTURE_FACTS, STORY_BIBLE_TOKEN_BUDGET)
+const FIXTURE_GHOST_BIBLE = renderStoryBible(FIXTURE_FACTS, STORY_BIBLE_GHOST_TOKEN_BUDGET)
+/** The bible at each budget: the renderer cuts the category lines to fit, so these are the caps. */
+const MAXED_BIBLE = renderStoryBible(MAXED_FACTS, STORY_BIBLE_TOKEN_BUDGET)
+const MAXED_GHOST_BIBLE = renderStoryBible(MAXED_FACTS, STORY_BIBLE_GHOST_TOKEN_BUDGET)
+
 export interface EvalCase {
   version: PromptVersion
   name: string
@@ -284,6 +388,68 @@ function ghostCase(
       : buildGhostTextRegenPrompt({ ...input, violation })
   return {
     version: violation === null ? GHOST_PROMPT_VERSION : GHOST_REGEN_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    temperature: built.temperature,
+    scoring: {
+      kind: 'prose',
+      before: input.before,
+      after: input.after,
+      profile: input.voice === null ? null : FIXTURE_STATS
+    }
+  }
+}
+
+/** The same three shapes under `ghostText.v2` (F-14.3): no brief, the fixture brief, a brief at every line cap. */
+const ghostFreshV2: BuildGhostTextPromptV2Input = { ...fresh, brief: null }
+const ghostFullV2: BuildGhostTextPromptV2Input = { ...full, brief: BRIEF_BLOCK }
+const ghostMaxedV2: BuildGhostTextPromptV2Input = { ...maxed, brief: MAXED_BRIEF_BLOCK }
+
+function ghostCaseV2(
+  name: string,
+  note: string,
+  input: BuildGhostTextPromptV2Input,
+  violation: string | null
+): EvalCase {
+  const built =
+    violation === null
+      ? buildGhostTextPromptV2(input)
+      : buildGhostTextRegenPromptV2({ ...input, violation })
+  return {
+    version: violation === null ? GHOST_PROMPT_V2_VERSION : GHOST_REGEN_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    temperature: built.temperature,
+    scoring: {
+      kind: 'prose',
+      before: input.before,
+      after: input.after,
+      profile: input.voice === null ? null : FIXTURE_STATS
+    }
+  }
+}
+
+/** The same three shapes under `ghostText.v3` (F-14.9): no bible, the fixture bible at the ghost budget, the bible at its cap. */
+const ghostFreshV3: BuildGhostTextPromptV3Input = { ...ghostFreshV2, bible: null }
+const ghostFullV3: BuildGhostTextPromptV3Input = { ...ghostFullV2, bible: FIXTURE_GHOST_BIBLE }
+const ghostMaxedV3: BuildGhostTextPromptV3Input = { ...ghostMaxedV2, bible: MAXED_GHOST_BIBLE }
+
+function ghostCaseV3(
+  name: string,
+  note: string,
+  input: BuildGhostTextPromptV3Input,
+  violation: string | null
+): EvalCase {
+  const built =
+    violation === null
+      ? buildGhostTextPromptV3(input)
+      : buildGhostTextRegenPromptV3({ ...input, violation })
+  return {
+    version: violation === null ? GHOST_PROMPT_V3_VERSION : GHOST_REGEN_PROMPT_V3_VERSION,
     name,
     note,
     messages: built.messages,
@@ -403,6 +569,56 @@ function chatCase(
   }
 }
 
+/** The same four shapes under `chat.v2` (F-14.3): the brief in Agent mode only. */
+const planFreshV2: BuildChatPromptV2Input = { ...planFresh, brief: null }
+const planFullV2: BuildChatPromptV2Input = { ...planFull, brief: BRIEF_BLOCK }
+const agentFullV2: BuildChatPromptV2Input = { ...agentFull, brief: BRIEF_BLOCK }
+const agentMaxedV2: BuildChatPromptV2Input = { ...agentMaxed, brief: MAXED_BRIEF_BLOCK }
+
+function chatCaseV2(
+  name: string,
+  note: string,
+  input: BuildChatPromptV2Input,
+  violation: string | null
+): EvalCase {
+  const built =
+    violation === null ? buildChatPromptV2(input) : buildChatRegenPromptV2({ ...input, violation })
+  return {
+    version: violation === null ? CHAT_PROMPT_V2_VERSION : CHAT_REGEN_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
+/** The same four shapes under `chat.v3` (F-14.9): Plan mode carries the bible too (PLAN.md §2.3). */
+const planFreshV3: BuildChatPromptV3Input = { ...planFreshV2, bible: null }
+const planFullV3: BuildChatPromptV3Input = { ...planFullV2, bible: FIXTURE_BIBLE }
+const agentFullV3: BuildChatPromptV3Input = { ...agentFullV2, bible: FIXTURE_BIBLE }
+const agentMaxedV3: BuildChatPromptV3Input = { ...agentMaxedV2, bible: MAXED_BIBLE }
+
+function chatCaseV3(
+  name: string,
+  note: string,
+  input: BuildChatPromptV3Input,
+  violation: string | null
+): EvalCase {
+  const built =
+    violation === null ? buildChatPromptV3(input) : buildChatRegenPromptV3({ ...input, violation })
+  return {
+    version: violation === null ? CHAT_PROMPT_V3_VERSION : CHAT_REGEN_PROMPT_V3_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
 /** The paragraph an author would select for a rewrite, with the manuscript text each side of it. */
 const REWRITE_PASSAGE =
   'He looked at the lantern, then at the far bank, where the dark trees ran down to the water ' +
@@ -462,6 +678,29 @@ function rewriteCase(
   }
 }
 
+/** The same three shapes under `rewrite.v2` (F-14.9): no bible, the fixture bible, the bible at its cap. */
+const rewriteFreshV2: BuildRewritePromptV2Input = { ...rewriteFresh, bible: null }
+const rewriteFullV2: BuildRewritePromptV2Input = { ...rewriteFull, bible: FIXTURE_BIBLE }
+const rewriteMaxedV2: BuildRewritePromptV2Input = { ...rewriteMaxed, bible: MAXED_BIBLE }
+
+function rewriteCaseV2(
+  name: string,
+  note: string,
+  input: BuildRewritePromptV2Input,
+  regen: { note: string | null; violation: string | null } | null
+): EvalCase {
+  const built =
+    regen === null ? buildRewritePromptV2(input) : buildRewriteRegenPromptV2({ ...input, ...regen })
+  return {
+    version: regen === null ? REWRITE_PROMPT_V2_VERSION : REWRITE_REGEN_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
 /** The scene an author asks for notes on: the fixture as `docToText` yields it. */
 const critiqueFresh: BuildCritiquePromptInput = {
   sceneText: FIXTURE_PASSAGE,
@@ -511,60 +750,7 @@ function critiqueCase(
   }
 }
 
-const ghostFreshV2: BuildGhostTextPromptV2Input = { ...fresh, brief: null }
-const ghostFullV2: BuildGhostTextPromptV2Input = { ...full, brief: BRIEF_BLOCK }
-const ghostMaxedV2: BuildGhostTextPromptV2Input = { ...maxed, brief: MAXED_BRIEF_BLOCK }
-
-function ghostCaseV2(
-  name: string,
-  note: string,
-  input: BuildGhostTextPromptV2Input,
-  violation: string | null
-): EvalCase {
-  const built =
-    violation === null
-      ? buildGhostTextPromptV2(input)
-      : buildGhostTextRegenPromptV2({ ...input, violation })
-  return {
-    version: violation === null ? GHOST_PROMPT_V2_VERSION : GHOST_REGEN_PROMPT_V2_VERSION,
-    name,
-    note,
-    messages: built.messages,
-    maxTokens: built.maxTokens,
-    temperature: built.temperature,
-    scoring: {
-      kind: 'prose',
-      before: input.before,
-      after: input.after,
-      profile: input.voice === null ? null : FIXTURE_STATS
-    }
-  }
-}
-
-const planFreshV2: BuildChatPromptV2Input = { ...planFresh, brief: null }
-const planFullV2: BuildChatPromptV2Input = { ...planFull, brief: BRIEF_BLOCK }
-const agentFullV2: BuildChatPromptV2Input = { ...agentFull, brief: BRIEF_BLOCK }
-const agentMaxedV2: BuildChatPromptV2Input = { ...agentMaxed, brief: MAXED_BRIEF_BLOCK }
-
-function chatCaseV2(
-  name: string,
-  note: string,
-  input: BuildChatPromptV2Input,
-  violation: string | null
-): EvalCase {
-  const built =
-    violation === null ? buildChatPromptV2(input) : buildChatRegenPromptV2({ ...input, violation })
-  return {
-    version: violation === null ? CHAT_PROMPT_V2_VERSION : CHAT_REGEN_PROMPT_V2_VERSION,
-    name,
-    note,
-    messages: built.messages,
-    maxTokens: built.maxTokens,
-    ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
-    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
-  }
-}
-
+/** The same three shapes under `critique.v2` (F-14.3): the brief in place of the notes. */
 const critiqueFreshV2: BuildCritiquePromptV2Input = {
   sceneText: FIXTURE_PASSAGE,
   brief: null,
@@ -604,6 +790,32 @@ function critiqueCaseV2(
   return {
     version:
       regenNote === undefined ? CRITIQUE_PROMPT_V2_VERSION : CRITIQUE_REGEN_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'critique', sceneText: input.sceneText }
+  }
+}
+
+/** The same three shapes under `critique.v3` (F-14.9): no bible, the fixture bible, the bible at its cap. */
+const critiqueFreshV3: BuildCritiquePromptV3Input = { ...critiqueFreshV2, bible: null }
+const critiqueFullV3: BuildCritiquePromptV3Input = { ...critiqueFullV2, bible: FIXTURE_BIBLE }
+const critiqueMaxedV3: BuildCritiquePromptV3Input = { ...critiqueMaxedV2, bible: MAXED_BIBLE }
+
+function critiqueCaseV3(
+  name: string,
+  note: string,
+  input: BuildCritiquePromptV3Input,
+  regenNote: string | null | undefined
+): EvalCase {
+  const built =
+    regenNote === undefined
+      ? buildCritiquePromptV3(input)
+      : buildCritiqueRegenPromptV3({ ...input, note: regenNote })
+  return {
+    version:
+      regenNote === undefined ? CRITIQUE_PROMPT_V3_VERSION : CRITIQUE_REGEN_PROMPT_V3_VERSION,
     name,
     note,
     messages: built.messages,
@@ -669,6 +881,36 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed',
     'the maxed case regenerated after a tense violation',
     ghostMaxedV2,
+    VIOLATION
+  ),
+  ghostCaseV3(
+    'fresh',
+    'the v2 fresh case with no story bible: a project that states no facts yet',
+    ghostFreshV3,
+    null
+  ),
+  ghostCaseV3(
+    'full',
+    'the v2 full case plus the story bible at the ghost budget (the bank, the scene, its neighbours)',
+    ghostFullV3,
+    null
+  ),
+  ghostCaseV3(
+    'maxed',
+    'every cap at its limit, the story bible filling its ghost budget too',
+    ghostMaxedV3,
+    null
+  ),
+  ghostCaseV3(
+    'full',
+    'the full case with its bible, regenerated after a tense violation',
+    ghostFullV3,
+    VIOLATION
+  ),
+  ghostCaseV3(
+    'maxed',
+    'the maxed case with its bible, regenerated after a tense violation',
+    ghostMaxedV3,
     VIOLATION
   ),
   tagsCase(
@@ -771,6 +1013,32 @@ export const EVAL_CASES: EvalCase[] = [
     agentMaxedV2,
     VIOLATION
   ),
+  chatCaseV3(
+    'plan fresh',
+    'the v2 plan fresh case with no story bible: a project that states no facts yet',
+    planFreshV3,
+    null
+  ),
+  chatCaseV3('plan full', 'the v2 plan full case plus the story bible', planFullV3, null),
+  chatCaseV3('agent full', 'the v2 agent full case plus the story bible', agentFullV3, null),
+  chatCaseV3(
+    'agent maxed',
+    'every cap at its limit, the story bible filling its budget too',
+    agentMaxedV3,
+    null
+  ),
+  chatCaseV3(
+    'agent full',
+    'the agent full case with its bible, regenerated after a tense violation',
+    agentFullV3,
+    VIOLATION
+  ),
+  chatCaseV3(
+    'agent maxed',
+    'the agent maxed case with its bible, regenerated after a tense violation',
+    agentMaxedV3,
+    VIOLATION
+  ),
   rewriteCase('fresh', 'no voice block, no context either side, no metadata', rewriteFresh, null),
   rewriteCase(
     'full',
@@ -798,6 +1066,37 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed both',
     'the maxed case regenerated with an author note at the length limit and a tense violation',
     rewriteMaxed,
+    { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: VIOLATION }
+  ),
+  rewriteCaseV2(
+    'fresh',
+    'the fresh case with no story bible: a project that states no facts yet',
+    rewriteFreshV2,
+    null
+  ),
+  rewriteCaseV2('full', 'the full case plus the story bible', rewriteFullV2, null),
+  rewriteCaseV2(
+    'maxed',
+    'every cap at its limit, the story bible filling its budget too',
+    rewriteMaxedV2,
+    null
+  ),
+  rewriteCaseV2(
+    'full note',
+    'the full case with its bible, regenerated with an author note at the length limit',
+    rewriteFullV2,
+    { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: null }
+  ),
+  rewriteCaseV2(
+    'full violation',
+    'the full case with its bible, regenerated after a tense violation',
+    rewriteFullV2,
+    { note: null, violation: VIOLATION }
+  ),
+  rewriteCaseV2(
+    'maxed both',
+    'the maxed case with its bible, regenerated with an author note and a tense violation',
+    rewriteMaxedV2,
     { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: VIOLATION }
   ),
   critiqueCase(
@@ -860,6 +1159,31 @@ export const EVAL_CASES: EvalCase[] = [
     critiqueMaxedV2,
     'n'.repeat(PROPOSAL_NOTE_MAX)
   ),
+  critiqueCaseV3(
+    'fresh',
+    'the v2 fresh case with no story bible: a project that states no facts yet',
+    critiqueFreshV3,
+    undefined
+  ),
+  critiqueCaseV3('full', 'the v2 full case plus the story bible', critiqueFullV3, undefined),
+  critiqueCaseV3(
+    'maxed',
+    'every cap at its limit, the story bible filling its budget too',
+    critiqueMaxedV3,
+    undefined
+  ),
+  critiqueCaseV3(
+    'full note',
+    'the full case with its bible, regenerated with an author note at the length limit',
+    critiqueFullV3,
+    'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
+  critiqueCaseV3(
+    'maxed note',
+    'the maxed case with its bible, regenerated with an author note at the length limit',
+    critiqueMaxedV3,
+    'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
   briefCase(
     'fresh',
     'the fixture scene with no metadata: the shape a new project sends',
@@ -869,7 +1193,7 @@ export const EVAL_CASES: EvalCase[] = [
   briefCase(
     'maxed',
     'a scene at the character budget with long metadata: the most a brief draft can cost',
-    `${FIXTURE_PASSAGE.repeat(20).slice(0, BRIEF_SCENE_CHAR_BUDGET)}\u2026`,
+    `${FIXTURE_PASSAGE.repeat(20).slice(0, BRIEF_SCENE_CHAR_BUDGET)}…`,
     {
       location: 'L'.repeat(200),
       pov: 'P'.repeat(200),
