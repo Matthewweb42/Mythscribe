@@ -8,6 +8,7 @@ import {
   type AiTestConnectionResult,
   type AiUsageSummary
 } from '@shared/ai'
+import type { Background } from '@shared/focus'
 import type { AiChatResult, AiGhostTextResult, AiRecommendTagsResult } from '@shared/ipc/contract'
 import { runChat } from '../ai/chat'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
@@ -26,6 +27,7 @@ import type { ProjectDialogs } from '../dialogs'
 import { getDocumentContent, saveDocument } from '../document/documentStore'
 import { getNotes, saveNotes } from '../document/notesStore'
 import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
+import { addBackground, listBackgrounds, removeBackground } from '../project/backgroundStore'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor, sanitizeName } from '../project/projectStore'
 import { renderDisclosure } from '../provenance/disclosure'
@@ -34,10 +36,12 @@ import {
   getAiSettings,
   getConversations,
   getEditorSettings,
+  getFocusSettings,
   getWritingPresets,
   setAiSettings,
   setConversations,
   setEditorSettings,
+  setFocusSettings,
   setWritingPresets
 } from '../project/settingsStore'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
@@ -177,6 +181,43 @@ export function registerHandlers({
   register('presets:get', () => getWritingPresets(manager.require().connection.orm))
 
   register('presets:set', (value) => setWritingPresets(manager.require().connection.orm, value))
+
+  register('focusSettings:get', () => getFocusSettings(manager.require().connection.orm))
+
+  register('focusSettings:set', (value) =>
+    setFocusSettings(manager.require().connection.orm, value)
+  )
+
+  // F-6.2: the backgrounds are the files in the project's `assets/backgrounds/` folder.
+  register('background:list', () => listBackgrounds(manager.require().folder))
+
+  register('background:add', async () => {
+    const session = manager.require()
+    const chosen = await dialogs.chooseImages()
+    if (chosen === null) return null
+    const added: Background[] = []
+    const skipped: string[] = []
+    for (const source of chosen) {
+      try {
+        added.push(addBackground(session.folder, source))
+      } catch (err) {
+        // A refused file (type or size) is reported by name; anything else is a real failure.
+        if (err instanceof AppError && err.code === 'VALIDATION')
+          skipped.push(path.basename(source))
+        else throw err
+      }
+    }
+    return { added, skipped }
+  })
+
+  register('background:remove', ({ id }) => {
+    const session = manager.require()
+    removeBackground(session.folder, id)
+    const focus = getFocusSettings(session.connection.orm)
+    if (focus.backgroundId === id)
+      setFocusSettings(session.connection.orm, { ...focus, backgroundId: null })
+    return null
+  })
 
   register('conversations:get', () => getConversations(manager.require().connection.orm))
 

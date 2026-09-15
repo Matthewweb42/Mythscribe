@@ -83,6 +83,8 @@ const untilCancelled = (request: CompletionRequest): Promise<never> =>
 
 /** What the fake export dialog answers (F-14.6); null cancels. Tests set it per case. */
 let exportPath: string | null
+/** What the fake image dialog answers (F-6.2); null cancels. Tests set it per case. */
+let chosenImages: string[] | null
 /** The default name and directory the last export dialog was asked for. */
 let exportAsked: { defaultName: string; directory: string | undefined } | null
 
@@ -92,7 +94,8 @@ const dialogs: ProjectDialogs = {
   chooseExportPath: async (defaultName, _filters, directory) => {
     exportAsked = { defaultName, directory }
     return exportPath
-  }
+  },
+  chooseImages: async () => chosenImages
 }
 
 beforeEach(() => {
@@ -101,6 +104,7 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-handlers-'))
   exportPath = null
   exportAsked = null
+  chosenImages = null
   manager = new ProjectManager()
   fullScreen = false
   fakeWin = {
@@ -711,6 +715,106 @@ describe('presets:get / presets:set (F-5.2)', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     expect(await invoke('presets:get', undefined)).toEqual(defaults)
+  })
+})
+
+describe('focusSettings and backgrounds (F-6.2)', () => {
+  const PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMwTpsJAAICATNWh+JUAAAAAElFTkSuQmCC',
+    'base64'
+  )
+  const image = (name: string, bytes: Buffer = PNG): string => {
+    const file = path.join(tmp, name)
+    fs.writeFileSync(file, bytes)
+    return file
+  }
+  const backgroundsDir = (projectPath: string): string =>
+    path.join(projectPath, 'assets', 'backgrounds')
+
+  it('reports NO_PROJECT for every channel when nothing is open', async () => {
+    await expect(invoke('focusSettings:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('focusSettings:set', { backgroundId: null })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+    await expect(invoke('background:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('background:add', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('background:remove', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers no background and no files for a new project, then what was set, also after a reopen', async () => {
+    const created = await invoke('project:create', {
+      name: 'Focus',
+      format: 'novel',
+      directory: tmp
+    })
+    expect(await invoke('focusSettings:get', undefined)).toEqual({ backgroundId: null })
+    expect(await invoke('background:list', undefined)).toEqual([])
+    expect(await invoke('focusSettings:set', { backgroundId: 'bg' })).toEqual({
+      backgroundId: 'bg'
+    })
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    expect(await invoke('focusSettings:get', undefined)).toEqual({ backgroundId: 'bg' })
+  })
+
+  it('refuses a non-string id with VALIDATION and keeps the stored value', async () => {
+    await invoke('project:create', { name: 'Focus', format: 'novel', directory: tmp })
+    const result = await handlerFor('focusSettings:set')(undefined, { backgroundId: 3 })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(await invoke('focusSettings:get', undefined)).toEqual({ backgroundId: null })
+  })
+
+  it('copies the chosen images into the project folder, skipping refused ones by name', async () => {
+    const created = await invoke('project:create', {
+      name: 'Focus',
+      format: 'novel',
+      directory: tmp
+    })
+    chosenImages = [image('Sunset.PNG'), image('notes.txt'), image('b.jpg')]
+    const result = await invoke('background:add', undefined)
+    expect(result?.skipped).toEqual(['notes.txt'])
+    expect(result?.added).toHaveLength(2)
+    const [a, b] = result?.added ?? []
+    expect(a?.name).toBe('Sunset.png')
+    expect(a?.url).toBe(`mythscribe-asset://backgrounds/${a?.id}.png`)
+    expect(b?.name).toBe('b.jpg')
+    const dir = backgroundsDir(created?.path ?? '')
+    // Stored as `<id>.<ext>`; `name` is the display name without the short id.
+    expect(fs.readdirSync(dir).sort()).toEqual([`${a?.id}.png`, `${b?.id}.jpg`].sort())
+    expect(fs.readFileSync(path.join(dir, `${a?.id}.png`))).toEqual(PNG)
+    const listed = await invoke('background:list', undefined)
+    expect(listed).toEqual([a, b].sort((x, y) => (x?.name ?? '').localeCompare(y?.name ?? '')))
+  })
+
+  it('answers null when the image dialog is cancelled', async () => {
+    const created = await invoke('project:create', {
+      name: 'Focus',
+      format: 'novel',
+      directory: tmp
+    })
+    expect(await invoke('background:add', undefined)).toBeNull()
+    expect(fs.existsSync(backgroundsDir(created?.path ?? ''))).toBe(false)
+  })
+
+  it('removes a background, clearing the current selection when it was that one', async () => {
+    const created = await invoke('project:create', {
+      name: 'Focus',
+      format: 'novel',
+      directory: tmp
+    })
+    chosenImages = [image('a.png'), image('b.png')]
+    const added = (await invoke('background:add', undefined))?.added ?? []
+    const [a, b] = added
+    if (!a || !b) throw new Error('two backgrounds expected')
+    await invoke('focusSettings:set', { backgroundId: a.id })
+    expect(await invoke('background:remove', { id: b.id })).toBeNull()
+    expect(await invoke('focusSettings:get', undefined)).toEqual({ backgroundId: a.id })
+    expect(await invoke('background:remove', { id: a.id })).toBeNull()
+    expect(await invoke('focusSettings:get', undefined)).toEqual({ backgroundId: null })
+    expect(await invoke('background:list', undefined)).toEqual([])
+    expect(fs.readdirSync(backgroundsDir(created?.path ?? ''))).toEqual([])
+    await expect(invoke('background:remove', { id: a.id })).rejects.toThrowError(/^NOT_FOUND: /)
   })
 })
 

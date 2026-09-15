@@ -5,6 +5,8 @@ import {
   type EditorSettings
 } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
+import { BackgroundManager } from '@renderer/features/focus/BackgroundManager'
+import { useCurrentBackground } from '@renderer/features/focus/backgroundStore'
 import { COLUMN, editorStyle } from './column'
 import { useEditorSettings, useEditorSettingsStore } from './settingsStore'
 
@@ -83,7 +85,35 @@ export function EditorSettingsTab({ format }: { format: NovelFormat }): React.JS
         </button>
       </div>
       <EditorPreview settings={settings} />
+      <FocusModeGroup />
     </div>
+  )
+}
+
+/**
+ * The focus-mode group (F-6.2): the current background's name and the button that opens the
+ * Background Manager. It lives here until the control bar (F-6.5) hosts the same manager.
+ */
+function FocusModeGroup(): React.JSX.Element {
+  const background = useCurrentBackground()
+  const [managerOpen, setManagerOpen] = useState(false)
+  return (
+    <section aria-label="Focus mode" className="flex flex-col gap-2 border-t border-line pt-4">
+      <p className="m-0 text-xs font-medium text-fg-muted">Focus mode</p>
+      <div className={ROW}>
+        <span>
+          Background: <span data-testid="focus-background-name">{background?.name ?? 'None'}</span>
+        </span>
+        <button
+          type="button"
+          onClick={() => setManagerOpen(true)}
+          className="rounded-md border border-line px-2 py-1 hover:bg-surface"
+        >
+          Backgrounds…
+        </button>
+      </div>
+      {managerOpen ? <BackgroundManager onClose={() => setManagerOpen(false)} /> : null}
+    </section>
   )
 }
 

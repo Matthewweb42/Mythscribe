@@ -1,6 +1,9 @@
-import { app, BrowserWindow, Menu, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, Menu, net, protocol, safeStorage, shell } from 'electron'
 import icon from '../../resources/icon.png?asset'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { ASSET_SCHEME } from '@shared/focus'
 import { AiKeyStore } from './ai/keyStore'
 import { AiProviderRegistry } from './ai/registry'
 import { AppStateStore } from './appState/appStateStore'
@@ -8,6 +11,7 @@ import { createDialogs } from './dialogs'
 import { registerHandlers } from './ipc/handlers'
 import { emit } from './ipc/registry'
 import { installSingleInstance } from './lifecycle'
+import { assetPathFor } from './project/assetUrl'
 import { ProjectManager } from './project/manager'
 
 const isDev = !app.isPackaged
@@ -22,6 +26,16 @@ if (process.env.MYTHSCRIBE_USER_DATA) app.setPath('userData', process.env.MYTHSC
  * the AI tab warns. The method exists only on Linux.
  */
 if (process.platform === 'linux') safeStorage.setUsePlainTextEncryption(true)
+
+/**
+ * F-6.2: project assets (focus-mode backgrounds) reach the sandboxed renderer through a custom
+ * scheme, `mythscribe-asset://backgrounds/<file>`, answered from the open project's folder by
+ * the handler installed once the app is ready. Electron only accepts the registration before
+ * `ready`; `standard` and `secure` let CSS `url()` and `<img>` load it like https.
+ */
+protocol.registerSchemesAsPrivileged([
+  { scheme: ASSET_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }
+])
 
 /** The lock lives in userData, so it must be requested after the override above. */
 const primaryInstance = installSingleInstance(app, () => BrowserWindow.getAllWindows()[0] ?? null)
@@ -90,6 +104,13 @@ if (!primaryInstance) {
 } else {
   void app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
+    // No project open, a URL outside the backgrounds folder, or a file that is gone: 404.
+    protocol.handle(ASSET_SCHEME, (request) => {
+      const folder = manager.current()?.path
+      const file = folder === undefined ? null : assetPathFor(folder, request.url)
+      if (file === null || !existsSync(file)) return new Response(null, { status: 404 })
+      return net.fetch(pathToFileURL(file).toString())
+    })
     const appState = new AppStateStore(join(app.getPath('userData'), 'app-state.json'))
     const keyStore = new AiKeyStore(join(app.getPath('userData'), 'ai-keys.json'), safeStorage)
     registerHandlers({

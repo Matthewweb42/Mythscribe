@@ -1,5 +1,6 @@
 import { app, dialog, type BrowserWindow } from 'electron'
 import path from 'node:path'
+import { BACKGROUND_EXTENSIONS } from '@shared/focus'
 import { DB_FILE, PROJECT_EXTENSION, sanitizeName } from './project/projectStore'
 
 export interface ProjectDialogs {
@@ -16,6 +17,8 @@ export interface ProjectDialogs {
     filters: Electron.FileFilter[],
     directory?: string
   ) => Promise<string | null>
+  /** Returns the image files the user chose for focus-mode backgrounds (F-6.2), or null if cancelled. */
+  chooseImages: () => Promise<string[] | null>
 }
 
 export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDialogs {
@@ -54,6 +57,20 @@ export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDia
       )
       if (result.canceled || !result.filePath) return null
       return result.filePath
+    },
+    async chooseImages() {
+      const options: Electron.OpenDialogOptions = {
+        title: 'Add background images',
+        buttonLabel: 'Add',
+        defaultPath: app.getPath('pictures'),
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Images', extensions: [...BACKGROUND_EXTENSIONS] }]
+      }
+      const result = await show((win) =>
+        win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
+      )
+      if (result.canceled || result.filePaths.length === 0) return null
+      return result.filePaths
     }
   }
 }

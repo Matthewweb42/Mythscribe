@@ -8,6 +8,7 @@ import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
 import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
 import type { MenuItem } from '@renderer/features/manuscript/contextMenuItems'
+import { useCurrentBackground } from '@renderer/features/focus/backgroundStore'
 import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -139,6 +140,9 @@ function RegionEditor({
   const focus = useFocusStore((s) => s.active)
   // F-3.9 / F-6.7: typewriter scrolling follows the setting, and focus mode turns it on.
   const typewriter = focus || settings.typewriter
+  // F-6.2: over a background image the column gets a translucent panel so the text stays legible.
+  const background = useCurrentBackground()
+  const surface = focus && background !== null
   const [menu, setMenu] = useState<TokenMenu | null>(null)
 
   const editor = useEditor(
@@ -262,7 +266,7 @@ function RegionEditor({
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <EditorContent
           editor={editor}
-          className={`${COLUMN} flex flex-1 flex-col py-6 ${typewriter ? 'pb-[50vh]' : ''}`}
+          className={`${COLUMN} flex flex-1 flex-col py-6 ${typewriter ? 'pb-[50vh]' : ''} ${surface ? 'focus-surface' : ''}`}
         />
       </div>
       <DocumentStatusBar id={id} editor={ready ? editor : null} />

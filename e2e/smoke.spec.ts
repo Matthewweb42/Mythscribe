@@ -11,6 +11,7 @@ import {
 } from '@playwright/test'
 import type { AiStatus, AiUsageSummary } from '../src/shared/ai'
 import type { AiSettings } from '../src/shared/aiSettings'
+import type { FocusSettings } from '../src/shared/focus'
 import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
 import { PRESETS, type WritingPresets } from '../src/shared/presets'
@@ -1443,6 +1444,90 @@ test('create, close, reopen a project on disk', async () => {
   await expect(formatting).toBeVisible()
   await expect(focusButton).toHaveAttribute('aria-pressed', 'false')
 
+  // F-6.2: background images. The stubbed open dialog answers a 1×1 PNG written into the temp
+  // dir; "Add images…" copies it into the project's `assets/backgrounds/`, the tile appears and
+  // is selected, and in focus mode the backdrop shows it through the `mythscribe-asset://`
+  // scheme (the image really loads: `naturalWidth` is 1). Delete removes the tile, the file,
+  // and the backdrop.
+  const backgroundSource = path.join(tmp, 'backdrop.png')
+  fs.writeFileSync(backgroundSource, Buffer.from(PNG_1X1_BASE64, 'base64'))
+  await stubOpenDialog(backgroundSource)
+  const backgroundsDir = path.join(projectPath, 'assets', 'backgrounds')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(settingsDialog.getByTestId('focus-background-name')).toHaveText('None')
+  await settingsDialog.getByRole('button', { name: 'Backgrounds…' }).click()
+  const manager = page.getByRole('dialog', { name: 'Backgrounds' })
+  await expect(manager).toBeVisible()
+  const noBackground = manager.getByRole('button', { name: 'No background' })
+  await expect(noBackground).toHaveAttribute('aria-pressed', 'true')
+  await expect(manager.getByText('No images yet.')).toBeVisible()
+  await manager.getByRole('button', { name: 'Add images…' }).click()
+  const backgroundTile = manager.getByRole('button', { name: /^(?!Delete ).*\.png$/ })
+  await expect(backgroundTile).toHaveCount(1)
+  const backgroundName = await backgroundTile.getAttribute('aria-label')
+  if (!backgroundName) throw new Error('background tile has no name')
+  // Stored as `<stem>.<short id>.png`; the tile shows the name without the id.
+  const [storedFile, ...otherFiles] = fs.readdirSync(backgroundsDir)
+  expect(otherFiles).toEqual([])
+  expect(storedFile?.replace(/\.[0-9a-f]{8}\.png$/, '.png')).toBe(backgroundName)
+  expect(fs.readFileSync(path.join(backgroundsDir, storedFile ?? '')).toString('base64')).toBe(
+    PNG_1X1_BASE64
+  )
+  await expect(backgroundTile).toHaveAttribute('aria-pressed', 'false')
+  await backgroundTile.click()
+  await expect(backgroundTile).toHaveAttribute('aria-pressed', 'true')
+  await expect(noBackground).toHaveAttribute('aria-pressed', 'false')
+  await manager.getByRole('button', { name: 'Close backgrounds' }).click()
+  await expect(manager).toHaveCount(0)
+  await expect(settingsDialog).toBeVisible()
+  await expect(settingsDialog.getByTestId('focus-background-name')).toHaveText(backgroundName)
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await expect
+    .poll(async () => (await focusSettings()).backgroundId)
+    .toBe(storedFile?.replace(/\.png$/, ''))
+  const backdrop = page.getByTestId('focus-backdrop')
+  await expect(backdrop).toHaveCount(0)
+  await editor.click()
+  await page.keyboard.press('F11')
+  await expect.poll(isFullScreen).toBe(true)
+  await expect(backdrop).toBeVisible()
+  const backgroundUrl = `mythscribe-asset://backgrounds/${storedFile}`
+  await expect(backdrop).toHaveCSS('background-image', `url("${backgroundUrl}")`)
+  const naturalWidth = await page.evaluate(async (src) => {
+    const img = new Image()
+    img.src = src
+    await img.decode()
+    return img.naturalWidth
+  }, backgroundUrl)
+  expect(naturalWidth).toBe(1)
+  await expect(page.locator('.focus-surface')).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect.poll(isFullScreen).toBe(false)
+  await expect(backdrop).toHaveCount(0)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('button', { name: 'Backgrounds…' }).click()
+  await manager.getByRole('button', { name: `Delete ${backgroundName}` }).click()
+  const deleteConfirm = page.getByRole('dialog', { name: `Delete "${backgroundName}"?` })
+  await deleteConfirm.getByRole('button', { name: 'Delete' }).click()
+  await expect(deleteConfirm).toHaveCount(0)
+  await expect(backgroundTile).toHaveCount(0)
+  await expect(noBackground).toHaveAttribute('aria-pressed', 'true')
+  expect(fs.readdirSync(backgroundsDir)).toEqual([])
+  await manager.getByRole('button', { name: 'Close backgrounds' }).click()
+  await expect(settingsDialog.getByTestId('focus-background-name')).toHaveText('None')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await expect.poll(async () => (await focusSettings()).backgroundId).toBeNull()
+  await editor.click()
+  await page.keyboard.press('F11')
+  await expect.poll(isFullScreen).toBe(true)
+  await expect(backdrop).toHaveCount(0)
+  await expect(page.locator('.focus-surface')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect.poll(isFullScreen).toBe(false)
+  await expect(formatting).toBeVisible()
+
   // F-5.4: the assistant panel. Ctrl+K opens it (the dial is still at Suggest with the key
   // saved). A Plan question streams its answer into the chat with the cost line, and the
   // request carries the scene's text; the tab takes the question as its title. Agent mode
@@ -1619,6 +1704,20 @@ async function aiStatus(): Promise<AiStatus> {
 }
 
 /** The project's AI dial and toggles (F-14.4) as main reads them from the settings table. */
+/** A valid 1×1 RGB PNG (F-6.2): the smallest image the background e2e step can upload. */
+const PNG_1X1_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMwTpsJAAICATNWh+JUAAAAAElFTkSuQmCC'
+
+/** The project's focus-mode settings (F-6.2), read through the bridge. */
+async function focusSettings(): Promise<FocusSettings> {
+  const result = await page.evaluate<IpcResult<FocusSettings>>(
+    () =>
+      window.mythscribe.invoke('focusSettings:get', undefined) as Promise<IpcResult<FocusSettings>>
+  )
+  if (!result.ok) throw new Error(`focusSettings:get failed: ${result.error.message}`)
+  return result.data
+}
+
 async function aiSettings(): Promise<AiSettings> {
   const result = await page.evaluate<IpcResult<AiSettings>>(
     () => window.mythscribe.invoke('aiSettings:get', undefined) as Promise<IpcResult<AiSettings>>

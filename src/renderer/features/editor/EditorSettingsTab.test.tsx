@@ -1,8 +1,9 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultEditorSettings, type EditorSettings } from '@shared/editorSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
+import { resetBackgroundStore, useBackgroundStore } from '@renderer/features/focus/backgroundStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -39,6 +40,7 @@ function open(): void {
 
 beforeEach(() => {
   resetEditorSettingsStore()
+  resetBackgroundStore()
   resetPendingSaves()
   useDialogStore.setState({ modals: [], toasts: [] })
   const recording = recordingClient()
@@ -49,6 +51,7 @@ beforeEach(() => {
 // The store's debounced write outlives a test: cancel it here so it cannot fire into the next file's fake client.
 afterEach(() => {
   resetEditorSettingsStore()
+  resetBackgroundStore()
 })
 
 describe('EditorSettingsTab (F-3.6, F-7.5)', () => {
@@ -208,5 +211,24 @@ describe('EditorSettingsTab (F-3.6, F-7.5)', () => {
     expect(previewBreak()).toBe(sampleBreak)
     expect(previewBreak()).toHaveTextContent('~~~')
     expect(preview()).toBe(box)
+  })
+})
+
+describe('EditorSettingsTab focus-mode group (F-6.2)', () => {
+  it('names the current background and opens the Background Manager', async () => {
+    useBackgroundStore.setState({
+      backgrounds: [{ id: 'a', name: 'a.png', url: 'mythscribe-asset://backgrounds/a.png' }],
+      settings: { backgroundId: null }
+    })
+    open()
+    const group = within(screen.getByRole('region', { name: 'Focus mode' }))
+    expect(screen.getByTestId('focus-background-name')).toHaveTextContent('None')
+    expect(screen.queryByRole('dialog', { name: 'Backgrounds' })).not.toBeInTheDocument()
+    await userEvent.click(group.getByRole('button', { name: 'Backgrounds…' }))
+    const manager = screen.getByRole('dialog', { name: 'Backgrounds' })
+    await userEvent.click(within(manager).getByRole('button', { name: 'a.png' }))
+    expect(screen.getByTestId('focus-background-name')).toHaveTextContent('a.png')
+    await userEvent.click(within(manager).getByRole('button', { name: 'Close backgrounds' }))
+    expect(screen.queryByRole('dialog', { name: 'Backgrounds' })).not.toBeInTheDocument()
   })
 })

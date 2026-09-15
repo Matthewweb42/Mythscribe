@@ -214,3 +214,30 @@ select {
   text-decoration: none;
   vertical-align: baseline;
 }
+
+/*
+ * Focus-mode background (F-6.2): a fixed layer under the main pane (`isolate` on <main> keeps
+ * the negative z-index inside it) with the image cover-fitted and a dark scrim over it; the
+ * editor column gets a translucent panel so the text stays readable over any image.
+ */
+.focus-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+.focus-backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--ms-focus-scrim);
+}
+
+.focus-surface {
+  border-radius: var(--ms-radius-lg);
+  background: var(--ms-focus-surface);
+  padding-inline: 2rem;
+}

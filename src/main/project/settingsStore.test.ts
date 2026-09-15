@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AI_SETTINGS_KEY, defaultAiSettings, defaultGhostTextSettings } from '@shared/aiSettings'
 import { CONVERSATIONS_KEY, defaultConversations } from '@shared/chat'
 import { EDITOR_SETTINGS_KEY, defaultEditorSettings } from '@shared/editorSettings'
+import { FOCUS_SETTINGS_KEY, defaultFocusSettings } from '@shared/focus'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { WRITING_PRESETS_KEY, builtinParams, defaultWritingPresets } from '@shared/presets'
 import { settings } from '../db/schema'
@@ -15,10 +16,12 @@ import {
   getAiSettings,
   getConversations,
   getEditorSettings,
+  getFocusSettings,
   getWritingPresets,
   setAiSettings,
   setConversations,
   setEditorSettings,
+  setFocusSettings,
   setWritingPresets
 } from './settingsStore'
 
@@ -269,5 +272,38 @@ describe('getConversations / setConversations (F-5.4)', () => {
     expect(getConversations(db)).toEqual(defaultConversations())
     setRaw(JSON.stringify({ active: 'c1', items: [{ id: 'c1' }] }), CONVERSATIONS_KEY)
     expect(getConversations(db)).toEqual(defaultConversations())
+  })
+})
+
+describe('getFocusSettings / setFocusSettings (F-6.2)', () => {
+  it('answers no background for a new project, which seeds no row', () => {
+    open('novel')
+    expect(rows(FOCUS_SETTINGS_KEY)).toHaveLength(0)
+    expect(getFocusSettings(db)).toEqual(defaultFocusSettings())
+  })
+
+  it('round-trips a value and overwrites the single row', () => {
+    open('epic')
+    expect(setFocusSettings(db, { backgroundId: 'bg-1' })).toEqual({ backgroundId: 'bg-1' })
+    expect(getFocusSettings(db)).toEqual({ backgroundId: 'bg-1' })
+    setFocusSettings(db, { backgroundId: null })
+    expect(rows(FOCUS_SETTINGS_KEY)).toHaveLength(1)
+    expect(getFocusSettings(db)).toEqual({ backgroundId: null })
+  })
+
+  it('fills the background field into a row written without it', () => {
+    open('novel')
+    setRaw('{}', FOCUS_SETTINGS_KEY)
+    expect(getFocusSettings(db)).toEqual({ backgroundId: null })
+    expect(setFocusSettings(db, {})).toEqual({ backgroundId: null })
+  })
+
+  it('falls back when the stored value is not JSON or no longer fits the schema', () => {
+    open('novel')
+    setRaw('{not json', FOCUS_SETTINGS_KEY)
+    expect(getFocusSettings(db)).toEqual(defaultFocusSettings())
+    setRaw(JSON.stringify({ backgroundId: 7 }), FOCUS_SETTINGS_KEY)
+    expect(getFocusSettings(db)).toEqual(defaultFocusSettings())
+    expect(() => setFocusSettings(db, { backgroundId: 7 as unknown as string })).toThrow()
   })
 })

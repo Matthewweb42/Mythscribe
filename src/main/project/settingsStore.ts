@@ -12,6 +12,12 @@ import {
   defaultEditorSettings,
   type EditorSettingsInput
 } from '@shared/editorSettings'
+import {
+  FOCUS_SETTINGS_KEY,
+  FocusSettings,
+  defaultFocusSettings,
+  type FocusSettingsInput
+} from '@shared/focus'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
 import { settings } from '../db/schema'
@@ -134,6 +140,39 @@ export function setConversations(db: TreeDb, value: Conversations): Conversation
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: CONVERSATIONS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the project's focus-mode settings (F-6.2) from the `settings` row under
+ * `FOCUS_SETTINGS_KEY`. A missing row, unparsable JSON, or a value that no longer fits the
+ * schema all answer with `defaultFocusSettings()` (no background): nothing is seeded at
+ * creation, and a refused row only ever means a plain focus mode.
+ */
+export function getFocusSettings(db: TreeDb): FocusSettings {
+  const row = db.select().from(settings).where(eq(settings.key, FOCUS_SETTINGS_KEY)).get()
+  if (!row) return defaultFocusSettings()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultFocusSettings()
+  }
+  const parsed = FocusSettings.safeParse(json)
+  return parsed.success ? parsed.data : defaultFocusSettings()
+}
+
+/**
+ * Replaces the project's focus-mode settings (upsert on the settings key) and returns what was
+ * stored. Takes the pre-parse shape so later fields default for an older caller.
+ */
+export function setFocusSettings(db: TreeDb, value: FocusSettingsInput): FocusSettings {
+  const stored = FocusSettings.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: FOCUS_SETTINGS_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

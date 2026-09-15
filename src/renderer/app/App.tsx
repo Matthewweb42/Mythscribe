@@ -25,6 +25,8 @@ import { usePresetsStore } from '@renderer/features/ai/presetsStore'
 import { useProvenanceStore } from '@renderer/features/ai/provenanceStore'
 import { useVoiceStore } from '@renderer/features/ai/voiceStore'
 import { useEditorSettingsStore } from '@renderer/features/editor/settingsStore'
+import { FocusBackdrop } from '@renderer/features/focus/FocusBackdrop'
+import { useBackgroundStore, useCurrentBackground } from '@renderer/features/focus/backgroundStore'
 import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
 import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -81,7 +83,7 @@ export function App(): React.JSX.Element {
   // presets. F-14.1: and the voice exemplars (the toolbar button needs the count). F-14.6: the
   // provenance report is loaded by its section on demand and only cleared here. F-5.4: and the
   // assistant conversations. F-6.1: a project closed in focus mode leaves it, so the welcome
-  // screen is windowed.
+  // screen is windowed. F-6.2: and the focus-mode backgrounds.
   useEffect(() => {
     const tree = useTreeStore.getState()
     if (projectId === null) {
@@ -99,6 +101,7 @@ export function App(): React.JSX.Element {
       useAssistantStore.getState().clear()
       useTagStore.getState().clear()
       useDocumentTagStore.getState().clear()
+      useBackgroundStore.getState().clear()
       return
     }
     tree.load().catch((err: unknown) => toast.error(describeError(err)))
@@ -126,12 +129,19 @@ export function App(): React.JSX.Element {
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
+    useBackgroundStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
   }, [projectId])
 
   // F-6.1: focus mode hides the header with the rest of the chrome; the header's shortcut
   // listeners (Ctrl+, / Ctrl+K / Insert) go with it, `FocusShortcuts` stays so F11 and Escape
   // are always a way out.
   const focus = useFocusStore((s) => s.active) && current !== null
+  // F-6.2: the current background sits behind the editor in focus mode; `isolate` keeps the
+  // fixed layer under the main pane's content.
+  const background = useCurrentBackground()
 
   return (
     <div className="flex h-full flex-col">
@@ -161,10 +171,11 @@ export function App(): React.JSX.Element {
       <main
         className={
           current
-            ? 'flex min-h-0 flex-1 overflow-hidden'
+            ? 'isolate flex min-h-0 flex-1 overflow-hidden'
             : 'flex flex-1 items-center justify-center overflow-auto'
         }
       >
+        {focus && background ? <FocusBackdrop url={background.url} /> : null}
         {!ready ? null : current ? <ProjectScreen format={current.format} /> : <WelcomeScreen />}
       </main>
       <DialogHost />

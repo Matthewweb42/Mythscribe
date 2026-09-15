@@ -24,6 +24,7 @@ import {
   Conversations
 } from '../chat'
 import { EditorSettings } from '../editorSettings'
+import { Background, FocusSettings } from '../focus'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
 import { MatterTemplateId } from '../matterTemplates'
@@ -388,6 +389,23 @@ export const contract = {
   'presets:get': { input: z.undefined(), output: WritingPresets },
   /** Replaces the project's writing presets (F-5.2); a value outside the schema is refused with VALIDATION. */
   'presets:set': { input: WritingPresets, output: WritingPresets },
+  /** The project's focus-mode settings (F-6.2); a missing or unreadable row answers with the defaults (no background). */
+  'focusSettings:get': { input: z.undefined(), output: FocusSettings },
+  /** Replaces the project's focus-mode settings (F-6.2); a value outside the schema is refused with VALIDATION. */
+  'focusSettings:set': { input: FocusSettings, output: FocusSettings },
+  /** Every focus-mode background of the open project (F-6.2): the files in `assets/backgrounds/`, by name. */
+  'background:list': { input: z.undefined(), output: z.array(Background) },
+  /**
+   * Opens the OS file dialog (multi-select) and copies each chosen image into the project's
+   * `assets/backgrounds/` under a minted id (F-6.2). A file that is not an allowed image type
+   * or is over `BACKGROUND_MAX_BYTES` is skipped and named in `skipped`; null when cancelled.
+   */
+  'background:add': {
+    input: z.undefined(),
+    output: z.object({ added: z.array(Background), skipped: z.array(z.string()) }).nullable()
+  },
+  /** Deletes a background's file (F-6.2) and clears `backgroundId` when it was the current one; NOT_FOUND for an unknown id. */
+  'background:remove': { input: z.object({ id: z.string() }), output: z.null() },
   /** Every tag of the open project (F-4.1), ordered by name. */
   'tag:list': { input: z.undefined(), output: z.array(Tag) },
   /**

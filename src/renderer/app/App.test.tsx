@@ -24,6 +24,7 @@ import {
   resetEditorSettingsStore,
   useEditorSettingsStore
 } from '@renderer/features/editor/settingsStore'
+import { resetBackgroundStore } from '@renderer/features/focus/backgroundStore'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -70,6 +71,7 @@ beforeEach(() => {
   resetAssistantStore()
   resetTagStore()
   resetFocusStore()
+  resetBackgroundStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -78,6 +80,7 @@ beforeEach(() => {
 afterEach(() => {
   resetAiSettingsStore()
   resetAssistantStore()
+  resetBackgroundStore()
   vi.unstubAllGlobals()
 })
 
@@ -106,6 +109,8 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'layout:set') return input
     if (channel === 'window:setFullScreen') return input // the fake window does what it is asked
     if (channel === 'conversations:get') return { active: null, items: [] }
+    if (channel === 'focusSettings:get') return { backgroundId: null }
+    if (channel === 'background:list') return []
     return null
   })
   const on = <E extends EventName>(
@@ -802,6 +807,54 @@ describe('App', () => {
       // Escape while windowed asks nothing.
       await userEvent.keyboard('{Escape}')
       expect(fullScreenCalls(invoke)).toHaveLength(2)
+    })
+
+    it('shows the selected background behind the editor only in focus mode (F-6.2)', async () => {
+      const url = 'mythscribe-asset://backgrounds/b1.png'
+      install({
+        'project:current': info,
+        'tree:list': treeFixture,
+        'focusSettings:get': { backgroundId: 'b1' },
+        'background:list': [{ id: 'b1', name: 'b1.png', url }]
+      })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      const editor = await screen.findByRole('textbox', { name: 'Document' })
+      await waitFor(() => expect(editor).toHaveAttribute('contenteditable', 'true'))
+      expect(screen.queryByTestId('focus-backdrop')).not.toBeInTheDocument()
+      expect(editor.parentElement).not.toHaveClass('focus-surface')
+
+      editor.focus()
+      await userEvent.keyboard('{F11}')
+      await waitFor(() => expect(useFocusStore.getState().active).toBe(true))
+      const backdrop = await screen.findByTestId('focus-backdrop')
+      expect(backdrop).toHaveStyle({ backgroundImage: `url("${url}")` })
+      expect(screen.getByRole('main')).toHaveClass('isolate')
+      // The column gets its translucent panel over the image.
+      expect(screen.getByRole('textbox', { name: 'Document' }).parentElement).toHaveClass(
+        'focus-surface'
+      )
+
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape', keyCode: 27 })
+      await waitFor(() => expect(useFocusStore.getState().active).toBe(false))
+      expect(screen.queryByTestId('focus-backdrop')).not.toBeInTheDocument()
+    })
+
+    it('renders no backdrop in focus mode when no background is selected (F-6.2)', async () => {
+      install({ 'project:current': info, 'tree:list': treeFixture })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      const editor = await screen.findByRole('textbox', { name: 'Document' })
+      await waitFor(() => expect(editor).toHaveAttribute('contenteditable', 'true'))
+      editor.focus()
+      await userEvent.keyboard('{F11}')
+      await waitFor(() => expect(useFocusStore.getState().active).toBe(true))
+      expect(screen.queryByTestId('focus-backdrop')).not.toBeInTheDocument()
+      expect(screen.getByRole('textbox', { name: 'Document' }).parentElement).not.toHaveClass(
+        'focus-surface'
+      )
     })
 
     it('the toolbar button enters focus mode, and F11 toggles back out', async () => {
