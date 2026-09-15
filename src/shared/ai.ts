@@ -177,7 +177,8 @@ export const DEFAULT_INPUT_BUDGET = 8_000
 export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   ghostText: 60,
   tags: 200,
-  summary: 150,
+  // F-5.6: the ~100-token summary, up to four key points, and the characters present as one JSON object.
+  summary: 300,
   // F-5.4: ten paragraphs at ~120 tokens each in Agent mode; Plan answers share the cap.
   chat: 1_200,
   // F-14.10: a 4,000-character passage (~1,000 tokens) rewritten at up to 1.5× its length.

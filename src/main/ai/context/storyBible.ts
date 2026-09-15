@@ -8,6 +8,7 @@ import {
   type StoryBibleScene
 } from '@shared/storyBible'
 import type { NodeRow } from '../../db/schema'
+import { summariesFor } from '../../document/summaryStore'
 import { listDocumentTags } from '../../tag/documentTagStore'
 import { listTags } from '../../tag/tagStore'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
@@ -27,10 +28,11 @@ export interface StoryBibleInput {
  * manuscript root: its tags, its containing folders nearest first, its position among its
  * sibling documents, and the documents either side of it in reading order (the same
  * `manuscriptDocuments` order the voice profile and the scene brief's neighbours use, so the
- * last scene of one chapter precedes the first of the next) with their metadata. Front and end
- * matter get the bank alone. A few cheap queries, no cache: the rendered string goes into the
- * feature's context hash, so a changed bible never answers from a stale local cache entry.
- * F-9 entity sheets and F-5.6 summaries plug in here later.
+ * last scene of one chapter precedes the first of the next) with their metadata and their
+ * scene summaries (F-5.6, read in one query). Front and end matter get the bank alone. A few
+ * cheap queries, no cache: the rendered string goes into the feature's context hash, so a
+ * changed bible never answers from a stale local cache entry.
+ * F-9 entity sheets plug in here later.
  */
 export function buildStoryBible(db: TreeDb, input: StoryBibleInput): string | null {
   const bank = listTags(db).flatMap((tag) =>
@@ -74,14 +76,27 @@ function scenePart(
   }
   const previous = at > 0 ? documents[at - 1] : undefined
   const next = documents[at + 1]
+  // The two neighbours' summaries (F-5.6) in one query; a scene with none reads as null and
+  // its line is simply absent. A stale summary is still sent: it regenerates within seconds.
+  const summaries = summariesFor(
+    db,
+    [previous?.id, next?.id].filter((id): id is string => id !== undefined)
+  )
+  const summaryOf = (row: NodeRow): string | null => summaries.get(row.id)?.summary ?? null
   return {
     scene,
-    previous: previous ? neighbor(previous) : null,
-    next: next ? neighbor(next) : null
+    previous: previous ? neighbor(previous, summaryOf(previous)) : null,
+    next: next ? neighbor(next, summaryOf(next)) : null
   }
 }
 
-function neighbor(row: NodeRow): SceneNeighbor {
+function neighbor(row: NodeRow, summary: string | null): SceneNeighbor {
   const meta = parseStoredSceneMeta(row.sceneMeta)
-  return { title: row.title, location: meta.location, pov: meta.pov, timeline: meta.timeline }
+  return {
+    title: row.title,
+    location: meta.location,
+    pov: meta.pov,
+    timeline: meta.timeline,
+    summary
+  }
 }

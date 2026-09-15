@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { emptySceneMeta } from '@shared/sceneMeta'
 import { STORY_BIBLE_HEADING, STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
 import { setSceneMeta } from '../../document/sceneMetaStore'
+import { upsertSummary } from '../../document/summaryStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { addDocumentTag } from '../../tag/documentTagStore'
 import { createTag } from '../../tag/tagStore'
@@ -75,7 +76,12 @@ describe('buildStoryBible (F-14.9)', () => {
       hierarchyLevel: 'scene',
       title: 'Leaving'
     })
-    setSceneMeta(db, leaving.id, { ...emptySceneMeta(), location: 'Town', pov: 'Mara', timeline: 'Day 1' })
+    setSceneMeta(db, leaving.id, {
+      ...emptySceneMeta(),
+      location: 'Town',
+      pov: 'Mara',
+      timeline: 'Day 1'
+    })
     setSceneMeta(db, secondChapterScene, { ...emptySceneMeta(), timeline: 'Day 2' })
     const mara = createTag(db, { name: 'Mara', category: 'character', color: '#112233' })
     const ferry = createTag(db, { name: 'ferry landing', category: 'setting', color: '#112233' })
@@ -96,6 +102,38 @@ describe('buildStoryBible (F-14.9)', () => {
         'This scene: "Leaving", in "Chapter 1", in "Part 1", scene 2 of 2.\n' +
         'Previous scene: "The Ferry".\n' +
         'Next scene: "Night" (timeline Day 2).'
+    )
+  })
+
+  it("carries the neighbours' stored summaries (F-5.6), and only theirs", () => {
+    const stored = (nodeId: string, summary: string): void =>
+      upsertSummary(db, {
+        nodeId,
+        summary,
+        keyPoints: ['a key point'],
+        characters: ['Mara'],
+        contentHash: `hash-${nodeId}`,
+        promptVersion: 'summary.v1',
+        model: 'gpt-fast',
+        truncated: false,
+        createdAt: '2026-09-15T00:00:00.000Z'
+      })
+    stored(scene, 'Mara reached the ferry landing and waited.')
+    stored(secondChapterScene, 'Tomas walked north before dawn.')
+
+    // From the second scene: the first is its previous, and its own summary never goes out.
+    expect(buildStoryBible(db, { nodeId: secondChapterScene, ...budget })).toBe(
+      `${STORY_BIBLE_HEADING}\n` +
+        'This scene: "Scene 1", in "Chapter 2", in "Part 1", scene 1 of 1.\n' +
+        'Previous scene: "Scene 1".\n' +
+        'Next scene: "Scene 1".\n' +
+        'Previous scene summary: Mara reached the ferry landing and waited.'
+    )
+    expect(buildStoryBible(db, { nodeId: scene, ...budget })).toBe(
+      `${STORY_BIBLE_HEADING}\n` +
+        'This scene: "Scene 1", in "Chapter 1", in "Part 1", scene 1 of 1.\n' +
+        'Next scene: "Scene 1".\n' +
+        'Next scene summary: Tomas walked north before dawn.'
     )
   })
 

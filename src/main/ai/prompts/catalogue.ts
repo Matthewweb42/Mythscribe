@@ -22,6 +22,7 @@ import { REWRITE_PROMPT_VERSION } from './rewrite.v1'
 import { REWRITE_PROMPT_V2_VERSION } from './rewrite.v2'
 import { REWRITE_REGEN_PROMPT_VERSION } from './rewriteRegen.v1'
 import { REWRITE_REGEN_PROMPT_V2_VERSION } from './rewriteRegen.v2'
+import { SUMMARY_PROMPT_VERSION } from './summary.v1'
 import { TAGS_PROMPT_VERSION } from './tags.v1'
 import { TAGS_REGEN_PROMPT_VERSION } from './tagsRegen.v1'
 
@@ -62,7 +63,8 @@ export const PROMPT_VERSIONS = [
   CRITIQUE_REGEN_PROMPT_V2_VERSION,
   CRITIQUE_PROMPT_V3_VERSION,
   CRITIQUE_REGEN_PROMPT_V3_VERSION,
-  BRIEF_PROMPT_VERSION
+  BRIEF_PROMPT_VERSION,
+  SUMMARY_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -182,7 +184,8 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     output: 'json',
     since: 'F-14.9'
   },
-  [BRIEF_PROMPT_VERSION]: { feature: 'brief', tier: 'fast', output: 'json', since: 'F-14.3' }
+  [BRIEF_PROMPT_VERSION]: { feature: 'brief', tier: 'fast', output: 'json', since: 'F-14.3' },
+  [SUMMARY_PROMPT_VERSION]: { feature: 'summary', tier: 'fast', output: 'json', since: 'F-5.6' }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

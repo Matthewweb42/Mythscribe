@@ -11,7 +11,8 @@ import {
   AI_FEATURES_BY_LEVEL,
   AiSettings,
   defaultAiSettings,
-  isFeatureAllowed
+  isFeatureAllowed,
+  STORY_BIBLE_SENDS
 } from './aiSettings'
 import { DEFAULT_HONESTY } from './critique'
 
@@ -111,9 +112,10 @@ describe('AI_DATA_SHARING', () => {
         "its metadata (location, POV, timeline), its brief plus the previous scene's " +
         "reader-knows-after line and the next scene's goal, the voice profile (stylometric rules " +
         'and up to 3 exemplar passages), your author rules and banned phrases, and the story ' +
-        "bible (your tag names by category, the scene's tags, and the titles and metadata of the " +
-        'scenes either side of it). An answer that breaks the voice profile or uses a banned ' +
-        'phrase is sent back once, with the same context plus the rule it broke, for a second try.'
+        "bible (your tag names by category, the scene's tags, and the titles, metadata, and " +
+        'summaries of the scenes either side of it). An answer that breaks the voice profile or ' +
+        'uses a banned phrase is sent back once, with the same context plus the rule it broke, ' +
+        'for a second try.'
     )
   })
 
@@ -121,6 +123,18 @@ describe('AI_DATA_SHARING', () => {
     for (const id of ['ghostText', 'chat', 'critique', 'rewrite'] as const) {
       expect(AI_DATA_SHARING[id].sends).toContain('the story bible')
     }
+  })
+
+  it('names what a scene summary sends (F-5.6): the scene, its metadata, and the character names', () => {
+    expect(AI_DATA_SHARING.summary.sends).toBe(
+      "A scene's text (the first 20,000 characters), its metadata, and the names of your " +
+        'character tags, to keep its summary, key points, and characters present up to date ' +
+        'after you pause typing.'
+    )
+  })
+
+  it('names the neighbours’ summaries in the story bible line (F-5.6)', () => {
+    expect(STORY_BIBLE_SENDS).toContain('summaries of the scenes either side of it')
   })
 
   it('names what a brief draft sends (F-14.3) and gates it at Ask', () => {

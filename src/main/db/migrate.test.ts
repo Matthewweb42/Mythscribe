@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(6)
+    expect(result.version).toBe(7)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -118,6 +118,7 @@ describe('migrate', () => {
     expect(tables()).toContain('ai_cache')
     expect(tables()).toContain('voice_exemplar')
     expect(tables()).toContain('ai_proposal')
+    expect(tables()).toContain('scene_summary')
   })
 })
 
@@ -169,5 +170,42 @@ describe('node table (0001_nodes)', () => {
       (r) => r.id
     )
     expect(ids).toEqual(['ms'])
+  })
+})
+
+describe('scene_summary table (0006_scene_summaries)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '2026-01-01', '2026-01-01')`
+    ).run()
+  })
+  afterEach(() => db.close())
+
+  const insertSummary = (nodeId: string): void => {
+    db.prepare(
+      `INSERT INTO scene_summary
+         (node_id, content_hash, summary, key_points, characters, prompt_version, model,
+          truncated, created_at)
+       VALUES (?, 'hash', 'Mara waits at the landing.', '[]', '["Mara"]', 'summary.v1',
+               'gpt-fast', 0, '2026-01-01')`
+    ).run(nodeId)
+  }
+
+  it('holds one row per node and refuses a summary for a node that is not there', () => {
+    insertSummary('scene')
+    expect(() => insertSummary('scene')).toThrow(/UNIQUE|PRIMARY/)
+    expect(() => insertSummary('ghost')).toThrow(/FOREIGN KEY/)
+  })
+
+  it('drops the summary with the scene: a deleted node keeps no index data', () => {
+    insertSummary('scene')
+    db.prepare('DELETE FROM node WHERE id = ?').run('scene')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM scene_summary').get()).toEqual({ n: 0 })
   })
 })

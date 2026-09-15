@@ -109,8 +109,8 @@ export interface AiDataSharing {
  * feature whose prompt includes it, so the panel and the block can never drift apart.
  */
 export const STORY_BIBLE_SENDS =
-  "the story bible (your tag names by category, the scene's tags, and the titles and " +
-  'metadata of the scenes either side of it)'
+  "the story bible (your tag names by category, the scene's tags, and the titles, " +
+  'metadata, and summaries of the scenes either side of it)'
 
 export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   tags: {
@@ -120,7 +120,10 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   },
   summary: {
     label: 'Scene summaries',
-    sends: "A scene's text, to generate its summary.",
+    sends:
+      "A scene's text (the first 20,000 characters), its metadata, and the names of your " +
+      'character tags, to keep its summary, key points, and characters present up to date ' +
+      'after you pause typing.',
     minDial: 1
   },
   query: {

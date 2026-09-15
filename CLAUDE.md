@@ -27,7 +27,7 @@ The original prototype was deleted on purpose (git tag `v0-legacy`). Do not resu
 ## Next up (keep this current; it is the handoff between sessions)
 
 1. Done: M0, M1, and all of M2 except F-7.4 (the spec marks it replaced by F-9 entities; decide with the user whether to build the throwaway or move it past the line). Also done from M2.5: F-14.1, F-14.2, F-14.4, F-14.5, F-14.6, F-14.7, F-14.8 (editor mode; the beta reader is F-14.11 in M3), F-14.3, F-14.9 (merged 2026-09-15 after F-14.3: the prose prompts are at `ghostText.v3`, `chat.v3`, `critique.v3`, `rewrite.v2`), F-14.10, F-5.4, F-5.10, F-5.12; F-5.5 and F-15.1 are reconciled as satisfied by F-14.4/F-5.3/F-5.2 and F-5.1/F-5.11. Per-feature status is in `FEATURES.md`; per-area notes are in `docs/ARCHITECTURE.md`.
-2. Next: M3 Story Intelligence (F-5.6 summaries first; F-14.11 beta reader rides on them; both extend `StoryBibleFacts` in `src/shared/storyBible.ts` rather than the prompts). F-5.13 (job queue) stays queued. Read `PLAN.md` §2 and §3 before anything under §2.14. The `worktree-f-14-9` branch and its worktree under `.claude/worktrees/f-14-9` are merged and can be removed.
+2. F-5.6 scene summaries done 2026-09-15 on branch `feature/f-5.6` (built in the `.claude/worktrees/f-14-9` worktree; merge it into main, then the worktree and the old `worktree-f-14-9` branch can go). Main runs a per-node debounced scheduler that F-5.13 grows into the real queue; the story bible carries the neighbours' summaries. Next in M3: F-14.11 beta reader (reads the summaries in order) or F-5.7 query mode; F-5.8 embeddings and F-5.13 after. Read `PLAN.md` §2 and §3 before anything under §2.14.
 3. Before launch: confirm `MODEL_PRICING` in `src/shared/ai.ts` against OpenAI's pricing page (written from memory on 2026-09-12). Post-launch splits: F-1.6 v0 import, F-4.11 custom tag templates.
 4. Gotchas (the e2e keyboard-focus "flake" on WSLg, debounced-store test hygiene, pre-F-1.3 throwaway projects) are under Known gotchas in `docs/ARCHITECTURE.md`. Read them before touching the e2e or a store test.
 
@@ -57,7 +57,7 @@ Every AI feature is a cost line on the Cloud plan and a trust line with the auth
 apply to all of `FEATURES.md` §2.5, §2.14, §2.15 and are checked in review.
 
 **Author control**
-1. AI output is always a `Proposal`; nothing enters the manuscript without an explicit accept (F-14.5). Accepted text carries provenance (F-14.6).
+1. AI output is always a `Proposal`; nothing enters the manuscript without an explicit accept (F-14.5). Accepted text carries provenance (F-14.6). The one exception is derived index data the author never accepts (scene summaries, F-5.6): stored in its own table, costed in the ledger, never in the manuscript.
 2. Every prompt that generates prose includes the voice profile, the scene brief, and retrieved exemplars (F-14.1–14.3); every generated proposal passes the fidelity check (F-14.7) before display.
 3. Respect the AI dial and per-feature toggles (F-14.4). Installs at Off. A feature must not send text the data-sharing panel does not list.
 4. Grounded answers only: Story Intelligence answers cite manuscript passages or say "not found" (F-5.7). Critique cites a passage for every claim; no uncited praise (F-14.8).
@@ -68,7 +68,7 @@ apply to all of `FEATURES.md` §2.5, §2.14, §2.15 and are checked in review.
 3. **Stable prefix first.** Order prompts as: system rules → voice profile → story bible → task-specific context → user turn, so provider prompt caching applies to the stable part. Do not interleave dynamic text into the prefix.
 4. **Cache locally.** Identical (feature, prompt version, context hash) requests return the cached proposal. Summaries and embeddings are invalidated by content hash, not by time.
 5. **Trigger discipline for ghost text.** Minimum idle interval, minimum new characters typed since the last request, no request while a proposal is pending or visible, per-day cap. Off at dial ≤ 1.
-6. **Short outputs, structured where possible.** Set `max_tokens` per feature (ghost text ≤ 60; tags ≤ 200; summaries ≤ 150). Use JSON/structured output for tags, summaries, and critique so parsing is exact and retries are rare.
+6. **Short outputs, structured where possible.** Set `max_tokens` per feature (ghost text ≤ 60; tags ≤ 200; summaries ≤ 300 for the summary, key points, and characters as one JSON object). Use JSON/structured output for tags, summaries, and critique so parsing is exact and retries are rare.
 7. **Batch the background.** Indexing (summaries, embeddings) goes through the job queue (F-5.13) and uses the provider batch API when available; never block typing; coalesce edits so a scene is summarized once per burst.
 8. **Count before you send.** Estimate tokens locally; if a request would exceed its budget, trim context by priority (drop far summaries, then exemplars, then recent text) rather than failing or overspending.
 9. **Prompts are compact and versioned** (F-5.12): no restated instructions, no examples the retrieval already supplies, no reasoning dumps. Every prompt change runs the eval harness and reports token delta and fidelity delta in the PR.

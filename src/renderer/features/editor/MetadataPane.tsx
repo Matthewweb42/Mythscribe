@@ -18,6 +18,7 @@ import { useBriefDraft } from './briefDraft'
 import { BriefDraftPanel } from './BriefDraftPanel'
 import { useSceneMetaStore } from './sceneMetaStore'
 import { SuggestInput } from './SuggestInput'
+import { SummaryBlock } from './SummaryBlock'
 
 const BUTTON =
   'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-expanded:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
@@ -47,7 +48,8 @@ function useTagNames(category: TagCategory): string[] {
  * clips them), and opening the brief grows the tag bar to `TAG_BAR_BRIEF_HEIGHT` when it is
  * shorter, never shrinking a taller one. For a document, "Draft with AI" asks main for a brief
  * drafted from the scene (`useBriefDraft`); the author reviews the five lines and fills the
- * fields with one click.
+ * fields with one click. Under the brief, `SummaryBlock` shows the scene summary main keeps up
+ * to date in the background (F-5.6) for a manuscript document.
  */
 export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   const meta = useSceneMetaStore((s) => s.docs[id]?.content ?? null)
@@ -61,9 +63,13 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   const [briefOpen, setBriefOpen] = useState(false)
   const tagBarHeight = useLayoutStore((s) => s.layout.tagBar.height)
   const setTagBarHeight = useLayoutStore((s) => s.setTagBarHeight)
+  /** Opening a disclosure grows a short bar to fit it, and never shrinks a taller one. */
+  const growBar = (): void => {
+    if (tagBarHeight < TAG_BAR_BRIEF_HEIGHT) setTagBarHeight(TAG_BAR_BRIEF_HEIGHT)
+  }
   const openBrief = (): void => {
     setBriefOpen(true)
-    if (tagBarHeight < TAG_BAR_BRIEF_HEIGHT) setTagBarHeight(TAG_BAR_BRIEF_HEIGHT)
+    growBar()
   }
   const draft = useBriefDraft(id, openBrief)
 
@@ -164,6 +170,7 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
           ))}
         </div>
       ) : null}
+      <SummaryBlock id={id} onOpen={growBar} />
     </div>
   )
 }

@@ -56,7 +56,7 @@ describe('budgets', () => {
     expect(FEATURE_BUDGETS).toEqual({
       ghostText: 60,
       tags: 200,
-      summary: 150,
+      summary: 300,
       chat: 1_200,
       rewrite: 1_500,
       critique: 1_500,

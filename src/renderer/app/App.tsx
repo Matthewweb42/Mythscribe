@@ -26,6 +26,7 @@ import { StackedEditor } from '@renderer/features/editor/StackedEditor'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
+import { useSummaryStore } from '@renderer/features/editor/summaryStore'
 import { AiActivityIndicator } from '@renderer/features/ai/AiActivityIndicator'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { useAuthorRulesStore } from '@renderer/features/ai/authorRulesStore'
@@ -112,6 +113,7 @@ export function App(): React.JSX.Element {
       useDocumentStore.getState().clear()
       useNotesStore.getState().clear()
       useSceneMetaStore.getState().clear()
+      useSummaryStore.getState().clear()
       useEditorSettingsStore.getState().clear()
       useAiSettingsStore.getState().clear()
       useAuthorRulesStore.getState().clear()

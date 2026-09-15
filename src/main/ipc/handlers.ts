@@ -8,6 +8,7 @@ import {
   type AiTestConnectionResult,
   type AiUsageSummary
 } from '@shared/ai'
+import { isFeatureAllowed } from '@shared/aiSettings'
 import type { Background } from '@shared/focus'
 import type {
   AiChatResult,
@@ -15,8 +16,15 @@ import type {
   AiDraftBriefResult,
   AiGhostTextResult,
   AiRecommendTagsResult,
-  AiRewriteResult
+  AiRewriteResult,
+  AiSummarizeResult
 } from '@shared/ipc/contract'
+import {
+  SUMMARY_DEBOUNCE_MS,
+  SUMMARY_TEXT_MIN,
+  UNAVAILABLE_SUMMARY,
+  type SceneSummaryState
+} from '@shared/summary'
 import { runChat } from '../ai/chat'
 import { runCritique } from '../ai/critique'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
@@ -30,6 +38,8 @@ import { recommendTags } from '../ai/recommendTags'
 import { runRewrite } from '../ai/rewrite'
 import type { AiProviderRegistry } from '../ai/registry'
 import { buildAiRequestDeps } from '../ai/request'
+import { summarizeScene, summarySource } from '../ai/summarize'
+import { createSummaryScheduler } from '../ai/summaryScheduler'
 import { ledgerSummary } from '../ai/usageStore'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
@@ -37,6 +47,7 @@ import type { ProjectDialogs } from '../dialogs'
 import { getDocumentContent, saveDocument } from '../document/documentStore'
 import { getNotes, saveNotes } from '../document/notesStore'
 import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
+import { getSummary } from '../document/summaryStore'
 import { addBackground, listBackgrounds, removeBackground } from '../project/backgroundStore'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor, sanitizeName } from '../project/projectStore'
@@ -112,6 +123,47 @@ export function registerHandlers({
   openExternal,
   onCloseCancelled
 }: HandlerDeps): void {
+  /**
+   * F-5.6: the background scene summaries. One scheduler for the session; it reads the open
+   * project through `manager.require()` at run time, never a captured handle, and
+   * `manager.onChange` clears it, so a run queued for one project never writes into another.
+   * Its timers are unref'd: a pending summary never holds the app (or a test) open.
+   */
+  const summaries = createSummaryScheduler({
+    delayMs: SUMMARY_DEBOUNCE_MS,
+    run: (nodeId, requestId) => {
+      const db = manager.require().connection.orm
+      return summarizeScene(db, buildAiRequestDeps({ db, providers: ai, appState }), {
+        nodeId,
+        ...(requestId === undefined ? {} : { requestId })
+      })
+    },
+    onStatus: (nodeId, status) => emit(windows(), 'ai:summaryChanged', { nodeId, status })
+  })
+
+  /**
+   * A node's summary state: `available` only for a manuscript document, `stale` by content
+   * hash (never by time), and the scheduler's status and last error for the node. The hash is
+   * computed by `summarySource`, the same function the run hashes with, so "out of date" here
+   * and "nothing to do" there can never disagree.
+   */
+  const summaryStateOf = (nodeId: string): SceneSummaryState => {
+    const db = manager.require().connection.orm
+    const source = summarySource(db, nodeId)
+    if (source === null) return UNAVAILABLE_SUMMARY
+    const summary = getSummary(db, nodeId)
+    return {
+      available: true,
+      summary,
+      stale:
+        summary === null
+          ? source.length >= SUMMARY_TEXT_MIN
+          : summary.contentHash !== source.contentHash,
+      status: summaries.statusOf(nodeId),
+      error: summaries.errorOf(nodeId)
+    }
+  }
+
   register('app:info', () => ({ version: app.getVersion(), platform: process.platform }))
 
   register('project:create', async ({ name, format, directory }) => {
@@ -171,8 +223,14 @@ export function registerHandlers({
   // F-14.1: every save moves the voice profile's version (a cheap integer; checking whether the
   // document is under the manuscript would cost a lookup on the hot path for nothing).
   register('document:save', ({ id, content }) => {
-    const saved = saveDocument(manager.require().connection.orm, id, content)
+    const db = manager.require().connection.orm
+    const saved = saveDocument(db, id, content)
     bumpVoiceVersion()
+    // F-5.6: the summary is rewritten once the author pauses, never on the save itself. The
+    // gate is read here, not at run time: a save with summaries off must not show the pane
+    // "Updating…" for a run that will never happen, nor leave a run queued for the moment the
+    // toggle comes on (one settings row per save; the run gates again anyway).
+    if (isFeatureAllowed(getAiSettings(db), 'summary')) summaries.touch(id)
     return saved
   })
 
@@ -637,6 +695,33 @@ export function registerHandlers({
     }
   })
 
+  // F-5.6: the pane reads the node's summary, whether it is out of date, and what the last
+  // background run did. Cheap: two small queries and the scheduler's own maps.
+  register('summary:get', ({ id }) => summaryStateOf(id))
+
+  // F-5.6: Summarize now. The node's debounce is cancelled and its run awaited (a run already
+  // in flight is joined, not doubled); a content-hash match answers from the stored row
+  // without a request. The scheduler records the status either way, so the pane's event and
+  // this reply agree. VALIDATION (not a manuscript document, too little text) comes back
+  // through the error envelope; the expected AI failures come back as data, like the rest.
+  register('ai:summarize', async ({ nodeId, requestId }): Promise<AiSummarizeResult> => {
+    try {
+      const result = await summaries.runNow(nodeId, requestId)
+      return {
+        ok: true,
+        state: summaryStateOf(nodeId),
+        usage: result.usage,
+        costUsd: result.costUsd,
+        cached: result.cached,
+        model: result.model,
+        requestId
+      }
+    } catch (err) {
+      if (err instanceof AiProviderError) return { ...aiFailure(err.code, err.message), requestId }
+      throw err
+    }
+  })
+
   // F-5.10: aborts the request registered under the id, or its fidelity regenerate (F-14.7)
   // when the second call is the one in flight. Needs no project: the registry is process-wide.
   // The request's own reply comes back as the CANCELLED failure; `cancelled` is false when
@@ -730,6 +815,8 @@ export function registerHandlers({
   manager.onChange((info) => {
     // Open, create, and close all land here: a profile built for one project never answers for another.
     resetVoiceProfileCache()
+    // F-5.6: drop every pending summary timer and status with the project that queued them.
+    summaries.clear()
     if (info) {
       try {
         appState.update((s) => ({ ...s, recents: touchRecent(s.recents, toRecentEntry(info)) }))

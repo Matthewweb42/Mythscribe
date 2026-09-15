@@ -106,6 +106,22 @@ const CRITIQUE_ANSWER = JSON.stringify({
  * `src/main/ai/prompts/brief.v1.ts`; main is outside the e2e tsconfig, so it is repeated here).
  * A JSON request carrying it gets the canned brief below.
  */
+/**
+ * F-5.6: the opening of the summary prompt's system turn (`SUMMARY_RULES` in
+ * `src/main/ai/prompts/summary.v1.ts`, repeated here for the same reason). A JSON request
+ * carrying it gets the canned summary below. The Scene summaries toggle is off from the moment
+ * the dial leaves Off until the summary step, so the background run after each save never
+ * disturbs the exact request counts the steps between assert.
+ */
+const SUMMARY_SENTINEL = 'You are the scene-summary feature inside a novel-writing app.'
+const SUMMARY_TEXT = 'Mara tries to cross the rising river at night and gives up until dawn.'
+const SUMMARY_KEY_POINTS = ['The river is too high to cross.', 'Tomas refuses to row.']
+const SUMMARY_CHARACTERS = ['Mara', 'Tomas']
+const SUMMARY_ANSWER = JSON.stringify({
+  summary: SUMMARY_TEXT,
+  keyPoints: SUMMARY_KEY_POINTS,
+  characters: SUMMARY_CHARACTERS
+})
 const BRIEF_SENTINEL = 'You are the scene-brief feature inside a novel-writing app.'
 const BRIEF_GOAL = 'Mara wants to cross the river tonight.'
 const BRIEF_ANSWER = JSON.stringify({
@@ -204,6 +220,10 @@ function startFakeOpenAi(): Promise<string> {
           const brief = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(BRIEF_SENTINEL)
           )
+          // F-5.6: a scene summary comes back as the summary, key points, and characters.
+          const summary = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(SUMMARY_SENTINEL)
+          )
           // F-5.4: a Plan turn streams (server-sent events in the shape the SDK parses: content
           // deltas, one usage-only chunk, then [DONE]); an Agent turn is a plain completion.
           if (request.stream) {
@@ -261,9 +281,11 @@ function startFakeOpenAi(): Promise<string> {
                         ? CRITIQUE_ANSWER
                         : brief
                           ? BRIEF_ANSWER
-                          : regen
-                            ? '{"tags":["antagonist","protagonist"]}'
-                            : '{"tags":["dark-forest","protagonist"]}'
+                          : summary
+                            ? SUMMARY_ANSWER
+                            : regen
+                              ? '{"tags":["antagonist","protagonist"]}'
+                              : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -1176,6 +1198,12 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   await dial.getByRole('radio', { name: 'Ask' }).click()
   await expect.poll(async () => (await aiSettings()).dial).toBe(1)
+  // F-5.6: summaries would otherwise run in the background after every save from here on
+  // and disturb the exact request counts below; the summary step turns them back on.
+  const summaryToggle = settingsDialog.getByRole('checkbox', { name: /^Scene summaries/ })
+  await expect(summaryToggle).toBeEnabled()
+  await summaryToggle.uncheck()
+  await expect.poll(async () => (await aiSettings()).features.summary).toBe(false)
   await keyField.fill(ACCEPTED_KEY)
   await settingsDialog.getByRole('button', { name: 'Save' }).click()
   await expect(keyHint).toHaveText('Key saved: sk-…wxyz')
@@ -2025,6 +2053,48 @@ test('create, close, reopen a project on disk', async () => {
   })
   await critiquePanel.getByTestId('critique-close').click()
   await expect(critiquePanel).toHaveCount(0)
+
+  // F-5.6: scene summaries. With the toggle back on, the metadata pane's Summary disclosure
+  // shows Scene 1 has none yet (out of date: the text is long past the floor). Summarize now
+  // asks the fast tier once and shows the summary, key points, and characters; a sentence
+  // typed afterwards is saved, and main's debounce summarises again in the background without
+  // a click, clearing the out-of-date hint. Both runs land in the ledger under `summary`.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await summaryToggle.check()
+  await expect.poll(async () => (await aiSettings()).features.summary).toBe(true)
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  const summaryRequestsBefore = openAiRequests.length
+  await metadata.getByRole('button', { name: 'Summary' }).click()
+  await expect(metadata.getByTestId('summary-empty')).toBeVisible()
+  await expect(metadata.getByTestId('summary-status')).toHaveText('Out of date')
+  await metadata.getByTestId('summary-refresh').click()
+  await expect(metadata.getByTestId('summary-text')).toHaveText(SUMMARY_TEXT)
+  await expect(metadata.getByTestId('summary-key-points').getByRole('listitem')).toHaveText(
+    SUMMARY_KEY_POINTS
+  )
+  await expect(metadata.getByTestId('summary-characters').getByRole('listitem')).toHaveText(
+    SUMMARY_CHARACTERS
+  )
+  await expect(metadata.getByTestId('summary-status')).toHaveText('')
+  expect(openAiRequests).toHaveLength(summaryRequestsBefore + 1)
+  const summarySystem = openAiChatBodies.at(-1)?.messages[0]
+  expect(summarySystem?.role).toBe('system')
+  expect(summarySystem?.content.startsWith(SUMMARY_SENTINEL)).toBe(true)
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(' She counted the boats twice.')
+  await expect(metadata.getByTestId('summary-status')).toHaveText('Updating…')
+  await expect
+    .poll(() => openAiRequests.length, { timeout: 15_000 })
+    .toBe(summaryRequestsBefore + 2)
+  await expect(metadata.getByTestId('summary-status')).toHaveText('')
+  await expect(metadata.getByTestId('summary-text')).toHaveText(SUMMARY_TEXT)
+  const afterSummary = await usageSummary()
+  expect(afterSummary.byFeature.find((f) => f.feature === 'summary')).toMatchObject({
+    requests: 2
+  })
 
   // Back to Off and no key, as the steps above left them.
   await page.getByRole('button', { name: 'Settings' }).click()

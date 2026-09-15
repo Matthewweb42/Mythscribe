@@ -1481,6 +1481,198 @@ describe('ai:draftBrief (F-14.3)', () => {
   })
 })
 
+describe('scene summaries (F-5.6)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const SCENE =
+    'The ferry landing was empty when Mara reached it. The rope hung slack in the water and ' +
+    'the bell had lost its clapper years ago. She set the lantern down on the post and waited. ' +
+    '"You came alone," a voice said behind her.'
+  const ANSWER = {
+    summary: 'Mara waited alone at the ferry landing until a voice spoke behind her.',
+    keyPoints: ['The bell has no clapper', 'Someone follows her'],
+    characters: ['Mara']
+  }
+
+  /** A project with the dial at Ask, a key, and a scene long enough to summarise. */
+  async function ready(dial: AiDial = 1): Promise<{ scene: string; folder: string }> {
+    await invoke('project:create', { name: 'Summary', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    const folder = rows.find((r) => r.kind === 'folder' && r.hierarchyLevel === 'chapter')
+    if (!scene || !folder) throw new Error('skeleton not seeded')
+    await write(scene.id, SCENE)
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+    await invoke('ai:setKey', { key: KEY })
+    complete.mockResolvedValue({
+      text: JSON.stringify(ANSWER),
+      model: 'gpt-fake',
+      usage: { inputTokens: 400, outputTokens: 60 }
+    })
+    return { scene: scene.id, folder: folder.id }
+  }
+
+  const write = (id: string, text: string): Promise<unknown> =>
+    invoke('document:save', {
+      id,
+      content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }
+    })
+
+  /** The `ai:summaryChanged` payloads sent to the window. */
+  const statusesSent = (): unknown[] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([channel]) => channel === 'ai:summaryChanged')
+      .map(([, payload]) => payload)
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('summary:get', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('ai:summarize', { nodeId: 'x', requestId: 's-0' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('says a long scene has no summary yet and is out of date, and that a folder has none at all', async () => {
+    const { scene, folder } = await ready()
+    // The save in `ready` landed while the dial was still Off, so nothing was queued and the
+    // pane never said "Updating…" for a run that would not happen; the scene is simply out of
+    // date. A save once the feature is allowed queues the node and reads as pending from the
+    // save, not from the moment the request leaves.
+    expect(await invoke('summary:get', { id: scene })).toEqual({
+      available: true,
+      summary: null,
+      stale: true,
+      status: 'idle',
+      error: null
+    })
+    expect(statusesSent()).toEqual([])
+    await write(scene, `${SCENE} She waited.`)
+    expect(await invoke('summary:get', { id: scene })).toMatchObject({ status: 'pending' })
+    expect(statusesSent()).toEqual([{ nodeId: scene, status: 'pending' }])
+    for (const id of [folder, 'nope']) {
+      expect(await invoke('summary:get', { id })).toEqual({
+        available: false,
+        summary: null,
+        stale: false,
+        status: 'idle',
+        error: null
+      })
+    }
+  })
+
+  it('summarises now, stores the row, and answers the state with what the run cost', async () => {
+    const { scene } = await ready()
+    const result = await invoke('ai:summarize', { nodeId: scene, requestId: 's-1' })
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toMatchObject({
+      ok: true,
+      usage: { inputTokens: 400, outputTokens: 60 },
+      cached: false,
+      model: 'gpt-fake',
+      requestId: 's-1'
+    })
+    expect(result.state).toMatchObject({ available: true, stale: false, status: 'idle' })
+    expect(result.state.summary).toMatchObject({
+      ...ANSWER,
+      nodeId: scene,
+      promptVersion: 'summary.v1',
+      model: 'gpt-fake',
+      truncated: false
+    })
+    expect(await invoke('summary:get', { id: scene })).toEqual(result.state)
+    const usage = await invoke('ai:usageSummary', undefined)
+    expect(usage.byFeature.map((f) => f.feature)).toEqual(['summary'])
+    // The pane hears about the run without polling.
+    expect(statusesSent()).toContainEqual({ nodeId: scene, status: 'idle' })
+  })
+
+  it('answers an unchanged scene from the stored row, and calls it out of date once it is edited', async () => {
+    const { scene } = await ready()
+    await invoke('ai:summarize', { nodeId: scene, requestId: 's-1' })
+    const again = await invoke('ai:summarize', { nodeId: scene, requestId: 's-2' })
+    if (!again.ok) throw new Error(again.message)
+    expect(again.cached).toBe(true)
+    expect(again.usage).toEqual({ inputTokens: 0, outputTokens: 0 })
+    expect(complete).toHaveBeenCalledTimes(1)
+
+    await write(scene, `${SCENE} She did not turn.`)
+    const state = await invoke('summary:get', { id: scene })
+    expect(state.stale).toBe(true)
+    expect(state.summary?.summary).toBe(ANSWER.summary)
+  })
+
+  it('answers an expected AI failure as data, and a folder through the error envelope', async () => {
+    const { scene, folder } = await ready(0)
+    expect(await invoke('ai:summarize', { nodeId: scene, requestId: 's-3' })).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Scene summaries needs the AI dial at Ask or higher (it is at Off).',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      requestId: 's-3'
+    })
+    expect(complete).not.toHaveBeenCalled()
+    // A refused run is not a failure the author must act on: the node goes quiet again.
+    expect((await invoke('summary:get', { id: scene })).status).toBe('idle')
+
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    const onFolder = await handlerFor('ai:summarize')(undefined, {
+      nodeId: folder,
+      requestId: 's-4'
+    })
+    expect(onFolder.ok).toBe(false)
+    if (!onFolder.ok) expect(onFolder.error.code).toBe('VALIDATION')
+  })
+
+  it('marks a saved scene pending at once and summarises it after the debounce, in the background', async () => {
+    // Fake timers before the project, so every debounce this test starts is a fake one.
+    vi.useFakeTimers()
+    try {
+      const { scene } = await ready()
+      await write(scene, `${SCENE} The wind pushed the flame flat.`)
+      expect((await invoke('summary:get', { id: scene })).status).toBe('pending')
+      expect(statusesSent()).toContainEqual({ nodeId: scene, status: 'pending' })
+      expect(complete).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(complete).toHaveBeenCalledTimes(1)
+      const state = await invoke('summary:get', { id: scene })
+      expect(state).toMatchObject({ status: 'idle', stale: false })
+      expect(state.summary?.summary).toBe(ANSWER.summary)
+      expect(statusesSent()).toContainEqual({ nodeId: scene, status: 'idle' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('records a provider failure on the node, where the author can act on it', async () => {
+    const { scene } = await ready()
+    complete.mockRejectedValueOnce(new InvalidKeyError('The API key was rejected.'))
+    const failed = await invoke('ai:summarize', { nodeId: scene, requestId: 's-5' })
+    expect(failed).toMatchObject({ ok: false, code: 'INVALID_KEY', requestId: 's-5' })
+    expect(await invoke('summary:get', { id: scene })).toMatchObject({
+      status: 'failed',
+      error: {
+        message: 'The API key was rejected.',
+        nextStep: 'Check the key and try again.'
+      }
+    })
+    expect(statusesSent()).toContainEqual({ nodeId: scene, status: 'failed' })
+  })
+
+  it('forgets a pending summary when the project closes, so nothing runs against the next one', async () => {
+    vi.useFakeTimers()
+    try {
+      const { scene } = await ready()
+      await write(scene, `${SCENE} The lantern went out.`)
+      await invoke('project:close', undefined)
+      await vi.advanceTimersByTimeAsync(3_000 * 2)
+      expect(complete).not.toHaveBeenCalled()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('tag handlers (F-4.1)', () => {
   it('reports NO_PROJECT when nothing is open', async () => {
     await expect(invoke('tag:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)

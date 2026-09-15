@@ -7,6 +7,7 @@ import {
   STORY_BIBLE_TOKEN_BUDGET,
   type StoryBibleFacts
 } from './storyBible'
+import { SUMMARY_MAX_CHARS } from './summary'
 
 const bank: StoryBibleFacts['bank'] = [
   { category: 'character', name: 'mara' },
@@ -24,8 +25,8 @@ const full: StoryBibleFacts = {
     count: 4,
     tags: ['ferry-landing', 'mara']
   },
-  previous: { title: 'Leaving', location: 'Town', pov: 'Mara', timeline: 'Day 1' },
-  next: { title: 'Night', location: '', pov: '', timeline: '' }
+  previous: { title: 'Leaving', location: 'Town', pov: 'Mara', timeline: 'Day 1', summary: null },
+  next: { title: 'Night', location: '', pov: '', timeline: '', summary: null }
 }
 
 describe('renderStoryBible (F-14.9)', () => {
@@ -60,7 +61,7 @@ describe('renderStoryBible (F-14.9)', () => {
     const built = renderStoryBible(
       {
         ...full,
-        previous: { title: 'Leaving', location: '', pov: 'Mara', timeline: '' },
+        previous: { title: 'Leaving', location: '', pov: 'Mara', timeline: '', summary: null },
         next: null
       },
       400
@@ -81,6 +82,54 @@ describe('renderStoryBible (F-14.9)', () => {
     expect(built).toContain('Previous scene:')
     expect(built).toContain('Next scene:')
     expect(built).toMatch(/Characters: character-number-0, .* … and \d+ more\n/)
+  })
+
+  it("renders the neighbours' summaries last, after the category lines (F-5.6)", () => {
+    const withSummaries: StoryBibleFacts = {
+      ...full,
+      previous: { ...full.previous!, summary: 'Mara left town before the thaw.' },
+      next: { ...full.next!, summary: 'Tomas walks to the north pasture.' }
+    }
+    expect(renderStoryBible(withSummaries, STORY_BIBLE_TOKEN_BUDGET)).toBe(
+      `${STORY_BIBLE_HEADING}\n` +
+        'Characters: mara, tomas\n' +
+        'Settings: ferry-landing\n' +
+        'Plot threads: the-crossing\n' +
+        'This scene: "The Ferry", in "Chapter 2", in "Part One", scene 2 of 4; tagged ferry-landing, mara.\n' +
+        'Previous scene: "Leaving" (location Town, POV Mara, timeline Day 1).\n' +
+        'Next scene: "Night".\n' +
+        'Previous scene summary: Mara left town before the thaw.\n' +
+        'Next scene summary: Tomas walks to the north pasture.'
+    )
+  })
+
+  it('takes a summary whole or not at all, and stays inside the budget (F-5.6)', () => {
+    const long = 's'.repeat(SUMMARY_MAX_CHARS)
+    const withSummaries: StoryBibleFacts = {
+      ...full,
+      previous: { ...full.previous!, summary: long },
+      next: { ...full.next!, summary: long }
+    }
+    const tight = renderStoryBible(withSummaries, STORY_BIBLE_GHOST_TOKEN_BUDGET)
+    expect(estimateTokens(tight ?? '')).toBeLessThanOrEqual(STORY_BIBLE_GHOST_TOKEN_BUDGET)
+    expect(tight).not.toContain('scene summary:')
+    const roomy = renderStoryBible(withSummaries, STORY_BIBLE_TOKEN_BUDGET)
+    expect(estimateTokens(roomy ?? '')).toBeLessThanOrEqual(STORY_BIBLE_TOKEN_BUDGET)
+    // The first fits whole; the second has no room left and is dropped rather than cut.
+    expect(roomy).toContain(`Previous scene summary: ${long}`)
+    expect(roomy).not.toContain('Next scene summary:')
+  })
+
+  it('never carries a summary whose scene line was cut for the budget (F-5.6)', () => {
+    const tight = estimateTokens(
+      `${STORY_BIBLE_HEADING}\nThis scene: "The Ferry", in "Chapter 2", in "Part One", scene 2 of 4; tagged ferry-landing, mara.`
+    )
+    const built = renderStoryBible(
+      { ...full, previous: { ...full.previous!, summary: 'Mara left town before the thaw.' } },
+      tight
+    )
+    expect(built).not.toContain('Previous scene:')
+    expect(built).not.toContain('Previous scene summary:')
   })
 
   it('drops a category that cannot keep even one name, never the scene line', () => {

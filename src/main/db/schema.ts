@@ -241,3 +241,32 @@ export const aiProposal = sqliteTable(
 )
 export type AiProposalRow = typeof aiProposal.$inferSelect
 export type AiProposalInsert = typeof aiProposal.$inferInsert
+
+/**
+ * A scene's derived summary (F-5.6): the ~100-token summary, its key points, and the
+ * characters present, written in the background after the author pauses typing. One row per
+ * manuscript document, keyed by the node and cascaded with it: a deleted scene has no index
+ * data. `content_hash` is the hash of everything that was sent (the scene text as sent, the
+ * metadata, the character names), so staleness is a comparison, never a timestamp (CLAUDE.md,
+ * token efficiency rule 4). `key_points` and `characters` are JSON arrays; the shapes and the
+ * caps live in `src/shared/summary.ts`. A summary is not a proposal: nothing enters the
+ * manuscript, so its only other trace is the `ai_usage` row that paid for it.
+ */
+export const sceneSummary = sqliteTable('scene_summary', {
+  nodeId: text('node_id')
+    .primaryKey()
+    .references(() => node.id, { onDelete: 'cascade' }),
+  contentHash: text('content_hash').notNull(),
+  summary: text('summary').notNull(),
+  /** JSON array of strings. */
+  keyPoints: text('key_points').notNull(),
+  /** JSON array of strings. */
+  characters: text('characters').notNull(),
+  promptVersion: text('prompt_version').notNull(),
+  model: text('model').notNull(),
+  /** Whether the scene was head-truncated to `SUMMARY_SCENE_CHAR_BUDGET` before it was sent. */
+  truncated: integer('truncated', { mode: 'boolean' }).notNull(),
+  createdAt: text('created_at').notNull()
+})
+export type SceneSummaryRow = typeof sceneSummary.$inferSelect
+export type SceneSummaryInsert = typeof sceneSummary.$inferInsert

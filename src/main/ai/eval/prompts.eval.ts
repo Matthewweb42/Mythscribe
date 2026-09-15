@@ -6,6 +6,7 @@ import { inputBudget, outputBudget, priceFor } from '@shared/ai'
 import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote } from '@shared/critique'
 import { SCENE_BRIEF_FIELD_MAX } from '@shared/sceneMeta'
+import { SceneSummary } from '@shared/summary'
 import { toTagName } from '@shared/tags'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { checkChatFidelity, postProcessChatText } from '../chat'
@@ -149,6 +150,29 @@ function scoreBrief(answer: string): LiveResult['verdict'] {
       }
 }
 
+/**
+ * A scene summary (F-5.6) scores against the schema the row is stored under: the answer must
+ * parse to `SceneSummary`, which is also where the caps live, so an over-long summary or one
+ * key point too many is a failure here exactly as it would be in the app.
+ */
+function scoreSummary(answer: string): LiveResult['verdict'] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(answer)
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not JSON' }
+  }
+  const result = SceneSummary.safeParse(parsed)
+  if (result.success) return { kind: 'json', ok: true, problem: null }
+  const issue = result.error.issues[0]
+  return {
+    kind: 'json',
+    ok: false,
+    problem:
+      `not { summary, keyPoints, characters } within the caps: ${issue?.path.join('.') ?? ''} ${issue?.message ?? ''}`.trim()
+  }
+}
+
 describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
   it('sends every case once, scores the answers, and writes the fidelity report', async () => {
     const key = process.env.OPENAI_API_KEY
@@ -192,6 +216,10 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
       }
       if (c.scoring.kind === 'brief') {
         results.push({ ...base, answer: reply.text, verdict: scoreBrief(reply.text) })
+        continue
+      }
+      if (c.scoring.kind === 'summary') {
+        results.push({ ...base, answer: reply.text, verdict: scoreSummary(reply.text) })
         continue
       }
       const answer =

@@ -6,7 +6,8 @@ import type { TagCategory } from './tags'
  * ground truth, rendered once and placed in the stable prefix after the voice profile
  * (CLAUDE.md, token efficiency rule 3). Today the facts are the tag bank in its four story
  * categories, the scene's tags, its place in the manuscript, and the scenes either side with
- * their metadata; F-9 entity sheets and F-5.6 summaries plug into the same shape later.
+ * their metadata and their scene summaries (F-5.6); F-9 entity sheets plug into the same
+ * shape later.
  * `renderStoryBible` is pure; `src/main/ai/context/storyBible.ts` gathers the facts.
  */
 
@@ -45,6 +46,8 @@ export interface SceneNeighbor {
   location: string
   pov: string
   timeline: string
+  /** The neighbour's stored scene summary (F-5.6), or null while it has none. */
+  summary: string | null
 }
 
 export interface StoryBibleScene {
@@ -73,10 +76,12 @@ const MIN_NAMES_WHEN_CUT = 1
 /**
  * Renders the block within `maxTokens` estimated tokens, or null when the facts say nothing
  * (an empty bank, no neighbour, and no tag on the scene). Lines come out in a fixed order
- * (heading, categories, this scene, previous, next), but are admitted by priority when the
- * budget is short (CLAUDE.md, token efficiency rule 8): the heading and the scene line
- * always, then the neighbours, then each category in order, cut to fit with "… and N more"
- * rather than dropped. A bank line that cannot keep even one name is dropped whole.
+ * (heading, categories, this scene, previous, next, the two neighbours' summaries), but are
+ * admitted by priority when the budget is short (CLAUDE.md, token efficiency rule 8): the
+ * heading and the scene line always, then the neighbours, then each category in order, cut to
+ * fit with "… and N more" rather than dropped, and last the neighbours' summaries (F-5.6),
+ * each whole or not at all — half a summary states a fact the scene does not. A bank line
+ * that cannot keep even one name is dropped whole.
  */
 export function renderStoryBible(facts: StoryBibleFacts, maxTokens: number): string | null {
   const hasTags = facts.scene !== null && facts.scene.tags.length > 0
@@ -85,19 +90,31 @@ export function renderStoryBible(facts: StoryBibleFacts, maxTokens: number): str
   }
 
   const sceneLine = facts.scene ? renderScene(facts.scene) : null
-  const previousLine = facts.previous ? `Previous scene: ${renderNeighbor(facts.previous)}` : null
-  const nextLine = facts.next ? `Next scene: ${renderNeighbor(facts.next)}` : null
 
   const base = [STORY_BIBLE_HEADING, sceneLine].filter((line): line is string => line !== null)
   let used = estimateTokens(base.join('\n'))
   const fits = (line: string): boolean => estimateTokens(`${line}\n`) + used <= maxTokens
+  const admit = (line: string, into: string[]): void => {
+    if (!fits(line)) return
+    into.push(line)
+    used += estimateTokens(`${line}\n`)
+  }
 
+  const sides = [
+    { label: 'Previous', neighbor: facts.previous },
+    { label: 'Next', neighbor: facts.next }
+  ]
   const neighbours: string[] = []
-  for (const line of [previousLine, nextLine]) {
-    if (line !== null && fits(line)) {
-      neighbours.push(line)
-      used += estimateTokens(`${line}\n`)
-    }
+  // Only a neighbour whose own line got in carries its summary: a summary with no scene line
+  // to hang on reads as a fact about nothing.
+  const withSummary: { label: string; summary: string }[] = []
+  for (const { label, neighbor } of sides) {
+    if (neighbor === null) continue
+    const line = `${label} scene: ${renderNeighbor(neighbor)}`
+    const before = neighbours.length
+    admit(line, neighbours)
+    if (neighbours.length === before) continue
+    if (neighbor.summary) withSummary.push({ label, summary: neighbor.summary })
   }
 
   const categories: string[] = []
@@ -110,7 +127,12 @@ export function renderStoryBible(facts: StoryBibleFacts, maxTokens: number): str
     used += estimateTokens(`${line}\n`)
   }
 
-  return [STORY_BIBLE_HEADING, ...categories, sceneLine, ...neighbours]
+  const summaries: string[] = []
+  for (const { label, summary } of withSummary) {
+    admit(`${label} scene summary: ${summary}`, summaries)
+  }
+
+  return [STORY_BIBLE_HEADING, ...categories, sceneLine, ...neighbours, ...summaries]
     .filter((line): line is string => line !== null)
     .join('\n')
 }

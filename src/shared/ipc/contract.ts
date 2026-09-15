@@ -36,6 +36,7 @@ import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../rewrite'
 import { SceneBrief, SceneMeta } from '../sceneMeta'
 import { Stylometrics } from '../stylometry'
+import { SceneSummaryState, SummaryStatus } from '../summary'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
 import { TagTemplateId } from '../tagTemplates'
 import { TiptapNode } from '../tiptap'
@@ -260,6 +261,31 @@ export const AiDraftBriefResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiDraftBriefResult = z.infer<typeof AiDraftBriefResult>
+
+/**
+ * What `ai:summarize` answers (F-5.6): the node's summary state after the run (the stored row,
+ * fresh or served from the content-hash match), what the run cost; or an expected AI failure
+ * as data. A summary is not a proposal: it is derived index data with no accept step.
+ */
+export const AiSummarizeResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    state: SceneSummaryState,
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiSummarizeResult = z.infer<typeof AiSummarizeResult>
 
 /** An author-marked voice exemplar (F-14.1): a plain-text passage with the POV and kind it was filed under. */
 export const VoiceExemplar = z.object({
@@ -706,6 +732,27 @@ export const contract = {
     input: z.object({ nodeId: z.string(), requestId: z.string() }),
     output: AiDraftBriefResult
   },
+  /**
+   * A node's scene summary state (F-5.6): the stored row (if any), whether it is stale against
+   * the scene's current text, and the background scheduler's status and last error for the
+   * node. `available` is false for anything that is not a manuscript document, an unknown id
+   * included: to the pane both are "no summary here", never an error.
+   */
+  'summary:get': {
+    input: z.object({ id: z.string() }),
+    output: SceneSummaryState
+  },
+  /**
+   * Summarises a manuscript document now (F-5.6): cancels its pending debounce, runs the
+   * summary on the fast tier (a content-hash match answers from the stored row without a
+   * request), stores the row, and answers the new state. VALIDATION for a node that is not a
+   * manuscript document or holds under `SUMMARY_TEXT_MIN` characters; the AI failures come back
+   * as data with the echoed `requestId`.
+   */
+  'ai:summarize': {
+    input: z.object({ nodeId: z.string(), requestId: z.string() }),
+    output: AiSummarizeResult
+  },
   /** The project's conversations (F-5.4), stored as JSON under the settings key `conversations`; a fresh project has none. */
   'conversations:get': { input: z.undefined(), output: Conversations },
   /** Replaces the project's conversations (F-5.4); a value outside the schema is refused with VALIDATION. */
@@ -815,6 +862,8 @@ export const events = {
   'ai:chatDelta': z.object({ requestId: z.string(), delta: z.string() }),
   /** A streamed piece of a rewrite's first draft (F-14.10); the panel appends it to the draft with this `requestId`. */
   'ai:rewriteDelta': z.object({ requestId: z.string(), delta: z.string() }),
+  /** A node's background summary run changed status (F-5.6): pending → idle or failed; the pane refetches `summary:get`. */
+  'ai:summaryChanged': z.object({ nodeId: z.string(), status: SummaryStatus }),
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /** A native menu item was clicked or its accelerator pressed (F-7.1); the renderer runs the action. */

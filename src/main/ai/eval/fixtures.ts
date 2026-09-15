@@ -124,8 +124,10 @@ import {
   buildRewriteRegenPromptV2,
   REWRITE_REGEN_PROMPT_V2_VERSION
 } from '../prompts/rewriteRegen.v2'
+import { buildSummaryPrompt, SUMMARY_PROMPT_VERSION } from '../prompts/summary.v1'
 import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../prompts/tags.v1'
 import { buildTagsRegenPrompt, TAGS_REGEN_PROMPT_VERSION } from '../prompts/tagsRegen.v1'
+import { SUMMARY_BANK_NAMES_MAX, SUMMARY_SCENE_CHAR_BUDGET } from '@shared/summary'
 import {
   BRIEF_SCENE_CHAR_BUDGET,
   EMPTY_SCENE_BRIEF,
@@ -284,13 +286,23 @@ const FIXTURE_FACTS: StoryBibleFacts = {
     count: 4,
     tags: ['protagonist', 'antagonist', 'primary-location', 'main-plot']
   },
+  // The neighbours carry no summary (F-5.6): the shipped prompts' rows in the token report
+  // measure the bible as a project sends it before the background index has caught up, and
+  // the summary lines' own budget behaviour is pinned by `src/shared/storyBible.test.ts`.
   previous: {
     title: 'The mill ledger',
     location: 'The mill',
     pov: 'Mara',
-    timeline: 'Two days before'
+    timeline: 'Two days before',
+    summary: null
   },
-  next: { title: 'The north pasture', location: 'North pasture', pov: 'Mara', timeline: 'Dawn' }
+  next: {
+    title: 'The north pasture',
+    location: 'North pasture',
+    pov: 'Mara',
+    timeline: 'Dawn',
+    summary: null
+  }
 }
 /** Every template's story facts, with long titles and a heavily tagged scene: the bible at its cap. */
 const MAXED_FACTS: StoryBibleFacts = {
@@ -306,13 +318,15 @@ const MAXED_FACTS: StoryBibleFacts = {
     title: 'The mill ledger, copied twice',
     location: 'The mill on the north bank',
     pov: 'Mara',
-    timeline: 'Two days before the thaw'
+    timeline: 'Two days before the thaw',
+    summary: null
   },
   next: {
     title: 'The north pasture, under the elm',
     location: 'The north pasture',
     pov: 'Tomas',
-    timeline: 'Dawn after the thaw'
+    timeline: 'Dawn after the thaw',
+    summary: null
   }
 }
 
@@ -345,6 +359,8 @@ export interface EvalCase {
     | { kind: 'critique'; sceneText: string }
     /** A scene brief (F-14.3): the answer must parse to the five string lines the prompt asks for. */
     | { kind: 'brief' }
+    /** A scene summary (F-5.6): the answer must parse to `SceneSummary`, caps and all. */
+    | { kind: 'summary' }
 }
 
 const general = builtinParams('general')
@@ -841,6 +857,30 @@ function briefCase(
   }
 }
 
+function summaryCase(
+  name: string,
+  note: string,
+  sceneText: string,
+  meta: typeof META | null,
+  characters: string[]
+): EvalCase {
+  const built = buildSummaryPrompt({ sceneText, meta, characters })
+  return {
+    version: SUMMARY_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'summary' }
+  }
+}
+
+/** The character names a summary request lists: the bible's own cast, and the bank at its cap. */
+const FIXTURE_CHARACTERS = FIXTURE_FACTS.bank
+  .filter((entry) => entry.category === 'character')
+  .map((entry) => entry.name)
+const MAXED_CHARACTERS = MAXED_BANK.slice(0, SUMMARY_BANK_NAMES_MAX)
+
 /** Every case, grouped by version in catalogue order. */
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
@@ -1200,5 +1240,31 @@ export const EVAL_CASES: EvalCase[] = [
       timeline: 'T'.repeat(500),
       brief: EMPTY_SCENE_BRIEF
     }
+  ),
+  summaryCase(
+    'fresh',
+    'the fixture scene with no character names and no metadata: the shape a new project sends',
+    FIXTURE_PASSAGE,
+    null,
+    []
+  ),
+  summaryCase(
+    'full',
+    "the fixture scene with the bank's character names and the scene's metadata",
+    FIXTURE_PASSAGE,
+    META,
+    FIXTURE_CHARACTERS
+  ),
+  summaryCase(
+    'maxed',
+    `a scene at the character budget with ${SUMMARY_BANK_NAMES_MAX} character names and long metadata: the most a background summary can cost`,
+    `${FIXTURE_PASSAGE.repeat(20).slice(0, SUMMARY_SCENE_CHAR_BUDGET)}…`,
+    {
+      location: 'L'.repeat(200),
+      pov: 'P'.repeat(200),
+      timeline: 'T'.repeat(500),
+      brief: EMPTY_SCENE_BRIEF
+    },
+    MAXED_CHARACTERS
   )
 ]
