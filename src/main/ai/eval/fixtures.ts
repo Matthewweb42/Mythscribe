@@ -10,6 +10,7 @@ import {
 import type { VoiceProfile } from '@shared/ipc/contract'
 import { builtinParams } from '@shared/presets'
 import { PROPOSAL_NOTE_MAX } from '@shared/proposal'
+import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX } from '@shared/rewrite'
 import {
   classifyKind,
   computeStylometrics,
@@ -35,6 +36,12 @@ import {
   type BuildGhostTextPromptInput
 } from '../prompts/ghostText.v1'
 import { buildGhostTextRegenPrompt, GHOST_REGEN_PROMPT_VERSION } from '../prompts/ghostTextRegen.v1'
+import {
+  buildRewritePrompt,
+  REWRITE_PROMPT_VERSION,
+  type BuildRewritePromptInput
+} from '../prompts/rewrite.v1'
+import { buildRewriteRegenPrompt, REWRITE_REGEN_PROMPT_VERSION } from '../prompts/rewriteRegen.v1'
 import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../prompts/tags.v1'
 import { buildTagsRegenPrompt, TAGS_REGEN_PROMPT_VERSION } from '../prompts/tagsRegen.v1'
 
@@ -291,6 +298,60 @@ function chatCase(
   }
 }
 
+/** The paragraph an author would select for a rewrite, with the manuscript text each side of it. */
+const REWRITE_PASSAGE =
+  'He looked at the lantern, then at the far bank, where the dark trees ran down to the water ' +
+  'like a crowd that had come to watch. "Your brother owes the mill. The mill owes me. That is ' +
+  'the whole of it."'
+const REWRITE_BEFORE = FIXTURE_PASSAGE.slice(0, FIXTURE_PASSAGE.indexOf(REWRITE_PASSAGE)).slice(
+  -REWRITE_CONTEXT_CHARS
+)
+const REWRITE_AFTER = FIXTURE_PASSAGE.slice(
+  FIXTURE_PASSAGE.indexOf(REWRITE_PASSAGE) + REWRITE_PASSAGE.length
+).slice(0, REWRITE_CONTEXT_CHARS)
+
+const rewriteFresh: BuildRewritePromptInput = {
+  text: REWRITE_PASSAGE,
+  before: '',
+  after: '',
+  meta: null,
+  voice: null
+}
+const rewriteFull: BuildRewritePromptInput = {
+  ...rewriteFresh,
+  before: REWRITE_BEFORE,
+  after: REWRITE_AFTER,
+  meta: META,
+  voice: voiceBlock(FIXTURE_PROFILE, { text: REWRITE_PASSAGE, pov: 'Mara' })
+}
+/** Every rewrite cap at its limit: the passage, both context windows, long metadata, a voice block at its budget. */
+const rewriteMaxedText = FIXTURE_PASSAGE.repeat(3).slice(0, REWRITE_TEXT_MAX)
+const rewriteMaxed: BuildRewritePromptInput = {
+  text: rewriteMaxedText,
+  before: FIXTURE_PASSAGE.slice(-REWRITE_CONTEXT_CHARS),
+  after: FIXTURE_PASSAGE.slice(0, REWRITE_CONTEXT_CHARS),
+  meta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500) },
+  voice: voiceBlock(MAXED_PROFILE, { text: rewriteMaxedText, pov: 'Mara' })
+}
+
+function rewriteCase(
+  name: string,
+  note: string,
+  input: BuildRewritePromptInput,
+  regen: { note: string | null; violation: string | null } | null
+): EvalCase {
+  const built =
+    regen === null ? buildRewritePrompt(input) : buildRewriteRegenPrompt({ ...input, ...regen })
+  return {
+    version: regen === null ? REWRITE_PROMPT_VERSION : REWRITE_REGEN_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
 /** Every case, grouped by version in catalogue order. */
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
@@ -371,5 +432,34 @@ export const EVAL_CASES: EvalCase[] = [
     'the agent maxed case regenerated after a tense violation',
     agentMaxed,
     VIOLATION
+  ),
+  rewriteCase('fresh', 'no voice block, no context either side, no metadata', rewriteFresh, null),
+  rewriteCase(
+    'full',
+    'voice rules and one exemplar, metadata, manuscript text before and after the passage',
+    rewriteFull,
+    null
+  ),
+  rewriteCase(
+    'maxed',
+    'every cap at its limit: a 4,000-character passage, both context windows, long metadata, a voice block at its budget',
+    rewriteMaxed,
+    null
+  ),
+  rewriteCase(
+    'full note',
+    'the full case regenerated with an author note at the length limit',
+    rewriteFull,
+    { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: null }
+  ),
+  rewriteCase('full violation', 'the full case regenerated after a tense violation', rewriteFull, {
+    note: null,
+    violation: VIOLATION
+  }),
+  rewriteCase(
+    'maxed both',
+    'the maxed case regenerated with an author note at the length limit and a tense violation',
+    rewriteMaxed,
+    { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: VIOLATION }
   )
 ]

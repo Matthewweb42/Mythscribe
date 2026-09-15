@@ -31,6 +31,7 @@ import { MatterTemplateId } from '../matterTemplates'
 import { EditRole, MenuItemId } from '../menu'
 import { WritingPresets } from '../presets'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
+import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../rewrite'
 import { SceneMeta } from '../sceneMeta'
 import { Stylometrics } from '../stylometry'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
@@ -191,6 +192,15 @@ export const AiChatResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiChatResult = z.infer<typeof AiChatResult>
+
+/**
+ * What `ai:rewrite` answers (F-14.10): the rewritten passage (streamed first through
+ * `ai:rewriteDelta` events keyed by `requestId`), what it cost, the proposal it became
+ * (F-14.5, with the target range), and the fidelity flag (F-14.7); or an expected AI failure
+ * as data. The same shape as a chat answer, so the renderer's handling is shared.
+ */
+export const AiRewriteResult = AiChatResult
+export type AiRewriteResult = z.infer<typeof AiRewriteResult>
 
 /** An author-marked voice exemplar (F-14.1): a plain-text passage with the POV and kind it was filed under. */
 export const VoiceExemplar = z.object({
@@ -572,6 +582,32 @@ export const contract = {
     }),
     output: AiChatResult
   },
+  /**
+   * Rewrites a selected passage in the author's voice (F-14.10). The renderer sends the
+   * selection as plain text (bounded; outside the bounds is VALIDATION) with up to
+   * `REWRITE_CONTEXT_CHARS` of manuscript text each side and the ProseMirror range it came
+   * from (recorded on the proposal as its target, a snapshot); main adds the scene metadata
+   * and the voice profile. The first draft streams as `ai:rewriteDelta` events for
+   * `requestId`; the answer resolves once the fidelity check (and its one regenerate) is done.
+   * Nothing is replaced: the renderer shows a diff until the author accepts. A regenerate
+   * (F-14.5) names the proposal it replaces in `regeneratedFrom` and may carry the author's
+   * `note`. NOT_FOUND for an unknown id, VALIDATION for a folder; the AI failures come back as
+   * data with the echoed `requestId`.
+   */
+  'ai:rewrite': {
+    input: z.object({
+      nodeId: z.string(),
+      from: z.number().int().nonnegative(),
+      to: z.number().int().nonnegative(),
+      text: z.string().min(REWRITE_TEXT_MIN).max(REWRITE_TEXT_MAX),
+      before: z.string().max(REWRITE_CONTEXT_CHARS),
+      after: z.string().max(REWRITE_CONTEXT_CHARS),
+      requestId: z.string(),
+      note: z.string().max(PROPOSAL_NOTE_MAX).nullable().optional(),
+      regeneratedFrom: z.string().nullable().optional()
+    }),
+    output: AiRewriteResult
+  },
   /** The project's conversations (F-5.4), stored as JSON under the settings key `conversations`; a fresh project has none. */
   'conversations:get': { input: z.undefined(), output: Conversations },
   /** Replaces the project's conversations (F-5.4); a value outside the schema is refused with VALIDATION. */
@@ -677,6 +713,8 @@ export const events = {
   'window:close-requested': z.null(),
   /** A streamed piece of a Plan-mode answer (F-5.4); the renderer appends it to the turn with this `requestId`. */
   'ai:chatDelta': z.object({ requestId: z.string(), delta: z.string() }),
+  /** A streamed piece of a rewrite's first draft (F-14.10); the panel appends it to the draft with this `requestId`. */
+  'ai:rewriteDelta': z.object({ requestId: z.string(), delta: z.string() }),
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /** A native menu item was clicked or its accelerator pressed (F-7.1); the renderer runs the action. */

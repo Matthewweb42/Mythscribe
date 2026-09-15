@@ -22,15 +22,31 @@ describe('defaultAiSettings (F-14.4)', () => {
     expect(Object.keys(defaults.features).sort()).toEqual([...AI_FEATURE_IDS].sort())
   })
 
-  it('parses its own defaults and refuses a dial outside 0–3 or a missing toggle', () => {
+  it('parses its own defaults and refuses a dial outside 0–3, an unknown toggle key, or a non-boolean toggle', () => {
     expect(AiSettings.safeParse(defaultAiSettings()).success).toBe(true)
     expect(AiSettings.safeParse({ ...defaultAiSettings(), dial: 4 }).success).toBe(false)
     expect(AiSettings.safeParse({ ...defaultAiSettings(), dial: -1 }).success).toBe(false)
     expect(AiSettings.safeParse({ ...defaultAiSettings(), dial: 1.5 }).success).toBe(false)
-    const missingOne = Object.fromEntries(
-      Object.entries(defaultAiSettings().features).filter(([id]) => id !== 'ghostText')
+    const features = defaultAiSettings().features
+    expect(AiSettings.safeParse({ dial: 0, features: { ...features, bogus: true } }).success).toBe(
+      false
     )
-    expect(AiSettings.safeParse({ dial: 0, features: missingOne }).success).toBe(false)
+    expect(
+      AiSettings.safeParse({ dial: 0, features: { ...features, ghostText: 'yes' } }).success
+    ).toBe(false)
+  })
+
+  it('fills a toggle missing from a stored row (a feature added later, F-14.10) with on, keeping the rest', () => {
+    const { ghostText: _ghostText, rewrite: _rewrite, ...older } = defaultAiSettings().features
+    const parsed = AiSettings.safeParse({ dial: 2, features: { ...older, chat: false } })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.dial).toBe(2)
+      expect(parsed.data.features.chat).toBe(false)
+      expect(parsed.data.features.ghostText).toBe(true)
+      expect(parsed.data.features.rewrite).toBe(true)
+      expect(Object.keys(parsed.data.features).sort()).toEqual([...AI_FEATURE_IDS].sort())
+    }
   })
 
   it('starts VibeWrite off with the default idle delay (F-5.3)', () => {

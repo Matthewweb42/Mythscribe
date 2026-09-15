@@ -1090,6 +1090,128 @@ describe('ai:chat (F-5.4)', () => {
   })
 })
 
+describe('ai:rewrite (F-14.10)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const PASSAGE = 'The storm broke at dusk over the dark forest. Mara counted the lightning gaps.'
+
+  /** A project with the dial at Suggest, a key, and a scene holding the passage. */
+  async function ready(dial: AiDial = 2): Promise<{ scene: string }> {
+    await invoke('project:create', { name: 'Rewrite', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: PASSAGE }] }]
+      }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+    await invoke('ai:setKey', { key: KEY })
+    streamChunks = [
+      { delta: '"The storm broke at dusk. ' },
+      { delta: 'Mara counted the gaps."', usage: { inputTokens: 90, outputTokens: 8 } }
+    ]
+    return { scene: scene.id }
+  }
+
+  /** The `ai:rewriteDelta` events sent to the window (project:changed rides the same fake). */
+  const deltasSent = (): unknown[][] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([channel]) => channel === 'ai:rewriteDelta')
+
+  const ask = (scene: string, requestId = 'rw-1'): Input<'ai:rewrite'> => ({
+    nodeId: scene,
+    from: 5,
+    to: 5 + PASSAGE.length,
+    text: PASSAGE,
+    before: '',
+    after: '',
+    requestId
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('ai:rewrite', ask('x'))).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('emits one ai:rewriteDelta per delta, then resolves the post-processed rewrite and a pending proposal carrying the target range', async () => {
+    const { scene } = await ready()
+    const result = await invoke('ai:rewrite', ask(scene, 'rw-7'))
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toEqual({
+      ok: true,
+      text: 'The storm broke at dusk. Mara counted the gaps.',
+      usage: { inputTokens: 90, outputTokens: 8 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      flagged: false,
+      violation: null,
+      proposalId: result.proposalId,
+      requestId: 'rw-7'
+    })
+    expect(deltasSent()).toEqual([
+      ['ai:rewriteDelta', { requestId: 'rw-7', delta: '"The storm broke at dusk. ' }],
+      ['ai:rewriteDelta', { requestId: 'rw-7', delta: 'Mara counted the gaps."' }]
+    ])
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'rewrite',
+      nodeId: scene,
+      promptVersion: 'rewrite.v1',
+      content: 'The storm broke at dusk. Mara counted the gaps.',
+      flagged: false,
+      violation: null,
+      targetFrom: 5,
+      targetTo: 5 + PASSAGE.length,
+      regeneratedFrom: null,
+      status: 'pending'
+    })
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['rewrite'])
+  })
+
+  it('a regenerate goes through rewriteRegen.v1 and its proposal names the one it replaces', async () => {
+    const { scene } = await ready()
+    const first = await invoke('ai:rewrite', ask(scene, 'rw-8'))
+    if (!first.ok) throw new Error(first.message)
+    streamChunks = [{ delta: 'Dusk, and the storm over the forest.' }]
+    const again = await invoke('ai:rewrite', {
+      ...ask(scene, 'rw-9'),
+      note: 'Colder, and keep the bell.',
+      regeneratedFrom: first.proposalId
+    })
+    if (!again.ok) throw new Error(again.message)
+    expect(again.text).toBe('Dusk, and the storm over the forest.')
+    expect(getProposal(manager.require().connection.orm, again.proposalId)).toMatchObject({
+      feature: 'rewrite',
+      promptVersion: 'rewriteRegen.v1',
+      regeneratedFrom: first.proposalId
+    })
+  })
+
+  it('answers an expected AI failure as data with the requestId, and an unknown node or a passage outside the limits through the error envelope', async () => {
+    const { scene } = await ready(1)
+    expect(await invoke('ai:rewrite', ask(scene, 'rw-3'))).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Rewrite in my voice needs the AI dial at Suggest or higher (it is at Ask).',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      requestId: 'rw-3'
+    })
+    expect(deltasSent()).toEqual([])
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    const unknown = await handlerFor('ai:rewrite')(undefined, ask('nope'))
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    const short = await handlerFor('ai:rewrite')(undefined, { ...ask(scene), text: 'Too short.' })
+    expect(short.ok).toBe(false)
+    if (!short.ok) expect(short.error.code).toBe('VALIDATION')
+  })
+})
+
 describe('tag handlers (F-4.1)', () => {
   it('reports NO_PROJECT when nothing is open', async () => {
     await expect(invoke('tag:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)

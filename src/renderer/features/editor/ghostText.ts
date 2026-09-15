@@ -4,6 +4,7 @@ import { AddMarkStep, RemoveMarkStep } from '@tiptap/pm/transform'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { SettledStatus } from '@shared/proposal'
 import { markAiOrigin } from './aiOrigin'
+import { insertProse } from './insertProse'
 
 /**
  * The suggestion while it is showing (F-5.3): the text still to accept and the document
@@ -236,42 +237,14 @@ function renderGhost(ghost: GhostState): HTMLElement {
  */
 const NEXT_WORD = /^(\s*\S+)( ?)/
 
-/** A blank line (one or more empty or whitespace-only lines) between two paragraphs of a suggestion. */
-const PARAGRAPH_BREAK = /\n[ \t]*\n\s*/
-
 /**
- * Inserts `text` at the suggestion's anchor and, when it belongs to a proposal, marks it as
- * AI-origin with the running total of what the author has accepted from it (F-14.6). A
- * multi-paragraph suggestion (the assistant's Agent mode, F-5.4) is split on blank lines into
- * paragraphs of the same block type, each carrying the mark; a single newline inside a
- * paragraph becomes a hard break. Returns the position right after what was inserted, which
- * is past `text.length` whenever a block boundary or a break token went in.
+ * Inserts `text` at the suggestion's anchor as prose (`insertProse`: blank lines become
+ * paragraphs, single newlines hard breaks) and, when it belongs to a proposal, marks it as
+ * AI-origin with the running total of what the author has accepted from it (F-14.6). Returns
+ * the position right after what was inserted.
  */
 function insertAccepted(tr: Transaction, ghost: GhostState, text: string): number {
-  const schema = tr.doc.type.schema
-  const hardBreak = schema.nodes.hardBreak
-  let pos = ghost.from
-  text.split(PARAGRAPH_BREAK).forEach((paragraph, index) => {
-    if (index > 0) {
-      tr.split(pos)
-      pos += 2
-    }
-    paragraph.split('\n').forEach((line, lineIndex) => {
-      if (lineIndex > 0) {
-        if (hardBreak) {
-          tr.insert(pos, hardBreak.create())
-          pos += 1
-        } else {
-          tr.insertText(' ', pos)
-          pos += 1
-        }
-      }
-      if (line) {
-        tr.insertText(line, pos)
-        pos += line.length
-      }
-    })
-  })
+  const pos = insertProse(tr, ghost.from, text)
   if (ghost.proposalId !== null) {
     markAiOrigin(tr, ghost.from, pos, {
       proposalId: ghost.proposalId,

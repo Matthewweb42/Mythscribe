@@ -144,7 +144,8 @@ export const GHOST_AFTER_CHARS = 100
  * `aiSettings.ts`) share one owner. The string values are stored in project settings and ledger
  * rows, so a member is never renamed. A feature's budget lines join `FEATURE_BUDGETS` and
  * `FEATURE_INPUT_BUDGETS` in the change that builds it (F-5.3 ghost text, F-4.7 tags, F-5.6
- * summaries, F-5.4 chat, F-5.5 Author mode, F-5.7 queries, F-14.8 critique, F-5.8 embeddings).
+ * summaries, F-5.4 chat, F-5.5 Author mode, F-5.7 queries, F-14.8 critique, F-5.8 embeddings,
+ * F-14.10 rewrite).
  */
 export const AI_FEATURE_IDS = [
   'ghostText',
@@ -154,7 +155,9 @@ export const AI_FEATURE_IDS = [
   'authorMode',
   'query',
   'critique',
-  'embeddings'
+  'embeddings',
+  // F-14.10: rewrite-in-my-voice on a selection.
+  'rewrite'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -174,7 +177,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   tags: 200,
   summary: 150,
   // F-5.4: ten paragraphs at ~120 tokens each in Agent mode; Plan answers share the cap.
-  chat: 1_200
+  chat: 1_200,
+  // F-14.10: a 4,000-character passage (~1,000 tokens) rewritten at up to 1.5× its length.
+  rewrite: 1_500
 }
 
 /**
@@ -188,7 +193,9 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   tags: 8_000,
   summary: 8_000,
   // F-5.4: one scene head-truncated to 6 000 characters, the voice block, referenced notes, and ten turns of history.
-  chat: 8_000
+  chat: 8_000,
+  // F-14.10: the passage (≤ 4,000 characters), 300 characters of context each side, the metadata, and the voice block.
+  rewrite: 3_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

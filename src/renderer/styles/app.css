@@ -201,6 +201,28 @@ select {
   text-underline-offset: 0.2em;
 }
 
+/*
+ * Rewrite in my voice (F-14.10): the passage a rewrite is pending for, tinted with the accent
+ * while the proposal shows; the panel's diff strikes deletions in the danger tone and tints
+ * insertions in the success tone.
+ */
+.ms-editor .rewrite-target {
+  background: color-mix(in srgb, var(--ms-accent) 18%, transparent);
+  border-radius: 2px;
+}
+
+.rewrite-diff del {
+  text-decoration: line-through;
+  color: var(--ms-danger);
+  background: color-mix(in srgb, var(--ms-danger) 12%, transparent);
+}
+
+.rewrite-diff ins {
+  text-decoration: none;
+  color: var(--ms-success);
+  background: color-mix(in srgb, var(--ms-success) 14%, transparent);
+}
+
 /* F-14.7: a suggestion that failed the voice fidelity check. */
 .ms-editor .ghost-text[data-flagged='true'] {
   text-decoration: underline wavy var(--ms-warning);

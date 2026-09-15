@@ -53,7 +53,13 @@ describe('estimateTokens', () => {
 
 describe('budgets', () => {
   it('give every built feature an output cap and a larger input cap', () => {
-    expect(FEATURE_BUDGETS).toEqual({ ghostText: 60, tags: 200, summary: 150, chat: 1_200 })
+    expect(FEATURE_BUDGETS).toEqual({
+      ghostText: 60,
+      tags: 200,
+      summary: 150,
+      chat: 1_200,
+      rewrite: 1_500
+    })
     expect(Object.keys(FEATURE_INPUT_BUDGETS).sort()).toEqual(Object.keys(FEATURE_BUDGETS).sort())
     for (const feature of AI_FEATURE_IDS) {
       const out = FEATURE_BUDGETS[feature]

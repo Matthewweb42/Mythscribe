@@ -9,7 +9,12 @@ import {
   type AiUsageSummary
 } from '@shared/ai'
 import type { Background } from '@shared/focus'
-import type { AiChatResult, AiGhostTextResult, AiRecommendTagsResult } from '@shared/ipc/contract'
+import type {
+  AiChatResult,
+  AiGhostTextResult,
+  AiRecommendTagsResult,
+  AiRewriteResult
+} from '@shared/ipc/contract'
 import { runChat } from '../ai/chat'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
 import { generateGhostText } from '../ai/ghostText'
@@ -18,6 +23,7 @@ import type { AiKeyStore } from '../ai/keyStore'
 import { createProposal, settleProposal } from '../ai/proposalStore'
 import { AiProviderError, NoKeyError } from '../ai/providers/types'
 import { recommendTags } from '../ai/recommendTags'
+import { runRewrite } from '../ai/rewrite'
 import type { AiProviderRegistry } from '../ai/registry'
 import { buildAiRequestDeps } from '../ai/request'
 import { ledgerSummary } from '../ai/usageStore'
@@ -447,6 +453,70 @@ export function registerHandlers({
         return {
           ok: true,
           text,
+          usage,
+          costUsd,
+          cached,
+          model,
+          flagged,
+          violation,
+          proposalId: proposal.id,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
+
+  // F-14.10: the same envelope again. The first draft streams as `ai:rewriteDelta` events for
+  // the caller's `requestId`; the reply comes once the fidelity check (F-14.7) and its one
+  // regenerate are done, so the panel only ever offers Accept on a checked rewrite. The
+  // proposal (F-14.5) records the range the rewrite targets as it stood when the author asked
+  // (a snapshot; the editor maps the live range itself) and the proposal it replaces.
+  register(
+    'ai:rewrite',
+    async ({
+      nodeId,
+      from,
+      to,
+      text,
+      before,
+      after,
+      requestId,
+      note,
+      regeneratedFrom
+    }): Promise<AiRewriteResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const result = await runRewrite(
+          db,
+          deps,
+          { nodeId, text, before, after, note, regeneratedFrom, requestId },
+          (delta) => emit(windows(), 'ai:rewriteDelta', { requestId, delta })
+        )
+        const { usage, costUsd, cached, model, flagged, violation } = result
+        const proposal = createProposal(db, {
+          feature: 'rewrite',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model,
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          costUsd,
+          cached,
+          content: result.text,
+          flagged,
+          violation,
+          targetFrom: from,
+          targetTo: to,
+          regeneratedFrom: regeneratedFrom ?? null
+        })
+        return {
+          ok: true,
+          text: result.text,
           usage,
           costUsd,
           cached,

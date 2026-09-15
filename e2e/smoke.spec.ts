@@ -55,6 +55,10 @@ const AGENT_FIRST = 'The rain came sideways over the ridge.'
 const AGENT_SECOND = 'Mara pulled her hood down and waited for the others.'
 /** The opening of the Agent-mode rules in `chat.v1`; the fake server tells Agent requests apart by it. */
 const AGENT_SENTINEL = 'You are drafting inside a novel-writing app'
+/** F-14.10: the opening of the rewrite prompt's system turn; the fake server streams the rewrite for it. */
+const REWRITE_SENTINEL = 'You are the rewrite feature inside a novel-writing app.'
+/** What the fake server answers a rewrite with: past tense, third person, so the local voice check passes. */
+const REWRITE_ANSWER = 'The storm came down at dusk. Rain followed it, and then the quiet held.'
 /** F-5.10: a request whose body carries this waits before answering, so a Stop can land. */
 const SLOW_SENTINEL = 'SLOW'
 const SLOW_DELAY_MS = 3_000
@@ -127,6 +131,11 @@ function startFakeOpenAi(): Promise<string> {
           const agent = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(AGENT_SENTINEL)
           )
+          // F-14.10: a rewrite streams its first draft and, should the local voice check send
+          // it back, gets the same answer again as a plain completion.
+          const rewrite = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(REWRITE_SENTINEL)
+          )
           // F-5.4: a Plan turn streams (server-sent events in the shape the SDK parses: content
           // deltas, one usage-only chunk, then [DONE]); an Agent turn is a plain completion.
           if (request.stream) {
@@ -134,18 +143,21 @@ function startFakeOpenAi(): Promise<string> {
             res.setHeader('Content-Type', 'text/event-stream')
             const chunk = (payload: object): string =>
               `data: ${JSON.stringify({ id: 'chatcmpl-fake', object: 'chat.completion.chunk', created: 0, model: 'gpt-5.4-mini', ...payload })}\n\n`
-            const cut = CHAT_ANSWER.indexOf(' ridge') + 6
+            const answer = rewrite ? REWRITE_ANSWER : CHAT_ANSWER
+            const cut = rewrite
+              ? REWRITE_ANSWER.indexOf(' Rain')
+              : CHAT_ANSWER.indexOf(' ridge') + 6
             res.write(
               chunk({
                 choices: [
-                  { index: 0, delta: { content: CHAT_ANSWER.slice(0, cut) }, finish_reason: null }
+                  { index: 0, delta: { content: answer.slice(0, cut) }, finish_reason: null }
                 ]
               })
             )
             res.write(
               chunk({
                 choices: [
-                  { index: 0, delta: { content: CHAT_ANSWER.slice(cut) }, finish_reason: 'stop' }
+                  { index: 0, delta: { content: answer.slice(cut) }, finish_reason: 'stop' }
                 ]
               })
             )
@@ -180,11 +192,13 @@ function startFakeOpenAi(): Promise<string> {
                       ? regen
                         ? '{"tags":["antagonist","protagonist"]}'
                         : '{"tags":["dark-forest","protagonist"]}'
-                      : agent
-                        ? `${AGENT_FIRST}\n\n${AGENT_SECOND}`
-                        : offVoice
-                          ? OFF_VOICE_CONTINUATION
-                          : GHOST_CONTINUATION
+                      : rewrite
+                        ? REWRITE_ANSWER
+                        : agent
+                          ? `${AGENT_FIRST}\n\n${AGENT_SECOND}`
+                          : offVoice
+                            ? OFF_VOICE_CONTINUATION
+                            : GHOST_CONTINUATION
                   },
                   finish_reason: 'stop'
                 }
@@ -1728,6 +1742,77 @@ test('create, close, reopen a project on disk', async () => {
     .click()
   await expect(turns).toHaveCount(0)
   await expect(assistant.getByRole('tab')).toHaveCount(2)
+
+  // F-14.10: rewrite in my voice. With Scene 1's opening sentence selected (set on the DOM, as
+  // the provenance step does, since the paragraph wraps), the toolbar button sends the passage
+  // with the voice block in the system turn; the fake server streams the rewrite and the panel
+  // shows it as a word diff against the selection. Accept replaces the passage as AI-origin
+  // text through the editor (so it autosaves), and the ledger gains a rewrite request.
+  for (const button of await page.getByRole('button', { name: 'Dismiss notification' }).all()) {
+    await button.click()
+  }
+  const rewriteButton = page.getByRole('button', { name: 'Rewrite in my voice' })
+  await expect(rewriteButton).toBeDisabled()
+  const rewriteBodiesBefore = openAiChatBodies.length
+  await editor.click()
+  await editor
+    .locator('p')
+    .first()
+    .evaluate((paragraph, length) => {
+      // The first `length` characters of the paragraph, whichever text nodes hold them.
+      const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT)
+      const first = walker.nextNode()
+      if (!(first instanceof Text)) throw new Error('expected the paragraph to open with text')
+      let node: Node | null = first
+      let offset = length
+      while (node instanceof Text && offset > node.length) {
+        offset -= node.length
+        node = walker.nextNode()
+      }
+      if (!(node instanceof Text)) throw new Error('the paragraph is shorter than the sentence')
+      const range = document.createRange()
+      range.setStart(first, 0)
+      range.setEnd(node, offset)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+    }, SENTENCE.length)
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+    .toBe(SENTENCE)
+  await expect(rewriteButton).toBeEnabled()
+  await rewriteButton.click()
+  const rewritePanel = page.getByTestId('rewrite-panel')
+  await expect(rewritePanel).toBeVisible()
+  await expect(editor.locator('.rewrite-target')).toHaveText(SENTENCE)
+  const rewriteDiff = rewritePanel.getByTestId('rewrite-diff')
+  await expect(rewriteDiff).toBeVisible()
+  await expect(rewriteDiff.locator('ins').filter({ hasText: 'quiet' })).toHaveCount(1)
+  await expect(rewriteDiff.locator('del').filter({ hasText: 'broke' })).toHaveCount(1)
+  await expect(page.getByTestId('ai-activity')).toHaveCount(0)
+  expect(openAiChatBodies).toHaveLength(rewriteBodiesBefore + 1)
+  const rewriteSystem = openAiChatBodies.at(-1)?.messages[0]
+  expect(rewriteSystem?.role).toBe('system')
+  expect(rewriteSystem?.content.startsWith(REWRITE_SENTINEL)).toBe(true)
+  expect(rewriteSystem?.content).toContain("Match the author's voice:")
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toContain(SENTENCE)
+  await rewritePanel.getByTestId('rewrite-accept').click()
+  await expect(rewritePanel).toHaveCount(0)
+  await expect(editor.locator('.rewrite-target')).toHaveCount(0)
+  await expect(editor.locator('p').first()).toContainText(REWRITE_ANSWER)
+  await expect(editor.locator('p').first()).not.toContainText('Then silence.')
+  await expect(
+    editor.locator('.ai-origin[data-proposal-id]').filter({ hasText: REWRITE_ANSWER })
+  ).toHaveCount(1)
+  await expect
+    .poll(async () => ((await documentText(scene1Row.id)) ?? '').includes(REWRITE_ANSWER), {
+      timeout: 3000
+    })
+    .toBe(true)
+  const afterRewrite = await usageSummary()
+  expect(afterRewrite.byFeature.find((f) => f.feature === 'rewrite')).toMatchObject({
+    requests: 1
+  })
 
   // Back to Off and no key, as the steps above left them.
   await page.getByRole('button', { name: 'Settings' }).click()

@@ -5,6 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { AiOrigin } from './aiOrigin'
 import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
+import { RewriteTarget } from './rewriteTarget'
 import { Typewriter } from './typewriter'
 
 export interface EditorSchemaOptions {
@@ -21,9 +22,9 @@ export interface EditorSchemaOptions {
   onEscape?: () => boolean
   /**
    * The manuscript document the editor shows (F-4.6): adds the inline tag token and its `#`
-   * suggestion, which links picked tags to this node, the ghost-text decoration (F-5.3), and
-   * the AI-origin mark its accepted text carries (F-14.6). Left out for notes, which never get
-   * tags or suggestions.
+   * suggestion, which links picked tags to this node, the ghost-text decoration (F-5.3), the
+   * AI-origin mark its accepted text carries (F-14.6), and the rewrite target highlight
+   * (F-14.10). Left out for notes, which never get tags or suggestions.
    */
   inlineTagNodeId?: string
 }
@@ -158,9 +159,9 @@ export const SceneBreak = Node.create<SceneBreakOptions>({
  * headings 1–3, block quote, hard break, undo/redo, cursors) plus text alignment on headings and
  * paragraphs, the scene-break block, the Ctrl+S save shortcut (F-3.2), and, for a manuscript
  * document, the inline tag token with its `#` suggestion (F-4.6), the AI-origin mark (F-14.6,
- * wherever ghost text can insert), and the ghost-text decoration (F-5.3, always in the schema
- * so toggling VibeWrite never rebuilds the editor), and the Escape hand-off (F-6.1) when the
- * caller wants one. Lists, links, code blocks, horizontal rules, and the trailing node are off
+ * wherever ghost text can insert), the ghost-text decoration (F-5.3, always in the schema
+ * so toggling VibeWrite never rebuilds the editor), the rewrite target (F-14.10), and the
+ * Escape hand-off (F-6.1) when the caller wants one. Lists, links, code blocks, horizontal rules, and the trailing node are off
  * so the document model stays what the compile views (F-3.12) and the AI post-processors
  * expect.
  */
@@ -194,6 +195,7 @@ export function buildExtensions({
       InlineTag.configure({ nodeId: inlineTagNodeId }),
       AiOrigin,
       GhostText,
+      RewriteTarget,
       Typewriter
     )
   }

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Editor } from '@tiptap/core'
@@ -21,8 +21,12 @@ import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc
 import { resetActiveEditorStore, useActiveEditorStore } from './activeEditorStore'
 import { DocumentEditor } from './DocumentEditor'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
+import { resetRewriteStore, useRewriteStore } from './rewriteStore'
 import { resetSceneMetaStore } from './sceneMetaStore'
 import { resetVoiceStore } from '@renderer/features/ai/voiceStore'
+import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { defaultAiSettings } from '@shared/aiSettings'
+import type { AiRewriteResult } from '@shared/ipc/contract'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultFocusSettings } from '@shared/focus'
 import { resetBackgroundStore, useBackgroundStore } from '@renderer/features/focus/backgroundStore'
@@ -183,6 +187,8 @@ beforeEach(() => {
   resetSceneMetaStore()
   resetVoiceStore()
   resetActiveEditorStore()
+  resetRewriteStore()
+  resetAiSettingsStore()
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
 })
@@ -196,6 +202,91 @@ afterEach(() => {
   resetSceneMetaStore()
   resetVoiceStore()
   resetActiveEditorStore()
+  resetRewriteStore()
+  resetAiSettingsStore()
+})
+
+describe('DocumentEditor rewrite in my voice (F-14.10)', () => {
+  const PASSAGE = 'Into the dark woods they went, without a word.'
+
+  it('the toolbar button rewrites the selection, the panel shows the diff, and Accept replaces the text', async () => {
+    let resolveRewrite: ((result: AiRewriteResult) => void) | null = null
+    let sent: Input<'ai:rewrite'> | null = null
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
+    const editor = await mountReadyWithEditor({
+      'document:get': () => ({ id: 'sc-1', content: doc(PASSAGE) }),
+      'ai:rewrite': (input) =>
+        new Promise<AiRewriteResult>((resolve) => {
+          sent = input as Input<'ai:rewrite'>
+          resolveRewrite = resolve
+        }),
+      'proposal:settle': () => null
+    })
+    const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
+    const rewrite = within(toolbar).getByRole('button', { name: 'Rewrite in my voice' })
+    expect(rewrite).toBeDisabled()
+    expect(screen.queryByTestId('rewrite-panel')).not.toBeInTheDocument()
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: PASSAGE.length + 1 })
+    })
+    await waitFor(() => expect(rewrite).toBeEnabled())
+    await userEvent.click(rewrite)
+    await waitFor(() => expect(sent).not.toBeNull())
+    expect(sent).toMatchObject({ nodeId: 'sc-1', from: 1, to: PASSAGE.length + 1, text: PASSAGE })
+    const panel = screen.getByTestId('rewrite-panel')
+    expect(within(panel).getByTestId('rewrite-stop')).toBeInTheDocument()
+    expect(box().querySelector('.rewrite-target')?.textContent).toBe(PASSAGE)
+    act(() => {
+      resolveRewrite?.({
+        ok: true,
+        text: 'Into the dark woods they went, and nobody spoke.',
+        usage: { inputTokens: 300, outputTokens: 20 },
+        costUsd: 0.0002,
+        cached: false,
+        model: 'gpt-5.4-mini',
+        flagged: false,
+        violation: null,
+        proposalId: 'p1',
+        requestId: sent?.requestId ?? ''
+      })
+    })
+    await waitFor(() => expect(within(panel).getByTestId('rewrite-diff')).toBeInTheDocument())
+    expect(
+      Array.from(within(panel).getByTestId('rewrite-diff').querySelectorAll('ins'))
+        .map((el) => el.textContent)
+        .join('')
+    ).toContain('nobody')
+    await userEvent.click(within(panel).getByTestId('rewrite-accept'))
+    await waitFor(() => expect(screen.queryByTestId('rewrite-panel')).not.toBeInTheDocument())
+    expect(box()).toHaveTextContent('Into the dark woods they went, and nobody spoke.')
+    expect(box().querySelector('.ai-origin[data-proposal-id="p1"]')).not.toBeNull()
+    expect(useDocumentStore.getState().docs['sc-1']?.content).toMatchObject({
+      content: [{ content: [{ marks: [{ type: 'aiOrigin' }] }] }]
+    })
+    expect(useRewriteStore.getState().session).toBeNull()
+  })
+
+  it('unmounting the editor dismisses its pending rewrite', async () => {
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
+    let cancelled: string | null = null
+    const editor = await mountReadyWithEditor({
+      'document:get': () => ({ id: 'sc-1', content: doc(PASSAGE) }),
+      'ai:rewrite': () => new Promise<AiRewriteResult>(() => {}),
+      'ai:cancel': (input) => {
+        cancelled = (input as Input<'ai:cancel'>).requestId
+        return { cancelled: true }
+      }
+    })
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: PASSAGE.length + 1 })
+      useRewriteStore.getState().start('sc-1', editor)
+    })
+    await waitFor(() => expect(screen.getByTestId('rewrite-panel')).toBeInTheDocument())
+    const requestId = useRewriteStore.getState().session?.requestId ?? null
+    cleanup()
+    expect(useRewriteStore.getState().session).toBeNull()
+    await waitFor(() => expect(cancelled).toBe(requestId))
+  })
 })
 
 describe('DocumentEditor focus mode (F-6.1)', () => {

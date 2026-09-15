@@ -170,6 +170,9 @@ describe('buildExtensions', () => {
       extensions: buildExtensions({ sceneBreak: '~~~', onSave, inlineTagNodeId: 'sc-1' })
     })
     expect(tagged.schema.nodes.inlineTag).toBeDefined()
+    // The rewrite target (F-14.10) joins with the same document, never in notes.
+    expect(tagged.extensionManager.extensions.some((e) => e.name === 'rewriteTarget')).toBe(true)
+    expect(editor.extensionManager.extensions.some((e) => e.name === 'rewriteTarget')).toBe(false)
     tagged.destroy()
     for (const name of ['bold', 'italic', 'underline', 'strike', 'code']) {
       expect(marks[name], name).toBeDefined()

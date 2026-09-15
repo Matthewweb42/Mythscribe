@@ -45,31 +45,36 @@ export function defaultGhostTextSettings(): GhostTextSettings {
   return { enabled: false, idleMs: DEFAULT_GHOST_IDLE_MS }
 }
 
+/** Every toggle on: raising the dial is the one act that enables anything (F-14.4). */
+export function defaultFeatureToggles(): Record<AiFeatureId, boolean> {
+  return Object.fromEntries(AI_FEATURE_IDS.map((id) => [id, true])) as Record<
+    AiFeatureId,
+    boolean
+  >
+}
+
 export const AiSettings = z.object({
   dial: AiDial,
-  /** One toggle per feature; exhaustive, so a stored row from before a feature existed falls back to the defaults. */
-  features: z.record(AiFeatureId, z.boolean()),
+  /**
+   * One toggle per feature. A stored row from before a feature existed lacks its key, so the
+   * missing toggles are filled from the defaults (on) instead of the whole row falling back
+   * and resetting the dial (F-14.10 added `rewrite` after projects had settings rows).
+   */
+  features: z
+    .partialRecord(AiFeatureId, z.boolean())
+    .transform((stored) => ({ ...defaultFeatureToggles(), ...stored })),
   /** Defaulted, so a row stored before F-5.3 (no `ghostText` key) still parses instead of falling back wholesale. */
   ghostText: GhostTextSettings.default(defaultGhostTextSettings)
 })
 export type AiSettings = z.infer<typeof AiSettings>
-/** The shape before parsing: `ghostText` may be absent (a row stored before F-5.3). */
+/** The shape before parsing: `ghostText` may be absent (a row stored before F-5.3) and `features` may lack newer ids. */
 export type AiSettingsInput = z.input<typeof AiSettings>
 
 /** Installs at Off (F-14.4) with every toggle on, so raising the dial is the one act that enables anything. */
 export function defaultAiSettings(): AiSettings {
   return {
     dial: 0,
-    features: {
-      ghostText: true,
-      tags: true,
-      summary: true,
-      chat: true,
-      authorMode: true,
-      query: true,
-      critique: true,
-      embeddings: true
-    },
+    features: defaultFeatureToggles(),
     ghostText: defaultGhostTextSettings()
   }
 }
@@ -132,6 +137,15 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'and metadata (location, POV, timeline), and the voice profile (stylometric rules and up ' +
       'to 3 exemplar passages). An answer that breaks the voice profile is sent back once, with ' +
       'the same context plus the rule it broke, for a second try.',
+    minDial: 2
+  },
+  rewrite: {
+    label: 'Rewrite in my voice',
+    sends:
+      'The selected passage (up to 4,000 characters), up to 300 characters of manuscript text ' +
+      'before and after it, the scene metadata (location, POV, timeline), and the voice profile ' +
+      '(stylometric rules and up to 3 exemplar passages). An off-voice rewrite is sent back once ' +
+      'with the rule it broke; a regenerate carries your note.',
     minDial: 2
   },
   authorMode: {

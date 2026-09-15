@@ -148,8 +148,18 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
     open('novel')
     setRaw(JSON.stringify({ dial: 9, features: defaultAiSettings().features }), AI_SETTINGS_KEY)
     expect(getAiSettings(db)).toEqual(defaultAiSettings())
-    setRaw(JSON.stringify({ dial: 3, features: { ghostText: true } }), AI_SETTINGS_KEY)
+    setRaw(JSON.stringify({ dial: 3, features: { ghostText: 'on' } }), AI_SETTINGS_KEY)
     expect(getAiSettings(db)).toEqual(defaultAiSettings())
+  })
+
+  it('fills toggles missing from an older row with on instead of resetting the dial (F-14.10)', () => {
+    open('novel')
+    setRaw(JSON.stringify({ dial: 3, features: { ghostText: false } }), AI_SETTINGS_KEY)
+    expect(getAiSettings(db)).toEqual({
+      ...defaultAiSettings(),
+      dial: 3,
+      features: { ...defaultAiSettings().features, ghostText: false }
+    })
   })
 
   it('fills the VibeWrite defaults into a row stored before F-5.3 and keeps the rest', () => {

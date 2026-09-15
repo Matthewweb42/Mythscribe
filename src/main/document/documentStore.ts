@@ -17,8 +17,12 @@ export interface SaveResult {
   modified: string
 }
 
-/** The row behind `id` if it is a document; NOT_FOUND or VALIDATION otherwise. Shared by read and write. */
-function requireDocument(db: TreeDb, id: string): NodeRow {
+/**
+ * The row behind `id` if it is a document; NOT_FOUND or VALIDATION otherwise. Shared by read
+ * and write, and by the features that need the row to be a document without reading its
+ * content (F-14.10 rewrite).
+ */
+export function requireDocument(db: TreeDb, id: string): NodeRow {
   const row = getNode(db, id)
   if (!row) throw new AppError('NOT_FOUND', 'Document not found', { id })
   if (row.kind !== 'document') {
