@@ -13,6 +13,7 @@ import {
 import { AI_PROVIDER_IDS } from '../../shared/ai'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
 import { TAG_CATEGORIES } from '../../shared/tags'
+import { EXEMPLAR_KINDS } from '../../shared/voice'
 
 /**
  * Drizzle schema. Migrations are generated from this file with `npm run db:generate`
@@ -168,3 +169,26 @@ export const aiCache = sqliteTable('ai_cache', {
 })
 export type AiCacheRow = typeof aiCache.$inferSelect
 export type AiCacheInsert = typeof aiCache.$inferInsert
+
+/**
+ * An author-marked voice exemplar (F-14.1): a plain-text snapshot of a passage, the POV of the
+ * document it came from, and its kind (`classifyKind`). The node reference is cleared, not
+ * cascaded, when the node goes: the profile still needs the passage.
+ */
+export const voiceExemplar = sqliteTable(
+  'voice_exemplar',
+  {
+    id: text('id').primaryKey(),
+    /** The node the passage was marked in; null once that node is deleted. */
+    nodeId: text('node_id').references(() => node.id, { onDelete: 'set null' }),
+    /** Plain text, not Tiptap JSON; the contract bounds its length. */
+    text: text('text').notNull(),
+    /** The source document's `scene_meta.pov` at mark time, trimmed; null when empty. */
+    pov: text('pov'),
+    kind: text('kind', { enum: EXEMPLAR_KINDS }).notNull(),
+    created: text('created').notNull()
+  },
+  (t) => [index('voice_exemplar_created_idx').on(t.created)]
+)
+export type VoiceExemplarRow = typeof voiceExemplar.$inferSelect
+export type VoiceExemplarInsert = typeof voiceExemplar.$inferInsert

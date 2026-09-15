@@ -125,7 +125,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     label: 'Ghost text',
     sends:
       'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes ' +
-      'and metadata (location, POV, timeline).',
+      'and metadata (location, POV, timeline), and the voice profile (stylometric rules and up ' +
+      'to 3 exemplar passages). An answer that breaks the voice profile is sent back once, with ' +
+      'the same context plus the rule it broke, for a second try.',
     minDial: 2
   },
   authorMode: {

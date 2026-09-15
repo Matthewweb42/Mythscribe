@@ -20,9 +20,11 @@ import { Layout } from '../layout'
 import { MatterTemplateId } from '../matterTemplates'
 import { WritingPresets } from '../presets'
 import { SceneMeta } from '../sceneMeta'
+import { Stylometrics } from '../stylometry'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
 import { TagTemplateId } from '../tagTemplates'
 import { TiptapNode } from '../tiptap'
+import { VOICE_EXEMPLAR_TEXT_MAX, VOICE_EXEMPLAR_TEXT_MIN, VoiceExemplarKind } from '../voice'
 
 /**
  * The single IPC contract shared by main, preload, and renderer.
@@ -119,6 +121,9 @@ export type AiRecommendTagsResult = z.infer<typeof AiRecommendTagsResult>
  * What `ai:ghostText` answers (F-5.3): the continuation to show at the caret (`''` for "no
  * suggestion"), what it cost, and the caller's `requestId` echoed back so a stale answer is
  * dropped; or an expected AI failure as data with its next step, also carrying the id.
+ * `flagged` (F-14.7) is true when the text still fails the local fidelity check after one
+ * regenerate, with the first violation in `violation` for the warning badge; `usage` and
+ * `costUsd` then cover both calls.
  */
 export const AiGhostTextResult = z.discriminatedUnion('ok', [
   z.object({
@@ -128,6 +133,8 @@ export const AiGhostTextResult = z.discriminatedUnion('ok', [
     costUsd: z.number(),
     cached: z.boolean(),
     model: z.string(),
+    flagged: z.boolean(),
+    violation: z.string().nullable(),
     requestId: z.string()
   }),
   z.object({
@@ -139,6 +146,56 @@ export const AiGhostTextResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiGhostTextResult = z.infer<typeof AiGhostTextResult>
+
+/** An author-marked voice exemplar (F-14.1): a plain-text passage with the POV and kind it was filed under. */
+export const VoiceExemplar = z.object({
+  id: z.string(),
+  /** The node it was marked in; null once that node is gone. */
+  nodeId: z.string().nullable(),
+  text: z.string(),
+  pov: z.string().nullable(),
+  kind: VoiceExemplarKind,
+  created: z.string()
+})
+export type VoiceExemplar = z.infer<typeof VoiceExemplar>
+
+/**
+ * The voice profile (F-14.1) as `voice:profile` answers it: the plain-language rules a prompt
+ * carries, the stylometrics behind them, every exemplar (POV-matching first when a POV was
+ * asked for), the confidence, and the words of manuscript the profile was built from.
+ */
+export const VoiceProfile = z.object({
+  rules: z.array(z.string()),
+  stats: Stylometrics,
+  exemplars: z.array(VoiceExemplar),
+  confidence: z.number().min(0).max(1),
+  wordCount: z.number().int().nonnegative()
+})
+export type VoiceProfile = z.infer<typeof VoiceProfile>
+
+/** One manuscript document in the voice consistency report (F-14.7): `short` under 200 words (not scored), `drift` with violations, else `ok`. */
+export const VoiceConsistencyStatus = z.enum(['ok', 'drift', 'short'])
+export type VoiceConsistencyStatus = z.infer<typeof VoiceConsistencyStatus>
+
+/**
+ * The whole-manuscript voice consistency report (F-14.7) as `voice:consistencyReport` answers
+ * it: every manuscript document in tree order, scored locally against the profile's
+ * stylometrics, with each violation as a report line.
+ */
+export const VoiceConsistencyReport = z.object({
+  /** The words the profile was built from. */
+  profileWordCount: z.number().int().nonnegative(),
+  documents: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      wordCount: z.number().int().nonnegative(),
+      status: VoiceConsistencyStatus,
+      violations: z.array(z.string())
+    })
+  )
+})
+export type VoiceConsistencyReport = z.infer<typeof VoiceConsistencyReport>
 
 export const contract = {
   'app:info': {
@@ -389,6 +446,38 @@ export const contract = {
       requestId: z.string()
     }),
     output: AiGhostTextResult
+  },
+  /** Every voice exemplar of the open project (F-14.1), oldest first. */
+  'voice:listExemplars': { input: z.undefined(), output: z.array(VoiceExemplar) },
+  /**
+   * Marks a passage as a voice exemplar (F-14.1): the text is trimmed and bounded (outside the
+   * bounds is VALIDATION), the POV comes from the node's scene metadata, the kind from
+   * `classifyKind`. NOT_FOUND for an unknown node, VALIDATION for one that is not a document
+   * or once the project holds `VOICE_EXEMPLAR_MAX` exemplars.
+   */
+  'voice:addExemplar': {
+    input: z.object({
+      nodeId: z.string(),
+      text: z.string().trim().min(VOICE_EXEMPLAR_TEXT_MIN).max(VOICE_EXEMPLAR_TEXT_MAX)
+    }),
+    output: VoiceExemplar
+  },
+  /** Removes an exemplar (F-14.1); NOT_FOUND for an unknown id. */
+  'voice:removeExemplar': { input: z.object({ id: z.string() }), output: z.null() },
+  /**
+   * The voice profile (F-14.1), built locally from the manuscript and the exemplars and cached
+   * until something is saved. With `pov`, the stylometrics come from the documents whose scene
+   * metadata names that POV when they hold at least 2,000 words, else from the whole manuscript.
+   */
+  'voice:profile': { input: z.object({ pov: z.string().optional() }), output: VoiceProfile },
+  /**
+   * The voice consistency report (F-14.7): every manuscript document scored locally against the
+   * profile (built as `voice:profile` builds it, `pov` included), in tree order. On demand, never
+   * cached, no AI call.
+   */
+  'voice:consistencyReport': {
+    input: z.object({ pov: z.string().optional() }),
+    output: VoiceConsistencyReport
   },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },

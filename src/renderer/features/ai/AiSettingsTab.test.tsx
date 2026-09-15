@@ -10,12 +10,14 @@ import {
   type AiUsageSummary
 } from '@shared/ai'
 import { defaultAiSettings } from '@shared/aiSettings'
-import type { Channel, Input, Output } from '@shared/ipc/contract'
+import type { Channel, Input, Output, VoiceProfile } from '@shared/ipc/contract'
+import { computeStylometrics } from '@shared/stylometry'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, IpcRequestError, type IpcClient } from '@renderer/lib/ipc'
 import { AiSettingsTab } from './AiSettingsTab'
 import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
 import { resetAiStore, useAiStore } from './aiStore'
+import { resetVoiceStore } from './voiceStore'
 
 const NO_KEY: AiStatus = {
   provider: 'openai',
@@ -87,6 +89,8 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
             return defaultAiSettings() as Output<C>
           case 'aiSettings:set':
             return input as Output<C>
+          case 'voice:profile':
+            return EMPTY_PROFILE as Output<C>
           default:
             throw new Error(`unexpected ${channel}`)
         }
@@ -95,6 +99,15 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
     }
   }
   return fake
+}
+
+/** What `voice:profile` answers for a fresh project (F-14.1); the Voice section is its own test. */
+const EMPTY_PROFILE: VoiceProfile = {
+  rules: [],
+  stats: computeStylometrics(''),
+  exemplars: [],
+  confidence: 0,
+  wordCount: 0
 }
 
 let fake: Fake
@@ -120,6 +133,7 @@ async function open(initial: AiStatus = NO_KEY, usage: AiUsageSummary = NO_USAGE
 beforeEach(() => {
   resetAiStore()
   resetAiSettingsStore()
+  resetVoiceStore()
   useDialogStore.setState({ modals: [], toasts: [] })
 })
 afterEach(() => {
@@ -131,6 +145,7 @@ describe('AiSettingsTab (F-5.1)', () => {
     await open()
     expect(fake.calls).toEqual([
       { channel: 'aiSettings:get', input: undefined },
+      { channel: 'voice:profile', input: {} },
       { channel: 'ai:getStatus', input: undefined },
       { channel: 'ai:usageSummary', input: undefined }
     ])
@@ -151,7 +166,7 @@ describe('AiSettingsTab (F-5.1)', () => {
     expect(button('Save')).toBeEnabled()
     await userEvent.click(button('Save'))
     await waitFor(() => expect(hint()).toHaveTextContent('Key saved: sk-…abcd'))
-    expect(fake.calls[3]).toEqual({ channel: 'ai:setKey', input: { key: 'sk-test-1234abcd' } })
+    expect(fake.calls[4]).toEqual({ channel: 'ai:setKey', input: { key: 'sk-test-1234abcd' } })
     expect(keyField()).toHaveValue('')
     expect(button('Clear')).toBeEnabled()
     expect(button('Test connection')).toBeEnabled()
@@ -161,7 +176,7 @@ describe('AiSettingsTab (F-5.1)', () => {
     await open()
     await userEvent.type(keyField(), '  sk-test-1234abcd  {Enter}')
     await waitFor(() => expect(hint()).toHaveTextContent('Key saved: sk-…abcd'))
-    expect(fake.calls[3]).toEqual({ channel: 'ai:setKey', input: { key: 'sk-test-1234abcd' } })
+    expect(fake.calls[4]).toEqual({ channel: 'ai:setKey', input: { key: 'sk-test-1234abcd' } })
   })
 
   it('clears the key and goes back to no key', async () => {
@@ -169,7 +184,7 @@ describe('AiSettingsTab (F-5.1)', () => {
     expect(hint()).toHaveTextContent('Key saved: sk-…abcd')
     await userEvent.click(button('Clear'))
     await waitFor(() => expect(hint()).toHaveTextContent('No key'))
-    expect(fake.calls[3]).toEqual({ channel: 'ai:clearKey', input: undefined })
+    expect(fake.calls[4]).toEqual({ channel: 'ai:clearKey', input: undefined })
     expect(button('Test connection')).toBeDisabled()
   })
 

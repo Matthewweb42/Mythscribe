@@ -6,16 +6,20 @@ import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS, outputBudget, priceFor } from '@
 import { defaultAiSettings } from '@shared/aiSettings'
 import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import type { TiptapNodeT } from '@shared/tiptap'
+import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
 import { setAiSettings, setWritingPresets } from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
+import { addExemplar } from '../voice/exemplarStore'
+import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { generateGhostText, postProcessGhostText } from './ghostText'
 import {
   AiProviderError,
+  AiRateLimitError,
   type CompletionRequest,
   type CompletionResult,
   type Provider
@@ -66,7 +70,15 @@ async function failure(
   throw new Error('expected a failure')
 }
 
+/** One paragraph of third-person past narration with four dialogue tags; six of them trip the tense, person, and tag rules. */
+const VOICE_PARAGRAPH =
+  'Mara turned from the window and looked at the ridge, where the storm had settled for the ' +
+  'night. "We should go," she said. "Not yet," Tomas replied. He knew she was tired, and he was ' +
+  'tired too. They walked to the door and she pulled it open. "The river is rising," she said. ' +
+  '"Then we wait," he said.'
+
 beforeEach(() => {
+  resetVoiceProfileCache()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-ghost-'))
   session = createProject(projectFolderFor(tmp, 'Ghost'), 'Ghost', 'novel')
   db = session.connection.orm
@@ -110,7 +122,9 @@ describe('generateGhostText (F-5.3)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'ghostText.v1'
+      promptVersion: 'ghostText.v1',
+      flagged: false,
+      violation: null
     })
     expect(complete).toHaveBeenCalledTimes(1)
     const request = complete.mock.calls[0]![0]
@@ -170,6 +184,36 @@ describe('generateGhostText (F-5.3)', () => {
     expect(complete).toHaveBeenCalledTimes(4)
   })
 
+  it('folds the voice profile into the system turn after the rules and misses the cache when the profile version moves (F-14.1)', async () => {
+    saveDocument(db, scene, doc(Array(6).fill(VOICE_PARAGRAPH).join(' ')))
+    const first = addExemplar(db, scene, VOICE_PARAGRAPH)
+    await ask()
+    const system = complete.mock.calls[0]![0].messages[0]?.content ?? ''
+    const voiceAt = system.indexOf("Match the author's voice:")
+    expect(voiceAt).toBeGreaterThan(0)
+    expect(system).toContain('- Narration is in past tense.')
+    expect(system).toContain('- Narration is in third person.')
+    expect(system).toContain("- Dialogue tags are 'said' or 'asked' 75% of the time.")
+    expect(system).toContain(`Example in this voice:\n"""\n${first.text}\n"""`)
+    // The stable prefix order: rules, then the voice, then the preset's instruction.
+    expect(voiceAt).toBeGreaterThan(system.indexOf('ghost-text continuation feature'))
+    expect(voiceAt).toBeLessThan(system.indexOf(builtinParams('general').styleInstruction))
+    const hashBefore = ledger[0]!.contextHash
+    await ask()
+    expect(complete).toHaveBeenCalledTimes(1) // same version: the cache answered
+    bumpVoiceVersion()
+    await ask()
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(ledger[2]!.contextHash).not.toBe(hashBefore)
+  })
+
+  it('leaves the voice slot empty for a project with no rules and no exemplars', async () => {
+    await ask()
+    expect(complete.mock.calls[0]![0].messages[0]?.content).not.toContain(
+      "Match the author's voice"
+    )
+  })
+
   it('never asks for more than the ghost-text output budget', async () => {
     setWritingPresets(db, {
       active: 'custom',
@@ -208,6 +252,119 @@ describe('generateGhostText (F-5.3)', () => {
   it('answers an empty text for a blank or all-whitespace answer', async () => {
     answer('   \n ')
     expect((await ask()).text).toBe('')
+  })
+})
+
+describe('generateGhostText fidelity check (F-14.7)', () => {
+  /** Third person, past, no pronoun switch: passes every fragment check. */
+  const CLEAN =
+    'She turned back to the ridge and he followed, and they said nothing until the door had closed.'
+  /** Five present markers and five first-person pronouns: trips tense first, then person. */
+  const OFF_VOICE =
+    'I am lost and I know we are done, and it is late, and my hands are cold, and I am tired.'
+  const REGEN_CLAUSE =
+    "Your last attempt switches to present tense. Write a different continuation that keeps the manuscript's voice."
+
+  /** A manuscript strong enough for the tense and person rules. */
+  const strongProfile = (): void => {
+    saveDocument(db, scene, doc(Array(6).fill(VOICE_PARAGRAPH).join(' ')))
+  }
+  const answers = (...texts: string[]): void => {
+    for (const text of texts) {
+      complete.mockResolvedValueOnce({
+        text,
+        model: 'gpt-5.4-mini',
+        usage: { inputTokens: 120, outputTokens: 12 }
+      })
+    }
+  }
+
+  it('shows a clean answer after one call, unflagged', async () => {
+    strongProfile()
+    answers(CLEAN)
+    const result = await ask()
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ text: ` ${CLEAN}`, flagged: false, violation: null })
+    expect(ledger).toHaveLength(1)
+  })
+
+  it('regenerates an off-voice answer once with the violation named, and shows the clean second answer with both calls summed', async () => {
+    strongProfile()
+    answers(OFF_VOICE, CLEAN)
+    const result = await ask()
+    expect(complete).toHaveBeenCalledTimes(2)
+    const second = complete.mock.calls[1]![0]
+    expect(second.messages[0]?.content.endsWith(REGEN_CLAUSE)).toBe(true)
+    expect(second.messages[0]?.content).toContain("Match the author's voice:")
+    expect(second.messages[1]).toEqual(complete.mock.calls[0]![0].messages[1])
+    expect(second).toMatchObject({
+      tier: 'fast',
+      maxTokens: builtinParams('general').maxSuggestionTokens
+    })
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['ghostText.v1', 'ghostTextRegen.v1'])
+    expect(ledger[0]!.contextHash).not.toBe(ledger[1]!.contextHash)
+    expect(result).toEqual({
+      text: ` ${CLEAN}`,
+      usage: { inputTokens: 240, outputTokens: 24 },
+      costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd * 2,
+      cached: false,
+      model: 'gpt-5.4-mini',
+      promptVersion: 'ghostTextRegen.v1',
+      flagged: false,
+      violation: null
+    })
+  })
+
+  it('shows the second answer flagged with its violation when it is off-voice too', async () => {
+    strongProfile()
+    answers(OFF_VOICE, `"${OFF_VOICE}"  `)
+    const result = await ask()
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({
+      text: ` ${OFF_VOICE}`,
+      flagged: true,
+      violation: 'switches to present tense',
+      promptVersion: 'ghostTextRegen.v1',
+      usage: { inputTokens: 240, outputTokens: 24 }
+    })
+  })
+
+  it('falls back to the first answer, flagged, when the regenerate fails, and never throws', async () => {
+    strongProfile()
+    answers(OFF_VOICE)
+    complete.mockRejectedValueOnce(new AiRateLimitError('Slow down.'))
+    const result = await ask()
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(result).toEqual({
+      text: ` ${OFF_VOICE}`,
+      usage: { inputTokens: 120, outputTokens: 12 },
+      costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd,
+      cached: false,
+      model: 'gpt-5.4-mini',
+      promptVersion: 'ghostText.v1',
+      flagged: true,
+      violation: 'switches to present tense'
+    })
+    expect(ledger).toHaveLength(1) // a failed call is not logged
+  })
+
+  it('keeps the first answer, flagged, when the regenerate comes back empty', async () => {
+    strongProfile()
+    answers(OFF_VOICE, '""')
+    const result = await ask()
+    expect(result).toMatchObject({
+      text: ` ${OFF_VOICE}`,
+      flagged: true,
+      promptVersion: 'ghostText.v1'
+    })
+    expect(result.usage).toEqual({ inputTokens: 240, outputTokens: 24 })
+  })
+
+  it('never regenerates for a project with no rules and no exemplars, whatever the answer', async () => {
+    answers(OFF_VOICE)
+    const result = await ask()
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ text: ` ${OFF_VOICE}`, flagged: false, violation: null })
   })
 })
 

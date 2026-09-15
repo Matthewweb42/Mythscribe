@@ -43,6 +43,10 @@ import {
   renameNode,
   toTreeNode
 } from '../tree/treeStore'
+import { addExemplar, listExemplars, removeExemplar } from '../voice/exemplarStore'
+import { buildConsistencyReport } from '../voice/consistency'
+import { buildVoiceProfile } from '../voice/profile'
+import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { AppError } from './errors'
 import { emit, register, type EmitTarget } from './registry'
 
@@ -127,9 +131,13 @@ export function registerHandlers({
 
   register('document:get', ({ id }) => getDocumentContent(manager.require().connection.orm, id))
 
-  register('document:save', ({ id, content }) =>
-    saveDocument(manager.require().connection.orm, id, content)
-  )
+  // F-14.1: every save moves the voice profile's version (a cheap integer; checking whether the
+  // document is under the manuscript would cost a lookup on the hot path for nothing).
+  register('document:save', ({ id, content }) => {
+    const saved = saveDocument(manager.require().connection.orm, id, content)
+    bumpVoiceVersion()
+    return saved
+  })
 
   register('notes:get', ({ id }) => getNotes(manager.require().connection.orm, id))
 
@@ -278,18 +286,39 @@ export function registerHandlers({
       try {
         const db = manager.require().connection.orm
         const deps = buildAiRequestDeps({ db, providers: ai, appState })
-        const { text, usage, costUsd, cached, model } = await generateGhostText(db, deps, {
-          nodeId,
-          before,
-          after
-        })
-        return { ok: true, text, usage, costUsd, cached, model, requestId }
+        const { text, usage, costUsd, cached, model, flagged, violation } = await generateGhostText(
+          db,
+          deps,
+          { nodeId, before, after }
+        )
+        return { ok: true, text, usage, costUsd, cached, model, flagged, violation, requestId }
       } catch (err) {
         if (err instanceof AiProviderError)
           return { ...aiFailure(err.code, err.message), requestId }
         throw err
       }
     }
+  )
+
+  // F-14.1: the exemplars and the locally built profile; nothing here calls the provider.
+  register('voice:listExemplars', () => listExemplars(manager.require().connection.orm))
+
+  register('voice:addExemplar', ({ nodeId, text }) =>
+    addExemplar(manager.require().connection.orm, nodeId, text)
+  )
+
+  register('voice:removeExemplar', ({ id }) => {
+    removeExemplar(manager.require().connection.orm, id)
+    return null
+  })
+
+  register('voice:profile', ({ pov }) =>
+    buildVoiceProfile(manager.require().connection.orm, { pov })
+  )
+
+  // F-14.7: the whole-manuscript report, local and on demand.
+  register('voice:consistencyReport', ({ pov }) =>
+    buildConsistencyReport(manager.require().connection.orm, { pov })
   )
 
   register('window:close', () => {
@@ -304,6 +333,8 @@ export function registerHandlers({
   })
 
   manager.onChange((info) => {
+    // Open, create, and close all land here: a profile built for one project never answers for another.
+    resetVoiceProfileCache()
     if (info) {
       try {
         appState.update((s) => ({ ...s, recents: touchRecent(s.recents, toRecentEntry(info)) }))

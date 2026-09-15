@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Editor } from '@tiptap/core'
 import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
 import { toTagName } from '@shared/tags'
@@ -20,6 +20,7 @@ import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc
 import { DocumentEditor } from './DocumentEditor'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { resetSceneMetaStore } from './sceneMetaStore'
+import { resetVoiceStore } from '@renderer/features/ai/voiceStore'
 import { resetEditorSettingsStore } from './settingsStore'
 
 type Handler = (input: unknown) => unknown
@@ -174,8 +175,19 @@ beforeEach(() => {
   resetDocumentTagStore()
   resetLayoutStore()
   resetSceneMetaStore()
+  resetVoiceStore()
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
+})
+afterEach(() => {
+  resetDocumentStore()
+  resetEditorSettingsStore()
+  resetPendingSaves()
+  resetTagStore()
+  resetDocumentTagStore()
+  resetLayoutStore()
+  resetSceneMetaStore()
+  resetVoiceStore()
 })
 
 describe('DocumentEditor inline tags (F-4.6)', () => {

@@ -8,9 +8,9 @@ import type { AiMessage } from '../providers/types'
  * its own golden test, never an edit here, so every ledger row's `promptVersion` stays true.
  *
  * Order (CLAUDE.md, token efficiency rule 3): the system turn is the stable prefix, in the
- * order the later features fill it in: the rules, then the voice profile (F-14.1; empty today,
- * the slot sits where it will go so nothing reorders later), then the preset's style
- * instruction and its new-elements rule (F-5.2). The user turn carries the task-specific
+ * order the features fill it in: the rules, then the voice profile block (F-14.1: rules and
+ * exemplars, null for a project with neither), then the preset's style instruction and its
+ * new-elements rule (F-5.2). The user turn carries the task-specific
  * context, cheapest first: the scene's metadata and notes, then the caret window, then the
  * one-line instruction.
  */
@@ -40,8 +40,9 @@ export interface BuildGhostTextPromptInput {
   /** Location / POV / timeline when any field is non-empty, else null. */
   meta: { location: string; pov: string; timeline: string } | null
   /**
-   * The voice profile block (F-14.1). Null until that feature exists; placed system-side,
-   * right after the rules, so the stable prefix is ready for it without reordering later.
+   * The voice profile block (F-14.1, `voiceBlock`), or null when the project has neither
+   * rules nor exemplars yet. System-side, right after the rules, so it is part of the stable
+   * prefix provider caching applies to.
    */
   voice: string | null
   preset: PresetParams

@@ -68,10 +68,12 @@ describe('AI_DATA_SHARING', () => {
     expect(Object.keys(AI_DATA_SHARING).sort()).toEqual([...AI_FEATURE_IDS].sort())
   })
 
-  it('names everything ghost text sends: the caret window, the notes, and the metadata (F-5.3)', () => {
+  it('names everything ghost text sends: the caret window, the notes, the metadata (F-5.3), the voice profile (F-14.1), and the one regenerate (F-14.7)', () => {
     expect(AI_DATA_SHARING.ghostText.sends).toBe(
       'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes ' +
-        'and metadata (location, POV, timeline).'
+        'and metadata (location, POV, timeline), and the voice profile (stylometric rules and up ' +
+        'to 3 exemplar passages). An answer that breaks the voice profile is sent back once, with ' +
+        'the same context plus the rule it broke, for a second try.'
     )
   })
 
