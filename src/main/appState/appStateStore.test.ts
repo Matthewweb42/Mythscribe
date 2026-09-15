@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiModels } from '@shared/ai'
-import { defaultLayout } from '@shared/layout'
+import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultAiUsageState } from '../ai/dailyCap'
 import { AppStateStore, EMPTY_APP_STATE } from './appStateStore'
 
@@ -60,7 +60,8 @@ describe('AppStateStore', () => {
       ...layout,
       sidebar: { ...layout.sidebar, tab: 'manuscript' },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     })
   })
 
@@ -75,7 +76,8 @@ describe('AppStateStore', () => {
     expect(new AppStateStore(file).get().layout).toEqual({
       ...layout,
       tagBar: { open: false, height: 240, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     })
   })
 
@@ -93,7 +95,8 @@ describe('AppStateStore', () => {
       sidebar: { open: false, size: 0.3, tab: 'manuscript' as const },
       notes: { open: true, size: 0.4 },
       tagBar: { open: false, height: 240, split: 0.55 },
-      assistant: { open: true, size: 0.25 }
+      assistant: { open: true, size: 0.25 },
+      floating: defaultFloating()
     }
     expect(store.update((s) => ({ ...s, layout })).layout).toEqual(layout)
     expect(new AppStateStore(file).get().layout).toEqual(layout)

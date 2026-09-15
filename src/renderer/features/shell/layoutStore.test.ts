@@ -1,13 +1,15 @@
 import { renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
-import { defaultLayout, type Layout } from '@shared/layout'
+import { defaultFloating, defaultLayout, type Layout } from '@shared/layout'
 import { flushPendingSaves, resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import {
   LAYOUT_SAVE_DELAY_MS,
+  moveFloatingBy,
   resetLayoutStore,
+  resizeFloatingBy,
   resizePanelBy,
   resizeTagBarBy,
   resizeTagBarSplitBy,
@@ -53,7 +55,8 @@ const stored: Layout = {
   sidebar: { open: true, size: 0.3, tab: 'manuscript' },
   notes: { open: true, size: 0.2 },
   tagBar: { open: true, height: 150, split: 0.4 },
-  assistant: { open: false, size: 0.3 }
+  assistant: { open: false, size: 0.3 },
+  floating: defaultFloating()
 }
 let sets: PendingSet[]
 let gets: (() => void)[]
@@ -129,7 +132,8 @@ describe('useLayoutStore', () => {
       sidebar: { open: true, size: 0.26, tab: 'manuscript' },
       notes: { open: false, size: 0.2 },
       tagBar: { open: true, height: 150, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     })
   })
 
@@ -195,7 +199,8 @@ describe('useLayoutStore', () => {
         sidebar: { open: true, size: 0.35, tab: 'manuscript' },
         notes: { open: false, size: 0.5 },
         tagBar: { open: true, height: 120, split: 0.4 },
-        assistant: { open: false, size: 0.3 }
+        assistant: { open: false, size: 0.3 },
+        floating: defaultFloating()
       }
     })
     store().toggle('notes')
@@ -210,7 +215,8 @@ describe('useLayoutStore', () => {
         sidebar: { open: true, size: 0.35, tab: 'manuscript' },
         notes: { open: true, size: 0.35 },
         tagBar: { open: true, height: 120, split: 0.4 },
-        assistant: { open: false, size: 0.3 }
+        assistant: { open: false, size: 0.3 },
+        floating: defaultFloating()
       }
     })
     store().toggle('assistant')
@@ -385,6 +391,67 @@ describe('tag bar split (F-4.5)', () => {
     expect(store().layout.tagBar.split).toBe(0.7)
     resizeTagBarSplitBy(100, 0) // not laid out: ignored
     expect(store().layout.tagBar.split).toBe(0.7)
+  })
+})
+
+describe('floating windows (F-6.6)', () => {
+  it('setFloatingRect applies a rect at once, clamped into the window, and writes once after the debounce', async () => {
+    await load() // window stubbed at 1000 × 800
+    store().setFloatingRect('notes', { x: 100, y: 60, width: 300, height: 240 })
+    expect(store().layout.floating.notes).toEqual({ x: 100, y: 60, width: 300, height: 240 })
+    // Off the right and bottom edges: moved back in, size kept.
+    store().setFloatingRect('notes', { x: 900, y: 700, width: 300, height: 240 })
+    expect(store().layout.floating.notes).toEqual({ x: 700, y: 560, width: 300, height: 240 })
+    // Under the minimum size: grown to it.
+    store().setFloatingRect('assistant', { x: 0, y: 0, width: 10, height: 10 })
+    expect(store().layout.floating.assistant).toEqual({ x: 0, y: 0, width: 280, height: 200 })
+    expect(sets).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(1)
+    expect(sets[0]?.value.floating).toEqual({
+      notes: { x: 700, y: 560, width: 300, height: 240 },
+      assistant: { x: 0, y: 0, width: 280, height: 200 }
+    })
+    expect(sets[0]?.value.sidebar).toEqual(stored.sidebar)
+  })
+
+  it('setFloatingRect ignores a rect that clamps to the current one without scheduling a write', async () => {
+    await load()
+    const fits = { x: 100, y: 60, width: 300, height: 240 }
+    useLayoutStore.setState({
+      layout: { ...store().layout, floating: { ...store().layout.floating, notes: fits } }
+    })
+    store().setFloatingRect('notes', { ...fits })
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(0)
+    store().setFloatingRect('notes', { x: 0, y: 0, width: 280, height: 200 })
+    store().setFloatingRect('notes', { x: -50, y: -50, width: 100, height: 100 }) // clamps to the same
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(1)
+  })
+
+  it('a window resize re-clamp is a no-op until the rect no longer fits', async () => {
+    await load()
+    store().setFloatingRect('notes', { x: 600, y: 400, width: 300, height: 240 })
+    vi.stubGlobal('innerWidth', 800)
+    vi.stubGlobal('innerHeight', 500)
+    store().setFloatingRect('notes', store().layout.floating.notes)
+    expect(store().layout.floating.notes).toEqual({ x: 500, y: 260, width: 300, height: 240 })
+  })
+
+  it('moveFloatingBy and resizeFloatingBy add px deltas to the rect, clamped', async () => {
+    await load()
+    store().setFloatingRect('assistant', { x: 100, y: 100, width: 300, height: 240 })
+    moveFloatingBy('assistant', 40, -30)
+    expect(store().layout.floating.assistant).toEqual({ x: 140, y: 70, width: 300, height: 240 })
+    moveFloatingBy('assistant', -500, 0)
+    expect(store().layout.floating.assistant.x).toBe(0)
+    resizeFloatingBy('assistant', 50, 60)
+    expect(store().layout.floating.assistant).toEqual({ x: 0, y: 70, width: 350, height: 300 })
+    resizeFloatingBy('assistant', -500, -500)
+    expect(store().layout.floating.assistant).toEqual({ x: 0, y: 70, width: 280, height: 200 })
+    resizeFloatingBy('assistant', 5000, 5000)
+    expect(store().layout.floating.assistant).toEqual({ x: 0, y: 0, width: 1000, height: 800 })
   })
 })
 

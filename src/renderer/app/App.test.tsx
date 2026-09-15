@@ -14,7 +14,7 @@ import type {
   ProjectInfo,
   RecentProject
 } from '@shared/ipc/contract'
-import { defaultLayout } from '@shared/layout'
+import { defaultFloating, defaultLayout } from '@shared/layout'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
@@ -398,7 +398,8 @@ describe('App', () => {
         sidebar: { open: true, size: 0.3, tab: 'manuscript' },
         notes: { open: false, size: 0.25 },
         tagBar: { open: true, height: 120, split: 0.4 },
-        assistant: { open: false, size: 0.3 }
+        assistant: { open: false, size: 0.3 },
+        floating: defaultFloating()
       }
     })
     render(<App />)
@@ -447,7 +448,8 @@ describe('App', () => {
         },
         notes: { open: false, size: 0.25 },
         tagBar: { open: true, height: 120, split: 0.4 },
-        assistant: { open: false, size: 0.3 }
+        assistant: { open: false, size: 0.3 },
+        floating: defaultFloating()
       })
     } finally {
       vi.useRealTimers()
@@ -989,8 +991,20 @@ describe('App', () => {
       expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
     })
 
-    it("shows the notes and assistant panels in focus mode only on the bar's flags, closed on exit, layout untouched (F-6.5)", async () => {
-      install({ 'project:current': info, 'tree:list': treeFixture })
+    it("floats the notes and assistant windows in focus mode on the bar's flags, never docked, closed on exit, layout flags untouched (F-6.5, F-6.6)", async () => {
+      install({
+        'project:current': info,
+        'tree:list': treeFixture,
+        'notes:get': {
+          id: 'sc-1',
+          notes: {
+            type: 'doc',
+            content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'Get them to the coast' }] }
+            ]
+          } satisfies TiptapNodeT
+        }
+      })
       render(<App />)
       const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
       await userEvent.click(within(scene).getByText('Scene 1'))
@@ -1000,31 +1014,123 @@ describe('App', () => {
 
       await userEvent.keyboard('{F11}')
       const bar = await screen.findByRole('toolbar', { name: 'Focus controls' })
-      expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument()
-      expect(screen.queryByTestId('assistant-panel')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
       const notes = within(bar).getByRole('button', { name: 'Notes' })
       const assistant = within(bar).getByRole('button', { name: 'AI assistant' })
       await userEvent.click(notes)
       expect(notes).toHaveAttribute('aria-pressed', 'true')
-      expect(await screen.findByTestId('notes-panel')).toBeInTheDocument()
+      const notesWindow = await screen.findByRole('dialog', { name: 'Notes' })
+      expect(notesWindow).toHaveAttribute('data-testid', 'floating-notes')
+      // The same notes as the docked panel: the selected node's, through the notes store.
+      const notesBox = await within(notesWindow).findByRole('textbox', { name: 'Notes' })
+      await waitFor(() => expect(notesBox).toHaveTextContent('Get them to the coast'))
+      expect(Object.keys(useNotesStore.getState().docs)).toEqual(['sc-1'])
+      // Placed from the layout's floating rect, clamped into the 1000 px wide window.
+      const rect = useLayoutStore.getState().layout.floating.notes
+      expect(rect).toEqual({ ...defaultFloating().notes, x: 1000 - defaultFloating().notes.width })
+      expect(notesWindow.style.left).toBe(`${rect.x}px`)
+      expect(notesWindow.style.width).toBe(`${rect.width}px`)
       await userEvent.click(assistant)
       expect(assistant).toHaveAttribute('aria-pressed', 'true')
-      expect(await screen.findByTestId('assistant-panel')).toBeInTheDocument()
-      // The persisted layout did not move: these are the focus store's session flags.
+      const assistantWindow = await screen.findByRole('dialog', { name: 'Assistant' })
+      expect(assistantWindow).toHaveAttribute('data-testid', 'floating-assistant')
+      expect(within(assistantWindow).getByRole('textbox', { name: 'Message' })).toBeInTheDocument()
+      expect(
+        within(assistantWindow).getByRole('button', { name: 'New conversation' })
+      ).toBeInTheDocument()
+      // Never the docked panels; the persisted open flags did not move.
+      expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('assistant-panel')).not.toBeInTheDocument()
+      expect(asides()).toEqual([])
       expect(useLayoutStore.getState().layout.notes.open).toBe(false)
       expect(useLayoutStore.getState().layout.assistant.open).toBe(false)
-      await userEvent.click(notes)
-      expect(notes).toHaveAttribute('aria-pressed', 'false')
-      await waitFor(() => expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument())
-      expect(screen.getByTestId('assistant-panel')).toBeInTheDocument()
 
-      // Leaving focus mode closes the focus-mode panels; the normal screen follows the layout (both closed).
+      // The window's own Close clears the bar's flag; the bar's button closes the other.
+      await userEvent.click(within(notesWindow).getByRole('button', { name: 'Close Notes' }))
+      expect(notes).toHaveAttribute('aria-pressed', 'false')
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog', { name: 'Notes' })).not.toBeInTheDocument()
+      )
+      expect(screen.getByRole('dialog', { name: 'Assistant' })).toBeInTheDocument()
+      await userEvent.click(assistant)
+      expect(assistant).toHaveAttribute('aria-pressed', 'false')
+      expect(screen.queryByRole('dialog', { name: 'Assistant' })).not.toBeInTheDocument()
+
+      // Escape inside a window closes the window and keeps focus mode.
+      await userEvent.click(notes)
+      const reopened = await screen.findByRole('dialog', { name: 'Notes' })
+      const box = await within(reopened).findByRole('textbox', { name: 'Notes' })
+      box.focus()
+      fireEvent.keyDown(box, { key: 'Escape', keyCode: 27 })
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog', { name: 'Notes' })).not.toBeInTheDocument()
+      )
+      expect(useFocusStore.getState().active).toBe(true)
+      expect(notes).toHaveAttribute('aria-pressed', 'false')
+
+      // Leaving focus mode closes the focus-mode windows; the normal screen follows the layout (both closed).
+      await userEvent.click(notes)
+      await screen.findByRole('dialog', { name: 'Notes' })
       await userEvent.click(within(bar).getByRole('button', { name: 'Exit focus mode' }))
       await waitFor(() => expect(useFocusStore.getState().active).toBe(false))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(screen.queryByTestId('assistant-panel')).not.toBeInTheDocument()
       expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument()
       expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
+    })
+
+    it('a dragged floating window persists its geometry to the layout, and it is back on reopen (F-6.6)', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      try {
+        const invoke = install({ 'project:current': info, 'tree:list': treeFixture })
+        render(<App />)
+        const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+        await userEvent.click(within(scene).getByText('Scene 1'))
+        await screen.findByRole('toolbar', { name: 'Formatting' })
+        await userEvent.keyboard('{F11}')
+        const bar = await screen.findByRole('toolbar', { name: 'Focus controls' })
+        const notes = within(bar).getByRole('button', { name: 'Notes' })
+        await userEvent.click(notes)
+        const notesWindow = await screen.findByRole('dialog', { name: 'Notes' })
+        const before = useLayoutStore.getState().layout.floating.notes
+        const titleBar = within(notesWindow).getByRole('group', { name: 'Notes window' })
+        fireEvent.pointerDown(titleBar, { clientX: 700, clientY: 60, button: 0, pointerId: 1 })
+        fireEvent.pointerMove(titleBar, { clientX: 580, clientY: 100, pointerId: 1 })
+        fireEvent.pointerUp(titleBar, { clientX: 580, clientY: 100, pointerId: 1 })
+        const moved = { ...before, x: before.x - 120, y: before.y + 40 }
+        expect(useLayoutStore.getState().layout.floating.notes).toEqual(moved)
+        expect(notesWindow.style.left).toBe(`${moved.x}px`)
+        expect(notesWindow.style.top).toBe(`${moved.y}px`)
+        const grip = within(notesWindow).getByTestId('floating-notes-grip')
+        fireEvent.pointerDown(grip, { clientX: 900, clientY: 400, button: 0, pointerId: 2 })
+        fireEvent.pointerMove(grip, { clientX: 860, clientY: 430, pointerId: 2 })
+        fireEvent.pointerUp(grip, { clientX: 860, clientY: 430, pointerId: 2 })
+        const resized = { ...moved, width: moved.width - 40, height: moved.height + 30 }
+        expect(useLayoutStore.getState().layout.floating.notes).toEqual(resized)
+        await act(() => vi.advanceTimersByTimeAsync(200))
+        const writes = invoke.mock.calls.filter(([c]) => c === 'layout:set')
+        expect(writes).toHaveLength(1)
+        expect(writes[0]?.[1]).toEqual({
+          ...defaultLayout(),
+          floating: { ...defaultFloating(), notes: resized }
+        })
+        // Closed and reopened: the same geometry.
+        await userEvent.click(notes)
+        await waitFor(() =>
+          expect(screen.queryByRole('dialog', { name: 'Notes' })).not.toBeInTheDocument()
+        )
+        await userEvent.click(notes)
+        const again = await screen.findByRole('dialog', { name: 'Notes' })
+        expect(again.style.left).toBe(`${resized.x}px`)
+        expect(again.style.top).toBe(`${resized.y}px`)
+        expect(again.style.width).toBe(`${resized.width}px`)
+        expect(again.style.height).toBe(`${resized.height}px`)
+        await act(() => vi.advanceTimersByTimeAsync(200))
+        expect(invoke.mock.calls.filter(([c]) => c === 'layout:set')).toHaveLength(1)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 

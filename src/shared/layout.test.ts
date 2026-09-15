@@ -8,12 +8,18 @@ import {
   TAG_BAR_SPLIT_LIMITS,
   clampForEditorMin,
   clampPanel,
+  clampRect,
   clampTagBarHeight,
   clampTagBarSplit,
+  defaultFloating,
   defaultLayout,
   editorFraction,
   fitsEditorMin,
-  normalizeLayout
+  normalizeLayout,
+  rectEquals,
+  FLOATING_MIN_SIZE,
+  FLOATING_PANELS,
+  type Rect
 } from './layout'
 
 describe('defaultLayout', () => {
@@ -43,6 +49,20 @@ describe('defaultLayout', () => {
   it('every panel at its floor still leaves the editor its minimum', () => {
     const floors = LAYOUT_PANELS.reduce((sum, p) => sum + LAYOUT_LIMITS[p][0], 0)
     expect(floors + LAYOUT_LIMITS.editorMin).toBeLessThanOrEqual(1)
+  })
+
+  it('floats the notes at the right third and the assistant below it, each a fresh copy (F-6.6)', () => {
+    expect(FLOATING_PANELS).toEqual(['notes', 'assistant'])
+    const floating = defaultFloating()
+    expect(defaultLayout().floating).toEqual(floating)
+    expect(floating.notes).toEqual({ x: 860, y: 48, width: 380, height: 320 })
+    expect(floating.assistant).toEqual({ x: 860, y: 392, width: 380, height: 380 })
+    // Both fit a 1280 × 800 window, one under the other.
+    expect(floating.notes.x + floating.notes.width).toBeLessThanOrEqual(1280)
+    expect(floating.notes.y + floating.notes.height).toBeLessThanOrEqual(floating.assistant.y)
+    expect(floating.assistant.y + floating.assistant.height).toBeLessThanOrEqual(800)
+    expect(defaultFloating().notes).not.toBe(defaultFloating().notes)
+    expect(defaultLayout().floating).not.toBe(defaultLayout().floating)
   })
 })
 
@@ -94,6 +114,33 @@ describe('Layout schema', () => {
     expect(Layout.safeParse({ ...base, tagBar: bar(0.71) }).success).toBe(false)
     const { split: _dropped, ...withoutSplit } = bar(0.4)
     expect(Layout.safeParse({ ...base, tagBar: withoutSplit }).success).toBe(false)
+  })
+
+  it('refuses a floating window under the minimum size or off the top-left, and requires the field; StoredLayout defaults a pre-F-6.6 layout (F-6.6)', () => {
+    const base = defaultLayout()
+    const rect = (patch: Partial<Rect>): Rect => ({ ...base.floating.notes, ...patch })
+    const withNotes = (notes: Rect): unknown => ({
+      ...base,
+      floating: { ...base.floating, notes }
+    })
+    expect(FLOATING_MIN_SIZE).toEqual({ width: 280, height: 200 })
+    expect(Layout.safeParse(withNotes(rect({ width: 279 }))).success).toBe(false)
+    expect(Layout.safeParse(withNotes(rect({ width: 280 }))).success).toBe(true)
+    expect(Layout.safeParse(withNotes(rect({ height: 199 }))).success).toBe(false)
+    expect(Layout.safeParse(withNotes(rect({ height: 200 }))).success).toBe(true)
+    expect(Layout.safeParse(withNotes(rect({ x: -1 }))).success).toBe(false)
+    expect(Layout.safeParse(withNotes(rect({ y: -1 }))).success).toBe(false)
+    expect(Layout.safeParse(withNotes(rect({ x: 0, y: 0 }))).success).toBe(true)
+    // No ceiling: a rect from a larger display parses and is clamped at render time.
+    expect(Layout.safeParse(withNotes(rect({ x: 5000, width: 4000 }))).success).toBe(true)
+    expect(Layout.safeParse({ ...base, floating: { notes: base.floating.notes } }).success).toBe(
+      false
+    )
+    const { floating: _dropped, ...withoutFloating } = base
+    expect(Layout.safeParse(withoutFloating).success).toBe(false)
+    expect(StoredLayout.parse(withoutFloating)).toEqual(base)
+    const stored = { notes: rect({ x: 10, y: 20 }), assistant: rect({ width: 300, height: 250 }) }
+    expect(StoredLayout.parse({ ...withoutFloating, floating: stored }).floating).toEqual(stored)
   })
 
   it('StoredLayout defaults a pre-F-4.4 layout to the default tag bar', () => {
@@ -162,7 +209,8 @@ describe('clampForEditorMin', () => {
       sidebar: { open: false, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.25 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     }
     expect(clampForEditorMin(notesOnly, 'notes', 0.9)).toBe(0.5)
   })
@@ -172,7 +220,8 @@ describe('clampForEditorMin', () => {
       sidebar: { open: true, size: 0.3, tab: 'manuscript' },
       notes: { open: true, size: 0.3 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     }
     // Growing the sidebar: 1 - 0.3 (editor) - 0.3 (notes) leaves 0.4, capped by its own max.
     expect(clampForEditorMin(layout, 'sidebar', 0.34)).toBe(0.34)
@@ -184,7 +233,8 @@ describe('clampForEditorMin', () => {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.5 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     }
     expect(clampForEditorMin(wide, 'notes', 0.5)).toBeCloseTo(0.35)
     expect(clampForEditorMin(wide, 'sidebar', 0.35)).toBeCloseTo(0.2)
@@ -195,7 +245,8 @@ describe('clampForEditorMin', () => {
       sidebar: { open: true, size: 0.3, tab: 'manuscript' },
       notes: { open: true, size: 0.3 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     }
     expect(clampForEditorMin(layout, 'sidebar', 0.1)).toBe(0.15)
     expect(clampForEditorMin(layout, 'notes', 0.2)).toBe(0.2)
@@ -207,14 +258,16 @@ describe('clampForEditorMin', () => {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.5 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     }
     clampForEditorMin(layout, 'notes', 0.5)
     expect(layout).toEqual({
       sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.5 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     })
   })
 })
@@ -224,7 +277,8 @@ describe('editor minimum across panels', () => {
     sidebar: { open: true, size: 0.35, tab: 'manuscript' },
     notes: { open: true, size: 0.5 },
     tagBar: { open: true, height: 120, split: 0.4 },
-    assistant: { open: false, size: 0.3 }
+    assistant: { open: false, size: 0.3 },
+    floating: defaultFloating()
   }
 
   it('fitsEditorMin counts only open panels', () => {
@@ -246,7 +300,8 @@ describe('editor minimum across panels', () => {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.15 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     }
     const still = normalizeLayout({
       ...tight,
@@ -260,7 +315,8 @@ describe('editor minimum across panels', () => {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.35 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: true, size: 0.4 }
+      assistant: { open: true, size: 0.4 },
+      floating: defaultFloating()
     }
     const fixed = normalizeLayout(three)
     // The assistant lands on its floor, then the notes give the rest; the sidebar keeps its size.
@@ -273,5 +329,69 @@ describe('editor minimum across panels', () => {
     const closed = normalizeLayout(input)
     expect(closed).toBe(input)
     expect(closed.notes.size).toBe(0.35)
+  })
+})
+
+describe('clampRect (F-6.6)', () => {
+  const viewport = { width: 1000, height: 800 }
+
+  it('passes a rect inside the viewport through unchanged', () => {
+    const rect: Rect = { x: 100, y: 50, width: 300, height: 250 }
+    expect(clampRect(rect, viewport)).toEqual(rect)
+  })
+
+  it('moves an overflowing rect back in, keeping its size', () => {
+    expect(clampRect({ x: 900, y: 700, width: 300, height: 250 }, viewport)).toEqual({
+      x: 700,
+      y: 550,
+      width: 300,
+      height: 250
+    })
+    expect(clampRect({ x: -40, y: -10, width: 300, height: 250 }, viewport)).toEqual({
+      x: 0,
+      y: 0,
+      width: 300,
+      height: 250
+    })
+  })
+
+  it('shrinks a rect larger than the viewport to the viewport, at the origin', () => {
+    expect(clampRect({ x: 100, y: 100, width: 1200, height: 900 }, viewport)).toEqual({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 800
+    })
+  })
+
+  it('never goes under the minimum size, even on a viewport smaller than it', () => {
+    expect(clampRect({ x: 10, y: 10, width: 100, height: 50 }, viewport)).toEqual({
+      x: 10,
+      y: 10,
+      width: 280,
+      height: 200
+    })
+    expect(
+      clampRect({ x: 10, y: 10, width: 300, height: 250 }, { width: 200, height: 100 })
+    ).toEqual({ x: 0, y: 0, width: 280, height: 200 })
+    expect(
+      clampRect({ x: 10, y: 10, width: 100, height: 50 }, viewport, { width: 50, height: 40 })
+    ).toEqual({ x: 10, y: 10, width: 100, height: 50 })
+  })
+
+  it('rounds to whole px', () => {
+    expect(clampRect({ x: 10.4, y: 20.6, width: 300.5, height: 250.2 }, viewport)).toEqual({
+      x: 10,
+      y: 21,
+      width: 301,
+      height: 250
+    })
+  })
+
+  it('rectEquals compares the four values', () => {
+    const a: Rect = { x: 1, y: 2, width: 300, height: 250 }
+    expect(rectEquals(a, { ...a })).toBe(true)
+    expect(rectEquals(a, { ...a, x: 2 })).toBe(false)
+    expect(rectEquals(a, { ...a, height: 251 })).toBe(false)
   })
 })

@@ -74,13 +74,12 @@ export function AssistantToggleButton(): React.JSX.Element {
  * answers in the chat (streamed); Agent mode places the answer in the active editor as ghost
  * text and the chat shows a notice. Every assistant turn shows what it cost. The open state
  * and width live in the layout store (F-7.2); the conversations in `useAssistantStore`.
- * Renders nothing while closed. F-6.5: `open` overrides the layout's flag (focus mode keeps
- * its own session flag in the focus store, so the persisted layout is never touched); the
- * width stays the layout's.
+ * Renders nothing while closed. Not mounted in focus mode, where `AssistantBody` floats
+ * instead (F-6.6).
  */
-export function AssistantPanel({ open }: { open?: boolean } = {}): React.JSX.Element | null {
+export function AssistantPanel(): React.JSX.Element | null {
   const assistant = useLayoutStore((s) => s.layout.assistant)
-  if (!(open ?? assistant.open)) return null
+  if (!assistant.open) return null
   return (
     <aside
       aria-label="Assistant"
@@ -97,31 +96,51 @@ export function AssistantPanel({ open }: { open?: boolean } = {}): React.JSX.Ele
         onChange={(deltaPx) => resizePanelBy('assistant', deltaPx)}
       />
       <PanelHeader />
-      <ConversationTabs />
-      <MessageLog />
-      <Composer />
+      <AssistantBody />
     </aside>
   )
 }
 
+/**
+ * The conversation tabs, the open conversation's turns, and the composer: everything under
+ * the heading. The docked panel and the floating window in focus mode (F-6.6) share it, and
+ * so the same store, so a conversation started in one continues in the other.
+ */
+export function AssistantBody(): React.JSX.Element {
+  return (
+    <>
+      <ConversationTabs />
+      <MessageLog />
+      <Composer />
+    </>
+  )
+}
+
 function PanelHeader(): React.JSX.Element {
+  return (
+    <div className="flex shrink-0 items-center gap-1 px-3 pt-3 pb-1">
+      <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Assistant</h2>
+      <NewConversationButton />
+    </div>
+  )
+}
+
+/** Opens a fresh conversation; disabled until the conversations load and at the cap. The floating window (F-6.6) puts it in its title bar. */
+export function NewConversationButton(): React.JSX.Element {
   const loaded = useAssistantStore((s) => s.conversations !== null)
   const count = useAssistantStore((s) => s.conversations?.items.length ?? 0)
   const newConversation = useAssistantStore((s) => s.newConversation)
   return (
-    <div className="flex shrink-0 items-center gap-1 px-3 pt-3 pb-1">
-      <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Assistant</h2>
-      <button
-        type="button"
-        aria-label="New conversation"
-        title="New conversation"
-        disabled={!loaded || count >= CHAT_MAX_CONVERSATIONS}
-        onClick={newConversation}
-        className={ICON_BUTTON}
-      >
-        <Plus size={14} aria-hidden="true" />
-      </button>
-    </div>
+    <button
+      type="button"
+      aria-label="New conversation"
+      title="New conversation"
+      disabled={!loaded || count >= CHAT_MAX_CONVERSATIONS}
+      onClick={newConversation}
+      className={ICON_BUTTON}
+    >
+      <Plus size={14} aria-hidden="true" />
+    </button>
   )
 }
 

@@ -18,7 +18,7 @@ import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
 import { defaultConversations, type Conversations } from '@shared/chat'
 import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import { defaultEditorSettings } from '@shared/editorSettings'
-import { defaultLayout } from '@shared/layout'
+import { defaultFloating, defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
@@ -1270,7 +1270,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
       sidebar: { open: false, size: 0.3, tab: 'manuscript' as const },
       notes: { open: true, size: 0.4 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     }
     expect(await invoke('layout:set', next)).toEqual(next)
     expect(await invoke('layout:get', undefined)).toEqual(next)
@@ -1284,7 +1285,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
       sidebar: { open: true, size: 0.2, tab: 'manuscript' as const },
       notes: { open: false, size: 0.25 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     }
     await invoke('layout:set', stored)
     const raw = handlerFor('layout:set')
@@ -1308,7 +1310,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
       sidebar: { open: true, size: 0.3, tab: 'manuscript' as const },
       notes: { open: true, size: 0.3 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     }
     await invoke('layout:set', next)
     const list = await invoke('recents:list', undefined)
@@ -1324,7 +1327,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
       notes: { open: true, size: 0.5 },
       tagBar: { open: true, height: 120, split: 0.4 },
-      assistant: { open: false, size: 0.3 }
+      assistant: { open: false, size: 0.3 },
+      floating: defaultFloating()
     }
     const raw = handlerFor('layout:set')
     const result = await raw(undefined, bothMaxed)
@@ -1347,7 +1351,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
           sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
           notes: { open: true, size: 0.5 },
           tagBar: { open: true, height: 120, split: 0.4 },
-          assistant: { open: false, size: 0.3 }
+          assistant: { open: false, size: 0.3 },
+          floating: defaultFloating()
         }
       })
     )

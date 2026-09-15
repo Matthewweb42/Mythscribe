@@ -1,12 +1,16 @@
 import { create } from 'zustand'
 import {
   clampForEditorMin,
+  clampRect,
   clampTagBarHeight,
   clampTagBarSplit,
   defaultLayout,
   normalizeLayout,
+  rectEquals,
+  type FloatingPanel,
   type Layout,
-  type LayoutPanel
+  type LayoutPanel,
+  type Rect
 } from '@shared/layout'
 import type { SidebarTabId } from '@shared/sidebarTabs'
 import { registerPendingSave } from '@renderer/features/project/pendingSaves'
@@ -55,6 +59,12 @@ interface LayoutState {
    * schedules the write; a no-op when the clamp lands on the current value.
    */
   setTagBarSplit: (split: number) => void
+  /**
+   * Sets a floating window's geometry in px (F-6.6), clamped into the current window with
+   * `clampRect`, then schedules the write; a no-op when the clamp lands on the current rect
+   * (so the window can re-clamp itself on every resize without writing).
+   */
+  setFloatingRect: (panel: FloatingPanel, rect: Rect) => void
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -159,6 +169,13 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     const clamped = clampTagBarSplit(split)
     if (clamped === base.tagBar.split) return
     schedule({ ...base, tagBar: { ...base.tagBar, split: clamped } }, base)
+  },
+
+  setFloatingRect(panel, rect) {
+    const base = get().layout
+    const clamped = clampRect(rect, { width: window.innerWidth, height: window.innerHeight })
+    if (rectEquals(clamped, base.floating[panel])) return
+    schedule({ ...base, floating: { ...base.floating, [panel]: clamped } }, base)
   }
 }))
 
@@ -192,6 +209,20 @@ export function resizeTagBarSplitBy(deltaPx: number, barWidthPx: number): void {
   if (barWidthPx <= 0) return
   const state = useLayoutStore.getState()
   state.setTagBarSplit(state.layout.tagBar.split + deltaPx / barWidthPx)
+}
+
+/** Applies a drag or key step on a floating window's title bar (F-6.6): the px deltas move it. */
+export function moveFloatingBy(panel: FloatingPanel, dxPx: number, dyPx: number): void {
+  const state = useLayoutStore.getState()
+  const rect = state.layout.floating[panel]
+  state.setFloatingRect(panel, { ...rect, x: rect.x + dxPx, y: rect.y + dyPx })
+}
+
+/** Applies a drag on a floating window's grip or a Shift+arrow step (F-6.6): the px deltas grow it. */
+export function resizeFloatingBy(panel: FloatingPanel, dwPx: number, dhPx: number): void {
+  const state = useLayoutStore.getState()
+  const rect = state.layout.floating[panel]
+  state.setFloatingRect(panel, { ...rect, width: rect.width + dwPx, height: rect.height + dhPx })
 }
 
 /** Drops the timer, the revert baseline, and the registration, then restores the defaults. For tests only. */

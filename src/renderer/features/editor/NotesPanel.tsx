@@ -31,12 +31,11 @@ export function NotesToggleButton(): React.JSX.Element {
  * Its open state and width live in the layout store (F-7.2), as a fraction of the window
  * rendered in `vw`, so it follows a window resize on its own and is back after a restart.
  * Renders nothing while closed, so the editor gets the whole pane and no notes are loaded.
- * F-6.5: `open` overrides the layout's flag (focus mode keeps its own session flag in the focus
- * store, so the persisted layout is never touched); the width stays the layout's.
+ * Not mounted in focus mode, where `NotesBody` floats instead (F-6.6).
  */
-export function NotesPanel({ id, open }: { id: string; open?: boolean }): React.JSX.Element | null {
+export function NotesPanel({ id }: { id: string }): React.JSX.Element | null {
   const notes = useLayoutStore((s) => s.layout.notes)
-  if (!(open ?? notes.open)) return null
+  if (!notes.open) return null
   return (
     <div
       data-testid="notes-panel"
@@ -52,9 +51,20 @@ export function NotesPanel({ id, open }: { id: string; open?: boolean }): React.
         onChange={(deltaPx) => resizePanelBy('notes', deltaPx)}
       />
       <h2 className="m-0 shrink-0 px-4 pt-4 pb-2 text-sm font-medium text-fg-muted">Notes</h2>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        <NotesEditor id={id} />
-      </div>
+      <NotesBody id={id} />
+    </div>
+  )
+}
+
+/**
+ * The scrolling notes editor for one node: the docked panel's content under its heading, and
+ * the floating window's whole content in focus mode (F-6.6), so both edit the same notes
+ * through the same store.
+ */
+export function NotesBody({ id }: { id: string }): React.JSX.Element {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+      <NotesEditor id={id} />
     </div>
   )
 }

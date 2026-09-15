@@ -34,3 +34,15 @@ if (typeof Range.prototype.getClientRects !== 'function') {
 if (typeof document.elementFromPoint !== 'function') {
   document.elementFromPoint = () => null
 }
+
+// Pointer capture (F-6.6 floating windows): jsdom dispatches pointer events but does not
+// implement capture, so the calls are no-ops here; the tests fire the moves at the element.
+if (typeof Element.prototype.setPointerCapture !== 'function') {
+  Element.prototype.setPointerCapture = () => undefined
+}
+if (typeof Element.prototype.releasePointerCapture !== 'function') {
+  Element.prototype.releasePointerCapture = () => undefined
+}
+if (typeof Element.prototype.hasPointerCapture !== 'function') {
+  Element.prototype.hasPointerCapture = () => false
+}

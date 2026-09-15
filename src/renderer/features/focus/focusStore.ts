@@ -1,10 +1,11 @@
 import { create } from 'zustand'
+import type { FloatingPanel } from '@shared/layout'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 
-/** The side panels the control bar (F-6.5) can show in focus mode. */
-export type FocusPanel = 'notes' | 'assistant'
+/** The side panels the control bar (F-6.5) can show in focus mode; they float there (F-6.6). */
+export type FocusPanel = FloatingPanel
 
 /** Which side panels are shown in focus mode; session state, both closed on entry. */
 export type FocusPanels = Record<FocusPanel, boolean>

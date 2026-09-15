@@ -53,6 +53,48 @@ const DEFAULT_ASSISTANT = { open: false, size: 0.3 } as const
 
 const assistantSchema = panelSchema(LAYOUT_LIMITS.assistant)
 
+/** The panels focus mode shows as floating windows (F-6.6). */
+export const FLOATING_PANELS = ['notes', 'assistant'] as const
+export type FloatingPanel = (typeof FLOATING_PANELS)[number]
+
+/** The smallest a floating window may be, in px: room for the notes editor or the composer. */
+export const FLOATING_MIN_SIZE = { width: 280, height: 200 } as const
+
+/** How far one arrow key moves a floating window (Shift: resizes it), in px. */
+export const FLOATING_KEY_STEP_PX = 16
+
+/**
+ * A floating window's geometry (F-6.6), in px from the viewport's top-left corner. Stored in
+ * px rather than as fractions: a window keeps its size across displays and is clamped into
+ * the viewport at render time (`clampRect`), not by this schema, which only holds the floor.
+ */
+export const Rect = z.object({
+  x: z.number().min(0),
+  y: z.number().min(0),
+  width: z.number().min(FLOATING_MIN_SIZE.width),
+  height: z.number().min(FLOATING_MIN_SIZE.height)
+})
+export type Rect = z.infer<typeof Rect>
+
+/** A viewport's size in px; `clampRect` keeps windows inside it. */
+export interface Viewport {
+  width: number
+  height: number
+}
+
+const floatingSchema = z.object({ notes: Rect, assistant: Rect })
+
+/** The notes window at the right third of a 1280 × 800 window and the assistant below it. */
+const DEFAULT_FLOATING: Record<FloatingPanel, Rect> = {
+  notes: { x: 860, y: 48, width: 380, height: 320 },
+  assistant: { x: 860, y: 392, width: 380, height: 380 }
+}
+
+/** A fresh copy of the default floating-window geometry (F-6.6). */
+export function defaultFloating(): Record<FloatingPanel, Rect> {
+  return { notes: { ...DEFAULT_FLOATING.notes }, assistant: { ...DEFAULT_FLOATING.assistant } }
+}
+
 export const Layout = z.object({
   // F-7.3: the sidebar's active tab.
   sidebar: sidebarSchema.extend({ tab: SidebarTabId }),
@@ -60,7 +102,9 @@ export const Layout = z.object({
   // F-4.4: the document tag bar above the editor; a height, so it never joins LAYOUT_PANELS.
   tagBar: tagBarSchema,
   // F-5.4: the AI assistant panel on the right, beside the notes.
-  assistant: assistantSchema
+  assistant: assistantSchema,
+  // F-6.6: where the notes and assistant windows float in focus mode.
+  floating: floatingSchema
 })
 export type Layout = z.infer<typeof Layout>
 
@@ -77,21 +121,51 @@ export const StoredLayout = z.object({
     .extend({ split: tagBarSchema.shape.split.default(DEFAULT_TAG_BAR.split) })
     .default({ ...DEFAULT_TAG_BAR }),
   // A layout written before F-5.4 has no assistant panel and parses to the closed default.
-  assistant: assistantSchema.default({ ...DEFAULT_ASSISTANT })
+  assistant: assistantSchema.default({ ...DEFAULT_ASSISTANT }),
+  // A layout written before F-6.6 has no floating windows and parses to the default geometry.
+  floating: floatingSchema.default(defaultFloating())
 })
 
 /**
  * A fresh install: the Manuscript tab open at just under a quarter, the notes closed at a
  * quarter, the tag bar open at 120 px with the metadata pane at 40 % of it, the assistant
- * closed at just under a third.
+ * closed at just under a third, the floating windows at their default geometry.
  */
 export function defaultLayout(): Layout {
   return {
     sidebar: { open: true, size: 0.22, tab: 'manuscript' },
     notes: { open: false, size: 0.25 },
     tagBar: { ...DEFAULT_TAG_BAR },
-    assistant: { ...DEFAULT_ASSISTANT }
+    assistant: { ...DEFAULT_ASSISTANT },
+    floating: defaultFloating()
   }
+}
+
+/**
+ * `rect` kept inside `viewport` (F-6.6): the size is preserved and the window moved back in
+ * when it overflows; only when it is larger than the viewport itself does it shrink, never
+ * under `minSize` (a viewport smaller than that still gets a window of `minSize` at the
+ * origin). Values are rounded to whole px, so the stored geometry stays tidy.
+ */
+export function clampRect(
+  rect: Rect,
+  viewport: Viewport,
+  minSize: { width: number; height: number } = FLOATING_MIN_SIZE
+): Rect {
+  const width = Math.round(
+    Math.min(Math.max(minSize.width, viewport.width), Math.max(minSize.width, rect.width))
+  )
+  const height = Math.round(
+    Math.min(Math.max(minSize.height, viewport.height), Math.max(minSize.height, rect.height))
+  )
+  const x = Math.round(Math.min(Math.max(0, viewport.width - width), Math.max(0, rect.x)))
+  const y = Math.round(Math.min(Math.max(0, viewport.height - height), Math.max(0, rect.y)))
+  return { x, y, width, height }
+}
+
+/** True when two rects have the same geometry. */
+export function rectEquals(a: Rect, b: Rect): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
 }
 
 /** The tag bar height clamped to `[TAG_BAR_MIN_HEIGHT, 60 % of the given window height]` (F-4.4). */

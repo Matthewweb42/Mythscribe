@@ -1444,8 +1444,8 @@ test('create, close, reopen a project on disk', async () => {
   // F-6.5: the control bar. It shows on entry (the intro, 2 s, checked in the unit tests: the
   // fullscreen transition can outlast it here) and hides once the pointer is away from the
   // bottom edge; near the edge it comes back. Its word count is the document's live count;
-  // Notes opens the notes panel in focus mode (the persisted layout never moves) and closes it
-  // again; moving away hides the bar after the delay; Exit leaves focus mode.
+  // Notes opens the notes window in focus mode (the persisted open flag never moves) and closes
+  // it again; moving away hides the bar after the delay; Exit leaves focus mode.
   const controlBar = page.getByTestId('focus-control-bar')
   await expect(controlBar).toHaveCount(1)
   const screenSize = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
@@ -1461,9 +1461,61 @@ test('create, close, reopen a project on disk', async () => {
   const focusNotes = controlBar.getByRole('button', { name: 'Notes' })
   await focusNotes.click()
   await expect(focusNotes).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByTestId('notes-panel')).toBeVisible()
-  await focusNotes.click()
+  // F-6.6: the notes float as a window (never the docked panel), placed from the layout's
+  // rect, clamped into the screen. Dragging the title bar 120 px right moves it, dragging the
+  // grip resizes it; both persist through the layout after the debounce. Its Close clears the
+  // bar's flag, and reopening brings the same geometry back.
+  const notesWindow = page.getByRole('dialog', { name: 'Notes' })
+  await expect(notesWindow).toBeVisible()
   await expect(page.getByTestId('notes-panel')).toHaveCount(0)
+  await expect(notesWindow.getByRole('textbox', { name: 'Notes' })).toBeVisible()
+  const notesRectBefore = (await getLayout()).floating.notes
+  const windowBox = async (): Promise<{ x: number; y: number; width: number; height: number }> => {
+    const box = await notesWindow.boundingBox()
+    if (!box) throw new Error('the notes window has no box')
+    return box
+  }
+  expect(await windowBox()).toEqual(notesRectBefore)
+  expect(notesRectBefore.x + notesRectBefore.width).toBeLessThanOrEqual(screenSize.w)
+  const titleBar = notesWindow.getByRole('group', { name: 'Notes window' })
+  const titleBox = await titleBar.boundingBox()
+  if (!titleBox) throw new Error('the notes title bar has no box')
+  await page.mouse.move(titleBox.x + titleBox.width / 2, titleBox.y + titleBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(titleBox.x + titleBox.width / 2 + 120, titleBox.y + titleBox.height / 2, {
+    steps: 6
+  })
+  await page.mouse.up()
+  const movedX = Math.min(notesRectBefore.x + 120, screenSize.w - notesRectBefore.width)
+  const moved = { ...notesRectBefore, x: movedX }
+  await expect.poll(windowBox).toEqual(moved)
+  await expect
+    .poll(async () => (await getLayout()).floating.notes, { timeout: 3000 })
+    .toEqual(moved)
+  const gripBox = await notesWindow.getByTestId('floating-notes-grip').boundingBox()
+  if (!gripBox) throw new Error('the notes grip has no box')
+  await page.mouse.move(gripBox.x + gripBox.width / 2, gripBox.y + gripBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(gripBox.x + gripBox.width / 2 - 40, gripBox.y + gripBox.height / 2 + 30, {
+    steps: 6
+  })
+  await page.mouse.up()
+  const resized = { ...moved, width: moved.width - 40, height: moved.height + 30 }
+  await expect.poll(windowBox).toEqual(resized)
+  await expect
+    .poll(async () => (await getLayout()).floating.notes, { timeout: 3000 })
+    .toEqual(resized)
+  await notesWindow.getByRole('button', { name: 'Close Notes' }).click()
+  await expect(notesWindow).toHaveCount(0)
+  await page.mouse.move(screenSize.w / 2, screenSize.h - 8)
+  await expect(controlBar).toHaveAttribute('data-visible', 'true')
+  await expect(focusNotes).toHaveAttribute('aria-pressed', 'false')
+  await focusNotes.click()
+  await expect(notesWindow).toBeVisible()
+  expect(await windowBox()).toEqual(resized)
+  expect((await getLayout()).floating.notes).toEqual(resized)
+  await focusNotes.click()
+  await expect(notesWindow).toHaveCount(0)
   await page.mouse.move(screenSize.w / 2, screenSize.h / 2)
   await expect(controlBar).toHaveAttribute('data-visible', 'false', { timeout: 10_000 })
   await page.mouse.move(screenSize.w / 2, screenSize.h - 8)
