@@ -206,6 +206,7 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 - [ ] **F-15.7 Signed builds and auto-update** — Code-signed Windows and notarized macOS builds; stable and beta channels; release notes in-app.
 - [ ] **F-15.8 Opt-in diagnostics** — Crash reports and anonymous usage counts, off by default, content-scrubbed, explained in plain language.
 - [ ] **F-15.9 Supporter license** — One-time purchase unlocking cosmetic extras for BYOK users.
+- [ ] **F-15.10 Website at mythscribe.app** — Static site on Cloudflare Pages (domain registered 2026-09-14, DNS on Cloudflare): landing page with the pitch and screenshots, download buttons per platform (wired to the F-15.7 release feed), privacy and terms pages (required by Lemon Squeezy and the AI data-sharing copy), and a `docs/` page for the AI dial. Apex and `www` on Pages; `api.mythscribe.app` reserved for the F-15.4 proxy; SPF/DMARC set before any mail is sent from the domain. No analytics beyond Cloudflare's own.
 
 ---
 
@@ -263,7 +264,7 @@ Parity first, then voice and control, then the differentiator, then launch, then
 | **M2 Organize and assist** | v0 parity with BYOK AI: tags, presets, ghost text, chat, focus mode, references, menus | F-4.1–4.7, F-5.1–5.5, F-5.10, F-5.11, F-5.12, F-5.14, F-15.1, F-6.1–6.7, F-7.1, F-7.4, F-7.7, F-3.9, F-2.7 |
 | **M2.5 Voice and control** | The AI keeps the author's voice, serves their intent, and never acts without consent | F-14.1–14.10 |
 | **M3 Story Intelligence** | Cited answers about the manuscript | F-5.6, F-5.7, F-5.8, F-5.9, F-5.13, F-4.10 |
-| **— LAUNCH v1 —** | Everything above ships; everything below is post-launch | |
+| **— LAUNCH v1 —** | Everything above ships; everything below is post-launch | F-15.10 (site live before the first public build) |
 | **M-Cloud** | Paid managed AI | F-15.2–15.9 |
 | **M4 Entities, search, goals** | Structured story bible; find anything; motivation | F-9.1–9.6, F-10.1–10.5, F-4.9, F-4.11, F-4.12, F-3.10, F-3.12 |
 | **M5 Safety and output** | Never lose words; get the book out | F-8.3–8.6, F-12.1, F-12.2, F-7.9 |
