@@ -48,6 +48,12 @@ const REGEN_NOTE = 'Too generic; the scene is about the crossing.'
  * each so the classifier resolves both; tense is checked first, so it is the one named), for
  * both the first try and the regenerate, so the badge shows.
  */
+/** F-5.4: the fake server streams this Plan answer in two deltas and answers Agent requests with two paragraphs. */
+const CHAT_ANSWER = 'Mara is on the ridge to watch the storm come in before the others wake.'
+const AGENT_FIRST = 'The rain came sideways over the ridge.'
+const AGENT_SECOND = 'Mara pulled her hood down and waited for the others.'
+/** The opening of the Agent-mode rules in `chat.v1`; the fake server tells Agent requests apart by it. */
+const AGENT_SENTINEL = 'You are drafting inside a novel-writing app'
 const OFF_VOICE_SENTINEL = 'She counted the lanterns on the far bank.'
 const OFF_VOICE_CONTINUATION =
   'I am running now, and I know we are lost, and my hands are cold, and I am tired.'
@@ -107,10 +113,45 @@ function startFakeOpenAi(): Promise<string> {
       req.on('end', () => {
         const request = JSON.parse(body) as {
           response_format?: { type?: string }
+          stream?: boolean
           messages: { role: string; content: string }[]
         }
         openAiChatBodies.push({ messages: request.messages })
         const json = request.response_format?.type === 'json_object'
+        const agent = request.messages.some(
+          (m) => m.role === 'system' && m.content.startsWith(AGENT_SENTINEL)
+        )
+        // F-5.4: a Plan turn streams (server-sent events in the shape the SDK parses: content
+        // deltas, one usage-only chunk, then [DONE]); an Agent turn is a plain completion.
+        if (request.stream) {
+          res.statusCode = 200
+          res.setHeader('Content-Type', 'text/event-stream')
+          const chunk = (payload: object): string =>
+            `data: ${JSON.stringify({ id: 'chatcmpl-fake', object: 'chat.completion.chunk', created: 0, model: 'gpt-5.4-mini', ...payload })}\n\n`
+          const cut = CHAT_ANSWER.indexOf(' ridge') + 6
+          res.write(
+            chunk({
+              choices: [
+                { index: 0, delta: { content: CHAT_ANSWER.slice(0, cut) }, finish_reason: null }
+              ]
+            })
+          )
+          res.write(
+            chunk({
+              choices: [
+                { index: 0, delta: { content: CHAT_ANSWER.slice(cut) }, finish_reason: 'stop' }
+              ]
+            })
+          )
+          res.write(
+            chunk({
+              choices: [],
+              usage: { prompt_tokens: 500, completion_tokens: 16, total_tokens: 516 }
+            })
+          )
+          res.end('data: [DONE]\n\n')
+          return
+        }
         const regen = request.messages.some(
           (m) => m.role === 'system' && m.content.includes(TAGS_REGEN_SENTINEL)
         )
@@ -133,9 +174,11 @@ function startFakeOpenAi(): Promise<string> {
                     ? regen
                       ? '{"tags":["antagonist","protagonist"]}'
                       : '{"tags":["dark-forest","protagonist"]}'
-                    : offVoice
-                      ? OFF_VOICE_CONTINUATION
-                      : GHOST_CONTINUATION
+                    : agent
+                      ? `${AGENT_FIRST}\n\n${AGENT_SECOND}`
+                      : offVoice
+                        ? OFF_VOICE_CONTINUATION
+                        : GHOST_CONTINUATION
                 },
                 finish_reason: 'stop'
               }
@@ -1276,11 +1319,6 @@ test('create, close, reopen a project on disk', async () => {
     new RegExp(`\\| Scene 1 \\| ${GHOST_CONTINUATION.length + 2} \\| [\\d,]+ \\| [1-9]\\d*% \\|`)
   )
   expect(openAiRequests).toHaveLength(requestsBeforeReport)
-  // Back to Off and no key, as the steps above left them.
-  await dial.getByRole('radio', { name: 'Off' }).click()
-  await expect.poll(async () => (await aiSettings()).dial).toBe(0)
-  await settingsDialog.getByRole('button', { name: 'Clear' }).click()
-  await expect(keyHint).toHaveText('No key')
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
 
@@ -1307,6 +1345,76 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('status-ai')).toHaveCount(0)
   await expect(editor).toContainText(GHOST_CONTINUATION.slice(25))
 
+  // F-5.4: the assistant panel. Ctrl+K opens it (the dial is still at Suggest with the key
+  // saved). A Plan question streams its answer into the chat with the cost line, and the
+  // request carries the scene's text; the tab takes the question as its title. Agent mode
+  // places a two-paragraph answer in the editor as ghost text with a notice in the chat; Tab
+  // accepts it as AI-origin paragraphs. A second conversation is cleared after confirming.
+  const chatRequestsBefore = openAiChatBodies.length
+  await page.keyboard.press('Control+k')
+  const assistant = page.getByTestId('assistant-panel')
+  await expect(assistant).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Assistant' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  const messageBox = assistant.getByRole('textbox', { name: 'Message' })
+  const turns = assistant.locator('[data-testid="chat-turn"]')
+  await messageBox.fill('Why is Mara on the ridge?')
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(2)
+  await expect(turns.nth(0)).toHaveAttribute('data-role', 'user')
+  await expect(turns.nth(1)).toHaveAttribute('data-role', 'assistant')
+  await expect(turns.nth(1)).toContainText(CHAT_ANSWER)
+  await expect(turns.nth(1).getByTestId('chat-turn-cost')).toContainText('gpt-5.4-mini')
+  expect(openAiChatBodies).toHaveLength(chatRequestsBefore + 1)
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe('Why is Mara on the ridge?')
+  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain('Mara waited on the ridge')
+  await expect(assistant.getByRole('tab', { name: 'Why is Mara on the ridge?' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  await assistant.getByRole('radio', { name: 'Agent' }).click()
+  await assistant.getByRole('combobox', { name: 'Paragraphs' }).selectOption('2')
+  await messageBox.fill('Continue the scene.')
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(4)
+  await expect(turns.nth(3)).toContainText('Placed in the editor. Tab accepts, Escape dismisses.')
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe(
+    'Write 2 paragraphs. Continue the scene.'
+  )
+  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain("Match the author's voice:")
+  const agentGhost = editor.locator('.ghost-text')
+  await expect(agentGhost).toContainText(AGENT_FIRST)
+  await expect(agentGhost).toContainText(AGENT_SECOND)
+  await page.keyboard.press('Tab')
+  await expect(agentGhost).toHaveCount(0)
+  await expect(editor).toContainText(AGENT_SECOND)
+  await expect(editor.locator('.ai-origin[data-proposal-id]')).toHaveCount(2)
+  await expect(page.getByTestId('status-ai')).toHaveText(/^[1-9]\d*% AI$/)
+  await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
+  await expect(turns).toHaveCount(0)
+  await messageBox.fill('A second question.')
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(2)
+  await assistant.getByRole('button', { name: 'Clear conversation' }).click()
+  await page
+    .getByRole('dialog', { name: 'Clear conversation' })
+    .getByRole('button', { name: 'Clear' })
+    .click()
+  await expect(turns).toHaveCount(0)
+  await expect(assistant.getByRole('tab')).toHaveCount(2)
+
+  // Back to Off and no key, as the steps above left them.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await dial.getByRole('radio', { name: 'Off' }).click()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(0)
+  await settingsDialog.getByRole('button', { name: 'Clear' }).click()
+  await expect(keyHint).toHaveText('No key')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+
   // F-1.4: choosing something that is not a project explains what to pick instead.
   await closeProject()
   const stray = path.join(tmp, 'not-a-project.txt')
@@ -1320,6 +1428,9 @@ test('create, close, reopen a project on disk', async () => {
   // closes the project and the window; with no windows left the app quits.
   await recents.getByRole('button', { name: 'Smoke Novel', exact: true }).click()
   await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  // F-5.4: the conversations came back with the project (the panel stayed open in the layout).
+  await expect(assistant).toBeVisible()
+  await expect(assistant.getByRole('tab', { name: 'Why is Mara on the ridge?' })).toBeVisible()
   const closed = app.waitForEvent('close')
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
   await closed

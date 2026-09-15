@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FEATURE_BUDGETS, inputBudget, priceFor } from '@shared/ai'
+import { estimateTokens, FEATURE_BUDGETS, inputBudget, priceFor } from '@shared/ai'
 import { AppStateStore } from '../appState/appStateStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { getCached, type CacheEntry, type CachedResponse } from './cacheStore'
@@ -11,12 +11,14 @@ import {
   AiRateLimitError,
   type CompletionRequest,
   type CompletionResult,
-  type Provider
+  type Provider,
+  type StreamChunk
 } from './providers/types'
 import {
   buildAiRequestDeps,
   cacheKey,
   runAiRequest,
+  runAiStream,
   type AiRequestDeps,
   type AiRequestInput
 } from './request'
@@ -48,6 +50,9 @@ interface Fakes {
   day: AiUsageState
   spends: { costUsd: number; tokens: number }[]
   provider: Provider | null
+  /** What `stream` yields, in order; a thrown value in the list is thrown from that pull. */
+  chunks: (StreamChunk | Error)[]
+  stream: ReturnType<typeof vi.fn<(request: CompletionRequest) => AsyncIterable<StreamChunk>>>
 }
 
 function fakes(over: Partial<AiUsageState> = {}): Fakes {
@@ -58,17 +63,27 @@ function fakes(over: Partial<AiUsageState> = {}): Fakes {
       usage: { inputTokens: 40, outputTokens: 10 }
     })
   )
+  const stream = vi.fn<(request: CompletionRequest) => AsyncIterable<StreamChunk>>(
+    async function* () {
+      for (const chunk of f.chunks) {
+        if (chunk instanceof Error) throw chunk
+        yield chunk
+      }
+    }
+  )
   const f: Fakes = {
     complete,
     ledger: [],
     cache: new Map(),
     day: { ...defaultAiUsageState(), spentDate: TODAY, ...over },
     spends: [],
+    chunks: [{ delta: '{"tags":' }, { delta: '["dark-forest"]}' }],
+    stream,
     provider: {
       id: 'openai',
       resolveModel: (tier) => (tier === 'fast' ? 'gpt-5.4-mini' : 'gpt-5.4'),
       complete,
-      stream: async function* () {},
+      stream,
       testConnection: () => Promise.resolve({ model: 'gpt-5.4-mini' })
     },
     deps: {
@@ -256,6 +271,110 @@ describe('runAiRequest (F-5.14)', () => {
     await runAiRequest(f.deps, { ...input, promptVersion: 'tagsRegen.v1' })
     expect(f.ledger[0]?.promptVersion).toBe('tagsRegen.v1')
     expect([...f.cache.values()][0]?.promptVersion).toBe('tagsRegen.v1')
+  })
+})
+
+describe('runAiStream (F-5.4)', () => {
+  const deltas = (): { seen: string[]; onDelta: (delta: string) => void } => {
+    const seen: string[] = []
+    return { seen, onDelta: (delta) => void seen.push(delta) }
+  }
+
+  it('hands every delta over as it arrives, then prices the final chunk usage, logs, caches, and tallies like runAiRequest', async () => {
+    const f = fakes()
+    f.chunks.push({ delta: '', usage: { inputTokens: 40, outputTokens: 10 } })
+    const { seen, onDelta } = deltas()
+    const result = await runAiStream(f.deps, input, onDelta)
+    expect(seen).toEqual(['{"tags":', '["dark-forest"]}'])
+    expect(result).toEqual({
+      text: '{"tags":["dark-forest"]}',
+      model: 'gpt-5.4-mini',
+      usage: { inputTokens: 40, outputTokens: 10 },
+      costUsd: priceFor('gpt-5.4-mini', 40, 10).costUsd,
+      cached: false,
+      priced: true
+    })
+    expect(f.stream).toHaveBeenCalledWith({
+      tier: 'fast',
+      messages: input.messages,
+      maxTokens: 120,
+      json: true
+    })
+    expect(f.complete).not.toHaveBeenCalled()
+    expect(f.ledger).toHaveLength(1)
+    expect(f.ledger[0]).toMatchObject({
+      feature: 'tags',
+      promptVersion: 'tags.v1',
+      promptTokens: 40,
+      completionTokens: 10,
+      cached: false
+    })
+    expect([...f.cache.values()][0]).toMatchObject({
+      key: cacheKey(input, 'gpt-5.4-mini'),
+      text: '{"tags":["dark-forest"]}',
+      usage: { inputTokens: 40, outputTokens: 10 }
+    })
+    expect(f.spends).toEqual([{ costUsd: result.costUsd, tokens: 50 }])
+  })
+
+  it('falls back to the local estimate when the stream carries no usage', async () => {
+    const f = fakes()
+    const result = await runAiStream(f.deps, input, () => {})
+    const prompt = input.messages.map((m) => m.content).join('\n')
+    expect(result.usage).toEqual({
+      inputTokens: estimateTokens(prompt),
+      outputTokens: estimateTokens('{"tags":["dark-forest"]}')
+    })
+    expect(f.ledger[0]).toMatchObject({
+      promptTokens: result.usage.inputTokens,
+      completionTokens: result.usage.outputTokens
+    })
+  })
+
+  it('answers a cache hit as one delta with the stored text and a cached zero-cost row', async () => {
+    const f = fakes()
+    await runAiRequest(f.deps, input)
+    const { seen, onDelta } = deltas()
+    const second = await runAiStream(f.deps, input, onDelta)
+    expect(f.stream).not.toHaveBeenCalled()
+    expect(seen).toEqual(['{"tags":["dark-forest"]}'])
+    expect(second).toMatchObject({ text: '{"tags":["dark-forest"]}', cached: true, costUsd: 0 })
+    expect(f.ledger[1]).toMatchObject({ cached: true, costUsd: 0 })
+    expect(f.spends[1]).toEqual({ costUsd: 0, tokens: 0 })
+  })
+
+  it('lets a mid-stream provider error propagate after the deltas already shown, caching and logging nothing', async () => {
+    const f = fakes()
+    f.chunks = [{ delta: 'Half' }, new AiRateLimitError('OpenAI is rate-limiting this key.')]
+    const { seen, onDelta } = deltas()
+    await expect(runAiStream(f.deps, input, onDelta)).rejects.toMatchObject({
+      code: 'RATE_LIMIT'
+    })
+    expect(seen).toEqual(['Half'])
+    expect(f.ledger).toEqual([])
+    expect(f.cache.size).toBe(0)
+    expect(f.spends).toEqual([])
+  })
+
+  it('shares the pre-checks: no key, the input budget, and the daily cap refuse before pulling', async () => {
+    const noKey = fakes()
+    noKey.provider = null
+    await expect(runAiStream(noKey.deps, input, () => {})).rejects.toMatchObject({
+      code: 'NO_KEY'
+    })
+    const over = fakes()
+    const huge = 'x'.repeat((inputBudget('tags') + 1) * 4)
+    await expect(
+      runAiStream(over.deps, { ...input, messages: [{ role: 'user', content: huge }] }, () => {})
+    ).rejects.toMatchObject({ code: 'BUDGET' })
+    const capped = fakes({ dailyCapUsd: 0 })
+    await expect(runAiStream(capped.deps, input, () => {})).rejects.toMatchObject({
+      code: 'BUDGET'
+    })
+    for (const f of [over, capped]) {
+      expect(f.stream).not.toHaveBeenCalled()
+      expect(f.ledger).toEqual([])
+    }
   })
 })
 

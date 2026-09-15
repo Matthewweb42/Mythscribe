@@ -4,6 +4,7 @@ import {
   clampTagBarHeight,
   clampTagBarSplit,
   defaultLayout,
+  normalizeLayout,
   type Layout,
   type LayoutPanel
 } from '@shared/layout'
@@ -34,7 +35,11 @@ interface LayoutState {
    * editor keeps its minimum share next to the other open panels, then schedules the write.
    */
   setSize: (panel: LayoutPanel, size: number) => void
-  /** Opens or closes a panel; a panel opening gives way first if the editor would get too little. */
+  /**
+   * Opens or closes a panel; a panel opening gives way first if the editor would get too little,
+   * and when even its floor is too much beside two wide panels (F-5.4 made three possible) the
+   * others give way in `normalizeLayout`'s order, so main never refuses the write.
+   */
   toggle: (panel: LayoutPanel) => void
   /** Shows a sidebar tab (F-7.3); a no-op for the tab already shown, so no write is scheduled. */
   setSidebarTab: (tab: SidebarTabId) => void
@@ -128,7 +133,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     const base = get().layout
     const current = base[panel]
     const size = current.open ? current.size : clampForEditorMin(base, panel, current.size)
-    schedule({ ...base, [panel]: { ...current, open: !current.open, size } }, base)
+    schedule(normalizeLayout({ ...base, [panel]: { ...current, open: !current.open, size } }), base)
   },
 
   setSidebarTab(tab) {

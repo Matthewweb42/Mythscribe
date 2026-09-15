@@ -4,6 +4,7 @@ import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AI_SETTINGS_KEY, defaultAiSettings, defaultGhostTextSettings } from '@shared/aiSettings'
+import { CONVERSATIONS_KEY, defaultConversations } from '@shared/chat'
 import { EDITOR_SETTINGS_KEY, defaultEditorSettings } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { WRITING_PRESETS_KEY, builtinParams, defaultWritingPresets } from '@shared/presets'
@@ -12,9 +13,11 @@ import type { TreeDb } from '../tree/treeStore'
 import { createProject, projectFolderFor, type ProjectSession } from './projectStore'
 import {
   getAiSettings,
+  getConversations,
   getEditorSettings,
   getWritingPresets,
   setAiSettings,
+  setConversations,
   setEditorSettings,
   setWritingPresets
 } from './settingsStore'
@@ -209,5 +212,62 @@ describe('getWritingPresets / setWritingPresets (F-5.2)', () => {
       WRITING_PRESETS_KEY
     )
     expect(getWritingPresets(db)).toEqual(defaultWritingPresets())
+  })
+})
+
+describe('getConversations / setConversations (F-5.4)', () => {
+  const conversation = {
+    id: 'c1',
+    title: 'Why is Mara on the ridge?',
+    mode: 'plan' as const,
+    paragraphs: 1,
+    messages: [
+      {
+        id: 'm1',
+        role: 'user' as const,
+        content: 'Why is Mara on the ridge?',
+        created: '2026-09-15T10:00:00.000Z',
+        proposalId: null,
+        model: null,
+        costUsd: null,
+        mode: null
+      }
+    ],
+    created: '2026-09-15T10:00:00.000Z',
+    modified: '2026-09-15T10:00:00.000Z'
+  }
+
+  it('answers no conversations for a new project, which seeds no row', () => {
+    open('novel')
+    expect(rows(CONVERSATIONS_KEY)).toHaveLength(0)
+    expect(getConversations(db)).toEqual(defaultConversations())
+  })
+
+  it('round-trips a value and overwrites the single row', () => {
+    open('epic')
+    const next = { active: 'c1', items: [conversation] }
+    expect(setConversations(db, next)).toEqual(next)
+    expect(getConversations(db)).toEqual(next)
+    setConversations(db, { active: null, items: [] })
+    expect(rows(CONVERSATIONS_KEY)).toHaveLength(1)
+    expect(getConversations(db)).toEqual(defaultConversations())
+  })
+
+  it('refuses a value outside the schema and keeps the stored one', () => {
+    open('novel')
+    const stored = { active: 'c1', items: [conversation] }
+    setConversations(db, stored)
+    expect(() =>
+      setConversations(db, { active: 'c1', items: [{ ...conversation, paragraphs: 11 }] })
+    ).toThrow()
+    expect(getConversations(db)).toEqual(stored)
+  })
+
+  it('falls back to no conversations when the stored value is not JSON or no longer fits', () => {
+    open('novel')
+    setRaw('{not json', CONVERSATIONS_KEY)
+    expect(getConversations(db)).toEqual(defaultConversations())
+    setRaw(JSON.stringify({ active: 'c1', items: [{ id: 'c1' }] }), CONVERSATIONS_KEY)
+    expect(getConversations(db)).toEqual(defaultConversations())
   })
 })

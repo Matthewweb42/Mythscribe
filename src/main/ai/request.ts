@@ -78,10 +78,26 @@ export interface AiRequestDeps {
   price: typeof priceFor
 }
 
-export async function runAiRequest(
-  deps: AiRequestDeps,
-  input: AiRequestInput
-): Promise<AiRequestResult> {
+/** What the shared pre-checks settle before either path calls the provider. */
+interface PreparedRequest {
+  provider: Provider
+  model: string
+  maxTokens: number
+  /** The local estimate of the prompt, what the input budget was checked against. */
+  estimatedIn: number
+  key: string
+  /** The ledger and cache columns both paths write. */
+  base: Omit<
+    UsageEntry,
+    'at' | 'promptTokens' | 'completionTokens' | 'cachedTokens' | 'costUsd' | 'cached'
+  >
+}
+
+/**
+ * The pre-checks in order: a provider (a saved key), the output clamp, the input budget, the
+ * daily cap. Throws `NoKeyError` or `AiBudgetError`; nothing is spent or written.
+ */
+function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
   const provider = deps.providers.get()
   if (!provider) throw new NoKeyError('No API key is saved.')
   const maxTokens = Math.min(input.maxTokens, outputBudget(input.feature))
@@ -103,47 +119,65 @@ export async function runAiRequest(
     )
   }
 
-  const { promptVersion } = input
-  const key = cacheKey(input, model)
-  const base = {
-    feature: input.feature,
-    tier: input.tier,
+  return {
+    provider,
     model,
-    provider: provider.id,
-    promptVersion,
-    contextHash: input.contextHash
-  }
-
-  const hit = deps.cache.get(key)
-  if (hit) {
-    deps.ledger.insert({
-      ...base,
-      at: deps.now().toISOString(),
-      promptTokens: 0,
-      completionTokens: 0,
-      cachedTokens: null,
-      costUsd: 0,
-      cached: true
-    })
-    deps.dailyCap.spend({ costUsd: 0, tokens: 0 })
-    return { text: hit.text, model, usage: hit.usage, costUsd: 0, cached: true, priced: true }
-  }
-
-  const result = await provider.complete({
-    tier: input.tier,
-    messages: input.messages,
     maxTokens,
-    json: input.json,
-    ...(input.temperature === undefined ? {} : { temperature: input.temperature })
-  })
-  const { costUsd, priced } = deps.price(model, result.usage.inputTokens, result.usage.outputTokens)
-  const at = deps.now().toISOString()
-  const tokens = result.usage.inputTokens + result.usage.outputTokens
+    estimatedIn,
+    key: cacheKey(input, model),
+    base: {
+      feature: input.feature,
+      tier: input.tier,
+      model,
+      provider: provider.id,
+      promptVersion: input.promptVersion,
+      contextHash: input.contextHash
+    }
+  }
+}
+
+/** A cache hit: a zero-cost ledger row, a free request on the day's tally, the stored answer. */
+function serveCached(
+  deps: AiRequestDeps,
+  prepared: PreparedRequest,
+  hit: CachedResponse
+): AiRequestResult {
   deps.ledger.insert({
-    ...base,
+    ...prepared.base,
+    at: deps.now().toISOString(),
+    promptTokens: 0,
+    completionTokens: 0,
+    cachedTokens: null,
+    costUsd: 0,
+    cached: true
+  })
+  deps.dailyCap.spend({ costUsd: 0, tokens: 0 })
+  return {
+    text: hit.text,
+    model: prepared.model,
+    usage: hit.usage,
+    costUsd: 0,
+    cached: true,
+    priced: true
+  }
+}
+
+/** The post-steps after the provider answered: price, ledger row, cache row, the day's tally. */
+function record(
+  deps: AiRequestDeps,
+  input: AiRequestInput,
+  prepared: PreparedRequest,
+  answer: { text: string; usage: CompletionUsage }
+): AiRequestResult {
+  const { model, key } = prepared
+  const { costUsd, priced } = deps.price(model, answer.usage.inputTokens, answer.usage.outputTokens)
+  const at = deps.now().toISOString()
+  const tokens = answer.usage.inputTokens + answer.usage.outputTokens
+  deps.ledger.insert({
+    ...prepared.base,
     at,
-    promptTokens: result.usage.inputTokens,
-    completionTokens: result.usage.outputTokens,
+    promptTokens: answer.usage.inputTokens,
+    completionTokens: answer.usage.outputTokens,
     cachedTokens: null,
     costUsd,
     cached: false
@@ -151,14 +185,76 @@ export async function runAiRequest(
   deps.cache.put({
     key,
     feature: input.feature,
-    promptVersion,
+    promptVersion: input.promptVersion,
     model,
-    text: result.text,
-    usage: result.usage,
+    text: answer.text,
+    usage: answer.usage,
     createdAt: at
   })
   deps.dailyCap.spend({ costUsd, tokens })
-  return { text: result.text, model, usage: result.usage, costUsd, cached: false, priced }
+  return { text: answer.text, model, usage: answer.usage, costUsd, cached: false, priced }
+}
+
+export async function runAiRequest(
+  deps: AiRequestDeps,
+  input: AiRequestInput
+): Promise<AiRequestResult> {
+  const prepared = prepare(deps, input)
+  const hit = deps.cache.get(prepared.key)
+  if (hit) return serveCached(deps, prepared, hit)
+
+  const result = await prepared.provider.complete({
+    tier: input.tier,
+    messages: input.messages,
+    maxTokens: prepared.maxTokens,
+    json: input.json,
+    ...(input.temperature === undefined ? {} : { temperature: input.temperature })
+  })
+  return record(deps, input, prepared, { text: result.text, usage: result.usage })
+}
+
+/**
+ * The streamed form of `runAiRequest` (F-5.4, Plan-mode chat): the same pre-checks and the
+ * same post-steps, with every piece of the answer handed to `onDelta` as it arrives and the
+ * whole answer resolved at the end so the caller can store it. A cache hit hands the stored
+ * text over as one delta. The usage comes from the stream's final chunk; a provider that
+ * carries none is priced from the local estimate (the prompt's, and `estimateTokens` over the
+ * answer), so the ledger and the cap never skip a streamed request. A provider error at the
+ * first pull or mid-stream propagates like `complete`'s: nothing is logged or cached, and the
+ * deltas already shown are the caller's to discard.
+ */
+export async function runAiStream(
+  deps: AiRequestDeps,
+  input: AiRequestInput,
+  onDelta: (delta: string) => void
+): Promise<AiRequestResult> {
+  const prepared = prepare(deps, input)
+  const hit = deps.cache.get(prepared.key)
+  if (hit) {
+    if (hit.text) onDelta(hit.text)
+    return serveCached(deps, prepared, hit)
+  }
+
+  let text = ''
+  let usage: CompletionUsage | undefined
+  const chunks = prepared.provider.stream({
+    tier: input.tier,
+    messages: input.messages,
+    maxTokens: prepared.maxTokens,
+    json: input.json,
+    ...(input.temperature === undefined ? {} : { temperature: input.temperature })
+  })
+  for await (const chunk of chunks) {
+    if (chunk.delta) {
+      text += chunk.delta
+      onDelta(chunk.delta)
+    }
+    if (chunk.usage) usage = chunk.usage
+  }
+  return record(deps, input, prepared, {
+    text,
+    usage: usage ?? { inputTokens: prepared.estimatedIn, outputTokens: estimateTokens(text) }
+  })
 }
 
 /** The stored cache key: the feature, prompt version, model, context hash, and the messages themselves. */

@@ -37,6 +37,12 @@ export interface CompletionResult {
 
 export interface StreamChunk {
   delta: string
+  /**
+   * The whole request's token count, on the final chunk only (F-5.4: the streamed request
+   * path prices it like `complete`'s). Absent when the provider does not report it; the
+   * request path then falls back to its own estimate.
+   */
+  usage?: CompletionUsage
 }
 
 export interface Provider {

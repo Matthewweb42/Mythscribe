@@ -8,7 +8,8 @@ import {
   type AiTestConnectionResult,
   type AiUsageSummary
 } from '@shared/ai'
-import type { AiGhostTextResult, AiRecommendTagsResult } from '@shared/ipc/contract'
+import type { AiChatResult, AiGhostTextResult, AiRecommendTagsResult } from '@shared/ipc/contract'
+import { runChat } from '../ai/chat'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
 import { generateGhostText } from '../ai/ghostText'
 import type { AiKeyStore } from '../ai/keyStore'
@@ -30,9 +31,11 @@ import { renderDisclosure } from '../provenance/disclosure'
 import { buildProvenanceReport } from '../provenance/report'
 import {
   getAiSettings,
+  getConversations,
   getEditorSettings,
   getWritingPresets,
   setAiSettings,
+  setConversations,
   setEditorSettings,
   setWritingPresets
 } from '../project/settingsStore'
@@ -171,6 +174,12 @@ export function registerHandlers({
   register('presets:get', () => getWritingPresets(manager.require().connection.orm))
 
   register('presets:set', (value) => setWritingPresets(manager.require().connection.orm, value))
+
+  register('conversations:get', () => getConversations(manager.require().connection.orm))
+
+  register('conversations:set', (value) =>
+    setConversations(manager.require().connection.orm, value)
+  )
 
   register('tag:list', () => listTags(manager.require().connection.orm))
 
@@ -341,6 +350,57 @@ export function registerHandlers({
           flagged,
           violation,
           proposalId,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
+
+  // F-5.4: same envelope as `ai:ghostText`. Plan mode streams its answer as `ai:chatDelta`
+  // events for the caller's `requestId` before resolving with the whole text; Agent mode
+  // resolves only. Every answer is a proposal (F-14.5): a Plan answer stays pending (it never
+  // enters the manuscript), an Agent draft settles through ghost text. `flagged` is null for
+  // Plan answers, which run no fidelity check.
+  register(
+    'ai:chat',
+    async ({ nodeId, mode, paragraphs, message, history, requestId }): Promise<AiChatResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const result = await runChat(
+          db,
+          deps,
+          { nodeId, mode, paragraphs, message, history },
+          (delta) => emit(windows(), 'ai:chatDelta', { requestId, delta })
+        )
+        const { text, usage, costUsd, cached, model, flagged, violation } = result
+        const proposal = createProposal(db, {
+          feature: 'chat',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model,
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          costUsd,
+          cached,
+          content: text,
+          flagged: mode === 'agent' ? flagged : null,
+          violation
+        })
+        return {
+          ok: true,
+          text,
+          usage,
+          costUsd,
+          cached,
+          model,
+          flagged,
+          violation,
+          proposalId: proposal.id,
           requestId
         }
       } catch (err) {

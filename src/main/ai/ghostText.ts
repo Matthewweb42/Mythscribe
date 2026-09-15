@@ -195,7 +195,8 @@ export function postProcessGhostText(raw: string, before: string, after: string)
   return joinAtCaret(text, before, after)
 }
 
-function stripWrappingQuotes(text: string): string {
+/** Exported for the chat use case (F-5.4), whose Agent mode strips the same way. */
+export function stripWrappingQuotes(text: string): string {
   for (const [open, close] of QUOTE_PAIRS) {
     if (text.length >= 2 && text.startsWith(open) && text.endsWith(close)) {
       const inner = text.slice(open.length, -close.length)

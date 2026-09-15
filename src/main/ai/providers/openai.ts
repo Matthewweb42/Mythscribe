@@ -65,10 +65,23 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
 
     async *stream(request): AsyncGenerator<StreamChunk> {
       try {
-        const chunks = await client.chat.completions.create({ ...params(request), stream: true })
+        // `include_usage`: one final chunk with no choices and the whole request's usage (F-5.4).
+        const chunks = await client.chat.completions.create({
+          ...params(request),
+          stream: true,
+          stream_options: { include_usage: true }
+        })
         for await (const chunk of chunks) {
-          const delta = chunk.choices[0]?.delta.content
-          if (delta) yield { delta }
+          const delta = chunk.choices[0]?.delta.content ?? ''
+          const usage = chunk.usage
+          if (usage) {
+            yield {
+              delta,
+              usage: { inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens }
+            }
+          } else if (delta) {
+            yield { delta }
+          }
         }
       } catch (err) {
         throw mapOpenAiError(err)

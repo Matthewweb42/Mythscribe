@@ -168,6 +168,72 @@ describe('GhostText extension (F-5.3)', () => {
     expect(text()).toBe(`${CONTENT} Rain`)
   })
 
+  it('Tab accepts a multi-paragraph suggestion as paragraphs, each marked, in one undo step (F-5.4)', () => {
+    const multi = ' Rain followed.\n\nThen silence.\nAnd wind.'
+    editor.commands.setGhost(multi, false, null, 'prop-9')
+    expect(widget()?.textContent).toBe(multi)
+    editor.view.dispatch(closeHistory(editor.state.tr))
+    press('Tab')
+    expect(widget()).toBeNull()
+    expect(editor.getJSON().content).toMatchObject([
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: CONTENT },
+          {
+            type: 'text',
+            text: ' Rain followed.',
+            marks: [{ type: 'aiOrigin', attrs: { proposalId: 'prop-9', accepted: multi.length } }]
+          }
+        ]
+      },
+      {
+        type: 'paragraph',
+        content: [
+          {
+            type: 'text',
+            text: 'Then silence.',
+            marks: [{ type: 'aiOrigin', attrs: { proposalId: 'prop-9', accepted: multi.length } }]
+          },
+          {
+            type: 'hardBreak',
+            marks: [{ type: 'aiOrigin', attrs: { proposalId: 'prop-9', accepted: multi.length } }]
+          },
+          {
+            type: 'text',
+            text: 'And wind.',
+            marks: [{ type: 'aiOrigin', attrs: { proposalId: 'prop-9', accepted: multi.length } }]
+          }
+        ]
+      }
+    ])
+    // The caret ends after the last word of the second paragraph.
+    expect(editor.state.selection.from).toBe(editor.state.doc.content.size - 1)
+    editor.commands.undo()
+    expect(text()).toBe(CONTENT)
+    expect(editor.getJSON().content).toHaveLength(1)
+  })
+
+  it('Shift+Tab across a paragraph break keeps the anchor on the new paragraph (F-5.4)', () => {
+    editor.commands.setGhost(' Rain.\n\nThen silence.')
+    press('Tab', true) // ' Rain.'
+    expect(editor.getJSON().content).toHaveLength(1)
+    press('Tab', true) // '\n\nThen ' opens the paragraph
+    expect(editor.getJSON().content).toHaveLength(2)
+    expect(editor.getJSON().content?.[1]).toMatchObject({
+      type: 'paragraph',
+      content: [{ type: 'text', text: 'Then ' }]
+    })
+    expect(widget()?.textContent).toBe('silence.')
+    expect(ghostOf(editor.state)?.from).toBe(editor.state.selection.from)
+    press('Tab', true)
+    expect(editor.getJSON().content?.[1]).toMatchObject({
+      type: 'paragraph',
+      content: [{ type: 'text', text: 'Then silence.' }]
+    })
+    expect(widget()).toBeNull()
+  })
+
   it('Escape clears without inserting; Tab and Escape fall through when nothing is showing', () => {
     editor.commands.setGhost(SUGGESTION)
     expect(press('Escape')).toBe(true)

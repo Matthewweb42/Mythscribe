@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { inputBudget, outputBudget, priceFor } from '@shared/ai'
 import { toTagName } from '@shared/tags'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
+import { checkChatFidelity, postProcessChatText } from '../chat'
 import { postProcessGhostText } from '../ghostText'
 import { buildOpenAiProvider } from '../providers/openai'
 import { PROMPT_CATALOGUE, PROMPT_VERSIONS } from '../prompts/catalogue'
@@ -109,20 +110,26 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
         })
         continue
       }
-      const answer = postProcessGhostText(reply.text, c.scoring.before, c.scoring.after)
+      const answer =
+        c.scoring.kind === 'chat'
+          ? postProcessChatText(reply.text)
+          : postProcessGhostText(reply.text, c.scoring.before, c.scoring.after)
       const profile = c.scoring.profile
       if (profile === null || answer === '') {
         results.push({ ...base, answer, verdict: { kind: 'unscored' } })
         continue
       }
-      const fidelity = checkGhostTextFidelity(profile, answer)
+      const violations =
+        c.scoring.kind === 'chat'
+          ? checkChatFidelity(profile, answer)
+          : checkGhostTextFidelity(profile, answer).violations
       results.push({
         ...base,
         answer,
         verdict: {
           kind: 'fidelity',
-          ok: fidelity.ok,
-          violations: fidelity.violations.map((v) => v.message)
+          ok: violations.length === 0,
+          violations: violations.map((v) => v.message)
         }
       })
     }

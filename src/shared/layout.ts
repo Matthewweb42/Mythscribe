@@ -4,16 +4,19 @@ import { SidebarTabId } from './sidebarTabs'
 /**
  * The resizable panel layout (F-7.2). Every size is a fraction of the window width, so a
  * persisted layout means the same thing at any window size and the panels follow an OS resize
- * without a listener. The AI and references panels (M2) join `Layout` later as defaulted fields.
+ * without a listener. The assistant panel (F-5.4) joined as a field `StoredLayout` defaults; the
+ * references panel (M2) joins the same way.
  */
 
-export const LAYOUT_PANELS = ['sidebar', 'notes'] as const
+export const LAYOUT_PANELS = ['sidebar', 'notes', 'assistant'] as const
 export type LayoutPanel = (typeof LAYOUT_PANELS)[number]
 
 /** Per-panel `[min, max]` fractions, plus the share the editor always keeps. */
 export const LAYOUT_LIMITS = {
   sidebar: [0.15, 0.35],
   notes: [0.15, 0.5],
+  // F-5.4: wide enough at its floor for the tab strip, the mode radios, and the composer.
+  assistant: [0.2, 0.5],
   editorMin: 0.3
 } as const
 
@@ -45,13 +48,19 @@ const tagBarSchema = z.object({
 })
 
 const DEFAULT_TAG_BAR = { open: true, height: 120, split: 0.4 } as const
+/** The assistant panel (F-5.4) starts closed; Ctrl+K opens it at just under a third. */
+const DEFAULT_ASSISTANT = { open: false, size: 0.3 } as const
+
+const assistantSchema = panelSchema(LAYOUT_LIMITS.assistant)
 
 export const Layout = z.object({
   // F-7.3: the sidebar's active tab.
   sidebar: sidebarSchema.extend({ tab: SidebarTabId }),
   notes: panelSchema(LAYOUT_LIMITS.notes),
   // F-4.4: the document tag bar above the editor; a height, so it never joins LAYOUT_PANELS.
-  tagBar: tagBarSchema
+  tagBar: tagBarSchema,
+  // F-5.4: the AI assistant panel on the right, beside the notes.
+  assistant: assistantSchema
 })
 export type Layout = z.infer<typeof Layout>
 
@@ -66,18 +75,22 @@ export const StoredLayout = z.object({
   // before F-4.5 has a tag bar without `split`, which parses to the default split on its own.
   tagBar: tagBarSchema
     .extend({ split: tagBarSchema.shape.split.default(DEFAULT_TAG_BAR.split) })
-    .default({ ...DEFAULT_TAG_BAR })
+    .default({ ...DEFAULT_TAG_BAR }),
+  // A layout written before F-5.4 has no assistant panel and parses to the closed default.
+  assistant: assistantSchema.default({ ...DEFAULT_ASSISTANT })
 })
 
 /**
  * A fresh install: the Manuscript tab open at just under a quarter, the notes closed at a
- * quarter, the tag bar open at 120 px with the metadata pane at 40 % of it.
+ * quarter, the tag bar open at 120 px with the metadata pane at 40 % of it, the assistant
+ * closed at just under a third.
  */
 export function defaultLayout(): Layout {
   return {
     sidebar: { open: true, size: 0.22, tab: 'manuscript' },
     notes: { open: false, size: 0.25 },
-    tagBar: { ...DEFAULT_TAG_BAR }
+    tagBar: { ...DEFAULT_TAG_BAR },
+    assistant: { ...DEFAULT_ASSISTANT }
   }
 }
 
@@ -126,23 +139,23 @@ export function fitsEditorMin(layout: Layout): boolean {
   return editorFraction(layout) >= LAYOUT_LIMITS.editorMin - EPSILON
 }
 
+/** The order in which open panels give way when the editor would get too little: assistant, notes, sidebar. */
+const GIVE_WAY_ORDER: readonly LayoutPanel[] = ['assistant', 'notes', 'sidebar']
+
 /**
  * A layout that respects the editor minimum: an already-valid layout is returned as is; an
- * over-wide one (a hand-edited app-state file) gives way notes first, then the sidebar.
+ * over-wide one (a hand-edited app-state file, or a third panel opening beside two wide ones)
+ * gives way assistant first, then notes, then the sidebar. Every panel at its floor still
+ * leaves the editor its minimum, so the result always fits.
  */
 export function normalizeLayout(layout: Layout): Layout {
-  if (fitsEditorMin(layout)) return layout
-  let next: Layout = { ...layout, notes: { ...layout.notes } }
-  if (next.notes.open) {
+  let next = layout
+  for (const panel of GIVE_WAY_ORDER) {
+    if (fitsEditorMin(next)) return next
+    if (!next[panel].open) continue
     next = {
       ...next,
-      notes: { ...next.notes, size: clampForEditorMin(next, 'notes', next.notes.size) }
-    }
-  }
-  if (!fitsEditorMin(next) && next.sidebar.open) {
-    next = {
-      ...next,
-      sidebar: { ...next.sidebar, size: clampForEditorMin(next, 'sidebar', next.sidebar.size) }
+      [panel]: { ...next[panel], size: clampForEditorMin(next, panel, next[panel].size) }
     }
   }
   return next

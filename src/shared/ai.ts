@@ -169,7 +169,9 @@ export const DEFAULT_INPUT_BUDGET = 8_000
 export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   ghostText: 60,
   tags: 200,
-  summary: 150
+  summary: 150,
+  // F-5.4: ten paragraphs at ~120 tokens each in Agent mode; Plan answers share the cap.
+  chat: 1_200
 }
 
 /**
@@ -181,7 +183,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
 export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   ghostText: 1_500,
   tags: 8_000,
-  summary: 8_000
+  summary: 8_000,
+  // F-5.4: one scene head-truncated to 6 000 characters, the voice block, referenced notes, and ten turns of history.
+  chat: 8_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

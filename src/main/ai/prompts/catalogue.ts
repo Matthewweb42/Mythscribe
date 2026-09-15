@@ -1,4 +1,6 @@
 import type { AiFeatureId, Tier } from '@shared/ai'
+import { CHAT_PROMPT_VERSION } from './chat.v1'
+import { CHAT_REGEN_PROMPT_VERSION } from './chatRegen.v1'
 import { GHOST_PROMPT_VERSION } from './ghostText.v1'
 import { GHOST_REGEN_PROMPT_VERSION } from './ghostTextRegen.v1'
 import { TAGS_PROMPT_VERSION } from './tags.v1'
@@ -20,7 +22,9 @@ export const PROMPT_VERSIONS = [
   GHOST_PROMPT_VERSION,
   GHOST_REGEN_PROMPT_VERSION,
   TAGS_PROMPT_VERSION,
-  TAGS_REGEN_PROMPT_VERSION
+  TAGS_REGEN_PROMPT_VERSION,
+  CHAT_PROMPT_VERSION,
+  CHAT_REGEN_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -44,7 +48,9 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     since: 'F-14.7'
   },
   [TAGS_PROMPT_VERSION]: { feature: 'tags', tier: 'fast', output: 'json', since: 'F-4.7' },
-  [TAGS_REGEN_PROMPT_VERSION]: { feature: 'tags', tier: 'fast', output: 'json', since: 'F-14.5' }
+  [TAGS_REGEN_PROMPT_VERSION]: { feature: 'tags', tier: 'fast', output: 'json', since: 'F-14.5' },
+  [CHAT_PROMPT_VERSION]: { feature: 'chat', tier: 'fast', output: 'text', since: 'F-5.4' },
+  [CHAT_REGEN_PROMPT_VERSION]: { feature: 'chat', tier: 'fast', output: 'text', since: 'F-5.4' }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

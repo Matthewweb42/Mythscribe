@@ -1,4 +1,12 @@
 import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS } from '@shared/ai'
+import {
+  CHAT_HISTORY_TURNS,
+  CHAT_MAX_REFS,
+  CHAT_MESSAGE_MAX,
+  CHAT_PARAGRAPHS_MAX,
+  CHAT_REF_NOTES_CHAR_BUDGET,
+  CHAT_SCENE_CHAR_BUDGET
+} from '@shared/chat'
 import type { VoiceProfile } from '@shared/ipc/contract'
 import { builtinParams } from '@shared/presets'
 import { PROPOSAL_NOTE_MAX } from '@shared/proposal'
@@ -13,6 +21,13 @@ import { voiceConfidence, VOICE_EXEMPLAR_TEXT_MAX } from '@shared/voice'
 import { voiceBlock } from '../../voice/voiceBlock'
 import type { AiMessage } from '../providers/types'
 import type { PromptVersion } from '../prompts/catalogue'
+import {
+  buildChatPrompt,
+  CHAT_PROMPT_VERSION,
+  type BuildChatPromptInput,
+  type ChatTurn
+} from '../prompts/chat.v1'
+import { buildChatRegenPrompt, CHAT_REGEN_PROMPT_VERSION } from '../prompts/chatRegen.v1'
 import {
   buildGhostTextPrompt,
   GHOST_NOTES_CHAR_CAP,
@@ -117,6 +132,8 @@ export interface EvalCase {
   scoring:
     | { kind: 'prose'; before: string; after: string; profile: Stylometrics | null }
     | { kind: 'json'; bank: string[] }
+    /** A chat answer: post-processed like an Agent draft and, when a voice block went out, checked at any length (`checkChatFidelity`). */
+    | { kind: 'chat'; profile: Stylometrics | null }
 }
 
 const general = builtinParams('general')
@@ -197,6 +214,83 @@ function tagsCase(
 
 const VIOLATION = 'switches to present tense'
 
+/** Two turns of a conversation about the fixture scene. */
+const CHAT_HISTORY: ChatTurn[] = [
+  { role: 'user', content: 'Why does Mara go to the landing alone?' },
+  {
+    role: 'assistant',
+    content:
+      'Because Tomas asked her to ("You said to.") and she wants the meeting on her own terms; ' +
+      'the scene never says she told anyone.'
+  }
+]
+const CHAT_REF = { name: 'mara', notes: NOTES }
+const planFresh: BuildChatPromptInput = {
+  mode: 'plan',
+  paragraphs: 1,
+  sceneText: '',
+  sceneMeta: null,
+  refs: [],
+  history: [],
+  message: 'What should the opening chapter establish?',
+  voice: null,
+  preset: null
+}
+const planFull: BuildChatPromptInput = {
+  ...planFresh,
+  sceneText: FIXTURE_PASSAGE,
+  sceneMeta: META,
+  refs: [CHAT_REF],
+  history: CHAT_HISTORY,
+  message: 'What does #mara want from Tomas here?'
+}
+const agentFull: BuildChatPromptInput = {
+  ...planFull,
+  mode: 'agent',
+  paragraphs: 3,
+  message: 'Continue with Tomas following her up the bank. #mara',
+  voice: voiceBlock(FIXTURE_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' }),
+  preset: suspense
+}
+/** Every chat cap at its limit while the whole prompt stays under the input budget: the history turns are sized to fit. */
+const CHAT_MAXED_TURN_CHARS = 1_200
+const agentMaxed: BuildChatPromptInput = {
+  mode: 'agent',
+  paragraphs: CHAT_PARAGRAPHS_MAX,
+  sceneText: `${FIXTURE_PASSAGE.repeat(6).slice(0, CHAT_SCENE_CHAR_BUDGET)}…`,
+  sceneMeta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500) },
+  refs: Array.from({ length: CHAT_MAX_REFS }, (_, i) => ({
+    name: `ref-${i + 1}`,
+    notes: `${FIXTURE_PASSAGE.slice(0, CHAT_REF_NOTES_CHAR_BUDGET / CHAT_MAX_REFS)}…`
+  })),
+  history: Array.from({ length: CHAT_HISTORY_TURNS }, (_, i) => ({
+    role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+    content: FIXTURE_PASSAGE.slice(0, CHAT_MAXED_TURN_CHARS)
+  })),
+  message: FIXTURE_PASSAGE.repeat(3).slice(0, CHAT_MESSAGE_MAX),
+  voice: voiceBlock(MAXED_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' }),
+  preset: suspense
+}
+
+function chatCase(
+  name: string,
+  note: string,
+  input: BuildChatPromptInput,
+  violation: string | null
+): EvalCase {
+  const built =
+    violation === null ? buildChatPrompt(input) : buildChatRegenPrompt({ ...input, violation })
+  return {
+    version: violation === null ? CHAT_PROMPT_VERSION : CHAT_REGEN_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
 /** Every case, grouped by version in catalogue order. */
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
@@ -241,5 +335,41 @@ export const EVAL_CASES: EvalCase[] = [
     FIXTURE_PASSAGE.repeat(6).slice(0, TAGS_TEXT_CHAR_BUDGET + 500),
     MAXED_BANK,
     'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
+  chatCase(
+    'plan fresh',
+    'Plan mode with no scene open, no references, no history',
+    planFresh,
+    null
+  ),
+  chatCase(
+    'plan full',
+    'Plan mode over the fixture scene with one #reference and two turns of history',
+    planFull,
+    null
+  ),
+  chatCase(
+    'agent full',
+    'Agent mode, 3 paragraphs: voice rules and one exemplar, Suspense preset, metadata, one #reference, two turns',
+    agentFull,
+    null
+  ),
+  chatCase(
+    'agent maxed',
+    'every cap at its limit: the scene, four references, long metadata, a voice block at its budget, ten history turns, a message at the limit, 10 paragraphs',
+    agentMaxed,
+    null
+  ),
+  chatCase(
+    'agent full',
+    'the agent full case regenerated after a tense violation',
+    agentFull,
+    VIOLATION
+  ),
+  chatCase(
+    'agent maxed',
+    'the agent maxed case regenerated after a tense violation',
+    agentMaxed,
+    VIOLATION
   )
 ]

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, type Tier } from '@shared/ai'
 import { buildOpenAiProvider, mapOpenAiError, type FetchLike } from './openai'
-import { AiProviderError, type CompletionRequest } from './types'
+import { AiProviderError, type CompletionRequest, type StreamChunk } from './types'
 
 interface Call {
   url: string
@@ -168,14 +168,24 @@ describe('buildOpenAiProvider.complete (F-5.1)', () => {
 })
 
 describe('buildOpenAiProvider.stream', () => {
+  const chunk = (content: string | null): unknown => ({
+    id: 'chatcmpl-1',
+    object: 'chat.completion.chunk',
+    created: 0,
+    model: 'gpt-5.4-mini',
+    choices: [{ index: 0, delta: { content }, finish_reason: null }]
+  })
+  /** The final chunk `stream_options.include_usage` adds: no choices, the whole request's usage. */
+  const usageChunk = {
+    id: 'chatcmpl-1',
+    object: 'chat.completion.chunk',
+    created: 0,
+    model: 'gpt-5.4-mini',
+    choices: [],
+    usage: { prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 }
+  }
+
   it('yields the content deltas and skips empty ones', async () => {
-    const chunk = (content: string | null): unknown => ({
-      id: 'chatcmpl-1',
-      object: 'chat.completion.chunk',
-      created: 0,
-      model: 'gpt-5.4-mini',
-      choices: [{ index: 0, delta: { content }, finish_reason: null }]
-    })
     const { fetch, calls } = answering(() => sse([chunk('Hel'), chunk(null), chunk('lo')]))
     const seen: string[] = []
     for await (const { delta } of buildOpenAiProvider(KEY, { fetch }).stream(request)) {
@@ -184,6 +194,18 @@ describe('buildOpenAiProvider.stream', () => {
     expect(seen).toEqual(['Hel', 'lo'])
     const body = bodyOf(calls[0])
     expect(body.stream).toBe(true)
+  })
+
+  it('asks for the usage and yields it on the final chunk (F-5.4)', async () => {
+    const { fetch, calls } = answering(() => sse([chunk('Hel'), chunk('lo'), usageChunk]))
+    const seen: StreamChunk[] = []
+    for await (const c of buildOpenAiProvider(KEY, { fetch }).stream(request)) seen.push(c)
+    expect(seen).toEqual([
+      { delta: 'Hel' },
+      { delta: 'lo' },
+      { delta: '', usage: { inputTokens: 7, outputTokens: 2 } }
+    ])
+    expect(bodyOf(calls[0]).stream_options).toEqual({ include_usage: true })
   })
 
   it('throws the mapped error from the first pull', async () => {

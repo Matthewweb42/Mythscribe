@@ -52,7 +52,8 @@ function deferredClient(stored: Layout): {
 const stored: Layout = {
   sidebar: { open: true, size: 0.3, tab: 'manuscript' },
   notes: { open: true, size: 0.2 },
-  tagBar: { open: true, height: 150, split: 0.4 }
+  tagBar: { open: true, height: 150, split: 0.4 },
+  assistant: { open: false, size: 0.3 }
 }
 let sets: PendingSet[]
 let gets: (() => void)[]
@@ -127,7 +128,8 @@ describe('useLayoutStore', () => {
     expect(sets[0]?.value).toEqual({
       sidebar: { open: true, size: 0.26, tab: 'manuscript' },
       notes: { open: false, size: 0.2 },
-      tagBar: { open: true, height: 150, split: 0.4 }
+      tagBar: { open: true, height: 150, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     })
   })
 
@@ -192,13 +194,32 @@ describe('useLayoutStore', () => {
       layout: {
         sidebar: { open: true, size: 0.35, tab: 'manuscript' },
         notes: { open: false, size: 0.5 },
-        tagBar: { open: true, height: 120, split: 0.4 }
+        tagBar: { open: true, height: 120, split: 0.4 },
+        assistant: { open: false, size: 0.3 }
       }
     })
     store().toggle('notes')
     expect(store().layout.notes.open).toBe(true)
     expect(store().layout.notes.size).toBeCloseTo(0.35)
     expect(store().layout.sidebar.size).toBe(0.35)
+  })
+
+  it('opening a third panel that cannot fit at its floor makes the others give way (F-5.4)', async () => {
+    useLayoutStore.setState({
+      layout: {
+        sidebar: { open: true, size: 0.35, tab: 'manuscript' },
+        notes: { open: true, size: 0.35 },
+        tagBar: { open: true, height: 120, split: 0.4 },
+        assistant: { open: false, size: 0.3 }
+      }
+    })
+    store().toggle('assistant')
+    expect(store().layout.assistant).toEqual({ open: true, size: 0.2 })
+    expect(store().layout.notes.size).toBeCloseTo(0.15)
+    expect(store().layout.sidebar.size).toBe(0.35)
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(1)
+    expect(sets[0]?.value.assistant).toEqual({ open: true, size: 0.2 })
   })
 
   it('clamps a size to the panel limits and to the editor minimum, both directions', async () => {

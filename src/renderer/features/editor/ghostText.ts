@@ -230,21 +230,55 @@ function renderGhost(ghost: GhostState): HTMLElement {
   return span
 }
 
-/** The next word of a suggestion: leading whitespace, the word, and one trailing space if present. */
-const NEXT_WORD = /^(\s*\S+)(\s?)/
+/**
+ * The next word of a suggestion: leading whitespace (a paragraph break included, so the split
+ * lands with the word that opens the paragraph), the word, and one trailing space if present.
+ */
+const NEXT_WORD = /^(\s*\S+)( ?)/
+
+/** A blank line (one or more empty or whitespace-only lines) between two paragraphs of a suggestion. */
+const PARAGRAPH_BREAK = /\n[ \t]*\n\s*/
 
 /**
  * Inserts `text` at the suggestion's anchor and, when it belongs to a proposal, marks it as
- * AI-origin with the running total of what the author has accepted from it (F-14.6).
+ * AI-origin with the running total of what the author has accepted from it (F-14.6). A
+ * multi-paragraph suggestion (the assistant's Agent mode, F-5.4) is split on blank lines into
+ * paragraphs of the same block type, each carrying the mark; a single newline inside a
+ * paragraph becomes a hard break. Returns the position right after what was inserted, which
+ * is past `text.length` whenever a block boundary or a break token went in.
  */
-function insertAccepted(tr: Transaction, ghost: GhostState, text: string): void {
-  tr.insertText(text, ghost.from)
+function insertAccepted(tr: Transaction, ghost: GhostState, text: string): number {
+  const schema = tr.doc.type.schema
+  const hardBreak = schema.nodes.hardBreak
+  let pos = ghost.from
+  text.split(PARAGRAPH_BREAK).forEach((paragraph, index) => {
+    if (index > 0) {
+      tr.split(pos)
+      pos += 2
+    }
+    paragraph.split('\n').forEach((line, lineIndex) => {
+      if (lineIndex > 0) {
+        if (hardBreak) {
+          tr.insert(pos, hardBreak.create())
+          pos += 1
+        } else {
+          tr.insertText(' ', pos)
+          pos += 1
+        }
+      }
+      if (line) {
+        tr.insertText(line, pos)
+        pos += line.length
+      }
+    })
+  })
   if (ghost.proposalId !== null) {
-    markAiOrigin(tr, ghost.from, ghost.from + text.length, {
+    markAiOrigin(tr, ghost.from, pos, {
       proposalId: ghost.proposalId,
       accepted: ghost.acceptedChars + text.length
     })
   }
+  return pos
 }
 
 /**
@@ -312,12 +346,12 @@ export const GhostText = Extension.create<Record<string, never>, GhostTextStorag
           const chunk = `${match[1] ?? ''}${match[2] ?? ''}`
           const remaining = ghost.text.slice(chunk.length)
           if (dispatch) {
-            insertAccepted(tr, ghost, chunk)
+            const end = insertAccepted(tr, ghost, chunk)
             const meta: GhostMeta = remaining
               ? {
                   type: 'advance',
                   text: remaining,
-                  from: ghost.from + chunk.length,
+                  from: end,
                   acceptedChars: ghost.acceptedChars + chunk.length
                 }
               : { type: 'accept' }

@@ -53,7 +53,7 @@ describe('estimateTokens', () => {
 
 describe('budgets', () => {
   it('give every built feature an output cap and a larger input cap', () => {
-    expect(FEATURE_BUDGETS).toEqual({ ghostText: 60, tags: 200, summary: 150 })
+    expect(FEATURE_BUDGETS).toEqual({ ghostText: 60, tags: 200, summary: 150, chat: 1_200 })
     expect(Object.keys(FEATURE_INPUT_BUDGETS).sort()).toEqual(Object.keys(FEATURE_BUDGETS).sort())
     for (const feature of AI_FEATURE_IDS) {
       const out = FEATURE_BUDGETS[feature]
@@ -68,8 +68,8 @@ describe('budgets', () => {
     expect(DEFAULT_INPUT_BUDGET).toBeGreaterThan(DEFAULT_OUTPUT_BUDGET)
     expect(outputBudget('ghostText')).toBe(60)
     expect(inputBudget('ghostText')).toBe(1_500)
-    expect(outputBudget('chat')).toBe(DEFAULT_OUTPUT_BUDGET)
-    expect(inputBudget('chat')).toBe(DEFAULT_INPUT_BUDGET)
+    expect(outputBudget('query')).toBe(DEFAULT_OUTPUT_BUDGET)
+    expect(inputBudget('query')).toBe(DEFAULT_INPUT_BUDGET)
   })
 
   it('bound the daily cap to 0–500 USD', () => {

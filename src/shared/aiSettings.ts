@@ -113,7 +113,11 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   },
   chat: {
     label: 'Assistant chat',
-    sends: "The active scene's text, any notes pulled in with #Name, and your message.",
+    sends:
+      "The active scene's text (head-truncated), the notes of documents tagged with any #name " +
+      'you mention, the recent turns of the conversation, and your message. In Agent mode, ' +
+      'which needs Suggest, the voice profile and the scene metadata go too, and an off-voice ' +
+      'answer is sent back once with the rule it broke.',
     minDial: 1
   },
   embeddings: {

@@ -17,6 +17,8 @@ import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { AssistantPanel, AssistantToggleButton } from '@renderer/features/ai/AssistantPanel'
+import { useAssistantStore } from '@renderer/features/ai/assistantStore'
 import { usePresetsStore } from '@renderer/features/ai/presetsStore'
 import { useProvenanceStore } from '@renderer/features/ai/provenanceStore'
 import { useVoiceStore } from '@renderer/features/ai/voiceStore'
@@ -67,7 +69,8 @@ export function App(): React.JSX.Element {
   // tag links, loaded per document by the tag bar. F-4.5: and the scene metadata, loaded per
   // node by the metadata pane. F-14.4: and the AI dial and toggles. F-5.2: and the writing
   // presets. F-14.1: and the voice exemplars (the toolbar button needs the count). F-14.6: the
-  // provenance report is loaded by its section on demand and only cleared here.
+  // provenance report is loaded by its section on demand and only cleared here. F-5.4: and the
+  // assistant conversations.
   useEffect(() => {
     const tree = useTreeStore.getState()
     if (projectId === null) {
@@ -80,6 +83,7 @@ export function App(): React.JSX.Element {
       usePresetsStore.getState().clear()
       useVoiceStore.getState().clear()
       useProvenanceStore.getState().clear()
+      useAssistantStore.getState().clear()
       useTagStore.getState().clear()
       useDocumentTagStore.getState().clear()
       return
@@ -98,6 +102,10 @@ export function App(): React.JSX.Element {
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
     useVoiceStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    useAssistantStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
@@ -120,6 +128,7 @@ export function App(): React.JSX.Element {
         ) : null}
         {current ? (
           <div className="ml-auto flex items-center gap-2">
+            <AssistantToggleButton />
             <SettingsButton format={current.format} />
             <CloseProjectButton />
           </div>
@@ -309,7 +318,8 @@ function SettingsButton({ format }: { format: NovelFormat }): React.JSX.Element 
  * pane for the selected document, or every document of the selected folder stacked (F-2.5,
  * F-3.8), with the notes panel (F-3.7) beside it when open. F-7.2: the sidebar's open state
  * and width come from the layout store; the width is a fraction of the window rendered in
- * `vw`, resized by the handle on its right edge.
+ * `vw`, resized by the handle on its right edge. F-5.4: the assistant panel docks at the right
+ * edge, full height, whatever is selected (Plan mode works without a scene).
  */
 function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
   const sidebar = useLayoutStore((s) => s.layout.sidebar)
@@ -334,6 +344,7 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <MainPane format={format} />
       </section>
+      <AssistantPanel />
     </>
   )
 }

@@ -14,6 +14,15 @@ import {
   GHOST_BEFORE_CHARS
 } from '../ai'
 import { AiSettings } from '../aiSettings'
+import {
+  CHAT_HISTORY_TURNS,
+  CHAT_MESSAGE_MAX,
+  CHAT_PARAGRAPHS_MAX,
+  CHAT_PARAGRAPHS_MIN,
+  ChatMode,
+  ChatRole,
+  Conversations
+} from '../chat'
 import { EditorSettings } from '../editorSettings'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
@@ -151,6 +160,35 @@ export const AiGhostTextResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiGhostTextResult = z.infer<typeof AiGhostTextResult>
+
+/**
+ * What `ai:chat` answers (F-5.4): the full answer (Plan mode streamed it first through
+ * `ai:chatDelta` events keyed by `requestId`; Agent mode never streams, the text goes to the
+ * editor as ghost text), what it cost, the proposal it became (F-14.5), and the fidelity flag
+ * (F-14.7, Agent mode only; Plan answers are never flagged); or an expected AI failure as data.
+ */
+export const AiChatResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    text: z.string(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    flagged: z.boolean(),
+    violation: z.string().nullable(),
+    proposalId: z.string(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiChatResult = z.infer<typeof AiChatResult>
 
 /** An author-marked voice exemplar (F-14.1): a plain-text passage with the POV and kind it was filed under. */
 export const VoiceExemplar = z.object({
@@ -486,6 +524,29 @@ export const contract = {
     output: AiGhostTextResult
   },
   /**
+   * One assistant turn (F-5.4). `nodeId` is the active document whose text rides along (null
+   * with no document open); `history` is the recent turns the renderer keeps; Plan mode streams
+   * `ai:chatDelta` events for `requestId` before resolving, Agent mode resolves with the text
+   * the renderer places as ghost text. Expected AI failures come back as data.
+   */
+  'ai:chat': {
+    input: z.object({
+      nodeId: z.string().nullable(),
+      mode: ChatMode,
+      paragraphs: z.number().int().min(CHAT_PARAGRAPHS_MIN).max(CHAT_PARAGRAPHS_MAX),
+      message: z.string().trim().min(1).max(CHAT_MESSAGE_MAX),
+      history: z
+        .array(z.object({ role: ChatRole, content: z.string().max(CHAT_MESSAGE_MAX) }))
+        .max(CHAT_HISTORY_TURNS),
+      requestId: z.string()
+    }),
+    output: AiChatResult
+  },
+  /** The project's conversations (F-5.4), stored as JSON under the settings key `conversations`; a fresh project has none. */
+  'conversations:get': { input: z.undefined(), output: Conversations },
+  /** Replaces the project's conversations (F-5.4); a value outside the schema is refused with VALIDATION. */
+  'conversations:set': { input: Conversations, output: Conversations },
+  /**
    * Records how the author settled a proposal (F-14.5): accepted, accepted in part, rejected,
    * or regenerated, with an optional note (a blank one is stored as none). Idempotent: only a
    * pending proposal changes; a second settlement or an evicted id is a silent no-op.
@@ -564,7 +625,9 @@ export type TagLoadTemplateInput = Input<'tag:loadTemplate'>
 export const events = {
   'project:changed': ProjectInfo.nullable(),
   /** The OS asked to close the window while a project is open; the renderer flushes, then invokes `window:close`. */
-  'window:close-requested': z.null()
+  'window:close-requested': z.null(),
+  /** A streamed piece of a Plan-mode answer (F-5.4); the renderer appends it to the turn with this `requestId`. */
+  'ai:chatDelta': z.object({ requestId: z.string(), delta: z.string() })
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

@@ -13,7 +13,8 @@ import {
 } from '@shared/ipc/contract'
 import { z } from 'zod'
 import { DEFAULT_MODELS } from '@shared/ai'
-import { defaultAiSettings } from '@shared/aiSettings'
+import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
+import { defaultConversations, type Conversations } from '@shared/chat'
 import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultLayout } from '@shared/layout'
@@ -27,7 +28,8 @@ import {
   InvalidKeyError,
   type CompletionRequest,
   type CompletionResult,
-  type Provider
+  type Provider,
+  type StreamChunk
 } from '../ai/providers/types'
 import { AiProviderRegistry } from '../ai/registry'
 import { getProposal } from '../ai/proposalStore'
@@ -58,6 +60,8 @@ let keyFile: string
 let testConnection: ReturnType<typeof vi.fn<() => Promise<{ model: string }>>>
 /** What the fake provider's `complete` answers (F-4.7); tests replace it per case. */
 let complete: ReturnType<typeof vi.fn<(request: CompletionRequest) => Promise<CompletionResult>>>
+/** What the fake provider's `stream` yields (F-5.4); an Error in the list is thrown from that pull. Tests set it per case. */
+let streamChunks: (StreamChunk | Error)[]
 
 /** What the fake export dialog answers (F-14.6); null cancels. Tests set it per case. */
 let exportPath: string | null
@@ -94,11 +98,17 @@ beforeEach(() => {
       usage: { inputTokens: 40, outputTokens: 10 }
     })
   )
+  streamChunks = []
   const provider: Provider = {
     id: 'openai',
     resolveModel: () => 'gpt-fake',
     complete,
-    stream: async function* () {},
+    stream: async function* () {
+      for (const chunk of streamChunks) {
+        if (chunk instanceof Error) throw chunk
+        yield chunk
+      }
+    },
     testConnection
   }
   const appState = new AppStateStore(path.join(tmp, 'userData', 'app-state.json'))
@@ -675,6 +685,225 @@ describe('presets:get / presets:set (F-5.2)', () => {
   })
 })
 
+describe('conversations:get / conversations:set (F-5.4)', () => {
+  const stored: Conversations = {
+    active: 'c1',
+    items: [
+      {
+        id: 'c1',
+        title: 'Why is Mara on the ridge?',
+        mode: 'plan',
+        paragraphs: 1,
+        messages: [],
+        created: '2026-09-15T10:00:00.000Z',
+        modified: '2026-09-15T10:00:00.000Z'
+      }
+    ]
+  }
+
+  it('reports NO_PROJECT for both when nothing is open', async () => {
+    await expect(invoke('conversations:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('conversations:set', defaultConversations())).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('answers no conversations for a new project, then what set wrote, also after a reopen', async () => {
+    const created = await invoke('project:create', {
+      name: 'Chats',
+      format: 'novel',
+      directory: tmp
+    })
+    expect(await invoke('conversations:get', undefined)).toEqual(defaultConversations())
+    expect(await invoke('conversations:set', stored)).toEqual(stored)
+    expect(await invoke('conversations:get', undefined)).toEqual(stored)
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    expect(await invoke('conversations:get', undefined)).toEqual(stored)
+  })
+
+  it('refuses a value outside the schema with VALIDATION and keeps the stored one', async () => {
+    await invoke('project:create', { name: 'Chats', format: 'novel', directory: tmp })
+    await invoke('conversations:set', stored)
+    const result = await handlerFor('conversations:set')(undefined, {
+      ...stored,
+      items: [{ ...stored.items[0], paragraphs: 0 }]
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(await invoke('conversations:get', undefined)).toEqual(stored)
+  })
+})
+
+describe('ai:chat (F-5.4)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const SCENE = 'The storm broke at dusk over the dark forest. Mara counted the lightning gaps.'
+
+  /** A project with the dial at Suggest, a key, and a scene with text. */
+  async function ready(dial: AiDial = 2): Promise<{ scene: string }> {
+    await invoke('project:create', { name: 'Chat', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: SCENE }] }]
+      }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+    await invoke('ai:setKey', { key: KEY })
+    streamChunks = [
+      { delta: 'The storm, ' },
+      { delta: 'per the opening.', usage: { inputTokens: 90, outputTokens: 8 } }
+    ]
+    complete.mockResolvedValue({
+      text: '"Somewhere ahead the river was rising."',
+      model: 'gpt-fake',
+      usage: { inputTokens: 120, outputTokens: 12 }
+    })
+    return { scene: scene.id }
+  }
+
+  /** The `ai:chatDelta` events sent to the window (project:changed rides the same fake). */
+  const deltasSent = (): unknown[][] =>
+    vi.mocked(fakeWin.webContents.send).mock.calls.filter(([channel]) => channel === 'ai:chatDelta')
+
+  const plan = (scene: string, requestId = 'req-1'): Input<'ai:chat'> => ({
+    nodeId: scene,
+    mode: 'plan',
+    paragraphs: 1,
+    message: 'What is Mara afraid of?',
+    history: [],
+    requestId
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('ai:chat', plan('x'))).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('Plan mode: emits one ai:chatDelta per delta with the requestId, then resolves the whole text, the cost, and a pending proposal with no fidelity flag', async () => {
+    const { scene } = await ready()
+    const result = await invoke('ai:chat', plan(scene, 'req-7'))
+    if (!result.ok) throw new Error(result.message)
+    expect(result.proposalId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(result).toEqual({
+      ok: true,
+      text: 'The storm, per the opening.',
+      usage: { inputTokens: 90, outputTokens: 8 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      flagged: false,
+      violation: null,
+      proposalId: result.proposalId,
+      requestId: 'req-7'
+    })
+    expect(deltasSent()).toEqual([
+      ['ai:chatDelta', { requestId: 'req-7', delta: 'The storm, ' }],
+      ['ai:chatDelta', { requestId: 'req-7', delta: 'per the opening.' }]
+    ])
+    expect(complete).not.toHaveBeenCalled()
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'chat',
+      nodeId: scene,
+      promptVersion: 'chat.v1',
+      model: 'gpt-fake',
+      promptTokens: 90,
+      completionTokens: 8,
+      cached: false,
+      content: 'The storm, per the opening.',
+      flagged: null,
+      violation: null,
+      status: 'pending'
+    })
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.total.requests).toBe(1)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['chat'])
+  })
+
+  it('Agent mode: no deltas, the post-processed draft, a proposal carrying the fidelity flag', async () => {
+    const { scene } = await ready()
+    const result = await invoke('ai:chat', {
+      ...plan(scene, 'req-8'),
+      mode: 'agent',
+      paragraphs: 2,
+      message: 'Bring Tomas onto the landing.'
+    })
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toMatchObject({
+      text: 'Somewhere ahead the river was rising.',
+      usage: { inputTokens: 120, outputTokens: 12 },
+      flagged: false,
+      violation: null,
+      requestId: 'req-8'
+    })
+    expect(deltasSent()).toEqual([])
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(complete.mock.calls[0]![0]).toMatchObject({ tier: 'fast', maxTokens: 240 })
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'chat',
+      content: 'Somewhere ahead the river was rising.',
+      flagged: false
+    })
+  })
+
+  it('answers each expected AI failure as data with its next step and the requestId', async () => {
+    const { scene } = await ready(1)
+    await invoke('ai:clearKey', undefined)
+    expect(await invoke('ai:chat', plan(scene, 'req-9'))).toEqual({
+      ok: false,
+      code: 'NO_KEY',
+      message: 'No API key is saved.',
+      nextStep: 'Add a key above and save it.',
+      requestId: 'req-9'
+    })
+    await invoke('ai:setKey', { key: KEY })
+    expect(await invoke('ai:chat', { ...plan(scene, 'req-9'), mode: 'agent' })).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Agent mode needs the AI dial at Suggest or higher (it is at Ask).',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      requestId: 'req-9'
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 0 })
+    expect(await invoke('ai:chat', plan(scene, 'req-9'))).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Assistant chat needs the AI dial at Ask or higher (it is at Off).',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      requestId: 'req-9'
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    expect(deltasSent()).toEqual([])
+    // A provider error mid-stream: the deltas already sent stay sent, the failure is data, no proposal.
+    streamChunks = [{ delta: 'Half' }, new InvalidKeyError('OpenAI rejected the API key.')]
+    expect(await invoke('ai:chat', plan(scene, 'req-9'))).toEqual({
+      ok: false,
+      code: 'INVALID_KEY',
+      message: 'OpenAI rejected the API key.',
+      nextStep: 'Check the key and try again.',
+      requestId: 'req-9'
+    })
+    expect(deltasSent()).toEqual([['ai:chatDelta', { requestId: 'req-9', delta: 'Half' }]])
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+  })
+
+  it('lets an unknown node and an invalid input reach the error envelope as NOT_FOUND and VALIDATION', async () => {
+    await ready()
+    const unknown = await handlerFor('ai:chat')(undefined, plan('nope'))
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    const blank = await handlerFor('ai:chat')(undefined, { ...plan('nope'), message: '   ' })
+    expect(blank.ok).toBe(false)
+    if (!blank.ok) expect(blank.error.code).toBe('VALIDATION')
+    const many = await handlerFor('ai:chat')(undefined, { ...plan('nope'), paragraphs: 11 })
+    expect(many.ok).toBe(false)
+    if (!many.ok) expect(many.error.code).toBe('VALIDATION')
+  })
+})
+
 describe('tag handlers (F-4.1)', () => {
   it('reports NO_PROJECT when nothing is open', async () => {
     await expect(invoke('tag:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
@@ -868,7 +1097,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const next = {
       sidebar: { open: false, size: 0.3, tab: 'manuscript' as const },
       notes: { open: true, size: 0.4 },
-      tagBar: { open: true, height: 120, split: 0.4 }
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     }
     expect(await invoke('layout:set', next)).toEqual(next)
     expect(await invoke('layout:get', undefined)).toEqual(next)
@@ -881,7 +1111,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const stored = {
       sidebar: { open: true, size: 0.2, tab: 'manuscript' as const },
       notes: { open: false, size: 0.25 },
-      tagBar: { open: true, height: 120, split: 0.4 }
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     }
     await invoke('layout:set', stored)
     const raw = handlerFor('layout:set')
@@ -904,7 +1135,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const next = {
       sidebar: { open: true, size: 0.3, tab: 'manuscript' as const },
       notes: { open: true, size: 0.3 },
-      tagBar: { open: true, height: 120, split: 0.4 }
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     }
     await invoke('layout:set', next)
     const list = await invoke('recents:list', undefined)
@@ -919,7 +1151,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const bothMaxed = {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
       notes: { open: true, size: 0.5 },
-      tagBar: { open: true, height: 120, split: 0.4 }
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     }
     const raw = handlerFor('layout:set')
     const result = await raw(undefined, bothMaxed)
@@ -941,7 +1174,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
         layout: {
           sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
           notes: { open: true, size: 0.5 },
-          tagBar: { open: true, height: 120, split: 0.4 }
+          tagBar: { open: true, height: 120, split: 0.4 },
+          assistant: { open: false, size: 0.3 }
         }
       })
     )

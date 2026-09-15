@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   LAYOUT_LIMITS,
+  LAYOUT_PANELS,
   Layout,
   StoredLayout,
   TAG_BAR_MIN_HEIGHT,
@@ -32,6 +33,17 @@ describe('defaultLayout', () => {
   it('opens the tag bar at 120 px (F-4.4) with the metadata pane at 40 % (F-4.5)', () => {
     expect(defaultLayout().tagBar).toEqual({ open: true, height: 120, split: 0.4 })
   })
+
+  it('starts with the assistant panel closed at 0.3 (F-5.4)', () => {
+    expect(defaultLayout().assistant).toEqual({ open: false, size: 0.3 })
+    expect(LAYOUT_PANELS).toEqual(['sidebar', 'notes', 'assistant'])
+    expect(LAYOUT_LIMITS.assistant).toEqual([0.2, 0.5])
+  })
+
+  it('every panel at its floor still leaves the editor its minimum', () => {
+    const floors = LAYOUT_PANELS.reduce((sum, p) => sum + LAYOUT_LIMITS[p][0], 0)
+    expect(floors + LAYOUT_LIMITS.editorMin).toBeLessThanOrEqual(1)
+  })
 })
 
 describe('Layout schema', () => {
@@ -45,6 +57,22 @@ describe('Layout schema', () => {
     ).toBe(false)
     expect(Layout.safeParse({ ...base, notes: { open: false, size: 0.51 } }).success).toBe(false)
     expect(Layout.safeParse({ ...base, notes: { open: false, size: 0.5 } }).success).toBe(true)
+  })
+
+  it('refuses an assistant panel outside 20–50 % and requires it; StoredLayout defaults a pre-F-5.4 layout (F-5.4)', () => {
+    const base = defaultLayout()
+    expect(Layout.safeParse({ ...base, assistant: { open: true, size: 0.19 } }).success).toBe(false)
+    expect(Layout.safeParse({ ...base, assistant: { open: true, size: 0.2 } }).success).toBe(true)
+    expect(Layout.safeParse({ ...base, assistant: { open: false, size: 0.5 } }).success).toBe(true)
+    expect(Layout.safeParse({ ...base, assistant: { open: false, size: 0.51 } }).success).toBe(
+      false
+    )
+    const { assistant: _dropped, ...withoutAssistant } = base
+    expect(Layout.safeParse(withoutAssistant).success).toBe(false)
+    expect(StoredLayout.parse(withoutAssistant)).toEqual(base)
+    expect(
+      StoredLayout.parse({ ...withoutAssistant, assistant: { open: true, size: 0.4 } }).assistant
+    ).toEqual({ open: true, size: 0.4 })
   })
 
   it('refuses a tag bar under its floor and has no static ceiling (F-4.4)', () => {
@@ -80,9 +108,9 @@ describe('Layout schema', () => {
       tagBar: { open: false, height: 240, split: 0.4 }
     })
     // A stored split is kept, and one outside the limits is still refused.
-    expect(StoredLayout.parse({ ...base, tagBar: { open: true, height: 120, split: 0.6 } })).toEqual(
-      { ...base, tagBar: { open: true, height: 120, split: 0.6 } }
-    )
+    expect(
+      StoredLayout.parse({ ...base, tagBar: { open: true, height: 120, split: 0.6 } })
+    ).toEqual({ ...base, tagBar: { open: true, height: 120, split: 0.6 } })
     expect(
       StoredLayout.safeParse({ ...base, tagBar: { open: true, height: 120, split: 0.8 } }).success
     ).toBe(false)
@@ -133,7 +161,8 @@ describe('clampForEditorMin', () => {
     const notesOnly: Layout = {
       sidebar: { open: false, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.25 },
-      tagBar: { open: true, height: 120, split: 0.4 }
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     }
     expect(clampForEditorMin(notesOnly, 'notes', 0.9)).toBe(0.5)
   })
@@ -142,7 +171,8 @@ describe('clampForEditorMin', () => {
     const layout: Layout = {
       sidebar: { open: true, size: 0.3, tab: 'manuscript' },
       notes: { open: true, size: 0.3 },
-      tagBar: { open: true, height: 120, split: 0.4 }
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     }
     // Growing the sidebar: 1 - 0.3 (editor) - 0.3 (notes) leaves 0.4, capped by its own max.
     expect(clampForEditorMin(layout, 'sidebar', 0.34)).toBe(0.34)
@@ -153,7 +183,8 @@ describe('clampForEditorMin', () => {
     const wide: Layout = {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.5 },
-      tagBar: { open: true, height: 120, split: 0.4 }
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     }
     expect(clampForEditorMin(wide, 'notes', 0.5)).toBeCloseTo(0.35)
     expect(clampForEditorMin(wide, 'sidebar', 0.35)).toBeCloseTo(0.2)
@@ -163,7 +194,8 @@ describe('clampForEditorMin', () => {
     const layout: Layout = {
       sidebar: { open: true, size: 0.3, tab: 'manuscript' },
       notes: { open: true, size: 0.3 },
-      tagBar: { open: true, height: 120, split: 0.4 }
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     }
     expect(clampForEditorMin(layout, 'sidebar', 0.1)).toBe(0.15)
     expect(clampForEditorMin(layout, 'notes', 0.2)).toBe(0.2)
@@ -174,13 +206,15 @@ describe('clampForEditorMin', () => {
     const layout: Layout = {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.5 },
-      tagBar: { open: true, height: 120, split: 0.4 }
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     }
     clampForEditorMin(layout, 'notes', 0.5)
     expect(layout).toEqual({
       sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.5 },
-      tagBar: { open: true, height: 120, split: 0.4 }
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     })
   })
 })
@@ -189,7 +223,8 @@ describe('editor minimum across panels', () => {
   const wide: Layout = {
     sidebar: { open: true, size: 0.35, tab: 'manuscript' },
     notes: { open: true, size: 0.5 },
-    tagBar: { open: true, height: 120, split: 0.4 }
+    tagBar: { open: true, height: 120, split: 0.4 },
+    assistant: { open: false, size: 0.3 }
   }
 
   it('fitsEditorMin counts only open panels', () => {
@@ -210,12 +245,33 @@ describe('editor minimum across panels', () => {
     const tight: Layout = {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' },
       notes: { open: true, size: 0.15 },
-      tagBar: { open: true, height: 120, split: 0.4 }
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: false, size: 0.3 }
     }
     const still = normalizeLayout({
       ...tight,
       sidebar: { open: true, size: 0.35, tab: 'manuscript' }
     })
     expect(fitsEditorMin(still)).toBe(true)
+  })
+
+  it('normalizeLayout gives way assistant first when a third panel opens beside two wide ones (F-5.4)', () => {
+    const three: Layout = {
+      sidebar: { open: true, size: 0.35, tab: 'manuscript' },
+      notes: { open: true, size: 0.35 },
+      tagBar: { open: true, height: 120, split: 0.4 },
+      assistant: { open: true, size: 0.4 }
+    }
+    const fixed = normalizeLayout(three)
+    // The assistant lands on its floor, then the notes give the rest; the sidebar keeps its size.
+    expect(fixed.assistant.size).toBe(0.2)
+    expect(fixed.notes.size).toBeCloseTo(0.15, 9)
+    expect(fixed.sidebar.size).toBe(0.35)
+    expect(fitsEditorMin(fixed)).toBe(true)
+    // A closed assistant does not take part: the other two fit as they are.
+    const input: Layout = { ...three, assistant: { open: false, size: 0.4 } }
+    const closed = normalizeLayout(input)
+    expect(closed).toBe(input)
+    expect(closed.notes.size).toBe(0.35)
   })
 })

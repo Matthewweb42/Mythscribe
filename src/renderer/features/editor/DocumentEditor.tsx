@@ -13,6 +13,7 @@ import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
+import { useActiveEditorStore } from './activeEditorStore'
 import { COLUMN, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
 import { buildExtensions } from './extensions'
@@ -100,7 +101,9 @@ const TOKEN_MENU_ITEMS: MenuItem[] = [
  * deletes the token only: links are the author's explicit choice and stay. VibeWrite (F-5.3)
  * runs only in the single-document view: the controller arms itself there and the toggle sits
  * in the toolbar's right slot, so a stacked region never shows ghost text. The voice exemplar
- * button (F-14.1) sits beside it, for the same reason.
+ * button (F-14.1) sits beside it, for the same reason. Once ready, the instance registers as
+ * the active editor (F-5.4; again on focus, so the last-focused region of a stack wins) and
+ * releases itself on unmount, which is how the assistant panel reaches the caret.
  */
 function RegionEditor({
   id,
@@ -146,10 +149,20 @@ function RegionEditor({
       },
       onUpdate: ({ editor }) => edit(id, editor.getJSON()),
       // `useEditor` reads the latest `onFocus` on every call, so a changed callback is honoured.
-      onFocus: ({ editor }) => onFocus?.(editor)
+      onFocus: ({ editor }) => {
+        useActiveEditorStore.getState().set(id, editor)
+        onFocus?.(editor)
+      }
     },
     [extensions]
   )
+
+  useEffect(() => {
+    if (!ready) return
+    const store = useActiveEditorStore.getState()
+    store.set(id, editor)
+    return () => store.release(editor)
+  }, [editor, id, ready])
 
   useEffect(() => {
     resyncInlineTags(editor.view.dom, tagsById)

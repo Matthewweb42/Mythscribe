@@ -187,6 +187,8 @@ select {
   opacity: 0.55;
   pointer-events: none;
   user-select: none;
+  /* F-5.4: an Agent-mode answer keeps its paragraph breaks while it shows. */
+  white-space: pre-wrap;
 }
 
 /*

@@ -5,6 +5,7 @@ import {
   defaultAiSettings,
   type AiSettingsInput
 } from '@shared/aiSettings'
+import { CONVERSATIONS_KEY, Conversations, parseStoredConversations } from '@shared/chat'
 import { EDITOR_SETTINGS_KEY, EditorSettings, defaultEditorSettings } from '@shared/editorSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
@@ -99,6 +100,35 @@ export function setWritingPresets(db: TreeDb, value: WritingPresets): WritingPre
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: WRITING_PRESETS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the project's assistant conversations (F-5.4) from the `settings` row under
+ * `CONVERSATIONS_KEY`. A missing row, unparsable JSON, or a value that no longer fits the
+ * schema all answer with `defaultConversations()` (no conversations): nothing is seeded at
+ * creation, and a refused row can never resurrect a conversation the author did not keep.
+ */
+export function getConversations(db: TreeDb): Conversations {
+  const row = db.select().from(settings).where(eq(settings.key, CONVERSATIONS_KEY)).get()
+  if (!row) return parseStoredConversations(undefined)
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return parseStoredConversations(undefined)
+  }
+  return parseStoredConversations(json)
+}
+
+/** Replaces the project's conversations (upsert on the settings key) and returns what was stored. */
+export function setConversations(db: TreeDb, value: Conversations): Conversations {
+  const stored = Conversations.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: CONVERSATIONS_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

@@ -17,6 +17,7 @@ import {
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetActiveEditorStore, useActiveEditorStore } from './activeEditorStore'
 import { DocumentEditor } from './DocumentEditor'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { resetSceneMetaStore } from './sceneMetaStore'
@@ -176,6 +177,7 @@ beforeEach(() => {
   resetLayoutStore()
   resetSceneMetaStore()
   resetVoiceStore()
+  resetActiveEditorStore()
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
 })
@@ -188,6 +190,38 @@ afterEach(() => {
   resetLayoutStore()
   resetSceneMetaStore()
   resetVoiceStore()
+  resetActiveEditorStore()
+})
+
+describe('DocumentEditor active editor (F-5.4)', () => {
+  it('registers the ready instance as the active editor and releases it on unmount', async () => {
+    install()
+    expect(useActiveEditorStore.getState().active).toBeNull()
+    const { unmount } = render(<DocumentEditor id="sc-1" format="novel" />)
+    await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
+    const active = useActiveEditorStore.getState().active
+    expect(active?.id).toBe('sc-1')
+    expect(active?.editor.view.dom).toBe(box())
+    unmount()
+    expect(useActiveEditorStore.getState().active).toBeNull()
+  })
+
+  it('the focused region of a stack takes over from the last one mounted', async () => {
+    install()
+    render(
+      <>
+        <DocumentEditor id="sc-1" format="novel" toolbar={false} />
+        <DocumentEditor id="sc-2" format="novel" toolbar={false} />
+      </>
+    )
+    const boxes = (): HTMLElement[] => screen.getAllByRole('textbox', { name: 'Document' })
+    await waitFor(() =>
+      expect(boxes().every((b) => b.getAttribute('contenteditable') === 'true')).toBe(true)
+    )
+    expect(useActiveEditorStore.getState().active?.id).toBe('sc-2')
+    await userEvent.click(boxes()[0]!)
+    expect(useActiveEditorStore.getState().active?.id).toBe('sc-1')
+  })
 })
 
 describe('DocumentEditor status bar AI share (F-14.6)', () => {

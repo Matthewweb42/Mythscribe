@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiSettings } from '@shared/aiSettings'
+import type { Conversations } from '@shared/chat'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type {
   Channel,
@@ -16,6 +17,7 @@ import { defaultLayout } from '@shared/layout'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { resetAssistantStore, useAssistantStore } from '@renderer/features/ai/assistantStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import {
@@ -64,6 +66,7 @@ beforeEach(() => {
   resetLayoutStore()
   resetEditorSettingsStore()
   resetAiSettingsStore()
+  resetAssistantStore()
   resetTagStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
@@ -72,6 +75,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   resetAiSettingsStore()
+  resetAssistantStore()
   vi.unstubAllGlobals()
 })
 
@@ -98,6 +102,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'aiSettings:get') return defaultAiSettings()
     if (channel === 'layout:get') return defaultLayout()
     if (channel === 'layout:set') return input
+    if (channel === 'conversations:get') return { active: null, items: [] }
     return null
   })
   const on = <E extends EventName>(
@@ -368,7 +373,8 @@ describe('App', () => {
       'layout:get': {
         sidebar: { open: true, size: 0.3, tab: 'manuscript' },
         notes: { open: false, size: 0.25 },
-        tagBar: { open: true, height: 120, split: 0.4 }
+        tagBar: { open: true, height: 120, split: 0.4 },
+        assistant: { open: false, size: 0.3 }
       }
     })
     render(<App />)
@@ -416,7 +422,8 @@ describe('App', () => {
           tab: 'manuscript'
         },
         notes: { open: false, size: 0.25 },
-        tagBar: { open: true, height: 120, split: 0.4 }
+        tagBar: { open: true, height: 120, split: 0.4 },
+        assistant: { open: false, size: 0.3 }
       })
     } finally {
       vi.useRealTimers()
@@ -518,6 +525,54 @@ describe('App', () => {
     expect(within(dialog).getByRole('spinbutton', { name: 'Font size' })).toBeInTheDocument()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Close settings' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('Ctrl+K opens the assistant panel beside the main pane; the conversations load with the project and drop on close (F-5.4)', async () => {
+    const stored: Conversations = {
+      active: 'c-1',
+      items: [
+        {
+          id: 'c-1',
+          title: 'Why the ridge?',
+          mode: 'plan',
+          paragraphs: 1,
+          messages: [],
+          created: '2026-09-15T10:00:00.000Z',
+          modified: '2026-09-15T10:00:00.000Z'
+        }
+      ]
+    }
+    const invoke = install({
+      'project:current': info,
+      'tree:list': treeFixture,
+      'conversations:get': stored
+    })
+    render(<App />)
+    await screen.findByRole('treeitem', { name: 'Scene 1' })
+    expect(invoke).toHaveBeenCalledWith('conversations:get', undefined)
+    await waitFor(() => expect(useAssistantStore.getState().conversations).toEqual(stored))
+    const toggle = screen.getByRole('button', { name: 'Assistant' })
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByTestId('assistant-panel')).not.toBeInTheDocument()
+
+    await userEvent.keyboard('{Control>}k{/Control}')
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    const panel = screen.getByRole('complementary', { name: 'Assistant' })
+    expect(panel.style.width).toBe('30vw')
+    expect(within(panel).getByRole('tab', { name: 'Why the ridge?' })).toBeInTheDocument()
+    // Docked at the right edge: after the main pane, full height.
+    expect(
+      screen.getByTestId('empty-state').compareDocumentPosition(panel) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+
+    await userEvent.click(screen.getByRole('button', { name: /close project/i }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    await screen.findByRole('button', { name: /new project/i })
+    expect(useAssistantStore.getState().conversations).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
+    // The panel's open state is app-wide (F-7.2), so it is still open for the next project.
+    expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
   })
 
   it('does not show the Settings button on the welcome screen, and Ctrl+, does nothing (F-7.5)', async () => {
