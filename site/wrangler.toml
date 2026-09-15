@@ -1,0 +1,17 @@
+# MythScribe website (F-15.10): a Worker that serves only static assets from ./public.
+# Custom domains below are created by wrangler on deploy (DNS record + certificate).
+# api.mythscribe.app is reserved for the F-15.4 proxy; do not add it here.
+name = "mythscribe-app"
+account_id = "dcc26cac35ac537e749bfab8672bd8d3"
+compatibility_date = "2026-09-01"
+workers_dev = false
+
+routes = [
+  { pattern = "mythscribe.app", custom_domain = true },
+  { pattern = "www.mythscribe.app", custom_domain = true }
+]
+
+[assets]
+directory = "./public"
+html_handling = "auto-trailing-slash"
+not_found_handling = "404-page"

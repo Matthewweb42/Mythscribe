@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MythScribe – local-first novel writing with AI that keeps your voice</title>
+    <meta
+      name="description"
+      content="MythScribe is a free desktop app for fiction writers: a Scrivener-style organizer, a distraction-free editor, story tags, and AI that reads your manuscript and keeps your voice. Your book stays on your machine."
+    />
+    <meta name="theme-color" content="#1b1b1f" />
+    <meta property="og:title" content="MythScribe" />
+    <meta
+      property="og:description"
+      content="Local-first novel writing with AI that keeps your voice. Free desktop app; bring your own key."
+    />
+    <meta property="og:image" content="https://mythscribe.app/img/screenshot-manuscript.png" />
+    <meta property="og:url" content="https://mythscribe.app/" />
+    <link rel="icon" href="img/favicon.png" type="image/png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="./" aria-current="page">
+          <img src="img/favicon.png" alt="" width="32" height="32" />
+          MythScribe
+        </a>
+        <nav class="site-nav" aria-label="Site">
+          <ul>
+            <li><a href="#download">Download</a></li>
+            <li><a href="docs/">AI dial</a></li>
+            <li><a href="privacy">Privacy</a></li>
+            <li><a href="terms">Terms</a></li>
+            <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section class="hero" aria-labelledby="pitch">
+        <h1 id="pitch">Write your novel on your own machine.</h1>
+        <p class="lede">
+          MythScribe is a desktop app for fiction writers: a Scrivener-style organizer, a
+          distraction-free editor, story tags, and AI that reads your manuscript and keeps your
+          voice. It is free, it works offline, and nothing leaves your computer unless you turn the
+          AI dial up yourself.
+        </p>
+        <div class="actions">
+          <a class="button" href="#download">Download</a>
+          <a class="button button-secondary" href="docs/">How the AI dial works</a>
+        </div>
+        <ul class="cards">
+          <li class="card">
+            <h3>Local-first</h3>
+            <p>
+              A project is a folder on your disk: one database file plus your assets. No account, no
+              sign-in, no sync you did not ask for. Copy the folder and you have a backup.
+            </p>
+          </li>
+          <li class="card">
+            <h3>Never lose words</h3>
+            <p>
+              Every pause in typing saves your work, and the app flushes pending saves before it
+              lets a window close or the app quit. Word counts, tags, and notes live in the same
+              file as the text.
+            </p>
+          </li>
+          <li class="card">
+            <h3>AI assists, you decide</h3>
+            <p>
+              Every AI output is a proposal you accept, edit, or dismiss. Nothing is written into
+              your manuscript silently, and AI is off when you install. Each feature tells you
+              exactly what it sends before you turn it on.
+            </p>
+          </li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="screens">
+        <h2 id="screens">What it looks like</h2>
+        <p class="note">
+          Screenshots from the current development build with a sample project. The interface is
+          dark by default; themes come later.
+        </p>
+        <div class="shots">
+          <figure>
+            <a href="img/screenshot-manuscript.png">
+              <img
+                src="img/screenshot-manuscript.png"
+                width="1400"
+                height="900"
+                loading="lazy"
+                alt="The MythScribe window. On the left, a manuscript tree with Front Matter, Manuscript, and End Matter, expanded to Part One: Tides, chapter The Harbour, and the selected scene Low Water. On the right, the scene's tags (ilse, prophecy, the-ferryman, the-harbour), its location, point of view, and timeline fields, and the scene text in a serif book column."
+              />
+            </a>
+            <figcaption>
+              Parts, chapters, and scenes on the left; the scene's tags, location, point of view,
+              and timeline above the text; the editor in a book-width column.
+            </figcaption>
+          </figure>
+          <figure>
+            <a href="img/screenshot-tags.png">
+              <img
+                src="img/screenshot-tags.png"
+                width="1400"
+                height="900"
+                loading="lazy"
+                alt="The Tags tab in the sidebar: category filters (Characters, Settings, World Building, Tone, Content, Plot Threads, Custom), a Standard Fiction template ready to load, a search box, and a colour-coded list of tags such as ally, battle, coming-of-age, and dark-fantasy with their use counts."
+              />
+            </a>
+            <figcaption>
+              A tag bank per project, filtered by category, with templates for standard fiction,
+              mystery, fantasy, and sci-fi to start from. Type <code>#</code> in the editor to tag
+              inline.
+            </figcaption>
+          </figure>
+          <figure>
+            <a href="img/screenshot-ai-dial.png">
+              <img
+                src="img/screenshot-ai-dial.png"
+                width="1400"
+                height="900"
+                loading="lazy"
+                alt="The Settings dialog on the AI tab. The AI dial shows four levels: Off, Ask, Suggest (selected), and Draft. Below it, a checkbox per feature, the ghost text idle delay, and a table listing each feature, what it sends, the provider, and the level it needs."
+              />
+            </a>
+            <figcaption>
+              The AI dial in Settings: four levels, a toggle per feature, and a table of exactly
+              what each feature sends and the level it needs.
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section aria-labelledby="ai">
+        <h2 id="ai">AI on your terms</h2>
+        <p class="note">
+          AI features are optional and off when you install. The dial in Settings runs from Off,
+          where nothing leaves your machine, to Draft. Every feature lists what it sends, and every
+          result is a proposal you have to accept. The
+          <a href="docs/">AI dial page</a> has the full table.
+        </p>
+        <div class="plans">
+          <div class="card">
+            <h3>Bring your own key <span class="badge">Free</span></h3>
+            <p>
+              Enter your OpenAI API key in Settings. The key is stored in your operating system's
+              secure storage, and requests go straight from the app to OpenAI: nothing passes
+              through us, and we never see your key or your text. You pay OpenAI for what you use;
+              the app shows the cost of every request and a running total, and you can set a daily
+              cap.
+            </p>
+          </div>
+          <div class="card">
+            <h3>MythScribe Cloud <span class="badge">Not yet available</span></h3>
+            <p>
+              A subscription for writers who would rather not manage an API key: sign in, and the
+              app sends AI requests through a small proxy that meters usage and hands them to the
+              provider. The proxy will not store or log manuscript text, and billing will go through
+              Lemon Squeezy. It is not built yet; the app you can download today is
+              bring-your-own-key only.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="download" aria-labelledby="download-heading">
+        <h2 id="download-heading">Download</h2>
+        <p class="note">
+          MythScribe is still in development and there are no public builds yet. The buttons below
+          go to the GitHub releases page, which is where the first Windows build will appear,
+          followed by macOS and Linux. Installers will be signed before the first public release.
+        </p>
+        <div class="downloads">
+          <a class="button" href="https://github.com/Matthewweb42/Mythscribe/releases">Windows</a>
+          <a class="button" href="https://github.com/Matthewweb42/Mythscribe/releases">macOS</a>
+          <a class="button" href="https://github.com/Matthewweb42/Mythscribe/releases">Linux</a>
+          <a class="button button-secondary" href="https://github.com/Matthewweb42/Mythscribe"
+            >Source on GitHub</a
+          >
+        </div>
+        <p class="note">
+          Want to know when the first build is out? Email
+          <a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a> and I will reply when it
+          ships. No mailing list, no tracking.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <p>MythScribe is made by Matthew Webecke.</p>
+        <nav aria-label="Footer">
+          <ul>
+            <li><a href="privacy">Privacy</a></li>
+            <li><a href="terms">Terms</a></li>
+            <li><a href="docs/">AI dial</a></li>
+            <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
+            <li><a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a></li>
+          </ul>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

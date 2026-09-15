@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy policy – MythScribe</title>
+    <meta
+      name="description"
+      content="What MythScribe does with your data: the desktop app is local-first, AI is off by default, bring-your-own-key requests go straight to the provider, and this website has no analytics."
+    />
+    <meta name="theme-color" content="#1b1b1f" />
+    <link rel="icon" href="img/favicon.png" type="image/png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="./">
+          <img src="img/favicon.png" alt="" width="32" height="32" />
+          MythScribe
+        </a>
+        <nav class="site-nav" aria-label="Site">
+          <ul>
+            <li><a href="./#download">Download</a></li>
+            <li><a href="docs/">AI dial</a></li>
+            <li><a href="privacy" aria-current="page">Privacy</a></li>
+            <li><a href="terms">Terms</a></li>
+            <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <article class="prose">
+        <h1>Privacy policy</h1>
+        <p class="meta">Last updated 14 September 2026</p>
+
+        <p>
+          MythScribe is built to need as little of your data as possible. The short version: the
+          desktop app keeps your writing on your own computer, AI features are off until you turn
+          them on, requests made with your own API key go directly to the provider without passing
+          through us, and this website has no analytics. The rest of this page spells that out.
+        </p>
+
+        <h2 id="who">Who we are</h2>
+        <p>
+          MythScribe is made and operated by Matthew Webecke, operating as MythScribe
+          (&ldquo;we&rdquo;, &ldquo;us&rdquo;). You can reach us at
+          <a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a>.
+        </p>
+
+        <h2 id="app">The desktop app</h2>
+        <p>
+          A MythScribe project is a folder on your disk containing a database file and an assets
+          directory. Your manuscript, notes, tags, settings, and AI usage records are stored there
+          and nowhere else. The app does not require an account, does not sync your project
+          anywhere, and works offline. It sends no telemetry, crash reports, or usage analytics to
+          us.
+        </p>
+        <p>
+          AI features are off when you install. They are controlled by a dial in Settings with four
+          levels, plus a switch per feature, and each feature lists exactly what it sends before you
+          can enable it. The <a href="docs/">AI dial page</a> reproduces that list. At the lowest
+          level, nothing leaves your machine.
+        </p>
+
+        <h2 id="byok">Using your own API key</h2>
+        <p>
+          If you enter an API key for an AI provider (OpenAI is the default), the app stores it with
+          your operating system's secure storage: the Windows Data Protection API, the macOS
+          Keychain, or the Linux secret service where one is available. On a Linux machine without a
+          keyring, the key is stored obfuscated rather than encrypted, and the app tells you so in
+          Settings.
+        </p>
+        <p>
+          When an AI feature runs, the app sends the request straight from your computer to the
+          provider. We are not in that path: we never receive your key, your text, or the provider's
+          answer. What the provider does with the request is governed by its own terms and privacy
+          policy; for OpenAI, that is the API data-usage policy at
+          <a href="https://openai.com/policies/">openai.com/policies</a>. You pay the provider
+          directly for what you use. The app records each request's model, token counts, and cost in
+          your project so you can see your spend; those records stay on your machine.
+        </p>
+
+        <h2 id="cloud">MythScribe Cloud (not yet available)</h2>
+        <p>
+          We plan a subscription service, MythScribe Cloud, for writers who do not want to manage an
+          API key. It does not exist yet. When it launches, this policy will be updated first, and
+          it will work like this:
+        </p>
+        <ul>
+          <li>
+            You create an account with your email address. We store the address, your subscription
+            state, and a usage ledger (which feature ran, when, and how many tokens it used).
+          </li>
+          <li>
+            AI requests go from the app through our proxy to the provider. The proxy checks your
+            session and credits, meters the request, and passes it on.
+            <strong>Manuscript content is not stored or logged by the proxy.</strong>
+          </li>
+          <li>
+            Sub-processors will be Cloudflare (hosting), Lemon Squeezy (billing), and the AI
+            provider (OpenAI at launch). Your writing is not used to train models by us; the
+            provider's API terms govern its own handling.
+          </li>
+          <li>You will be able to export or delete your account data by emailing us.</li>
+        </ul>
+
+        <h2 id="payments">Payments</h2>
+        <p>
+          Paid products (the Cloud subscription and a one-time Supporter license, neither available
+          yet) will be sold through Lemon Squeezy as merchant of record. Lemon Squeezy collects your
+          payment details, issues invoices, and handles sales tax; we never see your card number.
+          Their handling of your data is described in their privacy policy. Refunds follow the
+          <a href="terms">terms of service</a> and Lemon Squeezy's refund process.
+        </p>
+
+        <h2 id="website">This website</h2>
+        <p>
+          mythscribe.app is a static site served by Cloudflare. It sets no cookies, loads nothing
+          from third parties, and runs no analytics, not even Cloudflare's. Cloudflare keeps
+          short-lived server logs (IP address, user agent, requested page) to operate and protect
+          the service, under Cloudflare's own privacy policy.
+        </p>
+        <p>
+          Email sent to hello@mythscribe.app is forwarded by Cloudflare Email Routing to the
+          operator's mailbox. We keep correspondence only as long as needed to answer you.
+        </p>
+
+        <h2 id="children">Children</h2>
+        <p>
+          MythScribe is not directed at children under 13, and we do not knowingly collect data from
+          them. The Cloud service, when it launches, will require you to be at least 16, or older
+          where your local law requires it, to create an account.
+        </p>
+
+        <h2 id="rights">Your rights</h2>
+        <p>
+          For the desktop app there is nothing for us to hand over or delete: your data is on your
+          computer, and deleting a project folder deletes everything in it. If you have written to
+          us or, later, hold a Cloud account, you can ask us at any time to show you what we hold,
+          correct it, or delete it. Email
+          <a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a>.
+        </p>
+
+        <h2 id="changes">Changes to this policy</h2>
+        <p>
+          When this policy changes, the new version is posted here with an updated date at the top.
+          Changes that affect what the app sends are also reflected in the app's own data-sharing
+          table, which this site's <a href="docs/">AI dial page</a> mirrors.
+        </p>
+
+        <h2 id="contact">Contact</h2>
+        <p>
+          Questions about this policy:
+          <a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a>.
+        </p>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <p>MythScribe is made by Matthew Webecke.</p>
+        <nav aria-label="Footer">
+          <ul>
+            <li><a href="privacy" aria-current="page">Privacy</a></li>
+            <li><a href="terms">Terms</a></li>
+            <li><a href="docs/">AI dial</a></li>
+            <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
+            <li><a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a></li>
+          </ul>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

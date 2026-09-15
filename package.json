@@ -21,7 +21,9 @@
     "postinstall": "electron-builder install-app-deps",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac",
-    "build:linux": "npm run build && electron-builder --linux"
+    "build:linux": "npm run build && electron-builder --linux",
+    "site:check": "vitest run src/shared/site.test.ts",
+    "site:deploy": "wrangler deploy --config site/wrangler.toml"
   },
   "dependencies": {
     "@tiptap/core": "3.31.3",
@@ -47,6 +49,7 @@
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.7",
     "@types/better-sqlite3": "9.6.0",
+    "@types/jsdom": "30.0.0",
     "@types/node": "24.13.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
@@ -65,6 +68,7 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.70.0",
     "vite": "7.3.6",
-    "vitest": "5.0.0"
+    "vitest": "5.0.0",
+    "wrangler": "4.131.2"
   }
 }

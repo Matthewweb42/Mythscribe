@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How MythScribe's AI dial works – MythScribe</title>
+    <meta
+      name="description"
+      content="The four levels of MythScribe's AI dial, what each AI feature sends and the level it needs, and the rules that keep the author in control."
+    />
+    <meta name="theme-color" content="#1b1b1f" />
+    <link rel="icon" href="../img/favicon.png" type="image/png" />
+    <link rel="stylesheet" href="../styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../">
+          <img src="../img/favicon.png" alt="" width="32" height="32" />
+          MythScribe
+        </a>
+        <nav class="site-nav" aria-label="Site">
+          <ul>
+            <li><a href="../#download">Download</a></li>
+            <li><a href="./" aria-current="page">AI dial</a></li>
+            <li><a href="../privacy">Privacy</a></li>
+            <li><a href="../terms">Terms</a></li>
+            <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <article class="prose">
+        <h1>How MythScribe's AI dial works</h1>
+        <p class="meta">Matches the app's Settings as of 14 September 2026</p>
+
+        <p>
+          MythScribe installs with AI off. One control in Settings, the AI dial, decides how much
+          the app is allowed to do, and a switch per feature lets you turn off anything you do not
+          want even at a level that allows it. This page reproduces the dial's four levels and the
+          data-sharing table from the app, word for word. The text is copied from the app's source,
+          and a test in the repository fails if the two drift apart.
+        </p>
+
+        <h2 id="principles">The rules the AI features follow</h2>
+        <ol>
+          <li>
+            <strong>Everything is a proposal.</strong> Ghost text, suggested tags, rewrites, and
+            drafts are shown to you and go nowhere until you accept them. Nothing enters your
+            manuscript without an explicit accept.
+          </li>
+          <li>
+            <strong>Your voice, not the model's.</strong> Anything that generates prose is given a
+            profile of your own writing, built from passages you choose. A check of the result
+            against that profile, before it is shown to you, is the next piece being built.
+          </li>
+          <li>
+            <strong>The dial and the toggles are the law.</strong> A feature runs only at or above
+            the level it needs, and only with its own switch on. A feature may not send any text
+            that the table below does not list.
+          </li>
+          <li>
+            <strong>Answers are grounded.</strong> Story Intelligence answers cite the passages they
+            come from or say that nothing was found, and editor's notes point at a passage for every
+            claim. No uncited praise.
+          </li>
+        </ol>
+
+        <h2 id="dial">The four levels</h2>
+        <p>
+          The dial is monotonic: each level includes everything below it. It is set per project, so
+          a project you are experimenting with can sit at Draft while your novel stays at Off.
+        </p>
+        <div class="table-wrap">
+          <table id="dial-levels">
+            <thead>
+              <tr>
+                <th scope="col">Level</th>
+                <th scope="col">Name</th>
+                <th scope="col">What it means</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>0</td>
+                <th scope="row">Off</th>
+                <td>Nothing leaves this machine.</td>
+              </tr>
+              <tr>
+                <td>1</td>
+                <th scope="row">Ask</th>
+                <td>Queries, summaries, tag suggestions, and critique, on request.</td>
+              </tr>
+              <tr>
+                <td>2</td>
+                <th scope="row">Suggest</th>
+                <td>Adds ghost text and rewrite-in-my-voice.</td>
+              </tr>
+              <tr>
+                <td>3</td>
+                <th scope="row">Draft</th>
+                <td>Adds multi-paragraph drafting proposals.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="features">What each feature sends</h2>
+        <p>
+          This is the table shown in Settings, in the same order. It lists every feature the app
+          knows about, including some that are still being built; a feature that is not built yet
+          sends nothing. At launch the provider is OpenAI, using your own API key. Nothing else is
+          sent: no telemetry, no other documents, never the whole manuscript.
+        </p>
+        <div class="table-wrap">
+          <table id="feature-sharing">
+            <thead>
+              <tr>
+                <th scope="col">Feature</th>
+                <th scope="col">What it sends</th>
+                <th scope="col">Level needed</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Tag suggestions</th>
+                <td>The current document's text and the existing tag names.</td>
+                <td>Ask</td>
+              </tr>
+              <tr>
+                <th scope="row">Scene summaries</th>
+                <td>A scene's text, to generate its summary.</td>
+                <td>Ask</td>
+              </tr>
+              <tr>
+                <th scope="row">Assistant chat</th>
+                <td>The active scene's text, any notes pulled in with #Name, and your message.</td>
+                <td>Ask</td>
+              </tr>
+              <tr>
+                <th scope="row">Story Intelligence</th>
+                <td>
+                  Your question, scene summaries, and the full text of the top matching scenes.
+                </td>
+                <td>Ask</td>
+              </tr>
+              <tr>
+                <th scope="row">Editor's notes</th>
+                <td>The scene's text and its scene brief.</td>
+                <td>Ask</td>
+              </tr>
+              <tr>
+                <th scope="row">Search indexing</th>
+                <td>Chunks of scene text, to compute embeddings for search.</td>
+                <td>Ask</td>
+              </tr>
+              <tr>
+                <th scope="row">Ghost text</th>
+                <td>
+                  Up to 500 characters of text before the cursor and 100 after it, plus the scene’s
+                  notes and metadata (location, POV, timeline).
+                </td>
+                <td>Suggest</td>
+              </tr>
+              <tr>
+                <th scope="row">Author mode</th>
+                <td>
+                  The active scene's text, referenced notes, the scene brief, and your instruction.
+                </td>
+                <td>Draft</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="cost">Seeing what it costs</h2>
+        <p>
+          Every request records the model, the tokens in and out, and the cost in your project's
+          usage ledger, and the AI tab in Settings shows today's spend and the running total. You
+          can set a daily cap; at a cap of zero the app makes no requests at all, cached answers
+          included. Ghost text has its own brakes: it waits for a pause in typing, needs a minimum
+          of new text since the last request, never asks while a suggestion is showing, and stops
+          after a daily limit.
+        </p>
+
+        <h2 id="where">Where to find it</h2>
+        <p>
+          Open Settings (<kbd>Ctrl</kbd>+<kbd>,</kbd>, or <kbd>Cmd</kbd>+<kbd>,</kbd> on macOS),
+          choose the AI tab, and the dial is at the top under &ldquo;This project&rdquo;. Your API
+          key, the model tiers, and the usage figures are on the same tab.
+        </p>
+
+        <p>
+          In short: every AI output is a proposal, nothing enters the manuscript without your
+          explicit accept, and AI is off until you turn the dial.
+        </p>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <p>MythScribe is made by Matthew Webecke.</p>
+        <nav aria-label="Footer">
+          <ul>
+            <li><a href="../privacy">Privacy</a></li>
+            <li><a href="../terms">Terms</a></li>
+            <li><a href="./" aria-current="page">AI dial</a></li>
+            <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
+            <li><a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a></li>
+          </ul>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
