@@ -34,7 +34,7 @@
     <main class="wrap">
       <article class="prose">
         <h1>How MythScribe's AI dial works</h1>
-        <p class="meta">Matches the app's Settings as of 14 September 2026</p>
+        <p class="meta">Matches the app’s Settings as of 15 September 2026</p>
 
         <p>
           MythScribe installs with AI off. One control in Settings, the AI dial, decides how much
@@ -53,8 +53,8 @@
           </li>
           <li>
             <strong>Your voice, not the model's.</strong> Anything that generates prose is given a
-            profile of your own writing, built from passages you choose. A check of the result
-            against that profile, before it is shown to you, is the next piece being built.
+            profile of your own writing, built from passages you choose, and the result is checked
+            against that profile before it is shown to you.
           </li>
           <li>
             <strong>The dial and the toggles are the law.</strong> A feature runs only at or above
@@ -160,7 +160,9 @@
                 <th scope="row">Ghost text</th>
                 <td>
                   Up to 500 characters of text before the cursor and 100 after it, plus the scene’s
-                  notes and metadata (location, POV, timeline).
+                  notes and metadata (location, POV, timeline), and the voice profile (stylometric
+                  rules and up to 3 exemplar passages). An answer that breaks the voice profile is
+                  sent back once, with the same context plus the rule it broke, for a second try.
                 </td>
                 <td>Suggest</td>
               </tr>
