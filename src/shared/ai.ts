@@ -64,7 +64,9 @@ export const AiErrorCode = z.enum([
   'NETWORK',
   'PROVIDER',
   'BUDGET',
-  'DISABLED'
+  'DISABLED',
+  // F-5.10: the author stopped the request; never logged, never cached, never toasted.
+  'CANCELLED'
 ])
 export type AiErrorCode = z.infer<typeof AiErrorCode>
 
@@ -77,7 +79,8 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
   NETWORK: 'Check your internet connection and retry.',
   PROVIDER: 'Try again in a moment.',
   BUDGET: 'Raise the daily cap in Settings or wait until tomorrow.',
-  DISABLED: 'Turn the AI dial up in Settings, or enable the feature there.'
+  DISABLED: 'Turn the AI dial up in Settings, or enable the feature there.',
+  CANCELLED: 'Send it again whenever you like.'
 }
 
 /**

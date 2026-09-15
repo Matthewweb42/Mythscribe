@@ -7,7 +7,9 @@ import { AppStateStore } from '../appState/appStateStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { getCached, type CacheEntry, type CachedResponse } from './cacheStore'
 import { dayOf, defaultAiUsageState, type AiUsageState } from './dailyCap'
+import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import {
+  AiCancelledError,
   AiRateLimitError,
   type CompletionRequest,
   type CompletionResult,
@@ -114,6 +116,18 @@ function fakes(over: Partial<AiUsageState> = {}): Fakes {
   }
   return f
 }
+
+beforeEach(() => resetInflight())
+
+/** Settles like the adapter once its `signal` aborts: rejects with CANCELLED. */
+const untilCancelled = (request: CompletionRequest): Promise<never> =>
+  new Promise((_, reject) => {
+    request.signal?.addEventListener(
+      'abort',
+      () => reject(new AiCancelledError('The request was stopped.')),
+      { once: true }
+    )
+  })
 
 describe('runAiRequest (F-5.14)', () => {
   it('calls the provider with the clamped cap, prices the real usage, logs, caches, and tallies', async () => {
@@ -375,6 +389,105 @@ describe('runAiStream (F-5.4)', () => {
       expect(f.stream).not.toHaveBeenCalled()
       expect(f.ledger).toEqual([])
     }
+  })
+})
+
+describe('cancel (F-5.10)', () => {
+  it('hands the registered signal to the provider under the requestId and releases it after the answer', async () => {
+    const f = fakes()
+    f.complete.mockImplementationOnce(async (request) => {
+      expect(request.signal).toBeInstanceOf(AbortSignal)
+      expect(request.signal?.aborted).toBe(false)
+      expect(inflightCount()).toBe(1)
+      return { text: 'ok', model: 'gpt-5.4-mini', usage: { inputTokens: 1, outputTokens: 1 } }
+    })
+    await runAiRequest(f.deps, { ...input, requestId: 'req-1' })
+    expect(f.complete).toHaveBeenCalledTimes(1)
+    expect(inflightCount()).toBe(0)
+    expect(cancelInflight('req-1')).toBe(false)
+  })
+
+  it('a cancel mid-flight rejects runAiRequest with CANCELLED, logging, caching, and spending nothing', async () => {
+    const f = fakes()
+    f.complete.mockImplementationOnce(untilCancelled)
+    const pending = runAiRequest(f.deps, { ...input, requestId: 'req-1' })
+    expect(cancelInflight('req-1')).toBe(true)
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(f.ledger).toEqual([])
+    expect(f.cache.size).toBe(0)
+    expect(f.spends).toEqual([])
+    expect(inflightCount()).toBe(0)
+  })
+
+  it('a cancel mid-stream rejects runAiStream after the deltas already shown, recording nothing', async () => {
+    const f = fakes()
+    f.stream.mockImplementationOnce(async function* (request) {
+      yield { delta: 'Half' }
+      await untilCancelled(request)
+    })
+    const seen: string[] = []
+    const pending = runAiStream(f.deps, { ...input, requestId: 'req-1' }, (d) => void seen.push(d))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(f.stream.mock.calls[0]?.[0].signal).toBeInstanceOf(AbortSignal)
+    expect(cancelInflight('req-1')).toBe(true)
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(seen).toEqual(['Half'])
+    expect(f.ledger).toEqual([])
+    expect(f.cache.size).toBe(0)
+    expect(inflightCount()).toBe(0)
+  })
+
+  it('refuses a duplicate requestId with VALIDATION while the first is in flight, and the first still answers', async () => {
+    const f = fakes()
+    let answer: (() => void) | undefined
+    f.complete.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = (): void =>
+            resolve({
+              text: 'ok',
+              model: 'gpt-5.4-mini',
+              usage: { inputTokens: 1, outputTokens: 1 }
+            })
+        })
+    )
+    const first = runAiRequest(f.deps, { ...input, requestId: 'req-1' })
+    await expect(
+      runAiRequest(f.deps, { ...input, contextHash: 'ctx-2', requestId: 'req-1' })
+    ).rejects.toMatchObject({ code: 'VALIDATION' })
+    expect(inflightCount()).toBe(1)
+    if (!answer) throw new Error('the provider was not called')
+    answer()
+    await expect(first).resolves.toMatchObject({ text: 'ok' })
+    expect(f.complete).toHaveBeenCalledTimes(1)
+    expect(inflightCount()).toBe(0)
+  })
+
+  it('registers and releases around a cache hit and a budget refusal too, so cancel is never left dangling', async () => {
+    const f = fakes()
+    await runAiRequest(f.deps, input)
+    await expect(runAiRequest(f.deps, { ...input, requestId: 'hit' })).resolves.toMatchObject({
+      cached: true
+    })
+    expect(inflightCount()).toBe(0)
+    const capped = fakes({ dailyCapUsd: 0 })
+    await expect(
+      runAiRequest(capped.deps, { ...input, requestId: 'refused' })
+    ).rejects.toMatchObject({ code: 'BUDGET' })
+    await expect(
+      runAiStream(capped.deps, { ...input, requestId: 'refused' }, () => {})
+    ).rejects.toMatchObject({ code: 'BUDGET' })
+    expect(inflightCount()).toBe(0)
+    expect(cancelInflight('refused')).toBe(false)
+  })
+
+  it('sends no signal at all without a requestId', async () => {
+    const f = fakes()
+    await runAiRequest(f.deps, input)
+    expect('signal' in (f.complete.mock.calls[0]?.[0] ?? {})).toBe(false)
+    await runAiStream(f.deps, { ...input, contextHash: 'ctx-2' }, () => {})
+    expect('signal' in (f.stream.mock.calls[0]?.[0] ?? {})).toBe(false)
+    expect(inflightCount()).toBe(0)
   })
 })
 

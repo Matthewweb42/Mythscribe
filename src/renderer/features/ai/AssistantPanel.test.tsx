@@ -11,6 +11,7 @@ import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetAiActivityStore } from './aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
 import { AssistantPanel, AssistantToggleButton } from './AssistantPanel'
 import { AGENT_NOTICE, resetAssistantStore, useAssistantStore } from './assistantStore'
@@ -23,6 +24,7 @@ interface PendingChat {
 
 let chats: PendingChat[]
 let sets: Conversations[]
+let cancels: string[]
 
 /** `conversations:get` answers with `stored`; writes record; `ai:chat` resolves when the test says so. */
 function install(stored: Conversations): void {
@@ -43,6 +45,10 @@ function install(stored: Conversations): void {
       }
       if (channel === 'layout:set') return input as Output<C>
       if (channel === 'proposal:settle') return null as Output<C>
+      if (channel === 'ai:cancel') {
+        cancels.push((input as Input<'ai:cancel'>).requestId)
+        return { cancelled: true } as Output<C>
+      }
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -111,6 +117,7 @@ const tabs = (): HTMLElement[] =>
   within(screen.getByRole('tablist', { name: 'Conversations' })).getAllByRole('tab')
 const box = (): HTMLElement => screen.getByRole('textbox', { name: 'Message' })
 const sendButton = (): HTMLElement => screen.getByRole('button', { name: 'Send' })
+const stopButton = (): HTMLElement => screen.getByRole('button', { name: 'Stop' })
 const turns = (): HTMLElement[] => within(log()).queryAllByTestId('chat-turn')
 const modals = (): string[] => useDialogStore.getState().modals.map((m) => m.options.title)
 
@@ -145,9 +152,11 @@ beforeEach(() => {
   vi.stubGlobal('innerWidth', 1000)
   chats = []
   sets = []
+  cancels = []
   resetLayoutStore()
   resetAssistantStore()
   resetAiSettingsStore()
+  resetAiActivityStore()
   resetActiveEditorStore()
   resetProposalStore()
   resetPendingSaves()
@@ -157,6 +166,7 @@ afterEach(() => {
   resetLayoutStore()
   resetAssistantStore()
   resetAiSettingsStore()
+  resetAiActivityStore()
   vi.unstubAllGlobals()
 })
 
@@ -239,7 +249,8 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(box()).toHaveValue('')
     expect(turns()).toHaveLength(4)
     expect(within(turns()[3]!).getByTestId('chat-pending')).toHaveTextContent('Thinking…')
-    expect(sendButton()).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument()
+    expect(stopButton()).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Clear conversation' })).toBeDisabled()
 
     await act(async () => {
@@ -251,6 +262,37 @@ describe('AssistantPanel (F-5.4)', () => {
     )
     expect(screen.queryByTestId('chat-pending')).not.toBeInTheDocument()
     await userEvent.type(box(), 'more')
+    expect(sendButton()).toBeEnabled()
+  })
+
+  it('Stop takes Send’s place while a turn is in flight; clicking it drops the thinking turn, keeps the author’s, and stops the request (F-5.10)', async () => {
+    await mountOpen()
+    await userEvent.type(box(), 'What next?{Enter}')
+    expect(turns()).toHaveLength(4)
+    const stop = stopButton()
+    expect(stop).toHaveAttribute('data-testid', 'assistant-stop')
+    expect(stop).toHaveAttribute('title', 'Stop this answer')
+    await userEvent.click(stop)
+    expect(cancels).toEqual([chats[0]?.input.requestId])
+    expect(turns()).toHaveLength(3)
+    expect(turns()[2]).toHaveAttribute('data-role', 'user')
+    expect(turns()[2]).toHaveTextContent('What next?')
+    expect(screen.queryByTestId('chat-pending')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+    expect(sendButton()).toHaveAttribute('data-testid', 'assistant-send')
+    expect(sendButton()).toBeDisabled() // the box is empty; typing enables it again
+    await act(async () => {
+      chats[0]?.resolve({
+        ok: false,
+        code: 'CANCELLED',
+        message: 'The request was stopped.',
+        nextStep: 'Send it again whenever you like.',
+        requestId: chats[0].input.requestId
+      })
+    })
+    expect(turns()).toHaveLength(3)
+    expect(useDialogStore.getState().toasts).toEqual([])
+    await userEvent.type(box(), 'again')
     expect(sendButton()).toBeEnabled()
   })
 

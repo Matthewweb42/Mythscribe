@@ -20,8 +20,10 @@ import { listNodes, type TreeDb } from '../tree/treeStore'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { checkChatFidelity, postProcessChatText, runChat, type ChatInput } from './chat'
 import { defaultAiUsageState, dayOf } from './dailyCap'
+import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import type { ChatTurn } from './prompts/chat.v1'
 import {
+  AiCancelledError,
   AiProviderError,
   AiRateLimitError,
   type CompletionRequest,
@@ -103,8 +105,19 @@ async function failure(over: Partial<ChatInput> = {}): Promise<{ code: string; m
   throw new Error('expected a failure')
 }
 
+/** Settles like the adapter once its `signal` aborts: rejects with CANCELLED. */
+const untilCancelled = (request: CompletionRequest): Promise<never> =>
+  new Promise((_, reject) => {
+    request.signal?.addEventListener(
+      'abort',
+      () => reject(new AiCancelledError('The request was stopped.')),
+      { once: true }
+    )
+  })
+
 beforeEach(() => {
   resetVoiceProfileCache()
+  resetInflight()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-chat-'))
   session = createProject(projectFolderFor(tmp, 'Chat'), 'Chat', 'novel')
   db = session.connection.orm
@@ -283,6 +296,23 @@ describe('runChat, Plan mode (F-5.4)', () => {
   it('refuses an unknown node with NOT_FOUND', async () => {
     expect((await failure({ nodeId: 'nope' })).code).toBe('NOT_FOUND')
   })
+
+  it('hands the requestId to the stream as its signal, and a cancel mid-stream rejects with CANCELLED after the deltas shown (F-5.10)', async () => {
+    stream.mockImplementationOnce(async function* (request) {
+      yield { delta: 'Half' }
+      await untilCancelled(request)
+    })
+    const seen: string[] = []
+    const pending = ask({ requestId: 'c-1' }, (delta) => void seen.push(delta))
+    await vi.waitFor(() => expect(seen).toEqual(['Half']))
+    expect(stream.mock.calls[0]![0].signal).toBeInstanceOf(AbortSignal)
+    expect(cancelInflight('c-1')).toBe(true)
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(ledger).toHaveLength(0)
+    expect(inflightCount()).toBe(0)
+    await ask()
+    expect('signal' in stream.mock.calls[1]![0]).toBe(false)
+  })
 })
 
 describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
@@ -408,6 +438,20 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
     answers(OFF_VOICE)
     await ask(agent())
     expect(complete).toHaveBeenCalledTimes(2)
+  })
+
+  it('registers the regenerate under id:regen, and a cancel during it propagates as CANCELLED instead of falling back (F-5.10)', async () => {
+    strongProfile()
+    answers(OFF_VOICE)
+    complete.mockImplementationOnce(untilCancelled)
+    const pending = ask(agent({ requestId: 'c-1' }))
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(2))
+    expect(complete.mock.calls[0]![0].signal).toBeInstanceOf(AbortSignal)
+    expect(cancelInflight('c-1')).toBe(false) // the first call is released
+    expect(cancelInflight('c-1:regen')).toBe(true)
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(ledger).toHaveLength(1)
+    expect(inflightCount()).toBe(0)
   })
 
   it('refuses with DISABLED below Suggest even though chat itself is allowed at Ask', async () => {

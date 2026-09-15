@@ -17,6 +17,8 @@ export interface CompletionUsage {
 }
 
 export interface CompletionRequest {
+  /** F-5.10: aborting it stops the provider call; the adapter throws `AiCancelledError`. */
+  signal?: AbortSignal
   /** A tier, never a model name; the adapter maps it (`DEFAULT_MODELS` until F-5.11). */
   tier: Tier
   messages: AiMessage[]
@@ -99,4 +101,11 @@ export class AiBudgetError extends AiProviderError {
  */
 export class AiDisabledError extends AiProviderError {
   readonly code = 'DISABLED' as const
+}
+/**
+ * The caller aborted the request's `signal` (F-5.10, `ai:cancel`): the provider call stopped
+ * and nothing is logged, cached, or shown. The renderer never toasts it.
+ */
+export class AiCancelledError extends AiProviderError {
+  readonly code = 'CANCELLED' as const
 }

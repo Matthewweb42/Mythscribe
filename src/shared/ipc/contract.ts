@@ -503,9 +503,20 @@ export const contract = {
     input: z.object({
       nodeId: z.string(),
       note: z.string().max(PROPOSAL_NOTE_MAX).nullable().optional(),
-      regeneratedFrom: z.string().nullable().optional()
+      regeneratedFrom: z.string().nullable().optional(),
+      /** F-5.10: lets `ai:cancel` find the request; without one it cannot be stopped. */
+      requestId: z.string().optional()
     }),
     output: AiRecommendTagsResult
+  },
+  /**
+   * Stops an in-flight AI request by the `requestId` its caller minted (F-5.10). The request's
+   * own reply comes back as the `CANCELLED` failure; `cancelled` is false when nothing by that
+   * id is in flight (already finished, or never started).
+   */
+  'ai:cancel': {
+    input: z.object({ requestId: z.string() }),
+    output: z.object({ cancelled: z.boolean() })
   },
   /**
    * Asks the AI to continue the passage at the caret (F-5.3, VibeWrite): the text before and

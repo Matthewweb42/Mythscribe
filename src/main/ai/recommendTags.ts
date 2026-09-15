@@ -30,10 +30,15 @@ export interface RecommendTagsResult {
 
 const ModelAnswer = z.object({ tags: z.array(z.string()) })
 
-/** A regenerate (F-14.5): the proposal being replaced and the author's note, either may be missing. */
-export interface TagsRegenerate {
+/**
+ * A regenerate (F-14.5): the proposal being replaced and the author's note, either may be
+ * missing; and the caller's `requestId` for `ai:cancel` (F-5.10), without which the request
+ * cannot be stopped. Tags have no fidelity regenerate, so the one id is the whole request.
+ */
+export interface RecommendTagsOptions {
   note?: string | null
   regeneratedFrom?: string | null
+  requestId?: string
 }
 
 /**
@@ -56,7 +61,7 @@ export async function recommendTags(
   db: TagDb,
   deps: AiRequestDeps,
   nodeId: string,
-  regenerate: TagsRegenerate = {}
+  options: RecommendTagsOptions = {}
 ): Promise<RecommendTagsResult> {
   const { content } = getDocumentContent(db, nodeId)
   const text = content ? docToText(content) : ''
@@ -72,8 +77,8 @@ export async function recommendTags(
   const bank = listTags(db)
   const linkedIds = new Set(listDocumentTags(db, nodeId).map((tag) => tag.id))
   const tagNames = bank.map((tag) => tag.name)
-  const note = normalizeProposalNote(regenerate.note)
-  const regeneratedFrom = regenerate.regeneratedFrom ?? null
+  const note = normalizeProposalNote(options.note)
+  const regeneratedFrom = options.regeneratedFrom ?? null
   const isRegenerate = note !== null || regeneratedFrom !== null
   const prompt = isRegenerate
     ? buildTagsRegenPrompt({ text, tagNames, note })
@@ -90,7 +95,8 @@ export async function recommendTags(
     maxTokens: prompt.maxTokens,
     json: true,
     contextHash,
-    promptVersion: prompt.version
+    promptVersion: prompt.version,
+    ...(options.requestId === undefined ? {} : { requestId: options.requestId })
   })
 
   const names = parseAnswer(result.text)

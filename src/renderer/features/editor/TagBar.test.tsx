@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiRecommendTagsResult, Channel, Input, Output, Tag } from '@shared/ipc/contract'
+import { resetAiActivityStore, useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -62,6 +63,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
         return { id, meta: { location: '', pov: '', timeline: '' } } as Output<C>
       }
       if (channel === 'proposal:settle') return null as Output<C>
+      if (channel === 'ai:cancel') return { cancelled: true } as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -127,8 +129,19 @@ const answerInOrder = (...results: AiRecommendTagsResult[]): (() => AiRecommendT
 }
 const settlements = (calls: [Channel, unknown][]): unknown[] =>
   calls.filter(([channel]) => channel === 'proposal:settle').map(([, input]) => input)
+/** What each Recommend request carried, without the request id (the cancel test covers it). */
 const recommendInputs = (calls: [Channel, unknown][]): unknown[] =>
-  calls.filter(([channel]) => channel === 'ai:recommendTags').map(([, input]) => input)
+  calls
+    .filter(([channel]) => channel === 'ai:recommendTags')
+    .map(([, input]) => {
+      const { requestId, ...rest } = input as { requestId?: string }
+      expect(requestId).toEqual(expect.any(String))
+      return rest
+    })
+const recommendInputsRaw = (calls: [Channel, unknown][]): { requestId?: string }[] =>
+  calls
+    .filter(([channel]) => channel === 'ai:recommendTags')
+    .map(([, input]) => input as { requestId?: string })
 const regenerateButton = (): HTMLElement =>
   within(bar()).getByRole('button', { name: 'Regenerate…' })
 const noteDialog = (): HTMLElement =>
@@ -149,12 +162,14 @@ beforeEach(() => {
   resetSceneMetaStore()
   resetDocumentStore()
   resetProposalStore()
+  resetAiActivityStore()
   useTreeStore.setState({ ...buildIndex([]), loaded: true })
   useDialogStore.setState({ modals: [], toasts: [] })
   vi.stubGlobal('innerHeight', 800)
 })
 afterEach(() => {
   resetProposalStore()
+  resetAiActivityStore()
   vi.unstubAllGlobals()
 })
 
@@ -434,7 +449,7 @@ describe('TagBar (F-4.4)', () => {
       expect(recommendButton().querySelector('.animate-spin')).not.toBeNull()
       expect(within(bar()).getByRole('status')).toHaveTextContent('Asking for tag suggestions…')
       expect(calls.filter(([channel]) => channel === 'ai:recommendTags')).toEqual([
-        ['ai:recommendTags', { nodeId: 'sc-1' }]
+        ['ai:recommendTags', { nodeId: 'sc-1', requestId: expect.any(String) as string }]
       ])
       await act(async () => {
         resolve(suggested('t-mara', 't-moody'))
@@ -586,6 +601,47 @@ describe('TagBar (F-4.4)', () => {
       expect(order.indexOf('document:save')).toBeGreaterThan(-1)
       expect(order.indexOf('document:save')).toBeLessThan(order.indexOf('ai:recommendTags'))
       expect(useDocumentStore.getState().docs['sc-1']?.dirty).toBe(false)
+    })
+
+    it('Cancel stops the pending request by its id; the cancelled reply returns the bar to idle in silence (F-5.10)', async () => {
+      let resolve: (result: AiRecommendTagsResult) => void = () => {}
+      const calls = install({
+        'ai:recommendTags': () =>
+          new Promise<AiRecommendTagsResult>((r) => {
+            resolve = r
+          })
+      })
+      await mount()
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      const sent = recommendInputsRaw(calls)[0]
+      expect(sent?.requestId).toEqual(expect.any(String))
+      expect(useAiActivityStore.getState().inflight).toEqual({
+        [sent?.requestId ?? '']: { feature: 'tags', startedAt: expect.any(Number) as number }
+      })
+      const cancelButton = within(bar()).getByRole('button', { name: 'Cancel' })
+      expect(cancelButton).toHaveAttribute('data-testid', 'tag-recommend-cancel')
+      await userEvent.click(cancelButton)
+      expect(calls.filter(([channel]) => channel === 'ai:cancel')).toEqual([
+        ['ai:cancel', { requestId: sent?.requestId }]
+      ])
+      // Still pending until main answers: the reply is what settles the state.
+      expect(recommendButton()).toBeDisabled()
+      await act(async () => {
+        resolve({
+          ok: false,
+          code: 'CANCELLED',
+          message: 'The request was stopped.',
+          nextStep: 'Send it again whenever you like.'
+        })
+      })
+      expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      expect(recommendButton()).toBeEnabled()
+      expect(toasts()).toEqual([])
+      expect(useAiActivityStore.getState().inflight).toEqual({})
+      // A regenerate request carries its own id too.
+      await userEvent.click(recommendButton())
+      expect(recommendInputsRaw(calls)[1]?.requestId).not.toBe(sent?.requestId)
     })
 
     it('switching documents drops the result without a new request', async () => {

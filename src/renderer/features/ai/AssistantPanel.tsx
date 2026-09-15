@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { MessageSquare, Plus, Send, X } from 'lucide-react'
+import { MessageSquare, Plus, Send, Square, X } from 'lucide-react'
 import {
   CHAT_MAX_CONVERSATIONS,
   CHAT_MESSAGE_MAX,
@@ -312,8 +312,10 @@ function Turn({
 
 /**
  * The mode, the paragraph count (Agent only), Clear conversation, and the message box. Enter
- * sends, Shift+Enter breaks the line; Send is disabled for a blank message, while a turn is in
- * flight, and while the dial does not allow the assistant (the note above says what to change).
+ * sends, Shift+Enter breaks the line; Send is disabled for a blank message and while the dial
+ * does not allow the assistant (the note above says what to change). While a turn is in
+ * flight, Stop takes Send's place (F-5.10): it drops the unanswered turn and keeps the
+ * author's, so it can be sent again.
  */
 function Composer(): React.JSX.Element {
   const conversation = useActiveConversation()
@@ -321,6 +323,7 @@ function Composer(): React.JSX.Element {
     conversation ? s.pending[conversation.id] !== undefined : false
   )
   const send = useAssistantStore((s) => s.send)
+  const stop = useAssistantStore((s) => s.stop)
   const setMode = useAssistantStore((s) => s.setMode)
   const setParagraphs = useAssistantStore((s) => s.setParagraphs)
   const clearMessages = useAssistantStore((s) => s.clearMessages)
@@ -464,17 +467,32 @@ function Composer(): React.JSX.Element {
         className="min-w-0 resize-none rounded-md border border-line bg-bg px-2 py-1.5 text-sm"
       />
       <div className="flex items-center justify-end">
-        <button
-          type="button"
-          aria-label="Send"
-          title="Send (Enter)"
-          disabled={!canSend}
-          onClick={submit}
-          className="flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-50 disabled:hover:bg-accent"
-        >
-          <Send size={12} aria-hidden="true" />
-          Send
-        </button>
+        {pending ? (
+          <button
+            type="button"
+            aria-label="Stop"
+            title="Stop this answer"
+            data-testid="assistant-stop"
+            onClick={stop}
+            className="flex items-center gap-1 rounded-md border border-line px-2.5 py-1 text-xs font-medium text-fg hover:bg-surface-raised"
+          >
+            <Square size={12} aria-hidden="true" />
+            Stop
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label="Send"
+            title="Send (Enter)"
+            data-testid="assistant-send"
+            disabled={!canSend}
+            onClick={submit}
+            className="flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-50 disabled:hover:bg-accent"
+          >
+            <Send size={12} aria-hidden="true" />
+            Send
+          </button>
+        )}
       </div>
     </div>
   )

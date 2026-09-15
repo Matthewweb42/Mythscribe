@@ -21,9 +21,11 @@ import { defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
+import { registerInflight, resetInflight } from '../ai/inflight'
 import { AiKeyStore } from '../ai/keyStore'
 import { fakeSafeStorage } from '../ai/keyStoreFixture'
 import {
+  AiCancelledError,
   AiProviderError,
   InvalidKeyError,
   type CompletionRequest,
@@ -60,8 +62,22 @@ let keyFile: string
 let testConnection: ReturnType<typeof vi.fn<() => Promise<{ model: string }>>>
 /** What the fake provider's `complete` answers (F-4.7); tests replace it per case. */
 let complete: ReturnType<typeof vi.fn<(request: CompletionRequest) => Promise<CompletionResult>>>
-/** What the fake provider's `stream` yields (F-5.4); an Error in the list is thrown from that pull. Tests set it per case. */
-let streamChunks: (StreamChunk | Error)[]
+/**
+ * What the fake provider's `stream` yields (F-5.4); an Error in the list is thrown from that
+ * pull, a function is awaited with the request (F-5.10: to hold the stream until cancelled).
+ * Tests set it per case.
+ */
+let streamChunks: (StreamChunk | Error | ((request: CompletionRequest) => Promise<StreamChunk>))[]
+
+/** Settles like the adapter once its `signal` aborts: rejects with CANCELLED (F-5.10). */
+const untilCancelled = (request: CompletionRequest): Promise<never> =>
+  new Promise((_, reject) => {
+    request.signal?.addEventListener(
+      'abort',
+      () => reject(new AiCancelledError('The request was stopped.')),
+      { once: true }
+    )
+  })
 
 /** What the fake export dialog answers (F-14.6); null cancels. Tests set it per case. */
 let exportPath: string | null
@@ -79,6 +95,7 @@ const dialogs: ProjectDialogs = {
 
 beforeEach(() => {
   vi.mocked(ipcMain.handle).mockClear()
+  resetInflight()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-handlers-'))
   exportPath = null
   exportAsked = null
@@ -103,10 +120,10 @@ beforeEach(() => {
     id: 'openai',
     resolveModel: () => 'gpt-fake',
     complete,
-    stream: async function* () {
+    stream: async function* (request) {
       for (const chunk of streamChunks) {
         if (chunk instanceof Error) throw chunk
-        yield chunk
+        yield typeof chunk === 'function' ? await chunk(request) : chunk
       }
     },
     testConnection
@@ -890,6 +907,29 @@ describe('ai:chat (F-5.4)', () => {
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
   })
 
+  it('ai:cancel stops a streaming turn by its requestId: the deltas already sent stay sent, the reply is CANCELLED with the id, no proposal, no ledger row (F-5.10)', async () => {
+    const { scene } = await ready()
+    streamChunks = [{ delta: 'Half' }, untilCancelled]
+    const pending = invoke('ai:chat', plan(scene, 'req-5'))
+    await vi.waitFor(() => expect(deltasSent()).toHaveLength(1))
+    expect(await invoke('ai:cancel', { requestId: 'req-5' })).toEqual({ cancelled: true })
+    expect(await pending).toEqual({
+      ok: false,
+      code: 'CANCELLED',
+      message: 'The request was stopped.',
+      nextStep: 'Send it again whenever you like.',
+      requestId: 'req-5'
+    })
+    expect(deltasSent()).toEqual([['ai:chatDelta', { requestId: 'req-5', delta: 'Half' }]])
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+    expect((await invoke('ai:usageSummary', undefined)).total.requests).toBe(0)
+    // Settled: the id is gone, and a fresh turn under a new id still streams.
+    expect(await invoke('ai:cancel', { requestId: 'req-5' })).toEqual({ cancelled: false })
+    streamChunks = [{ delta: 'Whole.' }]
+    const again = await invoke('ai:chat', plan(scene, 'req-6'))
+    expect(again).toMatchObject({ ok: true, text: 'Whole.', requestId: 'req-6' })
+  })
+
   it('lets an unknown node and an invalid input reach the error envelope as NOT_FOUND and VALIDATION', async () => {
     await ready()
     const unknown = await handlerFor('ai:chat')(undefined, plan('nope'))
@@ -1398,6 +1438,29 @@ describe('ai:recommendTags (F-4.7)', () => {
     expect(complete).toHaveBeenCalledTimes(2)
   })
 
+  it('ai:cancel stops a request by the requestId the caller passed; without one the request cannot be stopped (F-5.10)', async () => {
+    const { scene } = await ready()
+    await invoke('ai:setKey', { key: KEY })
+    complete.mockImplementationOnce(untilCancelled)
+    const pending = invoke('ai:recommendTags', { nodeId: scene, requestId: 'req-1' })
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1))
+    expect(complete.mock.calls[0]![0].signal).toBeInstanceOf(AbortSignal)
+    expect(await invoke('ai:cancel', { requestId: 'req-1' })).toEqual({ cancelled: true })
+    expect(await pending).toEqual({
+      ok: false,
+      code: 'CANCELLED',
+      message: 'The request was stopped.',
+      nextStep: 'Send it again whenever you like.'
+    })
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+    expect((await invoke('ai:usageSummary', undefined)).total.requests).toBe(0)
+    expect(await invoke('ai:cancel', { requestId: 'req-1' })).toEqual({ cancelled: false })
+    // No requestId: the provider sees no signal, and nothing is registered to cancel.
+    const plain = await invoke('ai:recommendTags', { nodeId: scene })
+    expect(plain.ok).toBe(true)
+    expect('signal' in complete.mock.calls[1]![0]).toBe(false)
+  })
+
   it('records the batch as one pending proposal holding the offered names, and a regenerate with its note and predecessor (F-14.5)', async () => {
     const { scene, hero } = await ready()
     await invoke('ai:setKey', { key: KEY })
@@ -1681,6 +1744,44 @@ describe('proposal:settle (F-14.5)', () => {
     })
     expect(long.ok).toBe(false)
     if (!long.ok) expect(long.error.code).toBe('VALIDATION')
+  })
+})
+
+describe('ai:cancel (F-5.10)', () => {
+  it('needs no project and answers false for an id that is not in flight', async () => {
+    expect(await invoke('ai:cancel', { requestId: 'never' })).toEqual({ cancelled: false })
+  })
+
+  it('also reaches a fidelity regenerate registered under id:regen (F-14.7)', async () => {
+    const regen = registerInflight('req-3:regen')
+    expect(await invoke('ai:cancel', { requestId: 'req-3' })).toEqual({ cancelled: true })
+    expect(regen.signal.aborted).toBe(true)
+  })
+
+  it('passes the ghost-text requestId through so the provider gets a signal (F-5.3)', async () => {
+    await invoke('project:create', { name: 'Ghost', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
+    complete.mockImplementationOnce(untilCancelled)
+    const pending = invoke('ai:ghostText', {
+      nodeId: scene.id,
+      before: 'The storm broke at dusk.',
+      after: '',
+      requestId: 'req-4'
+    })
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1))
+    expect(await invoke('ai:cancel', { requestId: 'req-4' })).toEqual({ cancelled: true })
+    expect(await pending).toEqual({
+      ok: false,
+      code: 'CANCELLED',
+      message: 'The request was stopped.',
+      nextStep: 'Send it again whenever you like.',
+      requestId: 'req-4'
+    })
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
   })
 })
 

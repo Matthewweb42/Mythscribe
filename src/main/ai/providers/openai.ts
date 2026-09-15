@@ -1,6 +1,13 @@
-import OpenAI, { APIConnectionError, APIError, AuthenticationError, RateLimitError } from 'openai'
+import OpenAI, {
+  APIConnectionError,
+  APIError,
+  APIUserAbortError,
+  AuthenticationError,
+  RateLimitError
+} from 'openai'
 import { DEFAULT_MODELS, type Tier } from '@shared/ai'
 import {
+  AiCancelledError,
   AiFallbackError,
   AiNetworkError,
   AiProviderError,
@@ -49,7 +56,9 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
 
     async complete(request): Promise<CompletionResult> {
       try {
-        const completion = await client.chat.completions.create(params(request))
+        const completion = await client.chat.completions.create(params(request), {
+          signal: request.signal
+        })
         return {
           text: completion.choices[0]?.message.content ?? '',
           model: completion.model,
@@ -66,12 +75,12 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
     async *stream(request): AsyncGenerator<StreamChunk> {
       try {
         // `include_usage`: one final chunk with no choices and the whole request's usage (F-5.4).
-        const chunks = await client.chat.completions.create({
-          ...params(request),
-          stream: true,
-          stream_options: { include_usage: true }
-        })
+        const chunks = await client.chat.completions.create(
+          { ...params(request), stream: true, stream_options: { include_usage: true } },
+          { signal: request.signal }
+        )
         for await (const chunk of chunks) {
+          assertNotCancelled(request.signal)
           const delta = chunk.choices[0]?.delta.content ?? ''
           const usage = chunk.usage
           if (usage) {
@@ -83,6 +92,9 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
             yield { delta }
           }
         }
+        // The SDK ends an aborted stream quietly instead of throwing (F-5.10); a cancelled
+        // request must not read as a short answer that gets logged and cached.
+        assertNotCancelled(request.signal)
       } catch (err) {
         throw mapOpenAiError(err)
       }
@@ -100,6 +112,12 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
   }
 }
 
+const CANCELLED_MESSAGE = 'The request was stopped.'
+
+function assertNotCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new AiCancelledError(CANCELLED_MESSAGE)
+}
+
 /**
  * The one mapping from SDK errors to the error taxonomy. Messages are fixed copy: OpenAI's own
  * 401 text echoes (a masked form of) the key, and a 400 can echo the request, so neither is
@@ -107,6 +125,9 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
  */
 export function mapOpenAiError(err: unknown): AiProviderError {
   if (err instanceof AiProviderError) return err
+  if (err instanceof APIUserAbortError || (err instanceof Error && err.name === 'AbortError')) {
+    return new AiCancelledError(CANCELLED_MESSAGE, err)
+  }
   if (err instanceof APIConnectionError) return new AiNetworkError('Could not reach OpenAI.', err)
   if (err instanceof AuthenticationError) {
     return new InvalidKeyError('OpenAI rejected the API key.', err)

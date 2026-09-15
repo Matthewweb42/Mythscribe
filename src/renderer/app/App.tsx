@@ -16,6 +16,7 @@ import { StackedEditor } from '@renderer/features/editor/StackedEditor'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
+import { AiActivityIndicator } from '@renderer/features/ai/AiActivityIndicator'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { AssistantPanel, AssistantToggleButton } from '@renderer/features/ai/AssistantPanel'
 import { useAssistantStore } from '@renderer/features/ai/assistantStore'
@@ -128,6 +129,7 @@ export function App(): React.JSX.Element {
         ) : null}
         {current ? (
           <div className="ml-auto flex items-center gap-2">
+            <AiActivityIndicator />
             <AssistantToggleButton />
             <SettingsButton format={current.format} />
             <CloseProjectButton />

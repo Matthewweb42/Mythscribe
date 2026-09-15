@@ -54,6 +54,9 @@ const AGENT_FIRST = 'The rain came sideways over the ridge.'
 const AGENT_SECOND = 'Mara pulled her hood down and waited for the others.'
 /** The opening of the Agent-mode rules in `chat.v1`; the fake server tells Agent requests apart by it. */
 const AGENT_SENTINEL = 'You are drafting inside a novel-writing app'
+/** F-5.10: a request whose body carries this waits before answering, so a Stop can land. */
+const SLOW_SENTINEL = 'SLOW'
+const SLOW_DELAY_MS = 3_000
 const OFF_VOICE_SENTINEL = 'She counted the lanterns on the far bank.'
 const OFF_VOICE_CONTINUATION =
   'I am running now, and I know we are lost, and my hands are cold, and I am tired.'
@@ -117,77 +120,81 @@ function startFakeOpenAi(): Promise<string> {
           messages: { role: string; content: string }[]
         }
         openAiChatBodies.push({ messages: request.messages })
-        const json = request.response_format?.type === 'json_object'
-        const agent = request.messages.some(
-          (m) => m.role === 'system' && m.content.startsWith(AGENT_SENTINEL)
-        )
-        // F-5.4: a Plan turn streams (server-sent events in the shape the SDK parses: content
-        // deltas, one usage-only chunk, then [DONE]); an Agent turn is a plain completion.
-        if (request.stream) {
+        // Recorded on arrival: a stopped request still left the app. The answer may wait.
+        const respond = (): void => {
+          const json = request.response_format?.type === 'json_object'
+          const agent = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(AGENT_SENTINEL)
+          )
+          // F-5.4: a Plan turn streams (server-sent events in the shape the SDK parses: content
+          // deltas, one usage-only chunk, then [DONE]); an Agent turn is a plain completion.
+          if (request.stream) {
+            res.statusCode = 200
+            res.setHeader('Content-Type', 'text/event-stream')
+            const chunk = (payload: object): string =>
+              `data: ${JSON.stringify({ id: 'chatcmpl-fake', object: 'chat.completion.chunk', created: 0, model: 'gpt-5.4-mini', ...payload })}\n\n`
+            const cut = CHAT_ANSWER.indexOf(' ridge') + 6
+            res.write(
+              chunk({
+                choices: [
+                  { index: 0, delta: { content: CHAT_ANSWER.slice(0, cut) }, finish_reason: null }
+                ]
+              })
+            )
+            res.write(
+              chunk({
+                choices: [
+                  { index: 0, delta: { content: CHAT_ANSWER.slice(cut) }, finish_reason: 'stop' }
+                ]
+              })
+            )
+            res.write(
+              chunk({
+                choices: [],
+                usage: { prompt_tokens: 500, completion_tokens: 16, total_tokens: 516 }
+              })
+            )
+            res.end('data: [DONE]\n\n')
+            return
+          }
+          const regen = request.messages.some(
+            (m) => m.role === 'system' && m.content.includes(TAGS_REGEN_SENTINEL)
+          )
+          const offVoice = request.messages.some(
+            (m) => m.role === 'user' && m.content.includes(OFF_VOICE_SENTINEL)
+          )
           res.statusCode = 200
-          res.setHeader('Content-Type', 'text/event-stream')
-          const chunk = (payload: object): string =>
-            `data: ${JSON.stringify({ id: 'chatcmpl-fake', object: 'chat.completion.chunk', created: 0, model: 'gpt-5.4-mini', ...payload })}\n\n`
-          const cut = CHAT_ANSWER.indexOf(' ridge') + 6
-          res.write(
-            chunk({
+          res.end(
+            JSON.stringify({
+              id: 'chatcmpl-fake',
+              object: 'chat.completion',
+              created: 0,
+              model: 'gpt-5.4-mini',
               choices: [
-                { index: 0, delta: { content: CHAT_ANSWER.slice(0, cut) }, finish_reason: null }
-              ]
+                {
+                  index: 0,
+                  message: {
+                    role: 'assistant',
+                    content: json
+                      ? regen
+                        ? '{"tags":["antagonist","protagonist"]}'
+                        : '{"tags":["dark-forest","protagonist"]}'
+                      : agent
+                        ? `${AGENT_FIRST}\n\n${AGENT_SECOND}`
+                        : offVoice
+                          ? OFF_VOICE_CONTINUATION
+                          : GHOST_CONTINUATION
+                  },
+                  finish_reason: 'stop'
+                }
+              ],
+              usage: json
+                ? { prompt_tokens: 400, completion_tokens: 12, total_tokens: 412 }
+                : { prompt_tokens: 300, completion_tokens: 9, total_tokens: 309 }
             })
           )
-          res.write(
-            chunk({
-              choices: [
-                { index: 0, delta: { content: CHAT_ANSWER.slice(cut) }, finish_reason: 'stop' }
-              ]
-            })
-          )
-          res.write(
-            chunk({
-              choices: [],
-              usage: { prompt_tokens: 500, completion_tokens: 16, total_tokens: 516 }
-            })
-          )
-          res.end('data: [DONE]\n\n')
-          return
         }
-        const regen = request.messages.some(
-          (m) => m.role === 'system' && m.content.includes(TAGS_REGEN_SENTINEL)
-        )
-        const offVoice = request.messages.some(
-          (m) => m.role === 'user' && m.content.includes(OFF_VOICE_SENTINEL)
-        )
-        res.statusCode = 200
-        res.end(
-          JSON.stringify({
-            id: 'chatcmpl-fake',
-            object: 'chat.completion',
-            created: 0,
-            model: 'gpt-5.4-mini',
-            choices: [
-              {
-                index: 0,
-                message: {
-                  role: 'assistant',
-                  content: json
-                    ? regen
-                      ? '{"tags":["antagonist","protagonist"]}'
-                      : '{"tags":["dark-forest","protagonist"]}'
-                    : agent
-                      ? `${AGENT_FIRST}\n\n${AGENT_SECOND}`
-                      : offVoice
-                        ? OFF_VOICE_CONTINUATION
-                        : GHOST_CONTINUATION
-                },
-                finish_reason: 'stop'
-              }
-            ],
-            usage: json
-              ? { prompt_tokens: 400, completion_tokens: 12, total_tokens: 412 }
-              : { prompt_tokens: 300, completion_tokens: 9, total_tokens: 309 }
-          })
-        )
+        setTimeout(respond, body.includes(SLOW_SENTINEL) ? SLOW_DELAY_MS : 0)
       })
       return
     }
@@ -1351,6 +1358,10 @@ test('create, close, reopen a project on disk', async () => {
   // places a two-paragraph answer in the editor as ghost text with a notice in the chat; Tab
   // accepts it as AI-origin paragraphs. A second conversation is cleared after confirming.
   const chatRequestsBefore = openAiChatBodies.length
+  // Toasts stack over the panel's composer (bottom right); dismiss what the steps above left.
+  for (const button of await page.getByRole('button', { name: 'Dismiss notification' }).all()) {
+    await button.click()
+  }
   await page.keyboard.press('Control+k')
   const assistant = page.getByTestId('assistant-panel')
   await expect(assistant).toBeVisible()
@@ -1374,12 +1385,27 @@ test('create, close, reopen a project on disk', async () => {
     'aria-selected',
     'true'
   )
+  // F-5.10: a slow answer shows the header activity indicator and Stop in place of Send; Stop
+  // drops the pending turn, keeps the question so it can be resent, and toasts nothing. The
+  // request left (the fake server answers after its delay to a client that is gone).
+  await messageBox.fill(`${SLOW_SENTINEL}: what happens next?`)
+  await messageBox.press('Enter')
+  await expect(assistant.getByTestId('chat-pending')).toBeVisible()
+  await expect(page.getByTestId('ai-activity')).toContainText('Assistant chat')
+  await assistant.getByTestId('assistant-stop').click()
+  await expect(assistant.getByTestId('chat-pending')).toHaveCount(0)
+  await expect(turns).toHaveCount(3)
+  await expect(turns.nth(2)).toHaveAttribute('data-role', 'user')
+  await expect(page.getByTestId('ai-activity')).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: 'stopped' })).toHaveCount(0)
+  expect(openAiChatBodies).toHaveLength(chatRequestsBefore + 2)
+  await expect(assistant.getByTestId('assistant-send')).toBeVisible()
   await assistant.getByRole('radio', { name: 'Agent' }).click()
   await assistant.getByRole('combobox', { name: 'Paragraphs' }).selectOption('2')
   await messageBox.fill('Continue the scene.')
   await messageBox.press('Enter')
-  await expect(turns).toHaveCount(4)
-  await expect(turns.nth(3)).toContainText('Placed in the editor. Tab accepts, Escape dismisses.')
+  await expect(turns).toHaveCount(5)
+  await expect(turns.nth(4)).toContainText('Placed in the editor. Tab accepts, Escape dismisses.')
   expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe(
     'Write 2 paragraphs. Continue the scene.'
   )

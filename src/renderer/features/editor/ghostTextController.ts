@@ -12,6 +12,7 @@ import {
 } from '@shared/aiThrottle'
 import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
 import type { AiGhostTextResult } from '@shared/ipc/contract'
+import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -40,8 +41,10 @@ let session: SessionState = {
   failedAt: null,
   turnOffToastShown: false
 }
+/** Shared by every editor session, so a request id is unique across document switches (main refuses a duplicate). */
+let requestCounter = 0
 
-/** Drops the session counters, the back-off, and the toast flag. For tests only. */
+/** Drops the session counters, the back-off, the toast flag, and the request id counter. For tests only. */
 export function resetGhostTextController(): void {
   session = {
     dayKey: dayKeyOf(Date.now()),
@@ -49,6 +52,7 @@ export function resetGhostTextController(): void {
     failedAt: null,
     turnOffToastShown: false
   }
+  requestCounter = 0
 }
 
 /** Inline atoms as the author reads them: an inline tag token as `#name` (mirrors `docToText`). */
@@ -82,6 +86,12 @@ export interface GhostConfig {
   idleMs: number
 }
 
+interface GhostSession {
+  /** Stops the request in flight, if any; used when the mode turns off. */
+  cancelPending: () => void
+  dispose: () => void
+}
+
 interface GhostSessionDeps {
   editor: Editor
   nodeId: string
@@ -99,20 +109,25 @@ interface GhostSessionDeps {
  * document, the newest request id, no edit or caret move since it left, and the editor still
  * focused. Failures are handled whatever their age: DISABLED, NO_KEY, and INVALID_KEY turn
  * VibeWrite off with one toast (nothing will succeed until Settings change); anything else
- * goes to the toolbar indicator and backs off for `GHOST_BACKOFF_MS`.
+ * goes to the toolbar indicator and backs off for `GHOST_BACKOFF_MS`. A request whose answer
+ * would be dropped anyway (an edit or caret move since it left, the document switched, the mode
+ * off, the session disposed) is cancelled through the activity store (F-5.10), and its
+ * `CANCELLED` reply is silent: no toast, no back-off, the mode stays on.
  *
  * A shown suggestion is a proposal (F-14.5): the session keeps its id while it shows and
  * settles it (never with a note; Escape stays silent) when the extension reports how it left
  * the screen; the extension marks what it inserts with the same id (F-14.6). Answers without
  * a proposal id (an empty suggestion) have nothing to settle.
  */
-function startGhostSession(deps: GhostSessionDeps): () => void {
+function startGhostSession(deps: GhostSessionDeps): GhostSession {
   const { editor, nodeId, now } = deps
   let timer: ReturnType<typeof setTimeout> | null = null
   let lastEditAt = now()
   let newChars = 0
   let pending = false
-  let latestRequestId = 0
+  let latestRequestId: string | null = null
+  /** The pending request already asked to stop, so activity does not ask again. */
+  let cancelRequested = false
   let editedSinceSend = false
   let focused = editor.isFocused
   let disposed = false
@@ -139,7 +154,15 @@ function startGhostSession(deps: GhostSessionDeps): () => void {
     if (key !== session.dayKey) session = { ...session, dayKey: key, requestsToday: 0 }
   }
 
+  /** Stops the request in flight, once; its reply comes back as CANCELLED and is dropped in silence. */
+  const cancelPending = (): void => {
+    if (!pending || cancelRequested || latestRequestId === null) return
+    cancelRequested = true
+    void useAiActivityStore.getState().cancel(latestRequestId)
+  }
+
   const failed = (code: AiErrorCode | null, message: string, nextStep: string): void => {
+    if (code === 'CANCELLED') return
     if (code !== null && TURN_OFF_CODES.has(code)) {
       const store = useAiSettingsStore.getState()
       const settings = store.settings
@@ -160,7 +183,7 @@ function startGhostSession(deps: GhostSessionDeps): () => void {
       failed(result.code, result.message, result.nextStep)
       return
     }
-    if (disposed || result.requestId !== String(latestRequestId) || editedSinceSend || !focused) {
+    if (disposed || result.requestId !== latestRequestId || editedSinceSend || !focused) {
       return
     }
     deps.onError(null)
@@ -195,12 +218,19 @@ function startGhostSession(deps: GhostSessionDeps): () => void {
     const { before, after } = caretWindow(editor.state)
     if (!before.trim()) return
     pending = true
+    cancelRequested = false
     editedSinceSend = false
     newChars = 0
     session = { ...session, requestsToday: session.requestsToday + 1 }
-    const requestId = String(++latestRequestId)
-    ipc()
-      .invoke('ai:ghostText', { nodeId, before, after, requestId })
+    const requestId = `g-${++requestCounter}`
+    latestRequestId = requestId
+    useAiActivityStore
+      .getState()
+      .track(
+        'ghostText',
+        requestId,
+        ipc().invoke('ai:ghostText', { nodeId, before, after, requestId })
+      )
       .then(settle, (err: unknown) => {
         pending = false
         failed(null, describeError(err), '')
@@ -211,6 +241,7 @@ function startGhostSession(deps: GhostSessionDeps): () => void {
     if (transaction.getMeta(GHOST_TEXT_KEY) !== undefined) return
     focused = true
     editedSinceSend = true
+    cancelPending() // the answer would be dropped as stale anyway
     lastEditAt = now()
     newChars = Math.max(0, newChars + sizeDelta)
     clearTimer()
@@ -236,15 +267,19 @@ function startGhostSession(deps: GhostSessionDeps): () => void {
   editor.on('focus', onFocus)
   editor.on('blur', onBlur)
 
-  return () => {
-    disposed = true
-    clearTimer()
-    editor.off('update', onUpdate)
-    editor.off('selectionUpdate', onSelection)
-    editor.off('focus', onFocus)
-    editor.off('blur', onBlur)
-    if (!editor.isDestroyed && ghostOf(editor.state) !== null) editor.commands.clearGhost()
-    if (storage?.onSettle === onSettle) storage.onSettle = null
+  return {
+    cancelPending,
+    dispose: () => {
+      disposed = true
+      cancelPending()
+      clearTimer()
+      editor.off('update', onUpdate)
+      editor.off('selectionUpdate', onSelection)
+      editor.off('focus', onFocus)
+      editor.off('blur', onBlur)
+      if (!editor.isDestroyed && ghostOf(editor.state) !== null) editor.commands.clearGhost()
+      if (storage?.onSettle === onSettle) storage.onSettle = null
+    }
   }
 }
 
@@ -271,6 +306,7 @@ export function useGhostTextController({
   const [error, setError] = useState<string | null>(null)
   const armed = active && enabled && allowed
   const config = useRef<GhostConfig>({ armed, idleMs })
+  const sessionRef = useRef<GhostSession | null>(null)
   // Turning the mode on starts clean: the indicator's last failure is dropped.
   const [armedSeen, setArmedSeen] = useState(armed)
   if (armedSeen !== armed) {
@@ -284,20 +320,27 @@ export function useGhostTextController({
 
   useEffect(() => {
     if (!editor || !active) return
-    return startGhostSession({
+    const started = startGhostSession({
       editor,
       nodeId,
       config: () => config.current,
       onError: setError,
       now: Date.now
     })
+    sessionRef.current = started
+    return () => {
+      if (sessionRef.current === started) sessionRef.current = null
+      started.dispose()
+    }
   }, [editor, nodeId, active])
 
-  // Turning the mode off drops a suggestion still showing; turning it on resets the session's
-  // back-off and the one-time toast, so the next failure is reported again.
+  // Turning the mode off drops a suggestion still showing and stops a request in flight;
+  // turning it on resets the session's back-off and the one-time toast, so the next failure
+  // is reported again.
   useEffect(() => {
     if (!editor) return
     if (!armed) {
+      sessionRef.current?.cancelPending()
       if (!editor.isDestroyed && ghostOf(editor.state) !== null) editor.commands.clearGhost()
     } else {
       session = { ...session, turnOffToastShown: false, failedAt: null }

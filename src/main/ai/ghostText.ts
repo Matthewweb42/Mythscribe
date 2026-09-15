@@ -10,9 +10,10 @@ import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
 import { voiceBlock } from '../voice/voiceBlock'
 import { assertFeatureAllowed } from './dial'
+import { regenRequestId } from './inflight'
 import { buildGhostTextPrompt } from './prompts/ghostText.v1'
 import { buildGhostTextRegenPrompt } from './prompts/ghostTextRegen.v1'
-import type { CompletionUsage } from './providers/types'
+import { AiCancelledError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from './request'
 
 export interface GhostTextInput {
@@ -21,6 +22,12 @@ export interface GhostTextInput {
   before: string
   /** The text right after the caret, at most `GHOST_AFTER_CHARS`; '' at the end of the document. */
   after: string
+  /**
+   * The caller's id for `ai:cancel` (F-5.10): the first call registers under it, the fidelity
+   * regenerate under `regenRequestId(id)`, so a cancel lands during either. Optional so the
+   * use case can run without one (the eval harness); then it cannot be stopped.
+   */
+  requestId?: string
 }
 
 export interface GhostTextResult {
@@ -61,7 +68,9 @@ export interface GhostTextResult {
  * the metadata, the preset, and the voice profile's version (the version stands in for the
  * block: it moves on every save and exemplar write, so a changed profile misses the cache
  * while an unchanged one keeps hitting it). A caret window over the shared bounds is
- * VALIDATION (the contract refuses it first; this is the backstop).
+ * VALIDATION (the contract refuses it first; this is the backstop). A cancel (F-5.10) during
+ * either call propagates as CANCELLED: it never falls back to the first answer, since the
+ * author asked for nothing to be shown.
  */
 export async function generateGhostText(
   db: TreeDb,
@@ -104,7 +113,8 @@ export async function generateGhostText(
     maxTokens: prompt.maxTokens,
     temperature: prompt.temperature,
     contextHash: sha256(JSON.stringify(context)),
-    promptVersion: prompt.version
+    promptVersion: prompt.version,
+    ...(input.requestId === undefined ? {} : { requestId: input.requestId })
   })
   const firstText = postProcessGhostText(first.text, input.before, input.after)
   const shown = (call: AiRequestResult, text: string, version: string): GhostTextResult => ({
@@ -138,9 +148,11 @@ export async function generateGhostText(
       maxTokens: regen.maxTokens,
       temperature: regen.temperature,
       contextHash: sha256(JSON.stringify({ ...context, violation: violation.code })),
-      promptVersion: regen.version
+      promptVersion: regen.version,
+      ...(input.requestId === undefined ? {} : { requestId: regenRequestId(input.requestId) })
     })
-  } catch {
+  } catch (err) {
+    if (err instanceof AiCancelledError) throw err
     return flaggedFirst
   }
   const combined = {

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AiSettings, defaultAiSettings } from '@shared/aiSettings'
 import { GHOST_BACKOFF_MS, GHOST_MAX_PER_DAY, GHOST_MIN_NEW_CHARS } from '@shared/aiThrottle'
 import type { AiGhostTextResult, Channel, Input, Output } from '@shared/ipc/contract'
+import { resetAiActivityStore, useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -32,10 +33,16 @@ let editor: Editor
 let requests: PendingRequest[]
 let settingsWrites: AiSettings[]
 let settles: Input<'proposal:settle'>[]
+/** The request ids `ai:cancel` was asked to stop. */
+let cancels: string[]
 
 function fakeClient(): IpcClient {
   return {
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
+      if (channel === 'ai:cancel') {
+        cancels.push((input as Input<'ai:cancel'>).requestId)
+        return { cancelled: true } as Output<C>
+      }
       if (channel === 'ai:ghostText') {
         return new Promise<Output<C>>((resolve, reject) => {
           requests.push({
@@ -67,11 +74,13 @@ const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   ...over
 })
 
+/** The id the controller mints for its `n`th request of the test (the counter resets with the controller). */
+const idOf = (n: number): string => `g-${n}`
 const ok = (
-  requestId: string,
+  n: number,
   text = ' Rain followed.',
   fidelity: { flagged: boolean; violation: string | null } = { flagged: false, violation: null },
-  proposalId: string | null = `prop-${requestId}`
+  proposalId: string | null = `prop-${n}`
 ): AiGhostTextResult => ({
   ok: true,
   text,
@@ -81,19 +90,19 @@ const ok = (
   model: 'gpt-fake',
   ...fidelity,
   proposalId,
-  requestId
+  requestId: idOf(n)
 })
 const fail = (
-  requestId: string,
+  n: number,
   code: AiGhostTextResult['ok'] extends true
     ? never
-    : 'DISABLED' | 'NO_KEY' | 'INVALID_KEY' | 'RATE_LIMIT' | 'NETWORK'
+    : 'DISABLED' | 'NO_KEY' | 'INVALID_KEY' | 'RATE_LIMIT' | 'NETWORK' | 'CANCELLED'
 ): AiGhostTextResult => ({
   ok: false,
   code,
   message: `${code} happened.`,
   nextStep: 'Do the thing.',
-  requestId
+  requestId: idOf(n)
 })
 
 const type = (text: string): void => {
@@ -134,6 +143,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date(2026, 8, 13, 10, 0, 0))
   resetGhostTextController()
   resetAiSettingsStore()
+  resetAiActivityStore()
   resetProposalStore()
   resetPendingSaves()
   resetTagStore()
@@ -141,6 +151,7 @@ beforeEach(() => {
   requests = []
   settingsWrites = []
   settles = []
+  cancels = []
   setIpcClient(fakeClient())
   useAiSettingsStore.setState({ settings: settings() })
   editor = new Editor({
@@ -155,6 +166,7 @@ beforeEach(() => {
 afterEach(() => {
   editor.destroy()
   resetAiSettingsStore()
+  resetAiActivityStore()
   resetGhostTextController()
   resetProposalStore()
   vi.useRealTimers()
@@ -204,9 +216,9 @@ describe('useGhostTextController (F-5.3)', () => {
       nodeId: 'sc-1',
       before: CONTENT + ENOUGH,
       after: '',
-      requestId: '1'
+      requestId: 'g-1'
     })
-    await answer(ok('1'))
+    await answer(ok(1))
     expect(ghostText()).toBe(' Rain followed.')
   })
 
@@ -214,7 +226,7 @@ describe('useGhostTextController (F-5.3)', () => {
     mount()
     type(ENOUGH)
     await idle()
-    await answer(ok('1', undefined, { flagged: true, violation: 'switches to first person' }))
+    await answer(ok(1, undefined, { flagged: true, violation: 'switches to first person' }))
     expect(ghostOf(editor.state)).toMatchObject({
       text: ' Rain followed.',
       flagged: true,
@@ -234,12 +246,12 @@ describe('useGhostTextController (F-5.3)', () => {
     type(ENOUGH) // while pending: no second request
     await idle()
     expect(requests).toHaveLength(1)
-    await answer(ok('1')) // edited since it left, so the answer is dropped
+    await answer(ok(1)) // edited since it left, so the answer is dropped
     expect(ghostText()).toBeNull()
     type(ENOUGH)
     await idle()
     expect(requests).toHaveLength(2)
-    await answer(ok('2'))
+    await answer(ok(2))
     expect(ghostText()).toBe(' Rain followed.')
     type(' ') // consumes the first character, keeps the suggestion showing
     type(ENOUGH.slice(1))
@@ -247,7 +259,7 @@ describe('useGhostTextController (F-5.3)', () => {
     type('b'.repeat(GHOST_MIN_NEW_CHARS))
     await idle()
     expect(requests).toHaveLength(3)
-    await answer(ok('3'))
+    await answer(ok(3))
     expect(ghostText()).toBe(' Rain followed.')
     type(' R')
     await idle()
@@ -285,7 +297,7 @@ describe('useGhostTextController (F-5.3)', () => {
     const hook = mount()
     type(ENOUGH)
     await idle()
-    await answer(ok('0'))
+    await answer(ok(0))
     expect(ghostText()).toBeNull()
     type(ENOUGH)
     await idle()
@@ -293,7 +305,7 @@ describe('useGhostTextController (F-5.3)', () => {
     act(() => {
       editor.commands.setTextSelection(2)
     })
-    await answer(ok('2'))
+    await answer(ok(2))
     expect(ghostText()).toBeNull()
     act(() => {
       editor.commands.focus('end')
@@ -304,13 +316,13 @@ describe('useGhostTextController (F-5.3)', () => {
     act(() => {
       editor.view.dom.dispatchEvent(new FocusEvent('blur'))
     })
-    await answer(ok('3'))
+    await answer(ok(3))
     expect(ghostText()).toBeNull()
     type(ENOUGH)
     await idle()
     expect(requests).toHaveLength(4)
     hook.rerender({ nodeId: 'sc-2', active: true })
-    await answer(ok('4'))
+    await answer(ok(4))
     expect(ghostText()).toBeNull()
   })
 
@@ -318,7 +330,7 @@ describe('useGhostTextController (F-5.3)', () => {
     const hook = mount()
     type(ENOUGH)
     await idle()
-    await answer(ok('1'))
+    await answer(ok(1))
     expect(ghostText()).toBe(' Rain followed.')
     act(() => {
       useAiSettingsStore.setState({
@@ -332,7 +344,7 @@ describe('useGhostTextController (F-5.3)', () => {
     })
     type(ENOUGH)
     await idle()
-    await answer(ok('2'))
+    await answer(ok(2))
     expect(ghostText()).toBe(' Rain followed.')
     hook.rerender({ nodeId: 'sc-2', active: true })
     expect(ghostText()).toBeNull()
@@ -347,7 +359,7 @@ describe('useGhostTextController (F-5.3)', () => {
     type(ENOUGH)
     await idle()
     type('zz') // stale by the time it answers; the failure still counts
-    await answer(fail('1', 'DISABLED'))
+    await answer(fail(1, 'DISABLED'))
     expect(useAiSettingsStore.getState().settings?.ghostText.enabled).toBe(false)
     expect(toasts()).toEqual(['VibeWrite turned off: DISABLED happened. Do the thing.'])
     await idle(200)
@@ -359,7 +371,7 @@ describe('useGhostTextController (F-5.3)', () => {
     type(ENOUGH)
     await idle()
     expect(requests).toHaveLength(2)
-    await answer(fail('2', 'NO_KEY'))
+    await answer(fail(2, 'NO_KEY'))
     expect(useAiSettingsStore.getState().settings?.ghostText.enabled).toBe(false)
     expect(toasts()).toHaveLength(2)
     act(() => {
@@ -367,7 +379,7 @@ describe('useGhostTextController (F-5.3)', () => {
     })
     type(ENOUGH)
     await idle()
-    await answer(fail('3', 'INVALID_KEY'))
+    await answer(fail(3, 'INVALID_KEY'))
     expect(useAiSettingsStore.getState().settings?.ghostText.enabled).toBe(false)
     expect(toasts()).toHaveLength(3)
     expect(ghostText()).toBeNull()
@@ -377,7 +389,7 @@ describe('useGhostTextController (F-5.3)', () => {
     const hook = mount()
     type(ENOUGH)
     await idle()
-    await answer(fail('1', 'RATE_LIMIT'))
+    await answer(fail(1, 'RATE_LIMIT'))
     expect(hook.result.current.error).toBe('RATE_LIMIT happened. Do the thing.')
     expect(toasts()).toEqual([])
     expect(useAiSettingsStore.getState().settings?.ghostText.enabled).toBe(true)
@@ -388,7 +400,7 @@ describe('useGhostTextController (F-5.3)', () => {
     type(ENOUGH)
     await idle()
     expect(requests).toHaveLength(2)
-    await answer(ok('2'))
+    await answer(ok(2))
     expect(hook.result.current.error).toBeNull()
     expect(ghostText()).toBe(' Rain followed.')
   })
@@ -410,7 +422,7 @@ describe('useGhostTextController (F-5.3)', () => {
     for (let i = 0; i < GHOST_MAX_PER_DAY; i++) {
       type(ENOUGH)
       await idle()
-      await answer(ok(String(i + 1), ''))
+      await answer(ok(i + 1, ''))
     }
     expect(requests).toHaveLength(GHOST_MAX_PER_DAY)
     type(ENOUGH)
@@ -426,7 +438,7 @@ describe('useGhostTextController (F-5.3)', () => {
     mount()
     type(ENOUGH)
     await idle()
-    await answer(ok('1'))
+    await answer(ok(1))
     act(() => {
       editor.commands.acceptGhost()
     })
@@ -435,11 +447,96 @@ describe('useGhostTextController (F-5.3)', () => {
     expect(requests).toHaveLength(1) // accepting is not typing: no new request
   })
 
-  describe('settles the proposal behind a shown suggestion (F-14.5)', () => {
-    const show = async (requestId = '1', text?: string): Promise<void> => {
+  describe('cancels a request whose answer would be stale (F-5.10)', () => {
+    const inflight = (): string[] => Object.keys(useAiActivityStore.getState().inflight)
+
+    it('tracks the request in the activity store until its reply lands', async () => {
+      mount()
       type(ENOUGH)
       await idle()
-      await answer(ok(requestId, text))
+      expect(useAiActivityStore.getState().inflight).toEqual({
+        'g-1': { feature: 'ghostText', startedAt: expect.any(Number) as number }
+      })
+      await answer(ok(1))
+      expect(inflight()).toEqual([])
+    })
+
+    it('asks main to stop, once, when an edit or a caret move follows the send; the cancelled reply is silent', async () => {
+      const hook = mount()
+      type(ENOUGH)
+      await idle()
+      expect(cancels).toEqual([])
+      type('z')
+      expect(cancels).toEqual(['g-1'])
+      type('z')
+      act(() => {
+        editor.commands.setTextSelection(2)
+      })
+      expect(cancels).toEqual(['g-1'])
+      await answer(fail(1, 'CANCELLED'))
+      expect(toasts()).toEqual([])
+      expect(hook.result.current.error).toBeNull()
+      expect(useAiSettingsStore.getState().settings?.ghostText.enabled).toBe(true)
+      // No back-off: the next idle spell asks again at once.
+      act(() => {
+        editor.commands.focus('end')
+      })
+      type(ENOUGH)
+      await idle()
+      expect(requests).toHaveLength(2)
+      await answer(ok(2))
+      expect(ghostText()).toBe(' Rain followed.')
+    })
+
+    it('stops the request in flight when the document switches, the mode turns off, or the hook unmounts', async () => {
+      const hook = mount()
+      type(ENOUGH)
+      await idle()
+      hook.rerender({ nodeId: 'sc-2', active: true })
+      expect(cancels).toEqual(['g-1'])
+      await answer(fail(1, 'CANCELLED'))
+      type(ENOUGH)
+      await idle()
+      expect(requests).toHaveLength(2)
+      act(() => {
+        useAiSettingsStore.setState({
+          settings: settings({ ghostText: { enabled: false, idleMs: IDLE_MS } })
+        })
+      })
+      expect(cancels).toEqual(['g-1', 'g-2'])
+      await answer(fail(2, 'CANCELLED'))
+      act(() => {
+        useAiSettingsStore.setState({ settings: settings() })
+      })
+      type(ENOUGH)
+      await idle()
+      expect(requests).toHaveLength(3)
+      hook.unmount()
+      expect(cancels).toEqual(['g-1', 'g-2', 'g-3'])
+      expect(toasts()).toEqual([])
+    })
+
+    it('does not stop a request that nothing made stale', async () => {
+      mount()
+      type(ENOUGH)
+      await idle()
+      act(() => {
+        editor.view.dom.dispatchEvent(new FocusEvent('blur'))
+      })
+      act(() => {
+        editor.view.dom.dispatchEvent(new FocusEvent('focus'))
+      })
+      expect(cancels).toEqual([])
+      await answer(ok(1))
+      expect(ghostText()).toBe(' Rain followed.')
+    })
+  })
+
+  describe('settles the proposal behind a shown suggestion (F-14.5)', () => {
+    const show = async (n = 1, text?: string): Promise<void> => {
+      type(ENOUGH)
+      await idle()
+      await answer(ok(n, text))
       expect(ghostText()).toBe(text ?? ' Rain followed.')
     }
 
@@ -488,7 +585,7 @@ describe('useGhostTextController (F-5.3)', () => {
       expect(settles).toEqual([{ id: 'prop-1', status: 'rejected', note: null }])
       type('b'.repeat(GHOST_MIN_NEW_CHARS))
       await idle()
-      await answer(ok('2'))
+      await answer(ok(2))
       type(' R')
       type('x')
       expect(ghostText()).toBeNull()
@@ -502,13 +599,13 @@ describe('useGhostTextController (F-5.3)', () => {
       mount()
       type(ENOUGH)
       await idle()
-      await answer(ok('1', '', undefined, null))
+      await answer(ok(1, '', undefined, null))
       expect(ghostText()).toBeNull()
       press('Escape')
       expect(settles).toEqual([])
       type('b'.repeat(GHOST_MIN_NEW_CHARS))
       await idle()
-      await answer(ok('2', ' Wind rose.', undefined, null))
+      await answer(ok(2, ' Wind rose.', undefined, null))
       press('Tab')
       expect(editor.getJSON().content?.[0]?.content).toEqual([
         { type: 'text', text: `${CONTENT}${ENOUGH}${'b'.repeat(GHOST_MIN_NEW_CHARS)} Wind rose.` }

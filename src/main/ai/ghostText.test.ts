@@ -17,7 +17,9 @@ import { addExemplar } from '../voice/exemplarStore'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { generateGhostText, postProcessGhostText } from './ghostText'
+import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import {
+  AiCancelledError,
   AiProviderError,
   AiRateLimitError,
   type CompletionRequest,
@@ -77,8 +79,19 @@ const VOICE_PARAGRAPH =
   'tired too. They walked to the door and she pulled it open. "The river is rising," she said. ' +
   '"Then we wait," he said.'
 
+/** Settles like the adapter once its `signal` aborts: rejects with CANCELLED. */
+const untilCancelled = (request: CompletionRequest): Promise<never> =>
+  new Promise((_, reject) => {
+    request.signal?.addEventListener(
+      'abort',
+      () => reject(new AiCancelledError('The request was stopped.')),
+      { once: true }
+    )
+  })
+
 beforeEach(() => {
   resetVoiceProfileCache()
+  resetInflight()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-ghost-'))
   session = createProject(projectFolderFor(tmp, 'Ghost'), 'Ghost', 'novel')
   db = session.connection.orm
@@ -249,6 +262,34 @@ describe('generateGhostText (F-5.3)', () => {
     expect(complete).not.toHaveBeenCalled()
   })
 
+  it('hands the requestId to the request path so the provider gets its signal, and none without one (F-5.10)', async () => {
+    await generateGhostText(db, deps, {
+      nodeId: scene,
+      before: BEFORE,
+      after: '',
+      requestId: 'g-1'
+    })
+    expect(complete.mock.calls[0]![0].signal).toBeInstanceOf(AbortSignal)
+    expect(inflightCount()).toBe(0)
+    await ask(BEFORE, 'x')
+    expect('signal' in complete.mock.calls[1]![0]).toBe(false)
+  })
+
+  it('a cancel mid-flight rejects with CANCELLED and logs nothing', async () => {
+    complete.mockImplementationOnce(untilCancelled)
+    const pending = generateGhostText(db, deps, {
+      nodeId: scene,
+      before: BEFORE,
+      after: '',
+      requestId: 'g-1'
+    })
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1))
+    expect(cancelInflight('g-1')).toBe(true)
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(ledger).toEqual([])
+    expect(inflightCount()).toBe(0)
+  })
+
   it('answers an empty text for a blank or all-whitespace answer', async () => {
     answer('   \n ')
     expect((await ask()).text).toBe('')
@@ -346,6 +387,25 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       violation: 'switches to present tense'
     })
     expect(ledger).toHaveLength(1) // a failed call is not logged
+  })
+
+  it('registers the regenerate under id:regen, and a cancel during it propagates as CANCELLED instead of falling back (F-5.10)', async () => {
+    strongProfile()
+    answers(OFF_VOICE)
+    complete.mockImplementationOnce(untilCancelled)
+    const pending = generateGhostText(db, deps, {
+      nodeId: scene,
+      before: BEFORE,
+      after: '',
+      requestId: 'g-1'
+    })
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(2))
+    expect(complete.mock.calls[1]![0].signal).toBeInstanceOf(AbortSignal)
+    expect(cancelInflight('g-1')).toBe(false) // the first call is released
+    expect(cancelInflight('g-1:regen')).toBe(true)
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(ledger).toHaveLength(1) // the first call was logged; the cancelled one was not
+    expect(inflightCount()).toBe(0)
   })
 
   it('keeps the first answer, flagged, when the regenerate comes back empty', async () => {

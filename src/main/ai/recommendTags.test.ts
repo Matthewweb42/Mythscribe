@@ -13,7 +13,9 @@ import { addDocumentTag } from '../tag/documentTagStore'
 import { createTag, type TagDb } from '../tag/tagStore'
 import { listNodes } from '../tree/treeStore'
 import { defaultAiUsageState, dayOf } from './dailyCap'
+import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import {
+  AiCancelledError,
   AiProviderError,
   type CompletionRequest,
   type CompletionResult,
@@ -64,6 +66,7 @@ async function failure(nodeId = scene): Promise<{ code: string; message: string 
 }
 
 beforeEach(() => {
+  resetInflight()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-recommend-'))
   session = createProject(projectFolderFor(tmp, 'Rec'), 'Rec', 'novel')
   db = session.connection.orm
@@ -265,6 +268,29 @@ describe('recommendTags (F-4.7)', () => {
     expect(complete.mock.calls[0]![0].messages[1]?.content).toContain(
       'Rain fell on the #dark-forest until nobody could see.'
     )
+  })
+
+  it('hands the requestId option to the request path as the provider signal, and a cancel rejects with CANCELLED logging nothing (F-5.10)', async () => {
+    createTag(db, { name: 'Dark Forest', category: 'setting' })
+    complete.mockImplementationOnce(
+      (request) =>
+        new Promise((_, reject) => {
+          request.signal?.addEventListener(
+            'abort',
+            () => reject(new AiCancelledError('The request was stopped.')),
+            { once: true }
+          )
+        })
+    )
+    const pending = recommendTags(db, deps, scene, { requestId: 't-1' })
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1))
+    expect(complete.mock.calls[0]![0].signal).toBeInstanceOf(AbortSignal)
+    expect(cancelInflight('t-1')).toBe(true)
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(ledger).toEqual([])
+    expect(inflightCount()).toBe(0)
+    await recommendTags(db, deps, scene)
+    expect('signal' in complete.mock.calls[1]![0]).toBe(false)
   })
 
   it('refuses a folder with VALIDATION and an unknown id with NOT_FOUND', async () => {

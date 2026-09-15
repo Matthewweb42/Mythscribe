@@ -7,6 +7,7 @@ import { countInlineTags } from '@shared/inlineTags'
 import type { Tag } from '@shared/ipc/contract'
 import { TAG_BAR_MAX_FRACTION, TAG_BAR_MIN_HEIGHT, TAG_BAR_SPLIT_LIMITS } from '@shared/layout'
 import { PROPOSAL_NOTE_MAX, normalizeProposalNote } from '@shared/proposal'
+import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { formatRequestCost } from '@renderer/features/ai/usageFormat'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -29,15 +30,20 @@ const BUTTON =
   'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-expanded:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
 const LINK_BUTTON = 'rounded px-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg'
 
+let requestCounter = 0
+/** A request id `ai:cancel` can find (F-5.10), unique across this renderer's tag bars. */
+const nextRequestId = (): string => `t-${Date.now().toString(36)}-${++requestCounter}`
+
 /**
  * One Recommend request (F-4.7), keyed by the node it was made for so a document switch drops
  * it without an effect (the `pickingFor` idiom); the suggestions are bank tags, rendered live
  * from the bank by id, and leave the list only when accepted, so a failed link keeps its chip.
  * A `done` result is the proposal (F-14.5) the author settles: `acceptedCount` is how many of
- * its chips were linked, which decides between accepted in part and rejected on Dismiss.
+ * its chips were linked, which decides between accepted in part and rejected on Dismiss. The
+ * pending state carries the request id its Cancel button stops (F-5.10).
  */
 type RecommendState =
-  | { nodeId: string; status: 'pending' }
+  | { nodeId: string; status: 'pending'; requestId: string }
   | {
       nodeId: string
       status: 'done'
@@ -73,7 +79,9 @@ interface RegenerateOptions {
  * under the chips says which model answered and what it cost. Each answer is a proposal
  * (F-14.5): accepting every chip settles it accepted, Dismiss settles it accepted in part or
  * rejected (one click, no note), and "Regenerate…" asks what was off, settles it regenerated
- * with that note, and asks again with the note and the proposal id in the request.
+ * with that note, and asks again with the note and the proposal id in the request. While a
+ * request is pending, Cancel stops it (F-5.10): the reply comes back cancelled and the bar
+ * returns to idle without a word.
  */
 export function TagBar({ id }: { id: string }): React.JSX.Element {
   const tagBar = useLayoutStore((s) => s.layout.tagBar)
@@ -111,6 +119,8 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
     if (drained) void proposalStore.settle(drained.proposalId, 'accepted')
   }, [drained])
   const pending = mine?.status === 'pending'
+  const cancel = useAiActivityStore((s) => s.cancel)
+  const track = useAiActivityStore((s) => s.track)
   const bodyId = useId()
 
   useEffect(() => {
@@ -129,20 +139,36 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   // Main reads the saved row, so unsaved typing is flushed first: the request carries what
   // the author sees, and the 50-character gate here and in main agree.
   const askForTags = (nodeId: string, regenerate?: RegenerateOptions): void => {
-    setRecommend({ nodeId, status: 'pending' })
+    const requestId = nextRequestId()
+    /** Replaces the pending state this request owns; a reply for another request changes nothing. */
+    const settle = (next: RecommendState | null): void => {
+      setRecommend((current) =>
+        current?.status === 'pending' && current.requestId === requestId ? next : current
+      )
+    }
+    setRecommend({ nodeId, status: 'pending', requestId })
     flush()
       .then(() =>
-        ipc().invoke(
-          'ai:recommendTags',
-          regenerate
-            ? { nodeId, note: regenerate.note, regeneratedFrom: regenerate.regeneratedFrom }
-            : { nodeId }
+        track(
+          'tags',
+          requestId,
+          ipc().invoke(
+            'ai:recommendTags',
+            regenerate
+              ? {
+                  nodeId,
+                  note: regenerate.note,
+                  regeneratedFrom: regenerate.regeneratedFrom,
+                  requestId
+                }
+              : { nodeId, requestId }
+          )
         )
       )
       .then((result) => {
         if (result.ok) {
           for (const tag of result.suggestions) merge(tag)
-          setRecommend({
+          settle({
             nodeId,
             status: 'done',
             proposalId: result.proposalId,
@@ -152,8 +178,10 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
             costUsd: result.costUsd,
             cached: result.cached
           })
+        } else if (result.code === 'CANCELLED') {
+          settle(null)
         } else {
-          setRecommend({
+          settle({
             nodeId,
             status: 'error',
             message: result.message,
@@ -162,9 +190,14 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
         }
       })
       .catch((err: unknown) => {
-        setRecommend((current) => (current?.nodeId === nodeId ? null : current))
+        settle(null)
         report(err)
       })
+  }
+  /** Stops the pending request; the bar goes idle when its cancelled reply lands. */
+  const cancelRecommend = (): void => {
+    if (mine?.status !== 'pending') return
+    void cancel(mine.requestId)
   }
   /** Drops accepted suggestions from the result; draining it is settled by the effect above. */
   const dropAccepted = (nodeId: string, acceptedIds: string[]): void => {
@@ -320,8 +353,16 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
             {mine ? (
               <div role="group" aria-label="Tag suggestions" className="mb-2">
                 {mine.status === 'pending' ? (
-                  <p role="status" className="m-0 text-xs text-fg-muted">
-                    Asking for tag suggestions…
+                  <p role="status" className="m-0 flex items-center gap-2 text-xs text-fg-muted">
+                    <span>Asking for tag suggestions…</span>
+                    <button
+                      type="button"
+                      data-testid="tag-recommend-cancel"
+                      onClick={cancelRecommend}
+                      className={LINK_BUTTON}
+                    >
+                      Cancel
+                    </button>
                   </p>
                 ) : null}
                 {mine.status === 'error' ? (

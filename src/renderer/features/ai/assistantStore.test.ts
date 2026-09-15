@@ -34,6 +34,7 @@ import {
   resetAssistantStore,
   useAssistantStore
 } from './assistantStore'
+import { resetAiActivityStore, useAiActivityStore } from './aiActivityStore'
 import { resetProposalStore } from './proposalStore'
 
 interface PendingSet {
@@ -50,6 +51,8 @@ interface PendingChat {
 let sets: PendingSet[]
 let chats: PendingChat[]
 let settles: Input<'proposal:settle'>[]
+/** The request ids `ai:cancel` was asked to stop. */
+let cancels: string[]
 /** The `ai:chatDelta` listener the store registered, if any. */
 let deltaListener: ((payload: EventPayload<'ai:chatDelta'>) => void) | null
 let unsubscribed: number
@@ -80,6 +83,10 @@ function deferredClient(stored: Conversations): IpcClient {
       if (channel === 'proposal:settle') {
         settles.push(input as Input<'proposal:settle'>)
         return null as Output<C>
+      }
+      if (channel === 'ai:cancel') {
+        cancels.push((input as Input<'ai:cancel'>).requestId)
+        return { cancelled: true } as Output<C>
       }
       throw new Error(`unexpected ${channel}`)
     },
@@ -172,10 +179,12 @@ beforeEach(() => {
   sets = []
   chats = []
   settles = []
+  cancels = []
   deltaListener = null
   unsubscribed = 0
   resetAssistantStore()
   resetActiveEditorStore()
+  resetAiActivityStore()
   resetProposalStore()
   resetPendingSaves()
   resetTagStore()
@@ -185,6 +194,7 @@ beforeEach(() => {
 afterEach(() => {
   resetAssistantStore()
   resetActiveEditorStore()
+  resetAiActivityStore()
   vi.useRealTimers()
 })
 
@@ -455,6 +465,90 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
     expect(settles).toEqual([
       { id: `prop-${request?.input.requestId}`, status: 'rejected', note: null }
     ])
+    expect(toasts()).toEqual([])
+  })
+})
+
+describe('useAssistantStore stop (F-5.10)', () => {
+  const cancelled = (requestId: string): AiChatResult => ({
+    ok: false,
+    code: 'CANCELLED',
+    message: 'The request was stopped.',
+    nextStep: 'Send it again whenever you like.',
+    requestId
+  })
+
+  it('tracks the request in the activity store until its reply lands', async () => {
+    await store().load()
+    const request = await sendAndCapture('hello')
+    expect(useAiActivityStore.getState().inflight).toEqual({
+      [request.input.requestId]: { feature: 'chat', startedAt: expect.any(Number) as number }
+    })
+    request.resolve(ok(request.input.requestId, 'answer'))
+    await settle()
+    expect(useAiActivityStore.getState().inflight).toEqual({})
+  })
+
+  it('stop drops the unanswered turn with what streamed into it, keeps the author’s turn, asks main to stop, and the reply is silent', async () => {
+    await store().load()
+    const request = await sendAndCapture('What next?')
+    deltaListener?.({ requestId: request.input.requestId, delta: 'The ' })
+    expect(active().messages).toHaveLength(4)
+    store().stop()
+    expect(active().messages).toHaveLength(3)
+    expect(active().messages[2]).toMatchObject({ role: 'user', content: 'What next?' })
+    expect(store().pending).toEqual({})
+    expect(cancels).toEqual([request.input.requestId])
+    expect(toasts()).toEqual([])
+    request.resolve(cancelled(request.input.requestId))
+    await settle()
+    expect(active().messages).toHaveLength(3)
+    expect(toasts()).toEqual([])
+    expect(settles).toEqual([])
+    // The author can send again at once.
+    const again = await sendAndCapture('What next?')
+    expect(again.input.requestId).not.toBe(request.input.requestId)
+    expect(active().messages).toHaveLength(5)
+    again.resolve(ok(again.input.requestId, 'She climbs.'))
+    await settle()
+    expect(active().messages[4]?.content).toBe('She climbs.')
+  })
+
+  it('stop is a no-op without a request in flight, and a late answer for a stopped request only rejects its proposal', async () => {
+    await store().load()
+    store().stop()
+    expect(cancels).toEqual([])
+    const request = await sendAndCapture('hello')
+    store().stop()
+    request.resolve(ok(request.input.requestId, 'late'))
+    await settle()
+    expect(active().messages).toHaveLength(3)
+    expect(settles).toEqual([
+      { id: `prop-${request.input.requestId}`, status: 'rejected', note: null }
+    ])
+    expect(toasts()).toEqual([])
+  })
+
+  it('a cancelled reply that lands while the turn is still pending drops it without a toast', async () => {
+    await store().load()
+    const request = await sendAndCapture('hello')
+    request.resolve(cancelled(request.input.requestId))
+    await settle()
+    expect(active().messages).toHaveLength(3)
+    expect(store().pending).toEqual({})
+    expect(toasts()).toEqual([])
+  })
+
+  it('closing a conversation stops its request in flight', async () => {
+    await store().load()
+    store().newConversation()
+    const second = store().conversations?.active ?? ''
+    const sending = store().send('hello')
+    await settle()
+    store().closeConversation(second)
+    expect(cancels).toEqual([chats[0]?.input.requestId])
+    chats[0]?.resolve(cancelled(chats[0].input.requestId))
+    await sending
     expect(toasts()).toEqual([])
   })
 })

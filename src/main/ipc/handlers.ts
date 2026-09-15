@@ -12,6 +12,7 @@ import type { AiChatResult, AiGhostTextResult, AiRecommendTagsResult } from '@sh
 import { runChat } from '../ai/chat'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
 import { generateGhostText } from '../ai/ghostText'
+import { cancelInflight, regenRequestId } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
 import { createProposal, settleProposal } from '../ai/proposalStore'
 import { AiProviderError, NoKeyError } from '../ai/providers/types'
@@ -286,11 +287,11 @@ export function registerHandlers({
   // snapshot (what was offered, not what was linked: linking is the tag bar's accept).
   register(
     'ai:recommendTags',
-    async ({ nodeId, note, regeneratedFrom }): Promise<AiRecommendTagsResult> => {
+    async ({ nodeId, note, regeneratedFrom, requestId }): Promise<AiRecommendTagsResult> => {
       try {
         const db = manager.require().connection.orm
         const deps = buildAiRequestDeps({ db, providers: ai, appState })
-        const result = await recommendTags(db, deps, nodeId, { note, regeneratedFrom })
+        const result = await recommendTags(db, deps, nodeId, { note, regeneratedFrom, requestId })
         const proposal = createProposal(db, {
           feature: 'tags',
           nodeId,
@@ -321,7 +322,7 @@ export function registerHandlers({
       try {
         const db = manager.require().connection.orm
         const deps = buildAiRequestDeps({ db, providers: ai, appState })
-        const result = await generateGhostText(db, deps, { nodeId, before, after })
+        const result = await generateGhostText(db, deps, { nodeId, before, after, requestId })
         const { text, usage, costUsd, cached, model, flagged, violation } = result
         // F-14.5: a shown suggestion is a proposal; "no suggestion" has nothing to settle.
         const proposalId =
@@ -374,7 +375,7 @@ export function registerHandlers({
         const result = await runChat(
           db,
           deps,
-          { nodeId, mode, paragraphs, message, history },
+          { nodeId, mode, paragraphs, message, history, requestId },
           (delta) => emit(windows(), 'ai:chatDelta', { requestId, delta })
         )
         const { text, usage, costUsd, cached, model, flagged, violation } = result
@@ -410,6 +411,16 @@ export function registerHandlers({
       }
     }
   )
+
+  // F-5.10: aborts the request registered under the id, or its fidelity regenerate (F-14.7)
+  // when the second call is the one in flight. Needs no project: the registry is process-wide.
+  // The request's own reply comes back as the CANCELLED failure; `cancelled` is false when
+  // nothing by that id is in flight (already settled, or never sent).
+  register('ai:cancel', ({ requestId }) => {
+    const main = cancelInflight(requestId)
+    const regen = cancelInflight(regenRequestId(requestId))
+    return { cancelled: main || regen }
+  })
 
   // F-14.5: idempotent in the store (only a pending row changes); a blank note is stored as none.
   register('proposal:settle', ({ id, status, note }) => {

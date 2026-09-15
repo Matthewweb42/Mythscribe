@@ -15,9 +15,10 @@ import { voiceBlock } from '../voice/voiceBlock'
 import { buildChatContext } from './context/chatContext'
 import { assertFeatureAllowed } from './dial'
 import { stripWrappingQuotes } from './ghostText'
+import { regenRequestId } from './inflight'
 import { buildChatPrompt, type BuildChatPromptInput, type ChatTurn } from './prompts/chat.v1'
 import { buildChatRegenPrompt } from './prompts/chatRegen.v1'
-import { AiDisabledError, type CompletionUsage } from './providers/types'
+import { AiCancelledError, AiDisabledError, type CompletionUsage } from './providers/types'
 import {
   runAiRequest,
   runAiStream,
@@ -34,6 +35,11 @@ export interface ChatInput {
   message: string
   /** The recent turns the renderer keeps, oldest first. */
   history: ChatTurn[]
+  /**
+   * The caller's id for `ai:cancel` (F-5.10): the first call registers under it, an Agent
+   * regenerate under `regenRequestId(id)`. Optional so the eval harness can run without one.
+   */
+  requestId?: string
 }
 
 export interface ChatResult {
@@ -72,8 +78,9 @@ export const CHAT_FRAGMENT_MAX_WORDS = 200
  * `CHAT_FRAGMENT_MAX_WORDS` words through `checkGhostTextFidelity`, a longer draft through
  * `scoreDocumentDrift`; an off-voice draft is regenerated once through `chatRegen.v1` with
  * the violation named, re-scored, and shown flagged when it still fails; a regenerate that
- * fails for any reason falls back to the first draft, flagged. Plan answers are never
- * flagged. Both tiers are `fast`.
+ * fails for any reason falls back to the first draft, flagged, except a cancel (F-5.10),
+ * which propagates as CANCELLED from either call. Plan answers are never flagged. Both tiers
+ * are `fast`.
  *
  * The context hash covers everything that shaped the messages: the scene text, the metadata,
  * the references, the (trimmed) history, the message, the mode, the paragraph count, the
@@ -137,12 +144,16 @@ export async function runChat(
     maxTokens: prompt.maxTokens,
     ...(prompt.temperature === undefined ? {} : { temperature: prompt.temperature })
   }
+  const requestId = input.requestId === undefined ? {} : { requestId: input.requestId }
+  const regenId =
+    input.requestId === undefined ? {} : { requestId: regenRequestId(input.requestId) }
 
   if (!agent) {
     const answer = await runAiStream(
       deps,
       {
         ...request,
+        ...requestId,
         messages: prompt.messages,
         contextHash: sha256(JSON.stringify(hashed)),
         promptVersion: prompt.version
@@ -154,6 +165,7 @@ export async function runChat(
 
   const first = await runAiRequest(deps, {
     ...request,
+    ...requestId,
     messages: prompt.messages,
     contextHash: sha256(JSON.stringify(hashed)),
     promptVersion: prompt.version
@@ -176,11 +188,13 @@ export async function runChat(
   try {
     second = await runAiRequest(deps, {
       ...request,
+      ...regenId,
       messages: regen.messages,
       contextHash: sha256(JSON.stringify({ ...hashed, violation: violation.code })),
       promptVersion: regen.version
     })
-  } catch {
+  } catch (err) {
+    if (err instanceof AiCancelledError) throw err
     return flaggedFirst
   }
   const combined = {

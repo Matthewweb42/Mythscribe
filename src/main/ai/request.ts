@@ -10,10 +10,12 @@ import {
 import type { AppStateStore } from '../appState/appStateStore'
 import { getCached, putCached, type CacheEntry, type CachedResponse } from './cacheStore'
 import { dayOf, rollIfNewDay, spend, wouldExceed, type AiUsageState } from './dailyCap'
+import { registerInflight, releaseInflight } from './inflight'
 import {
   AiBudgetError,
   NoKeyError,
   type AiMessage,
+  type CompletionRequest,
   type CompletionUsage,
   type Provider
 } from './providers/types'
@@ -47,6 +49,13 @@ export interface AiRequestInput {
   contextHash: string
   /** The catalogued prompt version the messages were built from (F-5.12); the ledger and the proposal record it. */
   promptVersion: PromptVersion
+  /**
+   * The caller's id for `ai:cancel` (F-5.10): registered in flight for the whole call (the
+   * pre-checks and a cache hit included, so cancel semantics stay simple), its signal handed
+   * to the provider, released whatever the outcome. A duplicate id is VALIDATION. Without
+   * one the request cannot be stopped.
+   */
+  requestId?: string
 }
 
 export interface AiRequestResult {
@@ -195,22 +204,49 @@ function record(
   return { text: answer.text, model, usage: answer.usage, costUsd, cached: false, priced }
 }
 
-export async function runAiRequest(
-  deps: AiRequestDeps,
-  input: AiRequestInput
-): Promise<AiRequestResult> {
-  const prepared = prepare(deps, input)
-  const hit = deps.cache.get(prepared.key)
-  if (hit) return serveCached(deps, prepared, hit)
+/**
+ * Registers `input.requestId` (when given) for the duration of `run`, so `cancelInflight`
+ * can abort the provider call, and releases it on every path (F-5.10). The abort surfaces as
+ * the adapter's `AiCancelledError`, a provider error like any other: nothing logged or cached.
+ */
+async function withInflight<T>(
+  input: AiRequestInput,
+  run: (signal: AbortSignal | undefined) => Promise<T>
+): Promise<T> {
+  if (input.requestId === undefined) return run(undefined)
+  const controller = registerInflight(input.requestId)
+  try {
+    return await run(controller.signal)
+  } finally {
+    releaseInflight(input.requestId)
+  }
+}
 
-  const result = await prepared.provider.complete({
+/** The provider request both paths send; `signal` only when the caller registered an id, so a fake sees the exact shape. */
+function completionRequest(
+  input: AiRequestInput,
+  prepared: PreparedRequest,
+  signal: AbortSignal | undefined
+): CompletionRequest {
+  return {
     tier: input.tier,
     messages: input.messages,
     maxTokens: prepared.maxTokens,
     json: input.json,
-    ...(input.temperature === undefined ? {} : { temperature: input.temperature })
+    ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+    ...(signal === undefined ? {} : { signal })
+  }
+}
+
+export function runAiRequest(deps: AiRequestDeps, input: AiRequestInput): Promise<AiRequestResult> {
+  return withInflight(input, async (signal) => {
+    const prepared = prepare(deps, input)
+    const hit = deps.cache.get(prepared.key)
+    if (hit) return serveCached(deps, prepared, hit)
+
+    const result = await prepared.provider.complete(completionRequest(input, prepared, signal))
+    return record(deps, input, prepared, { text: result.text, usage: result.usage })
   })
-  return record(deps, input, prepared, { text: result.text, usage: result.usage })
 }
 
 /**
@@ -223,37 +259,33 @@ export async function runAiRequest(
  * first pull or mid-stream propagates like `complete`'s: nothing is logged or cached, and the
  * deltas already shown are the caller's to discard.
  */
-export async function runAiStream(
+export function runAiStream(
   deps: AiRequestDeps,
   input: AiRequestInput,
   onDelta: (delta: string) => void
 ): Promise<AiRequestResult> {
-  const prepared = prepare(deps, input)
-  const hit = deps.cache.get(prepared.key)
-  if (hit) {
-    if (hit.text) onDelta(hit.text)
-    return serveCached(deps, prepared, hit)
-  }
-
-  let text = ''
-  let usage: CompletionUsage | undefined
-  const chunks = prepared.provider.stream({
-    tier: input.tier,
-    messages: input.messages,
-    maxTokens: prepared.maxTokens,
-    json: input.json,
-    ...(input.temperature === undefined ? {} : { temperature: input.temperature })
-  })
-  for await (const chunk of chunks) {
-    if (chunk.delta) {
-      text += chunk.delta
-      onDelta(chunk.delta)
+  return withInflight(input, async (signal) => {
+    const prepared = prepare(deps, input)
+    const hit = deps.cache.get(prepared.key)
+    if (hit) {
+      if (hit.text) onDelta(hit.text)
+      return serveCached(deps, prepared, hit)
     }
-    if (chunk.usage) usage = chunk.usage
-  }
-  return record(deps, input, prepared, {
-    text,
-    usage: usage ?? { inputTokens: prepared.estimatedIn, outputTokens: estimateTokens(text) }
+
+    let text = ''
+    let usage: CompletionUsage | undefined
+    const chunks = prepared.provider.stream(completionRequest(input, prepared, signal))
+    for await (const chunk of chunks) {
+      if (chunk.delta) {
+        text += chunk.delta
+        onDelta(chunk.delta)
+      }
+      if (chunk.usage) usage = chunk.usage
+    }
+    return record(deps, input, prepared, {
+      text,
+      usage: usage ?? { inputTokens: prepared.estimatedIn, outputTokens: estimateTokens(text) }
+    })
   })
 }
 

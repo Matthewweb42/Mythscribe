@@ -1,3 +1,4 @@
+import { APIUserAbortError } from 'openai'
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, type Tier } from '@shared/ai'
 import { buildOpenAiProvider, mapOpenAiError, type FetchLike } from './openai'
@@ -46,6 +47,18 @@ const sse = (events: unknown[]): Response =>
       headers: { 'content-type': 'text/event-stream' }
     }
   )
+
+/** What a spec-compliant fetch rejects with once its `signal` aborts. */
+const abortError = (): Error => new DOMException('The operation was aborted.', 'AbortError')
+
+/** Rejects like a real fetch when the SDK's request signal aborts. */
+const whenAborted = (init: RequestInit | undefined): Promise<never> =>
+  new Promise((_, reject) => {
+    const signal = init?.signal
+    if (!signal) throw new Error('expected the SDK to pass a signal')
+    if (signal.aborted) reject(abortError())
+    signal.addEventListener('abort', () => reject(abortError()), { once: true })
+  })
 
 const KEY = 'sk-test-secret-1234abcd'
 
@@ -165,6 +178,32 @@ describe('buildOpenAiProvider.complete (F-5.1)', () => {
     await failure(fetch)
     expect(calls).toHaveLength(1)
   })
+
+  it('aborting the request signal mid-flight rejects with CANCELLED (F-5.10)', async () => {
+    const fetch: FetchLike = (_input, init) => whenAborted(init)
+    const controller = new AbortController()
+    const pending = buildOpenAiProvider(KEY, { fetch }).complete({
+      ...request,
+      signal: controller.signal
+    })
+    let settled = false
+    const mark = (): void => void (settled = true)
+    void pending.then(mark, mark)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(settled).toBe(false)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' })
+  })
+
+  it('an already aborted signal rejects with CANCELLED before any request leaves', async () => {
+    const { fetch, calls } = answering(() => json(200, completion))
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      buildOpenAiProvider(KEY, { fetch }).complete({ ...request, signal: controller.signal })
+    ).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(calls).toHaveLength(0)
+  })
 })
 
 describe('buildOpenAiProvider.stream', () => {
@@ -213,6 +252,37 @@ describe('buildOpenAiProvider.stream', () => {
     const iterator = buildOpenAiProvider(KEY, { fetch }).stream(request)[Symbol.asyncIterator]()
     await expect(iterator.next()).rejects.toMatchObject({ code: 'INVALID_KEY' })
   })
+
+  it('aborting the signal mid-stream yields what arrived, then throws CANCELLED instead of ending quietly (F-5.10)', async () => {
+    // An SSE body that sends one chunk, then stalls until the SDK's request signal aborts.
+    const fetch: FetchLike = (_input, init) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(body) {
+              body.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk('Hel'))}\n\n`))
+              init?.signal?.addEventListener('abort', () => body.error(abortError()), {
+                once: true
+              })
+            }
+          }),
+          { status: 200, headers: { 'content-type': 'text/event-stream' } }
+        )
+      )
+    const controller = new AbortController()
+    const seen: string[] = []
+    const run = async (): Promise<void> => {
+      for await (const { delta } of buildOpenAiProvider(KEY, { fetch }).stream({
+        ...request,
+        signal: controller.signal
+      })) {
+        seen.push(delta)
+        controller.abort()
+      }
+    }
+    await expect(run()).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(seen).toEqual(['Hel'])
+  })
 })
 
 describe('buildOpenAiProvider.testConnection', () => {
@@ -257,5 +327,13 @@ describe('mapOpenAiError', () => {
     expect(mapped.code).toBe('PROVIDER')
     expect(mapped.cause).toBeInstanceOf(TypeError)
     expect(mapOpenAiError(mapped)).toBe(mapped)
+  })
+
+  it("maps the SDK's user abort and any AbortError-named error to CANCELLED, ahead of the APIError fallback (F-5.10)", () => {
+    const sdk = mapOpenAiError(new APIUserAbortError())
+    expect(sdk.code).toBe('CANCELLED')
+    expect(sdk.message).toBe('The request was stopped.')
+    expect(sdk.cause).toBeInstanceOf(APIUserAbortError)
+    expect(mapOpenAiError(abortError()).code).toBe('CANCELLED')
   })
 })

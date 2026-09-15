@@ -19,6 +19,7 @@ import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
+import { useAiActivityStore } from './aiActivityStore'
 import { proposalStore } from './proposalStore'
 
 /** The title of a conversation nobody has written in yet. */
@@ -41,7 +42,10 @@ export const EMPTY_ANSWER_MESSAGE = 'The assistant returned no text. Try again.'
  * the model, cost, and proposal id when the request resolves. An Agent answer never enters the
  * chat: it goes to the active editor as ghost text (F-5.3), marked with its proposal on accept
  * (F-14.6) and settled through the ghost's own exit (F-14.5); the chat records a notice turn.
- * Loaded with the tree on project open and cleared on close (`App.tsx`).
+ * Every request is tracked in the activity store and can be stopped (F-5.10): `stop` drops the
+ * unanswered turn (with whatever streamed into it) and keeps the author's turn to resend; the
+ * `CANCELLED` reply is silent. Loaded with the tree on project open and cleared on close
+ * (`App.tsx`).
  */
 interface AssistantState {
   /** The loaded conversations; null until `load` resolves (the panel renders its chrome disabled until then). */
@@ -55,7 +59,7 @@ interface AssistantState {
   clear: () => void
   /** Opens a fresh Plan conversation as the active tab; a no-op at the conversation cap. */
   newConversation: () => void
-  /** Drops a conversation (its request in flight is abandoned); the last tab is replaced by a fresh one. */
+  /** Drops a conversation (its request in flight is stopped); the last tab is replaced by a fresh one. */
   closeConversation: (id: string) => void
   select: (id: string) => void
   setMode: (mode: ChatMode) => void
@@ -64,6 +68,8 @@ interface AssistantState {
   clearMessages: () => void
   /** Sends one turn in the active conversation; ignored while one is in flight or for a blank message. */
   send: (message: string) => Promise<void>
+  /** Stops the active conversation's request in flight: the unanswered turn goes, the author's turn stays. */
+  stop: () => void
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -217,13 +223,22 @@ function setPending(id: string, requestId: string | null): void {
   })
 }
 
-/** Removes the empty assistant turn a failed or abandoned request left at the end of the conversation. */
-function dropPlaceholder(value: Conversations, id: string): Conversations {
+/**
+ * Removes the unanswered assistant turn a failed, stopped, or abandoned request left at the end
+ * of the conversation, streamed pieces included: only a resolved request fills in the model.
+ */
+function dropUnanswered(value: Conversations, id: string): Conversations {
   return patchOne(value, id, (c) => {
     const last = c.messages[c.messages.length - 1]
-    if (last?.role !== 'assistant' || last.content !== '') return c
+    if (last?.role !== 'assistant' || last.model !== null) return c
     return { ...c, messages: c.messages.slice(0, -1) }
   })
+}
+
+/** Stops the request `id` is waiting on, if any, through the activity store; its reply is then dropped. */
+function cancelRequest(id: string): void {
+  const requestId = useAssistantStore.getState().pending[id]
+  if (requestId !== undefined) void useAiActivityStore.getState().cancel(requestId)
 }
 
 /**
@@ -291,6 +306,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   closeConversation(id) {
     const value = get().conversations
     if (!value?.items.some((c) => c.id === id)) return
+    cancelRequest(id)
     setPending(id, null)
     const index = value.items.findIndex((c) => c.id === id)
     const items = value.items.filter((c) => c.id !== id)
@@ -353,14 +369,18 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     const nodeId = useActiveEditorStore.getState().active?.id ?? null
     let result: AiChatResult
     try {
-      result = await ipc().invoke('ai:chat', {
-        nodeId,
-        mode,
-        paragraphs,
-        message: text,
-        history,
-        requestId
-      })
+      result = await useAiActivityStore.getState().track(
+        'chat',
+        requestId,
+        ipc().invoke('ai:chat', {
+          nodeId,
+          mode,
+          paragraphs,
+          message: text,
+          history,
+          requestId
+        })
+      )
     } catch (err) {
       settleFailure(id, requestId, describeError(err))
       return
@@ -371,7 +391,11 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       return
     }
     if (!result.ok) {
-      settleFailure(id, requestId, `${result.message} ${result.nextStep}`.trim())
+      settleFailure(
+        id,
+        requestId,
+        result.code === 'CANCELLED' ? null : `${result.message} ${result.nextStep}`.trim()
+      )
       return
     }
     if (mode === 'agent' && !result.text.trim()) {
@@ -410,16 +434,30 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     if (result.cached && turnId !== null) {
       set((s) => ({ cached: { ...s.cached, [turnId]: true } }))
     }
+  },
+
+  stop() {
+    const value = get().conversations
+    if (value?.active == null) return
+    const id = value.active
+    const requestId = get().pending[id]
+    if (requestId === undefined) return
+    // The turn leaves now, so the author can resend at once; the cancelled reply finds nothing pending.
+    settleFailure(id, requestId, null)
+    void useAiActivityStore.getState().cancel(requestId)
   }
 }))
 
-/** A failed or abandoned turn: the empty answer leaves the chat, the request is no longer pending, the reason toasts. */
-function settleFailure(id: string, requestId: string, message: string): void {
+/**
+ * A failed, stopped, or abandoned turn: the unanswered turn leaves the chat, the request is no
+ * longer pending, and the reason toasts (none for a cancellation, which the author chose).
+ */
+function settleFailure(id: string, requestId: string, message: string | null): void {
   const { pending, conversations } = useAssistantStore.getState()
   if (pending[id] !== requestId) return
   setPending(id, null)
-  if (conversations !== null) commit(dropPlaceholder(conversations, id))
-  toast.error(message)
+  if (conversations !== null) commit(dropUnanswered(conversations, id))
+  if (message !== null) toast.error(message)
 }
 
 /** The active conversation, or null before the load or without one. */
