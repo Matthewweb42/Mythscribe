@@ -1,4 +1,6 @@
 import type { AiFeatureId, Tier } from '@shared/ai'
+import { BETA_READER_PROMPT_VERSION } from './betaReader.v1'
+import { BETA_READER_REGEN_PROMPT_VERSION } from './betaReaderRegen.v1'
 import { BRIEF_PROMPT_VERSION } from './brief.v1'
 import { CHAT_PROMPT_VERSION } from './chat.v1'
 import { CHAT_PROMPT_V2_VERSION } from './chat.v2'
@@ -63,6 +65,8 @@ export const PROMPT_VERSIONS = [
   CRITIQUE_REGEN_PROMPT_V2_VERSION,
   CRITIQUE_PROMPT_V3_VERSION,
   CRITIQUE_REGEN_PROMPT_V3_VERSION,
+  BETA_READER_PROMPT_VERSION,
+  BETA_READER_REGEN_PROMPT_VERSION,
   BRIEF_PROMPT_VERSION,
   SUMMARY_PROMPT_VERSION
 ] as const
@@ -183,6 +187,18 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'strong',
     output: 'json',
     since: 'F-14.9'
+  },
+  [BETA_READER_PROMPT_VERSION]: {
+    feature: 'betaReader',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-14.11'
+  },
+  [BETA_READER_REGEN_PROMPT_VERSION]: {
+    feature: 'betaReader',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-14.11'
   },
   [BRIEF_PROMPT_VERSION]: { feature: 'brief', tier: 'fast', output: 'json', since: 'F-14.3' },
   [SUMMARY_PROMPT_VERSION]: { feature: 'summary', tier: 'fast', output: 'json', since: 'F-5.6' }

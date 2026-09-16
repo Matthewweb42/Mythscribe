@@ -123,6 +123,31 @@ const SUMMARY_ANSWER = JSON.stringify({
   characters: SUMMARY_CHARACTERS
 })
 const BRIEF_SENTINEL = 'You are the scene-brief feature inside a novel-writing app.'
+/**
+ * F-14.11: the opening of the beta-reader prompt's system turn (`BETA_READER_RULES` in
+ * `src/main/ai/prompts/betaReader.v1.ts`, repeated here for the same reason). A JSON request
+ * carrying it gets the canned report below: one item citing Scene 1, one quoting a passage that
+ * is nowhere in it, and one naming a scene the reader was never sent, so both drop rules show.
+ */
+const BETA_READER_SENTINEL = 'You are the beta-reader feature inside a novel-writing app.'
+const BETA_READER_NOTE = 'I expect the ridge to matter: she keeps looking at it.'
+const BETA_READER_ANSWER = JSON.stringify({
+  items: [
+    { category: 'expects', scene: 1, quote: CRITIQUE_PRAISE_QUOTE, note: BETA_READER_NOTE },
+    {
+      category: 'confusion',
+      scene: 1,
+      quote: CRITIQUE_FABRICATED_QUOTE,
+      note: 'Never written; the app must drop this one.'
+    },
+    {
+      category: 'knows',
+      scene: 9,
+      quote: CRITIQUE_PRAISE_QUOTE,
+      note: 'Scene 9 was never sent; the app must drop this one too.'
+    }
+  ]
+})
 const BRIEF_GOAL = 'Mara wants to cross the river tonight.'
 const BRIEF_ANSWER = JSON.stringify({
   goal: BRIEF_GOAL,
@@ -216,6 +241,10 @@ function startFakeOpenAi(): Promise<string> {
           const critique = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(CRITIQUE_SENTINEL)
           )
+          // F-14.11: a beta read comes back as three JSON items, two of them uncitable.
+          const betaReader = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(BETA_READER_SENTINEL)
+          )
           // F-14.3: a brief draft comes back as the five JSON lines.
           const brief = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(BRIEF_SENTINEL)
@@ -279,13 +308,15 @@ function startFakeOpenAi(): Promise<string> {
                     content: json
                       ? critique
                         ? CRITIQUE_ANSWER
-                        : brief
-                          ? BRIEF_ANSWER
-                          : summary
-                            ? SUMMARY_ANSWER
-                            : regen
-                              ? '{"tags":["antagonist","protagonist"]}'
-                              : '{"tags":["dark-forest","protagonist"]}'
+                        : betaReader
+                          ? BETA_READER_ANSWER
+                          : brief
+                            ? BRIEF_ANSWER
+                            : summary
+                              ? SUMMARY_ANSWER
+                              : regen
+                                ? '{"tags":["antagonist","protagonist"]}'
+                                : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -2095,6 +2126,49 @@ test('create, close, reopen a project on disk', async () => {
   expect(afterSummary.byFeature.find((f) => f.feature === 'summary')).toMatchObject({
     requests: 2
   })
+
+  // F-14.11: the beta reader. Reading up to Scene 1 sends the strong tier the scene in full
+  // and the stored summaries of the manuscript documents before it: Opening has none (it is
+  // under the summary floor), so the reader is told nothing about it and the panel counts it
+  // as missing. The fake server's three items shrink to the one whose quote is in Scene 1; the
+  // fabricated quote and the item naming an unsent scene are dropped and counted. No voice
+  // block and no story bible go out: the reader knows only what is on the page.
+  const betaReaderButton = page.getByRole('button', { name: 'Beta reader' })
+  const betaReaderBodiesBefore = openAiChatBodies.length
+  await expect(betaReaderButton).toBeEnabled()
+  await betaReaderButton.click()
+  const betaReaderPanel = page.getByTestId('beta-reader-panel')
+  await expect(betaReaderPanel).toBeVisible()
+  await expect(betaReaderPanel.getByTestId('beta-reader-item')).toHaveCount(1)
+  await expect(betaReaderPanel.getByTestId('beta-reader-item')).toHaveAttribute(
+    'data-category',
+    'expects'
+  )
+  await expect(betaReaderPanel.getByTestId('beta-reader-quote')).toHaveText(CRITIQUE_PRAISE_QUOTE)
+  await expect(betaReaderPanel).toContainText(BETA_READER_NOTE)
+  await expect(betaReaderPanel).not.toContainText(CRITIQUE_FABRICATED_QUOTE)
+  await expect(betaReaderPanel.getByTestId('beta-reader-dropped')).toHaveText(
+    '2 uncited items dropped'
+  )
+  await expect(betaReaderPanel.getByTestId('beta-reader-missing')).toContainText(
+    '1 earlier scene has no summary yet'
+  )
+  expect(openAiChatBodies).toHaveLength(betaReaderBodiesBefore + 1)
+  const betaReaderSystem = openAiChatBodies.at(-1)?.messages[0]
+  expect(betaReaderSystem?.role).toBe('system')
+  expect(betaReaderSystem?.content.startsWith(BETA_READER_SENTINEL)).toBe(true)
+  expect(betaReaderSystem?.content).toContain('Be specific and direct')
+  expect(betaReaderSystem?.content).not.toContain(STORY_BIBLE_HEADING)
+  const betaReaderUser = openAiChatBodies.at(-1)?.messages[1]
+  expect(betaReaderUser?.content).toContain('No earlier scenes.')
+  expect(betaReaderUser?.content).toContain('[1] Chapter 1 › Scene 1 (this scene, full text)')
+  expect(betaReaderUser?.content).toContain(CRITIQUE_PRAISE_QUOTE)
+  const afterBetaReader = await usageSummary()
+  expect(afterBetaReader.byFeature.find((f) => f.feature === 'betaReader')).toMatchObject({
+    requests: 1
+  })
+  await betaReaderPanel.getByTestId('beta-reader-close').click()
+  await expect(betaReaderPanel).toHaveCount(0)
 
   // Back to Off and no key, as the steps above left them.
   await page.getByRole('button', { name: 'Settings' }).click()

@@ -159,7 +159,15 @@ describe('AI_DATA_SHARING', () => {
   it("places ghost text at Suggest and Author mode at Draft, per PLAN.md §2.3's table", () => {
     expect(AI_DATA_SHARING.ghostText.minDial).toBe(2)
     expect(AI_DATA_SHARING.authorMode.minDial).toBe(3)
-    for (const id of ['query', 'summary', 'tags', 'critique', 'chat', 'embeddings'] as const) {
+    for (const id of [
+      'query',
+      'summary',
+      'tags',
+      'critique',
+      'betaReader',
+      'chat',
+      'embeddings'
+    ] as const) {
       expect(AI_DATA_SHARING[id].minDial).toBe(1)
     }
   })

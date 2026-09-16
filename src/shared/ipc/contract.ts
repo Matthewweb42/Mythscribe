@@ -24,6 +24,7 @@ import {
   Conversations
 } from '../chat'
 import { AuthorRules } from '../authorRules'
+import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { CritiqueNotes } from '../critique'
 import { EditorSettings } from '../editorSettings'
 import { Background, FocusSettings } from '../focus'
@@ -233,6 +234,41 @@ export const AiCritiqueResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiCritiqueResult = z.infer<typeof AiCritiqueResult>
+
+/**
+ * What `ai:betaReader` answers (F-14.11): the reader's report, every item citing a passage main
+ * found in the scene it names (`dropped` counts the items whose quote or scene number did not
+ * hold up), the scenes the reader read in the order sent (the current one last, for the panel's
+ * citation labels), whether the scene was cut (`truncated`), how many of the farthest earlier
+ * scenes were left out to fit the budget (`skipped`), how many earlier scenes had no stored
+ * summary to read (`missing`), what it cost, and the proposal it became (F-14.5); or an
+ * expected AI failure as data.
+ */
+export const AiBetaReaderResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    items: BetaReaderItems,
+    scenes: z.array(BetaReaderScene),
+    truncated: z.boolean(),
+    skipped: z.number().int().nonnegative(),
+    missing: z.number().int().nonnegative(),
+    dropped: z.number().int().nonnegative(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    proposalId: z.string(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiBetaReaderResult = z.infer<typeof AiBetaReaderResult>
 
 /**
  * What `ai:draftBrief` answers (F-14.3): the five brief lines the model drafted from the scene
@@ -719,6 +755,27 @@ export const contract = {
       regeneratedFrom: z.string().nullable().optional()
     }),
     output: AiCritiqueResult
+  },
+  /**
+   * The beta-reader read-through up to a scene (F-14.11). The renderer sends only the node;
+   * main reads every manuscript document before it in reading order through its stored
+   * summary and key points (F-5.6; one without a summary is counted in `missing`), the scene
+   * itself head-truncated to `BETA_READER_SCENE_CHAR_BUDGET`, and the honesty setting, asks
+   * the strong tier for JSON, and drops every item whose quote it cannot find in the scene the
+   * item names. Nothing is changed and nothing is applied: a reader reports. A regenerate
+   * (F-14.5) names the proposal it replaces in `regeneratedFrom` and may carry the author's
+   * `note`. NOT_FOUND for an unknown id, VALIDATION for a node that is not a manuscript
+   * document or holds under `BETA_READER_TEXT_MIN` characters; the AI failures come back as
+   * data with the echoed `requestId`.
+   */
+  'ai:betaReader': {
+    input: z.object({
+      nodeId: z.string(),
+      requestId: z.string(),
+      note: z.string().max(PROPOSAL_NOTE_MAX).nullable().optional(),
+      regeneratedFrom: z.string().nullable().optional()
+    }),
+    output: AiBetaReaderResult
   },
   /**
    * Drafts a scene's brief from its text (F-14.3). The renderer sends only the node; main reads

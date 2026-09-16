@@ -20,7 +20,7 @@ export type Tier = z.infer<typeof Tier>
 /** What each tier serves (CLAUDE.md, token efficiency rule 1); shown under the model fields in Settings. */
 export const TIER_USE: Record<Tier, string> = {
   fast: 'Ghost text, tags, summaries, and classification.',
-  strong: 'Author mode, critique, and Story Intelligence queries.'
+  strong: 'Author mode, critique, the beta reader, and Story Intelligence queries.'
 }
 
 /**
@@ -159,7 +159,9 @@ export const AI_FEATURE_IDS = [
   // F-14.10: rewrite-in-my-voice on a selection.
   'rewrite',
   // F-14.3: drafting a scene's brief from its text.
-  'brief'
+  'brief',
+  // F-14.11: the beta-reader read-through up to a scene, over the scene summaries.
+  'betaReader'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -186,7 +188,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-14.8: up to 8 editor's notes as JSON, each with a quote, a reason, and an optional fix.
   critique: 1_500,
   // F-14.3: five one-line brief fields as JSON.
-  brief: 200
+  brief: 200,
+  // F-14.11: up to 12 reader items as JSON, each with a scene number, a quote, and a note.
+  betaReader: 1_200
 }
 
 /**
@@ -208,7 +212,10 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-14.8: one scene head-truncated to 20,000 characters, the brief, the metadata, and the voice block.
   critique: 8_000,
   // F-14.3: one scene head-truncated to 20,000 characters and its metadata line.
-  brief: 6_000
+  brief: 6_000,
+  // F-14.11: one scene head-truncated to 20,000 characters plus the summaries and key points of
+  // every earlier scene (~250 tokens each); the fit shrinks the scene, then drops the farthest.
+  betaReader: 12_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

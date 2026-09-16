@@ -42,6 +42,8 @@ import {
 import { AiProviderRegistry } from '../ai/registry'
 import { getProposal } from '../ai/proposalStore'
 import { insertUsage } from '../ai/usageStore'
+import { upsertSummary } from '../document/summaryStore'
+import { manuscriptDocuments } from '../voice/profile'
 import { aiProposal } from '../db/schema'
 import { AppStateStore } from '../appState/appStateStore'
 import type { ProjectDialogs } from '../dialogs'
@@ -1363,6 +1365,159 @@ describe('ai:critique (F-14.8)', () => {
       }
     })
     const short = await handlerFor('ai:critique')(undefined, ask(scene))
+    expect(short.ok).toBe(false)
+    if (!short.ok) expect(short.error.code).toBe('VALIDATION')
+  })
+})
+
+describe('ai:betaReader (F-14.11)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const SCENE =
+    'The ferry landing was empty when Mara reached it. The rope hung slack in the water and ' +
+    'the bell had lost its clapper years ago. She set the lantern down on the post and waited. ' +
+    '"You came alone," a voice said behind her.'
+  const QUOTE = 'The rope hung slack in the water'
+  const SUMMARY = 'Mara finds the ledger her brother copied and hides it under the floor.'
+  const ITEM = {
+    category: 'knows',
+    scene: 2,
+    quote: QUOTE,
+    note: 'I know she came to meet someone she does not trust.'
+  }
+
+  /**
+   * A project with the dial at Ask, a key, the second manuscript scene written, and the first
+   * one carrying a stored summary (F-5.6) so the reader has something to read before it.
+   */
+  async function ready(dial: AiDial = 1): Promise<{ scene: string; first: string }> {
+    await invoke('project:create', { name: 'Reader', format: 'novel', directory: tmp })
+    // Reading order, not tree:list order: the reader reads the manuscript as the tree shows it.
+    const documents = manuscriptDocuments(manager.require().connection.orm)
+    const first = documents[0]
+    const scene = documents[1]
+    if (!first || !scene) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: SCENE }] }]
+      }
+    })
+    upsertSummary(manager.require().connection.orm, {
+      nodeId: first.id,
+      contentHash: 'hash-1',
+      summary: SUMMARY,
+      keyPoints: ['The ledger is a copy.'],
+      characters: ['Mara'],
+      promptVersion: 'summary.v1',
+      model: 'gpt-fake',
+      truncated: false,
+      createdAt: new Date().toISOString()
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+    await invoke('ai:setKey', { key: KEY })
+    answersWith({ items: [ITEM] })
+    return { scene: scene.id, first: first.id }
+  }
+
+  /** The next provider answer, as the JSON the beta-reader prompt asks for. */
+  function answersWith(answer: unknown): void {
+    complete.mockResolvedValue({
+      text: JSON.stringify(answer),
+      model: 'gpt-fake',
+      usage: { inputTokens: 900, outputTokens: 120 }
+    })
+  }
+
+  const ask = (scene: string, requestId = 'br-1'): Input<'ai:betaReader'> => ({
+    nodeId: scene,
+    requestId
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('ai:betaReader', ask('x'))).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers the cited items with the scenes read, drops an uncited one, and records one pending proposal', async () => {
+    const { scene, first } = await ready()
+    answersWith({
+      items: [ITEM, { ...ITEM, category: 'confusion', quote: 'The dragon circled the keep.' }]
+    })
+    const result = await invoke('ai:betaReader', ask(scene, 'br-7'))
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toEqual({
+      ok: true,
+      items: [ITEM],
+      scenes: [
+        { nodeId: first, title: 'Chapter 1 \u203a Scene 1', current: false },
+        { nodeId: scene, title: 'Chapter 2 \u203a Scene 1', current: true }
+      ],
+      truncated: false,
+      skipped: 0,
+      missing: 0,
+      dropped: 1,
+      usage: { inputTokens: 900, outputTokens: 120 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      proposalId: result.proposalId,
+      requestId: 'br-7'
+    })
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'betaReader',
+      nodeId: scene,
+      promptVersion: 'betaReader.v1',
+      content: JSON.stringify(result.items),
+      flagged: false,
+      violation: null,
+      regeneratedFrom: null,
+      status: 'pending'
+    })
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['betaReader'])
+  })
+
+  it('a regenerate goes through betaReaderRegen.v1 and its proposal names the one it replaces', async () => {
+    const { scene } = await ready()
+    const first = await invoke('ai:betaReader', ask(scene, 'br-8'))
+    if (!first.ok) throw new Error(first.message)
+    answersWith({ items: [{ ...ITEM, note: 'Now I expect her brother to show up.' }] })
+    const again = await invoke('ai:betaReader', {
+      ...ask(scene, 'br-9'),
+      note: 'Less about what you expect, more about where you got lost.',
+      regeneratedFrom: first.proposalId
+    })
+    if (!again.ok) throw new Error(again.message)
+    expect(again.items[0]?.note).toBe('Now I expect her brother to show up.')
+    expect(getProposal(manager.require().connection.orm, again.proposalId)).toMatchObject({
+      feature: 'betaReader',
+      promptVersion: 'betaReaderRegen.v1',
+      regeneratedFrom: first.proposalId
+    })
+  })
+
+  it('answers an expected AI failure as data with the requestId, and an unknown or too-short node through the error envelope', async () => {
+    const { scene } = await ready(0)
+    expect(await invoke('ai:betaReader', ask(scene, 'br-3'))).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Beta reader needs the AI dial at Ask or higher (it is at Off).',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      requestId: 'br-3'
+    })
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    const unknown = await handlerFor('ai:betaReader')(undefined, ask('nope'))
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    await invoke('document:save', {
+      id: scene,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Too short.' }] }]
+      }
+    })
+    const short = await handlerFor('ai:betaReader')(undefined, ask(scene))
     expect(short.ok).toBe(false)
     if (!short.ok) expect(short.error.code).toBe('VALIDATION')
   })

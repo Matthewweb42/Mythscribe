@@ -3,18 +3,14 @@ import type { Editor } from '@tiptap/core'
 import {
   CRITIQUE_CATEGORY_LABEL,
   CRITIQUE_SCENE_CHAR_BUDGET,
-  DEFAULT_HONESTY,
-  HONESTY_LABEL,
-  HONESTY_LEVELS,
-  Honesty,
   type CritiqueNote
 } from '@shared/critique'
 import { normalizeProposalNote, PROPOSAL_NOTE_MAX } from '@shared/proposal'
 import { diffWords } from '@shared/rewrite'
-import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { formatRequestCost } from '@renderer/features/ai/usageFormat'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { useCritiqueStore, type CritiqueSession } from './critiqueStore'
+import { HonestySelect } from './HonestySelect'
 import { useRewriteStore } from './rewriteStore'
 
 const BUTTON =
@@ -75,7 +71,7 @@ function Body({
   if (session.status === 'pending') {
     return (
       <>
-        <Header title="Reading the scene…" />
+        <HonestySelect title="Reading the scene…" testId="critique-honesty" />
         <p data-testid="critique-pending" className="m-0 text-xs text-fg-muted" aria-live="polite">
           Your editor is making notes.
         </p>
@@ -91,7 +87,7 @@ function Body({
   if (session.status === 'error' || result === null) {
     return (
       <>
-        <Header title="Editor's notes failed" />
+        <HonestySelect title="Editor's notes failed" testId="critique-honesty" />
         <p role="alert" data-testid="critique-error" className="m-0 text-xs text-danger">
           {session.error ?? 'Something went wrong'}
         </p>
@@ -124,7 +120,7 @@ function Body({
 
   return (
     <>
-      <Header title="Editor's notes" />
+      <HonestySelect title="Editor's notes" testId="critique-honesty" />
       {result.truncated ? (
         <p data-testid="critique-truncated" className="m-0 text-xs text-warning">
           {`Only the first ${CRITIQUE_SCENE_CHAR_BUDGET.toLocaleString()} characters were read.`}
@@ -271,34 +267,5 @@ function Note({
         </div>
       )}
     </li>
-  )
-}
-
-/** The panel's title row: the heading and the honesty setting, shown in every state. */
-function Header({ title }: { title: string }): React.JSX.Element {
-  const honesty = useAiSettingsStore((s) => s.settings?.critique.honesty ?? DEFAULT_HONESTY)
-  const loaded = useAiSettingsStore((s) => s.settings !== null)
-  const update = useAiSettingsStore((s) => s.update)
-  return (
-    <div className="flex flex-wrap items-center gap-3">
-      <span className="text-xs font-medium text-fg">{title}</span>
-      <label className="ml-auto flex items-center gap-1 text-xs text-fg-muted">
-        <span>Honesty</span>
-        <select
-          data-testid="critique-honesty"
-          aria-label="Honesty"
-          value={honesty}
-          disabled={!loaded}
-          onChange={(event) => update({ critique: { honesty: Honesty.parse(event.target.value) } })}
-          className="rounded-md border border-line bg-bg px-1 py-0.5 text-xs text-fg"
-        >
-          {HONESTY_LEVELS.map((level) => (
-            <option key={level} value={level}>
-              {HONESTY_LABEL[level]}
-            </option>
-          ))}
-        </select>
-      </label>
-    </div>
   )
 }

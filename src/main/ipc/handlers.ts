@@ -11,6 +11,7 @@ import {
 import { isFeatureAllowed } from '@shared/aiSettings'
 import type { Background } from '@shared/focus'
 import type {
+  AiBetaReaderResult,
   AiChatResult,
   AiCritiqueResult,
   AiDraftBriefResult,
@@ -25,6 +26,7 @@ import {
   UNAVAILABLE_SUMMARY,
   type SceneSummaryState
 } from '@shared/summary'
+import { runBetaReader } from '../ai/betaReader'
 import { runChat } from '../ai/chat'
 import { runCritique } from '../ai/critique'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
@@ -639,6 +641,56 @@ export function registerHandlers({
           ok: true,
           notes,
           truncated: result.truncated,
+          dropped: result.dropped,
+          usage,
+          costUsd,
+          cached,
+          model,
+          proposalId: proposal.id,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
+
+  // F-14.11: the beta-reader read-through up to one scene, JSON from the strong tier, not
+  // streamed (a report is only useful whole). The reply carries the items as main located them
+  // — every quote is in the scene the item names, as that scene was sent — with the scenes the
+  // reader read and what the budget left out, and the proposal (F-14.5) holds the items as
+  // JSON. Nothing is flagged and nothing is applied: a reader reports, the editor's notes fix.
+  register(
+    'ai:betaReader',
+    async ({ nodeId, requestId, note, regeneratedFrom }): Promise<AiBetaReaderResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const result = await runBetaReader(db, deps, { nodeId, note, regeneratedFrom, requestId })
+        const { items, usage, costUsd, cached, model } = result
+        const proposal = createProposal(db, {
+          feature: 'betaReader',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model,
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          costUsd,
+          cached,
+          content: JSON.stringify(items),
+          flagged: false,
+          violation: null,
+          regeneratedFrom: regeneratedFrom ?? null
+        })
+        return {
+          ok: true,
+          items,
+          scenes: result.scenes,
+          truncated: result.truncated,
+          skipped: result.skipped,
+          missing: result.missing,
           dropped: result.dropped,
           usage,
           costUsd,

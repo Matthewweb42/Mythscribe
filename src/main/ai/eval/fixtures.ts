@@ -125,9 +125,25 @@ import {
   REWRITE_REGEN_PROMPT_V2_VERSION
 } from '../prompts/rewriteRegen.v2'
 import { buildSummaryPrompt, SUMMARY_PROMPT_VERSION } from '../prompts/summary.v1'
+import {
+  buildBetaReaderPrompt,
+  BETA_READER_PROMPT_VERSION,
+  type BuildBetaReaderPromptInput
+} from '../prompts/betaReader.v1'
+import {
+  buildBetaReaderRegenPrompt,
+  BETA_READER_REGEN_PROMPT_VERSION
+} from '../prompts/betaReaderRegen.v1'
 import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../prompts/tags.v1'
 import { buildTagsRegenPrompt, TAGS_REGEN_PROMPT_VERSION } from '../prompts/tagsRegen.v1'
-import { SUMMARY_BANK_NAMES_MAX, SUMMARY_SCENE_CHAR_BUDGET } from '@shared/summary'
+import {
+  SUMMARY_BANK_NAMES_MAX,
+  SUMMARY_KEY_POINT_MAX,
+  SUMMARY_KEY_POINTS_MAX,
+  SUMMARY_MAX_CHARS,
+  SUMMARY_SCENE_CHAR_BUDGET
+} from '@shared/summary'
+import { BETA_READER_SCENE_CHAR_BUDGET } from '@shared/betaReader'
 import {
   BRIEF_SCENE_CHAR_BUDGET,
   EMPTY_SCENE_BRIEF,
@@ -361,6 +377,12 @@ export interface EvalCase {
     | { kind: 'brief' }
     /** A scene summary (F-5.6): the answer must parse to `SceneSummary`, caps and all. */
     | { kind: 'summary' }
+    /**
+     * A beta-reader report (F-14.11): the answer must parse, every item must name a scene in
+     * range, and its quote must be in that scene's text as sent — one entry per scene sent, the
+     * current scene last.
+     */
+    | { kind: 'betaReader'; texts: string[] }
 }
 
 const general = builtinParams('general')
@@ -840,6 +862,78 @@ function critiqueCaseV3(
   }
 }
 
+/**
+ * The read-through an author asks their beta reader for: the fixture scene with the scenes
+ * before it as their stored summaries. The texts an item may cite are the summary blocks and
+ * the scene itself, exactly as the feature matches them.
+ */
+const betaReaderScenes: BuildBetaReaderPromptInput['scenes'] = [
+  {
+    title: 'Chapter 1 \u203a The ledger',
+    summary:
+      'Mara finds the ledger her brother copied and learns the mill has been paying Tomas for ' +
+      'a debt that was never hers.',
+    keyPoints: ['The ledger is a copy.', 'Tomas holds the mill\u2019s debt.']
+  },
+  {
+    title: 'Chapter 1 \u203a The north pasture',
+    summary: 'Tomas refuses to talk while the river is up and sends Mara back to the landing.',
+    keyPoints: ['The river is rising.']
+  }
+]
+const betaReaderFresh: BuildBetaReaderPromptInput = {
+  scenes: [],
+  current: { title: 'Chapter 1 \u203a The ferry landing', text: FIXTURE_PASSAGE },
+  honesty: DEFAULT_HONESTY
+}
+const betaReaderFull: BuildBetaReaderPromptInput = {
+  ...betaReaderFresh,
+  scenes: betaReaderScenes,
+  current: { title: 'Chapter 2 \u203a The ferry landing', text: FIXTURE_PASSAGE }
+}
+/** Every beta-reader cap at its limit: a 20,000-character scene, 20 earlier summaries at theirs, long titles, the bluntest honesty line. */
+const betaReaderMaxed: BuildBetaReaderPromptInput = {
+  scenes: Array.from({ length: 20 }, (_, index) => ({
+    title: `${'C'.repeat(40)} \u203a ${'S'.repeat(40)} ${index}`,
+    summary: 's'.repeat(SUMMARY_MAX_CHARS),
+    keyPoints: Array.from({ length: SUMMARY_KEY_POINTS_MAX }, () =>
+      'k'.repeat(SUMMARY_KEY_POINT_MAX)
+    )
+  })),
+  current: {
+    title: 'T'.repeat(90),
+    text: `${FIXTURE_PASSAGE.repeat(20).slice(0, BETA_READER_SCENE_CHAR_BUDGET)}\u2026`
+  },
+  honesty: 'brutal'
+}
+
+function betaReaderCase(
+  name: string,
+  note: string,
+  input: BuildBetaReaderPromptInput,
+  regenNote: string | null | undefined
+): EvalCase {
+  const built =
+    regenNote === undefined
+      ? buildBetaReaderPrompt(input)
+      : buildBetaReaderRegenPrompt({ ...input, note: regenNote })
+  return {
+    version:
+      regenNote === undefined ? BETA_READER_PROMPT_VERSION : BETA_READER_REGEN_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: {
+      kind: 'betaReader',
+      texts: [
+        ...input.scenes.map((scene) => [scene.summary, ...scene.keyPoints].join('\n')),
+        input.current.text
+      ]
+    }
+  }
+}
+
 function briefCase(
   name: string,
   note: string,
@@ -1222,6 +1316,36 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed note',
     'the maxed case with its bible, regenerated with an author note at the length limit',
     critiqueMaxedV3,
+    'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
+  betaReaderCase(
+    'fresh',
+    'the first scene of a manuscript: nothing read before it, the default honesty line',
+    betaReaderFresh,
+    undefined
+  ),
+  betaReaderCase(
+    'full',
+    'two earlier scenes as their stored summaries and key points, then the scene in full',
+    betaReaderFull,
+    undefined
+  ),
+  betaReaderCase(
+    'maxed',
+    'every cap at its limit: a 20,000-character scene, 20 earlier summaries at their caps, long titles, the brutal honesty line',
+    betaReaderMaxed,
+    undefined
+  ),
+  betaReaderCase(
+    'full note',
+    'the full case regenerated with an author note at the length limit',
+    betaReaderFull,
+    'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
+  betaReaderCase(
+    'maxed note',
+    'the maxed case regenerated with an author note at the length limit',
+    betaReaderMaxed,
     'n'.repeat(PROPOSAL_NOTE_MAX)
   ),
   briefCase(

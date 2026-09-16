@@ -23,6 +23,9 @@ import { useGhostTextController } from './ghostTextController'
 import { INLINE_TAG_SELECTOR, resyncInlineTags } from './InlineTag'
 import { useLiveDocStats } from './liveDocStats'
 import { MarkVoiceExemplarButton } from './MarkVoiceExemplarButton'
+import { BetaReaderButton } from './BetaReaderButton'
+import { BetaReaderPanel } from './BetaReaderPanel'
+import { useBetaReaderStore } from './betaReaderStore'
 import { CritiqueButton } from './CritiqueButton'
 import { CritiquePanel } from './CritiquePanel'
 import { useCritiqueStore } from './critiqueStore'
@@ -112,9 +115,11 @@ const TOKEN_MENU_ITEMS: MenuItem[] = [
  * runs only in the single-document view: the controller arms itself there and the toggle sits
  * in the toolbar's right slot, so a stacked region never shows ghost text. The voice exemplar
  * button (F-14.1), the rewrite button (F-14.10), and the editor's-notes button (F-14.8) sit
- * beside it, for the same reason; the rewrite panel shows between the tag bar and the text
- * while this document's rewrite runs, with the editor's-notes panel under it while its
- * critique runs, and both are dismissed when the instance goes (unmount, switch, or rebuild).
+ * beside it, for the same reason, and so does the beta-reader button (F-14.11); the rewrite
+ * panel shows between the tag bar and the text while this document's rewrite runs, with the
+ * editor's-notes panel under it while its critique runs and the beta-reader panel under that
+ * while its read runs, and all three are dismissed when the instance goes (unmount, switch,
+ * or rebuild).
  * Once ready, the instance registers as the active editor (F-5.4; again on focus, so the
  * last-focused region of a stack wins) and releases itself on unmount, which is how the
  * assistant panel reaches the caret. Focus mode (F-6.1) drops the toolbar and the tag bar;
@@ -194,6 +199,8 @@ function RegionEditor({
   useEffect(() => () => useRewriteStore.getState().dismissFor(id), [editor, id])
 
   useEffect(() => () => useCritiqueStore.getState().dismissFor(id), [editor, id])
+
+  useEffect(() => () => useBetaReaderStore.getState().dismissFor(id), [editor, id])
 
   useEffect(() => {
     editor?.commands.setTypewriter(typewriter)
@@ -282,6 +289,7 @@ function RegionEditor({
           right={
             <>
               <CritiqueButton editor={ready ? editor : null} nodeId={id} />
+              <BetaReaderButton editor={ready ? editor : null} nodeId={id} />
               <RewriteButton editor={ready ? editor : null} nodeId={id} />
               <MarkVoiceExemplarButton editor={ready ? editor : null} nodeId={id} />
               <VibeWriteToggle error={ghostError} />
@@ -294,6 +302,7 @@ function RegionEditor({
       {focus ? null : <TagBar id={id} />}
       {focus ? null : <RewritePanel id={id} editor={ready ? editor : null} />}
       {focus ? null : <CritiquePanel id={id} editor={ready ? editor : null} />}
+      {focus ? null : <BetaReaderPanel id={id} editor={ready ? editor : null} />}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <EditorContent
           editor={editor}

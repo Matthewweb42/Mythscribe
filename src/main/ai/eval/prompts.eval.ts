@@ -115,6 +115,33 @@ function scoreCritique(sceneText: string, answer: string): LiveResult['verdict']
     : { kind: 'json', ok: false, problem: `${uncited} of ${result.data.notes.length} uncited` }
 }
 
+const BetaReaderAnswer = z.object({
+  items: z.array(z.object({ scene: z.number(), quote: z.string() }))
+})
+
+/**
+ * A beta-reader report (F-14.11) scores on the rule the feature turns on: it must parse to the
+ * shape the prompt asks for, and every item must name one of the scenes that were sent and
+ * quote that scene, matched exactly as `runBetaReader` matches it.
+ */
+function scoreBetaReader(texts: string[], answer: string): LiveResult['verdict'] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(answer)
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not JSON' }
+  }
+  const result = BetaReaderAnswer.safeParse(parsed)
+  if (!result.success) return { kind: 'json', ok: false, problem: 'not { items: [{ scene, quote }] }' }
+  const uncited = result.data.items.filter((item) => {
+    const source = Number.isInteger(item.scene) ? texts[item.scene - 1] : undefined
+    return source === undefined || !findQuote(source, item.quote)
+  }).length
+  return uncited === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `${uncited} of ${result.data.items.length} uncited` }
+}
+
 const BriefAnswer = z.object({
   goal: z.string(),
   conflict: z.string(),
@@ -220,6 +247,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
       }
       if (c.scoring.kind === 'summary') {
         results.push({ ...base, answer: reply.text, verdict: scoreSummary(reply.text) })
+        continue
+      }
+      if (c.scoring.kind === 'betaReader') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreBetaReader(c.scoring.texts, reply.text)
+        })
         continue
       }
       const answer =

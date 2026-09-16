@@ -140,6 +140,15 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       `phrases, and ${STORY_BIBLE_SENDS}.`,
     minDial: 1
   },
+  betaReader: {
+    label: 'Beta reader',
+    sends:
+      "The scene's text (the first 20,000 characters) and the stored summaries and key points " +
+      'of every manuscript scene before it, in reading order, so a first-time reader can report ' +
+      'what they know, believe, and expect. No voice profile, no story bible: the reader knows ' +
+      'only what is on the page.',
+    minDial: 1
+  },
   brief: {
     label: 'Scene brief drafts',
     sends:

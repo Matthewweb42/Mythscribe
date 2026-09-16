@@ -21,12 +21,13 @@ import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc
 import { resetActiveEditorStore, useActiveEditorStore } from './activeEditorStore'
 import { DocumentEditor } from './DocumentEditor'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
+import { resetBetaReaderStore, useBetaReaderStore } from './betaReaderStore'
 import { resetRewriteStore, useRewriteStore } from './rewriteStore'
 import { resetSceneMetaStore } from './sceneMetaStore'
 import { resetVoiceStore } from '@renderer/features/ai/voiceStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { defaultAiSettings } from '@shared/aiSettings'
-import type { AiRewriteResult } from '@shared/ipc/contract'
+import type { AiBetaReaderResult, AiRewriteResult } from '@shared/ipc/contract'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultFocusSettings } from '@shared/focus'
 import { resetBackgroundStore, useBackgroundStore } from '@renderer/features/focus/backgroundStore'
@@ -188,6 +189,7 @@ beforeEach(() => {
   resetVoiceStore()
   resetActiveEditorStore()
   resetRewriteStore()
+  resetBetaReaderStore()
   resetAiSettingsStore()
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
@@ -203,6 +205,7 @@ afterEach(() => {
   resetVoiceStore()
   resetActiveEditorStore()
   resetRewriteStore()
+  resetBetaReaderStore()
   resetAiSettingsStore()
 })
 
@@ -285,6 +288,39 @@ describe('DocumentEditor rewrite in my voice (F-14.10)', () => {
     const requestId = useRewriteStore.getState().session?.requestId ?? null
     cleanup()
     expect(useRewriteStore.getState().session).toBeNull()
+    await waitFor(() => expect(cancelled).toBe(requestId))
+  })
+})
+
+describe('DocumentEditor beta reader (F-14.11)', () => {
+  const SCENE = 'Into the dark woods they went, without a word. '.repeat(5)
+
+  it('the toolbar button opens the panel, and unmounting dismisses the read', async () => {
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
+    let sent: Input<'ai:betaReader'> | null = null
+    let cancelled: string | null = null
+    await mountReady({
+      'document:get': () => ({ id: 'sc-1', content: doc(SCENE) }),
+      'ai:betaReader': (input) =>
+        new Promise<AiBetaReaderResult>(() => {
+          sent = input as Input<'ai:betaReader'>
+        }),
+      'ai:cancel': (input) => {
+        cancelled = (input as Input<'ai:cancel'>).requestId
+        return { cancelled: true }
+      }
+    })
+    const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
+    const read = within(toolbar).getByRole('button', { name: 'Beta reader' })
+    await waitFor(() => expect(read).toBeEnabled())
+    await userEvent.click(read)
+    await waitFor(() => expect(sent).not.toBeNull())
+    expect(sent).toMatchObject({ nodeId: 'sc-1' })
+    // It sits under the editor's-notes panel, between the tag bar and the text.
+    expect(screen.getByTestId('beta-reader-pending')).toBeInTheDocument()
+    const requestId = useBetaReaderStore.getState().session?.requestId ?? null
+    cleanup()
+    expect(useBetaReaderStore.getState().session).toBeNull()
     await waitFor(() => expect(cancelled).toBe(requestId))
   })
 })
