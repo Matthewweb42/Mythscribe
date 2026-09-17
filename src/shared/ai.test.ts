@@ -58,6 +58,7 @@ describe('budgets', () => {
       tags: 200,
       summary: 300,
       chat: 1_200,
+      query: 600,
       rewrite: 1_500,
       critique: 1_500,
       brief: 200,
@@ -77,8 +78,10 @@ describe('budgets', () => {
     expect(DEFAULT_INPUT_BUDGET).toBeGreaterThan(DEFAULT_OUTPUT_BUDGET)
     expect(outputBudget('ghostText')).toBe(60)
     expect(inputBudget('ghostText')).toBe(2_200)
-    expect(outputBudget('query')).toBe(DEFAULT_OUTPUT_BUDGET)
-    expect(inputBudget('query')).toBe(DEFAULT_INPUT_BUDGET)
+    expect(outputBudget('authorMode')).toBe(DEFAULT_OUTPUT_BUDGET)
+    expect(inputBudget('authorMode')).toBe(DEFAULT_INPUT_BUDGET)
+    expect(outputBudget('query')).toBe(600)
+    expect(inputBudget('query')).toBe(12_000)
   })
 
   it('bound the daily cap to 0–500 USD', () => {

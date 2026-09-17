@@ -19,9 +19,10 @@ import { getDocumentContent } from '../document/documentStore'
 import { summariesFor } from '../document/summaryStore'
 import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
-import { listNodes, type TreeDb } from '../tree/treeStore'
+import type { TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { headTruncate } from './context/chatContext'
+import { sceneTitles } from './context/queryContext'
 import { assertFeatureAllowed } from './dial'
 import {
   buildBetaReaderPrompt,
@@ -233,24 +234,6 @@ export async function runBetaReader(
     cached: result.cached,
     model: result.model,
     promptVersion: prompt.version
-  }
-}
-
-/**
- * How a scene is named to the model and in the panel: `Chapter 1 › The Ferry` when it sits
- * under a folder, its own title at the top level, so two scenes called "Scene 1" in different
- * chapters are still told apart. Built once per request from `listNodes`, since the read-through
- * names every scene before this one.
- */
-function sceneTitles(db: TreeDb): (nodeId: string) => string {
-  const rows = listNodes(db)
-  const byId = new Map(rows.map((row) => [row.id, row]))
-  return (nodeId) => {
-    const row = byId.get(nodeId)
-    if (row === undefined) return ''
-    const parent = row.parentId === null ? undefined : byId.get(row.parentId)
-    // The manuscript root is not a chapter; prefixing every scene with "Manuscript" says nothing.
-    return parent?.sectionType !== null ? row.title : `${parent.title} › ${row.title}`
   }
 }
 

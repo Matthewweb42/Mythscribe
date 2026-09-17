@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { Editor } from '@tiptap/core'
 import {
   CHAT_HISTORY_TURNS,
   CHAT_MAX_CONVERSATIONS,
@@ -11,10 +12,16 @@ import {
   type ChatMode,
   type Conversation
 } from '@shared/chat'
-import type { AiChatResult } from '@shared/ipc/contract'
+import type { AiChatResult, AiQueryResult, Input } from '@shared/ipc/contract'
+import type { QuerySceneRef } from '@shared/query'
 import { SETTINGS_SAVE_DELAY_MS } from '@renderer/features/editor/settingsStore'
-import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
+import {
+  useActiveEditorStore,
+  type ActiveEditor
+} from '@renderer/features/editor/activeEditorStore'
 import type { GhostSettleHandler } from '@renderer/features/editor/ghostText'
+import { locateText } from '@renderer/features/editor/locateText'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -30,6 +37,10 @@ export const AGENT_NOTICE = 'Placed in the editor. Tab accepts, Escape dismisses
 export const NO_EDITOR_MESSAGE = 'Open a scene to place text'
 /** The toast when Agent mode came back with nothing to place. */
 export const EMPTY_ANSWER_MESSAGE = 'The assistant returned no text. Try again.'
+/** The toast when a Query citation names a passage the scene no longer holds (F-5.7). */
+export const PASSAGE_GONE_MESSAGE = 'That passage is no longer in the scene'
+/** How long `openScene` waits for the scene it selected to mount its editor. */
+export const OPEN_SCENE_TIMEOUT_MS = 3_000
 
 /**
  * The one owner of the project's assistant conversations (F-5.4): the tabs, the open one,
@@ -42,6 +53,9 @@ export const EMPTY_ANSWER_MESSAGE = 'The assistant returned no text. Try again.'
  * the model, cost, and proposal id when the request resolves. An Agent answer never enters the
  * chat: it goes to the active editor as ghost text (F-5.3), marked with its proposal on accept
  * (F-14.6) and settled through the ghost's own exit (F-14.5); the chat records a notice turn.
+ * A Query answer (F-5.7) comes back whole, not streamed, and rides on its turn as `query`: the
+ * citations main verified, the ranked scenes it did not cite, and the two flags the panel
+ * shows; `openScene` opens a cited scene and selects the passage.
  * Every request is tracked in the activity store and can be stopped (F-5.10): `stop` drops the
  * unanswered turn (with whatever streamed into it) and keeps the author's turn to resend; the
  * `CANCELLED` reply is silent. Loaded with the tree on project open and cleared on close
@@ -70,6 +84,11 @@ interface AssistantState {
   send: (message: string) => Promise<void>
   /** Stops the active conversation's request in flight: the unanswered turn goes, the author's turn stays. */
   stop: () => void
+  /**
+   * Opens the scene a Query citation names (F-5.7) and, with a quote, selects that passage in
+   * it. A quote the scene no longer holds toasts; a null quote just opens the scene.
+   */
+  openScene: (ref: QuerySceneRef, quote: string | null) => Promise<void>
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -166,7 +185,8 @@ const turn = (role: ChatMessage['role'], content: string, mode: ChatMode | null)
   proposalId: null,
   model: null,
   costUsd: null,
-  mode
+  mode,
+  query: null
 })
 
 /** `value` with the active conversation replaced by `patch(conversation)`, its `modified` bumped. */
@@ -367,6 +387,10 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       }))
     )
     const nodeId = useActiveEditorStore.getState().active?.id ?? null
+    if (mode === 'query') {
+      await sendQuery(id, { nodeId, message: text, history, requestId })
+      return
+    }
     let result: AiChatResult
     try {
       result = await useAiActivityStore.getState().track(
@@ -445,8 +469,110 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     // The turn leaves now, so the author can resend at once; the cancelled reply finds nothing pending.
     settleFailure(id, requestId, null)
     void useAiActivityStore.getState().cancel(requestId)
+  },
+
+  async openScene(ref, quote) {
+    // The tree's selection drives the editor pane, so selecting the node opens the scene.
+    useTreeStore.getState().select(ref.nodeId)
+    if (quote === null) return
+    const editor = await editorFor(ref.nodeId)
+    if (editor === null || editor.isDestroyed) return
+    const range = locateText(editor.state.doc, quote)
+    if (range === null) {
+      toast.error(PASSAGE_GONE_MESSAGE)
+      return
+    }
+    editor.chain().focus().setTextSelection(range).scrollIntoView().run()
   }
 }))
+
+/**
+ * The live editor of `nodeId`: the one already registered, or the one the scene mounts after
+ * the selection changed. Null when none arrives within `OPEN_SCENE_TIMEOUT_MS` (the scene is
+ * open all the same; only the passage cannot be selected).
+ */
+function editorFor(nodeId: string): Promise<Editor | null> {
+  const liveOne = (active: ActiveEditor | null): Editor | null =>
+    active !== null && active.id === nodeId && !active.editor.isDestroyed ? active.editor : null
+  const current = liveOne(useActiveEditorStore.getState().active)
+  if (current !== null) return Promise.resolve(current)
+  return new Promise((resolve) => {
+    let stopWatching: (() => void) | null = null
+    const settle = (editor: Editor | null): void => {
+      clearTimeout(waiting)
+      stopWatching?.()
+      resolve(editor)
+    }
+    const waiting = setTimeout(() => settle(null), OPEN_SCENE_TIMEOUT_MS)
+    stopWatching = useActiveEditorStore.subscribe((state) => {
+      const editor = liveOne(state.active)
+      if (editor !== null) settle(editor)
+    })
+  })
+}
+
+/**
+ * One Query turn (F-5.7): main ranks the manuscript's scenes, answers with the citations it
+ * verified, and the answer lands whole in the chat (nothing streams, nothing enters the
+ * manuscript). Failures settle exactly as a Plan turn's do.
+ */
+async function sendQuery(id: string, input: Input<'ai:query'>): Promise<void> {
+  const { requestId } = input
+  let result: AiQueryResult
+  try {
+    result = await useAiActivityStore
+      .getState()
+      .track('query', requestId, ipc().invoke('ai:query', input))
+  } catch (err) {
+    settleFailure(id, requestId, describeError(err))
+    return
+  }
+  if (useAssistantStore.getState().pending[id] !== requestId) {
+    // The conversation was closed or the store cleared meanwhile: nothing shows the answer.
+    if (result.ok) void proposalStore.settle(result.proposalId, 'rejected', null)
+    return
+  }
+  if (!result.ok) {
+    settleFailure(
+      id,
+      requestId,
+      result.code === 'CANCELLED' ? null : `${result.message} ${result.nextStep}`.trim()
+    )
+    return
+  }
+  setPending(id, null)
+  const current = useAssistantStore.getState().conversations
+  if (current === null) return
+  const turnId = current.items.find((c) => c.id === id)?.messages.at(-1)?.id ?? null
+  commit(
+    patchOne(current, id, (c) => {
+      const last = c.messages[c.messages.length - 1]
+      if (last?.role !== 'assistant') return c
+      return {
+        ...c,
+        messages: [
+          ...c.messages.slice(0, -1),
+          {
+            ...last,
+            content: result.answer,
+            model: result.model,
+            costUsd: result.costUsd,
+            proposalId: result.proposalId,
+            query: {
+              found: result.found,
+              uncited: result.uncited,
+              citations: result.citations,
+              also: result.also
+            }
+          }
+        ]
+      }
+    })
+  )
+  if (result.cached && turnId !== null) {
+    useAssistantStore.setState((s) => ({ cached: { ...s.cached, [turnId]: true } }))
+  }
+}
 
 /**
  * A failed, stopped, or abandoned turn: the unanswered turn leaves the chat, the request is no

@@ -251,7 +251,8 @@ describe('getConversations / setConversations (F-5.4)', () => {
         proposalId: null,
         model: null,
         costUsd: null,
-        mode: null
+        mode: null,
+        query: null
       }
     ],
     created: '2026-09-15T10:00:00.000Z',

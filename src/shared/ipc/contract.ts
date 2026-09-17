@@ -34,6 +34,7 @@ import { MatterTemplateId } from '../matterTemplates'
 import { EditRole, MenuItemId } from '../menu'
 import { WritingPresets } from '../presets'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
+import { QueryCitation, QuerySceneRef } from '../query'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../rewrite'
 import { SceneBrief, SceneMeta } from '../sceneMeta'
 import { Stylometrics } from '../stylometry'
@@ -196,6 +197,40 @@ export const AiChatResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiChatResult = z.infer<typeof AiChatResult>
+
+/**
+ * What `ai:query` answers (F-5.7): the answer text (its `[n]` markers name the surviving
+ * citations' scene numbers; dangling ones are stripped), whether the model found an answer in
+ * the scenes at all, whether it claimed one that no citation survived (`uncited`, shown
+ * flagged), the citations main verified against the text it sent, the ranked candidates the
+ * answer did not cite (`also`), how many citations were dropped, what it cost, and the
+ * proposal it became (F-14.5); or an expected AI failure as data.
+ */
+export const AiQueryResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    answer: z.string(),
+    found: z.boolean(),
+    uncited: z.boolean(),
+    citations: z.array(QueryCitation),
+    also: z.array(QuerySceneRef),
+    dropped: z.number().int().nonnegative(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    proposalId: z.string(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiQueryResult = z.infer<typeof AiQueryResult>
 
 /**
  * What `ai:rewrite` answers (F-14.10): the rewritten passage (streamed first through
@@ -709,6 +744,23 @@ export const contract = {
       requestId: z.string()
     }),
     output: AiChatResult
+  },
+  /**
+   * One Story Intelligence turn (F-5.7). `nodeId` is the active document (null with none open;
+   * it breaks ranking ties and is the fallback candidate); `history` is the recent turns of the
+   * conversation; the answer is JSON on the strong tier and is not streamed. Expected AI
+   * failures come back as data.
+   */
+  'ai:query': {
+    input: z.object({
+      nodeId: z.string().nullable(),
+      message: z.string().trim().min(1).max(CHAT_MESSAGE_MAX),
+      history: z
+        .array(z.object({ role: ChatRole, content: z.string().max(CHAT_MESSAGE_MAX) }))
+        .max(CHAT_HISTORY_TURNS),
+      requestId: z.string()
+    }),
+    output: AiQueryResult
   },
   /**
    * Rewrites a selected passage in the author's voice (F-14.10). The renderer sends the

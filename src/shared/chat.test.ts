@@ -36,7 +36,8 @@ describe('chat model (F-5.4)', () => {
               proposalId: null,
               model: null,
               costUsd: null,
-              mode: null
+              mode: null,
+              query: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',
@@ -45,6 +46,37 @@ describe('chat model (F-5.4)', () => {
       ]
     }
     expect(parseStoredConversations(stored)).toEqual(stored)
+  })
+
+  it('reads a message stored before F-5.7, with no query field, as query: null', () => {
+    const stored = {
+      active: 'c1',
+      items: [
+        {
+          id: 'c1',
+          title: 'Why is Mara on the ridge?',
+          mode: 'plan',
+          paragraphs: 1,
+          messages: [
+            {
+              id: 'm1',
+              role: 'user',
+              content: 'Why is Mara on the ridge?',
+              created: '2026-09-15T10:00:00.000Z',
+              proposalId: null,
+              model: null,
+              costUsd: null,
+              mode: null
+              // no `query` field at all, as a row written before F-5.7 has.
+            }
+          ],
+          created: '2026-09-15T10:00:00.000Z',
+          modified: '2026-09-15T10:00:00.000Z'
+        }
+      ]
+    }
+    const parsed = parseStoredConversations(stored)
+    expect(parsed.items[0]?.messages[0]?.query).toBeNull()
   })
 
   it('titles a conversation from the first line of the first message, cut to fit', () => {

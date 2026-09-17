@@ -1523,6 +1523,119 @@ describe('ai:betaReader (F-14.11)', () => {
   })
 })
 
+describe('ai:query (F-5.7)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const LEDGER =
+    'The ledger sat on the mill desk where Tomas had left it. Mara copied the ledger twice ' +
+    'and hid the copy under the elm in the north pasture.'
+  const QUIET = 'Mara stood in the yard and the lantern would not stay lit.'
+  const QUOTE = 'Mara copied the ledger twice'
+  const QUESTION = 'Where did Mara hide the ledger?'
+
+  const body = (text: string): Input<'document:save'>['content'] => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+  })
+
+  /** A project with the dial at Ask, a key, and the first two manuscript scenes written. */
+  async function ready(dial: AiDial = 1): Promise<{ first: string; second: string }> {
+    await invoke('project:create', { name: 'Query', format: 'novel', directory: tmp })
+    const documents = manuscriptDocuments(manager.require().connection.orm)
+    const first = documents[0]
+    const second = documents[1]
+    if (!first || !second) throw new Error('skeleton not seeded')
+    await invoke('document:save', { id: first.id, content: body(LEDGER) })
+    await invoke('document:save', { id: second.id, content: body(QUIET) })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+    await invoke('ai:setKey', { key: KEY })
+    answersWith({ found: true, answer: 'Under the elm. [1]', citations: [{ scene: 1, quote: QUOTE }] })
+    return { first: first.id, second: second.id }
+  }
+
+  /** The next provider answer, as the JSON the query prompt asks for. */
+  function answersWith(answer: unknown): void {
+    complete.mockResolvedValue({
+      text: JSON.stringify(answer),
+      model: 'gpt-fake',
+      usage: { inputTokens: 900, outputTokens: 60 }
+    })
+  }
+
+  const ask = (requestId = 'q-1'): Input<'ai:query'> => ({
+    nodeId: null,
+    message: QUESTION,
+    history: [],
+    requestId
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('ai:query', ask())).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers the verified citations, drops the rest with their markers, and records one pending proposal', async () => {
+    const { first, second } = await ready()
+    answersWith({
+      found: true,
+      answer: 'Under the elm [1], by the river [2], after the thaw [9].',
+      citations: [
+        { scene: 1, quote: QUOTE },
+        { scene: 2, quote: 'The dragon circled the keep.' },
+        { scene: 9, quote: QUOTE }
+      ]
+    })
+    const result = await invoke('ai:query', ask('q-7'))
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toEqual({
+      ok: true,
+      answer: 'Under the elm [1], by the river, after the thaw.',
+      found: true,
+      uncited: false,
+      citations: [{ nodeId: first, title: 'Chapter 1 \u203a Scene 1', scene: 1, quote: QUOTE }],
+      also: [{ nodeId: second, title: 'Chapter 2 \u203a Scene 1' }],
+      dropped: 2,
+      usage: { inputTokens: 900, outputTokens: 60 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      proposalId: result.proposalId,
+      requestId: 'q-7'
+    })
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'query',
+      nodeId: null,
+      promptVersion: 'query.v1',
+      content: JSON.stringify({ answer: result.answer, citations: result.citations }),
+      flagged: false,
+      violation: null,
+      regeneratedFrom: null,
+      status: 'pending'
+    })
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['query'])
+  })
+
+  it('answers an expected AI failure as data with the requestId, and proposes nothing', async () => {
+    await ready(0)
+    expect(await invoke('ai:query', ask('q-3'))).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Story Intelligence needs the AI dial at Ask or higher (it is at Off).',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      requestId: 'q-3'
+    })
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+  })
+
+  it('refuses through the error envelope when no scene has been written yet', async () => {
+    await invoke('project:create', { name: 'Empty', format: 'novel', directory: tmp })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    await invoke('ai:setKey', { key: KEY })
+    const empty = await handlerFor('ai:query')(undefined, ask())
+    expect(empty.ok).toBe(false)
+    if (!empty.ok) expect(empty.error.code).toBe('VALIDATION')
+  })
+})
+
 describe('ai:draftBrief (F-14.3)', () => {
   const KEY = 'sk-test-secret-1234abcd'
   const SCENE =

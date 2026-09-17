@@ -11,8 +11,15 @@ import {
   type ChatMode,
   type Conversation
 } from '@shared/chat'
-import { AI_DATA_SHARING, AI_DIAL_LABEL, isFeatureAllowed } from '@shared/aiSettings'
+import { AI_DATA_SHARING, AI_DIAL_LABEL, isFeatureAllowed, type AiDial } from '@shared/aiSettings'
 import { LAYOUT_LIMITS } from '@shared/layout'
+import {
+  CITATION_MARKER,
+  QUERY_NOT_FOUND,
+  type QueryCitation,
+  type QuerySceneRef,
+  type QueryTurn
+} from '@shared/query'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
@@ -27,6 +34,14 @@ const RADIO =
   'rounded-md border border-line px-2 py-0.5 text-xs hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 disabled:hover:bg-transparent aria-checked:border-accent aria-checked:bg-surface-raised aria-checked:text-accent'
 const LINK_BUTTON =
   'text-xs text-fg-muted underline-offset-2 hover:text-fg hover:underline disabled:opacity-40 disabled:hover:no-underline'
+/** A `[n]` marker inside an answer, and the chips under "Also mentioned in". */
+const CITE_BUTTON =
+  'rounded-sm px-0.5 align-baseline text-xs font-medium text-accent hover:bg-surface-raised hover:underline focus-visible:outline-2 focus-visible:outline-accent'
+const CHIP_BUTTON =
+  'rounded-full border border-line px-2 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg'
+/** The warning a Query answer no citation survived carries (F-5.7, author-control rule 4). */
+export const QUERY_UNCITED_WARNING =
+  'No cited passage supports this answer; treat it as unverified.'
 
 /** The paragraph counts Agent mode offers, 1–10. */
 const PARAGRAPH_OPTIONS = Array.from(
@@ -272,7 +287,8 @@ function MessageLog(): React.JSX.Element {
       {messages.length === 0 ? (
         <p className="m-0 text-xs text-fg-muted">
           Ask about the open scene, or write #name to pull in that tag's notes. Agent mode places
-          the answer in the editor as ghost text.
+          the answer in the editor as ghost text; Query mode answers about the whole manuscript and
+          cites the scenes it rests on.
         </p>
       ) : null}
       {messages.map((message, index) => (
@@ -290,7 +306,8 @@ function MessageLog(): React.JSX.Element {
 /**
  * One turn. The author's on the right; the assistant's on the left with its cost line once it
  * has one (`model · cost · cached`, F-4.7's note). An empty assistant turn with a request in
- * flight reads as thinking; an Agent turn shows the notice, its text went to the editor.
+ * flight reads as thinking; an Agent turn shows the notice, its text went to the editor; a
+ * Query turn (F-5.7) shows its citations through `QueryAnswer`.
  */
 function Turn({
   message,
@@ -315,6 +332,8 @@ function Turn({
         </p>
       ) : !mine && message.mode === 'agent' ? (
         <p className="m-0 text-xs text-fg-muted italic">{AGENT_NOTICE}</p>
+      ) : !mine && message.query !== null ? (
+        <QueryAnswer answer={message.content} query={message.query} />
       ) : (
         <p className="m-0 break-words whitespace-pre-wrap">{message.content}</p>
       )}
@@ -325,6 +344,132 @@ function Turn({
       ) : null}
     </article>
   )
+}
+
+/**
+ * A Query answer (F-5.7): the "not found" line or the uncited warning when either applies, the
+ * answer with every live `[n]` marker as a button that opens that scene at the passage it
+ * rests on, the Sources list of the citations main verified against the text it sent, and the
+ * ranked scenes the answer did not cite. Nothing here enters the manuscript.
+ */
+function QueryAnswer({ answer, query }: { answer: string; query: QueryTurn }): React.JSX.Element {
+  const openScene = useAssistantStore((s) => s.openScene)
+  const open = (ref: QuerySceneRef, quote: string | null): void => {
+    void openScene(ref, quote)
+  }
+  return (
+    <div className="flex flex-col gap-1.5">
+      {!query.found ? (
+        <p data-testid="query-not-found" className="m-0 text-xs text-fg-muted italic">
+          {QUERY_NOT_FOUND}
+        </p>
+      ) : null}
+      {query.uncited ? (
+        <p data-testid="query-uncited" role="status" className="m-0 text-xs text-warning">
+          {QUERY_UNCITED_WARNING}
+        </p>
+      ) : null}
+      <p className="m-0 break-words whitespace-pre-wrap">
+        {answerParts(answer, query.citations, open)}
+      </p>
+      {query.citations.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <p className="m-0 text-xs font-medium text-fg-muted">Sources</p>
+          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+            {query.citations.map((citation, index) => (
+              <li key={`${citation.nodeId}-${index}`}>
+                <button
+                  type="button"
+                  data-testid="query-citation"
+                  data-scene={citation.scene}
+                  title={`Open ${citation.title}`}
+                  onClick={() => open(citation, citation.quote)}
+                  className="w-full rounded-md border border-line px-2 py-1 text-left text-xs hover:bg-surface-raised"
+                >
+                  <span className="block font-medium text-fg">{citation.title}</span>
+                  <span className="block text-fg-muted italic">“{citation.quote}”</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {query.also.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <p className="m-0 text-xs font-medium text-fg-muted">Also mentioned in</p>
+          <ul className="m-0 flex list-none flex-wrap gap-1 p-0">
+            {query.also.map((ref) => (
+              <li key={ref.nodeId}>
+                <button
+                  type="button"
+                  data-testid="query-also"
+                  title={`Open ${ref.title}`}
+                  onClick={() => open(ref, null)}
+                  className={CHIP_BUTTON}
+                >
+                  {ref.title}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * The answer text with each `[n]` marker replaced by a button opening the first citation of
+ * that scene at its passage. Main strips the markers no citation survived, so one that still
+ * names an uncited scene is left as plain text.
+ */
+function answerParts(
+  answer: string,
+  citations: readonly QueryCitation[],
+  open: (ref: QuerySceneRef, quote: string | null) => void
+): React.ReactNode[] {
+  const parts: React.ReactNode[] = []
+  let cut = 0
+  for (const match of answer.matchAll(CITATION_MARKER)) {
+    const marker = match[0]
+    const label = `[${match[1] ?? ''}]`
+    const at = match.index ?? 0
+    const citation = citations.find((c) => c.scene === Number(match[1]))
+    parts.push(answer.slice(cut, at) + marker.slice(0, marker.length - label.length))
+    cut = at + marker.length
+    if (citation === undefined) {
+      parts.push(label)
+      continue
+    }
+    parts.push(
+      <button
+        key={`cite-${at}`}
+        type="button"
+        data-testid="query-cite"
+        data-scene={citation.scene}
+        aria-label={`Open ${citation.title}`}
+        title={`Open ${citation.title}`}
+        onClick={() => open(citation, citation.quote)}
+        className={CITE_BUTTON}
+      >
+        {label}
+      </button>
+    )
+  }
+  parts.push(answer.slice(cut))
+  return parts
+}
+
+/** What a mode radio's tooltip says: what it does, or what to change when the dial forbids it. */
+function modeTitle(id: ChatMode, disabled: boolean, agentDial: AiDial): string {
+  if (disabled) {
+    return id === 'agent'
+      ? `Agent needs the AI dial at ${AI_DIAL_LABEL[agentDial]} or higher (Settings, AI tab)`
+      : `Query needs the AI dial at ${AI_DIAL_LABEL[AI_DATA_SHARING.query.minDial]} or higher, with ${AI_DATA_SHARING.query.label} on (Settings, AI tab)`
+  }
+  if (id === 'agent') return 'Place the answer in the editor as ghost text'
+  if (id === 'query') return 'Ask about the whole manuscript; answers cite scenes'
+  return 'Answer in the chat'
 }
 
 /**
@@ -351,13 +496,12 @@ function Composer(): React.JSX.Element {
   const chatAllowed = settings !== null && isFeatureAllowed(settings, 'chat')
   const agentDial = AI_DATA_SHARING.ghostText.minDial
   const agentAllowed = settings !== null && settings.dial >= agentDial
+  const queryAllowed = settings !== null && isFeatureAllowed(settings, 'query')
+  const modeOff = (id: ChatMode): boolean =>
+    (id === 'agent' && !agentAllowed) || (id === 'query' && !queryAllowed)
   const mode = conversation?.mode ?? 'plan'
   const canSend =
-    conversation !== null &&
-    chatAllowed &&
-    !pending &&
-    draft.trim() !== '' &&
-    !(mode === 'agent' && !agentAllowed)
+    conversation !== null && chatAllowed && !pending && draft.trim() !== '' && !modeOff(mode)
 
   const submit = (): void => {
     if (!canSend) return
@@ -366,7 +510,7 @@ function Composer(): React.JSX.Element {
   }
 
   const selectMode = (next: ChatMode): void => {
-    if (next === 'agent' && !agentAllowed) return
+    if (modeOff(next)) return
     setMode(next)
     radios.current.get(next)?.focus()
   }
@@ -412,7 +556,7 @@ function Composer(): React.JSX.Element {
       <div className="flex flex-wrap items-center gap-2">
         <div role="radiogroup" aria-label="Mode" className="flex gap-1">
           {CHAT_MODES.map((id) => {
-            const disabled = id === 'agent' && !agentAllowed
+            const disabled = modeOff(id)
             return (
               <button
                 key={id}
@@ -425,13 +569,7 @@ function Composer(): React.JSX.Element {
                 aria-checked={id === mode}
                 tabIndex={id === mode ? 0 : -1}
                 disabled={disabled}
-                title={
-                  disabled
-                    ? `Agent needs the AI dial at ${AI_DIAL_LABEL[agentDial]} or higher (Settings, AI tab)`
-                    : id === 'agent'
-                      ? 'Place the answer in the editor as ghost text'
-                      : 'Answer in the chat'
-                }
+                title={modeTitle(id, disabled, agentDial)}
                 onClick={() => selectMode(id)}
                 onKeyDown={onRadioKeyDown}
                 className={RADIO}

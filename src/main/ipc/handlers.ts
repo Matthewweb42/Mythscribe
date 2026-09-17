@@ -16,6 +16,7 @@ import type {
   AiCritiqueResult,
   AiDraftBriefResult,
   AiGhostTextResult,
+  AiQueryResult,
   AiRecommendTagsResult,
   AiRewriteResult,
   AiSummarizeResult
@@ -36,6 +37,7 @@ import { cancelInflight, regenRequestId } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
 import { createProposal, settleProposal } from '../ai/proposalStore'
 import { AiProviderError, NoKeyError } from '../ai/providers/types'
+import { runQuery } from '../ai/query'
 import { recommendTags } from '../ai/recommendTags'
 import { runRewrite } from '../ai/rewrite'
 import type { AiProviderRegistry } from '../ai/registry'
@@ -692,6 +694,58 @@ export function registerHandlers({
           skipped: result.skipped,
           missing: result.missing,
           dropped: result.dropped,
+          usage,
+          costUsd,
+          cached,
+          model,
+          proposalId: proposal.id,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
+
+  // F-5.7: one Story Intelligence turn. Main ranks the manuscript's scenes locally, sends the
+  // top matches, and verifies every citation against the text it sent, so the reply carries
+  // only passages the scenes really hold — `dropped` counts the rest, `uncited` says the answer
+  // rests on none, `found: false` is the grounded "not found". JSON from the strong tier, not
+  // streamed (the citations are checked before anything is shown). The proposal (F-14.5) holds
+  // the answer and its citations and stays pending, as a Plan answer does: nothing here enters
+  // the manuscript.
+  register(
+    'ai:query',
+    async ({ nodeId, message, history, requestId }): Promise<AiQueryResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const result = await runQuery(db, deps, { nodeId, message, history, requestId })
+        const { answer, found, uncited, citations, also, dropped, usage, costUsd, cached, model } =
+          result
+        const proposal = createProposal(db, {
+          feature: 'query',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model,
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          costUsd,
+          cached,
+          content: JSON.stringify({ answer, citations }),
+          flagged: false,
+          violation: null
+        })
+        return {
+          ok: true,
+          answer,
+          found,
+          uncited,
+          citations,
+          also,
+          dropped,
           usage,
           costUsd,
           cached,

@@ -142,6 +142,38 @@ function scoreBetaReader(texts: string[], answer: string): LiveResult['verdict']
     : { kind: 'json', ok: false, problem: `${uncited} of ${result.data.items.length} uncited` }
 }
 
+const QueryAnswer = z.object({
+  answer: z.string(),
+  citations: z.array(z.object({ scene: z.number(), quote: z.string() })).optional()
+})
+
+/**
+ * A Story Intelligence answer (F-5.7) scores on the rule the feature turns on: it must parse to
+ * the shape the prompt asks for, and every citation must name one of the scenes that were sent
+ * in full and quote that scene, matched exactly as `runQuery` matches it. A `found: false`
+ * answer carries no citations, so it scores as a pass: "not found" is a valid grounded answer.
+ */
+function scoreQuery(texts: string[], answer: string): LiveResult['verdict'] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(answer)
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not JSON' }
+  }
+  const result = QueryAnswer.safeParse(parsed)
+  if (!result.success) {
+    return { kind: 'json', ok: false, problem: 'not { answer, citations: [{ scene, quote }] }' }
+  }
+  const citations = result.data.citations ?? []
+  const uncited = citations.filter((citation) => {
+    const source = Number.isInteger(citation.scene) ? texts[citation.scene - 1] : undefined
+    return source === undefined || !findQuote(source, citation.quote)
+  }).length
+  return uncited === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `${uncited} of ${citations.length} uncited` }
+}
+
 const BriefAnswer = z.object({
   goal: z.string(),
   conflict: z.string(),
@@ -254,6 +286,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreBetaReader(c.scoring.texts, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'query') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreQuery(c.scoring.texts, reply.text)
         })
         continue
       }

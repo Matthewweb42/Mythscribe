@@ -148,6 +148,27 @@ const BETA_READER_ANSWER = JSON.stringify({
     }
   ]
 })
+/**
+ * F-5.7: the opening of the Story Intelligence prompt's system turn (`QUERY_RULES` in
+ * `src/main/ai/prompts/query.v1.ts`, repeated here for the same reason). A JSON request
+ * carrying it gets the canned answer below: one citation quoting a passage of the scene that
+ * ranks first, one quoting a passage that is nowhere in it, and one naming a scene that was
+ * never sent, so both drop rules show and the dangling `[3]` marker is stripped.
+ */
+const QUERY_SENTINEL = 'You are the Story Intelligence feature inside a novel-writing app.'
+const QUERY_QUESTION = 'Where does the storm reach the ridge?'
+const QUERY_ANSWER_TEXT = 'She waits out the storm on the ridge [1], then crosses at dawn [3].'
+/** What the answer reads once main drops the uncited scene and strips its marker. */
+const QUERY_ANSWER_KEPT = 'She waits out the storm on the ridge [1], then crosses at dawn.'
+const QUERY_ANSWER = JSON.stringify({
+  found: true,
+  answer: QUERY_ANSWER_TEXT,
+  citations: [
+    { scene: 1, quote: CRITIQUE_PRAISE_QUOTE },
+    { scene: 1, quote: CRITIQUE_FABRICATED_QUOTE },
+    { scene: 9, quote: CRITIQUE_PRAISE_QUOTE }
+  ]
+})
 const BRIEF_GOAL = 'Mara wants to cross the river tonight.'
 const BRIEF_ANSWER = JSON.stringify({
   goal: BRIEF_GOAL,
@@ -245,6 +266,11 @@ function startFakeOpenAi(): Promise<string> {
           const betaReader = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(BETA_READER_SENTINEL)
           )
+          // F-5.7: a Story Intelligence answer comes back with three JSON citations, two of
+          // them uncitable.
+          const query = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(QUERY_SENTINEL)
+          )
           // F-14.3: a brief draft comes back as the five JSON lines.
           const brief = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(BRIEF_SENTINEL)
@@ -310,13 +336,15 @@ function startFakeOpenAi(): Promise<string> {
                         ? CRITIQUE_ANSWER
                         : betaReader
                           ? BETA_READER_ANSWER
-                          : brief
-                            ? BRIEF_ANSWER
-                            : summary
-                              ? SUMMARY_ANSWER
-                              : regen
-                                ? '{"tags":["antagonist","protagonist"]}'
-                                : '{"tags":["dark-forest","protagonist"]}'
+                          : query
+                            ? QUERY_ANSWER
+                            : brief
+                              ? BRIEF_ANSWER
+                              : summary
+                                ? SUMMARY_ANSWER
+                                : regen
+                                  ? '{"tags":["antagonist","protagonist"]}'
+                                  : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -2169,6 +2197,50 @@ test('create, close, reopen a project on disk', async () => {
   })
   await betaReaderPanel.getByTestId('beta-reader-close').click()
   await expect(betaReaderPanel).toHaveCount(0)
+
+  // F-5.7: Story Intelligence. The assistant's third mode asks about the whole manuscript: main
+  // ranks the scenes on the question's words (Scene 1 carries both "storm" and "ridge", so it
+  // goes out in full as [1]), and the answer's citations are checked against the text that was
+  // sent. The fabricated quote and the one naming a scene that was never sent are dropped, and
+  // the `[3]` marker they left behind is stripped. Clicking the surviving citation opens the
+  // scene and selects the passage in the editor.
+  for (const button of await page.getByRole('button', { name: 'Dismiss notification' }).all()) {
+    await button.click()
+  }
+  const queryBodiesBefore = openAiChatBodies.length
+  await expect(assistant).toBeVisible()
+  const queryRadio = assistant.getByRole('radio', { name: 'Query' })
+  await expect(queryRadio).toBeEnabled()
+  await queryRadio.click()
+  await expect(queryRadio).toHaveAttribute('aria-checked', 'true')
+  await messageBox.fill(QUERY_QUESTION)
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(2)
+  const queryTurn = turns.nth(1)
+  await expect(queryTurn).toContainText(QUERY_ANSWER_KEPT)
+  await expect(queryTurn).not.toContainText('[3]')
+  await expect(queryTurn.getByTestId('query-not-found')).toHaveCount(0)
+  await expect(queryTurn.getByTestId('query-uncited')).toHaveCount(0)
+  const citation = queryTurn.getByTestId('query-citation')
+  await expect(citation).toHaveCount(1)
+  await expect(citation).toContainText(CRITIQUE_PRAISE_QUOTE)
+  await expect(citation).toContainText('Chapter 1 › Scene 1')
+  await expect(queryTurn).not.toContainText(CRITIQUE_FABRICATED_QUOTE)
+  await expect(queryTurn.getByTestId('chat-turn-cost')).toContainText('gpt-5.4-mini')
+  expect(openAiChatBodies).toHaveLength(queryBodiesBefore + 1)
+  const querySystem = openAiChatBodies.at(-1)?.messages[0]
+  expect(querySystem?.role).toBe('system')
+  expect(querySystem?.content.startsWith(QUERY_SENTINEL)).toBe(true)
+  expect(querySystem?.content).toContain(CRITIQUE_PRAISE_QUOTE)
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe(QUERY_QUESTION)
+  const afterQuery = await usageSummary()
+  expect(afterQuery.byFeature.find((f) => f.feature === 'query')).toMatchObject({ requests: 1 })
+  // The citation opens its scene and selects the cited passage there.
+  await citation.click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''), { timeout: 5_000 })
+    .toBe(CRITIQUE_PRAISE_QUOTE)
 
   // Back to Off and no key, as the steps above left them.
   await page.getByRole('button', { name: 'Settings' }).click()

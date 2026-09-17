@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { QueryTurn } from './query'
 import { toTagName } from './tags'
 
 /**
@@ -9,11 +10,19 @@ import { toTagName } from './tags'
  */
 export const CONVERSATIONS_KEY = 'conversations'
 
-/** Plan answers in the chat; Agent places the answer in the editor as ghost text. */
-export const CHAT_MODES = ['plan', 'agent'] as const
+/**
+ * Plan answers in the chat about the open scene; Agent places the answer in the editor as
+ * ghost text; Query (F-5.7) answers about the whole manuscript with citations. F-5.8 renames
+ * them; the stored values stay.
+ */
+export const CHAT_MODES = ['plan', 'agent', 'query'] as const
 export const ChatMode = z.enum(CHAT_MODES)
 export type ChatMode = z.infer<typeof ChatMode>
-export const CHAT_MODE_LABEL: Record<ChatMode, string> = { plan: 'Plan', agent: 'Agent' }
+export const CHAT_MODE_LABEL: Record<ChatMode, string> = {
+  plan: 'Plan',
+  agent: 'Agent',
+  query: 'Query'
+}
 
 export const CHAT_PARAGRAPHS_MIN = 1
 export const CHAT_PARAGRAPHS_MAX = 10
@@ -50,7 +59,9 @@ export const ChatMessage = z.object({
   model: z.string().nullable(),
   costUsd: z.number().nullable(),
   /** The mode the turn was made in; an Agent turn's text went to the editor, not the chat. */
-  mode: ChatMode.nullable()
+  mode: ChatMode.nullable(),
+  /** A Query turn's citations and flags (F-5.7); null for every other turn and for rows written before it. */
+  query: QueryTurn.nullable().default(null)
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
 

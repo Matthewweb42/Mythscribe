@@ -190,7 +190,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-14.3: five one-line brief fields as JSON.
   brief: 200,
   // F-14.11: up to 12 reader items as JSON, each with a scene number, a quote, and a note.
-  betaReader: 1_200
+  betaReader: 1_200,
+  // F-5.7: a short cited answer as JSON with up to 6 citations, each quoting a passage.
+  query: 600
 }
 
 /**
@@ -215,7 +217,11 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   brief: 6_000,
   // F-14.11: one scene head-truncated to 20,000 characters plus the summaries and key points of
   // every earlier scene (~250 tokens each); the fit shrinks the scene, then drops the farthest.
-  betaReader: 12_000
+  betaReader: 12_000,
+  // F-5.7: the top 3 scenes head-truncated to 12,000 characters each plus up to 10 summaries
+  // (~250 tokens each) and ten turns of history; the fit shrinks the scenes, then drops
+  // summaries, then the lowest-ranked full scene.
+  query: 12_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

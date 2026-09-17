@@ -88,3 +88,26 @@ export function removeDocumentTag(db: TagDb, nodeId: string, tagId: string): Tag
     return tagAfterWrite(tx, tagId)
   })
 }
+
+/**
+ * Every node ↔ tag link in one query, as the tag names of each node (name order), keyed by node
+ * id. The query ranker (F-5.7) scores every manuscript document in one pass and must not run a
+ * query per scene; a node with no tag is simply absent from the map. Unlike `listDocumentTags`
+ * this reads across the whole project, so it takes no target and checks nothing: it is a read
+ * for ranking, not for the tag bar.
+ */
+export function listAllDocumentTags(db: TagDb): Map<string, string[]> {
+  const rows = db
+    .select({ nodeId: documentTag.nodeId, name: tag.name })
+    .from(documentTag)
+    .innerJoin(tag, eq(tag.id, documentTag.tagId))
+    .orderBy(asc(documentTag.nodeId), asc(tag.name))
+    .all()
+  const byNode = new Map<string, string[]>()
+  for (const row of rows) {
+    const names = byNode.get(row.nodeId)
+    if (names === undefined) byNode.set(row.nodeId, [row.name])
+    else names.push(row.name)
+  }
+  return byNode
+}

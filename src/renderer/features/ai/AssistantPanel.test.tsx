@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import type { Conversation, Conversations } from '@shared/chat'
-import type { AiChatResult, Channel, Input, Output } from '@shared/ipc/contract'
+import type { AiChatResult, AiQueryResult, Channel, Input, Output } from '@shared/ipc/contract'
+import { QUERY_NOT_FOUND, type QueryTurn } from '@shared/query'
 import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
 import { resetActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -21,12 +22,18 @@ interface PendingChat {
   input: Input<'ai:chat'>
   resolve: (result: AiChatResult) => void
 }
+interface PendingQuery {
+  input: Input<'ai:query'>
+  resolve: (result: AiQueryResult) => void
+}
 
 let chats: PendingChat[]
-let sets: Conversations[]
+let queries: PendingQuery[]
+/** The zod input shape: a turn stored before F-5.7 carries no `query`. */
+let sets: Input<'conversations:set'>[]
 let cancels: string[]
 
-/** `conversations:get` answers with `stored`; writes record; `ai:chat` resolves when the test says so. */
+/** `conversations:get` answers with `stored`; writes record; `ai:chat`/`ai:query` resolve when the test says so. */
 function install(stored: Conversations): void {
   const client: IpcClient = {
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
@@ -39,6 +46,14 @@ function install(stored: Conversations): void {
         return new Promise<Output<C>>((resolve) => {
           chats.push({
             input: input as Input<'ai:chat'>,
+            resolve: (result) => resolve(result as Output<C>)
+          })
+        })
+      }
+      if (channel === 'ai:query') {
+        return new Promise<Output<C>>((resolve) => {
+          queries.push({
+            input: input as Input<'ai:query'>,
             resolve: (result) => resolve(result as Output<C>)
           })
         })
@@ -70,6 +85,7 @@ const message = (
   model: null,
   costUsd: null,
   mode: null,
+  query: null,
   ...over
 })
 
@@ -151,6 +167,7 @@ async function mountOpen(
 beforeEach(() => {
   vi.stubGlobal('innerWidth', 1000)
   chats = []
+  queries = []
   sets = []
   cancels = []
   resetLayoutStore()
@@ -409,5 +426,161 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(box()).toBeDisabled()
     expect(sendButton()).toBeDisabled()
     expect(screen.getByRole('button', { name: 'New conversation' })).toBeDisabled()
+  })
+})
+
+describe('AssistantPanel Query mode (F-5.7)', () => {
+  const CITATION = {
+    nodeId: 'sc-1',
+    title: 'Chapter 1 › Scene 1',
+    scene: 1,
+    quote: 'Rain followed it, and then the quiet held.'
+  }
+  const ANSWER = 'She waits out the storm [1] and crosses at dawn.'
+
+  const queryTurn = (over: Partial<QueryTurn> = {}): QueryTurn => ({
+    found: true,
+    uncited: false,
+    citations: [CITATION],
+    also: [{ nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' }],
+    ...over
+  })
+
+  const answered = (answer: string, query: QueryTurn): Conversations => ({
+    active: 'c-1',
+    items: [
+      conversation({
+        mode: 'query',
+        messages: [
+          message('m-1', 'user', 'Where does she cross?'),
+          message('m-2', 'assistant', answer, {
+            mode: 'query',
+            model: 'gpt-fake',
+            costUsd: 0.0009,
+            proposalId: 'p-2',
+            query
+          })
+        ]
+      })
+    ]
+  })
+
+  const queryOk = (requestId: string): AiQueryResult => ({
+    ok: true,
+    answer: ANSWER,
+    found: true,
+    uncited: false,
+    citations: [CITATION],
+    also: [{ nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' }],
+    dropped: 2,
+    usage: { inputTokens: 900, outputTokens: 60 },
+    costUsd: 0.0009,
+    cached: false,
+    model: 'gpt-fake',
+    proposalId: `prop-${requestId}`,
+    requestId
+  })
+
+  /** Replaces `openScene` with a spy: the panel's buttons are what this describe checks. */
+  function spyOnOpenScene(): ReturnType<typeof vi.fn> {
+    const openScene = vi.fn(async () => {})
+    act(() => useAssistantStore.setState({ openScene }))
+    return openScene
+  }
+
+  it('offers Query beside Plan and Agent, disabled with the reason while the dial forbids it', async () => {
+    await mountOpen({ active: 'c-1', items: [conversation()] }, settings({ dial: 0 }))
+    const query = screen.getByRole('radio', { name: 'Query' })
+    expect(query).toBeDisabled()
+    expect(query).toHaveAttribute(
+      'title',
+      'Query needs the AI dial at Ask or higher, with Story Intelligence on (Settings, AI tab)'
+    )
+    act(() =>
+      useAiSettingsStore.setState({
+        settings: settings({ dial: 2, features: { ...defaultAiSettings().features, query: false } })
+      })
+    )
+    expect(query).toBeDisabled()
+    act(() => useAiSettingsStore.setState({ settings: settings({ dial: 1 }) }))
+    expect(query).toBeEnabled()
+    expect(query).toHaveAttribute('title', 'Ask about the whole manuscript; answers cite scenes')
+    await userEvent.click(query)
+    expect(query).toHaveAttribute('aria-checked', 'true')
+    expect(useAssistantStore.getState().conversations?.items[0]?.mode).toBe('query')
+    // The paragraph count belongs to Agent alone.
+    expect(screen.queryByRole('combobox', { name: 'Paragraphs' })).not.toBeInTheDocument()
+  })
+
+  it('sends the question on ai:query and shows the answer with its markers, sources, and cost', async () => {
+    await mountOpen({ active: 'c-1', items: [conversation({ mode: 'query', messages: [] })] })
+    const openScene = spyOnOpenScene()
+    await userEvent.type(box(), 'Where does she cross?{Enter}')
+    expect(chats).toHaveLength(0)
+    expect(queries).toHaveLength(1)
+    expect(queries[0]?.input).toMatchObject({ message: 'Where does she cross?', nodeId: null })
+    expect(within(turns()[1]!).getByTestId('chat-pending')).toBeInTheDocument()
+
+    await act(async () => {
+      queries[0]?.resolve(queryOk(queries[0].input.requestId))
+    })
+    const turn = turns()[1]!
+    expect(turn).toHaveTextContent('She waits out the storm [1] and crosses at dawn.')
+    expect(within(turn).getByTestId('chat-turn-cost')).toHaveTextContent('gpt-fake · $0.0009')
+    expect(within(turn).queryByTestId('query-not-found')).not.toBeInTheDocument()
+    expect(within(turn).queryByTestId('query-uncited')).not.toBeInTheDocument()
+
+    const marker = within(turn).getByTestId('query-cite')
+    expect(marker).toHaveTextContent('[1]')
+    expect(marker).toHaveAttribute('data-scene', '1')
+    expect(marker).toHaveAttribute('aria-label', 'Open Chapter 1 › Scene 1')
+    await userEvent.click(marker)
+    expect(openScene).toHaveBeenCalledExactlyOnceWith(CITATION, CITATION.quote)
+
+    const source = within(turn).getByTestId('query-citation')
+    expect(source).toHaveTextContent('Chapter 1 › Scene 1')
+    expect(source).toHaveTextContent(CITATION.quote)
+    await userEvent.click(source)
+    expect(openScene).toHaveBeenCalledTimes(2)
+
+    const also = within(turn).getByTestId('query-also')
+    expect(also).toHaveTextContent('Chapter 2 › Scene 2')
+    await userEvent.click(also)
+    expect(openScene).toHaveBeenLastCalledWith(
+      { nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' },
+      null
+    )
+  })
+
+  it('says so when the scenes do not answer, and flags an answer no citation survived', async () => {
+    await mountOpen(
+      answered(
+        `${QUERY_NOT_FOUND} No scene names the boat's owner.`,
+        queryTurn({ found: false, citations: [], also: [] })
+      )
+    )
+    const notFound = turns()[1]!
+    expect(within(notFound).getByTestId('query-not-found')).toHaveTextContent(QUERY_NOT_FOUND)
+    expect(within(notFound).queryByTestId('query-citation')).not.toBeInTheDocument()
+    expect(within(notFound).queryByTestId('query-also')).not.toBeInTheDocument()
+
+    act(() =>
+      useAssistantStore.setState({
+        conversations: answered('She crosses at dawn.', queryTurn({ uncited: true, citations: [] }))
+      })
+    )
+    const uncited = turns()[1]!
+    expect(within(uncited).getByTestId('query-uncited')).toHaveTextContent(
+      'No cited passage supports this answer; treat it as unverified.'
+    )
+    expect(within(uncited).queryByTestId('query-citation')).not.toBeInTheDocument()
+    expect(within(uncited).getByTestId('query-also')).toHaveTextContent('Chapter 2 › Scene 2')
+  })
+
+  it('leaves a marker naming no surviving citation as plain text', async () => {
+    await mountOpen(answered('She crosses [1] at dawn [4].', queryTurn({ also: [] })))
+    const turn = turns()[1]!
+    expect(within(turn).getAllByTestId('query-cite')).toHaveLength(1)
+    expect(turn).toHaveTextContent('She crosses [1] at dawn [4].')
   })
 })

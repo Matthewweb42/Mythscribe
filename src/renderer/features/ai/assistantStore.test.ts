@@ -9,21 +9,26 @@ import {
 } from '@shared/chat'
 import type {
   AiChatResult,
+  AiQueryResult,
   Channel,
   EventName,
   EventPayload,
   Input,
   Output
 } from '@shared/ipc/contract'
+import { QUERY_NOT_FOUND } from '@shared/query'
 import {
   resetActiveEditorStore,
   useActiveEditorStore
 } from '@renderer/features/editor/activeEditorStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
+import { locateText } from '@renderer/features/editor/locateText'
 import { ghostOf, type GhostSettleHandler } from '@renderer/features/editor/ghostText'
 import { SETTINGS_SAVE_DELAY_MS } from '@renderer/features/editor/settingsStore'
 import { flushPendingSaves, resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import {
@@ -31,6 +36,8 @@ import {
   EMPTY_ANSWER_MESSAGE,
   NEW_CONVERSATION_TITLE,
   NO_EDITOR_MESSAGE,
+  OPEN_SCENE_TIMEOUT_MS,
+  PASSAGE_GONE_MESSAGE,
   resetAssistantStore,
   useAssistantStore
 } from './assistantStore'
@@ -38,7 +45,8 @@ import { resetAiActivityStore, useAiActivityStore } from './aiActivityStore'
 import { resetProposalStore } from './proposalStore'
 
 interface PendingSet {
-  value: Conversations
+  /** The zod input shape: a stored turn written before F-5.7 carries no `query`. */
+  value: Input<'conversations:set'>
   resolve: () => void
   reject: (err: Error) => void
 }
@@ -47,9 +55,15 @@ interface PendingChat {
   resolve: (result: AiChatResult) => void
   reject: (err: Error) => void
 }
+interface PendingQuery {
+  input: Input<'ai:query'>
+  resolve: (result: AiQueryResult) => void
+  reject: (err: Error) => void
+}
 
 let sets: PendingSet[]
 let chats: PendingChat[]
+let queries: PendingQuery[]
 let settles: Input<'proposal:settle'>[]
 /** The request ids `ai:cancel` was asked to stop. */
 let cancels: string[]
@@ -58,8 +72,8 @@ let deltaListener: ((payload: EventPayload<'ai:chatDelta'>) => void) | null
 let unsubscribed: number
 
 /**
- * `conversations:get` answers with `stored`; `conversations:set` and `ai:chat` resolve only when
- * the test says so; `proposal:settle` records; the delta event listener is captured.
+ * `conversations:get` answers with `stored`; `conversations:set`, `ai:chat`, and `ai:query`
+ * resolve only when the test says so; `proposal:settle` records; the delta listener is captured.
  */
 function deferredClient(stored: Conversations): IpcClient {
   return {
@@ -75,6 +89,15 @@ function deferredClient(stored: Conversations): IpcClient {
         return new Promise<Output<C>>((resolve, reject) => {
           chats.push({
             input: input as Input<'ai:chat'>,
+            resolve: (result) => resolve(result as Output<C>),
+            reject
+          })
+        })
+      }
+      if (channel === 'ai:query') {
+        return new Promise<Output<C>>((resolve, reject) => {
+          queries.push({
+            input: input as Input<'ai:query'>,
             resolve: (result) => resolve(result as Output<C>),
             reject
           })
@@ -116,7 +139,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       proposalId: null,
       model: null,
       costUsd: null,
-      mode: null
+      mode: null,
+      query: null
     },
     {
       id: 'm-2',
@@ -126,7 +150,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       proposalId: 'p-1',
       model: 'gpt-fake',
       costUsd: 0.0002,
-      mode: 'plan'
+      mode: 'plan',
+      query: null
     }
   ],
   created: '2026-09-15T10:00:00.000Z',
@@ -178,6 +203,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   sets = []
   chats = []
+  queries = []
   settles = []
   cancels = []
   deltaListener = null
@@ -188,6 +214,7 @@ beforeEach(() => {
   resetProposalStore()
   resetPendingSaves()
   resetTagStore()
+  useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
   setIpcClient(deferredClient(STORED))
 })
@@ -195,6 +222,7 @@ afterEach(() => {
   resetAssistantStore()
   resetActiveEditorStore()
   resetAiActivityStore()
+  useTreeStore.getState().clear()
   vi.useRealTimers()
 })
 
@@ -386,7 +414,8 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
       proposalId: null,
       model: null,
       costUsd: null,
-      mode: null
+      mode: null,
+      query: null
     }))
     setIpcClient(
       deferredClient({
@@ -668,5 +697,237 @@ describe('useAssistantStore send, Agent mode (F-5.4)', () => {
     expect(ghostOf(editor.state)).toBeNull()
     expect(toasts()).toEqual([NO_EDITOR_MESSAGE, EMPTY_ANSWER_MESSAGE])
     expect(settles).toHaveLength(2)
+  })
+})
+
+describe('useAssistantStore send, Query mode (F-5.7)', () => {
+  type QueryOk = Extract<AiQueryResult, { ok: true }>
+
+  const CITATION = {
+    nodeId: 'sc-1',
+    title: 'Chapter 1 › Scene 1',
+    scene: 1,
+    quote: 'Rain followed.'
+  }
+
+  const queryOk = (requestId: string, over: Partial<QueryOk> = {}): AiQueryResult => ({
+    ok: true,
+    answer: 'She waits for the storm [1].',
+    found: true,
+    uncited: false,
+    citations: [CITATION],
+    also: [{ nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' }],
+    dropped: 1,
+    usage: { inputTokens: 900, outputTokens: 60 },
+    costUsd: 0.0009,
+    cached: false,
+    model: 'gpt-fake',
+    proposalId: `prop-${requestId}`,
+    requestId,
+    ...over
+  })
+
+  /** Sends `text` in Query mode and hands back the request main received. */
+  async function askAndCapture(text: string): Promise<PendingQuery> {
+    const asking = store().send(text)
+    await settle()
+    const request = queries[queries.length - 1]
+    if (!request) throw new Error('nothing was asked')
+    return Object.assign(request, { done: asking })
+  }
+
+  it('asks ai:query with the open scene and the recent history, and fills the turn with the answer, its cost, and its citations', async () => {
+    await store().load()
+    store().setMode('query')
+    const request = await askAndCapture('  Where does the storm break?  ')
+    expect(chats).toHaveLength(0)
+    expect(request.input).toEqual({
+      nodeId: null,
+      message: 'Where does the storm break?',
+      history: [
+        { role: 'user', content: 'Why the ridge?' },
+        { role: 'assistant', content: 'Because Mara wants the view.' }
+      ],
+      requestId: expect.any(String) as string
+    })
+    expect(useAiActivityStore.getState().inflight).toEqual({
+      [request.input.requestId]: { feature: 'query', startedAt: expect.any(Number) as number }
+    })
+    expect(active().messages[3]).toMatchObject({ role: 'assistant', content: '', mode: 'query' })
+
+    request.resolve(queryOk(request.input.requestId, { cached: true }))
+    await settle()
+    expect(useAiActivityStore.getState().inflight).toEqual({})
+    expect(store().pending).toEqual({})
+    const answer = active().messages[3]
+    expect(answer).toMatchObject({
+      role: 'assistant',
+      mode: 'query',
+      content: 'She waits for the storm [1].',
+      model: 'gpt-fake',
+      costUsd: 0.0009,
+      proposalId: `prop-${request.input.requestId}`,
+      query: {
+        found: true,
+        uncited: false,
+        citations: [CITATION],
+        also: [{ nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' }]
+      }
+    })
+    expect(store().cached[answer?.id ?? '']).toBe(true)
+    expect(settles).toEqual([])
+    await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
+    expect(sets[0]?.value.items[0]?.messages[3]).toMatchObject({ query: { found: true } })
+  })
+
+  it('sends the active scene and carries a not-found answer with no citations', async () => {
+    const editor = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' })
+    })
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await store().load()
+    store().setMode('query')
+    const request = await askAndCapture('Who owns the boat?')
+    expect(request.input.nodeId).toBe('sc-1')
+    request.resolve(
+      queryOk(request.input.requestId, {
+        answer: `${QUERY_NOT_FOUND} The scenes never name an owner.`,
+        found: false,
+        citations: [],
+        also: []
+      })
+    )
+    await settle()
+    expect(active().messages[3]).toMatchObject({
+      content: `${QUERY_NOT_FOUND} The scenes never name an owner.`,
+      query: { found: false, uncited: false, citations: [], also: [] }
+    })
+    editor.destroy()
+  })
+
+  it('an expected failure drops the unanswered turn and toasts, and a stop is silent', async () => {
+    await store().load()
+    store().setMode('query')
+    const request = await askAndCapture('Where is Mara?')
+    request.resolve({
+      ok: false,
+      code: 'NO_KEY',
+      message: 'No API key is saved.',
+      nextStep: 'Add one in Settings.',
+      requestId: request.input.requestId
+    })
+    await settle()
+    expect(active().messages).toHaveLength(3)
+    expect(store().pending).toEqual({})
+    expect(toasts()).toEqual(['No API key is saved. Add one in Settings.'])
+
+    const again = await askAndCapture('Where is Mara?')
+    store().stop()
+    expect(cancels).toEqual([again.input.requestId])
+    again.resolve({
+      ok: false,
+      code: 'CANCELLED',
+      message: 'The request was stopped.',
+      nextStep: 'Send it again whenever you like.',
+      requestId: again.input.requestId
+    })
+    await settle()
+    // The author's two turns stay: both can be sent again.
+    expect(active().messages).toHaveLength(4)
+    expect(active().messages.at(-1)).toMatchObject({ role: 'user', content: 'Where is Mara?' })
+    expect(toasts()).toEqual(['No API key is saved. Add one in Settings.'])
+  })
+
+  it('rejects the proposal of an answer whose conversation closed meanwhile', async () => {
+    await store().load()
+    store().newConversation()
+    const second = store().conversations?.active ?? ''
+    store().setMode('query')
+    const asking = store().send('Where is Mara?')
+    await settle()
+    store().closeConversation(second)
+    const request = queries[0]
+    request?.resolve(queryOk(request.input.requestId))
+    await asking
+    expect(settles).toEqual([
+      { id: `prop-${request?.input.requestId}`, status: 'rejected', note: null }
+    ])
+    expect(toasts()).toEqual([])
+  })
+})
+
+describe('useAssistantStore openScene (F-5.7)', () => {
+  const QUOTE = 'She turned from the window.'
+  const TEXT = `The storm broke at dusk. ${QUOTE} Rain followed.`
+  let editor: Editor
+  /** A second scene's editor, registered to prove `openScene` waits for the right one. */
+  let other: Editor
+
+  const newEditor = (): Editor =>
+    new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' }),
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: TEXT }] }]
+      }
+    })
+
+  beforeEach(() => {
+    useTreeStore.setState(buildIndex(treeFixture))
+    editor = newEditor()
+    other = newEditor()
+  })
+  afterEach(() => {
+    editor.destroy()
+    other.destroy()
+  })
+
+  const selectedText = (): string => {
+    const { from, to } = editor.state.selection
+    return editor.state.doc.textBetween(from, to)
+  }
+
+  it('selects the scene in the tree and the cited passage in its editor', async () => {
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await store().openScene({ nodeId: 'sc-1', title: 'Chapter 1 › Scene 1' }, QUOTE)
+    expect(useTreeStore.getState().selectedId).toBe('sc-1')
+    expect(editor.state.selection).toMatchObject(locateText(editor.state.doc, QUOTE) ?? {})
+    expect(selectedText()).toBe(QUOTE)
+    expect(toasts()).toEqual([])
+  })
+
+  it('waits for the scene it opened to mount its editor, and gives up after the timeout', async () => {
+    const opening = store().openScene({ nodeId: 'sc-1', title: 'Chapter 1 › Scene 1' }, QUOTE)
+    expect(useTreeStore.getState().selectedId).toBe('sc-1')
+    expect(selectedText()).toBe('')
+    // A different scene's editor is not the one it waits for.
+    useActiveEditorStore.getState().set('sc-2', other)
+    await settle()
+    expect(selectedText()).toBe('')
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await opening
+    expect(selectedText()).toBe(QUOTE)
+
+    const never = store().openScene({ nodeId: 'sc-3', title: 'Chapter 3 › Scene 3' }, QUOTE)
+    await vi.advanceTimersByTimeAsync(OPEN_SCENE_TIMEOUT_MS)
+    await never
+    expect(useTreeStore.getState().selectedId).toBe('sc-3')
+    expect(toasts()).toEqual([])
+  })
+
+  it('toasts when the passage is no longer in the scene, and a chip without a quote only opens it', async () => {
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await store().openScene(
+      { nodeId: 'sc-1', title: 'Chapter 1 › Scene 1' },
+      'The lighthouse blinked twice.'
+    )
+    expect(toasts()).toEqual([PASSAGE_GONE_MESSAGE])
+    expect(selectedText()).toBe('')
+
+    useTreeStore.getState().select('sc-2')
+    await store().openScene({ nodeId: 'sc-1', title: 'Chapter 1 › Scene 1' }, null)
+    expect(useTreeStore.getState().selectedId).toBe('sc-1')
+    expect(selectedText()).toBe('')
+    expect(toasts()).toEqual([PASSAGE_GONE_MESSAGE])
   })
 })

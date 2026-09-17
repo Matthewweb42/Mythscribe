@@ -1,4 +1,4 @@
-import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS } from '@shared/ai'
+import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS, inputBudget } from '@shared/ai'
 import { AUTHOR_RULES_TEXT_MAX, defaultAuthorRules } from '@shared/authorRules'
 import {
   CHAT_HISTORY_TURNS,
@@ -134,6 +134,12 @@ import {
   buildBetaReaderRegenPrompt,
   BETA_READER_REGEN_PROMPT_VERSION
 } from '../prompts/betaReaderRegen.v1'
+import {
+  buildQueryPrompt,
+  QUERY_PROMPT_VERSION,
+  type BuildQueryPromptInput
+} from '../prompts/query.v1'
+import { fitQueryPrompt } from '../query'
 import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../prompts/tags.v1'
 import { buildTagsRegenPrompt, TAGS_REGEN_PROMPT_VERSION } from '../prompts/tagsRegen.v1'
 import {
@@ -144,6 +150,7 @@ import {
   SUMMARY_SCENE_CHAR_BUDGET
 } from '@shared/summary'
 import { BETA_READER_SCENE_CHAR_BUDGET } from '@shared/betaReader'
+import { QUERY_SCENE_CHAR_BUDGET } from '@shared/query'
 import {
   BRIEF_SCENE_CHAR_BUDGET,
   EMPTY_SCENE_BRIEF,
@@ -383,6 +390,11 @@ export interface EvalCase {
      * current scene last.
      */
     | { kind: 'betaReader'; texts: string[] }
+    /**
+     * A Story Intelligence answer (F-5.7): the answer must parse, every citation must name one
+     * of the scenes sent in full, and its quote must be in that scene's text as sent.
+     */
+    | { kind: 'query'; texts: string[] }
 }
 
 const general = builtinParams('general')
@@ -975,6 +987,81 @@ const FIXTURE_CHARACTERS = FIXTURE_FACTS.bank
   .map((entry) => entry.name)
 const MAXED_CHARACTERS = MAXED_BANK.slice(0, SUMMARY_BANK_NAMES_MAX)
 
+/**
+ * A Story Intelligence turn (F-5.7): a question about the whole manuscript, the scenes main
+ * retrieved for it in full, and the next candidates as their stored summaries. The texts a
+ * citation may quote are exactly the full scenes, as the feature matches them.
+ */
+const QUERY_QUESTION = 'What does Tomas want from Mara, and what does she give him instead?'
+const queryFresh: BuildQueryPromptInput = {
+  full: [{ title: 'Chapter 1 \u203a The ferry landing', text: FIXTURE_PASSAGE }],
+  summaries: [],
+  history: [],
+  question: QUERY_QUESTION
+}
+const queryFull: BuildQueryPromptInput = {
+  full: [
+    { title: 'Chapter 1 \u203a The ferry landing', text: FIXTURE_PASSAGE },
+    { title: 'Chapter 2 \u203a The mill ledger', text: FIXTURE_PASSAGE.slice(0, 1_200) },
+    { title: 'Chapter 2 \u203a The north pasture', text: FIXTURE_PASSAGE.slice(-1_200) }
+  ],
+  summaries: betaReaderScenes,
+  history: [
+    { role: 'user', content: 'Who is Tomas to Mara?' },
+    {
+      role: 'assistant',
+      content: 'He is the man the mill owes; he meets her at the ferry landing. [1]'
+    }
+  ],
+  question: QUERY_QUESTION
+}
+/**
+ * The worst input the feature can be handed — three scenes at the character budget, ten
+ * summaries at every cap, long titles, ten history turns at the message cap — as `fitQueryPrompt`
+ * leaves it, which is what production would actually send: the raw shape is far over the input
+ * budget, so the fit shrinks the scenes to their floor, drops the summaries, and drops the
+ * lowest-ranked scenes before anything goes out (CLAUDE.md, token rule 8).
+ */
+const queryMaxedRaw = {
+  full: Array.from({ length: 3 }, (_, index) => ({
+    nodeId: `full-${index}`,
+    title: `${'C'.repeat(40)} \u203a ${'S'.repeat(40)} ${index}`,
+    text: `${FIXTURE_PASSAGE.repeat(20).slice(0, QUERY_SCENE_CHAR_BUDGET)}\u2026`
+  })),
+  summaries: Array.from({ length: 10 }, (_, index) => ({
+    nodeId: `summary-${index}`,
+    contentHash: `hash-${index}`,
+    title: `${'C'.repeat(40)} \u203a ${'S'.repeat(40)} ${index}`,
+    summary: 's'.repeat(SUMMARY_MAX_CHARS),
+    keyPoints: Array.from({ length: SUMMARY_KEY_POINTS_MAX }, () =>
+      'k'.repeat(SUMMARY_KEY_POINT_MAX)
+    )
+  })),
+  history: Array.from({ length: CHAT_HISTORY_TURNS }, (_, index) => ({
+    role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+    content: 'h'.repeat(CHAT_MESSAGE_MAX)
+  }))
+}
+const MAXED_QUESTION = 'q'.repeat(CHAT_MESSAGE_MAX)
+const queryMaxed: BuildQueryPromptInput = {
+  ...fitQueryPrompt(queryMaxedRaw, inputBudget('query'), (full, summaries, history) =>
+    buildQueryPrompt({ full, summaries, history, question: MAXED_QUESTION }).messages
+  ),
+  question: MAXED_QUESTION
+}
+
+function queryCase(name: string, note: string, input: BuildQueryPromptInput): EvalCase {
+  const built = buildQueryPrompt(input)
+  return {
+    version: QUERY_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'query', texts: input.full.map((scene) => scene.text) }
+  }
+}
+
 /** Every case, grouped by version in catalogue order. */
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
@@ -1390,5 +1477,20 @@ export const EVAL_CASES: EvalCase[] = [
       brief: EMPTY_SCENE_BRIEF
     },
     MAXED_CHARACTERS
+  ),
+  queryCase(
+    'fresh',
+    'one retrieved scene, no summaries and no history: the shape a new project sends',
+    queryFresh
+  ),
+  queryCase(
+    'full',
+    'three retrieved scenes in full, two candidates as their stored summaries, two history turns',
+    queryFull
+  ),
+  queryCase(
+    'maxed',
+    'the worst input (three scenes at the character budget, ten summaries at theirs, ten history turns at the message cap) as the fit leaves it',
+    queryMaxed
   )
 ]
