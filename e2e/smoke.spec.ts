@@ -2226,7 +2226,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(citation).toContainText(CRITIQUE_PRAISE_QUOTE)
   await expect(citation).toContainText('Chapter 1 › Scene 1')
   await expect(queryTurn).not.toContainText(CRITIQUE_FABRICATED_QUOTE)
-  await expect(queryTurn.getByTestId('chat-turn-cost')).toContainText('gpt-5.4-mini')
+  await expect(queryTurn.getByTestId('chat-turn-cost')).toContainText('gpt-5.4 ·')
   expect(openAiChatBodies).toHaveLength(queryBodiesBefore + 1)
   const querySystem = openAiChatBodies.at(-1)?.messages[0]
   expect(querySystem?.role).toBe('system')
