@@ -157,7 +157,9 @@ describe('RewritePanel (F-14.10)', () => {
     // The word-level LCS keeps one original space, so the insertion arrives in two pieces.
     expect(parts('ins').join('').trim()).toBe('camedown')
     expect(diff).toHaveTextContent('The storm brokecame down at dusk. Rain followed.')
-    expect(screen.getByTestId('rewrite-cost')).toHaveTextContent('gpt-5.4-mini · $0.0002')
+    expect(screen.getByTestId('rewrite-cost')).toHaveTextContent(
+      'gpt-5.4-mini · $0.0002 · 300 in · 20 out'
+    )
     expect(screen.queryByTestId('rewrite-flag')).not.toBeInTheDocument()
     expect(screen.getByTestId('rewrite-accept')).toBeEnabled()
     await userEvent.click(screen.getByTestId('rewrite-accept'))
@@ -175,7 +177,9 @@ describe('RewritePanel (F-14.10)', () => {
       'Off-voice: switches to present tense'
     )
     expect(screen.getByTestId('rewrite-flag')).toHaveAttribute('title', 'switches to present tense')
-    expect(screen.getByTestId('rewrite-cost')).toHaveTextContent('gpt-5.4-mini · $0.0002 · cached')
+    expect(screen.getByTestId('rewrite-cost')).toHaveTextContent(
+      'gpt-5.4-mini · $0.0002 · 300 in · 20 out · cached'
+    )
     expect(screen.getByTestId('rewrite-accept')).toBeEnabled()
   })
 

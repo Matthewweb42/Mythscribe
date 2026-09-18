@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import type { AiUsage } from '@shared/ai'
 import { AI_DATA_SHARING, AI_DIAL_LABEL, isFeatureAllowed } from '@shared/aiSettings'
 import { docToText } from '@shared/docText'
 import { BRIEF_TEXT_MIN, type SceneBrief } from '@shared/sceneMeta'
@@ -32,6 +33,8 @@ export type BriefDraftState =
       truncated: boolean
       model: string
       costUsd: number
+      /** The tokens the request spent, for the cost line (F-5.9). */
+      usage: AiUsage
       cached: boolean
     }
   | { nodeId: string; status: 'error'; message: string; nextStep: string }
@@ -115,6 +118,7 @@ export function useBriefDraft(id: string, onLanded: () => void): BriefDraft {
             truncated: result.truncated,
             model: result.model,
             costUsd: result.costUsd,
+            usage: result.usage,
             cached: result.cached
           })
           onLanded()

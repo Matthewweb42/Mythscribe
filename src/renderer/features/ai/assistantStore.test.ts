@@ -139,6 +139,7 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       proposalId: null,
       model: null,
       costUsd: null,
+      usage: null,
       mode: null,
       query: null
     },
@@ -150,6 +151,7 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       proposalId: 'p-1',
       model: 'gpt-fake',
       costUsd: 0.0002,
+      usage: { inputTokens: 300, outputTokens: 20 },
       mode: 'plan',
       query: null
     }
@@ -396,6 +398,7 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
       content: 'The view.',
       model: 'gpt-fake',
       costUsd: 0.0003,
+      usage: { inputTokens: 200, outputTokens: 40 },
       proposalId: `prop-${request.input.requestId}`,
       mode: 'plan'
     })
@@ -415,6 +418,7 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
       proposalId: null,
       model: null,
       costUsd: null,
+      usage: null,
       mode: null,
       query: null
     }))
@@ -769,6 +773,7 @@ describe('useAssistantStore send, Query mode (F-5.7)', () => {
       content: 'She waits for the storm [1].',
       model: 'gpt-fake',
       costUsd: 0.0009,
+      usage: { inputTokens: 900, outputTokens: 60 },
       proposalId: `prop-${request.input.requestId}`,
       query: {
         found: true,

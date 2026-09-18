@@ -84,6 +84,7 @@ const message = (
   proposalId: null,
   model: null,
   costUsd: null,
+  usage: null,
   mode: null,
   query: null,
   ...over
@@ -234,7 +235,9 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(mine).toHaveTextContent('Why the ridge?')
     expect(theirs).toHaveAttribute('data-role', 'assistant')
     expect(theirs).toHaveTextContent('Because Mara wants the view.')
+    // A turn stored before F-5.9 kept no tokens, so the line is the model and the cost alone.
     expect(within(theirs!).getByTestId('chat-turn-cost')).toHaveTextContent('gpt-fake · $0.0002')
+    expect(within(theirs!).getByTestId('chat-turn-cost')).not.toHaveTextContent(' in · ')
     expect(within(mine!).queryByTestId('chat-turn-cost')).not.toBeInTheDocument()
     const modes = screen.getByRole('radiogroup', { name: 'Mode' })
     expect(within(modes).getByRole('radio', { name: 'Plan' })).toHaveAttribute(
@@ -281,7 +284,7 @@ describe('AssistantPanel (F-5.4)', () => {
     })
     expect(turns()[3]).toHaveTextContent('She climbs.')
     expect(within(turns()[3]!).getByTestId('chat-turn-cost')).toHaveTextContent(
-      'gpt-fake · $0.0003 · cached'
+      'gpt-fake · $0.0003 · 200 in · 40 out · cached'
     )
     expect(screen.queryByTestId('chat-pending')).not.toBeInTheDocument()
     await userEvent.type(box(), 'more')
@@ -543,7 +546,9 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     })
     const turn = turns()[1]!
     expect(turn).toHaveTextContent('She waits out the storm [1] and crosses at dawn.')
-    expect(within(turn).getByTestId('chat-turn-cost')).toHaveTextContent('gpt-fake · $0.0009')
+    expect(within(turn).getByTestId('chat-turn-cost')).toHaveTextContent(
+      'gpt-fake · $0.0009 · 900 in · 60 out'
+    )
     expect(within(turn).queryByTestId('query-not-found')).not.toBeInTheDocument()
     expect(within(turn).queryByTestId('query-uncited')).not.toBeInTheDocument()
 

@@ -3,7 +3,14 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
-import { insertUsage, ledgerSummary, listUsage, type AiDb, type UsageEntry } from './usageStore'
+import {
+  insertUsage,
+  ledgerSummary,
+  listUsage,
+  recentUsage,
+  type AiDb,
+  type UsageEntry
+} from './usageStore'
 
 let tmp: string
 let session: ProjectSession
@@ -76,5 +83,34 @@ describe('usageStore (F-5.14)', () => {
     expect(summary.byFeature[1]?.costUsd).toBeCloseTo(0.003, 8)
     expect(summary.total).toMatchObject({ requests: 4, tokens: 205 })
     expect(summary.total.costUsd).toBeCloseTo(0.0031, 8)
+  })
+
+  it('lists the most recent requests newest first, honouring the limit (F-5.9)', () => {
+    expect(recentUsage(db, 10)).toEqual([])
+    insertUsage(db, entry({ at: '2026-09-12T10:00:00.000Z', feature: 'tags' }))
+    insertUsage(db, entry({ at: '2026-09-12T12:00:00.000Z', feature: 'chat' }))
+    insertUsage(db, entry({ at: '2026-09-12T11:00:00.000Z', feature: 'ghostText' }))
+    // Same instant as the newest: the later insertion wins the tie.
+    const newest = insertUsage(db, entry({ at: '2026-09-12T12:00:00.000Z', feature: 'summary' }))
+
+    expect(recentUsage(db, 10).map((r) => r.feature)).toEqual([
+      'summary',
+      'chat',
+      'ghostText',
+      'tags'
+    ])
+    expect(recentUsage(db, 2).map((r) => r.feature)).toEqual(['summary', 'chat'])
+    expect(recentUsage(db, 1)).toEqual([
+      {
+        id: newest.id,
+        at: '2026-09-12T12:00:00.000Z',
+        feature: 'summary',
+        model: 'gpt-5.4-mini',
+        promptTokens: 100,
+        completionTokens: 20,
+        costUsd: 0.001,
+        cached: false
+      }
+    ])
   })
 })

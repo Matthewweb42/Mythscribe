@@ -36,6 +36,7 @@ describe('chat model (F-5.4)', () => {
               proposalId: null,
               model: null,
               costUsd: null,
+              usage: null,
               mode: null,
               query: null
             }
@@ -77,6 +78,72 @@ describe('chat model (F-5.4)', () => {
     }
     const parsed = parseStoredConversations(stored)
     expect(parsed.items[0]?.messages[0]?.query).toBeNull()
+  })
+
+  it('reads a turn stored before F-5.9, with no usage field, as usage: null', () => {
+    const stored = {
+      active: 'c1',
+      items: [
+        {
+          id: 'c1',
+          title: 'Why is Mara on the ridge?',
+          mode: 'plan',
+          paragraphs: 1,
+          messages: [
+            {
+              id: 'm1',
+              role: 'assistant',
+              content: 'She is waiting for the signal.',
+              created: '2026-09-15T10:00:00.000Z',
+              proposalId: 'p1',
+              model: 'gpt-5.4-mini',
+              costUsd: 0.0012,
+              mode: 'plan',
+              query: null
+              // no `usage` field at all, as a turn written before F-5.9 has.
+            }
+          ],
+          created: '2026-09-15T10:00:00.000Z',
+          modified: '2026-09-15T10:00:00.000Z'
+        }
+      ]
+    }
+    const parsed = parseStoredConversations(stored)
+    expect(parsed.items[0]?.messages[0]?.usage).toBeNull()
+  })
+
+  it('keeps the tokens of a turn written with them (F-5.9)', () => {
+    const stored = {
+      active: 'c1',
+      items: [
+        {
+          id: 'c1',
+          title: 'Why is Mara on the ridge?',
+          mode: 'plan',
+          paragraphs: 1,
+          messages: [
+            {
+              id: 'm1',
+              role: 'assistant',
+              content: 'She is waiting for the signal.',
+              created: '2026-09-15T10:00:00.000Z',
+              proposalId: 'p1',
+              model: 'gpt-5.4-mini',
+              costUsd: 0.0012,
+              usage: { inputTokens: 300, outputTokens: 20 },
+              mode: 'plan',
+              query: null
+            }
+          ],
+          created: '2026-09-15T10:00:00.000Z',
+          modified: '2026-09-15T10:00:00.000Z'
+        }
+      ]
+    }
+    expect(parseStoredConversations(stored).items[0]?.messages[0]?.usage).toEqual({
+      inputTokens: 300,
+      outputTokens: 20
+    })
   })
 
   it('titles a conversation from the first line of the first message, cut to fit', () => {

@@ -200,7 +200,9 @@ describe('CritiquePanel (F-14.8)', () => {
       'Nobody answered him'
     )
     expect(screen.getAllByTestId('critique-apply')).toHaveLength(1)
-    expect(screen.getByTestId('critique-cost')).toHaveTextContent('gpt-5.4 · $0.0200 · cached')
+    expect(screen.getByTestId('critique-cost')).toHaveTextContent(
+      'gpt-5.4 · $0.0200 · 900 in · 120 out · cached'
+    )
     expect(screen.getByTestId('critique-dropped')).toHaveTextContent('2 uncited notes dropped')
     expect(screen.queryByTestId('critique-truncated')).not.toBeInTheDocument()
   })

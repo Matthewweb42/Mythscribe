@@ -185,6 +185,7 @@ const turn = (role: ChatMessage['role'], content: string, mode: ChatMode | null)
   proposalId: null,
   model: null,
   costUsd: null,
+  usage: null,
   mode,
   query: null
 })
@@ -449,6 +450,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
               content: result.text,
               model: result.model,
               costUsd: result.costUsd,
+              usage: result.usage,
               proposalId: result.proposalId
             }
           ]
@@ -557,6 +559,7 @@ async function sendQuery(id: string, input: Input<'ai:query'>): Promise<void> {
             content: result.answer,
             model: result.model,
             costUsd: result.costUsd,
+            usage: result.usage,
             proposalId: result.proposalId,
             query: {
               found: result.found,

@@ -19,7 +19,14 @@ const NO_KEY: AiStatus = {
 }
 const WITH_KEY: AiStatus = { ...NO_KEY, hasKey: true, hint: 'sk-…abcd' }
 const ZERO = { requests: 0, tokens: 0, costUsd: 0 }
-const USAGE: AiUsageSummary = { today: ZERO, total: ZERO, byFeature: [], dailyCapUsd: 2 }
+const USAGE: AiUsageSummary = {
+  today: ZERO,
+  session: ZERO,
+  total: ZERO,
+  byFeature: [],
+  recent: [],
+  dailyCapUsd: 2
+}
 
 interface Fake {
   client: IpcClient

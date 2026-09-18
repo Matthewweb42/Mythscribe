@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Editor } from '@tiptap/core'
+import type { AiUsage } from '@shared/ai'
 import type { AiRewriteResult, EventPayload, Input } from '@shared/ipc/contract'
 import { REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '@shared/rewrite'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
@@ -24,6 +25,8 @@ export interface RewriteOutcome {
   proposalId: string
   model: string
   costUsd: number
+  /** The tokens the request spent, for the cost line (F-5.9). */
+  usage: AiUsage
   cached: boolean
 }
 
@@ -133,6 +136,7 @@ function settle(requestId: string, result: AiRewriteResult): void {
         proposalId: result.proposalId,
         model: result.model,
         costUsd: result.costUsd,
+        usage: result.usage,
         cached: result.cached
       }
     }

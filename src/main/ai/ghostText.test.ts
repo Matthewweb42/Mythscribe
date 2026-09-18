@@ -127,6 +127,7 @@ beforeEach(() => {
       put: (entry) => void cache.set(entry.key, { text: entry.text, usage: entry.usage })
     },
     dailyCap: { get: () => ({ ...defaultAiUsageState(), spentDate: dayOf(NOW) }), spend: () => {} },
+    session: { spend: () => {} },
     now: () => NOW,
     price: priceFor
   }

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Editor } from '@tiptap/core'
+import type { AiUsage } from '@shared/ai'
 import type { CritiqueNote } from '@shared/critique'
 import type { AiCritiqueResult, Input } from '@shared/ipc/contract'
 import type { SettledStatus } from '@shared/proposal'
@@ -24,6 +25,8 @@ export interface CritiqueOutcome {
   proposalId: string
   model: string
   costUsd: number
+  /** The tokens the request spent, for the cost line (F-5.9). */
+  usage: AiUsage
   cached: boolean
   /** The scene was head-truncated before it was sent. */
   truncated: boolean
@@ -117,6 +120,7 @@ function settle(requestId: string, result: AiCritiqueResult): void {
         proposalId: result.proposalId,
         model: result.model,
         costUsd: result.costUsd,
+        usage: result.usage,
         cached: result.cached,
         truncated: result.truncated,
         dropped: result.dropped

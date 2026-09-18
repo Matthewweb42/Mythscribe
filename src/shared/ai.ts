@@ -285,15 +285,37 @@ export const DailyCapUsd = z.number().min(DAILY_CAP_MIN).max(DAILY_CAP_MAX)
 const UsageTotals = z.object({ requests: z.number(), tokens: z.number(), costUsd: z.number() })
 export type UsageTotals = z.infer<typeof UsageTotals>
 
+/** One request as the Usage block lists it (F-5.9); the newest rows of the project's ledger. */
+export const AiUsageRecent = z.object({
+  id: z.string(),
+  /** ISO timestamp, as the ledger stored it. */
+  at: z.string(),
+  feature: z.string(),
+  model: z.string(),
+  promptTokens: z.number().int().nonnegative(),
+  completionTokens: z.number().int().nonnegative(),
+  costUsd: z.number(),
+  cached: z.boolean()
+})
+export type AiUsageRecent = z.infer<typeof AiUsageRecent>
+
+/** How many of the newest ledger rows `ai:usageSummary` carries. */
+export const USAGE_RECENT_LIMIT = 10
+
 /**
- * What the AI tab's Usage block shows (F-5.14). `today` and `dailyCapUsd` are app-wide (every
- * project opened today spends against one cap); `total` and `byFeature` are the open project's
- * ledger since it was created.
+ * What the AI tab's Usage block shows (F-5.14, extended by F-5.9). `today`, `session` and
+ * `dailyCapUsd` are app-wide (every project opened today spends against one cap, and the
+ * session tally spans every project this run opened); `total`, `byFeature` and `recent` are
+ * the open project's ledger since it was created.
  */
 export const AiUsageSummary = z.object({
   today: UsageTotals,
+  /** This run of the app, across every project (F-5.9); zeroed when the app restarts. */
+  session: UsageTotals,
   total: UsageTotals,
   byFeature: z.array(UsageTotals.extend({ feature: z.string() })),
+  /** The newest `USAGE_RECENT_LIMIT` requests of this project, newest first. */
+  recent: z.array(AiUsageRecent),
   dailyCapUsd: DailyCapUsd
 })
 export type AiUsageSummary = z.infer<typeof AiUsageSummary>

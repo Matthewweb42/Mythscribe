@@ -251,6 +251,7 @@ describe('getConversations / setConversations (F-5.4)', () => {
         proposalId: null,
         model: null,
         costUsd: null,
+        usage: null,
         mode: null,
         query: null
       }

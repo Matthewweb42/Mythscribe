@@ -32,13 +32,43 @@ const NO_KEY: AiStatus = {
 }
 const WITH_KEY: AiStatus = { ...NO_KEY, hasKey: true, hint: 'sk-…abcd' }
 const ZERO = { requests: 0, tokens: 0, costUsd: 0 }
-const NO_USAGE: AiUsageSummary = { today: ZERO, total: ZERO, byFeature: [], dailyCapUsd: 2 }
+const NO_USAGE: AiUsageSummary = {
+  today: ZERO,
+  session: ZERO,
+  total: ZERO,
+  byFeature: [],
+  recent: [],
+  dailyCapUsd: 2
+}
 const SOME_USAGE: AiUsageSummary = {
   today: { requests: 7, tokens: 2_100, costUsd: 0.0123 },
+  session: { requests: 3, tokens: 900, costUsd: 0.0456 },
   total: { requests: 12, tokens: 15_400, costUsd: 0.75 },
   byFeature: [
     { feature: 'ghostText', requests: 10, tokens: 1_400, costUsd: 0.002 },
     { feature: 'tags', requests: 2, tokens: 14_000, costUsd: 0.748 }
+  ],
+  recent: [
+    {
+      id: 'u2',
+      at: new Date(2026, 8, 17, 14, 5).toISOString(),
+      feature: 'tags',
+      model: 'gpt-5.4-mini',
+      promptTokens: 1_200,
+      completionTokens: 80,
+      costUsd: 0.0012,
+      cached: false
+    },
+    {
+      id: 'u1',
+      at: new Date(2026, 8, 17, 9, 30).toISOString(),
+      feature: 'ghostText',
+      model: 'gpt-5.4-mini',
+      promptTokens: 0,
+      completionTokens: 0,
+      costUsd: 0,
+      cached: true
+    }
   ],
   dailyCapUsd: 3.5
 }
@@ -371,7 +401,12 @@ describe('AiSettingsTab usage (F-5.14)', () => {
     expect(capField()).toHaveValue(2)
     expect(capField()).toHaveAccessibleDescription(/Every project spends against this cap/)
     expect(screen.getByText('Spent today, all projects')).toBeInTheDocument()
+    expect(screen.getByText('This session, all projects')).toBeInTheDocument()
+    expect(screen.getByTestId('ai-usage-session')).toHaveTextContent(
+      '$0.00 · 0 requests · 0 tokens'
+    )
     expect(screen.getByText('This project, all time')).toBeInTheDocument()
+    expect(screen.queryByRole('table', { name: 'Recent requests' })).not.toBeInTheDocument()
   })
 
   it('shows the day, the project totals, and the per-feature table with labels', async () => {
@@ -387,6 +422,20 @@ describe('AiSettingsTab usage (F-5.14)', () => {
       'Tag suggestions214,000$0.75'
     ])
     expect(capField()).toHaveValue(3.5)
+  })
+
+  it('shows the session tally and the recent requests newest first (F-5.9)', async () => {
+    await open(NO_KEY, SOME_USAGE)
+    expect(screen.getByTestId('ai-usage-session')).toHaveTextContent(
+      '$0.05 · 3 requests · 900 tokens'
+    )
+    const table = screen.getByRole('table', { name: 'Recent requests' })
+    expect(screen.getByTestId('ai-usage-recent')).toBe(table)
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows.map((row) => row.textContent)).toEqual([
+      '14:05Tag suggestionsgpt-5.4-mini1,200 / 80$0.0012',
+      '09:30Ghost textgpt-5.4-mini0 / 0$0.0000 · cached'
+    ])
   })
 
   it('commits a new cap on blur through ai:setDailyCap and shows the answered value', async () => {

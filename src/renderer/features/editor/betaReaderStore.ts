@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Editor } from '@tiptap/core'
+import type { AiUsage } from '@shared/ai'
 import type { BetaReaderItem, BetaReaderScene } from '@shared/betaReader'
 import type { AiBetaReaderResult, Input } from '@shared/ipc/contract'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
@@ -21,6 +22,8 @@ export interface BetaReaderOutcome {
   proposalId: string
   model: string
   costUsd: number
+  /** The tokens the request spent, for the cost line (F-5.9). */
+  usage: AiUsage
   cached: boolean
   /** The current scene was head-truncated before it was sent. */
   truncated: boolean
@@ -108,6 +111,7 @@ function settle(requestId: string, result: AiBetaReaderResult): void {
         proposalId: result.proposalId,
         model: result.model,
         costUsd: result.costUsd,
+        usage: result.usage,
         cached: result.cached,
         truncated: result.truncated,
         skipped: result.skipped,

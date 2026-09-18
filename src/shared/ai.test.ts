@@ -93,7 +93,14 @@ describe('budgets', () => {
 
   it('AiUsageSummary refuses a cap outside the bounds', () => {
     const zero = { requests: 0, tokens: 0, costUsd: 0 }
-    const summary = { today: zero, total: zero, byFeature: [], dailyCapUsd: 2 }
+    const summary = {
+      today: zero,
+      session: zero,
+      total: zero,
+      byFeature: [],
+      recent: [],
+      dailyCapUsd: 2
+    }
     expect(AiUsageSummary.safeParse(summary).success).toBe(true)
     expect(AiUsageSummary.safeParse({ ...summary, dailyCapUsd: 501 }).success).toBe(false)
   })

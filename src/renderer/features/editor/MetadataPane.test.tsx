@@ -371,7 +371,9 @@ describe('MetadataPane brief (F-14.3)', () => {
     expect(group).toHaveTextContent('Goal: Mara wants to cross the river tonight.')
     // The empty line reads as a dash rather than nothing at all.
     expect(group).toHaveTextContent('Reader knows after: —')
-    expect(screen.getByTestId('brief-draft-cost')).toHaveTextContent('gpt-5.4-mini · $0.0012')
+    expect(screen.getByTestId('brief-draft-cost')).toHaveTextContent(
+      'gpt-5.4-mini · $0.0012 · 400 in · 60 out'
+    )
     // The draft opens the disclosure, so the fields it would fill are in view.
     expect(briefToggle()).toHaveAttribute('aria-expanded', 'true')
     expect(briefLines()).toEqual(['', '', '', '', ''])

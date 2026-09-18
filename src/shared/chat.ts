@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AiUsage } from './ai'
 import { QueryTurn } from './query'
 import { toTagName } from './tags'
 
@@ -59,6 +60,8 @@ export const ChatMessage = z.object({
   proposalId: z.string().nullable(),
   model: z.string().nullable(),
   costUsd: z.number().nullable(),
+  /** The tokens the turn spent (F-5.9); null for the author's and for rows written before it. */
+  usage: AiUsage.nullable().default(null),
   /** The mode the turn was made in; an Author turn's text went to the editor, not the chat. */
   mode: ChatMode.nullable(),
   /** A Query turn's citations and flags (F-5.7); null for every other turn and for rows written before it. */

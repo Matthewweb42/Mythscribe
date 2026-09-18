@@ -848,10 +848,16 @@ test('create, close, reopen a project on disk', async () => {
   await dailyCap.fill('5')
   await dailyCap.blur()
   await expect(dailyCap).toHaveValue('5.00')
+  await expect(settingsDialog.getByTestId('ai-usage-session')).toHaveText(
+    '$0.00 · 0 requests · 0 tokens'
+  )
+  await expect(settingsDialog.getByTestId('ai-usage-recent')).toHaveCount(0)
   expect(await usageSummary()).toEqual({
     today: { requests: 0, tokens: 0, costUsd: 0 },
+    session: { requests: 0, tokens: 0, costUsd: 0 },
     total: { requests: 0, tokens: 0, costUsd: 0 },
     byFeature: [],
+    recent: [],
     dailyCapUsd: 5
   })
   expect(
@@ -1272,7 +1278,10 @@ test('create, close, reopen a project on disk', async () => {
   const suggestedList = tagBar.getByRole('list', { name: 'Suggested tags' })
   await expect(suggestedList.getByRole('listitem')).toHaveText(['protagonist'])
   await expect(recommendResult).toHaveCount(0)
-  await expect(tagBar.getByTestId('tag-recommend-cost')).toHaveText('gpt-5.4-mini · $0.0001')
+  // F-5.9: the line names the model, the cost, and the tokens the request spent.
+  await expect(tagBar.getByTestId('tag-recommend-cost')).toHaveText(
+    'gpt-5.4-mini · $0.0001 · 400 in · 12 out'
+  )
   expect(openAiRequests.at(-1)).toEqual({
     url: '/v1/chat/completions',
     auth: `Bearer ${ACCEPTED_KEY}`
@@ -1311,6 +1320,12 @@ test('create, close, reopen a project on disk', async () => {
   expect(spent.total).toMatchObject({ requests: 2, tokens: 824 })
   expect(spent.total.costUsd).toBeGreaterThan(0)
   expect(spent.byFeature).toEqual([{ feature: 'tags', ...spent.total }])
+  // F-5.9: this run of the app counted the same requests, and the newest is the tag one.
+  expect(spent.session.requests).toBeGreaterThanOrEqual(1)
+  expect(spent.recent[0]).toMatchObject({ feature: 'tags', cached: false })
+  expect(
+    (spent.recent[0]?.promptTokens ?? 0) + (spent.recent[0]?.completionTokens ?? 0)
+  ).toBeGreaterThan(0)
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   await expect(usageTotal).toHaveText('<$0.01 · 2 requests · 824 tokens')
@@ -1946,6 +1961,8 @@ test('create, close, reopen a project on disk', async () => {
   await expect(turns.nth(1)).toHaveAttribute('data-role', 'assistant')
   await expect(turns.nth(1)).toContainText(CHAT_ANSWER)
   await expect(turns.nth(1).getByTestId('chat-turn-cost')).toContainText('gpt-5.4-mini')
+  // F-5.9: the cost line carries the tokens the turn spent, not the model and the cost alone.
+  await expect(turns.nth(1).getByTestId('chat-turn-cost')).toContainText(' in · ')
   expect(openAiChatBodies).toHaveLength(chatRequestsBefore + 1)
   expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe('Why is Mara on the ridge?')
   expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain('Mara waited on the ridge')

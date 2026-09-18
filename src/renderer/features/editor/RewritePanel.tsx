@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import type { Editor } from '@tiptap/core'
 import { normalizeProposalNote, PROPOSAL_NOTE_MAX } from '@shared/proposal'
 import { diffWords } from '@shared/rewrite'
-import { formatRequestCost } from '@renderer/features/ai/usageFormat'
+import { describeRequest } from '@renderer/features/ai/usageFormat'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { useRewriteStore, type RewriteSession } from './rewriteStore'
 
@@ -165,7 +165,7 @@ function Body({
           </button>
         )}
         <span data-testid="rewrite-cost" className="text-xs text-fg-subtle">
-          {`${result.model} · ${formatRequestCost(result.costUsd)}${result.cached ? ' · cached' : ''}`}
+          {describeRequest(result)}
         </span>
         {invalid ? (
           <span data-testid="rewrite-invalid" className="text-xs text-warning">

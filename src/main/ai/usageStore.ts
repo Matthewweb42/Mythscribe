@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { RunResult } from 'better-sqlite3'
-import { asc, count, sql } from 'drizzle-orm'
+import { asc, count, desc, sql } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
-import type { AiUsageSummary, UsageTotals } from '@shared/ai'
+import type { AiUsageRecent, AiUsageSummary, UsageTotals } from '@shared/ai'
 import type * as schema from '../db/schema'
 import { aiUsage, type AiUsageInsert, type AiUsageRow } from '../db/schema'
 
@@ -28,6 +28,29 @@ export function listUsage(db: AiDb): AiUsageRow[] {
     .select()
     .from(aiUsage)
     .orderBy(asc(aiUsage.at), asc(sql`rowid`))
+    .all()
+}
+
+/**
+ * The newest `limit` rows, newest first (insertion order breaks a tie), as the Usage block's
+ * "Recent requests" table shows them (F-5.9). A cache hit is a row like any other: zero tokens
+ * at zero cost, flagged `cached`.
+ */
+export function recentUsage(db: AiDb, limit: number): AiUsageRecent[] {
+  return db
+    .select({
+      id: aiUsage.id,
+      at: aiUsage.at,
+      feature: aiUsage.feature,
+      model: aiUsage.model,
+      promptTokens: aiUsage.promptTokens,
+      completionTokens: aiUsage.completionTokens,
+      costUsd: aiUsage.costUsd,
+      cached: aiUsage.cached
+    })
+    .from(aiUsage)
+    .orderBy(desc(aiUsage.at), desc(sql`rowid`))
+    .limit(limit)
     .all()
 }
 

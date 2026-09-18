@@ -24,6 +24,7 @@ import {
   type AiRequestDeps,
   type AiRequestInput
 } from './request'
+import { createSessionUsage, type SessionUsage } from './sessionUsage'
 import { listUsage, type UsageEntry } from './usageStore'
 
 const NOW = new Date(2026, 8, 12, 10, 0, 0)
@@ -51,6 +52,8 @@ interface Fakes {
   cache: Map<string, CacheEntry>
   day: AiUsageState
   spends: { costUsd: number; tokens: number }[]
+  /** The session tally the deps spend against (F-5.9). */
+  session: SessionUsage
   provider: Provider | null
   /** What `stream` yields, in order; a thrown value in the list is thrown from that pull. */
   chunks: (StreamChunk | Error)[]
@@ -79,6 +82,7 @@ function fakes(over: Partial<AiUsageState> = {}): Fakes {
     cache: new Map(),
     day: { ...defaultAiUsageState(), spentDate: TODAY, ...over },
     spends: [],
+    session: createSessionUsage(),
     chunks: [{ delta: '{"tags":' }, { delta: '["dark-forest"]}' }],
     stream,
     provider: {
@@ -110,6 +114,7 @@ function fakes(over: Partial<AiUsageState> = {}): Fakes {
           }
         }
       },
+      session: { spend: (amount) => f.session.spend(amount) },
       now: () => NOW,
       price: priceFor
     }
@@ -176,6 +181,7 @@ describe('runAiRequest (F-5.14)', () => {
       }
     ])
     expect(f.spends).toEqual([{ costUsd: expected.costUsd, tokens: 50 }])
+    expect(f.session.totals()).toEqual({ requests: 1, tokens: 50, costUsd: expected.costUsd })
   })
 
   it('forwards the temperature to the provider and leaves it out when absent (F-5.3)', async () => {
@@ -245,6 +251,8 @@ describe('runAiRequest (F-5.14)', () => {
     expect(f.spends[1]).toEqual({ costUsd: 0, tokens: 0 })
     expect(f.day.requestsToday).toBe(2)
     expect(f.day.spentTodayUsd).toBe(first.costUsd)
+    // The session counts the cache hit as a free request, exactly as the day does (F-5.9).
+    expect(f.session.totals()).toEqual({ requests: 2, tokens: 50, costUsd: first.costUsd })
   })
 
   it('misses the cache when the context, the messages, the model, the version, or the mode differ', async () => {
@@ -267,6 +275,7 @@ describe('runAiRequest (F-5.14)', () => {
     expect(f.ledger).toEqual([])
     expect(f.cache.size).toBe(0)
     expect(f.spends).toEqual([])
+    expect(f.session.totals()).toEqual({ requests: 0, tokens: 0, costUsd: 0 })
   })
 
   it('logs an unknown model at cost 0 and reports it as unpriced', async () => {
@@ -522,6 +531,7 @@ describe('buildAiRequestDeps (the production binding)', () => {
       db: session.connection.orm,
       providers: { get: () => f.provider },
       appState,
+      session: f.session,
       now: () => NOW
     })
     const result = await runAiRequest(deps, input)
@@ -560,6 +570,7 @@ describe('buildAiRequestDeps (the production binding)', () => {
       db: session.connection.orm,
       providers: { get: () => f.provider },
       appState,
+      session: f.session,
       now: () => NOW
     })
     await expect(runAiRequest(deps, input)).resolves.toMatchObject({ cached: false })

@@ -6,6 +6,7 @@ import {
   testConnectionFailure,
   type AiStatus,
   type AiTestConnectionResult,
+  USAGE_RECENT_LIMIT,
   type AiUsageSummary
 } from '@shared/ai'
 import { isFeatureAllowed } from '@shared/aiSettings'
@@ -43,9 +44,10 @@ import { runQuery } from '../ai/query'
 import { recommendTags } from '../ai/recommendTags'
 import { runRewrite } from '../ai/rewrite'
 import type { AiProviderRegistry } from '../ai/registry'
-import { buildAiRequestDeps } from '../ai/request'
+import { buildAiRequestDeps, type AiRequestDeps } from '../ai/request'
+import { createSessionUsage } from '../ai/sessionUsage'
 import { staleSummaryNodeIds, summarizeScene, summarySource } from '../ai/summarize'
-import { ledgerSummary } from '../ai/usageStore'
+import { ledgerSummary, recentUsage, type AiDb } from '../ai/usageStore'
 import { createIndexQueue } from '../jobs/indexQueue'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
@@ -130,6 +132,14 @@ export function registerHandlers({
   onCloseCancelled
 }: HandlerDeps): void {
   /**
+   * F-5.9: one session tally for this run of the app, shared by every request these handlers
+   * make, so "this session, all projects" counts each one exactly once.
+   */
+  const sessionUsage = createSessionUsage()
+  const requestDeps = (db: AiDb): AiRequestDeps =>
+    buildAiRequestDeps({ db, providers: ai, appState, session: sessionUsage })
+
+  /**
    * F-5.13: the background index queue, which took over the F-5.6 summary scheduler. One queue
    * for the session; it reads the open project through the manager at run time, never a
    * captured handle, and `manager.onChange` clears it and loads the next project's jobs, so a
@@ -141,7 +151,7 @@ export function registerHandlers({
     db: () => (manager.current() === null ? null : manager.require().connection.orm),
     run: async (job, requestId) => {
       const db = manager.require().connection.orm
-      const result = await summarizeScene(db, buildAiRequestDeps({ db, providers: ai, appState }), {
+      const result = await summarizeScene(db, requestDeps(db), {
         nodeId: job.nodeId,
         requestId
       })
@@ -409,14 +419,18 @@ export function registerHandlers({
   })
 
   // F-5.14: today's tally and the cap are app-wide (rolled to the current day on read, never
-  // written here); the totals are the open project's ledger.
+  // written here); the totals are the open project's ledger. F-5.9 adds the session tally
+  // (this run of the app, every project) and the newest requests of this project.
   const usageSummary = (): AiUsageSummary => {
-    const { total, byFeature } = ledgerSummary(manager.require().connection.orm)
+    const db = manager.require().connection.orm
+    const { total, byFeature } = ledgerSummary(db)
     const day = rollIfNewDay(appState.get().aiUsage, dayOf(new Date()))
     return {
       today: { requests: day.requestsToday, tokens: day.tokensToday, costUsd: day.spentTodayUsd },
+      session: sessionUsage.totals(),
       total,
       byFeature,
+      recent: recentUsage(db, USAGE_RECENT_LIMIT),
       dailyCapUsd: day.dailyCapUsd
     }
   }
@@ -437,7 +451,7 @@ export function registerHandlers({
     async ({ nodeId, note, regeneratedFrom, requestId }): Promise<AiRecommendTagsResult> => {
       try {
         const db = manager.require().connection.orm
-        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const deps = requestDeps(db)
         const result = await recommendTags(db, deps, nodeId, { note, regeneratedFrom, requestId })
         const proposal = createProposal(db, {
           feature: 'tags',
@@ -468,7 +482,7 @@ export function registerHandlers({
     async ({ nodeId, before, after, requestId }): Promise<AiGhostTextResult> => {
       try {
         const db = manager.require().connection.orm
-        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const deps = requestDeps(db)
         const result = await generateGhostText(db, deps, { nodeId, before, after, requestId })
         const { text, usage, costUsd, cached, model, flagged, violation } = result
         // F-14.5: a shown suggestion is a proposal; "no suggestion" has nothing to settle.
@@ -518,7 +532,7 @@ export function registerHandlers({
     async ({ nodeId, mode, paragraphs, message, history, requestId }): Promise<AiChatResult> => {
       try {
         const db = manager.require().connection.orm
-        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const deps = requestDeps(db)
         const result = await runChat(
           db,
           deps,
@@ -579,7 +593,7 @@ export function registerHandlers({
     }): Promise<AiRewriteResult> => {
       try {
         const db = manager.require().connection.orm
-        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const deps = requestDeps(db)
         const result = await runRewrite(
           db,
           deps,
@@ -633,7 +647,7 @@ export function registerHandlers({
     async ({ nodeId, requestId, note, regeneratedFrom }): Promise<AiCritiqueResult> => {
       try {
         const db = manager.require().connection.orm
-        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const deps = requestDeps(db)
         const result = await runCritique(db, deps, { nodeId, note, regeneratedFrom, requestId })
         const { notes, usage, costUsd, cached, model } = result
         const flaggedNote = notes.find((entry) => entry.flagged)
@@ -681,7 +695,7 @@ export function registerHandlers({
     async ({ nodeId, requestId, note, regeneratedFrom }): Promise<AiBetaReaderResult> => {
       try {
         const db = manager.require().connection.orm
-        const deps = buildAiRequestDeps({ db, providers: ai, appState })
+        const deps = requestDeps(db)
         const result = await runBetaReader(db, deps, { nodeId, note, regeneratedFrom, requestId })
         const { items, usage, costUsd, cached, model } = result
         const proposal = createProposal(db, {
@@ -731,7 +745,7 @@ export function registerHandlers({
   register('ai:query', async ({ nodeId, message, history, requestId }): Promise<AiQueryResult> => {
     try {
       const db = manager.require().connection.orm
-      const deps = buildAiRequestDeps({ db, providers: ai, appState })
+      const deps = requestDeps(db)
       const result = await runQuery(db, deps, { nodeId, message, history, requestId })
       const { answer, found, uncited, citations, also, dropped, usage, costUsd, cached, model } =
         result
@@ -776,7 +790,7 @@ export function registerHandlers({
   register('ai:draftBrief', async ({ nodeId, requestId }): Promise<AiDraftBriefResult> => {
     try {
       const db = manager.require().connection.orm
-      const deps = buildAiRequestDeps({ db, providers: ai, appState })
+      const deps = requestDeps(db)
       const result = await draftBrief(db, deps, { nodeId, requestId })
       const { brief, usage, costUsd, cached, model } = result
       const proposal = createProposal(db, {

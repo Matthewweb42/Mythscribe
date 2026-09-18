@@ -144,6 +144,7 @@ beforeEach(() => {
       get: () => ({ ...defaultAiUsageState(), dailyCapUsd, spentDate: dayOf(NOW) }),
       spend: () => {}
     },
+    session: { spend: () => {} },
     now: () => NOW,
     price: priceFor
   }

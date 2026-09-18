@@ -194,7 +194,9 @@ describe('BetaReaderPanel (F-14.11)', () => {
     expect(items()).toHaveLength(3)
     expect(items()[0]).toHaveAttribute('data-category', 'knows')
     expect(items()[0]).toHaveTextContent('The reader knows he is stranded.')
-    expect(screen.getByTestId('beta-reader-cost')).toHaveTextContent('gpt-5.4 · $0.0300 · cached')
+    expect(screen.getByTestId('beta-reader-cost')).toHaveTextContent(
+      'gpt-5.4 · $0.0300 · 1,400 in · 180 out · cached'
+    )
     expect(screen.getByTestId('beta-reader-dropped')).toHaveTextContent('2 uncited items dropped')
     expect(screen.queryByTestId('beta-reader-truncated')).not.toBeInTheDocument()
   })

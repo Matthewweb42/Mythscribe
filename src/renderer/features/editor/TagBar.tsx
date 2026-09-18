@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Loader2, Plus, RefreshCw, Sparkles, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { TAGS_MIN_CHARS } from '@shared/ai'
+import { TAGS_MIN_CHARS, type AiUsage } from '@shared/ai'
 import { docToText } from '@shared/docText'
 import { countInlineTags } from '@shared/inlineTags'
 import type { Tag } from '@shared/ipc/contract'
@@ -9,7 +9,7 @@ import { TAG_BAR_MAX_FRACTION, TAG_BAR_MIN_HEIGHT, TAG_BAR_SPLIT_LIMITS } from '
 import { PROPOSAL_NOTE_MAX, normalizeProposalNote } from '@shared/proposal'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
-import { formatRequestCost } from '@renderer/features/ai/usageFormat'
+import { describeRequest } from '@renderer/features/ai/usageFormat'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import {
@@ -52,6 +52,8 @@ type RecommendState =
       acceptedCount: number
       model: string
       costUsd: number
+      /** The tokens the request spent, for the cost line (F-5.9). */
+      usage: AiUsage
       cached: boolean
     }
   | { nodeId: string; status: 'error'; message: string; nextStep: string }
@@ -176,6 +178,7 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
             acceptedCount: 0,
             model: result.model,
             costUsd: result.costUsd,
+            usage: result.usage,
             cached: result.cached
           })
         } else if (result.code === 'CANCELLED') {
@@ -400,9 +403,7 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
                       </ul>
                     )}
                     <p className="mt-1 mb-0 flex items-center gap-2 text-xs text-fg-subtle">
-                      <span data-testid="tag-recommend-cost">
-                        {`${mine.model} · ${formatRequestCost(mine.costUsd)}${mine.cached ? ' · cached' : ''}`}
-                      </span>
+                      <span data-testid="tag-recommend-cost">{describeRequest(mine)}</span>
                       {mine.suggestions.length > 0 ? (
                         <button type="button" onClick={acceptAll} className={LINK_BUTTON}>
                           Accept all

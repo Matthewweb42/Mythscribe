@@ -1,5 +1,5 @@
 import { BRIEF_SCENE_CHAR_BUDGET, SCENE_BRIEF_FIELDS } from '@shared/sceneMeta'
-import { formatRequestCost } from '@renderer/features/ai/usageFormat'
+import { describeRequest } from '@renderer/features/ai/usageFormat'
 import type { BriefDraft } from './briefDraft'
 
 const LINK_BUTTON = 'rounded px-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg'
@@ -58,9 +58,7 @@ export function BriefDraftPanel({ draft }: { draft: BriefDraft }): React.JSX.Ele
         </p>
       ) : null}
       <p className="mt-1 mb-0 flex flex-wrap items-center gap-2 text-xs text-fg-subtle">
-        <span data-testid="brief-draft-cost">
-          {`${state.model} · ${formatRequestCost(state.costUsd)}${state.cached ? ' · cached' : ''}`}
-        </span>
+        <span data-testid="brief-draft-cost">{describeRequest(state)}</span>
         <button type="button" onClick={draft.accept} className={LINK_BUTTON}>
           Use draft
         </button>

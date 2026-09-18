@@ -24,7 +24,7 @@ import { WritingPresetsSection } from './WritingPresetsSection'
 import { useAiSettingsStore } from './aiSettingsStore'
 import { useAiStore } from './aiStore'
 import { useIndexingStore } from './indexingStore'
-import { describeTotals, formatCount, formatUsd } from './usageFormat'
+import { describeTotals, formatCount, formatRequestCost, formatUsd } from './usageFormat'
 
 const FIELD = 'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 const BUTTON =
@@ -262,10 +262,17 @@ export function AiSettingsTab(): React.JSX.Element {
   )
 }
 
+/** The local clock time of a ledger row's ISO timestamp, the Recent requests Time column. */
+const clockTime = (iso: string): string => {
+  const at = new Date(iso)
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+}
+
 /**
- * The Usage block (F-5.14): today's spend across every project (the day and the cap are
- * app-wide), this project's ledger since it was created with a per-feature breakdown, and the
- * daily cap field. Nothing renders until the summary has loaded.
+ * The Usage block (F-5.14, extended by F-5.9): today's spend across every project (the day and
+ * the cap are app-wide), this run of the app across every project, this project's ledger since
+ * it was created with a per-feature breakdown and the newest requests one by one, and the daily
+ * cap field. Nothing renders until the summary has loaded.
  */
 function UsageBlock({
   usage,
@@ -285,6 +292,10 @@ function UsageBlock({
         <span data-testid="ai-usage-today" className="font-medium">
           {formatUsd(usage.today.costUsd)}
         </span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span>This session, all projects</span>
+        <span data-testid="ai-usage-session">{describeTotals(usage.session)}</span>
       </div>
       <div className="flex items-center justify-between gap-3">
         <span>This project, all time</span>
@@ -324,6 +335,50 @@ function UsageBlock({
       ) : (
         <p className="m-0 text-xs text-fg-muted">No AI requests in this project yet.</p>
       )}
+      {usage.recent.length > 0 ? (
+        <table
+          aria-label="Recent requests"
+          data-testid="ai-usage-recent"
+          className="w-full text-xs"
+        >
+          <thead className="text-fg-muted">
+            <tr>
+              <th scope="col" className="text-left font-normal">
+                Time
+              </th>
+              <th scope="col" className="text-left font-normal">
+                Feature
+              </th>
+              <th scope="col" className="text-left font-normal">
+                Model
+              </th>
+              <th scope="col" className="text-right font-normal">
+                Tokens
+              </th>
+              <th scope="col" className="text-right font-normal">
+                Cost
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {usage.recent.map((row) => (
+              <tr key={row.id}>
+                <th scope="row" className="text-left font-normal tabular-nums">
+                  {clockTime(row.at)}
+                </th>
+                <td className="text-left">{featureLabel(row.feature)}</td>
+                <td className="text-left">{row.model}</td>
+                <td className="text-right tabular-nums">
+                  {`${formatCount(row.promptTokens)} / ${formatCount(row.completionTokens)}`}
+                </td>
+                <td className="text-right tabular-nums">
+                  {`${formatRequestCost(row.costUsd)}${row.cached ? ' · cached' : ''}`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
       <DailyCapField value={usage.dailyCapUsd} disabled={disabled} onCommit={onCommitCap} />
     </fieldset>
   )

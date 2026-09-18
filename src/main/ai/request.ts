@@ -20,6 +20,7 @@ import {
   type Provider
 } from './providers/types'
 import type { PromptVersion } from './prompts/catalogue'
+import type { SessionUsage } from './sessionUsage'
 import { insertUsage, type AiDb, type UsageEntry } from './usageStore'
 
 /**
@@ -83,6 +84,8 @@ export interface AiRequestDeps {
     get(): AiUsageState
     spend(amount: { costUsd: number; tokens: number }): void
   }
+  /** This run of the app, across every project it opened (F-5.9). */
+  session: { spend(amount: { costUsd: number; tokens: number }): void }
   now: () => Date
   price: typeof priceFor
 }
@@ -145,7 +148,7 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
   }
 }
 
-/** A cache hit: a zero-cost ledger row, a free request on the day's tally, the stored answer. */
+/** A cache hit: a zero-cost ledger row, a free request on both tallies, the stored answer. */
 function serveCached(
   deps: AiRequestDeps,
   prepared: PreparedRequest,
@@ -161,6 +164,7 @@ function serveCached(
     cached: true
   })
   deps.dailyCap.spend({ costUsd: 0, tokens: 0 })
+  deps.session.spend({ costUsd: 0, tokens: 0 })
   return {
     text: hit.text,
     model: prepared.model,
@@ -171,7 +175,7 @@ function serveCached(
   }
 }
 
-/** The post-steps after the provider answered: price, ledger row, cache row, the day's tally. */
+/** The post-steps after the provider answered: price, ledger row, cache row, the day's and the session's tallies. */
 function record(
   deps: AiRequestDeps,
   input: AiRequestInput,
@@ -201,6 +205,7 @@ function record(
     createdAt: at
   })
   deps.dailyCap.spend({ costUsd, tokens })
+  deps.session.spend({ costUsd, tokens })
   return { text: answer.text, model, usage: answer.usage, costUsd, cached: false, priced }
 }
 
@@ -317,6 +322,8 @@ export function buildAiRequestDeps(bind: {
   db: AiDb
   providers: { get(): Provider | null }
   appState: AppStateStore
+  /** The one tally for this run of the app; every call site must pass the same object (F-5.9). */
+  session: SessionUsage
   now?: () => Date
 }): AiRequestDeps {
   const now = bind.now ?? ((): Date => new Date())
@@ -330,6 +337,7 @@ export function buildAiRequestDeps(bind: {
         bind.appState.update((s) => ({ ...s, aiUsage: spend(s.aiUsage, amount, dayOf(now())) }))
       }
     },
+    session: bind.session,
     now,
     price: priceFor
   }

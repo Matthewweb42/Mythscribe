@@ -13,7 +13,7 @@ import {
   type Tag
 } from '@shared/ipc/contract'
 import { z } from 'zod'
-import { DEFAULT_MODELS } from '@shared/ai'
+import { DEFAULT_MODELS, USAGE_RECENT_LIMIT } from '@shared/ai'
 import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
 import {
   AUTHOR_RULES_TEXT_MAX,
@@ -1011,6 +1011,15 @@ describe('ai:chat (F-5.4)', () => {
     const summary = await invoke('ai:usageSummary', undefined)
     expect(summary.total.requests).toBe(1)
     expect(summary.byFeature.map((f) => f.feature)).toEqual(['chat'])
+    // F-5.9: the session counted the same request, and it is the newest of the ledger.
+    expect(summary.session).toMatchObject({ requests: 1, tokens: 98 })
+    expect(summary.recent[0]).toMatchObject({
+      feature: 'chat',
+      model: 'gpt-fake',
+      promptTokens: 90,
+      completionTokens: 8,
+      cached: false
+    })
   })
 
   it('Agent mode: no deltas, the post-processed draft, a proposal carrying the fidelity flag', async () => {
@@ -2863,8 +2872,10 @@ describe('ai:usageSummary / ai:setDailyCap (F-5.14)', () => {
     await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
     expect(await invoke('ai:usageSummary', undefined)).toEqual({
       today: zero,
+      session: zero,
       total: zero,
       byFeature: [],
+      recent: [],
       dailyCapUsd: 2
     })
   })
@@ -2889,6 +2900,39 @@ describe('ai:usageSummary / ai:setDailyCap (F-5.14)', () => {
     expect(summary.total.costUsd).toBeCloseTo(0.003, 8)
     // The day is app-wide: nothing in this project's ledger moves it.
     expect(summary.today).toEqual(zero)
+    // The session tally counts what this run of the app spent, not what the ledger holds (F-5.9).
+    expect(summary.session).toEqual(zero)
+    expect(summary.recent.map((r) => r.feature)).toEqual(['summary', 'tags'])
+    expect(summary.recent[0]).toMatchObject({
+      feature: 'summary',
+      model: 'gpt-5.4-mini',
+      promptTokens: 100,
+      completionTokens: 20,
+      costUsd: 0.002,
+      cached: false
+    })
+  })
+
+  it('caps the recent list at USAGE_RECENT_LIMIT, newest first (F-5.9)', async () => {
+    await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
+    for (let i = 0; i < USAGE_RECENT_LIMIT + 3; i += 1) {
+      insertUsage(manager.require().connection.orm, {
+        at: `2026-09-12T10:${String(i).padStart(2, '0')}:00.000Z`,
+        feature: 'tags',
+        tier: 'fast',
+        model: 'gpt-5.4-mini',
+        provider: 'openai',
+        promptTokens: i,
+        completionTokens: 0,
+        cached: false,
+        costUsd: 0,
+        contextHash: 'ctx'
+      })
+    }
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.recent).toHaveLength(USAGE_RECENT_LIMIT)
+    expect(summary.recent[0]?.promptTokens).toBe(USAGE_RECENT_LIMIT + 2)
+    expect(summary.total.requests).toBe(USAGE_RECENT_LIMIT + 3)
   })
 
   it('persists a new cap, answers the summary with it, and refuses one outside 0–500', async () => {

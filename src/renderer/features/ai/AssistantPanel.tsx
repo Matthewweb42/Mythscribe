@@ -26,7 +26,7 @@ import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { useAiSettingsStore } from './aiSettingsStore'
 import { AGENT_NOTICE, useActiveConversation, useAssistantStore } from './assistantStore'
-import { formatRequestCost } from './usageFormat'
+import { describeRequest } from './usageFormat'
 
 const ICON_BUTTON =
   'rounded-md p-1 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
@@ -340,7 +340,12 @@ function Turn({
       )}
       {message.model !== null ? (
         <p data-testid="chat-turn-cost" className="m-0 text-xs text-fg-subtle">
-          {`${message.model} · ${formatRequestCost(message.costUsd ?? 0)}${cached ? ' · cached' : ''}`}
+          {describeRequest({
+            model: message.model,
+            costUsd: message.costUsd ?? 0,
+            usage: message.usage,
+            cached
+          })}
         </p>
       ) : null}
     </article>

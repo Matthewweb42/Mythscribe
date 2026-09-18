@@ -7,7 +7,7 @@ import {
 } from '@shared/critique'
 import { normalizeProposalNote, PROPOSAL_NOTE_MAX } from '@shared/proposal'
 import { diffWords } from '@shared/rewrite'
-import { formatRequestCost } from '@renderer/features/ai/usageFormat'
+import { describeRequest } from '@renderer/features/ai/usageFormat'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { useCritiqueStore, type CritiqueSession } from './critiqueStore'
 import { HonestySelect } from './HonestySelect'
@@ -156,7 +156,7 @@ function Body({
           Close
         </button>
         <span data-testid="critique-cost" className="text-xs text-fg-subtle">
-          {`${result.model} · ${formatRequestCost(result.costUsd)}${result.cached ? ' · cached' : ''}`}
+          {describeRequest(result)}
         </span>
         {result.dropped > 0 ? (
           <span data-testid="critique-dropped" className="text-xs text-fg-subtle">

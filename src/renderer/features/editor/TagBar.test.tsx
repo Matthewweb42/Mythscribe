@@ -457,7 +457,9 @@ describe('TagBar (F-4.4)', () => {
       })
       expect(recommendButton()).toBeEnabled()
       expect(suggestionNames()).toEqual(['mara', 'moody'])
-      expect(screen.getByTestId('tag-recommend-cost')).toHaveTextContent('gpt-5.4-mini · $0.0012')
+      expect(screen.getByTestId('tag-recommend-cost')).toHaveTextContent(
+        'gpt-5.4-mini · $0.0012 · 40 in · 10 out'
+      )
       expect(screen.getByTestId('tag-recommend-cost')).not.toHaveTextContent('cached')
       // The linked chips are untouched: nothing enters the document without an accept.
       expect(chipNames().filter((n) => n.startsWith('Remove'))).toEqual(['Remove dark-forest'])
@@ -573,7 +575,7 @@ describe('TagBar (F-4.4)', () => {
         expect(screen.getByTestId('tag-recommend-result')).toHaveTextContent('No new tags fit.')
       )
       expect(screen.getByTestId('tag-recommend-cost')).toHaveTextContent(
-        'gpt-5.4-mini · $0.0000 · cached'
+        'gpt-5.4-mini · $0.0000 · 0 in · 0 out · cached'
       )
       expect(within(bar()).queryByRole('button', { name: 'Accept all' })).not.toBeInTheDocument()
       await userEvent.click(recommendButton())

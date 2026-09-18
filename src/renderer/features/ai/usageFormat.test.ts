@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { describeTotals, formatCount, formatRequestCost, formatUsd } from './usageFormat'
+import {
+  describeRequest,
+  describeTotals,
+  formatCount,
+  formatRequestCost,
+  formatUsd
+} from './usageFormat'
 
 describe('usageFormat (F-5.14)', () => {
   it('formatUsd shows two decimals and floors a fraction of a cent instead of reading as free', () => {
@@ -27,6 +33,34 @@ describe('usageFormat (F-5.14)', () => {
   it('describeTotals joins cost, requests, and tokens', () => {
     expect(describeTotals({ requests: 12, tokens: 15_400, costUsd: 0.75 })).toBe(
       '$0.75 · 12 requests · 15,400 tokens'
+    )
+  })
+
+  it('describeRequest names the model, the cost, and the tokens in and out (F-5.9)', () => {
+    expect(
+      describeRequest({
+        model: 'gpt-5.4-mini',
+        costUsd: 0.0012,
+        usage: { inputTokens: 1_300, outputTokens: 20 },
+        cached: false
+      })
+    ).toBe('gpt-5.4-mini · $0.0012 · 1,300 in · 20 out')
+  })
+
+  it('describeRequest marks a cache hit', () => {
+    expect(
+      describeRequest({
+        model: 'gpt-5.4-mini',
+        costUsd: 0,
+        usage: { inputTokens: 300, outputTokens: 20 },
+        cached: true
+      })
+    ).toBe('gpt-5.4-mini · $0.0000 · 300 in · 20 out · cached')
+  })
+
+  it('describeRequest leaves the tokens out when none were stored (a turn before F-5.9)', () => {
+    expect(describeRequest({ model: 'gpt-5.4', costUsd: 0.0123, usage: null, cached: false })).toBe(
+      'gpt-5.4 · $0.0123'
     )
   })
 })
