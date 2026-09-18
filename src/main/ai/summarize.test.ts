@@ -17,7 +17,7 @@ import {
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
-import { getSummary } from '../document/summaryStore'
+import { getSummary, upsertSummary } from '../document/summaryStore'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { setAiSettings } from '../project/settingsStore'
@@ -37,6 +37,7 @@ import {
 import type { AiRequestDeps } from './request'
 import {
   parseSummaryAnswer,
+  staleSummaryNodeIds,
   summarizeScene,
   summarySource,
   type SummarizeSceneInput
@@ -371,5 +372,61 @@ describe('parseSummaryAnswer (F-5.6)', () => {
       keyPoints: [],
       characters: []
     })
+  })
+})
+
+describe('staleSummaryNodeIds (F-5.13)', () => {
+  /** A second manuscript scene right after the seeded one, with the text it is given. */
+  function secondScene(text: string): string {
+    const now = NOW.toISOString()
+    const first = listNodes(db).find((row) => row.id === scene)
+    if (!first) throw new Error('no seeded scene')
+    db.insert(node)
+      .values({
+        id: 'scene-2',
+        parentId: first.parentId,
+        kind: 'document',
+        hierarchyLevel: 'scene',
+        title: 'Scene 2',
+        position: first.position + 1,
+        created: now,
+        modified: now
+      })
+      .run()
+    saveDocument(db, 'scene-2', doc(text))
+    return 'scene-2'
+  }
+
+  it('lists a scene with no summary and skips the ones too short to have one', () => {
+    const second = secondScene('Too short to summarise.')
+    expect(staleSummaryNodeIds(db)).toEqual([scene])
+    expect(second).toBe('scene-2')
+  })
+
+  it('skips a scene whose stored summary is still current, and the front matter', async () => {
+    // A front-matter document is long enough but is not in the manuscript: never summarised.
+    matterDocument()
+    await summarize()
+    expect(staleSummaryNodeIds(db)).toEqual([])
+  })
+
+  it('lists a scene again once its text has changed', async () => {
+    await summarize()
+    expect(staleSummaryNodeIds(db)).toEqual([])
+    saveDocument(db, scene, doc(`${SCENE} She left the lantern burning on the post.`))
+    expect(staleSummaryNodeIds(db)).toEqual([scene])
+  })
+
+  it('lists a scene whose summary came from an older prompt version', async () => {
+    await summarize()
+    const stored = getSummary(db, scene)
+    if (!stored) throw new Error('no stored summary')
+    upsertSummary(db, { ...stored, promptVersion: 'summary.v0' })
+    expect(staleSummaryNodeIds(db)).toEqual([scene])
+  })
+
+  it('answers in reading order', () => {
+    secondScene(SCENE)
+    expect(staleSummaryNodeIds(db)).toEqual([scene, 'scene-2'])
   })
 })

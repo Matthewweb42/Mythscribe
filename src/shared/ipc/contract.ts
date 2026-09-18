@@ -28,6 +28,7 @@ import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { CritiqueNotes } from '../critique'
 import { EditorSettings } from '../editorSettings'
 import { Background, FocusSettings } from '../focus'
+import { IndexQueueStatus } from '../jobs'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
 import { MatterTemplateId } from '../matterTemplates'
@@ -357,6 +358,26 @@ export const AiSummarizeResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiSummarizeResult = z.infer<typeof AiSummarizeResult>
+
+/**
+ * What `jobs:indexAll` answers (F-5.13): how many scenes were queued for a summary (0 when
+ * every scene is already current) and the queue as it stands right after; or the expected AI
+ * failure as data, which is how a turned-off Scene summaries feature comes back.
+ */
+export const JobsIndexAllResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    queued: z.number().int().nonnegative(),
+    status: IndexQueueStatus
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string()
+  })
+])
+export type JobsIndexAllResult = z.infer<typeof JobsIndexAllResult>
 
 /** An author-marked voice exemplar (F-14.1): a plain-text passage with the POV and kind it was filed under. */
 export const VoiceExemplar = z.object({
@@ -862,6 +883,25 @@ export const contract = {
     input: z.object({ nodeId: z.string(), requestId: z.string() }),
     output: AiSummarizeResult
   },
+  /** The index queue as it stands (F-5.13): what is waiting, running, failed, done, and why it is paused. */
+  'jobs:status': { input: z.undefined(), output: IndexQueueStatus },
+  /**
+   * Stops indexing (F-5.13): aborts the job in flight, drops every queued and failed job with
+   * the debounces that would re-queue them, and clears a pause. Answers the empty queue.
+   */
+  'jobs:cancel': { input: z.undefined(), output: IndexQueueStatus },
+  /**
+   * Tries again after a pause or a failure (F-5.13): clears the pause, puts every failed job
+   * back in the queue with its attempts reset, and starts the worker.
+   */
+  'jobs:resume': { input: z.undefined(), output: IndexQueueStatus },
+  /**
+   * "Summarize all scenes" (F-5.13): queues a summary for every manuscript document long
+   * enough to have one whose stored summary is missing, stale, or from an older prompt
+   * version, and answers how many were queued. Gated like `ai:summarize`: a dial or toggle
+   * that refuses comes back as the DISABLED failure, not an error.
+   */
+  'jobs:indexAll': { input: z.undefined(), output: JobsIndexAllResult },
   /** The project's conversations (F-5.4), stored as JSON under the settings key `conversations`; a fresh project has none. */
   'conversations:get': { input: z.undefined(), output: Conversations },
   /** Replaces the project's conversations (F-5.4); a value outside the schema is refused with VALIDATION. */
@@ -973,6 +1013,8 @@ export const events = {
   'ai:rewriteDelta': z.object({ requestId: z.string(), delta: z.string() }),
   /** A node's background summary run changed status (F-5.6): pending → idle or failed; the pane refetches `summary:get`. */
   'ai:summaryChanged': z.object({ nodeId: z.string(), status: SummaryStatus }),
+  /** The index queue changed (F-5.13): a job was queued, started, finished, failed, or the queue paused. */
+  'jobs:changed': IndexQueueStatus,
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /** A native menu item was clicked or its accelerator pressed (F-7.1); the renderer runs the action. */

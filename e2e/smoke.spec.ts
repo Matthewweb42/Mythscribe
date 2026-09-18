@@ -1923,9 +1923,7 @@ test('create, close, reopen a project on disk', async () => {
   // accepts it as AI-origin paragraphs. A second conversation is cleared after confirming.
   const chatRequestsBefore = openAiChatBodies.length
   // Toasts stack over the panel's composer (bottom right); dismiss what the steps above left.
-  for (const button of await page.getByRole('button', { name: 'Dismiss notification' }).all()) {
-    await button.click()
-  }
+  await dismissToasts()
   await page.keyboard.press('Control+k')
   const assistant = page.getByTestId('assistant-panel')
   await expect(assistant).toBeVisible()
@@ -2001,9 +1999,7 @@ test('create, close, reopen a project on disk', async () => {
   // with the voice block in the system turn; the fake server streams the rewrite and the panel
   // shows it as a word diff against the selection. Accept replaces the passage as AI-origin
   // text through the editor (so it autosaves), and the ledger gains a rewrite request.
-  for (const button of await page.getByRole('button', { name: 'Dismiss notification' }).all()) {
-    await button.click()
-  }
+  await dismissToasts()
   const rewriteButton = page.getByRole('button', { name: 'Rewrite in my voice' })
   await expect(rewriteButton).toBeDisabled()
   const rewriteBodiesBefore = openAiChatBodies.length
@@ -2155,6 +2151,54 @@ test('create, close, reopen a project on disk', async () => {
     requests: 2
   })
 
+  // F-5.13: the background index queue. "Summarize all scenes" queues every scene whose summary
+  // is missing or out of date and works through them one at a time, at most one request at a
+  // time. With the toggle off for a moment, Scene 1 is edited without a background run, so
+  // exactly one scene is stale when the button is clicked; its request lands in the ledger
+  // under `summary` like any other. A second click has nothing to do: a scene whose content
+  // hash still matches costs nothing.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await summaryToggle.uncheck()
+  await expect.poll(async () => (await aiSettings()).features.summary).toBe(false)
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  const indexRequestsBefore = openAiRequests.length
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(' The ferryman kept his lamp lit.')
+  await expect
+    .poll(() => documentText(scene1Row.id), { timeout: 5_000 })
+    .toContain('The ferryman kept his lamp lit.')
+  // Summaries are off, so the save queued nothing.
+  expect(openAiRequests).toHaveLength(indexRequestsBefore)
+
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await summaryToggle.check()
+  await expect.poll(async () => (await aiSettings()).features.summary).toBe(true)
+  const summarizeAll = settingsDialog.getByTestId('summarize-all')
+  await expect(summarizeAll).toBeEnabled()
+  await summarizeAll.click()
+  await expect(page.getByRole('status').filter({ hasText: 'Queued 1 scene' })).toBeVisible()
+  await expect.poll(() => openAiRequests.length, { timeout: 15_000 }).toBe(indexRequestsBefore + 1)
+  // The queue is empty again, so the header indicator says nothing at all.
+  await expect(page.getByTestId('indexing')).toHaveCount(0)
+  await summarizeAll.click()
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Every scene is up to date' })
+  ).toBeVisible()
+  expect(openAiRequests).toHaveLength(indexRequestsBefore + 1)
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await expect(metadata.getByTestId('summary-status')).toHaveText('')
+  // The two toasts this step raised would otherwise stack over the panels the steps below use.
+  await dismissToasts()
+  const afterIndexAll = await usageSummary()
+  expect(afterIndexAll.byFeature.find((f) => f.feature === 'summary')).toMatchObject({
+    requests: 3
+  })
+
   // F-14.11: the beta reader. Reading up to Scene 1 sends the strong tier the scene in full
   // and the stored summaries of the manuscript documents before it: Opening has none (it is
   // under the summary floor), so the reader is told nothing about it and the panel counts it
@@ -2204,9 +2248,7 @@ test('create, close, reopen a project on disk', async () => {
   // sent. The fabricated quote and the one naming a scene that was never sent are dropped, and
   // the `[3]` marker they left behind is stripped. Clicking the surviving citation opens the
   // scene and selects the passage in the editor.
-  for (const button of await page.getByRole('button', { name: 'Dismiss notification' }).all()) {
-    await button.click()
-  }
+  await dismissToasts()
   const queryBodiesBefore = openAiChatBodies.length
   await expect(assistant).toBeVisible()
   const queryRadio = assistant.getByRole('radio', { name: 'Query' })
@@ -2382,6 +2424,17 @@ test('create, close, reopen a project on disk', async () => {
 })
 
 /** The single-document editor's text with the ghost-text widget (F-5.3) left out. */
+/**
+ * Dismisses every toast on screen, first one first: clicking one removes it and moves the rest
+ * up, so a snapshot of the list goes stale after the first click.
+ */
+async function dismissToasts(): Promise<void> {
+  const buttons = page.getByRole('button', { name: 'Dismiss notification' })
+  for (let left = await buttons.count(); left > 0; left -= 1) {
+    await buttons.first().click()
+  }
+}
+
 async function documentTextWithoutGhost(): Promise<string> {
   return page.getByRole('textbox', { name: 'Document' }).evaluate((element) => {
     const clone = element.cloneNode(true) as HTMLElement

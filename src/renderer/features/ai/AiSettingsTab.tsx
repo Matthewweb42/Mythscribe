@@ -13,7 +13,7 @@ import {
   type AiUsageSummary,
   type Tier
 } from '@shared/ai'
-import { AI_DATA_SHARING } from '@shared/aiSettings'
+import { AI_DATA_SHARING, isFeatureAllowed } from '@shared/aiSettings'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { AiDialSection } from './AiDialSection'
@@ -21,7 +21,9 @@ import { AuthorRulesSection } from './AuthorRulesSection'
 import { ProvenanceSection } from './ProvenanceSection'
 import { VoiceSection } from './VoiceSection'
 import { WritingPresetsSection } from './WritingPresetsSection'
+import { useAiSettingsStore } from './aiSettingsStore'
 import { useAiStore } from './aiStore'
+import { useIndexingStore } from './indexingStore'
 import { describeTotals, formatCount, formatUsd } from './usageFormat'
 
 const FIELD = 'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-1 text-sm'
@@ -58,7 +60,7 @@ const featureLabel = (feature: string): string => {
 /**
  * The AI tab of the Settings dialog (F-5.1): the project's AI dial, toggles, and data-sharing
  * table first (F-14.4, loaded with the project by `App.tsx`), the writing presets (F-5.2,
- * loaded the same way), the voice profile (F-14.1), the author rules (F-14.2), the provenance ledger (F-14.6), then the
+ * loaded the same way), "Summarize all scenes" (F-5.13), the voice profile (F-14.1), the author rules (F-14.2), the provenance ledger (F-14.6), then the
  * provider, the key field with Save and Clear, the masked hint once a key is saved, the model
  * per tier with "Reset to defaults" (F-5.11),
  * "Test connection" with its result inline, the Usage block with the daily cap (F-5.14), the
@@ -80,6 +82,11 @@ export function AiSettingsTab(): React.JSX.Element {
   const setDailyCap = useAiStore((s) => s.setDailyCap)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  // F-5.13: "Summarize all scenes" is only offered when the dial and the toggle allow summaries.
+  const summariesAllowed = useAiSettingsStore((s) =>
+    s.settings === null ? false : isFeatureAllowed(s.settings, 'summary')
+  )
+  const indexAll = useIndexingStore((s) => s.indexAll)
 
   useEffect(() => {
     load().catch(report)
@@ -117,6 +124,22 @@ export function AiSettingsTab(): React.JSX.Element {
   return (
     <div className="flex flex-col gap-4 text-sm">
       <AiDialSection />
+
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-fg-muted">
+          Summarise every scene that has no summary yet or whose summary is out of date. They are
+          indexed in the background, one at a time; the header shows the progress.
+        </span>
+        <button
+          type="button"
+          data-testid="summarize-all"
+          disabled={!summariesAllowed || busy}
+          onClick={() => void indexAll()}
+          className={BUTTON}
+        >
+          Summarize all scenes
+        </button>
+      </div>
 
       <WritingPresetsSection />
 

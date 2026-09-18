@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(7)
+    expect(result.version).toBe(8)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -119,6 +119,7 @@ describe('migrate', () => {
     expect(tables()).toContain('voice_exemplar')
     expect(tables()).toContain('ai_proposal')
     expect(tables()).toContain('scene_summary')
+    expect(tables()).toContain('index_job')
   })
 })
 
@@ -207,5 +208,50 @@ describe('scene_summary table (0006_scene_summaries)', () => {
     insertSummary('scene')
     db.prepare('DELETE FROM node WHERE id = ?').run('scene')
     expect(db.prepare('SELECT COUNT(*) AS n FROM scene_summary').get()).toEqual({ n: 0 })
+  })
+})
+
+describe('index_job table (0007_index_jobs)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '2026-01-01', '2026-01-01')`
+    ).run()
+  })
+  afterEach(() => db.close())
+
+  const insertJob = (id: string, nodeId: string): void => {
+    db.prepare(
+      `INSERT INTO index_job (id, kind, node_id, status, attempts, last_error, created_at, updated_at)
+       VALUES (?, 'summary', ?, 'queued', 0, NULL, '2026-01-01', '2026-01-01')`
+    ).run(id, nodeId)
+  }
+
+  it('holds one job per kind and node and refuses a job for a node that is not there', () => {
+    insertJob('summary:scene', 'scene')
+    expect(() => insertJob('summary:scene', 'scene')).toThrow(/UNIQUE|PRIMARY/)
+    expect(() => insertJob('summary:ghost', 'ghost')).toThrow(/FOREIGN KEY/)
+  })
+
+  it('drops the job with the scene: a deleted node has nothing left to index', () => {
+    insertJob('summary:scene', 'scene')
+    db.prepare('DELETE FROM node WHERE id = ?').run('scene')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM index_job').get()).toEqual({ n: 0 })
+  })
+
+  it('defaults attempts to 0 and leaves the last error empty', () => {
+    db.prepare(
+      `INSERT INTO index_job (id, kind, node_id, status, created_at, updated_at)
+       VALUES ('summary:scene', 'summary', 'scene', 'queued', '2026-01-01', '2026-01-01')`
+    ).run()
+    expect(db.prepare('SELECT attempts, last_error FROM index_job').get()).toEqual({
+      attempts: 0,
+      last_error: null
+    })
   })
 })

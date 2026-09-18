@@ -19,7 +19,8 @@ import type {
   AiQueryResult,
   AiRecommendTagsResult,
   AiRewriteResult,
-  AiSummarizeResult
+  AiSummarizeResult,
+  JobsIndexAllResult
 } from '@shared/ipc/contract'
 import {
   SUMMARY_DEBOUNCE_MS,
@@ -31,6 +32,7 @@ import { runBetaReader } from '../ai/betaReader'
 import { runChat } from '../ai/chat'
 import { runCritique } from '../ai/critique'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
+import { assertFeatureAllowed } from '../ai/dial'
 import { draftBrief } from '../ai/draftBrief'
 import { generateGhostText } from '../ai/ghostText'
 import { cancelInflight, regenRequestId } from '../ai/inflight'
@@ -42,9 +44,9 @@ import { recommendTags } from '../ai/recommendTags'
 import { runRewrite } from '../ai/rewrite'
 import type { AiProviderRegistry } from '../ai/registry'
 import { buildAiRequestDeps } from '../ai/request'
-import { summarizeScene, summarySource } from '../ai/summarize'
-import { createSummaryScheduler } from '../ai/summaryScheduler'
+import { staleSummaryNodeIds, summarizeScene, summarySource } from '../ai/summarize'
 import { ledgerSummary } from '../ai/usageStore'
+import { createIndexQueue } from '../jobs/indexQueue'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
@@ -128,26 +130,34 @@ export function registerHandlers({
   onCloseCancelled
 }: HandlerDeps): void {
   /**
-   * F-5.6: the background scene summaries. One scheduler for the session; it reads the open
-   * project through `manager.require()` at run time, never a captured handle, and
-   * `manager.onChange` clears it, so a run queued for one project never writes into another.
-   * Its timers are unref'd: a pending summary never holds the app (or a test) open.
+   * F-5.13: the background index queue, which took over the F-5.6 summary scheduler. One queue
+   * for the session; it reads the open project through the manager at run time, never a
+   * captured handle, and `manager.onChange` clears it and loads the next project's jobs, so a
+   * run queued for one project never writes into another. Its timers are unref'd: a pending
+   * summary never holds the app (or a test) open. Only `summary` jobs exist so far; a new kind
+   * is a new branch in `run` (no provider batch API at launch, see `FEATURES.md` F-5.13).
    */
-  const summaries = createSummaryScheduler({
-    delayMs: SUMMARY_DEBOUNCE_MS,
-    run: (nodeId, requestId) => {
+  const queue = createIndexQueue<Awaited<ReturnType<typeof summarizeScene>>>({
+    db: () => (manager.current() === null ? null : manager.require().connection.orm),
+    run: async (job, requestId) => {
       const db = manager.require().connection.orm
-      return summarizeScene(db, buildAiRequestDeps({ db, providers: ai, appState }), {
-        nodeId,
-        ...(requestId === undefined ? {} : { requestId })
+      const result = await summarizeScene(db, buildAiRequestDeps({ db, providers: ai, appState }), {
+        nodeId: job.nodeId,
+        requestId
       })
+      // A stored row whose hash still matches (or a cache hit) made no request, so the rate
+      // limit must not charge it a turn.
+      return { requested: !result.cached, value: result }
     },
-    onStatus: (nodeId, status) => emit(windows(), 'ai:summaryChanged', { nodeId, status })
+    cancelRequest: (requestId) => void cancelInflight(requestId),
+    debounceMs: SUMMARY_DEBOUNCE_MS,
+    onChange: (status) => emit(windows(), 'jobs:changed', status),
+    onNodeStatus: (nodeId, status) => emit(windows(), 'ai:summaryChanged', { nodeId, status })
   })
 
   /**
    * A node's summary state: `available` only for a manuscript document, `stale` by content
-   * hash (never by time), and the scheduler's status and last error for the node. The hash is
+   * hash (never by time), and the queue's status and last error for the node. The hash is
    * computed by `summarySource`, the same function the run hashes with, so "out of date" here
    * and "nothing to do" there can never disagree.
    */
@@ -156,6 +166,7 @@ export function registerHandlers({
     const source = summarySource(db, nodeId)
     if (source === null) return UNAVAILABLE_SUMMARY
     const summary = getSummary(db, nodeId)
+    const failure = queue.nodeError(nodeId)
     return {
       available: true,
       summary,
@@ -163,8 +174,9 @@ export function registerHandlers({
         summary === null
           ? source.length >= SUMMARY_TEXT_MIN
           : summary.contentHash !== source.contentHash,
-      status: summaries.statusOf(nodeId),
-      error: summaries.errorOf(nodeId)
+      status: queue.nodeStatus(nodeId),
+      // The queue's failure carries its code too; the pane shows what to do about it.
+      error: failure === null ? null : { message: failure.message, nextStep: failure.nextStep }
     }
   }
 
@@ -234,7 +246,7 @@ export function registerHandlers({
     // gate is read here, not at run time: a save with summaries off must not show the pane
     // "Updating…" for a run that will never happen, nor leave a run queued for the moment the
     // toggle comes on (one settings row per save; the run gates again anyway).
-    if (isFeatureAllowed(getAiSettings(db), 'summary')) summaries.touch(id)
+    if (isFeatureAllowed(getAiSettings(db), 'summary')) queue.touch('summary', id)
     return saved
   })
 
@@ -716,50 +728,46 @@ export function registerHandlers({
   // streamed (the citations are checked before anything is shown). The proposal (F-14.5) holds
   // the answer and its citations and stays pending, as a Plan answer does: nothing here enters
   // the manuscript.
-  register(
-    'ai:query',
-    async ({ nodeId, message, history, requestId }): Promise<AiQueryResult> => {
-      try {
-        const db = manager.require().connection.orm
-        const deps = buildAiRequestDeps({ db, providers: ai, appState })
-        const result = await runQuery(db, deps, { nodeId, message, history, requestId })
-        const { answer, found, uncited, citations, also, dropped, usage, costUsd, cached, model } =
-          result
-        const proposal = createProposal(db, {
-          feature: 'query',
-          nodeId,
-          promptVersion: result.promptVersion,
-          model,
-          promptTokens: usage.inputTokens,
-          completionTokens: usage.outputTokens,
-          costUsd,
-          cached,
-          content: JSON.stringify({ answer, citations }),
-          flagged: false,
-          violation: null
-        })
-        return {
-          ok: true,
-          answer,
-          found,
-          uncited,
-          citations,
-          also,
-          dropped,
-          usage,
-          costUsd,
-          cached,
-          model,
-          proposalId: proposal.id,
-          requestId
-        }
-      } catch (err) {
-        if (err instanceof AiProviderError)
-          return { ...aiFailure(err.code, err.message), requestId }
-        throw err
+  register('ai:query', async ({ nodeId, message, history, requestId }): Promise<AiQueryResult> => {
+    try {
+      const db = manager.require().connection.orm
+      const deps = buildAiRequestDeps({ db, providers: ai, appState })
+      const result = await runQuery(db, deps, { nodeId, message, history, requestId })
+      const { answer, found, uncited, citations, also, dropped, usage, costUsd, cached, model } =
+        result
+      const proposal = createProposal(db, {
+        feature: 'query',
+        nodeId,
+        promptVersion: result.promptVersion,
+        model,
+        promptTokens: usage.inputTokens,
+        completionTokens: usage.outputTokens,
+        costUsd,
+        cached,
+        content: JSON.stringify({ answer, citations }),
+        flagged: false,
+        violation: null
+      })
+      return {
+        ok: true,
+        answer,
+        found,
+        uncited,
+        citations,
+        also,
+        dropped,
+        usage,
+        costUsd,
+        cached,
+        model,
+        proposalId: proposal.id,
+        requestId
       }
+    } catch (err) {
+      if (err instanceof AiProviderError) return { ...aiFailure(err.code, err.message), requestId }
+      throw err
     }
-  )
+  })
 
   // F-14.3: the scene brief drafted from the scene's text, JSON from the fast tier, not
   // streamed (five short lines are only useful whole). Nothing is stored on the node: the
@@ -805,14 +813,14 @@ export function registerHandlers({
   // background run did. Cheap: two small queries and the scheduler's own maps.
   register('summary:get', ({ id }) => summaryStateOf(id))
 
-  // F-5.6: Summarize now. The node's debounce is cancelled and its run awaited (a run already
-  // in flight is joined, not doubled); a content-hash match answers from the stored row
-  // without a request. The scheduler records the status either way, so the pane's event and
-  // this reply agree. VALIDATION (not a manuscript document, too little text) comes back
-  // through the error envelope; the expected AI failures come back as data, like the rest.
+  // F-5.6: Summarize now. The node's debounce is cancelled and its run awaited ahead of the
+  // queue (a run already in flight is joined, not doubled); a content-hash match answers from
+  // the stored row without a request. The queue records the status either way, so the pane's
+  // event and this reply agree. VALIDATION (not a manuscript document, too little text) comes
+  // back through the error envelope; the expected AI failures come back as data, like the rest.
   register('ai:summarize', async ({ nodeId, requestId }): Promise<AiSummarizeResult> => {
     try {
-      const result = await summaries.runNow(nodeId, requestId)
+      const result = await queue.runNow('summary', nodeId, requestId)
       return {
         ok: true,
         state: summaryStateOf(nodeId),
@@ -826,6 +834,32 @@ export function registerHandlers({
       if (err instanceof AiProviderError) return { ...aiFailure(err.code, err.message), requestId }
       throw err
     }
+  })
+
+  // F-5.13: the index queue. `status` is what the header indicator shows, `cancel` stops
+  // everything (the job in flight is aborted through the inflight registry), `resume` clears a
+  // pause and puts the failed jobs back in the queue. Each answers the queue as it then stands,
+  // and the same status goes to every window as `jobs:changed`.
+  register('jobs:status', () => queue.status())
+
+  register('jobs:cancel', () => queue.cancelAll())
+
+  register('jobs:resume', () => queue.resume())
+
+  // F-5.13: "Summarize all scenes". Only the scenes that would show "Out of date" are queued
+  // (`staleSummaryNodeIds`), so a second click over an indexed manuscript queues nothing and
+  // costs nothing. The dial and the toggle are checked here, once, and come back as data like
+  // `ai:summarize`'s failures; the runs gate again anyway.
+  register('jobs:indexAll', (): JobsIndexAllResult => {
+    const db = manager.require().connection.orm
+    try {
+      assertFeatureAllowed(getAiSettings(db), 'summary')
+    } catch (err) {
+      if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
+      throw err
+    }
+    const queued = queue.indexAll('summary', staleSummaryNodeIds(db))
+    return { ok: true, queued, status: queue.status() }
   })
 
   // F-5.10: aborts the request registered under the id, or its fidelity regenerate (F-14.7)
@@ -921,9 +955,12 @@ export function registerHandlers({
   manager.onChange((info) => {
     // Open, create, and close all land here: a profile built for one project never answers for another.
     resetVoiceProfileCache()
-    // F-5.6: drop every pending summary timer and status with the project that queued them.
-    summaries.clear()
+    // F-5.13: drop every pending job, timer, and status with the project that queued them;
+    // the rows stay in that project's database, so opening it again takes the work up where it
+    // stopped (`load` on an empty table does nothing, which is what a create lands on).
+    queue.clear()
     if (info) {
+      queue.load()
       try {
         appState.update((s) => ({ ...s, recents: touchRecent(s.recents, toRecentEntry(info)) }))
       } catch (err) {

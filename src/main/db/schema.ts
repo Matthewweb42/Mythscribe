@@ -270,3 +270,30 @@ export const sceneSummary = sqliteTable('scene_summary', {
 })
 export type SceneSummaryRow = typeof sceneSummary.$inferSelect
 export type SceneSummaryInsert = typeof sceneSummary.$inferInsert
+
+/**
+ * A job waiting in the background index queue (F-5.13). Only what must survive a quit is here:
+ * `queued` jobs and the ones that gave up (`failed`), one row per kind and node, keyed
+ * `<kind>:<node_id>`. A running job is memory-only, so a crash leaves its row `queued` and
+ * reopening the project resumes it; a finished job leaves no row at all (the `scene_summary` it
+ * wrote and the `ai_usage` row that paid for it are its record). Cascaded with the node: a
+ * deleted scene has nothing left to index. `last_error` is a JSON `JobFailure` on a failed row.
+ */
+export const indexJob = sqliteTable('index_job', {
+  /** `<kind>:<node_id>`: one job per kind and node, so a burst of saves cannot pile up rows. */
+  id: text('id').primaryKey(),
+  /** A `JobKind`. */
+  kind: text('kind').notNull(),
+  nodeId: text('node_id')
+    .notNull()
+    .references(() => node.id, { onDelete: 'cascade' }),
+  /** A `JobStatus`: 'queued' or 'failed'. */
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  /** JSON `JobFailure` for a failed row; null otherwise. */
+  lastError: text('last_error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull()
+})
+export type IndexJobRow = typeof indexJob.$inferSelect
+export type IndexJobInsert = typeof indexJob.$inferInsert

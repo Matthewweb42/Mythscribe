@@ -28,6 +28,8 @@ import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useSummaryStore } from '@renderer/features/editor/summaryStore'
 import { AiActivityIndicator } from '@renderer/features/ai/AiActivityIndicator'
+import { IndexingIndicator } from '@renderer/features/ai/IndexingIndicator'
+import { useIndexingStore } from '@renderer/features/ai/indexingStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { useAuthorRulesStore } from '@renderer/features/ai/authorRulesStore'
 import { AssistantPanel, AssistantToggleButton } from '@renderer/features/ai/AssistantPanel'
@@ -102,7 +104,8 @@ export function App(): React.JSX.Element {
   // node by the metadata pane. F-14.4: and the AI dial and toggles. F-5.2: and the writing
   // presets. F-14.2: and the author rules. F-14.1: and the voice exemplars (the toolbar button needs the count). F-14.6: the
   // provenance report is loaded by its section on demand and only cleared here. F-5.4: and the
-  // assistant conversations. F-6.1: a project closed in focus mode leaves it, so the welcome
+  // assistant conversations. F-5.13: and the background index queue's status, which the header
+  // indicator shows. F-6.1: a project closed in focus mode leaves it, so the welcome
   // screen is windowed. F-6.2: and the focus-mode backgrounds.
   useEffect(() => {
     const tree = useTreeStore.getState()
@@ -114,6 +117,7 @@ export function App(): React.JSX.Element {
       useNotesStore.getState().clear()
       useSceneMetaStore.getState().clear()
       useSummaryStore.getState().clear()
+      useIndexingStore.getState().clear()
       useEditorSettingsStore.getState().clear()
       useAiSettingsStore.getState().clear()
       useAuthorRulesStore.getState().clear()
@@ -150,6 +154,10 @@ export function App(): React.JSX.Element {
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
     useAssistantStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    useIndexingStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
@@ -191,6 +199,7 @@ export function App(): React.JSX.Element {
           {current ? (
             <div className="ml-auto flex items-center gap-2">
               <AiActivityIndicator />
+              <IndexingIndicator />
               <AssistantToggleButton />
               <SettingsButton />
               <CloseProjectButton />

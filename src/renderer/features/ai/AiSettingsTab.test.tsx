@@ -13,11 +13,13 @@ import { defaultAiSettings } from '@shared/aiSettings'
 import { defaultAuthorRules } from '@shared/authorRules'
 import type { Channel, Input, Output, ProvenanceReport, VoiceProfile } from '@shared/ipc/contract'
 import { computeStylometrics } from '@shared/stylometry'
+import { IDLE_INDEX_QUEUE } from '@shared/jobs'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, IpcRequestError, type IpcClient } from '@renderer/lib/ipc'
 import { AiSettingsTab } from './AiSettingsTab'
 import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
 import { resetAiStore, useAiStore } from './aiStore'
+import { resetIndexingStore } from './indexingStore'
 import { resetProvenanceStore, useProvenanceStore } from './provenanceStore'
 import { resetVoiceStore } from './voiceStore'
 
@@ -95,6 +97,8 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
             return EMPTY_PROFILE as Output<C>
           case 'provenance:report':
             return EMPTY_LEDGER as Output<C>
+          case 'jobs:indexAll':
+            return { ok: true, queued: 2, status: IDLE_INDEX_QUEUE } as Output<C>
           default:
             throw new Error(`unexpected ${channel}`)
         }
@@ -149,10 +153,12 @@ beforeEach(() => {
   resetAiSettingsStore()
   resetVoiceStore()
   resetProvenanceStore()
+  resetIndexingStore()
   useDialogStore.setState({ modals: [], toasts: [] })
 })
 afterEach(() => {
   resetAiSettingsStore()
+  resetIndexingStore()
 })
 
 describe('AiSettingsTab (F-5.1)', () => {
@@ -426,5 +432,24 @@ describe('AiSettingsTab usage (F-5.14)', () => {
     await userEvent.type(capField(), '900{Enter}')
     await waitFor(() => expect(toasts()).toEqual(['Cap must be 0 to 500']))
     await waitFor(() => expect(capField()).toHaveValue(2))
+  })
+})
+
+describe('AiSettingsTab: Summarize all scenes (F-5.13)', () => {
+  const summarizeAll = (): HTMLElement => screen.getByTestId('summarize-all')
+
+  it('is offered but refused while the dial or the toggle keeps summaries off', async () => {
+    await open()
+    // A fresh project installs at Off, so nothing can be summarised yet.
+    expect(summarizeAll()).toBeDisabled()
+  })
+
+  it('queues every stale scene once summaries are allowed', async () => {
+    await open()
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
+    await waitFor(() => expect(summarizeAll()).toBeEnabled())
+    await userEvent.click(summarizeAll())
+    await waitFor(() => expect(toasts()).toEqual(['Queued 2 scenes for a summary.']))
+    expect(fake.calls.filter((c) => c.channel === 'jobs:indexAll')).toHaveLength(1)
   })
 })

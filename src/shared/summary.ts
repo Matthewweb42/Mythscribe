@@ -7,7 +7,7 @@ import { z } from 'zod'
  * and is stored in `scene_summary`, not as a proposal: nothing enters the manuscript and there
  * is no accept step, so its cost lives in the usage ledger alone. This file owns the limits and
  * the shapes both sides share; `src/main/ai/summarize.ts` is the use case and
- * `src/main/ai/summaryScheduler.ts` the debounce.
+ * `src/main/jobs/indexQueue.ts` (F-5.13) the debounce and the background runs.
  */
 
 /** A scene shorter than this has nothing to summarise; a stored summary is dropped when it shrinks below. */

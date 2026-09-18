@@ -15,6 +15,7 @@ import type {
   ProjectInfo,
   RecentProject
 } from '@shared/ipc/contract'
+import { IDLE_INDEX_QUEUE } from '@shared/jobs'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -27,6 +28,7 @@ import {
   resetEditorSettingsStore,
   useEditorSettingsStore
 } from '@renderer/features/editor/settingsStore'
+import { resetIndexingStore } from '@renderer/features/ai/indexingStore'
 import { resetBackgroundStore } from '@renderer/features/focus/backgroundStore'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
 import { dialogs, useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -80,6 +82,7 @@ beforeEach(() => {
   resetBackgroundStore()
   resetShellDialogStore()
   resetWelcomeStore()
+  resetIndexingStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -90,6 +93,7 @@ afterEach(() => {
   resetAuthorRulesStore()
   resetAssistantStore()
   resetBackgroundStore()
+  resetIndexingStore()
   vi.unstubAllGlobals()
 })
 
@@ -121,6 +125,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'conversations:get') return { active: null, items: [] }
     if (channel === 'focusSettings:get') return { ...defaultFocusSettings(), backgroundId: null }
     if (channel === 'background:list') return []
+    if (channel === 'jobs:status') return IDLE_INDEX_QUEUE
     return null
   })
   const on = <E extends EventName>(

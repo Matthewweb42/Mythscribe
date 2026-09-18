@@ -12,7 +12,7 @@ import {
   type SceneSummary,
   type StoredSceneSummary
 } from '@shared/summary'
-import { deleteSummary, getSummary, upsertSummary } from '../document/summaryStore'
+import { deleteSummary, getSummary, summariesFor, upsertSummary } from '../document/summaryStore'
 import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
 import { listTags } from '../tag/tagStore'
@@ -94,11 +94,41 @@ export function summarySource(db: TreeDb, nodeId: string): SummarySource | null 
   }
 }
 
+/**
+ * Every manuscript document that should have a summary and does not have a current one
+ * (F-5.13, "Summarize all scenes"): long enough to be worth summarising, and either no stored
+ * row, a row made from different text, or one from an older prompt version. In reading order,
+ * so the queue works through the book from the front. The staleness test is `summarySource`'s
+ * hash, the same one `summary:get` shows as "Out of date", so the button and the pane can
+ * never disagree; a scene whose hash still matches is left alone and costs nothing.
+ */
+export function staleSummaryNodeIds(db: TreeDb): string[] {
+  const rows = manuscriptDocuments(db)
+  const stored = summariesFor(
+    db,
+    rows.map((row) => row.id)
+  )
+  const stale: string[] = []
+  for (const row of rows) {
+    const source = summarySource(db, row.id)
+    if (source === null || source.length < SUMMARY_TEXT_MIN) continue
+    const current = stored.get(row.id)
+    if (
+      current?.contentHash === source.contentHash &&
+      current.promptVersion === SUMMARY_PROMPT_VERSION
+    ) {
+      continue
+    }
+    stale.push(row.id)
+  }
+  return stale
+}
+
 export interface SummarizeSceneInput {
   nodeId: string
   /**
-   * The caller's id for `ai:cancel` (F-5.10). The background scheduler runs without one (there
-   * is nothing to cancel); `ai:summarize` passes the renderer's.
+   * The caller's id for `ai:cancel` (F-5.10). A background job carries the queue's own
+   * `job-<n>` (F-5.13), so Cancel can stop it too; `ai:summarize` passes the renderer's.
    */
   requestId?: string
 }
