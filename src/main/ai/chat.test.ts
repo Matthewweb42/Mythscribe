@@ -504,7 +504,7 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
     expect(await failure(agent())).toEqual({
       code: 'DISABLED',
-      message: 'Agent mode needs the AI dial at Suggest or higher (it is at Ask).'
+      message: 'Author mode needs the AI dial at Suggest or higher (it is at Ask).'
     })
     expect(complete).not.toHaveBeenCalled()
     // The ghost-text toggle does not gate Agent mode: only the level does.

@@ -241,10 +241,16 @@ describe('AssistantPanel (F-5.4)', () => {
       'aria-checked',
       'true'
     )
-    expect(within(modes).getByRole('radio', { name: 'Agent' })).toHaveAttribute(
+    expect(within(modes).getByRole('radio', { name: 'Author' })).toHaveAttribute(
       'aria-checked',
       'false'
     )
+    // F-5.8: the radios read Query, Author, Plan in that order.
+    expect(within(modes).getAllByRole('radio').map((radio) => radio.textContent)).toEqual([
+      'Query',
+      'Author',
+      'Plan'
+    ])
     expect(screen.queryByRole('combobox', { name: 'Paragraphs' })).not.toBeInTheDocument()
     expect(box()).toBeEnabled()
     expect(sendButton()).toBeDisabled()
@@ -313,13 +319,13 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(sendButton()).toBeEnabled()
   })
 
-  it('Agent is disabled below Suggest with the reason; at Suggest it shows the paragraph selector and the notice turn', async () => {
+  it('Author is disabled below Suggest with the reason; at Suggest it shows the paragraph selector and the notice turn', async () => {
     await mountOpen({ active: 'c-1', items: [conversation()] }, settings({ dial: 1 }))
-    const agent = screen.getByRole('radio', { name: 'Agent' })
+    const agent = screen.getByRole('radio', { name: 'Author' })
     expect(agent).toBeDisabled()
     expect(agent).toHaveAttribute(
       'title',
-      'Agent needs the AI dial at Suggest or higher (Settings, AI tab)'
+      'Author needs the AI dial at Suggest or higher (Settings, AI tab)'
     )
     act(() => useAiSettingsStore.setState({ settings: settings({ dial: 2 }) }))
     expect(agent).toBeEnabled()
@@ -331,13 +337,16 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(within(paragraphs).getAllByRole('option')).toHaveLength(10)
     await userEvent.selectOptions(paragraphs, '4')
     expect(useAssistantStore.getState().conversations?.items[0]?.paragraphs).toBe(4)
-    // Arrow keys move between the modes on the radios themselves.
+    // Arrow keys move between the modes on the radios themselves, in the Query, Author, Plan order.
     agent.focus()
-    await userEvent.keyboard('{ArrowLeft}')
+    await userEvent.keyboard('{ArrowRight}')
     expect(screen.getByRole('radio', { name: 'Plan' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('radio', { name: 'Plan' })).toHaveFocus()
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')
+    expect(screen.getByRole('radio', { name: 'Query' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Query' })).toHaveFocus()
 
-    // An Agent turn already recorded reads as the notice, never as its text.
+    // An Author turn already recorded reads as the notice, never as its text.
     act(() =>
       useAssistantStore.setState({
         conversations: {
@@ -488,7 +497,7 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     return openScene
   }
 
-  it('offers Query beside Plan and Agent, disabled with the reason while the dial forbids it', async () => {
+  it('offers Query first, disabled with the reason while the dial forbids it, and the composer says so for a Query conversation', async () => {
     await mountOpen({ active: 'c-1', items: [conversation()] }, settings({ dial: 0 }))
     const query = screen.getByRole('radio', { name: 'Query' })
     expect(query).toBeDisabled()
@@ -496,19 +505,27 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
       'title',
       'Query needs the AI dial at Ask or higher, with Story Intelligence on (Settings, AI tab)'
     )
+    expect(screen.queryByTestId('assistant-mode-off')).not.toBeInTheDocument()
     act(() =>
       useAiSettingsStore.setState({
         settings: settings({ dial: 2, features: { ...defaultAiSettings().features, query: false } })
       })
     )
     expect(query).toBeDisabled()
+    // A conversation already in Query mode (the F-5.8 default) says why Send is off.
+    act(() => useAssistantStore.getState().setMode('query'))
+    expect(screen.getByTestId('assistant-mode-off')).toHaveTextContent(
+      'Query needs the AI dial at Ask or higher, with Story Intelligence on (Settings, AI tab). Pick another mode to keep going.'
+    )
+    expect(sendButton()).toBeDisabled()
     act(() => useAiSettingsStore.setState({ settings: settings({ dial: 1 }) }))
     expect(query).toBeEnabled()
+    expect(screen.queryByTestId('assistant-mode-off')).not.toBeInTheDocument()
     expect(query).toHaveAttribute('title', 'Ask about the whole manuscript; answers cite scenes')
     await userEvent.click(query)
     expect(query).toHaveAttribute('aria-checked', 'true')
     expect(useAssistantStore.getState().conversations?.items[0]?.mode).toBe('query')
-    // The paragraph count belongs to Agent alone.
+    // The paragraph count belongs to Author alone.
     expect(screen.queryByRole('combobox', { name: 'Paragraphs' })).not.toBeInTheDocument()
   })
 

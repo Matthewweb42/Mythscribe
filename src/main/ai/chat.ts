@@ -105,7 +105,7 @@ export async function runChat(
     const { minDial } = AI_DATA_SHARING.ghostText
     if (settings.dial < minDial) {
       throw new AiDisabledError(
-        `Agent mode needs the AI dial at ${AI_DIAL_LABEL[minDial]} or higher (it is at ${AI_DIAL_LABEL[settings.dial]}).`
+        `Author mode needs the AI dial at ${AI_DIAL_LABEL[minDial]} or higher (it is at ${AI_DIAL_LABEL[settings.dial]}).`
       )
     }
   }

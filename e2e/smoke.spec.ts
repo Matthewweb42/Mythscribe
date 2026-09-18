@@ -52,7 +52,7 @@ const REGEN_NOTE = 'Too generic; the scene is about the crossing.'
  * each so the classifier resolves both; tense is checked first, so it is the one named), for
  * both the first try and the regenerate, so the badge shows.
  */
-/** F-5.4: the fake server streams this Plan answer in two deltas and answers Agent requests with two paragraphs. */
+/** F-5.4: the fake server streams this Plan answer in two deltas and answers Author (stored `agent`) requests with two paragraphs. */
 const CHAT_ANSWER = 'Mara is on the ridge to watch the storm come in before the others wake.'
 const AGENT_FIRST = 'The rain came sideways over the ridge.'
 const AGENT_SECOND = 'Mara pulled her hood down and waited for the others.'
@@ -1918,9 +1918,11 @@ test('create, close, reopen a project on disk', async () => {
 
   // F-5.4: the assistant panel. Ctrl+K opens it (the dial is still at Suggest with the key
   // saved). A Plan question streams its answer into the chat with the cost line, and the
-  // request carries the scene's text; the tab takes the question as its title. Agent mode
+  // request carries the scene's text; the tab takes the question as its title. Author mode
   // places a two-paragraph answer in the editor as ghost text with a notice in the chat; Tab
   // accepts it as AI-origin paragraphs. A second conversation is cleared after confirming.
+  // F-5.8: a fresh conversation starts in Query mode, so the radios are Query, Author, Plan
+  // and the Plan questions here pick Plan first.
   const chatRequestsBefore = openAiChatBodies.length
   // Toasts stack over the panel's composer (bottom right); dismiss what the steps above left.
   await dismissToasts()
@@ -1933,6 +1935,10 @@ test('create, close, reopen a project on disk', async () => {
   )
   const messageBox = assistant.getByRole('textbox', { name: 'Message' })
   const turns = assistant.locator('[data-testid="chat-turn"]')
+  const modeRadios = assistant.getByRole('radiogroup', { name: 'Mode' }).getByRole('radio')
+  await expect(modeRadios).toHaveText(['Query', 'Author', 'Plan'])
+  await expect(modeRadios.nth(0)).toHaveAttribute('aria-checked', 'true')
+  await assistant.getByRole('radio', { name: 'Plan' }).click()
   await messageBox.fill('Why is Mara on the ridge?')
   await messageBox.press('Enter')
   await expect(turns).toHaveCount(2)
@@ -1962,7 +1968,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByRole('status').filter({ hasText: 'stopped' })).toHaveCount(0)
   expect(openAiChatBodies).toHaveLength(chatRequestsBefore + 2)
   await expect(assistant.getByTestId('assistant-send')).toBeVisible()
-  await assistant.getByRole('radio', { name: 'Agent' }).click()
+  await assistant.getByRole('radio', { name: 'Author' }).click()
   await assistant.getByRole('combobox', { name: 'Paragraphs' }).selectOption('2')
   await messageBox.fill('Continue the scene.')
   await messageBox.press('Enter')
@@ -1983,6 +1989,11 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('status-ai')).toHaveText(/^[1-9]\d*% AI$/)
   await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
   await expect(turns).toHaveCount(0)
+  await expect(assistant.getByRole('radio', { name: 'Query' })).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  await assistant.getByRole('radio', { name: 'Plan' }).click()
   await messageBox.fill('A second question.')
   await messageBox.press('Enter')
   await expect(turns).toHaveCount(2)

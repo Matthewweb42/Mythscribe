@@ -1053,7 +1053,7 @@ describe('ai:chat (F-5.4)', () => {
     expect(await invoke('ai:chat', { ...plan(scene, 'req-9'), mode: 'agent' })).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Agent mode needs the AI dial at Suggest or higher (it is at Ask).',
+      message: 'Author mode needs the AI dial at Suggest or higher (it is at Ask).',
       nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
       requestId: 'req-9'
     })

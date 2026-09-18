@@ -43,7 +43,7 @@ const CHIP_BUTTON =
 export const QUERY_UNCITED_WARNING =
   'No cited passage supports this answer; treat it as unverified.'
 
-/** The paragraph counts Agent mode offers, 1–10. */
+/** The paragraph counts Author mode offers, 1–10. */
 const PARAGRAPH_OPTIONS = Array.from(
   { length: CHAT_PARAGRAPHS_MAX - CHAT_PARAGRAPHS_MIN + 1 },
   (_, i) => CHAT_PARAGRAPHS_MIN + i
@@ -85,9 +85,10 @@ export function AssistantToggleButton(): React.JSX.Element {
 
 /**
  * The AI assistant panel (F-5.4): a docked column on the right, resizable by its left edge,
- * with one tab per conversation, the turns of the open one, and the composer. Plan mode
- * answers in the chat (streamed); Agent mode places the answer in the active editor as ghost
- * text and the chat shows a notice. Every assistant turn shows what it cost. The open state
+ * with one tab per conversation, the turns of the open one, and the composer. Query mode (the
+ * default, F-5.8) answers about the manuscript with citations; Plan mode answers in the chat
+ * (streamed); Author mode places the answer in the active editor as ghost text and the chat
+ * shows a notice. Every assistant turn shows what it cost. The open state
  * and width live in the layout store (F-7.2); the conversations in `useAssistantStore`.
  * Renders nothing while closed. Not mounted in focus mode, where `AssistantBody` floats
  * instead (F-6.6).
@@ -286,9 +287,9 @@ function MessageLog(): React.JSX.Element {
     >
       {messages.length === 0 ? (
         <p className="m-0 text-xs text-fg-muted">
-          Ask about the open scene, or write #name to pull in that tag's notes. Agent mode places
-          the answer in the editor as ghost text; Query mode answers about the whole manuscript and
-          cites the scenes it rests on.
+          Query answers about the whole manuscript and cites the scenes it rests on. Author places
+          its answer in the editor as ghost text. Plan talks through ideas and feedback about the
+          open scene. Write #name to pull in that tag's notes.
         </p>
       ) : null}
       {messages.map((message, index) => (
@@ -306,7 +307,7 @@ function MessageLog(): React.JSX.Element {
 /**
  * One turn. The author's on the right; the assistant's on the left with its cost line once it
  * has one (`model · cost · cached`, F-4.7's note). An empty assistant turn with a request in
- * flight reads as thinking; an Agent turn shows the notice, its text went to the editor; a
+ * flight reads as thinking; an Author turn shows the notice, its text went to the editor; a
  * Query turn (F-5.7) shows its citations through `QueryAnswer`.
  */
 function Turn({
@@ -464,16 +465,16 @@ function answerParts(
 function modeTitle(id: ChatMode, disabled: boolean, agentDial: AiDial): string {
   if (disabled) {
     return id === 'agent'
-      ? `Agent needs the AI dial at ${AI_DIAL_LABEL[agentDial]} or higher (Settings, AI tab)`
+      ? `Author needs the AI dial at ${AI_DIAL_LABEL[agentDial]} or higher (Settings, AI tab)`
       : `Query needs the AI dial at ${AI_DIAL_LABEL[AI_DATA_SHARING.query.minDial]} or higher, with ${AI_DATA_SHARING.query.label} on (Settings, AI tab)`
   }
   if (id === 'agent') return 'Place the answer in the editor as ghost text'
   if (id === 'query') return 'Ask about the whole manuscript; answers cite scenes'
-  return 'Answer in the chat'
+  return 'Talk through ideas and feedback about the open scene'
 }
 
 /**
- * The mode, the paragraph count (Agent only), Clear conversation, and the message box. Enter
+ * The mode, the paragraph count (Author only), Clear conversation, and the message box. Enter
  * sends, Shift+Enter breaks the line; Send is disabled for a blank message and while the dial
  * does not allow the assistant (the note above says what to change). While a turn is in
  * flight, Stop takes Send's place (F-5.10): it drops the unanswered turn and keeps the
@@ -499,7 +500,7 @@ function Composer(): React.JSX.Element {
   const queryAllowed = settings !== null && isFeatureAllowed(settings, 'query')
   const modeOff = (id: ChatMode): boolean =>
     (id === 'agent' && !agentAllowed) || (id === 'query' && !queryAllowed)
-  const mode = conversation?.mode ?? 'plan'
+  const mode = conversation?.mode ?? 'query'
   const canSend =
     conversation !== null && chatAllowed && !pending && draft.trim() !== '' && !modeOff(mode)
 
@@ -551,6 +552,10 @@ function Composer(): React.JSX.Element {
         <p data-testid="assistant-disabled" className="m-0 text-xs text-warning">
           The assistant needs the AI dial at {AI_DIAL_LABEL[AI_DATA_SHARING.chat.minDial]} or
           higher, with Assistant chat on (Settings, AI tab).
+        </p>
+      ) : settings !== null && modeOff(mode) ? (
+        <p data-testid="assistant-mode-off" className="m-0 text-xs text-warning">
+          {modeTitle(mode, true, agentDial)}. Pick another mode to keep going.
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
@@ -609,7 +614,7 @@ function Composer(): React.JSX.Element {
         aria-label="Message"
         rows={3}
         maxLength={CHAT_MESSAGE_MAX}
-        placeholder="Ask about your scene… Enter sends, Shift+Enter breaks the line"
+        placeholder="Ask about your story… Enter sends, Shift+Enter breaks the line"
         disabled={conversation === null}
         value={draft}
         onChange={(event) => setDraft(event.target.value)}

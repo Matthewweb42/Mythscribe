@@ -236,7 +236,7 @@ describe('useAssistantStore load and persistence (F-5.4)', () => {
     expect(sets).toHaveLength(0)
   })
 
-  it('gives a fresh project one Plan conversation to write in without writing it', async () => {
+  it('gives a fresh project one Query conversation (F-5.8) to write in without writing it', async () => {
     setIpcClient(deferredClient({ active: null, items: [] }))
     await store().load()
     const value = store().conversations
@@ -244,7 +244,7 @@ describe('useAssistantStore load and persistence (F-5.4)', () => {
     expect(value?.active).toBe(value?.items[0]?.id)
     expect(value?.items[0]).toMatchObject({
       title: NEW_CONVERSATION_TITLE,
-      mode: 'plan',
+      mode: 'query',
       paragraphs: 1,
       messages: []
     })
@@ -320,7 +320,8 @@ describe('useAssistantStore tabs (F-5.4)', () => {
     const value = store().conversations
     expect(value?.items).toHaveLength(2)
     expect(value?.active).toBe(value?.items[1]?.id)
-    expect(active()).toMatchObject({ title: NEW_CONVERSATION_TITLE, mode: 'plan', messages: [] })
+    // F-5.8: a new conversation starts in Query mode.
+    expect(active()).toMatchObject({ title: NEW_CONVERSATION_TITLE, mode: 'query', messages: [] })
     for (let i = 0; i < CHAT_MAX_CONVERSATIONS + 2; i++) store().newConversation()
     expect(store().conversations?.items).toHaveLength(CHAT_MAX_CONVERSATIONS)
   })
@@ -483,6 +484,7 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
   it('drops the answer of a conversation closed meanwhile and rejects its proposal', async () => {
     await store().load()
     store().newConversation()
+    store().setMode('plan')
     const second = store().conversations?.active ?? ''
     const sending = store().send('hello')
     await settle()
@@ -571,6 +573,7 @@ describe('useAssistantStore stop (F-5.10)', () => {
   it('closing a conversation stops its request in flight', async () => {
     await store().load()
     store().newConversation()
+    store().setMode('plan')
     const second = store().conversations?.active ?? ''
     const sending = store().send('hello')
     await settle()
@@ -582,7 +585,7 @@ describe('useAssistantStore stop (F-5.10)', () => {
   })
 })
 
-describe('useAssistantStore send, Agent mode (F-5.4)', () => {
+describe('useAssistantStore send, Author mode (F-5.4; Agent until F-5.8)', () => {
   const CONTENT = 'The storm broke at dusk.'
   let editor: Editor
 

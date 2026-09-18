@@ -11,23 +11,24 @@ import { toTagName } from './tags'
 export const CONVERSATIONS_KEY = 'conversations'
 
 /**
- * Plan answers in the chat about the open scene; Agent places the answer in the editor as
- * ghost text; Query (F-5.7) answers about the whole manuscript with citations. F-5.8 renames
- * them; the stored values stay.
+ * Query (F-5.7, the default) answers about the whole manuscript with citations; Author places
+ * its answer in the editor as ghost text; Plan answers in the chat about the open scene
+ * (ideas and feedback). F-5.8 named them and set this order; the stored values (`agent` for
+ * Author) stay, so conversations written before it parse unchanged.
  */
-export const CHAT_MODES = ['plan', 'agent', 'query'] as const
+export const CHAT_MODES = ['query', 'agent', 'plan'] as const
 export const ChatMode = z.enum(CHAT_MODES)
 export type ChatMode = z.infer<typeof ChatMode>
 export const CHAT_MODE_LABEL: Record<ChatMode, string> = {
-  plan: 'Plan',
-  agent: 'Agent',
-  query: 'Query'
+  query: 'Query',
+  agent: 'Author',
+  plan: 'Plan'
 }
 
 export const CHAT_PARAGRAPHS_MIN = 1
 export const CHAT_PARAGRAPHS_MAX = 10
 export const CHAT_PARAGRAPHS_DEFAULT = 1
-/** Output tokens asked for per paragraph in Agent mode; Plan mode always gets the feature cap. */
+/** Output tokens asked for per paragraph in Author mode; Plan mode always gets the feature cap. */
 export const CHAT_TOKENS_PER_PARAGRAPH = 120
 
 export const CHAT_MESSAGE_MAX = 4_000
@@ -58,7 +59,7 @@ export const ChatMessage = z.object({
   proposalId: z.string().nullable(),
   model: z.string().nullable(),
   costUsd: z.number().nullable(),
-  /** The mode the turn was made in; an Agent turn's text went to the editor, not the chat. */
+  /** The mode the turn was made in; an Author turn's text went to the editor, not the chat. */
   mode: ChatMode.nullable(),
   /** A Query turn's citations and flags (F-5.7); null for every other turn and for rows written before it. */
   query: QueryTurn.nullable().default(null)

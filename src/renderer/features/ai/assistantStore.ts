@@ -31,11 +31,11 @@ import { proposalStore } from './proposalStore'
 
 /** The title of a conversation nobody has written in yet. */
 export const NEW_CONVERSATION_TITLE = 'New conversation'
-/** The turn the chat shows for an Agent-mode answer, whose text went to the editor instead. */
+/** The turn the chat shows for an Author-mode answer, whose text went to the editor instead. */
 export const AGENT_NOTICE = 'Placed in the editor. Tab accepts, Escape dismisses.'
-/** The toast when Agent mode has no document editor to place its answer in. */
+/** The toast when Author mode has no document editor to place its answer in. */
 export const NO_EDITOR_MESSAGE = 'Open a scene to place text'
-/** The toast when Agent mode came back with nothing to place. */
+/** The toast when Author mode came back with nothing to place. */
 export const EMPTY_ANSWER_MESSAGE = 'The assistant returned no text. Try again.'
 /** The toast when a Query citation names a passage the scene no longer holds (F-5.7). */
 export const PASSAGE_GONE_MESSAGE = 'That passage is no longer in the scene'
@@ -50,7 +50,7 @@ export const OPEN_SCENE_TIMEOUT_MS = 3_000
  * toasts; the pending-save registry flushes it before the project closes. Main is stateless
  * about conversations: `send` carries the recent turns as `history`, appends the streamed
  * `ai:chatDelta` pieces of a Plan answer to the turn they belong to, and fills the turn with
- * the model, cost, and proposal id when the request resolves. An Agent answer never enters the
+ * the model, cost, and proposal id when the request resolves. An Author answer never enters the
  * chat: it goes to the active editor as ghost text (F-5.3), marked with its proposal on accept
  * (F-14.6) and settled through the ghost's own exit (F-14.5); the chat records a notice turn.
  * A Query answer (F-5.7) comes back whole, not streamed, and rides on its turn as `query`: the
@@ -157,7 +157,7 @@ function freshConversation(): Conversation {
   return {
     id: nextId('c'),
     title: NEW_CONVERSATION_TITLE,
-    mode: 'plan',
+    mode: 'query',
     paragraphs: CHAT_PARAGRAPHS_DEFAULT,
     messages: [],
     created: now,
