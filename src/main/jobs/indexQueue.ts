@@ -123,7 +123,10 @@ const HARD_CODES: ReadonlySet<AiErrorCode> = new Set<AiErrorCode>([
   'INVALID_KEY',
   'QUOTA',
   'BUDGET',
-  'DISABLED'
+  'DISABLED',
+  // F-15.4: neither a signed-out account nor an empty balance improves by retrying.
+  'SIGNED_OUT',
+  'NO_CREDIT'
 ])
 
 type Outcome = 'quiet' | 'cancelled' | 'transient' | 'hard'

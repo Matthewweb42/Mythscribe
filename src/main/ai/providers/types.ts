@@ -1,4 +1,4 @@
-import type { AiErrorCode, AiProviderId, Tier } from '@shared/ai'
+import type { AiErrorCode, AiFeatureId, AiProviderId, Tier } from '@shared/ai'
 
 /**
  * The provider interface every adapter implements (PLAN.md §3, F-5.1). Feature code in main
@@ -28,6 +28,11 @@ export interface CompletionRequest {
   json?: boolean
   /** Sampling temperature (the writing preset's, F-5.2); the provider's default when absent. */
   temperature?: number
+  /**
+   * What the request is for. The MythScribe Cloud proxy meters spend per feature (F-15.3), so
+   * it is sent with the request; the OpenAI adapter ignores it.
+   */
+  feature?: AiFeatureId
 }
 
 /** `usage` is on every result so the ledger (F-5.14) can price it. */
@@ -60,6 +65,17 @@ export interface Provider {
   stream(request: CompletionRequest): AsyncIterable<StreamChunk>
   /** A token-free authenticated request; resolves with the model that answered or throws like `complete`. */
   testConnection(): Promise<{ model: string }>
+  /**
+   * What this provider charges for a request, when that is not the provider's own published
+   * price: the Cloud adapter prices at the MythScribe rate (F-15.4), so the cost line under a
+   * proposal is what the author actually paid. When absent the request path prices with
+   * `priceFor`.
+   */
+  price?: (
+    model: string,
+    inputTokens: number,
+    outputTokens: number
+  ) => { costUsd: number; priced: boolean }
 }
 
 /**
@@ -108,4 +124,15 @@ export class AiDisabledError extends AiProviderError {
  */
 export class AiCancelledError extends AiProviderError {
   readonly code = 'CANCELLED' as const
+}
+/**
+ * The project sends its requests through MythScribe Cloud (F-15.4) but no account is signed in,
+ * so there is no session to call the proxy with. Nothing was sent.
+ */
+export class AiSignedOutError extends AiProviderError {
+  readonly code = 'SIGNED_OUT' as const
+}
+/** The Cloud proxy refused the request: the account's credits are used up (F-15.3's 402). */
+export class AiNoCreditError extends AiProviderError {
+  readonly code = 'NO_CREDIT' as const
 }

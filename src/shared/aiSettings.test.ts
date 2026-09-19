@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { AI_FEATURE_IDS } from './ai'
 import {
   AI_DATA_SHARING,
+  AI_SOURCE_LABEL,
+  AI_SOURCE_MEANING,
+  AiSource,
   AI_DIAL_LABEL,
   DEFAULT_GHOST_IDLE_MS,
   GHOST_IDLE_MS_MAX,
@@ -230,6 +233,29 @@ describe('isFeatureAllowed', () => {
   it('allows nothing at Off, whatever the toggles say', () => {
     for (const feature of AI_FEATURE_IDS) {
       expect(isFeatureAllowed(defaultAiSettings(), feature)).toBe(false)
+    }
+  })
+})
+
+describe('AiSettings.source (F-15.4)', () => {
+  it("defaults a row stored before the Cloud source existed to the author's own key", () => {
+    const { source: _source, ...stored } = defaultAiSettings()
+    const parsed = AiSettings.parse(stored)
+    expect(parsed.source).toBe('ownKey')
+    expect(parsed.dial).toBe(stored.dial)
+  })
+
+  it('keeps a stored source and refuses an unknown one', () => {
+    expect(AiSettings.parse({ ...defaultAiSettings(), source: 'cloud' }).source).toBe('cloud')
+    expect(AiSettings.safeParse({ ...defaultAiSettings(), source: 'anthropic' }).success).toBe(
+      false
+    )
+  })
+
+  it('labels and explains every source option', () => {
+    for (const source of AiSource.options) {
+      expect(AI_SOURCE_LABEL[source].length).toBeGreaterThan(0)
+      expect(AI_SOURCE_MEANING[source].length).toBeGreaterThan(0)
     }
   })
 })

@@ -93,6 +93,12 @@ export interface AiRequestDeps {
 /** What the shared pre-checks settle before either path calls the provider. */
 interface PreparedRequest {
   provider: Provider
+  /**
+   * What this request costs: the provider's own rate when it has one (the Cloud adapter prices
+   * at the MythScribe rate, F-15.4), else `deps.price`. The cap estimate and the ledger row use
+   * the same function, so a proposal's cost line is always what the request actually cost.
+   */
+  price: typeof priceFor
   model: string
   maxTokens: number
   /** The local estimate of the prompt, what the input budget was checked against. */
@@ -114,6 +120,11 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
   if (!provider) throw new NoKeyError('No API key is saved.')
   const maxTokens = Math.min(input.maxTokens, outputBudget(input.feature))
   const model = provider.resolveModel(input.tier)
+  // Called through a closure rather than passed as a method reference: the provider owns it.
+  const providerPrice = provider.price
+  const price: typeof priceFor = providerPrice
+    ? (model, inTok, outTok) => providerPrice(model, inTok, outTok)
+    : deps.price
 
   const estimatedIn = estimateTokens(input.messages.map((m) => m.content).join('\n'))
   const promptBudget = inputBudget(input.feature)
@@ -124,7 +135,7 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
   }
 
   const day = deps.dailyCap.get()
-  const estimatedCost = deps.price(model, estimatedIn, maxTokens).costUsd
+  const estimatedCost = price(model, estimatedIn, maxTokens).costUsd
   if (wouldExceed(day, estimatedCost, dayOf(deps.now()))) {
     throw new AiBudgetError(
       `This request would take today's AI spend over the ${day.dailyCapUsd.toFixed(2)} USD cap.`
@@ -133,6 +144,7 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
 
   return {
     provider,
+    price,
     model,
     maxTokens,
     estimatedIn,
@@ -183,7 +195,11 @@ function record(
   answer: { text: string; usage: CompletionUsage }
 ): AiRequestResult {
   const { model, key } = prepared
-  const { costUsd, priced } = deps.price(model, answer.usage.inputTokens, answer.usage.outputTokens)
+  const { costUsd, priced } = prepared.price(
+    model,
+    answer.usage.inputTokens,
+    answer.usage.outputTokens
+  )
   const at = deps.now().toISOString()
   const tokens = answer.usage.inputTokens + answer.usage.outputTokens
   deps.ledger.insert({
@@ -235,6 +251,7 @@ function completionRequest(
 ): CompletionRequest {
   return {
     tier: input.tier,
+    feature: input.feature,
     messages: input.messages,
     maxTokens: prepared.maxTokens,
     json: input.json,

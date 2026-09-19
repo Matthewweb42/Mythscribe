@@ -29,12 +29,14 @@ export type AccountErrorCode = CloudErrorCode | 'NETWORK' | 'PROTOCOL'
 /** Fixed copy per failure; the Worker's own message is used only where it knows more (below). */
 const MESSAGES: Record<AccountErrorCode, string> = {
   INVALID_EMAIL: 'Enter a valid email address.',
+  BAD_REQUEST: 'MythScribe Cloud refused the request.',
   RATE_LIMITED: 'Too many sign-in links were requested for this address.',
   NOT_CONFIGURED: 'MythScribe Cloud cannot send sign-in emails right now.',
   UNAUTHORIZED: 'This MythScribe Cloud sign-in is no longer valid.',
   NOT_FOUND: 'MythScribe Cloud does not know this sign-in attempt.',
   BAD_SIGNATURE: "MythScribe Cloud refused the request's signature.",
   INSUFFICIENT_CREDITS: 'Your MythScribe Cloud balance is used up.',
+  UPSTREAM: 'The AI provider behind MythScribe Cloud did not answer.',
   INTERNAL: 'MythScribe Cloud had a problem with the request.',
   NETWORK: 'Could not reach MythScribe Cloud.',
   PROTOCOL: 'MythScribe Cloud sent an answer MythScribe could not read.'
@@ -42,12 +44,14 @@ const MESSAGES: Record<AccountErrorCode, string> = {
 
 const NEXT_STEPS: Record<AccountErrorCode, string> = {
   INVALID_EMAIL: 'Check the address and try again.',
+  BAD_REQUEST: 'Try again; if it keeps happening, update MythScribe.',
   RATE_LIMITED: 'Open the last email, or wait 15 minutes.',
   NOT_CONFIGURED: 'Try again later.',
   UNAUTHORIZED: 'Sign in again.',
   NOT_FOUND: 'Ask for a new sign-in link.',
   BAD_SIGNATURE: 'Try again; if it keeps happening, update MythScribe.',
   INSUFFICIENT_CREDITS: 'Buy more credits in Settings › Account.',
+  UPSTREAM: 'Try again in a moment.',
   INTERNAL: 'Try again in a moment.',
   NETWORK: 'Check your connection and try again.',
   PROTOCOL: 'Try again; if it keeps happening, update MythScribe.'

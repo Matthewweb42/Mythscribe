@@ -6,7 +6,8 @@ import {
   isCheckoutUrl,
   SESSION_TTL_MS
 } from '../../src/shared/cloudApi'
-import { type ConfiguredPack, type CreditsDeps, hasCredit, meterRequest } from './credits'
+import type { AiDeps } from './ai'
+import { type ConfiguredPack, hasCredit, meterRequest } from './credits'
 import { hmacSha256Hex, sha256Hex } from './crypto'
 import type { Mailer } from './email'
 import { handleRequest } from './index'
@@ -26,12 +27,12 @@ const PACKS: ConfiguredPack[] = [
 
 const silentMailer: Mailer = { send: () => Promise.resolve() }
 
-let deps: CreditsDeps
+let deps: AiDeps
 let clock: number
 let counter: number
 let warnings: string[]
 
-function makeDeps(overrides: Partial<CreditsDeps> = {}): CreditsDeps {
+function makeDeps(overrides: Partial<AiDeps> = {}): AiDeps {
   return {
     store: memoryStore(),
     mailer: silentMailer,
@@ -40,6 +41,8 @@ function makeDeps(overrides: Partial<CreditsDeps> = {}): CreditsDeps {
     revealLink: false,
     packs: PACKS,
     webhookSecret: SECRET,
+    // F-15.4: the AI proxy has its own tests in `ai.test.ts`.
+    upstream: null,
     ...overrides
   }
 }

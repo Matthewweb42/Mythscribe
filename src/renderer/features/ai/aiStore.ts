@@ -1,6 +1,13 @@
 import { create } from 'zustand'
-import type { AiModelMap, AiStatus, AiTestConnectionResult, AiUsageSummary } from '@shared/ai'
+import type {
+  AiModelMap,
+  AiProviderId,
+  AiStatus,
+  AiTestConnectionResult,
+  AiUsageSummary
+} from '@shared/ai'
 import { ipc } from '@renderer/lib/ipc'
+import { flushAiSettings } from './aiSettingsStore'
 
 /**
  * The renderer owner of the AI provider status (F-5.1): whether a key is saved (as a masked
@@ -25,8 +32,11 @@ interface AiState {
   /** Sends the key once; a fresh status (with the mask) comes back and any old test result is dropped. */
   setKey: (key: string) => Promise<void>
   clearKey: () => Promise<void>
-  /** Replaces the tier → model mapping (F-5.11); the last test result named the old model, so it is dropped. */
-  setModels: (models: AiModelMap) => Promise<void>
+  /**
+   * Replaces one provider's tier → model mapping (F-5.11; the provider is the project's AI
+   * source, F-15.4). The last test result named the old model, so it is dropped.
+   */
+  setModels: (provider: AiProviderId, models: AiModelMap) => Promise<void>
   test: () => Promise<void>
 }
 
@@ -74,9 +84,9 @@ export const useAiStore = create<AiState>((set) => ({
     set({ status, testResult: null })
   },
 
-  async setModels(models) {
+  async setModels(provider, models) {
     const mine = generation
-    const status = await ipc().invoke('ai:setModels', { provider: 'openai', models })
+    const status = await ipc().invoke('ai:setModels', { provider, models })
     if (mine !== generation) return
     set({ status, testResult: null })
   },
@@ -85,6 +95,10 @@ export const useAiStore = create<AiState>((set) => ({
     const mine = generation
     set({ testing: true, testResult: null })
     try {
+      // Main reads the project's AI source (F-15.4) from the saved settings row, so a source
+      // just picked in the tab has to land before the test is sent; otherwise a test clicked
+      // inside the settings debounce answers for the source the author just left.
+      await flushAiSettings()
       const testResult = await ipc().invoke('ai:testConnection', undefined)
       if (mine !== generation) return
       set({ testResult })

@@ -11,7 +11,6 @@ import {
   type AiDial
 } from '@shared/aiSettings'
 import { useAiSettingsStore } from './aiSettingsStore'
-import { useAiStore } from './aiStore'
 
 const RADIO =
   'flex min-w-0 flex-1 flex-col gap-0.5 rounded-md border border-line px-2 py-1.5 text-left hover:bg-surface focus-visible:outline-2 focus-visible:outline-accent aria-checked:border-accent aria-checked:bg-surface-raised'
@@ -30,7 +29,10 @@ const FIELD = 'w-24 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 export function AiDialSection(): React.JSX.Element | null {
   const settings = useAiSettingsStore((s) => s.settings)
   const update = useAiSettingsStore((s) => s.update)
-  const provider = useAiStore((s) => s.status?.provider ?? 'openai')
+  // F-15.4: the Provider column names where the text actually goes, which is the project's
+  // AI source, not a fixed provider id.
+  const source = useAiSettingsStore((s) => s.settings?.source ?? 'ownKey')
+  const provider = source === 'cloud' ? 'cloud' : 'openai'
   const radios = useRef(new Map<AiDial, HTMLButtonElement>())
   const headingId = useId()
   const dialId = useId()

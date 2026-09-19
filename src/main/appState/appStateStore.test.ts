@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defaultAiModels } from '@shared/ai'
+import { DEFAULT_MODELS, defaultAiModels } from '@shared/ai'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultAiUsageState } from '../ai/dailyCap'
 import { AppStateStore, EMPTY_APP_STATE } from './appStateStore'
@@ -118,21 +118,27 @@ describe('AppStateStore', () => {
 
   it('round-trips a changed model mapping, trimmed, and refuses an empty or over-long model', () => {
     const store = new AppStateStore(file)
-    const models = { openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' } }
+    const models = {
+      openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
+      cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' }
+    }
     expect(
       store.update((s) => ({
         ...s,
-        models: { openai: { ...models.openai, fast: ' gpt-5.4-nano ' } }
+        models: { ...models, openai: { ...models.openai, fast: ' gpt-5.4-nano ' } }
       })).models
     ).toEqual(models)
     expect(new AppStateStore(file).get().models).toEqual(models)
     expect(() =>
-      store.update((s) => ({ ...s, models: { openai: { fast: '', strong: 'gpt-5.4' } } }))
+      store.update((s) => ({
+        ...s,
+        models: { ...models, openai: { fast: '', strong: 'gpt-5.4' } }
+      }))
     ).toThrow()
     expect(() =>
       store.update((s) => ({
         ...s,
-        models: { openai: { fast: 'x'.repeat(101), strong: 'gpt-5.4' } }
+        models: { ...models, openai: { fast: 'x'.repeat(101), strong: 'gpt-5.4' } }
       }))
     ).toThrow()
     expect(new AppStateStore(file).get().models).toEqual(models)
@@ -163,6 +169,15 @@ describe('AppStateStore', () => {
       store.update((s) => ({ ...s, aiUsage: { ...aiUsage, dailyCapUsd: -1 } }))
     ).toThrow()
     expect(new AppStateStore(file).get().aiUsage).toEqual(aiUsage)
+  })
+
+  it('fills the cloud map in for a file written before F-15.4, keeping the recents', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const models = { openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' } }
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry], models }), 'utf8')
+    const state = new AppStateStore(file).get()
+    expect(state.models).toEqual({ ...models, cloud: DEFAULT_MODELS })
+    expect(state.recents).toEqual([entry])
   })
 
   it('warns and falls back to the empty state when the stored model mapping is invalid', () => {

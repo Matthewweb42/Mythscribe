@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_MODELS, MODEL_PRICING } from './ai'
+import { DEFAULT_MODELS, MODEL_PRICING, priceFor } from './ai'
 import {
   CLOUD_RATE_MULTIPLIER,
   CLOUD_RATES,
   cloudChargeMicros,
+  cloudPriceFor,
   cloudRateFor,
   MICROS_PER_USD
 } from './cloudRates'
@@ -59,5 +60,24 @@ describe('CLOUD_RATES', () => {
     const firstNonDefault = CLOUD_RATES.findIndex((rate) => rate.tiers.length === 0)
     const lastDefault = CLOUD_RATES.map((rate) => rate.tiers.length > 0).lastIndexOf(true)
     expect(firstNonDefault === -1 || firstNonDefault > lastDefault).toBe(true)
+  })
+})
+
+describe('cloudPriceFor (F-15.4)', () => {
+  it('prices a request at the Cloud rate, the charge the meter took in dollars', () => {
+    expect(cloudPriceFor('gpt-5.4-mini', 1000, 100)).toEqual({
+      costUsd: cloudChargeMicros('gpt-5.4-mini', 1000, 100) / MICROS_PER_USD,
+      priced: true
+    })
+  })
+
+  it('is the OpenAI price times the margin', () => {
+    const own = priceFor('gpt-5.4', 1_000_000, 1_000_000)
+    const cloud = cloudPriceFor('gpt-5.4', 1_000_000, 1_000_000)
+    expect(cloud.costUsd).toBeCloseTo(own.costUsd * CLOUD_RATE_MULTIPLIER, 8)
+  })
+
+  it('answers 0 and unpriced for an unknown model instead of throwing', () => {
+    expect(cloudPriceFor('gpt-unknown', 10, 10)).toEqual({ costUsd: 0, priced: false })
   })
 })

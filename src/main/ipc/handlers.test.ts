@@ -76,6 +76,8 @@ let safe: ReturnType<typeof fakeSafeStorage>
 let keyFile: string
 /** What the fake provider's `testConnection` does; the registry builds it for any saved key. */
 let testConnection: ReturnType<typeof vi.fn<() => Promise<{ model: string }>>>
+/** F-15.4: the Cloud adapter's, so a test can tell which source a request took. */
+let cloudTestConnection: ReturnType<typeof vi.fn<() => Promise<{ model: string }>>>
 /** What the fake provider's `complete` answers (F-4.7); tests replace it per case. */
 let complete: ReturnType<typeof vi.fn<(request: CompletionRequest) => Promise<CompletionResult>>>
 /**
@@ -166,6 +168,16 @@ beforeEach(() => {
     },
     testConnection
   }
+  // F-15.4: the Cloud adapter, so a project whose source is `cloud` reaches something.
+  cloudTestConnection = vi.fn<() => Promise<{ model: string }>>(() =>
+    Promise.resolve({ model: 'cloud-fake' })
+  )
+  const cloudProvider: Provider = {
+    ...provider,
+    id: 'cloud',
+    resolveModel: () => 'cloud-fake',
+    testConnection: cloudTestConnection
+  }
   const appState = new AppStateStore(path.join(tmp, 'userData', 'app-state.json'))
   // F-15.2: the account channels only forward to the service, which has its own tests; here it
   // is real over a client that is never reached (no test signs in).
@@ -184,7 +196,8 @@ beforeEach(() => {
     ai: new AiProviderRegistry(
       keyStore,
       () => appState.get().models,
-      () => provider
+      () => provider,
+      () => cloudProvider
     ),
     account: new AccountService({
       client: cloudClient,
@@ -2506,7 +2519,8 @@ describe('ai handlers (F-5.1)', () => {
       hasKey: false,
       hint: null,
       encryption: 'os',
-      models: DEFAULT_MODELS
+      // F-15.4: both provider maps, since the AI tab edits the one the project's source names.
+      models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS }
     })
   })
 
@@ -2517,7 +2531,7 @@ describe('ai handlers (F-5.1)', () => {
       hasKey: true,
       hint: 'sk-…abcd',
       encryption: 'os',
-      models: DEFAULT_MODELS
+      models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS }
     })
     expect(JSON.stringify(status)).not.toContain(KEY)
     expect(await invoke('ai:getStatus', undefined)).toEqual(status)
@@ -2571,6 +2585,21 @@ describe('ai handlers (F-5.1)', () => {
       message: 'OpenAI rejected the API key.',
       nextStep: 'Check the key and try again.'
     })
+  })
+
+  it('sends a project whose source is MythScribe Cloud through the proxy adapter (F-15.4)', async () => {
+    await invoke('project:create', { name: 'Cloudy', format: 'novel', directory: tmp })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), source: 'cloud' })
+    // No key is saved, and none is needed: the Cloud adapter carries the session instead.
+    expect(await invoke('ai:testConnection', undefined)).toEqual({ ok: true, model: 'cloud-fake' })
+    expect(testConnection).not.toHaveBeenCalled()
+    expect(cloudTestConnection).toHaveBeenCalledOnce()
+
+    // And back: the same project on its own key reaches the key adapter again.
+    await invoke('ai:setKey', { key: KEY })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), source: 'ownKey' })
+    expect(await invoke('ai:testConnection', undefined)).toEqual({ ok: true, model: 'gpt-fake' })
+    expect(cloudTestConnection).toHaveBeenCalledOnce()
   })
 
   it('lets an unexpected failure reach the error envelope', async () => {
@@ -3124,10 +3153,18 @@ describe('ai:setModels (F-5.11)', () => {
       provider: 'openai',
       models: { fast: ' gpt-5.4-nano ', strong: 'gpt-5.4-pro' }
     })
-    expect(status.models).toEqual(models)
-    expect(await invoke('ai:getStatus', undefined)).toMatchObject({ models })
+    expect(status.models.openai).toEqual(models)
+    // F-15.4: the other provider's map is untouched by a write to this one.
+    expect(status.models.cloud).toEqual(DEFAULT_MODELS)
+    expect(await invoke('ai:getStatus', undefined)).toMatchObject({ models: { openai: models } })
     const file = path.join(tmp, 'userData', 'app-state.json')
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({ models: { openai: models } })
+  })
+
+  it('writes the Cloud map on its own, leaving the key path alone (F-15.4)', async () => {
+    const cloud = { fast: 'gpt-5.4-mini', strong: 'gpt-5.4-nano' }
+    const status = await invoke('ai:setModels', { provider: 'cloud', models: cloud })
+    expect(status.models).toEqual({ openai: DEFAULT_MODELS, cloud })
   })
 
   it('refuses an empty or over-long model id with VALIDATION and keeps the stored mapping', async () => {
@@ -3140,7 +3177,7 @@ describe('ai:setModels (F-5.11)', () => {
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     }
-    expect(await invoke('ai:getStatus', undefined)).toMatchObject({ models })
+    expect(await invoke('ai:getStatus', undefined)).toMatchObject({ models: { openai: models } })
   })
 })
 

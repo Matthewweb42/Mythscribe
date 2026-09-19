@@ -59,6 +59,13 @@ export default tseslint.config(
     ...reactRefresh.configs.vite
   },
   {
+    // The Cloud Worker's only observability is `wrangler tail`: its one metering line per
+    // answered request (F-15.4) is deliberate output, not a leftover debug statement. It
+    // carries ids and numbers only; never a message and never an answer.
+    files: ['cloud/src/**/*.ts'],
+    rules: { 'no-console': ['error', { allow: ['log', 'warn', 'error'] }] }
+  },
+  {
     files: ['e2e/**/*.ts'],
     languageOptions: {
       parserOptions: { projectService: false, project: './tsconfig.e2e.json' }

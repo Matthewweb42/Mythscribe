@@ -7,11 +7,14 @@ import { z } from 'zod'
  */
 
 /** The provider ids as a tuple, so Drizzle enum columns and the zod enum share one owner. */
-export const AI_PROVIDER_IDS = ['openai'] as const
+export const AI_PROVIDER_IDS = ['openai', 'cloud'] as const
 export const AiProviderId = z.enum(AI_PROVIDER_IDS)
 export type AiProviderId = z.infer<typeof AiProviderId>
 
-export const AI_PROVIDER_LABEL: Record<AiProviderId, string> = { openai: 'OpenAI' }
+export const AI_PROVIDER_LABEL: Record<AiProviderId, string> = {
+  openai: 'OpenAI',
+  cloud: 'MythScribe Cloud'
+}
 
 /** Feature code requests a tier, never a model name (CLAUDE.md, token efficiency rule 1). */
 export const Tier = z.enum(['fast', 'strong'])
@@ -37,14 +40,20 @@ export const ModelName = z.string().trim().min(1).max(AI_MODEL_MAX)
 export const AiModelMap = z.object({ fast: ModelName, strong: ModelName })
 export type AiModelMap = z.infer<typeof AiModelMap>
 /**
- * One map per provider id. zod's enum-keyed record is exhaustive: a new `AiProviderId` member
- * is a parse and type error here until `defaultAiModels` gets defaults for it too.
+ * One map per provider id, spelled out rather than an enum-keyed record: a file written before
+ * a provider existed (F-15.4 added `cloud`) carries only the older keys, and a record would
+ * fail the whole app state — recents included — instead of filling the new map in. A new
+ * `AiProviderId` member is a type error here until it gets its own defaulted field.
  */
-export const AiModels = z.record(AiProviderId, AiModelMap)
+export const AiModels = z.object({
+  openai: AiModelMap,
+  /** F-15.4: the models the MythScribe Cloud proxy is asked for; same defaults as the key path. */
+  cloud: AiModelMap.default(() => ({ ...DEFAULT_MODELS }))
+})
 export type AiModels = z.infer<typeof AiModels>
 
 export function defaultAiModels(): AiModels {
-  return { openai: { ...DEFAULT_MODELS } }
+  return { openai: { ...DEFAULT_MODELS }, cloud: { ...DEFAULT_MODELS } }
 }
 
 /** Length bounds for a key as entered; a shape outside them is refused with VALIDATION. */
@@ -66,7 +75,11 @@ export const AiErrorCode = z.enum([
   'BUDGET',
   'DISABLED',
   // F-5.10: the author stopped the request; never logged, never cached, never toasted.
-  'CANCELLED'
+  'CANCELLED',
+  // F-15.4: the project sends its requests through MythScribe Cloud but no account is signed in.
+  'SIGNED_OUT',
+  // F-15.4: the Cloud proxy refused the request because the account's credits are used up.
+  'NO_CREDIT'
 ])
 export type AiErrorCode = z.infer<typeof AiErrorCode>
 
@@ -80,7 +93,9 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
   PROVIDER: 'Try again in a moment.',
   BUDGET: 'Raise the daily cap in Settings or wait until tomorrow.',
   DISABLED: 'Turn the AI dial up in Settings, or enable the feature there.',
-  CANCELLED: 'Send it again whenever you like.'
+  CANCELLED: 'Send it again whenever you like.',
+  SIGNED_OUT: 'Sign in on the Account tab in Settings.',
+  NO_CREDIT: 'Buy credits on the Account tab in Settings.'
 }
 
 /**
@@ -96,8 +111,11 @@ export const AiStatus = z.object({
   /** The masked key while one is saved, null otherwise. */
   hint: z.string().nullable(),
   encryption: AiKeyEncryption,
-  /** The effective tier → model mapping for `provider` (F-5.11). */
-  models: AiModelMap
+  /**
+   * The effective tier → model mapping of every provider (F-5.11); the AI tab edits the map of
+   * the source the project sends through (F-15.4), so both are carried rather than one.
+   */
+  models: AiModels
 })
 export type AiStatus = z.infer<typeof AiStatus>
 

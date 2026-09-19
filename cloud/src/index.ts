@@ -2,8 +2,9 @@
  * The MythScribe Cloud Worker (F-15.2, F-15.3): the account routes and the credit routes behind
  * `api.mythscribe.app`. No CORS headers — the desktop app is not a browser origin and nothing
  * here is meant to be called from a web page; only `/auth/verify` is opened in a browser, and it
- * answers HTML. F-15.4 adds the AI proxy routes to the same router.
+ * answers HTML. F-15.4 adds the AI proxy route (`POST /ai/complete`) to the same router.
  */
+import { type AiDeps, handleAiComplete } from './ai'
 import {
   handleMe,
   handlePoll,
@@ -16,13 +17,13 @@ import {
 import {
   type ConfiguredPack,
   ConfiguredPacks,
-  type CreditsDeps,
   handleCheckout,
   handleCredits,
   handleLemonSqueezyWebhook
 } from './credits'
 import { randomToken } from './crypto'
 import { logMailer, resendMailer, type Mailer } from './email'
+import { openAiUpstream } from './openai'
 import { d1Store } from './store'
 
 /**
@@ -39,6 +40,8 @@ export interface WorkerEnv {
   /** F-15.3: the credit packs on sale, as a JSON array of `{ variantId, url, priceCents }`. */
   LEMONSQUEEZY_PACKS?: string
   LEMONSQUEEZY_WEBHOOK_SECRET?: string
+  /** F-15.4: the operator's provider key, the only place it exists; absent → the proxy is a 503. */
+  OPENAI_API_KEY?: string
 }
 
 function mailerFor(env: WorkerEnv): Mailer | null {
@@ -69,7 +72,7 @@ function packsFor(env: WorkerEnv): ConfiguredPack[] {
   return parsed.data
 }
 
-function depsFor(env: WorkerEnv): CreditsDeps {
+function depsFor(env: WorkerEnv): AiDeps {
   return {
     store: d1Store(env.DB),
     mailer: mailerFor(env),
@@ -78,11 +81,12 @@ function depsFor(env: WorkerEnv): CreditsDeps {
     revealLink: env.EMAIL_TRANSPORT === 'log',
     packs: packsFor(env),
     webhookSecret: env.LEMONSQUEEZY_WEBHOOK_SECRET ?? null,
+    upstream: env.OPENAI_API_KEY ? openAiUpstream(env.OPENAI_API_KEY) : null,
     ...(env.PUBLIC_ORIGIN ? { publicOrigin: env.PUBLIC_ORIGIN } : {})
   }
 }
 
-function route(request: Request, deps: CreditsDeps): Promise<Response> | Response {
+function route(request: Request, deps: AiDeps): Promise<Response> | Response {
   const { pathname } = new URL(request.url)
   const { method } = request
 
@@ -100,6 +104,8 @@ function route(request: Request, deps: CreditsDeps): Promise<Response> | Respons
     return handleLemonSqueezyWebhook(request, deps)
   }
 
+  if (pathname === '/ai/complete' && method === 'POST') return handleAiComplete(request, deps)
+
   return jsonError('NOT_FOUND', 'No such endpoint.')
 }
 
@@ -111,7 +117,7 @@ function withNoStore(response: Response): Response {
 }
 
 /** The whole request path over injected dependencies, so the tests drive the real router. */
-export async function handleRequest(request: Request, deps: CreditsDeps): Promise<Response> {
+export async function handleRequest(request: Request, deps: AiDeps): Promise<Response> {
   try {
     return withNoStore(await route(request, deps))
   } catch (error) {

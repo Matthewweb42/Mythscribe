@@ -45,6 +45,25 @@ export function cloudChargeMicros(model: string, tokensIn: number, tokensOut: nu
   return Math.max(1, Math.ceil(usd * MICROS_PER_USD))
 }
 
+/**
+ * What a request costs the author when it went through MythScribe Cloud (F-15.4): the same
+ * shape as `priceFor`, at the Cloud rate, so the cost line under a proposal reads in dollars
+ * whichever path answered it. Unlike `cloudChargeMicros` this never throws: it prices what the
+ * meter already charged, and a model outside the table reads as unpriced, never as free.
+ */
+export function cloudPriceFor(
+  model: string,
+  inTok: number,
+  outTok: number
+): { costUsd: number; priced: boolean } {
+  const rate = cloudRateFor(model)
+  if (!rate.priced) return { costUsd: 0, priced: false }
+  return {
+    costUsd: cloudChargeMicros(model, inTok, outTok) / MICROS_PER_USD,
+    priced: true
+  }
+}
+
 export interface PublishedCloudRate extends CloudRate {
   /** The tiers this model is the default for (F-5.11), so the table reads "fast" and "strong". */
   tiers: Tier[]
@@ -57,4 +76,6 @@ export const CLOUD_RATES: readonly PublishedCloudRate[] = Object.keys(MODEL_PRIC
     tiers: (Object.keys(DEFAULT_MODELS) as Tier[]).filter((tier) => DEFAULT_MODELS[tier] === model)
   }))
   .filter((rate) => rate.priced)
-  .sort((a, b) => Number(b.tiers.length > 0) - Number(a.tiers.length > 0) || a.inUsdPerM - b.inUsdPerM)
+  .sort(
+    (a, b) => Number(b.tiers.length > 0) - Number(a.tiers.length > 0) || a.inUsdPerM - b.inUsdPerM
+  )

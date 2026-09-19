@@ -76,12 +76,36 @@ describe('AiProviderRegistry (F-5.1)', () => {
     const provider = registry.get()
     if (!provider) throw new Error('expected a provider')
     await expect(provider.testConnection()).resolves.toEqual({ model: 'gpt-5.4-mini' })
-    models = { openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-pro' } }
+    models = { ...models, openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-pro' } }
     await expect(provider.testConnection()).resolves.toEqual({ model: 'gpt-5.4-nano' })
     const request = { tier: 'strong' as const, messages: [], maxTokens: 1 }
     await expect(provider.complete(request)).resolves.toMatchObject({ model: 'gpt-5.4-pro' })
     expect(provider.resolveModel('strong')).toBe('gpt-5.4-pro')
     expect(registry.get()).toBe(provider)
     expect(build).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('AiProviderRegistry with a Cloud source (F-15.4)', () => {
+  it('answers the Cloud provider whatever the key is, and builds it once', () => {
+    const buildCloud = vi.fn<() => Provider>(() =>
+      fakeProvider('cloud', (tier) => models.cloud[tier])
+    )
+    const withCloud = new AiProviderRegistry(keyStore, () => models, build, buildCloud)
+    const provider = withCloud.get('cloud')
+    expect(provider).not.toBeNull()
+    expect(withCloud.get('cloud')).toBe(provider)
+    expect(buildCloud).toHaveBeenCalledOnce()
+    expect(build).not.toHaveBeenCalled()
+    // The key path is untouched by the Cloud one.
+    expect(withCloud.get('ownKey')).toBeNull()
+    keyStore.setKey('openai', 'sk-first-key-1234abcd')
+    expect(withCloud.get('ownKey')).not.toBe(provider)
+    expect(withCloud.get()).not.toBe(provider)
+    expect(withCloud.get('cloud')).toBe(provider)
+  })
+
+  it('has no Cloud provider when none was wired in', () => {
+    expect(registry.get('cloud')).toBeNull()
   })
 })

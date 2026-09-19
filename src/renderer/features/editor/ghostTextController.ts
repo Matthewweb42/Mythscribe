@@ -21,7 +21,14 @@ import { ipc } from '@renderer/lib/ipc'
 import { GHOST_TEXT_KEY, ghostOf, type GhostSettleHandler } from './ghostText'
 
 /** The failures that turn VibeWrite off: nothing will succeed until the author acts in Settings. */
-const TURN_OFF_CODES: ReadonlySet<AiErrorCode> = new Set(['DISABLED', 'NO_KEY', 'INVALID_KEY'])
+const TURN_OFF_CODES: ReadonlySet<AiErrorCode> = new Set([
+  'DISABLED',
+  'NO_KEY',
+  'INVALID_KEY',
+  // F-15.4: neither a signed-out Cloud account nor an empty balance is fixed by typing on.
+  'SIGNED_OUT',
+  'NO_CREDIT'
+])
 
 /** Session state shared by every editor instance: the soft per-day count, the back-off, the one-time toast. */
 interface SessionState {

@@ -300,6 +300,32 @@ describe('AccountService (F-15.2)', () => {
     service.dispose()
   })
 
+  it('hands the session token to main-side Cloud calls and null when signed out (F-15.4)', () => {
+    const keyStore = store()
+    const service = build(keyStore)
+    expect(service.sessionToken()).toBeNull()
+    keyStore.setKey('cloudSession', JSON.stringify(SESSION))
+    const restored = build(keyStore)
+    expect(restored.sessionToken()).toBe(SESSION.token)
+    service.dispose()
+    restored.dispose()
+  })
+
+  it('forgets the session and pushes one change when the proxy refuses it (F-15.4)', () => {
+    const keyStore = store()
+    keyStore.setKey('cloudSession', JSON.stringify(SESSION))
+    const service = build(keyStore)
+    service.sessionEnded()
+    expect(service.status()).toEqual({ state: 'signedOut' })
+    expect(service.sessionToken()).toBeNull()
+    expect(keyStore.hasKey('cloudSession')).toBe(false)
+    expect(changes).toEqual([{ state: 'signedOut' }])
+    // A second failure of an in-flight request changes nothing and says nothing.
+    service.sessionEnded()
+    expect(changes).toHaveLength(1)
+    service.dispose()
+  })
+
   it('does nothing on refresh while signed out', async () => {
     const service = build()
     expect(await service.refresh()).toEqual({ state: 'signedOut' })

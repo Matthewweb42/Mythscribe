@@ -177,10 +177,7 @@ export class AccountService {
       return this.status()
     } catch (err) {
       if (err instanceof AccountError && err.code === 'UNAUTHORIZED') {
-        if (this.signedIn === current) {
-          this.signedIn = null
-          this.keyStore.clearKey(SECRET_ID)
-        }
+        if (this.signedIn === current) this.forget()
         return this.status()
       }
       throw toAppError(err)
@@ -214,10 +211,35 @@ export class AccountService {
     }
   }
 
+  /**
+   * The session token for a Cloud call made inside main (F-15.4's proxy adapter), or null when
+   * signed out. It never crosses IPC and is never stored anywhere but the key store.
+   */
+  sessionToken(): string | null {
+    return this.signedIn?.session.token ?? null
+  }
+
+  /**
+   * The Worker refused the session (a 401 from the proxy): forget it exactly as `refresh()` and
+   * the credit calls do, and tell the renderer through `account:changed`. A no-op when there is
+   * nothing signed in, so a burst of failed requests pushes one change, not one each.
+   */
+  sessionEnded(): void {
+    if (this.signedIn === null) return
+    this.forget()
+    this.onChange(this.status())
+  }
+
   /** The app is quitting: drop the poll timer. Nothing stored changes. */
   dispose(): void {
     this.disposed = true
     this.stopPolling()
+  }
+
+  /** Drops the signed-in state and the stored session; the caller decides who to tell. */
+  private forget(): void {
+    this.signedIn = null
+    this.keyStore.clearKey(SECRET_ID)
   }
 
   /** The session a Cloud call needs, or the failure that says which action wanted one. */
@@ -233,8 +255,7 @@ export class AccountService {
    */
   private callFailed(err: unknown, state: SignedInState): Error {
     if (err instanceof AccountError && err.code === 'UNAUTHORIZED' && this.signedIn === state) {
-      this.signedIn = null
-      this.keyStore.clearKey(SECRET_ID)
+      this.forget()
       this.onChange(this.status())
     }
     // The pack is gone from the Worker's configuration: the author picked something that is no

@@ -67,6 +67,15 @@ async function flush(): Promise<void> {
   await write()
 }
 
+/**
+ * Writes a pending change now, for a caller that is about to ask main something main answers
+ * from the saved settings row — the AI source (F-15.4) decides where a connection test goes.
+ * Narrower than `flushPendingSaves`: only this store's write, never the manuscript's.
+ */
+export function flushAiSettings(): Promise<void> {
+  return flush()
+}
+
 export const useAiSettingsStore = create<AiSettingsState>((set, get) => ({
   settings: null,
 

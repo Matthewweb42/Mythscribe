@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   AI_FEATURE_IDS,
+  AI_NEXT_STEP,
+  AiErrorCode,
+  AiModels,
   AiUsageSummary,
   DEFAULT_INPUT_BUDGET,
   DEFAULT_MODELS,
@@ -11,6 +14,7 @@ import {
   MODEL_PRICING,
   TAGS_MIN_CHARS,
   aiFailure,
+  defaultAiModels,
   estimateTokens,
   inputBudget,
   outputBudget,
@@ -118,5 +122,36 @@ describe('aiFailure', () => {
       aiFailure('NO_KEY', 'No API key is saved.')
     )
     expect(TAGS_MIN_CHARS).toBe(50)
+  })
+})
+
+describe('AiModels (F-15.4)', () => {
+  it('fills the cloud map in when parsing a file written before the Cloud provider existed', () => {
+    const stored = { openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' } }
+    const parsed = AiModels.parse(stored)
+    expect(parsed.openai).toEqual(stored.openai)
+    expect(parsed.cloud).toEqual(DEFAULT_MODELS)
+  })
+
+  it('keeps a stored cloud map and parses its own defaults', () => {
+    const models = {
+      openai: { ...DEFAULT_MODELS },
+      cloud: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-mini' }
+    }
+    expect(AiModels.parse(models)).toEqual(models)
+    expect(AiModels.parse(defaultAiModels())).toEqual(defaultAiModels())
+  })
+
+  it('defaults both provider maps to the default models', () => {
+    expect(defaultAiModels()).toEqual({ openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS })
+  })
+})
+
+describe('AiErrorCode (F-15.4)', () => {
+  it('names the two Cloud failures and points each at the Account tab', () => {
+    expect(AiErrorCode.parse('SIGNED_OUT')).toBe('SIGNED_OUT')
+    expect(AiErrorCode.parse('NO_CREDIT')).toBe('NO_CREDIT')
+    expect(AI_NEXT_STEP.SIGNED_OUT).toBe('Sign in on the Account tab in Settings.')
+    expect(AI_NEXT_STEP.NO_CREDIT).toBe('Buy credits on the Account tab in Settings.')
   })
 })

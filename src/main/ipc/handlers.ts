@@ -9,7 +9,7 @@ import {
   USAGE_RECENT_LIMIT,
   type AiUsageSummary
 } from '@shared/ai'
-import { isFeatureAllowed } from '@shared/aiSettings'
+import { type AiSource, isFeatureAllowed } from '@shared/aiSettings'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl } from '@shared/cloudApi'
 import type { Background } from '@shared/focus'
 import type {
@@ -150,8 +150,19 @@ export function registerHandlers({
    * make, so "this session, all projects" counts each one exactly once.
    */
   const sessionUsage = createSessionUsage()
+  /**
+   * F-15.4: where this project's requests go — the author's own key or the MythScribe Cloud
+   * proxy — is a project setting, read on every request so a change in the AI tab applies to
+   * the next one without rebuilding anything.
+   */
+  const sourceOf = (db: AiDb): AiSource => getAiSettings(db).source
   const requestDeps = (db: AiDb): AiRequestDeps =>
-    buildAiRequestDeps({ db, providers: ai, appState, session: sessionUsage })
+    buildAiRequestDeps({
+      db,
+      providers: { get: () => ai.get(sourceOf(db)) },
+      appState,
+      session: sessionUsage
+    })
 
   /**
    * F-5.13: the background index queue, which took over the F-5.6 summary scheduler. One queue
@@ -428,7 +439,8 @@ export function registerHandlers({
     hasKey: keyStore.hasKey('openai'),
     hint: keyStore.getHint('openai'),
     encryption: keyStore.encryption(),
-    models: appState.get().models.openai
+    // F-15.4: both maps, since the AI tab edits the one the project's source names.
+    models: appState.get().models
   })
 
   register('ai:getStatus', aiStatus)
@@ -452,7 +464,11 @@ export function registerHandlers({
   // Expected failures are data (the author acts on them inline); only a bug reaches the envelope.
   register('ai:testConnection', async (): Promise<AiTestConnectionResult> => {
     try {
-      const provider = ai.get()
+      // F-15.4: the open project decides where the test goes; with none open there is nothing
+      // to read the source from, so it is the key path, as it was before Cloud existed.
+      const open = manager.current()
+      const source = open === null ? 'ownKey' : sourceOf(manager.require().connection.orm)
+      const provider = ai.get(source)
       if (!provider) throw new NoKeyError('No API key is saved.')
       const { model } = await provider.testConnection()
       return { ok: true, model }

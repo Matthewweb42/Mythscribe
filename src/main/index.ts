@@ -8,7 +8,9 @@ import { ASSET_SCHEME } from '@shared/focus'
 import { AccountService } from './account/accountService'
 import { createCloudAuthClient } from './account/cloudAuthClient'
 import { AiKeyStore } from './ai/keyStore'
+import { buildCloudProvider } from './ai/providers/cloud'
 import { AiProviderRegistry } from './ai/registry'
+import type { Provider } from './ai/providers/types'
 import { AppStateStore } from './appState/appStateStore'
 import { createDialogs } from './dialogs'
 import { registerHandlers } from './ipc/handlers'
@@ -127,19 +129,34 @@ if (!primaryInstance) {
     const keyStore = new AiKeyStore(join(app.getPath('userData'), 'ai-keys.json'), safeStorage)
     // F-15.2: the account is constructed here, not in the handlers, because it pushes
     // `account:changed` by itself when a sign-in link is opened or its attempt expires.
+    const cloudBaseUrl = cloudApiUrl(process.env)
+    const cloudClient = createCloudAuthClient({
+      baseUrl: cloudBaseUrl,
+      fetch: (input, init) => globalThis.fetch(input, init)
+    })
     account = new AccountService({
-      client: createCloudAuthClient({
-        baseUrl: cloudApiUrl(process.env),
-        fetch: (input, init) => globalThis.fetch(input, init)
-      }),
+      client: cloudClient,
       keyStore,
       onChange: (status) => emit(BrowserWindow.getAllWindows(), 'account:changed', status)
     })
+    // F-15.4: the Cloud adapter reads the session live through the account service, so it is
+    // built once here and never rebuilt; a 401 from the proxy ends the session the same way a
+    // refresh does. `credits` comes from the one auth client, so there is one piece of wire code.
+    const signedInAccount = account
+    const cloud = (): Provider =>
+      buildCloudProvider({
+        baseUrl: cloudBaseUrl,
+        fetch: (input, init) => globalThis.fetch(input, init),
+        token: () => signedInAccount.sessionToken(),
+        onSessionEnded: () => signedInAccount.sessionEnded(),
+        resolveModel: (tier) => appState.get().models.cloud[tier],
+        credits: (token) => cloudClient.credits(token)
+      })
     registerHandlers({
       manager,
       appState,
       keyStore,
-      ai: new AiProviderRegistry(keyStore, () => appState.get().models),
+      ai: new AiProviderRegistry(keyStore, () => appState.get().models, undefined, cloud),
       account,
       dialogs: createDialogs(
         () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null

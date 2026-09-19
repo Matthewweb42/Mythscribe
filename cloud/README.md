@@ -1,17 +1,19 @@
 # MythScribe Cloud API (`cloud/`)
 
 The Worker behind `api.mythscribe.app`. It serves the **account** routes (F-15.2: email magic
-link, sessions) and the **credit** routes (F-15.3: balance, Lemon Squeezy checkout and webhook,
-the meter); the AI proxy the app uses when a project runs on MythScribe's key (F-15.4, F-15.11)
-joins the same router later. It never sees the author's own key and never stores manuscript
-text — it stores an email address, hashes, and amounts.
+link, sessions), the **credit** routes (F-15.3: balance, Lemon Squeezy checkout and webhook,
+the meter), and the **AI proxy** the app uses when a project runs on MythScribe's key (F-15.4:
+`POST /ai/complete`). It never sees the author's own key and never stores manuscript text — it
+stores an email address, hashes, and amounts. Messages and answers pass through memory and a
+stream; nothing of them is written to the database or to a log line.
 
 Source: `src/index.ts` (router), `src/auth.ts` (account handlers, pure over a store + mailer +
 clock), `src/credits.ts` (credit handlers and the meter), `src/store.ts` (D1 and in-memory
 stores), `src/email.ts` (Resend / log transports), `src/pages.ts` (the two HTML pages),
-`src/crypto.ts` (tokens, hashes, the webhook HMAC). The wire contract is shared with the desktop
-app in `src/shared/cloudApi.ts` and the rates in `src/shared/cloudRates.ts`, imported from there,
-not copied.
+`src/crypto.ts` (tokens, hashes, the webhook HMAC), `src/ai.ts` (the proxy handler) and
+`src/openai.ts` (the upstream seam: Chat Completions over plain `fetch`, plus the SSE reader).
+The wire contract is shared with the desktop app in `src/shared/cloudApi.ts` and the rates in
+`src/shared/cloudRates.ts`, imported from there, not copied.
 
 ## Routes
 
@@ -25,7 +27,22 @@ not copied.
 | `POST /auth/signout` | same header; revokes the session, always 204 |
 | `GET /credits` | bearer → `{ balanceMicros, spend[], packs[] }` (F-15.3); the balance in micro-USD, lifetime spend per AI feature, and the packs on sale |
 | `POST /billing/checkout` | bearer + `{ variantId }` → `{ url }`; the pack's Lemon Squeezy checkout with `custom[user_id]` and the email stamped on it. The app opens it, never builds it |
+| `POST /ai/complete` | bearer + `AiCompleteBody` (`feature`, `model`, `messages`, `maxTokens`, `json?`, `temperature?`, `stream`) → the relayed answer (F-15.4). Caps: `AI_COMPLETE_MAX_TOKENS` 4 000, `AI_COMPLETE_MAX_MESSAGES` 64, `AI_COMPLETE_MAX_CHARS` 200 000 of message content; a model outside the rate table or a body over a cap is 400 `BAD_REQUEST`, no `OPENAI_API_KEY` is 503 `NOT_CONFIGURED`, a used-up balance is 402 `INSUFFICIENT_CREDITS`, a busy provider 429 `RATE_LIMITED`, any other provider failure 502 `UPSTREAM` |
 | `POST /billing/lemonsqueezy` | the webhook. `X-Signature` = HMAC-SHA256 hex of the raw body with `LEMONSQUEEZY_WEBHOOK_SECRET`; `order_created` (status `paid`) credits the pack price, `order_refunded` debits it, everything else answers 200 and is ignored |
+
+`/ai/complete` with `stream: false` answers `AiCompleteResult`
+(`{ text, model, usage, chargeMicros, balanceMicros }`) as JSON. With `stream: true` it answers
+200 `application/x-ndjson`, one `AiStreamEvent` per line: `{"type":"delta","delta":"…"}` as the
+text arrives, then exactly one terminal event — `{"type":"done", model, usage, chargeMicros,
+balanceMicros}`, or `{"type":"error", code, message}` when the provider fails after the headers
+were sent (the status is already 200). A client that stops reading cancels the upstream call and
+is charged nothing.
+
+The order per request is: authenticate, validate, check the balance (`hasCredit`), call the
+provider, then charge (`meterRequest`) — so the tokens are known before the charge and the last
+request of an account may overdraw it slightly. One log line per answered request, with the
+request id, the user id, the feature, the model, the token counts, the charge, and the status;
+never a message and never an answer.
 
 Errors are `{ code, message }` with the codes and statuses in `src/shared/cloudApi.ts`. There are
 no CORS headers: the desktop app is not a browser origin, and every response is `no-store`.
@@ -72,7 +89,8 @@ shows "Sign-in email is not configured on the server yet." verbatim.
 ## Running it locally
 
 ```
-cp cloud/.dev.vars.example cloud/.dev.vars    # EMAIL_TRANSPORT=log, PUBLIC_ORIGIN=http://127.0.0.1:8787
+cp cloud/.dev.vars.example cloud/.dev.vars    # EMAIL_TRANSPORT=log, PUBLIC_ORIGIN=http://127.0.0.1:8787,
+                                              # OPENAI_API_KEY=<a real key, for /ai/complete>
 npx wrangler d1 migrations apply mythscribe --local --config cloud/wrangler.toml
 npm run cloud:dev                             # http://127.0.0.1:8787
 MYTHSCRIBE_CLOUD_API_URL=http://127.0.0.1:8787 npm run dev

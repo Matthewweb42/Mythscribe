@@ -2,7 +2,6 @@ import { useEffect, useId, useState } from 'react'
 import {
   AI_KEY_MAX,
   AI_MODEL_MAX,
-  AI_PROVIDER_LABEL,
   DAILY_CAP_MAX,
   DAILY_CAP_MIN,
   DEFAULT_MODELS,
@@ -12,7 +11,8 @@ import {
   type AiUsageSummary,
   type Tier
 } from '@shared/ai'
-import { isFeatureAllowed } from '@shared/aiSettings'
+import { AI_SOURCE_LABEL, AI_SOURCE_MEANING, AiSource, isFeatureAllowed } from '@shared/aiSettings'
+import { useAccountStore } from '@renderer/features/account/accountStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { AiDialSection } from './AiDialSection'
@@ -43,9 +43,18 @@ const PLAIN_STORAGE_COPY =
   'No system keyring found: the key is stored obfuscated, not encrypted. ' +
   'Install a keyring (GNOME Keyring or KWallet) for real encryption.'
 
-/** The storage claim follows the real backend: no "encrypted" under the plain-text warning. */
-const privacyCopy = (encryption: 'os' | 'plain' | 'none' | undefined): string =>
-  `Your key is ${encryption === 'plain' ? 'stored only on this machine' : 'encrypted and stored only on this machine'}, and is sent only to OpenAI when you use an AI feature.`
+/**
+ * The storage claim follows the real backend: no "encrypted" under the plain-text warning. On
+ * MythScribe Cloud there is no key here at all, so the line names where the text goes instead.
+ */
+const privacyCopy = (encryption: 'os' | 'plain' | 'none' | undefined, source: AiSource): string =>
+  source === 'cloud'
+    ? 'Your key stays out of it on MythScribe Cloud: the text listed in the table above goes ' +
+      'to MythScribe Cloud, which relays it to OpenAI and stores none of it.'
+    : `Your key is ${encryption === 'plain' ? 'stored only on this machine' : 'encrypted and stored only on this machine'}, and is sent only to OpenAI when you use an AI feature.`
+
+const RADIO =
+  'flex min-w-0 flex-1 flex-col gap-0.5 rounded-md border border-line px-2 py-1.5 text-left hover:bg-surface focus-visible:outline-2 focus-visible:outline-accent aria-checked:border-accent aria-checked:bg-surface-raised'
 
 const report = (err: unknown): void => {
   toast.error(describeError(err))
@@ -86,6 +95,14 @@ export function AiSettingsTab(): React.JSX.Element {
     s.settings === null ? false : isFeatureAllowed(s.settings, 'summary')
   )
   const indexAll = useIndexingStore((s) => s.indexAll)
+  // F-15.4: where this project's requests go. The picker lives here because without it the
+  // Cloud proxy is unreachable; F-15.11 adds the wizard step and the rate beside each model.
+  const settings = useAiSettingsStore((s) => s.settings)
+  const updateSettings = useAiSettingsStore((s) => s.update)
+  const account = useAccountStore((s) => s.status)
+  const source: AiSource = settings?.source ?? 'ownKey'
+  const provider = source === 'cloud' ? 'cloud' : 'openai'
+  const signedIn = account?.state === 'signedIn'
 
   useEffect(() => {
     load().catch(report)
@@ -114,11 +131,12 @@ export function AiSettingsTab(): React.JSX.Element {
       setDraft('')
     })
 
-  const models = status?.models ?? null
+  const models = status?.models[provider] ?? null
   const saveModel = (tier: Tier, model: string): Promise<void> =>
     run(async () => {
-      if (models) await setModels({ ...models, [tier]: model })
+      if (models) await setModels(provider, { ...models, [tier]: model })
     })
+  const canTest = source === 'cloud' ? signedIn : hasKey
 
   return (
     <div className="flex flex-col gap-4 text-sm">
@@ -148,12 +166,30 @@ export function AiSettingsTab(): React.JSX.Element {
 
       <ProvenanceSection />
 
-      <div className="flex items-center justify-between gap-3">
-        <span>Provider</span>
-        <span className="font-medium">{AI_PROVIDER_LABEL.openai}</span>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs text-fg-muted">AI source</span>
+        <div role="radiogroup" aria-label="AI source" className="flex gap-2">
+          {AiSource.options.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              data-testid={`ai-source-${option}`}
+              aria-checked={option === source}
+              disabled={settings === null || busy}
+              onClick={() => updateSettings({ source: option })}
+              className={RADIO}
+            >
+              <span className="text-sm font-medium">{AI_SOURCE_LABEL[option]}</span>
+              <span className="text-xs text-fg-muted">{AI_SOURCE_MEANING[option]}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
-      {status !== null && status.encryption === 'none' ? (
+      {source === 'cloud' ? (
+        <CloudAccountLine signedIn={signedIn} email={signedIn ? account.email : null} />
+      ) : status !== null && status.encryption === 'none' ? (
         <p role="alert" className="m-0 rounded-md border border-warning/40 px-3 py-2 text-warning">
           {NO_SAFE_STORAGE_COPY}
         </p>
@@ -199,7 +235,7 @@ export function AiSettingsTab(): React.JSX.Element {
         </form>
       )}
 
-      {status?.encryption === 'plain' ? (
+      {source === 'ownKey' && status?.encryption === 'plain' ? (
         <p role="alert" className="m-0 text-xs text-warning">
           {PLAIN_STORAGE_COPY}
         </p>
@@ -211,7 +247,7 @@ export function AiSettingsTab(): React.JSX.Element {
           <button
             type="button"
             disabled={models === null || atDefaults(models) || busy}
-            onClick={() => void run(() => setModels({ ...DEFAULT_MODELS }))}
+            onClick={() => void run(() => setModels(provider, { ...DEFAULT_MODELS }))}
             className={BUTTON}
           >
             Reset to defaults
@@ -231,7 +267,7 @@ export function AiSettingsTab(): React.JSX.Element {
       <div className="flex flex-col gap-1.5">
         <button
           type="button"
-          disabled={!hasKey || testing || busy}
+          disabled={!canTest || testing || busy}
           onClick={() => void run(test)}
           className={`${BUTTON} self-start`}
         >
@@ -256,8 +292,28 @@ export function AiSettingsTab(): React.JSX.Element {
         onCommitCap={(usd) => run(() => setDailyCap(usd))}
       />
 
-      <p className="m-0 text-xs text-fg-muted">{privacyCopy(status?.encryption)}</p>
+      <p className="m-0 text-xs text-fg-muted">{privacyCopy(status?.encryption, source)}</p>
     </div>
+  )
+}
+
+/**
+ * Who the Cloud requests are charged to (F-15.4), in one line: the account this machine is
+ * signed in to, or what to do about it. The Account tab owns signing in; this only reports.
+ */
+function CloudAccountLine({
+  signedIn,
+  email
+}: {
+  signedIn: boolean
+  email: string | null
+}): React.JSX.Element {
+  return (
+    <p role="status" data-testid="ai-cloud-account" className="m-0 text-xs text-fg-muted">
+      {signedIn && email !== null
+        ? `Signed in as ${email}. Manage credits on the Account tab.`
+        : 'Not signed in. Sign in on the Account tab to use MythScribe Cloud.'}
+    </p>
   )
 }
 

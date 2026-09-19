@@ -9,10 +9,11 @@ import {
   type ElectronApplication,
   type Page
 } from '@playwright/test'
-import type { AiStatus, AiUsageSummary } from '../src/shared/ai'
+import { priceFor, type AiStatus, type AiUsageSummary } from '../src/shared/ai'
 import type { AiSettings } from '../src/shared/aiSettings'
 import type { AuthorRules } from '../src/shared/authorRules'
 import { LOGIN_ATTEMPT_TTL_MS } from '../src/shared/cloudApi'
+import { cloudChargeMicros, cloudPriceFor } from '../src/shared/cloudRates'
 import type { FocusSettings } from '../src/shared/focus'
 import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
@@ -400,6 +401,22 @@ const CLOUD_SPEND = { feature: 'ghostText', micros: 1200, requests: 3, tokens: 9
 const CLOUD_CHECKOUT_URL =
   'https://mythscribe.lemonsqueezy.com/buy/test?checkout[custom][user_id]=user-1'
 
+/**
+ * F-15.4: what the fake Cloud Worker answers `POST /ai/complete` with, and what it saw. The
+ * token counts are large enough that the Cloud rate (2x the provider's) shows in the cost line
+ * as a different number from the OpenAI one.
+ */
+const CLOUD_AI_USAGE = { inputTokens: 10_000, outputTokens: 2_000 }
+const CLOUD_AI_ANSWER = 'MythScribe Cloud answered this one.'
+const CLOUD_QUESTION = 'Does MythScribe Cloud answer this?'
+const CLOUD_AI_DELTAS = ['MythScribe Cloud ', 'answered this one.']
+const cloudAiRequests: {
+  feature: string
+  model: string
+  stream: boolean
+  auth: string | undefined
+}[] = []
+
 /** Stands in for the author opening the sign-in link in their browser. */
 function approveSignIn(): void {
   cloudApproved = true
@@ -498,6 +515,49 @@ function startFakeCloudApi(): Promise<string> {
         return
       }
       json(res, 200, { url: CLOUD_CHECKOUT_URL })
+      return
+    }
+    if (req.method === 'POST' && url === '/ai/complete') {
+      let body = ''
+      req.setEncoding('utf8')
+      req.on('data', (chunk: string) => {
+        body += chunk
+      })
+      req.on('end', () => {
+        if (!authorized(req)) {
+          json(res, 401, { code: 'UNAUTHORIZED', message: 'Sign in again.' })
+          return
+        }
+        const request = JSON.parse(body) as { feature: string; model: string; stream: boolean }
+        cloudAiRequests.push({
+          feature: request.feature,
+          model: request.model,
+          stream: request.stream,
+          auth: req.headers.authorization
+        })
+        const chargeMicros = cloudChargeMicros(
+          request.model,
+          CLOUD_AI_USAGE.inputTokens,
+          CLOUD_AI_USAGE.outputTokens
+        )
+        const done = {
+          model: request.model,
+          usage: CLOUD_AI_USAGE,
+          chargeMicros,
+          balanceMicros: CLOUD_BALANCE_MICROS - chargeMicros
+        }
+        if (!request.stream) {
+          json(res, 200, { text: CLOUD_AI_ANSWER, ...done })
+          return
+        }
+        // The streamed shape: NDJSON, the deltas as they arrive, then exactly one `done`.
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/x-ndjson')
+        for (const delta of CLOUD_AI_DELTAS) {
+          res.write(`${JSON.stringify({ type: 'delta', delta })}\n`)
+        }
+        res.end(`${JSON.stringify({ type: 'done', ...done })}\n`)
+      })
       return
     }
     if (req.method === 'POST' && url === '/auth/signout') {
@@ -969,10 +1029,17 @@ test('create, close, reopen a project on disk', async () => {
     url: '/v1/models/gpt-5.4-nano',
     auth: `Bearer ${ACCEPTED_KEY}`
   })
-  expect((await aiStatus()).models).toEqual({ fast: 'gpt-5.4-nano', strong: 'gpt-5.4' })
+  // F-15.4: one map per provider; a write to the key path leaves the Cloud one at its defaults.
+  expect((await aiStatus()).models).toEqual({
+    openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
+    cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' }
+  })
   expect(
     (JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { models: AiStatus['models'] }).models
-  ).toEqual({ openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' } })
+  ).toEqual({
+    openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
+    cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' }
+  })
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
   await page.getByRole('button', { name: 'Settings' }).click()
@@ -981,7 +1048,7 @@ test('create, close, reopen a project on disk', async () => {
   await resetModels.click()
   await expect(fastTier).toHaveValue('gpt-5.4-mini')
   await expect(resetModels).toBeDisabled()
-  expect((await aiStatus()).models).toEqual({ fast: 'gpt-5.4-mini', strong: 'gpt-5.4' })
+  expect((await aiStatus()).models.openai).toEqual({ fast: 'gpt-5.4-mini', strong: 'gpt-5.4' })
   // F-5.14: the Usage block shows nothing spent (no feature can spend yet) and the default
   // daily cap; a new cap lands in app-state.json and survives closing the dialog.
   const usageToday = settingsDialog.getByTestId('ai-usage-today')
@@ -1051,8 +1118,34 @@ test('create, close, reopen a project on disk', async () => {
   // there; clicking it would hand a Lemon Squeezy URL to the machine's real browser.
   await expect(settingsDialog.getByTestId('account-credit-balance')).toHaveText('$2.50')
   await expect(settingsDialog.getByRole('button', { name: 'Buy $5' })).toBeVisible()
+  // F-15.4: the AI tab's source picker. With the account signed in, MythScribe Cloud names it
+  // and Test connection reaches the fake Worker's `/credits` (no key is saved at this point).
+  // The project goes back to the author's own key before anything else runs.
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await settingsDialog.getByTestId('ai-source-cloud').click()
+  await expect(settingsDialog.getByTestId('ai-cloud-account')).toHaveText(
+    'Signed in as author@example.com. Manage credits on the Account tab.'
+  )
+  const openAiBeforeCloudTest = openAiRequests.length
+  await settingsDialog.getByRole('button', { name: 'Test connection' }).click()
+  await expect(testResult).toHaveText('Connected. gpt-5.4-mini answered.')
+  // It asked MythScribe Cloud, not OpenAI: the fake provider saw nothing.
+  expect(openAiRequests).toHaveLength(openAiBeforeCloudTest)
+  await settingsDialog.getByTestId('ai-source-ownKey').click()
+  await expect.poll(async () => (await aiSettings()).source).toBe('ownKey')
+  await settingsDialog.getByRole('tab', { name: 'Account' }).click()
   await settingsDialog.getByRole('button', { name: 'Sign out' }).click()
   await expect(settingsDialog.getByLabel('Email')).toBeVisible()
+  // Signed out, Cloud says so and Test connection has nothing to test with.
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await settingsDialog.getByTestId('ai-source-cloud').click()
+  await expect(settingsDialog.getByTestId('ai-cloud-account')).toHaveText(
+    'Not signed in. Sign in on the Account tab to use MythScribe Cloud.'
+  )
+  await expect(settingsDialog.getByRole('button', { name: 'Test connection' })).toBeDisabled()
+  await settingsDialog.getByTestId('ai-source-ownKey').click()
+  await expect.poll(async () => (await aiSettings()).source).toBe('ownKey')
+  expect(cloudAiRequests).toEqual([])
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
   const widened = await editor.locator('..').boundingBox()
@@ -2514,6 +2607,60 @@ test('create, close, reopen a project on disk', async () => {
   await expect
     .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''), { timeout: 5_000 })
     .toBe(CRITIQUE_PRAISE_QUOTE)
+
+  // F-15.4: MythScribe Cloud. Signing in again (the account step signed out), the AI tab's
+  // source picker points this project at the proxy; the next assistant question streams through
+  // the fake Cloud Worker instead of the fake OpenAI, carrying the session bearer and the
+  // feature it is charged to, and its cost line shows the Cloud rate — twice the provider's.
+  // The project goes back to the author's own key, signed out, for the steps below.
+  await dismissToasts()
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'Account' }).click()
+  await settingsDialog.getByLabel('Email').fill('author@example.com')
+  await settingsDialog.getByRole('button', { name: 'Send sign-in link' }).click()
+  approveSignIn()
+  await expect(settingsDialog.getByTestId('account-signed-in')).toHaveText(
+    'Signed in as author@example.com',
+    { timeout: 15_000 }
+  )
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await settingsDialog.getByTestId('ai-source-cloud').click()
+  await expect.poll(async () => (await aiSettings()).source).toBe('cloud')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  const cloudBodiesBefore = openAiChatBodies.length
+  await assistant.getByRole('radio', { name: 'Plan' }).click()
+  await messageBox.fill(CLOUD_QUESTION)
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(4)
+  await expect(turns.nth(3)).toContainText(CLOUD_AI_ANSWER)
+  const cloudCost = cloudPriceFor(
+    'gpt-5.4-mini',
+    CLOUD_AI_USAGE.inputTokens,
+    CLOUD_AI_USAGE.outputTokens
+  )
+  const ownKeyCost = priceFor(
+    'gpt-5.4-mini',
+    CLOUD_AI_USAGE.inputTokens,
+    CLOUD_AI_USAGE.outputTokens
+  )
+  expect(cloudCost.costUsd).toBeCloseTo(ownKeyCost.costUsd * 2, 8)
+  await expect(turns.nth(3).getByTestId('chat-turn-cost')).toHaveText(
+    `gpt-5.4-mini · $${cloudCost.costUsd.toFixed(4)} · 10,000 in · 2,000 out`
+  )
+  expect(openAiChatBodies).toHaveLength(cloudBodiesBefore)
+  expect(cloudAiRequests.filter((request) => request.feature === 'chat')).toEqual([
+    { feature: 'chat', model: 'gpt-5.4-mini', stream: true, auth: `Bearer ${CLOUD_SESSION_TOKEN}` }
+  ])
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await settingsDialog.getByTestId('ai-source-ownKey').click()
+  await expect.poll(async () => (await aiSettings()).source).toBe('ownKey')
+  await settingsDialog.getByRole('tab', { name: 'Account' }).click()
+  await settingsDialog.getByRole('button', { name: 'Sign out' }).click()
+  await expect(settingsDialog.getByLabel('Email')).toBeVisible()
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
 
   // Back to Off and no key, as the steps above left them.
   await page.getByRole('button', { name: 'Settings' }).click()

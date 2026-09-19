@@ -17,6 +17,7 @@ import { IDLE_INDEX_QUEUE } from '@shared/jobs'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, IpcRequestError, type IpcClient } from '@renderer/lib/ipc'
 import { AiSettingsTab } from './AiSettingsTab'
+import { resetAccountStore, useAccountStore } from '@renderer/features/account/accountStore'
 import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
 import { resetAiStore, useAiStore } from './aiStore'
 import { resetIndexingStore } from './indexingStore'
@@ -28,7 +29,7 @@ const NO_KEY: AiStatus = {
   hasKey: false,
   hint: null,
   encryption: 'os',
-  models: DEFAULT_MODELS
+  models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS }
 }
 const WITH_KEY: AiStatus = { ...NO_KEY, hasKey: true, hint: 'sk-…abcd' }
 const ZERO = { requests: 0, tokens: 0, costUsd: 0 }
@@ -81,7 +82,7 @@ interface Fake {
   testAnswer: () => AiTestConnectionResult
   setKeyAnswer: () => AiStatus
   /** What `ai:setModels` answers; by default the status with the sent mapping. */
-  setModelsAnswer: (models: AiModelMap) => AiStatus
+  setModelsAnswer: (provider: 'openai' | 'cloud', models: AiModelMap) => AiStatus
   /** What `ai:setDailyCap` answers; by default the usage with the sent cap. */
   setDailyCapAnswer: (dailyCapUsd: number) => AiUsageSummary
 }
@@ -95,7 +96,10 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
     usage,
     testAnswer: () => ({ ok: true, model: 'gpt-fake' }),
     setKeyAnswer: () => ({ ...WITH_KEY, encryption: fake.status.encryption }),
-    setModelsAnswer: (models) => ({ ...fake.status, models }),
+    setModelsAnswer: (provider, models) => ({
+      ...fake.status,
+      models: { ...fake.status.models, [provider]: models }
+    }),
     setDailyCapAnswer: (dailyCapUsd) => ({ ...fake.usage, dailyCapUsd }),
     client: {
       async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
@@ -110,7 +114,10 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
             fake.status = { ...NO_KEY, encryption: fake.status.encryption }
             return fake.status as Output<C>
           case 'ai:setModels':
-            fake.status = fake.setModelsAnswer((input as { models: AiModelMap }).models)
+            fake.status = fake.setModelsAnswer(
+              (input as { provider: 'openai' | 'cloud' }).provider,
+              (input as { models: AiModelMap }).models
+            )
             return fake.status as Output<C>
           case 'ai:testConnection':
             return fake.testAnswer() as Output<C>
@@ -181,6 +188,7 @@ async function open(initial: AiStatus = NO_KEY, usage: AiUsageSummary = NO_USAGE
 beforeEach(() => {
   resetAiStore()
   resetAiSettingsStore()
+  resetAccountStore()
   resetVoiceStore()
   resetProvenanceStore()
   resetIndexingStore()
@@ -189,6 +197,7 @@ beforeEach(() => {
 afterEach(() => {
   resetAiSettingsStore()
   resetIndexingStore()
+  resetAccountStore()
 })
 
 describe('AiSettingsTab (F-5.1)', () => {
@@ -368,7 +377,10 @@ describe('AiSettingsTab models (F-5.11)', () => {
   })
 
   it('resets both tiers to the defaults through one save', async () => {
-    await open({ ...NO_KEY, models: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-pro' } })
+    await open({
+      ...NO_KEY,
+      models: { openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-pro' }, cloud: DEFAULT_MODELS }
+    })
     expect(modelField('Fast tier')).toHaveValue('gpt-5.4-nano')
     await userEvent.click(button('Reset to defaults'))
     await waitFor(() => expect(modelField('Fast tier')).toHaveValue('gpt-5.4-mini'))
@@ -500,5 +512,85 @@ describe('AiSettingsTab: Summarize all scenes (F-5.13)', () => {
     await userEvent.click(summarizeAll())
     await waitFor(() => expect(toasts()).toEqual(['Queued 2 scenes for a summary.']))
     expect(fake.calls.filter((c) => c.channel === 'jobs:indexAll')).toHaveLength(1)
+  })
+})
+
+describe('AiSettingsTab AI source (F-15.4)', () => {
+  const sets = (): unknown[] =>
+    fake.calls.filter((c) => c.channel === 'aiSettings:set').map((c) => c.input)
+  const sourceRadio = (source: 'ownKey' | 'cloud'): HTMLElement =>
+    screen.getByTestId(`ai-source-${source}`)
+  const signIn = (): void => {
+    useAccountStore.setState({
+      status: { state: 'signedIn', email: 'author@example.com', userId: 'u1', since: null }
+    })
+  }
+
+  it("starts on the author's own key with the key form and the OpenAI privacy line", async () => {
+    await open()
+    expect(sourceRadio('ownKey')).toHaveAttribute('aria-checked', 'true')
+    expect(sourceRadio('cloud')).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByText(/nothing is paid to MythScribe/)).toBeInTheDocument()
+    expect(keyField()).toBeInTheDocument()
+    expect(screen.queryByTestId('ai-cloud-account')).not.toBeInTheDocument()
+    expect(screen.getByText(/sent only to OpenAI/)).toBeInTheDocument()
+  })
+
+  it('writes the source, hides the key form, and names the signed-in account', async () => {
+    await open(WITH_KEY)
+    signIn()
+    await userEvent.click(sourceRadio('cloud'))
+    expect(sourceRadio('cloud')).toHaveAttribute('aria-checked', 'true')
+    await waitFor(() => expect(sets()).toHaveLength(1))
+    expect(sets()[0]).toMatchObject({ source: 'cloud' })
+    expect(screen.queryByLabelText('API key', { selector: 'input' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('ai-cloud-account')).toHaveTextContent(
+      'Signed in as author@example.com. Manage credits on the Account tab.'
+    )
+    expect(screen.getByText(/relays it to OpenAI and stores none of it/)).toBeInTheDocument()
+    // The data-sharing table says where the text goes now.
+    expect(screen.getAllByText('MythScribe Cloud').length).toBeGreaterThan(1)
+  })
+
+  it('enables Test connection by the source: a key, or a signed-in account', async () => {
+    await open(WITH_KEY)
+    expect(button('Test connection')).toBeEnabled()
+    await userEvent.click(sourceRadio('cloud'))
+    expect(screen.getByTestId('ai-cloud-account')).toHaveTextContent(
+      'Not signed in. Sign in on the Account tab to use MythScribe Cloud.'
+    )
+    expect(button('Test connection')).toBeDisabled()
+    signIn()
+    await waitFor(() => expect(button('Test connection')).toBeEnabled())
+    await userEvent.click(button('Test connection'))
+    await waitFor(() => expect(screen.getByTestId('ai-test-result')).toBeInTheDocument())
+    expect(screen.getByTestId('ai-test-result')).toHaveTextContent('Connected. gpt-fake answered.')
+  })
+
+  it('edits the Cloud map, leaving the key map alone', async () => {
+    await open({
+      ...NO_KEY,
+      models: { openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' }, cloud: DEFAULT_MODELS }
+    })
+    expect(modelField('Fast tier')).toHaveValue('gpt-5.4-nano')
+    await userEvent.click(sourceRadio('cloud'))
+    await waitFor(() => expect(modelField('Fast tier')).toHaveValue(DEFAULT_MODELS.fast))
+    await userEvent.clear(modelField('Fast tier'))
+    await userEvent.type(modelField('Fast tier'), 'gpt-5.4-nano{Enter}')
+    await waitFor(() =>
+      expect(fake.calls.filter((c) => c.channel === 'ai:setModels')).toEqual([
+        {
+          channel: 'ai:setModels',
+          input: {
+            provider: 'cloud',
+            models: { fast: 'gpt-5.4-nano', strong: DEFAULT_MODELS.strong }
+          }
+        }
+      ])
+    )
+    expect(useAiStore.getState().status?.models.openai).toEqual({
+      fast: 'gpt-5.4-nano',
+      strong: 'gpt-5.4'
+    })
   })
 })

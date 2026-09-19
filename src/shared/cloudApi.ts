@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AiFeatureId, ModelName } from './ai'
 
 /**
  * The wire contract between the desktop app and the MythScribe Cloud Worker (F-15.2), imported
@@ -133,6 +134,8 @@ export function isCheckoutUrl(url: string): boolean {
 
 export const CloudErrorCode = z.enum([
   'INVALID_EMAIL',
+  /** The proxy could not read the body, or it asks for a model or a size the proxy refuses (F-15.4). */
+  'BAD_REQUEST',
   'RATE_LIMITED',
   /** No mail transport is configured on the Worker (the Resend secret is missing). */
   'NOT_CONFIGURED',
@@ -142,6 +145,8 @@ export const CloudErrorCode = z.enum([
   'BAD_SIGNATURE',
   /** The balance is at or below zero (F-15.3); the proxy refuses the request (F-15.4). */
   'INSUFFICIENT_CREDITS',
+  /** The model provider behind the proxy failed (F-15.4); the message never echoes the request. */
+  'UPSTREAM',
   'INTERNAL'
 ])
 export type CloudErrorCode = z.infer<typeof CloudErrorCode>
@@ -153,11 +158,83 @@ export type CloudApiError = z.infer<typeof CloudApiError>
 /** The HTTP status each error code answers with; one table so the Worker and its tests agree. */
 export const CLOUD_ERROR_STATUS: Record<CloudErrorCode, number> = {
   INVALID_EMAIL: 400,
+  BAD_REQUEST: 400,
   RATE_LIMITED: 429,
   NOT_CONFIGURED: 503,
   UNAUTHORIZED: 401,
   NOT_FOUND: 404,
   BAD_SIGNATURE: 401,
   INSUFFICIENT_CREDITS: 402,
+  UPSTREAM: 502,
   INTERNAL: 500
 }
+
+/**
+ * The AI proxy (F-15.4). One route, `POST /ai/complete`, with `Authorization: Bearer <session>`:
+ * the app sends the resolved model, the messages, and the caps; the Worker relays them to the
+ * provider with the operator's key, charges the account's credits after the answer, and stores
+ * none of it. A non-streamed answer is `AiCompleteResult` as JSON; a streamed one is NDJSON
+ * (`AI_STREAM_CONTENT_TYPE`), one `AiStreamEvent` per line.
+ */
+
+/** Hard caps the proxy refuses beyond, so one request can never run long or carry a manuscript. */
+export const AI_COMPLETE_MAX_TOKENS = 4_000
+export const AI_COMPLETE_MAX_CHARS = 200_000
+export const AI_COMPLETE_MAX_MESSAGES = 64
+
+export const AiCompleteMessage = z.object({
+  role: z.enum(['system', 'user', 'assistant']),
+  content: z.string()
+})
+export type AiCompleteMessage = z.infer<typeof AiCompleteMessage>
+
+export const AiCompleteBody = z
+  .object({
+    /** The `AiFeatureId` that is spending, so the ledger and the Account tab break spend down by feature. */
+    feature: AiFeatureId,
+    /** Resolved by the app (F-5.11); the Worker refuses a model outside the published rate table. */
+    model: ModelName,
+    messages: z.array(AiCompleteMessage).min(1).max(AI_COMPLETE_MAX_MESSAGES),
+    maxTokens: z.number().int().min(1).max(AI_COMPLETE_MAX_TOKENS),
+    json: z.boolean().optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    stream: z.boolean()
+  })
+  .refine(
+    (body) => body.messages.reduce((sum, m) => sum + m.content.length, 0) <= AI_COMPLETE_MAX_CHARS,
+    `The messages are longer than ${AI_COMPLETE_MAX_CHARS} characters`
+  )
+export type AiCompleteBody = z.infer<typeof AiCompleteBody>
+
+/** What the provider answered plus the meter's receipt: what it cost and what is left. */
+export const AiCompleteResult = z.object({
+  text: z.string(),
+  /** The model that actually answered; the charge is at its published rate. */
+  model: ModelName,
+  usage: z.object({
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative()
+  }),
+  /** Micro-USD taken off the balance for this request; at least 1 (`cloudChargeMicros`). */
+  chargeMicros: z.number().int().min(1),
+  /** The balance after the charge; may be slightly negative, since the charge lands afterwards. */
+  balanceMicros: z.number().int()
+})
+export type AiCompleteResult = z.infer<typeof AiCompleteResult>
+
+/** One line of a streamed answer: text as it arrives, then exactly one `done` or one `error`. */
+export const AiStreamEvent = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('delta'), delta: z.string() }),
+  z.object({
+    type: z.literal('done'),
+    model: ModelName,
+    usage: AiCompleteResult.shape.usage,
+    chargeMicros: AiCompleteResult.shape.chargeMicros,
+    balanceMicros: z.number().int()
+  }),
+  /** The upstream failed after the headers were sent, so the status is already 200. */
+  z.object({ type: z.literal('error'), code: CloudErrorCode, message: z.string() })
+])
+export type AiStreamEvent = z.infer<typeof AiStreamEvent>
+
+export const AI_STREAM_CONTENT_TYPE = 'application/x-ndjson'

@@ -46,6 +46,25 @@ export function defaultGhostTextSettings(): GhostTextSettings {
   return { enabled: false, idleMs: DEFAULT_GHOST_IDLE_MS }
 }
 
+/**
+ * Where this project's AI requests go (F-15.4): straight to the provider with the author's own
+ * key, or through the MythScribe Cloud proxy against the account's credits. Per project, so one
+ * manuscript can be on Cloud while another stays on a personal key.
+ */
+export const AiSource = z.enum(['ownKey', 'cloud'])
+export type AiSource = z.infer<typeof AiSource>
+
+export const AI_SOURCE_LABEL: Record<AiSource, string> = {
+  ownKey: 'My own key',
+  cloud: 'MythScribe Cloud'
+}
+
+/** One-line meaning per option; shown under each radio in the AI tab. */
+export const AI_SOURCE_MEANING: Record<AiSource, string> = {
+  ownKey: 'Calls go straight to OpenAI with the key below; nothing is paid to MythScribe.',
+  cloud: 'Calls go through MythScribe Cloud and are charged to your credits at the published rate.'
+}
+
 /** The editor's-notes settings (F-14.8), per project: how blunt the critique is. */
 export const CritiqueSettings = z.object({ honesty: Honesty })
 export type CritiqueSettings = z.infer<typeof CritiqueSettings>
@@ -72,7 +91,9 @@ export const AiSettings = z.object({
   /** Defaulted, so a row stored before F-5.3 (no `ghostText` key) still parses instead of falling back wholesale. */
   ghostText: GhostTextSettings.default(defaultGhostTextSettings),
   /** Defaulted likewise for a row stored before F-14.8. */
-  critique: CritiqueSettings.default(defaultCritiqueSettings)
+  critique: CritiqueSettings.default(defaultCritiqueSettings),
+  /** Defaulted likewise for a row stored before F-15.4: an existing project keeps its own key. */
+  source: AiSource.default('ownKey')
 })
 export type AiSettings = z.infer<typeof AiSettings>
 /** The shape before parsing: `ghostText` may be absent (a row stored before F-5.3) and `features` may lack newer ids. */
@@ -84,7 +105,8 @@ export function defaultAiSettings(): AiSettings {
     dial: 0,
     features: defaultFeatureToggles(),
     ghostText: defaultGhostTextSettings(),
-    critique: defaultCritiqueSettings()
+    critique: defaultCritiqueSettings(),
+    source: 'ownKey'
   }
 }
 

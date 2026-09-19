@@ -15,7 +15,7 @@ const STATUS: AiStatus = {
   hasKey: false,
   hint: null,
   encryption: 'os',
-  models: DEFAULT_MODELS
+  models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS }
 }
 
 interface Fake {
@@ -226,5 +226,19 @@ describe('AiDialSection (F-14.4)', () => {
     expect(rowFor('Ghost text')).toHaveTextContent(/Suggest$/)
     expect(rowFor('Author mode')).toHaveTextContent(/Draft$/)
     expect(rowFor('Tag suggestions')).toHaveTextContent(/Ask$/)
+  })
+})
+
+describe('AiDialSection provider column (F-15.4)', () => {
+  it('names OpenAI while the project runs on its own key', async () => {
+    await open()
+    expect(screen.getAllByText('OpenAI').length).toBeGreaterThan(0)
+    expect(screen.queryByText('MythScribe Cloud')).not.toBeInTheDocument()
+  })
+
+  it('names MythScribe Cloud once the project sends through the proxy', async () => {
+    await open({ ...defaultAiSettings(), source: 'cloud' })
+    expect(screen.getAllByText('MythScribe Cloud').length).toBeGreaterThan(0)
+    expect(screen.queryByText('OpenAI')).not.toBeInTheDocument()
   })
 })

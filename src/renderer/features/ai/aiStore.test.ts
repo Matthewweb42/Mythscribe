@@ -15,7 +15,7 @@ const NO_KEY: AiStatus = {
   hasKey: false,
   hint: null,
   encryption: 'os',
-  models: DEFAULT_MODELS
+  models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS }
 }
 const WITH_KEY: AiStatus = { ...NO_KEY, hasKey: true, hint: 'sk-…abcd' }
 const ZERO = { requests: 0, tokens: 0, costUsd: 0 }
@@ -50,8 +50,13 @@ function fakeClient(): Fake {
             return WITH_KEY as Output<C>
           case 'ai:clearKey':
             return NO_KEY as Output<C>
-          case 'ai:setModels':
-            return { ...WITH_KEY, models: (input as { models: AiModelMap }).models } as Output<C>
+          case 'ai:setModels': {
+            const { provider, models } = input as {
+              provider: 'openai' | 'cloud'
+              models: AiModelMap
+            }
+            return { ...WITH_KEY, models: { ...WITH_KEY.models, [provider]: models } } as Output<C>
+          }
           case 'ai:testConnection':
             return fake.testAnswer() as Output<C>
           case 'ai:usageSummary':
@@ -107,9 +112,9 @@ describe('aiStore (F-5.1)', () => {
   it('sends the model mapping for the provider and drops the stale test result (F-5.11)', async () => {
     useAiStore.setState({ status: WITH_KEY, testResult: { ok: true, model: 'old' } })
     const models = { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' }
-    await store().setModels(models)
-    expect(fake.calls).toEqual([{ channel: 'ai:setModels', input: { provider: 'openai', models } }])
-    expect(store().status).toEqual({ ...WITH_KEY, models })
+    await store().setModels('cloud', models)
+    expect(fake.calls).toEqual([{ channel: 'ai:setModels', input: { provider: 'cloud', models } }])
+    expect(store().status).toEqual({ ...WITH_KEY, models: { ...WITH_KEY.models, cloud: models } })
     expect(store().testResult).toBeNull()
   })
 

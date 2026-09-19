@@ -149,6 +149,8 @@ describe('runAiRequest (F-5.14)', () => {
     })
     expect(f.complete).toHaveBeenCalledWith({
       tier: 'fast',
+      // F-15.4: the Cloud proxy meters per feature, so every request names one.
+      feature: 'tags',
       messages: input.messages,
       maxTokens: 120,
       json: true
@@ -319,6 +321,8 @@ describe('runAiStream (F-5.4)', () => {
     })
     expect(f.stream).toHaveBeenCalledWith({
       tier: 'fast',
+      // F-15.4: the Cloud proxy meters per feature, so every request names one.
+      feature: 'tags',
       messages: input.messages,
       maxTokens: 120,
       json: true
@@ -575,5 +579,42 @@ describe('buildAiRequestDeps (the production binding)', () => {
     })
     await expect(runAiRequest(deps, input)).resolves.toMatchObject({ cached: false })
     expect(appState.get().aiUsage).toMatchObject({ spentDate: TODAY, requestsToday: 1 })
+  })
+})
+
+describe('a provider that prices its own requests (F-15.4)', () => {
+  /** The Cloud adapter charges the MythScribe rate; here, twice what `priceFor` says. */
+  const doubled = (
+    model: string,
+    inTok: number,
+    outTok: number
+  ): { costUsd: number; priced: boolean } => {
+    const own = priceFor(model, inTok, outTok)
+    return { costUsd: own.costUsd * 2, priced: own.priced }
+  }
+
+  it('prices the ledger row and the result with the provider price, not the default', async () => {
+    const f = fakes()
+    f.provider = { ...f.provider!, id: 'cloud', price: doubled }
+    const result = await runAiRequest(f.deps, input)
+    const expected = doubled('gpt-5.4-mini', 40, 10)
+    expect(result.costUsd).toBe(expected.costUsd)
+    expect(result.costUsd).toBe(priceFor('gpt-5.4-mini', 40, 10).costUsd * 2)
+    expect(f.ledger[0]).toMatchObject({ provider: 'cloud', costUsd: expected.costUsd })
+    expect(f.spends).toEqual([{ costUsd: expected.costUsd, tokens: 50 }])
+  })
+
+  it('checks the daily cap against the provider price too', async () => {
+    const own = priceFor(
+      'gpt-5.4-mini',
+      estimateTokens(input.messages.map((m) => m.content).join('\n')),
+      120
+    )
+    // A cap that the provider's own price fits under, but twice that price does not.
+    const f = fakes({ dailyCapUsd: own.costUsd * 1.5, spentTodayUsd: 0 })
+    f.provider = { ...f.provider!, id: 'cloud', price: doubled }
+    await expect(runAiRequest(f.deps, input)).rejects.toThrow(/cap/)
+    expect(f.complete).not.toHaveBeenCalled()
+    expect(f.ledger).toEqual([])
   })
 })
