@@ -3,7 +3,6 @@ import {
   AI_KEY_MAX,
   AI_MODEL_MAX,
   AI_PROVIDER_LABEL,
-  AiFeatureId,
   DAILY_CAP_MAX,
   DAILY_CAP_MIN,
   DEFAULT_MODELS,
@@ -13,7 +12,7 @@ import {
   type AiUsageSummary,
   type Tier
 } from '@shared/ai'
-import { AI_DATA_SHARING, isFeatureAllowed } from '@shared/aiSettings'
+import { isFeatureAllowed } from '@shared/aiSettings'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { AiDialSection } from './AiDialSection'
@@ -24,7 +23,13 @@ import { WritingPresetsSection } from './WritingPresetsSection'
 import { useAiSettingsStore } from './aiSettingsStore'
 import { useAiStore } from './aiStore'
 import { useIndexingStore } from './indexingStore'
-import { describeTotals, formatCount, formatRequestCost, formatUsd } from './usageFormat'
+import {
+  describeTotals,
+  featureLabel,
+  formatCount,
+  formatRequestCost,
+  formatUsd
+} from './usageFormat'
 
 const FIELD = 'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 const BUTTON =
@@ -50,12 +55,6 @@ const TIER_LABEL: Record<Tier, string> = { fast: 'Fast tier', strong: 'Strong ti
 
 const atDefaults = (models: AiModelMap): boolean =>
   models.fast === DEFAULT_MODELS.fast && models.strong === DEFAULT_MODELS.strong
-
-/** A ledger key from a newer build shows as itself. */
-const featureLabel = (feature: string): string => {
-  const parsed = AiFeatureId.safeParse(feature)
-  return parsed.success ? AI_DATA_SHARING[parsed.data].label : feature
-}
 
 /**
  * The AI tab of the Settings dialog (F-5.1): the project's AI dial, toggles, and data-sharing

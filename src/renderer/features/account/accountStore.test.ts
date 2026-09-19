@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AccountStatus } from '@shared/account'
+import type { CreditsResult } from '@shared/cloudApi'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAccountStore, useAccountStore } from './accountStore'
@@ -16,6 +17,12 @@ const SIGNED_IN: AccountStatus = {
   email: 'author@example.com',
   userId: 'u-1',
   since: '2026-09-19T12:00:00.000Z'
+}
+
+const CREDITS: CreditsResult = {
+  balanceMicros: 2_500_000,
+  spend: [{ feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }],
+  packs: [{ variantId: 'pack-5', priceCents: 500 }]
 }
 
 interface Fake {
@@ -49,6 +56,10 @@ function fakeClient(): Fake {
             return SIGNED_OUT as Output<C>
           case 'account:refresh':
             return SIGNED_IN as Output<C>
+          case 'account:getCredits':
+            return CREDITS as Output<C>
+          case 'account:buyCredits':
+            return null as Output<C>
           default:
             throw new Error(`unexpected ${channel}`)
         }
@@ -146,6 +157,58 @@ describe('accountStore (F-15.2)', () => {
     fake.listener?.(SIGNED_IN)
     expect(store().error).toBeNull()
     expect(store().status).toEqual(SIGNED_IN)
+  })
+
+  it('loads the credits of the signed-in account', async () => {
+    await store().loadCredits()
+    expect(fake.calls).toEqual([{ channel: 'account:getCredits', input: undefined }])
+    expect(store().credits).toEqual(CREDITS)
+    expect(store().creditsBusy).toBe(false)
+    expect(store().creditsError).toBeNull()
+  })
+
+  it('opens a checkout without touching the balance it already has', async () => {
+    await store().loadCredits()
+    await store().buyCredits('pack-5')
+    expect(fake.calls[1]).toEqual({
+      channel: 'account:buyCredits',
+      input: { variantId: 'pack-5' }
+    })
+    expect(store().credits).toEqual(CREDITS)
+  })
+
+  it('keeps a credits failure out of the sign-in error', async () => {
+    await store().load()
+    fake.fail = new IpcRequestError({ code: 'IO', message: 'Could not reach MythScribe Cloud.' })
+    await store().loadCredits()
+    expect(store().creditsError).toBe('Could not reach MythScribe Cloud.')
+    expect(store().error).toBeNull()
+    expect(store().status).toEqual(SIGNED_OUT)
+    expect(store().creditsBusy).toBe(false)
+  })
+
+  it('drops the credits with the account on sign out', async () => {
+    await store().loadCredits()
+    await store().signOut()
+    expect(store().credits).toBeNull()
+    expect(store().creditsError).toBeNull()
+  })
+
+  it('drops the credits when main pushes a state that is not signed in', async () => {
+    store().subscribe()
+    await store().loadCredits()
+    fake.listener?.(SIGNED_IN)
+    expect(store().credits).toEqual(CREDITS)
+    fake.listener?.(SIGNED_OUT)
+    expect(store().credits).toBeNull()
+  })
+
+  it('drops a credits answer from before a reset', async () => {
+    const pending = store().loadCredits()
+    resetAccountStore()
+    await pending
+    expect(store().credits).toBeNull()
+    expect(store().creditsBusy).toBe(false)
   })
 
   it('drops an answer from before a reset', async () => {

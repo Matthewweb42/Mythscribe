@@ -10,6 +10,7 @@ import {
   type AiUsageSummary
 } from '@shared/ai'
 import { isFeatureAllowed } from '@shared/aiSettings'
+import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl } from '@shared/cloudApi'
 import type { Background } from '@shared/focus'
 import type {
   AiBetaReaderResult,
@@ -405,6 +406,21 @@ export function registerHandlers({
   register('account:signOut', () => account.signOut())
 
   register('account:refresh', () => account.refresh())
+
+  // F-15.3: the Cloud credit balance, what each feature has spent, and the packs on sale.
+  register('account:getCredits', () => account.credits())
+
+  // The Worker builds the checkout URL (it knows the account and the pack) and this opens it;
+  // the app never builds one, and it opens nothing that is not a Lemon Squeezy checkout, so a
+  // wrong or tampered answer cannot turn this channel into a general "open any URL".
+  register('account:buyCredits', async ({ variantId }) => {
+    const url = await account.checkoutUrl(variantId)
+    if (!isCheckoutUrl(url)) {
+      throw new AppError('VALIDATION', `Only a checkout on ${CHECKOUT_HOST_SUFFIX} can be opened`)
+    }
+    await openExternal(url)
+    return null
+  })
 
   // F-5.1: the key is accepted by `ai:setKey` once and never returned; status carries a mask.
   const aiStatus = (): AiStatus => ({

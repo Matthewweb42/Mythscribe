@@ -1,8 +1,8 @@
 /**
- * Storage for the account routes (F-15.2): the `Store` interface the handlers use, the D1
- * implementation behind it, and an in-memory one for the unit tests. Timestamps are epoch
- * milliseconds so expiry is a plain SQL comparison; the handlers format them for the wire.
- * Every secret arrives here already hashed.
+ * Storage for the account routes (F-15.2) and the credit ledger (F-15.3): the `Store` interface
+ * the handlers use, the D1 implementation behind it, and an in-memory one for the unit tests.
+ * Timestamps are epoch milliseconds so expiry is a plain SQL comparison; the handlers format
+ * them for the wire. Every secret arrives here already hashed.
  */
 
 export interface UserRow {
@@ -35,6 +35,34 @@ export interface SessionRow {
   revokedAt: number | null
 }
 
+/** A purchase and a refund come from the webhook; a charge from an answered Cloud request. */
+export type CreditEventKind = 'purchase' | 'refund' | 'charge'
+
+export interface CreditEventRow {
+  id: string
+  userId: string
+  kind: CreditEventKind
+  /** Signed micro-USD: a purchase adds, a refund and a charge subtract. */
+  amountMicros: number
+  /** Charges only: the `AiFeatureId` that spent it and what answered. */
+  feature: string | null
+  model: string | null
+  tokensIn: number | null
+  tokensOut: number | null
+  /** Webhook events only: `<event_name>:<lemon squeezy id>`; UNIQUE, so a replay is a duplicate. */
+  orderRef: string | null
+  requestId: string | null
+  createdAt: number
+}
+
+/** One feature's lifetime spend, as `GET /credits` reports it; `micros` is positive. */
+export interface SpendByFeatureRow {
+  feature: string
+  micros: number
+  requests: number
+  tokens: number
+}
+
 export interface Store {
   findUserByEmail(email: string): Promise<UserRow | null>
   findUserById(id: string): Promise<UserRow | null>
@@ -54,6 +82,17 @@ export interface Store {
   findSessionByHash(tokenHash: string): Promise<SessionRow | null>
   touchSession(tokenHash: string, at: number): Promise<void>
   revokeSession(tokenHash: string, at: number): Promise<void>
+
+  /** The user's balance in micro-USD; 0 for a user who never bought or spent anything. */
+  getBalance(userId: string): Promise<number>
+  /**
+   * Record the event and move the balance by the same amount, both or neither. `'duplicate'`
+   * means an event with this `orderRef` was already applied (a replayed webhook delivery):
+   * nothing changed and the caller answers 200 anyway.
+   */
+  applyCreditEvent(event: CreditEventRow): Promise<'applied' | 'duplicate'>
+  /** Lifetime spend per feature, charges only, positive amounts. */
+  spendByFeature(userId: string): Promise<SpendByFeatureRow[]>
 }
 
 interface RawUser {
@@ -81,6 +120,21 @@ interface RawSession {
   expires_at: number
   last_seen_at: number
   revoked_at: number | null
+}
+
+interface RawSpend {
+  feature: string
+  micros: number
+  requests: number
+  tokens: number
+}
+
+/**
+ * D1 reports a constraint failure as a thrown error carrying SQLite's message; the only UNIQUE
+ * index a credit event can trip is `order_ref`, which means "already applied".
+ */
+function isUniqueViolation(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('UNIQUE constraint failed')
 }
 
 function toUser(row: RawUser | null): UserRow | null {
@@ -243,15 +297,87 @@ export function d1Store(db: D1Database): Store {
         .prepare('UPDATE sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL')
         .bind(at, tokenHash)
         .run()
+    },
+
+    async getBalance(userId: string): Promise<number> {
+      const row = await db
+        .prepare('SELECT balance_micros FROM credits WHERE user_id = ?')
+        .bind(userId)
+        .first<{ balance_micros: number }>()
+      return row ? row.balance_micros : 0
+    },
+
+    async applyCreditEvent(event: CreditEventRow): Promise<'applied' | 'duplicate'> {
+      const insertEvent = db
+        .prepare(
+          `INSERT INTO credit_events
+             (id, user_id, kind, amount_micros, feature, model, tokens_in, tokens_out, order_ref, request_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          event.id,
+          event.userId,
+          event.kind,
+          event.amountMicros,
+          event.feature,
+          event.model,
+          event.tokensIn,
+          event.tokensOut,
+          event.orderRef,
+          event.requestId,
+          event.createdAt
+        )
+      const moveBalance = db
+        .prepare(
+          `INSERT INTO credits (user_id, balance_micros, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(user_id) DO UPDATE
+             SET balance_micros = balance_micros + excluded.balance_micros,
+                 updated_at = excluded.updated_at`
+        )
+        .bind(event.userId, event.amountMicros, event.createdAt)
+
+      try {
+        // One batch is one transaction: a replayed webhook trips the `order_ref` UNIQUE index
+        // and neither statement lands, so the balance cannot be credited twice.
+        await db.batch([insertEvent, moveBalance])
+        return 'applied'
+      } catch (error) {
+        if (isUniqueViolation(error)) return 'duplicate'
+        throw error
+      }
+    },
+
+    async spendByFeature(userId: string): Promise<SpendByFeatureRow[]> {
+      const result = await db
+        .prepare(
+          `SELECT feature,
+                  SUM(-amount_micros) AS micros,
+                  COUNT(*) AS requests,
+                  SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)) AS tokens
+             FROM credit_events
+            WHERE user_id = ? AND kind = 'charge' AND feature IS NOT NULL
+            GROUP BY feature
+            ORDER BY micros DESC`
+        )
+        .bind(userId)
+        .all<RawSpend>()
+      return result.results.map((row) => ({
+        feature: row.feature,
+        micros: row.micros,
+        requests: row.requests,
+        tokens: row.tokens
+      }))
     }
   }
 }
 
-/** The test store: the same semantics in three maps, no SQL. */
+/** The test store: the same semantics in a handful of maps, no SQL. */
 export function memoryStore(): Store {
   const users = new Map<string, UserRow>()
   const attempts = new Map<string, LoginAttemptRow>()
   const sessions = new Map<string, SessionRow>()
+  const balances = new Map<string, number>()
+  const creditEvents: CreditEventRow[] = []
 
   return {
     findUserByEmail(email: string): Promise<UserRow | null> {
@@ -327,6 +453,38 @@ export function memoryStore(): Store {
       const found = sessions.get(tokenHash)
       if (found?.revokedAt === null) sessions.set(tokenHash, { ...found, revokedAt: at })
       return Promise.resolve()
+    },
+
+    getBalance(userId: string): Promise<number> {
+      return Promise.resolve(balances.get(userId) ?? 0)
+    },
+
+    applyCreditEvent(event: CreditEventRow): Promise<'applied' | 'duplicate'> {
+      // Mirrors the D1 UNIQUE index: a NULL `orderRef` (every charge) never collides.
+      if (event.orderRef !== null && creditEvents.some((row) => row.orderRef === event.orderRef)) {
+        return Promise.resolve('duplicate')
+      }
+      creditEvents.push({ ...event })
+      balances.set(event.userId, (balances.get(event.userId) ?? 0) + event.amountMicros)
+      return Promise.resolve('applied')
+    },
+
+    spendByFeature(userId: string): Promise<SpendByFeatureRow[]> {
+      const byFeature = new Map<string, SpendByFeatureRow>()
+      for (const event of creditEvents) {
+        if (event.userId !== userId || event.kind !== 'charge' || event.feature === null) continue
+        const row = byFeature.get(event.feature) ?? {
+          feature: event.feature,
+          micros: 0,
+          requests: 0,
+          tokens: 0
+        }
+        row.micros += -event.amountMicros
+        row.requests += 1
+        row.tokens += (event.tokensIn ?? 0) + (event.tokensOut ?? 0)
+        byFeature.set(event.feature, row)
+      }
+      return Promise.resolve([...byFeature.values()].sort((a, b) => b.micros - a.micros))
     }
   }
 }

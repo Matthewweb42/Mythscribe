@@ -27,6 +27,7 @@ import { defaultFloating, defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_BRIEF, EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
+import type { CheckoutResult, CloudSession, CreditsResult } from '@shared/cloudApi'
 import { AccountService } from '../account/accountService'
 import type { CloudAuthClient } from '../account/cloudAuthClient'
 import { registerInflight, resetInflight } from '../ai/inflight'
@@ -172,7 +173,9 @@ beforeEach(() => {
     start: () => Promise.reject(new Error('no cloud in these tests')),
     poll: () => Promise.reject(new Error('no cloud in these tests')),
     me: () => Promise.reject(new Error('no cloud in these tests')),
-    signOut: () => Promise.resolve()
+    signOut: () => Promise.resolve(),
+    credits: () => Promise.reject(new Error('no cloud in these tests')),
+    checkout: () => Promise.reject(new Error('no cloud in these tests'))
   }
   registerHandlers({
     manager,
@@ -1572,7 +1575,11 @@ describe('ai:query (F-5.7)', () => {
     await invoke('document:save', { id: second.id, content: body(QUIET) })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
     await invoke('ai:setKey', { key: KEY })
-    answersWith({ found: true, answer: 'Under the elm. [1]', citations: [{ scene: 1, quote: QUOTE }] })
+    answersWith({
+      found: true,
+      answer: 'Under the elm. [1]',
+      citations: [{ scene: 1, quote: QUOTE }]
+    })
     return { first: first.id, second: second.id }
   }
 
@@ -2368,6 +2375,125 @@ describe('menu:edit / menu:openExternal (F-7.1)', () => {
       if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     }
     expect(openExternal).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * account:getCredits and account:buyCredits (F-15.3): unlike the other account channels (a plain
+ * forward to the service, tested at that layer), `account:buyCredits` adds its own gate
+ * (`isCheckoutUrl`) before ever calling `openExternal` — that gate is what stops the channel from
+ * becoming a general "open any URL" hole (a wrong or tampered checkout URL from the Worker), so
+ * it is tested here against the real handler and a real, signed-in `AccountService`.
+ */
+describe('account:getCredits / account:buyCredits (F-15.3)', () => {
+  const SESSION: CloudSession = {
+    token: 'tok-cloud-1',
+    email: 'author@example.com',
+    userId: 'u-cloud-1'
+  }
+  let credits: ReturnType<typeof vi.fn<(token: string) => Promise<CreditsResult>>>
+  let checkout: ReturnType<
+    typeof vi.fn<(token: string, variantId: string) => Promise<CheckoutResult>>
+  >
+  let creditsInvoke: Invoke
+  let creditsHandlerFor: (
+    channel: Channel
+  ) => (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>
+
+  beforeEach(() => {
+    credits = vi.fn(() => Promise.resolve({ balanceMicros: 100, spend: [], packs: [] }))
+    checkout = vi.fn(() => Promise.reject(new Error('set a checkout answer per test')))
+    const cloudKeyStore = new AiKeyStore(
+      path.join(tmp, 'userData', 'ai-keys-credits.json'),
+      safe,
+      'win32'
+    )
+    cloudKeyStore.setKey('cloudSession', JSON.stringify(SESSION))
+    const cloudClient: CloudAuthClient = {
+      start: () => Promise.reject(new Error('no cloud in these tests')),
+      poll: () => Promise.reject(new Error('no cloud in these tests')),
+      me: () => Promise.reject(new Error('no cloud in these tests')),
+      signOut: () => Promise.resolve(),
+      credits,
+      checkout
+    }
+    const account = new AccountService({
+      client: cloudClient,
+      keyStore: cloudKeyStore,
+      onChange: () => {}
+    })
+    const appState = new AppStateStore(path.join(tmp, 'userData', 'app-state-credits.json'))
+    const neverProvider: Provider = {
+      id: 'openai',
+      resolveModel: () => 'gpt-fake',
+      complete: () => Promise.reject(new Error('not used by these tests')),
+      stream: async function* () {},
+      testConnection: () => Promise.reject(new Error('not used by these tests'))
+    }
+    registerHandlers({
+      manager,
+      appState,
+      keyStore: cloudKeyStore,
+      ai: new AiProviderRegistry(
+        cloudKeyStore,
+        () => appState.get().models,
+        () => neverProvider
+      ),
+      account,
+      dialogs,
+      windows: () => [fakeWin],
+      focusedWindow: () => focusedWindow,
+      openExternal,
+      onCloseCancelled
+    })
+    // A second registration on the shared `ipcMain.handle` mock: rebuild the map from every call
+    // so far, which leaves the last registration (this one) as the one these tests invoke.
+    const handlers = new Map<
+      string,
+      (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>
+    >()
+    for (const [channel, fn] of vi.mocked(ipcMain.handle).mock.calls) {
+      handlers.set(channel, fn as (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>)
+    }
+    creditsHandlerFor = (channel) => {
+      const fn = handlers.get(channel)
+      if (!fn) throw new Error(`No handler registered for ${channel}`)
+      return fn
+    }
+    creditsInvoke = async (channel, input) => {
+      const fn = handlers.get(channel)
+      if (!fn) throw new Error(`No handler registered for ${channel}`)
+      const result = await fn(undefined, input)
+      if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+      return result.data as Output<typeof channel>
+    }
+  })
+
+  it('answers the signed-in account balance', async () => {
+    const body: CreditsResult = {
+      balanceMicros: 2_500_000,
+      spend: [{ feature: 'ghostText', micros: 900, requests: 1, tokens: 100 }],
+      packs: [{ variantId: 'pack-5', priceCents: 500 }]
+    }
+    credits.mockResolvedValueOnce(body)
+    expect(await creditsInvoke('account:getCredits', undefined)).toEqual(body)
+    expect(credits).toHaveBeenCalledWith(SESSION.token)
+  })
+
+  it('opens the checkout URL the Worker built for a known pack', async () => {
+    const url = 'https://mythscribe.lemonsqueezy.com/buy/five?checkout[custom][user_id]=u-cloud-1'
+    checkout.mockResolvedValueOnce({ url })
+    expect(await creditsInvoke('account:buyCredits', { variantId: 'pack-5' })).toBeNull()
+    expect(checkout).toHaveBeenCalledWith(SESSION.token, 'pack-5')
+    expect(openExternal).toHaveBeenCalledWith(url)
+  })
+
+  it('refuses to open a URL that is not a Lemon Squeezy checkout', async () => {
+    checkout.mockResolvedValueOnce({ url: 'https://evil.example.com/buy/five' })
+    const result = await creditsHandlerFor('account:buyCredits')(null, { variantId: 'pack-5' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(openExternal).not.toHaveBeenCalled()
   })
 })
 

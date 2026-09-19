@@ -8,7 +8,9 @@ import type {
   AuthPollBody,
   AuthPollResult,
   AuthStartResult,
-  CloudSession
+  CheckoutResult,
+  CloudSession,
+  CreditsResult
 } from '@shared/cloudApi'
 import { AiKeyStore } from '../ai/keyStore'
 import { fakeSafeStorage } from '../ai/keyStoreFixture'
@@ -25,6 +27,12 @@ const START: AuthStartResult = {
 }
 const START_MS = Date.parse(START.expiresAt)
 const ME: AuthMeResult = { email: EMAIL, userId: 'u1', since: '2026-09-01T00:00:00.000Z' }
+const CREDITS: CreditsResult = {
+  balanceMicros: 2_500_000,
+  spend: [{ feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }],
+  packs: [{ variantId: 'pack-5', priceCents: 500 }]
+}
+const CHECKOUT: CheckoutResult = { url: 'https://mythscribe.lemonsqueezy.com/buy/abc?x=1' }
 
 let tmp: string
 let keyFile: string
@@ -36,6 +44,8 @@ let start: Mock<(email: string) => Promise<AuthStartResult>>
 let poll: Mock<(body: AuthPollBody) => Promise<AuthPollResult>>
 let me: Mock<(token: string) => Promise<AuthMeResult>>
 let signOut: Mock<(token: string) => Promise<void>>
+let credits: Mock<(token: string) => Promise<CreditsResult>>
+let checkout: Mock<(token: string, variantId: string) => Promise<CheckoutResult>>
 
 const schedule: Schedule = (run, ms) => {
   const timer = { run, ms, cancelled: false }
@@ -59,7 +69,7 @@ const armed = (): boolean => timers.some((t) => !t.cancelled)
 const store = (): AiKeyStore => new AiKeyStore(keyFile, fakeSafeStorage(), 'win32')
 
 const build = (keyStore: AiKeyStore = store()): AccountService => {
-  const client: CloudAuthClient = { start, poll, me, signOut }
+  const client: CloudAuthClient = { start, poll, me, signOut, credits, checkout }
   return new AccountService({
     client,
     keyStore,
@@ -92,6 +102,8 @@ beforeEach(() => {
   )
   me = vi.fn(() => Promise.resolve(ME))
   signOut = vi.fn(() => Promise.resolve())
+  credits = vi.fn(() => Promise.resolve(CREDITS))
+  checkout = vi.fn(() => Promise.resolve(CHECKOUT))
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
@@ -321,6 +333,86 @@ describe('AccountService (F-15.2)', () => {
     expect(keyStore.hasKey('cloudSession')).toBe(false)
     service.dispose()
     second.dispose()
+  })
+
+  it('refuses to ask for credits or a checkout while signed out', async () => {
+    const service = build()
+    expect((await caught(service.credits())).message).toBe(
+      'Sign in to see your MythScribe Cloud credits.'
+    )
+    expect((await caught(service.checkoutUrl('pack-5'))).message).toBe(
+      'Sign in to buy MythScribe Cloud credits.'
+    )
+    expect(credits).not.toHaveBeenCalled()
+    expect(checkout).not.toHaveBeenCalled()
+    service.dispose()
+  })
+
+  it('answers the balance and the checkout URL with the stored session', async () => {
+    const keyStore = store()
+    keyStore.setKey('cloudSession', JSON.stringify(SESSION))
+    const service = build(keyStore)
+
+    expect(await service.credits()).toEqual(CREDITS)
+    expect(credits).toHaveBeenCalledWith(SESSION.token)
+    expect(await service.checkoutUrl('pack-5')).toBe(CHECKOUT.url)
+    expect(checkout).toHaveBeenCalledWith(SESSION.token, 'pack-5')
+    service.dispose()
+  })
+
+  it('forgets a session the Worker rejects on a credits call and says so', async () => {
+    const keyStore = store()
+    keyStore.setKey('cloudSession', JSON.stringify(SESSION))
+    const service = build(keyStore)
+
+    credits.mockRejectedValueOnce(
+      new AccountError('UNAUTHORIZED', 'This sign-in is no longer valid.', 'Sign in again.')
+    )
+    const err = await caught(service.credits())
+    expect(err.code).toBe('IO')
+    expect(err.message).toBe('This sign-in is no longer valid. Sign in again.')
+    expect(service.status()).toEqual({ state: 'signedOut' })
+    expect(keyStore.hasKey('cloudSession')).toBe(false)
+    expect(changes).toEqual([{ state: 'signedOut' }])
+    service.dispose()
+  })
+
+  it('reports a pack the Worker does not know as VALIDATION and stays signed in', async () => {
+    const keyStore = store()
+    keyStore.setKey('cloudSession', JSON.stringify(SESSION))
+    const service = build(keyStore)
+
+    checkout.mockRejectedValueOnce(
+      new AccountError(
+        'NOT_FOUND',
+        'That credit pack is no longer on sale.',
+        'Refresh the packs and pick another.'
+      )
+    )
+    const err = await caught(service.checkoutUrl('gone'))
+    expect(err.code).toBe('VALIDATION')
+    expect(err.message).toBe(
+      'That credit pack is no longer on sale. Refresh the packs and pick another.'
+    )
+    expect(service.status().state).toBe('signedIn')
+    expect(changes).toEqual([])
+    service.dispose()
+  })
+
+  it('leaves the session alone when the Worker cannot be reached for credits', async () => {
+    const keyStore = store()
+    keyStore.setKey('cloudSession', JSON.stringify(SESSION))
+    const service = build(keyStore)
+
+    credits.mockRejectedValueOnce(
+      new AccountError('NETWORK', 'Could not reach MythScribe Cloud.', 'Try again.')
+    )
+    const err = await caught(service.credits())
+    expect(err.code).toBe('IO')
+    expect(service.status().state).toBe('signedIn')
+    expect(keyStore.hasKey('cloudSession')).toBe(true)
+    expect(changes).toEqual([])
+    service.dispose()
   })
 
   it('drops the poll timer on dispose', async () => {

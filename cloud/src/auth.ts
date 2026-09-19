@@ -22,7 +22,7 @@ import {
 import { sha256Hex, timingSafeEqualHex } from './crypto'
 import { signInEmail, type Mailer } from './email'
 import { LINK_EXPIRED_PAGE, pageResponse, SIGNED_IN_PAGE } from './pages'
-import type { Store } from './store'
+import type { SessionRow, Store, UserRow } from './store'
 
 export interface AuthDeps {
   store: Store
@@ -54,9 +54,10 @@ export function jsonError(code: CloudErrorCode, message: string): Response {
 }
 
 const NOT_FOUND_ATTEMPT = 'That sign-in attempt is no longer available. Send yourself a new link.'
-const UNAUTHORIZED_MESSAGE = 'Your MythScribe session has ended. Sign in again to continue.'
+/** The one answer for a missing, unknown, expired, or revoked session; shared by every bearer route. */
+export const UNAUTHORIZED_MESSAGE = 'Your MythScribe session has ended. Sign in again to continue.'
 
-async function readJson(request: Request): Promise<unknown> {
+export async function readJson(request: Request): Promise<unknown> {
   try {
     return await request.json()
   } catch {
@@ -179,26 +180,43 @@ export async function handlePoll(request: Request, deps: AuthDeps): Promise<Resp
   return jsonResponse({ status: 'pending' } satisfies AuthPollResult)
 }
 
-/** `GET /auth/me`: who this session belongs to; also refreshes `last_seen_at`. */
-export async function handleMe(request: Request, deps: AuthDeps): Promise<Response> {
+/** Who a `Authorization: Bearer` request is; `null` for every reason a caller must not tell apart. */
+export interface Caller {
+  session: SessionRow
+  user: UserRow
+  tokenHash: string
+}
+
+/**
+ * The bearer check every signed-in route shares (F-15.3 added `/credits` and the checkout):
+ * resolve the token to its user and refresh `last_seen_at`. `null` means answer UNAUTHORIZED —
+ * missing, unknown, expired, and revoked are deliberately indistinguishable.
+ */
+export async function authenticate(request: Request, deps: AuthDeps): Promise<Caller | null> {
   const token = bearerToken(request)
-  if (!token) return jsonError('UNAUTHORIZED', UNAUTHORIZED_MESSAGE)
+  if (!token) return null
 
   const tokenHash = await sha256Hex(token)
   const now = deps.now().getTime()
   const session = await deps.store.findSessionByHash(tokenHash)
-  if (!session) return jsonError('UNAUTHORIZED', UNAUTHORIZED_MESSAGE)
-  if (session.revokedAt !== null || session.expiresAt <= now) {
-    return jsonError('UNAUTHORIZED', UNAUTHORIZED_MESSAGE)
-  }
+  if (!session) return null
+  if (session.revokedAt !== null || session.expiresAt <= now) return null
   const user = await deps.store.findUserById(session.userId)
-  if (!user) return jsonError('UNAUTHORIZED', UNAUTHORIZED_MESSAGE)
+  if (!user) return null
 
   await deps.store.touchSession(tokenHash, now)
+  return { session, user, tokenHash }
+}
+
+/** `GET /auth/me`: who this session belongs to; also refreshes `last_seen_at`. */
+export async function handleMe(request: Request, deps: AuthDeps): Promise<Response> {
+  const caller = await authenticate(request, deps)
+  if (!caller) return jsonError('UNAUTHORIZED', UNAUTHORIZED_MESSAGE)
+
   return jsonResponse({
-    email: user.email,
-    userId: user.id,
-    since: new Date(session.createdAt).toISOString()
+    email: caller.user.email,
+    userId: caller.user.id,
+    since: new Date(caller.session.createdAt).toISOString()
   } satisfies AuthMeResult)
 }
 

@@ -5,7 +5,10 @@ import {
   AuthPollResult,
   AuthStartBody,
   AuthStartResult,
+  CheckoutBody,
+  CheckoutResult,
   CloudApiError,
+  CreditsResult,
   type CloudErrorCode
 } from '@shared/cloudApi'
 // The `fetch` shape is already defined once for the provider adapter; a type-only import, so
@@ -13,7 +16,8 @@ import {
 import type { FetchLike } from '../ai/providers/openai'
 
 /**
- * The typed client for the four MythScribe Cloud auth routes (F-15.2). It owns the wire: every
+ * The typed client for the MythScribe Cloud routes the app calls: the four auth routes (F-15.2)
+ * and the two credit routes (F-15.3). It owns the wire: every
  * 2xx body is parsed with the shared zod schemas, every other answer is parsed as `CloudApiError`,
  * and both failure paths leave as an `AccountError` carrying author-facing copy. It knows nothing
  * about state: `AccountService` owns the session and the poll timer.
@@ -29,6 +33,8 @@ const MESSAGES: Record<AccountErrorCode, string> = {
   NOT_CONFIGURED: 'MythScribe Cloud cannot send sign-in emails right now.',
   UNAUTHORIZED: 'This MythScribe Cloud sign-in is no longer valid.',
   NOT_FOUND: 'MythScribe Cloud does not know this sign-in attempt.',
+  BAD_SIGNATURE: "MythScribe Cloud refused the request's signature.",
+  INSUFFICIENT_CREDITS: 'Your MythScribe Cloud balance is used up.',
   INTERNAL: 'MythScribe Cloud had a problem with the request.',
   NETWORK: 'Could not reach MythScribe Cloud.',
   PROTOCOL: 'MythScribe Cloud sent an answer MythScribe could not read.'
@@ -40,6 +46,8 @@ const NEXT_STEPS: Record<AccountErrorCode, string> = {
   NOT_CONFIGURED: 'Try again later.',
   UNAUTHORIZED: 'Sign in again.',
   NOT_FOUND: 'Ask for a new sign-in link.',
+  BAD_SIGNATURE: 'Try again; if it keeps happening, update MythScribe.',
+  INSUFFICIENT_CREDITS: 'Buy more credits in Settings › Account.',
   INTERNAL: 'Try again in a moment.',
   NETWORK: 'Check your connection and try again.',
   PROTOCOL: 'Try again; if it keeps happening, update MythScribe.'
@@ -52,6 +60,13 @@ const PASS_THROUGH: ReadonlySet<CloudErrorCode> = new Set<CloudErrorCode>([
 ])
 
 const TIMEOUT_MESSAGE = 'MythScribe Cloud did not answer in time.'
+
+/**
+ * `NOT_FOUND` from `/billing/checkout` is about the pack, not a sign-in attempt (F-15.3), so the
+ * shared copy for the code would misname it; the checkout call re-throws with these instead.
+ */
+const UNKNOWN_PACK_MESSAGE = 'That credit pack is no longer on sale.'
+const UNKNOWN_PACK_NEXT_STEP = 'Refresh the packs and pick another.'
 
 /** An expected failure of a Cloud call. `nextStep` is shown after `message`, never instead of it. */
 export class AccountError extends Error {
@@ -79,6 +94,10 @@ export interface CloudAuthClient {
   me(token: string): Promise<AuthMeResult>
   /** Revokes the session server-side; answers 204 with no body. */
   signOut(token: string): Promise<void>
+  /** The account's credits (F-15.3): balance in micro-USD, spend per feature, packs on sale. */
+  credits(token: string): Promise<CreditsResult>
+  /** The Lemon Squeezy checkout URL for one pack (F-15.3); the Worker builds it, never the app. */
+  checkout(token: string, variantId: string): Promise<CheckoutResult>
 }
 
 /** No Cloud call may hang: the author is waiting on the Account tab for every one of them. */
@@ -152,6 +171,30 @@ export function createCloudAuthClient({
     },
     async signOut(token) {
       await send('/auth/signout', { method: 'POST', headers: bearer(token) })
+    },
+    async credits(token) {
+      return parseBody(
+        CreditsResult,
+        await send('/credits', { method: 'GET', headers: bearer(token) })
+      )
+    },
+    async checkout(token, variantId) {
+      const body = CheckoutBody.parse({ variantId })
+      try {
+        return parseBody(
+          CheckoutResult,
+          await send('/billing/checkout', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...bearer(token) },
+            body: JSON.stringify(body)
+          })
+        )
+      } catch (err) {
+        if (err instanceof AccountError && err.code === 'NOT_FOUND') {
+          throw new AccountError('NOT_FOUND', UNKNOWN_PACK_MESSAGE, UNKNOWN_PACK_NEXT_STEP, err)
+        }
+        throw err
+      }
     }
   }
 }

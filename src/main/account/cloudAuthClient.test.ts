@@ -164,6 +164,18 @@ describe('createCloudAuthClient (F-15.2)', () => {
     expect(err.message).toBe('MythScribe Cloud did not answer in time.')
   })
 
+  it('names the two codes only the credit routes can answer with', async () => {
+    answers = [errorBody('INSUFFICIENT_CREDITS', 'no credit')]
+    const spent = await caught(client().credits('tok-1'))
+    expect(spent.message).toBe('Your MythScribe Cloud balance is used up.')
+    expect(spent.nextStep).toBe('Buy more credits in Settings › Account.')
+
+    answers = [errorBody('BAD_SIGNATURE', 'nope')]
+    const signature = await caught(client().credits('tok-1'))
+    expect(signature.message).toBe("MythScribe Cloud refused the request's signature.")
+    expect(signature.nextStep).toBe('Try again; if it keeps happening, update MythScribe.')
+  })
+
   it('reports a body it cannot read as PROTOCOL, success or failure', async () => {
     answers = [json(200, { attemptId: 'a1' })]
     expect((await caught(client().start('author@example.com'))).code).toBe('PROTOCOL')
@@ -172,5 +184,55 @@ describe('createCloudAuthClient (F-15.2)', () => {
     const err = await caught(client().poll({ attemptId: 'a1', pollSecret: 's1' }))
     expect(err.code).toBe('PROTOCOL')
     expect(err.nextStep).toBe('Try again; if it keeps happening, update MythScribe.')
+  })
+})
+
+describe('createCloudAuthClient credits (F-15.3)', () => {
+  const CREDITS = {
+    balanceMicros: 2_500_000,
+    spend: [{ feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }],
+    packs: [{ variantId: 'pack-5', priceCents: 500 }]
+  }
+
+  it('reads the balance, the spend, and the packs with the session as a bearer', async () => {
+    answers = [json(200, CREDITS)]
+    expect(await client().credits('tok-1')).toEqual(CREDITS)
+    expect(calls[0]?.url).toBe(`${BASE}/credits`)
+    expect(calls[0]?.init?.method).toBe('GET')
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer tok-1')
+  })
+
+  it('asks the Worker for the checkout URL of one pack', async () => {
+    const url = 'https://mythscribe.lemonsqueezy.com/buy/abc?checkout%5Bcustom%5D%5Buser_id%5D=u1'
+    answers = [json(200, { url })]
+    expect(await client().checkout('tok-1', 'pack-5')).toEqual({ url })
+    expect(calls[0]?.url).toBe(`${BASE}/billing/checkout`)
+    expect(calls[0]?.init?.method).toBe('POST')
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ variantId: 'pack-5' }))
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer tok-1')
+  })
+
+  it('names the pack, not a sign-in attempt, when the Worker does not know it', async () => {
+    answers = [errorBody('NOT_FOUND', 'unknown variant')]
+    const err = await caught(client().checkout('tok-1', 'gone'))
+    expect(err.code).toBe('NOT_FOUND')
+    expect(err.message).toBe('That credit pack is no longer on sale.')
+    expect(err.nextStep).toBe('Refresh the packs and pick another.')
+  })
+
+  it('reports a revoked session as UNAUTHORIZED on both routes', async () => {
+    answers = [errorBody('UNAUTHORIZED', 'gone')]
+    expect((await caught(client().credits('tok-1'))).code).toBe('UNAUTHORIZED')
+    answers = [errorBody('UNAUTHORIZED', 'gone')]
+    const err = await caught(client().checkout('tok-1', 'pack-5'))
+    expect(err.code).toBe('UNAUTHORIZED')
+    expect(err.nextStep).toBe('Sign in again.')
+  })
+
+  it('reports a credits body it cannot read as PROTOCOL', async () => {
+    answers = [json(200, { balanceMicros: 1.5, spend: [], packs: [] })]
+    expect((await caught(client().credits('tok-1'))).code).toBe('PROTOCOL')
+    answers = [json(200, { url: 'not a url' })]
+    expect((await caught(client().checkout('tok-1', 'pack-5'))).code).toBe('PROTOCOL')
   })
 })

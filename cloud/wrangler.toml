@@ -10,7 +10,7 @@ workers_dev = false
 
 routes = [{ pattern = "api.mythscribe.app", custom_domain = true }]
 
-# The one D1 database (F-15.2 auth tables; credits and usage rows join it in F-15.3/F-15.5).
+# The one D1 database (F-15.2 auth tables, F-15.3 credits; usage rows join it in F-15.5).
 [[d1_databases]]
 binding = "DB"
 database_name = "mythscribe"
@@ -22,8 +22,15 @@ migrations_dir = "migrations"
 # returns it as `devLink` from /auth/start so local runs can be driven end to end.
 EMAIL_TRANSPORT = "resend"
 
+# The credit packs on sale (F-15.3), as a JSON array of { variantId, url, priceCents }. Unset
+# until the Lemon Squeezy products exist: the Account tab then says no packs are on sale.
+# `priceCents` is the truth for the amount credited, so currency and tax never reach the balance.
+# LEMONSQUEEZY_PACKS = '[{"variantId":"123456","url":"https://mythscribe.lemonsqueezy.com/buy/00000000-0000-0000-0000-000000000000","priceCents":500}]'
+
 # Secrets (never in this file, never in the repo):
-#   RESEND_API_KEY   the Resend key for sign-in@mythscribe.app  -> `npx wrangler secret put RESEND_API_KEY`
-#   OPENAI_API_KEY   the operator's OpenAI key (F-15.4)         -> `npx wrangler secret put OPENAI_API_KEY`
-# Without RESEND_API_KEY the Worker answers 503 NOT_CONFIGURED to /auth/start.
+#   RESEND_API_KEY                the Resend key for sign-in@mythscribe.app  -> `npx wrangler secret put RESEND_API_KEY`
+#   OPENAI_API_KEY                the operator's OpenAI key (F-15.4)         -> `npx wrangler secret put OPENAI_API_KEY`
+#   LEMONSQUEEZY_WEBHOOK_SECRET   signs the billing webhook (F-15.3)         -> `npx wrangler secret put LEMONSQUEEZY_WEBHOOK_SECRET`
+# Without RESEND_API_KEY the Worker answers 503 NOT_CONFIGURED to /auth/start, and without
+# LEMONSQUEEZY_WEBHOOK_SECRET the same to /billing/lemonsqueezy.
 # Local runs read them from ./.dev.vars (git-ignored); copy .dev.vars.example to start.

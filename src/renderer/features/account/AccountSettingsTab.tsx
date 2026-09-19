@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { EMAIL_MAX } from '@shared/cloudApi'
+import { CLOUD_RATES, MICROS_PER_USD } from '@shared/cloudRates'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { featureLabel, formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { describeError } from '@renderer/lib/errors'
 import { useAccountStore } from './accountStore'
 
@@ -18,12 +20,18 @@ const clockTime = (iso: string): string =>
 const day = (iso: string): string =>
   new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
+/** The one line about the rates, so no one reads the table as the provider's own price. */
+const RATES_NOTE =
+  "Rates include MythScribe's margin over the provider price; each request is charged at the " +
+  'rate of the model that answered.'
+
 /**
  * The Account tab of the Settings dialog (F-15.2). Three states, one at a time, from the store
  * main owns: signed out (an email address and "Send sign-in link"), pending (the link was
  * emailed and main is polling; this window signs itself in when the link is opened anywhere,
- * so there is nothing to paste back), and signed in. Failures show inline under the controls
- * because the author is looking at them, not at a toast. Nothing here gates any other feature.
+ * so there is nothing to paste back), and signed in, which also carries the Cloud credits
+ * (F-15.3). Failures show inline under the controls because the author is looking at them, not
+ * at a toast. Nothing here gates any other feature.
  */
 export function AccountSettingsTab(): React.JSX.Element {
   const status = useAccountStore((s) => s.status)
@@ -89,6 +97,7 @@ export function AccountSettingsTab(): React.JSX.Element {
           {status.since === null ? null : (
             <p className="m-0 text-xs text-fg-muted">since {day(status.since)}</p>
           )}
+          <CreditsSection />
         </div>
       )}
 
@@ -98,6 +107,140 @@ export function AccountSettingsTab(): React.JSX.Element {
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * The Cloud credits of the signed-in account (F-15.3): the balance, the packs on sale, what
+ * each feature has spent, and the published rate table. It mounts with the signed-in state, so
+ * the balance is asked for on sign-in and on every later visit to the tab; "Refresh" asks again
+ * after a checkout was paid in the browser. Its failures stay in here, under their own alert,
+ * so an unreachable Worker never hides the sign-out button.
+ */
+function CreditsSection(): React.JSX.Element {
+  const credits = useAccountStore((s) => s.credits)
+  const busy = useAccountStore((s) => s.creditsBusy)
+  const error = useAccountStore((s) => s.creditsError)
+  const loadCredits = useAccountStore((s) => s.loadCredits)
+  const buyCredits = useAccountStore((s) => s.buyCredits)
+
+  useEffect(() => {
+    void loadCredits()
+  }, [loadCredits])
+
+  return (
+    <section aria-label="Credits" className="flex flex-col gap-2 border-t border-line pt-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="m-0 text-sm font-medium">Credits</h3>
+        <button type="button" disabled={busy} onClick={() => void loadCredits()} className={BUTTON}>
+          Refresh
+        </button>
+      </div>
+
+      {credits === null ? null : (
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <span>Balance</span>
+            <span data-testid="account-credit-balance" className="tabular-nums">
+              {formatUsd(credits.balanceMicros / MICROS_PER_USD)}
+            </span>
+          </div>
+
+          {credits.packs.length === 0 ? (
+            <p className="m-0 text-xs text-fg-muted">Credit packs are not on sale yet.</p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              {credits.packs.map((pack) => (
+                <button
+                  key={pack.variantId}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void buyCredits(pack.variantId)}
+                  className={BUTTON}
+                >
+                  {`Buy ${formatUsd(pack.priceCents / 100)}`}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {credits.spend.length === 0 ? (
+            <p className="m-0 text-xs text-fg-muted">No Cloud requests yet.</p>
+          ) : (
+            <table aria-label="Cloud spend by feature" className="w-full text-xs">
+              <thead className="text-fg-muted">
+                <tr>
+                  <th scope="col" className="text-left font-normal">
+                    Feature
+                  </th>
+                  <th scope="col" className="text-right font-normal">
+                    Requests
+                  </th>
+                  <th scope="col" className="text-right font-normal">
+                    Tokens
+                  </th>
+                  <th scope="col" className="text-right font-normal">
+                    Spent
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {credits.spend.map((row) => (
+                  <tr key={row.feature}>
+                    <th scope="row" className="text-left font-normal">
+                      {featureLabel(row.feature)}
+                    </th>
+                    <td className="text-right tabular-nums">{formatCount(row.requests)}</td>
+                    <td className="text-right tabular-nums">{formatCount(row.tokens)}</td>
+                    <td className="text-right tabular-nums">
+                      {formatUsd(row.micros / MICROS_PER_USD)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+
+      <table aria-label="MythScribe Cloud rates" className="w-full text-xs">
+        <thead className="text-fg-muted">
+          <tr>
+            <th scope="col" className="text-left font-normal">
+              Model
+            </th>
+            <th scope="col" className="text-left font-normal">
+              Tier
+            </th>
+            <th scope="col" className="text-right font-normal">
+              Input per 1M
+            </th>
+            <th scope="col" className="text-right font-normal">
+              Output per 1M
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {CLOUD_RATES.map((rate) => (
+            <tr key={rate.model}>
+              <th scope="row" className="text-left font-normal">
+                {rate.model}
+              </th>
+              <td className="text-left">{rate.tiers.length === 0 ? '—' : rate.tiers.join(', ')}</td>
+              <td className="text-right tabular-nums">{formatUsd(rate.inUsdPerM)}</td>
+              <td className="text-right tabular-nums">{formatUsd(rate.outUsdPerM)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="m-0 text-xs text-fg-muted">{RATES_NOTE}</p>
+
+      {error === null ? null : (
+        <p role="alert" className="m-0 text-xs text-danger">
+          {error}
+        </p>
+      )}
+    </section>
   )
 }
 

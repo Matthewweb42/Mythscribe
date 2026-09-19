@@ -2,6 +2,7 @@ import type { AccountStatus } from '@shared/account'
 import {
   type AuthStartResult,
   CloudSession,
+  type CreditsResult,
   LOGIN_ATTEMPT_TTL_MS,
   POLL_INTERVAL_MS
 } from '@shared/cloudApi'
@@ -186,10 +187,62 @@ export class AccountService {
     }
   }
 
+  /**
+   * The account's MythScribe Cloud credits (F-15.3): balance, spend per feature, and the packs
+   * on sale. Signed out is a failure the author can act on, not an empty balance.
+   */
+  async credits(): Promise<CreditsResult> {
+    const current = this.requireSignedIn('Sign in to see your MythScribe Cloud credits.')
+    try {
+      return await this.client.credits(current.session.token)
+    } catch (err) {
+      throw this.callFailed(err, current)
+    }
+  }
+
+  /**
+   * The Lemon Squeezy checkout URL for one pack (F-15.3). The Worker builds it (it knows the
+   * account and the pack); this only carries it back to the handler, which opens it.
+   */
+  async checkoutUrl(variantId: string): Promise<string> {
+    const current = this.requireSignedIn('Sign in to buy MythScribe Cloud credits.')
+    try {
+      const { url } = await this.client.checkout(current.session.token, variantId)
+      return url
+    } catch (err) {
+      throw this.callFailed(err, current)
+    }
+  }
+
   /** The app is quitting: drop the poll timer. Nothing stored changes. */
   dispose(): void {
     this.disposed = true
     this.stopPolling()
+  }
+
+  /** The session a Cloud call needs, or the failure that says which action wanted one. */
+  private requireSignedIn(message: string): SignedInState {
+    if (this.signedIn === null) throw new AppError('IO', message)
+    return this.signedIn
+  }
+
+  /**
+   * A call made with the session failed. A session the Worker no longer accepts is forgotten
+   * here exactly as `refresh()` forgets it, and the renderer hears it through `account:changed`
+   * (these calls answer credits, not a status, so there is nothing else to tell it with).
+   */
+  private callFailed(err: unknown, state: SignedInState): Error {
+    if (err instanceof AccountError && err.code === 'UNAUTHORIZED' && this.signedIn === state) {
+      this.signedIn = null
+      this.keyStore.clearKey(SECRET_ID)
+      this.onChange(this.status())
+    }
+    // The pack is gone from the Worker's configuration: the author picked something that is no
+    // longer on sale, which is a bad request, not an outage.
+    if (err instanceof AccountError && err.code === 'NOT_FOUND') {
+      return new AppError('VALIDATION', `${err.message} ${err.nextStep}`, { code: err.code })
+    }
+    return toAppError(err)
   }
 
   /** The stored session, or null (and the stored garbage cleared) when it cannot be read. */

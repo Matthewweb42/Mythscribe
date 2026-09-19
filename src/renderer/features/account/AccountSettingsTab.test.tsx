@@ -1,7 +1,8 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AccountStatus } from '@shared/account'
+import type { CreditsResult } from '@shared/cloudApi'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -20,6 +21,12 @@ const SIGNED_IN: AccountStatus = {
   email: 'author@example.com',
   userId: 'u-1',
   since: new Date(2026, 8, 19, 12, 0).toISOString()
+}
+
+const CREDITS: CreditsResult = {
+  balanceMicros: 2_500_000,
+  spend: [{ feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }],
+  packs: [{ variantId: 'pack-5', priceCents: 500 }]
 }
 
 interface Fake {
@@ -49,6 +56,10 @@ function fakeClient(): Fake {
             return SIGNED_IN as Output<C>
           case 'account:getStatus':
             return SIGNED_OUT as Output<C>
+          case 'account:getCredits':
+            return CREDITS as Output<C>
+          case 'account:buyCredits':
+            return null as Output<C>
           default:
             throw new Error(`unexpected ${channel}`)
         }
@@ -83,6 +94,11 @@ afterEach(() => {
 /** The tab reads the store App loaded; the tests put the status there directly. */
 const show = (status: AccountStatus | null): void => {
   useAccountStore.setState({ status })
+}
+
+/** Signed in with the credits already in the store, so the section renders without a round trip. */
+const showWithCredits = (credits: CreditsResult): void => {
+  useAccountStore.setState({ status: SIGNED_IN, credits })
 }
 
 describe('AccountSettingsTab (F-15.2)', () => {
@@ -168,7 +184,8 @@ describe('AccountSettingsTab (F-15.2)', () => {
       )
     ).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
-    expect(fake.calls).toEqual([{ channel: 'account:signOut', input: undefined }])
+    // The credits section asked for a balance when it mounted (F-15.3); sign out is the last call.
+    expect(fake.calls.at(-1)).toEqual({ channel: 'account:signOut', input: undefined })
     expect(await screen.findByLabelText('Email')).toBeInTheDocument()
   })
 
@@ -176,8 +193,9 @@ describe('AccountSettingsTab (F-15.2)', () => {
     show({ ...SIGNED_IN, since: null })
     render(<AccountSettingsTab />)
     await waitFor(() => {
-      expect(fake.calls).toEqual([{ channel: 'account:refresh', input: undefined }])
+      expect(fake.calls.map((c) => c.channel)).toContain('account:refresh')
     })
+    expect(fake.calls.filter((c) => c.channel === 'account:refresh')).toHaveLength(1)
     expect(await screen.findByText(/^since /)).toBeInTheDocument()
   })
 
@@ -207,5 +225,94 @@ describe('AccountSettingsTab (F-15.2)', () => {
       'Signed in as author@example.com'
     )
     off()
+  })
+})
+
+describe('AccountSettingsTab credits (F-15.3)', () => {
+  it('asks for the credits as soon as the signed-in state is on screen', async () => {
+    show(SIGNED_IN)
+    render(<AccountSettingsTab />)
+    await waitFor(() => {
+      expect(fake.calls).toEqual([{ channel: 'account:getCredits', input: undefined }])
+    })
+    expect(await screen.findByTestId('account-credit-balance')).toHaveTextContent('$2.50')
+  })
+
+  it('shows the balance, a button per pack, and what each feature has spent', async () => {
+    showWithCredits(CREDITS)
+    render(<AccountSettingsTab />)
+    expect(screen.getByTestId('account-credit-balance')).toHaveTextContent('$2.50')
+
+    const spend = screen.getByRole('table', { name: 'Cloud spend by feature' })
+    expect(within(spend).getByRole('rowheader', { name: 'Ghost text' })).toBeInTheDocument()
+    expect(within(spend).getByText('900')).toBeInTheDocument()
+    expect(within(spend).getByText('<$0.01')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Buy $5.00' }))
+    await waitFor(() => {
+      expect(fake.calls.at(-1)).toEqual({
+        channel: 'account:buyCredits',
+        input: { variantId: 'pack-5' }
+      })
+    })
+  })
+
+  it('publishes the Cloud rate per model with the margin said out loud', () => {
+    showWithCredits(CREDITS)
+    render(<AccountSettingsTab />)
+    const rates = screen.getByRole('table', { name: 'MythScribe Cloud rates' })
+    const row = within(rates).getByRole('rowheader', { name: 'gpt-5.4-mini' }).closest('tr')
+    expect(row).not.toBeNull()
+    // 0.25 and 2.00 per 1M at the provider, doubled by CLOUD_RATE_MULTIPLIER.
+    expect(within(row as HTMLElement).getByText('$0.50')).toBeInTheDocument()
+    expect(within(row as HTMLElement).getByText('$4.00')).toBeInTheDocument()
+    expect(within(row as HTMLElement).getByText('fast')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Rates include MythScribe's margin over the provider price; each request is charged at the rate of the model that answered."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it('says so when no pack is on sale and nothing has been spent', () => {
+    showWithCredits({ balanceMicros: 0, spend: [], packs: [] })
+    render(<AccountSettingsTab />)
+    expect(screen.getByTestId('account-credit-balance')).toHaveTextContent('$0.00')
+    expect(screen.getByText('Credit packs are not on sale yet.')).toBeInTheDocument()
+    expect(screen.getByText('No Cloud requests yet.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Buy / })).not.toBeInTheDocument()
+  })
+
+  it('shows a credits failure inside the section, with the account still signed in', async () => {
+    show(SIGNED_IN)
+    fake.fail = new IpcRequestError({
+      code: 'IO',
+      message: 'Could not reach MythScribe Cloud. Check your connection and try again.'
+    })
+    render(<AccountSettingsTab />)
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not reach MythScribe Cloud. Check your connection and try again.'
+    )
+    expect(screen.getByTestId('account-signed-in')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeEnabled()
+    expect(screen.queryByTestId('account-credit-balance')).not.toBeInTheDocument()
+    expect(useDialogStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('asks again on Refresh', async () => {
+    showWithCredits(CREDITS)
+    render(<AccountSettingsTab />)
+    await waitFor(() => {
+      expect(fake.calls).toHaveLength(1)
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    expect(fake.calls.map((c) => c.channel)).toEqual(['account:getCredits', 'account:getCredits'])
+  })
+
+  it('shows no credits section while signed out', () => {
+    show(SIGNED_OUT)
+    render(<AccountSettingsTab />)
+    expect(screen.queryByRole('region', { name: 'Credits' })).not.toBeInTheDocument()
+    expect(fake.calls).toEqual([])
   })
 })

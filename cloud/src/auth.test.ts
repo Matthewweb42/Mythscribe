@@ -7,7 +7,7 @@ import {
   LOGIN_ATTEMPT_TTL_MS,
   START_RATE_LIMIT
 } from '../../src/shared/cloudApi'
-import type { AuthDeps } from './auth'
+import type { CreditsDeps } from './credits'
 import type { MailMessage, Mailer } from './email'
 import { handleRequest } from './index'
 import { memoryStore } from './store'
@@ -19,7 +19,7 @@ const START = new Date('2026-09-19T12:00:00.000Z')
 let mails: MailMessage[]
 let clock: number
 let counter: number
-let deps: AuthDeps
+let deps: CreditsDeps
 
 const capturingMailer: Mailer = {
   send(message) {
@@ -28,13 +28,16 @@ const capturingMailer: Mailer = {
   }
 }
 
-function makeDeps(overrides: Partial<AuthDeps> = {}): AuthDeps {
+function makeDeps(overrides: Partial<CreditsDeps> = {}): CreditsDeps {
   return {
     store: memoryStore(),
     mailer: capturingMailer,
     now: () => new Date(clock),
     random: () => `tok-${(counter += 1)}`,
     revealLink: false,
+    // The credit routes (F-15.3) share the router; the account tests configure neither.
+    packs: [],
+    webhookSecret: null,
     ...overrides
   }
 }

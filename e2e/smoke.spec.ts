@@ -393,6 +393,12 @@ let cloudSessionRevoked = false
 const CLOUD_SESSION_TOKEN = 'e2e-session-token'
 const CLOUD_USER_ID = 'e2e-user-1'
 const CLOUD_SINCE = '2026-09-19T12:00:00.000Z'
+/** F-15.3: $2.50 of credit, one pack on sale, and one feature that has spent something. */
+const CLOUD_BALANCE_MICROS = 2_500_000
+const CLOUD_PACK = { variantId: 'pack-5', priceCents: 500 }
+const CLOUD_SPEND = { feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }
+const CLOUD_CHECKOUT_URL =
+  'https://mythscribe.lemonsqueezy.com/buy/test?checkout[custom][user_id]=user-1'
 
 /** Stands in for the author opening the sign-in link in their browser. */
 function approveSignIn(): void {
@@ -404,7 +410,9 @@ function approveSignIn(): void {
  * main at this server, which speaks the four auth routes of `src/shared/cloudApi.ts`: it records
  * the address a link was asked for, answers polls pending until `approveSignIn()`, then hands
  * over one session, and authorises `/auth/me` and `/auth/signout` with that session's token
- * alone. No mail is sent and no link is ever pasted back into the app.
+ * alone. It also answers the two credit routes (F-15.3) behind the same bearer. No mail is sent,
+ * no link is ever pasted back into the app, and no checkout is ever opened (the test does not
+ * click Buy, which would hand a URL to the real browser).
  */
 function startFakeCloudApi(): Promise<string> {
   const json = (res: http.ServerResponse, status: number, body: unknown): void => {
@@ -468,6 +476,28 @@ function startFakeCloudApi(): Promise<string> {
         userId: CLOUD_USER_ID,
         since: CLOUD_SINCE
       })
+      return
+    }
+    if (req.method === 'GET' && url === '/credits') {
+      req.resume()
+      if (!authorized(req)) {
+        json(res, 401, { code: 'UNAUTHORIZED', message: 'Sign in again.' })
+        return
+      }
+      json(res, 200, {
+        balanceMicros: CLOUD_BALANCE_MICROS,
+        spend: [CLOUD_SPEND],
+        packs: [CLOUD_PACK]
+      })
+      return
+    }
+    if (req.method === 'POST' && url === '/billing/checkout') {
+      req.resume()
+      if (!authorized(req)) {
+        json(res, 401, { code: 'UNAUTHORIZED', message: 'Sign in again.' })
+        return
+      }
+      json(res, 200, { url: CLOUD_CHECKOUT_URL })
       return
     }
     if (req.method === 'POST' && url === '/auth/signout') {
@@ -1017,6 +1047,10 @@ test('create, close, reopen a project on disk', async () => {
     'Signed in as author@example.com',
     { timeout: 15_000 }
   )
+  // F-15.3: the credits section loads with the signed-in state. Buy is only checked for being
+  // there; clicking it would hand a Lemon Squeezy URL to the machine's real browser.
+  await expect(settingsDialog.getByTestId('account-credit-balance')).toHaveText('$2.50')
+  await expect(settingsDialog.getByRole('button', { name: 'Buy $5' })).toBeVisible()
   await settingsDialog.getByRole('button', { name: 'Sign out' }).click()
   await expect(settingsDialog.getByLabel('Email')).toBeVisible()
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()

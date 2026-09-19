@@ -25,7 +25,7 @@ import {
 } from '../chat'
 import { AccountStatus } from '../account'
 import { AuthorRules } from '../authorRules'
-import { EMAIL_MAX } from '../cloudApi'
+import { CheckoutBody, CreditsResult, EMAIL_MAX } from '../cloudApi'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { CritiqueNotes } from '../critique'
 import { EditorSettings } from '../editorSettings'
@@ -702,6 +702,18 @@ export const contract = {
    * session becomes signedOut. Unreachable network leaves the status as it is and is IO.
    */
   'account:refresh': { input: z.undefined(), output: AccountStatus },
+  /**
+   * The signed-in account's Cloud credits (F-15.3): balance, spend per feature, and the packs on
+   * sale. IO when signed out or the Worker is unreachable; a session the Worker no longer
+   * accepts signs out (pushed as `account:changed`) and is IO too.
+   */
+  'account:getCredits': { input: z.undefined(), output: CreditsResult },
+  /**
+   * Buys a credit pack (F-15.3): asks the Worker for the Lemon Squeezy checkout URL for this
+   * account and opens it in the default browser. An unknown pack or a URL off Lemon Squeezy is
+   * VALIDATION; signed out or unreachable is IO.
+   */
+  'account:buyCredits': { input: CheckoutBody, output: z.null() },
   /**
    * The AI provider status (F-5.1): whether a key is saved (with a masked hint, never the key)
    * and how the key is protected. App-wide, no project needed.

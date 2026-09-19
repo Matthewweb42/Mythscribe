@@ -3,7 +3,8 @@ import { z } from 'zod'
 /**
  * The wire contract between the desktop app and the MythScribe Cloud Worker (F-15.2), imported
  * by both sides (`src/main/account/` and `cloud/src/`) so a route's body is defined once.
- * Nothing here carries manuscript text; the auth routes see an email address and opaque tokens.
+ * Nothing here carries manuscript text; the auth routes see an email address and opaque tokens,
+ * the credit routes (F-15.3) amounts and feature ids.
  */
 
 /** Where the app sends Cloud requests; `MYTHSCRIBE_CLOUD_API_URL` overrides it for dev and e2e. */
@@ -77,6 +78,59 @@ export type AuthMeResult = z.infer<typeof AuthMeResult>
 
 /** `POST /auth/signout` with the same header; answers 204. */
 
+/**
+ * Credits (F-15.3). Every amount is an integer in micro-USD (1e-6 USD, `MICROS_PER_USD` in
+ * `cloudRates.ts`); a $5 pack is 5_000_000. The app shows dollars.
+ */
+
+/** A pack on sale: one Lemon Squeezy variant, `priceCents` paid = the same amount of credit. */
+export const CreditPack = z.object({
+  variantId: z.string().min(1),
+  priceCents: z.number().int().positive()
+})
+export type CreditPack = z.infer<typeof CreditPack>
+
+/** Spend on one AI feature (`AiFeatureId`, kept as a string on the wire) since the account was created. */
+export const CreditSpendRow = z.object({
+  feature: z.string().min(1),
+  micros: z.number().int().nonnegative(),
+  requests: z.number().int().nonnegative(),
+  tokens: z.number().int().nonnegative()
+})
+export type CreditSpendRow = z.infer<typeof CreditSpendRow>
+
+/** `GET /credits` with `Authorization: Bearer <token>` */
+export const CreditsResult = z.object({
+  /** May be slightly negative: the last request is charged after it was answered. */
+  balanceMicros: z.number().int(),
+  spend: z.array(CreditSpendRow),
+  /** Empty until the operator configures the packs on the Worker. */
+  packs: z.array(CreditPack)
+})
+export type CreditsResult = z.infer<typeof CreditsResult>
+
+/** `POST /billing/checkout` with the same header */
+export const CheckoutBody = z.object({ variantId: z.string().min(1) })
+export type CheckoutBody = z.infer<typeof CheckoutBody>
+
+export const CheckoutResult = z.object({ url: z.string().url() })
+export type CheckoutResult = z.infer<typeof CheckoutResult>
+
+/** Where a checkout may send the author: Lemon Squeezy's hosted checkout over https, nothing else. */
+export const CHECKOUT_HOST_SUFFIX = '.lemonsqueezy.com'
+
+export function isCheckoutUrl(url: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  return parsed.protocol === 'https:' && parsed.hostname.endsWith(CHECKOUT_HOST_SUFFIX)
+}
+
+/** `POST /billing/lemonsqueezy`: the Lemon Squeezy webhook; signed with `X-Signature`, no bearer. */
+
 export const CloudErrorCode = z.enum([
   'INVALID_EMAIL',
   'RATE_LIMITED',
@@ -84,6 +138,10 @@ export const CloudErrorCode = z.enum([
   'NOT_CONFIGURED',
   'UNAUTHORIZED',
   'NOT_FOUND',
+  /** The webhook body was not signed with the Worker's Lemon Squeezy secret (F-15.3). */
+  'BAD_SIGNATURE',
+  /** The balance is at or below zero (F-15.3); the proxy refuses the request (F-15.4). */
+  'INSUFFICIENT_CREDITS',
   'INTERNAL'
 ])
 export type CloudErrorCode = z.infer<typeof CloudErrorCode>
@@ -99,5 +157,7 @@ export const CLOUD_ERROR_STATUS: Record<CloudErrorCode, number> = {
   NOT_CONFIGURED: 503,
   UNAUTHORIZED: 401,
   NOT_FOUND: 404,
+  BAD_SIGNATURE: 401,
+  INSUFFICIENT_CREDITS: 402,
   INTERNAL: 500
 }

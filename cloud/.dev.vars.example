@@ -5,3 +5,7 @@ EMAIL_TRANSPORT=log
 PUBLIC_ORIGIN=http://127.0.0.1:8787
 RESEND_API_KEY=
 OPENAI_API_KEY=sk-replace-me
+# F-15.3 credits: the packs on sale and the secret the billing webhook is signed with. Any string
+# works locally — the README's replay recipe signs a body with the same value.
+LEMONSQUEEZY_PACKS=[{"variantId":"111","url":"https://mythscribe.lemonsqueezy.com/buy/replace-me","priceCents":500}]
+LEMONSQUEEZY_WEBHOOK_SECRET=local-webhook-secret

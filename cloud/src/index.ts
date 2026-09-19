@@ -1,8 +1,8 @@
 /**
- * The MythScribe Cloud Worker (F-15.2): the account routes behind `api.mythscribe.app`.
- * No CORS headers — the desktop app is not a browser origin and nothing here is meant to be
- * called from a web page; only `/auth/verify` is opened in a browser, and it answers HTML.
- * F-15.4 adds the AI proxy routes to the same router.
+ * The MythScribe Cloud Worker (F-15.2, F-15.3): the account routes and the credit routes behind
+ * `api.mythscribe.app`. No CORS headers — the desktop app is not a browser origin and nothing
+ * here is meant to be called from a web page; only `/auth/verify` is opened in a browser, and it
+ * answers HTML. F-15.4 adds the AI proxy routes to the same router.
  */
 import {
   handleMe,
@@ -11,9 +11,16 @@ import {
   handleStart,
   handleVerify,
   jsonError,
-  jsonResponse,
-  type AuthDeps
+  jsonResponse
 } from './auth'
+import {
+  type ConfiguredPack,
+  ConfiguredPacks,
+  type CreditsDeps,
+  handleCheckout,
+  handleCredits,
+  handleLemonSqueezyWebhook
+} from './credits'
 import { randomToken } from './crypto'
 import { logMailer, resendMailer, type Mailer } from './email'
 import { d1Store } from './store'
@@ -29,6 +36,9 @@ export interface WorkerEnv {
   RESEND_API_KEY?: string
   /** Local runs only: the origin for sign-in links (see `AuthDeps.publicOrigin`). */
   PUBLIC_ORIGIN?: string
+  /** F-15.3: the credit packs on sale, as a JSON array of `{ variantId, url, priceCents }`. */
+  LEMONSQUEEZY_PACKS?: string
+  LEMONSQUEEZY_WEBHOOK_SECRET?: string
 }
 
 function mailerFor(env: WorkerEnv): Mailer | null {
@@ -37,18 +47,42 @@ function mailerFor(env: WorkerEnv): Mailer | null {
   return null
 }
 
-function depsFor(env: WorkerEnv): AuthDeps {
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The configured packs, or none. A malformed var must not take the account routes down with it:
+ * the Account tab then says credit packs are not on sale, and the Worker log names the problem.
+ */
+function packsFor(env: WorkerEnv): ConfiguredPack[] {
+  if (!env.LEMONSQUEEZY_PACKS) return []
+  const parsed = ConfiguredPacks.safeParse(parseJson(env.LEMONSQUEEZY_PACKS))
+  if (!parsed.success) {
+    console.error('LEMONSQUEEZY_PACKS is not a valid pack list; no credit packs are on sale')
+    return []
+  }
+  return parsed.data
+}
+
+function depsFor(env: WorkerEnv): CreditsDeps {
   return {
     store: d1Store(env.DB),
     mailer: mailerFor(env),
     now: () => new Date(),
     random: randomToken,
     revealLink: env.EMAIL_TRANSPORT === 'log',
+    packs: packsFor(env),
+    webhookSecret: env.LEMONSQUEEZY_WEBHOOK_SECRET ?? null,
     ...(env.PUBLIC_ORIGIN ? { publicOrigin: env.PUBLIC_ORIGIN } : {})
   }
 }
 
-function route(request: Request, deps: AuthDeps): Promise<Response> | Response {
+function route(request: Request, deps: CreditsDeps): Promise<Response> | Response {
   const { pathname } = new URL(request.url)
   const { method } = request
 
@@ -59,6 +93,12 @@ function route(request: Request, deps: AuthDeps): Promise<Response> | Response {
   if (pathname === '/auth/poll' && method === 'POST') return handlePoll(request, deps)
   if (pathname === '/auth/me' && method === 'GET') return handleMe(request, deps)
   if (pathname === '/auth/signout' && method === 'POST') return handleSignOut(request, deps)
+
+  if (pathname === '/credits' && method === 'GET') return handleCredits(request, deps)
+  if (pathname === '/billing/checkout' && method === 'POST') return handleCheckout(request, deps)
+  if (pathname === '/billing/lemonsqueezy' && method === 'POST') {
+    return handleLemonSqueezyWebhook(request, deps)
+  }
 
   return jsonError('NOT_FOUND', 'No such endpoint.')
 }
@@ -71,7 +111,7 @@ function withNoStore(response: Response): Response {
 }
 
 /** The whole request path over injected dependencies, so the tests drive the real router. */
-export async function handleRequest(request: Request, deps: AuthDeps): Promise<Response> {
+export async function handleRequest(request: Request, deps: CreditsDeps): Promise<Response> {
   try {
     return withNoStore(await route(request, deps))
   } catch (error) {

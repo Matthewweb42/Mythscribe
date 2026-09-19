@@ -28,7 +28,7 @@
     "cloud:dev": "wrangler dev --config cloud/wrangler.toml",
     "cloud:deploy": "wrangler deploy --config cloud/wrangler.toml",
     "cloud:migrate": "wrangler d1 migrations apply mythscribe --remote --config cloud/wrangler.toml",
-    "cloud:types": "wrangler types --config cloud/wrangler.toml"
+    "cloud:types": "wrangler types --config cloud/wrangler.toml cloud/worker-configuration.d.ts"
   },
   "dependencies": {
     "@tiptap/core": "3.31.3",

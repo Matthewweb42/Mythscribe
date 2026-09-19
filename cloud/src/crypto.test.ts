@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { randomToken, sha256Hex, timingSafeEqualHex } from './crypto'
+import { hmacSha256Hex, randomToken, sha256Hex, timingSafeEqualHex } from './crypto'
 
 describe('randomToken', () => {
   it('is url-safe and different every time', () => {
@@ -35,5 +35,20 @@ describe('timingSafeEqualHex', () => {
   it('rejects a different digest and a different length', async () => {
     expect(timingSafeEqualHex(await sha256Hex('a'), await sha256Hex('b'))).toBe(false)
     expect(timingSafeEqualHex('abcd', 'abc')).toBe(false)
+  })
+})
+
+describe('hmacSha256Hex', () => {
+  it('matches the published HMAC-SHA256 test vector', async () => {
+    expect(await hmacSha256Hex('key', 'The quick brown fox jumps over the lazy dog')).toBe(
+      'f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8'
+    )
+  })
+
+  it('changes with the secret and with the body', async () => {
+    const signature = await hmacSha256Hex('secret', '{"a":1}')
+    expect(await hmacSha256Hex('other', '{"a":1}')).not.toBe(signature)
+    expect(await hmacSha256Hex('secret', '{"a":2}')).not.toBe(signature)
+    expect(signature).toHaveLength(64)
   })
 })
