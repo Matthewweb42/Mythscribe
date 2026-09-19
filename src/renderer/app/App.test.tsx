@@ -19,6 +19,7 @@ import { IDLE_INDEX_QUEUE } from '@shared/jobs'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetAccountStore } from '@renderer/features/account/accountStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetAuthorRulesStore, useAuthorRulesStore } from '@renderer/features/ai/authorRulesStore'
 import { resetAssistantStore, useAssistantStore } from '@renderer/features/ai/assistantStore'
@@ -83,6 +84,7 @@ beforeEach(() => {
   resetShellDialogStore()
   resetWelcomeStore()
   resetIndexingStore()
+  resetAccountStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -633,13 +635,17 @@ describe('App', () => {
     expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
   })
 
-  it('does not show the Settings button on the welcome screen, and Ctrl+, does nothing (F-7.5)', async () => {
+  it('opens Settings on the welcome screen with only the app-wide Account tab (F-7.5, F-15.2)', async () => {
     install()
     render(<App />)
     await screen.findByRole('button', { name: /new project/i })
-    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     await userEvent.keyboard('{Control>},{/Control}')
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' })
+    expect(within(dialog).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Account'])
+    expect(
+      within(dialog).getByText('Optional. You never need an account to write.', { exact: false })
+    ).toBeInTheDocument()
   })
 
   it('surfaces a failed document load as a toast and keeps the editor read-only', async () => {

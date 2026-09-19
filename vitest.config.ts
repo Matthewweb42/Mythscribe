@@ -32,6 +32,16 @@ export default defineConfig({
         }
       },
       {
+        resolve: { alias },
+        test: {
+          name: 'cloud',
+          environment: 'node',
+          // The MythScribe Cloud Worker (F-15.2): plain fetch handlers over injected
+          // dependencies, so they run under Node with no Worker runtime.
+          include: ['cloud/src/**/*.test.ts']
+        }
+      },
+      {
         plugins: [react()],
         resolve: { alias },
         test: {

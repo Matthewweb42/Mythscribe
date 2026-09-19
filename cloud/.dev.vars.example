@@ -1,2 +1,7 @@
 # Copy to cloud/.dev.vars (git-ignored) for `wrangler dev`. Production uses `wrangler secret put`.
+# `log` prints the sign-in link to the console and returns it as devLink from /auth/start.
+EMAIL_TRANSPORT=log
+# wrangler dev stamps requests with the route hostname, so links need the local origin spelled out.
+PUBLIC_ORIGIN=http://127.0.0.1:8787
+RESEND_API_KEY=
 OPENAI_API_KEY=sk-replace-me

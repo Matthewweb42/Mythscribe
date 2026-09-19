@@ -23,7 +23,9 @@ import {
   ChatRole,
   Conversations
 } from '../chat'
+import { AccountStatus } from '../account'
 import { AuthorRules } from '../authorRules'
+import { EMAIL_MAX } from '../cloudApi'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { CritiqueNotes } from '../critique'
 import { EditorSettings } from '../editorSettings'
@@ -678,6 +680,29 @@ export const contract = {
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
   'layout:set': { input: Layout, output: Layout },
   /**
+   * The MythScribe account (F-15.2): signed out, waiting for a sign-in link to be opened, or
+   * signed in. App-wide, no project needed; the session token never crosses IPC.
+   */
+  'account:getStatus': { input: z.undefined(), output: AccountStatus },
+  /**
+   * Asks the Cloud Worker to email a sign-in link (F-15.2) and starts polling for its approval;
+   * answers the pending status. A malformed address is VALIDATION; no network, a rate limit, or a
+   * Worker without a mail transport is IO with the cause and the next step in the message.
+   */
+  'account:requestLink': {
+    input: z.object({ email: z.string().trim().min(1).max(EMAIL_MAX) }),
+    output: AccountStatus
+  },
+  /** Stops waiting for the link (F-15.2); the link itself stays valid until it expires. Signed out afterwards. */
+  'account:cancelLink': { input: z.undefined(), output: AccountStatus },
+  /** Revokes the session on the Worker when reachable and forgets it locally either way (F-15.2). */
+  'account:signOut': { input: z.undefined(), output: AccountStatus },
+  /**
+   * Re-checks a stored session with the Worker (F-15.2): fills `since`; a revoked or expired
+   * session becomes signedOut. Unreachable network leaves the status as it is and is IO.
+   */
+  'account:refresh': { input: z.undefined(), output: AccountStatus },
+  /**
    * The AI provider status (F-5.1): whether a key is saved (with a masked hint, never the key)
    * and how the key is protected. App-wide, no project needed.
    */
@@ -1027,7 +1052,9 @@ export const events = {
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /** A native menu item was clicked or its accelerator pressed (F-7.1); the renderer runs the action. */
-  'menu:action': z.object({ id: MenuItemId })
+  'menu:action': z.object({ id: MenuItemId }),
+  /** The account state changed without a renderer call (F-15.2): a pending link was opened or expired. */
+  'account:changed': AccountStatus
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

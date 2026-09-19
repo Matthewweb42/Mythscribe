@@ -10,7 +10,7 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "npm run typecheck && electron-vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json && tsc --noEmit -p cloud/tsconfig.json",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -24,7 +24,11 @@
     "build:mac": "npm run build && electron-builder --mac",
     "build:linux": "npm run build && electron-builder --linux",
     "site:check": "vitest run src/shared/site.test.ts",
-    "site:deploy": "wrangler deploy --config site/wrangler.toml"
+    "site:deploy": "wrangler deploy --config site/wrangler.toml",
+    "cloud:dev": "wrangler dev --config cloud/wrangler.toml",
+    "cloud:deploy": "wrangler deploy --config cloud/wrangler.toml",
+    "cloud:migrate": "wrangler d1 migrations apply mythscribe --remote --config cloud/wrangler.toml",
+    "cloud:types": "wrangler types --config cloud/wrangler.toml"
   },
   "dependencies": {
     "@tiptap/core": "3.31.3",

@@ -12,6 +12,7 @@ import {
 import type { AiStatus, AiUsageSummary } from '../src/shared/ai'
 import type { AiSettings } from '../src/shared/aiSettings'
 import type { AuthorRules } from '../src/shared/authorRules'
+import { LOGIN_ATTEMPT_TTL_MS } from '../src/shared/cloudApi'
 import type { FocusSettings } from '../src/shared/focus'
 import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
@@ -381,18 +382,132 @@ function startFakeOpenAi(): Promise<string> {
   })
 }
 
+let fakeCloudApi: http.Server
+/** Every address the fake Cloud Worker was asked to email a sign-in link to (F-15.2). */
+const cloudSignInEmails: string[] = []
+/** The link is only "opened" when the test says so; until then every poll answers pending. */
+let cloudApproved = false
+/** The Worker hands a session over exactly once, so a second poll for the same attempt expires. */
+let cloudSessionTaken = false
+let cloudSessionRevoked = false
+const CLOUD_SESSION_TOKEN = 'e2e-session-token'
+const CLOUD_USER_ID = 'e2e-user-1'
+const CLOUD_SINCE = '2026-09-19T12:00:00.000Z'
+
+/** Stands in for the author opening the sign-in link in their browser. */
+function approveSignIn(): void {
+  cloudApproved = true
+}
+
+/**
+ * F-15.2: the account steps never reach api.mythscribe.app. `MYTHSCRIBE_CLOUD_API_URL` points
+ * main at this server, which speaks the four auth routes of `src/shared/cloudApi.ts`: it records
+ * the address a link was asked for, answers polls pending until `approveSignIn()`, then hands
+ * over one session, and authorises `/auth/me` and `/auth/signout` with that session's token
+ * alone. No mail is sent and no link is ever pasted back into the app.
+ */
+function startFakeCloudApi(): Promise<string> {
+  const json = (res: http.ServerResponse, status: number, body: unknown): void => {
+    res.statusCode = status
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify(body))
+  }
+  const authorized = (req: http.IncomingMessage): boolean =>
+    !cloudSessionRevoked && req.headers.authorization === `Bearer ${CLOUD_SESSION_TOKEN}`
+
+  fakeCloudApi = http.createServer((req, res) => {
+    const url = (req.url ?? '').split('?')[0]
+    if (req.method === 'POST' && url === '/auth/start') {
+      let body = ''
+      req.setEncoding('utf8')
+      req.on('data', (chunk: string) => {
+        body += chunk
+      })
+      req.on('end', () => {
+        const { email } = JSON.parse(body) as { email: string }
+        cloudSignInEmails.push(email)
+        cloudApproved = false
+        cloudSessionTaken = false
+        cloudSessionRevoked = false
+        json(res, 200, {
+          attemptId: 'e2e-attempt-1',
+          pollSecret: 'e2e-poll-secret',
+          expiresAt: new Date(Date.now() + LOGIN_ATTEMPT_TTL_MS).toISOString()
+        })
+      })
+      return
+    }
+    if (req.method === 'POST' && url === '/auth/poll') {
+      req.resume()
+      if (!cloudApproved) {
+        json(res, 200, { status: 'pending' })
+        return
+      }
+      if (cloudSessionTaken) {
+        json(res, 200, { status: 'expired' })
+        return
+      }
+      cloudSessionTaken = true
+      json(res, 200, {
+        status: 'ready',
+        session: {
+          token: CLOUD_SESSION_TOKEN,
+          email: cloudSignInEmails[cloudSignInEmails.length - 1] ?? '',
+          userId: CLOUD_USER_ID
+        }
+      })
+      return
+    }
+    if (req.method === 'GET' && url === '/auth/me') {
+      if (!authorized(req)) {
+        json(res, 401, { code: 'UNAUTHORIZED', message: 'Sign in again.' })
+        return
+      }
+      json(res, 200, {
+        email: cloudSignInEmails[cloudSignInEmails.length - 1] ?? '',
+        userId: CLOUD_USER_ID,
+        since: CLOUD_SINCE
+      })
+      return
+    }
+    if (req.method === 'POST' && url === '/auth/signout') {
+      req.resume()
+      if (!authorized(req)) {
+        json(res, 401, { code: 'UNAUTHORIZED', message: 'Sign in again.' })
+        return
+      }
+      cloudSessionRevoked = true
+      res.statusCode = 204
+      res.end()
+      return
+    }
+    req.resume()
+    json(res, 404, { code: 'NOT_FOUND', message: `no route for ${req.method ?? ''} ${url}` })
+  })
+  return new Promise((resolve) => {
+    fakeCloudApi.listen(0, '127.0.0.1', () => {
+      const address = fakeCloudApi.address()
+      if (!address || typeof address === 'string') throw new Error('fake Cloud API has no port')
+      resolve(`http://127.0.0.1:${address.port}`)
+    })
+  })
+}
+
 test.beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-e2e-'))
   const openAiBaseUrl = await startFakeOpenAi()
-  // Point app-level state (recents, the AI key) at the temp dir so the developer's real userData
-  // is untouched, and the OpenAI SDK at the fake server so nothing leaves the machine.
+  const cloudApiUrl = await startFakeCloudApi()
+  // Point app-level state (recents, the AI key, the Cloud session) at the temp dir so the
+  // developer's real userData is untouched, the OpenAI SDK at the fake provider, and the account
+  // routes (F-15.2) at the fake Worker, so nothing leaves the machine.
   app = await electron.launch({
     args: ['.'],
     env: {
       ...process.env,
       NODE_ENV: 'test',
       MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData'),
-      OPENAI_BASE_URL: openAiBaseUrl
+      OPENAI_BASE_URL: openAiBaseUrl,
+      MYTHSCRIBE_CLOUD_API_URL: cloudApiUrl
     }
   })
   app.on('close', () => {
@@ -405,6 +520,7 @@ test.afterAll(async () => {
   // The last step closes the window, which quits the app on Linux; only close it if still up.
   if (!exited) await app?.close()
   await new Promise<void>((resolve) => fakeOpenAi.close(() => resolve()))
+  await new Promise<void>((resolve) => fakeCloudApi.close(() => resolve()))
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -872,6 +988,37 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('button', { name: 'Clear' }).click()
   await expect(keyHint).toHaveText('No key')
   expect(await aiStatus()).toMatchObject({ hasKey: false, hint: null })
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  // F-15.2: the Account tab. It says the account is optional before it asks for anything, sends
+  // a sign-in link through the fake Cloud Worker, and then waits: when the test stands in for
+  // the author opening the link, main's poll picks the session up and this window signs itself
+  // in (nothing is pasted back). Signing out returns the field. The fields are filled, not
+  // typed, so the WSLg focus gotcha in docs/ARCHITECTURE.md cannot put stray letters in them.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(settingsDialog).toBeVisible()
+  await settingsDialog.getByRole('tab', { name: 'Account' }).click()
+  await expect(settingsDialog.getByRole('tab', { name: 'Account' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  await expect(
+    settingsDialog.getByText('Optional. You never need an account to write.')
+  ).toBeVisible()
+  await settingsDialog.getByLabel('Email').fill('author@example.com')
+  await settingsDialog.getByRole('button', { name: 'Send sign-in link' }).click()
+  await expect(
+    settingsDialog.getByText('We sent a sign-in link to author@example.com.')
+  ).toBeVisible()
+  expect(cloudSignInEmails).toEqual(['author@example.com'])
+  approveSignIn()
+  // The poll runs every 3 s (`POLL_INTERVAL_MS`), so give it a few rounds.
+  await expect(settingsDialog.getByTestId('account-signed-in')).toHaveText(
+    'Signed in as author@example.com',
+    { timeout: 15_000 }
+  )
+  await settingsDialog.getByRole('button', { name: 'Sign out' }).click()
+  await expect(settingsDialog.getByLabel('Email')).toBeVisible()
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
   const widened = await editor.locator('..').boundingBox()

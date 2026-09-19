@@ -107,7 +107,7 @@ describe('buildMenuTemplate (F-7.1)', () => {
     const closed = buildMenuTemplate(MENU, { format: null, platform: 'linux' }, onAction)
     expect(item(closed, 'saveDocument').enabled).toBe(false)
     expect(item(closed, 'insertScene').enabled).toBe(false)
-    expect(item(closed, 'openSettings').enabled).toBe(false)
+    expect(item(closed, 'openSettings').enabled).toBe(true)
     expect(item(closed, 'newProject').enabled).toBe(true)
     expect(item(closed, 'undo').enabled).toBe(true)
     expect(item(closed, 'openAbout').enabled).toBe(true)

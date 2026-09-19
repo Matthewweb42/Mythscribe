@@ -34,7 +34,7 @@
     <main class="wrap">
       <article class="prose">
         <h1>Privacy policy</h1>
-        <p class="meta">Last updated 14 September 2026</p>
+        <p class="meta">Last updated 19 September 2026</p>
 
         <p>
           MythScribe is built to need as little of your data as possible. The short version: the
@@ -85,14 +85,25 @@
 
         <h2 id="cloud">MythScribe Cloud (not yet available)</h2>
         <p>
-          We plan a subscription service, MythScribe Cloud, for writers who do not want to manage an
-          API key. It does not exist yet. When it launches, this policy will be updated first, and
-          it will work like this:
+          A MythScribe account exists now, ahead of the service it is for. It is optional: the app
+          never asks you to sign in, and nothing in it — writing, your projects, your own API key —
+          needs an account. If you do sign in, you give us your email address, and we store that
+          address and a sign-in session (a random token and its expiry, held as a hash) on our
+          servers at Cloudflare. The sign-in emails themselves are sent through
+          <a href="https://resend.com/legal/privacy-policy">Resend</a>, a sub-processor; they carry
+          the sign-in link and nothing else. Signing out revokes the session, and you can ask us to
+          delete the account and its address at any time. No manuscript text is involved at any
+          point.
+        </p>
+        <p>
+          Cloud AI itself — the subscription service for writers who do not want to manage an API
+          key — does not exist yet. When it launches, this policy will be updated first, and it will
+          work like this:
         </p>
         <ul>
           <li>
-            You create an account with your email address. We store the address, your subscription
-            state, and a usage ledger (which feature ran, when, and how many tokens it used).
+            Your account gains a subscription state and a usage ledger (which feature ran, when, and
+            how many tokens it used), beside the email address it already holds.
           </li>
           <li>
             AI requests go from the app through our proxy to the provider. The proxy checks your
@@ -100,9 +111,9 @@
             <strong>Manuscript content is not stored or logged by the proxy.</strong>
           </li>
           <li>
-            Sub-processors will be Cloudflare (hosting), Lemon Squeezy (billing), and the AI
-            provider (OpenAI at launch). Your writing is not used to train models by us; the
-            provider's API terms govern its own handling.
+            Sub-processors will be Cloudflare (hosting), Resend (sign-in email), Lemon Squeezy
+            (billing), and the AI provider (OpenAI at launch). Your writing is not used to train
+            models by us; the provider's API terms govern its own handling.
           </li>
           <li>You will be able to export or delete your account data by emailing us.</li>
         </ul>

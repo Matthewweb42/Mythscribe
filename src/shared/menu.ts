@@ -143,7 +143,7 @@ export const MENU: readonly MenuSection[] = [
     entries: [
       { id: 'openTags', label: 'Tags', when: 'project' },
       SEPARATOR,
-      { id: 'openSettings', label: 'Settings', shortcut: 'settings', when: 'project' }
+      { id: 'openSettings', label: 'Settings', shortcut: 'settings', when: 'always' }
     ]
   },
   {

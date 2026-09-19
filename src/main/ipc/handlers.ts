@@ -29,6 +29,7 @@ import {
   UNAVAILABLE_SUMMARY,
   type SceneSummaryState
 } from '@shared/summary'
+import type { AccountService } from '../account/accountService'
 import { runBetaReader } from '../ai/betaReader'
 import { runChat } from '../ai/chat'
 import { runCritique } from '../ai/critique'
@@ -115,6 +116,12 @@ export interface HandlerDeps {
   appState: AppStateStore
   keyStore: AiKeyStore
   ai: AiProviderRegistry
+  /**
+   * F-15.2: the MythScribe account. It owns its own state and poll timer and emits
+   * `account:changed` through the `onChange` it was built with in `index.ts`, so these handlers
+   * only ask it questions.
+   */
+  account: AccountService
   dialogs: ProjectDialogs
   windows: () => ClosableWindow[]
   /** The window with keyboard focus, for the edit commands (F-7.1); null when none has it. */
@@ -130,6 +137,7 @@ export function registerHandlers({
   appState,
   keyStore,
   ai,
+  account,
   dialogs,
   windows,
   focusedWindow,
@@ -384,6 +392,19 @@ export function registerHandlers({
     }
     return appState.update((s) => ({ ...s, layout })).layout
   })
+
+  // F-15.2: the MythScribe account. Optional everywhere: no other handler asks whether one is
+  // signed in. The service answers each of these with the status as it then stands; a change it
+  // makes by itself (the link was opened, or it expired) arrives as `account:changed`.
+  register('account:getStatus', () => account.status())
+
+  register('account:requestLink', ({ email }) => account.requestLink(email))
+
+  register('account:cancelLink', () => account.cancelLink())
+
+  register('account:signOut', () => account.signOut())
+
+  register('account:refresh', () => account.refresh())
 
   // F-5.1: the key is accepted by `ai:setKey` once and never returned; status carries a mask.
   const aiStatus = (): AiStatus => ({

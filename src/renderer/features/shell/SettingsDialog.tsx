@@ -2,21 +2,24 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { X } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import {
-  SETTINGS_DIALOG_TABS,
+  settingsTabsFor,
   type SettingsDialogTab,
-  type SettingsDialogTabId
+  type SettingsDialogTabId,
+  type SettingsDialogTabs
 } from '@renderer/features/shell/settingsDialogTabs'
 
 interface SettingsDialogProps {
-  format: NovelFormat
+  /** The open project's format, or null on the welcome screen (only app-wide tabs then). */
+  format: NovelFormat | null
   onClose: () => void
-  /** The tab registry; defaults to the built tabs. Injectable so tests can drive several tabs. */
-  tabs?: readonly [SettingsDialogTab, ...SettingsDialogTab[]]
+  /** The tab registry; defaults to the built tabs for `format`. Injectable so tests can drive several tabs. */
+  tabs?: SettingsDialogTabs
 }
 
 /**
  * The Settings dialog (F-7.5): a modal over the app with one tab per built settings area,
- * opened from the header button or Ctrl+, while a project is open. It owns nothing but the
+ * opened from the header button, Ctrl+, or Tools › Settings; without a project it shows only
+ * the app-wide tabs (F-15.2: Account). It owns nothing but the
  * active tab; each tab reads and writes its own store, so a change applies live behind the
  * dialog. Escape, the close button, and a click on the backdrop close it, like the confirm and
  * prompt modals in `DialogHost`; the active tab resets to the first one on every open. The tabs
@@ -26,7 +29,7 @@ interface SettingsDialogProps {
 export function SettingsDialog({
   format,
   onClose,
-  tabs = SETTINGS_DIALOG_TABS
+  tabs = settingsTabsFor(format)
 }: SettingsDialogProps): React.JSX.Element {
   const titleId = useId()
   const panelId = useId()
@@ -127,7 +130,7 @@ export function SettingsDialog({
           aria-labelledby={tabElementId(panelId, active.id)}
           className="min-h-0 flex-1 overflow-y-auto p-5"
         >
-          {active.render(format)}
+          {active.scope === 'app' ? active.render() : format ? active.render(format) : null}
         </div>
       </div>
     </div>

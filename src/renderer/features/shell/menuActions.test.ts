@@ -96,10 +96,15 @@ describe('runMenuAction (F-7.1)', () => {
   it('toasts and does nothing for a project item with no project open', async () => {
     await runMenuAction('saveDocument')
     await runMenuAction('insertScene')
-    await runMenuAction('openSettings')
-    expect(toasts()).toEqual([NO_PROJECT_MESSAGE, NO_PROJECT_MESSAGE, NO_PROJECT_MESSAGE])
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE, NO_PROJECT_MESSAGE])
     expect(invoke).not.toHaveBeenCalled()
     expect(useShellDialogStore.getState().open).toBeNull()
+  })
+
+  it('opens Settings without a project (F-15.2: the Account tab is app-wide)', async () => {
+    await runMenuAction('openSettings')
+    expect(toasts()).toEqual([])
+    expect(useShellDialogStore.getState().open).toBe('settings')
   })
 
   it('routes the Edit items through menu:edit', async () => {

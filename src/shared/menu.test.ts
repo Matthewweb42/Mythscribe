@@ -58,7 +58,7 @@ describe('menu definition (F-7.1)', () => {
     }
   })
 
-  it('needs a project for everything but File › New/Open, Edit, and Help', () => {
+  it('needs a project for everything but File › New/Open, Edit, Tools › Settings, and Help', () => {
     const always = menuItems()
       .filter((item) => item.when === 'always')
       .map((item) => item.id)
@@ -70,6 +70,7 @@ describe('menu definition (F-7.1)', () => {
       'cut',
       'copy',
       'paste',
+      'openSettings',
       'openDocumentation',
       'openShortcuts',
       'openAbout'

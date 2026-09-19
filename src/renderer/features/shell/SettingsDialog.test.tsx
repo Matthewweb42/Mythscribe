@@ -16,8 +16,8 @@ import type { SettingsDialogTab } from './settingsDialogTabs'
 
 /** Two fake tabs with the real ids, so the dialog's tab handling is driven without the real panels. */
 const tabs: readonly [SettingsDialogTab, ...SettingsDialogTab[]] = [
-  { id: 'editor', label: 'Editor', icon: Type, render: () => <p>formatting here</p> },
-  { id: 'ai', label: 'AI', icon: Sparkles, render: () => <p>keys here</p> }
+  { id: 'editor', label: 'Editor', icon: Type, scope: 'project', render: () => <p>formatting here</p> },
+  { id: 'ai', label: 'AI', icon: Sparkles, scope: 'project', render: () => <p>keys here</p> }
 ]
 
 /** Accepts every `editorSettings:set`; anything else is unexpected here. */
@@ -53,7 +53,11 @@ describe('SettingsDialog (F-7.5)', () => {
     render(<SettingsDialog format="novel" onClose={vi.fn()} />)
     expect(dialog()).toHaveAttribute('aria-modal', 'true')
     expect(within(dialog()).getByRole('tablist', { name: 'Settings' })).toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Editor', 'AI'])
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
+      'Editor',
+      'AI',
+      'Account'
+    ])
     expect(tab('Editor')).toHaveAttribute('aria-selected', 'true')
     expect(tab('Editor')).toHaveFocus()
     expect(panel()).toHaveAccessibleName('Editor')

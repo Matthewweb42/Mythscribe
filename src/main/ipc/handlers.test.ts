@@ -27,6 +27,8 @@ import { defaultFloating, defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_BRIEF, EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
+import { AccountService } from '../account/accountService'
+import type { CloudAuthClient } from '../account/cloudAuthClient'
 import { registerInflight, resetInflight } from '../ai/inflight'
 import { AiKeyStore } from '../ai/keyStore'
 import { fakeSafeStorage } from '../ai/keyStoreFixture'
@@ -164,6 +166,14 @@ beforeEach(() => {
     testConnection
   }
   const appState = new AppStateStore(path.join(tmp, 'userData', 'app-state.json'))
+  // F-15.2: the account channels only forward to the service, which has its own tests; here it
+  // is real over a client that is never reached (no test signs in).
+  const cloudClient: CloudAuthClient = {
+    start: () => Promise.reject(new Error('no cloud in these tests')),
+    poll: () => Promise.reject(new Error('no cloud in these tests')),
+    me: () => Promise.reject(new Error('no cloud in these tests')),
+    signOut: () => Promise.resolve()
+  }
   registerHandlers({
     manager,
     appState,
@@ -173,6 +183,11 @@ beforeEach(() => {
       () => appState.get().models,
       () => provider
     ),
+    account: new AccountService({
+      client: cloudClient,
+      keyStore,
+      onChange: () => {}
+    }),
     dialogs,
     windows: () => [fakeWin],
     focusedWindow: () => focusedWindow,

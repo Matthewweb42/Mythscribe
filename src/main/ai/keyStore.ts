@@ -3,6 +3,8 @@ import path from 'node:path'
 import { z } from 'zod'
 import { maskKey, type AiKeyEncryption, type AiProviderId } from '@shared/ai'
 import { AppError } from '../ipc/errors'
+/** What the store protects: a provider key (F-5.1) or the MythScribe Cloud session (F-15.2). */
+export type SecretId = AiProviderId | 'cloudSession'
 
 /** The parts of Electron's `safeStorage` the store uses; structural so tests inject a fake. */
 export interface SafeStorageLike {
@@ -27,7 +29,7 @@ export const NO_SAFE_STORAGE_MESSAGE =
   'On Linux, install and unlock a keyring (GNOME Keyring or KWallet), then try again.'
 
 /**
- * The one owner of provider keys (F-5.1): `<userData>/ai-keys.json`, separate from
+ * The one owner of provider keys (F-5.1) and the Cloud session (F-15.2): `<userData>/ai-keys.json`, separate from
  * `app-state.json` so the layout file never carries even ciphertext. Read lazily and written
  * atomically like `AppStateStore`; an unreadable file or ciphertext warns (naming only the
  * provider, never the key) and reads as "no key", so nothing throws on the read path.
@@ -49,39 +51,39 @@ export class AiKeyStore {
   }
 
   /** The decrypted key, or null when none is stored or the stored one cannot be decrypted. */
-  getKey(provider: AiProviderId): string | null {
-    const cipher = this.read().keys[provider]
+  getKey(id: SecretId): string | null {
+    const cipher = this.read().keys[id]
     if (cipher === undefined) return null
     try {
       const key = this.safeStorage.decryptString(Buffer.from(cipher, 'base64'))
       return key.length > 0 ? key : null
     } catch (err) {
-      console.warn(`Could not decrypt the stored ${provider} key`, err)
+      console.warn(`Could not decrypt the stored ${id} key`, err)
       return null
     }
   }
 
-  hasKey(provider: AiProviderId): boolean {
-    return this.getKey(provider) !== null
+  hasKey(id: SecretId): boolean {
+    return this.getKey(id) !== null
   }
 
-  getHint(provider: AiProviderId): string | null {
-    const key = this.getKey(provider)
+  getHint(id: SecretId): string | null {
+    const key = this.getKey(id)
     return key === null ? null : maskKey(key)
   }
 
   /** Encrypts and stores the key; throws `AppError('IO')` before touching the file when it cannot be protected. */
-  setKey(provider: AiProviderId, key: string): void {
+  setKey(id: SecretId, key: string): void {
     if (this.encryption() === 'none') throw new AppError('IO', NO_SAFE_STORAGE_MESSAGE)
     const cipher = this.safeStorage.encryptString(key).toString('base64')
     const current = this.read()
-    this.write({ ...current, keys: { ...current.keys, [provider]: cipher } })
+    this.write({ ...current, keys: { ...current.keys, [id]: cipher } })
   }
 
-  clearKey(provider: AiProviderId): void {
+  clearKey(id: SecretId): void {
     const current = this.read()
-    if (!(provider in current.keys)) return
-    const { [provider]: _removed, ...keys } = current.keys
+    if (!(id in current.keys)) return
+    const { [id]: _removed, ...keys } = current.keys
     this.write({ ...current, keys })
   }
 

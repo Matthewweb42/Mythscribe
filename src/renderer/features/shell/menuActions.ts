@@ -66,6 +66,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
       case 'openAbout':
         useShellDialogStore.getState().show('about')
         return
+      case 'openSettings':
+        // App-wide since F-15.2: without a project the dialog shows only the Account tab.
+        useShellDialogStore.getState().show('settings')
+        return
       default:
         break
     }
@@ -115,9 +119,6 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         if (!layout.layout.sidebar.open) layout.toggle('sidebar')
         return
       }
-      case 'openSettings':
-        useShellDialogStore.getState().show('settings')
-        return
     }
   } catch (err) {
     toast.error(describeError(err))

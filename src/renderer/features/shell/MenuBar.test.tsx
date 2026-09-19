@@ -85,12 +85,13 @@ describe('MenuBar (F-7.1)', () => {
   it('disables the project items without a project, and a click on one does nothing', async () => {
     render(<MenuBar />)
     await userEvent.click(trigger('Tools'))
-    const settings = item('Tools', 'Settings')
-    expect(settings).toHaveAttribute('aria-disabled', 'true')
-    await userEvent.click(settings)
+    const tags = item('Tools', 'Tags')
+    expect(tags).toHaveAttribute('aria-disabled', 'true')
+    await userEvent.click(tags)
     expect(useShellDialogStore.getState().open).toBeNull()
     expect(popup('Tools')).toBeInTheDocument()
-    expect(item('Tools', 'Tags')).toHaveAttribute('aria-disabled', 'true')
+    // Settings is app-wide since F-15.2 (the Account tab needs no project).
+    expect(item('Tools', 'Settings')).not.toHaveAttribute('aria-disabled')
     await userEvent.keyboard('{Escape}')
     await userEvent.click(trigger('Help'))
     expect(item('Help', 'About MythScribe')).not.toHaveAttribute('aria-disabled')

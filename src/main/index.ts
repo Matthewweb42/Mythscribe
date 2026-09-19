@@ -3,7 +3,10 @@ import icon from '../../resources/icon.png?asset'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { cloudApiUrl } from '@shared/account'
 import { ASSET_SCHEME } from '@shared/focus'
+import { AccountService } from './account/accountService'
+import { createCloudAuthClient } from './account/cloudAuthClient'
 import { AiKeyStore } from './ai/keyStore'
 import { AiProviderRegistry } from './ai/registry'
 import { AppStateStore } from './appState/appStateStore'
@@ -17,6 +20,8 @@ import { ProjectManager } from './project/manager'
 
 const isDev = !app.isPackaged
 const manager = new ProjectManager()
+/** F-15.2: built once the app is ready (it reads userData); its poll timer is dropped on quit. */
+let account: AccountService | null = null
 
 /** Lets e2e tests isolate app-wide state (recents) from the developer's own. */
 if (process.env.MYTHSCRIBE_USER_DATA) app.setPath('userData', process.env.MYTHSCRIBE_USER_DATA)
@@ -120,11 +125,22 @@ if (!primaryInstance) {
     })
     const appState = new AppStateStore(join(app.getPath('userData'), 'app-state.json'))
     const keyStore = new AiKeyStore(join(app.getPath('userData'), 'ai-keys.json'), safeStorage)
+    // F-15.2: the account is constructed here, not in the handlers, because it pushes
+    // `account:changed` by itself when a sign-in link is opened or its attempt expires.
+    account = new AccountService({
+      client: createCloudAuthClient({
+        baseUrl: cloudApiUrl(process.env),
+        fetch: (input, init) => globalThis.fetch(input, init)
+      }),
+      keyStore,
+      onChange: (status) => emit(BrowserWindow.getAllWindows(), 'account:changed', status)
+    })
     registerHandlers({
       manager,
       appState,
       keyStore,
       ai: new AiProviderRegistry(keyStore, () => appState.get().models),
+      account,
       dialogs: createDialogs(
         () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
       ),
@@ -152,7 +168,10 @@ app.on('before-quit', () => {
 })
 
 /** `will-quit`, not `before-quit`: the renderer must flush before the DB closes. */
-app.on('will-quit', () => manager.close())
+app.on('will-quit', () => {
+  account?.dispose()
+  manager.close()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' || quitRequested) app.quit()

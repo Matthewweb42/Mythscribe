@@ -3,6 +3,7 @@ import { FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, levelLabel, sectionLabel, type HierarchyLevel } from '@shared/labels'
 import { LAYOUT_LIMITS } from '@shared/layout'
+import { useAccountStore } from '@renderer/features/account/accountStore'
 import { AboutDialog } from '@renderer/features/shell/AboutDialog'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -83,10 +84,16 @@ export function App(): React.JSX.Element {
     const offMenu = ipc().on('menu:action', ({ id }) => {
       void runMenuAction(id)
     })
+    // F-15.2: the MythScribe account is app-wide, not per project, and main pushes the status
+    // when a pending sign-in link is opened or expires, so the subscription is opened once here
+    // rather than by the Settings tab, which is only mounted while the dialog is open.
+    const offAccount = useAccountStore.getState().subscribe()
+    void useAccountStore.getState().load()
     return () => {
       offClose()
       offFocus()
       offMenu()
+      offAccount()
     }
   }, [])
 
@@ -196,19 +203,21 @@ export function App(): React.JSX.Element {
               {formatLabel(current.format)}
             </span>
           ) : null}
-          {current ? (
-            <div className="ml-auto flex items-center gap-2">
-              <AiActivityIndicator />
-              <IndexingIndicator />
-              <AssistantToggleButton />
-              <SettingsButton />
-              <CloseProjectButton />
-            </div>
-          ) : null}
+          <div className="ml-auto flex items-center gap-2">
+            {current ? (
+              <>
+                <AiActivityIndicator />
+                <IndexingIndicator />
+                <AssistantToggleButton />
+              </>
+            ) : null}
+            <SettingsButton />
+            {current ? <CloseProjectButton /> : null}
+          </div>
         </header>
       )}
       {current ? <FocusShortcuts /> : null}
-      {current ? <SettingsShortcut /> : null}
+      <SettingsShortcut />
       {current ? <InsertShortcuts format={current.format} /> : null}
       <main
         className={
@@ -230,8 +239,8 @@ export function App(): React.JSX.Element {
 }
 
 /**
- * The app-level dialogs (F-7.1): Settings (F-7.5, a project's settings, so only with one open),
- * the shortcuts reference (F-7.7), and About, one at a time from the shell dialog store, which
+ * The app-level dialogs (F-7.1): Settings (F-7.5; without a project only its app-wide tabs,
+ * F-15.2), the shortcuts reference (F-7.7), and About, one at a time from the shell dialog store, which
  * the header button, Ctrl+, the in-app bar, and the native menu all open through.
  */
 function ShellDialogs({ format }: { format: NovelFormat | null }): React.JSX.Element | null {
@@ -239,7 +248,7 @@ function ShellDialogs({ format }: { format: NovelFormat | null }): React.JSX.Ele
   const close = useShellDialogStore((s) => s.close)
   switch (open) {
     case 'settings':
-      return format ? <SettingsDialog format={format} onClose={close} /> : null
+      return <SettingsDialog format={format} onClose={close} />
     case 'shortcuts':
       return <ShortcutsDialog onClose={close} />
     case 'about':
@@ -421,9 +430,9 @@ function FocusShortcuts(): null {
 }
 
 /**
- * Ctrl+, (Cmd+, on macOS) opens the Settings dialog (F-7.5). Settings are per project, so the
- * listener is mounted only while one is open; it sits beside `FocusShortcuts`, outside the
- * header, so it works in focus mode too (F-7.1). Renders nothing.
+ * Ctrl+, (Cmd+, on macOS) opens the Settings dialog (F-7.5), on the welcome screen too (F-15.2:
+ * the Account tab is app-wide); it sits beside `FocusShortcuts`, outside the header, so it works
+ * in focus mode too (F-7.1). Renders nothing.
  */
 function SettingsShortcut(): null {
   useEffect(() => {
