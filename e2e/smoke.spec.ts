@@ -1091,6 +1091,28 @@ test('create, close, reopen a project on disk', async () => {
   await tagSearch.press('Enter')
   await expect(tagBar.getByRole('listitem')).toHaveText(['dark-forest'])
   await expect(tagSearch).toHaveCount(0)
+
+  // F-4.10: the tag's detail view lists the documents carrying it (Scene 1, under Chapter 1) and
+  // "Show in tree" hands the Manuscript tab the same filter: the select shows dark-forest, the
+  // count line reads one, and only Scene 1 and its ancestors remain in the tree. Clear filter
+  // brings the whole tree back. (The Tags tab remounts on its list view when it is next shown.)
+  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await tagRows.getByRole('button', { name: /^dark-forest/ }).click()
+  const taggedDocuments = tagsPanel.getByRole('list', { name: 'Documents with this tag' })
+  await expect(taggedDocuments.getByRole('button')).toHaveText(['Scene 1Chapter 1'])
+  await tagsPanel.getByRole('button', { name: 'Show in tree' }).click()
+  await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
+  const tagFilter = page.getByRole('combobox', { name: 'Filter by tag' })
+  await expect(tagFilter.locator('option:checked')).toHaveText('dark-forest')
+  await expect(page.getByText('1 document carries #dark-forest')).toBeVisible()
+  await expect(tree.getByRole('treeitem', { name: 'Scene 1', exact: true })).toBeVisible()
+  await expect(tree.getByRole('treeitem', { name: 'Opening', exact: true })).toHaveCount(0)
+  await expect(tree.getByRole('treeitem', { name: 'Arc 2', exact: true })).toHaveCount(0)
+  await expect(tree.getByRole('treeitem', { name: 'Front Matter', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Clear filter' }).click()
+  await expect(tagFilter.locator('option:checked')).toHaveText('All documents')
+  await expect(tree.getByRole('treeitem', { name: 'Arc 2', exact: true })).toBeVisible()
+  await expect(tree.getByRole('treeitem', { name: 'Front Matter', exact: true })).toBeVisible()
   await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
   await expect(tagRows.getByRole('button', { name: /^dark-forest/ })).toHaveText(
     'dark-forest 1 use'

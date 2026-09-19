@@ -111,3 +111,19 @@ export function listAllDocumentTags(db: TagDb): Map<string, string[]> {
   }
   return byNode
 }
+
+/**
+ * Every node ↔ tag link in the project as id pairs (F-4.10), ordered by node id then tag name.
+ * The tree filter and the Tag Manager's document list both need the whole map at once, and the
+ * renderer already owns the tag records, so this returns ids only. Like `listAllDocumentTags`
+ * it reads across the project and checks no target; the inner join drops a link whose tag is
+ * gone.
+ */
+export function listAllDocumentTagLinks(db: TagDb): { nodeId: string; tagId: string }[] {
+  return db
+    .select({ nodeId: documentTag.nodeId, tagId: documentTag.tagId })
+    .from(documentTag)
+    .innerJoin(tag, eq(tag.id, documentTag.tagId))
+    .orderBy(asc(documentTag.nodeId), asc(tag.name), asc(tag.id))
+    .all()
+}

@@ -78,7 +78,12 @@ import {
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import { EXTERNAL_HOST, isAllowedExternalUrl, type EditRole } from '@shared/menu'
 import { normalizeProposalNote } from '@shared/proposal'
-import { addDocumentTag, listDocumentTags, removeDocumentTag } from '../tag/documentTagStore'
+import {
+  addDocumentTag,
+  listAllDocumentTagLinks,
+  listDocumentTags,
+  removeDocumentTag
+} from '../tag/documentTagStore'
 import { createTag, deleteTag, listTags, loadTagTemplate, updateTag } from '../tag/tagStore'
 import {
   createNode,
@@ -367,6 +372,8 @@ export function registerHandlers({
   register('documentTag:remove', ({ nodeId, tagId }) =>
     removeDocumentTag(manager.require().connection.orm, nodeId, tagId)
   )
+
+  register('documentTag:listAll', () => listAllDocumentTagLinks(manager.require().connection.orm))
 
   // A hand-edited app-state file may squeeze the editor; reading normalizes, writing refuses.
   register('layout:get', () => normalizeLayout(appState.get().layout))

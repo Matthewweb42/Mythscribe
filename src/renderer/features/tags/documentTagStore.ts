@@ -14,6 +14,12 @@ interface DocumentTagState {
   tagIdsByNode: Record<string, string[] | undefined>
   /** Loads a document's links; a response from a superseded load of the same node is dropped. */
   load: (nodeId: string) => Promise<void>
+  /**
+   * Loads every link in the project in one request (F-4.10), so the tree filter and the Tag
+   * Manager's document list read the same map the chips do. A node that was loaded before and
+   * has no link left comes back empty, never stale.
+   */
+  loadAll: () => Promise<void>
   /** Links a tag to a document and moves its usage count in the bank. */
   add: (nodeId: string, tagId: string) => Promise<void>
   /** Unlinks a tag from a document and moves its usage count in the bank. */
@@ -39,6 +45,16 @@ export const useDocumentTagStore = create<DocumentTagState>((set, get) => ({
     const bank = useTagStore.getState()
     for (const tag of tags) bank.merge(tag)
     set({ tagIdsByNode: { ...get().tagIdsByNode, [nodeId]: tags.map((tag) => tag.id) } })
+  },
+
+  async loadAll() {
+    const before = generation
+    const links = await ipc().invoke('documentTag:listAll', undefined)
+    if (before !== generation) return
+    const next: Record<string, string[] | undefined> = {}
+    for (const nodeId of Object.keys(get().tagIdsByNode)) next[nodeId] = []
+    for (const link of links) (next[link.nodeId] ??= []).push(link.tagId)
+    set({ tagIdsByNode: next })
   },
 
   async add(nodeId, tagId) {

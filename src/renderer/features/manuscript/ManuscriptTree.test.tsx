@@ -14,6 +14,12 @@ import { MatterTemplateId, matterTemplate } from '@shared/matterTemplates'
 import { countWords } from '@shared/wordCount'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import {
+  resetDocumentTagStore,
+  useDocumentTagStore
+} from '@renderer/features/tags/documentTagStore'
+import { tagFixture } from '@renderer/features/tags/tagFixture'
+import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { CreateNodeBar } from './CreateNodeBar'
 import { ManuscriptTree } from './ManuscriptTree'
@@ -178,9 +184,21 @@ const treeNames = (): (string | null)[] =>
 
 beforeEach(() => {
   useTreeStore.getState().clear()
+  resetTagStore()
+  resetDocumentTagStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
 })
+
+/** Puts dark-forest in the bank, links it to `nodeIds`, and filters the tree by it (F-4.10). */
+function filterBy(...nodeIds: string[]): void {
+  const forest = tagFixture[0]!
+  useTagStore.setState({ byId: { [forest.id]: forest }, ids: [forest.id] })
+  useDocumentTagStore.setState({
+    tagIdsByNode: Object.fromEntries(nodeIds.map((id) => [id, [forest.id]]))
+  })
+  useTreeStore.setState({ tagFilter: forest.id })
+}
 
 describe('ManuscriptTree', () => {
   it('shows a folder glyph for generic folders and a file glyph for generic documents', () => {
@@ -1002,6 +1020,68 @@ describe('ManuscriptTree', () => {
       )
       expect(treeNames()).toEqual(before)
       expect(indicator('Chapter 1')).toBeNull()
+    })
+  })
+  describe('tag filter (F-4.10)', () => {
+    it('shows only the matches and their ancestors, fully expanded', () => {
+      filterBy('sc-2')
+      useTreeStore.setState({ collapsed: { 'arc-1': true, manuscript: true } })
+      render(<ManuscriptTree format="webnovel" />)
+      expect(treeNames()).toEqual(['Volume 1', 'Arc 1', 'Chapter 2', 'Scene 2'])
+      expect(item('Arc 1')).toHaveAttribute('aria-expanded', 'true')
+      // The chevron is static while filtering: nothing can collapse a match out of sight.
+      expect(screen.queryByRole('button', { name: /^(Collapse|Expand) / })).not.toBeInTheDocument()
+    })
+
+    it('mutes the ancestors, marks the match with the tag color, and counts folders as matches', () => {
+      filterBy('sc-2', 'ch-4')
+      render(<ManuscriptTree format="webnovel" />)
+      expect(treeNames()).toEqual([
+        'Volume 1',
+        'Arc 1',
+        'Chapter 2',
+        'Scene 2',
+        'Arc 2',
+        'Chapter 4'
+      ])
+      expect(row('Arc 1')).toHaveClass('text-fg-muted')
+      expect(row('Scene 2')).not.toHaveClass('text-fg-muted')
+      const dot = row('Scene 2').querySelector('span.rounded-full')
+      expect(dot).toHaveStyle({ backgroundColor: tagFixture[0]!.color })
+      expect(row('Chapter 4').querySelector('span.rounded-full')).not.toBeNull()
+      expect(row('Arc 1').querySelector('span.rounded-full')).toBeNull()
+    })
+
+    it('the arrow keys walk the filtered rows and never toggle a folder', async () => {
+      filterBy('sc-2')
+      render(<ManuscriptTree format="webnovel" />)
+      item('Arc 1').focus()
+      await userEvent.keyboard('{ArrowDown}')
+      expect(item('Chapter 2')).toHaveFocus()
+      await userEvent.keyboard('{ArrowLeft}')
+      expect(item('Arc 1')).toHaveFocus()
+      expect(item('Arc 1')).toHaveAttribute('aria-expanded', 'true')
+      await userEvent.keyboard('{ArrowRight}')
+      expect(item('Chapter 2')).toHaveFocus()
+      expect(useTreeStore.getState().collapsed).toEqual({})
+      // Enter on a section selects nothing and leaves it open, so no row can vanish.
+      item('Volume 1').focus()
+      await userEvent.keyboard('{Enter}')
+      expect(item('Volume 1')).toHaveAttribute('aria-expanded', 'true')
+      expect(useTreeStore.getState().collapsed).toEqual({})
+    })
+
+    it('a tag that left the bank reads as no filter, and clearing restores every row', () => {
+      filterBy('sc-2')
+      const { rerender } = render(<ManuscriptTree format="webnovel" />)
+      expect(treeNames()).toHaveLength(4)
+      act(() => useTreeStore.getState().setTagFilter(null))
+      expect(treeNames()).toHaveLength(18)
+      act(() => {
+        useTreeStore.getState().setTagFilter('t-gone')
+      })
+      rerender(<ManuscriptTree format="webnovel" />)
+      expect(treeNames()).toHaveLength(18)
     })
   })
 })

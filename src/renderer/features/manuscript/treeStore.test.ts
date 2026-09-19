@@ -596,6 +596,7 @@ describe('treeStore', () => {
       selectedId: 'sc-1',
       collapsed: { front: true },
       sessionBaseline: { 'sc-1': 5 },
+      tagFilter: 't-forest',
       loaded: true,
       renamingId: 'sc-1',
       busy: true
@@ -610,10 +611,24 @@ describe('treeStore', () => {
       sessionBaseline: {},
       selectedId: null,
       collapsed: {},
+      tagFilter: null,
       loaded: false,
       renamingId: null,
       busy: false
     })
+  })
+
+  it('setTagFilter picks a tag and null clears it; load resets it (F-4.10)', async () => {
+    const { client } = fakeClient()
+    setIpcClient(client)
+    expect(useTreeStore.getState().tagFilter).toBeNull()
+    useTreeStore.getState().setTagFilter('t-forest')
+    expect(useTreeStore.getState().tagFilter).toBe('t-forest')
+    useTreeStore.getState().setTagFilter(null)
+    expect(useTreeStore.getState().tagFilter).toBeNull()
+    useTreeStore.getState().setTagFilter('t-mara')
+    await useTreeStore.getState().load()
+    expect(useTreeStore.getState().tagFilter).toBeNull()
   })
 
   it('startRename accepts documents and folders but not sections; endRename clears it', () => {

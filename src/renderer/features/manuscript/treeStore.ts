@@ -23,6 +23,12 @@ interface TreeState extends TreeIndex {
   sessionBaseline: Record<string, number>
   selectedId: string | null
   collapsed: Record<string, boolean>
+  /**
+   * The tag the tree is filtered by (F-4.10), or null for the whole tree. Tree view state like
+   * `collapsed`: the Manuscript tab's filter bar and the Tag Manager's "Show in tree" both write
+   * it. A filter whose tag has since left the bank reads as no filter.
+   */
+  tagFilter: string | null
   loaded: boolean
   /** The node whose title is being edited inline (F-2.2), if any. */
   renamingId: string | null
@@ -34,6 +40,8 @@ interface TreeState extends TreeIndex {
   /** Collapses or expands a folder or section. Documents are ignored. */
   toggle: (id: string) => void
   clear: () => void
+  /** Filters the tree by a tag, or clears the filter with null (F-4.10). */
+  setTagFilter: (tagId: string | null) => void
   startRename: (id: string) => void
   endRename: () => void
   /**
@@ -302,6 +310,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
   sessionBaseline: {},
   selectedId: null,
   collapsed: {},
+  tagFilter: null,
   loaded: false,
   renamingId: null,
   busy: false,
@@ -316,6 +325,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       sessionBaseline: { ...index.wordCountRollup },
       selectedId: null,
       collapsed: {},
+      tagFilter: null,
       renamingId: null,
       loaded: true
     })
@@ -341,10 +351,15 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       sessionBaseline: {},
       selectedId: null,
       collapsed: {},
+      tagFilter: null,
       loaded: false,
       renamingId: null,
       busy: false
     })
+  },
+
+  setTagFilter(tagId) {
+    set({ tagFilter: tagId })
   },
 
   startRename(id) {

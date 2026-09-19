@@ -5,8 +5,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { listNodes } from '../tree/treeStore'
-import { addDocumentTag, listDocumentTags, removeDocumentTag } from './documentTagStore'
-import { createTag, getTagWithUsage, listTags, type TagDb } from './tagStore'
+import {
+  addDocumentTag,
+  listAllDocumentTagLinks,
+  listDocumentTags,
+  removeDocumentTag
+} from './documentTagStore'
+import { createTag, deleteTag, getTagWithUsage, listTags, type TagDb } from './tagStore'
 
 let tmp: string
 let session: ProjectSession
@@ -120,5 +125,38 @@ describe('removeDocumentTag', () => {
     expectCode(() => removeDocumentTag(db, 'missing', rain.id), 'NOT_FOUND')
     expectCode(() => removeDocumentTag(db, nodeOfKind('section'), rain.id), 'VALIDATION')
     expectCode(() => removeDocumentTag(db, nodeOfKind('document'), 'missing'), 'NOT_FOUND')
+  })
+})
+
+describe('listAllDocumentTagLinks (F-4.10)', () => {
+  it('is empty for a project with no links', () => {
+    createTag(db, { name: 'Rain', category: 'tone' })
+    expect(listAllDocumentTagLinks(db)).toEqual([])
+  })
+
+  it('lists every link across nodes, ordered by node id then tag name', () => {
+    const first = nodeOfKind('document', 0)
+    const second = nodeOfKind('document', 1)
+    const rain = createTag(db, { name: 'Rain', category: 'tone' })
+    const forest = createTag(db, { name: 'Dark Forest', category: 'setting' })
+    addDocumentTag(db, second, rain.id)
+    addDocumentTag(db, first, rain.id)
+    addDocumentTag(db, first, forest.id)
+    // Node ids are uuids, so the expected node order is whatever sqlite's text order gives.
+    const expected = [
+      { nodeId: first, tagId: forest.id },
+      { nodeId: first, tagId: rain.id },
+      { nodeId: second, tagId: rain.id }
+    ].sort((a, b) => (a.nodeId < b.nodeId ? -1 : a.nodeId > b.nodeId ? 1 : 0))
+    expect(listAllDocumentTagLinks(db)).toEqual(expected)
+  })
+
+  it('drops the links of a deleted tag', () => {
+    const scene = nodeOfKind('document')
+    const rain = createTag(db, { name: 'Rain', category: 'tone' })
+    addDocumentTag(db, scene, rain.id)
+    expect(listAllDocumentTagLinks(db)).toEqual([{ nodeId: scene, tagId: rain.id }])
+    deleteTag(db, rain.id)
+    expect(listAllDocumentTagLinks(db)).toEqual([])
   })
 })

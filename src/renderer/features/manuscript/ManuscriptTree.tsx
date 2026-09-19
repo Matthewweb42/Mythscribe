@@ -12,28 +12,47 @@ import {
 import type { NovelFormat, TreeNode } from '@shared/ipc/contract'
 import { HierarchyLevel, sectionLabel, type SectionType } from '@shared/labels'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
 import { ContextMenu } from './ContextMenu'
 import { templateIdOf, treeContextMenuItems } from './contextMenuItems'
 import { resolveDropTarget, type DropZone } from './placement'
+import { tagFilterView } from './tagFilter'
 import { useTreeStore, type TreeIndex } from './treeStore'
+
+/** What the tree renders under an active tag filter (F-4.10). */
+interface TreeFilter {
+  /** The matches and their ancestors: the only rows drawn. */
+  visible: Set<string>
+  /** The nodes carrying the tag; the others are context and are drawn muted. */
+  matches: Set<string>
+  /** The tag's color, for the dot on a matching row. */
+  color: string
+}
 
 interface VisibleRow {
   id: string
   depth: number
 }
 
-/** Depth-first list of the rows currently on screen, in display order (collapsed subtrees skipped). */
+/**
+ * Depth-first list of the rows currently on screen, in display order (collapsed subtrees
+ * skipped). Under a tag filter (F-4.10) only the rows in `visible` are listed and `collapsed` is
+ * ignored, so every match is on screen.
+ */
 function listVisibleRows(
   rootIds: string[],
   childrenOf: Record<string, string[]>,
-  collapsed: Record<string, boolean>
+  collapsed: Record<string, boolean>,
+  visible?: Set<string>
 ): VisibleRow[] {
   const rows: VisibleRow[] = []
   const walk = (ids: string[], depth: number): void => {
     for (const id of ids) {
+      if (visible && !visible.has(id)) continue
       rows.push({ id, depth })
-      if (!collapsed[id]) walk(childrenOf[id] ?? [], depth + 1)
+      if (visible || !collapsed[id]) walk(childrenOf[id] ?? [], depth + 1)
     }
   }
   walk(rootIds, 1)
@@ -182,6 +201,8 @@ interface TreeItemProps {
   /** The row currently hovered by a drag, if any; the matching row draws the indicator. */
   over: DragOver | null
   drag: DragHandlers
+  /** The active tag filter (F-4.10), or null when the whole tree is shown. */
+  filter: TreeFilter | null
 }
 
 function TreeItem({
@@ -192,7 +213,8 @@ function TreeItem({
   register,
   onContextMenu,
   over,
-  drag
+  drag,
+  filter
 }: TreeItemProps): React.JSX.Element | null {
   const node = useTreeStore((s) => s.byId[id])
   const childIds = useTreeStore((s) => s.childrenOf[id])
@@ -208,10 +230,13 @@ function TreeItem({
 
   const isSection = node.sectionType !== null
   const isFolder = node.kind === 'folder'
-  const expanded = isFolder && !collapsed
+  // Under a filter every visible folder is open, so a match is never hidden behind a chevron.
+  const expanded = isFolder && (filter !== null || !collapsed)
   const label = node.sectionType ? sectionLabel(format, node.sectionType) : node.title
   const isMatter = node.kind === 'document' && section !== 'manuscript'
   const zone = over?.id === id ? over.zone : null
+  const matched = filter?.matches.has(id) === true
+  const visibleChildIds = filter ? childIds?.filter((childId) => filter.visible.has(childId)) : childIds
 
   return (
     <li
@@ -227,7 +252,11 @@ function TreeItem({
       className="m-0 list-none p-0 outline-none"
     >
       <div
-        onClick={() => (isSection ? toggle(id) : select(id))}
+        onClick={() => {
+          if (!isSection) select(id)
+          // A filtered tree is fully expanded, so a section click would only write dead state.
+          else if (filter === null) toggle(id)
+        }}
         onContextMenu={(event) => {
           event.preventDefault()
           event.stopPropagation()
@@ -243,10 +272,17 @@ function TreeItem({
         className={`relative flex h-7 cursor-default items-center gap-1 rounded-md pr-2 text-sm select-none ${
           selected ? 'bg-accent/15 text-fg' : 'hover:bg-surface-raised'
         } ${isSection ? 'font-medium tracking-wide uppercase text-xs text-fg-muted' : ''} ${
-          zone === 'into' ? 'ring-2 ring-accent ring-inset' : ''
-        }`}
+          filter !== null && !matched ? 'text-fg-muted' : ''
+        } ${zone === 'into' ? 'ring-2 ring-accent ring-inset' : ''}`}
       >
-        {isFolder ? (
+        {isFolder && filter !== null ? (
+          <span
+            aria-hidden="true"
+            className="flex h-4 w-4 shrink-0 items-center justify-center text-fg-subtle"
+          >
+            <ChevronDown size={14} />
+          </span>
+        ) : isFolder ? (
           <button
             type="button"
             tabIndex={-1}
@@ -272,7 +308,17 @@ function TreeItem({
         ) : (
           <span className="min-w-0 flex-1 truncate">{label}</span>
         )}
-        <span aria-hidden="true" className="ml-auto text-xs text-fg-subtle tabular-nums">
+        {matched && filter ? (
+          <span
+            aria-hidden="true"
+            style={{ backgroundColor: filter.color }}
+            className="ml-auto size-2 shrink-0 rounded-full"
+          />
+        ) : null}
+        <span
+          aria-hidden="true"
+          className={`text-xs text-fg-subtle tabular-nums ${matched ? '' : 'ml-auto'}`}
+        >
           {wordCount.toLocaleString()}
         </span>
         {zone === 'before' || zone === 'after' ? (
@@ -285,9 +331,9 @@ function TreeItem({
           />
         ) : null}
       </div>
-      {isFolder && expanded && childIds && childIds.length > 0 ? (
+      {isFolder && expanded && visibleChildIds && visibleChildIds.length > 0 ? (
         <ul role="group" className="m-0 list-none p-0">
-          {childIds.map((childId) => (
+          {visibleChildIds.map((childId) => (
             <TreeItem
               key={childId}
               id={childId}
@@ -298,6 +344,7 @@ function TreeItem({
               onContextMenu={onContextMenu}
               over={over}
               drag={drag}
+              filter={filter}
             />
           ))}
         </ul>
@@ -359,13 +406,26 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
   const wordCountRollup = useTreeStore((s) => s.wordCountRollup)
   const select = useTreeStore((s) => s.select)
   const toggle = useTreeStore((s) => s.toggle)
+  const tagFilterId = useTreeStore((s) => s.tagFilter)
+  // A tag deleted while its filter was on reads as no filter, so the tree never blanks out.
+  const filterTag = useTagStore((s) => (tagFilterId === null ? undefined : s.byId[tagFilterId]))
+  const tagIdsByNode = useDocumentTagStore((s) => s.tagIdsByNode)
   const items = useRef(new Map<string, HTMLLIElement>())
   const [menu, setMenu] = useState<MenuAnchor | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
 
+  const index: TreeIndex = useMemo(
+    () => ({ byId, childrenOf, rootIds, sectionOf, wordCountRollup }),
+    [byId, childrenOf, rootIds, sectionOf, wordCountRollup]
+  )
+  const filter = useMemo<TreeFilter | null>(() => {
+    if (!filterTag) return null
+    const view = tagFilterView(index, tagIdsByNode, filterTag.id)
+    return { visible: view.visible, matches: new Set(view.matches), color: filterTag.color }
+  }, [index, tagIdsByNode, filterTag])
   const rows = useMemo(
-    () => listVisibleRows(rootIds, childrenOf, collapsed),
-    [rootIds, childrenOf, collapsed]
+    () => listVisibleRows(rootIds, childrenOf, collapsed, filter?.visible),
+    [rootIds, childrenOf, collapsed, filter]
   )
   const selectedVisible = selectedId !== null && rows.some((row) => row.id === selectedId)
   const activeId = selectedVisible ? selectedId : (rows[0]?.id ?? null)
@@ -392,10 +452,6 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
     runMenuItem(itemId, nodeId).catch((err: unknown) => toast.error(describeError(err)))
   }
 
-  const index: TreeIndex = useMemo(
-    () => ({ byId, childrenOf, rootIds, sectionOf, wordCountRollup }),
-    [byId, childrenOf, rootIds, sectionOf, wordCountRollup]
-  )
   const menuItems = useMemo(
     () => (menu ? treeContextMenuItems(index, menu.id, format) : []),
     [index, menu, format]
@@ -464,7 +520,11 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
     const node = byId[id]
     if (index < 0 || !node) return
     const isFolder = node.kind === 'folder'
-    const expanded = isFolder && !collapsed[id]
+    // Under a filter every folder on screen is open and cannot be toggled (F-4.10).
+    const expanded = isFolder && (filter !== null || !collapsed[id])
+    const childIds = filter
+      ? (childrenOf[id] ?? []).filter((childId) => filter.visible.has(childId))
+      : (childrenOf[id] ?? [])
     let target: string | null = null
     switch (event.key) {
       case 'ArrowDown':
@@ -475,17 +535,17 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
         break
       case 'ArrowRight':
         if (!isFolder) return
-        if (expanded) target = childrenOf[id]?.[0] ?? null
+        if (expanded) target = childIds[0] ?? null
         else toggle(id)
         break
       case 'ArrowLeft':
-        if (expanded) toggle(id)
+        if (expanded && filter === null) toggle(id)
         else target = node.parentId
         break
       case 'Enter':
       case ' ':
-        if (node.sectionType !== null) toggle(id)
-        else select(id)
+        if (node.sectionType === null) select(id)
+        else if (filter === null) toggle(id)
         break
       default:
         return
@@ -508,7 +568,7 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
         onDragLeave={onTreeDragLeave}
         className="m-0 list-none p-1"
       >
-        {rootIds.map((id) => (
+        {(filter ? rootIds.filter((id) => filter.visible.has(id)) : rootIds).map((id) => (
           <TreeItem
             key={id}
             id={id}
@@ -519,6 +579,7 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
             onContextMenu={setMenu}
             over={drag?.over ?? null}
             drag={dragHandlers}
+            filter={filter}
           />
         ))}
       </ul>

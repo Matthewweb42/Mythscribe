@@ -2078,6 +2078,29 @@ describe('documentTag handlers (F-4.4)', () => {
     await expect(invoke('documentTag:remove', { nodeId: 'x', tagId: 'y' })).rejects.toThrowError(
       /^NO_PROJECT: /
     )
+    await expect(invoke('documentTag:listAll', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('lists every link in the project in one read (F-4.10)', async () => {
+    await invoke('project:create', { name: 'Tags', format: 'novel', directory: tmp })
+    const { scene, folder } = await seeded()
+    expect(await invoke('documentTag:listAll', undefined)).toEqual([])
+    const rain = await invoke('tag:create', { name: 'Rain', category: 'tone' })
+    const forest = await invoke('tag:create', { name: 'Dark Forest', category: 'setting' })
+    await invoke('documentTag:add', { nodeId: scene, tagId: rain.id })
+    await invoke('documentTag:add', { nodeId: scene, tagId: forest.id })
+    await invoke('documentTag:add', { nodeId: folder, tagId: rain.id })
+    const links = await invoke('documentTag:listAll', undefined)
+    expect(links).toHaveLength(3)
+    expect(links.filter((link) => link.nodeId === scene)).toEqual([
+      { nodeId: scene, tagId: forest.id },
+      { nodeId: scene, tagId: rain.id }
+    ])
+    expect(links.filter((link) => link.nodeId === folder)).toEqual([
+      { nodeId: folder, tagId: rain.id }
+    ])
+    await invoke('documentTag:remove', { nodeId: scene, tagId: rain.id })
+    expect(await invoke('documentTag:listAll', undefined)).toHaveLength(2)
   })
 
   it('links and unlinks a tag, moving the usage count tag:list reports, idempotently', async () => {

@@ -1,10 +1,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
 import { toTagName } from '@shared/tags'
+import { treeFixture } from '@renderer/features/manuscript/treeFixture'
+import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetDocumentTagStore, useDocumentTagStore } from './documentTagStore'
 import { tagFixture } from './tagFixture'
 import { resetTagStore, useTagStore } from './tagStore'
 import { TagsTab } from './TagsTab'
@@ -48,6 +52,8 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
         return tag as Output<C>
       }
       if (channel === 'tag:delete') return null as Output<C>
+      if (channel === 'documentTag:listAll') return [] as Output<C>
+      if (channel === 'layout:set') return input as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -91,6 +97,8 @@ async function renderLoaded(
 describe('TagsTab (F-4.2)', () => {
   beforeEach(() => {
     resetTagStore()
+    resetDocumentTagStore()
+    useTreeStore.getState().clear()
     useDialogStore.setState({ modals: [], toasts: [] })
   })
 
@@ -396,5 +404,90 @@ describe('TagsTab (F-4.2)', () => {
     expect(screen.getByText('Used in 3 documents')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Delete tag' })).toBeEnabled()
     expect(useTagStore.getState().ids).toEqual(['t-forest', 't-mara', 't-moody'])
+  })
+})
+
+describe('TagDetail documents (F-4.10)', () => {
+  /** Seeds the tree with the fixture, as the app does on project open. */
+  function seedTree(): void {
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+  }
+  const documents = (): HTMLElement =>
+    screen.getByRole('list', { name: 'Documents with this tag' })
+
+  beforeEach(() => {
+    resetTagStore()
+    resetDocumentTagStore()
+    useTreeStore.getState().clear()
+    useDialogStore.setState({ modals: [], toasts: [] })
+    resetLayoutStore()
+  })
+
+  afterEach(() => {
+    resetLayoutStore()
+  })
+
+  /** Puts the sidebar on the Tags tab without a scheduled write. */
+  function onTagsTab(): void {
+    const { layout } = useLayoutStore.getState()
+    useLayoutStore.setState({ layout: { ...layout, sidebar: { ...layout.sidebar, tab: 'tags' } } })
+  }
+
+  it('opening a detail loads every link and lists the carrying documents in tree order', async () => {
+    const user = userEvent.setup()
+    seedTree()
+    onTagsTab()
+    const calls = await renderLoaded({
+      'documentTag:listAll': () => [
+        { nodeId: 'ch-4', tagId: 't-forest' },
+        { nodeId: 'sc-2', tagId: 't-forest' },
+        { nodeId: 'sc-2', tagId: 't-mara' },
+        { nodeId: 'title-page', tagId: 't-forest' },
+        { nodeId: 'gone', tagId: 't-forest' }
+      ]
+    })
+    await user.click(row('dark-forest'))
+    expect(calls.filter(([channel]) => channel === 'documentTag:listAll')).toHaveLength(1)
+    await waitFor(() => expect(documents()).toBeInTheDocument())
+    expect(within(documents()).getAllByRole('button').map((b) => b.textContent)).toEqual([
+      'Title Page',
+      'Scene 2Chapter 2',
+      'Chapter 4Arc 2'
+    ])
+    await user.click(within(documents()).getByRole('button', { name: /^Scene 2/ }))
+    expect(useTreeStore.getState().selectedId).toBe('sc-2')
+    expect(useLayoutStore.getState().layout.sidebar.tab).toBe('tags')
+  })
+
+  it('shows the empty state for a tag no document carries', async () => {
+    const user = userEvent.setup()
+    seedTree()
+    await renderLoaded()
+    await user.click(row('moody'))
+    await waitFor(() =>
+      expect(screen.getByText('No documents carry this tag.')).toBeInTheDocument()
+    )
+    expect(screen.queryByRole('list', { name: 'Documents with this tag' })).not.toBeInTheDocument()
+  })
+
+  it('Show in tree sets the tree filter and switches to the Manuscript tab', async () => {
+    const user = userEvent.setup()
+    seedTree()
+    onTagsTab()
+    await renderLoaded()
+    await user.click(row('mara'))
+    await user.click(screen.getByRole('button', { name: 'Show in tree' }))
+    expect(useTreeStore.getState().tagFilter).toBe('t-mara')
+    expect(useLayoutStore.getState().layout.sidebar.tab).toBe('manuscript')
+  })
+
+  it('a failed link load toasts and leaves the detail view open', async () => {
+    const user = userEvent.setup()
+    seedTree()
+    await renderLoaded({ 'documentTag:listAll': failing('Database is locked') })
+    await user.click(row('mara'))
+    await waitFor(() => expect(toasts()).toEqual(['Database is locked']))
+    expect(screen.getByRole('textbox', { name: 'Tag name' })).toHaveValue('mara')
+    expect(useDocumentTagStore.getState().tagIdsByNode).toEqual({})
   })
 })

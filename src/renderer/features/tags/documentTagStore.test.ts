@@ -113,6 +113,46 @@ describe('documentTagStore (F-4.4)', () => {
     expect(bank().byId['t-forest']?.usageCount).toBe(3)
   })
 
+  it('loadAll groups every link per node and blanks the nodes that lost theirs (F-4.10)', async () => {
+    const { client, calls } = fakeClient({
+      'documentTag:list': () => [forest],
+      'documentTag:listAll': () => [
+        { nodeId: 'sc-1', tagId: 't-forest' },
+        { nodeId: 'sc-1', tagId: 't-mara' },
+        { nodeId: 'ch-2', tagId: 't-moody' }
+      ]
+    })
+    setIpcClient(client)
+    await bank().load()
+    await state().load('sc-2') // loaded once, no link left: it must come back empty, not stale
+    useDocumentTagStore.setState({ tagIdsByNode: { ...state().tagIdsByNode, 'sc-2': ['t-moody'] } })
+    await state().loadAll()
+    expect(state().tagIdsByNode).toEqual({
+      'sc-1': ['t-forest', 't-mara'],
+      'sc-2': [],
+      'ch-2': ['t-moody']
+    })
+    expect(calls.at(-1)).toEqual(['documentTag:listAll', undefined])
+  })
+
+  it('loadAll after a clear is dropped', async () => {
+    let release: (links: { nodeId: string; tagId: string }[]) => void = () => {}
+    setIpcClient(
+      fakeClient({
+        'documentTag:listAll': () =>
+          new Promise<{ nodeId: string; tagId: string }[]>((resolve) => {
+            release = resolve
+          })
+      }).client
+    )
+    await bank().load()
+    const loading = state().loadAll()
+    state().clear()
+    release([{ nodeId: 'sc-1', tagId: 't-forest' }])
+    await loading
+    expect(state().tagIdsByNode).toEqual({})
+  })
+
   it('a superseded load of the same node is dropped; other nodes are unaffected', async () => {
     let releaseFirst: (tags: Tag[]) => void = () => {}
     let answers = 0

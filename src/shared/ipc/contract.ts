@@ -664,6 +664,15 @@ export const contract = {
     input: z.object({ nodeId: z.string(), tagId: z.string() }),
     output: Tag
   },
+  /**
+   * Every node ↔ tag link in the project (F-4.10), ordered by node id then tag name: what the
+   * tree filter and the Tag Manager's document list read in one request. A project-wide read,
+   * so it takes no node and refuses nothing but a closed project.
+   */
+  'documentTag:listAll': {
+    input: z.undefined(),
+    output: z.array(z.object({ nodeId: z.string(), tagId: z.string() }))
+  },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */

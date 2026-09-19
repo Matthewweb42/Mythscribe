@@ -1,10 +1,23 @@
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import type { Tag } from '@shared/ipc/contract'
 import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, TAG_NAME_MAX, TagCategory } from '@shared/tags'
+import { tagFilterView } from '@renderer/features/manuscript/tagFilter'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { describeError } from '@renderer/lib/errors'
+import { useDocumentTagStore } from './documentTagStore'
 import { useTagStore } from './tagStore'
+
+/** One row of the tag's document list: the node and the folder it sits in, if that is not a section. */
+interface TaggedDocument {
+  id: string
+  title: string
+  /** The parent folder's title, or null when the parent is a section root (its label is generic). */
+  parentTitle: string | null
+}
 
 const FIELD = 'min-w-0 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 /** Label above control, so a long category label never fights the sidebar's minimum width. */
@@ -29,11 +42,16 @@ interface TagDetailProps {
  * The detail view of one tag (F-4.2): the name edits inline (Enter or blur commits, Escape
  * restores), the color and category write at once, and Delete asks first because it strips the
  * tag from every document. Every write goes through the tag store and merges what main returns
- * (the name comes back kebab-cased, so the field re-syncs from the stored row).
+ * (the name comes back kebab-cased, so the field re-syncs from the stored row). The Documents
+ * section (F-4.10) lists what carries the tag in tree order, opens a row in the editor, and
+ * hands the tree the same filter through "Show in tree".
  */
 export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX.Element {
   const update = useTagStore((s) => s.update)
   const remove = useTagStore((s) => s.remove)
+  const byId = useTreeStore((s) => s.byId)
+  const index = useTreeStore(useShallow((s) => ({ rootIds: s.rootIds, childrenOf: s.childrenOf })))
+  const tagIdsByNode = useDocumentTagStore((s) => s.tagIdsByNode)
   const [busy, setBusy] = useState(false)
   /** The color as picked, shown until main confirms it; null when the field shows the stored color. */
   const [draftColor, setDraftColor] = useState<string | null>(null)
@@ -45,6 +63,37 @@ export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX
 
   const report = (err: unknown): void => {
     toast.error(describeError(err))
+  }
+
+  // The links may have been made elsewhere (the tag bar, inline tags, AI recommendations), so the
+  // whole map is refreshed whenever a tag's detail opens; the chips keep it live in between.
+  useEffect(() => {
+    useDocumentTagStore
+      .getState()
+      .loadAll()
+      .catch((err: unknown) => toast.error(describeError(err)))
+  }, [tag.id])
+
+  const documents = useMemo<TaggedDocument[]>(
+    () =>
+      tagFilterView(index, tagIdsByNode, tag.id).matches.flatMap((id) => {
+        const node = byId[id]
+        if (!node) return []
+        const parent = node.parentId === null ? undefined : byId[node.parentId]
+        return [
+          {
+            id,
+            title: node.title,
+            parentTitle: parent?.sectionType === null ? parent.title : null
+          }
+        ]
+      }),
+    [index, byId, tagIdsByNode, tag.id]
+  )
+
+  const showInTree = (): void => {
+    useTreeStore.getState().setTagFilter(tag.id)
+    useLayoutStore.getState().setSidebarTab('manuscript')
   }
 
   const commitName = async (value: string): Promise<void> => {
@@ -175,6 +224,40 @@ export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX
         <dt className="text-fg-muted">Modified</dt>
         <dd className="m-0">{formatDate(tag.modified)}</dd>
       </dl>
+      <section className="flex flex-col gap-1">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="m-0 text-xs font-normal text-fg-muted">Documents</h3>
+          <button
+            type="button"
+            onClick={showInTree}
+            className="shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg"
+          >
+            Show in tree
+          </button>
+        </div>
+        {documents.length === 0 ? (
+          <p className="m-0 text-xs text-fg-muted">No documents carry this tag.</p>
+        ) : (
+          <ul role="list" aria-label="Documents with this tag" className="m-0 list-none p-0">
+            {documents.map((document) => (
+              <li key={document.id}>
+                <button
+                  type="button"
+                  onClick={() => useTreeStore.getState().select(document.id)}
+                  className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
+                >
+                  <span className="min-w-0 flex-1 truncate">{document.title}</span>
+                  {document.parentTitle === null ? null : (
+                    <span className="shrink-0 truncate text-xs text-fg-subtle">
+                      {document.parentTitle}
+                    </span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <button
         type="button"
         disabled={busy}
