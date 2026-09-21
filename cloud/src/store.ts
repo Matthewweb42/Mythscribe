@@ -55,7 +55,7 @@ export interface CreditEventRow {
   createdAt: number
 }
 
-/** One feature's lifetime spend, as `GET /credits` reports it; `micros` is positive. */
+/** One feature's spend over one window, as `GET /credits` reports it; `micros` is positive. */
 export interface SpendByFeatureRow {
   feature: string
   micros: number
@@ -91,8 +91,13 @@ export interface Store {
    * nothing changed and the caller answers 200 anyway.
    */
   applyCreditEvent(event: CreditEventRow): Promise<'applied' | 'duplicate'>
-  /** Lifetime spend per feature, charges only, positive amounts. */
-  spendByFeature(userId: string): Promise<SpendByFeatureRow[]>
+  /**
+   * Spend per feature, charges only, positive amounts. `since` (epoch ms) bounds the window:
+   * the default 0 is lifetime, the usage meter (F-15.5) passes the start of the period.
+   */
+  spendByFeature(userId: string, since?: number): Promise<SpendByFeatureRow[]>
+  /** When the oldest charge at or after `since` was made (epoch ms); null when there is none. */
+  firstChargeAt(userId: string, since: number): Promise<number | null>
 }
 
 interface RawUser {
@@ -347,7 +352,8 @@ export function d1Store(db: D1Database): Store {
       }
     },
 
-    async spendByFeature(userId: string): Promise<SpendByFeatureRow[]> {
+    async spendByFeature(userId: string, since = 0): Promise<SpendByFeatureRow[]> {
+      // The `(user_id, created_at)` index covers both the lifetime and the windowed read.
       const result = await db
         .prepare(
           `SELECT feature,
@@ -355,11 +361,11 @@ export function d1Store(db: D1Database): Store {
                   COUNT(*) AS requests,
                   SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)) AS tokens
              FROM credit_events
-            WHERE user_id = ? AND kind = 'charge' AND feature IS NOT NULL
+            WHERE user_id = ? AND kind = 'charge' AND feature IS NOT NULL AND created_at >= ?
             GROUP BY feature
             ORDER BY micros DESC`
         )
-        .bind(userId)
+        .bind(userId, since)
         .all<RawSpend>()
       return result.results.map((row) => ({
         feature: row.feature,
@@ -367,6 +373,19 @@ export function d1Store(db: D1Database): Store {
         requests: row.requests,
         tokens: row.tokens
       }))
+    },
+
+    async firstChargeAt(userId: string, since: number): Promise<number | null> {
+      // MIN over no rows is a row holding NULL, so an account with no charges answers null.
+      const row = await db
+        .prepare(
+          `SELECT MIN(created_at) AS first_at
+             FROM credit_events
+            WHERE user_id = ? AND kind = 'charge' AND created_at >= ?`
+        )
+        .bind(userId, since)
+        .first<{ first_at: number | null }>()
+      return row?.first_at ?? null
     }
   }
 }
@@ -469,10 +488,11 @@ export function memoryStore(): Store {
       return Promise.resolve('applied')
     },
 
-    spendByFeature(userId: string): Promise<SpendByFeatureRow[]> {
+    spendByFeature(userId: string, since = 0): Promise<SpendByFeatureRow[]> {
       const byFeature = new Map<string, SpendByFeatureRow>()
       for (const event of creditEvents) {
         if (event.userId !== userId || event.kind !== 'charge' || event.feature === null) continue
+        if (event.createdAt < since) continue
         const row = byFeature.get(event.feature) ?? {
           feature: event.feature,
           micros: 0,
@@ -485,6 +505,15 @@ export function memoryStore(): Store {
         byFeature.set(event.feature, row)
       }
       return Promise.resolve([...byFeature.values()].sort((a, b) => b.micros - a.micros))
+    },
+
+    firstChargeAt(userId: string, since: number): Promise<number | null> {
+      const times = creditEvents
+        .filter(
+          (event) => event.userId === userId && event.kind === 'charge' && event.createdAt >= since
+        )
+        .map((event) => event.createdAt)
+      return Promise.resolve(times.length === 0 ? null : Math.min(...times))
     }
   }
 }

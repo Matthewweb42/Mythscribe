@@ -12,6 +12,11 @@ interface SettingsDialogProps {
   /** The open project's format, or null on the welcome screen (only app-wide tabs then). */
   format: NovelFormat | null
   onClose: () => void
+  /**
+   * The tab to open on, when the opener named one (F-15.5: the low-credit notice opens Account).
+   * Ignored when that tab is not among the visible ones, so the dialog always opens on something.
+   */
+  initialTab?: SettingsDialogTabId | null
   /** The tab registry; defaults to the built tabs for `format`. Injectable so tests can drive several tabs. */
   tabs?: SettingsDialogTabs
 }
@@ -29,17 +34,20 @@ interface SettingsDialogProps {
 export function SettingsDialog({
   format,
   onClose,
+  initialTab = null,
   tabs = settingsTabsFor(format)
 }: SettingsDialogProps): React.JSX.Element {
   const titleId = useId()
   const panelId = useId()
-  const [activeId, setActiveId] = useState<SettingsDialogTabId>(tabs[0].id)
+  const openOn =
+    initialTab !== null && tabs.some((tab) => tab.id === initialTab) ? initialTab : tabs[0].id
+  const [activeId, setActiveId] = useState<SettingsDialogTabId>(openOn)
   const buttons = useRef(new Map<SettingsDialogTabId, HTMLButtonElement>())
   const active = tabs.find((tab) => tab.id === activeId) ?? tabs[0]
 
   useEffect(() => {
-    buttons.current.get(tabs[0].id)?.focus()
-  }, [tabs])
+    buttons.current.get(openOn)?.focus()
+  }, [tabs, openOn])
 
   const register = (id: SettingsDialogTabId, element: HTMLButtonElement | null): void => {
     if (element) buttons.current.set(id, element)

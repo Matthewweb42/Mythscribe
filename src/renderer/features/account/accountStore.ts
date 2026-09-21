@@ -21,6 +21,12 @@ interface AccountState {
   error: string | null
   /** The Cloud credits (F-15.3) of the signed-in account; null until they have been asked for. */
   credits: CreditsResult | null
+  /**
+   * When `credits` was last known to be current (epoch ms); null with no credits. The run-out
+   * projection (F-15.5) measures the period's pace against it, so the meter is a value the
+   * store owns rather than a clock read while React renders.
+   */
+  creditsAt: number | null
   /** True while a credits call is in flight; its own flag, so it cannot disable the sign-in row. */
   creditsBusy: boolean
   /**
@@ -40,14 +46,17 @@ interface AccountState {
   loadCredits: () => Promise<void>
   /** Opens the Lemon Squeezy checkout for one pack in the browser (F-15.3); the balance follows a Refresh. */
   buyCredits: (variantId: string) => Promise<void>
-  /** Listens for status changes main pushes (a link opened, an attempt expired); returns the unsubscribe. */
+  /**
+   * Listens for what main pushes: a status change (a link opened, an attempt expired) and the
+   * balance a Cloud request was charged against (F-15.5). Returns the one unsubscribe for both.
+   */
   subscribe: () => () => void
 }
 
 /** Bumped by every reset so a response from a superseded request is dropped. */
 let generation = 0
 
-export const useAccountStore = create<AccountState>((set) => {
+export const useAccountStore = create<AccountState>((set, get) => {
   const run = async (call: () => Promise<AccountStatus>): Promise<void> => {
     const mine = generation
     set({ busy: true, error: null })
@@ -56,7 +65,11 @@ export const useAccountStore = create<AccountState>((set) => {
       if (mine !== generation) return
       // Credits belong to the account that was signed in: an action that ends anywhere but
       // signed in (sign out, a revoked session on refresh) leaves none to show.
-      set(status.state === 'signedIn' ? { status } : { status, credits: null, creditsError: null })
+      set(
+        status.state === 'signedIn'
+          ? { status }
+          : { status, credits: null, creditsAt: null, creditsError: null }
+      )
     } catch (err: unknown) {
       if (mine !== generation) return
       set({ error: describeError(err) })
@@ -75,7 +88,7 @@ export const useAccountStore = create<AccountState>((set) => {
     try {
       const credits = await call()
       if (mine !== generation || credits === null) return
-      set({ credits })
+      set({ credits, creditsAt: Date.now() })
     } catch (err: unknown) {
       if (mine !== generation) return
       set({ creditsError: describeError(err) })
@@ -89,6 +102,7 @@ export const useAccountStore = create<AccountState>((set) => {
     busy: false,
     error: null,
     credits: null,
+    creditsAt: null,
     creditsBusy: false,
     creditsError: null,
 
@@ -106,16 +120,33 @@ export const useAccountStore = create<AccountState>((set) => {
 
     buyCredits: (variantId) => runCredits(() => ipc().invoke('account:buyCredits', { variantId })),
 
-    subscribe: () =>
-      ipc().on('account:changed', (status) => {
+    subscribe: () => {
+      const offStatus = ipc().on('account:changed', (status) => {
         // The state moved on under the author (the link was opened, or the attempt expired), so
         // whatever went wrong before describes a state that is gone. Credits go with the account.
         set(
           status.state === 'signedIn'
             ? { status, error: null }
-            : { status, error: null, credits: null, creditsError: null }
+            : { status, error: null, credits: null, creditsAt: null, creditsError: null }
         )
       })
+      // F-15.5: a Cloud request was answered and charged; the balance it left behind is the one
+      // part of the credits that is live, so the meter follows it without another `/credits`.
+      const offBalance = ipc().on('account:balanceChanged', ({ balanceMicros }) => {
+        const { credits, status, creditsBusy } = get()
+        if (credits !== null) {
+          set({ credits: { ...credits, balanceMicros }, creditsAt: Date.now() })
+          return
+        }
+        // Nothing has been asked for yet: the rest of the meter (the period, the spend) is worth
+        // one call now that this account is known to be spending.
+        if (status?.state === 'signedIn' && !creditsBusy) void get().loadCredits()
+      })
+      return () => {
+        offStatus()
+        offBalance()
+      }
+    }
   }
 })
 
@@ -127,6 +158,7 @@ export function resetAccountStore(): void {
     busy: false,
     error: null,
     credits: null,
+    creditsAt: null,
     creditsBusy: false,
     creditsError: null
   })

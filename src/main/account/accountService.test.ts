@@ -12,6 +12,7 @@ import type {
   CloudSession,
   CreditsResult
 } from '@shared/cloudApi'
+import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import { AiKeyStore } from '../ai/keyStore'
 import { fakeSafeStorage } from '../ai/keyStoreFixture'
 import { AppError } from '../ipc/errors'
@@ -30,6 +31,9 @@ const ME: AuthMeResult = { email: EMAIL, userId: 'u1', since: '2026-09-01T00:00:
 const CREDITS: CreditsResult = {
   balanceMicros: 2_500_000,
   spend: [{ feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }],
+  periodDays: USAGE_PERIOD_DAYS,
+  periodSpend: [{ feature: 'ghostText', micros: 400, requests: 1, tokens: 300 }],
+  periodFirstChargeAt: 1_758_000_000_000,
   packs: [{ variantId: 'pack-5', priceCents: 500 }]
 }
 const CHECKOUT: CheckoutResult = { url: 'https://mythscribe.lemonsqueezy.com/buy/abc?x=1' }

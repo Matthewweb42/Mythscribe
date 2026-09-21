@@ -15,4 +15,17 @@ describe('shellDialogStore (F-7.1)', () => {
     useShellDialogStore.getState().close()
     expect(useShellDialogStore.getState().open).toBeNull()
   })
+
+  it('remembers the Settings tab an opener named, and forgets it on close (F-15.5)', () => {
+    expect(useShellDialogStore.getState().settingsTab).toBeNull()
+    useShellDialogStore.getState().show('settings', 'account')
+    expect(useShellDialogStore.getState().open).toBe('settings')
+    expect(useShellDialogStore.getState().settingsTab).toBe('account')
+    useShellDialogStore.getState().close()
+    expect(useShellDialogStore.getState().settingsTab).toBeNull()
+    // An opener that names no tab leaves the dialog on its own first one.
+    useShellDialogStore.getState().show('settings', 'account')
+    useShellDialogStore.getState().show('settings')
+    expect(useShellDialogStore.getState().settingsTab).toBeNull()
+  })
 })

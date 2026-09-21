@@ -47,6 +47,11 @@ export interface CloudProviderOptions {
   resolveModel: (tier: Tier) => string
   /** The account's credits, for "Test connection"; built from the one `CloudAuthClient`. */
   credits: (token: string) => Promise<CreditsResult>
+  /**
+   * The balance the proxy reported with an answered request (F-15.5), so the app's meter follows
+   * a charge without asking `/credits` again. Called once per answer, after the charge.
+   */
+  onBalance?: (balanceMicros: number) => void
   /** The non-streamed call's overall timeout; a stream is bounded by its signal alone. */
   timeoutMs?: number
 }
@@ -168,6 +173,7 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
       const parsed = AiCompleteResult.safeParse(parseJson(await response.text().catch(() => '')))
       if (!parsed.success) throw new AiFallbackError(UNREADABLE)
       const { text, model, usage } = parsed.data
+      options.onBalance?.(parsed.data.balanceMicros)
       return { text, model, usage }
     },
 
@@ -185,6 +191,7 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
         }
         if (event.data.type === 'error') throw failureOf(event.data.code)
         // `done` carries the whole request's usage, like the OpenAI adapter's final chunk.
+        options.onBalance?.(event.data.balanceMicros)
         yield { delta: '', usage: event.data.usage }
         return
       }

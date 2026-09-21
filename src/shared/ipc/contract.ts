@@ -1066,7 +1066,9 @@ export const events = {
   /** A native menu item was clicked or its accelerator pressed (F-7.1); the renderer runs the action. */
   'menu:action': z.object({ id: MenuItemId }),
   /** The account state changed without a renderer call (F-15.2): a pending link was opened or expired. */
-  'account:changed': AccountStatus
+  'account:changed': AccountStatus,
+  /** A Cloud request was answered and charged (F-15.5): the balance the Worker reported with it. */
+  'account:balanceChanged': z.object({ balanceMicros: z.number().int() })
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

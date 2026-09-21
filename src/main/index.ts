@@ -150,7 +150,11 @@ if (!primaryInstance) {
         token: () => signedInAccount.sessionToken(),
         onSessionEnded: () => signedInAccount.sessionEnded(),
         resolveModel: (tier) => appState.get().models.cloud[tier],
-        credits: (token) => cloudClient.credits(token)
+        credits: (token) => cloudClient.credits(token),
+        // F-15.5: every answered request carries the balance it left behind, so the usage meter
+        // and the low-credit notice follow a charge without asking `/credits` again.
+        onBalance: (balanceMicros) =>
+          emit(BrowserWindow.getAllWindows(), 'account:balanceChanged', { balanceMicros })
       })
     registerHandlers({
       manager,

@@ -16,6 +16,7 @@ import {
   TOKEN_BYTES
 } from '../../src/shared/cloudApi'
 import { cloudChargeMicros, MICROS_PER_USD } from '../../src/shared/cloudRates'
+import { USAGE_PERIOD_DAYS, USAGE_PERIOD_MS } from '../../src/shared/cloudUsage'
 import {
   type AuthDeps,
   authenticate,
@@ -54,16 +55,30 @@ const UNKNOWN_PACK = 'That credit pack is not on sale. Refresh the Account tab a
 const WEBHOOK_NOT_CONFIGURED = 'Credit purchases are not configured on the server yet.'
 const BAD_SIGNATURE_MESSAGE = 'That webhook body was not signed with the configured secret.'
 
-/** `GET /credits`: the balance, what it was spent on, and what can be bought. */
+/**
+ * `GET /credits`: the balance, what it was spent on, and what can be bought. Spend comes twice —
+ * lifetime, and over the usage meter's rolling period (F-15.5), with the oldest charge inside it
+ * so the app can project the run-out from the pace rather than from the whole window.
+ */
 export async function handleCredits(request: Request, deps: CreditsDeps): Promise<Response> {
   const caller = await authenticate(request, deps)
   if (!caller) return jsonError('UNAUTHORIZED', UNAUTHORIZED_MESSAGE)
 
+  const since = deps.now().getTime() - USAGE_PERIOD_MS
   const balanceMicros = await deps.store.getBalance(caller.user.id)
   const spend = await deps.store.spendByFeature(caller.user.id)
+  const periodSpend = await deps.store.spendByFeature(caller.user.id, since)
+  const periodFirstChargeAt = await deps.store.firstChargeAt(caller.user.id, since)
   // The checkout URL stays on the Worker: the app only ever names a variant.
   const packs = deps.packs.map(({ variantId, priceCents }) => ({ variantId, priceCents }))
-  return jsonResponse({ balanceMicros, spend, packs } satisfies CreditsResult)
+  return jsonResponse({
+    balanceMicros,
+    spend,
+    periodDays: USAGE_PERIOD_DAYS,
+    periodSpend,
+    periodFirstChargeAt,
+    packs
+  } satisfies CreditsResult)
 }
 
 /**

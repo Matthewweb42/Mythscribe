@@ -1,3 +1,4 @@
+import { CreditNotice } from '@renderer/features/account/CreditNotice'
 import { formatDelta, formatWords } from './wordFormat'
 
 /**
@@ -6,7 +7,9 @@ import { formatDelta, formatWords } from './wordFormat'
  * rollup also moves when scenes are moved, duplicated, or deleted, so a delta there would not
  * mean "written". Presentational; the counts come from the caller so one document can count
  * live while a folder reads the saved rollup. `aiPercent` is the share of the document's
- * characters accepted from the AI (F-14.6), shown only while it is above zero.
+ * characters accepted from the AI (F-14.6), shown only while it is above zero. The one piece
+ * that reads a store of its own is `CreditNotice` (F-15.5), pushed to the far end; it renders
+ * nothing unless this project spends Cloud credits and they are running out.
  */
 export function StatusBar({
   words,
@@ -34,6 +37,7 @@ export function StatusBar({
           {aiPercent}% AI
         </span>
       ) : null}
+      <CreditNotice />
     </footer>
   )
 }

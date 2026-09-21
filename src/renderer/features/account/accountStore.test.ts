@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AccountStatus } from '@shared/account'
 import type { CreditsResult } from '@shared/cloudApi'
+import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAccountStore, useAccountStore } from './accountStore'
@@ -22,6 +23,9 @@ const SIGNED_IN: AccountStatus = {
 const CREDITS: CreditsResult = {
   balanceMicros: 2_500_000,
   spend: [{ feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }],
+  periodDays: USAGE_PERIOD_DAYS,
+  periodSpend: [{ feature: 'ghostText', micros: 400, requests: 1, tokens: 300 }],
+  periodFirstChargeAt: 1_758_000_000_000,
   packs: [{ variantId: 'pack-5', priceCents: 500 }]
 }
 
@@ -30,6 +34,10 @@ interface Fake {
   calls: { channel: Channel; input: unknown }[]
   /** The `account:changed` listener the store registered, if any. */
   listener: ((status: AccountStatus) => void) | null
+  /** The `account:balanceChanged` listener (F-15.5), if any. */
+  balanceListener: ((payload: { balanceMicros: number }) => void) | null
+  /** How many listeners the last `subscribe()` dropped. */
+  unsubscribes: number
   unsubscribed: boolean
   /** Thrown by every channel while set, so the failure path is driven. */
   fail: Error | null
@@ -39,6 +47,8 @@ function fakeClient(): Fake {
   const fake: Fake = {
     calls: [],
     listener: null,
+    balanceListener: null,
+    unsubscribes: 0,
     unsubscribed: false,
     fail: null,
     client: {
@@ -65,9 +75,17 @@ function fakeClient(): Fake {
         }
       },
       on<E extends EventName>(event: E, listener: (payload: EventPayload<E>) => void): () => void {
+        if (event === 'account:balanceChanged') {
+          fake.balanceListener = listener as (payload: { balanceMicros: number }) => void
+          return () => {
+            fake.unsubscribes++
+            fake.balanceListener = null
+          }
+        }
         if (event !== 'account:changed') throw new Error(`unexpected ${event}`)
         fake.listener = listener as (status: AccountStatus) => void
         return () => {
+          fake.unsubscribes++
           fake.unsubscribed = true
           fake.listener = null
         }
@@ -209,6 +227,41 @@ describe('accountStore (F-15.2)', () => {
     await pending
     expect(store().credits).toBeNull()
     expect(store().creditsBusy).toBe(false)
+  })
+
+  it('follows the balance main pushes with an answered Cloud request (F-15.5)', async () => {
+    store().subscribe()
+    await store().loadCredits()
+    fake.balanceListener?.({ balanceMicros: 2_487_000 })
+    expect(store().credits).toEqual({ ...CREDITS, balanceMicros: 2_487_000 })
+    // Only the balance is live: the period and its breakdown stay as they were loaded.
+    expect(fake.calls.map((c) => c.channel)).toEqual(['account:getCredits'])
+  })
+
+  it('asks for the credits once when a charge arrives before they were loaded (F-15.5)', async () => {
+    store().subscribe()
+    useAccountStore.setState({ status: SIGNED_IN })
+    fake.balanceListener?.({ balanceMicros: 900_000 })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fake.calls.map((c) => c.channel)).toEqual(['account:getCredits'])
+    expect(store().credits).toEqual(CREDITS)
+  })
+
+  it('ignores a pushed balance while signed out (F-15.5)', () => {
+    store().subscribe()
+    useAccountStore.setState({ status: SIGNED_OUT })
+    fake.balanceListener?.({ balanceMicros: 900_000 })
+    expect(fake.calls).toEqual([])
+    expect(store().credits).toBeNull()
+  })
+
+  it('drops both listeners on unsubscribe (F-15.5)', () => {
+    const off = store().subscribe()
+    expect(fake.balanceListener).not.toBeNull()
+    off()
+    expect(fake.unsubscribes).toBe(2)
+    expect(fake.balanceListener).toBeNull()
+    expect(fake.listener).toBeNull()
   })
 
   it('drops an answer from before a reset', async () => {

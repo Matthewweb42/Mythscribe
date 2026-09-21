@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { EMAIL_MAX } from '@shared/cloudApi'
+import { EMAIL_MAX, type CreditsResult } from '@shared/cloudApi'
 import { CLOUD_RATES, MICROS_PER_USD } from '@shared/cloudRates'
+import { creditWarning, periodSpentMicros, projectedDaysLeft } from '@shared/cloudUsage'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { featureLabel, formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { describeError } from '@renderer/lib/errors'
 import { useAccountStore } from './accountStore'
+import { creditWarningText, runOutText } from './creditMeter'
 
 const FIELD = 'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 const BUTTON =
@@ -119,6 +121,7 @@ export function AccountSettingsTab(): React.JSX.Element {
  */
 function CreditsSection(): React.JSX.Element {
   const credits = useAccountStore((s) => s.credits)
+  const creditsAt = useAccountStore((s) => s.creditsAt)
   const busy = useAccountStore((s) => s.creditsBusy)
   const error = useAccountStore((s) => s.creditsError)
   const loadCredits = useAccountStore((s) => s.loadCredits)
@@ -146,6 +149,8 @@ function CreditsSection(): React.JSX.Element {
             </span>
           </div>
 
+          {creditsAt === null ? null : <UsageMeter credits={credits} now={creditsAt} />}
+
           {credits.packs.length === 0 ? (
             <p className="m-0 text-xs text-fg-muted">Credit packs are not on sale yet.</p>
           ) : (
@@ -164,10 +169,15 @@ function CreditsSection(): React.JSX.Element {
             </div>
           )}
 
-          {credits.spend.length === 0 ? (
-            <p className="m-0 text-xs text-fg-muted">No Cloud requests yet.</p>
+          {credits.periodSpend.length === 0 ? (
+            <p className="m-0 text-xs text-fg-muted">
+              {credits.spend.length === 0
+                ? 'No Cloud requests yet.'
+                : `No Cloud requests in the last ${formatCount(credits.periodDays, 'day')}.`}
+            </p>
           ) : (
             <table aria-label="Cloud spend by feature" className="w-full text-xs">
+              <caption className="text-left text-fg-muted">{`Last ${formatCount(credits.periodDays, 'day')}`}</caption>
               <thead className="text-fg-muted">
                 <tr>
                   <th scope="col" className="text-left font-normal">
@@ -185,7 +195,7 @@ function CreditsSection(): React.JSX.Element {
                 </tr>
               </thead>
               <tbody>
-                {credits.spend.map((row) => (
+                {credits.periodSpend.map((row) => (
                   <tr key={row.feature}>
                     <th scope="row" className="text-left font-normal">
                       {featureLabel(row.feature)}
@@ -199,6 +209,12 @@ function CreditsSection(): React.JSX.Element {
                 ))}
               </tbody>
             </table>
+          )}
+
+          {credits.spend.length === 0 ? null : (
+            <p data-testid="account-all-time" className="m-0 text-xs text-fg-muted">
+              {`All time: ${formatUsd(periodSpentMicros(credits.spend) / MICROS_PER_USD)}`}
+            </p>
           )}
         </>
       )}
@@ -241,6 +257,42 @@ function CreditsSection(): React.JSX.Element {
         </p>
       )}
     </section>
+  )
+}
+
+/**
+ * The usage meter (F-15.5): what the rolling period cost, how long the balance lasts at that
+ * pace, and the one warning line when it is running out. The period is a window, not a billing
+ * cycle — credits are prepaid — so it says "the last 30 days" rather than "this month". `now` is
+ * when the store last had these numbers from the Worker, not a clock read during render. The
+ * same two pure functions drive the status-bar notice.
+ */
+function UsageMeter({ credits, now }: { credits: CreditsResult; now: number }): React.JSX.Element {
+  const spentMicros = periodSpentMicros(credits.periodSpend)
+  const daysLeft = projectedDaysLeft({
+    balanceMicros: credits.balanceMicros,
+    spentMicros,
+    firstChargeAt: credits.periodFirstChargeAt,
+    now
+  })
+  const warning = creditWarning({ balanceMicros: credits.balanceMicros, daysLeft })
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between gap-3">
+        <span>{`Used in the last ${formatCount(credits.periodDays, 'day')}`}</span>
+        <span data-testid="account-period-spent" className="tabular-nums">
+          {formatUsd(spentMicros / MICROS_PER_USD)}
+        </span>
+      </div>
+      <p data-testid="account-run-out" className="m-0 text-xs text-fg-muted">
+        {runOutText(daysLeft)}
+      </p>
+      {warning === null ? null : (
+        <p role="status" data-testid="account-credit-warning" className="m-0 text-xs text-warning">
+          {creditWarningText(warning, { balanceMicros: credits.balanceMicros, daysLeft })}
+        </p>
+      )}
+    </div>
   )
 }
 

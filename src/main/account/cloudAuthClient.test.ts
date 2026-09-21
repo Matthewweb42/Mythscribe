@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CLOUD_ERROR_STATUS, type CloudErrorCode } from '@shared/cloudApi'
+import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import { AccountError, createCloudAuthClient } from './cloudAuthClient'
 
 const BASE = 'http://127.0.0.1:8787'
@@ -191,6 +192,9 @@ describe('createCloudAuthClient credits (F-15.3)', () => {
   const CREDITS = {
     balanceMicros: 2_500_000,
     spend: [{ feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }],
+    periodDays: USAGE_PERIOD_DAYS,
+    periodSpend: [{ feature: 'chat', micros: 400, requests: 1, tokens: 300 }],
+    periodFirstChargeAt: 1_758_000_000_000,
     packs: [{ variantId: 'pack-5', priceCents: 500 }]
   }
 
@@ -200,6 +204,18 @@ describe('createCloudAuthClient credits (F-15.3)', () => {
     expect(calls[0]?.url).toBe(`${BASE}/credits`)
     expect(calls[0]?.init?.method).toBe('GET')
     expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer tok-1')
+  })
+
+  it('reads a Worker deployed before the usage meter, defaulting its period (F-15.5)', async () => {
+    answers = [json(200, { balanceMicros: 2_500_000, spend: [], packs: [] })]
+    expect(await client().credits('tok-1')).toEqual({
+      balanceMicros: 2_500_000,
+      spend: [],
+      periodDays: USAGE_PERIOD_DAYS,
+      periodSpend: [],
+      periodFirstChargeAt: null,
+      packs: []
+    })
   })
 
   it('asks the Worker for the checkout URL of one pack', async () => {

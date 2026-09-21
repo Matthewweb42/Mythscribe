@@ -8,6 +8,7 @@ import {
   resetEditorSettingsStore,
   useEditorSettingsStore
 } from '@renderer/features/editor/settingsStore'
+import { resetAccountStore } from '@renderer/features/account/accountStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -39,6 +40,9 @@ const panel = (): HTMLElement => screen.getByRole('tabpanel')
 beforeEach(() => {
   resetEditorSettingsStore()
   resetPendingSaves()
+  // The real registry includes the Account tab (F-15.2); the shared worker must not hand it a
+  // signed-in account left over from another file, which would send it looking for credits.
+  resetAccountStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   setIpcClient(client)
   useEditorSettingsStore.setState({ settings: { ...defaultEditorSettings('novel') } })
@@ -94,6 +98,19 @@ describe('SettingsDialog (F-7.5)', () => {
     expect(
       within(panel()).getByTestId('editor-preview').style.getPropertyValue('--ms-editor-font-size')
     ).toBe('20px')
+  })
+
+  it('opens on the tab the opener named, and focuses it (F-15.5)', () => {
+    render(<SettingsDialog format="novel" onClose={vi.fn()} initialTab="ai" tabs={tabs} />)
+    expect(tab('AI')).toHaveAttribute('aria-selected', 'true')
+    expect(tab('AI')).toHaveFocus()
+    expect(panel()).toHaveTextContent('keys here')
+  })
+
+  it('falls back to the first tab when the named one is not shown (F-15.5)', () => {
+    render(<SettingsDialog format={null} onClose={vi.fn()} initialTab="editor" />)
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Account'])
+    expect(tab('Account')).toHaveAttribute('aria-selected', 'true')
   })
 
   it('switches between injected tabs by click and by the arrow keys, one panel at a time', async () => {

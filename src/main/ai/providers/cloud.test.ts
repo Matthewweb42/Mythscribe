@@ -7,6 +7,7 @@ import {
   type CreditsResult
 } from '@shared/cloudApi'
 import { cloudPriceFor } from '@shared/cloudRates'
+import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import { AccountError } from '../../account/cloudAuthClient'
 import { buildCloudProvider, type CloudProviderOptions } from './cloud'
 import type { FetchLike } from './openai'
@@ -90,6 +91,9 @@ const line = (event: AiStreamEvent): string => `${JSON.stringify(event)}\n`
 const credits = (balanceMicros: number): CreditsResult => ({
   balanceMicros,
   spend: [],
+  periodDays: USAGE_PERIOD_DAYS,
+  periodSpend: [],
+  periodFirstChargeAt: null,
   packs: []
 })
 
@@ -220,6 +224,20 @@ describe('buildCloudProvider.complete', () => {
     const { fetch } = answering(() => json(200, { text: 'no usage here' }))
     await expect(build({ fetch }).complete(REQUEST)).rejects.toBeInstanceOf(AiFallbackError)
   })
+
+  it('reports the balance the proxy answered with, and none for a refusal (F-15.5)', async () => {
+    const onBalance = vi.fn()
+    const { fetch } = answering(() => answer())
+    await build({ fetch, onBalance }).complete(REQUEST)
+    expect(onBalance.mock.calls).toEqual([[2_499_870]])
+
+    onBalance.mockClear()
+    const refused = answering(() => failure(402, 'INSUFFICIENT_CREDITS'))
+    await build({ fetch: refused.fetch, onBalance })
+      .complete(REQUEST)
+      .catch(() => undefined)
+    expect(onBalance).not.toHaveBeenCalled()
+  })
 })
 
 describe('buildCloudProvider.stream', () => {
@@ -304,6 +322,33 @@ describe('buildCloudProvider.stream', () => {
       }
     })()
     expect(failed).toBeInstanceOf(AiCancelledError)
+  })
+
+  it('reports the balance from the done event, once (F-15.5)', async () => {
+    const onBalance = vi.fn()
+    const { fetch } = answering(() =>
+      ndjson([
+        line({ type: 'delta', delta: 'The storm ' }),
+        line({
+          type: 'done',
+          model: 'gpt-5.4-mini',
+          usage: { inputTokens: 100, outputTokens: 20 },
+          chargeMicros: 130,
+          balanceMicros: 2_499_870
+        })
+      ])
+    )
+    await collect(build({ fetch, onBalance }).stream(REQUEST))
+    expect(onBalance.mock.calls).toEqual([[2_499_870]])
+  })
+
+  it('reports no balance for a stream that failed mid-flight (F-15.5)', async () => {
+    const onBalance = vi.fn()
+    const { fetch } = answering(() =>
+      ndjson([line({ type: 'error', code: 'UPSTREAM', message: 'the provider gave up' })])
+    )
+    await collect(build({ fetch, onBalance }).stream(REQUEST)).catch(() => undefined)
+    expect(onBalance).not.toHaveBeenCalled()
   })
 
   it('reads a proxy failure before the first byte like a completion', async () => {

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { AiFeatureId, ModelName } from './ai'
+import { USAGE_PERIOD_DAYS } from './cloudUsage'
 
 /**
  * The wire contract between the desktop app and the MythScribe Cloud Worker (F-15.2), imported
@@ -91,7 +92,7 @@ export const CreditPack = z.object({
 })
 export type CreditPack = z.infer<typeof CreditPack>
 
-/** Spend on one AI feature (`AiFeatureId`, kept as a string on the wire) since the account was created. */
+/** Spend on one AI feature (`AiFeatureId`, kept as a string on the wire) over one window of time. */
 export const CreditSpendRow = z.object({
   feature: z.string().min(1),
   micros: z.number().int().nonnegative(),
@@ -100,11 +101,21 @@ export const CreditSpendRow = z.object({
 })
 export type CreditSpendRow = z.infer<typeof CreditSpendRow>
 
-/** `GET /credits` with `Authorization: Bearer <token>` */
+/**
+ * `GET /credits` with `Authorization: Bearer <token>`. The three `period*` fields are the usage
+ * meter (F-15.5); they default so the app still reads a Worker deployed before them.
+ */
 export const CreditsResult = z.object({
   /** May be slightly negative: the last request is charged after it was answered. */
   balanceMicros: z.number().int(),
+  /** Spend per feature since the account was created. */
   spend: z.array(CreditSpendRow),
+  /** How many days back `periodSpend` reaches (`USAGE_PERIOD_DAYS`, a rolling window). */
+  periodDays: z.number().int().positive().default(USAGE_PERIOD_DAYS),
+  /** Spend per feature inside the period. */
+  periodSpend: z.array(CreditSpendRow).default([]),
+  /** When the oldest charge inside the period was made (epoch ms); null with none. */
+  periodFirstChargeAt: z.number().int().nullable().default(null),
   /** Empty until the operator configures the packs on the Worker. */
   packs: z.array(CreditPack)
 })

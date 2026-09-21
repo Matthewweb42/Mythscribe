@@ -28,6 +28,7 @@ import { EMPTY_SCENE_BRIEF, EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
 import type { CheckoutResult, CloudSession, CreditsResult } from '@shared/cloudApi'
+import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import { AccountService } from '../account/accountService'
 import type { CloudAuthClient } from '../account/cloudAuthClient'
 import { registerInflight, resetInflight } from '../ai/inflight'
@@ -2414,7 +2415,16 @@ describe('account:getCredits / account:buyCredits (F-15.3)', () => {
   ) => (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>
 
   beforeEach(() => {
-    credits = vi.fn(() => Promise.resolve({ balanceMicros: 100, spend: [], packs: [] }))
+    credits = vi.fn(() =>
+      Promise.resolve({
+        balanceMicros: 100,
+        spend: [],
+        periodDays: USAGE_PERIOD_DAYS,
+        periodSpend: [],
+        periodFirstChargeAt: null,
+        packs: []
+      })
+    )
     checkout = vi.fn(() => Promise.reject(new Error('set a checkout answer per test')))
     const cloudKeyStore = new AiKeyStore(
       path.join(tmp, 'userData', 'ai-keys-credits.json'),
@@ -2486,6 +2496,9 @@ describe('account:getCredits / account:buyCredits (F-15.3)', () => {
     const body: CreditsResult = {
       balanceMicros: 2_500_000,
       spend: [{ feature: 'ghostText', micros: 900, requests: 1, tokens: 100 }],
+      periodDays: USAGE_PERIOD_DAYS,
+      periodSpend: [{ feature: 'ghostText', micros: 400, requests: 1, tokens: 50 }],
+      periodFirstChargeAt: 1_758_000_000_000,
       packs: [{ variantId: 'pack-5', priceCents: 500 }]
     }
     credits.mockResolvedValueOnce(body)

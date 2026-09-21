@@ -246,9 +246,11 @@ export function App(): React.JSX.Element {
 function ShellDialogs({ format }: { format: NovelFormat | null }): React.JSX.Element | null {
   const open = useShellDialogStore((s) => s.open)
   const close = useShellDialogStore((s) => s.close)
+  // F-15.5: an opener may name the tab (the low-credit notice opens Account).
+  const settingsTab = useShellDialogStore((s) => s.settingsTab)
   switch (open) {
     case 'settings':
-      return <SettingsDialog format={format} onClose={close} />
+      return <SettingsDialog format={format} onClose={close} initialTab={settingsTab} />
     case 'shortcuts':
       return <ShortcutsDialog onClose={close} />
     case 'about':

@@ -13,7 +13,8 @@ import { priceFor, type AiStatus, type AiUsageSummary } from '../src/shared/ai'
 import type { AiSettings } from '../src/shared/aiSettings'
 import type { AuthorRules } from '../src/shared/authorRules'
 import { LOGIN_ATTEMPT_TTL_MS } from '../src/shared/cloudApi'
-import { cloudChargeMicros, cloudPriceFor } from '../src/shared/cloudRates'
+import { cloudChargeMicros, cloudPriceFor, MICROS_PER_USD } from '../src/shared/cloudRates'
+import { USAGE_PERIOD_DAYS } from '../src/shared/cloudUsage'
 import type { FocusSettings } from '../src/shared/focus'
 import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
@@ -394,10 +395,22 @@ let cloudSessionRevoked = false
 const CLOUD_SESSION_TOKEN = 'e2e-session-token'
 const CLOUD_USER_ID = 'e2e-user-1'
 const CLOUD_SINCE = '2026-09-19T12:00:00.000Z'
-/** F-15.3: $2.50 of credit, one pack on sale, and one feature that has spent something. */
-const CLOUD_BALANCE_MICROS = 2_500_000
+/**
+ * F-15.3: a little over $1.00 of credit, one pack on sale, and one feature that has spent
+ * something. F-15.5: the period rows the meter shows, and a balance close enough to the
+ * low-credit line ($1.00) that one charged Cloud request takes it under, so the status-bar
+ * notice is driven for real. The fake keeps the balance: `/ai/complete` charges it and
+ * `/credits` answers it, so what the app shows after a charge is what the Worker said.
+ */
+const CLOUD_BALANCE_MICROS = 1_003_000
+let cloudBalanceMicros = CLOUD_BALANCE_MICROS
 const CLOUD_PACK = { variantId: 'pack-5', priceCents: 500 }
 const CLOUD_SPEND = { feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }
+/** The rolling period's own breakdown: $0.20 spent, the oldest of it three days ago. */
+const CLOUD_PERIOD_SPEND = { feature: 'chat', micros: 200_000, requests: 2, tokens: 5_000 }
+const CLOUD_PERIOD_FIRST_CHARGE_AT = Date.now() - 3 * 24 * 60 * 60_000
+/** The balance, as the app formats it (`formatUsd` in `usageFormat.ts`). */
+const balanceText = (micros: number): string => `$${(micros / MICROS_PER_USD).toFixed(2)}`
 const CLOUD_CHECKOUT_URL =
   'https://mythscribe.lemonsqueezy.com/buy/test?checkout[custom][user_id]=user-1'
 
@@ -502,8 +515,11 @@ function startFakeCloudApi(): Promise<string> {
         return
       }
       json(res, 200, {
-        balanceMicros: CLOUD_BALANCE_MICROS,
+        balanceMicros: cloudBalanceMicros,
         spend: [CLOUD_SPEND],
+        periodDays: USAGE_PERIOD_DAYS,
+        periodSpend: [CLOUD_PERIOD_SPEND],
+        periodFirstChargeAt: CLOUD_PERIOD_FIRST_CHARGE_AT,
         packs: [CLOUD_PACK]
       })
       return
@@ -540,11 +556,14 @@ function startFakeCloudApi(): Promise<string> {
           CLOUD_AI_USAGE.inputTokens,
           CLOUD_AI_USAGE.outputTokens
         )
+        // The Worker charges after it has answered (F-15.3), so every later `/credits` and the
+        // balance in this answer agree, and the app's meter follows without asking again.
+        cloudBalanceMicros -= chargeMicros
         const done = {
           model: request.model,
           usage: CLOUD_AI_USAGE,
           chargeMicros,
-          balanceMicros: CLOUD_BALANCE_MICROS - chargeMicros
+          balanceMicros: cloudBalanceMicros
         }
         if (!request.stream) {
           json(res, 200, { text: CLOUD_AI_ANSWER, ...done })
@@ -1116,8 +1135,17 @@ test('create, close, reopen a project on disk', async () => {
   )
   // F-15.3: the credits section loads with the signed-in state. Buy is only checked for being
   // there; clicking it would hand a Lemon Squeezy URL to the machine's real browser.
-  await expect(settingsDialog.getByTestId('account-credit-balance')).toHaveText('$2.50')
+  await expect(settingsDialog.getByTestId('account-credit-balance')).toHaveText(
+    balanceText(cloudBalanceMicros)
+  )
   await expect(settingsDialog.getByRole('button', { name: 'Buy $5' })).toBeVisible()
+  // F-15.5: the meter over the rolling period, and no warning while the balance is above $1.00.
+  await expect(settingsDialog.getByTestId('account-period-spent')).toHaveText(
+    balanceText(CLOUD_PERIOD_SPEND.micros)
+  )
+  await expect(settingsDialog.getByTestId('account-run-out')).toContainText('left at this pace')
+  await expect(settingsDialog.getByTestId('account-credit-warning')).toHaveCount(0)
+  await expect(page.getByTestId('credit-notice')).toHaveCount(0)
   // F-15.4: the AI tab's source picker. With the account signed in, MythScribe Cloud names it
   // and Test connection reaches the fake Worker's `/credits` (no key is saved at this point).
   // The project goes back to the author's own key before anything else runs.
@@ -2652,7 +2680,27 @@ test('create, close, reopen a project on disk', async () => {
   expect(cloudAiRequests.filter((request) => request.feature === 'chat')).toEqual([
     { feature: 'chat', model: 'gpt-5.4-mini', stream: true, auth: `Bearer ${CLOUD_SESSION_TOKEN}` }
   ])
-  await page.getByRole('button', { name: 'Settings' }).click()
+  // F-15.5: the balance in the stream's `done` reached the renderer by itself — no Settings
+  // visit, no Refresh — and the charge took it under $1.00, so the status bar offers the way to
+  // the Account tab, where the meter shows the same figure.
+  const creditNotice = page.getByTestId('credit-notice')
+  await expect(creditNotice).toHaveText(`Cloud credits low: ${balanceText(cloudBalanceMicros)}`)
+  await creditNotice.click()
+  await expect(settingsDialog).toBeVisible()
+  await expect(settingsDialog.getByRole('tab', { name: 'Account' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  await expect(settingsDialog.getByTestId('account-credit-balance')).toHaveText(
+    balanceText(cloudBalanceMicros)
+  )
+  await expect(settingsDialog.getByTestId('account-period-spent')).toHaveText(
+    balanceText(CLOUD_PERIOD_SPEND.micros)
+  )
+  await expect(settingsDialog.getByTestId('account-run-out')).toContainText('left at this pace')
+  await expect(settingsDialog.getByTestId('account-credit-warning')).toHaveText(
+    `Cloud credits low: ${balanceText(cloudBalanceMicros)}`
+  )
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   await settingsDialog.getByTestId('ai-source-ownKey').click()
   await expect.poll(async () => (await aiSettings()).source).toBe('ownKey')

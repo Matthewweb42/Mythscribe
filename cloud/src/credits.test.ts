@@ -19,6 +19,7 @@ const USER_ID = 'user-1'
 const TOKEN = 'session-token'
 const SECRET = 'lemon-webhook-secret'
 const START = new Date('2026-09-19T12:00:00.000Z')
+const DAY_MS = 24 * 60 * 60_000
 
 const PACKS: ConfiguredPack[] = [
   { variantId: '111', priceCents: 500, url: 'https://mythscribe.lemonsqueezy.com/buy/five' },
@@ -177,6 +178,9 @@ describe('GET /credits', () => {
     expect(body).toEqual({
       balanceMicros: 0,
       spend: [],
+      periodDays: 30,
+      periodSpend: [],
+      periodFirstChargeAt: null,
       packs: [
         { variantId: '111', priceCents: 500 },
         { variantId: '222', priceCents: 2000 }
@@ -238,6 +242,69 @@ describe('GET /credits', () => {
       { feature: 'chat', micros: 15_000, requests: 1, tokens: 2500 },
       { feature: 'ghostText', micros: 1800, requests: 2, tokens: 2200 }
     ])
+    // Everything was charged just now, so the period breakdown is the lifetime one.
+    expect(body.periodSpend).toEqual(body.spend)
+  })
+
+  it('reports the last 30 days separately from all time', async () => {
+    // Older than the period: lifetime spend counts it, the meter does not.
+    clock = START.getTime() - 40 * DAY_MS
+    await meterRequest(deps, USER_ID, {
+      feature: 'ghostText',
+      model: 'gpt-5.4-mini',
+      tokensIn: 1000,
+      tokensOut: 100,
+      requestId: 'req-old'
+    })
+    clock = START.getTime() - 20 * DAY_MS
+    await meterRequest(deps, USER_ID, {
+      feature: 'ghostText',
+      model: 'gpt-5.4-mini',
+      tokensIn: 1000,
+      tokensOut: 100,
+      requestId: 'req-in-window'
+    })
+    clock = START.getTime() - 5 * DAY_MS
+    await meterRequest(deps, USER_ID, {
+      feature: 'chat',
+      model: 'gpt-5.4',
+      tokensIn: 2000,
+      tokensOut: 500,
+      requestId: 'req-recent'
+    })
+    clock = START.getTime()
+
+    const body = await credits()
+
+    expect(body.periodDays).toBe(30)
+    expect(body.spend).toEqual([
+      { feature: 'chat', micros: 15_000, requests: 1, tokens: 2500 },
+      { feature: 'ghostText', micros: 1800, requests: 2, tokens: 2200 }
+    ])
+    expect(body.periodSpend).toEqual([
+      { feature: 'chat', micros: 15_000, requests: 1, tokens: 2500 },
+      { feature: 'ghostText', micros: 900, requests: 1, tokens: 1100 }
+    ])
+    // The oldest charge inside the window, not the oldest charge of the account.
+    expect(body.periodFirstChargeAt).toBe(START.getTime() - 20 * DAY_MS)
+  })
+
+  it('has no period spend or first charge when nothing was spent in the last 30 days', async () => {
+    clock = START.getTime() - 40 * DAY_MS
+    await meterRequest(deps, USER_ID, {
+      feature: 'chat',
+      model: 'gpt-5.4',
+      tokensIn: 2000,
+      tokensOut: 500,
+      requestId: 'req-old'
+    })
+    clock = START.getTime()
+
+    const body = await credits()
+
+    expect(body.spend).toEqual([{ feature: 'chat', micros: 15_000, requests: 1, tokens: 2500 }])
+    expect(body.periodSpend).toEqual([])
+    expect(body.periodFirstChargeAt).toBeNull()
   })
 })
 
