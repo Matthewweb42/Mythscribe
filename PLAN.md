@@ -241,7 +241,9 @@ Deliberately small; a solo side business cannot run a big service:
   `wrangler secret put`; `cloud/.dev.vars` locally); it never ships in the desktop app, which
   only ever holds the author's own key or a MythScribe session token.
 - **Entitlements**: signed license token cached in the app with an offline grace period (say 14
-  days) so writing never blocks on the network.
+  days) so writing never blocks on the network. Since Cloud became prepaid credits, the only
+  entitlement is the Supporter license, so the token is built with it (F-15.6 folded into F-15.9
+  on 2026-09-21); the account session already survives being offline.
 - **Ops**: uptime monitor, error tracking (Sentry, content-scrubbed), a status page, a support
   inbox. Budget a few hours a month.
 
