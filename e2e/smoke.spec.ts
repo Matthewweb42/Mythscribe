@@ -643,7 +643,8 @@ test('create, close, reopen a project on disk', async () => {
     dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
   }, projectPath)
 
-  // F-1.2: two-step wizard — name, then format cards. Back keeps the name.
+  // F-1.2: the wizard — name, then format cards. Back keeps the name. F-15.11 adds a third
+  // step: where AI requests go.
   await page.getByRole('button', { name: 'New project' }).click()
   const wizard = page.getByRole('dialog')
   await wizard.getByRole('button', { name: 'Next' }).click()
@@ -657,9 +658,37 @@ test('create, close, reopen a project on disk', async () => {
   await wizard.getByRole('button', { name: 'Back' }).click()
   await expect(wizard.getByRole('textbox', { name: 'Project name' })).toHaveValue('Smoke Novel')
   await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  // F-15.11: own key is the default; the Cloud card says what it needs (nobody is signed in yet).
+  await expect(wizard).toContainText('Step 3 of 3')
+  await expect(wizard.getByRole('radio', { name: /^my own key/i })).toBeChecked()
+  await wizard.getByText('MythScribe Cloud', { exact: true }).click()
+  await expect(wizard.getByRole('radio', { name: /^mythscribe cloud/i })).toBeChecked()
+  await expect(wizard.getByTestId('wizard-source-hint')).toContainText(
+    'Sign in and buy credits under Settings › Account'
+  )
   await wizard.getByRole('button', { name: 'Create' }).click()
 
   await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  // F-15.11: the choice was stored with the project, the AI tab opens on it with the Cloud rate
+  // beside each model (2x the provider price), and it switches back: the rest of this test runs
+  // on the author's own key.
+  expect((await aiSettings()).source).toBe('cloud')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const firstSettings = page.getByRole('dialog', { name: 'Settings' })
+  await firstSettings.getByRole('tab', { name: 'AI' }).click()
+  await expect(firstSettings.getByTestId('ai-source-cloud')).toHaveAttribute('aria-checked', 'true')
+  await expect(firstSettings.getByTestId('ai-model-rate-fast')).toHaveText(
+    'MythScribe Cloud rate: $0.50 input, $4.00 output per 1M tokens.'
+  )
+  await expect(firstSettings.getByTestId('ai-model-rate-strong')).toHaveText(
+    'MythScribe Cloud rate: $2.50 input, $20.00 output per 1M tokens.'
+  )
+  await firstSettings.getByTestId('ai-source-ownKey').click()
+  await expect(firstSettings.getByTestId('ai-model-rate-fast')).toHaveCount(0)
+  await expect.poll(async () => (await aiSettings()).source).toBe('ownKey')
+  await firstSettings.getByRole('button', { name: 'Close settings' }).click()
+  await expect(firstSettings).toHaveCount(0)
   // F-1.5: the shell header and window title carry the project name and format.
   await expect(page).toHaveTitle('Smoke Novel — MythScribe')
   await expect(page.locator('header')).toContainText('Web novel')

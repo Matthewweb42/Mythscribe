@@ -567,6 +567,25 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
     expect(screen.getByTestId('ai-test-result')).toHaveTextContent('Connected. gpt-fake answered.')
   })
 
+  it('shows the Cloud rate beside each model only while Cloud is the source (F-15.11)', async () => {
+    await open({
+      ...NO_KEY,
+      models: { openai: DEFAULT_MODELS, cloud: { fast: 'gpt-5.4-mini', strong: 'my-finetune' } }
+    })
+    expect(screen.queryByTestId('ai-model-rate-fast')).not.toBeInTheDocument()
+    await userEvent.click(sourceRadio('cloud'))
+    // 0.25 and 2.00 per 1M at the provider, doubled by CLOUD_RATE_MULTIPLIER.
+    expect(await screen.findByTestId('ai-model-rate-fast')).toHaveTextContent(
+      'MythScribe Cloud rate: $0.50 input, $4.00 output per 1M tokens.'
+    )
+    // A model outside the rate table cannot be billed, so the proxy refuses it; the line says so.
+    expect(screen.getByTestId('ai-model-rate-strong')).toHaveTextContent(
+      'MythScribe Cloud has no rate for this model'
+    )
+    await userEvent.click(sourceRadio('ownKey'))
+    await waitFor(() => expect(screen.queryByTestId('ai-model-rate-fast')).not.toBeInTheDocument())
+  })
+
   it('edits the Cloud map, leaving the key map alone', async () => {
     await open({
       ...NO_KEY,

@@ -217,12 +217,20 @@ export function registerHandlers({
 
   register('app:info', () => ({ version: app.getVersion(), platform: process.platform }))
 
-  register('project:create', async ({ name, format, directory }) => {
+  register('project:create', async ({ name, format, directory, aiSource }) => {
     const folder = directory
       ? projectFolderFor(directory, name)
       : await dialogs.chooseProjectSavePath(name)
     if (!folder) return null
-    return manager.create(folder, name, format)
+    const info = manager.create(folder, name, format)
+    // F-15.11: the wizard's choice is written before this answers, so the renderer's first
+    // `aiSettings:get` already reads it.
+    if (aiSource !== undefined) {
+      const orm = manager.require().connection.orm
+      const settings = getAiSettings(orm)
+      if (settings.source !== aiSource) setAiSettings(orm, { ...settings, source: aiSource })
+    }
+    return info
   })
 
   register('project:open', async ({ path }) => {

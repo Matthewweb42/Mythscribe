@@ -723,6 +723,26 @@ describe('aiSettings:get / aiSettings:set (F-14.4)', () => {
     )
   })
 
+  it("stores the wizard's AI source with the new project and changes nothing else (F-15.11)", async () => {
+    await invoke('project:create', {
+      name: 'Cloudy',
+      format: 'novel',
+      directory: tmp,
+      aiSource: 'cloud'
+    })
+    expect(await invoke('aiSettings:get', undefined)).toEqual({
+      ...defaultAiSettings(),
+      source: 'cloud'
+    })
+    await invoke('project:create', {
+      name: 'Keyed',
+      format: 'novel',
+      directory: tmp,
+      aiSource: 'ownKey'
+    })
+    expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
+  })
+
   it('answers the defaults (dial Off) for a new project, then what set wrote, also after a reopen', async () => {
     const created = await invoke('project:create', {
       name: 'Dial',

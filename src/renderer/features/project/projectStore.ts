@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { AiSource } from '@shared/aiSettings'
 import type { NovelFormat, ProjectInfo, RecentProject } from '@shared/ipc/contract'
 import { ipc } from '@renderer/lib/ipc'
 import { flushPendingSaves } from './pendingSaves'
@@ -9,7 +10,13 @@ interface ProjectState {
   busy: boolean
   recents: RecentProject[]
   init: () => Promise<void>
-  create: (name: string, format: NovelFormat, directory?: string) => Promise<ProjectInfo | null>
+  /** `aiSource` is the wizard's AI source choice (F-15.11); omitted keeps the project default. */
+  create: (
+    name: string,
+    format: NovelFormat,
+    directory?: string,
+    aiSource?: AiSource
+  ) => Promise<ProjectInfo | null>
   open: (path?: string) => Promise<ProjectInfo | null>
   close: () => Promise<void>
   /**
@@ -46,10 +53,10 @@ export const useProjectStore = create<ProjectState>((set) => {
       set({ current, ready: true })
     },
 
-    create(name, format, directory) {
+    create(name, format, directory, aiSource) {
       return run(async () => {
         await flushPendingSaves()
-        const info = await ipc().invoke('project:create', { name, format, directory })
+        const info = await ipc().invoke('project:create', { name, format, directory, aiSource })
         if (info) set({ current: info })
         return info
       })

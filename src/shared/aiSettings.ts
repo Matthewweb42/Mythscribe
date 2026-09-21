@@ -59,9 +59,9 @@ export const AI_SOURCE_LABEL: Record<AiSource, string> = {
   cloud: 'MythScribe Cloud'
 }
 
-/** One-line meaning per option; shown under each radio in the AI tab. */
+/** One-line meaning per option; shown under each radio in the AI tab and in the new-project wizard (F-15.11). */
 export const AI_SOURCE_MEANING: Record<AiSource, string> = {
-  ownKey: 'Calls go straight to OpenAI with the key below; nothing is paid to MythScribe.',
+  ownKey: 'Calls go straight to OpenAI with your own API key; nothing is paid to MythScribe.',
   cloud: 'Calls go through MythScribe Cloud and are charged to your credits at the published rate.'
 }
 

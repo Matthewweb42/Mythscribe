@@ -121,7 +121,7 @@ describe('AccountSettingsTab (F-15.2)', () => {
     render(<AccountSettingsTab />)
     expect(
       screen.getByText(
-        'Optional. You never need an account to write. It will connect MythScribe Cloud, which is not available yet.'
+        'Optional. You never need an account to write. It connects MythScribe Cloud, the paid AI source you can pick per project.'
       )
     ).toBeInTheDocument()
   })

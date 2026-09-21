@@ -13,7 +13,7 @@ import {
   GHOST_AFTER_CHARS,
   GHOST_BEFORE_CHARS
 } from '../ai'
-import { AiSettings } from '../aiSettings'
+import { AiSettings, AiSource } from '../aiSettings'
 import {
   CHAT_HISTORY_TURNS,
   CHAT_MESSAGE_MAX,
@@ -468,7 +468,9 @@ export const contract = {
       name: z.string().trim().min(1).max(PROJECT_NAME_MAX),
       format: NovelFormat,
       /** When omitted, main shows a native save dialog. */
-      directory: z.string().optional()
+      directory: z.string().optional(),
+      /** Where the new project's AI requests go (F-15.11, the wizard's third step); omitted keeps the `ownKey` default. */
+      aiSource: AiSource.optional()
     }),
     output: ProjectInfo.nullable()
   },

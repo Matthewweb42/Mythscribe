@@ -14,7 +14,7 @@ const BUTTON =
 
 /** The one promise the tab makes, before any field: the account is never needed to write. */
 const INTRO =
-  'Optional. You never need an account to write. It will connect MythScribe Cloud, which is not available yet.'
+  'Optional. You never need an account to write. It connects MythScribe Cloud, the paid AI source you can pick per project.'
 
 const clockTime = (iso: string): string =>
   new Date(iso).toLocaleTimeString(undefined, { timeStyle: 'short' })

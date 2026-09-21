@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
+import type { AiSource } from '@shared/aiSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, levelLabel, sectionLabel, type HierarchyLevel } from '@shared/labels'
 import { LAYOUT_LIMITS } from '@shared/layout'
@@ -271,6 +272,8 @@ function WelcomeScreen(): React.JSX.Element {
   // starts on the buttons again.
   const creating = useWelcomeStore((s) => s.creating)
   const setCreating = useWelcomeStore((s) => s.setCreating)
+  // F-15.11: the wizard's Cloud option says who is signed in; the account is app-wide.
+  const account = useAccountStore((s) => s.status)
 
   useEffect(() => {
     loadRecents().catch((err: unknown) => toast.error(describeError(err)))
@@ -278,8 +281,8 @@ function WelcomeScreen(): React.JSX.Element {
   useEffect(() => () => setCreating(false), [setCreating])
 
   /** Failures propagate: the wizard shows them inline where the author is looking. */
-  const onCreate = async (name: string, format: NovelFormat): Promise<void> => {
-    const info = await create(name, format)
+  const onCreate = async (name: string, format: NovelFormat, aiSource: AiSource): Promise<void> => {
+    const info = await create(name, format, undefined, aiSource)
     if (info) toast.success(`Created "${info.name}"`)
   }
 
@@ -313,7 +316,12 @@ function WelcomeScreen(): React.JSX.Element {
         <p className="mt-2 mb-0 text-sm text-fg-muted">Your book, your voice, on your machine.</p>
       </div>
       {creating ? (
-        <CreateProjectWizard busy={busy} onCancel={() => setCreating(false)} onCreate={onCreate} />
+        <CreateProjectWizard
+          busy={busy}
+          signedInEmail={account?.state === 'signedIn' ? account.email : null}
+          onCancel={() => setCreating(false)}
+          onCreate={onCreate}
+        />
       ) : (
         <div className="flex w-full flex-col gap-2">
           <button

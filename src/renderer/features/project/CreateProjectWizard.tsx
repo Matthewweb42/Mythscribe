@@ -1,8 +1,28 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { AI_SOURCE_LABEL, AI_SOURCE_MEANING, AiSource } from '@shared/aiSettings'
 import { PROJECT_NAME_MAX, type NovelFormat } from '@shared/ipc/contract'
 import { PROJECT_FORMATS } from './formats'
 
-type Step = 'name' | 'format'
+type Step = 'name' | 'format' | 'source'
+
+const STEPS: readonly Step[] = ['name', 'format', 'source']
+
+const STEP_TITLE: Record<Step, string> = {
+  name: 'New project',
+  format: 'Choose a format',
+  source: 'Choose an AI source'
+}
+
+/**
+ * What the choice asks of the author next (F-15.11). Neither option is a dead end: the key and
+ * the account are both set up in Settings once the project is open, and AI installs at Off.
+ */
+const sourceHint = (source: AiSource, signedInEmail: string | null): string =>
+  source === 'ownKey'
+    ? 'Add or change your OpenAI key under Settings › AI once the project is open.'
+    : signedInEmail !== null
+      ? `Signed in as ${signedInEmail}. Buy credits under Settings › Account.`
+      : 'Sign in and buy credits under Settings › Account once the project is open.'
 
 function validateName(name: string): string | null {
   if (name.length === 0) return 'A name is required'
@@ -14,21 +34,30 @@ const SECONDARY_BUTTON =
   'rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-60'
 const PRIMARY_BUTTON =
   'rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60'
+const OPTION =
+  'block cursor-pointer rounded-md border border-line bg-surface px-3 py-2 hover:bg-bg has-checked:border-accent has-focus-visible:outline-2 has-focus-visible:outline-accent'
 
-/** Two-step create-project form (F-1.2): name, then format. The caller owns the save location. */
+/**
+ * Three-step create-project form: name, then format (F-1.2), then where AI requests go
+ * (F-15.11; switchable later in the AI tab). The caller owns the save location.
+ */
 export function CreateProjectWizard({
   busy,
+  signedInEmail,
   onCancel,
   onCreate
 }: {
   busy: boolean
+  /** The MythScribe account this machine is signed in to, or null; only the Cloud hint reads it. */
+  signedInEmail: string | null
   onCancel: () => void
-  onCreate: (name: string, format: NovelFormat) => Promise<void>
+  onCreate: (name: string, format: NovelFormat, aiSource: AiSource) => Promise<void>
 }): React.JSX.Element {
   const titleId = useId()
   const [step, setStep] = useState<Step>('name')
   const [name, setName] = useState('')
   const [format, setFormat] = useState<NovelFormat>('novel')
+  const [aiSource, setAiSource] = useState<AiSource>('ownKey')
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fieldsetRef = useRef<HTMLFieldSetElement>(null)
@@ -57,9 +86,13 @@ export function CreateProjectWizard({
       setStep('format')
       return
     }
+    if (step === 'format') {
+      setStep('source')
+      return
+    }
     setError(null)
     try {
-      await onCreate(trimmed, format)
+      await onCreate(trimmed, format, aiSource)
     } catch (err) {
       // The author is looking at this form, so the failure belongs here, not in a toast.
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -75,10 +108,10 @@ export function CreateProjectWizard({
       className="w-full rounded-lg border border-line bg-surface-raised p-5 text-left shadow-panel"
     >
       <h2 id={titleId} className="m-0 text-base font-semibold">
-        {step === 'name' ? 'New project' : 'Choose a format'}
+        {STEP_TITLE[step]}
       </h2>
       <p className="mt-1 mb-0 text-xs text-fg-muted">
-        {step === 'name' ? 'Step 1 of 2' : 'Step 2 of 2'}
+        {`Step ${STEPS.indexOf(step) + 1} of ${STEPS.length}`}
       </p>
 
       {step === 'name' ? (
@@ -113,30 +146,53 @@ export function CreateProjectWizard({
         </>
       ) : (
         <>
-          <fieldset ref={fieldsetRef} className="mt-4 m-0 flex flex-col gap-2 border-0 p-0">
-            <legend className="mb-2 p-0 text-sm font-medium">Format</legend>
-            {PROJECT_FORMATS.map((option) => (
-              <label
-                key={option.id}
-                className="block cursor-pointer rounded-md border border-line bg-surface px-3 py-2 hover:bg-bg has-checked:border-accent has-focus-visible:outline-2 has-focus-visible:outline-accent"
-              >
-                <input
-                  type="radio"
-                  name="format"
-                  value={option.id}
-                  className="sr-only"
-                  checked={format === option.id}
-                  onChange={() => setFormat(option.id)}
-                />
-                <span className="block text-sm font-medium">{option.label}</span>
-                <span className="block text-sm text-fg-muted">{option.summary}</span>
-                <span className="mt-1 block text-xs text-fg-subtle">{option.structure}</span>
-              </label>
-            ))}
-          </fieldset>
-          <p className="mt-3 mb-0 text-xs text-fg-muted">
-            Next, choose where to save it (defaults to Documents/MythScribe).
-          </p>
+          {step === 'format' ? (
+            <fieldset ref={fieldsetRef} className="mt-4 m-0 flex flex-col gap-2 border-0 p-0">
+              <legend className="mb-2 p-0 text-sm font-medium">Format</legend>
+              {PROJECT_FORMATS.map((option) => (
+                <label key={option.id} className={OPTION}>
+                  <input
+                    type="radio"
+                    name="format"
+                    value={option.id}
+                    className="sr-only"
+                    checked={format === option.id}
+                    onChange={() => setFormat(option.id)}
+                  />
+                  <span className="block text-sm font-medium">{option.label}</span>
+                  <span className="block text-sm text-fg-muted">{option.summary}</span>
+                  <span className="mt-1 block text-xs text-fg-subtle">{option.structure}</span>
+                </label>
+              ))}
+            </fieldset>
+          ) : (
+            <>
+              <fieldset ref={fieldsetRef} className="mt-4 m-0 flex flex-col gap-2 border-0 p-0">
+                <legend className="mb-2 p-0 text-sm font-medium">AI source</legend>
+                {AiSource.options.map((option) => (
+                  <label key={option} className={OPTION}>
+                    <input
+                      type="radio"
+                      name="aiSource"
+                      value={option}
+                      className="sr-only"
+                      checked={aiSource === option}
+                      onChange={() => setAiSource(option)}
+                    />
+                    <span className="block text-sm font-medium">{AI_SOURCE_LABEL[option]}</span>
+                    <span className="block text-sm text-fg-muted">{AI_SOURCE_MEANING[option]}</span>
+                  </label>
+                ))}
+              </fieldset>
+              <p data-testid="wizard-source-hint" className="mt-3 mb-0 text-xs text-fg-muted">
+                {sourceHint(aiSource, signedInEmail)} AI stays off until you turn it on, and you can
+                switch the source any time in Settings › AI.
+              </p>
+              <p className="mt-2 mb-0 text-xs text-fg-muted">
+                Next, choose where to save it (defaults to Documents/MythScribe).
+              </p>
+            </>
+          )}
           {error ? (
             <p role="alert" className="mt-2 mb-0 text-sm text-danger">
               {error}
@@ -148,7 +204,7 @@ export function CreateProjectWizard({
               disabled={busy}
               onClick={() => {
                 setError(null)
-                setStep('name')
+                setStep(step === 'source' ? 'format' : 'name')
               }}
               className={SECONDARY_BUTTON}
             >
@@ -158,7 +214,7 @@ export function CreateProjectWizard({
               Cancel
             </button>
             <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
-              Create
+              {step === 'source' ? 'Create' : 'Next'}
             </button>
           </div>
         </>

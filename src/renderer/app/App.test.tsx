@@ -155,12 +155,14 @@ function fire<E extends EventName>(event: E, payload: EventPayload<E>): void {
   act(() => listener(payload as never))
 }
 
-async function fillWizard(name: string, format: RegExp): Promise<void> {
+async function fillWizard(name: string, format: RegExp, source?: RegExp): Promise<void> {
   await userEvent.click(await screen.findByRole('button', { name: /new project/i }))
   await userEvent.type(await screen.findByRole('textbox', { name: 'Project name' }), name)
   await userEvent.click(screen.getByRole('button', { name: 'Next' }))
   await userEvent.click(await screen.findByRole('radio', { name: format }))
-  await userEvent.click(screen.getByRole('button', { name: 'Create' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+  if (source) await userEvent.click(await screen.findByRole('radio', { name: source }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Create' }))
 }
 
 const createdScene = {
@@ -182,12 +184,14 @@ describe('App', () => {
   it('shows the welcome screen, creates a project through the wizard, then closes it', async () => {
     const invoke = install({ 'project:create': { ...info, format: 'epic' } })
     render(<App />)
-    await fillWizard('Smoke', /^epic/i)
+    await fillWizard('Smoke', /^epic/i, /^mythscribe cloud/i)
     expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
+    // F-15.11: the wizard's third step travels with the create, so main stores it with the project.
     expect(invoke).toHaveBeenCalledWith('project:create', {
       name: 'Smoke',
       format: 'epic',
-      directory: undefined
+      directory: undefined,
+      aiSource: 'cloud'
     })
     expect(screen.getByRole('status')).toHaveTextContent('Created "Smoke"')
 
@@ -642,7 +646,11 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     await userEvent.keyboard('{Control>},{/Control}')
     const dialog = await screen.findByRole('dialog', { name: 'Settings' })
-    expect(within(dialog).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Account'])
+    expect(
+      within(dialog)
+        .getAllByRole('tab')
+        .map((t) => t.textContent)
+    ).toEqual(['Account'])
     expect(
       within(dialog).getByText('Optional. You never need an account to write.', { exact: false })
     ).toBeInTheDocument()
@@ -689,7 +697,7 @@ describe('App', () => {
     install({ 'project:create': new Error('Folder is not empty: /x') })
     render(<App />)
     await fillWizard('Smoke', /^novel/i)
-    const wizard = screen.getByRole('dialog', { name: 'Choose a format' })
+    const wizard = screen.getByRole('dialog', { name: 'Choose an AI source' })
     expect(await within(wizard).findByRole('alert')).toHaveTextContent('Folder is not empty: /x')
     expect(screen.getByRole('status')).toBeEmptyDOMElement()
   })
@@ -701,10 +709,11 @@ describe('App', () => {
     expect(invoke).toHaveBeenCalledWith('project:create', {
       name: 'Smoke',
       format: 'novel',
-      directory: undefined
+      directory: undefined,
+      aiSource: 'ownKey'
     })
     expect(screen.getByRole('status')).toBeEmptyDOMElement()
-    expect(screen.getByRole('dialog', { name: 'Choose a format' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Choose an AI source' })).toBeInTheDocument()
   })
 
   it('Cancel in the wizard returns to the welcome buttons', async () => {

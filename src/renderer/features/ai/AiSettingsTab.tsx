@@ -12,6 +12,7 @@ import {
   type Tier
 } from '@shared/ai'
 import { AI_SOURCE_LABEL, AI_SOURCE_MEANING, AiSource, isFeatureAllowed } from '@shared/aiSettings'
+import { cloudRateFor } from '@shared/cloudRates'
 import { useAccountStore } from '@renderer/features/account/accountStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -70,7 +71,7 @@ const atDefaults = (models: AiModelMap): boolean =>
  * table first (F-14.4, loaded with the project by `App.tsx`), the writing presets (F-5.2,
  * loaded the same way), "Summarize all scenes" (F-5.13), the voice profile (F-14.1), the author rules (F-14.2), the provenance ledger (F-14.6), then the
  * provider, the key field with Save and Clear, the masked hint once a key is saved, the model
- * per tier with "Reset to defaults" (F-5.11),
+ * per tier with "Reset to defaults" (F-5.11) and, on MythScribe Cloud, its rate (F-15.11),
  * "Test connection" with its result inline, the Usage block with the daily cap (F-5.14), the
  * privacy line, and a warning when the key can only be obfuscated (no keyring) or not stored
  * at all. The uncommitted key lives in local state and is dropped as soon as it is saved, so
@@ -95,8 +96,8 @@ export function AiSettingsTab(): React.JSX.Element {
     s.settings === null ? false : isFeatureAllowed(s.settings, 'summary')
   )
   const indexAll = useIndexingStore((s) => s.indexAll)
-  // F-15.4: where this project's requests go. The picker lives here because without it the
-  // Cloud proxy is unreachable; F-15.11 adds the wizard step and the rate beside each model.
+  // F-15.4: where this project's requests go; the new-project wizard sets the first value
+  // (F-15.11) and this picker switches it any time.
   const settings = useAiSettingsStore((s) => s.settings)
   const updateSettings = useAiSettingsStore((s) => s.update)
   const account = useAccountStore((s) => s.status)
@@ -259,6 +260,7 @@ export function AiSettingsTab(): React.JSX.Element {
             tier={tier}
             value={models?.[tier] ?? ''}
             disabled={models === null || busy}
+            showCloudRate={source === 'cloud' && models !== null}
             onCommit={(model) => saveModel(tier, model)}
           />
         ))}
@@ -508,17 +510,21 @@ function DailyCapField({
  * One tier's model id, committed on blur or Enter (F-5.11). `draft` holds only text that is not
  * (yet) the saved value and is dropped when the value changes underneath (a save or a reset),
  * so the field always follows the store; a blank or unchanged commit restores the value without
- * a write, and a refused one shows the saved value again once the toast is up.
+ * a write, and a refused one shows the saved value again once the toast is up. On MythScribe
+ * Cloud the saved model's rate sits under it (F-15.11), so the author sees what a tier costs
+ * before choosing it; a model outside the rate table cannot be billed, and the line says so.
  */
 function ModelField({
   tier,
   value,
   disabled,
+  showCloudRate,
   onCommit
 }: {
   tier: Tier
   value: string
   disabled: boolean
+  showCloudRate: boolean
   onCommit: (model: string) => Promise<void>
 }): React.JSX.Element {
   const hintId = useId()
@@ -565,7 +571,27 @@ function ModelField({
       <p id={hintId} className="m-0 pl-27 text-xs text-fg-muted">
         {TIER_USE[tier]}
       </p>
+      {showCloudRate ? <CloudRateLine tier={tier} model={value} /> : null}
     </div>
+  )
+}
+
+/** The MythScribe Cloud rate of one tier's saved model, from the one published table (`cloudRates.ts`). */
+function CloudRateLine({ tier, model }: { tier: Tier; model: string }): React.JSX.Element {
+  const rate = cloudRateFor(model)
+  return rate.priced ? (
+    <p data-testid={`ai-model-rate-${tier}`} className="m-0 pl-27 text-xs text-fg-muted">
+      {`MythScribe Cloud rate: ${formatUsd(rate.inUsdPerM)} input, ${formatUsd(rate.outUsdPerM)} output per 1M tokens.`}
+    </p>
+  ) : (
+    <p
+      role="alert"
+      data-testid={`ai-model-rate-${tier}`}
+      className="m-0 pl-27 text-xs text-warning"
+    >
+      MythScribe Cloud has no rate for this model and will not answer with it. Pick one from the
+      rates table on the Account tab.
+    </p>
   )
 }
 
