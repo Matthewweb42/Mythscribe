@@ -1,6 +1,13 @@
 import { z } from 'zod'
 import { AiFeatureId, ModelName } from './ai'
 import { USAGE_PERIOD_DAYS } from './cloudUsage'
+import {
+  CrashReport,
+  DIAGNOSTIC_QUEUE_MAX,
+  DIAGNOSTIC_ROWS_MAX,
+  DiagnosticCountRow,
+  DiagnosticsEnvironment
+} from './diagnostics'
 
 /**
  * The wire contract between the desktop app and the MythScribe Cloud Worker (F-15.2), imported
@@ -249,3 +256,20 @@ export const AiStreamEvent = z.discriminatedUnion('type', [
 export type AiStreamEvent = z.infer<typeof AiStreamEvent>
 
 export const AI_STREAM_CONTENT_TYPE = 'application/x-ndjson'
+
+/**
+ * Opt-in diagnostics (F-15.8). One route, `POST /diagnostics`, and no `Authorization` header: a
+ * report is anonymous by design, so it carries no session, no install id, and nothing that links
+ * two reports. The shapes come from `diagnostics.ts` and are validated by the app before sending
+ * and by the Worker before storing, so nothing outside the counter enum and the scrubbed crash
+ * fields can cross the wire. The Worker answers 204 and stores only aggregates.
+ */
+
+/** Bytes the Worker reads at most; a longer body is refused outright. */
+export const DIAGNOSTICS_BODY_MAX = 32 * 1024
+
+export const DiagnosticsBody = DiagnosticsEnvironment.extend({
+  counts: z.array(DiagnosticCountRow).max(DIAGNOSTIC_ROWS_MAX),
+  crashes: z.array(CrashReport).max(DIAGNOSTIC_QUEUE_MAX)
+})
+export type DiagnosticsBody = z.infer<typeof DiagnosticsBody>

@@ -67,7 +67,8 @@ describe('SettingsDialog (F-7.5)', () => {
       'Editor',
       'AI',
       'Account',
-      'Updates'
+      'Updates',
+      'Diagnostics'
     ])
     expect(tab('Editor')).toHaveAttribute('aria-selected', 'true')
     expect(tab('Editor')).toHaveFocus()
@@ -116,8 +117,13 @@ describe('SettingsDialog (F-7.5)', () => {
 
   it('falls back to the first tab when the named one is not shown (F-15.5)', () => {
     render(<SettingsDialog format={null} onClose={vi.fn()} initialTab="editor" />)
-    // F-15.7: Updates is app-wide too, so the welcome screen shows it beside Account.
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Account', 'Updates'])
+    // F-15.7 / F-15.8: Updates and Diagnostics are app-wide too, so the welcome screen shows
+    // them beside Account.
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
+      'Account',
+      'Updates',
+      'Diagnostics'
+    ])
     expect(tab('Account')).toHaveAttribute('aria-selected', 'true')
   })
 

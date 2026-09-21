@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, defaultAiModels } from '@shared/ai'
+import { defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { RELEASE_NOTES_MAX, defaultUpdateSettings } from '@shared/updates'
 import { defaultAiUsageState } from '../ai/dailyCap'
@@ -42,7 +43,8 @@ describe('AppStateStore', () => {
       layout: defaultLayout(),
       models: defaultAiModels(),
       aiUsage: defaultAiUsageState(),
-      updates: defaultUpdateSettings()
+      updates: defaultUpdateSettings(),
+      diagnostics: defaultDiagnosticsSettings()
     })
   })
 
@@ -209,6 +211,35 @@ describe('AppStateStore', () => {
       }))
     ).toThrow()
     expect(new AppStateStore(file).get().updates).toEqual(updates)
+  })
+
+  it('parses a file written before F-15.8 (no diagnostics) to the switch being off', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().diagnostics).toEqual(defaultDiagnosticsSettings())
+    expect(EMPTY_APP_STATE.diagnostics).toEqual(defaultDiagnosticsSettings())
+  })
+
+  it('round-trips the diagnostics switch and its counts, and refuses an unknown counter', () => {
+    const store = new AppStateStore(file)
+    const diagnostics = {
+      enabled: true,
+      counts: { '2026-09-21': { 'app.launch': 2, 'ai.request.ghostText': 40 } },
+      queue: [],
+      lastSentDay: '2026-09-20'
+    }
+    expect(store.update((s) => ({ ...s, diagnostics })).diagnostics).toEqual(diagnostics)
+    expect(new AppStateStore(file).get().diagnostics).toEqual(diagnostics)
+    // A counter the enum does not know — which only a hand-edited file can hold, since the
+    // type refuses one — is rejected on the way back out too.
+    const invented: Record<string, number> = { 'scene.opened': 1 }
+    expect(() =>
+      store.update((s) => ({
+        ...s,
+        diagnostics: { ...diagnostics, counts: { '2026-09-21': invented } }
+      }))
+    ).toThrow()
+    expect(new AppStateStore(file).get().diagnostics).toEqual(diagnostics)
   })
 
   it('warns and falls back to the empty state when the stored model mapping is invalid', () => {

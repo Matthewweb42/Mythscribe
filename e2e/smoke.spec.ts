@@ -2907,6 +2907,29 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByRole('status')).toContainText('Not a MythScribe project')
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
 
+  // F-15.8: diagnostics are app-wide, so the tab is there on the welcome screen, and they are off
+  // on every install. The preview is the report verbatim, and the switch survives the dialog
+  // closing because main stores it in app state. Nothing leaves the machine here: this build has
+  // no diagnostics endpoint, so a flush has nowhere to go.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'Diagnostics' }).click()
+  const diagnosticsSwitch = settingsDialog.getByTestId('diagnostics-enabled')
+  await expect(diagnosticsSwitch).not.toBeChecked()
+  await expect(settingsDialog.getByTestId('diagnostics-pending')).toHaveCount(0)
+  await diagnosticsSwitch.check()
+  await expect(diagnosticsSwitch).toBeChecked()
+  await settingsDialog.getByRole('button', { name: 'See exactly what would be sent' }).click()
+  const pending = settingsDialog.getByTestId('diagnostics-pending')
+  await expect(pending).toContainText(`"appVersion": "${packageVersion}"`)
+  await expect(pending).toContainText('"crashes": []')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'Diagnostics' }).click()
+  await expect(settingsDialog.getByTestId('diagnostics-enabled')).toBeChecked()
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+
   // F-1.4: closing the OS window with a project open lets the renderer flush first, then main
   // closes the project and the window; with no windows left the app quits.
   await recents.getByRole('button', { name: 'Smoke Novel', exact: true }).click()

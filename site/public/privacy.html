@@ -55,8 +55,21 @@
           A MythScribe project is a folder on your disk containing a database file and an assets
           directory. Your manuscript, notes, tags, settings, and AI usage records are stored there
           and nowhere else. The app does not require an account, does not sync your project
-          anywhere, and works offline. It sends no telemetry, crash reports, or usage analytics to
-          us.
+          anywhere, and works offline.
+        </p>
+        <p>
+          Diagnostics are off when you install, and nothing is recorded until you turn them on in
+          Settings under Diagnostics. With them on, the app sends us two things: crash reports — the
+          kind of error, its message with every quoted phrase, file path, web address, and email
+          address removed, and the stack lines inside MythScribe itself — and counts of a fixed list
+          of actions, such as how many times the app started, a project was opened, an export ran,
+          or an AI feature made a request on a given day. A report also says which MythScribe
+          version, Electron version, operating system, and processor type it came from. It never
+          carries your manuscript, notes, or any other text you wrote, the name of a project,
+          folder, or document, any path on your machine, your account, your email address, or your
+          API key. There is no install identifier and nothing else that ties two reports together,
+          we do not store your IP address, and we keep only the totals, so a report cannot be traced
+          back to you. Turning diagnostics off again deletes whatever was waiting to be sent.
         </p>
         <p>
           AI features are off when you install. They are controlled by a dial in Settings with four

@@ -3,6 +3,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import { AiModels, defaultAiModels } from '@shared/ai'
 import { RecentProjectEntry } from '@shared/ipc/contract'
+import { DiagnosticsSettings, defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { StoredLayout, defaultLayout } from '@shared/layout'
 import { UpdateSettings, defaultUpdateSettings } from '@shared/updates'
 import { AiUsageState, defaultAiUsageState } from '../ai/dailyCap'
@@ -21,7 +22,12 @@ export const AppState = z.object({
   /** F-5.14: the app-wide daily spend cap and the day's tally; defaulted for older files. */
   aiUsage: AiUsageState.default(defaultAiUsageState),
   /** F-15.7: the update channel, the automatic check, and the notes of the last download. */
-  updates: UpdateSettings.default(defaultUpdateSettings)
+  updates: UpdateSettings.default(defaultUpdateSettings),
+  /**
+   * F-15.8: the diagnostics switch (off on every install, including older files) and whatever
+   * it has recorded but not sent. Nothing is recorded while it is off.
+   */
+  diagnostics: DiagnosticsSettings.default(defaultDiagnosticsSettings)
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -31,7 +37,8 @@ export const EMPTY_APP_STATE: AppState = {
   layout: defaultLayout(),
   models: defaultAiModels(),
   aiUsage: defaultAiUsageState(),
-  updates: defaultUpdateSettings()
+  updates: defaultUpdateSettings(),
+  diagnostics: defaultDiagnosticsSettings()
 }
 
 export class AppStateStore {

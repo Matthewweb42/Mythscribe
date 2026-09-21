@@ -5,6 +5,7 @@ import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, levelLabel, sectionLabel, type HierarchyLevel } from '@shared/labels'
 import { LAYOUT_LIMITS } from '@shared/layout'
 import { useAccountStore } from '@renderer/features/account/accountStore'
+import { useDiagnosticsStore } from '@renderer/features/diagnostics/diagnosticsStore'
 import { AboutDialog } from '@renderer/features/shell/AboutDialog'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -95,12 +96,16 @@ export function App(): React.JSX.Element {
     // F-15.7: updates are app-wide too, and main pushes the state from the background check and
     // the download, so the subscription is opened here once rather than by the Settings tab.
     const offUpdates = useUpdateStore.getState().subscribe()
+    // F-15.8: diagnostics are app-wide as well, and main pushes the state after a report is sent,
+    // so the subscription is opened here once rather than by the Settings tab.
+    const offDiagnostics = useDiagnosticsStore.getState().subscribe()
     return () => {
       offClose()
       offFocus()
       offMenu()
       offAccount()
       offUpdates()
+      offDiagnostics()
     }
   }, [])
 

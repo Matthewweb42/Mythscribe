@@ -3,6 +3,7 @@ import path from 'node:path'
 import { app } from 'electron'
 import {
   aiFailure,
+  AiFeatureId,
   testConnectionFailure,
   type AiStatus,
   type AiTestConnectionResult,
@@ -11,6 +12,7 @@ import {
 } from '@shared/ai'
 import { type AiSource, isFeatureAllowed } from '@shared/aiSettings'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl } from '@shared/cloudApi'
+import { aiRequestCounter } from '@shared/diagnostics'
 import type { Background } from '@shared/focus'
 import type {
   AiBetaReaderResult,
@@ -31,6 +33,7 @@ import {
   type SceneSummaryState
 } from '@shared/summary'
 import type { AccountService } from '../account/accountService'
+import type { DiagnosticsService } from '../diagnostics/diagnosticsService'
 import type { UpdateService } from '../updates/updateService'
 import { runBetaReader } from '../ai/betaReader'
 import { runChat } from '../ai/chat'
@@ -130,6 +133,12 @@ export interface HandlerDeps {
    * only ask it questions and forward the author's choices.
    */
   updates: UpdateService
+  /**
+   * F-15.8: opt-in diagnostics. Off on every install; it records nothing until the author turns
+   * it on, and these handlers only read it and forward the switch. Main counts and reports
+   * through the same service at the places that own those events.
+   */
+  diagnostics: DiagnosticsService
   dialogs: ProjectDialogs
   windows: () => ClosableWindow[]
   /** The window with keyboard focus, for the edit commands (F-7.1); null when none has it. */
@@ -147,6 +156,7 @@ export function registerHandlers({
   ai,
   account,
   updates,
+  diagnostics,
   dialogs,
   windows,
   focusedWindow,
@@ -164,13 +174,27 @@ export function registerHandlers({
    * the next one without rebuilding anything.
    */
   const sourceOf = (db: AiDb): AiSource => getAiSettings(db).source
-  const requestDeps = (db: AiDb): AiRequestDeps =>
-    buildAiRequestDeps({
+  const requestDeps = (db: AiDb): AiRequestDeps => {
+    const deps = buildAiRequestDeps({
       db,
       providers: { get: () => ai.get(sourceOf(db)) },
       appState,
       session: sessionUsage
     })
+    // F-15.8: one count per request, at the ledger row every request writes — a cache hit
+    // included, which is what the ledger counts as a request too. The stored feature is a
+    // column, so it is checked against the enum before it can become a counter name.
+    return {
+      ...deps,
+      ledger: {
+        insert: (entry) => {
+          deps.ledger.insert(entry)
+          const feature = AiFeatureId.safeParse(entry.feature)
+          if (feature.success) diagnostics.count(aiRequestCounter(feature.data))
+        }
+      }
+    }
+  }
 
   /**
    * F-5.13: the background index queue, which took over the F-5.6 summary scheduler. One queue
@@ -231,6 +255,7 @@ export function registerHandlers({
       : await dialogs.chooseProjectSavePath(name)
     if (!folder) return null
     const info = manager.create(folder, name, format)
+    diagnostics.count('project.create')
     // F-15.11: the wizard's choice is written before this answers, so the renderer's first
     // `aiSettings:get` already reads it.
     if (aiSource !== undefined) {
@@ -244,7 +269,9 @@ export function registerHandlers({
   register('project:open', async ({ path }) => {
     const folder = path ?? (await dialogs.chooseProjectToOpen())
     if (!folder) return null
-    return manager.open(folder)
+    const info = manager.open(folder)
+    diagnostics.count('project.open')
+    return info
   })
 
   register('project:close', () => {
@@ -469,6 +496,20 @@ export function registerHandlers({
       throw new AppError('VALIDATION', 'Close the project first, then install the update.')
     }
     updates.install()
+    return null
+  })
+
+  // F-15.8: opt-in diagnostics. The service owns the switch, what has been recorded, and the
+  // flush timer; a change it makes by itself (a report left, or the author switched it in
+  // another window) arrives as `diagnostics:changed`.
+  register('diagnostics:getState', () => diagnostics.state())
+
+  register('diagnostics:setEnabled', ({ on }) => diagnostics.setEnabled(on))
+
+  // The renderer has no way to store or send anything itself: it hands the error over and main
+  // scrubs it again before it is queued, or drops it when diagnostics are off.
+  register('diagnostics:reportRendererError', (error) => {
+    diagnostics.reportError('renderer', error)
     return null
   })
 
@@ -988,6 +1029,9 @@ export function registerHandlers({
   // F-14.5: idempotent in the store (only a pending row changes); a blank note is stored as none.
   register('proposal:settle', ({ id, status, note }) => {
     settleProposal(manager.require().connection.orm, id, status, normalizeProposalNote(note))
+    // F-15.8: `acceptedPart` put AI text in the manuscript too; `regenerated` settled nothing.
+    if (status === 'rejected') diagnostics.count('proposal.reject')
+    else if (status !== 'regenerated') diagnostics.count('proposal.accept')
     return null
   })
 
@@ -1026,6 +1070,7 @@ export function registerHandlers({
     )
     if (chosen === null) return null
     writeTextAtomic(chosen, text)
+    diagnostics.count('export.run')
     return { path: chosen }
   })
 

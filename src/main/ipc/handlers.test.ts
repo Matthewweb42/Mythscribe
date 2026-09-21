@@ -15,6 +15,8 @@ import {
 import { z } from 'zod'
 import { DEFAULT_MODELS, USAGE_RECENT_LIMIT } from '@shared/ai'
 import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
+import type { DiagnosticsBody } from '@shared/cloudApi'
+import { RENDERER_ERROR_MESSAGE_MAX } from '@shared/diagnostics'
 import {
   AUTHOR_RULES_TEXT_MAX,
   DEFAULT_BANNED_PHRASES,
@@ -50,6 +52,7 @@ import { upsertSummary } from '../document/summaryStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { aiProposal } from '../db/schema'
 import { AppStateStore } from '../appState/appStateStore'
+import { DiagnosticsService } from '../diagnostics/diagnosticsService'
 import { UpdateService } from '../updates/updateService'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
@@ -116,6 +119,26 @@ const unsupportedUpdates = (appState: AppStateStore): UpdateService =>
     unsupportedReason: UNSUPPORTED_UPDATES,
     appState,
     currentVersion: '0.0.0',
+    onChange: () => {}
+  })
+
+const DIAGNOSTICS_ENVIRONMENT = {
+  appVersion: '0.0.0',
+  platform: 'linux',
+  arch: 'arm64',
+  electron: '44.0.0'
+}
+
+/**
+ * F-15.8: the real service with no sender, which is what a test and a build without an endpoint
+ * get: it records and answers, and nothing ever leaves. It is tested in
+ * `diagnostics/diagnosticsService.test.ts`.
+ */
+const localDiagnostics = (appState: AppStateStore): DiagnosticsService =>
+  new DiagnosticsService({
+    appState,
+    environment: DIAGNOSTICS_ENVIRONMENT,
+    appRoots: ['/app'],
     onChange: () => {}
   })
 
@@ -222,6 +245,7 @@ beforeEach(() => {
     // F-15.7: a service with no updater, which is what a development build has; the service
     // itself is tested in `updates/updateService.test.ts`.
     updates: unsupportedUpdates(appState),
+    diagnostics: localDiagnostics(appState),
     dialogs,
     windows: () => [fakeWin],
     focusedWindow: () => focusedWindow,
@@ -2501,6 +2525,7 @@ describe('account:getCredits / account:buyCredits (F-15.3)', () => {
       ),
       account,
       updates: unsupportedUpdates(appState),
+      diagnostics: localDiagnostics(appState),
       dialogs,
       windows: () => [fakeWin],
       focusedWindow: () => focusedWindow,
@@ -2591,6 +2616,120 @@ describe('updates handlers (F-15.7)', () => {
 
   it('refuses to install with nothing downloaded, once the project is closed', async () => {
     const result = await handlerFor('updates:install')(undefined, undefined)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+  })
+})
+
+describe('diagnostics handlers (F-15.8)', () => {
+  it('answers off on a fresh install, with nothing pending', async () => {
+    const state = await invoke('diagnostics:getState', undefined)
+    expect(state.enabled).toBe(false)
+    expect(state.lastSentDay).toBeNull()
+    expect(JSON.parse(state.pending)).toEqual({
+      ...DIAGNOSTICS_ENVIRONMENT,
+      counts: [],
+      crashes: []
+    })
+  })
+
+  it('stores the switch the author flipped, which the next call answers', async () => {
+    expect((await invoke('diagnostics:setEnabled', { on: true })).enabled).toBe(true)
+    expect((await invoke('diagnostics:getState', undefined)).enabled).toBe(true)
+    expect((await invoke('diagnostics:setEnabled', { on: false })).enabled).toBe(false)
+  })
+
+  it('drops a renderer error while diagnostics are off and scrubs it once they are on', async () => {
+    const error = {
+      name: 'TypeError',
+      message: 'Could not render "She turned from the window." from /home/u/novel/x.db',
+      stack: '    at render (/app/out/renderer/main.js:9:2)'
+    }
+    expect(await invoke('diagnostics:reportRendererError', error)).toBeNull()
+    expect(JSON.parse((await invoke('diagnostics:getState', undefined)).pending)).toMatchObject({
+      crashes: []
+    })
+
+    await invoke('diagnostics:setEnabled', { on: true })
+    await invoke('diagnostics:reportRendererError', error)
+    const pending = JSON.parse(
+      (await invoke('diagnostics:getState', undefined)).pending
+    ) as DiagnosticsBody
+    expect(pending.crashes).toEqual([
+      {
+        ...DIAGNOSTICS_ENVIRONMENT,
+        kind: 'renderer',
+        name: 'TypeError',
+        message: 'Could not render <text> from <path>',
+        stack: ['out/renderer/main.js:9:2']
+      }
+    ])
+    await invoke('diagnostics:setEnabled', { on: false })
+  })
+
+  /**
+   * The tally as it stands on disk, read through a fresh store so nothing is served from the
+   * handlers' own cache. One run of a test is one day, so there is at most one day's tally.
+   */
+  const storedCounts = (): Record<string, number> => {
+    const stored = new AppStateStore(path.join(tmp, 'userData', 'app-state.json')).get()
+    return Object.values(stored.diagnostics.counts)[0] ?? {}
+  }
+
+  it('counts the events main owns, and records nothing at all while it is off', async () => {
+    const KEY = 'sk-test-secret-1234abcd'
+    complete.mockResolvedValue({
+      text: 'Somewhere ahead the river was rising.',
+      model: 'gpt-fake',
+      usage: { inputTokens: 120, outputTokens: 12 }
+    })
+
+    // Off: creating a project and exporting leave nothing behind.
+    await invoke('project:create', { name: 'Quiet', format: 'novel', directory: tmp })
+    expect(storedCounts()).toEqual({})
+
+    await invoke('diagnostics:setEnabled', { on: true })
+    const created = await invoke('project:create', {
+      name: 'Counted',
+      format: 'novel',
+      directory: tmp
+    })
+    await invoke('project:open', { path: created?.path ?? '' })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    await invoke('ai:setKey', { key: KEY })
+    const ghost = await invoke('ai:ghostText', {
+      nodeId: scene.id,
+      before: 'The storm broke at dusk over the dark forest.',
+      after: '',
+      requestId: 'count-1'
+    })
+    if (!ghost.ok || ghost.proposalId === null) throw new Error('expected a proposal')
+    await invoke('proposal:settle', { id: ghost.proposalId, status: 'accepted' })
+    exportPath = path.join(tmp, 'counted-disclosure.md')
+    await invoke('provenance:export', undefined)
+
+    expect(storedCounts()).toEqual({
+      'project.create': 1,
+      'project.open': 1,
+      'ai.request.ghostText': 1,
+      'proposal.accept': 1,
+      'export.run': 1
+    })
+
+    // Switching it off throws away everything that was recorded.
+    await invoke('diagnostics:setEnabled', { on: false })
+    expect(storedCounts()).toEqual({})
+  })
+
+  it('refuses a renderer error longer than the contract allows', async () => {
+    const result = await handlerFor('diagnostics:reportRendererError')(undefined, {
+      name: 'Error',
+      message: 'x'.repeat(RENDERER_ERROR_MESSAGE_MAX + 1),
+      stack: null
+    })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
   })

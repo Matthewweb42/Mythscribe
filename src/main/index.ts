@@ -1,4 +1,4 @@
-import { app, BrowserWindow, net, protocol, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, net, protocol, safeStorage, shell } from 'electron'
 import icon from '../../resources/icon.png?asset'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -13,6 +13,9 @@ import { AiProviderRegistry } from './ai/registry'
 import type { Provider } from './ai/providers/types'
 import { AppStateStore } from './appState/appStateStore'
 import { createDialogs } from './dialogs'
+import { installCrashHandlers, processGoneError } from './diagnostics/crashHandlers'
+import { createDiagnosticsSend } from './diagnostics/diagnosticsClient'
+import { DiagnosticsService, type DiagnosticsSend } from './diagnostics/diagnosticsService'
 import { registerHandlers } from './ipc/handlers'
 import { emit } from './ipc/registry'
 import { installSingleInstance } from './lifecycle'
@@ -28,6 +31,8 @@ const manager = new ProjectManager()
 let account: AccountService | null = null
 /** F-15.7: built once the app is ready; its check timer is dropped on quit. */
 let updates: UpdateService | null = null
+/** F-15.8: built once the app is ready; off until the author turns it on. */
+let diagnostics: DiagnosticsService | null = null
 
 /**
  * Why this build cannot update itself, or null when it can (F-15.7). Only a packaged build has
@@ -43,6 +48,37 @@ function unsupportedUpdateReason(): string | null {
   }
   return null
 }
+
+/**
+ * Where diagnostics reports go, or null when nothing may leave this machine (F-15.8). The e2e
+ * harness is the one caller that has to be sure: it runs with `NODE_ENV=test`, and only a URL
+ * override — its own fake Worker on loopback — lets a report be posted at all.
+ */
+function diagnosticsSender(baseUrl: string): DiagnosticsSend | null {
+  const override = process.env.MYTHSCRIBE_CLOUD_API_URL?.trim() ?? ''
+  if (process.env.NODE_ENV === 'test' && override === '') return null
+  return createDiagnosticsSend({
+    baseUrl,
+    fetch: (input, init) => globalThis.fetch(input, init)
+  })
+}
+
+/**
+ * F-15.8: a failure in the main process is reported (scrubbed, and only while diagnostics are
+ * on) and then shown exactly as Electron shows it by default. Installed at load, so a crash
+ * before the app is ready still raises the box; `diagnostics` is null until then, and a report
+ * from before the author's consent is read would be one nobody agreed to anyway.
+ */
+installCrashHandlers({
+  process,
+  report: (kind, error) => diagnostics?.reportError(kind, error),
+  showErrorBox: (title, content) => dialog.showErrorBox(title, content)
+})
+
+// A helper process that died says only what the event says: a reason, a type, and an exit code.
+app.on('child-process-gone', (_event, details) => {
+  diagnostics?.reportError('processGone', processGoneError('child', details))
+})
 
 /** Lets e2e tests isolate app-wide state (recents) from the developer's own. */
 if (process.env.MYTHSCRIBE_USER_DATA) app.setPath('userData', process.env.MYTHSCRIBE_USER_DATA)
@@ -101,9 +137,16 @@ function createWindow(): BrowserWindow {
     emit([win], 'window:close-requested', null)
   })
   // A dead renderer can never flush, so do not let it wedge the window.
-  win.webContents.on('render-process-gone', () => manager.close())
+  win.webContents.on('render-process-gone', (_event, details) => {
+    diagnostics?.reportError('processGone', processGoneError('renderer', details))
+    manager.close()
+  })
   // F-6.1: focus mode mirrors the window's real fullscreen state, whoever changed it.
-  win.on('enter-full-screen', () => emit([win], 'window:fullScreenChanged', { on: true }))
+  win.on('enter-full-screen', () => {
+    // F-15.8: fullscreen is how focus mode is entered, however it was asked for.
+    diagnostics?.count('focus.enter')
+    emit([win], 'window:fullScreenChanged', { on: true })
+  })
   win.on('leave-full-screen', () => emit([win], 'window:fullScreenChanged', { on: false }))
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -186,6 +229,23 @@ if (!primaryInstance) {
       currentVersion: app.getVersion(),
       onChange: (state) => emit(BrowserWindow.getAllWindows(), 'updates:changed', state)
     })
+    // F-15.8: opt-in diagnostics. Built for every run so the Settings tab has something to
+    // read, but off until the author says otherwise, and it records nothing while it is off.
+    // The stack scrubber keeps only frames inside the app bundle, so `getAppPath` is the root.
+    diagnostics = new DiagnosticsService({
+      appState,
+      environment: {
+        appVersion: app.getVersion(),
+        platform: process.platform,
+        arch: process.arch,
+        electron: process.versions.electron
+      },
+      appRoots: [app.getAppPath()],
+      send: diagnosticsSender(cloudBaseUrl),
+      onChange: (state) => emit(BrowserWindow.getAllWindows(), 'diagnostics:changed', state)
+    })
+    // The first counted event of the run; a no-op unless the author turned diagnostics on.
+    diagnostics.count('app.launch')
     registerHandlers({
       manager,
       appState,
@@ -193,6 +253,7 @@ if (!primaryInstance) {
       ai: new AiProviderRegistry(keyStore, () => appState.get().models, undefined, cloud),
       account,
       updates,
+      diagnostics,
       dialogs: createDialogs(
         () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
       ),
@@ -206,6 +267,8 @@ if (!primaryInstance) {
     createWindow()
     // The first check waits for the window: nothing about an update is urgent (F-15.7).
     updates.start()
+    // Same for the first diagnostics flush (F-15.8), which is also a no-op while it is off.
+    diagnostics.start()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -225,6 +288,7 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   account?.dispose()
   updates?.dispose()
+  diagnostics?.dispose()
   manager.close()
 })
 

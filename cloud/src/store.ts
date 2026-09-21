@@ -1,8 +1,8 @@
 /**
- * Storage for the account routes (F-15.2) and the credit ledger (F-15.3): the `Store` interface
- * the handlers use, the D1 implementation behind it, and an in-memory one for the unit tests.
- * Timestamps are epoch milliseconds so expiry is a plain SQL comparison; the handlers format
- * them for the wire. Every secret arrives here already hashed.
+ * Storage for the account routes (F-15.2), the credit ledger (F-15.3), and the diagnostics
+ * aggregates (F-15.8): the `Store` interface the handlers use, the D1 implementation behind it,
+ * and an in-memory one for the unit tests. Timestamps are epoch milliseconds so expiry is a plain
+ * SQL comparison; the handlers format them for the wire. Every secret arrives here already hashed.
  */
 
 export interface UserRow {
@@ -63,6 +63,47 @@ export interface SpendByFeatureRow {
   tokens: number
 }
 
+/**
+ * Diagnostics (F-15.8). Nothing below belongs to an account: a report carries no session and no
+ * install id, so these are pure aggregates — a day, a build, a platform, and a number.
+ */
+
+/** One counter from one report: add `n` to this day, build, platform, and counter. */
+export interface DiagnosticCountDelta {
+  day: string
+  appVersion: string
+  platform: string
+  counter: string
+  n: number
+}
+
+/** One crash as it arrives; the message and the stack were scrubbed by the app before sending. */
+export interface DiagnosticCrashInput {
+  fingerprint: string
+  kind: string
+  name: string
+  message: string
+  /** The scrubbed frames, newline-separated. */
+  stack: string
+  appVersion: string
+  platform: string
+  arch: string
+  /** When the Worker received it (epoch ms); the app never says when the crash happened. */
+  at: number
+}
+
+/** A stored count row, as `diagnostic_counts` holds it. */
+export interface StoredDiagnosticCount extends Omit<DiagnosticCountDelta, 'n'> {
+  total: number
+}
+
+/** A stored crash group, as `diagnostic_crashes` holds it. */
+export interface StoredDiagnosticCrash extends Omit<DiagnosticCrashInput, 'at'> {
+  count: number
+  firstSeen: number
+  lastSeen: number
+}
+
 export interface Store {
   findUserByEmail(email: string): Promise<UserRow | null>
   findUserById(id: string): Promise<UserRow | null>
@@ -98,6 +139,17 @@ export interface Store {
   spendByFeature(userId: string, since?: number): Promise<SpendByFeatureRow[]>
   /** When the oldest charge at or after `since` was made (epoch ms); null when there is none. */
   firstChargeAt(userId: string, since: number): Promise<number | null>
+
+  /**
+   * F-15.8: add one report's counts to the aggregates. An upsert per row, so the report itself
+   * leaves no trace — only `total` moves.
+   */
+  addDiagnosticCounts(deltas: DiagnosticCountDelta[]): Promise<void>
+  /**
+   * F-15.8: record crashes by fingerprint. The first sighting stores the group, every later one
+   * bumps `count` and `last_seen` and keeps the message and stack that were stored first.
+   */
+  recordDiagnosticCrashes(crashes: DiagnosticCrashInput[]): Promise<void>
 }
 
 interface RawUser {
@@ -386,17 +438,78 @@ export function d1Store(db: D1Database): Store {
         .bind(userId, since)
         .first<{ first_at: number | null }>()
       return row?.first_at ?? null
+    },
+
+    async addDiagnosticCounts(deltas: DiagnosticCountDelta[]): Promise<void> {
+      if (deltas.length === 0) return
+      const statements = deltas.map((delta) =>
+        db
+          .prepare(
+            `INSERT INTO diagnostic_counts (day, app_version, platform, counter, total)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(day, app_version, platform, counter) DO UPDATE
+               SET total = total + excluded.total`
+          )
+          .bind(delta.day, delta.appVersion, delta.platform, delta.counter, delta.n)
+      )
+      // One batch is one transaction: a report's counts land together or not at all, so a
+      // failure halfway cannot leave a day counted twice when the app retries.
+      await db.batch(statements)
+    },
+
+    async recordDiagnosticCrashes(crashes: DiagnosticCrashInput[]): Promise<void> {
+      if (crashes.length === 0) return
+      const statements = crashes.map((crash) =>
+        db
+          .prepare(
+            `INSERT INTO diagnostic_crashes
+               (fingerprint, kind, name, message, stack, app_version, platform, arch,
+                count, first_seen, last_seen)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+             ON CONFLICT(fingerprint) DO UPDATE
+               SET count = count + 1, last_seen = excluded.last_seen`
+          )
+          .bind(
+            crash.fingerprint,
+            crash.kind,
+            crash.name,
+            crash.message,
+            crash.stack,
+            crash.appVersion,
+            crash.platform,
+            crash.arch,
+            crash.at,
+            crash.at
+          )
+      )
+      await db.batch(statements)
     }
   }
 }
 
+/**
+ * The in-memory store plus the read-backs the unit tests assert on. The D1 store has no
+ * equivalent of those: no handler reads a diagnostics aggregate back — the operator queries them
+ * with `wrangler d1 execute` (see `README.md`).
+ */
+export interface MemoryStore extends Store {
+  diagnosticCounts(): StoredDiagnosticCount[]
+  diagnosticCrashes(): StoredDiagnosticCrash[]
+}
+
 /** The test store: the same semantics in a handful of maps, no SQL. */
-export function memoryStore(): Store {
+export function memoryStore(): MemoryStore {
   const users = new Map<string, UserRow>()
   const attempts = new Map<string, LoginAttemptRow>()
   const sessions = new Map<string, SessionRow>()
   const balances = new Map<string, number>()
   const creditEvents: CreditEventRow[] = []
+  const counts = new Map<string, StoredDiagnosticCount>()
+  const crashes = new Map<string, StoredDiagnosticCrash>()
+
+  /** The composite primary key of `diagnostic_counts`, as one map key. */
+  const countKey = (delta: Omit<DiagnosticCountDelta, 'n'>): string =>
+    [delta.day, delta.appVersion, delta.platform, delta.counter].join(' ')
 
   return {
     findUserByEmail(email: string): Promise<UserRow | null> {
@@ -514,6 +627,43 @@ export function memoryStore(): Store {
         )
         .map((event) => event.createdAt)
       return Promise.resolve(times.length === 0 ? null : Math.min(...times))
+    },
+
+    addDiagnosticCounts(deltas: DiagnosticCountDelta[]): Promise<void> {
+      for (const delta of deltas) {
+        const key = countKey(delta)
+        const existing = counts.get(key)
+        counts.set(key, {
+          day: delta.day,
+          appVersion: delta.appVersion,
+          platform: delta.platform,
+          counter: delta.counter,
+          total: (existing?.total ?? 0) + delta.n
+        })
+      }
+      return Promise.resolve()
+    },
+
+    recordDiagnosticCrashes(inputs: DiagnosticCrashInput[]): Promise<void> {
+      for (const { at, ...crash } of inputs) {
+        const existing = crashes.get(crash.fingerprint)
+        // Mirrors the D1 upsert: the stored message and stack are the first one's.
+        crashes.set(
+          crash.fingerprint,
+          existing
+            ? { ...existing, count: existing.count + 1, lastSeen: at }
+            : { ...crash, count: 1, firstSeen: at, lastSeen: at }
+        )
+      }
+      return Promise.resolve()
+    },
+
+    diagnosticCounts(): StoredDiagnosticCount[] {
+      return [...counts.values()].map((row) => ({ ...row }))
+    },
+
+    diagnosticCrashes(): StoredDiagnosticCrash[] {
+      return [...crashes.values()].map((row) => ({ ...row }))
     }
   }
 }

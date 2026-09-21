@@ -244,7 +244,7 @@ Deliberately small; a solo side business cannot run a big service:
   days) so writing never blocks on the network. Since Cloud became prepaid credits, the only
   entitlement is the Supporter license, so the token is built with it (F-15.6 folded into F-15.9
   on 2026-09-21); the account session already survives being offline.
-- **Ops**: uptime monitor, error tracking (Sentry, content-scrubbed), a status page, a support
+- **Ops**: uptime monitor, error tracking (the app's own opt-in diagnostics to the Cloud Worker, content-scrubbed, F-15.8; no Sentry), a status page, a support
   inbox. Budget a few hours a month.
 
 ### 4.4 Distribution and trust

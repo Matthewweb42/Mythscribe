@@ -639,7 +639,7 @@ describe('App', () => {
     expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
   })
 
-  it('opens Settings on the welcome screen with only the app-wide tabs (F-7.5, F-15.2, F-15.7)', async () => {
+  it('opens Settings on the welcome screen with only the app-wide tabs (F-7.5, F-15.2, F-15.7, F-15.8)', async () => {
     install()
     render(<App />)
     await screen.findByRole('button', { name: /new project/i })
@@ -650,7 +650,7 @@ describe('App', () => {
       within(dialog)
         .getAllByRole('tab')
         .map((t) => t.textContent)
-    ).toEqual(['Account', 'Updates'])
+    ).toEqual(['Account', 'Updates', 'Diagnostics'])
     expect(
       within(dialog).getByText('Optional. You never need an account to write.', { exact: false })
     ).toBeInTheDocument()

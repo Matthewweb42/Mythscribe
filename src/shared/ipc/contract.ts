@@ -28,6 +28,12 @@ import { AuthorRules } from '../authorRules'
 import { CheckoutBody, CreditsResult, EMAIL_MAX } from '../cloudApi'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { CritiqueNotes } from '../critique'
+import {
+  DiagnosticsState,
+  RENDERER_ERROR_MESSAGE_MAX,
+  RENDERER_ERROR_NAME_MAX,
+  RENDERER_ERROR_STACK_MAX
+} from '../diagnostics'
 import { EditorSettings } from '../editorSettings'
 import { Background, FocusSettings } from '../focus'
 import { IndexQueueStatus } from '../jobs'
@@ -746,6 +752,30 @@ export const contract = {
    */
   'updates:install': { input: z.undefined(), output: z.null() },
   /**
+   * Where diagnostics stand (F-15.8): whether they are on (off on every install), the next
+   * report verbatim so the author can read exactly what would be sent, and the last day one
+   * left the machine. App-wide, no project needed.
+   */
+  'diagnostics:getState': { input: z.undefined(), output: DiagnosticsState },
+  /**
+   * Turns diagnostics on or off (F-15.8). Off throws away everything recorded so far; on starts
+   * from nothing, so a report can never carry something from before the author agreed.
+   */
+  'diagnostics:setEnabled': { input: z.object({ on: z.boolean() }), output: DiagnosticsState },
+  /**
+   * A renderer error or unhandled rejection (F-15.8). Queued as a crash report while
+   * diagnostics are on and dropped while they are off; main scrubs the message and the stack
+   * again, so what the renderer sends is never what is stored.
+   */
+  'diagnostics:reportRendererError': {
+    input: z.object({
+      name: z.string().max(RENDERER_ERROR_NAME_MAX),
+      message: z.string().max(RENDERER_ERROR_MESSAGE_MAX),
+      stack: z.string().max(RENDERER_ERROR_STACK_MAX).nullable()
+    }),
+    output: z.null()
+  },
+  /**
    * The AI provider status (F-5.1): whether a key is saved (with a masked hint, never the key)
    * and how the key is protected. App-wide, no project needed.
    */
@@ -1101,7 +1131,9 @@ export const events = {
   /** A Cloud request was answered and charged (F-15.5): the balance the Worker reported with it. */
   'account:balanceChanged': z.object({ balanceMicros: z.number().int() }),
   /** The update state changed without a renderer call (F-15.7): a background check, a download, or a ready build. */
-  'updates:changed': UpdateState
+  'updates:changed': UpdateState,
+  /** Diagnostics were switched, or a report was sent (F-15.8); the tab shows what is pending now. */
+  'diagnostics:changed': DiagnosticsState
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

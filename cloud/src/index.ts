@@ -2,7 +2,8 @@
  * The MythScribe Cloud Worker (F-15.2, F-15.3): the account routes and the credit routes behind
  * `api.mythscribe.app`. No CORS headers — the desktop app is not a browser origin and nothing
  * here is meant to be called from a web page; only `/auth/verify` is opened in a browser, and it
- * answers HTML. F-15.4 adds the AI proxy route (`POST /ai/complete`) to the same router.
+ * answers HTML. F-15.4 adds the AI proxy route (`POST /ai/complete`) to the same router, and
+ * F-15.8 the one unauthenticated route, `POST /diagnostics`.
  */
 import { type AiDeps, handleAiComplete } from './ai'
 import {
@@ -22,6 +23,7 @@ import {
   handleLemonSqueezyWebhook
 } from './credits'
 import { randomToken } from './crypto'
+import { handleDiagnostics } from './diagnostics'
 import { logMailer, resendMailer, type Mailer } from './email'
 import { openAiUpstream } from './openai'
 import { d1Store } from './store'
@@ -105,6 +107,9 @@ function route(request: Request, deps: AiDeps): Promise<Response> | Response {
   }
 
   if (pathname === '/ai/complete' && method === 'POST') return handleAiComplete(request, deps)
+
+  // F-15.8: no bearer, on purpose — a diagnostics report carries nothing to authenticate.
+  if (pathname === '/diagnostics' && method === 'POST') return handleDiagnostics(request, deps)
 
   return jsonError('NOT_FOUND', 'No such endpoint.')
 }
