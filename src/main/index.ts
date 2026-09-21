@@ -19,11 +19,30 @@ import { installSingleInstance } from './lifecycle'
 import { installApplicationMenu } from './menu'
 import { assetPathFor } from './project/assetUrl'
 import { ProjectManager } from './project/manager'
+import { loadAutoUpdater } from './updates/autoUpdater'
+import { UpdateService } from './updates/updateService'
 
 const isDev = !app.isPackaged
 const manager = new ProjectManager()
 /** F-15.2: built once the app is ready (it reads userData); its poll timer is dropped on quit. */
 let account: AccountService | null = null
+/** F-15.7: built once the app is ready; its check timer is dropped on quit. */
+let updates: UpdateService | null = null
+
+/**
+ * Why this build cannot update itself, or null when it can (F-15.7). Only a packaged build has
+ * an installer to replace, the e2e harness must never reach GitHub, and on Linux only the
+ * AppImage updates itself — a .deb or .rpm belongs to the package manager.
+ */
+function unsupportedUpdateReason(): string | null {
+  if (!app.isPackaged || process.env.NODE_ENV === 'test') {
+    return 'This is a development build; updates are installed by the released app.'
+  }
+  if (process.platform === 'linux' && process.env.APPIMAGE === undefined) {
+    return 'This Linux package is updated by reinstalling; the AppImage updates itself.'
+  }
+  return null
+}
 
 /** Lets e2e tests isolate app-wide state (recents) from the developer's own. */
 if (process.env.MYTHSCRIBE_USER_DATA) app.setPath('userData', process.env.MYTHSCRIBE_USER_DATA)
@@ -156,12 +175,24 @@ if (!primaryInstance) {
         onBalance: (balanceMicros) =>
           emit(BrowserWindow.getAllWindows(), 'account:balanceChanged', { balanceMicros })
       })
+    // F-15.7: the updater is built here for the same reason as the account — it pushes
+    // `updates:changed` by itself from the background check and the download — and is left out
+    // entirely (a plain reason instead) wherever this build cannot replace itself.
+    const updateReason = unsupportedUpdateReason()
+    updates = new UpdateService({
+      updater: updateReason === null ? loadAutoUpdater() : null,
+      unsupportedReason: updateReason,
+      appState,
+      currentVersion: app.getVersion(),
+      onChange: (state) => emit(BrowserWindow.getAllWindows(), 'updates:changed', state)
+    })
     registerHandlers({
       manager,
       appState,
       keyStore,
       ai: new AiProviderRegistry(keyStore, () => appState.get().models, undefined, cloud),
       account,
+      updates,
       dialogs: createDialogs(
         () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
       ),
@@ -173,6 +204,8 @@ if (!primaryInstance) {
       }
     })
     createWindow()
+    // The first check waits for the window: nothing about an update is urgent (F-15.7).
+    updates.start()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -191,6 +224,7 @@ app.on('before-quit', () => {
 /** `will-quit`, not `before-quit`: the renderer must flush before the DB closes. */
 app.on('will-quit', () => {
   account?.dispose()
+  updates?.dispose()
   manager.close()
 })
 

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, defaultAiModels } from '@shared/ai'
 import { defaultFloating, defaultLayout } from '@shared/layout'
+import { RELEASE_NOTES_MAX, defaultUpdateSettings } from '@shared/updates'
 import { defaultAiUsageState } from '../ai/dailyCap'
 import { AppStateStore, EMPTY_APP_STATE } from './appStateStore'
 
@@ -40,7 +41,8 @@ describe('AppStateStore', () => {
       recents: [entry],
       layout: defaultLayout(),
       models: defaultAiModels(),
-      aiUsage: defaultAiUsageState()
+      aiUsage: defaultAiUsageState(),
+      updates: defaultUpdateSettings()
     })
   })
 
@@ -178,6 +180,35 @@ describe('AppStateStore', () => {
     const state = new AppStateStore(file).get()
     expect(state.models).toEqual({ ...models, cloud: DEFAULT_MODELS })
     expect(state.recents).toEqual([entry])
+  })
+
+  it('parses a file written before F-15.7 (no updates) to the stable channel, nothing seen', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().updates).toEqual(defaultUpdateSettings())
+    expect(EMPTY_APP_STATE.updates).toEqual(defaultUpdateSettings())
+  })
+
+  it('round-trips the update channel and the notes of the last download', () => {
+    const store = new AppStateStore(file)
+    const updates = {
+      channel: 'beta' as const,
+      autoCheck: false,
+      installedNotes: { version: '0.2.0', date: '2026-09-21T10:00:00.000Z', text: '- Faster' },
+      lastSeenVersion: '0.2.0'
+    }
+    expect(store.update((s) => ({ ...s, updates })).updates).toEqual(updates)
+    expect(new AppStateStore(file).get().updates).toEqual(updates)
+    expect(() =>
+      store.update((s) => ({
+        ...s,
+        updates: {
+          ...updates,
+          installedNotes: { ...updates.installedNotes, text: 'x'.repeat(RELEASE_NOTES_MAX + 1) }
+        }
+      }))
+    ).toThrow()
+    expect(new AppStateStore(file).get().updates).toEqual(updates)
   })
 
   it('warns and falls back to the empty state when the stored model mapping is invalid', () => {

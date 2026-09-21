@@ -111,6 +111,8 @@ describe('buildMenuTemplate (F-7.1)', () => {
     expect(item(closed, 'newProject').enabled).toBe(true)
     expect(item(closed, 'undo').enabled).toBe(true)
     expect(item(closed, 'openAbout').enabled).toBe(true)
+    // F-15.7: Help › Check for updates… works on the welcome screen too.
+    expect(item(closed, 'checkForUpdates').enabled).toBe(true)
     const open = buildMenuTemplate(MENU, { format: 'novel', platform: 'linux' }, onAction)
     expect(item(open, 'saveDocument').enabled).toBe(true)
     expect(item(open, 'insertScene').enabled).toBe(true)

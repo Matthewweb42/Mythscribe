@@ -19,6 +19,7 @@ import { useWelcomeStore } from '@renderer/features/project/welcomeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
+import { useUpdateStore } from '@renderer/features/updates/updateStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 
@@ -67,8 +68,13 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         useShellDialogStore.getState().show('about')
         return
       case 'openSettings':
-        // App-wide since F-15.2: without a project the dialog shows only the Account tab.
+        // App-wide since F-15.2: without a project the dialog shows only the app-wide tabs.
         useShellDialogStore.getState().show('settings')
+        return
+      case 'checkForUpdates':
+        // F-15.7: the Updates tab is where the answer shows, so it opens with the check.
+        useShellDialogStore.getState().show('settings', 'updates')
+        await useUpdateStore.getState().check()
         return
       default:
         break

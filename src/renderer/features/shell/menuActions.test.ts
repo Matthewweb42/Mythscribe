@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, Input, Output, ProjectInfo } from '@shared/ipc/contract'
 import { defaultLayout } from '@shared/layout'
 import { DOCS_URL } from '@shared/menu'
+import type { UpdateState } from '@shared/updates'
 import { EMPTY_DOC } from '@shared/tiptap'
 import {
   resetActiveEditorStore,
@@ -22,6 +23,7 @@ import {
   resetShellDialogStore,
   useShellDialogStore
 } from '@renderer/features/shell/shellDialogStore'
+import { resetUpdateStore, useUpdateStore } from '@renderer/features/updates/updateStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { NO_PROJECT_MESSAGE, closeProjectWithConfirm, runMenuAction } from './menuActions'
 
@@ -34,6 +36,16 @@ const info: ProjectInfo = {
   modified: 'm',
   lastOpened: 'l',
   schemaVersion: 1
+}
+
+/** F-15.7: what main answers `updates:check` with in these tests. */
+const updateState: UpdateState = {
+  currentVersion: '0.1.0',
+  channel: 'stable',
+  autoCheck: true,
+  status: { state: 'upToDate', checkedAt: '2026-09-21T10:00:00.000Z' },
+  installedNotes: null,
+  unseenNotes: false
 }
 
 let invoke: ReturnType<typeof vi.fn<(channel: string, input: unknown) => Promise<unknown>>>
@@ -82,6 +94,7 @@ beforeEach(() => {
   resetFocusStore()
   resetLayoutStore()
   resetShellDialogStore()
+  resetUpdateStore()
   resetWelcomeStore()
   useProjectStore.setState({ current: null, ready: true, busy: false, recents: [] })
   useTreeStore.getState().clear()
@@ -124,6 +137,15 @@ describe('runMenuAction (F-7.1)', () => {
     await withProject()
     await runMenuAction('openSettings')
     expect(useShellDialogStore.getState().open).toBe('settings')
+  })
+
+  it('Help › Check for updates… opens the Updates tab and checks (F-15.7)', async () => {
+    install({ 'updates:check': updateState })
+    await runMenuAction('checkForUpdates')
+    expect(useShellDialogStore.getState().open).toBe('settings')
+    expect(useShellDialogStore.getState().settingsTab).toBe('updates')
+    expect(invoke).toHaveBeenLastCalledWith('updates:check', undefined)
+    expect(useUpdateStore.getState().state).toEqual(updateState)
   })
 
   it('surfaces a failed action as a toast', async () => {

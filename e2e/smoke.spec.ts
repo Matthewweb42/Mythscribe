@@ -2830,6 +2830,48 @@ test('create, close, reopen a project on disk', async () => {
   await expect(aboutDialog.getByTestId('about-version')).toHaveText(`Version ${packageVersion}`)
   await aboutDialog.getByRole('button', { name: 'OK' }).click()
   await expect(aboutDialog).toHaveCount(0)
+
+  // F-15.7: Help › Check for updates… opens Settings on the Updates tab. This build is not a
+  // packaged one, so it says so instead of reaching GitHub — the check must never leave the
+  // machine in a test. The channel is a stored preference even here, so it survives the dialog.
+  await menuBar.getByRole('menuitem', { name: 'Help' }).click()
+  await page
+    .getByRole('menu', { name: 'Help' })
+    .getByRole('menuitem', { name: 'Check for updates…' })
+    .click()
+  await expect(settingsDialog).toBeVisible()
+  await expect(settingsDialog.getByRole('tab', { name: 'Updates' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  await expect(settingsDialog.getByTestId('update-version')).toHaveText(
+    `MythScribe ${packageVersion}`
+  )
+  await expect(settingsDialog.getByTestId('update-status')).toHaveText(
+    'This is a development build; updates are installed by the released app.'
+  )
+  await expect(settingsDialog.getByRole('button', { name: 'Check for updates' })).toHaveCount(0)
+  await settingsDialog.getByTestId('update-channel-beta').click()
+  await expect(settingsDialog.getByTestId('update-channel-beta')).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'Updates' }).click()
+  await expect(settingsDialog.getByTestId('update-channel-beta')).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  await settingsDialog.getByTestId('update-channel-stable').click()
+  await expect(settingsDialog.getByTestId('update-channel-stable')).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+
   const nativeMenu = (): Promise<{
     labels: (string | undefined)[]
     save: { enabled: boolean; accelerator: string | null } | null

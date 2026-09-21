@@ -8,6 +8,18 @@ files:
   - package.json
 asarUnpack:
   - '**/*.node'
+# F-15.7: the update feed is the public repo's GitHub releases. The release workflow uploads a
+# draft and publishes it once every platform has built, so the updater never sees a release with
+# a platform's files missing. `beta.yml` is written beside `latest.yml` for `x.y.z-beta.n` versions.
+publish:
+  provider: github
+  owner: Matthewweb42
+  repo: Mythscribe
+  releaseType: draft
+generateUpdatesFilesForAllChannels: true
+# Windows signing (Azure Trusted Signing) is not configured here: the release workflow passes
+# `-c.win.azureSignOptions.*` from the repository variables, so a local `npm run build:win` stays
+# an unsigned development build. See docs/RELEASING.md.
 win:
   target: nsis
   executableName: MythScribe
@@ -15,9 +27,17 @@ nsis:
   artifactName: ${name}-${version}-setup.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
+# The updater installs from the zip; the dmg is the download. Signing reads CSC_LINK and
+# CSC_KEY_PASSWORD, notarization the APPLE_API_KEY* variables; without them the build is unsigned
+# and the release workflow's verification step refuses it.
 mac:
-  target: dmg
+  target:
+    - dmg
+    - zip
   category: public.app-category.productivity
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
 linux:
   target: AppImage
   category: Office

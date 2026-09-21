@@ -50,6 +50,8 @@ import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusSt
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
+import { UpdateNotice } from '@renderer/features/updates/UpdateNotice'
+import { useUpdateStore } from '@renderer/features/updates/updateStore'
 import { CreateProjectWizard } from '@renderer/features/project/CreateProjectWizard'
 import { RecentProjects } from '@renderer/features/project/RecentProjects'
 import { useProjectStore } from '@renderer/features/project/projectStore'
@@ -90,11 +92,15 @@ export function App(): React.JSX.Element {
     // rather than by the Settings tab, which is only mounted while the dialog is open.
     const offAccount = useAccountStore.getState().subscribe()
     void useAccountStore.getState().load()
+    // F-15.7: updates are app-wide too, and main pushes the state from the background check and
+    // the download, so the subscription is opened here once rather than by the Settings tab.
+    const offUpdates = useUpdateStore.getState().subscribe()
     return () => {
       offClose()
       offFocus()
       offMenu()
       offAccount()
+      offUpdates()
     }
   }, [])
 
@@ -212,6 +218,7 @@ export function App(): React.JSX.Element {
                 <AssistantToggleButton />
               </>
             ) : null}
+            <UpdateNotice />
             <SettingsButton />
             {current ? <CloseProjectButton /> : null}
           </div>

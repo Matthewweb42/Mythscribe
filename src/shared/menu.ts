@@ -35,6 +35,7 @@ export const MENU_ITEM_IDS = [
   'openSettings',
   'openDocumentation',
   'openShortcuts',
+  'checkForUpdates',
   'openAbout'
 ] as const
 export const MenuItemId = z.enum(MENU_ITEM_IDS)
@@ -153,6 +154,7 @@ export const MENU: readonly MenuSection[] = [
       { id: 'openDocumentation', label: 'Documentation', when: 'always' },
       { id: 'openShortcuts', label: 'Keyboard shortcuts', when: 'always' },
       SEPARATOR,
+      { id: 'checkForUpdates', label: 'Check for updates…', when: 'always' },
       { id: 'openAbout', label: 'About MythScribe', when: 'always' }
     ]
   }

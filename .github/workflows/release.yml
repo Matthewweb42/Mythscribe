@@ -1,0 +1,162 @@
+# F-15.7: signed builds and the update feed. Pushing a tag `vX.Y.Z` (stable) or `vX.Y.Z-beta.N`
+# (beta) builds every platform, signs Windows (Azure Trusted Signing) and macOS (Developer ID +
+# notarization), uploads into one draft GitHub release, and publishes the draft only when every
+# platform built and its signature verified. Operator recipe: docs/RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    name: Create the draft release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag must match package.json
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+      - name: The release needs notes (they are shown in the app)
+        run: |
+          notes="docs/release-notes/$GITHUB_REF_NAME.md"
+          if [ ! -s "$notes" ]; then
+            echo "::error::Write $notes first; the app shows it as the release notes."
+            exit 1
+          fi
+      - name: Create the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "MythScribe ${GITHUB_REF_NAME#v}" \
+            --notes-file "docs/release-notes/$GITHUB_REF_NAME.md"
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: draft
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+          - name: macos
+            os: macos-latest
+          - name: linux
+            os: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      - name: Package and upload (Windows, Azure Trusted Signing)
+        if: matrix.name == 'windows'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          WIN_PUBLISHER_NAME: ${{ vars.WIN_PUBLISHER_NAME }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_CERTIFICATE_PROFILE: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+        run: |
+          for name in AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET WIN_PUBLISHER_NAME \
+            AZURE_SIGNING_ENDPOINT AZURE_CERTIFICATE_PROFILE AZURE_SIGNING_ACCOUNT; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not set; a release is never published unsigned (docs/RELEASING.md)."
+              exit 1
+            fi
+          done
+          npx electron-builder --win --publish always \
+            "-c.win.azureSignOptions.publisherName=$WIN_PUBLISHER_NAME" \
+            "-c.win.azureSignOptions.endpoint=$AZURE_SIGNING_ENDPOINT" \
+            "-c.win.azureSignOptions.certificateProfileName=$AZURE_CERTIFICATE_PROFILE" \
+            "-c.win.azureSignOptions.codeSigningAccountName=$AZURE_SIGNING_ACCOUNT"
+      - name: Verify the Windows signature
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          $installers = Get-ChildItem dist -Filter *-setup.exe
+          if ($installers.Count -eq 0) { throw 'No installer was built.' }
+          foreach ($file in $installers) {
+            $signature = Get-AuthenticodeSignature $file.FullName
+            if ($signature.Status -ne 'Valid') { throw "$($file.Name) is not signed: $($signature.Status)" }
+            Write-Host "$($file.Name): $($signature.SignerCertificate.Subject)"
+          }
+
+      - name: Package and upload (macOS, Developer ID + notarization)
+        if: matrix.name == 'macos'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not set; a release is never published unsigned (docs/RELEASING.md)."
+              exit 1
+            fi
+          done
+          key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+          echo "$APPLE_API_KEY_BASE64" | base64 --decode > "$key"
+          APPLE_API_KEY="$key" npx electron-builder --mac --x64 --arm64 --publish always
+      - name: Verify the macOS signature and notarization
+        if: matrix.name == 'macos'
+        run: |
+          found=0
+          for app in dist/mac*/MythScribe.app; do
+            found=1
+            codesign --verify --deep --strict "$app"
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose "$app"
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No app bundle was built."
+            exit 1
+          fi
+
+      - name: Package and upload (Linux AppImage)
+        if: matrix.name == 'linux'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npx electron-builder --linux --publish always
+
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the draft (a tag with a pre-release part is a beta)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          case "$GITHUB_REF_NAME" in
+            *-*) gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease ;;
+            *) gh release edit "$GITHUB_REF_NAME" --draft=false --latest ;;
+          esac

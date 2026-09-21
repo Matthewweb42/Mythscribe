@@ -1,12 +1,13 @@
 import { createElement, type ReactNode } from 'react'
-import { Sparkles, Type, UserRound, type LucideIcon } from 'lucide-react'
+import { Download, Sparkles, Type, UserRound, type LucideIcon } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { AccountSettingsTab } from '@renderer/features/account/AccountSettingsTab'
 import { AiSettingsTab } from '@renderer/features/ai/AiSettingsTab'
 import { EditorSettingsTab } from '@renderer/features/editor/EditorSettingsTab'
+import { UpdatesSettingsTab } from '@renderer/features/updates/UpdatesSettingsTab'
 
 /** The ids of the Settings dialog tabs (F-7.5). Not persisted: the dialog opens on the first. */
-export type SettingsDialogTabId = 'editor' | 'ai' | 'account'
+export type SettingsDialogTabId = 'editor' | 'ai' | 'account' | 'updates'
 
 interface SettingsDialogTabBase {
   id: SettingsDialogTabId
@@ -29,7 +30,7 @@ export type SettingsDialogTabs = readonly [SettingsDialogTab, ...SettingsDialogT
  * The registry of built Settings tabs, in display order (F-7.5). Only the tabs that exist are
  * listed, so there is never a placeholder to click. The AI tab (F-5.1) holds the provider and
  * key with the dial, presets, and behaviour (F-14.4, F-5.2); the Account tab (F-15.2) the
- * optional MythScribe account.
+ * optional MythScribe account; the Updates tab (F-15.7) the channel and the update state.
  */
 export const SETTINGS_DIALOG_TABS: SettingsDialogTabs = [
   {
@@ -52,6 +53,13 @@ export const SETTINGS_DIALOG_TABS: SettingsDialogTabs = [
     icon: UserRound,
     scope: 'app',
     render: () => createElement(AccountSettingsTab)
+  },
+  {
+    id: 'updates',
+    label: 'Updates',
+    icon: Download,
+    scope: 'app',
+    render: () => createElement(UpdatesSettingsTab)
   }
 ]
 

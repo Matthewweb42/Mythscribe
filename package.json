@@ -38,6 +38,7 @@
     "@tiptap/suggestion": "3.31.3",
     "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.2",
+    "electron-updater": "6.8.9",
     "lucide-react": "1.44.0",
     "openai": "7.15.0",
     "react": "19.3.0",

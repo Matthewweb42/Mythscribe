@@ -11,7 +11,8 @@ import {
   menuAccelerator,
   menuItemChord,
   menuItemLabel,
-  menuItems
+  menuItems,
+  type MenuItem
 } from './menu'
 
 describe('menu definition (F-7.1)', () => {
@@ -73,6 +74,7 @@ describe('menu definition (F-7.1)', () => {
       'openSettings',
       'openDocumentation',
       'openShortcuts',
+      'checkForUpdates',
       'openAbout'
     ])
     const [save] = menuItems().filter((item) => item.id === 'saveDocument')
@@ -80,6 +82,17 @@ describe('menu definition (F-7.1)', () => {
     expect(isMenuItemEnabled(save!, true)).toBe(true)
     const [about] = menuItems().filter((item) => item.id === 'openAbout')
     expect(isMenuItemEnabled(about!, false)).toBe(true)
+  })
+
+  it('offers Check for updates… in Help, just before About (F-15.7)', () => {
+    const help = MENU.find((section) => section.id === 'help')
+    const ids = (help?.entries ?? [])
+      .filter((entry): entry is MenuItem => !isSeparator(entry))
+      .map((entry) => entry.id)
+    expect(ids).toEqual(['openDocumentation', 'openShortcuts', 'checkForUpdates', 'openAbout'])
+    const [check] = menuItems().filter((item) => item.id === 'checkForUpdates')
+    expect(check?.label).toBe('Check for updates…')
+    expect(isMenuItemEnabled(check!, false)).toBe(true)
   })
 
   it('labels the Insert items by the format, and everything else as written', () => {

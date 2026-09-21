@@ -8,6 +8,7 @@ import {
 } from '@shared/cloudApi'
 import type { AiKeyStore } from '../ai/keyStore'
 import { AppError } from '../ipc/errors'
+import { defaultSchedule, type Schedule } from '../schedule'
 import { AccountError, type CloudAuthClient } from './cloudAuthClient'
 
 /**
@@ -26,16 +27,6 @@ const SECRET_ID = 'cloudSession'
 export const NO_SAFE_STORAGE_SESSION_MESSAGE =
   'This system has no safe storage available, so a MythScribe account sign-in cannot be stored ' +
   'securely. On Linux, install and unlock a keyring (GNOME Keyring or KWallet), then try again.'
-
-/** Starts a timer and answers its canceller; injectable so tests run the callbacks themselves. */
-export type Schedule = (run: () => void, ms: number) => () => void
-
-const defaultSchedule: Schedule = (run, ms) => {
-  const timer = setTimeout(run, ms)
-  // A pending poll must never hold the app (or a test) open.
-  if (typeof timer === 'object' && typeof timer.unref === 'function') timer.unref()
-  return () => clearTimeout(timer)
-}
 
 export interface AccountServiceOptions {
   client: CloudAuthClient

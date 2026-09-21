@@ -45,6 +45,7 @@ import { SceneSummaryState, SummaryStatus } from '../summary'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
 import { TagTemplateId } from '../tagTemplates'
 import { TiptapNode } from '../tiptap'
+import { UpdateChannel, UpdateState } from '../updates'
 import { VOICE_EXEMPLAR_TEXT_MAX, VOICE_EXEMPLAR_TEXT_MIN, VoiceExemplarKind } from '../voice'
 
 /**
@@ -717,6 +718,34 @@ export const contract = {
    */
   'account:buyCredits': { input: CheckoutBody, output: z.null() },
   /**
+   * Where the app stands on updates (F-15.7): the running version, the channel, whether it
+   * checks by itself, what the updater is doing, and the notes of the last download. App-wide,
+   * no project needed; a development build answers the `unsupported` status with its reason.
+   */
+  'updates:getState': { input: z.undefined(), output: UpdateState },
+  /**
+   * Asks the release feed now (F-15.7). Answers the state the check left behind; a check or a
+   * download already running answers the state as it stands rather than starting a second one.
+   * An unreachable feed is the `error` status with its next step, not a failed call.
+   */
+  'updates:check': { input: z.undefined(), output: UpdateState },
+  /**
+   * Switches between the stable and beta channels (F-15.7), stores it, and checks again, so the
+   * answer belongs to the channel just picked. Nothing is downgraded: a beta build stays until a
+   * newer stable one ships.
+   */
+  'updates:setChannel': { input: z.object({ channel: UpdateChannel }), output: UpdateState },
+  /** Turns the automatic check on or off (F-15.7); the manual check works either way. */
+  'updates:setAutoCheck': { input: z.object({ on: z.boolean() }), output: UpdateState },
+  /** The author has read what is new in the running version (F-15.7); it is not offered again. */
+  'updates:markSeen': { input: z.undefined(), output: UpdateState },
+  /**
+   * Restarts into the downloaded update (F-15.7). VALIDATION with nothing downloaded, and with
+   * a project still open: the installer starts before this process exits, so the renderer
+   * closes the project (flushing its saves) first.
+   */
+  'updates:install': { input: z.undefined(), output: z.null() },
+  /**
    * The AI provider status (F-5.1): whether a key is saved (with a masked hint, never the key)
    * and how the key is protected. App-wide, no project needed.
    */
@@ -1070,7 +1099,9 @@ export const events = {
   /** The account state changed without a renderer call (F-15.2): a pending link was opened or expired. */
   'account:changed': AccountStatus,
   /** A Cloud request was answered and charged (F-15.5): the balance the Worker reported with it. */
-  'account:balanceChanged': z.object({ balanceMicros: z.number().int() })
+  'account:balanceChanged': z.object({ balanceMicros: z.number().int() }),
+  /** The update state changed without a renderer call (F-15.7): a background check, a download, or a ready build. */
+  'updates:changed': UpdateState
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

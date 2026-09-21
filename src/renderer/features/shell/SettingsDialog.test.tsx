@@ -17,7 +17,13 @@ import type { SettingsDialogTab } from './settingsDialogTabs'
 
 /** Two fake tabs with the real ids, so the dialog's tab handling is driven without the real panels. */
 const tabs: readonly [SettingsDialogTab, ...SettingsDialogTab[]] = [
-  { id: 'editor', label: 'Editor', icon: Type, scope: 'project', render: () => <p>formatting here</p> },
+  {
+    id: 'editor',
+    label: 'Editor',
+    icon: Type,
+    scope: 'project',
+    render: () => <p>formatting here</p>
+  },
   { id: 'ai', label: 'AI', icon: Sparkles, scope: 'project', render: () => <p>keys here</p> }
 ]
 
@@ -60,7 +66,8 @@ describe('SettingsDialog (F-7.5)', () => {
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
       'Editor',
       'AI',
-      'Account'
+      'Account',
+      'Updates'
     ])
     expect(tab('Editor')).toHaveAttribute('aria-selected', 'true')
     expect(tab('Editor')).toHaveFocus()
@@ -109,7 +116,8 @@ describe('SettingsDialog (F-7.5)', () => {
 
   it('falls back to the first tab when the named one is not shown (F-15.5)', () => {
     render(<SettingsDialog format={null} onClose={vi.fn()} initialTab="editor" />)
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Account'])
+    // F-15.7: Updates is app-wide too, so the welcome screen shows it beside Account.
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Account', 'Updates'])
     expect(tab('Account')).toHaveAttribute('aria-selected', 'true')
   })
 

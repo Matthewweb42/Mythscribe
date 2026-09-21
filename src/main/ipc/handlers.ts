@@ -31,6 +31,7 @@ import {
   type SceneSummaryState
 } from '@shared/summary'
 import type { AccountService } from '../account/accountService'
+import type { UpdateService } from '../updates/updateService'
 import { runBetaReader } from '../ai/betaReader'
 import { runChat } from '../ai/chat'
 import { runCritique } from '../ai/critique'
@@ -123,6 +124,12 @@ export interface HandlerDeps {
    * only ask it questions.
    */
   account: AccountService
+  /**
+   * F-15.7: the update state. Like the account it owns its own timer and pushes
+   * `updates:changed` through the `onChange` it was built with in `index.ts`; these handlers
+   * only ask it questions and forward the author's choices.
+   */
+  updates: UpdateService
   dialogs: ProjectDialogs
   windows: () => ClosableWindow[]
   /** The window with keyboard focus, for the edit commands (F-7.1); null when none has it. */
@@ -139,6 +146,7 @@ export function registerHandlers({
   keyStore,
   ai,
   account,
+  updates,
   dialogs,
   windows,
   focusedWindow,
@@ -438,6 +446,29 @@ export function registerHandlers({
       throw new AppError('VALIDATION', `Only a checkout on ${CHECKOUT_HOST_SUFFIX} can be opened`)
     }
     await openExternal(url)
+    return null
+  })
+
+  // F-15.7: automatic updates. The service owns the updater, the timer, and what is stored;
+  // anything it decides by itself (a background check found a build, a download finished)
+  // arrives as `updates:changed`.
+  register('updates:getState', () => updates.state())
+
+  register('updates:check', () => updates.check())
+
+  register('updates:setChannel', ({ channel }) => updates.setChannel(channel))
+
+  register('updates:setAutoCheck', ({ on }) => updates.setAutoCheck(on))
+
+  register('updates:markSeen', () => updates.markSeen())
+
+  // The installer starts before this process exits, so the project must already be closed:
+  // the renderer flushes its saves and closes it, then invokes this.
+  register('updates:install', () => {
+    if (manager.current() !== null) {
+      throw new AppError('VALIDATION', 'Close the project first, then install the update.')
+    }
+    updates.install()
     return null
   })
 

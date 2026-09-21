@@ -50,6 +50,7 @@ import { upsertSummary } from '../document/summaryStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { aiProposal } from '../db/schema'
 import { AppStateStore } from '../appState/appStateStore'
+import { UpdateService } from '../updates/updateService'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
 import { projectFolderFor } from '../project/projectStore'
@@ -104,6 +105,19 @@ let exportPath: string | null
 let chosenImages: string[] | null
 /** The default name and directory the last export dialog was asked for. */
 let exportAsked: { defaultName: string; directory: string | undefined } | null
+
+const UNSUPPORTED_UPDATES =
+  'This is a development build; updates are installed by the released app.'
+
+/** F-15.7: the update service a development build gets — no updater, one plain reason. */
+const unsupportedUpdates = (appState: AppStateStore): UpdateService =>
+  new UpdateService({
+    updater: null,
+    unsupportedReason: UNSUPPORTED_UPDATES,
+    appState,
+    currentVersion: '0.0.0',
+    onChange: () => {}
+  })
 
 const dialogs: ProjectDialogs = {
   chooseProjectSavePath: async () => null,
@@ -205,6 +219,9 @@ beforeEach(() => {
       keyStore,
       onChange: () => {}
     }),
+    // F-15.7: a service with no updater, which is what a development build has; the service
+    // itself is tested in `updates/updateService.test.ts`.
+    updates: unsupportedUpdates(appState),
     dialogs,
     windows: () => [fakeWin],
     focusedWindow: () => focusedWindow,
@@ -2483,6 +2500,7 @@ describe('account:getCredits / account:buyCredits (F-15.3)', () => {
         () => neverProvider
       ),
       account,
+      updates: unsupportedUpdates(appState),
       dialogs,
       windows: () => [fakeWin],
       focusedWindow: () => focusedWindow,
@@ -2540,6 +2558,41 @@ describe('account:getCredits / account:buyCredits (F-15.3)', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     expect(openExternal).not.toHaveBeenCalled()
+  })
+})
+
+describe('updates handlers (F-15.7)', () => {
+  it('forwards the state of a build that cannot update itself', async () => {
+    expect(await invoke('updates:getState', undefined)).toEqual({
+      currentVersion: '0.0.0',
+      channel: 'stable',
+      autoCheck: true,
+      status: { state: 'unsupported', reason: UNSUPPORTED_UPDATES },
+      installedNotes: null,
+      unseenNotes: false
+    })
+  })
+
+  it('stores the channel the author picked, which the next call answers', async () => {
+    const state = await invoke('updates:setChannel', { channel: 'beta' })
+    expect(state.channel).toBe('beta')
+    expect((await invoke('updates:getState', undefined)).channel).toBe('beta')
+  })
+
+  it('refuses to install while a project is open, and says what to do first', async () => {
+    await invoke('project:create', { name: 'Updating', format: 'novel', directory: tmp })
+    const result = await handlerFor('updates:install')(undefined, undefined)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('VALIDATION')
+      expect(result.error.message).toContain('Close the project first')
+    }
+  })
+
+  it('refuses to install with nothing downloaded, once the project is closed', async () => {
+    const result = await handlerFor('updates:install')(undefined, undefined)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
   })
 })
 
