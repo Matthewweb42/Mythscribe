@@ -7,9 +7,8 @@ import {
   LOGIN_ATTEMPT_TTL_MS,
   START_RATE_LIMIT
 } from '../../src/shared/cloudApi'
-import type { AiDeps } from './ai'
 import type { MailMessage, Mailer } from './email'
-import { handleRequest } from './index'
+import { handleRequest, type WorkerDeps } from './index'
 import { memoryStore } from './store'
 
 const ORIGIN = 'https://api.mythscribe.app'
@@ -19,7 +18,7 @@ const START = new Date('2026-09-19T12:00:00.000Z')
 let mails: MailMessage[]
 let clock: number
 let counter: number
-let deps: AiDeps
+let deps: WorkerDeps
 
 const capturingMailer: Mailer = {
   send(message) {
@@ -28,7 +27,7 @@ const capturingMailer: Mailer = {
   }
 }
 
-function makeDeps(overrides: Partial<AiDeps> = {}): AiDeps {
+function makeDeps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
   return {
     store: memoryStore(),
     mailer: capturingMailer,
@@ -38,6 +37,9 @@ function makeDeps(overrides: Partial<AiDeps> = {}): AiDeps {
     // The credit routes (F-15.3) share the router; the account tests configure neither.
     packs: [],
     webhookSecret: null,
+    // F-15.9: the Supporter license has its own tests in `license.test.ts`.
+    supporter: null,
+    signingKey: null,
     // F-15.4: the AI proxy is off for the account and credit routes' tests.
     upstream: null,
     ...overrides

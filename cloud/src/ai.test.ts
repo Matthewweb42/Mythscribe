@@ -11,10 +11,9 @@ import {
   SESSION_TTL_MS
 } from '../../src/shared/cloudApi'
 import { cloudChargeMicros } from '../../src/shared/cloudRates'
-import type { AiDeps } from './ai'
 import { sha256Hex } from './crypto'
 import type { Mailer } from './email'
-import { handleRequest } from './index'
+import { handleRequest, type WorkerDeps } from './index'
 import {
   type Upstream,
   type UpstreamAnswer,
@@ -44,7 +43,7 @@ const ANSWER: UpstreamAnswer = {
 
 const silentMailer: Mailer = { send: () => Promise.resolve() }
 
-let deps: AiDeps
+let deps: WorkerDeps
 let clock: number
 let counter: number
 let events: CreditEventRow[]
@@ -92,7 +91,7 @@ function recordingStore(): Store {
   }
 }
 
-function makeDeps(overrides: Partial<AiDeps> = {}): AiDeps {
+function makeDeps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
   return {
     store: recordingStore(),
     mailer: silentMailer,
@@ -100,8 +99,10 @@ function makeDeps(overrides: Partial<AiDeps> = {}): AiDeps {
     random: () => `id-${(counter += 1)}`,
     revealLink: false,
     packs: [],
+    supporter: null,
     webhookSecret: null,
     upstream: fakeUpstream(),
+    signingKey: null,
     ...overrides
   }
 }

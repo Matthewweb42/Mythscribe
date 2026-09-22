@@ -3,6 +3,7 @@ import type { AccountStatus } from '@shared/account'
 import type { CreditsResult } from '@shared/cloudApi'
 import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
+import type { SupporterStatus } from '@shared/license'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAccountStore, useAccountStore } from './accountStore'
 
@@ -29,6 +30,24 @@ const CREDITS: CreditsResult = {
   packs: [{ variantId: 'pack-5', priceCents: 500 }]
 }
 
+/** F-15.9: no license yet, with the product on sale. */
+const SUPPORTER_NONE: SupporterStatus = {
+  licensed: false,
+  since: null,
+  validUntil: null,
+  offline: false,
+  product: { variantId: 'supporter-39', priceCents: 3900 },
+  accent: 'default'
+}
+const SUPPORTER_LICENSED: SupporterStatus = {
+  licensed: true,
+  since: '2026-09-20T10:00:00.000Z',
+  validUntil: '2026-10-04T10:00:00.000Z',
+  offline: false,
+  product: null,
+  accent: 'ember'
+}
+
 interface Fake {
   client: IpcClient
   calls: { channel: Channel; input: unknown }[]
@@ -36,6 +55,8 @@ interface Fake {
   listener: ((status: AccountStatus) => void) | null
   /** The `account:balanceChanged` listener (F-15.5), if any. */
   balanceListener: ((payload: { balanceMicros: number }) => void) | null
+  /** The `account:supporterChanged` listener (F-15.9), if any. */
+  supporterListener: ((status: SupporterStatus) => void) | null
   /** How many listeners the last `subscribe()` dropped. */
   unsubscribes: number
   unsubscribed: boolean
@@ -48,6 +69,7 @@ function fakeClient(): Fake {
     calls: [],
     listener: null,
     balanceListener: null,
+    supporterListener: null,
     unsubscribes: 0,
     unsubscribed: false,
     fail: null,
@@ -70,11 +92,27 @@ function fakeClient(): Fake {
             return CREDITS as Output<C>
           case 'account:buyCredits':
             return null as Output<C>
+          case 'account:getSupporter':
+            return SUPPORTER_NONE as Output<C>
+          case 'account:refreshSupporter':
+            return SUPPORTER_LICENSED as Output<C>
+          case 'account:buySupporter':
+            return null as Output<C>
+          case 'account:setAccent':
+            // Main answers the status it stored; the pick itself is checked on the call.
+            return { ...SUPPORTER_LICENSED, accent: 'sky' } as Output<C>
           default:
             throw new Error(`unexpected ${channel}`)
         }
       },
       on<E extends EventName>(event: E, listener: (payload: EventPayload<E>) => void): () => void {
+        if (event === 'account:supporterChanged') {
+          fake.supporterListener = listener as (status: SupporterStatus) => void
+          return () => {
+            fake.unsubscribes++
+            fake.supporterListener = null
+          }
+        }
         if (event === 'account:balanceChanged') {
           fake.balanceListener = listener as (payload: { balanceMicros: number }) => void
           return () => {
@@ -255,13 +293,15 @@ describe('accountStore (F-15.2)', () => {
     expect(store().credits).toBeNull()
   })
 
-  it('drops both listeners on unsubscribe (F-15.5)', () => {
+  it('drops every listener on unsubscribe (F-15.5, F-15.9)', () => {
     const off = store().subscribe()
     expect(fake.balanceListener).not.toBeNull()
+    expect(fake.supporterListener).not.toBeNull()
     off()
-    expect(fake.unsubscribes).toBe(2)
+    expect(fake.unsubscribes).toBe(3)
     expect(fake.balanceListener).toBeNull()
     expect(fake.listener).toBeNull()
+    expect(fake.supporterListener).toBeNull()
   })
 
   it('drops an answer from before a reset', async () => {
@@ -270,5 +310,81 @@ describe('accountStore (F-15.2)', () => {
     await pending
     expect(store().status).toBeNull()
     expect(store().busy).toBe(false)
+  })
+})
+
+describe('accountStore supporter (F-15.9)', () => {
+  it('reads the cached license without an account', async () => {
+    expect(store().supporter).toBeNull()
+    await store().loadSupporter()
+    expect(fake.calls).toEqual([{ channel: 'account:getSupporter', input: undefined }])
+    expect(store().supporter).toEqual(SUPPORTER_NONE)
+    expect(store().supporterBusy).toBe(false)
+    expect(store().supporterError).toBeNull()
+  })
+
+  it('replaces the status with what a refresh brings back', async () => {
+    await store().loadSupporter()
+    await store().refreshSupporter()
+    expect(fake.calls.at(-1)).toEqual({ channel: 'account:refreshSupporter', input: undefined })
+    expect(store().supporter).toEqual(SUPPORTER_LICENSED)
+  })
+
+  it('opens the checkout without granting anything', async () => {
+    await store().loadSupporter()
+    await store().buySupporter()
+    expect(fake.calls.at(-1)).toEqual({ channel: 'account:buySupporter', input: undefined })
+    expect(store().supporter).toEqual(SUPPORTER_NONE)
+    expect(store().supporterBusy).toBe(false)
+  })
+
+  it('sends the accent pick and keeps the status main stored', async () => {
+    await store().setAccent('sky')
+    expect(fake.calls).toEqual([{ channel: 'account:setAccent', input: { accent: 'sky' } }])
+    expect(store().supporter).toEqual({ ...SUPPORTER_LICENSED, accent: 'sky' })
+  })
+
+  it('keeps a license failure out of the sign-in and credits errors', async () => {
+    await store().load()
+    await store().loadSupporter()
+    fake.fail = new IpcRequestError({
+      code: 'VALIDATION',
+      message: 'The Supporter license is needed for that accent.'
+    })
+    await store().setAccent('violet')
+    expect(store().supporterError).toBe('The Supporter license is needed for that accent.')
+    expect(store().error).toBeNull()
+    expect(store().creditsError).toBeNull()
+    // The refused pick left the stored status alone.
+    expect(store().supporter).toEqual(SUPPORTER_NONE)
+    expect(store().supporterBusy).toBe(false)
+  })
+
+  it('takes the license main pushes and drops the error with it', async () => {
+    store().subscribe()
+    fake.fail = new IpcRequestError({ code: 'IO', message: 'Could not reach MythScribe Cloud.' })
+    await store().refreshSupporter()
+    expect(store().supporterError).toBe('Could not reach MythScribe Cloud.')
+    fake.supporterListener?.(SUPPORTER_LICENSED)
+    expect(store().supporter).toEqual(SUPPORTER_LICENSED)
+    expect(store().supporterError).toBeNull()
+  })
+
+  it('leaves the cached license alone on sign out; main pushes the clearing', async () => {
+    store().subscribe()
+    await store().refreshSupporter()
+    await store().signOut()
+    // The token is local, so the store does not guess: it is still licensed until main says otherwise.
+    expect(store().supporter).toEqual(SUPPORTER_LICENSED)
+    fake.supporterListener?.(SUPPORTER_NONE)
+    expect(store().supporter).toEqual(SUPPORTER_NONE)
+  })
+
+  it('drops a license answer from before a reset', async () => {
+    const pending = store().loadSupporter()
+    resetAccountStore()
+    await pending
+    expect(store().supporter).toBeNull()
+    expect(store().supporterBusy).toBe(false)
   })
 })

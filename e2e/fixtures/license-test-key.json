@@ -1,0 +1,23 @@
+{
+  "privateKey": {
+    "key_ops": [
+      "sign"
+    ],
+    "ext": true,
+    "alg": "Ed25519",
+    "crv": "Ed25519",
+    "d": "-CKL04VAuYcPtWrrg0ulNPAsq1MQcTN0jMf8IVt0Q-Y",
+    "x": "7c4jijPqpD-imlyv_IfXvV4DW0IbBCy4JNomRk1d7HA",
+    "kty": "OKP"
+  },
+  "publicKey": {
+    "key_ops": [
+      "verify"
+    ],
+    "ext": true,
+    "alg": "Ed25519",
+    "crv": "Ed25519",
+    "x": "7c4jijPqpD-imlyv_IfXvV4DW0IbBCy4JNomRk1d7HA",
+    "kty": "OKP"
+  }
+}

@@ -3,7 +3,8 @@
 The Worker behind `api.mythscribe.app`. It serves the **account** routes (F-15.2: email magic
 link, sessions), the **credit** routes (F-15.3: balance, Lemon Squeezy checkout and webhook,
 the meter), the **AI proxy** the app uses when a project runs on MythScribe's key (F-15.4:
-`POST /ai/complete`), and the **opt-in diagnostics** sink (F-15.8: `POST /diagnostics`). It never
+`POST /ai/complete`), the **opt-in diagnostics** sink (F-15.8: `POST /diagnostics`), and the
+**Supporter license** (F-15.9: `GET /license`). It never
 sees the author's own key and never stores manuscript text — it stores an email address, hashes,
 amounts, and anonymous counts. Messages and answers pass through memory and a stream; nothing of
 them is written to the database or to a log line.
@@ -11,11 +12,13 @@ them is written to the database or to a log line.
 Source: `src/index.ts` (router), `src/auth.ts` (account handlers, pure over a store + mailer +
 clock), `src/credits.ts` (credit handlers and the meter), `src/store.ts` (D1 and in-memory
 stores), `src/email.ts` (Resend / log transports), `src/pages.ts` (the two HTML pages),
-`src/crypto.ts` (tokens, hashes, the webhook HMAC), `src/ai.ts` (the proxy handler),
-`src/openai.ts` (the upstream seam: Chat Completions over plain `fetch`, plus the SSE reader)
-and `src/diagnostics.ts` (the diagnostics aggregates).
-The wire contract is shared with the desktop app in `src/shared/cloudApi.ts` and the rates in
-`src/shared/cloudRates.ts`, imported from there, not copied.
+`src/crypto.ts` (tokens, hashes, the webhook HMAC, the license signature), `src/ai.ts` (the proxy
+handler), `src/openai.ts` (the upstream seam: Chat Completions over plain `fetch`, plus the SSE
+reader), `src/diagnostics.ts` (the diagnostics aggregates) and `src/license.ts` (the Supporter
+token).
+The wire contract is shared with the desktop app in `src/shared/cloudApi.ts`, the rates in
+`src/shared/cloudRates.ts`, and the license token format in `src/shared/license.ts`, imported from
+there, not copied.
 
 ## Routes
 
@@ -28,10 +31,11 @@ The wire contract is shared with the desktop app in `src/shared/cloudApi.ts` and
 | `GET /auth/me` | `Authorization: Bearer <session>` → `{ email, userId, since }`; 401 when revoked or expired |
 | `POST /auth/signout` | same header; revokes the session, always 204 |
 | `GET /credits` | bearer → `{ balanceMicros, spend[], periodDays, periodSpend[], periodFirstChargeAt, packs[] }` (F-15.3, F-15.5); the balance in micro-USD, lifetime spend per AI feature, the same breakdown over the usage meter's rolling `USAGE_PERIOD_DAYS` window plus the oldest charge in it (null with none), and the packs on sale |
-| `POST /billing/checkout` | bearer + `{ variantId }` → `{ url }`; the pack's Lemon Squeezy checkout with `custom[user_id]` and the email stamped on it. The app opens it, never builds it |
+| `POST /billing/checkout` | bearer + `{ variantId }` → `{ url }`; the Lemon Squeezy checkout for one variant on sale — a credit pack or the Supporter product (F-15.9) — with `custom[user_id]` and the email stamped on it. The app opens it, never builds it |
+| `GET /license` | bearer → `{ token, product }` (F-15.9): a freshly signed Supporter token, or `token: null` when the account has no license or it was refunded, plus the Supporter product on sale (null until it is configured). 503 `NOT_CONFIGURED` only when the account *has* a license and `LICENSE_SIGNING_KEY` is unset |
 | `POST /ai/complete` | bearer + `AiCompleteBody` (`feature`, `model`, `messages`, `maxTokens`, `json?`, `temperature?`, `stream`) → the relayed answer (F-15.4). Caps: `AI_COMPLETE_MAX_TOKENS` 4 000, `AI_COMPLETE_MAX_MESSAGES` 64, `AI_COMPLETE_MAX_CHARS` 200 000 of message content; a model outside the rate table or a body over a cap is 400 `BAD_REQUEST`, no `OPENAI_API_KEY` is 503 `NOT_CONFIGURED`, a used-up balance is 402 `INSUFFICIENT_CREDITS`, a busy provider 429 `RATE_LIMITED`, any other provider failure 502 `UPSTREAM` |
 | `POST /diagnostics` | **no header at all** (F-15.8): `DiagnosticsBody` (`appVersion`, `platform`, `arch`, `electron`, `counts[]`, `crashes[]`) → 204. Folds the report into two aggregate tables and stores nothing per install. A body over `DIAGNOSTICS_BODY_MAX` (32 KB), a counter outside the shared enum, or anything else the schema refuses is 400 `BAD_REQUEST` |
-| `POST /billing/lemonsqueezy` | the webhook. `X-Signature` = HMAC-SHA256 hex of the raw body with `LEMONSQUEEZY_WEBHOOK_SECRET`; `order_created` (status `paid`) credits the pack price, `order_refunded` debits it, everything else answers 200 and is ignored |
+| `POST /billing/lemonsqueezy` | the webhook. `X-Signature` = HMAC-SHA256 hex of the raw body with `LEMONSQUEEZY_WEBHOOK_SECRET`; `order_created` (status `paid`) credits the pack price, `order_refunded` debits it, everything else answers 200 and is ignored. An order for the Supporter variant grants (or, refunded, revokes) the license instead and never touches the balance |
 
 `/ai/complete` with `stream: false` answers `AiCompleteResult`
 (`{ text, model, usage, chargeMicros, balanceMicros }`) as JSON. With `stream: true` it answers
@@ -81,13 +85,30 @@ summed before the clamp, so the cap cannot be split across rows. The table's row
 versions × platforms × counters × days. Per-IP limiting is deliberately not done in code (storing IPs
 would contradict "anonymous"); Cloudflare zone rate limiting can be added in the dashboard.
 
+## Supporter license (F-15.9)
+
+`GET /license` hands a licensed account a signed token and nothing else. The token is
+`base64url(JSON claims).base64url(Ed25519 signature)` over `{ v: 1, sub, iat, exp }`, with
+`exp = iat + LICENSE_GRACE_MS` (14 days) — the format, the claims, and the grace period live in
+`src/shared/license.ts` and are shared with the app. The app verifies the signature against the
+public key it ships with, caches the token, and refreshes it once a day, so the cosmetic extras keep
+working offline and never block on this route.
+
+The Worker stores no token: `supporter_licenses` holds one row per licensed account, written by the
+billing webhook, and every call signs a fresh token from it. A refund sets `revoked_at`, after which
+the route answers `token: null` — the app clears its cache on the next refresh, and an app that
+never reaches the Worker loses the extras when the cached token expires. Rotating
+`LICENSE_SIGNING_KEY` invalidates every token in the wild, so it goes with a release that carries
+the new public half.
+
 ## Database
 
 One D1 database, `mythscribe` (binding `DB`), migrations in `migrations/` — numbered, never
 edited once applied, same rule as the app's SQLite migrations. `0001_auth.sql` holds users,
 login attempts, and sessions; `0002_credits.sql` the balance (`credits`) and its ledger
 (`credit_events`); `0003_diagnostics.sql` the two diagnostics aggregates (`diagnostic_counts`,
-`diagnostic_crashes`), which belong to no user.
+`diagnostic_crashes`), which belong to no user; `0004_supporter.sql` the Supporter licenses
+(`supporter_licenses`), one row per account, idempotent on the Lemon Squeezy order.
 
 ```
 npm run cloud:migrate                      # apply to the remote database
@@ -96,12 +117,13 @@ npx wrangler d1 migrations apply mythscribe --local --config cloud/wrangler.toml
 
 ## Secrets
 
-All three are **Worker secrets**, never a file in the repo and never inside the desktop app.
+All four are **Worker secrets**, never a file in the repo and never inside the desktop app.
 
 ```
 npx wrangler secret put RESEND_API_KEY               # sign-in emails (F-15.2)
 npx wrangler secret put OPENAI_API_KEY               # the AI proxy (F-15.4)
 npx wrangler secret put LEMONSQUEEZY_WEBHOOK_SECRET  # signs the billing webhook (F-15.3)
+npx wrangler secret put LICENSE_SIGNING_KEY          # signs Supporter tokens (F-15.9)
 ```
 
 Rotating: run the same `secret put` with the new value; no redeploy needed. Without
@@ -176,6 +198,41 @@ The signature covers the exact bytes, so send the file as-is (`--data-binary`, n
 A correct replay answers `{"status":"applied"}` the first time and `{"status":"duplicate"}` after
 that; `{"status":"ignored"}` with a line in the `wrangler dev` log means the user id or the
 variant did not match the configuration.
+
+## Setting up the Supporter license (operator, once)
+
+The key pair does not exist until this is run: until then the app ships a placeholder public key and
+the Worker answers 503 `NOT_CONFIGURED` to a licensed account. Order matters — the app's public key
+must be the one the Worker signs with, so keygen comes before the first signed build.
+
+1. From the repo root: `npm run cloud:license-keygen`. It prints a private JWK and a public JWK and
+   stores neither.
+2. `npx wrangler secret put LICENSE_SIGNING_KEY` (from `cloud/`) and paste the **private** JWK, the
+   one-line JSON exactly as printed.
+3. Replace `LICENSE_PUBLIC_KEY_JWK` in `src/shared/license.ts` with the **public** block it printed,
+   and commit that. Every build from then on verifies tokens from this Worker.
+4. Create one **one-time** Lemon Squeezy product for the Supporter license ($39). Note its variant
+   id and buy link, and put them in `LEMONSQUEEZY_SUPPORTER` in `wrangler.toml` (the commented
+   example shows the shape). The existing webhook already covers it: add no new event.
+5. `npm run cloud:migrate` (for `0004_supporter.sql`) and `npm run cloud:deploy`.
+6. Buy it with a test card from the app's Account tab: the webhook log shows a 200, `GET /license`
+   starts answering a token, and the Account tab shows the Supporter badge. Refund the test order and
+   confirm the next refresh answers `token: null`.
+
+```bash
+# Who holds a license, and which order paid for it.
+npx wrangler d1 execute mythscribe --remote --config cloud/wrangler.toml --command \
+  "SELECT user_id, order_ref,
+          datetime(granted_at / 1000, 'unixepoch') AS granted_utc,
+          datetime(revoked_at / 1000, 'unixepoch') AS revoked_utc
+     FROM supporter_licenses
+    ORDER BY granted_at DESC
+    LIMIT 50"
+```
+
+Granting one by hand (a giveaway, or a purchase made outside the app) is one statement: insert a row
+with a unique `order_ref` for the account's `user_id`. Revoking is `UPDATE supporter_licenses SET
+revoked_at = <epoch ms>`.
 
 ## Reading diagnostics (operator)
 

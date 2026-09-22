@@ -9,6 +9,7 @@ import {
   CheckoutResult,
   CloudApiError,
   CreditsResult,
+  LicenseResult,
   type CloudErrorCode
 } from '@shared/cloudApi'
 // The `fetch` shape is already defined once for the provider adapter; a type-only import, so
@@ -102,6 +103,11 @@ export interface CloudAuthClient {
   credits(token: string): Promise<CreditsResult>
   /** The Lemon Squeezy checkout URL for one pack (F-15.3); the Worker builds it, never the app. */
   checkout(token: string, variantId: string): Promise<CheckoutResult>
+  /**
+   * The account's Supporter license (F-15.9): a freshly signed token, or null when the account has
+   * none, plus the product on sale. The signature is checked by `licenseVerifier.ts`, not here.
+   */
+  license(token: string): Promise<LicenseResult>
 }
 
 /** No Cloud call may hang: the author is waiting on the Account tab for every one of them. */
@@ -199,6 +205,12 @@ export function createCloudAuthClient({
         }
         throw err
       }
+    },
+    async license(token) {
+      return parseBody(
+        LicenseResult,
+        await send('/license', { method: 'GET', headers: bearer(token) })
+      )
     }
   }
 }

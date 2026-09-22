@@ -2,6 +2,7 @@ import { defaultFocusSettings } from '@shared/focus'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { generateKeyPairSync, sign } from 'node:crypto'
 import { ipcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -29,8 +30,15 @@ import { defaultFloating, defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_BRIEF, EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
-import type { CheckoutResult, CloudSession, CreditsResult } from '@shared/cloudApi'
+import type { CheckoutResult, CloudSession, CreditsResult, LicenseResult } from '@shared/cloudApi'
 import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
+import {
+  encodeLicensePayload,
+  formatLicenseToken,
+  LICENSE_GRACE_MS,
+  LicensePublicKeyJwk,
+  type LicenseClaims
+} from '@shared/license'
 import { AccountService } from '../account/accountService'
 import type { CloudAuthClient } from '../account/cloudAuthClient'
 import { registerInflight, resetInflight } from '../ai/inflight'
@@ -101,6 +109,18 @@ const untilCancelled = (request: CompletionRequest): Promise<never> =>
       { once: true }
     )
   })
+
+/**
+ * F-15.9: one throwaway Ed25519 keypair for this file. The account service verifies every license
+ * token against `licensePublicKey`, so `signLicense` is the only signer it trusts here.
+ */
+const { privateKey: licenseKey, publicKey: licensePublic } = generateKeyPairSync('ed25519')
+const LICENSE_PUBLIC_JWK = LicensePublicKeyJwk.parse(licensePublic.export({ format: 'jwk' }))
+
+const signLicense = (claims: LicenseClaims): string => {
+  const payload = encodeLicensePayload(claims)
+  return formatLicenseToken(payload, new Uint8Array(sign(null, payload, licenseKey)))
+}
 
 /** What the fake export dialog answers (F-14.6); null cancels. Tests set it per case. */
 let exportPath: string | null
@@ -225,7 +245,8 @@ beforeEach(() => {
     me: () => Promise.reject(new Error('no cloud in these tests')),
     signOut: () => Promise.resolve(),
     credits: () => Promise.reject(new Error('no cloud in these tests')),
-    checkout: () => Promise.reject(new Error('no cloud in these tests'))
+    checkout: () => Promise.reject(new Error('no cloud in these tests')),
+    license: () => Promise.reject(new Error('no cloud in these tests'))
   }
   registerHandlers({
     manager,
@@ -240,7 +261,10 @@ beforeEach(() => {
     account: new AccountService({
       client: cloudClient,
       keyStore,
-      onChange: () => {}
+      appState,
+      licensePublicKey: LICENSE_PUBLIC_JWK,
+      onChange: () => {},
+      onSupporterChange: () => {}
     }),
     // F-15.7: a service with no updater, which is what a development build has; the service
     // itself is tested in `updates/updateService.test.ts`.
@@ -2460,16 +2484,25 @@ describe('menu:edit / menu:openExternal (F-7.1)', () => {
  * becoming a general "open any URL" hole (a wrong or tampered checkout URL from the Worker), so
  * it is tested here against the real handler and a real, signed-in `AccountService`.
  */
-describe('account:getCredits / account:buyCredits (F-15.3)', () => {
+describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15.9)', () => {
   const SESSION: CloudSession = {
     token: 'tok-cloud-1',
     email: 'author@example.com',
     userId: 'u-cloud-1'
   }
+  const SUPPORTER = { variantId: 'supporter', priceCents: 3900 }
+  const NOW = Date.now()
+  const LICENSE_TOKEN = signLicense({
+    v: 1,
+    sub: SESSION.userId,
+    iat: NOW,
+    exp: NOW + LICENSE_GRACE_MS
+  })
   let credits: ReturnType<typeof vi.fn<(token: string) => Promise<CreditsResult>>>
   let checkout: ReturnType<
     typeof vi.fn<(token: string, variantId: string) => Promise<CheckoutResult>>
   >
+  let license: ReturnType<typeof vi.fn<(token: string) => Promise<LicenseResult>>>
   let creditsInvoke: Invoke
   let creditsHandlerFor: (
     channel: Channel
@@ -2487,6 +2520,8 @@ describe('account:getCredits / account:buyCredits (F-15.3)', () => {
       })
     )
     checkout = vi.fn(() => Promise.reject(new Error('set a checkout answer per test')))
+    // F-15.9: no license and nothing on sale unless a test says so.
+    license = vi.fn(() => Promise.resolve({ token: null, product: null }))
     const cloudKeyStore = new AiKeyStore(
       path.join(tmp, 'userData', 'ai-keys-credits.json'),
       safe,
@@ -2499,14 +2534,18 @@ describe('account:getCredits / account:buyCredits (F-15.3)', () => {
       me: () => Promise.reject(new Error('no cloud in these tests')),
       signOut: () => Promise.resolve(),
       credits,
-      checkout
+      checkout,
+      license
     }
+    const appState = new AppStateStore(path.join(tmp, 'userData', 'app-state-credits.json'))
     const account = new AccountService({
       client: cloudClient,
       keyStore: cloudKeyStore,
-      onChange: () => {}
+      appState,
+      licensePublicKey: LICENSE_PUBLIC_JWK,
+      onChange: () => {},
+      onSupporterChange: () => {}
     })
-    const appState = new AppStateStore(path.join(tmp, 'userData', 'app-state-credits.json'))
     const neverProvider: Provider = {
       id: 'openai',
       resolveModel: () => 'gpt-fake',
@@ -2583,6 +2622,45 @@ describe('account:getCredits / account:buyCredits (F-15.3)', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  it('answers the license the Worker signed, and stores an accent while it holds (F-15.9)', async () => {
+    license.mockResolvedValue({ token: LICENSE_TOKEN, product: SUPPORTER })
+    const refreshed = await creditsInvoke('account:refreshSupporter', undefined)
+    expect(refreshed).toMatchObject({ licensed: true, offline: false, accent: 'default' })
+    expect(license).toHaveBeenCalledWith(SESSION.token)
+    // The cached status is the same answer, without asking the Worker again.
+    const calls = license.mock.calls.length
+    expect(await creditsInvoke('account:getSupporter', undefined)).toEqual(refreshed)
+    expect(license).toHaveBeenCalledTimes(calls)
+
+    const accented = await creditsInvoke('account:setAccent', { accent: 'ember' })
+    expect(accented.accent).toBe('ember')
+    expect((await creditsInvoke('account:getSupporter', undefined)).accent).toBe('ember')
+  })
+
+  it('refuses an accent without a license (F-15.9)', async () => {
+    const result = await creditsHandlerFor('account:setAccent')(null, { accent: 'ember' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    // The default accent is every install's, so it is not refused.
+    expect((await creditsInvoke('account:setAccent', { accent: 'default' })).accent).toBe('default')
+  })
+
+  it('opens the Supporter checkout, and nothing that is not one (F-15.9)', async () => {
+    license.mockResolvedValue({ token: null, product: SUPPORTER })
+    await creditsInvoke('account:refreshSupporter', undefined)
+    const url = 'https://mythscribe.lemonsqueezy.com/buy/supporter?checkout[custom][user_id]=u1'
+    checkout.mockResolvedValueOnce({ url })
+    expect(await creditsInvoke('account:buySupporter', undefined)).toBeNull()
+    expect(checkout).toHaveBeenCalledWith(SESSION.token, SUPPORTER.variantId)
+    expect(openExternal).toHaveBeenCalledWith(url)
+
+    checkout.mockResolvedValueOnce({ url: 'https://evil.example.com/buy/supporter' })
+    const result = await creditsHandlerFor('account:buySupporter')(null, undefined)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(openExternal).toHaveBeenCalledTimes(1)
   })
 })
 

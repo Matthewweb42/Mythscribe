@@ -16,6 +16,7 @@ import { LOGIN_ATTEMPT_TTL_MS } from '../src/shared/cloudApi'
 import { cloudChargeMicros, cloudPriceFor, MICROS_PER_USD } from '../src/shared/cloudRates'
 import { USAGE_PERIOD_DAYS } from '../src/shared/cloudUsage'
 import type { FocusSettings } from '../src/shared/focus'
+import { encodeLicensePayload, formatLicenseToken, LICENSE_GRACE_MS } from '../src/shared/license'
 import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
 import { PRESETS, type WritingPresets } from '../src/shared/presets'
@@ -413,6 +414,35 @@ const CLOUD_PERIOD_FIRST_CHARGE_AT = Date.now() - 3 * 24 * 60 * 60_000
 const balanceText = (micros: number): string => `$${(micros / MICROS_PER_USD).toFixed(2)}`
 const CLOUD_CHECKOUT_URL =
   'https://mythscribe.lemonsqueezy.com/buy/test?checkout[custom][user_id]=user-1'
+/**
+ * F-15.9: the Supporter license. The fake Worker signs a real token with the throwaway keypair in
+ * `e2e/fixtures/license-test-key.json`, and the app is launched with that pair's public half in
+ * `MYTHSCRIBE_LICENSE_PUBLIC_KEY`, so the verification in main runs for real. The private half is
+ * test-only and is never the key the released Worker signs with.
+ */
+const LICENSE_FIXTURE = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'fixtures', 'license-test-key.json'), 'utf8')
+) as { privateKey: JsonWebKey; publicKey: JsonWebKey }
+const CLOUD_SUPPORTER_PRODUCT = { variantId: 'supporter', priceCents: 3900 }
+let licenseSigningKey: CryptoKey
+
+/** One freshly signed license token for the fake Worker's signed-in account. */
+async function signLicenseToken(): Promise<string> {
+  const iat = Date.now()
+  const payload = encodeLicensePayload({
+    v: 1,
+    sub: CLOUD_USER_ID,
+    iat,
+    exp: iat + LICENSE_GRACE_MS
+  })
+  // Copied into its own buffer: Web Crypto takes a `BufferSource` backed by a plain ArrayBuffer.
+  const signature = await crypto.subtle.sign(
+    { name: 'Ed25519' },
+    licenseSigningKey,
+    new Uint8Array(payload)
+  )
+  return formatLicenseToken(payload, new Uint8Array(signature))
+}
 
 /**
  * F-15.4: what the fake Cloud Worker answers `POST /ai/complete` with, and what it saw. The
@@ -440,11 +470,19 @@ function approveSignIn(): void {
  * main at this server, which speaks the four auth routes of `src/shared/cloudApi.ts`: it records
  * the address a link was asked for, answers polls pending until `approveSignIn()`, then hands
  * over one session, and authorises `/auth/me` and `/auth/signout` with that session's token
- * alone. It also answers the two credit routes (F-15.3) behind the same bearer. No mail is sent,
- * no link is ever pasted back into the app, and no checkout is ever opened (the test does not
- * click Buy, which would hand a URL to the real browser).
+ * alone. It also answers the two credit routes (F-15.3) behind the same bearer, and `/license`
+ * (F-15.9) with a token it signs itself. No mail is sent, no link is ever pasted back into the
+ * app, and no checkout is ever opened (the test does not click Buy, which would hand a URL to the
+ * real browser).
  */
-function startFakeCloudApi(): Promise<string> {
+async function startFakeCloudApi(): Promise<string> {
+  licenseSigningKey = await crypto.subtle.importKey(
+    'jwk',
+    LICENSE_FIXTURE.privateKey,
+    { name: 'Ed25519' },
+    false,
+    ['sign']
+  )
   const json = (res: http.ServerResponse, status: number, body: unknown): void => {
     res.statusCode = status
     res.setHeader('content-type', 'application/json')
@@ -522,6 +560,19 @@ function startFakeCloudApi(): Promise<string> {
         periodFirstChargeAt: CLOUD_PERIOD_FIRST_CHARGE_AT,
         packs: [CLOUD_PACK]
       })
+      return
+    }
+    if (req.method === 'GET' && url === '/license') {
+      req.resume()
+      if (!authorized(req)) {
+        json(res, 401, { code: 'UNAUTHORIZED', message: 'Sign in again.' })
+        return
+      }
+      // A fresh token per call, exactly as the Worker signs one (F-15.9).
+      void signLicenseToken().then(
+        (token) => json(res, 200, { token, product: CLOUD_SUPPORTER_PRODUCT }),
+        (err: unknown) => json(res, 500, { code: 'INTERNAL', message: String(err) })
+      )
       return
     }
     if (req.method === 'POST' && url === '/billing/checkout') {
@@ -616,7 +667,9 @@ test.beforeAll(async () => {
       NODE_ENV: 'test',
       MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData'),
       OPENAI_BASE_URL: openAiBaseUrl,
-      MYTHSCRIBE_CLOUD_API_URL: cloudApiUrl
+      MYTHSCRIBE_CLOUD_API_URL: cloudApiUrl,
+      // F-15.9: verify licenses against the fixture keypair, not the key the release ships with.
+      MYTHSCRIBE_LICENSE_PUBLIC_KEY: JSON.stringify(LICENSE_FIXTURE.publicKey)
     }
   })
   app.on('close', () => {
@@ -1190,6 +1243,36 @@ test('create, close, reopen a project on disk', async () => {
   expect(openAiRequests).toHaveLength(openAiBeforeCloudTest)
   await settingsDialog.getByTestId('ai-source-ownKey').click()
   await expect.poll(async () => (await aiSettings()).source).toBe('ownKey')
+  await settingsDialog.getByRole('tab', { name: 'Account' }).click()
+  // F-15.9: the Supporter license. The fake Worker signs a token for this account, main verifies
+  // it against the fixture public key and caches it, and the background refresh that follows the
+  // sign-in is what puts the badge on the tab — nothing here clicks Refresh. The accent is the
+  // cosmetic extra the license unlocks: it lands on <html>, is written to app-state.json, and is
+  // still there after the window is reloaded from main's state alone.
+  await expect(settingsDialog.getByTestId('account-supporter-badge')).toBeVisible({
+    timeout: 15_000
+  })
+  await settingsDialog.getByTestId('account-accent-ember').click()
+  await expect(page.locator('html')).toHaveAttribute('data-accent', 'ember')
+  await expect
+    .poll(
+      () =>
+        (JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { supporter: { accent: string } })
+          .supporter.accent,
+      { timeout: 3000 }
+    )
+    .toBe('ember')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await page.reload()
+  await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  await expect(page.locator('html')).toHaveAttribute('data-accent', 'ember')
+  // The reload dropped the renderer's selection (main keeps the project open, not the caret), so
+  // put the scene and the dialog back for the steps that follow.
+  await scene1.click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(settingsDialog).toBeVisible()
   await settingsDialog.getByRole('tab', { name: 'Account' }).click()
   await settingsDialog.getByRole('button', { name: 'Sign out' }).click()
   await expect(settingsDialog.getByLabel('Email')).toBeVisible()

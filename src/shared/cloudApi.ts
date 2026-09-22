@@ -150,6 +150,18 @@ export function isCheckoutUrl(url: string): boolean {
 
 /** `POST /billing/lemonsqueezy`: the Lemon Squeezy webhook; signed with `X-Signature`, no bearer. */
 
+/**
+ * `GET /license` with the bearer (F-15.9): the Supporter license token for this account, or
+ * null when it has none, and the product on sale (a `CreditPack` shape: the variant to name in
+ * `POST /billing/checkout` and the price to show). The token's claims and format are in
+ * `license.ts`; the app verifies it against the embedded public key before trusting it.
+ */
+export const LicenseResult = z.object({
+  token: z.string().nullable(),
+  product: CreditPack.nullable()
+})
+export type LicenseResult = z.infer<typeof LicenseResult>
+
 export const CloudErrorCode = z.enum([
   'INVALID_EMAIL',
   /** The proxy could not read the body, or it asks for a model or a size the proxy refuses (F-15.4). */

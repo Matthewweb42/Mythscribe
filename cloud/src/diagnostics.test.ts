@@ -5,10 +5,9 @@ import {
   type DiagnosticsBody
 } from '../../src/shared/cloudApi'
 import { type CrashReport, DIAGNOSTIC_COUNT_MAX } from '../../src/shared/diagnostics'
-import type { AiDeps } from './ai'
 import { crashFingerprint } from './diagnostics'
 import type { Mailer } from './email'
-import { handleRequest } from './index'
+import { handleRequest, type WorkerDeps } from './index'
 import { type MemoryStore, memoryStore } from './store'
 
 const ORIGIN = 'https://api.mythscribe.app'
@@ -18,7 +17,7 @@ const MINUTE_MS = 60_000
 const silentMailer: Mailer = { send: () => Promise.resolve() }
 
 let store: MemoryStore
-let deps: AiDeps
+let deps: WorkerDeps
 let clock: number
 
 beforeEach(() => {
@@ -31,8 +30,10 @@ beforeEach(() => {
     random: () => 'not-used',
     revealLink: false,
     packs: [],
+    supporter: null,
     webhookSecret: null,
-    upstream: null
+    upstream: null,
+    signingKey: null
   }
 })
 

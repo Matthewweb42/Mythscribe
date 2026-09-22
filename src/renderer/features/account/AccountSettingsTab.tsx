@@ -5,6 +5,7 @@ import { creditWarning, periodSpentMicros, projectedDaysLeft } from '@shared/clo
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { featureLabel, formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { describeError } from '@renderer/lib/errors'
+import { AccentPicker } from './AccentPicker'
 import { useAccountStore } from './accountStore'
 import { creditWarningText, runOutText } from './creditMeter'
 
@@ -26,6 +27,11 @@ const day = (iso: string): string =>
 const RATES_NOTE =
   "Rates include MythScribe's margin over the provider price; each request is charged at the " +
   'rate of the model that answered.'
+
+/** What the Supporter license (F-15.9) is, in one sentence, with no feature held hostage. */
+const SUPPORTER_INTRO =
+  'A one-time purchase that supports the project and unlocks the accent colours. Nothing else ' +
+  'changes: every writing and AI feature works without it.'
 
 /**
  * The Account tab of the Settings dialog (F-15.2). Three states, one at a time, from the store
@@ -102,6 +108,9 @@ export function AccountSettingsTab(): React.JSX.Element {
           <CreditsSection />
         </div>
       )}
+
+      {/* F-15.9: the license is cached locally, so it shows signed in or out; buying needs the account. */}
+      {status === null ? null : <SupporterSection signedIn={status.state === 'signedIn'} />}
 
       {error === null ? null : (
         <p role="alert" className="m-0 text-xs text-danger">
@@ -293,6 +302,91 @@ function UsageMeter({ credits, now }: { credits: CreditsResult; now: number }): 
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * The Supporter license (F-15.9): a one-time purchase, bought through the same Lemon Squeezy
+ * checkout as the credit packs and granted to the account. Licensed shows the badge and, while
+ * the Worker cannot be reached, how long the extras stay on from the cached token; unlicensed
+ * explains what the purchase is and offers it. The accent picker is here either way, so the
+ * locked extra is visible rather than described. App loads the status at start (the cache is
+ * local and works signed out), so this section never asks on mount; Refresh needs the account.
+ */
+function SupporterSection({ signedIn }: { signedIn: boolean }): React.JSX.Element {
+  const supporter = useAccountStore((s) => s.supporter)
+  const busy = useAccountStore((s) => s.supporterBusy)
+  const error = useAccountStore((s) => s.supporterError)
+  const refreshSupporter = useAccountStore((s) => s.refreshSupporter)
+  const buySupporter = useAccountStore((s) => s.buySupporter)
+  const licensed = supporter?.licensed === true
+  const product = supporter?.product ?? null
+
+  return (
+    <section aria-label="Supporter" className="flex flex-col gap-2 border-t border-line pt-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="m-0 text-sm font-medium">Supporter</h3>
+        <button
+          type="button"
+          // Its own name, so it is not the credits Refresh with a different job behind it.
+          aria-label="Refresh license"
+          title="Refresh license"
+          disabled={busy || !signedIn}
+          onClick={() => void refreshSupporter()}
+          className={BUTTON}
+        >
+          Refresh
+        </button>
+      </div>
+
+      {licensed && supporter !== null ? (
+        <>
+          <span
+            data-testid="account-supporter-badge"
+            className="self-start rounded-md border border-accent px-2 py-0.5 text-xs text-accent"
+          >
+            {/* `since` is the token's `iat`; a verified license always carries one. */}
+            {supporter.since === null ? 'Supporter' : `Supporter since ${day(supporter.since)}`}
+          </span>
+          {supporter.offline && supporter.validUntil !== null ? (
+            <p className="m-0 text-xs text-fg-muted">
+              {`Extras stay on until ${day(supporter.validUntil)} while MythScribe Cloud cannot be reached.`}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <p className="m-0 text-fg-muted">{SUPPORTER_INTRO}</p>
+          {product === null ? (
+            <p className="m-0 text-xs text-fg-muted">The Supporter license is not on sale yet.</p>
+          ) : (
+            <button
+              type="button"
+              data-testid="account-supporter-buy"
+              disabled={busy || !signedIn}
+              onClick={() => void buySupporter()}
+              className={BUTTON}
+            >
+              {`Become a Supporter — ${formatUsd(product.priceCents / 100)}`}
+            </button>
+          )}
+          {signedIn ? null : (
+            <p className="m-0 text-xs text-fg-muted">
+              Sign in to buy it: the license belongs to your account, so it follows you to the next
+              machine.
+            </p>
+          )}
+        </>
+      )}
+
+      <AccentPicker />
+
+      {error === null ? null : (
+        <p role="alert" className="m-0 text-xs text-danger">
+          {error}
+        </p>
+      )}
+    </section>
   )
 }
 

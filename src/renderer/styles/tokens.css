@@ -55,3 +55,39 @@
   --ms-font-prose: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', serif;
   --ms-font-mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
 }
+
+/*
+ * Supporter accents (F-15.9): the one cosmetic extra the license unlocks. App.tsx sets
+ * `data-accent` on <html> from the license status; `default` (the moss green in `:root` above) is
+ * the attribute's absence. The values are the same hex triples as `ACCENTS` in
+ * `src/shared/license.ts` — CSS cannot import the TypeScript, so change both together.
+ */
+:root[data-accent='ember'] {
+  --ms-accent: #f0885a;
+  --ms-accent-hover: #f5a27e;
+  --ms-accent-fg: #1f110b;
+}
+
+:root[data-accent='sky'] {
+  --ms-accent: #6db3f2;
+  --ms-accent-hover: #8cc4f6;
+  --ms-accent-fg: #0b1620;
+}
+
+:root[data-accent='rose'] {
+  --ms-accent: #e88aa8;
+  --ms-accent-hover: #efa7be;
+  --ms-accent-fg: #20101a;
+}
+
+:root[data-accent='gold'] {
+  --ms-accent: #e2b84a;
+  --ms-accent-hover: #ead07a;
+  --ms-accent-fg: #1f1908;
+}
+
+:root[data-accent='violet'] {
+  --ms-accent: #a78bfa;
+  --ms-accent-hover: #bda8fb;
+  --ms-accent-fg: #15102a;
+}

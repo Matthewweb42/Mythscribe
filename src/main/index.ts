@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { cloudApiUrl } from '@shared/account'
 import { ASSET_SCHEME } from '@shared/focus'
+import { licensePublicKey } from '@shared/license'
 import { AccountService } from './account/accountService'
 import { createCloudAuthClient } from './account/cloudAuthClient'
 import { AiKeyStore } from './ai/keyStore'
@@ -199,7 +200,14 @@ if (!primaryInstance) {
     account = new AccountService({
       client: cloudClient,
       keyStore,
-      onChange: (status) => emit(BrowserWindow.getAllWindows(), 'account:changed', status)
+      // F-15.9: the Supporter license rides along with the account — the cached token and the
+      // accent live in app-state.json, and the key it is verified against comes from the shared
+      // constant (`MYTHSCRIBE_LICENSE_PUBLIC_KEY` overrides it for dev and the e2e).
+      appState,
+      licensePublicKey: licensePublicKey(process.env),
+      onChange: (status) => emit(BrowserWindow.getAllWindows(), 'account:changed', status),
+      onSupporterChange: (status) =>
+        emit(BrowserWindow.getAllWindows(), 'account:supporterChanged', status)
     })
     // F-15.4: the Cloud adapter reads the session live through the account service, so it is
     // built once here and never rebuilt; a 401 from the proxy ends the session the same way a

@@ -1,6 +1,7 @@
 /**
- * Token and digest helpers for the account routes (F-15.2). Web Crypto only, so the same code
- * runs in the Worker runtime and under Node in the unit tests.
+ * Token and digest helpers for the account routes (F-15.2), the webhook HMAC (F-15.3), and the
+ * Supporter license signature (F-15.9). Web Crypto only, so the same code runs in the Worker
+ * runtime and under Node in the unit tests.
  */
 
 const encoder = new TextEncoder()
@@ -40,6 +41,24 @@ export async function hmacSha256Hex(secret: string, body: string): Promise<strin
     ['sign']
   )
   return hex(await crypto.subtle.sign('HMAC', key, encoder.encode(body)))
+}
+
+/**
+ * The Supporter license signing key (F-15.9): the private half of the Ed25519 pair, exactly as the
+ * `LICENSE_SIGNING_KEY` secret carries it. `crypto.subtle` speaks Ed25519 in the Worker runtime and
+ * under Node in the tests, so signing a license needs no library. Not extractable: the Worker only
+ * ever signs with it.
+ */
+export function importSigningKey(jwk: JsonWebKey): Promise<CryptoKey> {
+  return crypto.subtle.importKey('jwk', jwk, { name: 'Ed25519' }, false, ['sign'])
+}
+
+/**
+ * The Ed25519 signature over exactly `bytes` (the token's payload segment). The caller pairs it
+ * with the payload through `formatLicenseToken`, so the app verifies the same bytes.
+ */
+export async function signEd25519(key: CryptoKey, bytes: Uint8Array): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.sign('Ed25519', key, bytes))
 }
 
 /** Constant-time comparison of two hex digests; false as soon as the lengths differ. */

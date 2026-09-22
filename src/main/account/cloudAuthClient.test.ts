@@ -252,3 +252,35 @@ describe('createCloudAuthClient credits (F-15.3)', () => {
     expect((await caught(client().checkout('tok-1', 'pack-5'))).code).toBe('PROTOCOL')
   })
 })
+
+describe('createCloudAuthClient license (F-15.9)', () => {
+  const TOKEN = 'eyJ2IjoxfQ.c2lnbmF0dXJl'
+
+  it('reads the license token and the product with the session as a bearer', async () => {
+    const body = { token: TOKEN, product: { variantId: 'supporter', priceCents: 3900 } }
+    answers = [json(200, body)]
+    expect(await client().license('tok-1')).toEqual(body)
+    expect(calls[0]?.url).toBe(`${BASE}/license`)
+    expect(calls[0]?.init?.method).toBe('GET')
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer tok-1')
+  })
+
+  it('reads an account with no license, and a Worker with nothing on sale', async () => {
+    answers = [json(200, { token: null, product: null })]
+    expect(await client().license('tok-1')).toEqual({ token: null, product: null })
+  })
+
+  it('names what a Worker without a signing key is missing', async () => {
+    answers = [errorBody('NOT_CONFIGURED', 'The Supporter license signing key is not configured.')]
+    const err = await caught(client().license('tok-1'))
+    expect(err.code).toBe('NOT_CONFIGURED')
+    expect(err.message).toBe('The Supporter license signing key is not configured.')
+  })
+
+  it('reports a revoked session as UNAUTHORIZED and an unreadable body as PROTOCOL', async () => {
+    answers = [errorBody('UNAUTHORIZED', 'gone')]
+    expect((await caught(client().license('tok-1'))).code).toBe('UNAUTHORIZED')
+    answers = [json(200, { token: 7, product: null })]
+    expect((await caught(client().license('tok-1'))).code).toBe('PROTOCOL')
+  })
+})

@@ -6,11 +6,10 @@ import {
   isCheckoutUrl,
   SESSION_TTL_MS
 } from '../../src/shared/cloudApi'
-import type { AiDeps } from './ai'
 import { type ConfiguredPack, hasCredit, meterRequest } from './credits'
 import { hmacSha256Hex, sha256Hex } from './crypto'
 import type { Mailer } from './email'
-import { handleRequest } from './index'
+import { handleRequest, type WorkerDeps } from './index'
 import { memoryStore } from './store'
 
 const ORIGIN = 'https://api.mythscribe.app'
@@ -26,14 +25,21 @@ const PACKS: ConfiguredPack[] = [
   { variantId: '222', priceCents: 2000, url: 'https://mythscribe.lemonsqueezy.com/buy/twenty' }
 ]
 
+/** F-15.9: the Supporter product goes through the same checkout and webhook as a pack. */
+const SUPPORTER: ConfiguredPack = {
+  variantId: '333',
+  priceCents: 3900,
+  url: 'https://mythscribe.lemonsqueezy.com/buy/supporter'
+}
+
 const silentMailer: Mailer = { send: () => Promise.resolve() }
 
-let deps: AiDeps
+let deps: WorkerDeps
 let clock: number
 let counter: number
 let warnings: string[]
 
-function makeDeps(overrides: Partial<AiDeps> = {}): AiDeps {
+function makeDeps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
   return {
     store: memoryStore(),
     mailer: silentMailer,
@@ -41,9 +47,12 @@ function makeDeps(overrides: Partial<AiDeps> = {}): AiDeps {
     random: () => `evt-${(counter += 1)}`,
     revealLink: false,
     packs: PACKS,
+    supporter: SUPPORTER,
     webhookSecret: SECRET,
     // F-15.4: the AI proxy has its own tests in `ai.test.ts`.
     upstream: null,
+    // F-15.9: signing a token is `license.test.ts`; here the license is only granted and revoked.
+    signingKey: null,
     ...overrides
   }
 }
@@ -324,6 +333,33 @@ describe('POST /billing/checkout', () => {
     expect(parsed.searchParams.get('checkout[email]')).toBe(EMAIL)
   })
 
+  it('stamps the buyer on the Supporter product too', async () => {
+    const response = await handleRequest(
+      post('/billing/checkout', { variantId: SUPPORTER.variantId }, TOKEN),
+      deps
+    )
+
+    expect(response.status).toBe(200)
+    const parsed = new URL(CheckoutResult.parse(await response.json()).url)
+    expect(parsed.origin + parsed.pathname).toBe(
+      'https://mythscribe.lemonsqueezy.com/buy/supporter'
+    )
+    expect(parsed.searchParams.get('checkout[custom][user_id]')).toBe(USER_ID)
+  })
+
+  it('refuses the Supporter variant when the Worker has no product configured', async () => {
+    deps = makeDeps({ supporter: null })
+    await signIn()
+
+    const response = await handleRequest(
+      post('/billing/checkout', { variantId: SUPPORTER.variantId }, TOKEN),
+      deps
+    )
+
+    expect(response.status).toBe(404)
+    expect((await errorOf(response)).code).toBe('NOT_FOUND')
+  })
+
   it('refuses an unknown or malformed pack', async () => {
     const unknown = await handleRequest(
       post('/billing/checkout', { variantId: '999' }, TOKEN),
@@ -433,6 +469,75 @@ describe('POST /billing/lemonsqueezy', () => {
 
     expect((await credits()).balanceMicros).toBe(0)
     expect(warnings).toHaveLength(2)
+  })
+})
+
+describe('POST /billing/lemonsqueezy for the Supporter license (F-15.9)', () => {
+  /** An order for the Supporter variant; everything else about the payload is the same. */
+  function supporterOrder(options: OrderEventOptions = {}): unknown {
+    return orderEvent({ id: 'order-s1', variantId: SUPPORTER.variantId, ...options })
+  }
+
+  it('grants the license and credits nothing', async () => {
+    expect(await webhookStatus(await webhook(supporterOrder()))).toBe('applied')
+
+    expect(await deps.store.findSupporter(USER_ID)).toEqual({
+      grantedAt: START.getTime(),
+      revokedAt: null
+    })
+    // The license is not credit: the balance and the ledger stay untouched.
+    const body = await credits()
+    expect(body.balanceMicros).toBe(0)
+    expect(body.spend).toEqual([])
+  })
+
+  it('grants once for a replayed delivery', async () => {
+    await webhook(supporterOrder())
+
+    expect(await webhookStatus(await webhook(supporterOrder()))).toBe('duplicate')
+
+    expect(await deps.store.findSupporter(USER_ID)).toEqual({
+      grantedAt: START.getTime(),
+      revokedAt: null
+    })
+  })
+
+  it('revokes the license on a refund of the same order', async () => {
+    await webhook(supporterOrder())
+
+    clock = START.getTime() + DAY_MS
+    expect(await webhookStatus(await webhook(supporterOrder({ event: 'order_refunded' })))).toBe(
+      'applied'
+    )
+
+    expect(await deps.store.findSupporter(USER_ID)).toEqual({
+      grantedAt: START.getTime(),
+      revokedAt: clock
+    })
+    expect((await credits()).balanceMicros).toBe(0)
+  })
+
+  it('grants again when the author buys it a second time', async () => {
+    await webhook(supporterOrder())
+    await webhook(supporterOrder({ event: 'order_refunded' }))
+
+    clock = START.getTime() + 30 * DAY_MS
+    expect(await webhookStatus(await webhook(supporterOrder({ id: 'order-s2' })))).toBe('applied')
+
+    expect(await deps.store.findSupporter(USER_ID)).toEqual({
+      grantedAt: clock,
+      revokedAt: null
+    })
+  })
+
+  it('ignores the order when the Worker has no Supporter product configured', async () => {
+    deps = makeDeps({ supporter: null })
+    await signIn()
+
+    expect(await webhookStatus(await webhook(supporterOrder()))).toBe('ignored')
+
+    expect(await deps.store.findSupporter(USER_ID)).toBeNull()
+    expect(warnings).toHaveLength(1)
   })
 })
 

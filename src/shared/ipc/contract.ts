@@ -39,6 +39,7 @@ import { Background, FocusSettings } from '../focus'
 import { IndexQueueStatus } from '../jobs'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
+import { AccentId, SupporterStatus } from '../license'
 import { MatterTemplateId } from '../matterTemplates'
 import { EditRole, MenuItemId } from '../menu'
 import { WritingPresets } from '../presets'
@@ -724,6 +725,25 @@ export const contract = {
    */
   'account:buyCredits': { input: CheckoutBody, output: z.null() },
   /**
+   * The Supporter license (F-15.9) from the local cache: licensed or not, when the Worker last
+   * confirmed it, how long the cached token is trusted without the network, the product on sale,
+   * and the chosen accent. Never touches the network; app-wide, no project or sign-in needed.
+   */
+  'account:getSupporter': { input: z.undefined(), output: SupporterStatus },
+  /**
+   * Asks the Worker for a fresh license token (F-15.9) and answers the updated status. Signed
+   * out is IO; an unreachable Worker leaves the cached token in place and is IO too; a session
+   * the Worker no longer accepts signs out (pushed as `account:changed`).
+   */
+  'account:refreshSupporter': { input: z.undefined(), output: SupporterStatus },
+  /**
+   * Buys the Supporter license (F-15.9): the Lemon Squeezy checkout URL for this account, opened
+   * in the default browser. Not on sale is VALIDATION; signed out or unreachable is IO.
+   */
+  'account:buySupporter': { input: z.undefined(), output: z.null() },
+  /** Picks the UI accent (F-15.9). Anything but `default` needs the license: VALIDATION otherwise. */
+  'account:setAccent': { input: z.object({ accent: AccentId }), output: SupporterStatus },
+  /**
    * Where the app stands on updates (F-15.7): the running version, the channel, whether it
    * checks by itself, what the updater is doing, and the notes of the last download. App-wide,
    * no project needed; a development build answers the `unsupported` status with its reason.
@@ -1130,6 +1150,8 @@ export const events = {
   'account:changed': AccountStatus,
   /** A Cloud request was answered and charged (F-15.5): the balance the Worker reported with it. */
   'account:balanceChanged': z.object({ balanceMicros: z.number().int() }),
+  /** The Supporter license changed without a renderer call (F-15.9): a background refresh, a sign-in, or a sign-out. */
+  'account:supporterChanged': SupporterStatus,
   /** The update state changed without a renderer call (F-15.7): a background check, a download, or a ready build. */
   'updates:changed': UpdateState,
   /** Diagnostics were switched, or a report was sent (F-15.8); the tab shows what is pending now. */

@@ -5,6 +5,7 @@ import { AiModels, defaultAiModels } from '@shared/ai'
 import { RecentProjectEntry } from '@shared/ipc/contract'
 import { DiagnosticsSettings, defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { StoredLayout, defaultLayout } from '@shared/layout'
+import { SupporterSettings, defaultSupporterSettings } from '@shared/license'
 import { UpdateSettings, defaultUpdateSettings } from '@shared/updates'
 import { AiUsageState, defaultAiUsageState } from '../ai/dailyCap'
 
@@ -27,7 +28,13 @@ export const AppState = z.object({
    * F-15.8: the diagnostics switch (off on every install, including older files) and whatever
    * it has recorded but not sent. Nothing is recorded while it is off.
    */
-  diagnostics: DiagnosticsSettings.default(defaultDiagnosticsSettings)
+  diagnostics: DiagnosticsSettings.default(defaultDiagnosticsSettings),
+  /**
+   * F-15.9: the last verified Supporter license token and the chosen accent; defaulted so older
+   * files load as unlicensed. The token is signed, so plain JSON is safe: a tampered one fails
+   * verification and is dropped.
+   */
+  supporter: SupporterSettings.default(defaultSupporterSettings)
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -38,7 +45,8 @@ export const EMPTY_APP_STATE: AppState = {
   models: defaultAiModels(),
   aiUsage: defaultAiUsageState(),
   updates: defaultUpdateSettings(),
-  diagnostics: defaultDiagnosticsSettings()
+  diagnostics: defaultDiagnosticsSettings(),
+  supporter: defaultSupporterSettings()
 }
 
 export class AppStateStore {

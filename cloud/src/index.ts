@@ -2,8 +2,8 @@
  * The MythScribe Cloud Worker (F-15.2, F-15.3): the account routes and the credit routes behind
  * `api.mythscribe.app`. No CORS headers — the desktop app is not a browser origin and nothing
  * here is meant to be called from a web page; only `/auth/verify` is opened in a browser, and it
- * answers HTML. F-15.4 adds the AI proxy route (`POST /ai/complete`) to the same router, and
- * F-15.8 the one unauthenticated route, `POST /diagnostics`.
+ * answers HTML. F-15.4 adds the AI proxy route (`POST /ai/complete`) to the same router, F-15.8 the
+ * one unauthenticated route, `POST /diagnostics`, and F-15.9 the Supporter license, `GET /license`.
  */
 import { type AiDeps, handleAiComplete } from './ai'
 import {
@@ -16,15 +16,16 @@ import {
   jsonResponse
 } from './auth'
 import {
-  type ConfiguredPack,
+  ConfiguredPack,
   ConfiguredPacks,
   handleCheckout,
   handleCredits,
   handleLemonSqueezyWebhook
 } from './credits'
-import { randomToken } from './crypto'
+import { importSigningKey, randomToken } from './crypto'
 import { handleDiagnostics } from './diagnostics'
 import { logMailer, resendMailer, type Mailer } from './email'
+import { handleLicense, type LicenseDeps, LicenseSigningJwk, type LicenseSigner } from './license'
 import { openAiUpstream } from './openai'
 import { d1Store } from './store'
 
@@ -41,10 +42,17 @@ export interface WorkerEnv {
   PUBLIC_ORIGIN?: string
   /** F-15.3: the credit packs on sale, as a JSON array of `{ variantId, url, priceCents }`. */
   LEMONSQUEEZY_PACKS?: string
+  /** F-15.9: the Supporter product, as one JSON `{ variantId, url, priceCents }` object. */
+  LEMONSQUEEZY_SUPPORTER?: string
   LEMONSQUEEZY_WEBHOOK_SECRET?: string
   /** F-15.4: the operator's provider key, the only place it exists; absent → the proxy is a 503. */
   OPENAI_API_KEY?: string
+  /** F-15.9: the private Ed25519 JWK license tokens are signed with; absent → no token is issued. */
+  LICENSE_SIGNING_KEY?: string
 }
+
+/** Everything the router's routes need together; each handler asks for its own slice of it. */
+export type WorkerDeps = AiDeps & LicenseDeps
 
 function mailerFor(env: WorkerEnv): Mailer | null {
   if (env.EMAIL_TRANSPORT === 'log') return logMailer()
@@ -74,7 +82,39 @@ function packsFor(env: WorkerEnv): ConfiguredPack[] {
   return parsed.data
 }
 
-function depsFor(env: WorkerEnv): AiDeps {
+/**
+ * The Supporter product (F-15.9), configured exactly like one pack. Unset or malformed is treated
+ * the same way as a malformed pack list: nothing is on sale and the Account tab says so.
+ */
+function supporterFor(env: WorkerEnv): ConfiguredPack | null {
+  if (!env.LEMONSQUEEZY_SUPPORTER) return null
+  const parsed = ConfiguredPack.safeParse(parseJson(env.LEMONSQUEEZY_SUPPORTER))
+  if (!parsed.success) {
+    console.error(
+      'LEMONSQUEEZY_SUPPORTER is not a valid product; the Supporter license is off sale'
+    )
+    return null
+  }
+  return parsed.data
+}
+
+/**
+ * The license signer (F-15.9), or none. The key material is validated here and imported only when
+ * a token actually has to be signed, so no route pays for it and a mistyped secret is one logged
+ * line plus a 503 on `GET /license` rather than a failure anywhere else.
+ */
+function signingKeyFor(env: WorkerEnv): LicenseSigner | null {
+  if (!env.LICENSE_SIGNING_KEY) return null
+  const parsed = LicenseSigningJwk.safeParse(parseJson(env.LICENSE_SIGNING_KEY))
+  if (!parsed.success) {
+    console.error('LICENSE_SIGNING_KEY is not an Ed25519 private JWK; no license can be signed')
+    return null
+  }
+  const jwk = parsed.data
+  return () => importSigningKey(jwk)
+}
+
+function depsFor(env: WorkerEnv): WorkerDeps {
   return {
     store: d1Store(env.DB),
     mailer: mailerFor(env),
@@ -82,13 +122,15 @@ function depsFor(env: WorkerEnv): AiDeps {
     random: randomToken,
     revealLink: env.EMAIL_TRANSPORT === 'log',
     packs: packsFor(env),
+    supporter: supporterFor(env),
     webhookSecret: env.LEMONSQUEEZY_WEBHOOK_SECRET ?? null,
     upstream: env.OPENAI_API_KEY ? openAiUpstream(env.OPENAI_API_KEY) : null,
+    signingKey: signingKeyFor(env),
     ...(env.PUBLIC_ORIGIN ? { publicOrigin: env.PUBLIC_ORIGIN } : {})
   }
 }
 
-function route(request: Request, deps: AiDeps): Promise<Response> | Response {
+function route(request: Request, deps: WorkerDeps): Promise<Response> | Response {
   const { pathname } = new URL(request.url)
   const { method } = request
 
@@ -106,6 +148,9 @@ function route(request: Request, deps: AiDeps): Promise<Response> | Response {
     return handleLemonSqueezyWebhook(request, deps)
   }
 
+  // F-15.9: the Supporter license token for this account, signed fresh on every call.
+  if (pathname === '/license' && method === 'GET') return handleLicense(request, deps)
+
   if (pathname === '/ai/complete' && method === 'POST') return handleAiComplete(request, deps)
 
   // F-15.8: no bearer, on purpose — a diagnostics report carries nothing to authenticate.
@@ -122,7 +167,7 @@ function withNoStore(response: Response): Response {
 }
 
 /** The whole request path over injected dependencies, so the tests drive the real router. */
-export async function handleRequest(request: Request, deps: AiDeps): Promise<Response> {
+export async function handleRequest(request: Request, deps: WorkerDeps): Promise<Response> {
   try {
     return withNoStore(await route(request, deps))
   } catch (error) {

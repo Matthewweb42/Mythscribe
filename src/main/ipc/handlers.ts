@@ -476,6 +476,26 @@ export function registerHandlers({
     return null
   })
 
+  // F-15.9: the Supporter license. The service owns the cached token, its verification, and the
+  // daily refresh; a change it makes by itself (a background refresh, a sign-in, a sign-out)
+  // arrives as `account:supporterChanged`. The token itself never crosses IPC.
+  register('account:getSupporter', () => account.supporter())
+
+  register('account:refreshSupporter', () => account.refreshLicense())
+
+  // The same gate as `account:buyCredits`: the Worker builds the checkout and this opens it, and
+  // nothing but a Lemon Squeezy checkout is ever handed to the browser.
+  register('account:buySupporter', async () => {
+    const url = await account.supporterCheckoutUrl()
+    if (!isCheckoutUrl(url)) {
+      throw new AppError('VALIDATION', `Only a checkout on ${CHECKOUT_HOST_SUFFIX} can be opened`)
+    }
+    await openExternal(url)
+    return null
+  })
+
+  register('account:setAccent', ({ accent }) => account.setAccent(accent))
+
   // F-15.7: automatic updates. The service owns the updater, the timer, and what is stored;
   // anything it decides by itself (a background check found a build, a download finished)
   // arrives as `updates:changed`.

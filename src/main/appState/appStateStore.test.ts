@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, defaultAiModels } from '@shared/ai'
 import { defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { defaultFloating, defaultLayout } from '@shared/layout'
+import { defaultSupporterSettings } from '@shared/license'
 import { RELEASE_NOTES_MAX, defaultUpdateSettings } from '@shared/updates'
 import { defaultAiUsageState } from '../ai/dailyCap'
 import { AppStateStore, EMPTY_APP_STATE } from './appStateStore'
@@ -44,8 +45,15 @@ describe('AppStateStore', () => {
       models: defaultAiModels(),
       aiUsage: defaultAiUsageState(),
       updates: defaultUpdateSettings(),
-      diagnostics: defaultDiagnosticsSettings()
+      diagnostics: defaultDiagnosticsSettings(),
+      supporter: defaultSupporterSettings()
     })
+  })
+
+  it('parses a file written before F-15.9 (no supporter) as unlicensed with the default accent', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().supporter).toEqual(defaultSupporterSettings())
   })
 
   it('parses a file written before F-7.2 (no layout) to the default layout', () => {

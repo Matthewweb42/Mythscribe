@@ -5,6 +5,7 @@ import type { AccountStatus } from '@shared/account'
 import type { CreditsResult } from '@shared/cloudApi'
 import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
+import type { SupporterStatus } from '@shared/license'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { AccountSettingsTab } from './AccountSettingsTab'
@@ -38,6 +39,24 @@ const CREDITS: CreditsResult = {
   packs: [{ variantId: 'pack-5', priceCents: 500 }]
 }
 
+/** F-15.9: no license, with the one-time product on sale. */
+const UNLICENSED: SupporterStatus = {
+  licensed: false,
+  since: null,
+  validUntil: null,
+  offline: false,
+  product: { variantId: 'supporter-39', priceCents: 3900 },
+  accent: 'default'
+}
+const LICENSED: SupporterStatus = {
+  licensed: true,
+  since: new Date(2026, 8, 20, 10, 0).toISOString(),
+  validUntil: new Date(2026, 9, 4, 10, 0).toISOString(),
+  offline: false,
+  product: null,
+  accent: 'ember'
+}
+
 interface Fake {
   client: IpcClient
   calls: { channel: Channel; input: unknown }[]
@@ -69,13 +88,21 @@ function fakeClient(): Fake {
             return CREDITS as Output<C>
           case 'account:buyCredits':
             return null as Output<C>
+          case 'account:refreshSupporter':
+            return LICENSED as Output<C>
+          case 'account:buySupporter':
+            return null as Output<C>
+          case 'account:setAccent':
+            return { ...LICENSED, accent: 'sky' } as Output<C>
           default:
             throw new Error(`unexpected ${channel}`)
         }
       },
       on<E extends EventName>(event: E, listener: (payload: EventPayload<E>) => void): () => void {
-        // F-15.5: the store also listens for the balance; this tab drives only the status one.
-        if (event === 'account:balanceChanged') return () => undefined
+        // F-15.5 / F-15.9: the store also listens for the balance and the license; this tab
+        // drives only the status one.
+        if (event === 'account:balanceChanged' || event === 'account:supporterChanged')
+          return () => undefined
         if (event !== 'account:changed') throw new Error(`unexpected ${event}`)
         fake.listener = listener as (status: AccountStatus) => void
         return () => {
@@ -374,5 +401,124 @@ describe('AccountSettingsTab credits (F-15.3)', () => {
     render(<AccountSettingsTab />)
     expect(screen.queryByRole('region', { name: 'Credits' })).not.toBeInTheDocument()
     expect(fake.calls).toEqual([])
+  })
+})
+
+/**
+ * The Supporter section (F-15.9). App loads the license at start, so the tests put the status in
+ * the store the way it arrives; the section itself never asks on mount, which is why the signed-out
+ * cases make no calls at all.
+ */
+describe('AccountSettingsTab supporter (F-15.9)', () => {
+  const showSupporter = (supporter: SupporterStatus, status: AccountStatus = SIGNED_OUT): void => {
+    useAccountStore.setState({ status, supporter, credits: CREDITS, creditsAt: Date.now() })
+  }
+
+  it('badges a license with the day it was last confirmed and unlocks the accents', async () => {
+    showSupporter(LICENSED, SIGNED_IN)
+    render(<AccountSettingsTab />)
+    const section = screen.getByRole('region', { name: 'Supporter' })
+    expect(within(section).getByTestId('account-supporter-badge')).toHaveTextContent(
+      `Supporter since ${new Date(LICENSED.since ?? '').toLocaleDateString(undefined, { dateStyle: 'medium' })}`
+    )
+    expect(screen.queryByTestId('account-supporter-buy')).not.toBeInTheDocument()
+    expect(within(section).queryByText(/Extras stay on until/)).not.toBeInTheDocument()
+
+    const swatch = within(section).getByTestId('account-accent-sky')
+    expect(swatch).toBeEnabled()
+    await userEvent.click(swatch)
+    await waitFor(() => {
+      expect(fake.calls.at(-1)).toEqual({ channel: 'account:setAccent', input: { accent: 'sky' } })
+    })
+  })
+
+  it('says how long the extras last while the Worker cannot be reached', () => {
+    showSupporter({ ...LICENSED, offline: true }, SIGNED_IN)
+    render(<AccountSettingsTab />)
+    expect(
+      screen.getByText(
+        `Extras stay on until ${new Date(LICENSED.validUntil ?? '').toLocaleDateString(undefined, { dateStyle: 'medium' })} while MythScribe Cloud cannot be reached.`
+      )
+    ).toBeInTheDocument()
+  })
+
+  it('offers the one-time purchase at its price to a signed-in account', async () => {
+    showSupporter(UNLICENSED, SIGNED_IN)
+    render(<AccountSettingsTab />)
+    expect(
+      screen.getByText(
+        'A one-time purchase that supports the project and unlocks the accent colours. Nothing else changes: every writing and AI feature works without it.'
+      )
+    ).toBeInTheDocument()
+    const buy = screen.getByTestId('account-supporter-buy')
+    expect(buy).toHaveTextContent('Become a Supporter — $39.00')
+    expect(buy).toBeEnabled()
+    await userEvent.click(buy)
+    await waitFor(() => {
+      expect(fake.calls.at(-1)).toEqual({ channel: 'account:buySupporter', input: undefined })
+    })
+    // The locked extra is on screen, so what the purchase is for is visible, not just described.
+    expect(screen.getByTestId('account-accent-rose')).toBeDisabled()
+    expect(screen.queryByTestId('account-supporter-badge')).not.toBeInTheDocument()
+  })
+
+  it('says so when the license is not on sale yet', () => {
+    showSupporter({ ...UNLICENSED, product: null }, SIGNED_IN)
+    render(<AccountSettingsTab />)
+    expect(screen.getByText('The Supporter license is not on sale yet.')).toBeInTheDocument()
+    expect(screen.queryByTestId('account-supporter-buy')).not.toBeInTheDocument()
+  })
+
+  it('points a signed-out author at the account before the purchase, and asks nothing', () => {
+    showSupporter(UNLICENSED)
+    render(<AccountSettingsTab />)
+    expect(
+      screen.getByText(
+        'Sign in to buy it: the license belongs to your account, so it follows you to the next machine.'
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('account-supporter-buy')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Refresh license' })).toBeDisabled()
+    expect(fake.calls).toEqual([])
+  })
+
+  it('re-checks the license on Refresh without touching the credits Refresh', async () => {
+    showSupporter(UNLICENSED, SIGNED_IN)
+    render(<AccountSettingsTab />)
+    await waitFor(() => {
+      expect(fake.calls.map((c) => c.channel)).toEqual(['account:getCredits'])
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh license' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('account-supporter-badge')).toBeInTheDocument()
+    })
+    expect(fake.calls.map((c) => c.channel)).toEqual([
+      'account:getCredits',
+      'account:refreshSupporter'
+    ])
+  })
+
+  it('keeps a license failure inside its own section', async () => {
+    showSupporter(UNLICENSED, SIGNED_IN)
+    render(<AccountSettingsTab />)
+    fake.fail = new IpcRequestError({
+      code: 'IO',
+      message: 'Could not reach MythScribe Cloud. Check your connection and try again.'
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh license' }))
+    const section = screen.getByRole('region', { name: 'Supporter' })
+    expect(await within(section).findByRole('alert')).toHaveTextContent(
+      'Could not reach MythScribe Cloud. Check your connection and try again.'
+    )
+    expect(screen.getByTestId('account-signed-in')).toBeInTheDocument()
+    expect(useDialogStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('shows the section with the accents locked before anything is loaded', () => {
+    show(SIGNED_OUT)
+    render(<AccountSettingsTab />)
+    expect(screen.getByRole('region', { name: 'Supporter' })).toBeInTheDocument()
+    expect(screen.getByTestId('account-accent-ember')).toBeDisabled()
+    expect(screen.getByText('The Supporter license is not on sale yet.')).toBeInTheDocument()
   })
 })

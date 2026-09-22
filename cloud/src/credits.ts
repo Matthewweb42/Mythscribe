@@ -5,6 +5,10 @@
  * Every amount is an integer in micro-USD (1e-6 USD); the rate per model comes from the same
  * `src/shared/cloudRates.ts` the desktop app publishes, so there is exactly one rate. Handlers
  * are pure over `CreditsDeps`, like the account routes.
+ *
+ * The same checkout and webhook also sell the one-time Supporter license (F-15.9): it is one more
+ * configured variant, but it grants a row in `supporter_licenses` instead of credit, and
+ * `license.ts` turns that row into a signed token.
  */
 import { z } from 'zod'
 import {
@@ -44,14 +48,36 @@ export const ConfiguredPacks = z.array(ConfiguredPack)
 export interface CreditsDeps extends AuthDeps {
   /** The packs on sale; empty until the operator configures `LEMONSQUEEZY_PACKS`. */
   packs: ConfiguredPack[]
+  /**
+   * F-15.9: the Supporter product, configured like a pack but sold through the same checkout and
+   * webhook. It buys a license, never credit; null until the operator configures it.
+   */
+  supporter: ConfiguredPack | null
   /** `LEMONSQUEEZY_WEBHOOK_SECRET`; absent means the webhook answers NOT_CONFIGURED. */
   webhookSecret: string | null
+}
+
+/** One variant on sale, and what buying it does: add credit, or grant the Supporter license. */
+interface Variant {
+  pack: ConfiguredPack
+  supporter: boolean
+}
+
+/** Everything the operator has on sale: the credit packs plus the Supporter product (F-15.9). */
+function findVariant(deps: CreditsDeps, variantId: string | undefined): Variant | null {
+  const pack = deps.packs.find((candidate) => candidate.variantId === variantId)
+  if (pack) return { pack, supporter: false }
+  if (deps.supporter && deps.supporter.variantId === variantId) {
+    return { pack: deps.supporter, supporter: true }
+  }
+  return null
 }
 
 /** $1 paid is $1 of credit: the margin is in the rate, not in the pack (PLAN.md §4.2). */
 const MICROS_PER_CENT = MICROS_PER_USD / 100
 
-const UNKNOWN_PACK = 'That credit pack is not on sale. Refresh the Account tab and try again.'
+/** One message for an unknown credit pack and an unknown Supporter variant alike (F-15.9). */
+const UNKNOWN_VARIANT = 'That purchase is not on sale. Refresh the Account tab and try again.'
 const WEBHOOK_NOT_CONFIGURED = 'Credit purchases are not configured on the server yet.'
 const BAD_SIGNATURE_MESSAGE = 'That webhook body was not signed with the configured secret.'
 
@@ -82,19 +108,20 @@ export async function handleCredits(request: Request, deps: CreditsDeps): Promis
 }
 
 /**
- * `POST /billing/checkout`: the hosted checkout URL for one pack, with the buyer stamped on it.
- * `custom[user_id]` is what comes back on the webhook, so the Worker — not the app — builds it.
+ * `POST /billing/checkout`: the hosted checkout URL for one variant on sale — a credit pack or the
+ * Supporter license (F-15.9) — with the buyer stamped on it. `custom[user_id]` is what comes back
+ * on the webhook, so the Worker — not the app — builds it.
  */
 export async function handleCheckout(request: Request, deps: CreditsDeps): Promise<Response> {
   const caller = await authenticate(request, deps)
   if (!caller) return jsonError('UNAUTHORIZED', UNAUTHORIZED_MESSAGE)
 
   const parsed = CheckoutBody.safeParse(await readJson(request))
-  if (!parsed.success) return jsonError('NOT_FOUND', UNKNOWN_PACK)
-  const pack = deps.packs.find((candidate) => candidate.variantId === parsed.data.variantId)
-  if (!pack) return jsonError('NOT_FOUND', UNKNOWN_PACK)
+  if (!parsed.success) return jsonError('NOT_FOUND', UNKNOWN_VARIANT)
+  const variant = findVariant(deps, parsed.data.variantId)
+  if (!variant) return jsonError('NOT_FOUND', UNKNOWN_VARIANT)
 
-  const url = new URL(pack.url)
+  const url = new URL(variant.pack.url)
   url.searchParams.set('checkout[custom][user_id]', caller.user.id)
   url.searchParams.set('checkout[email]', caller.user.email)
   return jsonResponse({ url: url.toString() } satisfies CheckoutResult)
@@ -139,7 +166,8 @@ function parseJson(body: string): unknown {
 }
 
 /**
- * `POST /billing/lemonsqueezy`: credit a paid order, debit a refund, ignore everything else.
+ * `POST /billing/lemonsqueezy`: credit a paid order, debit a refund, ignore everything else. An
+ * order for the Supporter variant grants or revokes the license instead (F-15.9).
  *
  * Lemon Squeezy retries every non-2xx delivery for days, so the only failures answered here are
  * the two an operator can fix: a body that is not signed with our secret (401) and a Worker with
@@ -176,9 +204,9 @@ export async function handleLemonSqueezyWebhook(
 
   const userId = event.meta.custom_data?.user_id
   const variantId = event.data.attributes.first_order_item?.variant_id
-  const pack = deps.packs.find((candidate) => candidate.variantId === variantId)
+  const variant = findVariant(deps, variantId)
   const user = userId ? await deps.store.findUserById(userId) : null
-  if (!user || !pack) {
+  if (!user || !variant) {
     // Ids only, never the email or the payload. Nothing to retry: the operator fixes the config
     // or refunds the order by hand.
     console.warn(
@@ -187,9 +215,23 @@ export async function handleLemonSqueezyWebhook(
     return webhookDone('ignored')
   }
 
+  // Idempotency for both kinds of order: a replayed delivery of the same event changes nothing.
+  const orderRef = `${eventName}:${event.data.id}`
+  const at = deps.now().getTime()
+
+  if (variant.supporter) {
+    // F-15.9: the Supporter license buys a flag, never credit, so the ledger stays out of it.
+    if (kind === 'refund') {
+      await deps.store.revokeSupporter(user.id, at)
+      // Revoking an already revoked license is the same state, so a replay is 'applied' too.
+      return webhookDone('applied')
+    }
+    return webhookDone(await deps.store.grantSupporter(user.id, orderRef, at))
+  }
+
   // The configured price is the truth for the amount, so currency, discounts, and tax on the
   // order never reach the balance.
-  const amountMicros = pack.priceCents * MICROS_PER_CENT * (kind === 'refund' ? -1 : 1)
+  const amountMicros = variant.pack.priceCents * MICROS_PER_CENT * (kind === 'refund' ? -1 : 1)
   const outcome = await deps.store.applyCreditEvent({
     id: deps.random(TOKEN_BYTES),
     userId: user.id,
@@ -199,10 +241,9 @@ export async function handleLemonSqueezyWebhook(
     model: null,
     tokensIn: null,
     tokensOut: null,
-    // Idempotency: a replayed delivery of the same event for the same order changes nothing.
-    orderRef: `${eventName}:${event.data.id}`,
+    orderRef,
     requestId: null,
-    createdAt: deps.now().getTime()
+    createdAt: at
   })
   return webhookDone(outcome)
 }

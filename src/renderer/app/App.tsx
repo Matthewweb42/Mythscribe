@@ -93,6 +93,9 @@ export function App(): React.JSX.Element {
     // rather than by the Settings tab, which is only mounted while the dialog is open.
     const offAccount = useAccountStore.getState().subscribe()
     void useAccountStore.getState().load()
+    // F-15.9: the Supporter license is a local cache, so it is read at start whether anyone is
+    // signed in or not; main pushes it again after a background refresh, a sign-in, or a sign-out.
+    void useAccountStore.getState().loadSupporter()
     // F-15.7: updates are app-wide too, and main pushes the state from the background check and
     // the download, so the subscription is opened here once rather than by the Settings tab.
     const offUpdates = useUpdateStore.getState().subscribe()
@@ -113,6 +116,15 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     document.title = current ? `${current.name} — MythScribe` : 'MythScribe'
   }, [current])
+
+  // F-15.9: the Supporter accent is app-wide, so it rides on <html> and `tokens.css` swaps the
+  // three accent variables from there. The default is the stock green already in `:root`, so it
+  // is the absence of the attribute rather than a value of its own.
+  const accent = useAccountStore((s) => s.supporter?.accent ?? 'default')
+  useEffect(() => {
+    if (accent === 'default') delete document.documentElement.dataset.accent
+    else document.documentElement.dataset.accent = accent
+  }, [accent])
 
   // F-2.1: the document tree follows the open project. App owns when it loads and clears, keyed
   // on the project id so a refreshed `ProjectInfo` for the same project does not reload it.

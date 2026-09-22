@@ -27,10 +27,16 @@ EMAIL_TRANSPORT = "resend"
 # `priceCents` is the truth for the amount credited, so currency and tax never reach the balance.
 # LEMONSQUEEZY_PACKS = '[{"variantId":"123456","url":"https://mythscribe.lemonsqueezy.com/buy/00000000-0000-0000-0000-000000000000","priceCents":500}]'
 
+# The one-time Supporter license (F-15.9), the same shape as one pack. Unset until the Lemon
+# Squeezy product exists: `GET /license` then offers nothing and the Account tab says so. Buying it
+# grants a license row, never credit.
+# LEMONSQUEEZY_SUPPORTER = '{"variantId":"123457","url":"https://mythscribe.lemonsqueezy.com/buy/00000000-0000-0000-0000-000000000000","priceCents":3900}'
+
 # Secrets (never in this file, never in the repo):
 #   RESEND_API_KEY                the Resend key for sign-in@mythscribe.app  -> `npx wrangler secret put RESEND_API_KEY`
 #   OPENAI_API_KEY                the operator's OpenAI key (F-15.4)         -> `npx wrangler secret put OPENAI_API_KEY`
 #   LEMONSQUEEZY_WEBHOOK_SECRET   signs the billing webhook (F-15.3)         -> `npx wrangler secret put LEMONSQUEEZY_WEBHOOK_SECRET`
+#   LICENSE_SIGNING_KEY           signs Supporter tokens (F-15.9)            -> `npm run cloud:license-keygen`, then `npx wrangler secret put LICENSE_SIGNING_KEY`
 # Without RESEND_API_KEY the Worker answers 503 NOT_CONFIGURED to /auth/start, and without
 # LEMONSQUEEZY_WEBHOOK_SECRET the same to /billing/lemonsqueezy.
 # Local runs read them from ./.dev.vars (git-ignored); copy .dev.vars.example to start.

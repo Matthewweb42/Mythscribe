@@ -1,8 +1,9 @@
 /**
- * Storage for the account routes (F-15.2), the credit ledger (F-15.3), and the diagnostics
- * aggregates (F-15.8): the `Store` interface the handlers use, the D1 implementation behind it,
- * and an in-memory one for the unit tests. Timestamps are epoch milliseconds so expiry is a plain
- * SQL comparison; the handlers format them for the wire. Every secret arrives here already hashed.
+ * Storage for the account routes (F-15.2), the credit ledger (F-15.3), the diagnostics
+ * aggregates (F-15.8), and the Supporter licenses (F-15.9): the `Store` interface the handlers
+ * use, the D1 implementation behind it, and an in-memory one for the unit tests. Timestamps are
+ * epoch milliseconds so expiry is a plain SQL comparison; the handlers format them for the wire.
+ * Every secret arrives here already hashed.
  */
 
 export interface UserRow {
@@ -53,6 +54,16 @@ export interface CreditEventRow {
   orderRef: string | null
   requestId: string | null
   createdAt: number
+}
+
+/**
+ * The Supporter license of one account (F-15.9), as `supporter_licenses` holds it. The order it
+ * was bought with stays in the table only for idempotency, so it is not reported here.
+ */
+export interface SupporterLicenseRow {
+  grantedAt: number
+  /** Set by a refund; a revoked license is answered exactly like no license at all. */
+  revokedAt: number | null
 }
 
 /** One feature's spend over one window, as `GET /credits` reports it; `micros` is positive. */
@@ -141,6 +152,18 @@ export interface Store {
   firstChargeAt(userId: string, since: number): Promise<number | null>
 
   /**
+   * F-15.9: record the Supporter license one order paid for. `'duplicate'` means an order with
+   * this `orderRef` was already recorded (a replayed webhook delivery): nothing changed. A *new*
+   * order for an account that already has a row re-grants it, which is how a purchase after a
+   * refund lands.
+   */
+  grantSupporter(userId: string, orderRef: string, at: number): Promise<'applied' | 'duplicate'>
+  /** F-15.9: a refunded order; from here on `GET /license` answers no token. Idempotent. */
+  revokeSupporter(userId: string, at: number): Promise<void>
+  /** F-15.9: the account's license, revoked or not; null when it never bought one. */
+  findSupporter(userId: string): Promise<SupporterLicenseRow | null>
+
+  /**
    * F-15.8: add one report's counts to the aggregates. An upsert per row, so the report itself
    * leaves no trace — only `total` moves.
    */
@@ -186,9 +209,15 @@ interface RawSpend {
   tokens: number
 }
 
+interface RawSupporter {
+  granted_at: number
+  revoked_at: number | null
+}
+
 /**
  * D1 reports a constraint failure as a thrown error carrying SQLite's message; the only UNIQUE
- * index a credit event can trip is `order_ref`, which means "already applied".
+ * index a credit event or a Supporter grant can trip is its `order_ref`, which means "already
+ * applied".
  */
 function isUniqueViolation(error: unknown): boolean {
   return error instanceof Error && error.message.includes('UNIQUE constraint failed')
@@ -440,6 +469,56 @@ export function d1Store(db: D1Database): Store {
       return row?.first_at ?? null
     },
 
+    async grantSupporter(
+      userId: string,
+      orderRef: string,
+      at: number
+    ): Promise<'applied' | 'duplicate'> {
+      // `order_ref` is the idempotency key, but the upsert below would quietly re-grant on a
+      // replayed delivery instead of tripping it, so a known order is recognised first.
+      const seen = await db
+        .prepare('SELECT 1 AS n FROM supporter_licenses WHERE order_ref = ?')
+        .bind(orderRef)
+        .first<{ n: number }>()
+      if (seen) return 'duplicate'
+
+      try {
+        await db
+          .prepare(
+            `INSERT INTO supporter_licenses (user_id, order_ref, granted_at, revoked_at)
+             VALUES (?, ?, ?, NULL)
+             ON CONFLICT(user_id) DO UPDATE
+               SET order_ref = excluded.order_ref,
+                   granted_at = excluded.granted_at,
+                   revoked_at = NULL`
+          )
+          .bind(userId, orderRef, at)
+          .run()
+        return 'applied'
+      } catch (error) {
+        // Two deliveries of the same order at once: the loser trips the UNIQUE index.
+        if (isUniqueViolation(error)) return 'duplicate'
+        throw error
+      }
+    },
+
+    async revokeSupporter(userId: string, at: number): Promise<void> {
+      await db
+        .prepare(
+          'UPDATE supporter_licenses SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL'
+        )
+        .bind(at, userId)
+        .run()
+    },
+
+    async findSupporter(userId: string): Promise<SupporterLicenseRow | null> {
+      const row = await db
+        .prepare('SELECT granted_at, revoked_at FROM supporter_licenses WHERE user_id = ?')
+        .bind(userId)
+        .first<RawSupporter>()
+      return row ? { grantedAt: row.granted_at, revokedAt: row.revoked_at } : null
+    },
+
     async addDiagnosticCounts(deltas: DiagnosticCountDelta[]): Promise<void> {
       if (deltas.length === 0) return
       const statements = deltas.map((delta) =>
@@ -504,6 +583,7 @@ export function memoryStore(): MemoryStore {
   const sessions = new Map<string, SessionRow>()
   const balances = new Map<string, number>()
   const creditEvents: CreditEventRow[] = []
+  const supporters = new Map<string, SupporterLicenseRow & { orderRef: string }>()
   const counts = new Map<string, StoredDiagnosticCount>()
   const crashes = new Map<string, StoredDiagnosticCrash>()
 
@@ -627,6 +707,28 @@ export function memoryStore(): MemoryStore {
         )
         .map((event) => event.createdAt)
       return Promise.resolve(times.length === 0 ? null : Math.min(...times))
+    },
+
+    grantSupporter(userId: string, orderRef: string, at: number): Promise<'applied' | 'duplicate'> {
+      // Mirrors the UNIQUE `order_ref`: one order grants once, whoever it was for.
+      if ([...supporters.values()].some((row) => row.orderRef === orderRef)) {
+        return Promise.resolve('duplicate')
+      }
+      supporters.set(userId, { orderRef, grantedAt: at, revokedAt: null })
+      return Promise.resolve('applied')
+    },
+
+    revokeSupporter(userId: string, at: number): Promise<void> {
+      const found = supporters.get(userId)
+      if (found?.revokedAt === null) supporters.set(userId, { ...found, revokedAt: at })
+      return Promise.resolve()
+    },
+
+    findSupporter(userId: string): Promise<SupporterLicenseRow | null> {
+      const found = supporters.get(userId)
+      return Promise.resolve(
+        found ? { grantedAt: found.grantedAt, revokedAt: found.revokedAt } : null
+      )
     },
 
     addDiagnosticCounts(deltas: DiagnosticCountDelta[]): Promise<void> {

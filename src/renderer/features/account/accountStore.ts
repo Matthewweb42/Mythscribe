@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { AccountStatus } from '@shared/account'
 import type { CreditsResult } from '@shared/cloudApi'
+import type { AccentId, SupporterStatus } from '@shared/license'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 
@@ -34,6 +35,16 @@ interface AccountState {
    * cannot answer for credits does not hide (or get hidden by) a sign-in failure.
    */
   creditsError: string | null
+  /**
+   * The Supporter license (F-15.9) as main sees it; null until it has been asked for. It is the
+   * local cache, not the account, so it is loaded at start whether anyone is signed in or not,
+   * and main pushes `account:supporterChanged` when a background refresh or a sign-out changes it.
+   */
+  supporter: SupporterStatus | null
+  /** True while a supporter call is in flight; its own flag, like the credits one. */
+  supporterBusy: boolean
+  /** The message from the last failed supporter call; separate from `error` and `creditsError`. */
+  supporterError: string | null
   load: () => Promise<void>
   /** Asks main to email a sign-in link and start polling; the pending status comes back. */
   requestLink: (email: string) => Promise<void>
@@ -46,9 +57,18 @@ interface AccountState {
   loadCredits: () => Promise<void>
   /** Opens the Lemon Squeezy checkout for one pack in the browser (F-15.3); the balance follows a Refresh. */
   buyCredits: (variantId: string) => Promise<void>
+  /** Reads the cached Supporter license (F-15.9); works signed out, so App loads it at start. */
+  loadSupporter: () => Promise<void>
+  /** Asks the Worker to confirm the license and re-sign the token; unreachable leaves it as it is. */
+  refreshSupporter: () => Promise<void>
+  /** Opens the Lemon Squeezy checkout for the Supporter license in the browser (F-15.9). */
+  buySupporter: () => Promise<void>
+  /** Picks the accent colour (F-15.9); main refuses anything but `default` without a license. */
+  setAccent: (accent: AccentId) => Promise<void>
   /**
-   * Listens for what main pushes: a status change (a link opened, an attempt expired) and the
-   * balance a Cloud request was charged against (F-15.5). Returns the one unsubscribe for both.
+   * Listens for what main pushes: a status change (a link opened, an attempt expired), the
+   * balance a Cloud request was charged against (F-15.5), and the Supporter license after a
+   * background refresh or a sign-out (F-15.9). Returns the one unsubscribe for all three.
    */
   subscribe: () => () => void
 }
@@ -65,6 +85,8 @@ export const useAccountStore = create<AccountState>((set, get) => {
       if (mine !== generation) return
       // Credits belong to the account that was signed in: an action that ends anywhere but
       // signed in (sign out, a revoked session on refresh) leaves none to show.
+      // The Supporter license (F-15.9) is deliberately not cleared here: the cached token is
+      // local, and main pushes `account:supporterChanged` when signing out drops it.
       set(
         status.state === 'signedIn'
           ? { status }
@@ -97,6 +119,26 @@ export const useAccountStore = create<AccountState>((set, get) => {
     }
   }
 
+  /**
+   * One Supporter-license call (F-15.9), under its own busy and error for the same reason the
+   * credits have theirs. `account:buySupporter` answers null: it opens a browser, it grants
+   * nothing, so the status only changes on the next refresh.
+   */
+  const runSupporter = async (call: () => Promise<SupporterStatus | null>): Promise<void> => {
+    const mine = generation
+    set({ supporterBusy: true, supporterError: null })
+    try {
+      const supporter = await call()
+      if (mine !== generation || supporter === null) return
+      set({ supporter })
+    } catch (err: unknown) {
+      if (mine !== generation) return
+      set({ supporterError: describeError(err) })
+    } finally {
+      if (mine === generation) set({ supporterBusy: false })
+    }
+  }
+
   return {
     status: null,
     busy: false,
@@ -105,6 +147,9 @@ export const useAccountStore = create<AccountState>((set, get) => {
     creditsAt: null,
     creditsBusy: false,
     creditsError: null,
+    supporter: null,
+    supporterBusy: false,
+    supporterError: null,
 
     load: () => run(() => ipc().invoke('account:getStatus', undefined)),
 
@@ -119,6 +164,14 @@ export const useAccountStore = create<AccountState>((set, get) => {
     loadCredits: () => runCredits(() => ipc().invoke('account:getCredits', undefined)),
 
     buyCredits: (variantId) => runCredits(() => ipc().invoke('account:buyCredits', { variantId })),
+
+    loadSupporter: () => runSupporter(() => ipc().invoke('account:getSupporter', undefined)),
+
+    refreshSupporter: () => runSupporter(() => ipc().invoke('account:refreshSupporter', undefined)),
+
+    buySupporter: () => runSupporter(() => ipc().invoke('account:buySupporter', undefined)),
+
+    setAccent: (accent) => runSupporter(() => ipc().invoke('account:setAccent', { accent })),
 
     subscribe: () => {
       const offStatus = ipc().on('account:changed', (status) => {
@@ -142,9 +195,16 @@ export const useAccountStore = create<AccountState>((set, get) => {
         // one call now that this account is known to be spending.
         if (status?.state === 'signedIn' && !creditsBusy) void get().loadCredits()
       })
+      // F-15.9: the license changed without anyone asking — a background refresh confirmed or
+      // dropped it, a sign-in granted it, a sign-out cleared it. Whatever failed before describes
+      // a state that is gone, so the error goes with it.
+      const offSupporter = ipc().on('account:supporterChanged', (supporter) => {
+        set({ supporter, supporterError: null })
+      })
       return () => {
         offStatus()
         offBalance()
+        offSupporter()
       }
     }
   }
@@ -160,6 +220,9 @@ export function resetAccountStore(): void {
     credits: null,
     creditsAt: null,
     creditsBusy: false,
-    creditsError: null
+    creditsError: null,
+    supporter: null,
+    supporterBusy: false,
+    supporterError: null
   })
 }
