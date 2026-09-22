@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import type { Editor } from '@tiptap/core'
 import {
   CHAT_HISTORY_TURNS,
   CHAT_MAX_CONVERSATIONS,
@@ -15,12 +14,14 @@ import {
 import type { AiChatResult, AiQueryResult, Input } from '@shared/ipc/contract'
 import type { QuerySceneRef } from '@shared/query'
 import { SETTINGS_SAVE_DELAY_MS } from '@renderer/features/editor/settingsStore'
-import {
-  useActiveEditorStore,
-  type ActiveEditor
-} from '@renderer/features/editor/activeEditorStore'
+import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import type { GhostSettleHandler } from '@renderer/features/editor/ghostText'
 import { locateText } from '@renderer/features/editor/locateText'
+import {
+  OPEN_SCENE_TIMEOUT_MS,
+  PASSAGE_GONE_MESSAGE,
+  openPassage
+} from '@renderer/features/editor/openPassage'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -37,10 +38,9 @@ export const AGENT_NOTICE = 'Placed in the editor. Tab accepts, Escape dismisses
 export const NO_EDITOR_MESSAGE = 'Open a scene to place text'
 /** The toast when Author mode came back with nothing to place. */
 export const EMPTY_ANSWER_MESSAGE = 'The assistant returned no text. Try again.'
-/** The toast when a Query citation names a passage the scene no longer holds (F-5.7). */
-export const PASSAGE_GONE_MESSAGE = 'That passage is no longer in the scene'
-/** How long `openScene` waits for the scene it selected to mount its editor. */
-export const OPEN_SCENE_TIMEOUT_MS = 3_000
+// The passage jump lives in the editor feature (F-4.12 reuses it for mentions); the two
+// constants are re-exported here because the Query panel and this store's tests read them.
+export { OPEN_SCENE_TIMEOUT_MS, PASSAGE_GONE_MESSAGE }
 
 /**
  * The one owner of the project's assistant conversations (F-5.4): the tabs, the open one,
@@ -474,44 +474,15 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   },
 
   async openScene(ref, quote) {
-    // The tree's selection drives the editor pane, so selecting the node opens the scene.
-    useTreeStore.getState().select(ref.nodeId)
-    if (quote === null) return
-    const editor = await editorFor(ref.nodeId)
-    if (editor === null || editor.isDestroyed) return
-    const range = locateText(editor.state.doc, quote)
-    if (range === null) {
-      toast.error(PASSAGE_GONE_MESSAGE)
+    // The tree's selection drives the editor pane, so selecting the node opens the scene; a chip
+    // without a quote asks for nothing more, so it never waits for the editor.
+    if (quote === null) {
+      useTreeStore.getState().select(ref.nodeId)
       return
     }
-    editor.chain().focus().setTextSelection(range).scrollIntoView().run()
+    await openPassage(ref.nodeId, (doc) => locateText(doc, quote))
   }
 }))
-
-/**
- * The live editor of `nodeId`: the one already registered, or the one the scene mounts after
- * the selection changed. Null when none arrives within `OPEN_SCENE_TIMEOUT_MS` (the scene is
- * open all the same; only the passage cannot be selected).
- */
-function editorFor(nodeId: string): Promise<Editor | null> {
-  const liveOne = (active: ActiveEditor | null): Editor | null =>
-    active !== null && active.id === nodeId && !active.editor.isDestroyed ? active.editor : null
-  const current = liveOne(useActiveEditorStore.getState().active)
-  if (current !== null) return Promise.resolve(current)
-  return new Promise((resolve) => {
-    let stopWatching: (() => void) | null = null
-    const settle = (editor: Editor | null): void => {
-      clearTimeout(waiting)
-      stopWatching?.()
-      resolve(editor)
-    }
-    const waiting = setTimeout(() => settle(null), OPEN_SCENE_TIMEOUT_MS)
-    stopWatching = useActiveEditorStore.subscribe((state) => {
-      const editor = liveOne(state.active)
-      if (editor !== null) settle(editor)
-    })
-  })
-}
 
 /**
  * One Query turn (F-5.7): main ranks the manuscript's scenes, answers with the citations it

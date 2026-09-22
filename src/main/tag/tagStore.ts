@@ -21,6 +21,7 @@ function selectWithUsage(db: TagDb, where?: SQL): Tag[] {
       category: tag.category,
       color: tag.color,
       parentId: tag.parentId,
+      trackMentions: tag.trackMentions,
       created: tag.created,
       modified: tag.modified,
       usageCount: count(documentTag.id)
@@ -103,8 +104,8 @@ function assertNoCycle(db: TagDb, id: string, parent: TagRow): void {
 
 /**
  * Creates a tag (F-4.1): the name is kebab-cased and must be unique after normalization, the
- * color defaults to the category's, and the parent (when given) must exist. Returns the tag
- * with `usageCount: 0`.
+ * color defaults to the category's, and the parent (when given) must exist. Mention tracking
+ * (F-4.12) starts on. Returns the tag with `usageCount: 0`.
  */
 export function createTag(db: TagDb, input: TagCreateInput): Tag {
   return db.transaction((tx) => {
@@ -128,6 +129,8 @@ function insertTag(
     category: input.category,
     color: input.color ?? DEFAULT_CATEGORY_COLOR[input.category],
     parentId: input.parentId,
+    // F-4.12: a new tag is looked for from its first save; the author turns it off per tag.
+    trackMentions: true,
     created: now,
     modified: now
   }
@@ -180,6 +183,9 @@ export function updateTag(db: TagDb, id: string, patch: Omit<TagUpdateInput, 'id
       if (patch.parentId !== null) assertNoCycle(tx, id, assertParentExists(tx, patch.parentId))
       changes.parentId = patch.parentId
     }
+    // F-4.12: the caller acts on the switch itself (deleting the recorded mentions, or rescanning
+    // the manuscript); the store only records it.
+    if (patch.trackMentions !== undefined) changes.trackMentions = patch.trackMentions
     tx.update(tag)
       .set({ ...changes, modified: new Date().toISOString() })
       .where(eq(tag.id, id))

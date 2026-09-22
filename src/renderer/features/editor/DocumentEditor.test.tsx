@@ -15,6 +15,7 @@ import {
   resetDocumentTagStore,
   useDocumentTagStore
 } from '@renderer/features/tags/documentTagStore'
+import { resetMentionStore } from '@renderer/features/tags/mentionStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -68,6 +69,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
           color: value.color ?? '#6b7280',
           parentId: null,
           usageCount: 0,
+          trackMentions: true,
           created: '2026-09-12T08:00:00.000Z',
           modified: '2026-09-12T08:00:00.000Z'
         }
@@ -85,6 +87,9 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
         const { nodeId } = input as Input<'documentTag:list'>
         return (links[nodeId] ?? []).map(tagOf) as Output<C>
       }
+      // F-4.12: the tag bar asks for the document's recorded mentions; none in these tests.
+      if (channel === 'mention:listForNode') return [] as Output<C>
+
       if (channel === 'documentTag:add') {
         const { nodeId, tagId } = input as Input<'documentTag:add'>
         const tag = tagOf(tagId)
@@ -184,6 +189,7 @@ beforeEach(() => {
   resetTagStore()
   resetFocusStore()
   resetDocumentTagStore()
+  resetMentionStore()
   resetLayoutStore()
   resetSceneMetaStore()
   resetVoiceStore()
@@ -200,6 +206,7 @@ afterEach(() => {
   resetPendingSaves()
   resetTagStore()
   resetDocumentTagStore()
+  resetMentionStore()
   resetLayoutStore()
   resetSceneMetaStore()
   resetVoiceStore()

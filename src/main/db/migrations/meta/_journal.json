@@ -57,6 +57,13 @@
       "when": 1789692733305,
       "tag": "0007_index_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790103685495,
+      "tag": "0008_mentions",
+      "breakpoints": true
     }
   ]
 }

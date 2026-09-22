@@ -37,6 +37,7 @@ import { dialogs, useDialogStore } from '@renderer/features/shell/dialogs/dialog
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { resetMentionStore } from '@renderer/features/tags/mentionStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { registerPendingSave, resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -88,6 +89,7 @@ beforeEach(() => {
   resetIndexingStore()
   resetAccountStore()
   resetViewStore()
+  resetMentionStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.

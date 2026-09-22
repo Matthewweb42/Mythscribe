@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(8)
+    expect(result.version).toBe(9)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -120,6 +120,8 @@ describe('migrate', () => {
     expect(tables()).toContain('ai_proposal')
     expect(tables()).toContain('scene_summary')
     expect(tables()).toContain('index_job')
+    expect(tables()).toContain('tag_mention')
+    expect(tables()).toContain('mention_scan')
   })
 })
 
@@ -253,5 +255,71 @@ describe('index_job table (0007_index_jobs)', () => {
       attempts: 0,
       last_error: null
     })
+  })
+})
+
+describe('mentions tables (0008_mentions)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO tag (id, name, category, color, created, modified)
+       VALUES ('rose', 'rose', 'character', '#dc2626', '2026-01-01', '2026-01-01')`
+    ).run()
+  })
+  afterEach(() => db.close())
+
+  const insertMention = (id: string, tagId: string, nodeId: string): void => {
+    db.prepare(
+      `INSERT INTO tag_mention (id, tag_id, node_id, count, positions, updated_at)
+       VALUES (?, ?, ?, 2, '[[1,5],[31,35]]', '2026-01-01')`
+    ).run(id, tagId, nodeId)
+  }
+
+  it('tracks mentions for a tag created before this migration', () => {
+    expect(db.prepare('SELECT track_mentions FROM tag WHERE id = ?').get('rose')).toEqual({
+      track_mentions: 1
+    })
+  })
+
+  it('holds one row per tag and node and refuses either end that is not there', () => {
+    insertMention('rose:scene', 'rose', 'scene')
+    expect(() => insertMention('rose:scene', 'rose', 'scene')).toThrow(/UNIQUE|PRIMARY/)
+    expect(() => insertMention('ghost:scene', 'ghost', 'scene')).toThrow(/FOREIGN KEY/)
+    expect(() => insertMention('rose:ghost', 'rose', 'ghost')).toThrow(/FOREIGN KEY/)
+  })
+
+  it('drops the mentions with the tag and with the scene', () => {
+    insertMention('rose:scene', 'rose', 'scene')
+    db.prepare('DELETE FROM tag WHERE id = ?').run('rose')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM tag_mention').get()).toEqual({ n: 0 })
+
+    db.prepare(
+      `INSERT INTO tag (id, name, category, color, created, modified)
+       VALUES ('rain', 'rain', 'tone', '#2563eb', '2026-01-01', '2026-01-01')`
+    ).run()
+    insertMention('rain:scene', 'rain', 'scene')
+    db.prepare('DELETE FROM node WHERE id = ?').run('scene')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM tag_mention').get()).toEqual({ n: 0 })
+  })
+
+  it('keeps one scan row per node and drops it with the node', () => {
+    const insertScan = (): void => {
+      db.prepare(
+        `INSERT INTO mention_scan (node_id, content_hash, scanned_at)
+         VALUES ('scene', 'hash', '2026-01-01')`
+      ).run()
+    }
+    insertScan()
+    expect(insertScan).toThrow(/UNIQUE|PRIMARY/)
+    db.prepare('DELETE FROM node WHERE id = ?').run('scene')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM mention_scan').get()).toEqual({ n: 0 })
   })
 })

@@ -14,6 +14,7 @@ import { type AiSource, isFeatureAllowed } from '@shared/aiSettings'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl } from '@shared/cloudApi'
 import { aiRequestCounter } from '@shared/diagnostics'
 import type { Background } from '@shared/focus'
+import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
 import type {
   AiBetaReaderResult,
   AiChatResult,
@@ -91,19 +92,23 @@ import {
   listDocumentTags,
   removeDocumentTag
 } from '../tag/documentTagStore'
-import { createTag, deleteTag, listTags, loadTagTemplate, updateTag } from '../tag/tagStore'
+import { deleteMentionsForTag, listMentionsForNode, listMentionsForTag } from '../tag/mentionStore'
+import { scanMentions, staleMentionNodeIds } from '../tag/scanMentions'
+import { createTag, deleteTag, getTag, listTags, loadTagTemplate, updateTag } from '../tag/tagStore'
 import {
   createNode,
   deleteNode,
   duplicateNode,
+  getNode,
   listNodes,
   moveNode,
   renameNode,
-  toTreeNode
+  toTreeNode,
+  type TreeDb
 } from '../tree/treeStore'
 import { addExemplar, listExemplars, removeExemplar } from '../voice/exemplarStore'
 import { buildConsistencyReport } from '../voice/consistency'
-import { buildVoiceProfile } from '../voice/profile'
+import { buildVoiceProfile, manuscriptDocuments } from '../voice/profile'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { AppError } from './errors'
 import { emit, register, type EmitTarget } from './registry'
@@ -202,14 +207,19 @@ export function registerHandlers({
   }
 
   /**
-   * F-5.13: the background index queue, which took over the F-5.6 summary scheduler. One queue
-   * for the session; it reads the open project through the manager at run time, never a
-   * captured handle, and `manager.onChange` clears it and loads the next project's jobs, so a
-   * run queued for one project never writes into another. Its timers are unref'd: a pending
-   * summary never holds the app (or a test) open. Only `summary` jobs exist so far; a new kind
-   * is a new branch in `run` (no provider batch API at launch, see `FEATURES.md` F-5.13).
+   * F-5.13: the background index queue, which took over the F-5.6 summary scheduler. One
+   * instance per kind of work for the session; each reads the open project through the manager
+   * at run time, never a captured handle, and `manager.onChange` clears it and loads the next
+   * project's jobs, so a run queued for one project never writes into another. Their timers are
+   * unref'd: a pending summary never holds the app (or a test) open.
+   *
+   * There are two: this one for `summary` jobs, which needs a key and pauses without one, and
+   * `mentionQueue` below for F-4.12's local scan, which must run whatever the dial says. They
+   * share `index_job` and each passes its `kind`, so neither ever sees the other's rows (no
+   * provider batch API at launch, see `FEATURES.md` F-5.13).
    */
   const queue = createIndexQueue<Awaited<ReturnType<typeof summarizeScene>>>({
+    kind: 'summary',
     db: () => (manager.current() === null ? null : manager.require().connection.orm),
     run: async (job, requestId) => {
       const db = manager.require().connection.orm
@@ -226,6 +236,37 @@ export function registerHandlers({
     onChange: (status) => emit(windows(), 'jobs:changed', status),
     onNodeStatus: (nodeId, status) => emit(windows(), 'ai:summaryChanged', { nodeId, status })
   })
+
+  /**
+   * F-4.12: the automatic mention scan's own queue. Everything it does is local — read the saved
+   * document, match the tracked tag names, write `tag_mention` — so there is no key, no dial, no
+   * rate limit (`minIntervalMs: 0`) and nothing to abort, and it is deliberately silent: no
+   * `onChange` (the indexing indicator counts provider work, not this) and no `onNodeStatus`
+   * (the summary pane's "Updating…" is not about mentions). A scan that changed rows tells the
+   * windows which document moved, and only then.
+   */
+  const mentionQueue = createIndexQueue<{ changed: boolean }>({
+    kind: 'mentions',
+    db: () => (manager.current() === null ? null : manager.require().connection.orm),
+    run: (job) => {
+      const value = scanMentions(manager.require().connection.orm, job.nodeId, new Date())
+      if (value.changed) emit(windows(), 'mention:changed', { nodeIds: [job.nodeId] })
+      // Nothing was sent anywhere: the rate limit must not count a local scan a turn.
+      return Promise.resolve({ requested: false, value })
+    },
+    // A scan is synchronous and local: by the time anything could cancel it, it is over.
+    cancelRequest: () => undefined,
+    debounceMs: MENTION_DEBOUNCE_MS,
+    minIntervalMs: 0
+  })
+
+  /** F-4.12: every manuscript document is rescanned when the tag bank itself changes. */
+  const rescanManuscript = (db: TreeDb): void => {
+    mentionQueue.indexAll(
+      'mentions',
+      manuscriptDocuments(db).map((row) => row.id)
+    )
+  }
 
   /**
    * A node's summary state: `available` only for a manuscript document, `stale` by content
@@ -330,6 +371,9 @@ export function registerHandlers({
     // "Updating…" for a run that will never happen, nor leave a run queued for the moment the
     // toggle comes on (one settings row per save; the run gates again anyway).
     if (isFeatureAllowed(getAiSettings(db), 'summary')) queue.touch('summary', id)
+    // F-4.12: the mention scan is local, so it has no gate to read — every save queues one, and
+    // the scan itself answers "nothing changed" for a node that is not a manuscript document.
+    mentionQueue.touch('mentions', id)
     return saved
   })
 
@@ -414,20 +458,74 @@ export function registerHandlers({
 
   register('tag:list', () => listTags(manager.require().connection.orm))
 
-  register('tag:create', (input) => createTag(manager.require().connection.orm, input))
+  // F-4.12: a new name is a new thing to look for, so the manuscript is rescanned behind the
+  // author. The scans are hash-guarded, so a document the new tag does not touch costs one hash.
+  register('tag:create', (input) => {
+    const db = manager.require().connection.orm
+    const created = createTag(db, input)
+    rescanManuscript(db)
+    return created
+  })
 
-  register('tag:update', ({ id, ...patch }) =>
-    updateTag(manager.require().connection.orm, id, patch)
-  )
+  /**
+   * F-4.12: a rename, a recategorization, or tracking turned back on changes what a scan would
+   * find, so the manuscript is queued again. Tracking turned off is answered at once instead:
+   * the tag's recorded mentions go now, and the windows hear which documents lost them.
+   */
+  register('tag:update', ({ id, ...patch }) => {
+    const db = manager.require().connection.orm
+    const before = getTag(db, id)
+    const updated = updateTag(db, id, patch)
+    if (before !== undefined) {
+      if (before.trackMentions && !updated.trackMentions) {
+        const nodeIds = deleteMentionsForTag(db, id)
+        if (nodeIds.length > 0) emit(windows(), 'mention:changed', { nodeIds })
+      } else if (
+        updated.trackMentions &&
+        (before.name !== updated.name ||
+          before.category !== updated.category ||
+          !before.trackMentions)
+      ) {
+        rescanManuscript(db)
+      }
+    }
+    return updated
+  })
 
   register('tag:delete', ({ id }) => {
-    deleteTag(manager.require().connection.orm, id)
+    const db = manager.require().connection.orm
+    // F-4.12: the rows cascade away with the tag, so the documents that had them are collected
+    // first; the windows are told once the tag is actually gone.
+    const nodeIds = listMentionsForTag(db, id).map((mention) => mention.nodeId)
+    deleteTag(db, id)
+    if (nodeIds.length > 0) emit(windows(), 'mention:changed', { nodeIds })
     return null
   })
 
-  register('tag:loadTemplate', ({ template }) =>
-    loadTagTemplate(manager.require().connection.orm, template)
-  )
+  register('tag:loadTemplate', ({ template }) => {
+    const db = manager.require().connection.orm
+    const result = loadTagTemplate(db, template)
+    if (result.created.length > 0) rescanManuscript(db)
+    return result
+  })
+
+  // F-4.12: what the tag detail view and the tag bar read. A jump uses the stored range first
+  // and falls back to a search, so a range from before the last save is never a dead end.
+  register('mention:listForTag', ({ tagId }) => {
+    const db = manager.require().connection.orm
+    if (getTag(db, tagId) === undefined) {
+      throw new AppError('NOT_FOUND', 'Tag not found', { id: tagId })
+    }
+    return listMentionsForTag(db, tagId)
+  })
+
+  register('mention:listForNode', ({ nodeId }) => {
+    const db = manager.require().connection.orm
+    if (getNode(db, nodeId) === undefined) {
+      throw new AppError('NOT_FOUND', 'Document not found', { id: nodeId })
+    }
+    return listMentionsForNode(db, nodeId)
+  })
 
   register('documentTag:list', ({ nodeId }) =>
     listDocumentTags(manager.require().connection.orm, nodeId)
@@ -1162,8 +1260,13 @@ export function registerHandlers({
     // the rows stay in that project's database, so opening it again takes the work up where it
     // stopped (`load` on an empty table does nothing, which is what a create lands on).
     queue.clear()
+    // F-4.12: the same for the mention queue, and a project that was written before this feature
+    // (or by an older build) is backfilled from its own rows, silently, as soon as it opens.
+    mentionQueue.clear()
     if (info) {
       queue.load()
+      mentionQueue.load()
+      mentionQueue.indexAll('mentions', staleMentionNodeIds(manager.require().connection.orm))
       try {
         appState.update((s) => ({ ...s, recents: touchRecent(s.recents, toRecentEntry(info)) }))
       } catch (err) {

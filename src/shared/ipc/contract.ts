@@ -41,6 +41,7 @@ import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
 import { AccentId, SupporterStatus } from '../license'
 import { MatterTemplateId } from '../matterTemplates'
+import { TagMentions } from '../mentions'
 import { EditRole, MenuItemId } from '../menu'
 import { WritingPresets } from '../presets'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
@@ -115,7 +116,10 @@ export type TreeNode = z.infer<typeof TreeNode>
 /** Longest allowed node title (F-2.2). */
 export const NODE_TITLE_MAX = 200
 
-/** One tag of the tag bank (F-4.1); `usageCount` is derived from `document_tag`, never stored. */
+/**
+ * One tag of the tag bank (F-4.1); `usageCount` is derived from `document_tag`, never stored.
+ * `trackMentions` (F-4.12) is the per-tag switch for the automatic mention scan; on by default.
+ */
 export const Tag = z.object({
   id: z.string(),
   name: z.string(),
@@ -123,6 +127,7 @@ export const Tag = z.object({
   color: z.string().regex(HEX_COLOR),
   parentId: z.string().nullable(),
   usageCount: z.number().int().nonnegative(),
+  trackMentions: z.boolean(),
   created: z.string(),
   modified: z.string()
 })
@@ -640,7 +645,9 @@ export const contract = {
       name: z.string().trim().min(1).max(TAG_NAME_MAX).optional(),
       category: TagCategory.optional(),
       color: z.string().regex(HEX_COLOR).optional(),
-      parentId: z.string().nullable().optional()
+      parentId: z.string().nullable().optional(),
+      /** F-4.12: off deletes the tag's recorded mentions at once; on rescans the manuscript. */
+      trackMentions: z.boolean().optional()
     }),
     output: Tag
   },
@@ -686,6 +693,14 @@ export const contract = {
     input: z.undefined(),
     output: z.array(z.object({ nodeId: z.string(), tagId: z.string() }))
   },
+  /**
+   * Where a tag's name occurs in the manuscript (F-4.12): one entry per document that mentions
+   * it, with the count and the ranges of the saved document; empty when tracking is off for the
+   * tag. NOT_FOUND for an unknown tag id.
+   */
+  'mention:listForTag': { input: z.object({ tagId: z.string() }), output: z.array(TagMentions) },
+  /** The tags mentioned in one document (F-4.12), whether or not they are linked to it; NOT_FOUND for an unknown node. */
+  'mention:listForNode': { input: z.object({ nodeId: z.string() }), output: z.array(TagMentions) },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
@@ -1163,6 +1178,8 @@ export const events = {
   'ai:summaryChanged': z.object({ nodeId: z.string(), status: SummaryStatus }),
   /** The index queue changed (F-5.13): a job was queued, started, finished, failed, or the queue paused. */
   'jobs:changed': IndexQueueStatus,
+  /** The recorded mentions of these documents changed (F-4.12): a scan wrote rows, or a tag's tracking was turned off or the tag deleted (then every document). */
+  'mention:changed': z.object({ nodeIds: z.array(z.string()) }),
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /** A native menu item was clicked or its accelerator pressed (F-7.1); the renderer runs the action. */

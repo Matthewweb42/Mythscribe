@@ -49,20 +49,36 @@ function scan(doc: PmNode): Entry[] {
 }
 
 /**
+ * Lowercase character by character, so one character stays one character and every position
+ * still lines up with its entry (a few characters, such as `İ`, grow when lowercased whole).
+ */
+function foldCase(text: string): string {
+  return Array.from(text, (char) => {
+    const lower = char.toLowerCase()
+    return lower.length === char.length ? lower : char
+  }).join('')
+}
+
+/**
  * Where `quote` sits in the document, or null when it is not there (F-14.8). Both sides are
  * normalized the way `normalizeForMatch` does, so a quote that crosses a paragraph break (one
  * space once normalized) still resolves to the range holding it; the range runs from the first
  * matched character to just past the last, which is what `setRewriteTarget` and a selection
  * take. The needle is trimmed, so a match never begins or ends on a boundary space.
+ * `ignoreCase` is for a needle whose casing is not the prose's: a tag name against the proper
+ * noun it was found as (F-4.12). A cited quote never asks for it.
  */
-export function locateText(doc: PmNode, quote: string): TextRange | null {
-  const needle = normalizeForMatch(quote)
+export function locateText(
+  doc: PmNode,
+  quote: string,
+  options?: { ignoreCase?: boolean }
+): TextRange | null {
+  const fold = options?.ignoreCase === true
+  const needle = fold ? foldCase(normalizeForMatch(quote)) : normalizeForMatch(quote)
   if (needle === '') return null
   const entries = scan(doc)
-  const at = entries
-    .map((entry) => entry.char)
-    .join('')
-    .indexOf(needle)
+  const haystack = entries.map((entry) => entry.char).join('')
+  const at = (fold ? foldCase(haystack) : haystack).indexOf(needle)
   if (at === -1) return null
   const first = entries[at]
   const last = entries[at + needle.length - 1]

@@ -600,3 +600,80 @@ describe('createIndexQueue (F-5.13)', () => {
     real.clear()
   })
 })
+
+describe('two queues over one index_job table (F-4.12)', () => {
+  let summaries: IndexQueue<string>
+  let mentions: IndexQueue<string>
+  let mentionRuns: ReturnType<typeof vi.fn<Run>>
+
+  beforeEach(() => {
+    // The file's own `queue` owns every row; these two are the app's pair, each filtered.
+    queue.clear()
+    summaries = build({ kind: 'summary' })
+    mentionRuns = vi.fn<Run>(async (job) => ({ requested: false, value: `scanned ${job.nodeId}` }))
+    mentions = build({ kind: 'mentions', run: (job, id) => mentionRuns(job, id) })
+  })
+  afterEach(() => {
+    summaries.clear()
+    mentions.clear()
+  })
+
+  it('never picks up the other kind’s rows, and counts only its own', async () => {
+    const [a, b] = scenes
+    if (a === undefined || b === undefined) throw new Error('no scenes')
+    summaries.indexAll('summary', [a, b])
+    mentions.indexAll('mentions', [a])
+    expect(summaries.status()).toMatchObject({ queued: 2 })
+    expect(mentions.status()).toMatchObject({ queued: 1 })
+
+    await settle()
+    expect(nodesRun()).toEqual([a, b])
+    expect(mentionRuns.mock.calls.map(([job]) => job)).toEqual([{ kind: 'mentions', nodeId: a }])
+    expect(listJobs(db)).toEqual([])
+  })
+
+  it('leaves the other kind’s rows alone when one of them is cancelled', async () => {
+    const [a] = scenes
+    if (a === undefined) throw new Error('no scene')
+    const held = gate()
+    run.mockReturnValueOnce(held.promise)
+    summaries.indexAll('summary', [a])
+    mentionRuns.mockReturnValueOnce(gate().promise)
+    mentions.indexAll('mentions', [a])
+    await settle()
+
+    expect(mentions.cancelAll()).toEqual(IDLE_INDEX_QUEUE)
+    expect(listJobs(db).map((job) => job.kind)).toEqual(['summary'])
+    expect(summaries.status()).toMatchObject({ running: { kind: 'summary', nodeId: a } })
+    held.release()
+    await settle()
+  })
+
+  it('resumes only its own failed rows', async () => {
+    const [a] = scenes
+    if (a === undefined) throw new Error('no scene')
+    enqueueJob(db, 'summary', a, new Date())
+    markFailed(
+      db,
+      jobId('summary', a),
+      3,
+      { code: 'PROVIDER', message: 'no', nextStep: 'try again' },
+      new Date()
+    )
+    enqueueJob(db, 'mentions', a, new Date())
+    markFailed(
+      db,
+      jobId('mentions', a),
+      3,
+      { code: 'PROVIDER', message: 'no', nextStep: 'try again' },
+      new Date()
+    )
+
+    mentions.resume()
+    await settle()
+    // The mention job ran and left no row; the summary one is still waiting for its own Retry.
+    expect(mentionRuns).toHaveBeenCalledTimes(1)
+    expect(run).not.toHaveBeenCalled()
+    expect(listJobs(db).map((job) => [job.kind, job.status])).toEqual([['summary', 'failed']])
+  })
+})

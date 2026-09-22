@@ -52,6 +52,7 @@ import { useBackgroundStore, useCurrentBackground } from '@renderer/features/foc
 import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { useMentionStore } from '@renderer/features/tags/mentionStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { UpdateNotice } from '@renderer/features/updates/UpdateNotice'
 import { useUpdateStore } from '@renderer/features/updates/updateStore'
@@ -141,7 +142,8 @@ export function App(): React.JSX.Element {
   // F-3.1: the loaded document goes with it. F-3.6: so do the formatting settings. F-3.7: and
   // the loaded notes (the panel layout is app-wide, F-7.2, so it stays). F-4.2: and the tag
   // bank, whose failure toasts on its own and never blocks the tree. F-4.4: and the document
-  // tag links, loaded per document by the tag bar. F-4.5: and the scene metadata, loaded per
+  // tag links, loaded per document by the tag bar. F-4.12: and the recorded mentions, loaded by
+  // the tag bar and the tag detail and refreshed from main's `mention:changed`. F-4.5: and the scene metadata, loaded per
   // node by the metadata pane. F-14.4: and the AI dial and toggles. F-5.2: and the writing
   // presets. F-14.2: and the author rules. F-14.1: and the voice exemplars (the toolbar button needs the count). F-14.6: the
   // provenance report is loaded by its section on demand and only cleared here. F-5.4: and the
@@ -170,9 +172,13 @@ export function App(): React.JSX.Element {
       useShellDialogStore.getState().close()
       useTagStore.getState().clear()
       useDocumentTagStore.getState().clear()
+      useMentionStore.getState().clear()
       useBackgroundStore.getState().clear()
       return
     }
+    // F-4.12: main scans in the background and says which documents changed; the mention lists
+    // are fetched by the views that show them, so only the subscription is opened here.
+    useMentionStore.getState().subscribe()
     tree.load().catch((err: unknown) => toast.error(describeError(err)))
     useEditorSettingsStore
       .getState()

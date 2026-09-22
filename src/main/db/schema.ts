@@ -92,6 +92,8 @@ export const tag = sqliteTable(
     parentId: text('parent_id').references((): AnySQLiteColumn => tag.id, {
       onDelete: 'set null'
     }),
+    /** F-4.12: whether the automatic mention scan looks for this name; on for every new tag. */
+    trackMentions: integer('track_mentions', { mode: 'boolean' }).notNull().default(true),
     created: text('created').notNull(),
     modified: text('modified').notNull()
   },
@@ -297,3 +299,48 @@ export const indexJob = sqliteTable('index_job', {
 })
 export type IndexJobRow = typeof indexJob.$inferSelect
 export type IndexJobInsert = typeof indexJob.$inferInsert
+
+/**
+ * Where a tag's name occurs in a document (F-4.12): one row per tag and node, written by the
+ * local mention scan after every save, never by the author. A document without a single
+ * occurrence has no row at all, so "mentioned in N documents" is a count of rows. `positions`
+ * is a JSON array of `[from, to]` ProseMirror ranges of the document as it was saved, which is
+ * what a jump selects; the count is stored beside it so the lists need no parse to sort.
+ * Cascaded from both ends: neither a deleted tag nor a deleted scene leaves mentions behind.
+ */
+export const tagMention = sqliteTable(
+  'tag_mention',
+  {
+    /** `<tag_id>:<node_id>`: one row per pair, so a rescan replaces rather than piles up. */
+    id: text('id').primaryKey(),
+    tagId: text('tag_id')
+      .notNull()
+      .references(() => tag.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    count: integer('count').notNull(),
+    /** JSON array of `[from, to]` pairs; a cell that no longer parses reads as no ranges. */
+    positions: text('positions').notNull(),
+    updatedAt: text('updated_at').notNull()
+  },
+  (t) => [index('tag_mention_tag_idx').on(t.tagId), index('tag_mention_node_idx').on(t.nodeId)]
+)
+export type TagMentionRow = typeof tagMention.$inferSelect
+export type TagMentionInsert = typeof tagMention.$inferInsert
+
+/**
+ * What the last mention scan of a document saw (F-4.12): the hash of its text and of the tags
+ * that were candidates then. A save whose hash still matches is skipped without a single write,
+ * and a renamed, retired, or new tag changes the hash for every document, which is how the
+ * backfill after a tag change finds its work. Cascaded with the node.
+ */
+export const mentionScan = sqliteTable('mention_scan', {
+  nodeId: text('node_id')
+    .primaryKey()
+    .references(() => node.id, { onDelete: 'cascade' }),
+  contentHash: text('content_hash').notNull(),
+  scannedAt: text('scanned_at').notNull()
+})
+export type MentionScanRow = typeof mentionScan.$inferSelect
+export type MentionScanInsert = typeof mentionScan.$inferInsert

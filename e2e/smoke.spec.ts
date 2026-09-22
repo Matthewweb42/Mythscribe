@@ -1735,6 +1735,51 @@ test('create, close, reopen a project on disk', async () => {
   await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest', 'stormfront'])
   await expect(page.getByTestId('status-words')).toHaveText(`${SENTENCE_WORDS + 2} words`)
 
+  // F-4.12: automatic mentions. A character tag created through the bridge is found in the
+  // text once the save and the scan's debounce have run: the tag bar's Mentions list counts it
+  // apart from the chips (nothing is linked, nothing is inserted), Jump selects the word, the
+  // Tag Manager's detail shows the document with a jump of its own, and Track mentions off
+  // drops the rows at once (on again rescans). None of the template's tag names appear in
+  // Scene 1 as plain words, so the list holds exactly the one row.
+  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await categories.getByRole('tab', { name: 'Characters' }).click()
+  const roseForm = tagsPanel.getByRole('form', { name: 'New tag' })
+  await roseForm.getByRole('textbox', { name: 'Tag name' }).fill('Rose')
+  await roseForm.getByRole('button', { name: 'Create tag' }).click()
+  await expect(tagRows.getByRole('button', { name: /^rose/ })).toHaveText('rose 0 uses')
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await editor.click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' Rose waited.')
+  const mentionList = tagBar.getByRole('list', { name: 'Mentions' })
+  await expect(mentionList.getByRole('listitem')).toHaveText(['rose ×1'], { timeout: 15_000 })
+  await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest', 'stormfront'])
+  await expect(tokens).toHaveText(['#dark-forest'])
+  await tagBar.getByRole('button', { name: 'Jump to first mention of rose' }).click()
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('Rose')
+  // A click collapses the selection, so the detail view's jump is seen to select it again.
+  await editor.click()
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('')
+  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await categories.getByRole('tab', { name: 'Characters' }).click()
+  await tagRows.getByRole('button', { name: /^rose/ }).click()
+  await expect(tagsPanel.getByRole('textbox', { name: 'Tag name' })).toHaveValue('rose')
+  await expect(tagsPanel.getByText('Used in 0 documents')).toBeVisible()
+  await expect(tagsPanel.getByText('Mentioned in 1 document')).toBeVisible()
+  const mentionDocs = tagsPanel.getByRole('list', { name: 'Documents mentioning this tag' })
+  await expect(mentionDocs.getByRole('button')).toHaveText(['Scene 1 ×1'])
+  await mentionDocs.getByRole('button', { name: /^Scene 1/ }).click()
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('Rose')
+  const trackMentions = tagsPanel.getByRole('checkbox', { name: 'Track mentions' })
+  await trackMentions.uncheck()
+  await expect(tagsPanel.getByText('Not mentioned')).toBeVisible()
+  await expect(mentionDocs).toHaveCount(0)
+  await expect(mentionList).toHaveCount(0)
+  await trackMentions.check()
+  await expect(tagsPanel.getByText('Mentioned in 1 document')).toBeVisible({ timeout: 15_000 })
+  await expect(mentionList.getByRole('listitem')).toHaveText(['rose ×1'])
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+
   // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.
   await closeProject()
   await stubOpenDialog(path.join(projectPath, 'project.db'))

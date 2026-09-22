@@ -78,6 +78,16 @@ describe('locateText (F-14.8)', () => {
     expect(locateText(editor.state.doc, 'Rain fell.')).toBeNull()
   })
 
+  it('matches regardless of case only when asked to, and the range still reads the prose back (F-4.12)', () => {
+    expect(locateText(editor.state.doc, 'rain followed.')).toBeNull()
+    const range = locateText(editor.state.doc, 'rain followed.', { ignoreCase: true })
+    expect(range).toEqual(locateText(editor.state.doc, 'Rain followed.'))
+    expect(normalizeForMatch(passageText(editor.state.doc, range?.from ?? 0, range?.to ?? 0))).toBe(
+      'Rain followed.'
+    )
+    expect(locateText(editor.state.doc, 'the lighthouse', { ignoreCase: true })).toBeNull()
+  })
+
   it('covers a whole inline tag token when the quote starts inside it', () => {
     const range = locateText(editor.state.doc, 'dark-forest after.')
     expect(range).not.toBeNull()

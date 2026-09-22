@@ -1,4 +1,4 @@
-import { asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import { JobFailure, JobKind, JobStatus } from '@shared/jobs'
 import { indexJob, type IndexJobRow } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
@@ -42,11 +42,14 @@ export function jobId(kind: JobKind, nodeId: string): string {
 /**
  * Every job, oldest first; jobs queued in the same moment (one "Summarize all scenes" click)
  * keep the order they were inserted in, so the queue works through the book from the front.
+ * `kind` narrows the table to one queue's rows: two queue instances share `index_job` (F-4.12's
+ * local scan runs beside the provider-backed summaries), and neither may see the other's work.
  */
-export function listJobs(db: TreeDb): IndexJob[] {
+export function listJobs(db: TreeDb, kind?: JobKind): IndexJob[] {
   return db
     .select()
     .from(indexJob)
+    .where(kind === undefined ? undefined : eq(indexJob.kind, kind))
     .orderBy(asc(indexJob.createdAt), sql`rowid`)
     .all()
     .map(toJob)
@@ -121,17 +124,23 @@ export function deleteJob(db: TreeDb, id: string): void {
   db.delete(indexJob).where(eq(indexJob.id, id)).run()
 }
 
-/** Empties the queue (Cancel, F-5.13): every waiting and failed job goes. */
-export function deleteAllJobs(db: TreeDb): void {
-  db.delete(indexJob).run()
+/** Empties the queue (Cancel, F-5.13): every waiting and failed job of that kind goes, or all of them. */
+export function deleteAllJobs(db: TreeDb, kind?: JobKind): void {
+  db.delete(indexJob)
+    .where(kind === undefined ? undefined : eq(indexJob.kind, kind))
+    .run()
 }
 
-/** Puts every failed job back in the queue with its attempts reset; returns how many moved. */
-export function requeueFailed(db: TreeDb, now: Date): number {
+/** Puts every failed job (of that kind) back in the queue with its attempts reset; returns how many moved. */
+export function requeueFailed(db: TreeDb, now: Date, kind?: JobKind): number {
   const result = db
     .update(indexJob)
     .set({ status: 'queued', attempts: 0, lastError: null, updatedAt: now.toISOString() })
-    .where(eq(indexJob.status, 'failed'))
+    .where(
+      kind === undefined
+        ? eq(indexJob.status, 'failed')
+        : and(eq(indexJob.status, 'failed'), eq(indexJob.kind, kind))
+    )
     .run()
   return result.changes
 }

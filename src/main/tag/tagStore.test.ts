@@ -68,6 +68,8 @@ describe('createTag', () => {
       color: DEFAULT_CATEGORY_COLOR.setting,
       parentId: null,
       usageCount: 0,
+      // F-4.12: a new tag is looked for in the manuscript until the author says otherwise.
+      trackMentions: true,
       created: '2026-09-12T10:00:00.000Z',
       modified: '2026-09-12T10:00:00.000Z'
     })
@@ -170,6 +172,17 @@ describe('updateTag', () => {
     expectCode(() => updateTag(db, rain.id, { name: 'Snow!' }), 'ALREADY_EXISTS')
     expectCode(() => updateTag(db, rain.id, { name: '#' }), 'VALIDATION')
     expect(getTag(db, rain.id)?.name).toBe('rain')
+  })
+
+  it('turns mention tracking off and on again (F-4.12)', () => {
+    const rose = createTag(db, { name: 'Rose', category: 'character' })
+    expect(rose.trackMentions).toBe(true)
+    expect(updateTag(db, rose.id, { trackMentions: false }).trackMentions).toBe(false)
+    expect(getTag(db, rose.id)?.trackMentions).toBe(false)
+    // An update that says nothing about the switch leaves it alone.
+    expect(updateTag(db, rose.id, { color: '#000000' }).trackMentions).toBe(false)
+    expect(updateTag(db, rose.id, { trackMentions: true }).trackMentions).toBe(true)
+    expect(listTags(db)[0]?.trackMentions).toBe(true)
   })
 
   it('sets and clears the parent', () => {

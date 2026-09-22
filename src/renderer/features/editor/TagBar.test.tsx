@@ -1,3 +1,4 @@
+import { Editor } from '@tiptap/core'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,12 +13,15 @@ import {
   resetDocumentTagStore,
   useDocumentTagStore
 } from '@renderer/features/tags/documentTagStore'
+import { resetMentionStore, useMentionStore } from '@renderer/features/tags/mentionStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetActiveEditorStore, useActiveEditorStore } from './activeEditorStore'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
+import { buildExtensions } from './extensions'
 import { resetSceneMetaStore } from './sceneMetaStore'
 import { TagBar } from './TagBar'
 
@@ -64,6 +68,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
         return { id, meta: emptySceneMeta() } as Output<C>
       }
       if (channel === 'proposal:settle') return null as Output<C>
+      if (channel === 'mention:listForNode') return [] as Output<C>
       if (channel === 'ai:cancel') return { cancelled: true } as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
@@ -159,6 +164,8 @@ async function mount(id = 'sc-1'): Promise<ReturnType<typeof render>> {
 beforeEach(() => {
   resetTagStore()
   resetDocumentTagStore()
+  resetMentionStore()
+  resetActiveEditorStore()
   resetLayoutStore()
   resetSceneMetaStore()
   resetDocumentStore()
@@ -171,6 +178,7 @@ beforeEach(() => {
 afterEach(() => {
   resetProposalStore()
   resetAiActivityStore()
+  resetActiveEditorStore()
   vi.unstubAllGlobals()
 })
 
@@ -392,6 +400,60 @@ describe('TagBar (F-4.4)', () => {
       })
     })
     expect(within(bar()).queryByRole('list', { name: 'Inline tags' })).not.toBeInTheDocument()
+  })
+
+  it('lists the mentions main recorded for the document and jumps to the first one (F-4.12)', async () => {
+    const calls = install({
+      'mention:listForNode': () => [
+        {
+          tagId: 't-mara',
+          nodeId: 'sc-1',
+          count: 2,
+          ranges: [[1, 5] as [number, number], [26, 30]]
+        },
+        { tagId: 't-gone', nodeId: 'sc-1', count: 1, ranges: [[1, 5] as [number, number]] }
+      ]
+    })
+    await mount()
+    expect(calls).toContainEqual(['mention:listForNode', { nodeId: 'sc-1' }])
+    const mentions = await within(bar()).findByRole('list', { name: 'Mentions' })
+    // A recorded tag that is no longer in the bank has no name or color to show.
+    expect(
+      within(mentions)
+        .getAllByRole('listitem')
+        .map((row) => row.textContent)
+    ).toEqual(['mara ×2'])
+    expect(
+      within(mentions).getAllByRole('listitem')[0]!.querySelector('span[aria-hidden]')
+    ).toHaveStyle({ backgroundColor: '#dc2626' })
+
+    const editor = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' }),
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Mara waited.' }] }]
+      }
+    })
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await userEvent.click(
+      within(mentions).getByRole('button', { name: 'Jump to first mention of mara' })
+    )
+    await waitFor(() =>
+      expect(
+        editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to)
+      ).toBe('Mara')
+    )
+    // The tree selection is `openPassage`'s job and is covered there; this bar's tree is empty.
+    expect(toasts()).toEqual([])
+    editor.destroy()
+  })
+
+  it('shows no Mentions list for a document nothing mentions (F-4.12)', async () => {
+    install()
+    await mount()
+    await waitFor(() => expect(useMentionStore.getState().byNode['sc-1']).toEqual([]))
+    expect(within(bar()).queryByRole('list', { name: 'Mentions' })).not.toBeInTheDocument()
+    expect(within(bar()).queryByText('Mentions')).not.toBeInTheDocument()
   })
 
   it('shows the metadata pane behind a persisted split only for a node with a hierarchy level (F-4.5)', async () => {

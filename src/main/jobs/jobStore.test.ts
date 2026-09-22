@@ -158,6 +158,27 @@ describe('jobStore (F-5.13)', () => {
     })
   })
 
+  it('narrows every list and sweep to one kind, so two queues never touch each other (F-4.12)', () => {
+    enqueueJob(db, 'summary', scene(0).id, at(0))
+    enqueueJob(db, 'mentions', scene(0).id, at(1))
+    enqueueJob(db, 'mentions', scene(1).id, at(2))
+    markFailed(db, jobId('mentions', scene(1).id), 3, FAILURE, at(3))
+    markFailed(db, jobId('summary', scene(0).id), 3, FAILURE, at(3))
+
+    expect(listJobs(db, 'summary').map((job) => job.id)).toEqual([jobId('summary', scene(0).id)])
+    expect(listJobs(db, 'mentions').map((job) => job.id)).toEqual([
+      jobId('mentions', scene(0).id),
+      jobId('mentions', scene(1).id)
+    ])
+    expect(listJobs(db)).toHaveLength(3)
+
+    expect(requeueFailed(db, at(4), 'mentions')).toBe(1)
+    expect(getJob(db, jobId('summary', scene(0).id))).toMatchObject({ status: 'failed' })
+
+    deleteAllJobs(db, 'mentions')
+    expect(listJobs(db).map((job) => job.id)).toEqual([jobId('summary', scene(0).id)])
+  })
+
   it('skips a job whose kind this build does not know', () => {
     enqueueJob(db, 'summary', scene(0).id, at(0))
     enqueueJob(db, 'summary', scene(1).id, at(1))

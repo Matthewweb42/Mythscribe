@@ -72,6 +72,13 @@ export interface JobRun<T> {
 export interface IndexQueueOptions<T> {
   /** The open project's database, or null when none is open; read at run time, never captured. */
   db: () => TreeDb | null
+  /**
+   * The only kind of job this instance may see in `index_job`. Two instances share the table
+   * (F-4.12's local mention scan runs beside the provider-backed summaries), so an instance
+   * that filtered nothing would count, run, cancel, and retry the other one's rows. Left out,
+   * the instance owns the whole table.
+   */
+  kind?: JobKind
   /** Runs one job. `requestId` is registered in flight, so the run can be aborted. */
   run: (job: QueuedJob, requestId: string) => Promise<JobRun<T>>
   /** Aborts the request in flight under that id (the inflight registry, F-5.10). */
@@ -161,6 +168,7 @@ function unref(timer: ReturnType<typeof setTimeout>): ReturnType<typeof setTimeo
 export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T> {
   const {
     db: database,
+    kind: only,
     run,
     cancelRequest,
     now = () => new Date(),
@@ -249,7 +257,7 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
   function currentStatus(): IndexQueueStatus {
     const db = database()
     if (db === null) return IDLE_INDEX_QUEUE
-    const jobs = listJobs(db)
+    const jobs = listJobs(db, only)
     const queued = jobs.filter((job) => job.status === 'queued' && job.id !== running?.id).length
     const failed = jobs.filter((job) => job.status === 'failed').length
     // Idle again: the "3 of 12" counter starts over with the next burst.
@@ -266,8 +274,9 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
   function pickNext(db: TreeDb): IndexJob | null {
     const at = now().getTime()
     return (
-      listJobs(db).find((job) => job.status === 'queued' && (retryAt.get(job.id) ?? 0) <= at) ??
-      null
+      listJobs(db, only).find(
+        (job) => job.status === 'queued' && (retryAt.get(job.id) ?? 0) <= at
+      ) ?? null
     )
   }
 
@@ -278,7 +287,7 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
       retryTimer = null
     }
     const at = now().getTime()
-    const waiting = listJobs(db)
+    const waiting = listJobs(db, only)
       .filter((job) => job.status === 'queued')
       .map((job) => retryAt.get(job.id) ?? 0)
       .filter((deadline) => deadline > at)
@@ -532,7 +541,7 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
     load() {
       const db = database()
       if (db === null) return
-      for (const job of listJobs(db)) {
+      for (const job of listJobs(db, only)) {
         if (job.status === 'failed') announce(job.nodeId, 'failed', job.lastError)
         else announce(job.nodeId, 'pending', null)
       }
@@ -569,7 +578,7 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
         running = null
       }
       const db = database()
-      if (db !== null) deleteAllJobs(db)
+      if (db !== null) deleteAllJobs(db, only)
       retryAt.clear()
       foregroundIds.clear()
       dirty.clear()
@@ -585,9 +594,9 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
       paused = null
       const db = database()
       if (db !== null) {
-        requeueFailed(db, now())
+        requeueFailed(db, now(), only)
         retryAt.clear()
-        for (const job of listJobs(db)) {
+        for (const job of listJobs(db, only)) {
           if (job.status === 'queued') announce(job.nodeId, 'pending', null)
         }
       }

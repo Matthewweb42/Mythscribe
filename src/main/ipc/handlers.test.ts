@@ -2148,6 +2148,177 @@ describe('tag handlers (F-4.1)', () => {
   })
 })
 
+describe('automatic mentions (F-4.12)', () => {
+  /** The debounce is 1.5 s; 3 s covers it and the scan that follows. */
+  const SCAN = 3_000
+
+  const save = (id: string, ...paragraphs: string[]): Promise<unknown> =>
+    invoke('document:save', {
+      id,
+      content: {
+        type: 'doc',
+        content: paragraphs.map((text) => ({
+          type: 'paragraph',
+          content: [{ type: 'text', text }]
+        }))
+      }
+    })
+
+  /** The documents named by every `mention:changed` event sent to the window, flattened. */
+  const changedNodes = (): string[] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([channel]) => channel === 'mention:changed')
+      .flatMap(([, payload]) => (payload as { nodeIds: string[] }).nodeIds)
+
+  /** A project with one scene written; the manuscript's first document id. */
+  async function ready(...paragraphs: string[]): Promise<string> {
+    await invoke('project:create', { name: 'Mentions', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = manuscriptReadingOrder(rows)[0]
+    if (scene === undefined) throw new Error('skeleton not seeded')
+    if (paragraphs.length > 0) await save(scene, ...paragraphs)
+    return scene
+  }
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('mention:listForTag', { tagId: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('mention:listForNode', { nodeId: 'x' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('records where a character tag is named after a save, and tells the window', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await ready()
+      const rose = await invoke('tag:create', { name: 'Rose', category: 'character' })
+      await save(scene, 'Rose waited at the landing.', 'The rose had closed.')
+      expect(await invoke('mention:listForNode', { nodeId: scene })).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(SCAN)
+      // "rose" the flower is not the character: a character tag must read as a proper noun.
+      expect(await invoke('mention:listForNode', { nodeId: scene })).toEqual([
+        { tagId: rose.id, nodeId: scene, count: 1, ranges: [[1, 5]] }
+      ])
+      expect(await invoke('mention:listForTag', { tagId: rose.id })).toEqual([
+        { tagId: rose.id, nodeId: scene, count: 1, ranges: [[1, 5]] }
+      ])
+      expect(changedNodes()).toContain(scene)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('matches a tag of any other category whatever the case', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await ready()
+      const rain = await invoke('tag:create', { name: 'Rain', category: 'tone' })
+      await save(scene, 'Rain, then rain, then RAIN.')
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForNode', { nodeId: scene })).toMatchObject([
+        { tagId: rain.id, count: 3 }
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('scans the manuscript when a tag is created, without waiting for another save', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await ready('Rose waited at the landing.')
+      await vi.advanceTimersByTimeAsync(SCAN)
+      const rose = await invoke('tag:create', { name: 'Rose', category: 'character' })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(await invoke('mention:listForTag', { tagId: rose.id })).toMatchObject([
+        { nodeId: scene, count: 1 }
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('forgets a tag’s mentions the moment its tracking is turned off, and finds them again', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await ready('Rose waited at the landing.')
+      const rose = await invoke('tag:create', { name: 'Rose', category: 'character' })
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForTag', { tagId: rose.id })).toHaveLength(1)
+
+      const off = await invoke('tag:update', { id: rose.id, trackMentions: false })
+      expect(off.trackMentions).toBe(false)
+      expect(await invoke('mention:listForTag', { tagId: rose.id })).toEqual([])
+      expect(await invoke('mention:listForNode', { nodeId: scene })).toEqual([])
+      expect(changedNodes()).toContain(scene)
+
+      await invoke('tag:update', { id: rose.id, trackMentions: true })
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForTag', { tagId: rose.id })).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rescans after a rename and forgets everything when the tag is deleted', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await ready('Rose waited at the landing.')
+      const rose = await invoke('tag:create', { name: 'Rose', category: 'character' })
+      await vi.advanceTimersByTimeAsync(SCAN)
+
+      await invoke('tag:update', { id: rose.id, name: 'Marsh' })
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForTag', { tagId: rose.id })).toEqual([])
+
+      await invoke('tag:update', { id: rose.id, name: 'Rose' })
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForTag', { tagId: rose.id })).toHaveLength(1)
+
+      await invoke('tag:delete', { id: rose.id })
+      expect(await invoke('mention:listForNode', { nodeId: scene })).toEqual([])
+      expect(changedNodes()).toContain(scene)
+      await expect(invoke('mention:listForTag', { tagId: rose.id })).rejects.toThrowError(
+        /^NOT_FOUND: /
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('backfills a manuscript written before the scan existed when the project opens', async () => {
+    const project = await invoke('project:create', {
+      name: 'Mentions',
+      format: 'novel',
+      directory: tmp
+    })
+    const rows = await invoke('tree:list', undefined)
+    const scene = manuscriptReadingOrder(rows)[0]
+    if (scene === undefined) throw new Error('skeleton not seeded')
+    const rose = await invoke('tag:create', { name: 'Rose', category: 'character' })
+    await save(scene, 'Rose waited at the landing.')
+    await invoke('project:close', undefined)
+    // Nothing was scanned: the debounce never ran before the project closed.
+
+    await invoke('project:open', { path: project?.path ?? '' })
+    await vi.waitFor(async () => {
+      expect(await invoke('mention:listForTag', { tagId: rose.id })).toHaveLength(1)
+    })
+  })
+
+  it('answers NOT_FOUND for a tag and a node it does not know', async () => {
+    await ready()
+    await expect(invoke('mention:listForTag', { tagId: 'nope' })).rejects.toThrowError(
+      /^NOT_FOUND: /
+    )
+    await expect(invoke('mention:listForNode', { nodeId: 'nope' })).rejects.toThrowError(
+      /^NOT_FOUND: /
+    )
+  })
+})
+
 describe('tag:loadTemplate (F-4.3)', () => {
   const standard = TAG_TEMPLATES.find((t) => t.id === 'standard-fiction')!
 

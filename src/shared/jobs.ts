@@ -8,8 +8,9 @@ import { AiErrorCode } from './ai'
  * waiting and the ones that gave up, so reopening the project resumes them. A finished job
  * leaves no row: the `scene_summary` it wrote and the ledger row that paid for it are its record.
  *
- * Only `summary` jobs exist today. Embeddings (F-5.15) add a member to `JobKind` and a runner;
- * no provider batch API is used at launch (`FEATURES.md` F-5.13): OpenAI's is a 24-hour
+ * Two kinds exist: `summary` on the provider-backed queue, and `mentions` (F-4.12) on its own
+ * queue instance over the same table (a `kind` filter keeps them apart). Embeddings (F-5.15)
+ * add a member to `JobKind` and a runner; no provider batch API is used at launch (`FEATURES.md` F-5.13): OpenAI's is a 24-hour
  * asynchronous file job, and a summary feeds the story bible of the next prompt, so hours of
  * latency would leave the bible stale while the author writes. The rate-limited serial worker
  * and the content-hash short-circuit (an unchanged scene costs nothing) are the cost control.
@@ -22,8 +23,12 @@ export const JOB_BACKOFF_MS = [5_000, 15_000, 45_000] as const
 /** After this many attempts a transient failure becomes a `failed` row and the worker moves on. */
 export const JOB_MAX_ATTEMPTS = 3
 
-/** What a job does. One member today; a new kind is a new member and a new runner. */
-export const JobKind = z.enum(['summary'])
+/**
+ * What a job does. `summary` runs through the provider-backed queue; `mentions` (F-4.12) is a
+ * local scan on its own queue instance, so a missing key never holds it up. A new kind is a
+ * new member and a new runner.
+ */
+export const JobKind = z.enum(['summary', 'mentions'])
 export type JobKind = z.infer<typeof JobKind>
 
 /** What a persisted job can be: a running job is memory-only, so a crash resumes it as queued. */

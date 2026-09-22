@@ -3,12 +3,15 @@ import { ChevronLeft } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Tag } from '@shared/ipc/contract'
 import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, TAG_NAME_MAX, TagCategory } from '@shared/tags'
+import type { MentionRange } from '@shared/mentions'
+import { openMention } from '@renderer/features/editor/openPassage'
 import { tagFilterView } from '@renderer/features/manuscript/tagFilter'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { describeError } from '@renderer/lib/errors'
 import { useDocumentTagStore } from './documentTagStore'
+import { useMentionStore } from './mentionStore'
 import { useTagStore } from './tagStore'
 
 /** One row of the tag's document list: the node and the folder it sits in, if that is not a section. */
@@ -17,6 +20,15 @@ interface TaggedDocument {
   title: string
   /** The parent folder's title, or null when the parent is a section root (its label is generic). */
   parentTitle: string | null
+}
+
+/** One row of the tag's mention list: the document, how often the name occurs, and the first occurrence. */
+interface MentioningDocument {
+  id: string
+  title: string
+  count: number
+  /** The recorded range of the first occurrence, the jump's starting point. */
+  first: MentionRange
 }
 
 const FIELD = 'min-w-0 rounded-md border border-line bg-bg px-2 py-1 text-sm'
@@ -29,6 +41,12 @@ const formatDate = (iso: string): string =>
 /** "Used in 3 documents" / "Used in 1 document". */
 function usedInLabel(count: number): string {
   return count === 1 ? 'Used in 1 document' : `Used in ${count} documents`
+}
+
+/** "Mentioned in 3 documents" / "Mentioned in 1 document" / "Not mentioned" (F-4.12). */
+function mentionedInLabel(count: number): string {
+  if (count === 0) return 'Not mentioned'
+  return count === 1 ? 'Mentioned in 1 document' : `Mentioned in ${count} documents`
 }
 
 interface TagDetailProps {
@@ -44,7 +62,10 @@ interface TagDetailProps {
  * tag from every document. Every write goes through the tag store and merges what main returns
  * (the name comes back kebab-cased, so the field re-syncs from the stored row). The Documents
  * section (F-4.10) lists what carries the tag in tree order, opens a row in the editor, and
- * hands the tree the same filter through "Show in tree".
+ * hands the tree the same filter through "Show in tree". The Mentions section (F-4.12) lists
+ * where main's scan found the tag's name, apart from those explicit links, and a row jumps to
+ * the first occurrence; "Track mentions" turns the scan off for this tag, which drops its
+ * recorded rows in main and hides the section.
  */
 export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX.Element {
   const update = useTagStore((s) => s.update)
@@ -52,6 +73,7 @@ export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX
   const byId = useTreeStore((s) => s.byId)
   const index = useTreeStore(useShallow((s) => ({ rootIds: s.rootIds, childrenOf: s.childrenOf })))
   const tagIdsByNode = useDocumentTagStore((s) => s.tagIdsByNode)
+  const mentions = useMentionStore((s) => s.byTag[tag.id])
   const [busy, setBusy] = useState(false)
   /** The color as picked, shown until main confirms it; null when the field shows the stored color. */
   const [draftColor, setDraftColor] = useState<string | null>(null)
@@ -74,6 +96,15 @@ export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX
       .catch((err: unknown) => toast.error(describeError(err)))
   }, [tag.id])
 
+  // F-4.12: main scans on save and pushes `mention:changed`, which refreshes this list; the
+  // first read is asked for here, so the section is current whenever a detail opens.
+  useEffect(() => {
+    useMentionStore
+      .getState()
+      .loadForTag(tag.id)
+      .catch((err: unknown) => toast.error(describeError(err)))
+  }, [tag.id])
+
   const documents = useMemo<TaggedDocument[]>(
     () =>
       tagFilterView(index, tagIdsByNode, tag.id).matches.flatMap((id) => {
@@ -90,6 +121,30 @@ export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX
       }),
     [index, byId, tagIdsByNode, tag.id]
   )
+
+  // The mentioned documents in the same display order as the tagged ones: the mention rows are
+  // fed to `tagFilterView` as if each were a link, so one walk of the tree orders both lists.
+  const mentioned = useMemo<MentioningDocument[]>(() => {
+    const rows = mentions ?? []
+    const asLinks: Record<string, string[] | undefined> = {}
+    for (const row of rows) asLinks[row.nodeId] = [tag.id]
+    const byNode = new Map(rows.map((row) => [row.nodeId, row]))
+    return tagFilterView(index, asLinks, tag.id).matches.flatMap((id) => {
+      const node = byId[id]
+      const row = byNode.get(id)
+      if (!node || !row) return []
+      // A row always carries at least one range; `[0, 0]` would make the jump search by name.
+      return [{ id, title: node.title, count: row.count, first: row.ranges[0] ?? [0, 0] }]
+    })
+  }, [index, byId, mentions, tag.id])
+
+  const setTracking = async (trackMentions: boolean): Promise<void> => {
+    try {
+      await update(tag.id, { trackMentions })
+    } catch (err) {
+      report(err)
+    }
+  }
 
   const showInTree = (): void => {
     useTreeStore.getState().setTagFilter(tag.id)
@@ -216,9 +271,19 @@ export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX
           ))}
         </select>
       </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={tag.trackMentions}
+          onChange={(event) => void setTracking(event.target.checked)}
+        />
+        <span className="text-xs text-fg-muted">Track mentions</span>
+      </label>
       <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-fg-muted">Usage</dt>
         <dd className="m-0">{usedInLabel(tag.usageCount)}</dd>
+        <dt className="text-fg-muted">Mentions</dt>
+        <dd className="m-0">{mentionedInLabel(mentioned.length)}</dd>
         <dt className="text-fg-muted">Created</dt>
         <dd className="m-0">{formatDate(tag.created)}</dd>
         <dt className="text-fg-muted">Modified</dt>
@@ -258,6 +323,27 @@ export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX
           </ul>
         )}
       </section>
+      {tag.trackMentions && mentioned.length > 0 ? (
+        <section className="flex flex-col gap-1">
+          <h3 className="m-0 text-xs font-normal text-fg-muted">Mentions</h3>
+          <ul role="list" aria-label="Documents mentioning this tag" className="m-0 list-none p-0">
+            {mentioned.map((document) => (
+              <li key={document.id}>
+                <button
+                  type="button"
+                  onClick={() => void openMention(document.id, document.first, tag.name)}
+                  className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
+                >
+                  <span className="min-w-0 flex-1 truncate">{document.title}</span>{' '}
+                  <span className="shrink-0 text-xs text-fg-subtle tabular-nums">
+                    ×{document.count}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <button
         type="button"
         disabled={busy}

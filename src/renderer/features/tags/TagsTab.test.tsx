@@ -1,14 +1,22 @@
+import { Editor } from '@tiptap/core'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
+import type { TagMentions } from '@shared/mentions'
 import { toTagName } from '@shared/tags'
+import {
+  resetActiveEditorStore,
+  useActiveEditorStore
+} from '@renderer/features/editor/activeEditorStore'
+import { buildExtensions } from '@renderer/features/editor/extensions'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetDocumentTagStore, useDocumentTagStore } from './documentTagStore'
+import { resetMentionStore, useMentionStore } from './mentionStore'
 import { tagFixture } from './tagFixture'
 import { resetTagStore, useTagStore } from './tagStore'
 import { TagsTab } from './TagsTab'
@@ -34,6 +42,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
           color: value.color ?? '#000000',
           parentId: null,
           usageCount: 0,
+          trackMentions: true,
           created: '2026-09-12T08:00:00.000Z',
           modified: '2026-09-12T08:00:00.000Z'
         }
@@ -53,6 +62,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       }
       if (channel === 'tag:delete') return null as Output<C>
       if (channel === 'documentTag:listAll') return [] as Output<C>
+      if (channel === 'mention:listForTag') return [] as Output<C>
       if (channel === 'layout:set') return input as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
@@ -98,6 +108,7 @@ describe('TagsTab (F-4.2)', () => {
   beforeEach(() => {
     resetTagStore()
     resetDocumentTagStore()
+    resetMentionStore()
     useTreeStore.getState().clear()
     useDialogStore.setState({ modals: [], toasts: [] })
   })
@@ -412,12 +423,12 @@ describe('TagDetail documents (F-4.10)', () => {
   function seedTree(): void {
     useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
   }
-  const documents = (): HTMLElement =>
-    screen.getByRole('list', { name: 'Documents with this tag' })
+  const documents = (): HTMLElement => screen.getByRole('list', { name: 'Documents with this tag' })
 
   beforeEach(() => {
     resetTagStore()
     resetDocumentTagStore()
+    resetMentionStore()
     useTreeStore.getState().clear()
     useDialogStore.setState({ modals: [], toasts: [] })
     resetLayoutStore()
@@ -449,11 +460,11 @@ describe('TagDetail documents (F-4.10)', () => {
     await user.click(row('dark-forest'))
     expect(calls.filter(([channel]) => channel === 'documentTag:listAll')).toHaveLength(1)
     await waitFor(() => expect(documents()).toBeInTheDocument())
-    expect(within(documents()).getAllByRole('button').map((b) => b.textContent)).toEqual([
-      'Title Page',
-      'Scene 2Chapter 2',
-      'Chapter 4Arc 2'
-    ])
+    expect(
+      within(documents())
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual(['Title Page', 'Scene 2Chapter 2', 'Chapter 4Arc 2'])
     await user.click(within(documents()).getByRole('button', { name: /^Scene 2/ }))
     expect(useTreeStore.getState().selectedId).toBe('sc-2')
     expect(useLayoutStore.getState().layout.sidebar.tab).toBe('tags')
@@ -489,5 +500,129 @@ describe('TagDetail documents (F-4.10)', () => {
     await waitFor(() => expect(toasts()).toEqual(['Database is locked']))
     expect(screen.getByRole('textbox', { name: 'Tag name' })).toHaveValue('mara')
     expect(useDocumentTagStore.getState().tagIdsByNode).toEqual({})
+  })
+})
+
+describe('TagDetail mentions (F-4.12)', () => {
+  const TEXT = 'Mara waited at the gate.'
+  /** The open document of `sc-2`, so a jump can select the passage it finds. */
+  let editor: Editor
+
+  const mention = (nodeId: string, count: number, ranges: [number, number][]): TagMentions => ({
+    tagId: 't-mara',
+    nodeId,
+    count,
+    ranges
+  })
+  const mentions = (): HTMLElement =>
+    screen.getByRole('list', { name: 'Documents mentioning this tag' })
+  const trackBox = (): HTMLElement => screen.getByRole('checkbox', { name: 'Track mentions' })
+
+  beforeEach(() => {
+    resetTagStore()
+    resetDocumentTagStore()
+    resetMentionStore()
+    resetActiveEditorStore()
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    useDialogStore.setState({ modals: [], toasts: [] })
+    editor = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-2' }),
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: TEXT }] }]
+      }
+    })
+  })
+
+  afterEach(() => {
+    editor.destroy()
+    resetActiveEditorStore()
+  })
+
+  it('lists the mentioning documents in tree order with their counts and says how many there are', async () => {
+    const user = userEvent.setup()
+    await renderLoaded({
+      'mention:listForTag': () => [
+        mention('ch-4', 1, [[3, 7]]),
+        mention('sc-2', 2, [
+          [1, 5],
+          [40, 44]
+        ]),
+        mention('gone', 5, [[1, 5]])
+      ]
+    })
+    await user.click(row('mara'))
+    await waitFor(() => expect(mentions()).toBeInTheDocument())
+    // A recorded node that is not in the tree any more is skipped.
+    expect(
+      within(mentions())
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual(['Scene 2 ×2', 'Chapter 4 ×1'])
+    expect(screen.getByText('Mentioned in 2 documents')).toBeInTheDocument()
+  })
+
+  it('clicking a mention opens the document and selects the recorded occurrence', async () => {
+    const user = userEvent.setup()
+    await renderLoaded({ 'mention:listForTag': () => [mention('sc-2', 1, [[1, 5]])] })
+    await user.click(row('mara'))
+    await waitFor(() => expect(mentions()).toBeInTheDocument())
+    useActiveEditorStore.getState().set('sc-2', editor)
+    await user.click(within(mentions()).getByRole('button', { name: /^Scene 2/ }))
+    await waitFor(() => expect(useTreeStore.getState().selectedId).toBe('sc-2'))
+    await waitFor(() =>
+      expect(
+        editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to)
+      ).toBe('Mara')
+    )
+    expect(toasts()).toEqual([])
+  })
+
+  it('says so when nothing mentions the tag, and lists nothing', async () => {
+    const user = userEvent.setup()
+    await renderLoaded()
+    await user.click(row('moody'))
+    await waitFor(() => expect(screen.getByText('Not mentioned')).toBeInTheDocument())
+    expect(
+      screen.queryByRole('list', { name: 'Documents mentioning this tag' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('Track mentions patches the tag and hides the list while it is off', async () => {
+    const user = userEvent.setup()
+    const calls = await renderLoaded({
+      'mention:listForTag': () => [mention('sc-2', 1, [[1, 5]])]
+    })
+    await user.click(row('mara'))
+    await waitFor(() => expect(mentions()).toBeInTheDocument())
+    expect(trackBox()).toBeChecked()
+    await user.click(trackBox())
+    expect(calls.at(-1)).toEqual(['tag:update', { id: 't-mara', trackMentions: false }])
+    await waitFor(() => expect(trackBox()).not.toBeChecked())
+    expect(
+      screen.queryByRole('list', { name: 'Documents mentioning this tag' })
+    ).not.toBeInTheDocument()
+    await user.click(trackBox())
+    expect(calls.at(-1)).toEqual(['tag:update', { id: 't-mara', trackMentions: true }])
+    await waitFor(() => expect(mentions()).toBeInTheDocument())
+  })
+
+  it('a failed toggle toasts and leaves the checkbox as the stored tag has it', async () => {
+    const user = userEvent.setup()
+    await renderLoaded({ 'tag:update': failing('Database is locked') })
+    await user.click(row('mara'))
+    await user.click(trackBox())
+    await waitFor(() => expect(toasts()).toEqual(['Database is locked']))
+    expect(trackBox()).toBeChecked()
+    expect(useTagStore.getState().byId['t-mara']?.trackMentions).toBe(true)
+  })
+
+  it('a failed mention load toasts and leaves the detail view open', async () => {
+    const user = userEvent.setup()
+    await renderLoaded({ 'mention:listForTag': failing('Database is locked') })
+    await user.click(row('mara'))
+    await waitFor(() => expect(toasts()).toEqual(['Database is locked']))
+    expect(screen.getByRole('textbox', { name: 'Tag name' })).toHaveValue('mara')
+    expect(useMentionStore.getState().byTag).toEqual({})
   })
 })

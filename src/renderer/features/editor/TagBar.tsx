@@ -1,11 +1,21 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Loader2, Plus, RefreshCw, Sparkles, X } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  CornerDownRight,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  X
+} from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { TAGS_MIN_CHARS, type AiUsage } from '@shared/ai'
 import { docToText } from '@shared/docText'
 import { countInlineTags } from '@shared/inlineTags'
 import type { Tag } from '@shared/ipc/contract'
 import { TAG_BAR_MAX_FRACTION, TAG_BAR_MIN_HEIGHT, TAG_BAR_SPLIT_LIMITS } from '@shared/layout'
+import type { MentionRange } from '@shared/mentions'
 import { PROPOSAL_NOTE_MAX, normalizeProposalNote } from '@shared/proposal'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
@@ -19,11 +29,13 @@ import {
 } from '@renderer/features/shell/layoutStore'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { useMentionStore } from '@renderer/features/tags/mentionStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useDocumentStore } from './documentStore'
 import { MetadataPane } from './MetadataPane'
+import { openMention } from './openPassage'
 import { TagPicker } from './TagPicker'
 
 const BUTTON =
@@ -74,7 +86,10 @@ interface RegenerateOptions {
  * itself and reads the tag records from the bank by id, so a rename or recolor in the Tags tab
  * shows here at once. Below the chips, the inline tags used in the text (F-4.6) are listed with
  * their occurrence counts, taken from the document's live content, so they follow the typing
- * before any save; a folder is never loaded as a document, so its bar has no such list.
+ * before any save; a folder is never loaded as a document, so its bar has no such list. Under
+ * those, the automatic mentions (F-4.12) main recorded for the saved text: one row per tag whose
+ * name occurs here, with its count and a jump to the first occurrence. They are not links, so
+ * nothing about them is editable from the bar.
  * "Recommend" (F-4.7) asks main for bank tags that fit the live text once it has 50 characters
  * (a folder never does, so there it stays disabled) and shows them as chips the author accepts
  * one at a time, all at once, or dismisses; nothing is linked until accepted, and the note
@@ -96,6 +111,15 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   const add = useDocumentTagStore((s) => s.add)
   const remove = useDocumentTagStore((s) => s.remove)
   const merge = useTagStore((s) => s.merge)
+  const mentions = useMentionStore((s) => s.byNode[id])
+  const loadMentions = useMentionStore((s) => s.loadForNode)
+  const bank = useTagStore((s) => s.byId)
+  // A mention of a tag that has left the bank has no name or color to show; main drops the rows
+  // on a delete, so this only bridges the moment between the delete and the event.
+  const mentioned = useMemo(
+    () => (mentions ?? []).filter((row) => bank[row.tagId] !== undefined),
+    [mentions, bank]
+  )
   const content = useDocumentStore((s) => s.docs[id]?.content ?? null)
   const flush = useDocumentStore((s) => s.flush)
   const inlineCounts = useMemo(() => (content ? countInlineTags(content) : {}), [content])
@@ -128,6 +152,12 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   useEffect(() => {
     load(id).catch((err: unknown) => toast.error(describeError(err)))
   }, [id, load])
+
+  // F-4.12: what main's scan recorded for this document; `mention:changed` refreshes it after
+  // every save, so the list follows the manuscript without this bar asking again.
+  useEffect(() => {
+    loadMentions(id).catch((err: unknown) => toast.error(describeError(err)))
+  }, [id, loadMentions])
 
   const linked = ids ?? []
   const report = (err: unknown): void => {
@@ -454,6 +484,27 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
                 </ul>
               </>
             ) : null}
+            {mentioned.length > 0 ? (
+              <>
+                <p className="mt-2 mb-1 text-xs text-fg-subtle">Mentions</p>
+                <ul
+                  role="list"
+                  aria-label="Mentions"
+                  className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
+                >
+                  {mentioned.map((mention) => (
+                    <MentionRow
+                      key={mention.tagId}
+                      id={mention.tagId}
+                      nodeId={id}
+                      count={mention.count}
+                      // A row always carries at least one range; `[0, 0]` makes the jump search by name.
+                      range={mention.ranges[0] ?? [0, 0]}
+                    />
+                  ))}
+                </ul>
+              </>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -529,6 +580,45 @@ function SuggestionChip({
         className="rounded-full p-0.5 text-fg-muted hover:bg-surface-raised hover:text-fg"
       >
         <Plus size={12} aria-hidden="true" />
+      </button>
+    </li>
+  )
+}
+
+/**
+ * One recorded mention of the document (F-4.12): the bank's color dot and name, how often the
+ * name occurs in the saved text, and a jump to the first occurrence. Nothing if the tag is gone.
+ */
+function MentionRow({
+  id,
+  nodeId,
+  count,
+  range
+}: {
+  id: string
+  nodeId: string
+  count: number
+  range: MentionRange
+}): React.JSX.Element | null {
+  const tag = useTagStore(useShallow((s) => s.byId[id]))
+  if (!tag) return null
+  return (
+    <li role="listitem" className="flex items-center gap-1.5 text-xs">
+      <span
+        aria-hidden="true"
+        style={{ backgroundColor: tag.color }}
+        className="size-2.5 shrink-0 rounded-full"
+      />
+      <span className="max-w-48 truncate">{tag.name}</span>{' '}
+      <span className="text-fg-subtle tabular-nums">×{count}</span>
+      <button
+        type="button"
+        aria-label={`Jump to first mention of ${tag.name}`}
+        title="Jump to the first mention"
+        onClick={() => void openMention(nodeId, range, tag.name)}
+        className="rounded p-0.5 text-fg-muted hover:bg-surface-raised hover:text-fg"
+      >
+        <CornerDownRight size={12} aria-hidden="true" />
       </button>
     </li>
   )
