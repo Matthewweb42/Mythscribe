@@ -1433,4 +1433,40 @@ describe('App', () => {
       expect(invoke).not.toHaveBeenCalledWith('tree:create', expect.anything())
     })
   })
+
+  describe('zoom shortcuts (F-7.10)', () => {
+    it('Ctrl+= and Ctrl+0 zoom the window from the welcome screen, each announced as a toast', async () => {
+      const invoke = install({ 'window:zoom': { factor: 1.1 } })
+      render(<App />)
+      await screen.findByRole('button', { name: /new project/i })
+      await userEvent.keyboard('{Control>}={/Control}')
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith('window:zoom', { step: 'in' }))
+      await userEvent.keyboard('{Control>}-{/Control}')
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith('window:zoom', { step: 'out' }))
+      await userEvent.keyboard('{Control>}0{/Control}')
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith('window:zoom', { step: 'reset' }))
+      // Main answers with the factor it applied; every keystroke says where the zoom landed.
+      expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual([
+        'Zoom 110 %',
+        'Zoom 110 %',
+        'Zoom 110 %'
+      ])
+    })
+
+    it('is captured before the editor, so the chord never types into the document', async () => {
+      const invoke = install({
+        'project:current': info,
+        'tree:list': treeFixture,
+        'window:zoom': { factor: 0.9 }
+      })
+      render(<App />)
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      const editor = await screen.findByRole('textbox', { name: 'Document' })
+      editor.focus()
+      await userEvent.keyboard('{Control>}={/Control}')
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith('window:zoom', { step: 'in' }))
+      expect(editor.textContent).not.toContain('=')
+    })
+  })
 })

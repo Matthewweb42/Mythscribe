@@ -23,6 +23,7 @@ import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
 import { ShortcutsDialog } from '@renderer/features/shell/ShortcutsDialog'
 import { APP_SHORTCUTS, matchesShortcut, type Chord } from '@renderer/features/shell/shortcuts'
 import { SidebarTabs } from '@renderer/features/shell/SidebarTabs'
+import { zoomStepFor, zoomWindow } from '@renderer/features/shell/zoom'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
@@ -243,6 +244,7 @@ export function App(): React.JSX.Element {
       )}
       {current ? <FocusShortcuts /> : null}
       <SettingsShortcut />
+      <ZoomShortcuts />
       {current ? <InsertShortcuts format={current.format} /> : null}
       <main
         className={
@@ -478,6 +480,29 @@ function SettingsShortcut(): null {
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
+  return null
+}
+
+/**
+ * Zoom shortcuts (F-7.10): Ctrl+= / Ctrl+- / Ctrl+0 scale the whole window through the same
+ * `zoomWindow` the View menu runs. The listener runs in the capture phase and stops the event,
+ * so nothing inside the page sees the chord, and `preventDefault` is also what keeps the native
+ * accelerator — the menu's fallback for a key the page ignored — from zooming a second time.
+ * Mounted always, beside `SettingsShortcut`, so the welcome screen and focus mode zoom too;
+ * renders nothing.
+ */
+function ZoomShortcuts(): null {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const step = zoomStepFor(event)
+      if (!step) return
+      event.preventDefault()
+      event.stopPropagation()
+      void zoomWindow(step)
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
   }, [])
   return null
 }

@@ -104,7 +104,8 @@ protocol.registerSchemesAsPrivileged([
 /** The lock lives in userData, so it must be requested after the override above. */
 const primaryInstance = installSingleInstance(app, () => BrowserWindow.getAllWindows()[0] ?? null)
 
-function createWindow(): BrowserWindow {
+/** `zoom` is the persisted F-7.10 factor, applied before the window is shown. */
+function createWindow(zoom: number): BrowserWindow {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -126,6 +127,9 @@ function createWindow(): BrowserWindow {
   // Under the e2e harness the window must not steal the desktop's keyboard focus: on WSLg a
   // shown window takes focus, and anything typed on the machine lands in the test's inputs.
   win.once('ready-to-show', () => {
+    // F-7.10: the level the author left, applied before the first frame is on screen, so launch
+    // does not flash at 100 % first.
+    win.webContents.setZoomFactor(zoom)
     if (process.env.NODE_ENV === 'test') win.showInactive()
     else win.show()
   })
@@ -272,13 +276,13 @@ if (!primaryInstance) {
         quitRequested = false
       }
     })
-    createWindow()
+    createWindow(appState.get().zoom)
     // The first check waits for the window: nothing about an update is urgent (F-15.7).
     updates.start()
     // Same for the first diagnostics flush (F-15.8), which is also a no-op while it is off.
     diagnostics.start()
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      if (BrowserWindow.getAllWindows().length === 0) createWindow(appState.get().zoom)
     })
   })
 }

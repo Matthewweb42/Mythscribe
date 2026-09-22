@@ -29,6 +29,9 @@ export const SHORTCUT_IDS = [
   'settings',
   'assistant',
   'focusMode',
+  'zoomIn',
+  'zoomOut',
+  'zoomReset',
   'insertScene',
   'insertChapter',
   'insertPart'
@@ -46,6 +49,18 @@ export const APP_SHORTCUTS: Record<ShortcutId, Shortcut> = {
     group: 'app'
   },
   focusMode: { id: 'focusMode', label: 'Focus mode', chord: { key: 'F11' }, group: 'app' },
+  /**
+   * F-7.10: the browser chords. `=` is what a US layout reports for the key marked `+`; the
+   * renderer's listener takes `+` for it too, for the layouts (and the numpad) that report that.
+   */
+  zoomIn: { id: 'zoomIn', label: 'Zoom in', chord: { key: '=', ctrl: true }, group: 'app' },
+  zoomOut: { id: 'zoomOut', label: 'Zoom out', chord: { key: '-', ctrl: true }, group: 'app' },
+  zoomReset: {
+    id: 'zoomReset',
+    label: 'Reset zoom',
+    chord: { key: '0', ctrl: true },
+    group: 'app'
+  },
   insertScene: {
     id: 'insertScene',
     label: 'Insert scene',

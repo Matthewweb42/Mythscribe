@@ -7,6 +7,7 @@ import { DiagnosticsSettings, defaultDiagnosticsSettings } from '@shared/diagnos
 import { StoredLayout, defaultLayout } from '@shared/layout'
 import { SupporterSettings, defaultSupporterSettings } from '@shared/license'
 import { UpdateSettings, defaultUpdateSettings } from '@shared/updates'
+import { DEFAULT_ZOOM, ZoomFactor } from '@shared/zoom'
 import { AiUsageState, defaultAiUsageState } from '../ai/dailyCap'
 
 /** Persistent, app-wide state (not project state) kept as one JSON file in userData. */
@@ -34,7 +35,13 @@ export const AppState = z.object({
    * files load as unlicensed. The token is signed, so plain JSON is safe: a tampered one fails
    * verification and is dropped.
    */
-  supporter: SupporterSettings.default(defaultSupporterSettings)
+  supporter: SupporterSettings.default(defaultSupporterSettings),
+  /**
+   * F-7.10: the window zoom factor, app-wide and applied on launch; defaulted so older files
+   * open at 100 %. Main is the only writer, so a factor off the step table can only come from a
+   * hand-edited file, and the next zoom keystroke snaps it back onto the table.
+   */
+  zoom: ZoomFactor.default(DEFAULT_ZOOM)
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -46,7 +53,8 @@ export const EMPTY_APP_STATE: AppState = {
   aiUsage: defaultAiUsageState(),
   updates: defaultUpdateSettings(),
   diagnostics: defaultDiagnosticsSettings(),
-  supporter: defaultSupporterSettings()
+  supporter: defaultSupporterSettings(),
+  zoom: DEFAULT_ZOOM
 }
 
 export class AppStateStore {

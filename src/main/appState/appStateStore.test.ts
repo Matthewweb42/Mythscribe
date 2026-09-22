@@ -7,6 +7,7 @@ import { defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultSupporterSettings } from '@shared/license'
 import { RELEASE_NOTES_MAX, defaultUpdateSettings } from '@shared/updates'
+import { DEFAULT_ZOOM } from '@shared/zoom'
 import { defaultAiUsageState } from '../ai/dailyCap'
 import { AppStateStore, EMPTY_APP_STATE } from './appStateStore'
 
@@ -46,7 +47,8 @@ describe('AppStateStore', () => {
       aiUsage: defaultAiUsageState(),
       updates: defaultUpdateSettings(),
       diagnostics: defaultDiagnosticsSettings(),
-      supporter: defaultSupporterSettings()
+      supporter: defaultSupporterSettings(),
+      zoom: DEFAULT_ZOOM
     })
   })
 
@@ -248,6 +250,22 @@ describe('AppStateStore', () => {
       }))
     ).toThrow()
     expect(new AppStateStore(file).get().diagnostics).toEqual(diagnostics)
+  })
+
+  it('parses a file written before F-7.10 (no zoom) as 100 %', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().zoom).toBe(DEFAULT_ZOOM)
+    expect(EMPTY_APP_STATE.zoom).toBe(DEFAULT_ZOOM)
+  })
+
+  it('round-trips a zoom factor and refuses one outside 67–200 %', () => {
+    const store = new AppStateStore(file)
+    expect(store.update((s) => ({ ...s, zoom: 1.25 })).zoom).toBe(1.25)
+    expect(new AppStateStore(file).get().zoom).toBe(1.25)
+    expect(() => store.update((s) => ({ ...s, zoom: 2.5 }))).toThrow()
+    expect(() => store.update((s) => ({ ...s, zoom: 0.5 }))).toThrow()
+    expect(new AppStateStore(file).get().zoom).toBe(1.25)
   })
 
   it('warns and falls back to the empty state when the stored model mapping is invalid', () => {

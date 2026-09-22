@@ -59,7 +59,7 @@ describe('menu definition (F-7.1)', () => {
     }
   })
 
-  it('needs a project for everything but File › New/Open, Edit, Tools › Settings, and Help', () => {
+  it('needs a project for everything but File › New/Open, Edit, View › Zoom, Tools › Settings, and Help', () => {
     const always = menuItems()
       .filter((item) => item.when === 'always')
       .map((item) => item.id)
@@ -71,6 +71,9 @@ describe('menu definition (F-7.1)', () => {
       'cut',
       'copy',
       'paste',
+      'zoomIn',
+      'zoomOut',
+      'zoomReset',
       'openSettings',
       'openDocumentation',
       'openShortcuts',
@@ -82,6 +85,30 @@ describe('menu definition (F-7.1)', () => {
     expect(isMenuItemEnabled(save!, true)).toBe(true)
     const [about] = menuItems().filter((item) => item.id === 'openAbout')
     expect(isMenuItemEnabled(about!, false)).toBe(true)
+  })
+
+  it('offers the three zoom items in View, after Focus mode, working without a project (F-7.10)', () => {
+    const view = MENU.find((section) => section.id === 'view')
+    expect(
+      (view?.entries ?? []).map((entry) => (isSeparator(entry) ? 'separator' : entry.id))
+    ).toEqual([
+      'toggleSidebar',
+      'toggleNotes',
+      'toggleAssistant',
+      'separator',
+      'toggleFocusMode',
+      'separator',
+      'zoomIn',
+      'zoomOut',
+      'zoomReset'
+    ])
+    const byId = Object.fromEntries(menuItems().map((item) => [item.id, item]))
+    expect(byId.zoomIn?.label).toBe('Zoom in')
+    expect(byId.zoomOut?.label).toBe('Zoom out')
+    expect(byId.zoomReset?.label).toBe('Reset zoom')
+    expect(menuItemChord(byId.zoomIn!)).toEqual(APP_SHORTCUTS.zoomIn.chord)
+    expect(menuItemChord(byId.zoomReset!)).toEqual(APP_SHORTCUTS.zoomReset.chord)
+    expect(isMenuItemEnabled(byId.zoomIn!, false)).toBe(true)
   })
 
   it('offers Check for updates… in Help, just before About (F-15.7)', () => {
@@ -110,6 +137,9 @@ describe('menu definition (F-7.1)', () => {
     expect(menuAccelerator(APP_SHORTCUTS.insertScene.chord)).toBe('CmdOrCtrl+Shift+S')
     expect(menuAccelerator(APP_SHORTCUTS.settings.chord)).toBe('CmdOrCtrl+,')
     expect(menuAccelerator(APP_SHORTCUTS.focusMode.chord)).toBe('F11')
+    expect(menuAccelerator(APP_SHORTCUTS.zoomIn.chord)).toBe('CmdOrCtrl+=')
+    expect(menuAccelerator(APP_SHORTCUTS.zoomOut.chord)).toBe('CmdOrCtrl+-')
+    expect(menuAccelerator(APP_SHORTCUTS.zoomReset.chord)).toBe('CmdOrCtrl+0')
     expect(menuAccelerator({ key: 'x', ctrl: true, alt: true, shift: true })).toBe(
       'CmdOrCtrl+Alt+Shift+X'
     )

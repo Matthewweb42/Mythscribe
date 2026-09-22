@@ -100,6 +100,10 @@ describe('buildMenuTemplate (F-7.1)', () => {
     expect(item(template, 'openSettings').accelerator).toBe('CmdOrCtrl+,')
     expect(item(template, 'toggleAssistant').accelerator).toBe('CmdOrCtrl+K')
     expect(item(template, 'toggleFocusMode').accelerator).toBe('F11')
+    // F-7.10: the native accelerators are the fallback for a chord the page did not handle.
+    expect(item(template, 'zoomIn').accelerator).toBe('CmdOrCtrl+=')
+    expect(item(template, 'zoomOut').accelerator).toBe('CmdOrCtrl+-')
+    expect(item(template, 'zoomReset').accelerator).toBe('CmdOrCtrl+0')
     expect(item(template, 'newProject').accelerator).toBeUndefined()
   })
 
@@ -108,6 +112,8 @@ describe('buildMenuTemplate (F-7.1)', () => {
     expect(item(closed, 'saveDocument').enabled).toBe(false)
     expect(item(closed, 'insertScene').enabled).toBe(false)
     expect(item(closed, 'openSettings').enabled).toBe(true)
+    // F-7.10: the zoom is app-wide, so View › Zoom in works on the welcome screen.
+    expect(item(closed, 'zoomIn').enabled).toBe(true)
     expect(item(closed, 'newProject').enabled).toBe(true)
     expect(item(closed, 'undo').enabled).toBe(true)
     expect(item(closed, 'openAbout').enabled).toBe(true)

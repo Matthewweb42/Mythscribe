@@ -32,6 +32,7 @@ import {
   UNAVAILABLE_SUMMARY,
   type SceneSummaryState
 } from '@shared/summary'
+import { nextZoom } from '@shared/zoom'
 import type { AccountService } from '../account/accountService'
 import type { DiagnosticsService } from '../diagnostics/diagnosticsService'
 import type { UpdateService } from '../updates/updateService'
@@ -112,8 +113,12 @@ export interface ClosableWindow extends EmitTarget {
   close(): void
   setFullScreen(on: boolean): void
   isFullScreen(): boolean
-  /** `send` for events, plus the edit commands the in-app Edit menu runs (F-7.1). */
-  webContents: EmitTarget['webContents'] & Record<EditRole, () => void>
+  /**
+   * `send` for events, the edit commands the in-app Edit menu runs (F-7.1), and the window's
+   * zoom factor (F-7.10).
+   */
+  webContents: EmitTarget['webContents'] &
+    Record<EditRole, () => void> & { setZoomFactor(factor: number): void }
 }
 
 export interface HandlerDeps {
@@ -1112,6 +1117,16 @@ export function registerHandlers({
     if (!win) return { on: false }
     win.setFullScreen(on)
     return { on: win.isFullScreen() }
+  })
+
+  // F-7.10: main owns the zoom. It steps the persisted factor, writes it (so the next launch
+  // restores it), scales every live window — the level is app-wide — and answers what it
+  // applied, which is what the renderer announces.
+  register('window:zoom', ({ step }) => {
+    const factor = nextZoom(appState.get().zoom, step)
+    appState.update((s) => ({ ...s, zoom: factor }))
+    for (const w of windows()) if (!w.isDestroyed()) w.webContents.setZoomFactor(factor)
+    return { factor }
   })
 
   // F-7.1: the in-app Edit menu edits whatever has the focus, like the native roles do. A click

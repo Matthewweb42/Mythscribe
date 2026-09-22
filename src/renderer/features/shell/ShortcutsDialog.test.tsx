@@ -31,6 +31,10 @@ describe('ShortcutsDialog (F-7.7)', () => {
     expect(row('AI assistant')).toHaveTextContent('Ctrl+K')
     expect(row('Focus mode')).toHaveTextContent('F11')
     expect(row('Save')).toHaveTextContent('Ctrl+S')
+    // F-7.10: the zoom chords are app shortcuts, so the reference lists them from the registry.
+    expect(row('Zoom in')).toHaveTextContent('Ctrl+=')
+    expect(row('Zoom out')).toHaveTextContent('Ctrl+-')
+    expect(row('Reset zoom')).toHaveTextContent('Ctrl+0')
     expect(row('Bold')).toHaveTextContent('Ctrl+B')
     expect(row('Accept the ghost text')).toHaveTextContent('Tab')
     // The Insert group holds exactly the insert chords, in registry order.

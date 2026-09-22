@@ -261,6 +261,18 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useFocusStore.getState().active).toBe(true)
   })
 
+  it('View › Zoom in / Zoom out / Reset zoom run without a project and announce the factor (F-7.10)', async () => {
+    install({ 'window:zoom': { factor: 1.1 } })
+    await runMenuAction('zoomIn')
+    expect(invoke).toHaveBeenLastCalledWith('window:zoom', { step: 'in' })
+    install({ 'window:zoom': { factor: 1 } })
+    await runMenuAction('zoomOut')
+    expect(invoke).toHaveBeenLastCalledWith('window:zoom', { step: 'out' })
+    await runMenuAction('zoomReset')
+    expect(invoke).toHaveBeenLastCalledWith('window:zoom', { step: 'reset' })
+    expect(toasts()).toEqual(['Zoom 110 %', 'Zoom 100 %', 'Zoom 100 %'])
+  })
+
   it('View › Notes / AI assistant float on the focus flags in focus mode, leaving the layout alone', async () => {
     await withProject()
     await useFocusStore.getState().enter()

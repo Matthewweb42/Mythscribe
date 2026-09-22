@@ -845,6 +845,22 @@ test('create, close, reopen a project on disk', async () => {
   expect((JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { layout: Layout }).layout).toEqual(
     await getLayout()
   )
+
+  // F-7.10: Ctrl+= scales the whole window through Electron's zoom factor (one step up: 110 %)
+  // and the toast says where it landed; Ctrl+0 puts it back. The level is app-wide, so it lands
+  // in app-state.json beside the layout — and every later step assumes 100 %.
+  const zoomPercent = (): Promise<number> =>
+    app.evaluate(({ BrowserWindow }) =>
+      Math.round((BrowserWindow.getAllWindows()[0]?.webContents.getZoomFactor() ?? 0) * 100)
+    )
+  expect(await zoomPercent()).toBe(100)
+  await page.keyboard.press('Control+=')
+  await expect.poll(zoomPercent, { timeout: 3000 }).toBe(110)
+  await expect(page.getByRole('status').filter({ hasText: 'Zoom' })).toContainText('Zoom 110 %')
+  await page.keyboard.press('Control+0')
+  await expect.poll(zoomPercent, { timeout: 3000 }).toBe(100)
+  expect((JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { zoom: number }).zoom).toBe(1)
+
   const sidebarToggle = page.getByRole('button', { name: 'Sidebar', exact: true })
   await expect(sidebarToggle).toHaveAttribute('aria-pressed', 'true')
   await sidebarToggle.click()

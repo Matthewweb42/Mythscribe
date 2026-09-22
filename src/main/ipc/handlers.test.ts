@@ -190,7 +190,8 @@ beforeEach(() => {
       redo: vi.fn(),
       cut: vi.fn(),
       copy: vi.fn(),
-      paste: vi.fn()
+      paste: vi.fn(),
+      setZoomFactor: vi.fn()
     },
     setFullScreen: vi.fn((on: boolean) => {
       fullScreen = on
@@ -2424,6 +2425,45 @@ describe('window:setFullScreen (F-6.1)', () => {
 
   it('rejects a malformed input', async () => {
     const result = await handlerFor('window:setFullScreen')(null, { on: 'yes' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+  })
+})
+
+describe('window:zoom (F-7.10)', () => {
+  /** The factor as it stands in app-state.json, read back through a fresh store. */
+  const storedZoom = (): number =>
+    new AppStateStore(path.join(tmp, 'userData', 'app-state.json')).get().zoom
+
+  it('steps the factor in and out, scales the window, and persists what it applied', async () => {
+    expect(await invoke('window:zoom', { step: 'in' })).toEqual({ factor: 1.1 })
+    expect(fakeWin.webContents.setZoomFactor).toHaveBeenLastCalledWith(1.1)
+    expect(storedZoom()).toBe(1.1)
+    expect(await invoke('window:zoom', { step: 'in' })).toEqual({ factor: 1.25 })
+    expect(await invoke('window:zoom', { step: 'out' })).toEqual({ factor: 1.1 })
+    expect(fakeWin.webContents.setZoomFactor).toHaveBeenLastCalledWith(1.1)
+    expect(storedZoom()).toBe(1.1)
+  })
+
+  it('resets to 100 % and stops at the ends of the table', async () => {
+    for (let i = 0; i < 12; i++) await invoke('window:zoom', { step: 'in' })
+    expect(await invoke('window:zoom', { step: 'in' })).toEqual({ factor: 2 })
+    expect(await invoke('window:zoom', { step: 'reset' })).toEqual({ factor: 1 })
+    expect(storedZoom()).toBe(1)
+    for (let i = 0; i < 12; i++) await invoke('window:zoom', { step: 'out' })
+    expect(await invoke('window:zoom', { step: 'out' })).toEqual({ factor: 0.67 })
+    expect(storedZoom()).toBe(0.67)
+  })
+
+  it('skips a destroyed window but still records the factor', async () => {
+    fakeWin.isDestroyed = () => true
+    expect(await invoke('window:zoom', { step: 'out' })).toEqual({ factor: 0.9 })
+    expect(fakeWin.webContents.setZoomFactor).not.toHaveBeenCalled()
+    expect(storedZoom()).toBe(0.9)
+  })
+
+  it('rejects a step that is not one of the three', async () => {
+    const result = await handlerFor('window:zoom')(null, { step: 'bigger' })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
   })

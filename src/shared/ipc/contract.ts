@@ -54,6 +54,7 @@ import { TagTemplateId } from '../tagTemplates'
 import { TiptapNode } from '../tiptap'
 import { UpdateChannel, UpdateState } from '../updates'
 import { VOICE_EXEMPLAR_TEXT_MAX, VOICE_EXEMPLAR_TEXT_MIN, VoiceExemplarKind } from '../voice'
+import { ZoomFactor, ZoomStep } from '../zoom'
 
 /**
  * The single IPC contract shared by main, preload, and renderer.
@@ -1102,6 +1103,15 @@ export const contract = {
   'window:setFullScreen': {
     input: z.object({ on: z.boolean() }),
     output: z.object({ on: z.boolean() })
+  },
+  /**
+   * View zoom (F-7.10): steps the window's zoom factor in or out, or back to 100 %. Main owns
+   * the factor — it steps the persisted one, scales the window, and answers what it applied, so
+   * the renderer keeps no zoom state of its own and only announces the answer.
+   */
+  'window:zoom': {
+    input: z.object({ step: ZoomStep }),
+    output: z.object({ factor: ZoomFactor })
   },
   /**
    * Menu bar (F-7.1): an Edit item of the in-app bar runs the same `webContents` edit command

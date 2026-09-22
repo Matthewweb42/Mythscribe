@@ -31,6 +31,9 @@ export const MENU_ITEM_IDS = [
   'toggleNotes',
   'toggleAssistant',
   'toggleFocusMode',
+  'zoomIn',
+  'zoomOut',
+  'zoomReset',
   'openTags',
   'openSettings',
   'openDocumentation',
@@ -135,7 +138,12 @@ export const MENU: readonly MenuSection[] = [
       { id: 'toggleNotes', label: 'Notes', when: 'project' },
       { id: 'toggleAssistant', label: 'AI assistant', shortcut: 'assistant', when: 'project' },
       SEPARATOR,
-      { id: 'toggleFocusMode', label: 'Focus mode', shortcut: 'focusMode', when: 'project' }
+      { id: 'toggleFocusMode', label: 'Focus mode', shortcut: 'focusMode', when: 'project' },
+      SEPARATOR,
+      // F-7.10: the zoom is app-wide, so it works on the welcome screen too.
+      { id: 'zoomIn', label: 'Zoom in', shortcut: 'zoomIn', when: 'always' },
+      { id: 'zoomOut', label: 'Zoom out', shortcut: 'zoomOut', when: 'always' },
+      { id: 'zoomReset', label: 'Reset zoom', shortcut: 'zoomReset', when: 'always' }
     ]
   },
   {
