@@ -3,7 +3,7 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
-import { buildExtensions } from './extensions'
+import { buildExtensions, EDITOR_CORE_OPTIONS } from './extensions'
 import { useNotesStore } from './notesStore'
 
 /** Notes are not a manuscript, so the scene-break text is fixed rather than following the format. */
@@ -61,6 +61,7 @@ function NotesInstance({
   const editor = useEditor(
     {
       extensions,
+      coreExtensionOptions: EDITOR_CORE_OPTIONS,
       content: content ?? EMPTY_DOC,
       editable: ready,
       editorProps: {

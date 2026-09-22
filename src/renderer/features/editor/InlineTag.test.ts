@@ -98,7 +98,8 @@ describe('InlineTag node (F-4.6)', () => {
   it('Backspace after a token removes the whole token', () => {
     editor.commands.focus('end')
     editor.commands.insertContent([token('t-forest', 'dark-forest')])
-    expect(editor.getText()).toBe('Into the ')
+    // The token reads as its label in text form (F-3.13), so the deletion below is visible there too.
+    expect(editor.getText()).toBe('Into the #dark-forest')
     expect(
       editor.commands.deleteRange({
         from: editor.state.selection.from - 1,

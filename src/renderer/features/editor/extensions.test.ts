@@ -1,8 +1,9 @@
 import { Editor } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { TiptapNode } from '@shared/tiptap'
-import { resetTagStore } from '@renderer/features/tags/tagStore'
-import { buildExtensions } from './extensions'
+import { TiptapNode, type TiptapNodeT } from '@shared/tiptap'
+import { tagFixture } from '@renderer/features/tags/tagFixture'
+import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
+import { buildExtensions, EDITOR_CORE_OPTIONS } from './extensions'
 import { ghostOf } from './ghostText'
 
 let editor: Editor
@@ -177,5 +178,66 @@ describe('buildExtensions', () => {
     for (const name of ['bold', 'italic', 'underline', 'strike', 'code']) {
       expect(marks[name], name).toBeDefined()
     }
+  })
+})
+
+describe('plain-text copy (F-3.13)', () => {
+  /** What the clipboard's text/plain flavour gets for the whole document, as the component builds it. */
+  const copiedText = (content: TiptapNodeT, inlineTagNodeId?: string): string => {
+    const built = new Editor({
+      extensions: buildExtensions({ sceneBreak: '* * *', onSave, inlineTagNodeId }),
+      coreExtensionOptions: EDITOR_CORE_OPTIONS,
+      content
+    })
+    built.commands.selectAll()
+    const text = built.view.someProp('clipboardTextSerializer', (serialize) =>
+      serialize(built.state.selection.content(), built.view)
+    )
+    built.destroy()
+    return text ?? ''
+  }
+  const paragraph = (text: string): TiptapNodeT => ({
+    type: 'paragraph',
+    content: [{ type: 'text', text }]
+  })
+
+  it('joins paragraphs with one newline, not a blank line', () => {
+    expect(copiedText({ type: 'doc', content: [paragraph('One.'), paragraph('Two.')] })).toBe(
+      'One.\nTwo.'
+    )
+  })
+
+  it('keeps a blank line either side of a scene break and shows its text', () => {
+    expect(
+      copiedText({
+        type: 'doc',
+        content: [paragraph('One.'), { type: 'sceneBreak' }, paragraph('Two.')]
+      })
+    ).toBe('One.\n\n* * *\n\nTwo.')
+  })
+
+  it('reads an inline tag as the #name it shows', () => {
+    resetTagStore()
+    const [tag] = tagFixture
+    if (!tag) throw new Error('fixture has no tag')
+    useTagStore.setState({ byId: { [tag.id]: tag }, ids: [tag.id], loaded: true })
+    const text = copiedText(
+      {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Enter ' },
+              { type: 'inlineTag', attrs: { id: tag.id, name: 'old-name' } },
+              { type: 'text', text: '.' }
+            ]
+          }
+        ]
+      },
+      'sc-1'
+    )
+    expect(text).toBe(`Enter #${tag.name}.`)
+    resetTagStore()
   })
 })

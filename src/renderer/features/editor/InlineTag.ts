@@ -124,6 +124,12 @@ export const InlineTag = Node.create<InlineTagOptions>({
     return ['span', mergeAttributes(HTMLAttributes, attrs), `#${tag?.name ?? name}`]
   },
 
+  /** Copied as plain text (F-3.13): the token reads as the `#name` it shows, never as nothing. */
+  renderText({ node }) {
+    const { id, name } = readAttrs(node.attrs)
+    return `#${useTagStore.getState().byId[id]?.name ?? name}`
+  },
+
   addProseMirrorPlugins() {
     const { nodeId } = this.options
     if (nodeId === null) return []

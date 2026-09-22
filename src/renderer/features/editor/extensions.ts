@@ -121,6 +121,11 @@ export const SceneBreak = Node.create<SceneBreakOptions>({
     return ['div', { 'data-scene-break': '', class: 'scene-break' }, this.options.text]
   },
 
+  /** Copied as plain text (F-3.13): the break on its own line with a blank line either side. */
+  renderText() {
+    return `\n${this.options.text}\n`
+  },
+
   addCommands() {
     return {
       insertSceneBreak:
@@ -165,6 +170,17 @@ export const SceneBreak = Node.create<SceneBreakOptions>({
  * so the document model stays what the compile views (F-3.12) and the AI post-processors
  * expect.
  */
+/**
+ * What `useEditor` passes as `coreExtensionOptions` (F-3.13): plain-text copies join paragraphs
+ * with one newline, since the editor shows paragraphs by spacing and indent rather than by blank
+ * lines, and a `\n\n` join (Tiptap's default) pastes as a blank line between every paragraph in
+ * a plain-text target. The HTML clipboard flavour is untouched, so rich targets still receive
+ * paragraphs.
+ */
+export const EDITOR_CORE_OPTIONS = {
+  clipboardTextSerializer: { blockSeparator: '\n' }
+} as const
+
 export function buildExtensions({
   sceneBreak,
   onSave,

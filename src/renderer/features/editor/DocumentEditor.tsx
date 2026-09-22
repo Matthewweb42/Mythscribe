@@ -18,7 +18,7 @@ import { describeError } from '@renderer/lib/errors'
 import { useActiveEditorStore } from './activeEditorStore'
 import { COLUMN, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
-import { buildExtensions } from './extensions'
+import { buildExtensions, EDITOR_CORE_OPTIONS } from './extensions'
 import { useGhostTextController } from './ghostTextController'
 import { INLINE_TAG_SELECTOR, resyncInlineTags } from './InlineTag'
 import { useLiveDocStats } from './liveDocStats'
@@ -165,6 +165,7 @@ function RegionEditor({
   const editor = useEditor(
     {
       extensions,
+      coreExtensionOptions: EDITOR_CORE_OPTIONS,
       content: content ?? EMPTY_DOC,
       editable: ready,
       editorProps: {
