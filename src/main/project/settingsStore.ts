@@ -26,6 +26,7 @@ import {
 } from '@shared/focus'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
+import { DISMISSED_NAMES_KEY, DismissedNames, defaultDismissedNames } from '@shared/proposedTags'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
 
@@ -214,6 +215,36 @@ export function setAuthorRules(db: TreeDb, value: AuthorRulesInput): AuthorRules
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: AUTHOR_RULES_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the names the author dismissed as proposals (F-4.12b) from the `settings` row under
+ * `DISMISSED_NAMES_KEY`. A missing row, unparsable JSON, or a value outside the schema all
+ * answer with the empty list: a refused row can only ever propose a name again, never hide one
+ * the author never dismissed.
+ */
+export function getDismissedNames(db: TreeDb): DismissedNames {
+  const row = db.select().from(settings).where(eq(settings.key, DISMISSED_NAMES_KEY)).get()
+  if (!row) return defaultDismissedNames()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultDismissedNames()
+  }
+  const parsed = DismissedNames.safeParse(json)
+  return parsed.success ? parsed.data : defaultDismissedNames()
+}
+
+/** Replaces the dismissed proposals (F-4.12b; upsert on the settings key) and returns what was stored. */
+export function setDismissedNames(db: TreeDb, value: DismissedNames): DismissedNames {
+  const stored = DismissedNames.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: DISMISSED_NAMES_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

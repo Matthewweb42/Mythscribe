@@ -45,6 +45,7 @@ import { TagMentions } from '../mentions'
 import { EditRole, MenuItemId } from '../menu'
 import { WritingPresets } from '../presets'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
+import { ProposedTag } from '../proposedTags'
 import { QueryCitation, QuerySceneRef } from '../query'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../rewrite'
 import { SceneBrief, SceneMeta } from '../sceneMeta'
@@ -701,6 +702,21 @@ export const contract = {
   'mention:listForTag': { input: z.object({ tagId: z.string() }), output: z.array(TagMentions) },
   /** The tags mentioned in one document (F-4.12), whether or not they are linked to it; NOT_FOUND for an unknown node. */
   'mention:listForNode': { input: z.object({ nodeId: z.string() }), output: z.array(TagMentions) },
+  /**
+   * The recurring capitalised names of the manuscript that no tag stands for yet (F-4.12b),
+   * most used first. Computed from the saved text, the tag bank, and the dismissals; nothing is
+   * created by asking, and `tag:proposedChanged` pushes the list on when the manuscript moves.
+   */
+  'tag:proposed': { input: z.undefined(), output: z.array(ProposedTag) },
+  /**
+   * Dismisses a proposal (F-4.12b): the name is stored for the project and never proposed
+   * again, and the list without it comes back. An unknown name is stored all the same — there is
+   * nothing to find, and a name the author refuses stays refused.
+   */
+  'tag:dismissProposed': {
+    input: z.object({ name: z.string().trim().min(1).max(TAG_NAME_MAX) }),
+    output: z.array(ProposedTag)
+  },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
@@ -1180,6 +1196,8 @@ export const events = {
   'jobs:changed': IndexQueueStatus,
   /** The recorded mentions of these documents changed (F-4.12): a scan wrote rows, or a tag's tracking was turned off or the tag deleted (then every document). */
   'mention:changed': z.object({ nodeIds: z.array(z.string()) }),
+  /** The proposed tags changed (F-4.12b): a scan, a tag, or a dismissal moved the list. Only a real change is pushed. */
+  'tag:proposedChanged': z.array(ProposedTag),
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /** A native menu item was clicked or its accelerator pressed (F-7.1); the renderer runs the action. */

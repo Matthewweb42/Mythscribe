@@ -1780,6 +1780,38 @@ test('create, close, reopen a project on disk', async () => {
   await expect(mentionList.getByRole('listitem')).toHaveText(['rose ×1'])
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
 
+  // F-4.12b: proposed tags. A capitalised name the manuscript keeps using mid-sentence that no
+  // tag stands for is proposed in the bar of the document that carries it, with its count.
+  // Create tag makes it a character tag — which is what the F-4.12 scan then finds — and
+  // Dismiss keeps the name out for good, though the text still holds it and every later save
+  // scans it again. Nothing is created or hidden until one of the two is clicked.
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(' But Tash saw Tash, then Tash.')
+  const proposedList = tagBar.getByRole('list', { name: 'Proposed tags' })
+  await expect(proposedList.getByRole('listitem')).toHaveText(['Tash ×3'], { timeout: 15_000 })
+  await proposedList.getByRole('button', { name: 'Create tag Tash' }).click()
+  await expect(proposedList).toHaveCount(0)
+  await expect(mentionList.getByRole('listitem')).toHaveText(['rose ×1', 'tash ×3'], {
+    timeout: 15_000
+  })
+  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await categories.getByRole('tab', { name: 'Characters' }).click()
+  await expect(tagRows.getByRole('button', { name: /^tash/ })).toHaveText('tash 0 uses')
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(' But Bren saw Bren, then Bren.')
+  await expect(proposedList.getByRole('listitem')).toHaveText(['Bren ×3'], { timeout: 15_000 })
+  await proposedList.getByRole('button', { name: 'Dismiss Bren' }).click()
+  await expect(proposedList).toHaveCount(0)
+  // A third name proposed after the dismissal is what proves the scan ran again and still
+  // leaves Bren out; a plain "the list is empty" could have passed before the scan.
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(' But Kael saw Kael, then Kael.')
+  await expect(proposedList.getByRole('listitem')).toHaveText(['Kael ×3'], { timeout: 15_000 })
+
   // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.
   await closeProject()
   await stubOpenDialog(path.join(projectPath, 'project.db'))
@@ -1856,7 +1888,8 @@ test('create, close, reopen a project on disk', async () => {
     'protagonist'
   ])
   await expect(suggestedList.getByRole('listitem')).toHaveText(['antagonist'])
-  await tagBar.getByRole('button', { name: 'Dismiss' }).click()
+  // Exactly "Dismiss": a proposed tag's row (F-4.12b) carries a "Dismiss <name>" button too.
+  await tagBar.getByRole('button', { name: 'Dismiss', exact: true }).click()
   await expect(suggestedList).toHaveCount(0)
   await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
   await categories.getByRole('tab', { name: 'All' }).click()

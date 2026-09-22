@@ -56,20 +56,27 @@ export function mentionSource(db: TreeDb, nodeId: string): MentionSource | null 
  * nothing at all; otherwise the document's rows are rewritten in one transaction and the new
  * hash stored. `changed` says whether the mentions themselves moved, not whether the hash did:
  * renaming one tag makes every document stale, and the handler must only tell the windows about
- * the documents whose lists actually differ. A node that is not a manuscript document throws
- * NOT_FOUND, which the queue treats as quiet (the row goes, nothing is shown): a scene that
- * left the manuscript while its job waited is not a failure the author can act on.
+ * the documents whose lists actually differ. `scanned` says whether the hash had moved at all,
+ * which is what F-4.12b's proposals hang on: the text or the bank differs from the last scan, so
+ * the proposed names are worth computing again even when no tag's mentions changed. A node that
+ * is not a manuscript document throws NOT_FOUND, which the queue treats as quiet (the row goes,
+ * nothing is shown): a scene that left the manuscript while its job waited is not a failure the
+ * author can act on.
  */
-export function scanMentions(db: TreeDb, nodeId: string, now: Date): { changed: boolean } {
+export function scanMentions(
+  db: TreeDb,
+  nodeId: string,
+  now: Date
+): { changed: boolean; scanned: boolean } {
   const source = mentionSource(db, nodeId)
   if (source === null) {
     throw new AppError('NOT_FOUND', 'Not a manuscript document', { nodeId })
   }
-  if (getScanHash(db, nodeId) === source.contentHash) return { changed: false }
+  if (getScanHash(db, nodeId) === source.contentHash) return { changed: false, scanned: false }
   const mentions = findMentions(source.doc, source.candidates)
   const changed = !matchesStored(listMentionsForNode(db, nodeId), mentions)
   replaceNodeMentions(db, nodeId, mentions, source.contentHash, now)
-  return { changed }
+  return { changed, scanned: true }
 }
 
 /** Whether what was recorded for a document already says exactly what the scan just found. */

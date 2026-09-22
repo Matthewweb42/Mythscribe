@@ -38,6 +38,7 @@ import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layou
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetMentionStore } from '@renderer/features/tags/mentionStore'
+import { resetProposedTagStore } from '@renderer/features/tags/proposedTagStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { registerPendingSave, resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -90,6 +91,7 @@ beforeEach(() => {
   resetAccountStore()
   resetViewStore()
   resetMentionStore()
+  resetProposedTagStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -120,6 +122,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'tree:list') return []
     if (channel === 'tag:list') return []
     if (channel === 'documentTag:list') return []
+    if (channel === 'tag:proposed') return []
     if (channel === 'sceneMeta:get')
       return { id: (input as { id: string }).id, meta: { location: '', pov: '', timeline: '' } }
     if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }

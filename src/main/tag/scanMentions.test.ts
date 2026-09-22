@@ -86,7 +86,7 @@ describe('scanMentions (F-4.12)', () => {
     const rain = createTag(db, { name: 'Rain', category: 'tone' })
     write(scene(), 'Rose waited.', 'The rain came, then Rose left.')
 
-    expect(scanMentions(db, scene(), at(0))).toEqual({ changed: true })
+    expect(scanMentions(db, scene(), at(0))).toEqual({ changed: true, scanned: true })
     expect(listMentionsForNode(db, scene())).toEqual([
       {
         tagId: rose.id,
@@ -106,9 +106,9 @@ describe('scanMentions (F-4.12)', () => {
   it('does nothing at all when neither the text nor the tags moved', () => {
     createTag(db, { name: 'Rose', category: 'character' })
     write(scene(), 'Rose waited.')
-    expect(scanMentions(db, scene(), at(0))).toEqual({ changed: true })
+    expect(scanMentions(db, scene(), at(0))).toEqual({ changed: true, scanned: true })
     const hash = getScanHash(db, scene())
-    expect(scanMentions(db, scene(), at(1))).toEqual({ changed: false })
+    expect(scanMentions(db, scene(), at(1))).toEqual({ changed: false, scanned: false })
     expect(getScanHash(db, scene())).toBe(hash)
   })
 
@@ -120,9 +120,11 @@ describe('scanMentions (F-4.12)', () => {
 
     // A second tag makes every document stale; this one's mentions are exactly what they were.
     createTag(db, { name: 'Harbour', category: 'setting' })
-    expect(scanMentions(db, scene(), at(1))).toEqual({ changed: false })
+    // The hash moved, so the document was read again (F-4.12b hangs its proposals on that);
+    // the rows it found are what they were, so the windows hear nothing.
+    expect(scanMentions(db, scene(), at(1))).toEqual({ changed: false, scanned: true })
     expect(listMentionsForNode(db, scene())).toEqual(rose)
-    expect(scanMentions(db, scene(), at(2))).toEqual({ changed: false })
+    expect(scanMentions(db, scene(), at(2))).toEqual({ changed: false, scanned: false })
   })
 
   it('rewrites the document’s rows after an edit and after a rename', () => {
@@ -131,11 +133,11 @@ describe('scanMentions (F-4.12)', () => {
     scanMentions(db, scene(), at(0))
 
     write(scene(), 'Rose waited.', 'Rose waited again.')
-    expect(scanMentions(db, scene(), at(1))).toEqual({ changed: true })
+    expect(scanMentions(db, scene(), at(1))).toEqual({ changed: true, scanned: true })
     expect(listMentionsForNode(db, scene())[0]?.count).toBe(2)
 
     updateTag(db, rose.id, { name: 'Marsh' })
-    expect(scanMentions(db, scene(), at(2))).toEqual({ changed: true })
+    expect(scanMentions(db, scene(), at(2))).toEqual({ changed: true, scanned: true })
     expect(listMentionsForNode(db, scene())).toEqual([])
   })
 
@@ -146,7 +148,7 @@ describe('scanMentions (F-4.12)', () => {
     expect(listMentionsForTag(db, rose.id)).toHaveLength(1)
 
     write(scene(), 'Nobody was there.')
-    expect(scanMentions(db, scene(), at(1))).toEqual({ changed: true })
+    expect(scanMentions(db, scene(), at(1))).toEqual({ changed: true, scanned: true })
     expect(listMentionsForTag(db, rose.id)).toEqual([])
   })
 

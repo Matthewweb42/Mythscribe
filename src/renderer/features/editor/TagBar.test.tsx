@@ -14,6 +14,10 @@ import {
   useDocumentTagStore
 } from '@renderer/features/tags/documentTagStore'
 import { resetMentionStore, useMentionStore } from '@renderer/features/tags/mentionStore'
+import {
+  resetProposedTagStore,
+  useProposedTagStore
+} from '@renderer/features/tags/proposedTagStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
@@ -165,6 +169,7 @@ beforeEach(() => {
   resetTagStore()
   resetDocumentTagStore()
   resetMentionStore()
+  resetProposedTagStore()
   resetActiveEditorStore()
   resetLayoutStore()
   resetSceneMetaStore()
@@ -454,6 +459,61 @@ describe('TagBar (F-4.4)', () => {
     await waitFor(() => expect(useMentionStore.getState().byNode['sc-1']).toEqual([]))
     expect(within(bar()).queryByRole('list', { name: 'Mentions' })).not.toBeInTheDocument()
     expect(within(bar()).queryByText('Mentions')).not.toBeInTheDocument()
+  })
+
+  it('lists only the proposals this document carries, and creates one as a character tag (F-4.12b)', async () => {
+    const created: Tag = {
+      ...tagFixture[0]!,
+      id: 't-tash',
+      name: 'tash',
+      category: 'character',
+      usageCount: 0
+    }
+    const calls = install({ 'tag:create': () => created })
+    useProposedTagStore.setState({
+      proposals: [
+        { name: 'tash', display: 'Tash', count: 3, nodeIds: ['sc-1', 'sc-2'] },
+        { name: 'bren', display: 'Bren', count: 4, nodeIds: ['sc-2'] }
+      ]
+    })
+    await mount()
+    const list = within(bar()).getByRole('list', { name: 'Proposed tags' })
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((row) => row.textContent)
+    ).toEqual(['Tash ×3'])
+
+    await userEvent.click(within(list).getByRole('button', { name: 'Create tag Tash' }))
+    expect(calls).toContainEqual(['tag:create', { name: 'tash', category: 'character' }])
+    // Main publishes the list without the accepted name; the bar shows what it is told.
+    expect(useTagStore.getState().byId['t-tash']?.name).toBe('tash')
+    expect(toasts()).toEqual([])
+  })
+
+  it('dismisses a proposal and reports a refused dismissal (F-4.12b)', async () => {
+    const calls = install({
+      'tag:dismissProposed': () => {
+        throw new IpcRequestError({ code: 'NO_PROJECT', message: 'No project is open' })
+      }
+    })
+    useProposedTagStore.setState({
+      proposals: [{ name: 'tash', display: 'Tash', count: 3, nodeIds: ['sc-1'] }]
+    })
+    await mount()
+    const list = within(bar()).getByRole('list', { name: 'Proposed tags' })
+    await userEvent.click(within(list).getByRole('button', { name: 'Dismiss Tash' }))
+    expect(calls).toContainEqual(['tag:dismissProposed', { name: 'tash' }])
+    await waitFor(() => expect(toasts()).toEqual(['No project is open']))
+    // A refused dismissal leaves the row where the author saw it.
+    expect(within(bar()).getAllByTestId('proposed-tag')).toHaveLength(1)
+  })
+
+  it('shows no Proposed tags list for a document with nothing to propose (F-4.12b)', async () => {
+    install()
+    await mount()
+    expect(within(bar()).queryByRole('list', { name: 'Proposed tags' })).not.toBeInTheDocument()
+    expect(within(bar()).queryByText('Proposed tags')).not.toBeInTheDocument()
   })
 
   it('shows the metadata pane behind a persisted split only for a node with a hierarchy level (F-4.5)', async () => {

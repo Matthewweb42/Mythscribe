@@ -17,6 +17,7 @@ import type { Tag } from '@shared/ipc/contract'
 import { TAG_BAR_MAX_FRACTION, TAG_BAR_MIN_HEIGHT, TAG_BAR_SPLIT_LIMITS } from '@shared/layout'
 import type { MentionRange } from '@shared/mentions'
 import { PROPOSAL_NOTE_MAX, normalizeProposalNote } from '@shared/proposal'
+import type { ProposedTag } from '@shared/proposedTags'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { describeRequest } from '@renderer/features/ai/usageFormat'
@@ -30,6 +31,7 @@ import {
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
+import { useProposedTagStore } from '@renderer/features/tags/proposedTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -89,7 +91,10 @@ interface RegenerateOptions {
  * before any save; a folder is never loaded as a document, so its bar has no such list. Under
  * those, the automatic mentions (F-4.12) main recorded for the saved text: one row per tag whose
  * name occurs here, with its count and a jump to the first occurrence. They are not links, so
- * nothing about them is editable from the bar.
+ * nothing about them is editable from the bar. Under those again, the proposed tags (F-4.12b):
+ * the recurring capitalised names of the manuscript that no tag stands for, narrowed to the ones
+ * this document carries, each with a Create tag button and a Dismiss button; nothing is created
+ * until one is clicked.
  * "Recommend" (F-4.7) asks main for bank tags that fit the live text once it has 50 characters
  * (a folder never does, so there it stays disabled) and shows them as chips the author accepts
  * one at a time, all at once, or dismisses; nothing is linked until accepted, and the note
@@ -119,6 +124,13 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   const mentioned = useMemo(
     () => (mentions ?? []).filter((row) => bank[row.tagId] !== undefined),
     [mentions, bank]
+  )
+  // F-4.12b: the app-wide proposals main pushed, narrowed to the names this document carries, so
+  // the bar proposes what the author is looking at rather than the whole manuscript's list.
+  const proposals = useProposedTagStore((s) => s.proposals)
+  const proposed = useMemo(
+    () => proposals.filter((proposal) => proposal.nodeIds.includes(id)),
+    [proposals, id]
   )
   const content = useDocumentStore((s) => s.docs[id]?.content ?? null)
   const flush = useDocumentStore((s) => s.flush)
@@ -505,6 +517,20 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
                 </ul>
               </>
             ) : null}
+            {proposed.length > 0 ? (
+              <>
+                <p className="mt-2 mb-1 text-xs text-fg-subtle">Proposed tags</p>
+                <ul
+                  role="list"
+                  aria-label="Proposed tags"
+                  className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
+                >
+                  {proposed.map((proposal) => (
+                    <ProposedTagRow key={proposal.name} proposal={proposal} onError={report} />
+                  ))}
+                </ul>
+              </>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -619,6 +645,62 @@ function MentionRow({
         className="rounded p-0.5 text-fg-muted hover:bg-surface-raised hover:text-fg"
       >
         <CornerDownRight size={12} aria-hidden="true" />
+      </button>
+    </li>
+  )
+}
+
+/**
+ * One proposed tag (F-4.12b): a recurring capitalised name of the manuscript that no tag stands
+ * for, how often it occurs, and the two clicks that settle it — Create tag makes it a character
+ * tag (which is what links its mentions, F-4.12), Dismiss keeps the name quiet for the project.
+ * Nothing is created or hidden until one of them is clicked; while a click is in flight both are
+ * disabled, so one proposal is never settled twice.
+ */
+function ProposedTagRow({
+  proposal,
+  onError
+}: {
+  proposal: ProposedTag
+  onError: (err: unknown) => void
+}): React.JSX.Element {
+  const accept = useProposedTagStore((s) => s.accept)
+  const dismiss = useProposedTagStore((s) => s.dismiss)
+  const [busy, setBusy] = useState(false)
+  /** The row leaves the list when main publishes without it, so `busy` only has to outlive the click. */
+  const settle = (work: Promise<unknown>): void => {
+    setBusy(true)
+    work.catch(onError).finally(() => setBusy(false))
+  }
+  return (
+    <li
+      role="listitem"
+      data-testid="proposed-tag"
+      className="flex items-center gap-1.5 rounded-full border border-dashed border-line py-0.5 pr-1 pl-2 text-xs"
+    >
+      <span className="max-w-48 truncate">{proposal.display}</span>{' '}
+      <span className="text-fg-subtle tabular-nums">×{proposal.count}</span>
+      <button
+        type="button"
+        data-testid="proposed-tag-accept"
+        aria-label={`Create tag ${proposal.display}`}
+        title="Create a character tag for this name"
+        disabled={busy}
+        onClick={() => settle(accept(proposal.name))}
+        className="rounded-full p-0.5 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40"
+      >
+        <Plus size={12} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        data-testid="proposed-tag-dismiss"
+        aria-label={`Dismiss ${proposal.display}`}
+        title="Never propose this name again"
+        disabled={busy}
+        onClick={() => settle(dismiss(proposal.name))}
+        className="rounded-full p-0.5 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40"
+      >
+        <X size={12} aria-hidden="true" />
       </button>
     </li>
   )

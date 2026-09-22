@@ -93,6 +93,7 @@ import {
   removeDocumentTag
 } from '../tag/documentTagStore'
 import { deleteMentionsForTag, listMentionsForNode, listMentionsForTag } from '../tag/mentionStore'
+import { dismissName, listProposedTags, resetProposedTagCache } from '../tag/proposedTags'
 import { scanMentions, staleMentionNodeIds } from '../tag/scanMentions'
 import { createTag, deleteTag, getTag, listTags, loadTagTemplate, updateTag } from '../tag/tagStore'
 import {
@@ -245,12 +246,33 @@ export function registerHandlers({
    * (the summary pane's "Updating…" is not about mentions). A scan that changed rows tells the
    * windows which document moved, and only then.
    */
-  const mentionQueue = createIndexQueue<{ changed: boolean }>({
+  /**
+   * F-4.12b: the proposed tags as they stand now, pushed to the windows when they differ from
+   * what was last pushed. The list is computed, not stored, so everything that can move it — a
+   * scan, a tag, a dismissal, a project — calls this, and the JSON comparison keeps a burst of
+   * scans (the backfill of a whole manuscript) down to the one event that says something new.
+   * `lastProposed` is null for "nothing pushed yet", which is what a project change restores, so
+   * a reopened project publishes its list again even though it has not changed since.
+   */
+  let lastProposed: string | null = null
+  const publishProposed = (): void => {
+    if (manager.current() === null) return
+    const proposals = listProposedTags(manager.require().connection.orm)
+    const json = JSON.stringify(proposals)
+    if (json === lastProposed) return
+    lastProposed = json
+    emit(windows(), 'tag:proposedChanged', proposals)
+  }
+
+  const mentionQueue = createIndexQueue<{ changed: boolean; scanned: boolean }>({
     kind: 'mentions',
     db: () => (manager.current() === null ? null : manager.require().connection.orm),
     run: (job) => {
       const value = scanMentions(manager.require().connection.orm, job.nodeId, new Date())
       if (value.changed) emit(windows(), 'mention:changed', { nodeIds: [job.nodeId] })
+      // F-4.12b: a scan that read the document again may have changed which names are proposed,
+      // whether or not any tag's mentions moved; one that short-circuited on the hash cannot.
+      if (value.scanned) publishProposed()
       // Nothing was sent anywhere: the rate limit must not count a local scan a turn.
       return Promise.resolve({ requested: false, value })
     },
@@ -464,6 +486,9 @@ export function registerHandlers({
     const db = manager.require().connection.orm
     const created = createTag(db, input)
     rescanManuscript(db)
+    // F-4.12b: the new name is a tag now, so it is proposed no longer — which is what accepting
+    // a proposal comes down to. The scans that follow say nothing new about it.
+    publishProposed()
     return created
   })
 
@@ -489,6 +514,9 @@ export function registerHandlers({
         rescanManuscript(db)
       }
     }
+    // F-4.12b: a rename frees the old name to be proposed and takes the new one out of the list,
+    // whatever tracking says — the proposals are about the bank's names, not about the scan.
+    publishProposed()
     return updated
   })
 
@@ -499,13 +527,18 @@ export function registerHandlers({
     const nodeIds = listMentionsForTag(db, id).map((mention) => mention.nodeId)
     deleteTag(db, id)
     if (nodeIds.length > 0) emit(windows(), 'mention:changed', { nodeIds })
+    // F-4.12b: the name the deleted tag held is a plain word again, so it may be proposed.
+    publishProposed()
     return null
   })
 
   register('tag:loadTemplate', ({ template }) => {
     const db = manager.require().connection.orm
     const result = loadTagTemplate(db, template)
-    if (result.created.length > 0) rescanManuscript(db)
+    if (result.created.length > 0) {
+      rescanManuscript(db)
+      publishProposed()
+    }
     return result
   })
 
@@ -525,6 +558,25 @@ export function registerHandlers({
       throw new AppError('NOT_FOUND', 'Document not found', { id: nodeId })
     }
     return listMentionsForNode(db, nodeId)
+  })
+
+  // F-4.12b: what the tag bar's proposals read. Asking changes nothing: the list is computed
+  // from the saved text, the bank, and the dismissals, and a scan pushes the next one on.
+  register('tag:proposed', () => listProposedTags(manager.require().connection.orm))
+
+  /**
+   * F-4.12b: dismissing a proposal stores the name for the project, so the answer here is also
+   * what every window must now show; `lastProposed` is moved on with it rather than emitting to
+   * the window that asked.
+   */
+  register('tag:dismissProposed', ({ name }) => {
+    const proposals = dismissName(manager.require().connection.orm, name)
+    const json = JSON.stringify(proposals)
+    if (json !== lastProposed) {
+      lastProposed = json
+      emit(windows(), 'tag:proposedChanged', proposals)
+    }
+    return proposals
   })
 
   register('documentTag:list', ({ nodeId }) =>
@@ -1263,10 +1315,16 @@ export function registerHandlers({
     // F-4.12: the same for the mention queue, and a project that was written before this feature
     // (or by an older build) is backfilled from its own rows, silently, as soon as it opens.
     mentionQueue.clear()
+    // F-4.12b: the memoised word counts and what was last published belong to the project that
+    // left, so a project opened again publishes its proposals afresh rather than staying silent
+    // because the list happens to read the same as the last one's.
+    resetProposedTagCache()
+    lastProposed = null
     if (info) {
       queue.load()
       mentionQueue.load()
       mentionQueue.indexAll('mentions', staleMentionNodeIds(manager.require().connection.orm))
+      publishProposed()
       try {
         appState.update((s) => ({ ...s, recents: touchRecent(s.recents, toRecentEntry(info)) }))
       } catch (err) {

@@ -53,6 +53,7 @@ import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusSt
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
+import { useProposedTagStore } from '@renderer/features/tags/proposedTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { UpdateNotice } from '@renderer/features/updates/UpdateNotice'
 import { useUpdateStore } from '@renderer/features/updates/updateStore'
@@ -173,12 +174,20 @@ export function App(): React.JSX.Element {
       useTagStore.getState().clear()
       useDocumentTagStore.getState().clear()
       useMentionStore.getState().clear()
+      useProposedTagStore.getState().clear()
       useBackgroundStore.getState().clear()
       return
     }
     // F-4.12: main scans in the background and says which documents changed; the mention lists
     // are fetched by the views that show them, so only the subscription is opened here.
     useMentionStore.getState().subscribe()
+    // F-4.12b: the proposed names are one app-wide list main pushes on when a scan, a tag, or a
+    // dismissal moves it; the tag bar shows the ones its own document carries.
+    useProposedTagStore.getState().subscribe()
+    useProposedTagStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
     tree.load().catch((err: unknown) => toast.error(describeError(err)))
     useEditorSettingsStore
       .getState()

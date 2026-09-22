@@ -2319,6 +2319,118 @@ describe('automatic mentions (F-4.12)', () => {
   })
 })
 
+describe('proposed tags (F-4.12b)', () => {
+  /** The mention scan's debounce is 1.5 s, and the proposals ride on it; 3 s covers both. */
+  const SCAN = 3_000
+  /** Three mid-sentence uses of a name, which is what a proposal takes. */
+  const TASH = 'The road bent. Then Tash saw Tash and Tash.'
+
+  const save = (id: string, ...paragraphs: string[]): Promise<unknown> =>
+    invoke('document:save', {
+      id,
+      content: {
+        type: 'doc',
+        content: paragraphs.map((text) => ({
+          type: 'paragraph',
+          content: [{ type: 'text', text }]
+        }))
+      }
+    })
+
+  /** Every list sent to the window as `tag:proposedChanged`, in order, as its names. */
+  const published = (): string[][] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([channel]) => channel === 'tag:proposedChanged')
+      .map(([, payload]) => (payload as { name: string }[]).map((proposal) => proposal.name))
+
+  /** A project with one scene; the manuscript's first document id. */
+  async function ready(...paragraphs: string[]): Promise<string> {
+    await invoke('project:create', { name: 'Proposed', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = manuscriptReadingOrder(rows)[0]
+    if (scene === undefined) throw new Error('skeleton not seeded')
+    if (paragraphs.length > 0) await save(scene, ...paragraphs)
+    return scene
+  }
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('tag:proposed', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('tag:dismissProposed', { name: 'tash' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('publishes the list once a scan has read the saved text', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await ready(TASH)
+      expect(await invoke('tag:proposed', undefined)).toMatchObject([{ name: 'tash', count: 3 }])
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(published()).toContainEqual(['tash'])
+      const before = published().length
+
+      // A save that changes nothing about the names publishes nothing new.
+      await save(scene, TASH)
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(published()).toHaveLength(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops a proposal the author accepted, and publishes the list without it', async () => {
+    vi.useFakeTimers()
+    try {
+      await ready(TASH)
+      await vi.advanceTimersByTimeAsync(SCAN)
+      await invoke('tag:create', { name: 'Tash', category: 'character' })
+      expect(published().at(-1)).toEqual([])
+      expect(await invoke('tag:proposed', undefined)).toEqual([])
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(published().at(-1)).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a dismissed name out for good, and tells every window at once', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await ready(TASH)
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('tag:dismissProposed', { name: 'Tash' })).toEqual([])
+      expect(published().at(-1)).toEqual([])
+
+      // Another save rescans the document and still proposes nothing: the dismissal is stored.
+      await save(scene, TASH, 'Tash rode on with Tash and Tash.')
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('tag:proposed', undefined)).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('publishes the reopened project’s list again, and nothing while none is open', async () => {
+    const project = await invoke('project:create', {
+      name: 'Proposed',
+      format: 'novel',
+      directory: tmp
+    })
+    const rows = await invoke('tree:list', undefined)
+    const scene = manuscriptReadingOrder(rows)[0]
+    if (scene === undefined) throw new Error('skeleton not seeded')
+    await save(scene, TASH)
+    await invoke('project:close', undefined)
+    await expect(invoke('tag:proposed', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+
+    await invoke('project:open', { path: project?.path ?? '' })
+    await vi.waitFor(() => {
+      expect(published().at(-1)).toEqual(['tash'])
+    })
+  })
+})
+
 describe('tag:loadTemplate (F-4.3)', () => {
   const standard = TAG_TEMPLATES.find((t) => t.id === 'standard-fiction')!
 
