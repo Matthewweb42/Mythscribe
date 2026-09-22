@@ -13,6 +13,7 @@ import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusSt
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { useEditorZoom } from '@renderer/features/shell/viewStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
 import { useActiveEditorStore } from './activeEditorStore'
@@ -159,6 +160,8 @@ function RegionEditor({
   // F-6.2: over a background image the column gets a translucent panel so the text stays legible.
   const background = useCurrentBackground()
   const focusWidth = useBackgroundStore((s) => s.settings?.overlay.width ?? OVERLAY_WIDTH.default)
+  // F-7.10: the app-wide document zoom multiplies the project's column and font.
+  const zoom = useEditorZoom()
   const surface = focus && background !== null
   const [menu, setMenu] = useState<TokenMenu | null>(null)
 
@@ -274,14 +277,15 @@ function RegionEditor({
   return (
     <div
       className="flex min-h-0 min-w-0 flex-1 flex-col"
-      // F-6.4: in focus mode the column is a share of the pane instead of the settings' pixels.
+      // F-6.4: in focus mode the column is a share of the pane instead of the settings' pixels,
+      // so F-7.10's zoom scales the text inside it and leaves the share alone.
       style={
         focus
           ? ({
-              ...editorStyle(settings),
+              ...editorStyle(settings, zoom),
               '--ms-editor-max-width': `${focusWidth}%`
             } as CSSProperties)
-          : editorStyle(settings)
+          : editorStyle(settings, zoom)
       }
     >
       {focus ? null : (

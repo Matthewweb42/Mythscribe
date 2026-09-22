@@ -39,6 +39,7 @@ import {
   LicensePublicKeyJwk,
   type LicenseClaims
 } from '@shared/license'
+import type { ViewSettings } from '@shared/zoom'
 import { AccountService } from '../account/accountService'
 import type { CloudAuthClient } from '../account/cloudAuthClient'
 import { registerInflight, resetInflight } from '../ai/inflight'
@@ -2430,42 +2431,76 @@ describe('window:setFullScreen (F-6.1)', () => {
   })
 })
 
-describe('window:zoom (F-7.10)', () => {
-  /** The factor as it stands in app-state.json, read back through a fresh store. */
-  const storedZoom = (): number =>
-    new AppStateStore(path.join(tmp, 'userData', 'app-state.json')).get().zoom
+describe('view (F-7.10)', () => {
+  /** The settings as they stand in app-state.json, read back through a fresh store. */
+  const storedView = (): ViewSettings =>
+    new AppStateStore(path.join(tmp, 'userData', 'app-state.json')).get().view
 
-  it('steps the factor in and out, scales the window, and persists what it applied', async () => {
-    expect(await invoke('window:zoom', { step: 'in' })).toEqual({ factor: 1.1 })
-    expect(fakeWin.webContents.setZoomFactor).toHaveBeenLastCalledWith(1.1)
-    expect(storedZoom()).toBe(1.1)
-    expect(await invoke('window:zoom', { step: 'in' })).toEqual({ factor: 1.25 })
-    expect(await invoke('window:zoom', { step: 'out' })).toEqual({ factor: 1.1 })
-    expect(fakeWin.webContents.setZoomFactor).toHaveBeenLastCalledWith(1.1)
-    expect(storedZoom()).toBe(1.1)
+  it('answers the installed defaults before anything is changed', async () => {
+    expect(await invoke('view:get', undefined)).toEqual({ editorZoom: 1, uiScale: 'medium' })
+  })
+
+  it('steps the document zoom in and out and persists it, leaving the window alone', async () => {
+    expect(await invoke('view:zoomDocument', { step: 'in' })).toEqual({
+      editorZoom: 1.1,
+      uiScale: 'medium'
+    })
+    expect(storedView().editorZoom).toBe(1.1)
+    // The document zoom is the renderer's to apply; the window keeps the interface size.
+    expect(fakeWin.webContents.setZoomFactor).not.toHaveBeenCalled()
+    expect((await invoke('view:zoomDocument', { step: 'in' })).editorZoom).toBe(1.25)
+    expect((await invoke('view:zoomDocument', { step: 'out' })).editorZoom).toBe(1.1)
+    expect(storedView().editorZoom).toBe(1.1)
   })
 
   it('resets to 100 % and stops at the ends of the table', async () => {
-    for (let i = 0; i < 12; i++) await invoke('window:zoom', { step: 'in' })
-    expect(await invoke('window:zoom', { step: 'in' })).toEqual({ factor: 2 })
-    expect(await invoke('window:zoom', { step: 'reset' })).toEqual({ factor: 1 })
-    expect(storedZoom()).toBe(1)
-    for (let i = 0; i < 12; i++) await invoke('window:zoom', { step: 'out' })
-    expect(await invoke('window:zoom', { step: 'out' })).toEqual({ factor: 0.67 })
-    expect(storedZoom()).toBe(0.67)
+    for (let i = 0; i < 12; i++) await invoke('view:zoomDocument', { step: 'in' })
+    expect((await invoke('view:zoomDocument', { step: 'in' })).editorZoom).toBe(2)
+    expect((await invoke('view:zoomDocument', { step: 'reset' })).editorZoom).toBe(1)
+    expect(storedView().editorZoom).toBe(1)
+    for (let i = 0; i < 12; i++) await invoke('view:zoomDocument', { step: 'out' })
+    expect((await invoke('view:zoomDocument', { step: 'out' })).editorZoom).toBe(0.67)
+    expect(storedView().editorZoom).toBe(0.67)
   })
 
-  it('skips a destroyed window but still records the factor', async () => {
+  it('applies the interface size to every live window and persists it', async () => {
+    expect(await invoke('view:setUiScale', { scale: 'large' })).toEqual({
+      editorZoom: 1,
+      uiScale: 'large'
+    })
+    expect(fakeWin.webContents.setZoomFactor).toHaveBeenLastCalledWith(1.15)
+    expect(storedView().uiScale).toBe('large')
+    await invoke('view:setUiScale', { scale: 'small' })
+    expect(fakeWin.webContents.setZoomFactor).toHaveBeenLastCalledWith(0.9)
+    expect(storedView().uiScale).toBe('small')
+  })
+
+  it('keeps the two settings apart: the size does not disturb the zoom', async () => {
+    await invoke('view:zoomDocument', { step: 'in' })
+    expect(await invoke('view:setUiScale', { scale: 'small' })).toEqual({
+      editorZoom: 1.1,
+      uiScale: 'small'
+    })
+    expect(await invoke('view:zoomDocument', { step: 'reset' })).toEqual({
+      editorZoom: 1,
+      uiScale: 'small'
+    })
+  })
+
+  it('skips a destroyed window but still records the size', async () => {
     fakeWin.isDestroyed = () => true
-    expect(await invoke('window:zoom', { step: 'out' })).toEqual({ factor: 0.9 })
+    expect((await invoke('view:setUiScale', { scale: 'large' })).uiScale).toBe('large')
     expect(fakeWin.webContents.setZoomFactor).not.toHaveBeenCalled()
-    expect(storedZoom()).toBe(0.9)
+    expect(storedView().uiScale).toBe('large')
   })
 
-  it('rejects a step that is not one of the three', async () => {
-    const result = await handlerFor('window:zoom')(null, { step: 'bigger' })
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+  it('rejects a step and a size that are not one of the named ones', async () => {
+    const step = await handlerFor('view:zoomDocument')(null, { step: 'bigger' })
+    expect(step.ok).toBe(false)
+    if (!step.ok) expect(step.error.code).toBe('VALIDATION')
+    const scale = await handlerFor('view:setUiScale')(null, { scale: 'enormous' })
+    expect(scale.ok).toBe(false)
+    if (!scale.ok) expect(scale.error.code).toBe('VALIDATION')
   })
 })
 

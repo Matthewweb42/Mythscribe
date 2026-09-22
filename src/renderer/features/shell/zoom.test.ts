@@ -1,27 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Channel, Input, Output } from '@shared/ipc/contract'
-import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
-import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
-import { ZOOM_MENU_STEPS, zoomStepFor, zoomWindow } from './zoom'
-
-let invoke: ReturnType<typeof vi.fn<(channel: string, input: unknown) => Promise<unknown>>>
-
-/** Main answers `window:zoom` with `factor`, or throws it when it is an error. */
-function install(answer: unknown): void {
-  invoke = vi.fn(async (channel: string) => {
-    if (channel !== 'window:zoom') throw new Error(`unexpected ${channel}`)
-    if (answer instanceof Error) throw answer
-    return { factor: answer }
-  })
-  const client: IpcClient = {
-    invoke: <C extends Channel>(channel: C, input: Input<C>) =>
-      invoke(channel, input) as Promise<Output<C>>,
-    on: () => () => {}
-  }
-  setIpcClient(client)
-}
-
-const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.message)
+import { describe, expect, it } from 'vitest'
+import { WHEEL_ZOOM_COALESCE_MS, ZOOM_MENU_STEPS, wheelZoomStepFor, zoomStepFor } from './zoom'
 
 /** A keyboard event as the listener sees it, with every modifier up unless named. */
 const chord = (
@@ -36,28 +14,7 @@ const chord = (
   ...mods
 })
 
-beforeEach(() => {
-  install(1.1)
-  useDialogStore.setState({ modals: [], toasts: [] })
-})
-
-describe('zoomWindow (F-7.10)', () => {
-  it('asks main for the step and announces the factor it applied', async () => {
-    await zoomWindow('in')
-    expect(invoke).toHaveBeenCalledWith('window:zoom', { step: 'in' })
-    expect(toasts()).toEqual(['Zoom 110 %'])
-    install(1)
-    await zoomWindow('reset')
-    expect(invoke).toHaveBeenCalledWith('window:zoom', { step: 'reset' })
-    expect(toasts()).toEqual(['Zoom 110 %', 'Zoom 100 %'])
-  })
-
-  it('toasts the cause when main could not zoom', async () => {
-    install(new Error('no window'))
-    await zoomWindow('out')
-    expect(toasts()).toEqual(['no window'])
-  })
-
+describe('ZOOM_MENU_STEPS (F-7.10)', () => {
   it('maps each View › Zoom item to its step', () => {
     expect(ZOOM_MENU_STEPS).toEqual({ zoomIn: 'in', zoomOut: 'out', zoomReset: 'reset' })
   })
@@ -81,5 +38,39 @@ describe('zoomStepFor (F-2.7 chords)', () => {
     expect(zoomStepFor(chord('0', { ctrlKey: true, altKey: true }))).toBeNull()
     expect(zoomStepFor(chord('=', { ctrlKey: true, shiftKey: true }))).toBeNull()
     expect(zoomStepFor(chord('k', { ctrlKey: true }))).toBeNull()
+  })
+})
+
+describe('wheelZoomStepFor (F-7.10)', () => {
+  /** A wheel event as the listener sees it, with every modifier up unless named. */
+  const wheel = (
+    deltaY: number,
+    mods: Partial<Pick<WheelEvent, 'ctrlKey' | 'altKey' | 'metaKey'>> = {}
+  ): Pick<WheelEvent, 'ctrlKey' | 'altKey' | 'metaKey' | 'deltaY'> => ({
+    deltaY,
+    ctrlKey: true,
+    altKey: false,
+    metaKey: false,
+    ...mods
+  })
+
+  it('zooms in on a wheel up and out on a wheel down while Ctrl is held', () => {
+    expect(wheelZoomStepFor(wheel(-120), 1000, null)).toBe('in')
+    expect(wheelZoomStepFor(wheel(120), 1000, null)).toBe('out')
+  })
+
+  it('ignores the wheel without Ctrl, with Alt or Meta, and with no vertical movement', () => {
+    expect(wheelZoomStepFor(wheel(-120, { ctrlKey: false }), 1000, null)).toBeNull()
+    expect(wheelZoomStepFor(wheel(-120, { altKey: true }), 1000, null)).toBeNull()
+    expect(wheelZoomStepFor(wheel(-120, { metaKey: true }), 1000, null)).toBeNull()
+    expect(wheelZoomStepFor(wheel(0), 1000, null)).toBeNull()
+  })
+
+  it('takes one step per burst: the deltas that follow a step within the window are dropped', () => {
+    expect(wheelZoomStepFor(wheel(-4), 1000, 1000)).toBeNull()
+    expect(wheelZoomStepFor(wheel(-4), 1000 + WHEEL_ZOOM_COALESCE_MS - 1, 1000)).toBeNull()
+    expect(wheelZoomStepFor(wheel(-4), 1000 + WHEEL_ZOOM_COALESCE_MS, 1000)).toBe('in')
+    // The direction still decides once the window has passed.
+    expect(wheelZoomStepFor(wheel(4), 1000 + WHEEL_ZOOM_COALESCE_MS, 1000)).toBe('out')
   })
 })

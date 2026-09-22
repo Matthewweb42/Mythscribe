@@ -3,7 +3,7 @@ import { AI_DATA_SHARING, AI_DIAL_LABEL, isFeatureAllowed } from '@shared/aiSett
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 
 const BUTTON =
-  'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted aria-pressed:bg-surface-raised aria-pressed:text-accent'
+  'flex shrink-0 items-center gap-1 rounded-md whitespace-nowrap px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted aria-pressed:bg-surface-raised aria-pressed:text-accent'
 
 /**
  * The VibeWrite toggle in the single-document toolbar (F-5.3): `aria-pressed` is the mode's

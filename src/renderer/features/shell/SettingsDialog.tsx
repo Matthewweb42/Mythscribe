@@ -119,7 +119,9 @@ export function SettingsDialog({
           role="tablist"
           aria-label="Settings"
           onKeyDown={onTabsKeyDown}
-          className="mt-3 flex shrink-0 border-b border-line px-5"
+          // F-7.10: six tabs are wider than the dialog, so the strip wraps to a second row
+          // instead of pushing the last one past the edge; the tabs keep their own width.
+          className="mt-3 flex shrink-0 flex-wrap border-b border-line px-5"
         >
           {tabs.map((tab) => (
             <SettingsTabButton
@@ -173,7 +175,7 @@ function SettingsTabButton({
       aria-controls={panelId}
       tabIndex={selected ? 0 : -1}
       onClick={() => onSelect(tab.id)}
-      className="flex items-center gap-1.5 border-b-2 border-transparent px-3 py-1.5 text-sm font-medium text-fg-muted select-none hover:text-fg focus-visible:bg-surface focus-visible:outline-none aria-selected:border-accent aria-selected:text-fg"
+      className="flex shrink-0 items-center gap-1.5 border-b-2 border-transparent px-3 py-1.5 text-sm font-medium text-fg-muted select-none hover:text-fg focus-visible:bg-surface focus-visible:outline-none aria-selected:border-accent aria-selected:text-fg"
     >
       <Icon size={14} aria-hidden="true" />
       <span>{tab.label}</span>

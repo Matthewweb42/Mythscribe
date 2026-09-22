@@ -8,7 +8,7 @@ import { useDocumentStore } from './documentStore'
 import { useSummaryStore } from './summaryStore'
 
 const BUTTON =
-  'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-expanded:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
+  'flex shrink-0 items-center gap-1 rounded-md whitespace-nowrap px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-expanded:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
 const CHIP = 'rounded-full border border-line bg-surface-raised px-2 py-0.5 text-xs'
 
 /**
@@ -61,7 +61,8 @@ export function SummaryBlock({
 
   return (
     <>
-      <div className="flex items-center gap-1">
+      {/* Same as the brief's row: the pane may be narrow, so the row wraps, the labels do not. */}
+      <div className="flex flex-wrap items-center gap-1">
         <button
           type="button"
           aria-expanded={open}

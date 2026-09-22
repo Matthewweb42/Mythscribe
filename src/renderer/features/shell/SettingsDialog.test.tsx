@@ -4,6 +4,7 @@ import { Sparkles, Type } from 'lucide-react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
+import { defaultViewSettings } from '@shared/zoom'
 import {
   resetEditorSettingsStore,
   useEditorSettingsStore
@@ -13,6 +14,7 @@ import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { SettingsDialog } from './SettingsDialog'
+import { resetViewStore } from './viewStore'
 import type { SettingsDialogTab } from './settingsDialogTabs'
 
 /** Two fake tabs with the real ids, so the dialog's tab handling is driven without the real panels. */
@@ -27,13 +29,17 @@ const tabs: readonly [SettingsDialogTab, ...SettingsDialogTab[]] = [
   { id: 'ai', label: 'AI', icon: Sparkles, scope: 'project', render: () => <p>keys here</p> }
 ]
 
-/** Accepts every `editorSettings:set`; anything else is unexpected here. */
+/**
+ * Accepts every `editorSettings:set` and answers `view:get` for the real Appearance tab (F-7.10),
+ * which is the first tab on the welcome screen; anything else is unexpected here.
+ */
 const client: IpcClient = {
   async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
     if (channel === 'editorSettings:set') {
       const value = input as Input<'editorSettings:set'>
       return value as Output<C>
     }
+    if (channel === 'view:get') return defaultViewSettings() as Output<C>
     throw new Error(`unexpected ${channel}`)
   },
   on: () => () => {}
@@ -49,6 +55,7 @@ beforeEach(() => {
   // The real registry includes the Account tab (F-15.2); the shared worker must not hand it a
   // signed-in account left over from another file, which would send it looking for credits.
   resetAccountStore()
+  resetViewStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   setIpcClient(client)
   useEditorSettingsStore.setState({ settings: { ...defaultEditorSettings('novel') } })
@@ -56,6 +63,7 @@ beforeEach(() => {
 // The store's debounced write outlives a test: cancel it here so it cannot fire into the next file's fake client.
 afterEach(() => {
   resetEditorSettingsStore()
+  resetViewStore()
 })
 
 describe('SettingsDialog (F-7.5)', () => {
@@ -66,6 +74,7 @@ describe('SettingsDialog (F-7.5)', () => {
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
       'Editor',
       'AI',
+      'Appearance',
       'Account',
       'Updates',
       'Diagnostics'
@@ -117,14 +126,15 @@ describe('SettingsDialog (F-7.5)', () => {
 
   it('falls back to the first tab when the named one is not shown (F-15.5)', () => {
     render(<SettingsDialog format={null} onClose={vi.fn()} initialTab="editor" />)
-    // F-15.7 / F-15.8: Updates and Diagnostics are app-wide too, so the welcome screen shows
-    // them beside Account.
+    // F-7.10 / F-15.7 / F-15.8: Appearance, Updates, and Diagnostics are app-wide too, so the
+    // welcome screen shows them beside Account.
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
+      'Appearance',
       'Account',
       'Updates',
       'Diagnostics'
     ])
-    expect(tab('Account')).toHaveAttribute('aria-selected', 'true')
+    expect(tab('Appearance')).toHaveAttribute('aria-selected', 'true')
   })
 
   it('switches between injected tabs by click and by the arrow keys, one panel at a time', async () => {

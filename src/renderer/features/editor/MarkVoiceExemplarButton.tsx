@@ -9,7 +9,7 @@ import { describeError } from '@renderer/lib/errors'
 import { selectedText } from './selectedText'
 
 const BUTTON =
-  'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
+  'flex shrink-0 items-center gap-1 rounded-md whitespace-nowrap px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
 
 const MAX_LABEL = VOICE_EXEMPLAR_TEXT_MAX.toLocaleString()
 

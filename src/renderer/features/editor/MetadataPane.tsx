@@ -21,7 +21,7 @@ import { SuggestInput } from './SuggestInput'
 import { SummaryBlock } from './SummaryBlock'
 
 const BUTTON =
-  'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-expanded:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
+  'flex shrink-0 items-center gap-1 rounded-md whitespace-nowrap px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-expanded:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
 const FIELD =
   'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-px text-xs leading-5 disabled:opacity-50'
 
@@ -123,7 +123,8 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
           className={FIELD}
         />
       </div>
-      <div className="flex items-center gap-1">
+      {/* The labels never break inside a button, so a narrow pane wraps the row instead. */}
+      <div className="flex flex-wrap items-center gap-1">
         <button
           type="button"
           aria-expanded={briefOpen}

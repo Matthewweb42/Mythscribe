@@ -8,7 +8,7 @@ import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { useBetaReaderStore } from './betaReaderStore'
 
 const BUTTON =
-  'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
+  'flex shrink-0 items-center gap-1 rounded-md whitespace-nowrap px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
 
 const MIN_LABEL = BETA_READER_TEXT_MIN.toLocaleString()
 

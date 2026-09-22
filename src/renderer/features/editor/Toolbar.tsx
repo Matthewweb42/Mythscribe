@@ -260,7 +260,14 @@ export function Toolbar({
           })}
         </div>
       ))}
-      {right !== undefined ? <div className="ml-auto flex items-center">{right}</div> : null}
+      {/*
+       * The right cluster wraps inside itself as well (F-7.10): its buttons carry labels and
+       * never break them, so a narrow window (Large in 1280 x 720) has to take a second row
+       * rather than push the last ones past the edge.
+       */}
+      {right !== undefined ? (
+        <div className="ml-auto flex flex-wrap items-center justify-end">{right}</div>
+      ) : null}
     </div>
   )
 }

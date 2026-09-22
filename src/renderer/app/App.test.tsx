@@ -17,6 +17,7 @@ import type {
 } from '@shared/ipc/contract'
 import { IDLE_INDEX_QUEUE } from '@shared/jobs'
 import { defaultFloating, defaultLayout } from '@shared/layout'
+import { defaultViewSettings } from '@shared/zoom'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAccountStore } from '@renderer/features/account/accountStore'
@@ -42,6 +43,7 @@ import { registerPendingSave, resetPendingSaves } from '@renderer/features/proje
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { resetWelcomeStore } from '@renderer/features/project/welcomeStore'
 import { resetShellDialogStore } from '@renderer/features/shell/shellDialogStore'
+import { resetViewStore, useViewStore } from '@renderer/features/shell/viewStore'
 import { App } from './App'
 
 const info: ProjectInfo = {
@@ -85,6 +87,7 @@ beforeEach(() => {
   resetWelcomeStore()
   resetIndexingStore()
   resetAccountStore()
+  resetViewStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -96,6 +99,7 @@ afterEach(() => {
   resetAssistantStore()
   resetBackgroundStore()
   resetIndexingStore()
+  resetViewStore()
   vi.unstubAllGlobals()
 })
 
@@ -128,6 +132,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'focusSettings:get') return { ...defaultFocusSettings(), backgroundId: null }
     if (channel === 'background:list') return []
     if (channel === 'jobs:status') return IDLE_INDEX_QUEUE
+    if (channel === 'view:get') return defaultViewSettings()
     return null
   })
   const on = <E extends EventName>(
@@ -639,7 +644,7 @@ describe('App', () => {
     expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
   })
 
-  it('opens Settings on the welcome screen with only the app-wide tabs (F-7.5, F-15.2, F-15.7, F-15.8)', async () => {
+  it('opens Settings on the welcome screen with only the app-wide tabs (F-7.5, F-15.2, F-15.7, F-15.8, F-7.10)', async () => {
     install()
     render(<App />)
     await screen.findByRole('button', { name: /new project/i })
@@ -650,7 +655,9 @@ describe('App', () => {
       within(dialog)
         .getAllByRole('tab')
         .map((t) => t.textContent)
-    ).toEqual(['Account', 'Updates', 'Diagnostics'])
+    ).toEqual(['Appearance', 'Account', 'Updates', 'Diagnostics'])
+    // The dialog opens on the first app-wide tab, so Account's text is a tab click away.
+    await userEvent.click(within(dialog).getByRole('tab', { name: 'Account' }))
     expect(
       within(dialog).getByText('Optional. You never need an account to write.', { exact: false })
     ).toBeInTheDocument()
@@ -1434,22 +1441,43 @@ describe('App', () => {
     })
   })
 
-  describe('zoom shortcuts (F-7.10)', () => {
-    it('Ctrl+= and Ctrl+0 zoom the window from the welcome screen, each announced as a toast', async () => {
-      const invoke = install({ 'window:zoom': { factor: 1.1 } })
+  describe('document zoom (F-7.10)', () => {
+    it('reads the persisted level at start, so the first editor paints at it', async () => {
+      install({
+        'project:current': info,
+        'tree:list': treeFixture,
+        'view:get': { editorZoom: 1.25, uiScale: 'large' }
+      })
+      render(<App />)
+      await waitFor(() => expect(useViewStore.getState().editorZoom).toBe(1.25))
+      const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+      await userEvent.click(within(scene).getByText('Scene 1'))
+      const editor = await screen.findByRole('textbox', { name: 'Document' })
+      // The pane the column variables sit on: 16 px × 1.25 and 700 px × 1.25 (F-3.6 defaults).
+      const pane = editor.closest('[style*="--ms-editor-font-size"]')
+      expect(pane).toHaveStyle({ '--ms-editor-font-size': '20px' })
+      expect(pane).toHaveStyle({ '--ms-editor-max-width': '875px' })
+    })
+
+    it('Ctrl+= and Ctrl+0 zoom the document from the welcome screen, each announced as a toast', async () => {
+      const invoke = install({
+        'view:zoomDocument': { editorZoom: 1.1, uiScale: 'medium' }
+      })
       render(<App />)
       await screen.findByRole('button', { name: /new project/i })
       await userEvent.keyboard('{Control>}={/Control}')
-      await waitFor(() => expect(invoke).toHaveBeenCalledWith('window:zoom', { step: 'in' }))
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith('view:zoomDocument', { step: 'in' }))
       await userEvent.keyboard('{Control>}-{/Control}')
-      await waitFor(() => expect(invoke).toHaveBeenCalledWith('window:zoom', { step: 'out' }))
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith('view:zoomDocument', { step: 'out' }))
       await userEvent.keyboard('{Control>}0{/Control}')
-      await waitFor(() => expect(invoke).toHaveBeenCalledWith('window:zoom', { step: 'reset' }))
-      // Main answers with the factor it applied; every keystroke says where the zoom landed.
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith('view:zoomDocument', { step: 'reset' })
+      )
+      // Main answers with the level it applied; every keystroke says where the zoom landed.
       expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual([
-        'Zoom 110 %',
-        'Zoom 110 %',
-        'Zoom 110 %'
+        'Document zoom 110 %',
+        'Document zoom 110 %',
+        'Document zoom 110 %'
       ])
     })
 
@@ -1457,7 +1485,7 @@ describe('App', () => {
       const invoke = install({
         'project:current': info,
         'tree:list': treeFixture,
-        'window:zoom': { factor: 0.9 }
+        'view:zoomDocument': { editorZoom: 0.9, uiScale: 'medium' }
       })
       render(<App />)
       const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
@@ -1465,8 +1493,35 @@ describe('App', () => {
       const editor = await screen.findByRole('textbox', { name: 'Document' })
       editor.focus()
       await userEvent.keyboard('{Control>}={/Control}')
-      await waitFor(() => expect(invoke).toHaveBeenCalledWith('window:zoom', { step: 'in' }))
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith('view:zoomDocument', { step: 'in' }))
       expect(editor.textContent).not.toContain('=')
+    })
+
+    it('Ctrl+wheel steps once per burst and the plain wheel is left to scroll', async () => {
+      const invoke = install({ 'view:zoomDocument': { editorZoom: 1.1, uiScale: 'medium' } })
+      render(<App />)
+      await screen.findByRole('button', { name: /new project/i })
+      const zoomCalls = (): number =>
+        invoke.mock.calls.filter(([channel]) => channel === 'view:zoomDocument').length
+
+      // A notch emits several deltas; they are one step, and the page must not scroll under it.
+      const first = createWheel({ deltaY: -120, ctrlKey: true })
+      fireEvent(document, first)
+      fireEvent(document, createWheel({ deltaY: -12, ctrlKey: true }))
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith('view:zoomDocument', { step: 'in' }))
+      expect(zoomCalls()).toBe(1)
+      expect(first.defaultPrevented).toBe(true)
+
+      // Without Ctrl it is a scroll, and the listener leaves it alone.
+      const scroll = createWheel({ deltaY: -120 })
+      fireEvent(document, scroll)
+      expect(scroll.defaultPrevented).toBe(false)
+      expect(zoomCalls()).toBe(1)
     })
   })
 })
+
+/** A wheel event jsdom can dispatch; `fireEvent.wheel` does not carry `ctrlKey` on its own. */
+function createWheel(init: WheelEventInit): WheelEvent {
+  return new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init })
+}

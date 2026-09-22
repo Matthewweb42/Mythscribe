@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_ZOOM,
+  UI_SCALES,
+  UI_SCALE_FACTORS,
+  UI_SCALE_LABELS,
+  UiScale,
+  ViewSettings,
   ZOOM_MAX,
   ZOOM_MIN,
   ZOOM_STEPS,
   ZoomFactor,
   ZoomStep,
+  defaultViewSettings,
   formatZoom,
   nearestZoom,
   nextZoom
@@ -79,5 +85,35 @@ describe('view zoom (F-7.10)', () => {
     expect(formatZoom(1.25)).toBe('125 %')
     expect(formatZoom(0.67)).toBe('67 %')
     expect(formatZoom(2)).toBe('200 %')
+  })
+})
+
+describe('interface size (F-7.10)', () => {
+  it('offers three settings, 90 / 100 / 115 %, each with a label', () => {
+    expect(UiScale.options).toEqual(['small', 'medium', 'large'])
+    expect(UiScale.safeParse('huge').success).toBe(false)
+    expect(UI_SCALES.map((scale) => UI_SCALE_FACTORS[scale])).toEqual([0.9, 1, 1.15])
+    expect(UI_SCALES.map((scale) => UI_SCALE_LABELS[scale])).toEqual(['Small', 'Medium', 'Large'])
+    expect(formatZoom(UI_SCALE_FACTORS.large)).toBe('115 %')
+  })
+})
+
+describe('ViewSettings (F-7.10)', () => {
+  it('installs at 100 % and Medium', () => {
+    expect(defaultViewSettings()).toEqual({ editorZoom: 1, uiScale: 'medium' })
+  })
+
+  it('defaults each half on its own, so a file from before either one still parses', () => {
+    expect(ViewSettings.parse({})).toEqual(defaultViewSettings())
+    expect(ViewSettings.parse({ editorZoom: 1.25 })).toEqual({
+      editorZoom: 1.25,
+      uiScale: 'medium'
+    })
+    expect(ViewSettings.parse({ uiScale: 'small' })).toEqual({ editorZoom: 1, uiScale: 'small' })
+  })
+
+  it('refuses a zoom outside the range and a size that is not one of the three', () => {
+    expect(ViewSettings.safeParse({ editorZoom: 3 }).success).toBe(false)
+    expect(ViewSettings.safeParse({ uiScale: 'enormous' }).success).toBe(false)
   })
 })

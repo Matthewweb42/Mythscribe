@@ -23,7 +23,8 @@ import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
 import { ShortcutsDialog } from '@renderer/features/shell/ShortcutsDialog'
 import { APP_SHORTCUTS, matchesShortcut, type Chord } from '@renderer/features/shell/shortcuts'
 import { SidebarTabs } from '@renderer/features/shell/SidebarTabs'
-import { zoomStepFor, zoomWindow } from '@renderer/features/shell/zoom'
+import { useViewStore } from '@renderer/features/shell/viewStore'
+import { wheelZoomStepFor, zoomStepFor } from '@renderer/features/shell/zoom'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
@@ -97,6 +98,14 @@ export function App(): React.JSX.Element {
     // F-15.9: the Supporter license is a local cache, so it is read at start whether anyone is
     // signed in or not; main pushes it again after a background refresh, a sign-in, or a sign-out.
     void useAccountStore.getState().loadSupporter()
+    // F-7.10: the document zoom is app-wide and the editor multiplies the project's formatting by
+    // it, so it is read here — before any project opens, which is before an editor mounts — and
+    // the writing surface is at the author's level on its first paint. (The interface size is
+    // already on the window: main applied it before the first frame.)
+    useViewStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
     // F-15.7: updates are app-wide too, and main pushes the state from the background check and
     // the download, so the subscription is opened here once rather than by the Settings tab.
     const offUpdates = useUpdateStore.getState().subscribe()
@@ -485,12 +494,15 @@ function SettingsShortcut(): null {
 }
 
 /**
- * Zoom shortcuts (F-7.10): Ctrl+= / Ctrl+- / Ctrl+0 scale the whole window through the same
- * `zoomWindow` the View menu runs. The listener runs in the capture phase and stops the event,
- * so nothing inside the page sees the chord, and `preventDefault` is also what keeps the native
- * accelerator — the menu's fallback for a key the page ignored — from zooming a second time.
- * Mounted always, beside `SettingsShortcut`, so the welcome screen and focus mode zoom too;
- * renders nothing.
+ * Document zoom input (F-7.10): Ctrl+= / Ctrl+- / Ctrl+0 and Ctrl+wheel scale the writing
+ * surface through the same `zoomDocument` the View menu runs. Both listeners run in the capture
+ * phase and stop the event, so nothing inside the page sees the chord or scrolls under the
+ * wheel, and `preventDefault` is also what keeps the native accelerator — the menu's fallback
+ * for a key the page ignored — from stepping a second time, and Chromium's own Ctrl+wheel page
+ * zoom from running in parallel. The wheel needs `{ passive: false }` for that. One wheel notch
+ * is one step: `wheelZoomStepFor` drops the deltas that follow a step, because a notch (and a
+ * trackpad pinch, which arrives as Ctrl+wheel) emits several. Mounted always, beside
+ * `SettingsShortcut`, so the welcome screen and focus mode zoom too; renders nothing.
  */
 function ZoomShortcuts(): null {
   useEffect(() => {
@@ -499,10 +511,27 @@ function ZoomShortcuts(): null {
       if (!step) return
       event.preventDefault()
       event.stopPropagation()
-      void zoomWindow(step)
+      void useViewStore.getState().zoomDocument(step)
+    }
+    let lastWheelAt: number | null = null
+    const onWheel = (event: WheelEvent): void => {
+      // Every Ctrl+wheel is the zoom's, even the ones inside a burst: the page must not scroll
+      // and the browser must not zoom itself while the author is stepping the document.
+      if (!event.ctrlKey || event.altKey || event.metaKey) return
+      event.preventDefault()
+      event.stopPropagation()
+      const now = Date.now()
+      const step = wheelZoomStepFor(event, now, lastWheelAt)
+      if (!step) return
+      lastWheelAt = now
+      void useViewStore.getState().zoomDocument(step)
     }
     document.addEventListener('keydown', onKeyDown, true)
-    return () => document.removeEventListener('keydown', onKeyDown, true)
+    document.addEventListener('wheel', onWheel, { capture: true, passive: false })
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true)
+      document.removeEventListener('wheel', onWheel, true)
+    }
   }, [])
   return null
 }

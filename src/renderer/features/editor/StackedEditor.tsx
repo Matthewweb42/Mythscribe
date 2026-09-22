@@ -7,6 +7,7 @@ import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { descendantDocuments, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { useEditorZoom } from '@renderer/features/shell/viewStore'
 import { describeError } from '@renderer/lib/errors'
 import { COLUMN, editorStyle } from './column'
 import { DocumentEditor } from './DocumentEditor'
@@ -56,6 +57,8 @@ export function StackedEditor({
   const [active, setActive] = useState<ActiveRegion | null>(null)
   const words = useTreeStore((s) => s.wordCountRollup[folderId] ?? 0)
   const settings = useEditorSettings(format)
+  // F-7.10: the stack is a writing surface too, so it takes the app-wide document zoom.
+  const zoom = useEditorZoom()
   // A region that leaves the stack (deleted, moved out) takes its editor with it; the toolbar
   // must not keep pointing at it. Membership is decided here, at render, because Tiptap destroys
   // an unmounted editor on a timer, so `isDestroyed` alone would lag behind.
@@ -73,7 +76,7 @@ export function StackedEditor({
     )
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={editorStyle(settings)}>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={editorStyle(settings, zoom)}>
       {focus ? null : (
         <Toolbar
           editor={editor}

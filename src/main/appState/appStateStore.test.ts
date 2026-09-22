@@ -7,7 +7,7 @@ import { defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultSupporterSettings } from '@shared/license'
 import { RELEASE_NOTES_MAX, defaultUpdateSettings } from '@shared/updates'
-import { DEFAULT_ZOOM } from '@shared/zoom'
+import { defaultViewSettings } from '@shared/zoom'
 import { defaultAiUsageState } from '../ai/dailyCap'
 import { AppStateStore, EMPTY_APP_STATE } from './appStateStore'
 
@@ -48,7 +48,7 @@ describe('AppStateStore', () => {
       updates: defaultUpdateSettings(),
       diagnostics: defaultDiagnosticsSettings(),
       supporter: defaultSupporterSettings(),
-      zoom: DEFAULT_ZOOM
+      view: defaultViewSettings()
     })
   })
 
@@ -252,20 +252,22 @@ describe('AppStateStore', () => {
     expect(new AppStateStore(file).get().diagnostics).toEqual(diagnostics)
   })
 
-  it('parses a file written before F-7.10 (no zoom) as 100 %', () => {
+  it('parses a file written before F-7.10 (no view) as 100 % and Medium', () => {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
-    expect(new AppStateStore(file).get().zoom).toBe(DEFAULT_ZOOM)
-    expect(EMPTY_APP_STATE.zoom).toBe(DEFAULT_ZOOM)
+    expect(new AppStateStore(file).get().view).toEqual(defaultViewSettings())
+    expect(EMPTY_APP_STATE.view).toEqual(defaultViewSettings())
   })
 
-  it('round-trips a zoom factor and refuses one outside 67–200 %', () => {
+  it('round-trips the view settings and refuses a zoom outside 67–200 %', () => {
     const store = new AppStateStore(file)
-    expect(store.update((s) => ({ ...s, zoom: 1.25 })).zoom).toBe(1.25)
-    expect(new AppStateStore(file).get().zoom).toBe(1.25)
-    expect(() => store.update((s) => ({ ...s, zoom: 2.5 }))).toThrow()
-    expect(() => store.update((s) => ({ ...s, zoom: 0.5 }))).toThrow()
-    expect(new AppStateStore(file).get().zoom).toBe(1.25)
+    expect(
+      store.update((s) => ({ ...s, view: { editorZoom: 1.25, uiScale: 'large' } })).view
+    ).toEqual({ editorZoom: 1.25, uiScale: 'large' })
+    expect(new AppStateStore(file).get().view).toEqual({ editorZoom: 1.25, uiScale: 'large' })
+    expect(() => store.update((s) => ({ ...s, view: { ...s.view, editorZoom: 2.5 } }))).toThrow()
+    expect(() => store.update((s) => ({ ...s, view: { ...s.view, editorZoom: 0.5 } }))).toThrow()
+    expect(new AppStateStore(file).get().view).toEqual({ editorZoom: 1.25, uiScale: 'large' })
   })
 
   it('warns and falls back to the empty state when the stored model mapping is invalid', () => {

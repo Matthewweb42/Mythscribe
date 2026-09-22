@@ -846,20 +846,71 @@ test('create, close, reopen a project on disk', async () => {
     await getLayout()
   )
 
-  // F-7.10: Ctrl+= scales the whole window through Electron's zoom factor (one step up: 110 %)
-  // and the toast says where it landed; Ctrl+0 puts it back. The level is app-wide, so it lands
-  // in app-state.json beside the layout — and every later step assumes 100 %.
-  const zoomPercent = (): Promise<number> =>
+  // F-7.10: Ctrl+= scales the writing surface only — one step up is 110 % of the project's font
+  // size and column width (16 px and 700 px here, the web-novel defaults) — and leaves the
+  // window's zoom factor at 100 %, which is where the interface size lives. Ctrl+wheel steps it
+  // the same way, Settings › Appearance sets the interface size, and Ctrl+0 puts the document
+  // back. Both are app-wide, so they land in app-state.json beside the layout — and every later
+  // step assumes 100 % and Medium.
+  const windowZoom = (): Promise<number> =>
     app.evaluate(({ BrowserWindow }) =>
       Math.round((BrowserWindow.getAllWindows()[0]?.webContents.getZoomFactor() ?? 0) * 100)
     )
-  expect(await zoomPercent()).toBe(100)
+  /** The editing surface's font size and column width in CSS px, as the browser resolved them. */
+  const documentSize = (): Promise<{ font: number; column: number }> =>
+    page.getByRole('textbox', { name: 'Document' }).evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        font: parseFloat(style.fontSize),
+        column: parseFloat(style.getPropertyValue('--ms-editor-max-width'))
+      }
+    })
+  expect(await windowZoom()).toBe(100)
+  expect(await documentSize()).toEqual({ font: 16, column: 700 })
   await page.keyboard.press('Control+=')
-  await expect.poll(zoomPercent, { timeout: 3000 }).toBe(110)
-  await expect(page.getByRole('status').filter({ hasText: 'Zoom' })).toContainText('Zoom 110 %')
+  await expect.poll(async () => (await documentSize()).font, { timeout: 3000 }).toBeCloseTo(17.6, 1)
+  expect((await documentSize()).column).toBeCloseTo(770, 0)
+  await expect(page.getByRole('status').filter({ hasText: 'Document zoom' })).toContainText(
+    'Document zoom 110 %'
+  )
+  // The document zoom is not the window's: Chromium's own Ctrl+zoom never runs.
+  expect(await windowZoom()).toBe(100)
+  // One wheel notch with Ctrl held is one more step (125 %); the deltas of the notch coalesce.
+  const editorBox = await page.getByRole('textbox', { name: 'Document' }).boundingBox()
+  if (!editorBox) throw new Error('editor not laid out')
+  await page.mouse.move(editorBox.x + editorBox.width / 2, editorBox.y + 20)
+  await page.keyboard.down('Control')
+  await page.mouse.wheel(0, -120)
+  await page.keyboard.up('Control')
+  await expect.poll(async () => (await documentSize()).font, { timeout: 3000 }).toBeCloseTo(20, 1)
+  expect(await windowZoom()).toBe(100)
+
+  // Settings › Appearance is app-wide (it is there without a project too): Large scales the
+  // chrome through the window's zoom factor, and the document zoom above is untouched.
+  const appearance = page.getByRole('dialog', { name: 'Settings' })
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await appearance.getByRole('tab', { name: 'Appearance' }).click()
+  await expect(appearance.getByTestId('appearance-document-zoom')).toHaveText('125 %')
+  await appearance.getByTestId('appearance-ui-scale-large').click()
+  await expect.poll(windowZoom, { timeout: 3000 }).toBe(115)
+  await expect(appearance.getByTestId('appearance-ui-scale-large')).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  expect((await documentSize()).font).toBeCloseTo(20, 1)
+  // Back to Medium, so the rest of the test measures an unscaled window.
+  await appearance.getByTestId('appearance-ui-scale-medium').click()
+  await expect.poll(windowZoom, { timeout: 3000 }).toBe(100)
+  await appearance.getByRole('button', { name: 'Close settings' }).click()
+  await expect(appearance).toHaveCount(0)
+
   await page.keyboard.press('Control+0')
-  await expect.poll(zoomPercent, { timeout: 3000 }).toBe(100)
-  expect((JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { zoom: number }).zoom).toBe(1)
+  await expect.poll(async () => (await documentSize()).font, { timeout: 3000 }).toBe(16)
+  await expect
+    .poll(() => (JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { view: unknown }).view, {
+      timeout: 3000
+    })
+    .toEqual({ editorZoom: 1, uiScale: 'medium' })
 
   const sidebarToggle = page.getByRole('button', { name: 'Sidebar', exact: true })
   await expect(sidebarToggle).toHaveAttribute('aria-pressed', 'true')

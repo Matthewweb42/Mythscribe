@@ -1,24 +1,12 @@
 import type { MenuItemId } from '@shared/menu'
-import { formatZoom, type ZoomStep } from '@shared/zoom'
-import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import type { ZoomStep } from '@shared/zoom'
 import { APP_SHORTCUTS, matchesShortcut, type Chord } from '@renderer/features/shell/shortcuts'
-import { describeError } from '@renderer/lib/errors'
-import { ipc } from '@renderer/lib/ipc'
 
 /**
- * View zoom (F-7.10): main owns the factor — it steps the persisted one, scales the window, and
- * answers what it applied — so this side only asks and announces. The announcement is a toast
- * (F-7.6), not the status bar, because the zoom works on the welcome screen too, where there is
- * no status bar. A failure says its cause and changes nothing.
+ * How a keystroke, a Ctrl+wheel, or a View item turns into a document-zoom step (F-7.10). The
+ * step itself is run by `viewStore.zoomDocument`, which is the one owner of the value and of the
+ * announcement; this file is only the input side, and every function here is pure.
  */
-export async function zoomWindow(step: ZoomStep): Promise<void> {
-  try {
-    const { factor } = await ipc().invoke('window:zoom', { step })
-    toast.info(`Zoom ${formatZoom(factor)}`)
-  } catch (err) {
-    toast.error(describeError(err))
-  }
-}
 
 /** The View › Zoom items (F-7.1) and the step each one asks for. */
 export const ZOOM_MENU_STEPS = {
@@ -45,4 +33,28 @@ export function zoomStepFor(
   event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey'>
 ): ZoomStep | null {
   return ZOOM_CHORDS.find(([chord]) => matchesShortcut(event, chord))?.[1] ?? null
+}
+
+/**
+ * How long after a wheel step the next one is ignored (F-7.10). One notch of a real wheel emits
+ * several deltas, and a trackpad pinch arrives on Windows as Ctrl+wheel with a stream of small
+ * ones; a burst is one step, which is what a browser does too.
+ */
+export const WHEEL_ZOOM_COALESCE_MS = 150
+
+/**
+ * The step a Ctrl+wheel asks for, or null when it is not a zoom or it falls inside the burst
+ * that follows the last step. Ctrl only (Alt+wheel is the OS's, and the plain wheel scrolls);
+ * up is in, down is out, and a wheel that reported no vertical movement asks for nothing.
+ * `lastAt` is when the last step was taken, or null when there has been none.
+ */
+export function wheelZoomStepFor(
+  event: Pick<WheelEvent, 'ctrlKey' | 'altKey' | 'metaKey' | 'deltaY'>,
+  now: number,
+  lastAt: number | null
+): ZoomStep | null {
+  if (!event.ctrlKey || event.altKey || event.metaKey) return null
+  if (event.deltaY === 0) return null
+  if (lastAt !== null && now - lastAt < WHEEL_ZOOM_COALESCE_MS) return null
+  return event.deltaY < 0 ? 'in' : 'out'
 }

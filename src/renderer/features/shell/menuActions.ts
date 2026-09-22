@@ -19,7 +19,8 @@ import { useWelcomeStore } from '@renderer/features/project/welcomeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
-import { ZOOM_MENU_STEPS, zoomWindow } from '@renderer/features/shell/zoom'
+import { useViewStore } from '@renderer/features/shell/viewStore'
+import { ZOOM_MENU_STEPS } from '@renderer/features/shell/zoom'
 import { useUpdateStore } from '@renderer/features/updates/updateStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -75,8 +76,8 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
       case 'zoomIn':
       case 'zoomOut':
       case 'zoomReset':
-        // F-7.10: app-wide, so it runs without a project; `zoomWindow` announces the new factor.
-        await zoomWindow(ZOOM_MENU_STEPS[id])
+        // F-7.10: app-wide, so it runs without a project; the store announces the new level.
+        await useViewStore.getState().zoomDocument(ZOOM_MENU_STEPS[id])
         return
       case 'checkForUpdates':
         // F-15.7: the Updates tab is where the answer shows, so it opens with the check.

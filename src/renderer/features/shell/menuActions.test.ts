@@ -23,6 +23,7 @@ import {
   resetShellDialogStore,
   useShellDialogStore
 } from '@renderer/features/shell/shellDialogStore'
+import { resetViewStore, useViewStore } from '@renderer/features/shell/viewStore'
 import { resetUpdateStore, useUpdateStore } from '@renderer/features/updates/updateStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { NO_PROJECT_MESSAGE, closeProjectWithConfirm, runMenuAction } from './menuActions'
@@ -95,6 +96,7 @@ beforeEach(() => {
   resetLayoutStore()
   resetShellDialogStore()
   resetUpdateStore()
+  resetViewStore()
   resetWelcomeStore()
   useProjectStore.setState({ current: null, ready: true, busy: false, recents: [] })
   useTreeStore.getState().clear()
@@ -261,16 +263,17 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useFocusStore.getState().active).toBe(true)
   })
 
-  it('View › Zoom in / Zoom out / Reset zoom run without a project and announce the factor (F-7.10)', async () => {
-    install({ 'window:zoom': { factor: 1.1 } })
+  it('View › Zoom in / Zoom out / Reset zoom run without a project and announce the level (F-7.10)', async () => {
+    install({ 'view:zoomDocument': { editorZoom: 1.1, uiScale: 'medium' } })
     await runMenuAction('zoomIn')
-    expect(invoke).toHaveBeenLastCalledWith('window:zoom', { step: 'in' })
-    install({ 'window:zoom': { factor: 1 } })
+    expect(invoke).toHaveBeenLastCalledWith('view:zoomDocument', { step: 'in' })
+    install({ 'view:zoomDocument': { editorZoom: 1, uiScale: 'medium' } })
     await runMenuAction('zoomOut')
-    expect(invoke).toHaveBeenLastCalledWith('window:zoom', { step: 'out' })
+    expect(invoke).toHaveBeenLastCalledWith('view:zoomDocument', { step: 'out' })
     await runMenuAction('zoomReset')
-    expect(invoke).toHaveBeenLastCalledWith('window:zoom', { step: 'reset' })
-    expect(toasts()).toEqual(['Zoom 110 %', 'Zoom 100 %', 'Zoom 100 %'])
+    expect(invoke).toHaveBeenLastCalledWith('view:zoomDocument', { step: 'reset' })
+    expect(toasts()).toEqual(['Document zoom 110 %', 'Document zoom 100 %', 'Document zoom 100 %'])
+    expect(useViewStore.getState().editorZoom).toBe(1)
   })
 
   it('View › Notes / AI assistant float on the focus flags in focus mode, leaving the layout alone', async () => {

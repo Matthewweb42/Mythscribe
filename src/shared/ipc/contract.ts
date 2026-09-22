@@ -54,7 +54,7 @@ import { TagTemplateId } from '../tagTemplates'
 import { TiptapNode } from '../tiptap'
 import { UpdateChannel, UpdateState } from '../updates'
 import { VOICE_EXEMPLAR_TEXT_MAX, VOICE_EXEMPLAR_TEXT_MIN, VoiceExemplarKind } from '../voice'
-import { ZoomFactor, ZoomStep } from '../zoom'
+import { UiScale, ViewSettings, ZoomStep } from '../zoom'
 
 /**
  * The single IPC contract shared by main, preload, and renderer.
@@ -1104,14 +1104,25 @@ export const contract = {
     input: z.object({ on: z.boolean() }),
     output: z.object({ on: z.boolean() })
   },
+  /** The view settings (F-7.10) as they stand, for the renderer's mirror at start. */
+  'view:get': { input: z.undefined(), output: ViewSettings },
   /**
-   * View zoom (F-7.10): steps the window's zoom factor in or out, or back to 100 %. Main owns
-   * the factor — it steps the persisted one, scales the window, and answers what it applied, so
-   * the renderer keeps no zoom state of its own and only announces the answer.
+   * Document zoom (F-7.10): steps the manuscript's zoom in or out, or back to 100 %. Main owns
+   * the value — it steps the persisted one and answers the pair — and the renderer applies the
+   * multiplier to the editing surface; the window itself is not scaled by this.
    */
-  'window:zoom': {
+  'view:zoomDocument': {
     input: z.object({ step: ZoomStep }),
-    output: z.object({ factor: ZoomFactor })
+    output: ViewSettings
+  },
+  /**
+   * Interface size (F-7.10): main persists the setting and applies its factor to every live
+   * window, so the chrome (and with it the document, which sits inside the window) resizes at
+   * once and comes back the same size on the next launch.
+   */
+  'view:setUiScale': {
+    input: z.object({ scale: UiScale }),
+    output: ViewSettings
   },
   /**
    * Menu bar (F-7.1): an Edit item of the in-app bar runs the same `webContents` edit command

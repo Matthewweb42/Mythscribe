@@ -32,7 +32,7 @@ import {
   UNAVAILABLE_SUMMARY,
   type SceneSummaryState
 } from '@shared/summary'
-import { nextZoom } from '@shared/zoom'
+import { UI_SCALE_FACTORS, nextZoom } from '@shared/zoom'
 import type { AccountService } from '../account/accountService'
 import type { DiagnosticsService } from '../diagnostics/diagnosticsService'
 import type { UpdateService } from '../updates/updateService'
@@ -115,7 +115,7 @@ export interface ClosableWindow extends EmitTarget {
   isFullScreen(): boolean
   /**
    * `send` for events, the edit commands the in-app Edit menu runs (F-7.1), and the window's
-   * zoom factor (F-7.10).
+   * zoom factor, which carries the interface size (F-7.10).
    */
   webContents: EmitTarget['webContents'] &
     Record<EditRole, () => void> & { setZoomFactor(factor: number): void }
@@ -1119,14 +1119,24 @@ export function registerHandlers({
     return { on: win.isFullScreen() }
   })
 
-  // F-7.10: main owns the zoom. It steps the persisted factor, writes it (so the next launch
-  // restores it), scales every live window — the level is app-wide — and answers what it
-  // applied, which is what the renderer announces.
-  register('window:zoom', ({ step }) => {
-    const factor = nextZoom(appState.get().zoom, step)
-    appState.update((s) => ({ ...s, zoom: factor }))
+  // F-7.10: main owns both view settings, so the renderer's mirror starts from this.
+  register('view:get', () => appState.get().view)
+
+  // F-7.10: the document zoom is the renderer's to apply (it scales the editing surface, not the
+  // window), so main only steps the persisted value — the next launch opens at the same level —
+  // and answers the pair the renderer mirrors and announces.
+  register('view:zoomDocument', ({ step }) => {
+    const editorZoom = nextZoom(appState.get().view.editorZoom, step)
+    return appState.update((s) => ({ ...s, view: { ...s.view, editorZoom } })).view
+  })
+
+  // F-7.10: the interface size is the window's zoom factor, so main writes it (the next launch
+  // restores it) and applies it to every live window — the size is app-wide.
+  register('view:setUiScale', ({ scale }) => {
+    const view = appState.update((s) => ({ ...s, view: { ...s.view, uiScale: scale } })).view
+    const factor = UI_SCALE_FACTORS[scale]
     for (const w of windows()) if (!w.isDestroyed()) w.webContents.setZoomFactor(factor)
-    return { factor }
+    return view
   })
 
   // F-7.1: the in-app Edit menu edits whatever has the focus, like the native roles do. A click

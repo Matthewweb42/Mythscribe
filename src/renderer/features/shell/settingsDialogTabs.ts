@@ -1,14 +1,24 @@
 import { createElement, type ReactNode } from 'react'
-import { Activity, Download, Sparkles, Type, UserRound, type LucideIcon } from 'lucide-react'
+import {
+  Activity,
+  Download,
+  Monitor,
+  Sparkles,
+  Type,
+  UserRound,
+  type LucideIcon
+} from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { AccountSettingsTab } from '@renderer/features/account/AccountSettingsTab'
 import { AiSettingsTab } from '@renderer/features/ai/AiSettingsTab'
 import { DiagnosticsSettingsTab } from '@renderer/features/diagnostics/DiagnosticsSettingsTab'
 import { EditorSettingsTab } from '@renderer/features/editor/EditorSettingsTab'
 import { UpdatesSettingsTab } from '@renderer/features/updates/UpdatesSettingsTab'
+import { AppearanceSettingsTab } from './AppearanceSettingsTab'
 
 /** The ids of the Settings dialog tabs (F-7.5). Not persisted: the dialog opens on the first. */
-export type SettingsDialogTabId = 'editor' | 'ai' | 'account' | 'updates' | 'diagnostics'
+export type SettingsDialogTabId =
+  'editor' | 'ai' | 'appearance' | 'account' | 'updates' | 'diagnostics'
 
 interface SettingsDialogTabBase {
   id: SettingsDialogTabId
@@ -32,7 +42,8 @@ export type SettingsDialogTabs = readonly [SettingsDialogTab, ...SettingsDialogT
  * listed, so there is never a placeholder to click. The AI tab (F-5.1) holds the provider and
  * key with the dial, presets, and behaviour (F-14.4, F-5.2); the Account tab (F-15.2) the
  * optional MythScribe account; the Updates tab (F-15.7) the channel and the update state; the
- * Diagnostics tab (F-15.8) the opt-in crash and usage reports, which install off.
+ * Diagnostics tab (F-15.8) the opt-in crash and usage reports, which install off. The Appearance
+ * tab (F-7.10) is app-wide, so the interface size can be fixed from the welcome screen.
  */
 export const SETTINGS_DIALOG_TABS: SettingsDialogTabs = [
   {
@@ -48,6 +59,13 @@ export const SETTINGS_DIALOG_TABS: SettingsDialogTabs = [
     icon: Sparkles,
     scope: 'project',
     render: () => createElement(AiSettingsTab)
+  },
+  {
+    id: 'appearance',
+    label: 'Appearance',
+    icon: Monitor,
+    scope: 'app',
+    render: () => createElement(AppearanceSettingsTab)
   },
   {
     id: 'account',
