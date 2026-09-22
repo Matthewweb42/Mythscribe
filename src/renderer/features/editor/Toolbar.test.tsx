@@ -183,7 +183,7 @@ describe('Toolbar', () => {
     await userEvent.click(button('Align center'))
     await waitFor(() => expect(button('Align center')).toHaveAttribute('aria-pressed', 'true'))
     expect(button('Align left')).toHaveAttribute('aria-pressed', 'false')
-    expect(editor.getJSON().content?.[0]?.attrs).toEqual({ textAlign: 'center' })
+    expect(editor.getJSON().content?.[0]?.attrs).toEqual({ textAlign: 'center', origin: null })
 
     await userEvent.click(button('Block quote'))
     await waitFor(() => expect(button('Block quote')).toHaveAttribute('aria-pressed', 'true'))

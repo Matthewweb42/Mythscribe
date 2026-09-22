@@ -129,6 +129,8 @@ let exportPath: string | null
 let chosenImages: string[] | null
 /** The default name and directory the last export dialog was asked for. */
 let exportAsked: { defaultName: string; directory: string | undefined } | null
+/** What the fake import dialog answers (F-12.2); null cancels. */
+let manuscriptPath: string | null
 
 const UNSUPPORTED_UPDATES =
   'This is a development build; updates are installed by the released app.'
@@ -170,7 +172,8 @@ const dialogs: ProjectDialogs = {
     exportAsked = { defaultName, directory }
     return exportPath
   },
-  chooseImages: async () => chosenImages
+  chooseImages: async () => chosenImages,
+  chooseManuscriptFile: async () => manuscriptPath
 }
 
 beforeEach(() => {
@@ -180,6 +183,7 @@ beforeEach(() => {
   exportPath = null
   exportAsked = null
   chosenImages = null
+  manuscriptPath = null
   manager = new ProjectManager()
   fullScreen = false
   fakeWin = {
@@ -4074,5 +4078,94 @@ describe('provenance handlers (F-14.6)', () => {
     expect(await invoke('provenance:export', undefined)).toBeNull()
     expect(exportAsked?.defaultName).toBe('Ledger-ai-disclosure.md')
     expect(fs.readdirSync(tmp).filter((f) => f.endsWith('.md'))).toEqual([])
+  })
+})
+
+// F-12.2: the two channels around the review dialog. The heuristics and the write have their own
+// tests under `src/main/import/`; these cover the wiring — the dialog, the errors, and the rows
+// the renderer merges into its tree.
+describe('manuscript import', () => {
+  async function ready(): Promise<void> {
+    await invoke('project:create', { name: 'Imported', format: 'novel', directory: tmp })
+  }
+
+  function write(name: string, text: string): string {
+    const file = path.join(tmp, name)
+    fs.writeFileSync(file, text)
+    return file
+  }
+
+  const MARKDOWN =
+    '# Chapter One\n\nThe bell rang.\n\n* * *\n\nMorning came.\n\n# Chapter Two\n\nShe left.\n'
+
+  it('reads the file the dialog answers and builds a draft without writing anything', async () => {
+    await ready()
+    const before = await invoke('tree:list', undefined)
+    manuscriptPath = write('Book.md', MARKDOWN)
+
+    const draft = await invoke('import:open', {})
+    expect(draft?.source).toEqual({ name: 'Book.md', format: 'md', words: 7, paragraphs: 3 })
+    expect(draft?.parts[0]?.title).toBe('Book')
+    expect(
+      draft?.parts[0]?.chapters.map((chapter) => [chapter.title, chapter.scenes.length])
+    ).toEqual([
+      ['Chapter One', 2],
+      ['Chapter Two', 1]
+    ])
+    expect(await invoke('tree:list', undefined)).toHaveLength(before.length)
+  })
+
+  it('answers null when the dialog is cancelled', async () => {
+    await ready()
+    expect(await invoke('import:open', {})).toBeNull()
+  })
+
+  it('reports an unsupported file and an unreadable one as VALIDATION', async () => {
+    await ready()
+    await expect(invoke('import:open', { path: write('Book.rtf', 'x') })).rejects.toThrowError(
+      /^VALIDATION: Unsupported file type/
+    )
+    await expect(
+      invoke('import:open', { path: path.join(tmp, 'missing.md') })
+    ).rejects.toThrowError(/^VALIDATION: Could not read the file/)
+    await expect(invoke('import:open', { path: write('Empty.md', '\n\n') })).rejects.toThrowError(
+      /^VALIDATION: The file has no text to import\./
+    )
+  })
+
+  it('commits the draft and answers the created nodes and the words', async () => {
+    await ready()
+    const draft = await invoke('import:open', { path: write('Book.md', MARKDOWN) })
+    if (!draft) throw new Error('expected a draft')
+
+    const result = await invoke('import:commit', { draft })
+    expect(result.words).toBe(7)
+    expect(result.nodes.map((node) => node.title)).toEqual([
+      'Book',
+      'Chapter One',
+      'Scene 1',
+      'Scene 2',
+      'Chapter Two',
+      'Scene 1'
+    ])
+    const rows = await invoke('tree:list', undefined)
+    expect(rows.filter((row) => row.title === 'Book')).toHaveLength(1)
+    const scene = result.nodes[2]
+    const stored = await invoke('document:get', { id: scene?.id ?? '' })
+    expect(stored.content?.content?.[0]).toMatchObject({ attrs: { origin: 'imported' } })
+  })
+
+  it('reports a draft with nothing left to import as VALIDATION', async () => {
+    await ready()
+    const draft = await invoke('import:open', { path: write('Book.md', MARKDOWN) })
+    if (!draft) throw new Error('expected a draft')
+    const empty = { ...draft, parts: draft.parts.map((part) => ({ ...part, excluded: true })) }
+    await expect(invoke('import:commit', { draft: empty })).rejects.toThrowError(
+      /^VALIDATION: Nothing selected to import\./
+    )
+  })
+
+  it('reports NO_PROJECT for both channels when nothing is open', async () => {
+    await expect(invoke('import:open', {})).rejects.toThrowError(/^NO_PROJECT: /)
   })
 })

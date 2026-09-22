@@ -15,6 +15,15 @@ export const AI_ORIGIN_MARK = 'aiOrigin'
  */
 export const AI_ORIGIN_KEEP_RATIO = 0.5
 
+/**
+ * Imported prose (F-12.2) is marked at the paragraph, not the text: every paragraph the importer
+ * creates carries `attrs.origin = 'imported'` (rendered as `data-origin`), so it stays
+ * distinguishable from AI-origin marks and from what the author types afterwards. A paragraph
+ * the author starts after an imported one has no origin.
+ */
+export const PARAGRAPH_ORIGIN_ATTR = 'origin'
+export const IMPORTED_ORIGIN = 'imported'
+
 export interface AiOriginAttrs {
   /** The `ai_proposal` row the text was accepted from (F-14.5). */
   proposalId: string

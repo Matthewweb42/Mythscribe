@@ -36,6 +36,7 @@ import {
 } from '../diagnostics'
 import { EditorSettings } from '../editorSettings'
 import { Background, FocusSettings } from '../focus'
+import { ImportDraft } from '../import'
 import { IndexQueueStatus } from '../jobs'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
@@ -1122,6 +1123,23 @@ export const contract = {
    * path; null when the dialog is cancelled.
    */
   'provenance:export': { input: z.undefined(), output: z.object({ path: z.string() }).nullable() },
+  /**
+   * Manuscript import (F-12.2), step one: the author picks a DOCX, Markdown, or plain-text file
+   * (`path` skips the dialog, as for `project:open`), main reads it and answers the structure
+   * draft; null when the dialog is cancelled. An unsupported extension, an unreadable file, or a
+   * file with no text is VALIDATION with the cause. Nothing is written.
+   */
+  'import:open': { input: z.object({ path: z.string().optional() }), output: ImportDraft.nullable() },
+  /**
+   * Step two: writes the reviewed draft into the open project in one transaction (parts,
+   * chapters, scenes after the existing manuscript nodes; front/back-matter chapters as one
+   * generic document each under their section) and answers the created rows in creation order
+   * plus the words imported. A draft with nothing left to import is VALIDATION.
+   */
+  'import:commit': {
+    input: z.object({ draft: ImportDraft }),
+    output: z.object({ nodes: z.array(TreeNode), words: z.number().int() })
+  },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },
   /** The renderer could not flush, so the close it was asked for (and any quit behind it) is abandoned. */

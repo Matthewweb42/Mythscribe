@@ -12,6 +12,8 @@ import {
 import { resetDocumentStore, useDocumentStore } from '@renderer/features/editor/documentStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
+import { draftFixture } from '@renderer/features/import/draftFixture'
+import { resetImportStore, useImportStore } from '@renderer/features/import/importStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -93,6 +95,7 @@ beforeEach(() => {
   resetDocumentStore()
   resetActiveEditorStore()
   resetFocusStore()
+  resetImportStore()
   resetLayoutStore()
   resetShellDialogStore()
   resetUpdateStore()
@@ -183,6 +186,15 @@ describe('runMenuAction (F-7.1)', () => {
     expect(invoke).toHaveBeenCalledWith('project:open', { path: undefined })
     expect(useProjectStore.getState().current?.name).toBe('Other')
     expect(toasts()).toEqual(['Opened "Other"'])
+  })
+
+  it('File › Import manuscript… asks main for a draft and holds it for review (F-12.2)', async () => {
+    await withProject()
+    install({ 'import:open': draftFixture() })
+    await runMenuAction('importManuscript')
+    expect(invoke).toHaveBeenCalledWith('import:open', {})
+    expect(useImportStore.getState().draft?.source.name).toBe('novel.docx')
+    expect(toasts()).toEqual([])
   })
 
   it('File › Save writes the pending document now', async () => {

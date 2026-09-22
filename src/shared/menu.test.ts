@@ -116,6 +116,26 @@ describe('menu definition (F-7.1)', () => {
     expect(isMenuItemEnabled(byId.zoomIn!, false)).toBe(true)
   })
 
+  it('offers Import manuscript… in File, after Open project…, only with a project (F-12.2)', () => {
+    const file = MENU.find((section) => section.id === 'file')
+    expect(
+      (file?.entries ?? []).map((entry) => (isSeparator(entry) ? 'separator' : entry.id))
+    ).toEqual([
+      'newProject',
+      'openProject',
+      'importManuscript',
+      'separator',
+      'saveDocument',
+      'separator',
+      'closeProject'
+    ])
+    const [item] = menuItems().filter((entry) => entry.id === 'importManuscript')
+    expect(item?.label).toBe('Import manuscript…')
+    expect(menuItemChord(item!)).toBeNull()
+    expect(isMenuItemEnabled(item!, false)).toBe(false)
+    expect(isMenuItemEnabled(item!, true)).toBe(true)
+  })
+
   it('offers Check for updates… in Help, just before About (F-15.7)', () => {
     const help = MENU.find((section) => section.id === 'help')
     const ids = (help?.entries ?? [])

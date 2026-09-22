@@ -3196,6 +3196,105 @@ test('create, close, reopen a project on disk', async () => {
   // F-5.4: the conversations came back with the project (the panel stayed open in the layout).
   await expect(assistant).toBeVisible()
   await expect(assistant.getByRole('tab', { name: 'Why is Mara on the ridge?' })).toBeVisible()
+
+  // F-12.2: File › Import manuscript… reads a Markdown file into a structure draft (headings are
+  // chapters, `* * *` splits scenes), the author corrects it in the review dialog, and Import
+  // writes the nodes after the existing ones with `origin: imported` on every paragraph.
+  const importPath = path.join(tmp, 'the-ridge.md')
+  fs.writeFileSync(
+    importPath,
+    [
+      '# Chapter One',
+      '',
+      'The ridge was empty when Mara reached it.',
+      '',
+      'She waited *until dusk*.',
+      '',
+      '* * *',
+      '',
+      'Below, the lanterns of the village came on one by one.',
+      '',
+      '# Chapter Two',
+      '',
+      'Nobody came.',
+      ''
+    ].join('\n')
+  )
+  await stubOpenDialog(importPath)
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'File' })
+    .click()
+  await page
+    .getByRole('menu', { name: 'File' })
+    .getByRole('menuitem', { name: 'Import manuscript…' })
+    .click()
+  const importDialog = page.getByTestId('import-dialog')
+  await expect(importDialog).toBeVisible()
+  await expect(importDialog.getByTestId('import-question')).toContainText('Does this look right?')
+  await expect(importDialog.getByTestId('import-summary')).toContainText('3 scenes')
+  const importRows = importDialog.getByTestId('import-node')
+  await expect(importRows).toHaveText([
+    /the-ridge/,
+    /Chapter One/,
+    /Scene 1.*The ridge was empty when Mara reached it\./,
+    /Scene 2.*Below, the lanterns/,
+    /Chapter Two/,
+    /Scene 1.*Nobody came\./
+  ])
+  await importRows.nth(4).getByRole('button', { name: 'Chapter Two', exact: true }).click()
+  const importRename = importDialog.getByTestId('import-rename')
+  await importRename.fill('The Return')
+  await importRename.press('Enter')
+  await expect(importRows.nth(4)).toContainText('The Return')
+  const treeBefore = await listTree()
+  await importDialog.getByTestId('import-commit').click()
+  await expect(importDialog).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: 'Imported' })).toContainText(
+    'Imported 3 scenes (26 words)'
+  )
+  // 13, not 12: `countWords` counts per text leaf, so the italic run leaves the closing full stop
+  // as a token of its own (the editor counts a mid-sentence mark boundary the same way).
+  const treeAfter = await listTree()
+  const importedPart = treeAfter.find(
+    (n) => n.title === 'the-ridge' && !treeBefore.some((before) => before.id === n.id)
+  )
+  // Depth-first from the imported part (`tree:list` answers by parent and position, not creation order).
+  const walk = (parentId: string): TreeNode[] =>
+    treeAfter
+      .filter((n) => n.parentId === parentId)
+      .sort((a, b) => a.position - b.position)
+      .flatMap((n) => [n, ...walk(n.id)])
+  const imported = importedPart ? [importedPart, ...walk(importedPart.id)] : []
+  expect(imported.map((n) => [n.title, n.hierarchyLevel, n.wordCount])).toEqual([
+    ['the-ridge', 'part', 0],
+    ['Chapter One', 'chapter', 0],
+    ['Scene 1', 'scene', 13],
+    ['Scene 2', 'scene', 11],
+    ['The Return', 'chapter', 0],
+    ['Scene 1', 'scene', 2]
+  ])
+  const manuscriptRoot = treeAfter.find((n) => n.sectionType === 'manuscript')
+  expect(importedPart?.parentId).toBe(manuscriptRoot?.id)
+  expect(importedPart?.position).toBe(
+    treeBefore.filter((n) => n.parentId === manuscriptRoot?.id).length
+  )
+  // The first imported scene is selected and open; its paragraphs carry the provenance attribute.
+  const importedScene = imported[2]
+  await expect(tree.getByRole('treeitem', { name: 'The Return', exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Document' })).toContainText(
+    'The ridge was empty when Mara reached it.'
+  )
+  await expect(
+    page.getByRole('textbox', { name: 'Document' }).locator('p[data-origin="imported"]')
+  ).toHaveCount(2)
+  await expect(
+    page.getByRole('textbox', { name: 'Document' }).locator('em', { hasText: 'until dusk' })
+  ).toHaveCount(1)
+  expect(await documentText(importedScene?.id ?? '')).toBe(
+    'The ridge was empty when Mara reached it.\nShe waited until dusk.'
+  )
+
   const closed = app.waitForEvent('close')
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
   await closed

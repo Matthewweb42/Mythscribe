@@ -474,8 +474,15 @@ export function sessionDelta(
   return (state.wordCountRollup[id] ?? 0) - (state.sessionBaseline[id] ?? 0)
 }
 
-/** The collapse map with every ancestor from `parentId` up to the section root opened. */
-function expandAncestors(state: TreeState, parentId: string | null): Record<string, boolean> {
+/**
+ * The collapse map with every ancestor from `parentId` up to the section root opened. Exported
+ * for the merges that live outside this store (F-12.2's import writes a whole subtree and then
+ * reveals its first scene) so there is one owner of what "expand to it" means.
+ */
+export function expandAncestors(
+  state: Pick<TreeIndex, 'byId'> & { collapsed: Record<string, boolean> },
+  parentId: string | null
+): Record<string, boolean> {
   const collapsed = { ...state.collapsed }
   for (let id = parentId; id !== null; id = state.byId[id]?.parentId ?? null) {
     collapsed[id] = false

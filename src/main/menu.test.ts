@@ -69,6 +69,7 @@ describe('buildMenuTemplate (F-7.1)', () => {
     expect(submenu(template, 'File').map((e) => e.type ?? e.id)).toEqual([
       'newProject',
       'openProject',
+      'importManuscript',
       'separator',
       'saveDocument',
       'separator',

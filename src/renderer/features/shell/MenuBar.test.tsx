@@ -67,7 +67,7 @@ describe('MenuBar (F-7.1)', () => {
       within(file)
         .getAllByRole('menuitem')
         .map((m) => m.textContent)
-    ).toEqual(['New project', 'Open project…', 'SaveCtrl+S', 'Close project'])
+    ).toEqual(['New project', 'Open project…', 'Import manuscript…', 'SaveCtrl+S', 'Close project'])
     expect(within(file).getAllByRole('separator')).toHaveLength(2)
     expect(item('File', 'Save')).toHaveAttribute('aria-keyshortcuts', 'Ctrl+S')
     expect(item('File', 'Save')).not.toHaveAttribute('aria-disabled')

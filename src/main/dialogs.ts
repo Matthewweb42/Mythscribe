@@ -1,6 +1,7 @@
 import { app, dialog, type BrowserWindow } from 'electron'
 import path from 'node:path'
 import { BACKGROUND_EXTENSIONS } from '@shared/focus'
+import { IMPORT_EXTENSIONS } from '@shared/import'
 import { DB_FILE, PROJECT_EXTENSION, sanitizeName } from './project/projectStore'
 
 export interface ProjectDialogs {
@@ -19,6 +20,8 @@ export interface ProjectDialogs {
   ) => Promise<string | null>
   /** Returns the image files the user chose for focus-mode backgrounds (F-6.2), or null if cancelled. */
   chooseImages: () => Promise<string[] | null>
+  /** Returns the manuscript file the user chose to import (F-12.2), or null if cancelled. */
+  chooseManuscriptFile: () => Promise<string | null>
 }
 
 export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDialogs {
@@ -71,7 +74,30 @@ export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDia
       )
       if (result.canceled || result.filePaths.length === 0) return null
       return result.filePaths
+    },
+    async chooseManuscriptFile() {
+      const options = importOptions(defaultDir())
+      const result = await show((win) =>
+        win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
+      )
+      if (result.canceled) return null
+      return result.filePaths[0] ?? null
     }
+  }
+}
+
+/** The formats the importer reads (F-12.2), named so the author can see what to look for. */
+function importOptions(defaultDir: string): Electron.OpenDialogOptions {
+  const extensions = Object.values(IMPORT_EXTENSIONS).flatMap((list) => [...list])
+  return {
+    title: 'Import manuscript',
+    buttonLabel: 'Import',
+    defaultPath: defaultDir,
+    properties: ['openFile'],
+    filters: [
+      { name: `Manuscripts (${extensions.map((e) => `*.${e}`).join(', ')})`, extensions },
+      { name: 'All files', extensions: ['*'] }
+    ]
   }
 }
 

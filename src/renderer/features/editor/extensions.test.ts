@@ -181,6 +181,62 @@ describe('buildExtensions', () => {
   })
 })
 
+describe('imported paragraphs (F-12.2)', () => {
+  const imported: TiptapNodeT = {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        attrs: { origin: 'imported' },
+        content: [{ type: 'text', text: 'The storm broke at dusk.' }]
+      },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Mine, typed after.' }] }
+    ]
+  }
+
+  it('keeps the origin attribute on the document and renders it as data-origin', () => {
+    const view = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave }),
+      content: imported
+    })
+    const json = view.getJSON()
+    expect(json.content?.[0]?.attrs?.origin).toBe('imported')
+    // A paragraph the author starts afterwards has no origin, and renders no attribute.
+    expect(json.content?.[1]?.attrs?.origin).toBeNull()
+    expect(view.getHTML().match(/data-origin="imported"/g)).toHaveLength(1)
+    // The shared schema (and so the stored document) round-trips it.
+    expect(TiptapNode.parse(json)).toEqual(json)
+    view.destroy()
+  })
+
+  it('parses it back from the HTML flavour, so a copy between documents keeps the provenance', () => {
+    const view = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave }),
+      content: imported
+    })
+    const reloaded = new Editor({ extensions: buildExtensions({ sceneBreak: '~~~', onSave }) })
+    reloaded.commands.setContent(view.getHTML())
+    expect(reloaded.getJSON()).toEqual(view.getJSON())
+    // Only the importer's value is kept; anything else in the attribute is dropped.
+    reloaded.commands.setContent('<p data-origin="whatever">Hm.</p>')
+    expect(reloaded.getJSON().content?.[0]?.attrs?.origin).toBeNull()
+    view.destroy()
+    reloaded.destroy()
+  })
+
+  it('still takes the alignment TextAlign puts on paragraphs (F-3.1)', () => {
+    const view = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave }),
+      content: imported
+    })
+    view.commands.selectAll()
+    expect(view.commands.setTextAlign('center')).toBe(true)
+    const [first] = view.getJSON().content ?? []
+    expect(first?.attrs).toMatchObject({ origin: 'imported', textAlign: 'center' })
+    view.destroy()
+  })
+})
+
 describe('plain-text copy (F-3.13)', () => {
   /** What the clipboard's text/plain flavour gets for the whole document, as the component builds it. */
   const copiedText = (content: TiptapNodeT, inlineTagNodeId?: string): string => {

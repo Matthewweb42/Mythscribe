@@ -1,7 +1,9 @@
 import { canInsertNode, Extension, Node, type Extensions } from '@tiptap/core'
+import Paragraph from '@tiptap/extension-paragraph'
 import TextAlign from '@tiptap/extension-text-align'
 import { TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
+import { IMPORTED_ORIGIN, PARAGRAPH_ORIGIN_ATTR } from '@shared/provenance'
 import { AiOrigin } from './aiOrigin'
 import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
@@ -160,9 +162,35 @@ export const SceneBreak = Node.create<SceneBreakOptions>({
 })
 
 /**
+ * The paragraph with its import provenance (F-12.2): a paragraph the manuscript importer wrote
+ * carries `attrs.origin = 'imported'` and renders it as `data-origin="imported"`, so imported
+ * prose stays distinguishable from what the author typed afterwards (and from the AI-origin
+ * mark, F-14.6, which lives on text instead). Nothing in the editor sets the attribute; it rides
+ * on the document the importer stored, survives a round-trip through `getJSON`, and parses back
+ * from the HTML flavour of the clipboard. StarterKit's own paragraph is off in `buildExtensions`
+ * so this one is the schema's.
+ */
+export const OriginParagraph = Paragraph.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      [PARAGRAPH_ORIGIN_ATTR]: {
+        default: null,
+        parseHTML: (element: HTMLElement) =>
+          element.getAttribute('data-origin') === IMPORTED_ORIGIN ? IMPORTED_ORIGIN : null,
+        renderHTML: (attributes: Record<string, unknown>) =>
+          attributes[PARAGRAPH_ORIGIN_ATTR] === IMPORTED_ORIGIN
+            ? { 'data-origin': IMPORTED_ORIGIN }
+            : {}
+      }
+    }
+  }
+})
+
+/**
  * The one owner of the editor schema (F-3.1): StarterKit trimmed to what the spec lists (marks,
- * headings 1–3, block quote, hard break, undo/redo, cursors) plus text alignment on headings and
- * paragraphs, the scene-break block, the Ctrl+S save shortcut (F-3.2), and, for a manuscript
+ * headings 1–3, block quote, hard break, undo/redo, cursors) plus the paragraph that keeps its
+ * import provenance (F-12.2), text alignment on headings and paragraphs, the scene-break block, the Ctrl+S save shortcut (F-3.2), and, for a manuscript
  * document, the inline tag token with its `#` suggestion (F-4.6), the AI-origin mark (F-14.6,
  * wherever ghost text can insert), the ghost-text decoration (F-5.3, always in the schema
  * so toggling VibeWrite never rebuilds the editor), the rewrite target (F-14.10), and the
@@ -197,11 +225,14 @@ export function buildExtensions({
       listItem: false,
       listKeymap: false,
       horizontalRule: false,
+      // F-12.2: `OriginParagraph` takes its place, so an imported paragraph keeps `data-origin`.
+      paragraph: false,
       // Off: it appends an empty paragraph after a trailing heading or quote, which the mapped
       // select-all selection then spans, so `isActive` reports a freshly applied heading as
       // inactive. The scene-break command opens its own paragraph at the end of the document.
       trailingNode: false
     }),
+    OriginParagraph,
     TextAlign.configure({ types: ['heading', 'paragraph'], alignments: [...ALIGNMENTS] }),
     SceneBreak.configure({ text: sceneBreak }),
     SaveShortcut.configure({ onSave })

@@ -7,7 +7,7 @@ import { APP_SHORTCUTS, type Chord, type ShortcutId } from './shortcuts'
  * The one menu definition (F-7.1): main renders it as the native application menu (with the
  * F-2.7 chords as accelerators) and the renderer as the in-app menu bar, and every click on
  * either side becomes one `menu:action` handled by `runMenuAction`. Items whose feature is not
- * built are absent, never disabled or stubbed: Export…, Import… (F-12.x), Find and Find &
+ * built are absent, never disabled or stubbed: Export… (F-12.1), Find and Find &
  * Replace (F-10.x), Character, Setting, World-building note (F-9.x), References (F-7.4), Word
  * count, Statistics, Goals, Drafts, Snapshots (F-10.x, F-8.x) join the definition with their
  * features. Edit items carry an Electron role, so the native menu edits natively; the in-app
@@ -16,6 +16,7 @@ import { APP_SHORTCUTS, type Chord, type ShortcutId } from './shortcuts'
 export const MENU_ITEM_IDS = [
   'newProject',
   'openProject',
+  'importManuscript',
   'saveDocument',
   'closeProject',
   'undo',
@@ -90,6 +91,8 @@ export const MENU: readonly MenuSection[] = [
     entries: [
       { id: 'newProject', label: 'New project', when: 'always' },
       { id: 'openProject', label: 'Open project…', when: 'always' },
+      // F-12.2: the import goes into the open project, so it waits for one.
+      { id: 'importManuscript', label: 'Import manuscript…', when: 'project' },
       SEPARATOR,
       { id: 'saveDocument', label: 'Save', shortcut: 'save', when: 'project' },
       SEPARATOR,

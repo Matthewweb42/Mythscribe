@@ -64,6 +64,9 @@ import { getDocumentContent, saveDocument } from '../document/documentStore'
 import { getNotes, saveNotes } from '../document/notesStore'
 import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
 import { getSummary } from '../document/summaryStore'
+import { importDraft } from '../import/commit'
+import { readManuscript } from '../import/read'
+import { buildDraft } from '../import/structure'
 import { addBackground, listBackgrounds, removeBackground } from '../project/backgroundStore'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor, sanitizeName } from '../project/projectStore'
@@ -1247,6 +1250,26 @@ export function registerHandlers({
     writeTextAtomic(chosen, text)
     diagnostics.count('export.run')
     return { path: chosen }
+  })
+
+  // F-12.2: reading a manuscript writes nothing. The draft goes to the renderer, the author
+  // corrects it there, and only `import:commit` touches the project.
+  register('import:open', async ({ path: given }) => {
+    const session = manager.require()
+    const chosen = given ?? (await dialogs.chooseManuscriptFile())
+    if (chosen === null) return null
+    const file = await readManuscript(chosen)
+    return buildDraft(file.blocks, {
+      name: file.name,
+      format: file.format,
+      novelFormat: session.info.format
+    })
+  })
+
+  register('import:commit', ({ draft }) => {
+    const session = manager.require()
+    const result = importDraft(session.connection.orm, session.info.format, draft)
+    return { nodes: result.rows.map(toTreeNode), words: result.words }
   })
 
   register('window:close', () => {

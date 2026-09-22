@@ -50,6 +50,8 @@ import { BackgroundRotation } from '@renderer/features/focus/rotation'
 import { OVERLAY_DARKNESS } from '@shared/focus'
 import { useBackgroundStore, useCurrentBackground } from '@renderer/features/focus/backgroundStore'
 import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
+import { ImportDialog } from '@renderer/features/import/ImportDialog'
+import { useImportStore } from '@renderer/features/import/importStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
@@ -171,6 +173,8 @@ export function App(): React.JSX.Element {
       useAssistantStore.getState().clear()
       // F-7.1: a shell dialog left open over the closing project must not reappear over the next one.
       useShellDialogStore.getState().close()
+      // F-12.2: a draft under review belongs to the project it would be written into.
+      useImportStore.getState().cancel()
       useTagStore.getState().clear()
       useDocumentTagStore.getState().clear()
       useMentionStore.getState().clear()
@@ -282,6 +286,8 @@ export function App(): React.JSX.Element {
         {!ready ? null : current ? <ProjectScreen format={current.format} /> : <WelcomeScreen />}
         {focus ? <FocusControlBar /> : null}
       </main>
+      {/* F-12.2: the import review, which is open only while a draft is under review. */}
+      <ImportDialog />
       {/* The dialog service last, so a confirm from inside a shell dialog stacks above it. */}
       <ShellDialogs format={current?.format ?? null} />
       <DialogHost />

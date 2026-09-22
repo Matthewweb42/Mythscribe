@@ -12,6 +12,7 @@ import type { FloatingPanel } from '@shared/layout'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
+import { useImportStore } from '@renderer/features/import/importStore'
 import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useProjectStore } from '@renderer/features/project/projectStore'
@@ -98,6 +99,11 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         return
       case 'closeProject':
         await closeProjectWithConfirm()
+        return
+      case 'importManuscript':
+        // F-12.2: main opens the file dialog and answers a draft; the review dialog takes over
+        // from there. The store toasts its own failures, so a cancelled dialog is silent.
+        await useImportStore.getState().open()
         return
       case 'insertScene':
         insertLevel('scene', project.format)
