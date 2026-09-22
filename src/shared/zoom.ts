@@ -73,18 +73,24 @@ export const UI_SCALE_LABELS: Record<UiScale, string> = {
 }
 
 /**
- * The two app-wide view settings, kept under one key in app-state.json. Main is the only writer
- * of either: it steps the document zoom, applies the interface size to every window, and answers
- * the pair, which is what the renderer mirrors.
+ * The app-wide view settings, kept under one key in app-state.json. Main is the only writer
+ * of any of them: it steps the document zoom, applies the interface size to every window, flips
+ * the page edges, and answers the set, which is what the renderer mirrors.
  */
 export const ViewSettings = z.object({
   /** The multiplier the editing surface applies to the project's font size and column width. */
   editorZoom: ZoomFactor.default(DEFAULT_ZOOM),
-  uiScale: UiScale.default('medium')
+  uiScale: UiScale.default('medium'),
+  /**
+   * Page edges (F-7.11): the writing column drawn as a sheet on the desk, so the author sees
+   * where the page ends at any zoom. Off is the borderless column. A file from before the
+   * setting parses as on.
+   */
+  pageEdges: z.boolean().default(true)
 })
 export type ViewSettings = z.infer<typeof ViewSettings>
 
-/** A fresh install: the document at 100 % and the interface at its normal size. */
+/** A fresh install: the document at 100 %, the interface at its normal size, page edges shown. */
 export function defaultViewSettings(): ViewSettings {
-  return { editorZoom: DEFAULT_ZOOM, uiScale: 'medium' }
+  return { editorZoom: DEFAULT_ZOOM, uiScale: 'medium', pageEdges: true }
 }

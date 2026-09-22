@@ -24,6 +24,8 @@
   --color-level-scene: var(--ms-level-scene);
   --color-level-generic: var(--ms-level-generic);
   --color-matter: var(--ms-matter);
+  --color-desk: var(--ms-desk);
+  --color-sheet: var(--ms-sheet);
   --radius-md: var(--ms-radius);
   --radius-lg: var(--ms-radius-lg);
   --shadow-panel: var(--ms-shadow);
@@ -258,6 +260,19 @@ select {
   /* F-6.4: the darkness setting drives the scrim; the token is the fallback. */
   background: var(--ms-focus-scrim);
   opacity: var(--ms-focus-darkness, 1);
+}
+
+/*
+ * Page edges (F-7.11): the writing column drawn as a sheet on the desk. The column's own side
+ * padding is the margin between the edge and the text, and the column's width follows the
+ * document zoom, so the sheet grows and shrinks as a page. Square-cornered like paper, with a
+ * hairline and a soft shadow so the edge shows against the desk in any theme.
+ */
+.ms-sheet {
+  border: 1px solid var(--ms-line);
+  border-radius: 2px;
+  background: var(--ms-sheet);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.35);
 }
 
 .focus-surface {

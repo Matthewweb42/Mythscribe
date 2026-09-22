@@ -71,6 +71,7 @@ describe('menu definition (F-7.1)', () => {
       'cut',
       'copy',
       'paste',
+      'togglePageEdges',
       'zoomIn',
       'zoomOut',
       'zoomReset',
@@ -87,7 +88,7 @@ describe('menu definition (F-7.1)', () => {
     expect(isMenuItemEnabled(about!, false)).toBe(true)
   })
 
-  it('offers the three zoom items in View, after Focus mode, working without a project (F-7.10)', () => {
+  it('offers Page edges and the three zoom items in View, after Focus mode, working without a project (F-7.10, F-7.11)', () => {
     const view = MENU.find((section) => section.id === 'view')
     expect(
       (view?.entries ?? []).map((entry) => (isSeparator(entry) ? 'separator' : entry.id))
@@ -98,11 +99,15 @@ describe('menu definition (F-7.1)', () => {
       'separator',
       'toggleFocusMode',
       'separator',
+      'togglePageEdges',
       'zoomIn',
       'zoomOut',
       'zoomReset'
     ])
     const byId = Object.fromEntries(menuItems().map((item) => [item.id, item]))
+    expect(byId.togglePageEdges?.label).toBe('Page edges')
+    expect(menuItemChord(byId.togglePageEdges!)).toBeNull()
+    expect(isMenuItemEnabled(byId.togglePageEdges!, false)).toBe(true)
     expect(byId.zoomIn?.label).toBe('Zoom in')
     expect(byId.zoomOut?.label).toBe('Zoom out')
     expect(byId.zoomReset?.label).toBe('Reset zoom')

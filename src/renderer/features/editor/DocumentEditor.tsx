@@ -13,11 +13,11 @@ import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusSt
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
-import { useEditorZoom } from '@renderer/features/shell/viewStore'
+import { useEditorZoom, usePageEdges } from '@renderer/features/shell/viewStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
 import { useActiveEditorStore } from './activeEditorStore'
-import { COLUMN, editorStyle } from './column'
+import { columnClass, deskClass, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
 import { buildExtensions, EDITOR_CORE_OPTIONS } from './extensions'
 import { useGhostTextController } from './ghostTextController'
@@ -162,6 +162,8 @@ function RegionEditor({
   const focusWidth = useBackgroundStore((s) => s.settings?.overlay.width ?? OVERLAY_WIDTH.default)
   // F-7.10: the app-wide document zoom multiplies the project's column and font.
   const zoom = useEditorZoom()
+  // F-7.11: the sheet is for the ordinary view; focus mode has its own width and scrim (F-6.4).
+  const sheet = usePageEdges() && !focus
   const surface = focus && background !== null
   const [menu, setMenu] = useState<TokenMenu | null>(null)
 
@@ -265,10 +267,12 @@ function RegionEditor({
     />
   ) : null
 
+  // A region of a stack (F-3.8): the stack owns the column (and the sheet, F-7.11), so the
+  // region is only its vertical padding.
   if (!toolbar)
     return (
       <>
-        <EditorContent editor={editor} className={`${COLUMN} py-6`} />
+        <EditorContent editor={editor} className="py-6" />
         {tokenMenu}
       </>
     )
@@ -308,10 +312,10 @@ function RegionEditor({
       {focus ? null : <RewritePanel id={id} editor={ready ? editor : null} />}
       {focus ? null : <CritiquePanel id={id} editor={ready ? editor : null} />}
       {focus ? null : <BetaReaderPanel id={id} editor={ready ? editor : null} />}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className={`flex min-h-0 flex-1 flex-col overflow-y-auto ${deskClass(sheet)}`}>
         <EditorContent
           editor={editor}
-          className={`${COLUMN} flex flex-1 flex-col py-6 ${typewriter ? 'pb-[50vh]' : ''} ${surface ? 'focus-surface' : ''}`}
+          className={`${columnClass(sheet)} flex flex-1 flex-col py-6 ${typewriter ? 'pb-[50vh]' : ''} ${surface ? 'focus-surface' : ''}`}
         />
       </div>
       <DocumentStatusBar id={id} editor={ready ? editor : null} />

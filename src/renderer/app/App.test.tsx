@@ -1451,7 +1451,7 @@ describe('App', () => {
       install({
         'project:current': info,
         'tree:list': treeFixture,
-        'view:get': { editorZoom: 1.25, uiScale: 'large' }
+        'view:get': { editorZoom: 1.25, uiScale: 'large', pageEdges: true }
       })
       render(<App />)
       await waitFor(() => expect(useViewStore.getState().editorZoom).toBe(1.25))
@@ -1466,7 +1466,7 @@ describe('App', () => {
 
     it('Ctrl+= and Ctrl+0 zoom the document from the welcome screen, each announced as a toast', async () => {
       const invoke = install({
-        'view:zoomDocument': { editorZoom: 1.1, uiScale: 'medium' }
+        'view:zoomDocument': { editorZoom: 1.1, uiScale: 'medium', pageEdges: true }
       })
       render(<App />)
       await screen.findByRole('button', { name: /new project/i })
@@ -1490,7 +1490,7 @@ describe('App', () => {
       const invoke = install({
         'project:current': info,
         'tree:list': treeFixture,
-        'view:zoomDocument': { editorZoom: 0.9, uiScale: 'medium' }
+        'view:zoomDocument': { editorZoom: 0.9, uiScale: 'medium', pageEdges: true }
       })
       render(<App />)
       const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
@@ -1503,7 +1503,7 @@ describe('App', () => {
     })
 
     it('Ctrl+wheel steps once per burst and the plain wheel is left to scroll', async () => {
-      const invoke = install({ 'view:zoomDocument': { editorZoom: 1.1, uiScale: 'medium' } })
+      const invoke = install({ 'view:zoomDocument': { editorZoom: 1.1, uiScale: 'medium', pageEdges: true } })
       render(<App />)
       await screen.findByRole('button', { name: /new project/i })
       const zoomCalls = (): number =>

@@ -2720,13 +2720,18 @@ describe('view (F-7.10)', () => {
     new AppStateStore(path.join(tmp, 'userData', 'app-state.json')).get().view
 
   it('answers the installed defaults before anything is changed', async () => {
-    expect(await invoke('view:get', undefined)).toEqual({ editorZoom: 1, uiScale: 'medium' })
+    expect(await invoke('view:get', undefined)).toEqual({
+      editorZoom: 1,
+      uiScale: 'medium',
+      pageEdges: true
+    })
   })
 
   it('steps the document zoom in and out and persists it, leaving the window alone', async () => {
     expect(await invoke('view:zoomDocument', { step: 'in' })).toEqual({
       editorZoom: 1.1,
-      uiScale: 'medium'
+      uiScale: 'medium',
+      pageEdges: true
     })
     expect(storedView().editorZoom).toBe(1.1)
     // The document zoom is the renderer's to apply; the window keeps the interface size.
@@ -2749,7 +2754,8 @@ describe('view (F-7.10)', () => {
   it('applies the interface size to every live window and persists it', async () => {
     expect(await invoke('view:setUiScale', { scale: 'large' })).toEqual({
       editorZoom: 1,
-      uiScale: 'large'
+      uiScale: 'large',
+      pageEdges: true
     })
     expect(fakeWin.webContents.setZoomFactor).toHaveBeenLastCalledWith(1.15)
     expect(storedView().uiScale).toBe('large')
@@ -2762,11 +2768,13 @@ describe('view (F-7.10)', () => {
     await invoke('view:zoomDocument', { step: 'in' })
     expect(await invoke('view:setUiScale', { scale: 'small' })).toEqual({
       editorZoom: 1.1,
-      uiScale: 'small'
+      uiScale: 'small',
+      pageEdges: true
     })
     expect(await invoke('view:zoomDocument', { step: 'reset' })).toEqual({
       editorZoom: 1,
-      uiScale: 'small'
+      uiScale: 'small',
+      pageEdges: true
     })
   })
 
@@ -2775,6 +2783,22 @@ describe('view (F-7.10)', () => {
     expect((await invoke('view:setUiScale', { scale: 'large' })).uiScale).toBe('large')
     expect(fakeWin.webContents.setZoomFactor).not.toHaveBeenCalled()
     expect(storedView().uiScale).toBe('large')
+  })
+
+  it('persists the page edges and leaves the window and the other two alone (F-7.11)', async () => {
+    await invoke('view:zoomDocument', { step: 'in' })
+    expect(await invoke('view:setPageEdges', { on: false })).toEqual({
+      editorZoom: 1.1,
+      uiScale: 'medium',
+      pageEdges: false
+    })
+    expect(storedView().pageEdges).toBe(false)
+    expect(fakeWin.webContents.setZoomFactor).not.toHaveBeenCalled()
+    expect((await invoke('view:setPageEdges', { on: true })).pageEdges).toBe(true)
+    expect(storedView()).toEqual({ editorZoom: 1.1, uiScale: 'medium', pageEdges: true })
+    const bad = await handlerFor('view:setPageEdges')(null, { on: 'yes' })
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) expect(bad.error.code).toBe('VALIDATION')
   })
 
   it('rejects a step and a size that are not one of the named ones', async () => {

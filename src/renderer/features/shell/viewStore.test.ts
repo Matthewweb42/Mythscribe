@@ -17,7 +17,7 @@ interface Fake {
 function fakeClient(): Fake {
   const fake: Fake = {
     calls: [],
-    view: { editorZoom: 1, uiScale: 'medium' },
+    view: { editorZoom: 1, uiScale: 'medium', pageEdges: true },
     fail: null,
     client: {
       async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
@@ -34,6 +34,11 @@ function fakeClient(): Fake {
           case 'view:setUiScale': {
             const { scale } = input as { scale: ViewSettings['uiScale'] }
             fake.view = { ...fake.view, uiScale: scale }
+            return fake.view as Output<C>
+          }
+          case 'view:setPageEdges': {
+            const { on } = input as { on: boolean }
+            fake.view = { ...fake.view, pageEdges: on }
             return fake.view as Output<C>
           }
           default:
@@ -66,13 +71,15 @@ describe('viewStore (F-7.10)', () => {
     expect(useViewStore.getState()).toMatchObject({
       editorZoom: 1,
       uiScale: 'medium',
+      pageEdges: true,
       loaded: false
     })
-    fake.view = { editorZoom: 1.25, uiScale: 'large' }
+    fake.view = { editorZoom: 1.25, uiScale: 'large', pageEdges: false }
     await useViewStore.getState().load()
     expect(useViewStore.getState()).toMatchObject({
       editorZoom: 1.25,
       uiScale: 'large',
+      pageEdges: false,
       loaded: true
     })
     expect(fake.calls).toEqual([{ channel: 'view:get', input: undefined }])
@@ -102,12 +109,32 @@ describe('viewStore (F-7.10)', () => {
     expect(useViewStore.getState()).toMatchObject({ editorZoom: 0.9, uiScale: 'small' })
   })
 
+  it('sets the page edges silently from Settings and toasts the flip from the menu (F-7.11)', async () => {
+    await useViewStore.getState().setPageEdges(false)
+    expect(fake.calls).toEqual([{ channel: 'view:setPageEdges', input: { on: false } }])
+    expect(useViewStore.getState().pageEdges).toBe(false)
+    expect(toasts()).toEqual([])
+    await useViewStore.getState().togglePageEdges()
+    expect(fake.calls.at(-1)).toEqual({ channel: 'view:setPageEdges', input: { on: true } })
+    expect(useViewStore.getState().pageEdges).toBe(true)
+    await useViewStore.getState().togglePageEdges()
+    expect(useViewStore.getState().pageEdges).toBe(false)
+    expect(toasts()).toEqual(['Page edges shown', 'Page edges hidden'])
+    // The other two are untouched.
+    expect(useViewStore.getState()).toMatchObject({ editorZoom: 1, uiScale: 'medium' })
+  })
+
   it('toasts the cause of a failure and changes nothing', async () => {
     fake.fail = new Error('no window')
     await useViewStore.getState().zoomDocument('in')
     await useViewStore.getState().setUiScale('large')
-    expect(useViewStore.getState()).toMatchObject({ editorZoom: 1, uiScale: 'medium' })
-    expect(toasts()).toEqual(['no window', 'no window'])
+    await useViewStore.getState().togglePageEdges()
+    expect(useViewStore.getState()).toMatchObject({
+      editorZoom: 1,
+      uiScale: 'medium',
+      pageEdges: true
+    })
+    expect(toasts()).toEqual(['no window', 'no window', 'no window'])
   })
 
   it('drops an answer to a request the reset superseded', async () => {

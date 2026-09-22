@@ -1156,6 +1156,14 @@ export const contract = {
     output: ViewSettings
   },
   /**
+   * Page edges (F-7.11): main persists whether the writing column is drawn as a sheet and
+   * answers the set; the renderer applies it to every editing surface.
+   */
+  'view:setPageEdges': {
+    input: z.object({ on: z.boolean() }),
+    output: ViewSettings
+  },
+  /**
    * Menu bar (F-7.1): an Edit item of the in-app bar runs the same `webContents` edit command
    * the native role does, on the focused window, so both bars edit whatever has the focus.
    */

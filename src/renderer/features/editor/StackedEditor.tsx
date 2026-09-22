@@ -7,9 +7,9 @@ import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { descendantDocuments, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
-import { useEditorZoom } from '@renderer/features/shell/viewStore'
+import { useEditorZoom, usePageEdges } from '@renderer/features/shell/viewStore'
 import { describeError } from '@renderer/lib/errors'
-import { COLUMN, editorStyle } from './column'
+import { COLUMN, columnClass, editorStyle } from './column'
 import { DocumentEditor } from './DocumentEditor'
 import { FocusModeButton } from './FocusModeButton'
 import { NotesToggleButton } from './NotesPanel'
@@ -59,6 +59,8 @@ export function StackedEditor({
   const settings = useEditorSettings(format)
   // F-7.10: the stack is a writing surface too, so it takes the app-wide document zoom.
   const zoom = useEditorZoom()
+  // F-7.11: each region is a sheet on the desk; focus mode keeps the plain stack (F-6.4).
+  const sheet = usePageEdges() && !focus
   // A region that leaves the stack (deleted, moved out) takes its editor with it; the toolbar
   // must not keep pointing at it. Membership is decided here, at render, because Tiptap destroys
   // an unmounted editor on a timer, so `isDestroyed` alone would lag behind.
@@ -89,13 +91,13 @@ export function StackedEditor({
         />
       )}
       {tagBar ? <TagBar id={folderId} /> : null}
-      <div className="min-h-0 flex-1 overflow-y-auto pb-12">
+      <div className={`min-h-0 flex-1 overflow-y-auto pb-12 ${sheet ? 'bg-desk px-4' : ''}`}>
         {docIds.map((id, index) => (
           <Fragment key={id}>
             {index > 0 ? (
               <RegionSeparator sceneBreak={settings.sceneBreak} section={section} />
             ) : null}
-            <Region id={id} format={format} onFocus={setActive} />
+            <Region id={id} format={format} sheet={sheet} onFocus={setActive} />
           </Fragment>
         ))}
       </div>
@@ -104,20 +106,26 @@ export function StackedEditor({
   )
 }
 
-/** One document of the stack: a muted title (not part of the document) above its editor. */
+/**
+ * One document of the stack: a muted title (not part of the document) above its editor. The
+ * section is the column, so with the page edges on (F-7.11) the title and the text share one
+ * sheet, set off from its neighbours; the separators between regions stay on the desk.
+ */
 function Region({
   id,
   format,
+  sheet,
   onFocus
 }: {
   id: string
   format: NovelFormat
+  sheet: boolean
   onFocus: (region: ActiveRegion) => void
 }): React.JSX.Element {
   const title = useTreeStore((s) => s.byId[id]?.title ?? '')
   return (
-    <section aria-label={title}>
-      <h2 className={`${COLUMN} m-0 pt-6 text-sm font-medium text-fg-muted`}>{title}</h2>
+    <section aria-label={title} className={`${columnClass(sheet)} ${sheet ? 'my-6' : ''}`}>
+      <h2 className="m-0 pt-6 text-sm font-medium text-fg-muted">{title}</h2>
       <DocumentEditor
         id={id}
         format={format}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { defaultEditorSettings } from '@shared/editorSettings'
-import { editorStyle } from './column'
+import { COLUMN, SHEET, columnClass, deskClass, editorStyle } from './column'
 
 describe('editorStyle', () => {
   it('emits the five custom properties with their units', () => {
@@ -38,5 +38,15 @@ describe('editorStyle', () => {
   it('leaves the settings untouched at 100 %, which is what chrome passes', () => {
     const settings = defaultEditorSettings('novel')
     expect(editorStyle(settings, 1)).toEqual(editorStyle(settings))
+  })
+})
+
+describe('columnClass / deskClass (F-7.11)', () => {
+  it('keeps the column itself either way, adding the sheet and the desk only when the edges are on', () => {
+    expect(columnClass(false)).toBe(COLUMN)
+    expect(columnClass(true)).toBe(`${COLUMN} ${SHEET}`)
+    expect(columnClass(true)).toContain('px-6')
+    expect(deskClass(false)).toBe('')
+    expect(deskClass(true)).toContain('bg-desk')
   })
 })

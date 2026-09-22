@@ -1289,6 +1289,11 @@ export function registerHandlers({
     return view
   })
 
+  // F-7.11: the sheet is the renderer's to draw; main only keeps the choice for the next launch.
+  register('view:setPageEdges', ({ on }) => {
+    return appState.update((s) => ({ ...s, view: { ...s.view, pageEdges: on } })).view
+  })
+
   // F-7.1: the in-app Edit menu edits whatever has the focus, like the native roles do. A click
   // on the bar does not move the focus (the bar prevents it), so the editor or input keeps it.
   register('menu:edit', ({ role }) => {

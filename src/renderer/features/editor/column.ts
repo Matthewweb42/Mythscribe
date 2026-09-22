@@ -10,6 +10,27 @@ import { DEFAULT_ZOOM } from '@shared/zoom'
 export const COLUMN = 'mx-auto w-full max-w-(--ms-editor-max-width) px-6'
 
 /**
+ * Page edges (F-7.11): the column drawn as a sheet (`.ms-sheet` in `app.css`: the lighter
+ * surface, a hairline, a soft shadow). The column's `px-6` becomes the sheet's margins, so the
+ * text stays exactly where it is when the edges are turned off.
+ */
+export const SHEET = 'ms-sheet'
+
+/** The classes an editing column takes: the bare column, or the column as a sheet. */
+export function columnClass(sheet: boolean): string {
+  return sheet ? `${COLUMN} ${SHEET}` : COLUMN
+}
+
+/**
+ * The classes of the pane the column scrolls in: with the sheet on, the desk shows around it, a
+ * gap on every side so the edge is visible even where the text is at the top. The side gap is
+ * the smaller: it comes out of the pane's width, which a narrow window has little of.
+ */
+export function deskClass(sheet: boolean): string {
+  return sheet ? 'bg-desk px-4 py-6' : ''
+}
+
+/**
  * Turns the project's formatting settings (F-3.6) into the custom properties an editing pane
  * sets: the column width (F-3.4), font size, line height, paragraph spacing, and first-line
  * indent. `app.css` reads them on `.ms-editor`, so a change restyles the text in place with no

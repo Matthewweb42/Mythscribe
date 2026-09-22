@@ -31,6 +31,7 @@ export const MENU_ITEM_IDS = [
   'toggleNotes',
   'toggleAssistant',
   'toggleFocusMode',
+  'togglePageEdges',
   'zoomIn',
   'zoomOut',
   'zoomReset',
@@ -140,7 +141,9 @@ export const MENU: readonly MenuSection[] = [
       SEPARATOR,
       { id: 'toggleFocusMode', label: 'Focus mode', shortcut: 'focusMode', when: 'project' },
       SEPARATOR,
-      // F-7.10: the zoom is app-wide, so it works on the welcome screen too.
+      // F-7.11 and F-7.10: the sheet and the zoom are app-wide, so they work on the welcome
+      // screen too.
+      { id: 'togglePageEdges', label: 'Page edges', when: 'always' },
       { id: 'zoomIn', label: 'Zoom in', shortcut: 'zoomIn', when: 'always' },
       { id: 'zoomOut', label: 'Zoom out', shortcut: 'zoomOut', when: 'always' },
       { id: 'zoomReset', label: 'Reset zoom', shortcut: 'zoomReset', when: 'always' }

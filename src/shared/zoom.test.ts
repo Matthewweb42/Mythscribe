@@ -99,17 +99,29 @@ describe('interface size (F-7.10)', () => {
 })
 
 describe('ViewSettings (F-7.10)', () => {
-  it('installs at 100 % and Medium', () => {
-    expect(defaultViewSettings()).toEqual({ editorZoom: 1, uiScale: 'medium' })
+  it('installs at 100 %, Medium, and page edges shown', () => {
+    expect(defaultViewSettings()).toEqual({ editorZoom: 1, uiScale: 'medium', pageEdges: true })
   })
 
-  it('defaults each half on its own, so a file from before either one still parses', () => {
+  it('defaults each setting on its own, so a file from before any of them still parses', () => {
     expect(ViewSettings.parse({})).toEqual(defaultViewSettings())
     expect(ViewSettings.parse({ editorZoom: 1.25 })).toEqual({
       editorZoom: 1.25,
-      uiScale: 'medium'
+      uiScale: 'medium',
+      pageEdges: true
     })
-    expect(ViewSettings.parse({ uiScale: 'small' })).toEqual({ editorZoom: 1, uiScale: 'small' })
+    expect(ViewSettings.parse({ uiScale: 'small' })).toEqual({
+      editorZoom: 1,
+      uiScale: 'small',
+      pageEdges: true
+    })
+    // F-7.11: a file written before the sheet existed shows it, the installed default.
+    expect(ViewSettings.parse({ editorZoom: 1, uiScale: 'medium' }).pageEdges).toBe(true)
+    expect(ViewSettings.parse({ pageEdges: false })).toEqual({
+      editorZoom: 1,
+      uiScale: 'medium',
+      pageEdges: false
+    })
   })
 
   it('refuses a zoom outside the range and a size that is not one of the three', () => {

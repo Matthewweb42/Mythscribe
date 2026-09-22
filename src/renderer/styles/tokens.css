@@ -40,6 +40,15 @@
   --ms-editor-paragraph-spacing: 0.75em;
   --ms-editor-paragraph-indent: 0em;
 
+  /*
+   * Page edges (F-7.11): the desk is the editing pane's background (the same as `--ms-bg`, so
+   * the sheet off is today's borderless column) and the sheet is one step lighter in the same
+   * hue, so it reads as a raised surface, never a white page. A theme (F-7.8) sets both,
+   * keeping the sheet the lighter of the two.
+   */
+  --ms-desk: #1b1b1f;
+  --ms-sheet: #26262b;
+
   /* Focus mode (F-6.2): the scrim over a background image and the panel behind the column. */
   --ms-focus-scrim: rgb(0 0 0);
   --ms-focus-surface: rgb(27 27 31 / 0.72);

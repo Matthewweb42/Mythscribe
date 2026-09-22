@@ -28,6 +28,11 @@ const client: IpcClient = {
         view = { ...view, uiScale: scale }
         return view as Output<C>
       }
+      case 'view:setPageEdges': {
+        const { on } = input as { on: boolean }
+        view = { ...view, pageEdges: on }
+        return view as Output<C>
+      }
       default:
         throw new Error(`unexpected ${channel}`)
     }
@@ -43,7 +48,7 @@ const sizes = (): HTMLElement[] => screen.getAllByRole('radio')
 beforeEach(() => {
   resetViewStore()
   calls = []
-  view = { editorZoom: 1, uiScale: 'medium' }
+  view = { editorZoom: 1, uiScale: 'medium', pageEdges: true }
   setIpcClient(client)
   useDialogStore.setState({ modals: [], toasts: [] })
 })
@@ -53,12 +58,29 @@ afterEach(() => {
 
 describe('AppearanceSettingsTab (F-7.10)', () => {
   it('asks main for the settings it has not got yet and shows them', async () => {
-    view = { editorZoom: 1.25, uiScale: 'large' }
+    view = { editorZoom: 1.25, uiScale: 'large', pageEdges: false }
     render(<AppearanceSettingsTab />)
     await waitFor(() => expect(level()).toBe('125 %'))
     expect(calls).toEqual([{ channel: 'view:get', input: undefined }])
     expect(screen.getByTestId('appearance-ui-scale-large')).toHaveAttribute('aria-checked', 'true')
     expect(sizes().map((b) => b.textContent)).toEqual(['Small90 %', 'Medium100 %', 'Large115 %'])
+    expect(screen.getByRole('checkbox', { name: 'Show page edges' })).not.toBeChecked()
+  })
+
+  it('flips the page edges silently (F-7.11)', async () => {
+    useViewStore.setState({ ...view, loaded: true })
+    render(<AppearanceSettingsTab />)
+    const edges = screen.getByTestId('appearance-page-edges')
+    expect(edges).toBeChecked()
+    await userEvent.click(edges)
+    await waitFor(() => expect(edges).not.toBeChecked())
+    await userEvent.click(edges)
+    await waitFor(() => expect(edges).toBeChecked())
+    expect(calls).toEqual([
+      { channel: 'view:setPageEdges', input: { on: false } },
+      { channel: 'view:setPageEdges', input: { on: true } }
+    ])
+    expect(useDialogStore.getState().toasts).toEqual([])
   })
 
   it('applies an interface size at once, without asking again for what is already loaded', async () => {
@@ -103,7 +125,7 @@ describe('AppearanceSettingsTab (F-7.10)', () => {
   })
 
   it('offers no step past the ends of the table and no Reset at 100 %', () => {
-    useViewStore.setState({ editorZoom: 1, uiScale: 'medium', loaded: true })
+    useViewStore.setState({ editorZoom: 1, uiScale: 'medium', pageEdges: true, loaded: true })
     render(<AppearanceSettingsTab />)
     expect(screen.getByRole('button', { name: 'Reset' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Zoom in' })).toBeEnabled()

@@ -16,6 +16,7 @@ import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetViewStore, useViewStore } from '@renderer/features/shell/viewStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { resetEditorSettingsStore, useEditorSettingsStore } from './settingsStore'
@@ -142,6 +143,7 @@ beforeEach(() => {
 // The store's debounced write outlives a test: cancel it here so it cannot fire into the next file's fake client.
 afterEach(() => {
   resetEditorSettingsStore()
+  resetViewStore()
 })
 
 describe('StackedEditor (F-3.8, F-2.5)', () => {
@@ -190,17 +192,39 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     render(<StackedEditor folderId="arc-1" format="webnovel" />)
     const pane = screen.getByRole('toolbar', { name: 'Formatting' }).parentElement
     expect(pane?.style.getPropertyValue('--ms-editor-max-width')).toBe('700px')
+    // The region (its title heading and its editor together) is the column (F-7.11 moved it
+    // from the heading and the editor to the section so the two share one sheet).
     for (const region of regions()) {
-      expect(boxIn(region).parentElement).toHaveClass('max-w-(--ms-editor-max-width)', 'mx-auto')
-    }
-    // Each region's title heading also sits inside the shared column, not full width.
-    for (const heading of screen.getAllByRole('heading', { level: 2 })) {
-      expect(heading).toHaveClass('max-w-(--ms-editor-max-width)', 'mx-auto')
+      expect(region).toHaveClass('max-w-(--ms-editor-max-width)', 'mx-auto')
+      expect(within(region).getByRole('heading', { level: 2 })).not.toHaveClass('mx-auto')
+      expect(boxIn(region).parentElement).not.toHaveClass('mx-auto')
     }
     // The scene-break separator between regions follows the same column.
     for (const sep of screen.getAllByRole('separator', { name: 'Scene break' })) {
       expect(sep).toHaveClass('max-w-(--ms-editor-max-width)', 'mx-auto')
     }
+  })
+
+  it('draws each region as a sheet on the desk, with the separators between them on the desk (F-7.11)', () => {
+    loadTree()
+    render(<StackedEditor folderId="arc-1" format="webnovel" />)
+    const stack = regions()[0]?.parentElement
+    expect(stack).toHaveClass('bg-desk')
+    for (const region of regions()) expect(region).toHaveClass('ms-sheet')
+    for (const sep of screen.getAllByRole('separator', { name: 'Scene break' })) {
+      expect(sep).not.toHaveClass('ms-sheet')
+    }
+    // Focus mode keeps the plain stack; off keeps the column.
+    act(() => useFocusStore.setState({ active: true }))
+    for (const region of regions()) expect(region).not.toHaveClass('ms-sheet')
+    expect(stack).not.toHaveClass('bg-desk')
+    act(() => useFocusStore.setState({ active: false }))
+    act(() => useViewStore.setState({ pageEdges: false }))
+    for (const region of regions()) {
+      expect(region).not.toHaveClass('ms-sheet')
+      expect(region).toHaveClass('max-w-(--ms-editor-max-width)')
+    }
+    expect(stack).not.toHaveClass('bg-desk')
   })
 
   it('sets the same column class on the page-break separator between matter documents (F-3.4)', () => {

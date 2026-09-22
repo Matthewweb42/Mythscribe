@@ -29,12 +29,19 @@ const DOCUMENT_ZOOM_NOTE =
   'Ctrl+= , Ctrl+- , Ctrl+0 and Ctrl with the mouse wheel do the same from anywhere in the app. ' +
   'It is app-wide and separate from this project’s font size, which is under Editor.'
 
+/** What the sheet is for; the menu item is named because it is the quicker way to flip it. */
+const PAGE_EDGES_NOTE =
+  'Draws the writing column as a sheet on the desk, with its margins and a visible edge, so you ' +
+  'can see where the page ends and zoom it to the size you want. One continuous sheet, not ' +
+  'pages. Also under View › Page edges.'
+
 /**
- * The Appearance tab of the Settings dialog (F-7.10): the interface size and the document zoom,
- * the two app-wide view settings, with a sentence each saying what they move — they are easy to
- * confuse, and confusing them is how an author ends up with an unreadable window. App-scoped, so
- * it is there on the welcome screen too, where the writing surface is not. Main owns both values
- * and applies the interface size to the window itself, so these controls only ask.
+ * The Appearance tab of the Settings dialog (F-7.10, F-7.11): the interface size, the document
+ * zoom, and the page edges, the three app-wide view settings, with a sentence each saying what
+ * they move — the first two are easy to confuse, and confusing them is how an author ends up
+ * with an unreadable window. App-scoped, so it is there on the welcome screen too, where the
+ * writing surface is not. Main owns the values and applies the interface size to the window
+ * itself, so these controls only ask.
  */
 export function AppearanceSettingsTab(): React.JSX.Element {
   const editorZoom = useViewStore((s) => s.editorZoom)
@@ -43,6 +50,8 @@ export function AppearanceSettingsTab(): React.JSX.Element {
   const load = useViewStore((s) => s.load)
   const zoomDocument = useViewStore((s) => s.zoomDocument)
   const setUiScale = useViewStore((s) => s.setUiScale)
+  const pageEdges = useViewStore((s) => s.pageEdges)
+  const setPageEdges = useViewStore((s) => s.setPageEdges)
 
   // `App` loads the settings at start; this only covers the tab being opened before that first
   // answer arrived.
@@ -107,6 +116,19 @@ export function AppearanceSettingsTab(): React.JSX.Element {
           </button>
         </div>
         <p className="m-0 text-xs text-fg-muted">{DOCUMENT_ZOOM_NOTE}</p>
+      </div>
+
+      <div className="flex flex-col gap-1.5 border-t border-line pt-3">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            data-testid="appearance-page-edges"
+            checked={pageEdges}
+            onChange={(event) => void setPageEdges(event.target.checked)}
+          />
+          <span>Show page edges</span>
+        </label>
+        <p className="m-0 text-xs text-fg-muted">{PAGE_EDGES_NOTE}</p>
       </div>
     </div>
   )

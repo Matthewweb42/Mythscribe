@@ -906,11 +906,40 @@ test('create, close, reopen a project on disk', async () => {
 
   await page.keyboard.press('Control+0')
   await expect.poll(async () => (await documentSize()).font, { timeout: 3000 }).toBe(16)
+  const storedView = (): unknown =>
+    (JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { view: unknown }).view
   await expect
-    .poll(() => (JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { view: unknown }).view, {
-      timeout: 3000
-    })
-    .toEqual({ editorZoom: 1, uiScale: 'medium' })
+    .poll(storedView, { timeout: 3000 })
+    .toEqual({ editorZoom: 1, uiScale: 'medium', pageEdges: true })
+
+  // F-7.11: the column is a sheet on the desk by default (the edge is the column element's own
+  // border); View › Page edges turns it into the borderless column and announces it, the
+  // choice lands in app-state.json, and the Appearance checkbox turns it back on.
+  const sheet = page.getByRole('textbox', { name: 'Document' }).locator('..')
+  await expect(sheet).toHaveClass(/ms-sheet/)
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'View' })
+    .click()
+  await page
+    .getByRole('menu', { name: 'View' })
+    .getByRole('menuitem', { name: 'Page edges' })
+    .click()
+  await expect(sheet).not.toHaveClass(/ms-sheet/)
+  await expect(page.getByRole('status').filter({ hasText: 'Page edges' })).toContainText(
+    'Page edges hidden'
+  )
+  await expect.poll(storedView, { timeout: 3000 }).toMatchObject({ pageEdges: false })
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await appearance.getByRole('tab', { name: 'Appearance' }).click()
+  const pageEdges = appearance.getByTestId('appearance-page-edges')
+  await expect(pageEdges).not.toBeChecked()
+  await pageEdges.click()
+  await expect(pageEdges).toBeChecked()
+  await appearance.getByRole('button', { name: 'Close settings' }).click()
+  await expect(appearance).toHaveCount(0)
+  await expect(sheet).toHaveClass(/ms-sheet/)
+  await expect.poll(storedView, { timeout: 3000 }).toMatchObject({ pageEdges: true })
 
   const sidebarToggle = page.getByRole('button', { name: 'Sidebar', exact: true })
   await expect(sidebarToggle).toHaveAttribute('aria-pressed', 'true')
@@ -1484,6 +1513,8 @@ test('create, close, reopen a project on disk', async () => {
   await expect(notes.locator('p')).toHaveText(SCENE_NOTE)
   // F-3.6: the formatting settings survived the close too.
   await expect(editor).toHaveCSS('font-size', '20px')
+  // (The pane binds before 900 px does; F-7.11's desk takes 16 px a side of it, so a wider
+  // sidebar or desk gap would leave less than the 700 px this asserts.)
   const persistedColumn = await editor.locator('..').boundingBox()
   if (!persistedColumn) throw new Error('editor column not laid out')
   expect(persistedColumn.width).toBeGreaterThan(700)

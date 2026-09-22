@@ -264,16 +264,28 @@ describe('runMenuAction (F-7.1)', () => {
   })
 
   it('View › Zoom in / Zoom out / Reset zoom run without a project and announce the level (F-7.10)', async () => {
-    install({ 'view:zoomDocument': { editorZoom: 1.1, uiScale: 'medium' } })
+    install({ 'view:zoomDocument': { editorZoom: 1.1, uiScale: 'medium', pageEdges: true } })
     await runMenuAction('zoomIn')
     expect(invoke).toHaveBeenLastCalledWith('view:zoomDocument', { step: 'in' })
-    install({ 'view:zoomDocument': { editorZoom: 1, uiScale: 'medium' } })
+    install({ 'view:zoomDocument': { editorZoom: 1, uiScale: 'medium', pageEdges: true } })
     await runMenuAction('zoomOut')
     expect(invoke).toHaveBeenLastCalledWith('view:zoomDocument', { step: 'out' })
     await runMenuAction('zoomReset')
     expect(invoke).toHaveBeenLastCalledWith('view:zoomDocument', { step: 'reset' })
     expect(toasts()).toEqual(['Document zoom 110 %', 'Document zoom 100 %', 'Document zoom 100 %'])
     expect(useViewStore.getState().editorZoom).toBe(1)
+  })
+
+  it('View › Page edges flips the sheet without a project and announces it (F-7.11)', async () => {
+    install({ 'view:setPageEdges': { editorZoom: 1, uiScale: 'medium', pageEdges: false } })
+    await runMenuAction('togglePageEdges')
+    expect(invoke).toHaveBeenLastCalledWith('view:setPageEdges', { on: false })
+    expect(useViewStore.getState().pageEdges).toBe(false)
+    install({ 'view:setPageEdges': { editorZoom: 1, uiScale: 'medium', pageEdges: true } })
+    await runMenuAction('togglePageEdges')
+    expect(invoke).toHaveBeenLastCalledWith('view:setPageEdges', { on: true })
+    expect(useViewStore.getState().pageEdges).toBe(true)
+    expect(toasts()).toEqual(['Page edges hidden', 'Page edges shown'])
   })
 
   it('View › Notes / AI assistant float on the focus flags in focus mode, leaving the layout alone', async () => {

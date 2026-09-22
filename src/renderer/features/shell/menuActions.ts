@@ -79,6 +79,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         // F-7.10: app-wide, so it runs without a project; the store announces the new level.
         await useViewStore.getState().zoomDocument(ZOOM_MENU_STEPS[id])
         return
+      case 'togglePageEdges':
+        // F-7.11: app-wide like the zoom; the store announces which way it went.
+        await useViewStore.getState().togglePageEdges()
+        return
       case 'checkForUpdates':
         // F-15.7: the Updates tab is where the answer shows, so it opens with the check.
         useShellDialogStore.getState().show('settings', 'updates')

@@ -262,12 +262,23 @@ describe('AppStateStore', () => {
   it('round-trips the view settings and refuses a zoom outside 67–200 %', () => {
     const store = new AppStateStore(file)
     expect(
-      store.update((s) => ({ ...s, view: { editorZoom: 1.25, uiScale: 'large' } })).view
-    ).toEqual({ editorZoom: 1.25, uiScale: 'large' })
-    expect(new AppStateStore(file).get().view).toEqual({ editorZoom: 1.25, uiScale: 'large' })
+      store.update((s) => ({
+        ...s,
+        view: { editorZoom: 1.25, uiScale: 'large', pageEdges: false }
+      })).view
+    ).toEqual({ editorZoom: 1.25, uiScale: 'large', pageEdges: false })
+    expect(new AppStateStore(file).get().view).toEqual({
+      editorZoom: 1.25,
+      uiScale: 'large',
+      pageEdges: false
+    })
     expect(() => store.update((s) => ({ ...s, view: { ...s.view, editorZoom: 2.5 } }))).toThrow()
     expect(() => store.update((s) => ({ ...s, view: { ...s.view, editorZoom: 0.5 } }))).toThrow()
-    expect(new AppStateStore(file).get().view).toEqual({ editorZoom: 1.25, uiScale: 'large' })
+    expect(new AppStateStore(file).get().view).toEqual({
+      editorZoom: 1.25,
+      uiScale: 'large',
+      pageEdges: false
+    })
   })
 
   it('warns and falls back to the empty state when the stored model mapping is invalid', () => {
