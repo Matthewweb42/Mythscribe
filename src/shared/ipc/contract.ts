@@ -148,8 +148,9 @@ export type Tag = z.infer<typeof Tag>
  * One entity of the story bible (F-9.1): a character, a setting, or a world-building item.
  * `fields` holds the kind's structured template (a field with no text has no key) and `body` the
  * blank page; `template` says which of the two the author writes in, and both travel either way.
- * `image` (F-9.3, through `entity:setImage`/`entity:removeImage`) and `tagId` (F-9.4) are
- * written by their own channels, never by `entity:update`.
+ * `image` (F-9.3, through `entity:setImage`/`entity:removeImage`) is written by its own channel,
+ * never by `entity:update`; `tagId` (F-9.4) is written by `entity:create`, by a rename through
+ * `entity:update`, and by `entity:linkTag`, never as a patch field.
  */
 export const Entity = z.object({
   id: z.string(),
@@ -164,12 +165,20 @@ export const Entity = z.object({
    * loaded through `entityImageUrl`; null when there is none (always, for a world item).
    */
   image: z.string().nullable(),
-  /** The tag this entity is linked to (F-9.4); null until then, and again if that tag is deleted. */
+  /**
+   * The tag this entity is tagged with (F-9.4): created or linked with the entity, renamed with
+   * it, and null again if that tag is deleted (or if the name yields no tag name at all, like
+   * "???"). `entity:linkTag` makes one for an entity that has none.
+   */
   tagId: z.string().nullable(),
   created: z.string(),
   modified: z.string()
 })
 export type Entity = z.infer<typeof Entity>
+
+/** An entity and the tag it is linked to (F-9.4): what `entity:linkTag` answers. */
+export const EntityTagLink = z.object({ entity: Entity, tag: Tag })
+export type EntityTagLink = z.infer<typeof EntityTagLink>
 
 /**
  * What `ai:recommendTags` answers (F-4.7): the bank tags the model picked that are not yet on
@@ -765,7 +774,11 @@ export const contract = {
   /**
    * Creates an entity (F-9.1). The name is trimmed and must be free among the entities of the
    * same kind (ALREADY_EXISTS), compared case- and whitespace-insensitively; a field that is not
-   * of the kind's template ("age" on a setting) is VALIDATION. `image` and `tagId` start null.
+   * of the kind's template ("age" on a setting) is VALIDATION. `image` starts null.
+   *
+   * F-9.4: it also creates or links its tag — `entityTagName(name)` under the kind's category, or
+   * the tag of the bank that already carries that name, whatever that tag's category. A name that
+   * yields no tag name ("???") leaves `tagId` null; the entity is created either way.
    */
   'entity:create': {
     input: z.object({
@@ -781,8 +794,13 @@ export const contract = {
   /**
    * Patches the given parts of an entity (F-9.1); omitted ones keep their value. `fields` is
    * merged over what is stored and an empty value removes that field, so a patch never has to
-   * carry the whole template. `kind` is immutable (delete and recreate instead), and `image`
-   * and `tagId` have their own channels (F-9.3, F-9.4). Same refusals as `entity:create`, plus NOT_FOUND.
+   * carry the whole template. `kind` is immutable (delete and recreate instead) and `image` has
+   * its own channels (F-9.3). Same refusals as `entity:create`, plus NOT_FOUND.
+   *
+   * F-9.4: a rename carries the tag with it, but only while the tag still mirrors the entity —
+   * the tag's name is `entityTagName(the old name)` and no other entity shares it. A tag with the
+   * new name already in the bank is linked instead of renamed; a tag the author renamed by hand
+   * is left alone, link and all.
    */
   'entity:update': {
     input: z.object({
@@ -804,7 +822,14 @@ export const contract = {
   'entity:setImage': { input: z.object({ id: z.string() }), output: Entity.nullable() },
   /** Removes the entity's image (F-9.3): the file is deleted and `image` is null again. NOT_FOUND for an unknown id. */
   'entity:removeImage': { input: z.object({ id: z.string() }), output: Entity },
-  /** Deletes an entity (F-9.1) and its image file (F-9.3); its tag, if it has one, is left alone. NOT_FOUND for an unknown id. */
+  /**
+   * Creates or links the tag of the entity's current name (F-9.4) and answers the pair: what the
+   * entity page's "Create tag" asks for, and the way an entity from before F-9.4, or one whose
+   * tag was deleted, gets one. Idempotent — an entity already linked to the tag of its name
+   * answers unchanged. NOT_FOUND for an unknown id, VALIDATION when the name yields no tag name.
+   */
+  'entity:linkTag': { input: z.object({ id: z.string() }), output: EntityTagLink },
+  /** Deletes an entity (F-9.1) and its image file (F-9.3); its tag, if it has one, stays in the bank like any other tag (F-9.4). NOT_FOUND for an unknown id. */
   'entity:delete': { input: z.object({ id: z.string() }), output: z.null() },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
@@ -1337,6 +1362,12 @@ export const events = {
   'mention:changed': z.object({ nodeIds: z.array(z.string()) }),
   /** The proposed tags changed (F-4.12b): a scan, a tag, or a dismissal moved the list. Only a real change is pushed. */
   'tag:proposedChanged': z.array(ProposedTag),
+  /**
+   * A tag was created or renamed by something other than a `tag:*` call (F-9.4: an entity write);
+   * the tag store merges it, so the bank learns about it without a reload. Emitted to every
+   * window, the asking one included — merging the same tag twice changes nothing.
+   */
+  'tag:changed': Tag,
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /** A native menu item was clicked or its accelerator pressed (F-7.1); the renderer runs the action. */

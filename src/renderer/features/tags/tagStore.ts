@@ -29,6 +29,12 @@ interface TagState {
    */
   merge: (tag: Tag) => void
   /**
+   * Opens the one `tag:changed` subscription (idempotent); call it where the project opens.
+   * Main emits it for a tag something other than a `tag:*` call created or renamed (F-9.4: an
+   * entity write), so the bank learns about it without a reload.
+   */
+  subscribe: () => void
+  /**
    * A request from outside the Tags tab to show one tag's detail view (F-4.6, "Open in Tag
    * Manager"); `token` makes a repeat request for the same tag distinct. The tab consumes it.
    */
@@ -50,6 +56,8 @@ export function orderedIds(byId: Record<string, Tag>): string[] {
 
 /** Bumped by every load() and clear() so a response from a superseded load is dropped. */
 let generation = 0
+/** The subscription to main's tag writes; one for the renderer, opened by `subscribe`. */
+let unsubscribe: (() => void) | null = null
 
 export const useTagStore = create<TagState>((set, get) => ({
   byId: {},
@@ -107,6 +115,12 @@ export const useTagStore = create<TagState>((set, get) => ({
     set(previous?.name === tag.name ? { byId } : { byId, ids: orderedIds(byId) })
   },
 
+  subscribe() {
+    unsubscribe ??= ipc().on('tag:changed', (tag) => {
+      get().merge(tag)
+    })
+  },
+
   requestSelection(id) {
     set({ pendingSelection: { id, token: (get().pendingSelection?.token ?? 0) + 1 } })
   },
@@ -127,7 +141,9 @@ export const useTagStore = create<TagState>((set, get) => ({
   }
 }))
 
-/** Empties the store and invalidates in-flight loads. For tests only. */
+/** Empties the store, invalidates in-flight loads, and drops the subscription. For tests only. */
 export function resetTagStore(): void {
+  unsubscribe?.()
+  unsubscribe = null
   useTagStore.getState().clear()
 }

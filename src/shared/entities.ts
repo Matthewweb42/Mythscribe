@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { assetUrl } from './assets'
+import { TAG_NAME_MAX, toTagName, type TagCategory } from './tags'
 
 /**
  * Entity vocabulary shared by the database schema, the entity store, the IPC contract, and the
@@ -151,6 +152,26 @@ export const ENTITY_IMAGES_DIR = 'entities' as const
 /** The asset URL the renderer loads an entity's `image` file from (F-9.3). */
 export function entityImageUrl(fileName: string): string {
   return assetUrl(ENTITY_IMAGES_DIR, fileName)
+}
+
+/**
+ * The tag category an entity of each kind is tagged under (F-9.4). The three entity kinds are
+ * the first three tag categories by another name; a tag the author later recategorizes is left
+ * alone, the link is by id.
+ */
+export const ENTITY_TAG_CATEGORY: Record<EntityKind, TagCategory> = {
+  character: 'character',
+  setting: 'setting',
+  world: 'worldBuilding'
+}
+
+/**
+ * The name of an entity's tag (F-9.4): the entity name kebab-cased like any tag name, cut to
+ * `TAG_NAME_MAX` with the hyphen a cut through a separator leaves trimmed off. Returns '' when
+ * nothing survives ("???"), which is how an entity ends up with no tag at all.
+ */
+export function entityTagName(name: string): string {
+  return toTagName(name).slice(0, TAG_NAME_MAX).replace(/-+$/, '')
 }
 
 /**

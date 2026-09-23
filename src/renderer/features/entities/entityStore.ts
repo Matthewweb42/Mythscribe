@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { ENTITY_KINDS, toEntityNameKey, type EntityKind } from '@shared/entities'
 import type { Entity, EntityCreateInput, EntityUpdateInput } from '@shared/ipc/contract'
+import { useTagStore } from '@renderer/features/tags/tagStore'
 import { ipc } from '@renderer/lib/ipc'
 import type { EntityView } from './entityView'
 
@@ -39,6 +40,12 @@ interface EntityState {
   setImage: (id: string) => Promise<Entity | null>
   /** Removes the entity's image (F-9.3) and merges the returned row. */
   removeImage: (id: string) => Promise<Entity>
+  /**
+   * Creates or links the tag of the entity's name (F-9.4) and merges both rows — the entity here
+   * and the tag into the tag bank, so the chip renders at once. For an entity that has no tag:
+   * one made before F-9.4, or one whose tag was deleted.
+   */
+  linkTag: (id: string) => Promise<Entity>
   setView: (kind: EntityKind, view: EntityView) => void
   select: (id: string | null) => void
   /** Opens the creation dialog for `kind` (F-9.3: the quick-add button and the Insert menu). */
@@ -149,6 +156,17 @@ export const useEntityStore = create<EntityState>((set, get) => ({
     const entity = await ipc().invoke('entity:removeImage', { id })
     // The name cannot change here, so the order is untouched.
     if (mine === generation) set({ byId: { ...get().byId, [entity.id]: entity } })
+    return entity
+  },
+
+  async linkTag(id) {
+    const mine = generation
+    const { entity, tag } = await ipc().invoke('entity:linkTag', { id })
+    if (mine === generation) {
+      // The name cannot change here, so the entity order is untouched.
+      set({ byId: { ...get().byId, [entity.id]: entity } })
+      useTagStore.getState().merge(tag)
+    }
     return entity
   },
 

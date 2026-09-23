@@ -5,13 +5,18 @@ import { tagFixture } from './tagFixture'
 import { orderedIds, resetTagStore, useTagStore } from './tagStore'
 
 type Handler = (input: unknown) => unknown
+type Listener = (tag: Tag) => void
 
 /** Answers `tag:list` with the fixture and the mutations with `handlers`; records every call. */
 function fakeClient(handlers: Partial<Record<Channel, Handler>> = {}): {
   client: IpcClient
   calls: [Channel, unknown][]
+  listeners: Listener[]
+  /** Pushes a `tag:changed` event (F-9.4) to whoever subscribed. */
+  emit: (tag: Tag) => void
 } {
   const calls: [Channel, unknown][] = []
+  const listeners: Listener[] = []
   const client: IpcClient = {
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
       calls.push([channel, input])
@@ -20,9 +25,22 @@ function fakeClient(handlers: Partial<Record<Channel, Handler>> = {}): {
       if (channel === 'tag:list') return tagFixture as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
-    on: () => () => {}
+    on: (channel, listener) => {
+      if (channel !== 'tag:changed') throw new Error(`unexpected subscription ${channel}`)
+      listeners.push(listener as Listener)
+      return () => {
+        listeners.splice(listeners.indexOf(listener as Listener), 1)
+      }
+    }
   }
-  return { client, calls }
+  return {
+    client,
+    calls,
+    listeners,
+    emit: (tag) => {
+      for (const listener of [...listeners]) listener(tag)
+    }
+  }
 }
 
 const failure = (): never => {
@@ -216,6 +234,25 @@ describe('tagStore (F-4.2)', () => {
     release({ created: [created], skipped: [] })
     await expect(pending).resolves.toEqual({ created: [created], skipped: [] })
     expect(state().ids).toEqual([])
+  })
+
+  it('subscribe merges a tag main created or renamed elsewhere, once (F-9.4)', async () => {
+    const { client, listeners, emit } = fakeClient()
+    setIpcClient(client)
+    state().subscribe()
+    state().subscribe()
+    expect(listeners).toHaveLength(1)
+    await state().load()
+
+    const created: Tag = { ...tagFixture[1]!, id: 't-new', name: 'mara-vell' }
+    emit(created)
+    expect(state().byId['t-new']).toEqual(created)
+    expect(state().ids).toEqual(['t-forest', 't-mara', 't-new', 't-moody'])
+
+    // A rename of a tag already in the bank replaces it in place and re-sorts.
+    emit({ ...tagFixture[0]!, name: 'zebra' })
+    expect(state().byId['t-forest']?.name).toBe('zebra')
+    expect(state().ids).toEqual(['t-mara', 't-new', 't-moody', 't-forest'])
   })
 
   it('a mutation that resolves after clear does not repopulate the store', async () => {

@@ -78,9 +78,11 @@ import {
   createEntity,
   deleteEntity,
   getEntity,
+  linkEntityTag,
   listEntities,
   setEntityImage,
-  updateEntity
+  updateEntity,
+  type EntityTagChange
 } from '../entity/entityStore'
 import { importDraft } from '../import/commit'
 import { readManuscript } from '../import/read'
@@ -625,11 +627,40 @@ export function registerHandlers({
     return found
   })
 
-  register('entity:create', (input) => createEntity(manager.require().connection.orm, input))
+  /**
+   * F-9.4: an entity write may have created or renamed a tag. A new name in the bank is a new
+   * thing to look for, so the manuscript is rescanned and the proposals republished, exactly as
+   * `tag:create` and `tag:update` do, and every window hears about the tag itself — the asking
+   * one included, because merging a tag it already holds changes nothing. A tag that was only
+   * linked is unchanged and already in every bank, so it is announced to no one.
+   */
+  const publishTagChange = (db: TreeDb, change: EntityTagChange | null): void => {
+    if (change === null || !(change.created || change.renamed)) return
+    rescanManuscript(db)
+    publishProposed()
+    emit(windows(), 'tag:changed', change.tag)
+  }
 
-  register('entity:update', ({ id, ...patch }) =>
-    updateEntity(manager.require().connection.orm, id, patch)
-  )
+  register('entity:create', (input) => {
+    const db = manager.require().connection.orm
+    const { entity: created, tagChange } = createEntity(db, input)
+    publishTagChange(db, tagChange)
+    return created
+  })
+
+  register('entity:update', ({ id, ...patch }) => {
+    const db = manager.require().connection.orm
+    const { entity: updated, tagChange } = updateEntity(db, id, patch)
+    publishTagChange(db, tagChange)
+    return updated
+  })
+
+  register('entity:linkTag', ({ id }) => {
+    const db = manager.require().connection.orm
+    const { entity: linked, tagChange } = linkEntityTag(db, id)
+    publishTagChange(db, tagChange)
+    return { entity: linked, tag: tagChange.tag }
+  })
 
   /**
    * F-9.3: the entity's portrait or photograph. The file is copied into the project's

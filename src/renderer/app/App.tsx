@@ -192,6 +192,9 @@ export function App(): React.JSX.Element {
     // F-4.12b: the proposed names are one app-wide list main pushes on when a scan, a tag, or a
     // dismissal moves it; the tag bar shows the ones its own document carries.
     useProposedTagStore.getState().subscribe()
+    // F-9.4: an entity write may create or rename a tag; the bank hears about it here rather than
+    // reloading the list.
+    useTagStore.getState().subscribe()
     useProposedTagStore
       .getState()
       .load()

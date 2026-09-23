@@ -6,6 +6,8 @@ import {
   ENTITY_KIND_NOUN,
   ENTITY_KINDS,
   ENTITY_KINDS_WITH_IMAGE,
+  ENTITY_TAG_CATEGORY,
+  entityTagName,
   fieldIdsFor,
   isFieldOf,
   kindHasImage,
@@ -13,6 +15,7 @@ import {
   toEntityNameKey,
   WORLD_CATEGORY_SUGGESTIONS
 } from './entities'
+import { TAG_CATEGORIES, TAG_NAME_MAX } from './tags'
 
 describe('the kinds', () => {
   it('are the three of the spec, each with a label and a noun', () => {
@@ -123,6 +126,40 @@ describe('toEntityNameKey', () => {
     expect(toEntityNameKey("O'Rourke")).toBe("o'rourke")
     expect(toEntityNameKey('Sidi-ath')).toBe('sidi-ath')
     expect(toEntityNameKey('The Salt Marsh, North')).toBe('the salt marsh, north')
+  })
+})
+
+describe('the tag link (F-9.4)', () => {
+  it('gives every kind a category of the tag vocabulary', () => {
+    expect(ENTITY_TAG_CATEGORY).toEqual({
+      character: 'character',
+      setting: 'setting',
+      world: 'worldBuilding'
+    })
+    for (const kind of ENTITY_KINDS) expect(TAG_CATEGORIES).toContain(ENTITY_TAG_CATEGORY[kind])
+  })
+
+  it.each([
+    ['Mara Vell', 'mara-vell'],
+    ['  Mara  ', 'mara'],
+    ['Zoë', 'zoë'],
+    ['The Salt Marsh, North', 'the-salt-marsh-north'],
+    ['???', ''],
+    ['', '']
+  ])('kebab-cases %j → %j', (input, expected) => {
+    expect(entityTagName(input)).toBe(expected)
+  })
+
+  it('cuts a long name to the tag limit and leaves no trailing hyphen', () => {
+    const long = entityTagName('a'.repeat(TAG_NAME_MAX + 20))
+    expect(long).toBe('a'.repeat(TAG_NAME_MAX))
+    // The cut falls on a separator here, so the hyphen it would leave is trimmed.
+    const cutOnSeparator = entityTagName(`${'a'.repeat(TAG_NAME_MAX)} Vell`)
+    expect(cutOnSeparator).toBe('a'.repeat(TAG_NAME_MAX))
+    expect(entityTagName(`${'a'.repeat(TAG_NAME_MAX - 1)} Vell`)).toBe('a'.repeat(TAG_NAME_MAX - 1))
+    expect(entityTagName(`${'a'.repeat(TAG_NAME_MAX - 5)} Vell`)).toBe(
+      `${'a'.repeat(TAG_NAME_MAX - 5)}-vell`
+    )
   })
 })
 

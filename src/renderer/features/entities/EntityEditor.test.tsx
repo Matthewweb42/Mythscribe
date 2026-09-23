@@ -1,15 +1,29 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WORLD_CATEGORY_SUGGESTIONS } from '@shared/entities'
 import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
+import { openMention } from '@renderer/features/editor/openPassage'
+import { treeFixture } from '@renderer/features/manuscript/treeFixture'
+import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { resetMentionStore } from '@renderer/features/tags/mentionStore'
+import { tagFixture } from '@renderer/features/tags/tagFixture'
+import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { EntityEditor } from './EntityEditor'
 import { resetEntityDraftStore, useEntityDraftStore } from './entityDraftStore'
 import { entityFixture } from './entityFixture'
 import { resetEntityStore, useEntityStore } from './entityStore'
+
+// The jump itself is `openPassage`'s business (F-4.12) and needs a mounted editor; here only the
+// call matters.
+vi.mock('@renderer/features/editor/openPassage', () => ({
+  openMention: vi.fn(() => Promise.resolve())
+}))
 
 type Handler = (input: unknown) => unknown
 
@@ -22,6 +36,8 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       const override = overrides[channel]
       if (override) return override(input) as Output<C>
       if (channel === 'entity:list') return entityFixture as Output<C>
+      // The layout store writes after its own debounce when the Tag Manager is opened (F-9.4).
+      if (channel === 'layout:set') return input as Output<C>
       if (channel === 'entity:update') {
         const patch = input as Input<'entity:update'>
         const stored = useEntityStore.getState().byId[patch.id]
@@ -72,17 +88,39 @@ async function flushDraft(): Promise<void> {
   })
 }
 
+/** `e-mara` as F-9.4 stores her: linked to the bank's `mara` tag. */
+const linkedFixture: Entity[] = entityFixture.map((entity) =>
+  entity.id === 'e-mara' ? { ...entity, tagId: 't-mara' } : entity
+)
+
+/** The Scenes rows of the open page, as "<title> <folder> [Tagged] [×n]". */
+const sceneRows = (): string[] =>
+  within(screen.getByRole('list', { name: /^Scenes with / }))
+    .getAllByRole('button')
+    .map((button) => button.textContent ?? '')
+
 describe('EntityEditor (F-9.3)', () => {
   beforeEach(() => {
     resetPendingSaves()
     resetEntityDraftStore()
     resetEntityStore()
+    resetTagStore()
+    resetDocumentTagStore()
+    resetMentionStore()
+    resetLayoutStore()
+    useTreeStore.getState().clear()
+    vi.mocked(openMention).mockClear()
     useDialogStore.setState({ modals: [], toasts: [] })
   })
   afterEach(() => {
     cleanup()
     resetEntityDraftStore()
     resetPendingSaves()
+    resetTagStore()
+    resetDocumentTagStore()
+    resetMentionStore()
+    // The layout store's write is debounced; leaving it pending leaks into the next file.
+    resetLayoutStore()
   })
 
   it('shows the name, what the entity is, and the kind´s fields with their stored values', async () => {
@@ -220,6 +258,102 @@ describe('EntityEditor (F-9.3)', () => {
     await openPage('e-mara', { 'entity:setImage': failing('That file is not an image') })
     await user.click(screen.getByRole('button', { name: 'Add image…' }))
     expect(toasts()).toEqual(['That file is not an image'])
+  })
+
+  it('shows the entity´s tag as a chip and opens it in the Tag Manager (F-9.4)', async () => {
+    const user = userEvent.setup()
+    useTagStore.getState().merge(tagFixture[1]!)
+    await openPage('e-mara', {
+      'entity:list': () => linkedFixture,
+      'documentTag:listAll': () => [],
+      'mention:listForTag': () => []
+    })
+    const block = within(page()).getByRole('group', { name: 'Tag' })
+    expect(block).toHaveTextContent('#mara')
+    expect(block.querySelector('span[aria-hidden]')).toHaveStyle({ backgroundColor: '#dc2626' })
+    expect(within(page()).queryByRole('button', { name: 'Create tag' })).toBeNull()
+
+    await user.click(within(block).getByRole('button', { name: 'Open in Tag Manager' }))
+    expect(useLayoutStore.getState().layout.sidebar.open).toBe(true)
+    expect(useLayoutStore.getState().layout.sidebar.tab).toBe('tags')
+    expect(useTagStore.getState().pendingSelection?.id).toBe('t-mara')
+  })
+
+  it('Create tag links one for an entity that has none, and the chip follows (F-9.4)', async () => {
+    const user = userEvent.setup()
+    const mara = entityFixture[1]!
+    const calls = await openPage('e-mara', {
+      'entity:linkTag': () => ({
+        entity: { ...mara, tagId: 't-mara' },
+        tag: tagFixture[1]!
+      }),
+      'documentTag:listAll': () => [],
+      'mention:listForTag': () => []
+    })
+    const block = within(page()).getByRole('group', { name: 'Tag' })
+    expect(block).toHaveTextContent('No tag yet.')
+
+    await user.click(within(block).getByRole('button', { name: 'Create tag' }))
+    expect(calls).toContainEqual(['entity:linkTag', { id: 'e-mara' }])
+    expect(useEntityStore.getState().byId['e-mara']?.tagId).toBe('t-mara')
+    expect(useTagStore.getState().byId['t-mara']).toEqual(tagFixture[1])
+    expect(within(page()).getByRole('group', { name: 'Tag' })).toHaveTextContent('#mara')
+  })
+
+  it('a refused Create tag toasts its cause (F-9.4)', async () => {
+    const user = userEvent.setup()
+    await openPage('e-mara', {
+      'entity:linkTag': failing('"???" has no letters or digits to make a tag from')
+    })
+    await user.click(screen.getByRole('button', { name: 'Create tag' }))
+    expect(toasts()).toEqual(['"???" has no letters or digits to make a tag from'])
+  })
+
+  it('lists the scenes the tag reaches in tree order and jumps into them (F-9.4)', async () => {
+    const user = userEvent.setup()
+    useTagStore.getState().merge(tagFixture[1]!)
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    const calls = await openPage('e-mara', {
+      'entity:list': () => linkedFixture,
+      'documentTag:listAll': () => [{ nodeId: 'sc-4', tagId: 't-mara' }],
+      'mention:listForTag': () => [
+        { tagId: 't-mara', nodeId: 'sc-1', count: 2, ranges: [[4, 8]] },
+        { tagId: 't-mara', nodeId: 'sc-4', count: 1, ranges: [[9, 13]] }
+      ]
+    })
+    // Both lists are asked for when the page opens.
+    expect(calls.map(([channel]) => channel)).toContain('documentTag:listAll')
+    expect(calls.at(-1)).toEqual(['mention:listForTag', { tagId: 't-mara' }])
+
+    expect(await screen.findByText('In 2 scenes')).toBeInTheDocument()
+    expect(sceneRows()).toEqual(['Scene 1Chapter 1×2', 'Scene 4Chapter 4Tagged×1'])
+
+    // A mentioned row jumps to the first occurrence…
+    await user.click(screen.getByRole('button', { name: /^Scene 1/ }))
+    expect(vi.mocked(openMention).mock.calls.at(-1)).toEqual(['sc-1', [4, 8], 'mara'])
+  })
+
+  it('selects the document for a row that is only tagged, and says so without a tag (F-9.4)', async () => {
+    const user = userEvent.setup()
+    useTagStore.getState().merge(tagFixture[1]!)
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    await openPage('e-mara', {
+      'entity:list': () => linkedFixture,
+      'documentTag:listAll': () => [{ nodeId: 'sc-2', tagId: 't-mara' }],
+      'mention:listForTag': () => []
+    })
+    expect(await screen.findByText('In 1 scene')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /^Scene 2/ }))
+    expect(vi.mocked(openMention)).not.toHaveBeenCalled()
+    expect(useTreeStore.getState().selectedId).toBe('sc-2')
+    // F-9.3: opening a document closes the entity page.
+    expect(useEntityStore.getState().selectedId).toBeNull()
+  })
+
+  it('offers the tag first for an entity that has none (F-9.4)', async () => {
+    await openPage('e-forest')
+    expect(page()).toHaveTextContent('Create the tag to see where Dark Forest appears.')
+    expect(screen.queryByRole('list', { name: /^Scenes with / })).toBeNull()
   })
 
   it('an entity deleted while its page is open leaves the page', async () => {

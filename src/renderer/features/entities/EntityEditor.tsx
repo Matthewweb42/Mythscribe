@@ -1,5 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
-import { ImagePlus, Trash2, X } from 'lucide-react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ImagePlus, Tag as TagIcon, Trash2, X } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import {
   ENTITY_BODY_MAX,
   ENTITY_FIELDS,
@@ -13,7 +14,15 @@ import {
   type EntityFields,
   type EntityTemplate
 } from '@shared/entities'
+import type { Entity } from '@shared/ipc/contract'
+import { openMention } from '@renderer/features/editor/openPassage'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { useMentionStore } from '@renderer/features/tags/mentionStore'
+import { useTagStore } from '@renderer/features/tags/tagStore'
+import { sceneRowsForTag } from '@renderer/features/tags/tagUsage'
 import { describeError } from '@renderer/lib/errors'
 import { useEntityDraftStore } from './entityDraftStore'
 import { useEntityStore } from './entityStore'
@@ -185,6 +194,8 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
           </div>
         ) : null}
 
+        <EntityTagBlock entity={entity} />
+
         {entity.template === 'structured' ? (
           <div className="flex flex-col gap-3">
             {ENTITY_FIELDS[entity.kind].map((field) => {
@@ -232,6 +243,8 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
           />
         )}
 
+        <EntityScenes entity={entity} />
+
         <p role="status" className="m-0 h-4 text-xs text-fg-subtle">
           {draft === null || status === 'idle' || status === 'dirty'
             ? ''
@@ -241,6 +254,149 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
         </p>
       </div>
     </article>
+  )
+}
+
+/**
+ * The entity's tag (F-9.4): the chip of the tag it was created with, and the way to the Tag
+ * Manager for everything about it (colour, category, mentions, delete). An entity from before
+ * F-9.4, or one whose tag the author deleted, has none and is offered one here; a name with no
+ * letters or digits in it is refused by main and toasted.
+ */
+function EntityTagBlock({ entity }: { entity: Entity }): React.JSX.Element {
+  const tagId = entity.tagId
+  const tag = useTagStore(useShallow((s) => (tagId === null ? undefined : s.byId[tagId])))
+  const [busy, setBusy] = useState(false)
+
+  const openInTagManager = (): void => {
+    if (!tag) return
+    const layout = useLayoutStore.getState()
+    if (!layout.layout.sidebar.open) layout.toggle('sidebar')
+    layout.setSidebarTab('tags')
+    useTagStore.getState().requestSelection(tag.id)
+  }
+
+  const createTag = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      await useEntityStore.getState().linkTag(entity.id)
+    } catch (err) {
+      toast.error(describeError(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div role="group" aria-label="Tag" className="flex flex-wrap items-center gap-2">
+      {tag ? (
+        <>
+          <span className="flex items-center gap-1.5 rounded-full border border-line bg-surface-raised px-2 py-0.5 text-xs">
+            <span
+              aria-hidden="true"
+              style={{ backgroundColor: tag.color }}
+              className="size-2.5 shrink-0 rounded-full"
+            />
+            <span className="max-w-48 truncate">#{tag.name}</span>
+          </span>
+          <button type="button" onClick={openInTagManager} className={BUTTON}>
+            Open in Tag Manager
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="text-xs text-fg-muted">No tag yet.</span>
+          <button type="button" disabled={busy} onClick={() => void createTag()} className={BUTTON}>
+            Create tag
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** "In 3 scenes" / "In 1 scene" / "Not in any scene yet" (F-9.4). */
+function inScenesLabel(count: number): string {
+  if (count === 0) return 'Not in any scene yet'
+  return count === 1 ? 'In 1 scene' : `In ${count} scenes`
+}
+
+/**
+ * Where the entity appears (F-9.4): every document its tag is linked to (F-4.4) or its name
+ * occurs in (F-4.12), in tree order. A row that carries a mention jumps to the first occurrence;
+ * one that is only tagged selects the document, which closes this page (F-9.3). The lists are
+ * asked for when the page opens and refreshed by main's own events, so a scan that lands while
+ * the page is open shows up without a reload.
+ */
+function EntityScenes({ entity }: { entity: Entity }): React.JSX.Element {
+  const tagId = entity.tagId
+  const tag = useTagStore(useShallow((s) => (tagId === null ? undefined : s.byId[tagId])))
+  const byId = useTreeStore((s) => s.byId)
+  const index = useTreeStore(useShallow((s) => ({ rootIds: s.rootIds, childrenOf: s.childrenOf })))
+  const tagIdsByNode = useDocumentTagStore((s) => s.tagIdsByNode)
+  const mentions = useMentionStore((s) => (tagId === null ? undefined : s.byTag[tagId]))
+
+  useEffect(() => {
+    if (tagId === null) return
+    const report = (err: unknown): void => {
+      toast.error(describeError(err))
+    }
+    useDocumentTagStore.getState().loadAll().catch(report)
+    useMentionStore.getState().loadForTag(tagId).catch(report)
+  }, [tagId])
+
+  const rows = useMemo(
+    () => (tagId === null ? [] : sceneRowsForTag(index, byId, tagIdsByNode, mentions, tagId)),
+    [index, byId, tagIdsByNode, mentions, tagId]
+  )
+
+  return (
+    <section className="flex flex-col gap-1">
+      <h3 className={`m-0 font-normal ${LABEL}`}>Scenes</h3>
+      {tag === undefined ? (
+        <p className="m-0 text-xs text-fg-muted">
+          Create the tag to see where {entity.name} appears.
+        </p>
+      ) : (
+        <>
+          <p className="m-0 text-xs text-fg-muted">{inScenesLabel(rows.length)}</p>
+          {rows.length === 0 ? null : (
+            <ul role="list" aria-label={`Scenes with ${entity.name}`} className="m-0 list-none p-0">
+              {rows.map((row) => (
+                <li key={row.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (row.first !== null) void openMention(row.id, row.first, tag.name)
+                      else useTreeStore.getState().select(row.id)
+                    }}
+                    className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
+                  >
+                    <span className="min-w-0 flex-1 truncate">{row.title}</span>
+                    {row.parentTitle === null ? null : (
+                      <span className="shrink-0 truncate text-xs text-fg-subtle">
+                        {row.parentTitle}
+                      </span>
+                    )}
+                    {row.tagged ? (
+                      <span title="Tagged" className="shrink-0 text-fg-subtle">
+                        <TagIcon size={12} aria-hidden="true" />
+                        <span className="sr-only">Tagged</span>
+                      </span>
+                    ) : null}
+                    {row.mentionCount === 0 ? null : (
+                      <span className="shrink-0 text-xs text-fg-subtle tabular-nums">
+                        ×{row.mentionCount}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </section>
   )
 }
 

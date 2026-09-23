@@ -213,6 +213,8 @@ const VOICE_PARAGRAPH =
 
 /** What Scene 1 reads after the F-3.1/F-3.2 steps; nine words, so the cached count is checked too. */
 const SENTENCE = 'The storm broke at dusk. Rain followed. Then silence.'
+/** What Scene 1 carries while the story bible's character is built and shown (F-9.4). */
+const MARA_SENTENCE = ' Mara waited.'
 const SENTENCE_WORDS = 9
 
 /** The notes typed into the panel (F-3.7): one on Scene 1, one on Chapter 1 (a folder). */
@@ -1609,6 +1611,16 @@ test('create, close, reopen a project on disk', async () => {
   await expect(tagRows.getByRole('button')).toHaveCount(29)
   await expect(tagRows.getByRole('button', { name: /^protagonist/ })).toBeVisible()
 
+  // F-9.4: Scene 1 gains a sentence naming Mara, so the character created next has somewhere to
+  // appear; it is taken out again once her page has shown it, so the text the later steps assert
+  // is the one they were written for.
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(MARA_SENTENCE)
+  await expect
+    .poll(() => documentText(scene1Row.id), { timeout: 5000 })
+    .toBe(`${SENTENCE}${MARA_SENTENCE}`)
+
   // F-9.2: the Characters tab starts empty; quick-add creates a character (structured template)
   // that appears as a card and is selected, the search hides and shows it, the list view drops
   // the card border, and Delete asks first and then removes it, so the tab says the kind is
@@ -1678,11 +1690,43 @@ test('create, close, reopen a project on disk', async () => {
   await expect(entityEditor.getByRole('status')).toHaveText('Saved')
   await templateGroup.getByRole('button', { name: 'Structured' }).click()
   await expect(entityEditor.getByRole('textbox', { name: 'Age' })).toHaveValue('31')
+
+  // F-9.4: creating the character created her tag (a character tag of her kebab-cased name), and
+  // her page lists where it appears: Scene 1 mentions her once. The row jumps into the scene with
+  // her name selected, which closes the page; the sentence has done its work and is removed, so
+  // Scene 1 reads as it did before. Reopening her row brings the page back for the rename.
+  const entityTag = entityEditor.getByRole('group', { name: 'Tag' })
+  await expect(entityTag).toContainText('#mara')
+  await expect(entityTag.locator('span[aria-hidden]').first()).toHaveCSS(
+    'background-color',
+    'rgb(220, 38, 38)'
+  )
+  expect((await listTags()).find((tag) => tag.name === 'mara')).toMatchObject({
+    category: 'character'
+  })
+  const entityScenes = entityEditor.getByRole('list', { name: 'Scenes with Mara' })
+  await expect(entityScenes.getByRole('button')).toHaveText([/^Scene 1.*×1$/], { timeout: 15_000 })
+  await entityScenes.getByRole('button', { name: /^Scene 1/ }).click()
+  await expect(entityEditor).toHaveCount(0)
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('Mara')
+  // The click puts the caret back in the editor's one paragraph, so End lands after the sentence
+  // the step added (a jump alone leaves the selection on the name).
+  await editor.click()
+  await page.keyboard.press('End')
+  for (const _character of MARA_SENTENCE) await page.keyboard.press('Backspace')
+  await expect.poll(() => documentText(scene1Row.id), { timeout: 5000 }).toBe(SENTENCE)
+  await maraRow.click()
+  await expect(entityEditor).toBeVisible()
+
   await entityName.fill('Mara Vell')
   await entityName.press('Tab')
   const maraVellRow = characterRows.getByRole('button', { name: 'Mara Vell', exact: true })
   await expect(maraVellRow).toHaveAttribute('aria-current', 'true')
   await expect(entityEditor.getByRole('status')).toHaveText('Saved')
+  // F-9.4: the rename carried her tag with it, in the bank and on the page.
+  await expect(entityTag).toContainText('#mara-vell')
+  await expect.poll(async () => (await listTags()).map((tag) => tag.name)).toContain('mara-vell')
   const storedMara = (await listEntities()).find((entity) => entity.name === 'Mara Vell')
   expect(storedMara).toMatchObject({
     kind: 'character',
@@ -1737,6 +1781,10 @@ test('create, close, reopen a project on disk', async () => {
   await expect(charactersPanel.getByText('No characters yet.')).toBeVisible()
   // F-9.3: deleting the character deleted its image file too.
   expect(fs.readdirSync(entityImagesDir)).toEqual([])
+  // F-9.4: their tags are tags of the bank like any other, so they outlive the entities.
+  const tagsAfterEntities = (await listTags()).map((tag) => tag.name)
+  expect(tagsAfterEntities).toContain('mara-vell')
+  expect(tagsAfterEntities).toContain('tomas')
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
   await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
   await expect(tree).toBeVisible()
@@ -3584,6 +3632,15 @@ async function documentText(id: string): Promise<string | null> {
   )
   if (!result.ok) throw new Error(`document:get failed: ${result.error.message}`)
   return result.data.content ? plainText(result.data.content) : null
+}
+
+/** Every stored tag (F-4.1), as `tag:list` answers. */
+async function listTags(): Promise<Tag[]> {
+  const result = await page.evaluate<IpcResult<Tag[]>>(
+    () => window.mythscribe.invoke('tag:list', undefined) as Promise<IpcResult<Tag[]>>
+  )
+  if (!result.ok) throw new Error(`tag:list failed: ${result.error.message}`)
+  return result.data
 }
 
 /** Every stored entity (F-9.1), as `entity:list` answers. */

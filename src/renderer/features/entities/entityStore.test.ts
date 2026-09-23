@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
+import { tagFixture } from '@renderer/features/tags/tagFixture'
+import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { entityFixture } from './entityFixture'
 import { orderedIds, resetEntityStore, useEntityStore } from './entityStore'
@@ -191,5 +193,31 @@ describe('entityStore (F-9.2)', () => {
     await state().load()
     await expect(state().setImage('e-mara')).rejects.toMatchObject({ code: 'ALREADY_EXISTS' })
     expect(state().byId['e-mara']).toEqual(mara)
+  })
+
+  it('linkTag merges the entity here and the tag into the bank (F-9.4)', async () => {
+    const tag = tagFixture[1]!
+    const linked: Entity = { ...mara, tagId: tag.id }
+    const { client, calls } = fakeClient({
+      'entity:linkTag': () => ({ entity: linked, tag })
+    })
+    setIpcClient(client)
+    resetTagStore()
+    await state().load()
+    const ids = state().ids
+    await expect(state().linkTag('e-mara')).resolves.toEqual(linked)
+    expect(calls.at(-1)).toEqual(['entity:linkTag', { id: 'e-mara' }])
+    expect(state().byId['e-mara']?.tagId).toBe('t-mara')
+    expect(state().ids).toBe(ids) // the name did not change, so the order is untouched
+    expect(useTagStore.getState().byId['t-mara']).toEqual(tag)
+  })
+
+  it('a refused linkTag propagates and leaves both stores as they were (F-9.4)', async () => {
+    setIpcClient(fakeClient({ 'entity:linkTag': failure }).client)
+    resetTagStore()
+    await state().load()
+    await expect(state().linkTag('e-mara')).rejects.toMatchObject({ code: 'ALREADY_EXISTS' })
+    expect(state().byId['e-mara']).toEqual(mara)
+    expect(useTagStore.getState().ids).toEqual([])
   })
 })

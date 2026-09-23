@@ -5,6 +5,8 @@ import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import {
   ENTITY_KIND_NOUN,
   ENTITY_KINDS,
+  ENTITY_TAG_CATEGORY,
+  entityTagName,
   fieldIdsFor,
   isFieldOf,
   kindHasImage,
@@ -13,10 +15,11 @@ import {
   type EntityFields,
   type EntityKind
 } from '@shared/entities'
-import type { Entity, EntityCreateInput, EntityUpdateInput } from '@shared/ipc/contract'
+import type { Entity, EntityCreateInput, EntityUpdateInput, Tag } from '@shared/ipc/contract'
 import type * as schema from '../db/schema'
 import { entity, type EntityInsert, type EntityRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
+import { createTag, findTagByName, getTag, getTagWithUsage, updateTag } from '../tag/tagStore'
 
 /** Accepts both the connection's orm and a transaction handle (both extend this base). */
 export type EntityDb = BaseSQLiteDatabase<'sync', RunResult, typeof schema>
@@ -131,11 +134,101 @@ function collectFields(kind: EntityKind, base: EntityFields, patch: EntityFields
 }
 
 /**
+ * What an entity write did to the bank (F-9.4): the tag the entity now carries, and whether that
+ * tag was created for it (the manuscript is worth rescanning for the new name) or renamed with it
+ * (the same). A tag that was only linked is neither, and the windows still hear about it.
+ */
+export interface EntityTagChange {
+  tag: Tag
+  created: boolean
+  renamed: boolean
+}
+
+/** An entity write and what it did to the tag bank (F-9.4); `tagChange` is null when nothing did. */
+export interface EntityWrite {
+  entity: Entity
+  tagChange: EntityTagChange | null
+}
+
+/** An entity write that always touched the bank (F-9.4): what `linkEntityTag` answers. */
+export interface EntityTagWrite extends EntityWrite {
+  tagChange: EntityTagChange
+}
+
+/** The tag of the bank with this id, or NOT_FOUND: the row was read a statement ago. */
+function requireTagWithUsage(db: EntityDb, id: string): Tag {
+  const found = getTagWithUsage(db, id)
+  if (found === undefined) throw new AppError('NOT_FOUND', 'Tag not found', { id })
+  return found
+}
+
+function setTagId(db: EntityDb, id: string, tagId: string): void {
+  db.update(entity).set({ tagId }).where(eq(entity.id, id)).run()
+}
+
+/**
+ * Gives the row the tag of its name (F-9.4): the tag of the bank that already carries
+ * `entityTagName(name)`, whatever that tag's category — the author may have written `#mara` long
+ * before the character sheet — or a new one under the kind's category. Answers null, and writes
+ * nothing, for a name no tag name can be made of ("???"): an entity is never refused over its tag.
+ * Linking the tag the row already carries is a no-op that answers the pair all the same.
+ */
+function linkTag(db: EntityDb, row: EntityRow): EntityTagChange | null {
+  const name = entityTagName(row.name)
+  if (name === '') return null
+  const existing = findTagByName(db, name)
+  if (existing !== undefined) {
+    if (row.tagId !== existing) setTagId(db, row.id, existing)
+    return { tag: requireTagWithUsage(db, existing), created: false, renamed: false }
+  }
+  const created = createTag(db, { name, category: ENTITY_TAG_CATEGORY[row.kind] })
+  setTagId(db, row.id, created.id)
+  return { tag: created, created: true, renamed: false }
+}
+
+/** Whether another entity carries the same tag: then a rename must leave that tag alone. */
+function tagIsShared(db: EntityDb, id: string, tagId: string): boolean {
+  return (
+    db
+      .select({ id: entity.id })
+      .from(entity)
+      .where(and(eq(entity.tagId, tagId), ne(entity.id, id)))
+      .get() !== undefined
+  )
+}
+
+/**
+ * Carries a renamed entity's tag with it (F-9.4), but only while that tag still mirrors the
+ * entity: it carries the old name kebab-cased and no second entity shares it. A tag the author
+ * renamed by hand, or one two entities point at, keeps its name and its link. A new name that is
+ * already a tag of the bank relinks the entity to it and leaves the old tag where it is; a name
+ * with no tag name in it ("???") changes nothing.
+ */
+function mirrorRename(db: EntityDb, before: EntityRow, after: EntityRow): EntityTagChange | null {
+  const tagId = before.tagId
+  if (tagId === null) return null
+  const tag = getTag(db, tagId)
+  if (tag?.name !== entityTagName(before.name)) return null
+  if (tagIsShared(db, before.id, tagId)) return null
+  const name = entityTagName(after.name)
+  if (name === '' || name === tag.name) return null
+  const taken = findTagByName(db, name)
+  if (taken !== undefined) {
+    setTagId(db, after.id, taken)
+    return { tag: requireTagWithUsage(db, taken), created: false, renamed: false }
+  }
+  return { tag: updateTag(db, tagId, { name }), created: false, renamed: true }
+}
+
+/**
  * Creates an entity (F-9.1): the name is trimmed and must be free among the entities of its
  * kind, the fields must belong to that kind's template, and the template defaults to
- * `structured`. `image` and `tag_id` start null; F-9.3 and F-9.4 write them.
+ * `structured`. `image` starts null (F-9.3 writes it).
+ *
+ * F-9.4: the same transaction creates or links the entity's tag, so an entity and its tag arrive
+ * together or not at all. `tagChange` says what the bank owes the windows.
  */
-export function createEntity(db: EntityDb, input: EntityCreateInput): Entity {
+export function createEntity(db: EntityDb, input: EntityCreateInput): EntityWrite {
   return db.transaction((tx) => {
     const name = normalizeName(input.name)
     assertNameFree(tx, input.kind, name)
@@ -154,7 +247,12 @@ export function createEntity(db: EntityDb, input: EntityCreateInput): Entity {
       created: now,
       modified: now
     }
-    return rowToEntity(tx.insert(entity).values(row).returning().get())
+    const inserted = tx.insert(entity).values(row).returning().get()
+    const tagChange = linkTag(tx, inserted)
+    return {
+      entity: rowToEntity(tagChange === null ? inserted : { ...inserted, tagId: tagChange.tag.id }),
+      tagChange
+    }
   })
 }
 
@@ -162,12 +260,15 @@ export function createEntity(db: EntityDb, input: EntityCreateInput): Entity {
  * Patches the given parts of an entity (F-9.1); omitted ones keep their value. `fields` is
  * merged over the stored map and an empty value removes that field. The kind cannot change, so
  * the name and the fields are checked against the stored one. Stamps `modified`.
+ *
+ * F-9.4: a rename carries the entity's tag with it under `mirrorRename`'s rules; every other
+ * patch leaves the bank alone.
  */
 export function updateEntity(
   db: EntityDb,
   id: string,
   patch: Omit<EntityUpdateInput, 'id'>
-): Entity {
+): EntityWrite {
   return db.transaction((tx) => {
     const existing = getRow(tx, id)
     if (!existing) throw new AppError('NOT_FOUND', 'Entity not found', { id })
@@ -196,7 +297,37 @@ export function updateEntity(
       .where(eq(entity.id, id))
       .returning()
       .get()
-    return rowToEntity(updated)
+    const tagChange = changes.name === undefined ? null : mirrorRename(tx, existing, updated)
+    return {
+      entity: rowToEntity(tagChange === null ? updated : { ...updated, tagId: tagChange.tag.id }),
+      tagChange
+    }
+  })
+}
+
+/**
+ * Creates or links the tag of the entity's current name (F-9.4): the entity page's "Create tag",
+ * and how an entity written before F-9.4, or one whose tag was deleted, gets one. Idempotent —
+ * an entity already linked to the tag of its name answers the pair unchanged. NOT_FOUND for an
+ * unknown id; VALIDATION for a name no tag name can be made of, the one case `createEntity`
+ * passes over in silence.
+ */
+export function linkEntityTag(db: EntityDb, id: string): EntityTagWrite {
+  return db.transaction((tx) => {
+    const row = getRow(tx, id)
+    if (!row) throw new AppError('NOT_FOUND', 'Entity not found', { id })
+    const tagChange = linkTag(tx, row)
+    if (tagChange === null) {
+      throw new AppError(
+        'VALIDATION',
+        `"${row.name}" has no letters or digits to make a tag from`,
+        {
+          id,
+          name: row.name
+        }
+      )
+    }
+    return { entity: rowToEntity({ ...row, tagId: tagChange.tag.id }), tagChange }
   })
 }
 
@@ -228,8 +359,8 @@ export function setEntityImage(db: EntityDb, id: string, image: string | null): 
 
 /**
  * Deletes an entity (F-9.1) and answers it as it stood, so the caller can take its image file
- * with it (F-9.3). Its tag, when F-9.4 has linked one, is a tag of the bank like any other and
- * stays; only the entity goes.
+ * with it (F-9.3). Its tag (F-9.4) is a tag of the bank like any other and stays, with whatever
+ * the author has linked it to; only the entity goes.
  */
 export function deleteEntity(db: EntityDb, id: string): Entity {
   const row = getRow(db, id)

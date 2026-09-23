@@ -3,9 +3,7 @@ import { ChevronLeft } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Tag } from '@shared/ipc/contract'
 import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, TAG_NAME_MAX, TagCategory } from '@shared/tags'
-import type { MentionRange } from '@shared/mentions'
 import { openMention } from '@renderer/features/editor/openPassage'
-import { tagFilterView } from '@renderer/features/manuscript/tagFilter'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -13,23 +11,7 @@ import { describeError } from '@renderer/lib/errors'
 import { useDocumentTagStore } from './documentTagStore'
 import { useMentionStore } from './mentionStore'
 import { useTagStore } from './tagStore'
-
-/** One row of the tag's document list: the node and the folder it sits in, if that is not a section. */
-interface TaggedDocument {
-  id: string
-  title: string
-  /** The parent folder's title, or null when the parent is a section root (its label is generic). */
-  parentTitle: string | null
-}
-
-/** One row of the tag's mention list: the document, how often the name occurs, and the first occurrence. */
-interface MentioningDocument {
-  id: string
-  title: string
-  count: number
-  /** The recorded range of the first occurrence, the jump's starting point. */
-  first: MentionRange
-}
+import { sceneRowsForTag } from './tagUsage'
 
 const FIELD = 'min-w-0 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 /** Label above control, so a long category label never fights the sidebar's minimum width. */
@@ -105,38 +87,14 @@ export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX
       .catch((err: unknown) => toast.error(describeError(err)))
   }, [tag.id])
 
-  const documents = useMemo<TaggedDocument[]>(
-    () =>
-      tagFilterView(index, tagIdsByNode, tag.id).matches.flatMap((id) => {
-        const node = byId[id]
-        if (!node) return []
-        const parent = node.parentId === null ? undefined : byId[node.parentId]
-        return [
-          {
-            id,
-            title: node.title,
-            parentTitle: parent?.sectionType === null ? parent.title : null
-          }
-        ]
-      }),
-    [index, byId, tagIdsByNode, tag.id]
+  // One walk of the tree for both lists (F-9.4's `sceneRowsForTag`, which the entity page reads
+  // too): the links and the recorded mentions in one display order, split here by what each row is.
+  const rows = useMemo(
+    () => sceneRowsForTag(index, byId, tagIdsByNode, mentions, tag.id),
+    [index, byId, tagIdsByNode, mentions, tag.id]
   )
-
-  // The mentioned documents in the same display order as the tagged ones: the mention rows are
-  // fed to `tagFilterView` as if each were a link, so one walk of the tree orders both lists.
-  const mentioned = useMemo<MentioningDocument[]>(() => {
-    const rows = mentions ?? []
-    const asLinks: Record<string, string[] | undefined> = {}
-    for (const row of rows) asLinks[row.nodeId] = [tag.id]
-    const byNode = new Map(rows.map((row) => [row.nodeId, row]))
-    return tagFilterView(index, asLinks, tag.id).matches.flatMap((id) => {
-      const node = byId[id]
-      const row = byNode.get(id)
-      if (!node || !row) return []
-      // A row always carries at least one range; `[0, 0]` would make the jump search by name.
-      return [{ id, title: node.title, count: row.count, first: row.ranges[0] ?? [0, 0] }]
-    })
-  }, [index, byId, mentions, tag.id])
+  const documents = useMemo(() => rows.filter((row) => row.tagged), [rows])
+  const mentioned = useMemo(() => rows.filter((row) => row.mentionCount > 0), [rows])
 
   const setTracking = async (trackMentions: boolean): Promise<void> => {
     try {
@@ -331,12 +289,12 @@ export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX
               <li key={document.id}>
                 <button
                   type="button"
-                  onClick={() => void openMention(document.id, document.first, tag.name)}
+                  onClick={() => void openMention(document.id, document.first ?? [0, 0], tag.name)}
                   className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
                 >
                   <span className="min-w-0 flex-1 truncate">{document.title}</span>{' '}
                   <span className="shrink-0 text-xs text-fg-subtle tabular-nums">
-                    ×{document.count}
+                    ×{document.mentionCount}
                   </span>
                 </button>
               </li>

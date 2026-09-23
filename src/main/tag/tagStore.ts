@@ -57,6 +57,14 @@ function normalizeName(input: string): string {
   return name
 }
 
+/**
+ * The id of the tag that carries the (already normalized) name, or undefined when it is free.
+ * F-9.4 looks an entity's tag up with it before making a second one under the same name.
+ */
+export function findTagByName(db: TagDb, name: string): string | undefined {
+  return findByName(db, name)
+}
+
 /** The id of the tag (other than `exceptId`) that carries `name`, or undefined when it is free. */
 function findByName(db: TagDb, name: string, exceptId?: string): string | undefined {
   return db

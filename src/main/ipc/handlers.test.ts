@@ -2161,11 +2161,19 @@ describe('entity handlers (F-9.1)', () => {
   const openProject = (): Promise<unknown> =>
     invoke('project:create', { name: 'Bible', format: 'novel', directory: tmp })
 
+  /** Every tag sent to the window as `tag:changed` (F-9.4), in order, as its names. */
+  const tagsChanged = (): string[] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([channel]) => channel === 'tag:changed')
+      .map(([, payload]) => (payload as { name: string }).name)
+
   it('reports NO_PROJECT when nothing is open', async () => {
     await expect(invoke('entity:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
     await expect(invoke('entity:create', { kind: 'character', name: 'Ada' })).rejects.toThrowError(
       /^NO_PROJECT: /
     )
+    await expect(invoke('entity:linkTag', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
   })
 
   it('creates, lists, gets, updates, and deletes an entity', async () => {
@@ -2181,9 +2189,10 @@ describe('entity handlers (F-9.1)', () => {
       template: 'structured',
       fields: { age: '36' },
       body: null,
-      image: null,
-      tagId: null
+      image: null
     })
+    // F-9.4: the tag of the name is created with the entity.
+    expect(typeof created.tagId).toBe('string')
     expect(await invoke('entity:list', undefined)).toEqual([created])
     expect(await invoke('entity:get', { id: created.id })).toEqual(created)
     const updated = await invoke('entity:update', {
@@ -2259,6 +2268,60 @@ describe('entity handlers (F-9.1)', () => {
       if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     }
     expect((await invoke('entity:list', undefined)).map((e) => e.name)).toEqual(['Ada', 'Ada'])
+  })
+
+  it('creates the entity’s tag, puts it in the bank, and tells the windows (F-9.4)', async () => {
+    await openProject()
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara Vell' })
+    const bank = await invoke('tag:list', undefined)
+    expect(bank.map((t) => [t.name, t.category])).toEqual([['mara-vell', 'character']])
+    expect(mara.tagId).toBe(bank[0]?.id)
+    expect(tagsChanged()).toEqual(['mara-vell'])
+
+    // A rename carries the tag with it, and the windows hear the new name.
+    const renamed = await invoke('entity:update', { id: mara.id, name: 'Mara Sedge' })
+    expect(renamed.tagId).toBe(mara.tagId)
+    expect((await invoke('tag:list', undefined)).map((t) => t.name)).toEqual(['mara-sedge'])
+    expect(tagsChanged()).toEqual(['mara-vell', 'mara-sedge'])
+
+    // A patch that is not a rename says nothing about the bank.
+    await invoke('entity:update', { id: mara.id, fields: { age: '31' } })
+    expect(tagsChanged()).toEqual(['mara-vell', 'mara-sedge'])
+
+    // Deleting the entity leaves its tag in the bank.
+    await invoke('entity:delete', { id: mara.id })
+    expect((await invoke('tag:list', undefined)).map((t) => t.name)).toEqual(['mara-sedge'])
+  })
+
+  it('links an existing tag, and links one again after it was deleted (F-9.4)', async () => {
+    await openProject()
+    const rose = await invoke('tag:create', { name: 'Rose', category: 'plotThread' })
+    const entity = await invoke('entity:create', { kind: 'character', name: 'Rose' })
+    expect(entity.tagId).toBe(rose.id)
+    // Nothing was created, so nothing was announced.
+    expect(tagsChanged()).toEqual([])
+    expect(await invoke('tag:list', undefined)).toHaveLength(1)
+
+    // The pair comes back unchanged for an entity already linked to the tag of its name.
+    expect(await invoke('entity:linkTag', { id: entity.id })).toEqual({ entity, tag: rose })
+
+    await invoke('tag:delete', { id: rose.id })
+    expect((await invoke('entity:get', { id: entity.id })).tagId).toBeNull()
+    const linked = await invoke('entity:linkTag', { id: entity.id })
+    expect(linked.tag).toMatchObject({ name: 'rose', category: 'character' })
+    expect(linked.entity.tagId).toBe(linked.tag.id)
+    expect(tagsChanged()).toEqual(['rose'])
+  })
+
+  it('refuses entity:linkTag for an unknown id and a nameless name (F-9.4)', async () => {
+    await openProject()
+    await expect(invoke('entity:linkTag', { id: 'missing' })).rejects.toThrowError(/^NOT_FOUND: /)
+    const nameless = await invoke('entity:create', { kind: 'character', name: '???' })
+    expect(nameless.tagId).toBeNull()
+    expect(await invoke('tag:list', undefined)).toEqual([])
+    await expect(invoke('entity:linkTag', { id: nameless.id })).rejects.toThrowError(
+      /^VALIDATION: /
+    )
   })
 })
 
