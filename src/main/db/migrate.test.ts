@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(9)
+    expect(result.version).toBe(10)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -122,6 +122,7 @@ describe('migrate', () => {
     expect(tables()).toContain('index_job')
     expect(tables()).toContain('tag_mention')
     expect(tables()).toContain('mention_scan')
+    expect(tables()).toContain('entity')
   })
 })
 
@@ -321,5 +322,53 @@ describe('mentions tables (0008_mentions)', () => {
     expect(insertScan).toThrow(/UNIQUE|PRIMARY/)
     db.prepare('DELETE FROM node WHERE id = ?').run('scene')
     expect(db.prepare('SELECT COUNT(*) AS n FROM mention_scan').get()).toEqual({ n: 0 })
+  })
+})
+
+describe('entity table (0009_entities)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+    db.prepare(
+      `INSERT INTO tag (id, name, category, color, created, modified)
+       VALUES ('rose', 'rose', 'character', '#dc2626', '2026-01-01', '2026-01-01')`
+    ).run()
+  })
+  afterEach(() => db.close())
+
+  const insertEntity = (id: string, kind: string, name: string, tagId: string | null): void => {
+    db.prepare(
+      `INSERT INTO entity (id, kind, name, tag_id, created, modified)
+       VALUES (?, ?, ?, ?, '2026-01-01', '2026-01-01')`
+    ).run(id, kind, name, tagId)
+  }
+
+  it('defaults the template to structured and the fields to an empty object', () => {
+    insertEntity('ada', 'character', 'Ada', null)
+    expect(
+      db.prepare('SELECT template, fields, body, image, tag_id FROM entity WHERE id = ?').get('ada')
+    ).toEqual({ template: 'structured', fields: '{}', body: null, image: null, tag_id: null })
+  })
+
+  it('holds the three kinds side by side under one name', () => {
+    insertEntity('a', 'character', 'Marsh', null)
+    insertEntity('b', 'setting', 'Marsh', null)
+    insertEntity('c', 'world', 'Marsh', null)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM entity').get()).toEqual({ n: 3 })
+    // The name is not unique in SQL: the store compares `toEntityNameKey` per kind instead.
+    insertEntity('d', 'character', 'marsh', null)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM entity').get()).toEqual({ n: 4 })
+  })
+
+  it('refuses a tag that is not in the bank and clears the link when the tag goes', () => {
+    expect(() => insertEntity('ghost', 'character', 'Ghost', 'missing')).toThrow(/FOREIGN KEY/)
+    insertEntity('rose-entity', 'character', 'Rose', 'rose')
+    db.prepare('DELETE FROM tag WHERE id = ?').run('rose')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM entity').get()).toEqual({ n: 1 })
+    expect(db.prepare('SELECT tag_id FROM entity WHERE id = ?').get('rose-entity')).toEqual({
+      tag_id: null
+    })
   })
 })

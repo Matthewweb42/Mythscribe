@@ -2152,6 +2152,111 @@ describe('tag handlers (F-4.1)', () => {
   })
 })
 
+describe('entity handlers (F-9.1)', () => {
+  const openProject = (): Promise<unknown> =>
+    invoke('project:create', { name: 'Bible', format: 'novel', directory: tmp })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('entity:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('entity:create', { kind: 'character', name: 'Ada' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('creates, lists, gets, updates, and deletes an entity', async () => {
+    await openProject()
+    const created = await invoke('entity:create', {
+      kind: 'character',
+      name: 'Ada Lovelace',
+      fields: { age: '36' }
+    })
+    expect(created).toMatchObject({
+      kind: 'character',
+      name: 'Ada Lovelace',
+      template: 'structured',
+      fields: { age: '36' },
+      body: null,
+      image: null,
+      tagId: null
+    })
+    expect(await invoke('entity:list', undefined)).toEqual([created])
+    expect(await invoke('entity:get', { id: created.id })).toEqual(created)
+    const updated = await invoke('entity:update', {
+      id: created.id,
+      name: 'Ada',
+      fields: { age: '', goals: 'Finish the engine.' }
+    })
+    expect(updated).toMatchObject({ name: 'Ada', fields: { goals: 'Finish the engine.' } })
+    expect(await invoke('entity:delete', { id: created.id })).toBeNull()
+    expect(await invoke('entity:list', undefined)).toEqual([])
+  })
+
+  it('lists the story bible by kind and then by name', async () => {
+    await openProject()
+    await invoke('entity:create', { kind: 'world', name: 'Tide Law', template: 'blank' })
+    await invoke('entity:create', { kind: 'setting', name: 'harbor' })
+    await invoke('entity:create', { kind: 'character', name: 'Brann' })
+    await invoke('entity:create', { kind: 'setting', name: 'Blackreach' })
+    expect((await invoke('entity:list', undefined)).map((e) => [e.kind, e.name])).toEqual([
+      ['character', 'Brann'],
+      ['setting', 'Blackreach'],
+      ['setting', 'harbor'],
+      ['world', 'Tide Law']
+    ])
+  })
+
+  it('survives a reopen', async () => {
+    const project = await invoke('project:create', {
+      name: 'Bible',
+      format: 'novel',
+      directory: tmp
+    })
+    const created = await invoke('entity:create', {
+      kind: 'world',
+      name: 'The Tide Law',
+      template: 'blank',
+      body: 'Salt binds.'
+    })
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: project?.path ?? '' })
+    expect(await invoke('entity:list', undefined)).toEqual([created])
+  })
+
+  it('surfaces ALREADY_EXISTS, VALIDATION, and NOT_FOUND through the envelope', async () => {
+    await openProject()
+    const ada = await invoke('entity:create', { kind: 'character', name: 'Ada' })
+    await expect(
+      invoke('entity:create', { kind: 'character', name: ' ada ' })
+    ).rejects.toThrowError(/^ALREADY_EXISTS: /)
+    // The same name under another kind is free.
+    await invoke('entity:create', { kind: 'setting', name: 'Ada' })
+    await expect(
+      invoke('entity:create', { kind: 'setting', name: 'Harbor', fields: { age: '400' } })
+    ).rejects.toThrowError(/^VALIDATION: /)
+    await expect(
+      invoke('entity:update', { id: ada.id, fields: { atmosphere: 'Damp' } })
+    ).rejects.toThrowError(/^VALIDATION: /)
+    await expect(invoke('entity:get', { id: 'missing' })).rejects.toThrowError(/^NOT_FOUND: /)
+    await expect(invoke('entity:update', { id: 'missing', name: 'x' })).rejects.toThrowError(
+      /^NOT_FOUND: /
+    )
+    await expect(invoke('entity:delete', { id: 'missing' })).rejects.toThrowError(/^NOT_FOUND: /)
+    // Contract boundary: an unknown kind, an unknown field id, or an empty name never reaches
+    // the store.
+    const raw = handlerFor('entity:create')
+    for (const bad of [
+      { kind: 'creature', name: 'Wyrm' },
+      { kind: 'character', name: 'Ada', fields: { favourite: 'tea' } },
+      { kind: 'character', name: '   ' }
+    ]) {
+      const result = await raw(undefined, bad)
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    }
+    expect((await invoke('entity:list', undefined)).map((e) => e.name)).toEqual(['Ada', 'Ada'])
+  })
+})
+
 describe('automatic mentions (F-4.12)', () => {
   /** The debounce is 1.5 s; 3 s covers it and the scan that follows. */
   const SCAN = 3_000

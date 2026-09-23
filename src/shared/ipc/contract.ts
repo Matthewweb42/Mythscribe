@@ -35,6 +35,14 @@ import {
   RENDERER_ERROR_STACK_MAX
 } from '../diagnostics'
 import { EditorSettings } from '../editorSettings'
+import {
+  ENTITY_BODY_MAX,
+  ENTITY_FIELD_MAX,
+  ENTITY_NAME_MAX,
+  EntityFieldId,
+  EntityKind,
+  EntityTemplate
+} from '../entities'
 import { Background, FocusSettings } from '../focus'
 import { ImportDraft } from '../import'
 import { ImportDetectProgress, ImportDetectResult, PendingTagProposal } from '../importStructure'
@@ -135,6 +143,29 @@ export const Tag = z.object({
   modified: z.string()
 })
 export type Tag = z.infer<typeof Tag>
+
+/**
+ * One entity of the story bible (F-9.1): a character, a setting, or a world-building item.
+ * `fields` holds the kind's structured template (a field with no text has no key) and `body` the
+ * blank page; `template` says which of the two the author writes in, and both travel either way.
+ * `image` (F-9.3) and `tagId` (F-9.4) are written by their own features, never by `entity:update`.
+ */
+export const Entity = z.object({
+  id: z.string(),
+  kind: EntityKind,
+  /** The author's own spelling, trimmed; unique per kind on `toEntityNameKey`. */
+  name: z.string(),
+  template: EntityTemplate,
+  fields: z.partialRecord(EntityFieldId, z.string()),
+  body: z.string().nullable(),
+  /** The asset file name of the portrait or photograph; null until F-9.3 uploads one. */
+  image: z.string().nullable(),
+  /** The tag this entity is linked to (F-9.4); null until then, and again if that tag is deleted. */
+  tagId: z.string().nullable(),
+  created: z.string(),
+  modified: z.string()
+})
+export type Entity = z.infer<typeof Entity>
 
 /**
  * What `ai:recommendTags` answers (F-4.7): the bank tags the model picked that are not yet on
@@ -719,6 +750,48 @@ export const contract = {
     input: z.object({ name: z.string().trim().min(1).max(TAG_NAME_MAX) }),
     output: z.array(ProposedTag)
   },
+  /**
+   * Every entity of the open project (F-9.1): the whole story bible in one call, ordered by kind
+   * (characters, settings, world) and then by name, case- and whitespace-insensitively. The
+   * renderer store (F-9.2) normalizes it; there is no per-kind channel.
+   */
+  'entity:list': { input: z.undefined(), output: z.array(Entity) },
+  /** One entity (F-9.1); NOT_FOUND for an unknown id. */
+  'entity:get': { input: z.object({ id: z.string() }), output: Entity },
+  /**
+   * Creates an entity (F-9.1). The name is trimmed and must be free among the entities of the
+   * same kind (ALREADY_EXISTS), compared case- and whitespace-insensitively; a field that is not
+   * of the kind's template ("age" on a setting) is VALIDATION. `image` and `tagId` start null.
+   */
+  'entity:create': {
+    input: z.object({
+      kind: EntityKind,
+      name: z.string().trim().min(1).max(ENTITY_NAME_MAX),
+      /** Omitted → the kind's structured template. */
+      template: EntityTemplate.default('structured'),
+      fields: z.partialRecord(EntityFieldId, z.string().max(ENTITY_FIELD_MAX)).optional(),
+      body: z.string().max(ENTITY_BODY_MAX).nullable().optional()
+    }),
+    output: Entity
+  },
+  /**
+   * Patches the given parts of an entity (F-9.1); omitted ones keep their value. `fields` is
+   * merged over what is stored and an empty value removes that field, so a patch never has to
+   * carry the whole template. `kind` is immutable (delete and recreate instead), and `image`
+   * and `tagId` belong to F-9.3 and F-9.4. Same refusals as `entity:create`, plus NOT_FOUND.
+   */
+  'entity:update': {
+    input: z.object({
+      id: z.string(),
+      name: z.string().trim().min(1).max(ENTITY_NAME_MAX).optional(),
+      template: EntityTemplate.optional(),
+      fields: z.partialRecord(EntityFieldId, z.string().max(ENTITY_FIELD_MAX)).optional(),
+      body: z.string().max(ENTITY_BODY_MAX).nullable().optional()
+    }),
+    output: Entity
+  },
+  /** Deletes an entity (F-9.1); its tag, if it has one, is left alone. NOT_FOUND for an unknown id. */
+  'entity:delete': { input: z.object({ id: z.string() }), output: z.null() },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
@@ -1228,6 +1301,8 @@ export type TreeMoveInput = Input<'tree:move'>
 export type TagCreateInput = Input<'tag:create'>
 export type TagUpdateInput = Input<'tag:update'>
 export type TagLoadTemplateInput = Input<'tag:loadTemplate'>
+export type EntityCreateInput = Input<'entity:create'>
+export type EntityUpdateInput = Input<'entity:update'>
 
 /** Events pushed from main to the renderer. */
 export const events = {

@@ -72,6 +72,13 @@ import { getDocumentContent, saveDocument } from '../document/documentStore'
 import { getNotes, saveNotes } from '../document/notesStore'
 import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
 import { getSummary } from '../document/summaryStore'
+import {
+  createEntity,
+  deleteEntity,
+  getEntity,
+  listEntities,
+  updateEntity
+} from '../entity/entityStore'
 import { importDraft } from '../import/commit'
 import { readManuscript } from '../import/read'
 import { buildDraft } from '../import/structure'
@@ -603,6 +610,27 @@ export function registerHandlers({
   )
 
   register('documentTag:listAll', () => listAllDocumentTagLinks(manager.require().connection.orm))
+
+  // F-9.1: the story bible. The whole set comes in one call; the renderer store (F-9.2) keeps it
+  // normalized, so nothing here reloads the world after a write.
+  register('entity:list', () => listEntities(manager.require().connection.orm))
+
+  register('entity:get', ({ id }) => {
+    const found = getEntity(manager.require().connection.orm, id)
+    if (found === undefined) throw new AppError('NOT_FOUND', 'Entity not found', { id })
+    return found
+  })
+
+  register('entity:create', (input) => createEntity(manager.require().connection.orm, input))
+
+  register('entity:update', ({ id, ...patch }) =>
+    updateEntity(manager.require().connection.orm, id, patch)
+  )
+
+  register('entity:delete', ({ id }) => {
+    deleteEntity(manager.require().connection.orm, id)
+    return null
+  })
 
   // A hand-edited app-state file may squeeze the editor; reading normalizes, writing refuses.
   register('layout:get', () => normalizeLayout(appState.get().layout))

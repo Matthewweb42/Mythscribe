@@ -11,6 +11,7 @@ import {
 } from 'drizzle-orm/sqlite-core'
 // Relative on purpose: drizzle-kit loads this file without the `@shared` path alias.
 import { AI_PROVIDER_IDS } from '../../shared/ai'
+import { ENTITY_KINDS, ENTITY_TEMPLATES } from '../../shared/entities'
 import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
 import { TAG_CATEGORIES } from '../../shared/tags'
@@ -344,3 +345,37 @@ export const mentionScan = sqliteTable('mention_scan', {
 })
 export type MentionScanRow = typeof mentionScan.$inferSelect
 export type MentionScanInsert = typeof mentionScan.$inferInsert
+
+/**
+ * One entity of the story bible (F-9.1): a character, a setting, or a world-building item. The
+ * author writes it either through the kind's structured template (`fields`, a JSON object of the
+ * template's values keyed by field id) or as a blank page (`body`); both columns exist whatever
+ * `template` says, so switching it loses nothing. `name` is stored as the author typed it,
+ * trimmed, and is unique per kind on `toEntityNameKey` — enforced in the store, not by an index,
+ * since the key collapses whitespace and lower-cases beyond what SQLite compares. `image` is an
+ * asset file name written by F-9.3, and `tag_id` is the entity's tag (F-9.4), cleared rather
+ * than cascaded when that tag goes: the entity outlives its tag.
+ */
+export const entity = sqliteTable(
+  'entity',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind', { enum: ENTITY_KINDS }).notNull(),
+    /** The author's spelling, trimmed; compared through `toEntityNameKey`. */
+    name: text('name').notNull(),
+    template: text('template', { enum: ENTITY_TEMPLATES }).notNull().default('structured'),
+    /** JSON object of the template's values; `{}` when nothing is filled in. */
+    fields: text('fields').notNull().default('{}'),
+    /** The blank page's text; null until something is written. */
+    body: text('body'),
+    /** File name under the project's `assets/entities/`; null until F-9.3 uploads one. */
+    image: text('image'),
+    /** F-9.4 writes it; null everywhere until then. */
+    tagId: text('tag_id').references(() => tag.id, { onDelete: 'set null' }),
+    created: text('created').notNull(),
+    modified: text('modified').notNull()
+  },
+  (t) => [index('entity_kind_name_idx').on(t.kind, t.name)]
+)
+export type EntityRow = typeof entity.$inferSelect
+export type EntityInsert = typeof entity.$inferInsert
