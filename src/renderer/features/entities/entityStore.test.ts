@@ -144,4 +144,52 @@ describe('entityStore (F-9.2)', () => {
     expect(state().view.character).toBe('cards')
     expect(state().selectedId).toBeNull()
   })
+
+  it('startCreate names the kind the dialog is open for; cancelCreate and clear close it (F-9.3)', () => {
+    expect(state().creating).toBeNull()
+    state().startCreate('world')
+    expect(state().creating).toBe('world')
+    state().startCreate('character')
+    expect(state().creating).toBe('character')
+    state().cancelCreate()
+    expect(state().creating).toBeNull()
+    state().startCreate('setting')
+    state().clear()
+    expect(state().creating).toBeNull()
+  })
+
+  it('setImage merges the returned row, and a cancelled dialog changes nothing (F-9.3)', async () => {
+    const withImage: Entity = { ...mara, image: 'mara.0a1b2c3d.png' }
+    const { client, calls } = fakeClient({ 'entity:setImage': () => withImage })
+    setIpcClient(client)
+    await state().load()
+    const ids = state().ids
+    await expect(state().setImage('e-mara')).resolves.toEqual(withImage)
+    expect(calls.at(-1)).toEqual(['entity:setImage', { id: 'e-mara' }])
+    expect(state().byId['e-mara']?.image).toBe('mara.0a1b2c3d.png')
+    expect(state().ids).toBe(ids) // the name did not change, so the order is untouched
+
+    setIpcClient(fakeClient({ 'entity:setImage': () => null }).client)
+    await expect(state().setImage('e-mara')).resolves.toBeNull()
+    expect(state().byId['e-mara']?.image).toBe('mara.0a1b2c3d.png')
+  })
+
+  it('removeImage merges the row with no image (F-9.3)', async () => {
+    const { client, calls } = fakeClient({
+      'entity:removeImage': () => ({ ...mara, image: null })
+    })
+    setIpcClient(client)
+    await state().load()
+    useEntityStore.setState({ byId: { ...state().byId, 'e-mara': { ...mara, image: 'a.png' } } })
+    await state().removeImage('e-mara')
+    expect(calls.at(-1)).toEqual(['entity:removeImage', { id: 'e-mara' }])
+    expect(state().byId['e-mara']?.image).toBeNull()
+  })
+
+  it('a failed image request propagates and leaves the entity as it was (F-9.3)', async () => {
+    setIpcClient(fakeClient({ 'entity:setImage': failure }).client)
+    await state().load()
+    await expect(state().setImage('e-mara')).rejects.toMatchObject({ code: 'ALREADY_EXISTS' })
+    expect(state().byId['e-mara']).toEqual(mara)
+  })
 })

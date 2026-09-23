@@ -9,7 +9,9 @@ import type { EntityView } from './entityView'
  * rebuilds it from `entity:list`; every mutation awaits main and merges the returned row, never
  * re-listing. Errors propagate so the caller can show them, and a failed request leaves the
  * store as it was. It also carries the session-only view state the three entity tabs share
- * (the list/cards choice per kind and the selected entity), so switching sidebar tabs keeps them.
+ * (the list/cards choice per kind and the selected entity), so switching sidebar tabs keeps them,
+ * and which kind the creation dialog is open for (F-9.3). The open entity's unsaved edits are not
+ * here: they live in `entityDraftStore`, which writes them back through `update`.
  */
 interface EntityState {
   byId: Record<string, Entity>
@@ -20,6 +22,8 @@ interface EntityState {
   view: Record<EntityKind, EntityView>
   /** The entity the author picked in a tab, if any; F-9.3 opens it in the editor. */
   selectedId: string | null
+  /** The kind the creation dialog is open for (F-9.3), or null while it is closed. */
+  creating: EntityKind | null
   load: () => Promise<void>
   clear: () => void
   /** Creates an entity and merges it; resolves with the stored row (the name comes back trimmed). */
@@ -28,8 +32,19 @@ interface EntityState {
   update: (id: string, patch: Omit<EntityUpdateInput, 'id'>) => Promise<Entity>
   /** Deletes an entity and drops it from the list (and from the selection). */
   remove: (id: string) => Promise<void>
+  /**
+   * Opens the OS image dialog and makes the chosen file the entity's image (F-9.3), merging the
+   * returned row; resolves with null when the dialog was cancelled, leaving the entity as it was.
+   */
+  setImage: (id: string) => Promise<Entity | null>
+  /** Removes the entity's image (F-9.3) and merges the returned row. */
+  removeImage: (id: string) => Promise<Entity>
   setView: (kind: EntityKind, view: EntityView) => void
   select: (id: string | null) => void
+  /** Opens the creation dialog for `kind` (F-9.3: the quick-add button and the Insert menu). */
+  startCreate: (kind: EntityKind) => void
+  /** Closes the creation dialog (cancelled, or the entity was created). */
+  cancelCreate: () => void
 }
 
 /** The `entity:list` order: kind order, then `toEntityNameKey`, then id (as main sorts). */
@@ -62,6 +77,7 @@ export const useEntityStore = create<EntityState>((set, get) => ({
   loaded: false,
   view: DEFAULT_VIEW,
   selectedId: null,
+  creating: null,
 
   async load() {
     const mine = ++generation
@@ -74,7 +90,14 @@ export const useEntityStore = create<EntityState>((set, get) => ({
 
   clear() {
     generation++
-    set({ byId: {}, ids: [], loaded: false, view: DEFAULT_VIEW, selectedId: null })
+    set({
+      byId: {},
+      ids: [],
+      loaded: false,
+      view: DEFAULT_VIEW,
+      selectedId: null,
+      creating: null
+    })
   },
 
   async create(input) {
@@ -111,12 +134,38 @@ export const useEntityStore = create<EntityState>((set, get) => ({
     })
   },
 
+  async setImage(id) {
+    const mine = generation
+    const entity = await ipc().invoke('entity:setImage', { id })
+    // Null is a cancelled file dialog, not a change: the entity keeps the image it had.
+    if (entity !== null && mine === generation) {
+      set({ byId: { ...get().byId, [entity.id]: entity } })
+    }
+    return entity
+  },
+
+  async removeImage(id) {
+    const mine = generation
+    const entity = await ipc().invoke('entity:removeImage', { id })
+    // The name cannot change here, so the order is untouched.
+    if (mine === generation) set({ byId: { ...get().byId, [entity.id]: entity } })
+    return entity
+  },
+
   setView(kind, view) {
     if (get().view[kind] !== view) set({ view: { ...get().view, [kind]: view } })
   },
 
   select(id) {
     if (get().selectedId !== id) set({ selectedId: id })
+  },
+
+  startCreate(kind) {
+    set({ creating: kind })
+  },
+
+  cancelCreate() {
+    if (get().creating !== null) set({ creating: null })
   }
 }))
 

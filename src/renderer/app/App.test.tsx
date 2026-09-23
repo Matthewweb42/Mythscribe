@@ -37,6 +37,9 @@ import { dialogs, useDialogStore } from '@renderer/features/shell/dialogs/dialog
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { entityFixture } from '@renderer/features/entities/entityFixture'
+import { resetEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
+import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { resetMentionStore } from '@renderer/features/tags/mentionStore'
 import { resetProposedTagStore } from '@renderer/features/tags/proposedTagStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
@@ -83,6 +86,9 @@ beforeEach(() => {
   resetAuthorRulesStore()
   resetAssistantStore()
   resetTagStore()
+  // F-9.3: the entity page is part of the main pane, so its stores belong to the fixture too.
+  resetEntityDraftStore()
+  resetEntityStore()
   resetFocusStore()
   resetBackgroundStore()
   resetShellDialogStore()
@@ -98,6 +104,8 @@ beforeEach(() => {
   vi.stubGlobal('innerWidth', 1000)
 })
 afterEach(() => {
+  resetEntityDraftStore()
+  resetEntityStore()
   resetAiSettingsStore()
   resetAuthorRulesStore()
   resetAssistantStore()
@@ -302,6 +310,34 @@ describe('App', () => {
     await waitFor(() =>
       expect(Object.keys(useDocumentStore.getState().docs).sort()).toEqual(['sc-4', 'sc-5', 'sc-6'])
     )
+  })
+
+  it('an entity picked in its tab takes the main pane, and the tree takes it back (F-9.3)', async () => {
+    install({
+      'project:current': { ...info, name: 'Serial', format: 'webnovel' },
+      'tree:list': treeFixture,
+      'entity:list': entityFixture
+    })
+    render(<App />)
+    const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+    await userEvent.click(within(scene).getByText('Scene 1'))
+    expect(screen.getByTestId('selected-title')).toHaveTextContent('Scene 1')
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Characters' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Mara/ }))
+    // The page replaces the title block, the editor, and the notes panel.
+    expect(screen.getByRole('article', { name: 'Mara' })).toBeInTheDocument()
+    expect(screen.queryByTestId('selected-title')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Document' })).not.toBeInTheDocument()
+
+    // Back to the manuscript: the tree selection was never touched.
+    await userEvent.click(screen.getByRole('tab', { name: 'Manuscript' }))
+    await userEvent.click(
+      within(screen.getByRole('treeitem', { name: 'Scene 1' })).getByText('Scene 1')
+    )
+    expect(screen.queryByRole('article', { name: 'Mara' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('selected-title')).toHaveTextContent('Scene 1')
+    expect(useEntityStore.getState().selectedId).toBeNull()
   })
 
   it('invites the author to add a scene to an empty chapter (F-3.8)', async () => {
@@ -1266,12 +1302,21 @@ describe('App', () => {
 
       await userEvent.click(within(bar).getByRole('menuitem', { name: 'Insert' }))
       const insert = screen.getByRole('menu', { name: 'Insert' })
-      // Web novel labels the top level "Arc"; the scene item carries its chord.
+      // Web novel labels the top level "Arc"; the scene item carries its chord. F-9.3 adds the
+      // three story-bible items after the levels.
       expect(
         within(insert)
           .getAllByRole('menuitem')
           .map((m) => m.textContent)
-      ).toEqual(['SceneCtrl+Shift+S', 'ChapterCtrl+Shift+C', 'ArcCtrl+Shift+P', 'Scene break'])
+      ).toEqual([
+        'SceneCtrl+Shift+S',
+        'ChapterCtrl+Shift+C',
+        'ArcCtrl+Shift+P',
+        'Character',
+        'Setting',
+        'World-building note',
+        'Scene break'
+      ])
       expect(within(insert).getByRole('menuitem', { name: 'Scene' })).toHaveAttribute(
         'aria-keyshortcuts',
         'Ctrl+Shift+S'

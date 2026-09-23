@@ -52,6 +52,8 @@ import { useBackgroundStore, useCurrentBackground } from '@renderer/features/foc
 import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
 import { ImportDialog } from '@renderer/features/import/ImportDialog'
 import { useImportStore } from '@renderer/features/import/importStore'
+import { EntityCreateDialog } from '@renderer/features/entities/EntityCreateDialog'
+import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
@@ -618,16 +620,22 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
         <MainPane format={format} />
       </section>
       {focus ? <FocusFloatingPanels /> : <AssistantPanel />}
+      {/* F-9.3: the entity creation dialog, open while a kind is being created. */}
+      <EntityCreateDialog />
     </>
   )
 }
 
 function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
   const focus = useFocusStore((s) => s.active)
+  // F-9.3: an entity picked in a tab takes the whole pane; selecting a document closes it again
+  // (`treeStore.select`), so the manuscript comes back exactly where it was.
+  const entityId = useEntityStore((s) => s.selectedId)
   const node = useTreeStore((s) => (s.selectedId === null ? undefined : s.byId[s.selectedId]))
   const section = useTreeStore((s) =>
     s.selectedId === null ? undefined : s.sectionOf[s.selectedId]
   )
+  if (entityId !== null) return <EntityEditor key={entityId} id={entityId} />
   if (!node) {
     // F-3.5: the empty state, centered in the pane.
     return (

@@ -1,5 +1,6 @@
 import { app, dialog, type BrowserWindow } from 'electron'
 import path from 'node:path'
+import { IMAGE_EXTENSIONS } from '@shared/assets'
 import { BACKGROUND_EXTENSIONS } from '@shared/focus'
 import { IMPORT_EXTENSIONS } from '@shared/import'
 import { DB_FILE, PROJECT_EXTENSION, sanitizeName } from './project/projectStore'
@@ -20,6 +21,8 @@ export interface ProjectDialogs {
   ) => Promise<string | null>
   /** Returns the image files the user chose for focus-mode backgrounds (F-6.2), or null if cancelled. */
   chooseImages: () => Promise<string[] | null>
+  /** Returns the one image the user chose for an entity (F-9.3), or null if cancelled. */
+  chooseEntityImage: () => Promise<string | null>
   /** Returns the manuscript file the user chose to import (F-12.2), or null if cancelled. */
   chooseManuscriptFile: () => Promise<string | null>
 }
@@ -74,6 +77,20 @@ export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDia
       )
       if (result.canceled || result.filePaths.length === 0) return null
       return result.filePaths
+    },
+    async chooseEntityImage() {
+      const options: Electron.OpenDialogOptions = {
+        title: 'Choose an image',
+        buttonLabel: 'Choose',
+        defaultPath: app.getPath('pictures'),
+        properties: ['openFile'],
+        filters: [{ name: 'Images', extensions: [...IMAGE_EXTENSIONS] }]
+      }
+      const result = await show((win) =>
+        win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
+      )
+      if (result.canceled) return null
+      return result.filePaths[0] ?? null
     },
     async chooseManuscriptFile() {
       const options = importOptions(defaultDir())

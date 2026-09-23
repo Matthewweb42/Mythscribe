@@ -132,6 +132,10 @@ describe('buildMenuTemplate (F-7.1)', () => {
       'Chapter',
       'Arc',
       undefined,
+      'Character',
+      'Setting',
+      'World-building note',
+      undefined,
       'Scene break'
     ])
   })

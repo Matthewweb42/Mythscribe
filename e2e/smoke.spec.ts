@@ -17,7 +17,7 @@ import { cloudChargeMicros, cloudPriceFor, MICROS_PER_USD } from '../src/shared/
 import { USAGE_PERIOD_DAYS } from '../src/shared/cloudUsage'
 import type { FocusSettings } from '../src/shared/focus'
 import { encodeLicensePayload, formatLicenseToken, LICENSE_GRACE_MS } from '../src/shared/license'
-import type { IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
+import type { Entity, IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
 import { PRESETS, type WritingPresets } from '../src/shared/presets'
 import { matterTemplate } from '../src/shared/matterTemplates'
@@ -1633,13 +1633,110 @@ test('create, close, reopen a project on disk', async () => {
     'aria-pressed',
     'true'
   )
-  await maraRow.hover()
-  await characterRows.getByRole('button', { name: 'Delete Mara' }).click()
-  const deleteCharacterDialog = page.getByRole('dialog', { name: 'Delete "Mara"?' })
+
+  // F-9.3: the selected character is open as a full page in the main pane (the scene's title
+  // block is gone): the structured fields autosave, the stubbed open dialog uploads a 1×1 PNG
+  // into `assets/entities/` and the page shows it through the asset scheme, Blank page switches
+  // the template and keeps the fields, a rename follows in the list, and the stored entity
+  // carries all of it. Close brings Scene 1 back; a tree click does the same. "New character…"
+  // opens the creation dialog, whose Blank page choice opens the new character on its page.
+  const entityEditor = page.getByTestId('entity-editor')
+  await expect(entityEditor).toBeVisible()
+  await expect(page.getByTestId('selected-title')).toHaveCount(0)
+  const entityName = entityEditor.getByRole('textbox', { name: 'Name' })
+  await expect(entityName).toHaveValue('Mara')
+  await entityEditor.getByRole('textbox', { name: 'Age' }).fill('31')
+  await entityEditor
+    .getByRole('textbox', { name: 'Appearance' })
+    .fill('Tall, with a scar over one eye.')
+  await expect(entityEditor.getByRole('status')).toHaveText('Saved')
+  const entityImageSource = path.join(tmp, 'portrait.png')
+  fs.writeFileSync(entityImageSource, Buffer.from(PNG_1X1_BASE64, 'base64'))
+  await stubOpenDialog(entityImageSource)
+  const entityImagesDir = path.join(projectPath, 'assets', 'entities')
+  await entityEditor.getByRole('button', { name: 'Add image…' }).click()
+  const entityImage = entityEditor.locator('img')
+  await expect(entityImage).toHaveAttribute('src', /^mythscribe-asset:\/\/entities\/portrait\./)
+  const [entityImageFile, ...otherEntityFiles] = fs.readdirSync(entityImagesDir)
+  expect(otherEntityFiles).toEqual([])
+  expect(entityImageFile).toMatch(/^portrait\.[0-9a-f]{8}\.png$/)
+  const entityImageWidth = await page.evaluate(async (src) => {
+    const img = new Image()
+    img.src = src
+    await img.decode()
+    return img.naturalWidth
+  }, `mythscribe-asset://entities/${entityImageFile}`)
+  expect(entityImageWidth).toBe(1)
+  await expect(entityEditor.getByRole('button', { name: 'Replace image…' })).toBeVisible()
+  const templateGroup = entityEditor.getByRole('group', { name: 'Template' })
+  await templateGroup.getByRole('button', { name: 'Blank page' }).click()
+  await expect(templateGroup.getByRole('button', { name: 'Blank page' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await entityEditor.getByRole('textbox', { name: 'Page' }).fill('She keeps the lighthouse.')
+  await expect(entityEditor.getByRole('status')).toHaveText('Saved')
+  await templateGroup.getByRole('button', { name: 'Structured' }).click()
+  await expect(entityEditor.getByRole('textbox', { name: 'Age' })).toHaveValue('31')
+  await entityName.fill('Mara Vell')
+  await entityName.press('Tab')
+  const maraVellRow = characterRows.getByRole('button', { name: 'Mara Vell', exact: true })
+  await expect(maraVellRow).toHaveAttribute('aria-current', 'true')
+  await expect(entityEditor.getByRole('status')).toHaveText('Saved')
+  const storedMara = (await listEntities()).find((entity) => entity.name === 'Mara Vell')
+  expect(storedMara).toMatchObject({
+    kind: 'character',
+    template: 'structured',
+    fields: { age: '31', appearance: 'Tall, with a scar over one eye.' },
+    body: 'She keeps the lighthouse.',
+    image: entityImageFile
+  })
+  await entityEditor.getByRole('button', { name: 'Close Mara Vell' }).click()
+  await expect(entityEditor).toHaveCount(0)
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await expect(maraVellRow).not.toHaveAttribute('aria-current', 'true')
+  await charactersPanel.getByRole('button', { name: 'New character…' }).click()
+  const newCharacterDialog = page.getByRole('dialog', { name: 'New character' })
+  await expect(newCharacterDialog).toBeVisible()
+  await expect(newCharacterDialog.getByRole('textbox', { name: 'Name' })).toBeFocused()
+  await newCharacterDialog.getByRole('textbox', { name: 'Name' }).fill('Tomas')
+  // The radio is visually hidden, like the wizard's format cards; the tile label is what the
+  // author clicks.
+  await newCharacterDialog.getByText('Blank page', { exact: true }).click()
+  await expect(newCharacterDialog.getByRole('radio', { name: 'Blank page' })).toBeChecked()
+  await newCharacterDialog.getByRole('button', { name: 'Create' }).click()
+  await expect(newCharacterDialog).toHaveCount(0)
+  await expect(entityEditor).toBeVisible()
+  await expect(entityName).toHaveValue('Tomas')
+  await expect(entityEditor.getByRole('textbox', { name: 'Page' })).toBeVisible()
+  // Unqualified, "Age" matches "Page" too (a case-insensitive substring of the accessible name).
+  await expect(entityEditor.getByRole('textbox', { name: 'Age', exact: true })).toHaveCount(0)
+  await characterSearch.fill('')
+  const tomasRow = characterRows.getByRole('button', { name: 'Tomas', exact: true })
+  await expect(tomasRow).toHaveAttribute('aria-current', 'true')
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await scene1.click()
+  await expect(entityEditor).toHaveCount(0)
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  await expect(tomasRow).not.toHaveAttribute('aria-current', 'true')
+  await tomasRow.hover()
+  await characterRows.getByRole('button', { name: 'Delete Tomas' }).click()
+  await page
+    .getByRole('dialog', { name: 'Delete "Tomas"?' })
+    .getByRole('button', { name: 'Delete' })
+    .click()
+  await expect(tomasRow).toHaveCount(0)
+
+  await maraVellRow.hover()
+  await characterRows.getByRole('button', { name: 'Delete Mara Vell' }).click()
+  const deleteCharacterDialog = page.getByRole('dialog', { name: 'Delete "Mara Vell"?' })
   await expect(deleteCharacterDialog).toBeVisible()
   await deleteCharacterDialog.getByRole('button', { name: 'Delete' }).click()
   await expect(deleteCharacterDialog).toBeHidden()
   await expect(charactersPanel.getByText('No characters yet.')).toBeVisible()
+  // F-9.3: deleting the character deleted its image file too.
+  expect(fs.readdirSync(entityImagesDir)).toEqual([])
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
   await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
   await expect(tree).toBeVisible()
@@ -3091,10 +3188,14 @@ test('create, close, reopen a project on disk', async () => {
   await menuBar.getByRole('menuitem', { name: 'Insert' }).click()
   const insertMenu = page.getByRole('menu', { name: 'Insert' })
   // A web novel calls its parts arcs; the chord text rides along in the text, not the name.
+  // F-9.3 adds the three story-bible items after the levels.
   await expect(insertMenu.getByRole('menuitem')).toHaveText([
     'SceneCtrl+Shift+S',
     'ChapterCtrl+Shift+C',
     'ArcCtrl+Shift+P',
+    'Character',
+    'Setting',
+    'World-building note',
     'Scene break'
   ])
   await expect(insertMenu.getByRole('menuitem', { name: 'Scene', exact: true })).toHaveAttribute(
@@ -3483,6 +3584,15 @@ async function documentText(id: string): Promise<string | null> {
   )
   if (!result.ok) throw new Error(`document:get failed: ${result.error.message}`)
   return result.data.content ? plainText(result.data.content) : null
+}
+
+/** Every stored entity (F-9.1), as `entity:list` answers. */
+async function listEntities(): Promise<Entity[]> {
+  const result = await page.evaluate<IpcResult<Entity[]>>(
+    () => window.mythscribe.invoke('entity:list', undefined) as Promise<IpcResult<Entity[]>>
+  )
+  if (!result.ok) throw new Error(`entity:list failed: ${result.error.message}`)
+  return result.data
 }
 
 /** The plain text of a node's saved notes (F-3.7), or null when never written. */

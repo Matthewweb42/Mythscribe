@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Plus } from 'lucide-react'
 import { ENTITY_KIND_NOUN, ENTITY_NAME_MAX, type EntityKind } from '@shared/entities'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -6,13 +7,14 @@ import { useEntityStore } from './entityStore'
 
 /**
  * The quick-add form at the foot of an entity tab (F-9.2): a name, and Enter or Add creates the
- * entity with the kind's structured template (the creation dialog with a template choice is
- * F-9.3). The new entity is selected so its row is visible in the list; a name that is already
- * taken, or any other refusal, toasts and keeps the name in the field.
+ * entity with the kind's structured template. The new entity is selected so its row is visible in
+ * the list; a name that is already taken, or any other refusal, toasts and keeps the name in the
+ * field. The button beside Add opens the creation dialog instead (F-9.3), for a template choice.
  */
 export function EntityQuickAdd({ kind }: { kind: EntityKind }): React.JSX.Element {
   const create = useEntityStore((s) => s.create)
   const select = useEntityStore((s) => s.select)
+  const startCreate = useEntityStore((s) => s.startCreate)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const trimmed = name.trim()
@@ -50,9 +52,18 @@ export function EntityQuickAdd({ kind }: { kind: EntityKind }): React.JSX.Elemen
         className="min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-1 text-sm"
       />
       <button
+        type="button"
+        aria-label={`New ${noun}…`}
+        title={`New ${noun}…`}
+        onClick={() => startCreate(kind)}
+        className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-md border border-line text-fg-muted hover:bg-surface-raised hover:text-fg"
+      >
+        <Plus size={14} aria-hidden="true" />
+      </button>
+      <button
         type="submit"
         disabled={trimmed.length === 0 || busy}
-        className="ml-auto shrink-0 rounded-md border border-line px-2 py-1 text-xs hover:bg-surface-raised disabled:opacity-50 disabled:hover:bg-transparent"
+        className="shrink-0 rounded-md border border-line px-2 py-1 text-xs hover:bg-surface-raised disabled:opacity-50 disabled:hover:bg-transparent"
       >
         Add
       </button>

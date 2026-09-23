@@ -9,6 +9,8 @@ import {
   type MenuItemId
 } from '@shared/menu'
 import type { FloatingPanel } from '@shared/layout'
+import type { EntityKind } from '@shared/entities'
+import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
@@ -28,6 +30,13 @@ import { ipc } from '@renderer/lib/ipc'
 
 /** What a `project` item says when it runs with nothing open (a native accelerator can still reach it). */
 export const NO_PROJECT_MESSAGE = 'Open a project first.'
+
+/** The three Insert items that open the entity creation dialog (F-9.3), and the kind each makes. */
+const INSERT_ENTITY_KIND = {
+  insertCharacter: 'character',
+  insertSetting: 'setting',
+  insertWorldItem: 'world'
+} as const satisfies Record<string, EntityKind>
 
 const isEditRole = (id: MenuItemId): id is EditRole =>
   (EDIT_ROLES as readonly string[]).includes(id)
@@ -114,6 +123,15 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
       case 'insertPart':
         insertLevel('part', project.format)
         return
+      case 'insertCharacter':
+      case 'insertSetting':
+      case 'insertWorldItem': {
+        // F-9.3: the dialog is part of the project screen, so focus mode is left first, like Tools › Tags.
+        const focus = useFocusStore.getState()
+        if (focus.active) await focus.exit()
+        useEntityStore.getState().startCreate(INSERT_ENTITY_KIND[id])
+        return
+      }
       case 'insertSceneBreak': {
         const active = useActiveEditorStore.getState().active
         if (!active) {

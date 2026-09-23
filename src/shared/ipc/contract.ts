@@ -148,7 +148,8 @@ export type Tag = z.infer<typeof Tag>
  * One entity of the story bible (F-9.1): a character, a setting, or a world-building item.
  * `fields` holds the kind's structured template (a field with no text has no key) and `body` the
  * blank page; `template` says which of the two the author writes in, and both travel either way.
- * `image` (F-9.3) and `tagId` (F-9.4) are written by their own features, never by `entity:update`.
+ * `image` (F-9.3, through `entity:setImage`/`entity:removeImage`) and `tagId` (F-9.4) are
+ * written by their own channels, never by `entity:update`.
  */
 export const Entity = z.object({
   id: z.string(),
@@ -158,7 +159,10 @@ export const Entity = z.object({
   template: EntityTemplate,
   fields: z.partialRecord(EntityFieldId, z.string()),
   body: z.string().nullable(),
-  /** The asset file name of the portrait or photograph; null until F-9.3 uploads one. */
+  /**
+   * The file name of the portrait or photograph in the project's `assets/entities/` (F-9.3),
+   * loaded through `entityImageUrl`; null when there is none (always, for a world item).
+   */
   image: z.string().nullable(),
   /** The tag this entity is linked to (F-9.4); null until then, and again if that tag is deleted. */
   tagId: z.string().nullable(),
@@ -778,7 +782,7 @@ export const contract = {
    * Patches the given parts of an entity (F-9.1); omitted ones keep their value. `fields` is
    * merged over what is stored and an empty value removes that field, so a patch never has to
    * carry the whole template. `kind` is immutable (delete and recreate instead), and `image`
-   * and `tagId` belong to F-9.3 and F-9.4. Same refusals as `entity:create`, plus NOT_FOUND.
+   * and `tagId` have their own channels (F-9.3, F-9.4). Same refusals as `entity:create`, plus NOT_FOUND.
    */
   'entity:update': {
     input: z.object({
@@ -790,7 +794,17 @@ export const contract = {
     }),
     output: Entity
   },
-  /** Deletes an entity (F-9.1); its tag, if it has one, is left alone. NOT_FOUND for an unknown id. */
+  /**
+   * Opens the OS file dialog for one image and makes it the entity's portrait or photograph
+   * (F-9.3): the file is copied into the project's `assets/entities/` under a minted name, the
+   * previous image file, if any, is deleted, and the updated entity is answered; null when the
+   * dialog was cancelled. VALIDATION for a world item (no image), a type outside
+   * `IMAGE_EXTENSIONS`, or a file over `IMAGE_MAX_BYTES`; NOT_FOUND for an unknown id.
+   */
+  'entity:setImage': { input: z.object({ id: z.string() }), output: Entity.nullable() },
+  /** Removes the entity's image (F-9.3): the file is deleted and `image` is null again. NOT_FOUND for an unknown id. */
+  'entity:removeImage': { input: z.object({ id: z.string() }), output: Entity },
+  /** Deletes an entity (F-9.1) and its image file (F-9.3); its tag, if it has one, is left alone. NOT_FOUND for an unknown id. */
   'entity:delete': { input: z.object({ id: z.string() }), output: z.null() },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },

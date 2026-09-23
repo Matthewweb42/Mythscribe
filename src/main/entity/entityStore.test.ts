@@ -13,6 +13,7 @@ import {
   deleteEntity,
   getEntity,
   listEntities,
+  setEntityImage,
   updateEntity,
   type EntityDb
 } from './entityStore'
@@ -214,11 +215,38 @@ describe('updateEntity', () => {
   })
 })
 
+describe('setEntityImage (F-9.3)', () => {
+  it('sets the file name, replaces it, clears it again, and stamps modified', () => {
+    vi.useFakeTimers({ now: new Date('2026-09-23T10:00:00.000Z') })
+    const ada = createEntity(db, { kind: 'character', name: 'Ada' })
+    vi.setSystemTime(new Date('2026-09-23T11:00:00.000Z'))
+    const withImage = setEntityImage(db, ada.id, 'Ada.0a1b2c3d.png')
+    expect(withImage).toEqual({
+      ...ada,
+      image: 'Ada.0a1b2c3d.png',
+      modified: '2026-09-23T11:00:00.000Z'
+    })
+    expect(setEntityImage(db, ada.id, 'Ada.4e5f6a7b.jpg').image).toBe('Ada.4e5f6a7b.jpg')
+    expect(setEntityImage(db, ada.id, null).image).toBeNull()
+    expect(getEntity(db, ada.id)?.image).toBeNull()
+  })
+
+  it('works for a setting and refuses a world item and an unknown id', () => {
+    const marsh = createEntity(db, { kind: 'setting', name: 'The Salt Marsh' })
+    expect(setEntityImage(db, marsh.id, 'marsh.0a1b2c3d.png').image).toBe('marsh.0a1b2c3d.png')
+    const law = createEntity(db, { kind: 'world', name: 'Tide Law' })
+    expectCode(() => setEntityImage(db, law.id, 'law.0a1b2c3d.png'), 'VALIDATION')
+    expect(getEntity(db, law.id)?.image).toBeNull()
+    expectCode(() => setEntityImage(db, 'missing', null), 'NOT_FOUND')
+  })
+})
+
 describe('deleteEntity', () => {
-  it('removes the entity and refuses an unknown id', () => {
+  it('removes the entity, answers it as it stood, and refuses an unknown id', () => {
     const ada = createEntity(db, { kind: 'character', name: 'Ada' })
     const brann = createEntity(db, { kind: 'character', name: 'Brann' })
-    deleteEntity(db, ada.id)
+    const withImage = setEntityImage(db, ada.id, 'Ada.0a1b2c3d.png')
+    expect(deleteEntity(db, ada.id)).toEqual(withImage)
     expect(getEntity(db, ada.id)).toBeUndefined()
     expect(listEntities(db)).toEqual([brann])
     expectCode(() => deleteEntity(db, 'missing'), 'NOT_FOUND')

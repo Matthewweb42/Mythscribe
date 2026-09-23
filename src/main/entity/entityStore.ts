@@ -3,9 +3,11 @@ import type { RunResult } from 'better-sqlite3'
 import { and, eq, ne } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import {
+  ENTITY_KIND_NOUN,
   ENTITY_KINDS,
   fieldIdsFor,
   isFieldOf,
+  kindHasImage,
   parseEntityFields,
   toEntityNameKey,
   type EntityFields,
@@ -199,10 +201,39 @@ export function updateEntity(
 }
 
 /**
- * Deletes an entity (F-9.1). Its tag, when F-9.4 has linked one, is a tag of the bank like any
- * other and stays; only the entity goes.
+ * Sets or clears the entity's image (F-9.3): `image` is the file name stored in the project's
+ * `assets/entities/`, or null for none. The file itself is the handler's business — this only
+ * writes the column and stamps `modified`. A kind that carries no image (a world item) is
+ * VALIDATION, an unknown id NOT_FOUND.
  */
-export function deleteEntity(db: EntityDb, id: string): void {
-  if (getRow(db, id) === undefined) throw new AppError('NOT_FOUND', 'Entity not found', { id })
+export function setEntityImage(db: EntityDb, id: string, image: string | null): Entity {
+  return db.transaction((tx) => {
+    const existing = getRow(tx, id)
+    if (!existing) throw new AppError('NOT_FOUND', 'Entity not found', { id })
+    if (!kindHasImage(existing.kind)) {
+      throw new AppError('VALIDATION', `A ${ENTITY_KIND_NOUN[existing.kind]} has no image`, {
+        id,
+        kind: existing.kind
+      })
+    }
+    const updated = tx
+      .update(entity)
+      .set({ image, modified: new Date().toISOString() })
+      .where(eq(entity.id, id))
+      .returning()
+      .get()
+    return rowToEntity(updated)
+  })
+}
+
+/**
+ * Deletes an entity (F-9.1) and answers it as it stood, so the caller can take its image file
+ * with it (F-9.3). Its tag, when F-9.4 has linked one, is a tag of the bank like any other and
+ * stays; only the entity goes.
+ */
+export function deleteEntity(db: EntityDb, id: string): Entity {
+  const row = getRow(db, id)
+  if (row === undefined) throw new AppError('NOT_FOUND', 'Entity not found', { id })
   db.delete(entity).where(eq(entity.id, id)).run()
+  return rowToEntity(row)
 }

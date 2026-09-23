@@ -10,6 +10,7 @@ import {
   useActiveEditorStore
 } from '@renderer/features/editor/activeEditorStore'
 import { resetDocumentStore, useDocumentStore } from '@renderer/features/editor/documentStore'
+import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
 import { draftFixture } from '@renderer/features/import/draftFixture'
@@ -94,6 +95,7 @@ beforeEach(() => {
   resetPendingSaves()
   resetDocumentStore()
   resetActiveEditorStore()
+  resetEntityStore()
   resetFocusStore()
   resetImportStore()
   resetLayoutStore()
@@ -307,6 +309,27 @@ describe('runMenuAction (F-7.1)', () => {
     await runMenuAction('toggleAssistant')
     expect(useFocusStore.getState().panels).toEqual({ notes: true, assistant: true })
     expect(useLayoutStore.getState().layout).toEqual(defaultLayout())
+  })
+
+  it('Insert › Character / Setting / World-building note open the creation dialog (F-9.3)', async () => {
+    await withProject()
+    await runMenuAction('insertCharacter')
+    expect(useEntityStore.getState().creating).toBe('character')
+    await runMenuAction('insertSetting')
+    expect(useEntityStore.getState().creating).toBe('setting')
+
+    // The dialog belongs to the project screen, so focus mode is left first.
+    await useFocusStore.getState().enter()
+    await runMenuAction('insertWorldItem')
+    expect(useFocusStore.getState().active).toBe(false)
+    expect(useEntityStore.getState().creating).toBe('world')
+    expect(toasts()).toEqual([])
+  })
+
+  it('Insert › Character with no project open toasts instead (F-9.3)', async () => {
+    await runMenuAction('insertCharacter')
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE])
+    expect(useEntityStore.getState().creating).toBeNull()
   })
 
   it('Tools › Tags opens the sidebar on the Tags tab, leaving focus mode first', async () => {

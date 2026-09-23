@@ -13,6 +13,7 @@ import {
 import { type AiSource, isFeatureAllowed } from '@shared/aiSettings'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl } from '@shared/cloudApi'
 import { aiRequestCounter } from '@shared/diagnostics'
+import { ENTITY_IMAGES_DIR } from '@shared/entities'
 import type { Background } from '@shared/focus'
 import type { ImportDetectResult, PendingTagProposal } from '@shared/importStructure'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
@@ -26,6 +27,7 @@ import type {
   AiRecommendTagsResult,
   AiRewriteResult,
   AiSummarizeResult,
+  Entity,
   JobsIndexAllResult
 } from '@shared/ipc/contract'
 import {
@@ -77,12 +79,14 @@ import {
   deleteEntity,
   getEntity,
   listEntities,
+  setEntityImage,
   updateEntity
 } from '../entity/entityStore'
 import { importDraft } from '../import/commit'
 import { readManuscript } from '../import/read'
 import { buildDraft } from '../import/structure'
 import { addBackground, listBackgrounds, removeBackground } from '../project/backgroundStore'
+import { addImageAsset, removeImageAsset } from '../project/imageAssets'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor, sanitizeName } from '../project/projectStore'
 import { renderDisclosure } from '../provenance/disclosure'
@@ -627,8 +631,42 @@ export function registerHandlers({
     updateEntity(manager.require().connection.orm, id, patch)
   )
 
+  /**
+   * F-9.3: the entity's portrait or photograph. The file is copied into the project's
+   * `assets/entities/` first and the row written second, so a refusal (a world item, an unknown
+   * id) never leaves a stored file behind; the previous image goes only once the new one is in
+   * the row, so a failed write never loses the image the author had.
+   */
+  register('entity:setImage', async ({ id }) => {
+    const session = manager.require()
+    const source = await dialogs.chooseEntityImage()
+    if (source === null) return null
+    const previous = getEntity(session.connection.orm, id)?.image ?? null
+    const fileName = addImageAsset(session.folder, ENTITY_IMAGES_DIR, source, 'image')
+    let updated: Entity
+    try {
+      updated = setEntityImage(session.connection.orm, id, fileName)
+    } catch (err) {
+      removeImageAsset(session.folder, ENTITY_IMAGES_DIR, fileName)
+      throw err
+    }
+    if (previous !== null) removeImageAsset(session.folder, ENTITY_IMAGES_DIR, previous)
+    return updated
+  })
+
+  register('entity:removeImage', ({ id }) => {
+    const session = manager.require()
+    const previous = getEntity(session.connection.orm, id)?.image ?? null
+    const updated = setEntityImage(session.connection.orm, id, null)
+    if (previous !== null) removeImageAsset(session.folder, ENTITY_IMAGES_DIR, previous)
+    return updated
+  })
+
   register('entity:delete', ({ id }) => {
-    deleteEntity(manager.require().connection.orm, id)
+    const session = manager.require()
+    const deleted = deleteEntity(session.connection.orm, id)
+    // F-9.3: the image is the entity's own file, so it goes with it.
+    if (deleted.image !== null) removeImageAsset(session.folder, ENTITY_IMAGES_DIR, deleted.image)
     return null
   })
 

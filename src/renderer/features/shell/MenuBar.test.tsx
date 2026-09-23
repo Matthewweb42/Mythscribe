@@ -200,6 +200,14 @@ describe('MenuBar (F-7.1)', () => {
       within(popup('Insert'))
         .getAllByRole('menuitem')
         .map((m) => m.textContent)
-    ).toEqual(['SceneCtrl+Shift+S', 'ChapterCtrl+Shift+C', 'ArcCtrl+Shift+P', 'Scene break'])
+    ).toEqual([
+      'SceneCtrl+Shift+S',
+      'ChapterCtrl+Shift+C',
+      'ArcCtrl+Shift+P',
+      'Character',
+      'Setting',
+      'World-building note',
+      'Scene break'
+    ])
   })
 })

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { TreeNode } from '@shared/ipc/contract'
 import type { HierarchyLevel, NodeKind, SectionType } from '@shared/labels'
 import type { MatterTemplateId } from '@shared/matterTemplates'
+import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { ipc } from '@renderer/lib/ipc'
 import { resolveCreateTarget, resolveGenericTarget, type CreateTarget } from './placement'
 
@@ -334,6 +335,10 @@ export const useTreeStore = create<TreeState>((set, get) => ({
   select(id) {
     if (id !== null) {
       if (get().byId[id]?.sectionType !== null) return
+      // F-9.3: picking a document closes the entity page, whoever asked for the selection (the
+      // tree, a passage link, the tag detail, the assistant, an import), so the main pane always
+      // shows what was just selected — a click on the already-selected node included.
+      useEntityStore.getState().select(null)
     }
     set({ selectedId: id })
   },

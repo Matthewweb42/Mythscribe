@@ -183,6 +183,15 @@ describe('EntityTab (F-9.2)', () => {
     ])
   })
 
+  it('the button beside Add opens the creation dialog for the kind (F-9.3)', async () => {
+    const user = userEvent.setup()
+    const calls = await renderLoaded('character')
+    const form = screen.getByRole('form', { name: 'New character' })
+    await user.click(within(form).getByRole('button', { name: 'New character…' }))
+    expect(useEntityStore.getState().creating).toBe('character')
+    expect(calls.filter(([channel]) => channel === 'entity:create')).toHaveLength(0)
+  })
+
   it('a refused quick-add toasts the cause and keeps the name', async () => {
     const user = userEvent.setup()
     await renderLoaded('character', {

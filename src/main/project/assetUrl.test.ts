@@ -4,6 +4,7 @@ import { assetPathFor } from './assetUrl'
 
 const root = path.join('/', 'projects', 'Book.mythscribe')
 const dir = path.join(root, 'assets', 'backgrounds')
+const entitiesDir = path.join(root, 'assets', 'entities')
 
 describe('assetPathFor (F-6.2)', () => {
   it('resolves a background file name inside the project folder', () => {
@@ -13,6 +14,14 @@ describe('assetPathFor (F-6.2)', () => {
     expect(assetPathFor(root, 'mythscribe-asset://backgrounds/a%20b.JPG')).toBe(
       path.join(dir, 'a b.JPG')
     )
+  })
+
+  it('resolves an entity image in its own folder (F-9.3)', () => {
+    expect(assetPathFor(root, 'mythscribe-asset://entities/Mara.0a1b2c3d.png')).toBe(
+      path.join(entitiesDir, 'Mara.0a1b2c3d.png')
+    )
+    expect(assetPathFor(root, 'mythscribe-asset://entities/..%2Fa.png')).toBeNull()
+    expect(assetPathFor(root, 'mythscribe-asset://entities/notes.txt')).toBeNull()
   })
 
   it('refuses another scheme, host, or a nested path', () => {

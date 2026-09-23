@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { contract, type Channel, type Output, type TreeNode } from '@shared/ipc/contract'
 import { matterTemplate } from '@shared/matterTemplates'
 import { countWords } from '@shared/wordCount'
+import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { treeFixture } from './treeFixture'
 import {
@@ -159,6 +160,8 @@ const newNode = (parentId: string, position: number): TreeNode => ({
 
 beforeEach(() => {
   useTreeStore.getState().clear()
+  // F-9.3: `select` closes the open entity page, so this store's state is part of the fixture.
+  resetEntityStore()
 })
 
 describe('insertIntoIndex', () => {
@@ -575,6 +578,21 @@ describe('treeStore', () => {
     expect(useTreeStore.getState().selectedId).toBe('arc-1')
     useTreeStore.getState().select(null)
     expect(useTreeStore.getState().selectedId).toBeNull()
+  })
+
+  it('selecting a document closes the open entity page, a refused selection does not (F-9.3)', () => {
+    useTreeStore.setState(buildIndex(treeFixture))
+    useEntityStore.getState().select('e-mara')
+    useTreeStore.getState().select('manuscript') // a section root: nothing is selected
+    expect(useEntityStore.getState().selectedId).toBe('e-mara')
+    useTreeStore.getState().select('sc-1')
+    expect(useEntityStore.getState().selectedId).toBeNull()
+
+    // A click on the already-selected node comes back to the manuscript too.
+    useEntityStore.getState().select('e-mara')
+    useTreeStore.getState().select('sc-1')
+    expect(useEntityStore.getState().selectedId).toBeNull()
+    expect(useTreeStore.getState().selectedId).toBe('sc-1')
   })
 
   it('toggle flips only the given folder or section and ignores documents', () => {

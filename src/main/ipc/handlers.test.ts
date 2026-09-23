@@ -24,6 +24,7 @@ import {
   defaultAuthorRules
 } from '@shared/authorRules'
 import { defaultConversations, type Conversations } from '@shared/chat'
+import { entityImageUrl } from '@shared/entities'
 import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultFloating, defaultLayout } from '@shared/layout'
@@ -127,6 +128,8 @@ const signLicense = (claims: LicenseClaims): string => {
 let exportPath: string | null
 /** What the fake image dialog answers (F-6.2); null cancels. Tests set it per case. */
 let chosenImages: string[] | null
+/** What the fake entity-image dialog answers (F-9.3); null cancels. Tests set it per case. */
+let chosenEntityImage: string | null
 /** The default name and directory the last export dialog was asked for. */
 let exportAsked: { defaultName: string; directory: string | undefined } | null
 /** What the fake import dialog answers (F-12.2); null cancels. */
@@ -173,6 +176,7 @@ const dialogs: ProjectDialogs = {
     return exportPath
   },
   chooseImages: async () => chosenImages,
+  chooseEntityImage: async () => chosenEntityImage,
   chooseManuscriptFile: async () => manuscriptPath
 }
 
@@ -183,6 +187,7 @@ beforeEach(() => {
   exportPath = null
   exportAsked = null
   chosenImages = null
+  chosenEntityImage = null
   manuscriptPath = null
   manager = new ProjectManager()
   fullScreen = false
@@ -2254,6 +2259,108 @@ describe('entity handlers (F-9.1)', () => {
       if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     }
     expect((await invoke('entity:list', undefined)).map((e) => e.name)).toEqual(['Ada', 'Ada'])
+  })
+})
+
+describe('entity images (F-9.3)', () => {
+  const PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMwTpsJAAICATNWh+JUAAAAAElFTkSuQmCC',
+    'base64'
+  )
+  /** The project folder of a project created for one of these tests. */
+  let projectPath: string
+
+  const image = (name: string): string => {
+    const file = path.join(tmp, name)
+    fs.writeFileSync(file, PNG)
+    return file
+  }
+  const entitiesDir = (): string => path.join(projectPath, 'assets', 'entities')
+  const storedFiles = (): string[] =>
+    fs.existsSync(entitiesDir()) ? fs.readdirSync(entitiesDir()).sort() : []
+
+  const openProject = async (): Promise<void> => {
+    const created = await invoke('project:create', {
+      name: 'Bible',
+      format: 'novel',
+      directory: tmp
+    })
+    projectPath = created?.path ?? ''
+  }
+
+  it('reports NO_PROJECT for both channels when nothing is open', async () => {
+    await expect(invoke('entity:setImage', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('entity:removeImage', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('copies the chosen image into the project and puts its file name on the row', async () => {
+    await openProject()
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara' })
+    chosenEntityImage = image('Portrait.PNG')
+    const updated = await invoke('entity:setImage', { id: mara.id })
+    const file = updated?.image ?? ''
+    expect(file).toMatch(/^Portrait\.[0-9a-f]{8}\.png$/)
+    expect(entityImageUrl(file)).toBe(`mythscribe-asset://entities/${file}`)
+    expect(fs.readFileSync(path.join(entitiesDir(), file))).toEqual(PNG)
+    expect((await invoke('entity:get', { id: mara.id })).image).toBe(file)
+  })
+
+  it('answers null and changes nothing when the dialog is cancelled', async () => {
+    await openProject()
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara' })
+    expect(await invoke('entity:setImage', { id: mara.id })).toBeNull()
+    expect((await invoke('entity:get', { id: mara.id })).image).toBeNull()
+    expect(storedFiles()).toEqual([])
+  })
+
+  it('refuses a world item with VALIDATION and leaves no file behind', async () => {
+    await openProject()
+    const law = await invoke('entity:create', { kind: 'world', name: 'Tide Law' })
+    chosenEntityImage = image('Portrait.png')
+    await expect(invoke('entity:setImage', { id: law.id })).rejects.toThrowError(/^VALIDATION: /)
+    expect((await invoke('entity:get', { id: law.id })).image).toBeNull()
+    expect(storedFiles()).toEqual([])
+    await expect(invoke('entity:setImage', { id: 'missing' })).rejects.toThrowError(/^NOT_FOUND: /)
+    expect(storedFiles()).toEqual([])
+  })
+
+  it('deletes the previous file when the image is replaced', async () => {
+    await openProject()
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara' })
+    chosenEntityImage = image('first.png')
+    const first = (await invoke('entity:setImage', { id: mara.id }))?.image ?? ''
+    chosenEntityImage = image('second.jpg')
+    const second = (await invoke('entity:setImage', { id: mara.id }))?.image ?? ''
+    expect(second).toMatch(/^second\.[0-9a-f]{8}\.jpg$/)
+    expect(storedFiles()).toEqual([second])
+    expect(fs.existsSync(path.join(entitiesDir(), first))).toBe(false)
+  })
+
+  it('removes the image: the column is null again and the file is gone', async () => {
+    await openProject()
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara' })
+    chosenEntityImage = image('first.png')
+    await invoke('entity:setImage', { id: mara.id })
+    const cleared = await invoke('entity:removeImage', { id: mara.id })
+    expect(cleared.image).toBeNull()
+    expect(storedFiles()).toEqual([])
+    // Removing again is not an error: there is simply nothing to take out.
+    expect((await invoke('entity:removeImage', { id: mara.id })).image).toBeNull()
+    await expect(invoke('entity:removeImage', { id: 'missing' })).rejects.toThrowError(
+      /^NOT_FOUND: /
+    )
+  })
+
+  it('takes the image file with the entity when it is deleted', async () => {
+    await openProject()
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara' })
+    const other = await invoke('entity:create', { kind: 'setting', name: 'The Harbor' })
+    chosenEntityImage = image('mara.png')
+    await invoke('entity:setImage', { id: mara.id })
+    chosenEntityImage = image('harbor.png')
+    const kept = (await invoke('entity:setImage', { id: other.id }))?.image ?? ''
+    expect(await invoke('entity:delete', { id: mara.id })).toBeNull()
+    expect(storedFiles()).toEqual([kept])
   })
 })
 

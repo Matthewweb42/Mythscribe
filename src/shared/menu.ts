@@ -8,10 +8,11 @@ import { APP_SHORTCUTS, type Chord, type ShortcutId } from './shortcuts'
  * F-2.7 chords as accelerators) and the renderer as the in-app menu bar, and every click on
  * either side becomes one `menu:action` handled by `runMenuAction`. Items whose feature is not
  * built are absent, never disabled or stubbed: Export… (F-12.1), Find and Find &
- * Replace (F-10.x), Character, Setting, World-building note (F-9.x), References (F-7.4), Word
- * count, Statistics, Goals, Drafts, Snapshots (F-10.x, F-8.x) join the definition with their
- * features. Edit items carry an Electron role, so the native menu edits natively; the in-app
- * bar routes them through `menu:edit` to the same `webContents` commands.
+ * Replace (F-10.x), References (F-9.6), Word count, Statistics, Goals, Drafts, Snapshots
+ * (F-10.x, F-8.x) join the definition with their features; Character, Setting, and
+ * World-building note arrived with F-9.3. Edit items carry an Electron role, so the native menu
+ * edits natively; the in-app bar routes them through `menu:edit` to the same `webContents`
+ * commands.
  */
 export const MENU_ITEM_IDS = [
   'newProject',
@@ -27,6 +28,9 @@ export const MENU_ITEM_IDS = [
   'insertScene',
   'insertChapter',
   'insertPart',
+  'insertCharacter',
+  'insertSetting',
+  'insertWorldItem',
   'insertSceneBreak',
   'toggleSidebar',
   'toggleNotes',
@@ -130,6 +134,11 @@ export const MENU: readonly MenuSection[] = [
         when: 'project'
       },
       { id: 'insertPart', label: 'Part', shortcut: 'insertPart', level: 'part', when: 'project' },
+      SEPARATOR,
+      // F-9.3: each opens the creation dialog of its kind.
+      { id: 'insertCharacter', label: 'Character', when: 'project' },
+      { id: 'insertSetting', label: 'Setting', when: 'project' },
+      { id: 'insertWorldItem', label: 'World-building note', when: 'project' },
       SEPARATOR,
       { id: 'insertSceneBreak', label: 'Scene break', when: 'project' }
     ]

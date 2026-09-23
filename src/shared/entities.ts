@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { assetUrl } from './assets'
 
 /**
  * Entity vocabulary shared by the database schema, the entity store, the IPC contract, and the
@@ -142,6 +143,14 @@ export function isFieldOf(kind: EntityKind, id: string): id is EntityFieldId {
 /** Whether entities of this kind carry an image (F-9.3). */
 export function kindHasImage(kind: EntityKind): boolean {
   return ENTITY_KINDS_WITH_IMAGE.includes(kind)
+}
+
+/** The folder under the project's `assets/` that holds the entity images (F-9.3). */
+export const ENTITY_IMAGES_DIR = 'entities' as const
+
+/** The asset URL the renderer loads an entity's `image` file from (F-9.3). */
+export function entityImageUrl(fileName: string): string {
+  return assetUrl(ENTITY_IMAGES_DIR, fileName)
 }
 
 /**
