@@ -18,6 +18,7 @@ import { TAG_BAR_MAX_FRACTION, TAG_BAR_MIN_HEIGHT, TAG_BAR_SPLIT_LIMITS } from '
 import type { MentionRange } from '@shared/mentions'
 import { PROPOSAL_NOTE_MAX, normalizeProposalNote } from '@shared/proposal'
 import type { ProposedTag } from '@shared/proposedTags'
+import { toTagName } from '@shared/tags'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { describeRequest } from '@renderer/features/ai/usageFormat'
@@ -54,7 +55,10 @@ const nextRequestId = (): string => `t-${Date.now().toString(36)}-${++requestCou
  * from the bank by id, and leave the list only when accepted, so a failed link keeps its chip.
  * A `done` result is the proposal (F-14.5) the author settles: `acceptedCount` is how many of
  * its chips were linked, which decides between accepted in part and rejected on Dismiss. The
- * pending state carries the request id its Cancel button stops (F-5.10).
+ * pending state carries the request id its Cancel button stops (F-5.10). A `done` result is
+ * also how the tags the import pass proposed are offered (F-12.3): the same chips and the same
+ * settlements, only the request was made during the import, so `fromImport` replaces the cost
+ * line (this bar spent nothing; the pass's cost is on its own rows in the ledger).
  */
 type RecommendState =
   | { nodeId: string; status: 'pending'; requestId: string }
@@ -69,6 +73,8 @@ type RecommendState =
       /** The tokens the request spent, for the cost line (F-5.9). */
       usage: AiUsage
       cached: boolean
+      /** True for a proposal the import pass left pending (F-12.3), not a Recommend answer. */
+      fromImport: boolean
     }
   | { nodeId: string; status: 'error'; message: string; nextStep: string }
 
@@ -103,12 +109,16 @@ interface RegenerateOptions {
  * rejected (one click, no note), and "Regenerate…" asks what was off, settles it regenerated
  * with that note, and asks again with the note and the proposal id in the request. While a
  * request is pending, Cancel stops it (F-5.10): the reply comes back cancelled and the bar
- * returns to idle without a word.
+ * returns to idle without a word. The same chips carry the tags an import's structure pass
+ * proposed (F-12.3): opening an imported document asks main for its pending proposal once and
+ * shows what is left of it, so the author accepts those one by one too.
  */
 export function TagBar({ id }: { id: string }): React.JSX.Element {
   const tagBar = useLayoutStore((s) => s.layout.tagBar)
   const toggleTagBar = useLayoutStore((s) => s.toggleTagBar)
   const withMetadata = useTreeStore((s) => (s.byId[id]?.hierarchyLevel ?? null) !== null)
+  /** Only a document can carry a pending tag proposal from an import (F-12.3). */
+  const isDocument = useTreeStore((s) => s.byId[id]?.kind === 'document')
   /** The row holding both panes; the split drag is measured against its width. */
   const panes = useRef<HTMLDivElement>(null)
   const ids = useDocumentTagStore((s) => s.tagIdsByNode[id])
@@ -142,6 +152,9 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   const [pickingFor, setPickingFor] = useState<string | null>(null)
   const picking = pickingFor === id
   const [recommend, setRecommend] = useState<RecommendState | null>(null)
+  /** The node whose import proposal was already asked for, so the query runs once per document. */
+  const askedPending = useRef<string | null>(null)
+  const bankLoaded = useTagStore((s) => s.loaded)
   const result = recommend?.nodeId === id ? recommend : null
   /**
    * A result drained by acceptance (no suggestions left, at least one linked) is finished: it
@@ -172,6 +185,65 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   }, [id, loadMentions])
 
   const linked = ids ?? []
+  const linksLoaded = ids !== undefined
+
+  /**
+   * F-12.3: what the import's structure pass proposed for this scene waits as a pending proposal
+   * until the author opens it. The bar asks main once per document — after the bank and the
+   * links are in, since unknown names and names already on the document are dropped here — and
+   * seeds the F-4.7 result with what is left, so those chips are accepted one at a time, all at
+   * once, or dismissed, settling the proposal exactly as a Recommend answer does. Nothing is
+   * linked by the import itself. A row with nothing left to offer is settled rejected and shown
+   * to no one. A Recommend result the author asked for owns the bar: the row then stays pending
+   * and is offered again the next time the document is opened.
+   */
+  useEffect(() => {
+    if (!isDocument || !bankLoaded || !linksLoaded || askedPending.current === id) return
+    askedPending.current = id
+    const nodeId = id
+    let live = true
+    ipc()
+      .invoke('proposal:pendingTags', { nodeId })
+      .then((answer) => {
+        if (!live || answer === null) return
+        const bank = useTagStore.getState().byId
+        const linkedIds = useDocumentTagStore.getState().tagIdsByNode[nodeId] ?? []
+        const byName = new Map(Object.values(bank).map((tag) => [toTagName(tag.name), tag]))
+        const suggestions: Tag[] = []
+        for (const name of answer.tags) {
+          const tag = byName.get(toTagName(name))
+          if (!tag || linkedIds.includes(tag.id) || suggestions.includes(tag)) continue
+          suggestions.push(tag)
+        }
+        if (suggestions.length === 0) {
+          void proposalStore.settle(answer.proposalId, 'rejected')
+          return
+        }
+        setRecommend((current) =>
+          current?.nodeId === nodeId
+            ? current
+            : {
+                nodeId,
+                status: 'done',
+                proposalId: answer.proposalId,
+                suggestions,
+                acceptedCount: 0,
+                model: answer.model,
+                costUsd: 0,
+                usage: { inputTokens: 0, outputTokens: 0 },
+                cached: false,
+                fromImport: true
+              }
+        )
+      })
+      .catch(() => {
+        // Nobody asked for this query, so a failure says nothing: the proposal stays pending and
+        // the next time the document is opened it is offered again.
+      })
+    return () => {
+      live = false
+    }
+  }, [id, isDocument, bankLoaded, linksLoaded])
   const report = (err: unknown): void => {
     toast.error(describeError(err))
   }
@@ -221,7 +293,8 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
             model: result.model,
             costUsd: result.costUsd,
             usage: result.usage,
-            cached: result.cached
+            cached: result.cached,
+            fromImport: false
           })
         } else if (result.code === 'CANCELLED') {
           settle(null)
@@ -445,7 +518,9 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
                       </ul>
                     )}
                     <p className="mt-1 mb-0 flex items-center gap-2 text-xs text-fg-subtle">
-                      <span data-testid="tag-recommend-cost">{describeRequest(mine)}</span>
+                      <span data-testid="tag-recommend-cost">
+                        {mine.fromImport ? `${mine.model} · from import` : describeRequest(mine)}
+                      </span>
                       {mine.suggestions.length > 0 ? (
                         <button type="button" onClick={acceptAll} className={LINK_BUTTON}>
                           Accept all

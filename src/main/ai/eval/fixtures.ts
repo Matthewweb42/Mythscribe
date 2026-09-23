@@ -135,6 +135,11 @@ import {
   BETA_READER_REGEN_PROMPT_VERSION
 } from '../prompts/betaReaderRegen.v1'
 import {
+  buildImportStructurePrompt,
+  IMPORT_STRUCTURE_PROMPT_VERSION,
+  type StructurePromptParagraph
+} from '../prompts/importStructure.v1'
+import {
   buildQueryPrompt,
   QUERY_PROMPT_VERSION,
   type BuildQueryPromptInput
@@ -150,6 +155,7 @@ import {
   SUMMARY_SCENE_CHAR_BUDGET
 } from '@shared/summary'
 import { BETA_READER_SCENE_CHAR_BUDGET } from '@shared/betaReader'
+import { IMPORT_CHUNK_WORDS } from '@shared/importStructure'
 import { QUERY_SCENE_CHAR_BUDGET } from '@shared/query'
 import {
   BRIEF_SCENE_CHAR_BUDGET,
@@ -395,6 +401,12 @@ export interface EvalCase {
      * of the scenes sent in full, and its quote must be in that scene's text as sent.
      */
     | { kind: 'query'; texts: string[] }
+    /**
+     * An import structure pass (F-12.3): the answer must parse, every paragraph number must be
+     * one that was sent in this chunk, and every tag must name the bank — the three rules the
+     * runner enforces before a suggestion reaches the draft.
+     */
+    | { kind: 'structure'; bank: string[]; indices: number[] }
 }
 
 const general = builtinParams('general')
@@ -1050,6 +1062,58 @@ const queryMaxed: BuildQueryPromptInput = {
   question: MAXED_QUESTION
 }
 
+/** The fixture passage as the import draft sees it: one paragraph per block, in reading order. */
+const IMPORT_PARAGRAPHS = FIXTURE_PASSAGE.split('\n\n')
+
+/**
+ * A chunk of a draft: `every` paragraphs a scene starts (the boundaries the heuristics already
+ * found), the first one a chapter too, which is the shape `flattenDraft` hands the prompt.
+ */
+function structureChunk(texts: string[], every: number): StructurePromptParagraph[] {
+  let scene = 0
+  return texts.map((text, index) => {
+    const sceneStart = index % every === 0
+    if (sceneStart) scene += 1
+    return {
+      index,
+      text,
+      sceneStart,
+      chapterStart: index === 0,
+      sceneTitle: `Scene ${scene}`,
+      chapterTitle: 'Chapter One'
+    }
+  })
+}
+
+/** A chunk at the word cap: the fixture prose repeated until `IMPORT_CHUNK_WORDS` is reached. */
+function maxedChunk(): StructurePromptParagraph[] {
+  const texts: string[] = []
+  let words = 0
+  while (words < IMPORT_CHUNK_WORDS) {
+    const text = IMPORT_PARAGRAPHS[texts.length % IMPORT_PARAGRAPHS.length] ?? ''
+    texts.push(text)
+    words += text.split(/\s+/).length
+  }
+  return structureChunk(texts, 8)
+}
+
+function structureCase(
+  name: string,
+  note: string,
+  paragraphs: StructurePromptParagraph[],
+  bank: string[]
+): EvalCase {
+  const built = buildImportStructurePrompt({ paragraphs, tagNames: bank })
+  return {
+    version: IMPORT_STRUCTURE_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'structure', bank, indices: paragraphs.map((p) => p.index) }
+  }
+}
+
 function queryCase(name: string, note: string, input: BuildQueryPromptInput): EvalCase {
   const built = buildQueryPrompt(input)
   return {
@@ -1492,5 +1556,17 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed',
     'the worst input (three scenes at the character budget, ten summaries at theirs, ten history turns at the message cap) as the fit leaves it',
     queryMaxed
+  ),
+  structureCase(
+    'fixture',
+    'one chunk of an imported draft: the fixture passage with two scene starts already found, against the Standard Fiction bank',
+    structureChunk(IMPORT_PARAGRAPHS, 8),
+    FIXTURE_BANK
+  ),
+  structureCase(
+    'maxed',
+    `a chunk at the ${IMPORT_CHUNK_WORDS}-word cap against every template name: the most one chunk of an import can cost`,
+    maxedChunk(),
+    MAXED_BANK
   )
 ]

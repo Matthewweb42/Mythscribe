@@ -1,7 +1,14 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Channel, Input, Output } from '@shared/ipc/contract'
+import { defaultAiModels } from '@shared/ai'
+import { defaultAiSettings } from '@shared/aiSettings'
+import type { ImportDetectProgress, ImportDetectResult } from '@shared/importStructure'
+import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
+import { resetAiActivityStore } from '@renderer/features/ai/aiActivityStore'
+import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { resetAiStore, useAiStore } from '@renderer/features/ai/aiStore'
+import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -11,6 +18,8 @@ import { draftFixture } from './draftFixture'
 import { resetImportStore, useImportStore } from './importStore'
 
 let invoke: ReturnType<typeof vi.fn<(channel: string, input: unknown) => Promise<unknown>>>
+/** The listener `import:detectProgress` was subscribed with, so a test can push a chunk. */
+let progress: ((payload: ImportDetectProgress) => void) | null = null
 
 function install(overrides: Partial<Record<string, unknown>> = {}): void {
   invoke = vi.fn(async (channel: string, _input: unknown) => {
@@ -22,15 +31,55 @@ function install(overrides: Partial<Record<string, unknown>> = {}): void {
     if (channel === 'tree:list') return treeFixture
     if (channel === 'import:open') return draftFixture()
     if (channel === 'import:commit') return { nodes: [], words: 0 }
+    if (channel === 'proposal:settle') return null
+    if (channel === 'ai:cancel') return { cancelled: true }
     throw new Error(`unexpected ${channel}`)
   })
   const client: IpcClient = {
     invoke: <C extends Channel>(channel: C, input: Input<C>) =>
       invoke(channel, input) as Promise<Output<C>>,
-    on: () => () => {}
+    on<E extends EventName>(event: E, listener: (payload: EventPayload<E>) => void) {
+      if (event === 'import:detectProgress') {
+        progress = listener as (payload: ImportDetectProgress) => void
+      }
+      return () => {
+        progress = null
+      }
+    }
   }
   setIpcClient(client)
 }
+
+/** Turns the AI pass on (F-12.3): the dial at Suggest, with a priced fast model for the estimate. */
+function allowDetect(): void {
+  useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
+  useAiStore.setState({
+    status: {
+      provider: 'openai',
+      hasKey: true,
+      hint: 'sk-…1234',
+      encryption: 'os',
+      models: defaultAiModels()
+    }
+  })
+}
+
+/** What main answers a finished pass with: one break inside the fixture's first scene, one title. */
+const detectOk = (over: Partial<Extract<ImportDetectResult, { ok: true }>> = {}) =>
+  ({
+    ok: true,
+    suggestions: {
+      breaks: [{ before: 1, kind: 'scene', reason: 'A day passes here.' }],
+      scenes: [{ start: 1, title: 'Nobody Moves', tags: ['mara'] }]
+    },
+    chunks: 1,
+    usage: { inputTokens: 900, outputTokens: 40 },
+    costUsd: 0.11,
+    model: 'gpt-5.4-mini',
+    promptVersion: 'importStructure.v1',
+    proposalIds: ['pr-1'],
+    ...over
+  }) satisfies ImportDetectResult
 
 /** Renders the dialog over a draft main has already answered with. */
 async function open(): Promise<void> {
@@ -56,6 +105,11 @@ const rowTitles = (): string[] =>
 beforeEach(() => {
   install()
   resetImportStore()
+  resetAiSettingsStore()
+  resetAiStore()
+  resetAiActivityStore()
+  resetProposalStore()
+  progress = null
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
 })
@@ -190,5 +244,110 @@ describe('ImportDialog (F-12.2)', () => {
     await userEvent.click(screen.getByTestId('import-cancel'))
     expect(useImportStore.getState().draft).toBeNull()
     expect(invoke).not.toHaveBeenCalledWith('import:commit', expect.anything())
+  })
+})
+
+describe('ImportDialog, the AI structure pass (F-12.3)', () => {
+  it('offers the pass with what it would cost, and offers nothing when the dial is down', async () => {
+    await open()
+    expect(screen.queryByTestId('import-detect')).not.toBeInTheDocument()
+
+    cleanup()
+    resetImportStore()
+    allowDetect()
+    await open()
+    expect(screen.getByTestId('import-detect-estimate')).toHaveTextContent(
+      '≈ <$0.01 (22 words, 1 chunk)'
+    )
+    expect(screen.getByTestId('import-detect')).toHaveTextContent('Detect structure')
+  })
+
+  it('keeps the heuristic draft when the author says so, and sends nothing', async () => {
+    allowDetect()
+    await open()
+    await userEvent.click(screen.getByTestId('import-detect-skip'))
+    expect(screen.queryByTestId('import-detect')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('import-detect-estimate')).not.toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('import:detectStructure', expect.anything())
+  })
+
+  it('shows the chunks as they land and disables every edit while the pass runs', async () => {
+    let release: (result: ImportDetectResult) => void = () => {}
+    install({
+      'import:detectStructure': new Promise<ImportDetectResult>((resolve) => (release = resolve))
+    })
+    allowDetect()
+    await open()
+    await userEvent.click(screen.getByTestId('import-detect'))
+
+    expect(screen.getByTestId('import-detect-progress')).toHaveTextContent(
+      'Checking chunk 1 of 1 · $0.00 so far'
+    )
+    act(() => progress?.({ done: 1, total: 3, costUsd: 0.02 }))
+    expect(screen.getByTestId('import-detect-progress')).toHaveTextContent(
+      'Checking chunk 2 of 3 · $0.02 so far'
+    )
+    // Nothing may move under the indices the suggestions are about.
+    expect(within(row('p2')).getByRole('button', { name: 'Move Part Two down' })).toBeDisabled()
+    expect(within(row('p1c1s2')).getByRole('button', { name: 'Split Scene 2' })).toBeDisabled()
+    expect(within(row('p1c1')).getByTestId('import-exclude')).toBeDisabled()
+    expect(within(row('p1c2')).getByTestId('import-placement')).toBeDisabled()
+    expect(screen.getByTestId('import-commit')).toBeDisabled()
+
+    await userEvent.click(screen.getByTestId('import-detect-cancel'))
+    expect(invoke).toHaveBeenCalledWith('ai:cancel', {
+      requestId: expect.any(String) as string
+    })
+
+    release({ ok: false, code: 'CANCELLED', message: 'Stopped.', nextStep: '' })
+    await waitFor(() => expect(screen.getByTestId('import-detect')).toBeInTheDocument())
+  })
+
+  it('badges what the pass added, says what it cost, and rejects a suggestion on the row', async () => {
+    install({ 'import:detectStructure': detectOk() })
+    allowDetect()
+    await open()
+    await userEvent.click(screen.getByTestId('import-detect'))
+
+    await waitFor(() => expect(screen.getByTestId('import-detect-cost')).toBeInTheDocument())
+    expect(screen.getByTestId('import-detect-cost')).toHaveTextContent(
+      'AI pass cost $0.11 (estimate <$0.01) · 1 break added, 1 scene titled'
+    )
+    expect(screen.getByTestId('import-summary')).toHaveTextContent('4 scenes')
+
+    const added = row('p1c1s1-x1')
+    expect(added).toHaveTextContent('Nobody Moves')
+    expect(within(added).getByTestId('import-ai-badge')).toHaveAttribute(
+      'title',
+      'A day passes here.'
+    )
+    // The scene it was cut out of is the author's; only the new one is badged.
+    expect(within(row('p1c1s1')).queryByTestId('import-ai-badge')).not.toBeInTheDocument()
+
+    await userEvent.click(within(added).getByTestId('import-reject'))
+    expect(screen.queryAllByTestId('import-ai-badge')).toHaveLength(0)
+    expect(screen.getByTestId('import-summary')).toHaveTextContent('3 scenes')
+    expect(useImportStore.getState().detect?.rejected).toBe(1)
+  })
+
+  it('shows a failure with the step the author can take, and offers the pass again', async () => {
+    install({
+      'import:detectStructure': {
+        ok: false,
+        code: 'NO_KEY',
+        message: 'No OpenAI key is saved.',
+        nextStep: 'Add a key in Settings.'
+      }
+    })
+    allowDetect()
+    await open()
+    await userEvent.click(screen.getByTestId('import-detect'))
+    await waitFor(() => expect(screen.getByTestId('import-detect-error')).toBeInTheDocument())
+    expect(screen.getByTestId('import-detect-error')).toHaveTextContent(
+      'No OpenAI key is saved. Add a key in Settings.'
+    )
+    expect(screen.getByTestId('import-detect')).toHaveTextContent('Try again')
+    // The draft is the author's again while the pass is not running.
+    expect(screen.getByTestId('import-commit')).toBeEnabled()
   })
 })

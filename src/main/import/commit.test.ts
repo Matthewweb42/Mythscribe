@@ -44,7 +44,7 @@ function paragraph(text: string): TiptapNodeT {
 }
 
 function scene(id: string, text: string, excluded = false): ImportScene {
-  return { id, title: id, excluded, paragraphs: [paragraph(text)] }
+  return { id, title: id, excluded, paragraphs: [paragraph(text)], tags: [] }
 }
 
 function chapter(
@@ -198,6 +198,34 @@ describe('importDraft', () => {
       'Untitled Part',
       'Untitled Chapter',
       'Untitled Scene'
+    ])
+  })
+
+  // F-12.3: the AI pass's tag candidates travel with the draft and come back keyed by the node
+  // that was created, which is what the handler turns into one pending proposal per scene.
+  it('reports the tag candidates of each created manuscript scene, deduplicated, and none for matter', () => {
+    const tagged = (id: string, text: string, tags: string[]): ImportScene => ({
+      ...scene(id, text),
+      tags
+    })
+    const { rows, tagCandidates } = importDraft(
+      db,
+      'novel',
+      draftOf([
+        part('p1', [
+          chapter('c1', [
+            tagged('s1', 'One.', ['protagonist', ' protagonist ', 'dark-forest', '  ']),
+            scene('s2', 'Two.'),
+            tagged('s3', 'Three.', ['melancholy'])
+          ]),
+          chapter('Afterword', [tagged('s4', 'Four.', ['protagonist'])], { placement: 'end' })
+        ])
+      ])
+    )
+    const idOf = (title: string): string => rows.find((row) => row.title === title)?.id ?? ''
+    expect(tagCandidates).toEqual([
+      { nodeId: idOf('s1'), tags: ['protagonist', 'dark-forest'] },
+      { nodeId: idOf('s3'), tags: ['melancholy'] }
     ])
   })
 

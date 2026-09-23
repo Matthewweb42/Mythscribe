@@ -174,6 +174,47 @@ function scoreQuery(texts: string[], answer: string): LiveResult['verdict'] {
     : { kind: 'json', ok: false, problem: `${uncited} of ${citations.length} uncited` }
 }
 
+const StructureAnswer = z.object({
+  breaks: z.array(z.object({ before: z.number(), kind: z.string() })),
+  scenes: z.array(z.object({ start: z.number(), tags: z.array(z.string()).nullish() }))
+})
+
+/**
+ * An import structure pass (F-12.3) scores on the rules the runner enforces: the answer must
+ * parse to the shape the prompt asks for, every paragraph number must be one that was sent in
+ * the chunk, and every tag must name the bank — anything else is dropped before the author
+ * sees it, so a model that returns it wasted the tokens.
+ */
+function scoreStructure(
+  c: EvalCase & { scoring: { kind: 'structure' } },
+  answer: string
+): LiveResult['verdict'] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(answer)
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not JSON' }
+  }
+  const result = StructureAnswer.safeParse(parsed)
+  if (!result.success) {
+    return { kind: 'json', ok: false, problem: 'not { breaks: [{ before, kind }], scenes: [{ start }] }' }
+  }
+  const inChunk = new Set(c.scoring.indices)
+  const bank = new Set(c.scoring.bank)
+  const strays = [
+    ...result.data.breaks.filter((item) => !inChunk.has(item.before)).map((item) => `break ${item.before}`),
+    ...result.data.scenes.filter((item) => !inChunk.has(item.start)).map((item) => `scene ${item.start}`),
+    ...result.data.scenes
+      .flatMap((item) => item.tags ?? [])
+      .map(toTagName)
+      .filter((name) => !bank.has(name))
+      .map((name) => `tag ${name}`)
+  ]
+  return strays.length === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `outside the chunk or the bank: ${strays.join(', ')}` }
+}
+
 const BriefAnswer = z.object({
   goal: z.string(),
   conflict: z.string(),
@@ -294,6 +335,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreQuery(c.scoring.texts, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'structure') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreStructure({ ...c, scoring: c.scoring }, reply.text)
         })
         continue
       }

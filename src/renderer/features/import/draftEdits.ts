@@ -1,11 +1,14 @@
 import {
   IMPORT_TITLE_MAX,
+  isDefaultSceneTitle,
+  type ImportAiMarks,
   type ImportChapter,
   type ImportDraft,
   type ImportPart,
   type ImportPlacement,
   type ImportScene
 } from '@shared/import'
+import { flattenDraft, type StructureSuggestions } from '@shared/importStructure'
 
 /**
  * Every edit the review dialog (F-12.2) makes to a structure draft, as pure functions: the draft
@@ -252,6 +255,25 @@ export function mergeScene(draft: ImportDraft, sceneId: string): ImportDraft {
   return replaceChapter(draft, found, withScenes(found.chapter, scenes))
 }
 
+/**
+ * Merges a chapter into the one before it in the same part: its scenes are appended and the
+ * previous chapter keeps its title and placement. The first chapter of a part has nothing to
+ * merge with; move it to the previous part first.
+ */
+export function mergeChapter(draft: ImportDraft, chapterId: string): ImportDraft {
+  const found = findNode(draft, chapterId)
+  if (found?.kind !== 'chapter' || found.chapterIndex === 0) return draft
+  const previous = found.part.chapters[found.chapterIndex - 1]
+  if (!previous) return draft
+  const chapters = [...found.part.chapters]
+  chapters[found.chapterIndex - 1] = withScenes(previous, [
+    ...previous.scenes,
+    ...found.chapter.scenes
+  ])
+  chapters.splice(found.chapterIndex, 1)
+  return replacePart(draft, found.partIndex, withChapters(found.part, chapters))
+}
+
 /** What a scene split off another is called; no renumbering, so the author sees where it came from. */
 export const splitTitle = (title: string): string => `${title} (split)`.slice(0, IMPORT_TITLE_MAX)
 
@@ -275,11 +297,142 @@ export function splitScene(
     id: `${scene.id}-x${draft.nextId}`,
     title: splitTitle(scene.title),
     excluded: scene.excluded,
-    paragraphs: scene.paragraphs.slice(paragraphIndex)
+    paragraphs: scene.paragraphs.slice(paragraphIndex),
+    tags: []
   }
   const scenes = [...found.chapter.scenes]
   scenes[found.sceneIndex] = { ...scene, paragraphs: scene.paragraphs.slice(0, paragraphIndex) }
   scenes.splice(found.sceneIndex + 1, 0, tail)
   const next = replaceChapter(draft, found, withScenes(found.chapter, scenes))
   return { ...next, nextId: draft.nextId + 1 }
+}
+
+/** The draft with one scene replaced, inside its chapter. */
+function replaceScene(
+  draft: ImportDraft,
+  found: Extract<ImportLocation, { kind: 'scene' }>,
+  scene: ImportScene
+): ImportDraft {
+  const scenes = [...found.chapter.scenes]
+  scenes[found.sceneIndex] = scene
+  return replaceChapter(draft, found, withScenes(found.chapter, scenes))
+}
+
+/** The scene with `sceneId` after `change`; an id that is not a scene leaves the draft alone. */
+function updateScene(
+  draft: ImportDraft,
+  sceneId: string,
+  change: (scene: ImportScene) => ImportScene
+): ImportDraft {
+  const found = findNode(draft, sceneId)
+  if (found?.kind !== 'scene') return draft
+  return replaceScene(draft, found, change(found.scene))
+}
+
+/**
+ * Splits a chapter before `sceneId`: that scene and the ones after it become a new chapter right
+ * after it in the same part, with the same placement and an id minted from the draft's counter.
+ * A scene that already opens its chapter leaves the draft alone — the boundary is already there.
+ */
+function splitChapterAt(draft: ImportDraft, sceneId: string, ai: ImportAiMarks): ImportDraft {
+  const found = findNode(draft, sceneId)
+  if (found?.kind !== 'scene' || found.sceneIndex === 0) return draft
+  const { chapter } = found
+  const tail: ImportChapter = {
+    id: `${chapter.id}-x${draft.nextId}`,
+    title: splitTitle(chapter.title),
+    excluded: chapter.excluded,
+    placement: chapter.placement,
+    scenes: chapter.scenes.slice(found.sceneIndex),
+    ai
+  }
+  const chapters = [...found.part.chapters]
+  chapters[found.chapterIndex] = withScenes(chapter, chapter.scenes.slice(0, found.sceneIndex))
+  chapters.splice(found.chapterIndex + 1, 0, tail)
+  const next = replacePart(draft, found.partIndex, withChapters(found.part, chapters))
+  return { ...next, nextId: draft.nextId + 1 }
+}
+
+/** What `applyStructure` changed, for the dialog's "4 breaks added, 12 scenes titled" line. */
+export interface StructureApplied {
+  draft: ImportDraft
+  /** Breaks that produced a new scene or chapter; one already on a boundary counts for nothing. */
+  added: number
+  /** Scenes whose default title the model's title replaced. */
+  titled: number
+}
+
+/**
+ * Merges the AI pass's suggestions (F-12.3) into the draft, as one more pure edit. Paragraph
+ * indices are global over `flattenDraft`, so the breaks are applied from the highest down: a
+ * split never moves the paragraphs before it, and every lower index still points at the same
+ * paragraph. A scene or chapter the pass created is marked `ai.break` (with the model's reason)
+ * so the dialog can badge it and offer Reject; a title only replaces a default `Scene N` one and
+ * is marked `ai.title`. Tags are kept as candidates on the scene — nothing is linked here.
+ */
+export function applyStructure(
+  draft: ImportDraft,
+  suggestions: StructureSuggestions
+): StructureApplied {
+  let next = draft
+  let added = 0
+  const breaks = [...suggestions.breaks].sort((a, b) => b.before - a.before)
+  for (const suggestion of breaks) {
+    const at = flattenDraft(next)[suggestion.before]
+    if (at === undefined) continue
+    const ai: ImportAiMarks = { break: true, title: false, reason: suggestion.reason }
+    let changed = next
+    let sceneId = at.sceneId
+    if (at.local > 0) {
+      // The break falls inside a scene: cut it there, and the tail is the scene the pass added.
+      const tailId = `${at.sceneId}-x${next.nextId}`
+      const split = splitScene(next, at.sceneId, at.local)
+      if (split !== next) {
+        changed = updateScene(split, tailId, (scene) => ({ ...scene, ai }))
+        sceneId = tailId
+      }
+    }
+    if (suggestion.kind === 'chapter') changed = splitChapterAt(changed, sceneId, ai)
+    // Nothing moved: the boundary the model asked for was already in the draft.
+    if (changed === next) continue
+    next = changed
+    added += 1
+  }
+
+  let titled = 0
+  const flat = flattenDraft(next)
+  for (const scene of suggestions.scenes) {
+    const at = flat[scene.start]
+    // A title is for a scene that starts there; anything else is an index the splits moved past.
+    if (at?.sceneStart !== true) continue
+    const found = findNode(next, at.sceneId)
+    if (found?.kind !== 'scene') continue
+    const held = found.scene
+    const title = scene.title === null ? '' : scene.title.trim().slice(0, IMPORT_TITLE_MAX)
+    const tags = [...new Set(scene.tags)]
+    const takesTitle = title.length > 0 && isDefaultSceneTitle(held.title)
+    if (!takesTitle && tags.length === 0) continue
+    next = replaceScene(next, found, {
+      ...held,
+      title: takesTitle ? title : held.title,
+      tags: tags.length > 0 ? tags : held.tags,
+      ai: takesTitle
+        ? { break: held.ai?.break ?? false, title: true, reason: held.ai?.reason ?? null }
+        : held.ai
+    })
+    if (takesTitle) titled += 1
+  }
+  return { draft: next, added, titled }
+}
+
+/**
+ * Rejects one suggestion the pass made (F-12.3): the scene or chapter it added is merged back
+ * into the one before it, so the text is exactly where it was. Anything else (a part, an id the
+ * draft no longer holds) leaves the draft alone.
+ */
+export function rejectSuggestion(draft: ImportDraft, id: string): ImportDraft {
+  const found = findNode(draft, id)
+  if (found?.kind === 'scene') return mergeScene(draft, id)
+  if (found?.kind === 'chapter') return mergeChapter(draft, id)
+  return draft
 }

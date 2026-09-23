@@ -37,6 +37,7 @@ import {
 import { EditorSettings } from '../editorSettings'
 import { Background, FocusSettings } from '../focus'
 import { ImportDraft } from '../import'
+import { ImportDetectProgress, ImportDetectResult, PendingTagProposal } from '../importStructure'
 import { IndexQueueStatus } from '../jobs'
 import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
@@ -1079,6 +1080,15 @@ export const contract = {
     }),
     output: z.null()
   },
+  /**
+   * The newest pending tag proposal on a node (F-12.3): the bank names the import pass
+   * suggested for the scene, kept as one `importStructure` proposal at commit so the tag bar
+   * can offer them like an F-4.7 answer and settle them the same way. Null when none is pending.
+   */
+  'proposal:pendingTags': {
+    input: z.object({ nodeId: z.string() }),
+    output: PendingTagProposal.nullable()
+  },
   /** Every voice exemplar of the open project (F-14.1), oldest first. */
   'voice:listExemplars': { input: z.undefined(), output: z.array(VoiceExemplar) },
   /**
@@ -1139,6 +1149,18 @@ export const contract = {
   'import:commit': {
     input: z.object({ draft: ImportDraft }),
     output: z.object({ nodes: z.array(TreeNode), words: z.number().int() })
+  },
+  /**
+   * The AI pass over a draft (F-12.3), asked for from the review dialog after the author saw the
+   * estimate: main flattens the draft, sends it in chunks of about `IMPORT_CHUNK_WORDS` words to
+   * the fast tier (one ledger row and one pending proposal per chunk, `import:detectProgress`
+   * after each), and answers the merged suggestions with what the pass cost. Expected AI
+   * failures (no key, the dial, the cap, a stop through `ai:cancel { requestId }`) are data.
+   * Nothing is written to the project; the renderer merges the suggestions into the draft.
+   */
+  'import:detectStructure': {
+    input: z.object({ draft: ImportDraft, requestId: z.string() }),
+    output: ImportDetectResult
   },
   /** Closes the project and every window once the renderer has flushed its pending saves. */
   'window:close': { input: z.undefined(), output: z.null() },
@@ -1220,6 +1242,8 @@ export const events = {
   'ai:summaryChanged': z.object({ nodeId: z.string(), status: SummaryStatus }),
   /** The index queue changed (F-5.13): a job was queued, started, finished, failed, or the queue paused. */
   'jobs:changed': IndexQueueStatus,
+  /** One more chunk of the import structure pass (F-12.3) was answered; the dialog shows chunks done and the spend so far. */
+  'import:detectProgress': ImportDetectProgress,
   /** The recorded mentions of these documents changed (F-4.12): a scan wrote rows, or a tag's tracking was turned off or the tag deleted (then every document). */
   'mention:changed': z.object({ nodeIds: z.array(z.string()) }),
   /** The proposed tags changed (F-4.12b): a scan, a tag, or a dismissal moved the list. Only a real change is pushed. */

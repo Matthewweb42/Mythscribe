@@ -39,13 +39,15 @@ export function draftFixture(): ImportDraft {
                 paragraphs: [
                   importedParagraph('The storm broke at dusk.'),
                   importedParagraph('Nobody moved.')
-                ]
+                ],
+                tags: []
               },
               {
                 id: 'p1c1s2',
                 title: 'Scene 2',
                 excluded: false,
-                paragraphs: [importedParagraph('Morning came grey.')]
+                paragraphs: [importedParagraph('Morning came grey.')],
+                tags: []
               }
             ]
           },
@@ -59,7 +61,8 @@ export function draftFixture(): ImportDraft {
                 id: 'p1c2s1',
                 title: 'Scene 1',
                 excluded: false,
-                paragraphs: [importedParagraph('Thanks to everyone.')]
+                paragraphs: [importedParagraph('Thanks to everyone.')],
+                tags: []
               }
             ]
           }
@@ -84,7 +87,8 @@ export function draftFixture(): ImportDraft {
                   importedParagraph('They rode north.'),
                   importedParagraph('The road narrowed.'),
                   importedParagraph('Then it ended.')
-                ]
+                ],
+                tags: []
               }
             ]
           }

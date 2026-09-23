@@ -23,6 +23,13 @@ export interface ImportResult {
   rows: NodeRow[]
   /** Words written, by the same count the editor caches. */
   words: number
+  /**
+   * The tag names the AI pass (F-12.3) proposed for a created manuscript scene, by node id;
+   * the handler turns each into one pending proposal the tag bar offers. Scenes with no
+   * candidates are absent, and a chapter flattened into front or back matter drops its
+   * scenes' candidates with their boundaries: there is no scene left to tag.
+   */
+  tagCandidates: { nodeId: string; tags: string[] }[]
 }
 
 export function importDraft(db: TreeDb, format: NovelFormat, draft: ImportDraft): ImportResult {
@@ -67,6 +74,7 @@ export function importDraft(db: TreeDb, format: NovelFormat, draft: ImportDraft)
     }
 
     let words = 0
+    const tagCandidates: ImportResult['tagCandidates'] = []
     for (const part of draft.parts) {
       if (part.excluded) continue
       const chapters = part.chapters.filter(
@@ -113,13 +121,15 @@ export function importDraft(db: TreeDb, format: NovelFormat, draft: ImportDraft)
           const doc = sceneDocument(scene.paragraphs)
           const count = countWords(doc)
           words += count
-          append(chapterRow, {
+          const row = append(chapterRow, {
             kind: 'document',
             hierarchyLevel: 'scene',
             title: titleOr(scene.title, format, 'document', 'scene'),
             content: JSON.stringify(doc),
             wordCount: count
           })
+          const tags = [...new Set(scene.tags.map((tag) => tag.trim()).filter(Boolean))]
+          if (tags.length > 0) tagCandidates.push({ nodeId: row.id, tags })
         }
       }
     }
@@ -128,7 +138,7 @@ export function importDraft(db: TreeDb, format: NovelFormat, draft: ImportDraft)
       throw new AppError('VALIDATION', 'Nothing selected to import.')
     }
     insertNodes(tx, rows)
-    return { rows, words }
+    return { rows, words, tagCandidates }
   })
 }
 

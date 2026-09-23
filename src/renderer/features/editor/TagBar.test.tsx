@@ -2,8 +2,10 @@ import { Editor } from '@tiptap/core'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { PendingTagProposal } from '@shared/importStructure'
 import type { AiRecommendTagsResult, Channel, Input, Output, Tag } from '@shared/ipc/contract'
 import { emptySceneMeta } from '@shared/sceneMeta'
+import { UNAVAILABLE_SUMMARY } from '@shared/summary'
 import { resetAiActivityStore, useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
@@ -27,6 +29,7 @@ import { resetActiveEditorStore, useActiveEditorStore } from './activeEditorStor
 import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { buildExtensions } from './extensions'
 import { resetSceneMetaStore } from './sceneMetaStore'
+import { resetSummaryStore } from './summaryStore'
 import { TagBar } from './TagBar'
 
 type Handler = (input: unknown) => unknown
@@ -67,11 +70,13 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
         links[nodeId] = links[nodeId].filter((id) => id !== tagId)
         return { ...tag, usageCount: tag.usageCount - 1 } as Output<C>
       }
+      if (channel === 'summary:get') return UNAVAILABLE_SUMMARY as Output<C>
       if (channel === 'sceneMeta:get') {
         const { id } = input as Input<'sceneMeta:get'>
         return { id, meta: emptySceneMeta() } as Output<C>
       }
       if (channel === 'proposal:settle') return null as Output<C>
+      if (channel === 'proposal:pendingTags') return null as Output<C>
       if (channel === 'mention:listForNode') return [] as Output<C>
       if (channel === 'ai:cancel') return { cancelled: true } as Output<C>
       throw new Error(`unexpected ${channel}`)
@@ -173,6 +178,7 @@ beforeEach(() => {
   resetActiveEditorStore()
   resetLayoutStore()
   resetSceneMetaStore()
+  resetSummaryStore()
   resetDocumentStore()
   resetProposalStore()
   resetAiActivityStore()
@@ -933,6 +939,94 @@ describe('TagBar (F-4.4)', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(settlements(calls)).toEqual([])
       expect(recommendInputs(calls)).toHaveLength(1)
+    })
+  })
+
+  describe('Imported tags (F-12.3)', () => {
+    /** The pending proposal an import left on a scene, as `proposal:pendingTags` answers it. */
+    const pending = (...tags: string[]): PendingTagProposal => ({
+      proposalId: 'prop-import',
+      tags,
+      model: 'gpt-5.4-mini'
+    })
+    /** The bar only asks for a document, so the tree the node lives in is loaded first. */
+    const withTree = (): void => {
+      useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    }
+
+    it('offers the tags the import proposed as chips; accepting one links it and settles the proposal', async () => {
+      // 'Mara' matches the bank by name, 'dark-forest' is already on sc-1, 'ghost' is in no bank.
+      const calls = install({
+        'proposal:pendingTags': () => pending('Mara', 'dark-forest', 'ghost')
+      })
+      withTree()
+      await mount()
+      expect(calls).toContainEqual(['proposal:pendingTags', { nodeId: 'sc-1' }])
+      await waitFor(() => expect(suggestionNames()).toEqual(['mara']))
+      // The line names the model but no cost: this bar spent nothing, the import pass did.
+      expect(screen.getByTestId('tag-recommend-cost')).toHaveTextContent(
+        'gpt-5.4-mini · from import'
+      )
+      expect(screen.getByTestId('tag-recommend-cost')).not.toHaveTextContent('$')
+      // Nothing is linked until the author accepts.
+      expect(calls.filter(([channel]) => channel === 'documentTag:add')).toHaveLength(0)
+      expect(settlements(calls)).toEqual([])
+
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Accept mara' }))
+      await waitFor(() =>
+        expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      )
+      expect(calls).toContainEqual(['documentTag:add', { nodeId: 'sc-1', tagId: 't-mara' }])
+      expect(useDocumentTagStore.getState().tagIdsByNode['sc-1']).toEqual(['t-forest', 't-mara'])
+      await waitFor(() =>
+        expect(settlements(calls)).toEqual([{ id: 'prop-import', status: 'accepted', note: null }])
+      )
+    })
+
+    it('shows nothing and settles nothing for a document with no pending proposal', async () => {
+      const calls = install({ 'proposal:pendingTags': () => null })
+      withTree()
+      await mount()
+      await waitFor(() =>
+        expect(calls).toContainEqual(['proposal:pendingTags', { nodeId: 'sc-1' }])
+      )
+      expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      expect(settlements(calls)).toEqual([])
+      expect(chipNames()).toEqual(['Remove dark-forest'])
+    })
+
+    it('settles a proposal whose names are all unknown or already linked rejected, silently', async () => {
+      const calls = install({ 'proposal:pendingTags': () => pending('dark-forest', 'ghost') })
+      withTree()
+      await mount()
+      await waitFor(() =>
+        expect(settlements(calls)).toEqual([{ id: 'prop-import', status: 'rejected', note: null }])
+      )
+      expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
+      expect(calls.filter(([channel]) => channel === 'documentTag:add')).toHaveLength(0)
+      expect(toasts()).toEqual([])
+    })
+
+    it('never overwrites a Recommend answer the author asked for; that row waits for the next open', async () => {
+      let resolve: (answer: PendingTagProposal) => void = () => {}
+      const calls = install({
+        'proposal:pendingTags': () =>
+          new Promise<PendingTagProposal>((r) => {
+            resolve = r
+          }),
+        'ai:recommendTags': () => suggested('t-moody')
+      })
+      withTree()
+      await mount()
+      loadText('sc-1', 80)
+      await userEvent.click(recommendButton())
+      await waitFor(() => expect(suggestionNames()).toEqual(['moody']))
+      await act(async () => {
+        resolve(pending('Mara'))
+      })
+      expect(suggestionNames()).toEqual(['moody'])
+      expect(screen.getByTestId('tag-recommend-cost')).toHaveTextContent('$0.0012')
+      expect(settlements(calls)).toEqual([])
     })
   })
 })

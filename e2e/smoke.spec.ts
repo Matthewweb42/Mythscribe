@@ -128,6 +128,22 @@ const SUMMARY_ANSWER = JSON.stringify({
 })
 const BRIEF_SENTINEL = 'You are the scene-brief feature inside a novel-writing app.'
 /**
+ * F-12.3: the opening of the import structure prompt's system turn (`IMPORT_STRUCTURE_RULES` in
+ * `src/main/ai/prompts/importStructure.v1.ts`, repeated here for the same reason). A JSON
+ * request carrying it gets one scene break inside the imported Chapter One, a title for the
+ * scene before it, and one bank tag for it, so the badge, the reject offer, and the pending tag
+ * proposal all show.
+ */
+const IMPORT_STRUCTURE_SENTINEL =
+  'You are the structure-detection feature inside a novel-writing app'
+const IMPORT_STRUCTURE_ANSWER = JSON.stringify({
+  breaks: [{ before: 1, kind: 'scene', reason: 'The wait until dusk is a time skip.' }],
+  scenes: [
+    { start: 0, title: 'The Empty Ridge', tags: ['antagonist'] },
+    { start: 1, title: null, tags: [] }
+  ]
+})
+/**
  * F-14.11: the opening of the beta-reader prompt's system turn (`BETA_READER_RULES` in
  * `src/main/ai/prompts/betaReader.v1.ts`, repeated here for the same reason). A JSON request
  * carrying it gets the canned report below: one item citing Scene 1, one quoting a passage that
@@ -283,6 +299,10 @@ function startFakeOpenAi(): Promise<string> {
           const summary = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(SUMMARY_SENTINEL)
           )
+          // F-12.3: an import chunk comes back as one break, one title, and one tag candidate.
+          const importStructure = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(IMPORT_STRUCTURE_SENTINEL)
+          )
           // F-5.4: a Plan turn streams (server-sent events in the shape the SDK parses: content
           // deltas, one usage-only chunk, then [DONE]); an Agent turn is a plain completion.
           if (request.stream) {
@@ -336,19 +356,21 @@ function startFakeOpenAi(): Promise<string> {
                   message: {
                     role: 'assistant',
                     content: json
-                      ? critique
-                        ? CRITIQUE_ANSWER
-                        : betaReader
-                          ? BETA_READER_ANSWER
-                          : query
-                            ? QUERY_ANSWER
-                            : brief
-                              ? BRIEF_ANSWER
-                              : summary
-                                ? SUMMARY_ANSWER
-                                : regen
-                                  ? '{"tags":["antagonist","protagonist"]}'
-                                  : '{"tags":["dark-forest","protagonist"]}'
+                      ? importStructure
+                        ? IMPORT_STRUCTURE_ANSWER
+                        : critique
+                          ? CRITIQUE_ANSWER
+                          : betaReader
+                            ? BETA_READER_ANSWER
+                            : query
+                              ? QUERY_ANSWER
+                              : brief
+                                ? BRIEF_ANSWER
+                                : summary
+                                  ? SUMMARY_ANSWER
+                                  : regen
+                                    ? '{"tags":["antagonist","protagonist"]}'
+                                    : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -3220,6 +3242,16 @@ test('create, close, reopen a project on disk', async () => {
       ''
     ].join('\n')
   )
+  // F-12.3 needs the dial at Suggest and a key, which the steps above turned off.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await dial.getByRole('radio', { name: 'Suggest' }).click()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(2)
+  await keyField.fill(ACCEPTED_KEY)
+  await settingsDialog.getByRole('button', { name: 'Save' }).click()
+  await expect(keyHint).toHaveText('Key saved: sk-…wxyz')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
   await stubOpenDialog(importPath)
   await page
     .getByRole('menubar', { name: 'Application menu' })
@@ -3242,16 +3274,54 @@ test('create, close, reopen a project on disk', async () => {
     /Chapter Two/,
     /Scene 1.*Nobody came\./
   ])
-  await importRows.nth(4).getByRole('button', { name: 'Chapter Two', exact: true }).click()
+  // F-12.3: the dialog offers the AI pass with an estimate from the word count before anything
+  // is sent; Detect structure sends the draft in one chunk (the fake server answers one break,
+  // one title, one tag candidate), the added scene is badged with the reason and can be
+  // rejected, the AI title replaced the default one, and the line reports the cost against
+  // the estimate. Nothing has been written yet.
+  await expect(importDialog.getByTestId('import-detect-estimate')).toContainText(
+    '(26 words, 1 chunk)'
+  )
+  const importBodiesBefore = openAiChatBodies.length
+  await importDialog.getByTestId('import-detect').click()
+  await expect(importDialog.getByTestId('import-detect-cost')).toContainText(
+    '1 break added, 1 scene titled'
+  )
+  await expect(importDialog.getByTestId('import-detect-cost')).toContainText('AI pass cost')
+  expect(openAiChatBodies.length).toBe(importBodiesBefore + 1)
+  const importSystem = openAiChatBodies.at(-1)?.messages.find((m) => m.role === 'system')
+  expect(importSystem?.content).toContain(IMPORT_STRUCTURE_SENTINEL)
+  const importUser = openAiChatBodies.at(-1)?.messages.find((m) => m.role === 'user')
+  expect(importUser?.content).toContain('[0] The ridge was empty when Mara reached it.')
+  expect(importUser?.content).toContain('antagonist')
+  await expect(importDialog.getByTestId('import-summary')).toContainText('4 scenes')
+  await expect(importRows).toHaveText([
+    /the-ridge/,
+    /Chapter One/,
+    /The Empty Ridge.*The ridge was empty when Mara reached it\./,
+    /Scene 1 \(split\).*She waited until dusk\./,
+    /Scene 2.*Below, the lanterns/,
+    /Chapter Two/,
+    /Scene 1.*Nobody came\./
+  ])
+  const importBadges = importDialog.getByTestId('import-ai-badge')
+  await expect(importBadges).toHaveCount(2)
+  await expect(importRows.nth(3).getByTestId('import-ai-badge')).toHaveAttribute(
+    'title',
+    /time skip/
+  )
+  await expect(importRows.nth(3).getByTestId('import-reject')).toBeVisible()
+  await expect(importRows.nth(2).getByTestId('import-reject')).toHaveCount(0)
+  await importRows.nth(5).getByRole('button', { name: 'Chapter Two', exact: true }).click()
   const importRename = importDialog.getByTestId('import-rename')
   await importRename.fill('The Return')
   await importRename.press('Enter')
-  await expect(importRows.nth(4)).toContainText('The Return')
+  await expect(importRows.nth(5)).toContainText('The Return')
   const treeBefore = await listTree()
   await importDialog.getByTestId('import-commit').click()
   await expect(importDialog).toHaveCount(0)
   await expect(page.getByRole('status').filter({ hasText: 'Imported' })).toContainText(
-    'Imported 3 scenes (26 words)'
+    'Imported 4 scenes (26 words)'
   )
   // 13, not 12: `countWords` counts per text leaf, so the italic run leaves the closing full stop
   // as a token of its own (the editor counts a mid-sentence mark boundary the same way).
@@ -3269,7 +3339,8 @@ test('create, close, reopen a project on disk', async () => {
   expect(imported.map((n) => [n.title, n.hierarchyLevel, n.wordCount])).toEqual([
     ['the-ridge', 'part', 0],
     ['Chapter One', 'chapter', 0],
-    ['Scene 1', 'scene', 13],
+    ['The Empty Ridge', 'scene', 8],
+    ['Scene 1 (split)', 'scene', 5],
     ['Scene 2', 'scene', 11],
     ['The Return', 'chapter', 0],
     ['Scene 1', 'scene', 2]
@@ -3287,13 +3358,35 @@ test('create, close, reopen a project on disk', async () => {
   )
   await expect(
     page.getByRole('textbox', { name: 'Document' }).locator('p[data-origin="imported"]')
-  ).toHaveCount(2)
+  ).toHaveCount(1)
+  // F-12.3: the tag candidate is a pending proposal on the created scene, offered in the tag
+  // bar like an F-4.7 answer (no cost line: the chunk paid for it) and linked only on accept.
+  const importedSuggested = tagBar.getByRole('list', { name: 'Suggested tags' })
+  await expect(importedSuggested.getByRole('listitem')).toHaveText(['antagonist'])
+  await expect(tagBar.getByTestId('tag-recommend-cost')).toHaveText('gpt-5.4-mini · from import')
+  const importedChips = tagBar.getByRole('list', { name: 'Document tags' })
+  await expect(importedChips.getByRole('listitem')).toHaveCount(0)
+  await tagBar.getByRole('button', { name: 'Accept antagonist' }).click()
+  await expect(importedChips.getByRole('listitem')).toHaveText(['antagonist'])
+  await expect(importedSuggested).toHaveCount(0)
+  // Back to Off and no key, as before this step.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await dial.getByRole('radio', { name: 'Off' }).click()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(0)
+  await settingsDialog.getByRole('button', { name: 'Clear' }).click()
+  await expect(keyHint).toHaveText('No key')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  // The italic run survived the import and the AI split: it is the second scene's text now.
+  expect(await documentText(importedScene?.id ?? '')).toBe(
+    'The ridge was empty when Mara reached it.'
+  )
+  expect(await documentText(imported[3]?.id ?? '')).toBe('She waited until dusk.')
+  await tree.getByRole('treeitem', { name: 'Scene 1 (split)', exact: true }).click()
   await expect(
     page.getByRole('textbox', { name: 'Document' }).locator('em', { hasText: 'until dusk' })
   ).toHaveCount(1)
-  expect(await documentText(importedScene?.id ?? '')).toBe(
-    'The ridge was empty when Mara reached it.\nShe waited until dusk.'
-  )
 
   const closed = app.waitForEvent('close')
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())

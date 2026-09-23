@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
+import type { AiFeatureId } from '@shared/ai'
 import { PROPOSAL_RETENTION_MAX, type SettledStatus } from '@shared/proposal'
 import { aiProposal, type AiProposalInsert, type AiProposalRow } from '../db/schema'
 import type { AiDb } from './usageStore'
@@ -62,6 +63,30 @@ export function settleProposal(
 /** The row for `id`, or undefined once it is gone. */
 export function getProposal(db: AiDb, id: string): AiProposalRow | undefined {
   return db.select().from(aiProposal).where(eq(aiProposal.id, id)).get()
+}
+
+/**
+ * The still-pending proposals a feature left on a node, newest first (F-12.3): the tag
+ * candidates an import wrote on a scene wait here until the author opens it, so the tag bar
+ * can offer them and settle them like an F-4.7 answer.
+ */
+export function listPendingProposals(
+  db: AiDb,
+  feature: AiFeatureId,
+  nodeId: string
+): AiProposalRow[] {
+  return db
+    .select()
+    .from(aiProposal)
+    .where(
+      and(
+        eq(aiProposal.feature, feature),
+        eq(aiProposal.nodeId, nodeId),
+        eq(aiProposal.status, 'pending')
+      )
+    )
+    .orderBy(desc(aiProposal.createdAt), desc(aiProposal.id))
+    .all()
 }
 
 /** Deletes every row outside the newest `max` (by `created_at`, then id) and returns how many went. */

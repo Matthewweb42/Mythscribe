@@ -14,7 +14,7 @@ import {
   type Tag
 } from '@shared/ipc/contract'
 import { z } from 'zod'
-import { DEFAULT_MODELS, USAGE_RECENT_LIMIT } from '@shared/ai'
+import { AI_NEXT_STEP, DEFAULT_MODELS, USAGE_RECENT_LIMIT } from '@shared/ai'
 import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
 import type { DiagnosticsBody } from '@shared/cloudApi'
 import { RENDERER_ERROR_MESSAGE_MAX } from '@shared/diagnostics'
@@ -4167,5 +4167,120 @@ describe('manuscript import', () => {
 
   it('reports NO_PROJECT for both channels when nothing is open', async () => {
     await expect(invoke('import:open', {})).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  // F-12.3: the AI pass and what it leaves behind. The runner and the merge have their own
+  // tests; these cover the wiring — the progress event, the cancel, the failures as data, and
+  // the pending tag proposals the commit writes for the tag bar.
+  describe('AI structure detection', () => {
+    const KEY = 'sk-test-secret-1234abcd'
+    type ImportedDraft = NonNullable<Output<'import:open'>>
+
+    async function readyForDetect(): Promise<ImportedDraft> {
+      await ready()
+      await invoke('ai:setKey', { key: KEY })
+      await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+      await invoke('tag:create', { name: 'Protagonist', category: 'character' })
+      return draftFrom(write('Book.md', MARKDOWN))
+    }
+
+    async function draftFrom(file: string): Promise<ImportedDraft> {
+      const draft = await invoke('import:open', { path: file })
+      if (!draft) throw new Error('expected a draft')
+      return draft
+    }
+
+    it('answers the merged suggestions, emits progress, and leaves one pending proposal per chunk', async () => {
+      const draft = await readyForDetect()
+      complete.mockResolvedValue({
+        text: '{"breaks":[{"before":1,"kind":"chapter","reason":"time skip"}],"scenes":[{"start":0,"title":"The Bell","tags":["protagonist"]}]}',
+        model: 'gpt-fake',
+        usage: { inputTokens: 40, outputTokens: 10 }
+      })
+      const result = await invoke('import:detectStructure', { draft, requestId: 'd-1' })
+      if (!result.ok) throw new Error(result.message)
+
+      expect(result.suggestions).toEqual({
+        breaks: [{ before: 1, kind: 'chapter', reason: 'time skip' }],
+        scenes: [{ start: 0, title: 'The Bell', tags: ['protagonist'] }]
+      })
+      expect(result).toMatchObject({ chunks: 1, model: 'gpt-fake', promptVersion: 'importStructure.v1' })
+      expect(result.proposalIds).toHaveLength(1)
+      expect(getProposal(manager.require().connection.orm, result.proposalIds[0] ?? '')).toMatchObject({
+        feature: 'importStructure',
+        nodeId: null,
+        status: 'pending'
+      })
+      expect(fakeWin.webContents.send).toHaveBeenCalledWith('import:detectProgress', {
+        done: 1,
+        total: 1,
+        costUsd: 0
+      })
+      // Nothing is written to the project: the renderer merges the suggestions into the draft.
+      expect((await invoke('tree:list', undefined)).some((row) => row.title === 'The Bell')).toBe(
+        false
+      )
+    })
+
+    it('answers an expected AI failure as data and releases the request id', async () => {
+      await ready()
+      const draft = await draftFrom(write('Book.md', MARKDOWN))
+      // The dial is at Off, which is where every install starts.
+      expect(await invoke('import:detectStructure', { draft, requestId: 'd-1' })).toEqual({
+        ok: false,
+        code: 'DISABLED',
+        message: 'Import structure detection needs the AI dial at Suggest or higher (it is at Off).',
+        nextStep: AI_NEXT_STEP.DISABLED
+      })
+      expect(complete).not.toHaveBeenCalled()
+      // The id is free again, so asking a second time is not a duplicate.
+      expect(await invoke('import:detectStructure', { draft, requestId: 'd-1' })).toMatchObject({
+        ok: false
+      })
+    })
+
+    it('stops the pass when ai:cancel names the request id', async () => {
+      const draft = await readyForDetect()
+      complete.mockImplementationOnce(untilCancelled)
+      const pending = invoke('import:detectStructure', { draft, requestId: 'd-1' })
+      await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1))
+      expect(await invoke('ai:cancel', { requestId: 'd-1' })).toEqual({ cancelled: true })
+      expect(await pending).toMatchObject({ ok: false, code: 'CANCELLED' })
+      // A failure answers no proposal ids, so main settles what the pass created: nothing is
+      // left pending for a renderer that cannot name it.
+      const rows = manager.require().connection.orm.select().from(aiProposal).all()
+      expect(rows.filter((row) => row.status === 'pending')).toEqual([])
+    })
+
+    it('turns each imported scene’s tag candidates into one pending proposal the tag bar can ask for', async () => {
+      const draft = await readyForDetect()
+      const tagged = {
+        ...draft,
+        parts: draft.parts.map((part) => ({
+          ...part,
+          chapters: part.chapters.map((chapter, index) => ({
+            ...chapter,
+            scenes: chapter.scenes.map((scene) => ({
+              ...scene,
+              tags: index === 0 ? ['protagonist'] : []
+            }))
+          }))
+        }))
+      }
+      const { nodes } = await invoke('import:commit', { draft: tagged })
+      const scenes = nodes.filter((node) => node.hierarchyLevel === 'scene')
+      const first = scenes[0]?.id ?? ''
+      const last = scenes.at(-1)?.id ?? ''
+
+      const pending = await invoke('proposal:pendingTags', { nodeId: first })
+      expect(pending?.proposalId).toMatch(/^[0-9a-f-]{36}$/)
+      expect(pending).toMatchObject({ tags: ['protagonist'], model: 'gpt-fake' })
+      // The scene in the untagged chapter has none, and neither has a folder.
+      expect(await invoke('proposal:pendingTags', { nodeId: last })).toBeNull()
+
+      // Settled once, it is not offered again (F-14.5).
+      await invoke('proposal:settle', { id: pending?.proposalId ?? '', status: 'accepted' })
+      expect(await invoke('proposal:pendingTags', { nodeId: first })).toBeNull()
+    })
   })
 })

@@ -253,7 +253,8 @@ function label(
             id: `${chapterId}s${sceneIndex + 1}`,
             title: cap(`${sceneLabel} ${sceneIndex + 1}`),
             excluded: false,
-            paragraphs
+            paragraphs,
+            tags: []
           }))
         }
       })

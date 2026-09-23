@@ -20,6 +20,7 @@ import { GHOST_PROMPT_V3_VERSION } from './ghostText.v3'
 import { GHOST_REGEN_PROMPT_VERSION } from './ghostTextRegen.v1'
 import { GHOST_REGEN_PROMPT_V2_VERSION } from './ghostTextRegen.v2'
 import { GHOST_REGEN_PROMPT_V3_VERSION } from './ghostTextRegen.v3'
+import { IMPORT_STRUCTURE_PROMPT_VERSION } from './importStructure.v1'
 import { QUERY_PROMPT_VERSION } from './query.v1'
 import { REWRITE_PROMPT_VERSION } from './rewrite.v1'
 import { REWRITE_PROMPT_V2_VERSION } from './rewrite.v2'
@@ -70,7 +71,8 @@ export const PROMPT_VERSIONS = [
   BETA_READER_REGEN_PROMPT_VERSION,
   BRIEF_PROMPT_VERSION,
   SUMMARY_PROMPT_VERSION,
-  QUERY_PROMPT_VERSION
+  QUERY_PROMPT_VERSION,
+  IMPORT_STRUCTURE_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -204,7 +206,13 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   },
   [BRIEF_PROMPT_VERSION]: { feature: 'brief', tier: 'fast', output: 'json', since: 'F-14.3' },
   [SUMMARY_PROMPT_VERSION]: { feature: 'summary', tier: 'fast', output: 'json', since: 'F-5.6' },
-  [QUERY_PROMPT_VERSION]: { feature: 'query', tier: 'strong', output: 'json', since: 'F-5.7' }
+  [QUERY_PROMPT_VERSION]: { feature: 'query', tier: 'strong', output: 'json', since: 'F-5.7' },
+  [IMPORT_STRUCTURE_PROMPT_VERSION]: {
+    feature: 'importStructure',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-12.3'
+  }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

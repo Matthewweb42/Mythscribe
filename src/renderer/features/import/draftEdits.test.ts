@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { IMPORT_TITLE_MAX, draftSummary, type ImportDraft } from '@shared/import'
+import {
+  IMPORT_TITLE_MAX,
+  draftSummary,
+  type ImportAiMarks,
+  type ImportDraft
+} from '@shared/import'
+import type { StructureSuggestions } from '@shared/importStructure'
 import { draftFixture, importedParagraph } from './draftFixture'
 import {
+  applyStructure,
   findNode,
+  mergeChapter,
   mergeScene,
   moveNode,
   moveScene,
   nestChapter,
+  rejectSuggestion,
   renameNode,
   setExcluded,
   setPlacement,
@@ -207,6 +216,26 @@ describe('mergeScene', () => {
   })
 })
 
+describe('mergeChapter (F-12.3)', () => {
+  it('appends the scenes to the chapter before it in the part and keeps that chapter’s title', () => {
+    const merged = mergeChapter(draftFixture(), 'p1c2')
+    expect(shape(merged)).toEqual({
+      'Part One': { 'Chapter One': ['Scene 1', 'Scene 2', 'Scene 1'] },
+      'Part Two': { 'Chapter Two': ['Scene 1'] }
+    })
+    expect(merged.parts[0]?.chapters[0]?.placement).toBe('manuscript')
+    expect(draftSummary(merged).words).toBe(draftSummary(draftFixture()).words)
+  })
+
+  it('does nothing for the first chapter of a part or a non-chapter', () => {
+    const draft = draftFixture()
+    expect(mergeChapter(draft, 'p1c1')).toBe(draft)
+    expect(mergeChapter(draft, 'p2c1')).toBe(draft)
+    expect(mergeChapter(draft, 'p1c1s2')).toBe(draft)
+    expect(mergeChapter(draft, 'nope')).toBe(draft)
+  })
+})
+
 describe('splitScene', () => {
   it('cuts the paragraphs in two, mints an id from the counter, and titles the tail', () => {
     const split = splitScene(draftFixture(), 'p2c1s1', 2)
@@ -240,5 +269,203 @@ describe('splitScene', () => {
     const tail = split.parts[0]?.chapters[0]?.scenes[1]
     expect(tail?.id).toBe('p1c1s1-x7')
     expect(tail?.paragraphs).toEqual([importedParagraph('Nobody moved.')])
+  })
+})
+
+/**
+ * The fixture's paragraphs in reading order, as the AI pass indexes them: 0–1 open Chapter One's
+ * Scene 1, 2 is Scene 2, 3 is the Acknowledgements scene, 4–6 are Part Two's only scene.
+ */
+const suggestions = (over: Partial<StructureSuggestions> = {}): StructureSuggestions => ({
+  breaks: [],
+  scenes: [],
+  ...over
+})
+
+/** The AI marks on a node, or undefined when the pass left it alone. */
+const marks = (draft: ImportDraft, id: string): ImportAiMarks | undefined => {
+  const found = findNode(draft, id)
+  if (found?.kind === 'scene') return found.scene.ai
+  if (found?.kind === 'chapter') return found.chapter.ai
+  throw new Error(`no scene or chapter ${id}`)
+}
+
+describe('applyStructure (F-12.3)', () => {
+  it('splits a scene at a break inside it and marks the new scene with the model’s reason', () => {
+    const { draft, added, titled } = applyStructure(
+      draftFixture(),
+      suggestions({ breaks: [{ before: 1, kind: 'scene', reason: 'time skip' }] })
+    )
+    expect(added).toBe(1)
+    expect(titled).toBe(0)
+    expect(shape(draft)['Part One']?.['Chapter One']).toEqual([
+      'Scene 1',
+      'Scene 1 (split)',
+      'Scene 2'
+    ])
+    expect(scene(draft, 'p1c1s1-x1')).toEqual({ title: 'Scene 1 (split)', paragraphs: 1 })
+    expect(marks(draft, 'p1c1s1-x1')).toEqual({ break: true, title: false, reason: 'time skip' })
+    // The scene it was cut out of is not the AI's doing.
+    expect(marks(draft, 'p1c1s1')).toBeUndefined()
+    expect(draftSummary(draft).words).toBe(draftSummary(draftFixture()).words)
+  })
+
+  it('splits the chapter too when the break is a chapter, taking the scene and the rest', () => {
+    const { draft, added } = applyStructure(
+      draftFixture(),
+      suggestions({ breaks: [{ before: 5, kind: 'chapter', reason: 'new chapter' }] })
+    )
+    // One break, even though it made both a scene and a chapter.
+    expect(added).toBe(1)
+    expect(shape(draft)['Part Two']).toEqual({
+      'Chapter Two': ['Scene 1'],
+      'Chapter Two (split)': ['Scene 1 (split)']
+    })
+    expect(marks(draft, 'p2c1-x2')).toEqual({ break: true, title: false, reason: 'new chapter' })
+    expect(findNode(draft, 'p2c1-x2')).toMatchObject({ kind: 'chapter', partIndex: 1 })
+    expect(draft.parts[1]?.chapters[1]?.placement).toBe('manuscript')
+    expect(draft.nextId).toBe(3)
+  })
+
+  it('leaves a boundary that is already there alone, the whole draft included', () => {
+    const draft = draftFixture()
+    // Paragraph 4 opens Part Two's chapter already; paragraph 0 opens the book.
+    const applied = applyStructure(
+      draft,
+      suggestions({
+        breaks: [
+          { before: 4, kind: 'chapter', reason: 'already a chapter' },
+          { before: 2, kind: 'scene', reason: 'already a scene' },
+          { before: 99, kind: 'scene', reason: 'past the end' }
+        ]
+      })
+    )
+    expect(applied.draft).toBe(draft)
+    expect(applied.added).toBe(0)
+  })
+
+  it('promotes a scene that starts mid-chapter to a chapter of its own', () => {
+    const { draft, added } = applyStructure(
+      draftFixture(),
+      suggestions({ breaks: [{ before: 2, kind: 'chapter', reason: 'scene 2 opens a chapter' }] })
+    )
+    expect(added).toBe(1)
+    expect(shape(draft)['Part One']).toEqual({
+      'Chapter One': ['Scene 1'],
+      'Chapter One (split)': ['Scene 2'],
+      Acknowledgements: ['Scene 1']
+    })
+    expect(marks(draft, 'p1c1-x1')?.break).toBe(true)
+  })
+
+  it('applies several breaks from the highest index down, so the lower ones still point right', () => {
+    const { draft, added } = applyStructure(
+      draftFixture(),
+      suggestions({
+        breaks: [
+          { before: 5, kind: 'scene', reason: 'b' },
+          { before: 6, kind: 'scene', reason: 'c' }
+        ]
+      })
+    )
+    expect(added).toBe(2)
+    const scenes = draft.parts[1]?.chapters[0]?.scenes ?? []
+    expect(scenes.map((s) => s.id)).toEqual(['p2c1s1', 'p2c1s1-x2', 'p2c1s1-x1'])
+    expect(scenes.map((s) => s.paragraphs.length)).toEqual([1, 1, 1])
+    expect(draftSummary(draft).words).toBe(draftSummary(draftFixture()).words)
+  })
+
+  it('titles a default-titled scene, keeps the author’s title, and dedupes the tags', () => {
+    const { draft, titled } = applyStructure(
+      renameNode(draftFixture(), 'p2c1s1', 'The Road'),
+      suggestions({
+        scenes: [
+          { start: 2, title: '  Morning Grey  ', tags: ['rain', 'rain', 'mist'] },
+          { start: 4, title: 'Northward', tags: ['mara'] },
+          { start: 3, title: null, tags: [] }
+        ]
+      })
+    )
+    expect(titled).toBe(1)
+    expect(scene(draft, 'p1c1s2').title).toBe('Morning Grey')
+    expect(marks(draft, 'p1c1s2')).toEqual({ break: false, title: true, reason: null })
+    expect(findNode(draft, 'p1c1s2')).toMatchObject({ scene: { tags: ['rain', 'mist'] } })
+    // A title the author gave the scene stands; its tag candidates are still kept.
+    expect(scene(draft, 'p2c1s1').title).toBe('The Road')
+    expect(marks(draft, 'p2c1s1')).toBeUndefined()
+    expect(findNode(draft, 'p2c1s1')).toMatchObject({ scene: { tags: ['mara'] } })
+  })
+
+  // Regression for F-12.3 verification: `isDefaultSceneTitle` (src/shared/import.ts) is
+  // `/^[A-Za-z]+ \d+( \(split\))*$/`, which also matches a title the author chose that happens
+  // to be one word plus a number (the plan specified `/^Scene \d+( \(split\))?$/`, tied to the
+  // literal minted word). The spec: "An AI-supplied title replaces only default `Scene N` /
+  // `(split)` titles" — a heading the author wrote should stand, same as the "Morning Grey" case
+  // above with a two-word title. This fails today: "Round 2" is silently replaced.
+  it('does not replace an author title that only looks like a default one (Word N)', () => {
+    const { draft, titled } = applyStructure(
+      renameNode(draftFixture(), 'p1c1s2', 'Round 2'),
+      suggestions({ scenes: [{ start: 2, title: 'Morning Grey', tags: [] }] })
+    )
+    expect(titled).toBe(0)
+    expect(scene(draft, 'p1c1s2').title).toBe('Round 2')
+    expect(marks(draft, 'p1c1s2')).toBeUndefined()
+  })
+
+  it('titles the scene a break just created, keeping the break mark', () => {
+    const { draft, added, titled } = applyStructure(
+      draftFixture(),
+      suggestions({
+        breaks: [{ before: 1, kind: 'scene', reason: 'time skip' }],
+        scenes: [{ start: 1, title: 'Nobody Moves', tags: [] }]
+      })
+    )
+    expect({ added, titled }).toEqual({ added: 1, titled: 1 })
+    expect(scene(draft, 'p1c1s1-x1').title).toBe('Nobody Moves')
+    expect(marks(draft, 'p1c1s1-x1')).toEqual({ break: true, title: true, reason: 'time skip' })
+  })
+
+  it('ignores a scene index that is not the start of a scene, and changes nothing for nothing', () => {
+    const draft = draftFixture()
+    const applied = applyStructure(
+      draft,
+      suggestions({ scenes: [{ start: 1, title: 'Mid-scene', tags: [] }] })
+    )
+    expect(applied.draft).toBe(draft)
+    expect(applyStructure(draft, suggestions()).draft).toBe(draft)
+    // Pure: the draft it was given is untouched.
+    expect(shape(draft)).toEqual(shape(draftFixture()))
+  })
+})
+
+describe('rejectSuggestion (F-12.3)', () => {
+  it('merges an AI scene back into the one before it, text and all', () => {
+    const { draft } = applyStructure(
+      draftFixture(),
+      suggestions({ breaks: [{ before: 1, kind: 'scene', reason: 'time skip' }] })
+    )
+    const back = rejectSuggestion(draft, 'p1c1s1-x1')
+    expect(shape(back)['Part One']?.['Chapter One']).toEqual(['Scene 1', 'Scene 2'])
+    expect(scene(back, 'p1c1s1')).toEqual({ title: 'Scene 1', paragraphs: 2 })
+    expect(draftSummary(back).words).toBe(draftSummary(draftFixture()).words)
+  })
+
+  it('merges an AI chapter back into the chapter before it', () => {
+    const { draft } = applyStructure(
+      draftFixture(),
+      suggestions({ breaks: [{ before: 5, kind: 'chapter', reason: 'new chapter' }] })
+    )
+    const back = rejectSuggestion(draft, 'p2c1-x2')
+    expect(shape(back)['Part Two']).toEqual({ 'Chapter Two': ['Scene 1', 'Scene 1 (split)'] })
+    // Only the chapter was rejected: the scene the same break cut stays, still badged.
+    expect(marks(back, 'p2c1s1-x1')?.break).toBe(true)
+  })
+
+  it('does nothing for a part, an unknown id, or a node with nothing before it', () => {
+    const draft = draftFixture()
+    expect(rejectSuggestion(draft, 'p1')).toBe(draft)
+    expect(rejectSuggestion(draft, 'nope')).toBe(draft)
+    expect(rejectSuggestion(draft, 'p1c1s1')).toBe(draft)
+    expect(rejectSuggestion(draft, 'p1c1')).toBe(draft)
   })
 })

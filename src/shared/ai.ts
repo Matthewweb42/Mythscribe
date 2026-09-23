@@ -179,7 +179,9 @@ export const AI_FEATURE_IDS = [
   // F-14.3: drafting a scene's brief from its text.
   'brief',
   // F-14.11: the beta-reader read-through up to a scene, over the scene summaries.
-  'betaReader'
+  'betaReader',
+  // F-12.3: chapter and scene boundaries, titles, and tag candidates for an imported manuscript.
+  'importStructure'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -210,7 +212,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-14.11: up to 12 reader items as JSON, each with a scene number, a quote, and a note.
   betaReader: 1_200,
   // F-5.7: a short cited answer as JSON with up to 6 citations, each quoting a passage.
-  query: 600
+  query: 600,
+  // F-12.3: one chunk's breaks, scene titles, and tag candidates as JSON.
+  importStructure: 400
 }
 
 /**
@@ -239,7 +243,10 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-5.7: the top 3 scenes head-truncated to 12,000 characters each plus up to 10 summaries
   // (~250 tokens each) and ten turns of history; the fit shrinks the scenes, then drops
   // summaries, then the lowest-ranked full scene.
-  query: 12_000
+  query: 12_000,
+  // F-12.3: one chunk of about 2,500 words (~3,400 tokens; long paragraphs shortened), the
+  // rules, and the tag bank names.
+  importStructure: 6_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

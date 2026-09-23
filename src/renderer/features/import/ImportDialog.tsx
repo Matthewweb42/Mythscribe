@@ -9,13 +9,15 @@ import {
   draftSummary,
   sceneFirstLine,
   sceneWords,
+  type ImportAiMarks,
   type ImportChapter,
   type ImportDraft,
   type ImportSummary
 } from '@shared/import'
 import type { TiptapNodeT } from '@shared/tiptap'
+import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { findNode } from './draftEdits'
-import { useImportStore } from './importStore'
+import { useImportStore, type DetectState } from './importStore'
 
 /** `N word` / `N words`, with the thousands separators the tree shows. */
 const count = (n: number, singular: string): string =>
@@ -42,6 +44,9 @@ const ICON_ACTION =
   'flex h-5 w-5 shrink-0 items-center justify-center rounded border border-line text-fg-muted hover:bg-surface hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent'
 const INDENT = ['pl-2', 'pl-6', 'pl-10'] as const
 
+/** True while the AI pass runs: every edit in the tree is refused until it answers. */
+const useDetectRunning = (): boolean => useImportStore((s) => s.detect?.status === 'running')
+
 /**
  * The import review dialog (F-12.2): main's structure draft, shown as the parts, chapters, and
  * scenes it would create, with everything the author needs to correct a heuristic before
@@ -59,6 +64,7 @@ export function ImportDialog(): React.JSX.Element | null {
 function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
   const titleId = useId()
   const busy = useImportStore((s) => s.busy)
+  const running = useDetectRunning()
   const sceneId = useImportStore((s) => s.sceneId)
   const cancel = useImportStore((s) => s.cancel)
   const commit = useImportStore((s) => s.commit)
@@ -94,7 +100,7 @@ function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
         tabIndex={-1}
         data-testid="import-dialog"
         onKeyDown={onKeyDown}
-        className="flex h-[80vh] w-[900px] max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none"
+        className="flex h-[80vh] w-[1000px] max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none"
       >
         <div className="shrink-0 border-b border-line px-5 pt-4 pb-3">
           <h2 id={titleId} className="m-0 text-base font-semibold">
@@ -107,6 +113,7 @@ function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
             {summaryLine(summary)}
           </p>
         </div>
+        <DetectPanel />
         <div className="flex min-h-0 flex-1">
           <div className="min-h-0 flex-1 overflow-y-auto py-2">
             <ul className="m-0 flex list-none flex-col p-0">
@@ -155,6 +162,7 @@ function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
                                   words={words[sc.id] ?? 0}
                                   preview={sceneFirstLine(sc)}
                                   active={sc.id === sceneId}
+                                  ai={sc.ai}
                                 >
                                   <MoveButtons
                                     id={sc.id}
@@ -182,7 +190,7 @@ function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
               ))}
             </ul>
           </div>
-          <div className="min-h-0 w-[340px] shrink-0 overflow-y-auto border-l border-line px-4 py-3">
+          <div className="min-h-0 w-[300px] shrink-0 overflow-y-auto border-l border-line px-4 py-3">
             {scene ? (
               <>
                 <h3 className="m-0 text-sm font-semibold">{scene.title}</h3>
@@ -196,9 +204,10 @@ function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
                         <button
                           type="button"
                           data-testid="import-split"
+                          disabled={running}
                           aria-label={`Split before paragraph ${index + 1}`}
                           onClick={() => useImportStore.getState().splitScene(scene.id, index)}
-                          className="my-1 w-full rounded border border-dashed border-line py-0.5 text-[11px] text-fg-subtle hover:border-accent hover:text-fg"
+                          className="my-1 w-full rounded border border-dashed border-line py-0.5 text-[11px] text-fg-subtle hover:border-accent hover:text-fg disabled:opacity-40"
                         >
                           Split here
                         </button>
@@ -227,7 +236,7 @@ function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
           <button
             type="button"
             data-testid="import-commit"
-            disabled={busy || nothingToImport}
+            disabled={busy || running || nothingToImport}
             onClick={() => void commit()}
             className="rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60"
           >
@@ -252,6 +261,8 @@ interface RowProps {
   preview?: string
   /** The scene whose paragraphs the right pane shows. */
   active?: boolean
+  /** What the AI pass (F-12.3) did to this node, if anything: the row badges it and offers Reject. */
+  ai?: ImportAiMarks
   children?: ReactNode
 }
 
@@ -266,11 +277,14 @@ function Row({
   words,
   preview,
   active,
+  ai,
   children
 }: RowProps): React.JSX.Element {
   const renaming = useImportStore((s) => s.renamingId === id)
+  const running = useDetectRunning()
   const startRename = useImportStore((s) => s.startRename)
   const setExcluded = useImportStore((s) => s.setExcluded)
+  const reject = useImportStore((s) => s.rejectSuggestion)
 
   return (
     <div
@@ -287,14 +301,27 @@ function Row({
         <button
           type="button"
           title="Rename"
+          disabled={running}
           onClick={() => startRename(id)}
-          className={`min-w-0 shrink truncate rounded px-1 text-left hover:bg-surface-raised ${
+          // The title keeps at least 6rem (up to 12rem) and the preview gives way first: a badged
+          // row (F-12.3) carries an AI chip and a Reject button, which otherwise squeezed the
+          // title to one letter while the preview kept a few.
+          className={`min-w-24 max-w-48 shrink truncate rounded px-1 text-left hover:bg-surface-raised disabled:hover:bg-transparent ${
             depth === 2 ? '' : 'font-medium'
           }`}
         >
           {title}
         </button>
       )}
+      {ai && (ai.break || ai.title) ? (
+        <span
+          data-testid="import-ai-badge"
+          title={ai.reason ?? undefined}
+          className="shrink-0 rounded border border-accent/40 bg-accent/10 px-1 text-[10px] font-medium text-accent"
+        >
+          AI
+        </span>
+      ) : null}
       {preview ? (
         <span className="min-w-0 flex-1 truncate text-xs text-fg-subtle">{preview}</span>
       ) : (
@@ -302,10 +329,23 @@ function Row({
       )}
       <span className="shrink-0 text-xs text-fg-subtle tabular-nums">{words.toLocaleString()}</span>
       {children}
+      {ai?.break === true ? (
+        <button
+          type="button"
+          data-testid="import-reject"
+          disabled={running}
+          aria-label={`Reject the ${kindLabel} the AI added, ${title}`}
+          onClick={() => reject(id)}
+          className={ACTION}
+        >
+          Reject
+        </button>
+      ) : null}
       <label className="flex shrink-0 items-center gap-1 text-xs text-fg-muted">
         <input
           type="checkbox"
           data-testid="import-exclude"
+          disabled={running}
           aria-label={`Exclude ${kindLabel} ${title}`}
           checked={excluded}
           onChange={(event) => setExcluded(id, event.target.checked)}
@@ -336,6 +376,7 @@ function ChapterRow({
 }): React.JSX.Element {
   const setPlacement = useImportStore((s) => s.setPlacement)
   const nest = useImportStore((s) => s.nest)
+  const running = useDetectRunning()
   return (
     <Row
       id={chapter.id}
@@ -345,13 +386,15 @@ function ChapterRow({
       excluded={chapter.excluded}
       dimmed={dimmed}
       words={words}
+      ai={chapter.ai}
     >
       <select
         data-testid="import-placement"
         aria-label={`Placement for ${chapter.title}`}
         value={chapter.placement}
+        disabled={running}
         onChange={(event) => setPlacement(chapter.id, ImportPlacement.parse(event.target.value))}
-        className="shrink-0 rounded border border-line bg-bg px-1 py-0.5 text-xs text-fg"
+        className="shrink-0 rounded border border-line bg-bg px-1 py-0.5 text-xs text-fg disabled:opacity-40"
       >
         {IMPORT_PLACEMENTS.map((placement) => (
           <option key={placement} value={placement}>
@@ -362,7 +405,7 @@ function ChapterRow({
       <MoveButtons id={chapter.id} title={chapter.title} canUp={canUp} canDown={canDown} />
       <button
         type="button"
-        disabled={!canNestPrev}
+        disabled={!canNestPrev || running}
         aria-label={`Move ${chapter.title} to the previous part`}
         onClick={() => nest(chapter.id, 'prev')}
         className={ACTION}
@@ -371,7 +414,7 @@ function ChapterRow({
       </button>
       <button
         type="button"
-        disabled={!canNestNext}
+        disabled={!canNestNext || running}
         aria-label={`Move ${chapter.title} to the next part`}
         onClick={() => nest(chapter.id, 'next')}
         className={ACTION}
@@ -395,11 +438,12 @@ function MoveButtons({
   canDown: boolean
 }): React.JSX.Element {
   const move = useImportStore((s) => s.move)
+  const running = useDetectRunning()
   return (
     <>
       <button
         type="button"
-        disabled={!canUp}
+        disabled={!canUp || running}
         aria-label={`Move ${title} up`}
         onClick={() => move(id, -1)}
         className={ICON_ACTION}
@@ -408,7 +452,7 @@ function MoveButtons({
       </button>
       <button
         type="button"
-        disabled={!canDown}
+        disabled={!canDown || running}
         aria-label={`Move ${title} down`}
         onClick={() => move(id, 1)}
         className={ICON_ACTION}
@@ -438,11 +482,12 @@ function SceneActions({
   const moveScene = useImportStore((s) => s.moveScene)
   const mergeScene = useImportStore((s) => s.mergeScene)
   const selectScene = useImportStore((s) => s.selectScene)
+  const running = useDetectRunning()
   return (
     <>
       <button
         type="button"
-        disabled={!canPrevChapter}
+        disabled={!canPrevChapter || running}
         aria-label={`Move ${title} to the previous chapter`}
         onClick={() => moveScene(id, 'prev')}
         className={ACTION}
@@ -451,7 +496,7 @@ function SceneActions({
       </button>
       <button
         type="button"
-        disabled={!canNextChapter}
+        disabled={!canNextChapter || running}
         aria-label={`Move ${title} to the next chapter`}
         onClick={() => moveScene(id, 'next')}
         className={ACTION}
@@ -460,7 +505,7 @@ function SceneActions({
       </button>
       <button
         type="button"
-        disabled={!canMerge}
+        disabled={!canMerge || running}
         aria-label={`Merge ${title} with the scene before it`}
         onClick={() => mergeScene(id)}
         className={ACTION}
@@ -469,7 +514,7 @@ function SceneActions({
       </button>
       <button
         type="button"
-        disabled={!canSplit}
+        disabled={!canSplit || running}
         aria-label={`Split ${title}`}
         onClick={() => selectScene(id)}
         className={ACTION}
@@ -517,6 +562,108 @@ function RenameInput({ id, title }: { id: string; title: string }): React.JSX.El
       }}
       className="min-w-0 shrink rounded border border-line bg-bg px-1 text-sm"
     />
+  )
+}
+
+const DETECT_BUTTON =
+  'shrink-0 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60'
+
+/** The estimate before anything is sent: dollars when the fast model is priced, tokens when not. */
+function estimateLine(detect: DetectState): string {
+  const chunks = formatCount(detect.estimate.chunks, 'chunk')
+  return detect.estimate.priced
+    ? `≈ ${formatUsd(detect.estimate.costUsd)} (${formatCount(detect.words, 'word')}, ${chunks})`
+    : `≈ ${formatCount(detect.estimate.tokensIn)} tokens in (${chunks})`
+}
+
+/** What the finished pass really cost, against the estimate, and what it changed (CLAUDE.md rule 10). */
+function outcomeLine(detect: DetectState): string {
+  const outcome = detect.outcome
+  if (outcome === null) return ''
+  const estimated = detect.estimate.priced
+    ? ` (estimate ${formatUsd(detect.estimate.costUsd)})`
+    : ''
+  const changed = `${formatCount(outcome.added, 'break')} added, ${formatCount(outcome.titled, 'scene')} titled`
+  return `AI pass cost ${formatUsd(outcome.costUsd)}${estimated} · ${changed}`
+}
+
+/**
+ * The AI structure pass (F-12.3) above the tree: the offer with what it would cost before
+ * anything is sent, the chunk-by-chunk progress with Stop while it runs, and afterwards one
+ * line saying what it spent and what it changed. Absent when the dial or the toggle keeps the
+ * feature off, when the draft has nothing to send, and once the author keeps the draft as it is.
+ */
+function DetectPanel(): React.JSX.Element | null {
+  const detect = useImportStore((s) => s.detect)
+  const startDetect = useImportStore((s) => s.startDetect)
+  const skipDetect = useImportStore((s) => s.skipDetect)
+  const cancelDetect = useImportStore((s) => s.cancelDetect)
+  if (detect === null || detect.status === 'skipped') return null
+
+  const total = detect.progress?.total ?? detect.estimate.chunks
+  const done = Math.min((detect.progress?.done ?? 0) + 1, Math.max(total, 1))
+
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-5 py-2 text-xs">
+      {detect.status === 'offer' || detect.status === 'failed' ? (
+        <>
+          {detect.status === 'offer' ? (
+            <>
+              <span className="text-fg-muted">Let the AI check the chapters and scenes?</span>
+              <span data-testid="import-detect-estimate" className="text-fg-subtle tabular-nums">
+                {estimateLine(detect)}
+              </span>
+            </>
+          ) : (
+            <span data-testid="import-detect-error" className="text-danger">
+              {`${detect.error?.message ?? ''} ${detect.error?.nextStep ?? ''}`.trim()}
+            </span>
+          )}
+          <span className="flex-1" />
+          <button
+            type="button"
+            data-testid="import-detect"
+            onClick={() => void startDetect()}
+            className={DETECT_BUTTON}
+          >
+            {detect.status === 'offer' ? 'Detect structure' : 'Try again'}
+          </button>
+          {detect.status === 'offer' ? (
+            <button
+              type="button"
+              data-testid="import-detect-skip"
+              onClick={skipDetect}
+              className={ACTION}
+            >
+              Keep this draft
+            </button>
+          ) : null}
+        </>
+      ) : null}
+
+      {detect.status === 'running' ? (
+        <>
+          <span data-testid="import-detect-progress" className="text-fg-muted">
+            {`Checking chunk ${done} of ${total} · ${formatUsd(detect.progress?.costUsd ?? 0)} so far`}
+          </span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            data-testid="import-detect-cancel"
+            onClick={cancelDetect}
+            className={ACTION}
+          >
+            Stop
+          </button>
+        </>
+      ) : null}
+
+      {detect.status === 'done' ? (
+        <span data-testid="import-detect-cost" className="text-fg-muted">
+          {outcomeLine(detect)}
+        </span>
+      ) : null}
+    </div>
   )
 }
 

@@ -49,12 +49,31 @@ export const IMPORT_TITLE_MAX = 200
 
 const Title = z.string().max(IMPORT_TITLE_MAX)
 
+/**
+ * What the AI pass (F-12.3) did to a node, so the review tree can badge it and offer Reject:
+ * `break` when the node exists because the AI added a boundary, `title` when its title came
+ * from the AI (only default `Scene N` titles are replaced), `reason` the model's one-line why.
+ * Absent on everything the heuristics or the author produced.
+ */
+export const ImportAiMarks = z.object({
+  break: z.boolean(),
+  title: z.boolean(),
+  reason: z.string().nullable()
+})
+export type ImportAiMarks = z.infer<typeof ImportAiMarks>
+
 export const ImportScene = z.object({
   id: z.string(),
   title: Title,
   excluded: z.boolean(),
   /** Tiptap `paragraph` nodes, each with `attrs.origin = 'imported'` (F-14.6 style provenance). */
-  paragraphs: z.array(TiptapNode)
+  paragraphs: z.array(TiptapNode),
+  /**
+   * Tag-bank names the AI pass proposed for the scene (F-12.3); they become one pending
+   * proposal on the created node at commit and are never linked without an accept.
+   */
+  tags: z.array(z.string()).default([]),
+  ai: ImportAiMarks.optional()
 })
 export type ImportScene = z.infer<typeof ImportScene>
 
@@ -63,7 +82,8 @@ export const ImportChapter = z.object({
   title: Title,
   excluded: z.boolean(),
   placement: ImportPlacement,
-  scenes: z.array(ImportScene)
+  scenes: z.array(ImportScene),
+  ai: ImportAiMarks.optional()
 })
 export type ImportChapter = z.infer<typeof ImportChapter>
 
@@ -109,6 +129,15 @@ export function sceneFirstLine(scene: Pick<ImportScene, 'paragraphs'>): string {
 /** Words in a scene, by the same count the editor caches (`countWords`). */
 export function sceneWords(scene: Pick<ImportScene, 'paragraphs'>): number {
   return countWords({ type: 'doc', content: scene.paragraphs })
+}
+
+/**
+ * True for a title the heuristics minted (`Scene 3`, always the literal `levelLabel` word
+ * "Scene", or a `… (split)` of one), the only titles the AI pass (F-12.3) may replace: a heading
+ * the author wrote or renamed stays, even one that looks like a label (`Round 2`).
+ */
+export function isDefaultSceneTitle(title: string): boolean {
+  return /^Scene \d+( \(split\))*$/.test(title)
 }
 
 /** The document a scene becomes at commit: one Tiptap doc of its paragraphs. */

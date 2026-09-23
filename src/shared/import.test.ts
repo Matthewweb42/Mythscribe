@@ -23,7 +23,7 @@ function paragraph(text: string): TiptapNodeT {
 }
 
 function scene(id: string, texts: string[], excluded = false): ImportScene {
-  return { id, title: id, excluded, paragraphs: texts.map(paragraph) }
+  return { id, title: id, excluded, paragraphs: texts.map(paragraph), tags: [] }
 }
 
 describe('importFormatOf', () => {

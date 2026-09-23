@@ -1,0 +1,22 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`importStructure.v1 prompt (F-12.3) > matches the golden messages for the fixture chunk and asks for the feature output budget 1`] = `
+[
+  {
+    "content": "You are the structure-detection feature inside a novel-writing app, splitting an imported manuscript into chapters and scenes. The paragraphs below are numbered in reading order; a line above a paragraph marks a boundary the draft already has. Propose a break only where you are confident one belongs (a jump in time or place, a change of viewpoint, a new chapter opening), never where that boundary already exists, and never at the first paragraph. Give every scene in the chunk a title of at most 60 characters, or null when nothing fits, and up to 6 tags taken only from the tag bank; never invent a tag name. Reply with JSON only: {"breaks":[{"before":12,"kind":"scene","reason":"why, in a few words"}],"scenes":[{"start":0,"title":"A title","tags":["name"]}]}. "before" and "start" are the numbers in brackets; "kind" is "chapter" or "scene".",
+    "role": "system",
+  },
+  {
+    "content": "Tag bank: dark-forest, protagonist, melancholy
+
+Paragraphs:
+— chapter starts here: "Chapter One" —
+— scene starts here: "Scene 1" —
+[4] The ferry landing was empty when Mara reached it.
+[5] She set the lantern down on the post and waited.
+— scene starts here: "Scene 2" —
+[6] Three days later the thaw came.",
+    "role": "user",
+  },
+]
+`;

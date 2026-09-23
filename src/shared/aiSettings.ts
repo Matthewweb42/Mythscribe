@@ -205,6 +205,13 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'sent back once, with the same context plus the rule it broke, for a second try.',
     minDial: 2
   },
+  importStructure: {
+    label: 'Import structure detection',
+    sends:
+      'The manuscript you are importing, in chunks of about 2,500 words (long paragraphs ' +
+      'shortened), and your tag names, only when you ask for the check in the import dialog.',
+    minDial: 2
+  },
   rewrite: {
     label: 'Rewrite in my voice',
     sends:

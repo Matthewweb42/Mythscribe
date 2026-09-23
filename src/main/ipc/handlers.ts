@@ -14,6 +14,7 @@ import { type AiSource, isFeatureAllowed } from '@shared/aiSettings'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl } from '@shared/cloudApi'
 import { aiRequestCounter } from '@shared/diagnostics'
 import type { Background } from '@shared/focus'
+import type { ImportDetectResult, PendingTagProposal } from '@shared/importStructure'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
 import type {
   AiBetaReaderResult,
@@ -44,9 +45,16 @@ import { dayOf, rollIfNewDay } from '../ai/dailyCap'
 import { assertFeatureAllowed } from '../ai/dial'
 import { draftBrief } from '../ai/draftBrief'
 import { generateGhostText } from '../ai/ghostText'
-import { cancelInflight, regenRequestId } from '../ai/inflight'
+import { detectImportStructure } from '../ai/importStructure'
+import {
+  cancelInflight,
+  regenRequestId,
+  registerInflight,
+  releaseInflight
+} from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
-import { createProposal, settleProposal } from '../ai/proposalStore'
+import { IMPORT_STRUCTURE_PROMPT_VERSION } from '../ai/prompts/importStructure.v1'
+import { createProposal, listPendingProposals, settleProposal } from '../ai/proposalStore'
 import { AiProviderError, NoKeyError } from '../ai/providers/types'
 import { runQuery } from '../ai/query'
 import { recommendTags } from '../ai/recommendTags'
@@ -1213,6 +1221,17 @@ export function registerHandlers({
     return null
   })
 
+  // F-12.3: the tag candidates an import left on a scene, newest first — the tag bar asks for
+  // them when the author opens a document and settles the row as it settles an F-4.7 answer.
+  // A row whose content is not a list of names answers with no tags rather than an error the
+  // author cannot act on: the tag bar shows nothing and settles it, so the row does not linger.
+  register('proposal:pendingTags', ({ nodeId }): PendingTagProposal | null => {
+    const db = manager.require().connection.orm
+    const row = listPendingProposals(db, 'importStructure', nodeId)[0]
+    if (!row) return null
+    return { proposalId: row.id, tags: proposalTags(row.content), model: row.model }
+  })
+
   // F-14.1: the exemplars and the locally built profile; nothing here calls the provider.
   register('voice:listExemplars', () => listExemplars(manager.require().connection.orm))
 
@@ -1266,9 +1285,57 @@ export function registerHandlers({
     })
   })
 
+  // F-12.3: the AI pass over the draft. The parent `requestId` is registered here, not in the
+  // request path (each chunk registers its own `<id>:c<n>` there), so `ai:cancel` stops the
+  // whole pass and not just the chunk in flight. Expected AI failures — no key, the dial, the
+  // cap, a stop — come back as data like `ai:recommendTags`; NO_PROJECT stays an error.
+  register('import:detectStructure', async ({ draft, requestId }): Promise<ImportDetectResult> => {
+    const db = manager.require().connection.orm
+    const controller = registerInflight(requestId)
+    try {
+      const result = await detectImportStructure(db, requestDeps(db), {
+        draft,
+        requestId,
+        signal: controller.signal,
+        onProgress: (progress) => emit(windows(), 'import:detectProgress', progress)
+      })
+      return { ok: true, ...result }
+    } catch (err) {
+      if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
+      throw err
+    } finally {
+      releaseInflight(requestId)
+    }
+  })
+
   register('import:commit', ({ draft }) => {
     const session = manager.require()
-    const result = importDraft(session.connection.orm, session.info.format, draft)
+    const db = session.connection.orm
+    const result = importDraft(db, session.info.format, draft)
+    // F-12.3: the tag candidates the AI pass proposed for each scene become pending proposals
+    // on the created nodes, so the tag bar can offer them one by one (F-4.7) whenever the
+    // author opens the scene. They cost nothing: the pass itself was paid for by the chunk
+    // rows, and these only carry the names forward. The draft does not record which model
+    // answered, so the row names the current fast model (or `import` when there is none) and
+    // the catalogued prompt version of the pass that could have produced it.
+    if (result.tagCandidates.length > 0) {
+      const model = ai.get(sourceOf(db))?.resolveModel('fast') ?? 'import'
+      for (const candidate of result.tagCandidates) {
+        createProposal(db, {
+          feature: 'importStructure',
+          nodeId: candidate.nodeId,
+          promptVersion: IMPORT_STRUCTURE_PROMPT_VERSION,
+          model,
+          promptTokens: 0,
+          completionTokens: 0,
+          costUsd: 0,
+          cached: false,
+          content: JSON.stringify(candidate.tags),
+          flagged: null,
+          violation: null
+        })
+      }
+    }
     return { nodes: result.rows.map(toTreeNode), words: result.words }
   })
 
@@ -1361,6 +1428,16 @@ export function registerHandlers({
     }
     emit(windows(), 'project:changed', info)
   })
+}
+
+/** A tag proposal's stored content (F-12.3): the names as JSON, or none when it is anything else. */
+function proposalTags(content: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(content)
+    return Array.isArray(parsed) ? parsed.filter((name) => typeof name === 'string') : []
+  } catch {
+    return []
+  }
 }
 
 /** Writes through a sibling temp file and renames, as the app-state store does, so a failed write leaves no half file. */
