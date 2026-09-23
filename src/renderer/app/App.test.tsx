@@ -121,6 +121,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'recents:list') return []
     if (channel === 'tree:list') return []
     if (channel === 'tag:list') return []
+    if (channel === 'entity:list') return []
     if (channel === 'documentTag:list') return []
     if (channel === 'tag:proposed') return []
     if (channel === 'sceneMeta:get')
@@ -245,7 +246,7 @@ describe('App', () => {
       within(aside)
         .getAllByRole('tab')
         .map((t) => t.textContent)
-    ).toEqual(['Manuscript', 'Tags'])
+    ).toEqual(['Manuscript', 'Characters', 'Settings', 'World', 'Tags'])
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
@@ -1503,7 +1504,9 @@ describe('App', () => {
     })
 
     it('Ctrl+wheel steps once per burst and the plain wheel is left to scroll', async () => {
-      const invoke = install({ 'view:zoomDocument': { editorZoom: 1.1, uiScale: 'medium', pageEdges: true } })
+      const invoke = install({
+        'view:zoomDocument': { editorZoom: 1.1, uiScale: 'medium', pageEdges: true }
+      })
       render(<App />)
       await screen.findByRole('button', { name: /new project/i })
       const zoomCalls = (): number =>

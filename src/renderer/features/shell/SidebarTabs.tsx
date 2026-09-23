@@ -61,7 +61,7 @@ export function SidebarTabs({ format, tabs = SIDEBAR_TABS }: SidebarTabsProps): 
         role="tablist"
         aria-label="Sidebar"
         onKeyDown={onKeyDown}
-        className="flex shrink-0 border-b border-line"
+        className="@container flex shrink-0 border-b border-line"
       >
         {tabs.map((tab) => (
           <SidebarTabButton
@@ -109,11 +109,14 @@ function SidebarTabButton({
       aria-controls="sidebar-tabpanel"
       tabIndex={selected ? 0 : -1}
       title={tab.label}
+      aria-label={tab.label}
       onClick={() => onSelect(tab.id)}
-      className="flex min-w-0 flex-1 items-center justify-center gap-1.5 border-b-2 border-transparent px-2 py-1.5 text-xs font-medium text-fg-muted select-none hover:bg-surface-raised hover:text-fg focus-visible:bg-surface-raised focus-visible:outline-none aria-selected:border-accent aria-selected:text-fg"
+      className="flex min-w-0 flex-auto items-center justify-center gap-1.5 border-b-2 border-transparent px-1.5 py-1.5 text-xs font-medium text-fg-muted select-none hover:bg-surface-raised hover:text-fg focus-visible:bg-surface-raised focus-visible:outline-none aria-selected:border-accent aria-selected:text-fg"
     >
-      <Icon size={14} aria-hidden="true" />
-      <span className="truncate">{tab.label}</span>
+      <Icon size={14} aria-hidden="true" className="shrink-0" />
+      {/* Five tabs (F-9.2) do not fit their words at the sidebar minimum: below 30rem the bar
+          is icons only and the title carries the word; above it the labels return. */}
+      <span className="hidden truncate @min-[30rem]:inline">{tab.label}</span>
     </button>
   )
 }

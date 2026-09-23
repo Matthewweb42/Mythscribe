@@ -52,6 +52,7 @@ import { useBackgroundStore, useCurrentBackground } from '@renderer/features/foc
 import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
 import { ImportDialog } from '@renderer/features/import/ImportDialog'
 import { useImportStore } from '@renderer/features/import/importStore'
+import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
@@ -176,6 +177,7 @@ export function App(): React.JSX.Element {
       // F-12.2: a draft under review belongs to the project it would be written into.
       useImportStore.getState().cancel()
       useTagStore.getState().clear()
+      useEntityStore.getState().clear()
       useDocumentTagStore.getState().clear()
       useMentionStore.getState().clear()
       useProposedTagStore.getState().clear()
@@ -222,6 +224,11 @@ export function App(): React.JSX.Element {
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
     useTagStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    // F-9.2: the story bible loads beside the tag bank; the entity tabs read it, nothing waits on it.
+    useEntityStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))

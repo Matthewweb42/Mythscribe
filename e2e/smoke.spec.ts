@@ -977,10 +977,16 @@ test('create, close, reopen a project on disk', async () => {
     .poll(async () => (await getLayout()).sidebar, { timeout: 3000 })
     .toEqual({ open: true, size: sidebarFinal, tab: 'manuscript' })
 
-  // F-7.3: the sidebar is a tab bar; only the built Manuscript and Tags tabs are listed (no
-  // placeholders), Manuscript is selected, and its panel holds the tree.
+  // F-7.3: the sidebar is a tab bar; only the built tabs are listed (no placeholders: the entity
+  // tabs arrived with F-9.2), Manuscript is selected, and its panel holds the tree.
   const sidebarTabs = page.getByRole('tablist', { name: 'Sidebar' })
-  await expect(sidebarTabs.getByRole('tab')).toHaveText(['Manuscript', 'Tags'])
+  await expect(sidebarTabs.getByRole('tab')).toHaveText([
+    'Manuscript',
+    'Characters',
+    'Settings',
+    'World',
+    'Tags'
+  ])
   const manuscriptTab = sidebarTabs.getByRole('tab', { name: 'Manuscript' })
   await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('tabpanel', { name: 'Manuscript' }).getByRole('tree')).toBeVisible()
@@ -1602,6 +1608,38 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByRole('status')).toContainText('Added 28 tags')
   await expect(tagRows.getByRole('button')).toHaveCount(29)
   await expect(tagRows.getByRole('button', { name: /^protagonist/ })).toBeVisible()
+
+  // F-9.2: the Characters tab starts empty; quick-add creates a character (structured template)
+  // that appears as a card and is selected, the search hides and shows it, the list view drops
+  // the card border, and Delete asks first and then removes it, so the tab says the kind is
+  // empty again (the empty-kind message wins over the search's "no match").
+  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  const charactersPanel = page.getByRole('tabpanel', { name: 'Characters' })
+  await expect(charactersPanel.getByText('No characters yet.')).toBeVisible()
+  const characterForm = charactersPanel.getByRole('form', { name: 'New character' })
+  await characterForm.getByRole('textbox', { name: 'Character name' }).fill('Mara')
+  await characterForm.getByRole('button', { name: 'Add' }).click()
+  const characterRows = charactersPanel.getByRole('list', { name: 'Characters' })
+  const maraRow = characterRows.getByRole('button', { name: 'Mara', exact: true })
+  await expect(maraRow).toHaveAttribute('aria-current', 'true')
+  await expect(characterForm.getByRole('textbox', { name: 'Character name' })).toHaveValue('')
+  const characterSearch = charactersPanel.getByRole('searchbox', { name: 'Search characters' })
+  await characterSearch.fill('zed')
+  await expect(charactersPanel.getByText('No characters match.')).toBeVisible()
+  await characterSearch.fill('mar')
+  await expect(maraRow).toBeVisible()
+  await charactersPanel.getByRole('button', { name: 'List' }).click()
+  await expect(charactersPanel.getByRole('button', { name: 'List' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await maraRow.hover()
+  await characterRows.getByRole('button', { name: 'Delete Mara' }).click()
+  const deleteCharacterDialog = page.getByRole('dialog', { name: 'Delete "Mara"?' })
+  await expect(deleteCharacterDialog).toBeVisible()
+  await deleteCharacterDialog.getByRole('button', { name: 'Delete' }).click()
+  await expect(deleteCharacterDialog).toBeHidden()
+  await expect(charactersPanel.getByText('No characters yet.')).toBeVisible()
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
   await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
   await expect(tree).toBeVisible()
