@@ -1,4 +1,3 @@
-import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
 import {
@@ -13,7 +12,14 @@ import {
 import { type AiSource, isFeatureAllowed } from '@shared/aiSettings'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl } from '@shared/cloudApi'
 import { aiRequestCounter } from '@shared/diagnostics'
-import { ENTITY_IMAGES_DIR } from '@shared/entities'
+import { ENTITY_IMAGES_DIR, ENTITY_KIND_LABEL } from '@shared/entities'
+import {
+  ENTITY_EXCHANGE_EXTENSIONS,
+  ENTITY_EXCHANGE_LABEL,
+  entityExportFileName,
+  planEntityImport,
+  toExchangeRecord
+} from '@shared/entityExchange'
 import type { Background } from '@shared/focus'
 import type { ImportDetectResult, PendingTagProposal } from '@shared/importStructure'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
@@ -71,6 +77,7 @@ import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
 import { getDocumentContent, saveDocument } from '../document/documentStore'
+import { importEntities, readEntityFile, writeEntityFile } from '../entity/entityExchange'
 import { getNotes, saveNotes } from '../document/notesStore'
 import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
 import { getSummary } from '../document/summaryStore'
@@ -91,6 +98,7 @@ import { addBackground, listBackgrounds, removeBackground } from '../project/bac
 import { addImageAsset, removeImageAsset } from '../project/imageAssets'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor, sanitizeName } from '../project/projectStore'
+import { writeTextAtomic } from '../fs'
 import { renderDisclosure } from '../provenance/disclosure'
 import { buildProvenanceReport } from '../provenance/report'
 import {
@@ -699,6 +707,68 @@ export function registerHandlers({
     // F-9.3: the image is the entity's own file, so it goes with it.
     if (deleted.image !== null) removeImageAsset(session.folder, ENTITY_IMAGES_DIR, deleted.image)
     return null
+  })
+
+  /**
+   * F-9.5: the story bible out of the app. The JSON file is the reusable library — every kind
+   * reads it back — and the CSV is one kind's rows for a spreadsheet. The file lands where the
+   * author says; the default sits beside the project folder, as the disclosure report does.
+   */
+  register('entity:export', async ({ kind, format, path: given }) => {
+    const session = manager.require()
+    const rows = listEntities(session.connection.orm).filter((row) => row.kind === kind)
+    const label = ENTITY_KIND_LABEL[kind].toLowerCase()
+    if (rows.length === 0) {
+      throw new AppError('VALIDATION', `No ${label} to export`, { kind })
+    }
+    const chosen =
+      given ??
+      (await dialogs.chooseExportPath(
+        entityExportFileName(sanitizeName(session.info.name), kind, format),
+        [{ name: ENTITY_EXCHANGE_LABEL[format], extensions: [ENTITY_EXCHANGE_EXTENSIONS[format]] }],
+        path.dirname(session.folder)
+      ))
+    if (chosen === null) return null
+    writeEntityFile(chosen, format, rows.map(toExchangeRecord))
+    diagnostics.count('export.run')
+    return { path: chosen, count: rows.length }
+  })
+
+  // F-9.5: reading an entity file writes nothing, exactly as `import:open` does for a manuscript.
+  // The plan goes to the renderer, the author sets an action per row, and only `entity:importCommit`
+  // touches the project.
+  register('entity:importOpen', async ({ kind, path: given }) => {
+    const session = manager.require()
+    const chosen = given ?? (await dialogs.chooseEntityLibraryFile())
+    if (chosen === null) return null
+    const file = readEntityFile(chosen, kind)
+    const { items, duplicates } = planEntityImport(
+      listEntities(session.connection.orm),
+      file.records
+    )
+    return { source: { name: file.name, format: file.format }, items, duplicates }
+  })
+
+  /**
+   * F-9.5: the reviewed rows, in one transaction. However many tags the new entities created
+   * (F-9.4), the manuscript is rescanned once and the proposals published once; each created or
+   * renamed tag is still announced on its own, because a bank merges tags one at a time.
+   */
+  register('entity:importCommit', ({ items }) => {
+    const db = manager.require().connection.orm
+    const result = importEntities(db, items)
+    const announce = result.tagChanges.filter((change) => change.created || change.renamed)
+    if (announce.length > 0) {
+      rescanManuscript(db)
+      publishProposed()
+      for (const change of announce) emit(windows(), 'tag:changed', change.tag)
+    }
+    return {
+      entities: result.entities,
+      added: result.added,
+      merged: result.merged,
+      replaced: result.replaced
+    }
   })
 
   // A hand-edited app-state file may squeeze the editor; reading normalizes, writing refuses.
@@ -1537,9 +1607,3 @@ function proposalTags(content: string): string[] {
   }
 }
 
-/** Writes through a sibling temp file and renames, as the app-state store does, so a failed write leaves no half file. */
-function writeTextAtomic(file: string, text: string): void {
-  const tmp = `${file}.tmp`
-  fs.writeFileSync(tmp, text, 'utf8')
-  fs.renameSync(tmp, file)
-}

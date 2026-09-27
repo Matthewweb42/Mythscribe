@@ -247,4 +247,114 @@ describe('EntityTab (F-9.2)', () => {
     expect(toasts()).toEqual(['Database is locked'])
     expect(rowNames('Characters')).toEqual(['Aldous', 'Mara'])
   })
+
+  describe('export and import (F-9.5)', () => {
+    const openMenu = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
+      await user.click(screen.getByRole('button', { name: 'More' }))
+      return screen.getByRole('menu')
+    }
+    const item = (label: string): HTMLElement => screen.getByRole('menuitem', { name: label })
+
+    it('the More menu offers both exports and the import', async () => {
+      const user = userEvent.setup()
+      await renderLoaded('character')
+      const menu = await openMenu(user)
+      expect(within(menu).getAllByRole('menuitem').map((el) => el.textContent)).toEqual([
+        'Export as JSON…',
+        'Export as CSV…',
+        'Import…'
+      ])
+      expect(item('Export as JSON…')).toBeEnabled()
+    })
+
+    it('exports the kind and toasts where the file went', async () => {
+      const user = userEvent.setup()
+      const calls = await renderLoaded('character', {
+        'entity:export': () => ({ path: '/home/a/My Book-characters.csv', count: 2 })
+      })
+      await openMenu(user)
+      await user.click(item('Export as CSV…'))
+      expect(calls.at(-1)).toEqual(['entity:export', { kind: 'character', format: 'csv' }])
+      expect(toasts()).toEqual(['Exported 2 characters to My Book-characters.csv'])
+      expect(screen.queryByRole('menu')).toBeNull()
+    })
+
+    it('names one exported entity in the singular', async () => {
+      const user = userEvent.setup()
+      await renderLoaded('world', {
+        'entity:export': () => ({ path: '/home/a/Book-world.json', count: 1 })
+      })
+      await openMenu(user)
+      await user.click(item('Export as JSON…'))
+      expect(toasts()).toEqual(['Exported 1 world-building item to Book-world.json'])
+      expect(screen.queryByRole('menu')).toBeNull()
+    })
+
+    it('says nothing when the save dialog is cancelled', async () => {
+      const user = userEvent.setup()
+      await renderLoaded('character', { 'entity:export': () => null })
+      await openMenu(user)
+      await user.click(item('Export as JSON…'))
+      expect(toasts()).toEqual([])
+    })
+
+    it('a refused export toasts the cause', async () => {
+      const user = userEvent.setup()
+      await renderLoaded('character', { 'entity:export': failing('Disk is full') })
+      await openMenu(user)
+      await user.click(item('Export as JSON…'))
+      expect(toasts()).toEqual(['Disk is full'])
+    })
+
+    it('both exports are disabled while the kind is empty, and Import is not', async () => {
+      const user = userEvent.setup()
+      install({ 'entity:list': () => [] })
+      await act(async () => {
+        await useEntityStore.getState().load()
+      })
+      render(<EntityTab kind="world" />)
+      await openMenu(user)
+      expect(item('Export as JSON…')).toBeDisabled()
+      expect(item('Export as CSV…')).toBeDisabled()
+      expect(item('Import…')).toBeEnabled()
+    })
+
+    it('Import asks main for a plan and holds it for the dialog', async () => {
+      const user = userEvent.setup()
+      const plan = {
+        source: { name: 'library.json', format: 'json' as const },
+        duplicates: 0,
+        items: [
+          {
+            id: 'r1',
+            record: {
+              kind: 'character' as const,
+              name: 'Ilse',
+              template: 'structured' as const,
+              fields: {},
+              body: null
+            },
+            existingId: null,
+            action: 'add' as const
+          }
+        ]
+      }
+      const calls = await renderLoaded('character', { 'entity:importOpen': () => plan })
+      await openMenu(user)
+      await user.click(item('Import…'))
+      expect(calls.at(-1)).toEqual(['entity:importOpen', { kind: 'character' }])
+      expect(useEntityStore.getState().importPlan).toEqual(plan)
+    })
+
+    it('a refused import toasts the cause and opens nothing', async () => {
+      const user = userEvent.setup()
+      await renderLoaded('character', {
+        'entity:importOpen': failing('Row 2: "creature" is not a kind of entity')
+      })
+      await openMenu(user)
+      await user.click(item('Import…'))
+      expect(toasts()).toEqual(['Row 2: "creature" is not a kind of entity'])
+      expect(useEntityStore.getState().importPlan).toBeNull()
+    })
+  })
 })

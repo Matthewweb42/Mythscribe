@@ -1772,6 +1772,73 @@ test('create, close, reopen a project on disk', async () => {
     .click()
   await expect(tomasRow).toHaveCount(0)
 
+  // F-9.5: export and import. The tab's More menu writes the Characters as a JSON library where
+  // the (stubbed) save dialog points — Mara Vell as she stands, with no image and no tag id in the
+  // file. A hand-written library of one new character and one Mara Vell with a field she does not
+  // have is then imported: the review dialog offers the new one as Add and Mara as Fill in blanks,
+  // and after Import her background is filled while the age she already had is untouched.
+  const libraryPath = path.join(tmp, 'characters.json')
+  await stubSaveDialog(libraryPath)
+  await charactersPanel.getByRole('button', { name: 'More' }).click()
+  await page.getByRole('menuitem', { name: 'Export as JSON…' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Exported' })).toContainText(
+    'Exported 1 character to characters.json'
+  )
+  const exported: unknown = JSON.parse(fs.readFileSync(libraryPath, 'utf8'))
+  expect(exported).toEqual({
+    format: 'mythscribe-entities',
+    version: 1,
+    entities: [
+      {
+        kind: 'character',
+        name: 'Mara Vell',
+        template: 'structured',
+        fields: { age: '31', appearance: 'Tall, with a scar over one eye.' },
+        body: 'She keeps the lighthouse.'
+      }
+    ]
+  })
+  const incomingPath = path.join(tmp, 'incoming.json')
+  fs.writeFileSync(
+    incomingPath,
+    JSON.stringify({
+      format: 'mythscribe-entities',
+      version: 1,
+      entities: [
+        { kind: 'character', name: 'Ilse', fields: { age: '30' } },
+        { kind: 'character', name: 'mara vell', fields: { age: '99', background: 'Born at sea.' } }
+      ]
+    })
+  )
+  await stubOpenDialog(incomingPath)
+  await charactersPanel.getByRole('button', { name: 'More' }).click()
+  await page.getByRole('menuitem', { name: 'Import…' }).click()
+  const entityImport = page.getByTestId('entity-import-dialog')
+  await expect(entityImport).toBeVisible()
+  await expect(entityImport).toContainText('Import “incoming.json”')
+  await expect(entityImport.getByTestId('entity-import-item')).toHaveCount(2)
+  await expect(entityImport.getByRole('combobox', { name: 'Action for Ilse' })).toHaveValue('add')
+  const maraAction = entityImport.getByRole('combobox', { name: 'Action for mara vell' })
+  await expect(maraAction).toHaveValue('merge')
+  await expect(entityImport).toContainText('Existing: Mara Vell')
+  await entityImport.getByTestId('entity-import-commit').click()
+  await expect(entityImport).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: 'Imported' })).toContainText(
+    'Imported 2 entities (1 added, 1 merged, 0 replaced)'
+  )
+  const ilseRow = characterRows.getByRole('button', { name: 'Ilse', exact: true })
+  await expect(ilseRow).toBeVisible()
+  const importedMara = (await listEntities()).find((entity) => entity.name === 'Mara Vell')
+  // Fill in blanks filled the empty field and left the one she already had alone.
+  expect(importedMara?.fields).toMatchObject({ age: '31', background: 'Born at sea.' })
+  await ilseRow.hover()
+  await characterRows.getByRole('button', { name: 'Delete Ilse' }).click()
+  await page
+    .getByRole('dialog', { name: 'Delete "Ilse"?' })
+    .getByRole('button', { name: 'Delete' })
+    .click()
+  await expect(ilseRow).toHaveCount(0)
+
   await maraVellRow.hover()
   await characterRows.getByRole('button', { name: 'Delete Mara Vell' }).click()
   const deleteCharacterDialog = page.getByRole('dialog', { name: 'Delete "Mara Vell"?' })
@@ -3610,6 +3677,13 @@ async function closeProject(): Promise<void> {
 async function stubOpenDialog(filePath: string): Promise<void> {
   await app.evaluate(({ dialog }, chosen) => {
     dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] })
+  }, filePath)
+}
+
+/** The native save dialog answers this path (F-9.5 exports; the wizard patches it the same way). */
+async function stubSaveDialog(filePath: string): Promise<void> {
+  await app.evaluate(({ dialog }, chosen) => {
+    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath: chosen })
   }, filePath)
 }
 

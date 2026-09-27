@@ -7,6 +7,8 @@ import type { TreeIndex } from './treeStore'
 export interface MenuItem {
   id: string
   label: string
+  /** Shown but not choosable (F-9.5: an export with nothing to export); absent means choosable. */
+  disabled?: boolean
 }
 
 /** Prefix of the template items' ids (F-2.6): `template:<MatterTemplateId>`. */

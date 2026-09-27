@@ -44,8 +44,10 @@ export function matchesQuery(entity: Entity, needle: string): boolean {
  * One line summarizing the entity for its card: the first filled field of the kind's template,
  * in template order, or the blank page, whitespace collapsed and cut at `EXCERPT_MAX`. The World
  * category is skipped because the card shows it as a chip. Empty when nothing is written yet.
+ * Takes only what it reads, so an entity that is not stored yet — an incoming import row (F-9.5)
+ * — gets the same line as a card.
  */
-export function excerptOf(entity: Entity): string {
+export function excerptOf(entity: Pick<Entity, 'kind' | 'template' | 'fields' | 'body'>): string {
   let source = ''
   if (entity.template === 'structured') {
     for (const field of ENTITY_FIELDS[entity.kind]) {

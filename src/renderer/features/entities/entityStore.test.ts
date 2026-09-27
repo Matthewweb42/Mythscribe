@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import type { EntityImportPlan } from '@shared/entityExchange'
 import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
@@ -219,5 +220,120 @@ describe('entityStore (F-9.2)', () => {
     await expect(state().linkTag('e-mara')).rejects.toMatchObject({ code: 'ALREADY_EXISTS' })
     expect(state().byId['e-mara']).toEqual(mara)
     expect(useTagStore.getState().ids).toEqual([])
+  })
+
+  describe('export and import (F-9.5)', () => {
+    const plan = (over: Partial<EntityImportPlan> = {}): EntityImportPlan => ({
+      source: { name: 'library.json', format: 'json' },
+      duplicates: 0,
+      items: [
+        {
+          id: 'r1',
+          record: {
+            kind: 'character',
+            name: 'Ilse',
+            template: 'structured',
+            fields: { age: '30' },
+            body: null
+          },
+          existingId: null,
+          action: 'add'
+        },
+        {
+          id: 'r2',
+          record: {
+            kind: 'character',
+            name: 'Mara',
+            template: 'structured',
+            fields: { background: 'Born at sea.' },
+            body: null
+          },
+          existingId: 'e-mara',
+          action: 'merge'
+        }
+      ],
+      ...over
+    })
+
+    it('exportKind asks main and answers where the file went', async () => {
+      const written = { path: '/tmp/Book-characters.json', count: 2 }
+      const { client, calls } = fakeClient({ 'entity:export': () => written })
+      setIpcClient(client)
+      await expect(state().exportKind('character', 'json')).resolves.toEqual(written)
+      expect(calls.at(-1)).toEqual(['entity:export', { kind: 'character', format: 'json' }])
+      setIpcClient(fakeClient({ 'entity:export': () => null }).client)
+      await expect(state().exportKind('world', 'csv')).resolves.toBeNull()
+    })
+
+    it('openImport holds the plan; a cancelled dialog leaves none', async () => {
+      const { client, calls } = fakeClient({ 'entity:importOpen': () => plan() })
+      setIpcClient(client)
+      await state().load()
+      await expect(state().openImport('character')).resolves.toEqual(plan())
+      expect(calls.at(-1)).toEqual(['entity:importOpen', { kind: 'character' }])
+      expect(state().importPlan).toEqual(plan())
+      expect(state().importKind).toBe('character')
+      state().cancelImport()
+      expect(state().importPlan).toBeNull()
+      expect(state().importKind).toBeNull()
+
+      setIpcClient(fakeClient({ 'entity:importOpen': () => null }).client)
+      await expect(state().openImport('character')).resolves.toBeNull()
+      expect(state().importPlan).toBeNull()
+    })
+
+    it('setImportAction changes one row and leaves the others identical', async () => {
+      setIpcClient(fakeClient({ 'entity:importOpen': () => plan() }).client)
+      await state().openImport('character')
+      const before = state().importPlan
+      state().setImportAction('r2', 'replace')
+      expect(state().importPlan?.items.map((item) => item.action)).toEqual(['add', 'replace'])
+      expect(state().importPlan?.items[0]).toBe(before?.items[0])
+      const unchanged = state().importPlan
+      state().setImportAction('r2', 'replace')
+      state().setImportAction('nope', 'skip')
+      expect(state().importPlan).toBe(unchanged)
+    })
+
+    it('commitImport merges what came back, clears the plan, and answers the counts', async () => {
+      const ilse: Entity = { ...mara, id: 'e-ilse', name: 'Ilse', fields: { age: '30' } }
+      const merged: Entity = { ...mara, fields: { ...mara.fields, background: 'Born at sea.' } }
+      const { client, calls } = fakeClient({
+        'entity:importOpen': () => plan(),
+        'entity:importCommit': () => ({
+          entities: [ilse, merged],
+          added: 1,
+          merged: 1,
+          replaced: 0
+        })
+      })
+      setIpcClient(client)
+      await state().load()
+      await state().openImport('character')
+      await expect(state().commitImport()).resolves.toEqual({ added: 1, merged: 1, replaced: 0 })
+      expect(calls.at(-1)).toEqual(['entity:importCommit', { items: plan().items }])
+      expect(state().ids).toEqual(['e-aldous', 'e-ilse', 'e-mara', 'e-forest', 'e-blood', 'e-guild'])
+      expect(state().byId['e-mara']?.fields.background).toBe('Born at sea.')
+      expect(state().importPlan).toBeNull()
+    })
+
+    it('a failed commit propagates and keeps the plan open', async () => {
+      setIpcClient(
+        fakeClient({ 'entity:importOpen': () => plan(), 'entity:importCommit': failure }).client
+      )
+      await state().load()
+      await state().openImport('character')
+      await expect(state().commitImport()).rejects.toMatchObject({ code: 'ALREADY_EXISTS' })
+      expect(state().importPlan).not.toBeNull()
+      expect(state().ids).toHaveLength(5)
+    })
+
+    it('clear drops the plan under review', async () => {
+      setIpcClient(fakeClient({ 'entity:importOpen': () => plan() }).client)
+      await state().openImport('character')
+      state().clear()
+      expect(state().importPlan).toBeNull()
+      expect(state().importKind).toBeNull()
+    })
   })
 })

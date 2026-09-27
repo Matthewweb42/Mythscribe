@@ -1,6 +1,7 @@
 import { app, dialog, type BrowserWindow } from 'electron'
 import path from 'node:path'
 import { IMAGE_EXTENSIONS } from '@shared/assets'
+import { ENTITY_EXCHANGE_EXTENSIONS } from '@shared/entityExchange'
 import { BACKGROUND_EXTENSIONS } from '@shared/focus'
 import { IMPORT_EXTENSIONS } from '@shared/import'
 import { DB_FILE, PROJECT_EXTENSION, sanitizeName } from './project/projectStore'
@@ -25,6 +26,8 @@ export interface ProjectDialogs {
   chooseEntityImage: () => Promise<string | null>
   /** Returns the manuscript file the user chose to import (F-12.2), or null if cancelled. */
   chooseManuscriptFile: () => Promise<string | null>
+  /** Returns the entity library or CSV the user chose to import (F-9.5), or null if cancelled. */
+  chooseEntityLibraryFile: () => Promise<string | null>
 }
 
 export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDialogs {
@@ -99,7 +102,30 @@ export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDia
       )
       if (result.canceled) return null
       return result.filePaths[0] ?? null
+    },
+    async chooseEntityLibraryFile() {
+      const options = entityLibraryOptions(defaultDir())
+      const result = await show((win) =>
+        win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
+      )
+      if (result.canceled) return null
+      return result.filePaths[0] ?? null
     }
+  }
+}
+
+/** The entity files the importer reads (F-9.5): a MythScribe library, or a CSV of one kind. */
+function entityLibraryOptions(defaultDir: string): Electron.OpenDialogOptions {
+  const extensions = Object.values(ENTITY_EXCHANGE_EXTENSIONS)
+  return {
+    title: 'Import entities',
+    buttonLabel: 'Import',
+    defaultPath: defaultDir,
+    properties: ['openFile'],
+    filters: [
+      { name: `Entity files (${extensions.map((e) => `*.${e}`).join(', ')})`, extensions },
+      { name: 'All files', extensions: ['*'] }
+    ]
   }
 }
 

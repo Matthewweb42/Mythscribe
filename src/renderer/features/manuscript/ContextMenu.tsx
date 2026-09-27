@@ -9,9 +9,13 @@ interface ContextMenuProps {
   onClose: () => void
 }
 
+/** The items focus and the arrows move between: a disabled item is shown but skipped. */
+const CHOOSABLE = 'button:not(:disabled)'
+
 /**
  * A fixed-position popup menu (F-2.2). Focus lands on the first item; arrows move, Enter/Space
- * choose, Escape and any outside click close it. The parent owns which items it lists.
+ * choose, Escape and any outside click close it. The parent owns which items it lists, and may
+ * mark one disabled (F-9.5), which keeps it visible and out of the keyboard's way.
  */
 export function ContextMenu({
   x,
@@ -33,7 +37,7 @@ export function ContextMenu({
   }, [x, y])
 
   useEffect(() => {
-    list.current?.querySelector<HTMLButtonElement>('button')?.focus()
+    list.current?.querySelector<HTMLButtonElement>(CHOOSABLE)?.focus()
     const onMouseDown = (event: MouseEvent): void => {
       if (event.target instanceof Node && list.current?.contains(event.target)) return
       onClose()
@@ -43,7 +47,7 @@ export function ContextMenu({
   }, [onClose])
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLUListElement>): void => {
-    const buttons = Array.from(list.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+    const buttons = Array.from(list.current?.querySelectorAll<HTMLButtonElement>(CHOOSABLE) ?? [])
     const current = buttons.findIndex((button) => button === document.activeElement)
     switch (event.key) {
       case 'ArrowDown':
@@ -77,8 +81,9 @@ export function ContextMenu({
             type="button"
             role="menuitem"
             tabIndex={-1}
+            disabled={item.disabled}
             onClick={() => onSelect(item.id)}
-            className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-surface focus:bg-surface focus:outline-none"
+            className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-surface focus:bg-surface focus:outline-none disabled:opacity-50 disabled:hover:bg-transparent"
           >
             {item.label}
           </button>

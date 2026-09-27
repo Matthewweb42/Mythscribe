@@ -134,6 +134,8 @@ let chosenEntityImage: string | null
 let exportAsked: { defaultName: string; directory: string | undefined } | null
 /** What the fake import dialog answers (F-12.2); null cancels. */
 let manuscriptPath: string | null
+/** What the fake entity-library dialog answers (F-9.5); null cancels. */
+let entityFilePath: string | null
 
 const UNSUPPORTED_UPDATES =
   'This is a development build; updates are installed by the released app.'
@@ -177,7 +179,8 @@ const dialogs: ProjectDialogs = {
   },
   chooseImages: async () => chosenImages,
   chooseEntityImage: async () => chosenEntityImage,
-  chooseManuscriptFile: async () => manuscriptPath
+  chooseManuscriptFile: async () => manuscriptPath,
+  chooseEntityLibraryFile: async () => entityFilePath
 }
 
 beforeEach(() => {
@@ -189,6 +192,7 @@ beforeEach(() => {
   chosenImages = null
   chosenEntityImage = null
   manuscriptPath = null
+  entityFilePath = null
   manager = new ProjectManager()
   fullScreen = false
   fakeWin = {
@@ -2424,6 +2428,209 @@ describe('entity images (F-9.3)', () => {
     const kept = (await invoke('entity:setImage', { id: other.id }))?.image ?? ''
     expect(await invoke('entity:delete', { id: mara.id })).toBeNull()
     expect(storedFiles()).toEqual([kept])
+  })
+})
+
+// F-9.5: the three channels around the review dialog. The formats and the merge rules have their
+// own tests in `shared/entityExchange.test.ts` and `entity/entityExchange.test.ts`; these cover
+// the wiring — the dialogs, the default name, the errors, and the one tag announcement per import.
+describe('entity export and import (F-9.5)', () => {
+  const openProject = (name = 'My Book'): Promise<unknown> =>
+    invoke('project:create', { name, format: 'novel', directory: tmp })
+
+  /** Every tag sent to the window as `tag:changed`, in order, as its names. */
+  const tagsChanged = (): string[] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([channel]) => channel === 'tag:changed')
+      .map(([, payload]) => (payload as { name: string }).name)
+
+  const write = (name: string, text: string): string => {
+    const file = path.join(tmp, name)
+    fs.writeFileSync(file, text)
+    return file
+  }
+
+  it('reports NO_PROJECT for all three when nothing is open', async () => {
+    await expect(invoke('entity:export', { kind: 'character', format: 'json' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+    await expect(invoke('entity:importOpen', { kind: 'character' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+    await expect(
+      invoke('entity:importCommit', {
+        items: [
+          {
+            id: 'r1',
+            record: { kind: 'character', name: 'Ilse', template: 'structured', fields: {}, body: null },
+            existingId: null,
+            action: 'add'
+          }
+        ]
+      })
+    ).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('exports one kind to the chosen path, defaulting beside the project folder', async () => {
+    await openProject()
+    await invoke('entity:create', { kind: 'character', name: 'Mara Vell', fields: { age: '31' } })
+    await invoke('entity:create', { kind: 'setting', name: 'Harbour' })
+    exportPath = path.join(tmp, 'out', 'characters.json')
+    fs.mkdirSync(path.dirname(exportPath), { recursive: true })
+    expect(await invoke('entity:export', { kind: 'character', format: 'json' })).toEqual({
+      path: exportPath,
+      count: 1
+    })
+    expect(exportAsked).toEqual({ defaultName: 'My Book-characters.json', directory: tmp })
+    const written: unknown = JSON.parse(fs.readFileSync(exportPath, 'utf8'))
+    expect(written).toEqual({
+      format: 'mythscribe-entities',
+      version: 1,
+      entities: [
+        {
+          kind: 'character',
+          name: 'Mara Vell',
+          template: 'structured',
+          fields: { age: '31' },
+          body: null
+        }
+      ]
+    })
+    expect(fs.existsSync(`${exportPath}.tmp`)).toBe(false)
+  })
+
+  it('answers null on a cancelled save dialog, and refuses a kind with nothing in it', async () => {
+    await openProject()
+    await invoke('entity:create', { kind: 'character', name: 'Mara Vell' })
+    expect(await invoke('entity:export', { kind: 'character', format: 'csv' })).toBeNull()
+    expect(exportAsked).toEqual({ defaultName: 'My Book-characters.csv', directory: tmp })
+    await expect(invoke('entity:export', { kind: 'world', format: 'json' })).rejects.toThrowError(
+      /^VALIDATION: No world to export/
+    )
+    expect(fs.readdirSync(tmp).filter((file) => file.endsWith('.csv'))).toEqual([])
+  })
+
+  it('writes a CSV of the kind and reads its own file back as a plan', async () => {
+    await openProject()
+    await invoke('entity:create', {
+      kind: 'character',
+      name: 'Mara Vell',
+      fields: { goals: 'Find the ship, then rest.' }
+    })
+    const file = path.join(tmp, 'characters.csv')
+    expect(await invoke('entity:export', { kind: 'character', format: 'csv', path: file })).toEqual({
+      path: file,
+      count: 1
+    })
+    const plan = await invoke('entity:importOpen', { kind: 'character', path: file })
+    expect(plan?.source).toEqual({ name: 'characters.csv', format: 'csv' })
+    expect(plan?.items.map((item) => [item.record.name, item.action])).toEqual([
+      ['Mara Vell', 'merge']
+    ])
+  })
+
+  it('plans a file against the bible without writing anything, and cancels to null', async () => {
+    await openProject()
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara Vell' })
+    entityFilePath = write(
+      'library.json',
+      JSON.stringify({
+        format: 'mythscribe-entities',
+        version: 1,
+        entities: [
+          { kind: 'character', name: 'Ilse', fields: { age: '30' } },
+          { kind: 'character', name: 'mara vell', fields: { background: 'Born at sea.' } },
+          { kind: 'character', name: 'ILSE' }
+        ]
+      })
+    )
+    const plan = await invoke('entity:importOpen', { kind: 'character' })
+    expect(plan?.duplicates).toBe(1)
+    expect(plan?.items.map((item) => [item.id, item.record.name, item.existingId, item.action])).toEqual(
+      [
+        ['r1', 'Ilse', null, 'add'],
+        ['r2', 'mara vell', mara.id, 'merge']
+      ]
+    )
+    expect((await invoke('entity:list', undefined)).map((entity) => entity.name)).toEqual([
+      'Mara Vell'
+    ])
+
+    entityFilePath = null
+    expect(await invoke('entity:importOpen', { kind: 'character' })).toBeNull()
+  })
+
+  it('reports an unsupported file, another format, and a bad row as VALIDATION', async () => {
+    await openProject()
+    await expect(
+      invoke('entity:importOpen', { kind: 'character', path: write('a.txt', 'x') })
+    ).rejects.toThrowError(/^VALIDATION: Unsupported file type/)
+    await expect(
+      invoke('entity:importOpen', { kind: 'character', path: write('b.json', '{"format":"x"}') })
+    ).rejects.toThrowError(/^VALIDATION: That file is not a MythScribe entity file\./)
+    await expect(
+      invoke('entity:importOpen', {
+        kind: 'character',
+        path: write('c.csv', 'kind,name\r\ncreature,Wyrm\r\n')
+      })
+    ).rejects.toThrowError(/^VALIDATION: Row 1: "creature" is not a kind of entity/)
+  })
+
+  it('commits the reviewed rows, rescans once, and announces each created tag', async () => {
+    await openProject()
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara Vell' })
+    expect(tagsChanged()).toEqual(['mara-vell'])
+    entityFilePath = write(
+      'library.json',
+      JSON.stringify({
+        format: 'mythscribe-entities',
+        version: 1,
+        entities: [
+          { kind: 'character', name: 'Ilse', fields: { age: '30' } },
+          { kind: 'character', name: 'Mara Vell', fields: { background: 'Born at sea.' } },
+          { kind: 'setting', name: 'Harbour', fields: { atmosphere: 'Salt air' } }
+        ]
+      })
+    )
+    const plan = await invoke('entity:importOpen', { kind: 'character' })
+    if (!plan) throw new Error('expected a plan')
+    const result = await invoke('entity:importCommit', { items: plan.items })
+    expect(result).toMatchObject({ added: 2, merged: 1, replaced: 0 })
+    expect(result.entities.map((entity) => entity.name)).toEqual(['Ilse', 'Mara Vell', 'Harbour'])
+    expect(result.entities.find((entity) => entity.name === 'Mara Vell')).toMatchObject({
+      id: mara.id,
+      fields: { background: 'Born at sea.' }
+    })
+    // F-9.4: the two new entities created their tags, and each is announced once.
+    expect(tagsChanged()).toEqual(['mara-vell', 'ilse', 'harbour'])
+    expect((await invoke('tag:list', undefined)).map((tag) => tag.name)).toEqual([
+      'harbour',
+      'ilse',
+      'mara-vell'
+    ])
+  })
+
+  it('rolls the import back when a name was taken since the plan was made', async () => {
+    await openProject()
+    entityFilePath = write(
+      'library.json',
+      JSON.stringify({
+        format: 'mythscribe-entities',
+        version: 1,
+        entities: [
+          { kind: 'character', name: 'Ilse' },
+          { kind: 'character', name: 'Tomas' }
+        ]
+      })
+    )
+    const plan = await invoke('entity:importOpen', { kind: 'character' })
+    if (!plan) throw new Error('expected a plan')
+    await invoke('entity:create', { kind: 'character', name: 'tomas' })
+    await expect(invoke('entity:importCommit', { items: plan.items })).rejects.toThrowError(
+      /^ALREADY_EXISTS: /
+    )
+    expect((await invoke('entity:list', undefined)).map((entity) => entity.name)).toEqual(['tomas'])
   })
 })
 

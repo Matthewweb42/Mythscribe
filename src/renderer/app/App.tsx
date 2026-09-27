@@ -53,6 +53,7 @@ import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusSt
 import { ImportDialog } from '@renderer/features/import/ImportDialog'
 import { useImportStore } from '@renderer/features/import/importStore'
 import { EntityCreateDialog } from '@renderer/features/entities/EntityCreateDialog'
+import { EntityImportDialog } from '@renderer/features/entities/EntityImportDialog'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -625,6 +626,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       {focus ? <FocusFloatingPanels /> : <AssistantPanel />}
       {/* F-9.3: the entity creation dialog, open while a kind is being created. */}
       <EntityCreateDialog />
+      {/* F-9.5: the entity import review, open only while a plan is under review. */}
+      <EntityImportDialog />
     </>
   )
 }

@@ -1,5 +1,10 @@
 import { create } from 'zustand'
 import { ENTITY_KINDS, toEntityNameKey, type EntityKind } from '@shared/entities'
+import type {
+  EntityExchangeFormat,
+  EntityImportAction,
+  EntityImportPlan
+} from '@shared/entityExchange'
 import type { Entity, EntityCreateInput, EntityUpdateInput } from '@shared/ipc/contract'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { ipc } from '@renderer/lib/ipc'
@@ -25,6 +30,14 @@ interface EntityState {
   selectedId: string | null
   /** The kind the creation dialog is open for (F-9.3), or null while it is closed. */
   creating: EntityKind | null
+  /**
+   * The import under review (F-9.5): what main read from the file and what it would do, with the
+   * action the author has chosen per row. Null while no import is in progress; nothing has been
+   * written to the project while it is not null.
+   */
+  importPlan: EntityImportPlan | null
+  /** The kind whose tab the import was started from; a CSV with no kind column is read as it. */
+  importKind: EntityKind | null
   load: () => Promise<void>
   clear: () => void
   /** Creates an entity and merges it; resolves with the stored row (the name comes back trimmed). */
@@ -52,6 +65,30 @@ interface EntityState {
   startCreate: (kind: EntityKind) => void
   /** Closes the creation dialog (cancelled, or the entity was created). */
   cancelCreate: () => void
+  /**
+   * Writes every entity of the kind to a file the author picks (F-9.5) and resolves with where it
+   * went and how many rows it carried; null when the save dialog was cancelled.
+   */
+  exportKind: (
+    kind: EntityKind,
+    format: EntityExchangeFormat
+  ) => Promise<{ path: string; count: number } | null>
+  /**
+   * Asks main to read an entity file and plan it against the bible (F-9.5), and holds the plan for
+   * the review dialog. Resolves with the plan, or null when the open dialog was cancelled.
+   * Nothing is written until `commitImport`.
+   */
+  openImport: (kind: EntityKind) => Promise<EntityImportPlan | null>
+  /** Sets what one reviewed row will do; unknown ids and a closed plan are ignored. */
+  setImportAction: (itemId: string, action: EntityImportAction) => void
+  /** Drops the plan under review; nothing was written. */
+  cancelImport: () => void
+  /**
+   * Applies the reviewed rows in one call (F-9.5), merges what came back into the bank, and clears
+   * the plan; resolves with what was done. A failure propagates and leaves the plan open, so the
+   * author can read the cause and try again.
+   */
+  commitImport: () => Promise<{ added: number; merged: number; replaced: number }>
 }
 
 /** The `entity:list` order: kind order, then `toEntityNameKey`, then id (as main sorts). */
@@ -85,6 +122,8 @@ export const useEntityStore = create<EntityState>((set, get) => ({
   view: DEFAULT_VIEW,
   selectedId: null,
   creating: null,
+  importPlan: null,
+  importKind: null,
 
   async load() {
     const mine = ++generation
@@ -103,7 +142,9 @@ export const useEntityStore = create<EntityState>((set, get) => ({
       loaded: false,
       view: DEFAULT_VIEW,
       selectedId: null,
-      creating: null
+      creating: null,
+      importPlan: null,
+      importKind: null
     })
   },
 
@@ -184,6 +225,50 @@ export const useEntityStore = create<EntityState>((set, get) => ({
 
   cancelCreate() {
     if (get().creating !== null) set({ creating: null })
+  },
+
+  async exportKind(kind, format) {
+    return ipc().invoke('entity:export', { kind, format })
+  },
+
+  async openImport(kind) {
+    const mine = generation
+    const plan = await ipc().invoke('entity:importOpen', { kind })
+    if (mine !== generation) return null
+    // Null is the native dialog cancelled: no plan, no message, nothing to undo.
+    if (plan !== null) set({ importPlan: plan, importKind: kind })
+    return plan
+  },
+
+  setImportAction(itemId, action) {
+    const plan = get().importPlan
+    if (plan === null) return
+    if (!plan.items.some((item) => item.id === itemId && item.action !== action)) return
+    set({
+      importPlan: {
+        ...plan,
+        items: plan.items.map((item) => (item.id === itemId ? { ...item, action } : item))
+      }
+    })
+  },
+
+  cancelImport() {
+    if (get().importPlan !== null) set({ importPlan: null, importKind: null })
+  },
+
+  async commitImport() {
+    const plan = get().importPlan
+    if (plan === null) return { added: 0, merged: 0, replaced: 0 }
+    const mine = generation
+    const { entities, added, merged, replaced } = await ipc().invoke('entity:importCommit', {
+      items: plan.items
+    })
+    if (mine === generation) {
+      const byId = { ...get().byId }
+      for (const entity of entities) byId[entity.id] = entity
+      set({ byId, ids: orderedIds(byId), importPlan: null, importKind: null })
+    }
+    return { added, merged, replaced }
   }
 }))
 

@@ -43,6 +43,7 @@ import {
   EntityKind,
   EntityTemplate
 } from '../entities'
+import { EntityExchangeFormat, EntityImportItem, EntityImportPlan } from '../entityExchange'
 import { Background, FocusSettings } from '../focus'
 import { ImportDraft } from '../import'
 import { ImportDetectProgress, ImportDetectResult, PendingTagProposal } from '../importStructure'
@@ -831,6 +832,49 @@ export const contract = {
   'entity:linkTag': { input: z.object({ id: z.string() }), output: EntityTagLink },
   /** Deletes an entity (F-9.1) and its image file (F-9.3); its tag, if it has one, stays in the bank like any other tag (F-9.4). NOT_FOUND for an unknown id. */
   'entity:delete': { input: z.object({ id: z.string() }), output: z.null() },
+  /**
+   * Writes every entity of one kind to a file the author picks (F-9.5), as the JSON library
+   * format or as one CSV of that kind, and answers where it went and how many rows it carried;
+   * null when the save dialog is cancelled (`path` skips the dialog, as `project:open` does). The
+   * default name is `<project>-<kind>.<ext>` beside the project folder. A kind with no entities
+   * is VALIDATION. Images and tags are project-local and are not exported.
+   */
+  'entity:export': {
+    input: z.object({
+      kind: EntityKind,
+      format: EntityExchangeFormat,
+      path: z.string().optional()
+    }),
+    output: z.object({ path: z.string(), count: z.number().int().nonnegative() }).nullable()
+  },
+  /**
+   * Entity import (F-9.5), step one: reads the file the author picks (by extension, `.json` or
+   * `.csv`; a CSV row with no `kind` of its own is of `kind`) and answers what it would do to the
+   * story bible — one row per record, matched against the entities already stored. Null when the
+   * open dialog is cancelled. An unsupported extension, an unreadable file, a file of another
+   * format, or a row with a bad value is VALIDATION naming it. Nothing is written.
+   */
+  'entity:importOpen': {
+    input: z.object({ kind: EntityKind, path: z.string().optional() }),
+    output: EntityImportPlan.nullable()
+  },
+  /**
+   * Step two: applies the reviewed rows in one transaction and answers the written entities with
+   * what was done. `skip` rows are ignored, `add` creates (and creates or links the tag, F-9.4),
+   * `merge` fills only the empty values of the matched entity and `replace` overwrites them. A
+   * name taken since the plan was made is ALREADY_EXISTS and the whole import rolls back; an
+   * entity deleted since is NOT_FOUND. The manuscript is rescanned once, however many tags the
+   * import created.
+   */
+  'entity:importCommit': {
+    input: z.object({ items: z.array(EntityImportItem).min(1) }),
+    output: z.object({
+      entities: z.array(Entity),
+      added: z.number().int().nonnegative(),
+      merged: z.number().int().nonnegative(),
+      replaced: z.number().int().nonnegative()
+    })
+  },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */

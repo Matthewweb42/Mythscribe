@@ -1,7 +1,12 @@
 import { useState } from 'react'
-import { LayoutGrid, List } from 'lucide-react'
+import { LayoutGrid, List, MoreHorizontal } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { ENTITY_KIND_LABEL, type EntityKind } from '@shared/entities'
+import { ENTITY_KIND_LABEL, ENTITY_KIND_NOUN, type EntityKind } from '@shared/entities'
+import { ENTITY_EXCHANGE_LABEL, type EntityExchangeFormat } from '@shared/entityExchange'
+import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
+import type { MenuItem } from '@renderer/features/manuscript/contextMenuItems'
+import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { describeError } from '@renderer/lib/errors'
 import { EntityList } from './EntityList'
 import { EntityQuickAdd } from './EntityQuickAdd'
 import { useEntityStore } from './entityStore'
@@ -16,6 +21,11 @@ import {
 
 const VIEW_ICON: Record<EntityView, typeof List> = { list: List, cards: LayoutGrid }
 
+/** The export items of the More menu (F-9.5): one per format, in one order. */
+const EXPORT_FORMATS: readonly EntityExchangeFormat[] = ['json', 'csv']
+/** `export:<format>` is the menu item id; `import` is the third. */
+const EXPORT_PREFIX = 'export:'
+
 /**
  * One entity tab of the sidebar (F-9.2): Characters, Settings, or World, told apart by `kind`.
  * The search box on top (name, fields, and page), the list/cards toggle beside it, the filtered
@@ -26,6 +36,7 @@ const VIEW_ICON: Record<EntityView, typeof List> = { list: List, cards: LayoutGr
 export function EntityTab({ kind }: { kind: EntityKind }): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState(ALL_CATEGORIES)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const view = useEntityStore((s) => s.view[kind])
   const setView = useEntityStore((s) => s.setView)
   const needle = query.trim().toLowerCase()
@@ -47,6 +58,41 @@ export function EntityTab({ kind }: { kind: EntityKind }): React.JSX.Element {
     .filter((entity) => matchesQuery(entity, needle))
     .map((entity) => entity.id)
   const label = ENTITY_KIND_LABEL[kind]
+
+  // F-9.5: the tab's own export and import. Export needs something to export, so both items are
+  // shown and disabled while the kind is empty; Import is always offered — that is how the first
+  // entities of a reused library arrive.
+  const menuItems: MenuItem[] = [
+    ...EXPORT_FORMATS.map((format) => ({
+      id: `${EXPORT_PREFIX}${format}`,
+      label: `Export as ${ENTITY_EXCHANGE_LABEL[format]}…`,
+      disabled: ofKind.length === 0
+    })),
+    { id: 'import', label: 'Import…' }
+  ]
+
+  const runMenuItem = async (itemId: string): Promise<void> => {
+    const store = useEntityStore.getState()
+    if (itemId === 'import') {
+      await store.openImport(kind)
+      return
+    }
+    const format = EXPORT_FORMATS.find((option) => `${EXPORT_PREFIX}${option}` === itemId)
+    if (format === undefined) return
+    const written = await store.exportKind(kind, format)
+    // Null is the save dialog cancelled: nothing was written and nothing needs saying.
+    if (written === null) return
+    const name = written.path.split(/[\\/]/).pop() ?? written.path
+    const noun = ENTITY_KIND_NOUN[kind]
+    toast.success(
+      `Exported ${written.count} ${written.count === 1 ? noun : `${noun}s`} to ${name}`
+    )
+  }
+
+  const onMenuSelect = (itemId: string): void => {
+    setMenu(null)
+    runMenuItem(itemId).catch((err: unknown) => toast.error(describeError(err)))
+  }
 
   return (
     <>
@@ -76,6 +122,18 @@ export function EntityTab({ kind }: { kind: EntityKind }): React.JSX.Element {
             )
           })}
         </div>
+        <button
+          type="button"
+          aria-label="More"
+          aria-haspopup="menu"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            setMenu((open) => (open ? null : { x: rect.left, y: rect.bottom }))
+          }}
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-raised hover:text-fg"
+        >
+          <MoreHorizontal size={14} aria-hidden="true" />
+        </button>
         {categories.length > 0 ? (
           <select
             aria-label="Category"
@@ -96,6 +154,15 @@ export function EntityTab({ kind }: { kind: EntityKind }): React.JSX.Element {
         <EntityList kind={kind} ids={visibleIds} filtered={ofKind.length > 0} view={view} />
       </div>
       <EntityQuickAdd kind={kind} />
+      {menu ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems}
+          onSelect={onMenuSelect}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
     </>
   )
 }
