@@ -1,7 +1,8 @@
-import { StickyNote } from 'lucide-react'
+import { Pin, StickyNote } from 'lucide-react'
 import { LAYOUT_LIMITS } from '@shared/layout'
 import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
+import { useReferenceStore } from '@renderer/features/references/referenceStore'
 import { NotesEditor } from './NotesEditor'
 
 const BUTTON =
@@ -50,9 +51,36 @@ export function NotesPanel({ id }: { id: string }): React.JSX.Element | null {
         ariaLabel="Resize notes"
         onChange={(deltaPx) => resizePanelBy('notes', deltaPx)}
       />
-      <h2 className="m-0 shrink-0 px-4 pt-4 pb-2 text-sm font-medium text-fg-muted">Notes</h2>
+      <div className="flex shrink-0 items-center justify-between gap-2 px-4 pt-4 pb-2">
+        <h2 className="m-0 text-sm font-medium text-fg-muted">Notes</h2>
+        <PinNotesButton id={id} />
+      </div>
       <NotesBody id={id} />
     </div>
+  )
+}
+
+/**
+ * Pins the node's notes to the quick reference panel (F-9.6), or unpins them; `aria-pressed`
+ * reflects whether they are pinned. Pinning opens that panel, so the card is seen to arrive.
+ */
+function PinNotesButton({ id }: { id: string }): React.JSX.Element {
+  const pinned = useReferenceStore((s) => s.pins.some((p) => p.type === 'note' && p.id === id))
+  const toggle = (): void => {
+    const store = useReferenceStore.getState()
+    void (pinned ? store.unpin({ type: 'note', id }) : store.pin({ type: 'note', id }))
+  }
+  return (
+    <button
+      type="button"
+      aria-label={pinned ? 'Unpin notes' : 'Pin notes'}
+      title={pinned ? 'Unpin from References' : 'Pin to References'}
+      aria-pressed={pinned}
+      onClick={toggle}
+      className={BUTTON}
+    >
+      <Pin size={14} aria-hidden="true" />
+    </button>
   )
 }
 

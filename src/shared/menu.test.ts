@@ -96,6 +96,7 @@ describe('menu definition (F-7.1)', () => {
       'toggleSidebar',
       'toggleNotes',
       'toggleAssistant',
+      'toggleReferences',
       'separator',
       'toggleFocusMode',
       'separator',
@@ -114,6 +115,14 @@ describe('menu definition (F-7.1)', () => {
     expect(menuItemChord(byId.zoomIn!)).toEqual(APP_SHORTCUTS.zoomIn.chord)
     expect(menuItemChord(byId.zoomReset!)).toEqual(APP_SHORTCUTS.zoomReset.chord)
     expect(isMenuItemEnabled(byId.zoomIn!, false)).toBe(true)
+  })
+
+  it('offers References in View after AI assistant, only with a project and without a shortcut (F-9.6)', () => {
+    const byId = Object.fromEntries(menuItems().map((item) => [item.id, item]))
+    expect(byId.toggleReferences?.label).toBe('References')
+    expect(menuItemChord(byId.toggleReferences!)).toBeNull()
+    expect(isMenuItemEnabled(byId.toggleReferences!, false)).toBe(false)
+    expect(isMenuItemEnabled(byId.toggleReferences!, true)).toBe(true)
   })
 
   it('offers Import manuscript… in File, after Open project…, only with a project (F-12.2)', () => {

@@ -24,6 +24,13 @@ describe('assetPathFor (F-6.2)', () => {
     expect(assetPathFor(root, 'mythscribe-asset://entities/notes.txt')).toBeNull()
   })
 
+  it('resolves a pinned reference image in its own folder (F-9.6)', () => {
+    expect(assetPathFor(root, 'mythscribe-asset://references/Harbor-Map.0a1b2c3d.png')).toBe(
+      path.join(root, 'assets', 'references', 'Harbor-Map.0a1b2c3d.png')
+    )
+    expect(assetPathFor(root, 'mythscribe-asset://references/..%2Fa.png')).toBeNull()
+  })
+
   it('refuses another scheme, host, or a nested path', () => {
     expect(assetPathFor(root, 'file:///etc/passwd')).toBeNull()
     expect(assetPathFor(root, 'mythscribe-asset://other/a1.png')).toBeNull()

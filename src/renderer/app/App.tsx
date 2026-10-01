@@ -56,6 +56,11 @@ import { EntityCreateDialog } from '@renderer/features/entities/EntityCreateDial
 import { EntityImportDialog } from '@renderer/features/entities/EntityImportDialog'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
+import {
+  ReferencePanel,
+  ReferencesToggleButton
+} from '@renderer/features/references/ReferencePanel'
+import { useReferenceStore } from '@renderer/features/references/referenceStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
@@ -156,7 +161,7 @@ export function App(): React.JSX.Element {
   // provenance report is loaded by its section on demand and only cleared here. F-5.4: and the
   // assistant conversations. F-5.13: and the background index queue's status, which the header
   // indicator shows. F-6.1: a project closed in focus mode leaves it, so the welcome
-  // screen is windowed. F-6.2: and the focus-mode backgrounds.
+  // screen is windowed. F-6.2: and the focus-mode backgrounds. F-9.6: and the reference pins.
   useEffect(() => {
     const tree = useTreeStore.getState()
     if (projectId === null) {
@@ -181,6 +186,7 @@ export function App(): React.JSX.Element {
       useImportStore.getState().cancel()
       useTagStore.getState().clear()
       useEntityStore.getState().clear()
+      useReferenceStore.getState().clear()
       useDocumentTagStore.getState().clear()
       useMentionStore.getState().clear()
       useProposedTagStore.getState().clear()
@@ -238,6 +244,11 @@ export function App(): React.JSX.Element {
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
+    // F-9.6: the pins of the quick reference panel; the cards read the stores above.
+    useReferenceStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
     useBackgroundStore
       .getState()
       .load()
@@ -274,6 +285,7 @@ export function App(): React.JSX.Element {
               <>
                 <AiActivityIndicator />
                 <IndexingIndicator />
+                <ReferencesToggleButton />
                 <AssistantToggleButton />
               </>
             ) : null}
@@ -593,7 +605,8 @@ function SettingsButton(): React.JSX.Element {
  * F-3.8), with the notes panel (F-3.7) beside it when open. F-7.2: the sidebar's open state
  * and width come from the layout store; the width is a fraction of the window rendered in
  * `vw`, resized by the handle on its right edge. F-5.4: the assistant panel docks at the right
- * edge, full height, whatever is selected (Plan mode works without a scene). F-6.1: focus mode
+ * edge, full height, whatever is selected (Plan mode works without a scene). F-9.6: the
+ * reference panel docks to its left, full height too, beside a document or an entity page. F-6.1: focus mode
  * hides the sidebar and both side panels without touching the layout store, so they come back
  * as they were on exit. F-6.5 / F-6.6: in focus mode the notes and the assistant follow the
  * focus store's own flags (the control bar toggles them; both close on exit) and float as
@@ -623,6 +636,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <MainPane format={format} />
       </section>
+      {/* F-9.6: the pins dock between the main pane and the assistant; not shown in focus mode. */}
+      {focus ? null : <ReferencePanel />}
       {focus ? <FocusFloatingPanels /> : <AssistantPanel />}
       {/* F-9.3: the entity creation dialog, open while a kind is being created. */}
       <EntityCreateDialog />

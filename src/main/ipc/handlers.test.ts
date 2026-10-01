@@ -2434,6 +2434,152 @@ describe('entity images (F-9.3)', () => {
 // F-9.5: the three channels around the review dialog. The formats and the merge rules have their
 // own tests in `shared/entityExchange.test.ts` and `entity/entityExchange.test.ts`; these cover
 // the wiring — the dialogs, the default name, the errors, and the one tag announcement per import.
+describe('reference pins (F-9.6)', () => {
+  const PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMwTpsJAAICATNWh+JUAAAAAElFTkSuQmCC',
+    'base64'
+  )
+  const image = (name: string): string => {
+    const file = path.join(tmp, name)
+    fs.writeFileSync(file, PNG)
+    return file
+  }
+  const referencesDir = (projectPath: string): string =>
+    path.join(projectPath, 'assets', 'references')
+
+  it('reports NO_PROJECT for all three when nothing is open', async () => {
+    await expect(invoke('reference:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('reference:set', { pins: [] })).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('reference:addImages', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers no pins for a new project, then what was set in order, also after a reopen', async () => {
+    const created = await invoke('project:create', {
+      name: 'Pins',
+      format: 'novel',
+      directory: tmp
+    })
+    expect(await invoke('reference:get', undefined)).toEqual({ pins: [] })
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara' })
+    const harbor = await invoke('entity:create', { kind: 'setting', name: 'Harbor' })
+    const [node] = await invoke('tree:list', undefined)
+    if (!node) throw new Error('a seeded node expected')
+    const pins = [
+      { type: 'entity' as const, id: harbor.id },
+      { type: 'note' as const, id: node.id },
+      { type: 'entity' as const, id: mara.id }
+    ]
+    // A duplicate in the request is dropped; the first copy keeps its place.
+    expect(await invoke('reference:set', { pins: [...pins, pins[0]!] })).toEqual({ pins })
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    expect(await invoke('reference:get', undefined)).toEqual({ pins })
+  })
+
+  it('refuses a value outside the schema with VALIDATION and keeps the stored pins', async () => {
+    await invoke('project:create', { name: 'Pins', format: 'novel', directory: tmp })
+    const raw = handlerFor('reference:set')
+    for (const bad of [
+      { pins: [{ type: 'scene', id: 'x' }] },
+      { pins: [{ type: 'image', file: '../project.db' }] },
+      { pins: Array.from({ length: 51 }, (_, i) => ({ type: 'entity', id: `e${i}` })) }
+    ]) {
+      const result = await raw(undefined, bad)
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    }
+    expect(await invoke('reference:get', undefined)).toEqual({ pins: [] })
+  })
+
+  it('drops the pin of a deleted entity on the next read and rewrites the row', async () => {
+    await invoke('project:create', { name: 'Pins', format: 'novel', directory: tmp })
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara' })
+    const brann = await invoke('entity:create', { kind: 'character', name: 'Brann' })
+    await invoke('reference:set', {
+      pins: [
+        { type: 'entity', id: mara.id },
+        { type: 'entity', id: brann.id },
+        { type: 'note', id: 'no-such-node' }
+      ]
+    })
+    await invoke('entity:delete', { id: mara.id })
+    const expected = { pins: [{ type: 'entity', id: brann.id }] }
+    expect(await invoke('reference:get', undefined)).toEqual(expected)
+    expect(await invoke('reference:get', undefined)).toEqual(expected)
+  })
+
+  it('copies the chosen images in, pins them after the existing pins, and skips refused ones by name', async () => {
+    const created = await invoke('project:create', {
+      name: 'Pins',
+      format: 'novel',
+      directory: tmp
+    })
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara' })
+    await invoke('reference:set', { pins: [{ type: 'entity', id: mara.id }] })
+    chosenImages = [image('Harbor Map.PNG'), image('notes.txt'), image('b.jpg')]
+    const result = await invoke('reference:addImages', undefined)
+    expect(result?.skipped).toEqual(['notes.txt'])
+    const files = fs.readdirSync(referencesDir(created?.path ?? ''))
+    const map = files.find((file) => file.startsWith('Harbor-Map.'))
+    const b = files.find((file) => file.startsWith('b.'))
+    expect(files).toHaveLength(2)
+    expect(result?.pins).toEqual({
+      pins: [
+        { type: 'entity', id: mara.id },
+        { type: 'image', file: map },
+        { type: 'image', file: b }
+      ]
+    })
+    expect(await invoke('reference:get', undefined)).toEqual(result?.pins)
+  })
+
+  it('answers null when the image dialog is cancelled', async () => {
+    const created = await invoke('project:create', {
+      name: 'Pins',
+      format: 'novel',
+      directory: tmp
+    })
+    expect(await invoke('reference:addImages', undefined)).toBeNull()
+    expect(fs.existsSync(referencesDir(created?.path ?? ''))).toBe(false)
+  })
+
+  it('skips the images that would go past the maximum', async () => {
+    await invoke('project:create', { name: 'Pins', format: 'novel', directory: tmp })
+    const [node] = await invoke('tree:list', undefined)
+    if (!node) throw new Error('a seeded node expected')
+    chosenImages = Array.from({ length: 49 }, (_, i) => image(`p${i}.png`))
+    await invoke('reference:addImages', undefined)
+    const full = await invoke('reference:set', {
+      pins: [...(await invoke('reference:get', undefined)).pins, { type: 'note', id: node.id }]
+    })
+    expect(full.pins).toHaveLength(50)
+    chosenImages = [image('late.png')]
+    const result = await invoke('reference:addImages', undefined)
+    expect(result?.skipped).toEqual(['late.png'])
+    expect(result?.pins.pins).toHaveLength(50)
+  })
+
+  it('deletes the file of an unpinned image, and only that one; a reorder deletes nothing', async () => {
+    const created = await invoke('project:create', {
+      name: 'Pins',
+      format: 'novel',
+      directory: tmp
+    })
+    chosenImages = [image('a.png'), image('b.png')]
+    const added = (await invoke('reference:addImages', undefined))?.pins.pins ?? []
+    const [a, b] = added
+    if (a?.type !== 'image' || b?.type !== 'image') throw new Error('two image pins expected')
+    const dir = referencesDir(created?.path ?? '')
+    expect(await invoke('reference:set', { pins: [b, a] })).toEqual({ pins: [b, a] })
+    expect(fs.readdirSync(dir).sort()).toEqual([a.file, b.file].sort())
+    expect(await invoke('reference:set', { pins: [b] })).toEqual({ pins: [b] })
+    expect(fs.readdirSync(dir)).toEqual([b.file])
+    // The file taken out of the folder by hand takes its pin with it on the next read.
+    fs.rmSync(path.join(dir, b.file))
+    expect(await invoke('reference:get', undefined)).toEqual({ pins: [] })
+  })
+})
+
 describe('entity export and import (F-9.5)', () => {
   const openProject = (name = 'My Book'): Promise<unknown> =>
     invoke('project:create', { name, format: 'novel', directory: tmp })
@@ -2452,9 +2598,9 @@ describe('entity export and import (F-9.5)', () => {
   }
 
   it('reports NO_PROJECT for all three when nothing is open', async () => {
-    await expect(invoke('entity:export', { kind: 'character', format: 'json' })).rejects.toThrowError(
-      /^NO_PROJECT: /
-    )
+    await expect(
+      invoke('entity:export', { kind: 'character', format: 'json' })
+    ).rejects.toThrowError(/^NO_PROJECT: /)
     await expect(invoke('entity:importOpen', { kind: 'character' })).rejects.toThrowError(
       /^NO_PROJECT: /
     )
@@ -2463,7 +2609,13 @@ describe('entity export and import (F-9.5)', () => {
         items: [
           {
             id: 'r1',
-            record: { kind: 'character', name: 'Ilse', template: 'structured', fields: {}, body: null },
+            record: {
+              kind: 'character',
+              name: 'Ilse',
+              template: 'structured',
+              fields: {},
+              body: null
+            },
             existingId: null,
             action: 'add'
           }
@@ -2519,10 +2671,12 @@ describe('entity export and import (F-9.5)', () => {
       fields: { goals: 'Find the ship, then rest.' }
     })
     const file = path.join(tmp, 'characters.csv')
-    expect(await invoke('entity:export', { kind: 'character', format: 'csv', path: file })).toEqual({
-      path: file,
-      count: 1
-    })
+    expect(await invoke('entity:export', { kind: 'character', format: 'csv', path: file })).toEqual(
+      {
+        path: file,
+        count: 1
+      }
+    )
     const plan = await invoke('entity:importOpen', { kind: 'character', path: file })
     expect(plan?.source).toEqual({ name: 'characters.csv', format: 'csv' })
     expect(plan?.items.map((item) => [item.record.name, item.action])).toEqual([
@@ -2547,12 +2701,12 @@ describe('entity export and import (F-9.5)', () => {
     )
     const plan = await invoke('entity:importOpen', { kind: 'character' })
     expect(plan?.duplicates).toBe(1)
-    expect(plan?.items.map((item) => [item.id, item.record.name, item.existingId, item.action])).toEqual(
-      [
-        ['r1', 'Ilse', null, 'add'],
-        ['r2', 'mara vell', mara.id, 'merge']
-      ]
-    )
+    expect(
+      plan?.items.map((item) => [item.id, item.record.name, item.existingId, item.action])
+    ).toEqual([
+      ['r1', 'Ilse', null, 'add'],
+      ['r2', 'mara vell', mara.id, 'merge']
+    ])
     expect((await invoke('entity:list', undefined)).map((entity) => entity.name)).toEqual([
       'Mara Vell'
     ])
@@ -3060,6 +3214,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
       notes: { open: true, size: 0.4 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     expect(await invoke('layout:set', next)).toEqual(next)
@@ -3075,6 +3230,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
       notes: { open: false, size: 0.25 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     await invoke('layout:set', stored)
@@ -3100,6 +3256,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
       notes: { open: true, size: 0.3 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     await invoke('layout:set', next)
@@ -3117,6 +3274,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
       notes: { open: true, size: 0.5 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     const raw = handlerFor('layout:set')
@@ -3141,6 +3299,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
           notes: { open: true, size: 0.5 },
           tagBar: { open: true, height: 120, split: 0.4 },
           assistant: { open: false, size: 0.3 },
+          references: { open: false, size: 0.22 },
           floating: defaultFloating()
         }
       })
@@ -4686,9 +4845,15 @@ describe('manuscript import', () => {
         breaks: [{ before: 1, kind: 'chapter', reason: 'time skip' }],
         scenes: [{ start: 0, title: 'The Bell', tags: ['protagonist'] }]
       })
-      expect(result).toMatchObject({ chunks: 1, model: 'gpt-fake', promptVersion: 'importStructure.v1' })
+      expect(result).toMatchObject({
+        chunks: 1,
+        model: 'gpt-fake',
+        promptVersion: 'importStructure.v1'
+      })
       expect(result.proposalIds).toHaveLength(1)
-      expect(getProposal(manager.require().connection.orm, result.proposalIds[0] ?? '')).toMatchObject({
+      expect(
+        getProposal(manager.require().connection.orm, result.proposalIds[0] ?? '')
+      ).toMatchObject({
         feature: 'importStructure',
         nodeId: null,
         status: 'pending'
@@ -4711,7 +4876,8 @@ describe('manuscript import', () => {
       expect(await invoke('import:detectStructure', { draft, requestId: 'd-1' })).toEqual({
         ok: false,
         code: 'DISABLED',
-        message: 'Import structure detection needs the AI dial at Suggest or higher (it is at Off).',
+        message:
+          'Import structure detection needs the AI dial at Suggest or higher (it is at Off).',
         nextStep: AI_NEXT_STEP.DISABLED
       })
       expect(complete).not.toHaveBeenCalled()

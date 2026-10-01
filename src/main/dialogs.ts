@@ -20,8 +20,11 @@ export interface ProjectDialogs {
     filters: Electron.FileFilter[],
     directory?: string
   ) => Promise<string | null>
-  /** Returns the image files the user chose for focus-mode backgrounds (F-6.2), or null if cancelled. */
-  chooseImages: () => Promise<string[] | null>
+  /**
+   * Returns the image files the user chose (F-6.2 focus-mode backgrounds, the default title;
+   * F-9.6 pinned reference images pass their own), or null if cancelled.
+   */
+  chooseImages: (title?: string) => Promise<string[] | null>
   /** Returns the one image the user chose for an entity (F-9.3), or null if cancelled. */
   chooseEntityImage: () => Promise<string | null>
   /** Returns the manuscript file the user chose to import (F-12.2), or null if cancelled. */
@@ -67,9 +70,9 @@ export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDia
       if (result.canceled || !result.filePath) return null
       return result.filePath
     },
-    async chooseImages() {
+    async chooseImages(title = 'Add background images') {
       const options: Electron.OpenDialogOptions = {
-        title: 'Add background images',
+        title,
         buttonLabel: 'Add',
         defaultPath: app.getPath('pictures'),
         properties: ['openFile', 'multiSelections'],

@@ -1,15 +1,16 @@
 /**
- * Project image assets (F-6.2 backgrounds, F-9.3 entity images): the files under the project's
+ * Project image assets (F-6.2 backgrounds, F-9.3 entity images, F-9.6 pinned reference images):
+ * the files under the project's
  * `assets/<dir>/`, served to the renderer on one custom scheme. One owner for the scheme, the
  * folders it serves, the accepted image types and size, and the stored file naming, so the
- * backgrounds and the entity images never drift apart.
+ * backgrounds, the entity images, and the pinned images never drift apart.
  */
 
 /** The custom scheme main serves project assets on (`mythscribe-asset://<dir>/<file>`). */
 export const ASSET_SCHEME = 'mythscribe-asset'
 
 /** The folders under the project's `assets/` the scheme serves; anything else is a 404. */
-export const ASSET_DIRS = ['backgrounds', 'entities'] as const
+export const ASSET_DIRS = ['backgrounds', 'entities', 'references'] as const
 export type AssetDir = (typeof ASSET_DIRS)[number]
 
 /** The image types an asset may be, matched against the file extension (any case). */

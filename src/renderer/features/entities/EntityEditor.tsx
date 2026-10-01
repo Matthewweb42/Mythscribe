@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ImagePlus, Tag as TagIcon, Trash2, X } from 'lucide-react'
+import { ImagePlus, Pin, Tag as TagIcon, Trash2, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   ENTITY_BODY_MAX,
@@ -17,6 +17,7 @@ import {
 import type { Entity } from '@shared/ipc/contract'
 import { openMention } from '@renderer/features/editor/openPassage'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { useReferenceStore } from '@renderer/features/references/referenceStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
@@ -49,6 +50,8 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
   const draft = useEntityDraftStore((s) => (s.draft?.id === id ? s.draft : null))
   const status = useEntityDraftStore((s) => s.status)
   const edit = useEntityDraftStore((s) => s.edit)
+  // F-9.6: whether this entity has a card in the quick reference panel.
+  const pinned = useReferenceStore((s) => s.pins.some((p) => p.type === 'entity' && p.id === id))
   const [busy, setBusy] = useState(false)
   const uid = useId()
   const missing = entity === undefined
@@ -143,6 +146,21 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            aria-label={pinned ? 'Unpin from References' : 'Pin to References'}
+            title={pinned ? 'Unpin from References' : 'Pin to References'}
+            aria-pressed={pinned}
+            onClick={() => {
+              const references = useReferenceStore.getState()
+              void (pinned
+                ? references.unpin({ type: 'entity', id })
+                : references.pin({ type: 'entity', id }))
+            }}
+            className="shrink-0 rounded-md p-1.5 text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:bg-surface-raised aria-pressed:text-accent"
+          >
+            <Pin size={16} aria-hidden="true" />
+          </button>
           <button
             type="button"
             aria-label={`Close ${entity.name}`}

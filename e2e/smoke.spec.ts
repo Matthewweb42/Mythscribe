@@ -20,6 +20,7 @@ import { encodeLicensePayload, formatLicenseToken, LICENSE_GRACE_MS } from '../s
 import type { Entity, IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
 import { PRESETS, type WritingPresets } from '../src/shared/presets'
+import type { ReferencePin, ReferencePins } from '../src/shared/references'
 import { matterTemplate } from '../src/shared/matterTemplates'
 import type { SceneMeta } from '../src/shared/sceneMeta'
 import { STORY_BIBLE_HEADING } from '../src/shared/storyBible'
@@ -1712,8 +1713,13 @@ test('create, close, reopen a project on disk', async () => {
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('Mara')
   // The click puts the caret back in the editor's one paragraph, so End lands after the sentence
   // the step added (a jump alone leaves the selection on the name).
-  await editor.click()
-  await page.keyboard.press('End')
+  // Retried until the selection is really collapsed: a click that lands while the jump is still
+  // settling leaves the name selected, and the Backspaces would then eat the wrong text.
+  await expect(async () => {
+    await editor.click()
+    await page.keyboard.press('End')
+    expect(await page.evaluate(() => window.getSelection()?.isCollapsed ?? false)).toBe(true)
+  }).toPass({ timeout: 10_000 })
   for (const _character of MARA_SENTENCE) await page.keyboard.press('Backspace')
   await expect.poll(() => documentText(scene1Row.id), { timeout: 5000 }).toBe(SENTENCE)
   await maraRow.click()
@@ -1764,6 +1770,59 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
   await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
   await expect(tomasRow).not.toHaveAttribute('aria-current', 'true')
+
+  // F-9.6: the quick reference panel. Pinning Tomas from his page opens the panel with his card;
+  // Mara Vell's card joins below it with her filled fields, Move up puts her first, and the
+  // project's stored pins follow. The order and the open panel survive a close and reopen. Both
+  // are then unpinned and the panel closed, so the steps below run on the layout they expect
+  // (the reopen dropped the selection and the list view, which are put back).
+  const referencesPanel = page.getByTestId('references-panel')
+  const referenceTitles = referencesPanel.getByRole('heading', { level: 3 })
+  await expect(referencesPanel).toHaveCount(0)
+  await tomasRow.click()
+  await expect(entityName).toHaveValue('Tomas')
+  await entityEditor.getByRole('button', { name: 'Pin to References' }).click()
+  await expect(referencesPanel).toBeVisible()
+  await expect(referenceTitles).toHaveText(['Tomas'])
+  await expect(entityEditor.getByRole('button', { name: 'Unpin from References' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await maraVellRow.click()
+  await expect(entityName).toHaveValue('Mara Vell')
+  await entityEditor.getByRole('button', { name: 'Pin to References' }).click()
+  await expect(referenceTitles).toHaveText(['Tomas', 'Mara Vell'])
+  const maraCard = referencesPanel.getByRole('listitem').filter({ hasText: 'Mara Vell' })
+  await expect(maraCard).toContainText('Tall, with a scar over one eye.')
+  await maraCard.getByRole('button', { name: 'Move up' }).click()
+  await expect(referenceTitles).toHaveText(['Mara Vell', 'Tomas'])
+  const tomasId = (await listEntities()).find((entity) => entity.name === 'Tomas')?.id
+  const pinnedOrder = [
+    { type: 'entity', id: storedMara?.id },
+    { type: 'entity', id: tomasId }
+  ]
+  await expect.poll(referencePins).toEqual(pinnedOrder)
+  await closeProject()
+  await recents.getByRole('button', { name: 'Smoke Novel', exact: true }).click()
+  await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  await expect(referencesPanel).toBeVisible()
+  await expect(referenceTitles).toHaveText(['Mara Vell', 'Tomas'])
+  expect(await referencePins()).toEqual(pinnedOrder)
+  await referencesPanel.getByRole('button', { name: 'Unpin Tomas' }).click()
+  await referencesPanel.getByRole('button', { name: 'Unpin Mara Vell' }).click()
+  await expect(referencesPanel.getByText('Nothing pinned yet.')).toBeVisible()
+  await expect.poll(referencePins).toEqual([])
+  await page.getByRole('button', { name: 'References', exact: true }).click()
+  await expect(referencesPanel).toHaveCount(0)
+  await expect.poll(async () => (await getLayout()).references.open).toBe(false)
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await scene1.click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  await charactersPanel.getByRole('button', { name: 'List' }).click()
+  await expect(tomasRow).toBeVisible()
+  await expect(tomasRow).not.toHaveAttribute('aria-current', 'true')
+
   await tomasRow.hover()
   await characterRows.getByRole('button', { name: 'Delete Tomas' }).click()
   await page
@@ -3724,6 +3783,15 @@ async function listEntities(): Promise<Entity[]> {
   )
   if (!result.ok) throw new Error(`entity:list failed: ${result.error.message}`)
   return result.data
+}
+
+/** The quick reference panel's pins as the project stores them (F-9.6), in order. */
+async function referencePins(): Promise<ReferencePin[]> {
+  const result = await page.evaluate<IpcResult<ReferencePins>>(
+    () => window.mythscribe.invoke('reference:get', undefined) as Promise<IpcResult<ReferencePins>>
+  )
+  if (!result.ok) throw new Error(`reference:get failed: ${result.error.message}`)
+  return result.data.pins
 }
 
 /** The plain text of a node's saved notes (F-3.7), or null when never written. */

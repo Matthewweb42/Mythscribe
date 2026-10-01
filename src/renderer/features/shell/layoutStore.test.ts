@@ -56,6 +56,7 @@ const stored: Layout = {
   notes: { open: true, size: 0.2 },
   tagBar: { open: true, height: 150, split: 0.4 },
   assistant: { open: false, size: 0.3 },
+  references: { open: false, size: 0.22 },
   floating: defaultFloating()
 }
 let sets: PendingSet[]
@@ -133,6 +134,7 @@ describe('useLayoutStore', () => {
       notes: { open: false, size: 0.2 },
       tagBar: { open: true, height: 150, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     })
   })
@@ -200,6 +202,7 @@ describe('useLayoutStore', () => {
         notes: { open: false, size: 0.5 },
         tagBar: { open: true, height: 120, split: 0.4 },
         assistant: { open: false, size: 0.3 },
+        references: { open: false, size: 0.22 },
         floating: defaultFloating()
       }
     })
@@ -216,6 +219,7 @@ describe('useLayoutStore', () => {
         notes: { open: true, size: 0.35 },
         tagBar: { open: true, height: 120, split: 0.4 },
         assistant: { open: false, size: 0.3 },
+        references: { open: false, size: 0.22 },
         floating: defaultFloating()
       }
     })

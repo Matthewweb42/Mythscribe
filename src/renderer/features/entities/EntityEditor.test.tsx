@@ -7,6 +7,10 @@ import { openMention } from '@renderer/features/editor/openPassage'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import {
+  resetReferenceStore,
+  useReferenceStore
+} from '@renderer/features/references/referenceStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
@@ -104,6 +108,7 @@ describe('EntityEditor (F-9.3)', () => {
     resetPendingSaves()
     resetEntityDraftStore()
     resetEntityStore()
+    resetReferenceStore()
     resetTagStore()
     resetDocumentTagStore()
     resetMentionStore()
@@ -121,6 +126,24 @@ describe('EntityEditor (F-9.3)', () => {
     resetMentionStore()
     // The layout store's write is debounced; leaving it pending leaks into the next file.
     resetLayoutStore()
+  })
+
+  it('pins the entity to References and unpins it again, opening the panel (F-9.6)', async () => {
+    const user = userEvent.setup()
+    const calls = await openPage('e-mara', { 'reference:set': (input) => input })
+    const pin = screen.getByRole('button', { name: 'Pin to References' })
+    expect(pin).toHaveAttribute('aria-pressed', 'false')
+    await user.click(pin)
+    expect(calls.at(-1)).toEqual(['reference:set', { pins: [{ type: 'entity', id: 'e-mara' }] }])
+    expect(useReferenceStore.getState().pins).toEqual([{ type: 'entity', id: 'e-mara' }])
+    expect(useLayoutStore.getState().layout.references.open).toBe(true)
+    const unpin = screen.getByRole('button', { name: 'Unpin from References' })
+    expect(unpin).toHaveAttribute('aria-pressed', 'true')
+    await user.click(unpin)
+    expect(calls.at(-1)).toEqual(['reference:set', { pins: [] }])
+    expect(screen.getByRole('button', { name: 'Pin to References' })).toBeInTheDocument()
+    // Unpinning leaves the panel as it is.
+    expect(useLayoutStore.getState().layout.references.open).toBe(true)
   })
 
   it('shows the name, what the entity is, and the kind´s fields with their stored values', async () => {

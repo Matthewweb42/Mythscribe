@@ -7,6 +7,10 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
+import {
+  resetReferenceStore,
+  useReferenceStore
+} from '@renderer/features/references/referenceStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetDocumentStore } from './documentStore'
 import { NotesPanel, NotesToggleButton } from './NotesPanel'
@@ -39,6 +43,8 @@ function client(stored: Record<string, TiptapNodeT>): {
           saves.push(input as Input<'notes:save'>)
           return { modified: 'm' } as Output<C>
         }
+        // F-9.6: the pin button writes the list; main answers what it stored.
+        if (channel === 'reference:set') return input as Output<C>
         throw new Error(`unexpected ${channel}`)
       },
       on: () => () => {}
@@ -74,6 +80,7 @@ function Host({ id }: { id: string }): React.JSX.Element {
 beforeEach(() => {
   vi.stubGlobal('innerWidth', WINDOW_WIDTH)
   resetLayoutStore()
+  resetReferenceStore()
   resetNotesStore()
   resetDocumentStore()
   resetPendingSaves()
@@ -84,6 +91,8 @@ beforeEach(() => {
   setIpcClient(fake.client)
 })
 afterEach(() => {
+  // The layout store's write is debounced; leaving it pending leaks into the next file.
+  resetLayoutStore()
   vi.unstubAllGlobals()
 })
 
@@ -103,6 +112,26 @@ describe('NotesPanel (F-3.7)', () => {
     await userEvent.click(button)
     expect(button).toHaveAttribute('aria-pressed', 'false')
     expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument()
+  })
+
+  it('pins the notes of the node it shows to References and unpins them (F-9.6)', async () => {
+    openNotes()
+    const { rerender } = render(<Host id="sc-1" />)
+    const pin = screen.getByRole('button', { name: 'Pin notes' })
+    expect(pin).toHaveAttribute('aria-pressed', 'false')
+    await userEvent.click(pin)
+    expect(useReferenceStore.getState().pins).toEqual([{ type: 'note', id: 'sc-1' }])
+    expect(useLayoutStore.getState().layout.references.open).toBe(true)
+    expect(screen.getByRole('button', { name: 'Unpin notes' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    // Another node's notes are not pinned.
+    rerender(<Host id="ch-1" />)
+    expect(screen.getByRole('button', { name: 'Pin notes' })).toBeInTheDocument()
+    rerender(<Host id="sc-1" />)
+    await userEvent.click(screen.getByRole('button', { name: 'Unpin notes' }))
+    expect(useReferenceStore.getState().pins).toEqual([])
   })
 
   it('loads the notes for the id it is given and follows an id change', async () => {

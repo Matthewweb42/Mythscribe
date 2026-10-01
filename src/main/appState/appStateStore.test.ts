@@ -75,6 +75,7 @@ describe('AppStateStore', () => {
       sidebar: { ...layout.sidebar, tab: 'manuscript' },
       tagBar: { open: true, height: 180, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     })
   })
@@ -91,6 +92,7 @@ describe('AppStateStore', () => {
       ...layout,
       tagBar: { open: false, height: 240, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     })
   })
@@ -110,6 +112,7 @@ describe('AppStateStore', () => {
       notes: { open: true, size: 0.4 },
       tagBar: { open: false, height: 240, split: 0.55 },
       assistant: { open: true, size: 0.25 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     expect(store.update((s) => ({ ...s, layout })).layout).toEqual(layout)

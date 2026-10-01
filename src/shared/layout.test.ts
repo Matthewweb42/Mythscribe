@@ -42,8 +42,13 @@ describe('defaultLayout', () => {
 
   it('starts with the assistant panel closed at 0.3 (F-5.4)', () => {
     expect(defaultLayout().assistant).toEqual({ open: false, size: 0.3 })
-    expect(LAYOUT_PANELS).toEqual(['sidebar', 'notes', 'assistant'])
     expect(LAYOUT_LIMITS.assistant).toEqual([0.2, 0.5])
+  })
+
+  it('starts with the references panel closed at 0.22, the fourth panel (F-9.6)', () => {
+    expect(defaultLayout().references).toEqual({ open: false, size: 0.22 })
+    expect(LAYOUT_PANELS).toEqual(['sidebar', 'notes', 'assistant', 'references'])
+    expect(LAYOUT_LIMITS.references).toEqual([0.15, 0.35])
   })
 
   it('every panel at its floor still leaves the editor its minimum', () => {
@@ -93,6 +98,21 @@ describe('Layout schema', () => {
     expect(
       StoredLayout.parse({ ...withoutAssistant, assistant: { open: true, size: 0.4 } }).assistant
     ).toEqual({ open: true, size: 0.4 })
+  })
+
+  it('refuses a references panel outside 15–35 % and requires it; StoredLayout defaults a pre-F-9.6 layout (F-9.6)', () => {
+    const base = defaultLayout()
+    const references = (size: number, open = true): Layout['references'] => ({ open, size })
+    expect(Layout.safeParse({ ...base, references: references(0.14) }).success).toBe(false)
+    expect(Layout.safeParse({ ...base, references: references(0.15) }).success).toBe(true)
+    expect(Layout.safeParse({ ...base, references: references(0.35, false) }).success).toBe(true)
+    expect(Layout.safeParse({ ...base, references: references(0.36, false) }).success).toBe(false)
+    const { references: _dropped, ...withoutReferences } = base
+    expect(Layout.safeParse(withoutReferences).success).toBe(false)
+    expect(StoredLayout.parse(withoutReferences)).toEqual(base)
+    expect(
+      StoredLayout.parse({ ...withoutReferences, references: references(0.3) }).references
+    ).toEqual({ open: true, size: 0.3 })
   })
 
   it('refuses a tag bar under its floor and has no static ceiling (F-4.4)', () => {
@@ -210,6 +230,7 @@ describe('clampForEditorMin', () => {
       notes: { open: true, size: 0.25 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     expect(clampForEditorMin(notesOnly, 'notes', 0.9)).toBe(0.5)
@@ -221,6 +242,7 @@ describe('clampForEditorMin', () => {
       notes: { open: true, size: 0.3 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     // Growing the sidebar: 1 - 0.3 (editor) - 0.3 (notes) leaves 0.4, capped by its own max.
@@ -234,6 +256,7 @@ describe('clampForEditorMin', () => {
       notes: { open: true, size: 0.5 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     expect(clampForEditorMin(wide, 'notes', 0.5)).toBeCloseTo(0.35)
@@ -246,6 +269,7 @@ describe('clampForEditorMin', () => {
       notes: { open: true, size: 0.3 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     expect(clampForEditorMin(layout, 'sidebar', 0.1)).toBe(0.15)
@@ -259,6 +283,7 @@ describe('clampForEditorMin', () => {
       notes: { open: true, size: 0.5 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     clampForEditorMin(layout, 'notes', 0.5)
@@ -267,6 +292,7 @@ describe('clampForEditorMin', () => {
       notes: { open: true, size: 0.5 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     })
   })
@@ -278,6 +304,7 @@ describe('editor minimum across panels', () => {
     notes: { open: true, size: 0.5 },
     tagBar: { open: true, height: 120, split: 0.4 },
     assistant: { open: false, size: 0.3 },
+    references: { open: false, size: 0.22 },
     floating: defaultFloating()
   }
 
@@ -301,6 +328,7 @@ describe('editor minimum across panels', () => {
       notes: { open: true, size: 0.15 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: false, size: 0.3 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     const still = normalizeLayout({
@@ -316,6 +344,7 @@ describe('editor minimum across panels', () => {
       notes: { open: true, size: 0.35 },
       tagBar: { open: true, height: 120, split: 0.4 },
       assistant: { open: true, size: 0.4 },
+      references: { open: false, size: 0.22 },
       floating: defaultFloating()
     }
     const fixed = normalizeLayout(three)
@@ -329,6 +358,58 @@ describe('editor minimum across panels', () => {
     const closed = normalizeLayout(input)
     expect(closed).toBe(input)
     expect(closed.notes.size).toBe(0.35)
+  })
+})
+
+describe('the references panel in the layout arithmetic (F-9.6)', () => {
+  const four: Layout = {
+    ...defaultLayout(),
+    sidebar: { open: true, size: 0.35, tab: 'manuscript' },
+    notes: { open: true, size: 0.3 },
+    assistant: { open: true, size: 0.4 },
+    references: { open: true, size: 0.35 }
+  }
+
+  it('counts toward the editor share and is clamped like any panel', () => {
+    const layout: Layout = { ...defaultLayout(), references: { open: true, size: 0.3 } }
+    expect(editorFraction(layout)).toBeCloseTo(1 - 0.22 - 0.3, 9)
+    expect(clampPanel('references', 0.9)).toBe(0.35)
+    expect(clampPanel('references', 0.01)).toBe(0.15)
+    // Beside the 0.22 sidebar and a 0.3 assistant the references may take 0.18 at most.
+    const beside: Layout = { ...layout, assistant: { open: true, size: 0.3 } }
+    expect(clampForEditorMin(beside, 'references', 0.35)).toBeCloseTo(0.18, 9)
+  })
+
+  it('gives way assistant, then references, then notes, then the sidebar', () => {
+    const fixed = normalizeLayout(four)
+    expect(fixed.assistant.size).toBe(0.2)
+    expect(fixed.references.size).toBe(0.15)
+    expect(fixed.notes.size).toBe(0.15)
+    expect(fixed.sidebar.size).toBeCloseTo(0.2, 9)
+    expect(fitsEditorMin(fixed)).toBe(true)
+    // When the assistant and the references are enough, the notes and the sidebar keep their size.
+    const roomy = normalizeLayout({
+      ...four,
+      sidebar: { ...four.sidebar, size: 0.15 },
+      notes: { open: true, size: 0.15 }
+    })
+    expect(roomy.assistant.size).toBe(0.2)
+    expect(roomy.references.size).toBeCloseTo(0.2, 9)
+    expect(roomy.notes.size).toBe(0.15)
+    expect(roomy.sidebar.size).toBe(0.15)
+  })
+
+  it('fits four open panels at their floors', () => {
+    const floors: Layout = {
+      ...four,
+      sidebar: { open: true, size: 0.15, tab: 'manuscript' },
+      notes: { open: true, size: 0.15 },
+      assistant: { open: true, size: 0.2 },
+      references: { open: true, size: 0.15 }
+    }
+    expect(editorFraction(floors)).toBeCloseTo(0.35, 9)
+    expect(fitsEditorMin(floors)).toBe(true)
+    expect(normalizeLayout(floors)).toBe(floors)
   })
 })
 

@@ -54,12 +54,7 @@ import { assertFeatureAllowed } from '../ai/dial'
 import { draftBrief } from '../ai/draftBrief'
 import { generateGhostText } from '../ai/ghostText'
 import { detectImportStructure } from '../ai/importStructure'
-import {
-  cancelInflight,
-  regenRequestId,
-  registerInflight,
-  releaseInflight
-} from '../ai/inflight'
+import { cancelInflight, regenRequestId, registerInflight, releaseInflight } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
 import { IMPORT_STRUCTURE_PROMPT_VERSION } from '../ai/prompts/importStructure.v1'
 import { createProposal, listPendingProposals, settleProposal } from '../ai/proposalStore'
@@ -96,6 +91,11 @@ import { readManuscript } from '../import/read'
 import { buildDraft } from '../import/structure'
 import { addBackground, listBackgrounds, removeBackground } from '../project/backgroundStore'
 import { addImageAsset, removeImageAsset } from '../project/imageAssets'
+import {
+  addReferenceImage,
+  pruneReferencePins,
+  removeReferenceImage
+} from '../project/referenceStore'
 import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor, sanitizeName } from '../project/projectStore'
 import { writeTextAtomic } from '../fs'
@@ -107,17 +107,20 @@ import {
   getConversations,
   getEditorSettings,
   getFocusSettings,
+  getReferencePins,
   getWritingPresets,
   setAiSettings,
   setAuthorRules,
   setConversations,
   setEditorSettings,
   setFocusSettings,
+  setReferencePins,
   setWritingPresets
 } from '../project/settingsStore'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import { EXTERNAL_HOST, isAllowedExternalUrl, type EditRole } from '@shared/menu'
 import { normalizeProposalNote } from '@shared/proposal'
+import { REFERENCE_PINS_MAX, dedupePins, hasPin } from '@shared/references'
 import {
   addDocumentTag,
   listAllDocumentTagLinks,
@@ -502,6 +505,53 @@ export function registerHandlers({
     if (focus.backgroundId === id)
       setFocusSettings(session.connection.orm, { ...focus, backgroundId: null })
     return null
+  })
+
+  /**
+   * F-9.6: the quick reference panel's pins. Reading prunes: a pin whose entity, node, or image
+   * file is gone is dropped and the row rewritten, so a deleted target never comes back as a
+   * dead card and the list never fills up with pins nobody can see.
+   */
+  register('reference:get', () => {
+    const session = manager.require()
+    const stored = getReferencePins(session.connection.orm)
+    const pins = pruneReferencePins(session.connection.orm, session.folder, stored.pins)
+    if (pins === stored.pins) return stored
+    return setReferencePins(session.connection.orm, { pins: [...pins] })
+  })
+
+  // The row first, the files second: a refused write never deletes an image that is still pinned.
+  register('reference:set', (value) => {
+    const session = manager.require()
+    const previous = getReferencePins(session.connection.orm)
+    const stored = setReferencePins(session.connection.orm, { pins: dedupePins(value.pins) })
+    for (const pin of previous.pins)
+      if (pin.type === 'image' && !hasPin(stored.pins, pin))
+        removeReferenceImage(session.folder, pin.file)
+    return stored
+  })
+
+  register('reference:addImages', async () => {
+    const session = manager.require()
+    const chosen = await dialogs.chooseImages('Pin images to References')
+    if (chosen === null) return null
+    let pins = getReferencePins(session.connection.orm).pins
+    const skipped: string[] = []
+    for (const source of chosen) {
+      if (pins.length >= REFERENCE_PINS_MAX) {
+        skipped.push(path.basename(source))
+        continue
+      }
+      try {
+        pins = [...pins, { type: 'image', file: addReferenceImage(session.folder, source) }]
+      } catch (err) {
+        // A refused file (type or size) is reported by name; anything else is a real failure.
+        if (err instanceof AppError && err.code === 'VALIDATION')
+          skipped.push(path.basename(source))
+        else throw err
+      }
+    }
+    return { pins: setReferencePins(session.connection.orm, { pins }), skipped }
   })
 
   register('conversations:get', () => getConversations(manager.require().connection.orm))
@@ -1606,4 +1656,3 @@ function proposalTags(content: string): string[] {
     return []
   }
 }
-

@@ -8,9 +8,9 @@ import { APP_SHORTCUTS, type Chord, type ShortcutId } from './shortcuts'
  * F-2.7 chords as accelerators) and the renderer as the in-app menu bar, and every click on
  * either side becomes one `menu:action` handled by `runMenuAction`. Items whose feature is not
  * built are absent, never disabled or stubbed: Export… (F-12.1), Find and Find &
- * Replace (F-10.x), References (F-9.6), Word count, Statistics, Goals, Drafts, Snapshots
- * (F-10.x, F-8.x) join the definition with their features; Character, Setting, and
- * World-building note arrived with F-9.3. Edit items carry an Electron role, so the native menu
+ * Replace (F-10.x), Word count, Statistics, Goals, Drafts, Snapshots (F-10.x, F-8.x) join the
+ * definition with their features; Character, Setting, and World-building note arrived with
+ * F-9.3, References with F-9.6. Edit items carry an Electron role, so the native menu
  * edits natively; the in-app bar routes them through `menu:edit` to the same `webContents`
  * commands.
  */
@@ -35,6 +35,7 @@ export const MENU_ITEM_IDS = [
   'toggleSidebar',
   'toggleNotes',
   'toggleAssistant',
+  'toggleReferences',
   'toggleFocusMode',
   'togglePageEdges',
   'zoomIn',
@@ -150,6 +151,8 @@ export const MENU: readonly MenuSection[] = [
       { id: 'toggleSidebar', label: 'Sidebar', when: 'project' },
       { id: 'toggleNotes', label: 'Notes', when: 'project' },
       { id: 'toggleAssistant', label: 'AI assistant', shortcut: 'assistant', when: 'project' },
+      // F-9.6: the quick reference panel.
+      { id: 'toggleReferences', label: 'References', when: 'project' },
       SEPARATOR,
       { id: 'toggleFocusMode', label: 'Focus mode', shortcut: 'focusMode', when: 'project' },
       SEPARATOR,

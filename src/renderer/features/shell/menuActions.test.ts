@@ -332,6 +332,18 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useEntityStore.getState().creating).toBeNull()
   })
 
+  it('View › References toggles the reference panel, leaving focus mode first (F-9.6)', async () => {
+    await withProject()
+    await runMenuAction('toggleReferences')
+    expect(useLayoutStore.getState().layout.references.open).toBe(true)
+    await runMenuAction('toggleReferences')
+    expect(useLayoutStore.getState().layout.references.open).toBe(false)
+    await useFocusStore.getState().enter()
+    await runMenuAction('toggleReferences')
+    expect(useFocusStore.getState().active).toBe(false)
+    expect(useLayoutStore.getState().layout.references.open).toBe(true)
+  })
+
   it('Tools › Tags opens the sidebar on the Tags tab, leaving focus mode first', async () => {
     await withProject()
     useLayoutStore.getState().toggle('sidebar')

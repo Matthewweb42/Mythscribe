@@ -15,6 +15,7 @@ import { EDITOR_SETTINGS_KEY, defaultEditorSettings } from '@shared/editorSettin
 import { FOCUS_SETTINGS_KEY, defaultFocusSettings } from '@shared/focus'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { WRITING_PRESETS_KEY, builtinParams, defaultWritingPresets } from '@shared/presets'
+import { REFERENCE_PINS_KEY, REFERENCE_PINS_MAX, defaultReferencePins } from '@shared/references'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
 import { createProject, projectFolderFor, type ProjectSession } from './projectStore'
@@ -24,12 +25,14 @@ import {
   getConversations,
   getEditorSettings,
   getFocusSettings,
+  getReferencePins,
   getWritingPresets,
   setAiSettings,
   setAuthorRules,
   setConversations,
   setEditorSettings,
   setFocusSettings,
+  setReferencePins,
   setWritingPresets
 } from './settingsStore'
 
@@ -378,5 +381,47 @@ describe('getAuthorRules / setAuthorRules (F-14.2)', () => {
     setRaw(JSON.stringify({ rules: 'r'.repeat(401) }), AUTHOR_RULES_KEY)
     expect(getAuthorRules(db)).toEqual(defaultAuthorRules())
     expect(() => setAuthorRules(db, { rules: 'r'.repeat(401) })).toThrow()
+  })
+})
+
+describe('getReferencePins / setReferencePins (F-9.6)', () => {
+  it('answers no pins for a new project, which seeds no row', () => {
+    open('novel')
+    expect(rows(REFERENCE_PINS_KEY)).toHaveLength(0)
+    expect(getReferencePins(db)).toEqual(defaultReferencePins())
+  })
+
+  it('round-trips the pins in order and overwrites the single row', () => {
+    open('novel')
+    const value = {
+      pins: [
+        { type: 'note' as const, id: 'n1' },
+        { type: 'entity' as const, id: 'e1' },
+        { type: 'image' as const, file: 'map.0a1b2c3d.png' }
+      ]
+    }
+    expect(setReferencePins(db, value)).toEqual(value)
+    expect(getReferencePins(db)).toEqual(value)
+    setReferencePins(db, { pins: [value.pins[1]!] })
+    expect(rows(REFERENCE_PINS_KEY)).toHaveLength(1)
+    expect(getReferencePins(db)).toEqual({ pins: [{ type: 'entity', id: 'e1' }] })
+  })
+
+  it('falls back when the stored value is not JSON or no longer fits the schema', () => {
+    open('novel')
+    setRaw('{not json', REFERENCE_PINS_KEY)
+    expect(getReferencePins(db)).toEqual(defaultReferencePins())
+    setRaw(JSON.stringify({ pins: [{ type: 'image', file: '../project.db' }] }), REFERENCE_PINS_KEY)
+    expect(getReferencePins(db)).toEqual(defaultReferencePins())
+  })
+
+  it('refuses more pins than the maximum', () => {
+    open('novel')
+    const pins = Array.from({ length: REFERENCE_PINS_MAX + 1 }, (_, i) => ({
+      type: 'entity' as const,
+      id: `e${i}`
+    }))
+    expect(() => setReferencePins(db, { pins })).toThrow()
+    expect(rows(REFERENCE_PINS_KEY)).toHaveLength(0)
   })
 })

@@ -58,6 +58,7 @@ import { WritingPresets } from '../presets'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
 import { ProposedTag } from '../proposedTags'
 import { QueryCitation, QuerySceneRef } from '../query'
+import { ReferencePins } from '../references'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../rewrite'
 import { SceneBrief, SceneMeta } from '../sceneMeta'
 import { Stylometrics } from '../stylometry'
@@ -667,6 +668,28 @@ export const contract = {
   },
   /** Deletes a background's file (F-6.2) and clears `backgroundId` when it was the current one; NOT_FOUND for an unknown id. */
   'background:remove': { input: z.object({ id: z.string() }), output: z.null() },
+  /**
+   * The quick reference panel's pins (F-9.6), in the author's order. A pin whose entity or node
+   * was deleted, or whose image file is gone, is dropped (and the stored list rewritten) before
+   * it is answered; a missing or unreadable row answers with no pins.
+   */
+  'reference:get': { input: z.undefined(), output: ReferencePins },
+  /**
+   * Replaces the pins (F-9.6): duplicates are dropped, and the file of every image pin that was
+   * in the stored list and is not in the new one is deleted (the pin is its only record). A
+   * value outside the schema, or over `REFERENCE_PINS_MAX`, is refused with VALIDATION.
+   */
+  'reference:set': { input: ReferencePins, output: ReferencePins },
+  /**
+   * Opens the OS file dialog (multi-select), copies each chosen image into the project's
+   * `assets/references/`, and appends a pin for each (F-9.6). A file that is not an allowed image
+   * type, is over `IMAGE_MAX_BYTES`, or would go past `REFERENCE_PINS_MAX` is skipped and named in
+   * `skipped`; null when cancelled.
+   */
+  'reference:addImages': {
+    input: z.undefined(),
+    output: z.object({ pins: ReferencePins, skipped: z.array(z.string()) }).nullable()
+  },
   /** Every tag of the open project (F-4.1), ordered by name. */
   'tag:list': { input: z.undefined(), output: z.array(Tag) },
   /**
@@ -1295,7 +1318,10 @@ export const contract = {
    * draft; null when the dialog is cancelled. An unsupported extension, an unreadable file, or a
    * file with no text is VALIDATION with the cause. Nothing is written.
    */
-  'import:open': { input: z.object({ path: z.string().optional() }), output: ImportDraft.nullable() },
+  'import:open': {
+    input: z.object({ path: z.string().optional() }),
+    output: ImportDraft.nullable()
+  },
   /**
    * Step two: writes the reviewed draft into the open project in one transaction (parts,
    * chapters, scenes after the existing manuscript nodes; front/back-matter chapters as one

@@ -27,6 +27,7 @@ import {
 import type { NovelFormat } from '@shared/ipc/contract'
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
 import { DISMISSED_NAMES_KEY, DismissedNames, defaultDismissedNames } from '@shared/proposedTags'
+import { REFERENCE_PINS_KEY, ReferencePins, defaultReferencePins } from '@shared/references'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
 
@@ -245,6 +246,35 @@ export function setDismissedNames(db: TreeDb, value: DismissedNames): DismissedN
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: DISMISSED_NAMES_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the quick reference panel's pins (F-9.6) from the `settings` row under
+ * `REFERENCE_PINS_KEY`. A missing row, unparsable JSON, or a value outside the schema all answer
+ * with no pins: an unreadable row can only ever empty the panel, never block the project.
+ */
+export function getReferencePins(db: TreeDb): ReferencePins {
+  const row = db.select().from(settings).where(eq(settings.key, REFERENCE_PINS_KEY)).get()
+  if (!row) return defaultReferencePins()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultReferencePins()
+  }
+  const parsed = ReferencePins.safeParse(json)
+  return parsed.success ? parsed.data : defaultReferencePins()
+}
+
+/** Replaces the pins (F-9.6; upsert on the settings key) and returns what was stored. */
+export function setReferencePins(db: TreeDb, value: ReferencePins): ReferencePins {
+  const stored = ReferencePins.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: REFERENCE_PINS_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

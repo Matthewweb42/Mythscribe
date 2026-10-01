@@ -4,11 +4,11 @@ import { SidebarTabId } from './sidebarTabs'
 /**
  * The resizable panel layout (F-7.2). Every size is a fraction of the window width, so a
  * persisted layout means the same thing at any window size and the panels follow an OS resize
- * without a listener. The assistant panel (F-5.4) joined as a field `StoredLayout` defaults; the
- * references panel (M2) joins the same way.
+ * without a listener. The assistant panel (F-5.4) and the references panel (F-9.6) each joined as
+ * a field `StoredLayout` defaults, so a layout written before them still loads.
  */
 
-export const LAYOUT_PANELS = ['sidebar', 'notes', 'assistant'] as const
+export const LAYOUT_PANELS = ['sidebar', 'notes', 'assistant', 'references'] as const
 export type LayoutPanel = (typeof LAYOUT_PANELS)[number]
 
 /** Per-panel `[min, max]` fractions, plus the share the editor always keeps. */
@@ -17,6 +17,8 @@ export const LAYOUT_LIMITS = {
   notes: [0.15, 0.5],
   // F-5.4: wide enough at its floor for the tab strip, the mode radios, and the composer.
   assistant: [0.2, 0.5],
+  // F-9.6: a column of cards, as narrow and as wide as the sidebar.
+  references: [0.15, 0.35],
   editorMin: 0.3
 } as const
 
@@ -60,6 +62,11 @@ const DEFAULT_TAG_BAR = { open: true, height: 180, split: 0.4 } as const
 const DEFAULT_ASSISTANT = { open: false, size: 0.3 } as const
 
 const assistantSchema = panelSchema(LAYOUT_LIMITS.assistant)
+
+/** The references panel (F-9.6) starts closed; the first pin opens it at just under a quarter. */
+const DEFAULT_REFERENCES = { open: false, size: 0.22 } as const
+
+const referencesSchema = panelSchema(LAYOUT_LIMITS.references)
 
 /** The panels focus mode shows as floating windows (F-6.6). */
 export const FLOATING_PANELS = ['notes', 'assistant'] as const
@@ -111,6 +118,8 @@ export const Layout = z.object({
   tagBar: tagBarSchema,
   // F-5.4: the AI assistant panel on the right, beside the notes.
   assistant: assistantSchema,
+  // F-9.6: the quick reference panel on the right, between the main pane and the assistant.
+  references: referencesSchema,
   // F-6.6: where the notes and assistant windows float in focus mode.
   floating: floatingSchema
 })
@@ -130,6 +139,8 @@ export const StoredLayout = z.object({
     .default({ ...DEFAULT_TAG_BAR }),
   // A layout written before F-5.4 has no assistant panel and parses to the closed default.
   assistant: assistantSchema.default({ ...DEFAULT_ASSISTANT }),
+  // A layout written before F-9.6 has no references panel and parses to the closed default.
+  references: referencesSchema.default({ ...DEFAULT_REFERENCES }),
   // A layout written before F-6.6 has no floating windows and parses to the default geometry.
   floating: floatingSchema.default(defaultFloating())
 })
@@ -137,7 +148,8 @@ export const StoredLayout = z.object({
 /**
  * A fresh install: the Manuscript tab open at just under a quarter, the notes closed at a
  * quarter, the tag bar open at 180 px with the metadata pane at 40 % of it, the assistant
- * closed at just under a third, the floating windows at their default geometry.
+ * closed at just under a third, the references closed at just under a quarter, the floating
+ * windows at their default geometry.
  */
 export function defaultLayout(): Layout {
   return {
@@ -145,6 +157,7 @@ export function defaultLayout(): Layout {
     notes: { open: false, size: 0.25 },
     tagBar: { ...DEFAULT_TAG_BAR },
     assistant: { ...DEFAULT_ASSISTANT },
+    references: { ...DEFAULT_REFERENCES },
     floating: defaultFloating()
   }
 }
@@ -221,13 +234,13 @@ export function fitsEditorMin(layout: Layout): boolean {
   return editorFraction(layout) >= LAYOUT_LIMITS.editorMin - EPSILON
 }
 
-/** The order in which open panels give way when the editor would get too little: assistant, notes, sidebar. */
-const GIVE_WAY_ORDER: readonly LayoutPanel[] = ['assistant', 'notes', 'sidebar']
+/** The order in which open panels give way when the editor would get too little: assistant, references, notes, sidebar. */
+const GIVE_WAY_ORDER: readonly LayoutPanel[] = ['assistant', 'references', 'notes', 'sidebar']
 
 /**
  * A layout that respects the editor minimum: an already-valid layout is returned as is; an
- * over-wide one (a hand-edited app-state file, or a third panel opening beside two wide ones)
- * gives way assistant first, then notes, then the sidebar. Every panel at its floor still
+ * over-wide one (a hand-edited app-state file, or another panel opening beside wide ones)
+ * gives way assistant first, then the references, then notes, then the sidebar. Every panel at its floor still
  * leaves the editor its minimum, so the result always fits.
  */
 export function normalizeLayout(layout: Layout): Layout {

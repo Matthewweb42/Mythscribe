@@ -145,6 +145,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'conversations:get') return { active: null, items: [] }
     if (channel === 'focusSettings:get') return { ...defaultFocusSettings(), backgroundId: null }
     if (channel === 'background:list') return []
+    if (channel === 'reference:get') return { pins: [] }
     if (channel === 'jobs:status') return IDLE_INDEX_QUEUE
     if (channel === 'view:get') return defaultViewSettings()
     return null
@@ -467,6 +468,7 @@ describe('App', () => {
         notes: { open: false, size: 0.25 },
         tagBar: { open: true, height: 180, split: 0.4 },
         assistant: { open: false, size: 0.3 },
+        references: { open: false, size: 0.22 },
         floating: defaultFloating()
       }
     })
@@ -517,6 +519,7 @@ describe('App', () => {
         notes: { open: false, size: 0.25 },
         tagBar: { open: true, height: 180, split: 0.4 },
         assistant: { open: false, size: 0.3 },
+        references: { open: false, size: 0.22 },
         floating: defaultFloating()
       })
     } finally {
