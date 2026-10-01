@@ -1,6 +1,7 @@
 import type { Node as PmNode } from '@tiptap/pm/model'
 import { normalizeForMatch, straightenQuotes } from '@shared/critique'
 import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
+import { foldCase } from '@shared/search'
 
 /** A character of the document as it is matched, with the position it lives at (−1 for a boundary space). */
 interface Entry {
@@ -46,17 +47,6 @@ function scan(doc: PmNode): Entry[] {
     return true
   })
   return entries
-}
-
-/**
- * Lowercase character by character, so one character stays one character and every position
- * still lines up with its entry (a few characters, such as `İ`, grow when lowercased whole).
- */
-function foldCase(text: string): string {
-  return Array.from(text, (char) => {
-    const lower = char.toLowerCase()
-    return lower.length === char.length ? lower : char
-  }).join('')
 }
 
 /**

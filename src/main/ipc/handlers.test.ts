@@ -2329,6 +2329,59 @@ describe('entity handlers (F-9.1)', () => {
   })
 })
 
+describe('search:query (F-10.1)', () => {
+  const request = (
+    query: string
+  ): { query: string; types: ['document', 'character']; tagId: null } => ({
+    query,
+    types: ['document', 'character'],
+    tagId: null
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('search:query', request('lantern'))).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers the matching documents and entities, and empty for a query under the minimum', async () => {
+    await invoke('project:create', { name: 'Search', format: 'novel', directory: tmp })
+    const scene = manuscriptReadingOrder(await invoke('tree:list', undefined))[0]
+    if (scene === undefined) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'The Lantern swung.' }] }]
+      }
+    })
+    const ada = await invoke('entity:create', {
+      kind: 'character',
+      name: 'Ada',
+      fields: { goals: 'Keep the lantern lit.' }
+    })
+    const answer = await invoke('search:query', request(' lantern '))
+    expect(answer.total).toBe(2)
+    expect(answer.truncated).toBe(false)
+    expect(answer.results).toMatchObject([
+      {
+        type: 'document',
+        id: scene,
+        snippet: { text: 'The Lantern swung.', highlights: [[4, 11]] },
+        count: 1
+      },
+      { type: 'character', id: ada.id, title: 'Ada', field: 'Goals / motivations', count: 1 }
+    ])
+    expect(await invoke('search:query', request('l'))).toEqual({
+      results: [],
+      total: 0,
+      truncated: false
+    })
+    // The text cache is the closed project's: another project never reads it.
+    await invoke('project:close', undefined)
+    await invoke('project:create', { name: 'Other', format: 'novel', directory: tmp })
+    expect((await invoke('search:query', request('lantern'))).total).toBe(0)
+  })
+})
+
 describe('entity images (F-9.3)', () => {
   const PNG = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMwTpsJAAICATNWh+JUAAAAAElFTkSuQmCC',

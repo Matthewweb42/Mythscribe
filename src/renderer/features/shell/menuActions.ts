@@ -18,6 +18,7 @@ import { useImportStore } from '@renderer/features/import/importStore'
 import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useProjectStore } from '@renderer/features/project/projectStore'
+import { useSearchStore } from '@renderer/features/search/searchStore'
 import { useWelcomeStore } from '@renderer/features/project/welcomeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -113,6 +114,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         // F-12.2: main opens the file dialog and answers a draft; the review dialog takes over
         // from there. The store toasts its own failures, so a cancelled dialog is silent.
         await useImportStore.getState().open()
+        return
+      case 'searchProject':
+        // F-10.1: the dialog is part of the project screen and works in focus mode too.
+        useSearchStore.getState().openSearch()
         return
       case 'insertScene':
         insertLevel('scene', project.format)

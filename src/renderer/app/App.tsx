@@ -61,6 +61,8 @@ import {
   ReferencesToggleButton
 } from '@renderer/features/references/ReferencePanel'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
+import { SearchButton, SearchDialog } from '@renderer/features/search/SearchDialog'
+import { useSearchStore } from '@renderer/features/search/searchStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
@@ -187,6 +189,8 @@ export function App(): React.JSX.Element {
       useTagStore.getState().clear()
       useEntityStore.getState().clear()
       useReferenceStore.getState().clear()
+      // F-10.1: the search dialog and its last answer belong to the project that closed.
+      useSearchStore.getState().reset()
       useDocumentTagStore.getState().clear()
       useMentionStore.getState().clear()
       useProposedTagStore.getState().clear()
@@ -285,6 +289,7 @@ export function App(): React.JSX.Element {
               <>
                 <AiActivityIndicator />
                 <IndexingIndicator />
+                <SearchButton />
                 <ReferencesToggleButton />
                 <AssistantToggleButton />
               </>
@@ -299,6 +304,7 @@ export function App(): React.JSX.Element {
       <SettingsShortcut />
       <ZoomShortcuts />
       {current ? <InsertShortcuts format={current.format} /> : null}
+      {current ? <SearchShortcut /> : null}
       <main
         className={
           current
@@ -496,6 +502,28 @@ function InsertShortcuts({ format }: { format: NovelFormat }): null {
 }
 
 /**
+ * Ctrl+Shift+F opens the project search (F-10.1). Like `InsertShortcuts` the listener runs in
+ * the capture phase and stops the event, so the chord works with the caret in the editor and
+ * nothing inside the page handles it a second time; `preventDefault` also keeps the native
+ * accelerator (Edit › Search project…) from firing for the same key press, and opening is
+ * idempotent in any case. Mounted while a project is open, outside the header, so it works in
+ * focus mode; renders nothing.
+ */
+function SearchShortcut(): null {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!matchesShortcut(event, APP_SHORTCUTS.search.chord)) return
+      event.preventDefault()
+      event.stopPropagation()
+      useSearchStore.getState().openSearch()
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [])
+  return null
+}
+
+/**
  * Focus mode shortcuts (F-6.1): F11 toggles it; Escape leaves it, but only when nothing closer
  * to the keystroke claimed the key (the dialogs and popups handle their own Escape and prevent
  * default), so the listener runs in the bubble phase. Inside the editor ProseMirror prevents
@@ -643,6 +671,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <EntityCreateDialog />
       {/* F-9.5: the entity import review, open only while a plan is under review. */}
       <EntityImportDialog />
+      {/* F-10.1: the project search, open while the search store says so. */}
+      <SearchDialog />
     </>
   )
 }

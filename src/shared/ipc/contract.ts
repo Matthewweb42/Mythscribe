@@ -58,6 +58,7 @@ import { WritingPresets } from '../presets'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
 import { ProposedTag } from '../proposedTags'
 import { QueryCitation, QuerySceneRef } from '../query'
+import { SearchRequest, SearchResponse } from '../search'
 import { ReferencePins } from '../references'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../rewrite'
 import { SceneBrief, SceneMeta } from '../sceneMeta'
@@ -787,6 +788,13 @@ export const contract = {
     input: z.object({ name: z.string().trim().min(1).max(TAG_NAME_MAX) }),
     output: z.array(ProposedTag)
   },
+  /**
+   * Global search (F-10.1): documents (title and text), notes, and entities (name, template
+   * fields, page) holding the query, case-insensitively, filtered by type and tag; one result per
+   * matching source with a highlighted snippet, at most `SEARCH_MAX_RESULTS` of them. A query
+   * under `SEARCH_QUERY_MIN` characters answers no results, not an error.
+   */
+  'search:query': { input: SearchRequest, output: SearchResponse },
   /**
    * Every entity of the open project (F-9.1): the whole story bible in one call, ordered by kind
    * (characters, settings, world) and then by name, case- and whitespace-insensitively. The

@@ -28,6 +28,7 @@ export const SHORTCUT_IDS = [
   'save',
   'settings',
   'assistant',
+  'search',
   'focusMode',
   'zoomIn',
   'zoomOut',
@@ -46,6 +47,13 @@ export const APP_SHORTCUTS: Record<ShortcutId, Shortcut> = {
     id: 'assistant',
     label: 'AI assistant',
     chord: { key: 'k', ctrl: true },
+    group: 'app'
+  },
+  /** F-10.1: the project-wide search dialog. Ctrl+F stays free for find in document (F-3.10). */
+  search: {
+    id: 'search',
+    label: 'Search project',
+    chord: { key: 'f', ctrl: true, shift: true },
     group: 'app'
   },
   focusMode: { id: 'focusMode', label: 'Focus mode', chord: { key: 'F11' }, group: 'app' },

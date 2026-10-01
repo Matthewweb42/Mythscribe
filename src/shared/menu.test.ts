@@ -125,6 +125,20 @@ describe('menu definition (F-7.1)', () => {
     expect(isMenuItemEnabled(byId.toggleReferences!, true)).toBe(true)
   })
 
+  it('offers Search project… at the end of Edit, on Ctrl+Shift+F, only with a project (F-10.1)', () => {
+    const edit = MENU.find((section) => section.id === 'edit')
+    expect(
+      (edit?.entries ?? []).map((entry) => (isSeparator(entry) ? 'separator' : entry.id))
+    ).toEqual(['undo', 'redo', 'separator', 'cut', 'copy', 'paste', 'separator', 'searchProject'])
+    const [item] = menuItems().filter((entry) => entry.id === 'searchProject')
+    expect(item?.label).toBe('Search project…')
+    expect(item?.editRole).toBeUndefined()
+    expect(menuItemChord(item!)).toEqual({ key: 'f', ctrl: true, shift: true })
+    expect(menuAccelerator(menuItemChord(item!)!)).toBe('CmdOrCtrl+Shift+F')
+    expect(isMenuItemEnabled(item!, false)).toBe(false)
+    expect(isMenuItemEnabled(item!, true)).toBe(true)
+  })
+
   it('offers Import manuscript… in File, after Open project…, only with a project (F-12.2)', () => {
     const file = MENU.find((section) => section.id === 'file')
     expect(

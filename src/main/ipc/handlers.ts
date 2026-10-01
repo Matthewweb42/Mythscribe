@@ -100,6 +100,7 @@ import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor, sanitizeName } from '../project/projectStore'
 import { writeTextAtomic } from '../fs'
 import { renderDisclosure } from '../provenance/disclosure'
+import { clearSearchCache, searchProject } from '../search/searchStore'
 import { buildProvenanceReport } from '../provenance/report'
 import {
   getAiSettings,
@@ -674,6 +675,9 @@ export function registerHandlers({
   )
 
   register('documentTag:listAll', () => listAllDocumentTagLinks(manager.require().connection.orm))
+
+  // F-10.1: one scan of the stored text per query; a query under the minimum answers empty.
+  register('search:query', (request) => searchProject(manager.require().connection.orm, request))
 
   // F-9.1: the story bible. The whole set comes in one call; the renderer store (F-9.2) keeps it
   // normalized, so nothing here reloads the world after a write.
@@ -1632,6 +1636,9 @@ export function registerHandlers({
     // because the list happens to read the same as the last one's.
     resetProposedTagCache()
     lastProposed = null
+    // F-10.1: the cached searchable texts are keyed by node id, which means nothing in
+    // another project.
+    clearSearchCache()
     if (info) {
       queue.load()
       mentionQueue.load()

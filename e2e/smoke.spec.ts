@@ -1823,6 +1823,57 @@ test('create, close, reopen a project on disk', async () => {
   await expect(tomasRow).toBeVisible()
   await expect(tomasRow).not.toHaveAttribute('aria-current', 'true')
 
+  // F-10.1: global search. Ctrl+Shift+F opens the dialog on its query box; a phrase of Scene 1,
+  // typed in another case, lists the scene with the phrase marked, and Enter opens it with the
+  // phrase selected. With the Documents chip off, the character's name lists her entity row,
+  // and a click opens her page. Her page is then closed, so Scene 1 is back for the steps below.
+  const searchDialog = page.getByRole('dialog', { name: 'Search project' })
+  const searchBox = searchDialog.getByRole('searchbox', { name: 'Search the project' })
+  await expect(searchDialog).toHaveCount(0)
+  await page.keyboard.press('Control+Shift+F')
+  await expect(searchDialog).toBeVisible()
+  await expect(searchBox).toBeFocused()
+  await expect(searchDialog.getByRole('status')).toHaveText('Type at least 2 characters.')
+  await searchBox.fill('STORM BROKE')
+  const documentHits = searchDialog.getByTestId('search-result-document')
+  await expect(documentHits).toHaveCount(1)
+  await expect(documentHits).toContainText('Scene 1')
+  await expect(documentHits.locator('mark')).toHaveText(['storm broke'])
+  await expect(documentHits).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('Enter')
+  await expect(searchDialog).toHaveCount(0)
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+    .toBe('storm broke')
+  // The jump leaves the phrase selected; the caret goes back to the end before anything types
+  // (retried until the selection is really collapsed, see Known gotchas).
+  await expect(async () => {
+    await editor.click()
+    await page.keyboard.press('Control+End')
+    expect(await page.evaluate(() => window.getSelection()?.isCollapsed ?? false)).toBe(true)
+  }).toPass({ timeout: 10_000 })
+  await page.keyboard.press('Control+Shift+F')
+  await expect(searchBox).toBeFocused()
+  await expect(searchBox).toHaveValue('STORM BROKE')
+  await searchBox.fill('mara vell')
+  const documentsChip = searchDialog.getByRole('button', { name: 'Documents', exact: true })
+  await documentsChip.click()
+  await expect(documentsChip).toHaveAttribute('aria-pressed', 'false')
+  await expect(documentHits).toHaveCount(0)
+  const characterHit = searchDialog.getByTestId('search-result-character')
+  await expect(characterHit).toHaveCount(1)
+  await expect(characterHit.locator('mark').first()).toHaveText('Mara Vell')
+  await characterHit.click()
+  await expect(searchDialog).toHaveCount(0)
+  await expect(entityEditor).toBeVisible()
+  await expect(entityName).toHaveValue('Mara Vell')
+  await entityEditor.getByRole('button', { name: 'Close Mara Vell' }).click()
+  await expect(entityEditor).toHaveCount(0)
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await expect(maraVellRow).not.toHaveAttribute('aria-current', 'true')
+  expect(await documentText(scene1Row.id)).toBe(SENTENCE)
+
   await tomasRow.hover()
   await characterRows.getByRole('button', { name: 'Delete Tomas' }).click()
   await page

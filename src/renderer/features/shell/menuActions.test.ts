@@ -19,6 +19,7 @@ import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
+import { resetSearchStore, useSearchStore } from '@renderer/features/search/searchStore'
 import { resetWelcomeStore, useWelcomeStore } from '@renderer/features/project/welcomeStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -99,6 +100,7 @@ beforeEach(() => {
   resetFocusStore()
   resetImportStore()
   resetLayoutStore()
+  resetSearchStore()
   resetShellDialogStore()
   resetUpdateStore()
   resetViewStore()
@@ -342,6 +344,19 @@ describe('runMenuAction (F-7.1)', () => {
     await runMenuAction('toggleReferences')
     expect(useFocusStore.getState().active).toBe(false)
     expect(useLayoutStore.getState().layout.references.open).toBe(true)
+  })
+
+  it('Edit › Search project… opens the search dialog, in focus mode too, and needs a project (F-10.1)', async () => {
+    await runMenuAction('searchProject')
+    expect(useSearchStore.getState().open).toBe(false)
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE])
+    await withProject()
+    await useFocusStore.getState().enter()
+    await runMenuAction('searchProject')
+    // A second arrival of the same action (chord and accelerator) leaves it open.
+    await runMenuAction('searchProject')
+    expect(useSearchStore.getState().open).toBe(true)
+    expect(useFocusStore.getState().active).toBe(true)
   })
 
   it('Tools › Tags opens the sidebar on the Tags tab, leaving focus mode first', async () => {

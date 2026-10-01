@@ -37,6 +37,7 @@ import { dialogs, useDialogStore } from '@renderer/features/shell/dialogs/dialog
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { resetSearchStore, useSearchStore } from '@renderer/features/search/searchStore'
 import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
@@ -98,6 +99,7 @@ beforeEach(() => {
   resetViewStore()
   resetMentionStore()
   resetProposedTagStore()
+  resetSearchStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -106,6 +108,8 @@ beforeEach(() => {
 afterEach(() => {
   resetEntityDraftStore()
   resetEntityStore()
+  // F-10.1: a search debounce left pending must not fire into the next file's IPC fake.
+  resetSearchStore()
   resetAiSettingsStore()
   resetAuthorRulesStore()
   resetAssistantStore()
@@ -639,6 +643,61 @@ describe('App', () => {
     expect(within(dialog).getByRole('spinbutton', { name: 'Font size' })).toBeInTheDocument()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Close settings' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('Ctrl+Shift+F and the header button open the project search, which searches and closes with the project (F-10.1)', async () => {
+    const invoke = install({
+      'project:current': info,
+      'tree:list': treeFixture,
+      'search:query': {
+        results: [
+          {
+            type: 'document',
+            id: 'sc-2',
+            title: 'Scene 2',
+            location: 'Chapter 2',
+            field: null,
+            snippet: { text: 'The lantern swung.', highlights: [[4, 11]] },
+            titleHighlights: [],
+            count: 1
+          }
+        ],
+        total: 1,
+        truncated: false
+      }
+    })
+    render(<App />)
+    await screen.findByRole('treeitem', { name: 'Scene 1' })
+    expect(screen.queryByRole('dialog', { name: 'Search project' })).not.toBeInTheDocument()
+
+    await userEvent.keyboard('{Control>}{Shift>}f{/Shift}{/Control}')
+    const dialog = await screen.findByRole('dialog', { name: 'Search project' })
+    const box = within(dialog).getByRole('searchbox', { name: 'Search the project' })
+    expect(box).toHaveFocus()
+    await userEvent.type(box, 'lantern')
+    const row = await within(dialog).findByRole('option', { name: /Scene 2/ })
+    expect(invoke).toHaveBeenCalledWith('search:query', {
+      query: 'lantern',
+      types: ['document', 'notes', 'character', 'setting', 'world'],
+      tagId: null
+    })
+    expect(row.querySelector('mark')).toHaveTextContent('lantern')
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Search project' })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Search project' }))
+    expect(await screen.findByRole('dialog', { name: 'Search project' })).toBeInTheDocument()
+    expect(useSearchStore.getState().query).toBe('lantern')
+    await userEvent.keyboard('{Escape}')
+
+    await userEvent.click(screen.getByRole('button', { name: /close project/i }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    await screen.findByRole('button', { name: /new project/i })
+    expect(useSearchStore.getState()).toMatchObject({ open: false, query: '', response: null })
+    expect(screen.queryByRole('button', { name: 'Search project' })).not.toBeInTheDocument()
+    // No project: the chord does nothing.
+    await userEvent.keyboard('{Control>}{Shift>}f{/Shift}{/Control}')
+    expect(useSearchStore.getState().open).toBe(false)
   })
 
   it('Ctrl+K opens the assistant panel beside the main pane; the conversations load with the project and drop on close (F-5.4)', async () => {
