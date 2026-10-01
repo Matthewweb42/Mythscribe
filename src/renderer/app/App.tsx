@@ -61,6 +61,8 @@ import {
   ReferencesToggleButton
 } from '@renderer/features/references/ReferencePanel'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
+import { ReplaceDialog } from '@renderer/features/search/ReplaceDialog'
+import { useReplaceStore } from '@renderer/features/search/replaceStore'
 import { SearchButton, SearchDialog } from '@renderer/features/search/SearchDialog'
 import { useSearchStore } from '@renderer/features/search/searchStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -191,6 +193,8 @@ export function App(): React.JSX.Element {
       useReferenceStore.getState().clear()
       // F-10.1: the search dialog and its last answer belong to the project that closed.
       useSearchStore.getState().reset()
+      // F-10.2: and so do the replace dialog, its preview, and the offer to undo.
+      useReplaceStore.getState().reset()
       useDocumentTagStore.getState().clear()
       useMentionStore.getState().clear()
       useProposedTagStore.getState().clear()
@@ -502,7 +506,7 @@ function InsertShortcuts({ format }: { format: NovelFormat }): null {
 }
 
 /**
- * Ctrl+Shift+F opens the project search (F-10.1). Like `InsertShortcuts` the listener runs in
+ * Ctrl+Shift+F opens the project search (F-10.1) and Ctrl+Shift+H find and replace (F-10.2). Like `InsertShortcuts` the listener runs in
  * the capture phase and stops the event, so the chord works with the caret in the editor and
  * nothing inside the page handles it a second time; `preventDefault` also keeps the native
  * accelerator (Edit › Search project…) from firing for the same key press, and opening is
@@ -512,10 +516,18 @@ function InsertShortcuts({ format }: { format: NovelFormat }): null {
 function SearchShortcut(): null {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!matchesShortcut(event, APP_SHORTCUTS.search.chord)) return
+      const search = matchesShortcut(event, APP_SHORTCUTS.search.chord)
+      if (!search && !matchesShortcut(event, APP_SHORTCUTS.replaceProject.chord)) return
       event.preventDefault()
       event.stopPropagation()
-      useSearchStore.getState().openSearch()
+      // One of the two at a time: each is a modal over the same screen.
+      if (search) {
+        useReplaceStore.getState().close()
+        useSearchStore.getState().openSearch()
+      } else {
+        useSearchStore.getState().close()
+        useReplaceStore.getState().openReplace()
+      }
     }
     document.addEventListener('keydown', onKeyDown, true)
     return () => document.removeEventListener('keydown', onKeyDown, true)
@@ -673,6 +685,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <EntityImportDialog />
       {/* F-10.1: the project search, open while the search store says so. */}
       <SearchDialog />
+      {/* F-10.2: find and replace across documents, open while the replace store says so. */}
+      <ReplaceDialog />
     </>
   )
 }

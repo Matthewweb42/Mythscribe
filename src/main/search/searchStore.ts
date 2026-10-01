@@ -70,9 +70,10 @@ function readText(column: 'content' | 'notes', id: string, raw: string): string 
 /**
  * Every node below the section roots in the order the tree shows them: sorted by each row's chain
  * of positions from its root (`listNodes` orders by parent id, which is not reading order across
- * chapters). The roots themselves are left out: they carry neither content nor notes.
+ * chapters). The roots themselves are left out: they carry neither content nor notes. Shared with
+ * find and replace (F-10.2).
  */
-function nodesInTreeOrder(rows: NodeRow[]): NodeRow[] {
+export function nodesInTreeOrder(rows: NodeRow[]): NodeRow[] {
   const byId = new Map(rows.map((row) => [row.id, row]))
   const paths = new Map<string, number[]>()
   const pathOf = (row: NodeRow): number[] => {
@@ -94,6 +95,19 @@ function nodesInTreeOrder(rows: NodeRow[]): NodeRow[] {
     return a.id.localeCompare(b.id)
   }
   return rows.filter((row) => row.parentId !== null).sort(compare)
+}
+
+/**
+ * Where a node sits, for a result row: the parent, and the grandparent too unless it is a section
+ * root — scenes and chapters repeat their titles ("Scene 1" under every "Chapter 1"), so one
+ * level does not tell them apart. Shared with find and replace (F-10.2).
+ */
+export function nodeLocation(byId: ReadonlyMap<string, NodeRow>, row: NodeRow): string {
+  const parent = row.parentId === null ? undefined : byId.get(row.parentId)
+  if (!parent) return ''
+  const grand = parent.parentId === null ? undefined : byId.get(parent.parentId)
+  const path = grand && grand.parentId !== null ? [grand.title, parent.title] : [parent.title]
+  return searchableText(path.join(' › '))
 }
 
 /** The nodes the tag is linked to or mentioned in (the F-4.10 meaning), in two queries. */
@@ -199,15 +213,7 @@ export function searchProject(db: TreeDb, request: SearchRequest): SearchRespons
     const byId = new Map(rows.map((row) => [row.id, row]))
     const tagged = request.tagId === null ? null : nodeIdsWithTag(db, request.tagId)
     const nodes = nodesInTreeOrder(rows).filter((row) => tagged === null || tagged.has(row.id))
-    // The parent, and the grandparent too unless it is a section root: scenes and chapters
-    // repeat their titles ("Scene 1" under every "Chapter 1"), so one level does not tell them apart.
-    const locationOf = (row: NodeRow): string => {
-      const parent = row.parentId === null ? undefined : byId.get(row.parentId)
-      if (!parent) return ''
-      const grand = parent.parentId === null ? undefined : byId.get(parent.parentId)
-      const path = grand && grand.parentId !== null ? [grand.title, parent.title] : [parent.title]
-      return searchableText(path.join(' › '))
-    }
+    const locationOf = (row: NodeRow): string => nodeLocation(byId, row)
     if (types.has('document')) {
       for (const row of nodes) {
         if (row.kind !== 'document') continue

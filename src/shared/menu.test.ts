@@ -125,16 +125,36 @@ describe('menu definition (F-7.1)', () => {
     expect(isMenuItemEnabled(byId.toggleReferences!, true)).toBe(true)
   })
 
-  it('offers Search project… at the end of Edit, on Ctrl+Shift+F, only with a project (F-10.1)', () => {
+  it('offers Search project… after the clipboard items of Edit, on Ctrl+Shift+F, only with a project (F-10.1)', () => {
     const edit = MENU.find((section) => section.id === 'edit')
     expect(
       (edit?.entries ?? []).map((entry) => (isSeparator(entry) ? 'separator' : entry.id))
-    ).toEqual(['undo', 'redo', 'separator', 'cut', 'copy', 'paste', 'separator', 'searchProject'])
+    ).toEqual([
+      'undo',
+      'redo',
+      'separator',
+      'cut',
+      'copy',
+      'paste',
+      'separator',
+      'searchProject',
+      'replaceProject'
+    ])
     const [item] = menuItems().filter((entry) => entry.id === 'searchProject')
     expect(item?.label).toBe('Search project…')
     expect(item?.editRole).toBeUndefined()
     expect(menuItemChord(item!)).toEqual({ key: 'f', ctrl: true, shift: true })
     expect(menuAccelerator(menuItemChord(item!)!)).toBe('CmdOrCtrl+Shift+F')
+    expect(isMenuItemEnabled(item!, false)).toBe(false)
+    expect(isMenuItemEnabled(item!, true)).toBe(true)
+  })
+
+  it('offers Replace in project… right after it, on Ctrl+Shift+H, only with a project (F-10.2)', () => {
+    const [item] = menuItems().filter((entry) => entry.id === 'replaceProject')
+    expect(item?.label).toBe('Replace in project…')
+    expect(item?.editRole).toBeUndefined()
+    expect(menuItemChord(item!)).toEqual({ key: 'h', ctrl: true, shift: true })
+    expect(menuAccelerator(menuItemChord(item!)!)).toBe('CmdOrCtrl+Shift+H')
     expect(isMenuItemEnabled(item!, false)).toBe(false)
     expect(isMenuItemEnabled(item!, true)).toBe(true)
   })

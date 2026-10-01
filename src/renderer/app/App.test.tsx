@@ -37,6 +37,7 @@ import { dialogs, useDialogStore } from '@renderer/features/shell/dialogs/dialog
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { resetReplaceStore, useReplaceStore } from '@renderer/features/search/replaceStore'
 import { resetSearchStore, useSearchStore } from '@renderer/features/search/searchStore'
 import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
@@ -100,6 +101,7 @@ beforeEach(() => {
   resetMentionStore()
   resetProposedTagStore()
   resetSearchStore()
+  resetReplaceStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -110,6 +112,8 @@ afterEach(() => {
   resetEntityStore()
   // F-10.1: a search debounce left pending must not fire into the next file's IPC fake.
   resetSearchStore()
+  // F-10.2: nor a replace preview's.
+  resetReplaceStore()
   resetAiSettingsStore()
   resetAuthorRulesStore()
   resetAssistantStore()
@@ -698,6 +702,76 @@ describe('App', () => {
     // No project: the chord does nothing.
     await userEvent.keyboard('{Control>}{Shift>}f{/Shift}{/Control}')
     expect(useSearchStore.getState().open).toBe(false)
+  })
+
+  it('Ctrl+Shift+H opens find and replace on the selection, in place of the search, and it closes with the project (F-10.2)', async () => {
+    const invoke = install({
+      'project:current': info,
+      'tree:list': treeFixture,
+      'replace:preview': {
+        items: [
+          {
+            id: 'sc-2',
+            title: 'Scene 2',
+            location: 'Chapter 2',
+            count: 1,
+            samples: [
+              {
+                before: { text: 'The lantern swung.', range: [4, 11] },
+                after: { text: 'The lamp swung.', range: [4, 8] }
+              }
+            ]
+          }
+        ],
+        total: 1,
+        truncated: false
+      }
+    })
+    render(<App />)
+    await screen.findByRole('treeitem', { name: 'Scene 1' })
+    expect(screen.queryByRole('dialog', { name: 'Replace in project' })).not.toBeInTheDocument()
+
+    await userEvent.keyboard('{Control>}{Shift>}f{/Shift}{/Control}')
+    await screen.findByRole('dialog', { name: 'Search project' })
+    await userEvent.keyboard('{Control>}{Shift>}h{/Shift}{/Control}')
+    const dialog = await screen.findByRole('dialog', { name: 'Replace in project' })
+    expect(screen.queryByRole('dialog', { name: 'Search project' })).not.toBeInTheDocument()
+    const find = within(dialog).getByRole('textbox', { name: 'Find' })
+    expect(find).toHaveFocus()
+    await userEvent.type(find, 'lantern')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Replace with' }), 'lamp')
+    const group = await within(dialog).findByTestId('replace-document')
+    expect(group).toHaveTextContent('Scene 2')
+    expect(group.querySelector('del')).toHaveTextContent('lantern')
+    expect(group.querySelector('ins')).toHaveTextContent('lamp')
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('replace:preview', {
+        query: 'lantern',
+        replacement: 'lamp',
+        matchCase: false,
+        wholeWord: false,
+        scopeId: null
+      })
+    )
+    expect(invoke).not.toHaveBeenCalledWith('replace:commit', expect.anything())
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Replace in project' })).not.toBeInTheDocument()
+
+    // The search dialog's Replace… hands its query over.
+    await userEvent.keyboard('{Control>}{Shift>}f{/Shift}{/Control}')
+    const search = await screen.findByRole('dialog', { name: 'Search project' })
+    await userEvent.click(within(search).getByRole('button', { name: 'Replace…' }))
+    expect(await screen.findByRole('dialog', { name: 'Replace in project' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Search project' })).not.toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+
+    await userEvent.click(screen.getByRole('button', { name: /close project/i }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    await screen.findByRole('button', { name: /new project/i })
+    expect(useReplaceStore.getState()).toMatchObject({ open: false, query: '', preview: null })
+    // No project: the chord does nothing.
+    await userEvent.keyboard('{Control>}{Shift>}h{/Shift}{/Control}')
+    expect(useReplaceStore.getState().open).toBe(false)
   })
 
   it('Ctrl+K opens the assistant panel beside the main pane; the conversations load with the project and drop on close (F-5.4)', async () => {

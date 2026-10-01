@@ -29,6 +29,7 @@ export const SHORTCUT_IDS = [
   'settings',
   'assistant',
   'search',
+  'replaceProject',
   'focusMode',
   'zoomIn',
   'zoomOut',
@@ -54,6 +55,13 @@ export const APP_SHORTCUTS: Record<ShortcutId, Shortcut> = {
     id: 'search',
     label: 'Search project',
     chord: { key: 'f', ctrl: true, shift: true },
+    group: 'app'
+  },
+  /** F-10.2: the project-wide find and replace dialog. */
+  replaceProject: {
+    id: 'replaceProject',
+    label: 'Replace in project',
+    chord: { key: 'h', ctrl: true, shift: true },
     group: 'app'
   },
   focusMode: { id: 'focusMode', label: 'Focus mode', chord: { key: 'F11' }, group: 'app' },

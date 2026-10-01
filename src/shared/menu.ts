@@ -7,10 +7,10 @@ import { APP_SHORTCUTS, type Chord, type ShortcutId } from './shortcuts'
  * The one menu definition (F-7.1): main renders it as the native application menu (with the
  * F-2.7 chords as accelerators) and the renderer as the in-app menu bar, and every click on
  * either side becomes one `menu:action` handled by `runMenuAction`. Items whose feature is not
- * built are absent, never disabled or stubbed: Export… (F-12.1), Find (F-3.10) and Find &
- * Replace (F-10.2), Word count, Statistics, Goals, Drafts, Snapshots (F-10.x, F-8.x) join the
- * definition with their features; Character, Setting, and World-building note arrived with
- * F-9.3, References with F-9.6, Search project… with F-10.1. Edit items carry an Electron role, so the native menu
+ * built are absent, never disabled or stubbed: Export… (F-12.1), Find (F-3.10), Word count,
+ * Statistics, Goals, Drafts, Snapshots (F-10.x, F-8.x) join the definition with their features;
+ * Character, Setting, and World-building note arrived with F-9.3, References with F-9.6, Search
+ * project… with F-10.1, Replace in project… with F-10.2. Edit items carry an Electron role, so the native menu
  * edits natively; the in-app bar routes them through `menu:edit` to the same `webContents`
  * commands.
  */
@@ -26,6 +26,7 @@ export const MENU_ITEM_IDS = [
   'copy',
   'paste',
   'searchProject',
+  'replaceProject',
   'insertScene',
   'insertChapter',
   'insertPart',
@@ -117,7 +118,14 @@ export const MENU: readonly MenuSection[] = [
       { id: 'paste', label: 'Paste', editRole: 'paste', when: 'always' },
       SEPARATOR,
       // F-10.1: the project-wide search dialog.
-      { id: 'searchProject', label: 'Search project…', shortcut: 'search', when: 'project' }
+      { id: 'searchProject', label: 'Search project…', shortcut: 'search', when: 'project' },
+      // F-10.2: the project-wide find and replace dialog.
+      {
+        id: 'replaceProject',
+        label: 'Replace in project…',
+        shortcut: 'replaceProject',
+        when: 'project'
+      }
     ]
   },
   {

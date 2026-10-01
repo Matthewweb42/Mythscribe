@@ -58,6 +58,13 @@ import { WritingPresets } from '../presets'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
 import { ProposedTag } from '../proposedTags'
 import { QueryCitation, QuerySceneRef } from '../query'
+import {
+  ReplaceCommitRequest,
+  ReplaceCommitResult,
+  ReplacePreview,
+  ReplaceRequest,
+  ReplaceUndoResult
+} from '../replace'
 import { SearchRequest, SearchResponse } from '../search'
 import { ReferencePins } from '../references'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../rewrite'
@@ -795,6 +802,27 @@ export const contract = {
    * under `SEARCH_QUERY_MIN` characters answers no results, not an error.
    */
   'search:query': { input: SearchRequest, output: SearchResponse },
+  /**
+   * Project-wide find and replace (F-10.2), step one: the documents in the scope (`scopeId` and
+   * everything in it, or every document) whose stored text holds the query, in tree order, each
+   * with its occurrence count and a few before/after samples; at most `REPLACE_MAX_DOCUMENTS`.
+   * Nothing is written. An empty query answers no items; an unknown `scopeId` is NOT_FOUND.
+   */
+  'replace:preview': { input: ReplaceRequest, output: ReplacePreview },
+  /**
+   * Step two: replaces in the named documents, in one transaction, each recomputed from its
+   * content as stored now (never from the preview). Ids outside the scope and documents without
+   * a match are skipped. Everything a `document:save` does happens for each changed document,
+   * and their previous contents are kept for `replace:undo` until the next commit or the
+   * project closes.
+   */
+  'replace:commit': { input: ReplaceCommitRequest, output: ReplaceCommitResult },
+  /**
+   * Puts back the documents the last commit changed, each only if its stored content is still
+   * exactly what that commit wrote; the others are named in `skipped`. With nothing to undo it
+   * answers two empty lists.
+   */
+  'replace:undo': { input: z.undefined(), output: ReplaceUndoResult },
   /**
    * Every entity of the open project (F-9.1): the whole story bible in one call, ordered by kind
    * (characters, settings, world) and then by name, case- and whitespace-insensitively. The

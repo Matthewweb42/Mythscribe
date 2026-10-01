@@ -30,6 +30,15 @@ export interface AutosaveState<T> {
   docs: Record<string, LoadedRecord<T>>
   /** Loads `id` (waiting first for a pending save of the same id, so a remount reads its own last write). */
   load: (id: string) => Promise<void>
+  /**
+   * Reads the loaded records among `ids` again after main rewrote them behind the editor (find
+   * and replace, F-10.2). Whatever is still pending for them is dropped, never written: it is a
+   * draft of the text main just replaced, and saving it would silently undo the replacement.
+   * Callers flush first, so nothing the author typed is in that draft. Each record goes back to
+   * loading, so a mounted editor is rebuilt on the stored content. Ids that are not loaded are
+   * ignored.
+   */
+  reload: (ids: readonly string[]) => Promise<void>
   /** Saves any pending edit to `id` at once (without waiting), then forgets the record. */
   unload: (id: string) => void
   /** Records the latest editor state of `id` (on the record and as the pending save) and (re)starts its debounce timer. Ignored for ids that are not loaded. */
@@ -141,8 +150,12 @@ export function createAutosaveStore<T, R>({
   async function drain(wanted: (id: string) => boolean): Promise<void> {
     while (inflight !== null) await inflight.catch(() => undefined)
     let failure: { err: unknown } | null = null
-    for (const job of [...pending.values()]) {
-      if (!wanted(job.id)) continue
+    for (const queued of [...pending.values()]) {
+      if (!wanted(queued.id)) continue
+      // Read the job again: while an earlier write was on the wire, a `reload` may have dropped
+      // this one (F-10.2), or a newer edit replaced it.
+      const job = pending.get(queued.id)
+      if (job === undefined) continue
       pending.delete(job.id)
       inflight = write(job)
       try {
@@ -176,6 +189,20 @@ export function createAutosaveStore<T, R>({
       const stored = await read(id)
       if (loadTokens.get(id) !== mine) return // unloaded, cleared, or loaded again while in flight
       set((s) => ({ docs: { ...s.docs, [id]: { content: stored ?? empty, dirty: false } } }))
+    },
+
+    async reload(ids) {
+      // Drop the drafts first, synchronously: a flush that is writing another record resumes
+      // before this function does, and must not find them still queued (`drain` reads the job
+      // again). Callers flush before main rewrites, so nothing of these should be on the wire;
+      // if a write is, wait for it, so the read below shows what is really stored.
+      const loaded = ids.filter((id) => id in get().docs)
+      for (const id of loaded) {
+        cancelTimer(id)
+        pending.delete(id)
+      }
+      while (inflight !== null) await inflight.catch(() => undefined)
+      await Promise.all(loaded.map((id) => get().load(id)))
     },
 
     unload(id) {

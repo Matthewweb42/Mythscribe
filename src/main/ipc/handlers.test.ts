@@ -2382,6 +2382,140 @@ describe('search:query (F-10.1)', () => {
   })
 })
 
+describe('replace:* (F-10.2)', () => {
+  const request = (
+    query: string,
+    replacement: string
+  ): {
+    query: string
+    replacement: string
+    matchCase: boolean
+    wholeWord: boolean
+    scopeId: string | null
+  } => ({ query, replacement, matchCase: false, wholeWord: false, scopeId: null })
+
+  const prose = (
+    text: string
+  ): { type: string; content: { type: string; content: { type: string; text: string }[] }[] } => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+  })
+
+  /** A project whose first scene holds `text`; answers the scene's id. */
+  async function ready(text: string, name = 'Replace'): Promise<string> {
+    await invoke('project:create', { name, format: 'novel', directory: tmp })
+    const scene = manuscriptReadingOrder(await invoke('tree:list', undefined))[0]
+    if (scene === undefined) throw new Error('skeleton not seeded')
+    await invoke('document:save', { id: scene, content: prose(text) })
+    return scene
+  }
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('replace:preview', request('a', 'b'))).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('replace:commit', { ...request('a', 'b'), ids: [] })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+    await expect(invoke('replace:undo', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('previews, commits, and undoes over the stored document', async () => {
+    const scene = await ready('The Lantern swung. A lantern.')
+    const preview = await invoke('replace:preview', request('lantern', 'lamp'))
+    expect(preview).toMatchObject({
+      total: 1,
+      truncated: false,
+      items: [{ id: scene, count: 2 }]
+    })
+    expect((await invoke('document:get', { id: scene })).content).toEqual(
+      prose('The Lantern swung. A lantern.')
+    )
+
+    const committed = await invoke('replace:commit', {
+      ...request('lantern', 'oil lamp'),
+      ids: [scene]
+    })
+    expect(committed).toEqual({ changed: [{ id: scene, count: 2, wordCount: 7 }], total: 2 })
+    expect((await invoke('document:get', { id: scene })).content).toEqual(
+      prose('The oil lamp swung. A oil lamp.')
+    )
+    const tree = await invoke('tree:list', undefined)
+    expect(tree.find((row) => row.id === scene)?.wordCount).toBe(7)
+    // The search answers from the rewritten text, not from its cache.
+    const types: ['document'] = ['document']
+    expect((await invoke('search:query', { query: 'lantern', types, tagId: null })).total).toBe(0)
+    expect((await invoke('search:query', { query: 'oil lamp', types, tagId: null })).total).toBe(1)
+
+    expect(await invoke('replace:undo', undefined)).toEqual({
+      restored: [{ id: scene, wordCount: 5 }],
+      skipped: []
+    })
+    expect((await invoke('document:get', { id: scene })).content).toEqual(
+      prose('The Lantern swung. A lantern.')
+    )
+    expect(await invoke('replace:undo', undefined)).toEqual({ restored: [], skipped: [] })
+  })
+
+  it('refuses an unknown scope and a request over the limits', async () => {
+    await ready('A lantern.')
+    await expect(
+      invoke('replace:preview', { ...request('lantern', 'lamp'), scopeId: 'gone' })
+    ).rejects.toThrowError(/^NOT_FOUND: /)
+    await expect(
+      invoke('replace:preview', request('lantern', 'x'.repeat(1001)))
+    ).rejects.toThrowError(/^VALIDATION: /)
+  })
+
+  it('undo leaves a document saved since the commit alone', async () => {
+    const scene = await ready('A lantern.')
+    await invoke('replace:commit', { ...request('lantern', 'lamp'), ids: [scene] })
+    await invoke('document:save', { id: scene, content: prose('A lamp. And more.') })
+    expect(await invoke('replace:undo', undefined)).toEqual({ restored: [], skipped: [scene] })
+    expect((await invoke('document:get', { id: scene })).content).toEqual(
+      prose('A lamp. And more.')
+    )
+  })
+
+  it('forgets the undo when the project changes', async () => {
+    await ready('A lantern.')
+    const scene = manuscriptReadingOrder(await invoke('tree:list', undefined))[0] ?? ''
+    await invoke('replace:commit', { ...request('lantern', 'lamp'), ids: [scene] })
+    await invoke('project:close', undefined)
+    await ready('A lantern.', 'Other')
+    expect(await invoke('replace:undo', undefined)).toEqual({ restored: [], skipped: [] })
+  })
+
+  it('rescans the mentions of a replaced document, and again after the undo, like a save', async () => {
+    vi.useFakeTimers()
+    try {
+      const SCAN = 3_000
+      const scene = await ready('Mara waited at the landing.')
+      const rose = await invoke('tag:create', { name: 'Rose', category: 'character' })
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForNode', { nodeId: scene })).toEqual([])
+      vi.mocked(fakeWin.webContents.send).mockClear()
+
+      await invoke('replace:commit', { ...request('Mara', 'Rose'), ids: [scene] })
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForNode', { nodeId: scene })).toEqual([
+        { tagId: rose.id, nodeId: scene, count: 1, ranges: [[1, 5]] }
+      ])
+      const changed = (): string[] =>
+        vi
+          .mocked(fakeWin.webContents.send)
+          .mock.calls.filter(([channel]) => channel === 'mention:changed')
+          .flatMap(([, payload]) => (payload as { nodeIds: string[] }).nodeIds)
+      expect(changed()).toEqual([scene])
+
+      await invoke('replace:undo', undefined)
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForNode', { nodeId: scene })).toEqual([])
+      expect(changed()).toEqual([scene, scene])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('entity images (F-9.3)', () => {
   const PNG = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMwTpsJAAICATNWh+JUAAAAAElFTkSuQmCC',

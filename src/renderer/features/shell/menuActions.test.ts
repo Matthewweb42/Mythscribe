@@ -19,6 +19,7 @@ import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
+import { resetReplaceStore, useReplaceStore } from '@renderer/features/search/replaceStore'
 import { resetSearchStore, useSearchStore } from '@renderer/features/search/searchStore'
 import { resetWelcomeStore, useWelcomeStore } from '@renderer/features/project/welcomeStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -101,6 +102,7 @@ beforeEach(() => {
   resetImportStore()
   resetLayoutStore()
   resetSearchStore()
+  resetReplaceStore()
   resetShellDialogStore()
   resetUpdateStore()
   resetViewStore()
@@ -357,6 +359,22 @@ describe('runMenuAction (F-7.1)', () => {
     await runMenuAction('searchProject')
     expect(useSearchStore.getState().open).toBe(true)
     expect(useFocusStore.getState().active).toBe(true)
+  })
+
+  it('Edit › Replace in project… opens find and replace in place of the search, and needs a project (F-10.2)', async () => {
+    await runMenuAction('replaceProject')
+    expect(useReplaceStore.getState().open).toBe(false)
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE])
+    await withProject()
+    await runMenuAction('searchProject')
+    await runMenuAction('replaceProject')
+    // A second arrival of the same action (chord and accelerator) leaves it open.
+    await runMenuAction('replaceProject')
+    expect(useReplaceStore.getState().open).toBe(true)
+    expect(useSearchStore.getState().open).toBe(false)
+    await runMenuAction('searchProject')
+    expect(useReplaceStore.getState().open).toBe(false)
+    expect(useSearchStore.getState().open).toBe(true)
   })
 
   it('Tools › Tags opens the sidebar on the Tags tab, leaving focus mode first', async () => {

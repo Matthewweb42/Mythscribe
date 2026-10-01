@@ -100,6 +100,12 @@ import type { ProjectManager } from '../project/manager'
 import { isProjectFolder, projectFolderFor, sanitizeName } from '../project/projectStore'
 import { writeTextAtomic } from '../fs'
 import { renderDisclosure } from '../provenance/disclosure'
+import {
+  clearReplaceUndo,
+  commitReplace,
+  previewReplace,
+  undoReplace
+} from '../search/replaceStore'
 import { clearSearchCache, searchProject } from '../search/searchStore'
 import { buildProvenanceReport } from '../provenance/report'
 import {
@@ -418,20 +424,34 @@ export function registerHandlers({
 
   register('document:get', ({ id }) => getDocumentContent(manager.require().connection.orm, id))
 
-  // F-14.1: every save moves the voice profile's version (a cheap integer; checking whether the
-  // document is under the manuscript would cost a lookup on the hot path for nothing).
-  register('document:save', ({ id, content }) => {
-    const db = manager.require().connection.orm
-    const saved = saveDocument(db, id, content)
+  /**
+   * What follows every write of document content, whoever wrote it: the editor's `document:save`
+   * and the bulk writes of find and replace (F-10.2) both end here, so a replaced document is
+   * re-summarized and rescanned exactly like a typed one.
+   */
+  const documentsWritten = (db: TreeDb, ids: readonly string[]): void => {
+    if (ids.length === 0) return
+    // F-14.1: every save moves the voice profile's version (a cheap integer; checking whether the
+    // document is under the manuscript would cost a lookup on the hot path for nothing).
     bumpVoiceVersion()
     // F-5.6: the summary is rewritten once the author pauses, never on the save itself. The
     // gate is read here, not at run time: a save with summaries off must not show the pane
     // "Updating…" for a run that will never happen, nor leave a run queued for the moment the
     // toggle comes on (one settings row per save; the run gates again anyway).
-    if (isFeatureAllowed(getAiSettings(db), 'summary')) queue.touch('summary', id)
-    // F-4.12: the mention scan is local, so it has no gate to read — every save queues one, and
-    // the scan itself answers "nothing changed" for a node that is not a manuscript document.
-    mentionQueue.touch('mentions', id)
+    const summaries = isFeatureAllowed(getAiSettings(db), 'summary')
+    for (const id of ids) {
+      if (summaries) queue.touch('summary', id)
+      // F-4.12: the mention scan is local, so it has no gate to read — every save queues one, and
+      // the scan itself answers "nothing changed" for a node that is not a manuscript document.
+      // F-4.12b: a scan that read the document again republishes the proposed tags itself.
+      mentionQueue.touch('mentions', id)
+    }
+  }
+
+  register('document:save', ({ id, content }) => {
+    const db = manager.require().connection.orm
+    const saved = saveDocument(db, id, content)
+    documentsWritten(db, [id])
     return saved
   })
 
@@ -678,6 +698,39 @@ export function registerHandlers({
 
   // F-10.1: one scan of the stored text per query; a query under the minimum answers empty.
   register('search:query', (request) => searchProject(manager.require().connection.orm, request))
+
+  // F-10.2: find and replace across documents. The preview writes nothing; the commit and the
+  // undo are bulk document saves, so each ends in `documentsWritten`, once for the batch, and the
+  // cached search texts of the rewritten documents are dropped with the rest.
+  register('replace:preview', (request) =>
+    previewReplace(manager.require().connection.orm, request)
+  )
+
+  register('replace:commit', ({ ids, ...request }) => {
+    const db = manager.require().connection.orm
+    const result = commitReplace(db, request, ids)
+    if (result.changed.length > 0) {
+      clearSearchCache()
+      documentsWritten(
+        db,
+        result.changed.map((each) => each.id)
+      )
+    }
+    return result
+  })
+
+  register('replace:undo', () => {
+    const db = manager.require().connection.orm
+    const result = undoReplace(db)
+    if (result.restored.length > 0) {
+      clearSearchCache()
+      documentsWritten(
+        db,
+        result.restored.map((each) => each.id)
+      )
+    }
+    return result
+  })
 
   // F-9.1: the story bible. The whole set comes in one call; the renderer store (F-9.2) keeps it
   // normalized, so nothing here reloads the world after a write.
@@ -1639,6 +1692,8 @@ export function registerHandlers({
     // F-10.1: the cached searchable texts are keyed by node id, which means nothing in
     // another project.
     clearSearchCache()
+    // F-10.2: the last replace's undo holds another project's documents.
+    clearReplaceUndo()
     if (info) {
       queue.load()
       mentionQueue.load()

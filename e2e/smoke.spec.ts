@@ -725,6 +725,9 @@ test('create, close, reopen a project on disk', async () => {
   // step: where AI requests go.
   await page.getByRole('button', { name: 'New project' }).click()
   const wizard = page.getByRole('dialog')
+  // The name field takes focus as the wizard opens, so a key the author happens to press on the
+  // real keyboard lands in it (WSLg gives the window focus): empty it before testing the refusal.
+  await wizard.getByRole('textbox', { name: 'Project name' }).fill('')
   await wizard.getByRole('button', { name: 'Next' }).click()
   await expect(wizard.getByRole('alert')).toHaveText('A name is required')
   await wizard.getByRole('textbox', { name: 'Project name' }).fill('Smoke Novel')
@@ -1873,6 +1876,43 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
   await expect(maraVellRow).not.toHaveAttribute('aria-current', 'true')
   expect(await documentText(scene1Row.id)).toBe(SENTENCE)
+
+  // F-10.2: project-wide find and replace. Ctrl+Shift+H opens the dialog on its Find box;
+  // narrowed to the selected Scene 1, "storm" → "squall" previews one document with the change
+  // struck through and inserted; after the confirm the open editor and the stored document both
+  // read the new word, and Undo last replace puts the original back in both, so Scene 1 is
+  // exactly as the steps below expect.
+  const replaceDialog = page.getByRole('dialog', { name: 'Replace in project' })
+  await expect(replaceDialog).toHaveCount(0)
+  await page.keyboard.press('Control+Shift+H')
+  await expect(replaceDialog).toBeVisible()
+  const findBox = replaceDialog.getByRole('textbox', { name: 'Find' })
+  await expect(findBox).toBeFocused()
+  await findBox.fill('storm')
+  await replaceDialog.getByRole('textbox', { name: 'Replace with' }).fill('squall')
+  await replaceDialog.getByRole('radio', { name: 'Only Scene 1' }).check()
+  const replaceGroups = replaceDialog.getByTestId('replace-document')
+  await expect(replaceGroups).toHaveCount(1)
+  await expect(replaceGroups).toContainText('Scene 1')
+  await expect(replaceGroups).toContainText('1 occurrence')
+  await expect(replaceGroups.locator('del')).toHaveText(['storm'])
+  await expect(replaceGroups.locator('ins')).toHaveText(['squall'])
+  expect(await documentText(scene1Row.id)).toBe(SENTENCE)
+  await replaceDialog.getByRole('button', { name: 'Replace 1 occurrence in 1 document' }).click()
+  await page
+    .getByRole('dialog', { name: 'Replace across documents' })
+    .getByRole('button', { name: 'Replace', exact: true })
+    .click()
+  const REPLACED_SENTENCE = SENTENCE.replace('storm', 'squall')
+  await expect(editor).toContainText('The squall broke at dusk.')
+  await expect.poll(() => documentText(scene1Row.id), { timeout: 5000 }).toBe(REPLACED_SENTENCE)
+  await replaceDialog.getByRole('button', { name: 'Undo last replace' }).click()
+  await expect(editor).toContainText('The storm broke at dusk.')
+  await expect.poll(() => documentText(scene1Row.id), { timeout: 5000 }).toBe(SENTENCE)
+  await expect(replaceDialog.getByRole('button', { name: 'Undo last replace' })).toHaveCount(0)
+  await replaceDialog.getByRole('button', { name: 'Close replace' }).click()
+  await expect(replaceDialog).toHaveCount(0)
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
 
   await tomasRow.hover()
   await characterRows.getByRole('button', { name: 'Delete Tomas' }).click()

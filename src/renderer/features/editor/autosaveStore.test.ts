@@ -177,4 +177,47 @@ describe('createAutosaveStore', () => {
     b.saves[0]?.resolve(1)
     await flushing
   })
+
+  it('reload reads the loaded records again and drops their pending drafts unsaved (F-10.2)', async () => {
+    await loaded(a, 'n1')
+    await loaded(a, 'n2')
+    a.store.useStore.getState().edit('n1', 'a stale draft')
+    a.store.useStore.getState().edit('n2', 'kept')
+    const reloading = a.store.useStore.getState().reload(['n1', 'not-loaded'])
+    await settle()
+    // Back to loading, which is what rebuilds a mounted editor; only the loaded id is read.
+    expect(a.store.useStore.getState().docs.n1).toEqual({ content: null, dirty: false })
+    expect(a.gets.slice(2).map((get) => get.id)).toEqual(['n1'])
+    a.gets[2]?.resolve('rewritten by main')
+    await reloading
+    expect(a.store.useStore.getState().docs.n1).toEqual({
+      content: 'rewritten by main',
+      dirty: false
+    })
+    // The stale draft is never written, by the timer or by a flush; the other record's is.
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    expect(a.saves.map((save) => [save.id, save.content])).toEqual([['n2', 'kept']])
+    a.saves[0]?.resolve(1)
+    await settle()
+    await flushPendingSaves()
+    expect(a.saves).toHaveLength(1)
+  })
+
+  it('reload waits for a write already on the wire before it reads', async () => {
+    await loaded(a, 'n1')
+    a.store.useStore.getState().edit('n1', 'on the wire')
+    const flushing = a.store.useStore.getState().flush()
+    await settle()
+    expect(a.saves).toHaveLength(1)
+    const reloading = a.store.useStore.getState().reload(['n1'])
+    await settle()
+    expect(a.gets).toHaveLength(1)
+    a.saves[0]?.resolve(1)
+    await flushing
+    await settle()
+    expect(a.gets).toHaveLength(2)
+    a.gets[1]?.resolve('as stored')
+    await reloading
+    expect(a.store.useStore.getState().docs.n1).toEqual({ content: 'as stored', dirty: false })
+  })
 })

@@ -25,6 +25,7 @@ import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layou
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetReplaceStore, useReplaceStore } from './replaceStore'
 import { SearchButton, SearchDialog } from './SearchDialog'
 import { resetSearchStore, useSearchStore } from './searchStore'
 
@@ -128,6 +129,7 @@ beforeEach(() => {
   editor = null
   install()
   resetSearchStore()
+  resetReplaceStore()
   resetTagStore()
   resetEntityStore()
   resetFocusStore()
@@ -140,6 +142,7 @@ afterEach(() => {
   editor?.destroy()
   // The search debounce and the layout's debounced write must not fire into the next file.
   resetSearchStore()
+  resetReplaceStore()
   resetLayoutStore()
   resetActiveEditorStore()
   resetFocusStore()
@@ -349,5 +352,13 @@ describe('SearchDialog (F-10.1)', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     await waitFor(() => expect(useEntityStore.getState().selectedId).toBe('e-mara'))
     expect(useFocusStore.getState().active).toBe(false)
+  })
+
+  it('Replace… closes the search and opens find and replace on the same query (F-10.2)', async () => {
+    openWith(all)
+    await userEvent.click(within(dialog()).getByRole('button', { name: 'Replace…' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(useSearchStore.getState()).toMatchObject({ open: false, query: 'waited' })
+    expect(useReplaceStore.getState()).toMatchObject({ open: true, query: 'waited' })
   })
 })
