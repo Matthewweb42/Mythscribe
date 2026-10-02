@@ -6,10 +6,10 @@ const alias = { '@shared': resolve('src/shared'), '@renderer': resolve('src/rend
 
 export default defineConfig({
   test: {
-    // The repo lives on a slow /mnt/c mount: spawning a fork per file in parallel makes worker
-    // startup time out ("Failed to start forks worker"), and full isolation triples the run.
-    // Workers are reused across files, so every test file must reset module state (stores,
-    // the IPC client, registries) in beforeEach.
+    // Full isolation nearly triples the run (measured 2026-10-01 on the WSL ext4 clone: 64 s
+    // against 25 s), so workers are reused across files and every test file must reset module
+    // state (stores, the IPC client, registries) in beforeEach. What leaks anyway, and how to
+    // find the file that leaked it, is under Known gotchas in docs/ARCHITECTURE.md.
     maxWorkers: 4,
     isolate: false,
     projects: [

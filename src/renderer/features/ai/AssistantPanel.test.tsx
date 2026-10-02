@@ -493,6 +493,13 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     requestId
   })
 
+  // No store reset restores an action, and the workers share modules across files: left in
+  // place, the spy below is the `openScene` every later test file in this worker calls.
+  const realOpenScene = useAssistantStore.getState().openScene
+  afterEach(() => {
+    useAssistantStore.setState({ openScene: realOpenScene })
+  })
+
   /** Replaces `openScene` with a spy: the panel's buttons are what this describe checks. */
   function spyOnOpenScene(): ReturnType<typeof vi.fn> {
     const openScene = vi.fn(async () => {})

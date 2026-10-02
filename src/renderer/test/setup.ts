@@ -1,9 +1,19 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach } from 'vitest'
+import { resetActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
+import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetLayoutStore } from '@renderer/features/shell/layoutStore'
 
+// The workers are reused across files without isolation (`vitest.config.ts`), so what one test
+// leaves pending lands in whichever file the worker runs next. Any component can reach these
+// three, whatever the test file imports: a debounced `layout:set`, a jump waiting for its editor
+// (`editorFor`), a toast still showing. Registered first, so it runs after the file's own hooks.
 afterEach(() => {
   cleanup()
+  resetLayoutStore()
+  resetActiveEditorStore()
+  useDialogStore.setState({ modals: [], toasts: [] })
 })
 
 // ProseMirror measures ranges and hit-tests the document while it renders and tracks the

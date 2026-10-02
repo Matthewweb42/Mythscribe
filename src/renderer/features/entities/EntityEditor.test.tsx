@@ -1,9 +1,9 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { WORLD_CATEGORY_SUGGESTIONS } from '@shared/entities'
 import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
-import { openMention } from '@renderer/features/editor/openPassage'
+import { resetActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -22,12 +22,6 @@ import { EntityEditor } from './EntityEditor'
 import { resetEntityDraftStore, useEntityDraftStore } from './entityDraftStore'
 import { entityFixture } from './entityFixture'
 import { resetEntityStore, useEntityStore } from './entityStore'
-
-// The jump itself is `openPassage`'s business (F-4.12) and needs a mounted editor; here only the
-// call matters.
-vi.mock('@renderer/features/editor/openPassage', () => ({
-  openMention: vi.fn(() => Promise.resolve())
-}))
 
 type Handler = (input: unknown) => unknown
 
@@ -114,11 +108,13 @@ describe('EntityEditor (F-9.3)', () => {
     resetMentionStore()
     resetLayoutStore()
     useTreeStore.getState().clear()
-    vi.mocked(openMention).mockClear()
+    resetActiveEditorStore()
     useDialogStore.setState({ modals: [], toasts: [] })
   })
   afterEach(() => {
     cleanup()
+    // Gives up the wait the F-9.4 jump leaves open (no editor is mounted here).
+    resetActiveEditorStore()
     resetEntityDraftStore()
     resetPendingSaves()
     resetTagStore()
@@ -351,9 +347,11 @@ describe('EntityEditor (F-9.3)', () => {
     expect(await screen.findByText('In 2 scenes')).toBeInTheDocument()
     expect(sceneRows()).toEqual(['Scene 1Chapter 1×2', 'Scene 4Chapter 4Tagged×1'])
 
-    // A mentioned row jumps to the first occurrence…
+    // A mentioned row jumps to the first occurrence: `openMention` (F-4.12) selects the scene at
+    // once and waits for its editor, which nothing mounts here. The real module on purpose: a
+    // `vi.mock` does not reach an `EntityEditor` another file in this worker already imported.
     await user.click(screen.getByRole('button', { name: /^Scene 1/ }))
-    expect(vi.mocked(openMention).mock.calls.at(-1)).toEqual(['sc-1', [4, 8], 'mara'])
+    expect(useTreeStore.getState().selectedId).toBe('sc-1')
   })
 
   it('selects the document for a row that is only tagged, and says so without a tag (F-9.4)', async () => {
@@ -367,7 +365,6 @@ describe('EntityEditor (F-9.3)', () => {
     })
     expect(await screen.findByText('In 1 scene')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /^Scene 2/ }))
-    expect(vi.mocked(openMention)).not.toHaveBeenCalled()
     expect(useTreeStore.getState().selectedId).toBe('sc-2')
     // F-9.3: opening a document closes the entity page.
     expect(useEntityStore.getState().selectedId).toBeNull()

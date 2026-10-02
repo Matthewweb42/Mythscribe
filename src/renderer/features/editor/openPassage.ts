@@ -1,15 +1,13 @@
-import type { Editor } from '@tiptap/core'
 import type { Node as PmNode } from '@tiptap/pm/model'
 import { nameWords, type MentionRange } from '@shared/mentions'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
-import { useActiveEditorStore, type ActiveEditor } from './activeEditorStore'
+import { editorFor, OPEN_SCENE_TIMEOUT_MS } from './activeEditorStore'
 import { locateText, type TextRange } from './locateText'
 
 /** The toast when a passage another feature points at is no longer in the document (F-5.7, F-4.12). */
 export const PASSAGE_GONE_MESSAGE = 'That passage is no longer in the scene'
-/** How long `openPassage` waits for the document it selected to mount its editor. */
-export const OPEN_SCENE_TIMEOUT_MS = 3_000
+export { OPEN_SCENE_TIMEOUT_MS }
 
 /**
  * Opens `nodeId` and selects the passage `locate` finds in its document (F-5.7's cited quotes,
@@ -52,30 +50,5 @@ export function openMention(nodeId: string, range: MentionRange, name: string): 
     }
     // The tag's name is kebab-case, the prose may capitalize it: the search ignores case.
     return locateText(doc, words, { ignoreCase: true })
-  })
-}
-
-/**
- * The live editor of `nodeId`: the one already registered, or the one the document mounts after
- * the selection changed. Null when none arrives within `OPEN_SCENE_TIMEOUT_MS` (the document is
- * open all the same; only the passage cannot be selected).
- */
-export function editorFor(nodeId: string): Promise<Editor | null> {
-  const liveOne = (active: ActiveEditor | null): Editor | null =>
-    active !== null && active.id === nodeId && !active.editor.isDestroyed ? active.editor : null
-  const current = liveOne(useActiveEditorStore.getState().active)
-  if (current !== null) return Promise.resolve(current)
-  return new Promise((resolve) => {
-    let stopWatching: (() => void) | null = null
-    const settle = (editor: Editor | null): void => {
-      clearTimeout(waiting)
-      stopWatching?.()
-      resolve(editor)
-    }
-    const waiting = setTimeout(() => settle(null), OPEN_SCENE_TIMEOUT_MS)
-    stopWatching = useActiveEditorStore.subscribe((state) => {
-      const editor = liveOne(state.active)
-      if (editor !== null) settle(editor)
-    })
   })
 }
