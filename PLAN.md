@@ -131,6 +131,27 @@ embedding as an option. Store vectors in SQLite (sqlite-vec) so the project stay
 
 ---
 
+### 2.6 The assisted workflow (decided 2026-10-01; F-5.16, F-4.13, F-13.4, F-14.12, F-5.17, F-5.18, F-14.13)
+
+The author's description of the product: they write and keep writing; the AI does the bookkeeping
+behind them. It tags names, places, in-world words, tones, and themes; it logs character
+descriptions and details as they appear; the chat is always open for "what happened here?" or "what
+colour is her hair?"; it raises inconsistencies and suggests the fix in the text; and a few
+one-click buttons cover the common asks ("What should come next?", "Proofread", "Check
+consistency"). Tags tell the AI how to style its suggestions.
+
+What this changes in the design:
+
+- **Derived data is applied without asking; prose never is.** Auto-applied tags (F-4.13) and
+  observed facts (F-5.16) are treated like scene summaries: their own storage, marked as AI-made,
+  removable in one click, costed in the ledger, never in the manuscript. Every change to the
+  author's words stays a proposal (F-14.5). The author's own entity sheet wins over observed facts.
+- **One background request per scene.** Summary, observed facts, and tags come from one structured
+  `fast` call per burst of edits, through the job queue, invalidated by content hash.
+- **Continuity moves before launch.** F-13.4 reads the sheets and the observed facts, cites both
+  passages, and posts findings to the chat with a diff fix.
+- **Order.** M3.5 comes before the rest of M4 (goals, word count, statistics): it is the product.
+
 ## 3. AI architecture (low level)
 
 ```
