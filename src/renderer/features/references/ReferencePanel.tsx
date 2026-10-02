@@ -1,13 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ImagePlus, Pin } from 'lucide-react'
 import { LAYOUT_LIMITS } from '@shared/layout'
-import { pinKey, type ReferencePin } from '@shared/references'
+import { hasPin, pinKey, type ReferencePin } from '@shared/references'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
-import { ReferenceCard } from './ReferenceCard'
+import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { useMentionStore } from '@renderer/features/tags/mentionStore'
+import { describeError } from '@renderer/lib/errors'
+import { ReferenceCard, SceneEntityCard } from './ReferenceCard'
 import { useReferenceStore } from './referenceStore'
+import { sceneEntityIds, useOpenSceneId } from './sceneEntities'
+
+const SECTION_LABEL = 'm-0 text-xs font-medium tracking-wide text-fg-subtle uppercase'
+const CARD_LIST = 'm-0 flex list-none flex-col gap-2 p-0'
 
 /** The header toggle for the reference panel (F-9.6); `aria-pressed` reflects whether it is open. */
 export function ReferencesToggleButton(): React.JSX.Element {
@@ -63,8 +71,62 @@ export function ReferencePanel(): React.JSX.Element | null {
           Add image…
         </button>
       </div>
-      <PinList />
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 pb-4">
+        <InThisScene />
+        <PinList />
+      </div>
     </aside>
+  )
+}
+
+/**
+ * The automatic section above the pins (F-9.7): a card for every entity the open scene names,
+ * from what main's mention scan recorded (F-4.12, refreshed after each save) and the scene's
+ * tag links. Nothing is asked of any AI. An entity the author pinned shows once, among the
+ * pins. Not rendered when no scene is open.
+ */
+function InThisScene(): React.JSX.Element | null {
+  const sceneId = useOpenSceneId()
+  const mentions = useMentionStore((s) => (sceneId === null ? undefined : s.byNode[sceneId]))
+  const tagIds = useDocumentTagStore((s) =>
+    sceneId === null ? undefined : s.tagIdsByNode[sceneId]
+  )
+  const entities = useEntityStore((s) => s.byId)
+  const pins = useReferenceStore((s) => s.pins)
+
+  useEffect(() => {
+    if (sceneId === null) return
+    // The panel shows beside an entity page too, where no tag bar has loaded the scene's rows.
+    const failed = (err: unknown): void => void toast.error(describeError(err))
+    useMentionStore.getState().loadForNode(sceneId).catch(failed)
+    useDocumentTagStore.getState().load(sceneId).catch(failed)
+  }, [sceneId])
+
+  const ids = useMemo(
+    () => sceneEntityIds(Object.values(entities), mentions ?? [], tagIds ?? []),
+    [entities, mentions, tagIds]
+  )
+  if (sceneId === null) return null
+  const shown = ids.filter((id) => !hasPin(pins, { type: 'entity', id }))
+
+  return (
+    <section aria-label="In this scene" className="flex flex-col gap-2 pb-2">
+      <p className={SECTION_LABEL}>In this scene</p>
+      {shown.length === 0 ? (
+        <p className="m-0 text-sm text-fg-muted">
+          {ids.length === 0
+            ? 'No one from your story bible is named in this scene yet.'
+            : 'Everyone named in this scene is pinned below.'}
+        </p>
+      ) : (
+        <ul role="list" aria-label="In this scene" className={CARD_LIST}>
+          {shown.map((id) => (
+            <SceneEntityCard key={id} id={id} />
+          ))}
+        </ul>
+      )}
+      <p className={SECTION_LABEL}>Pinned</p>
+    </section>
   )
 }
 
@@ -91,7 +153,7 @@ function PinList(): React.JSX.Element {
 
   if (shown.length === 0) {
     return (
-      <p className="m-0 px-4 py-2 text-sm text-fg-muted">
+      <p className="m-0 text-sm text-fg-muted">
         Nothing pinned yet. Pin a character, a setting, notes, or an image.
       </p>
     )
@@ -106,11 +168,7 @@ function PinList(): React.JSX.Element {
   }
 
   return (
-    <ul
-      role="list"
-      aria-label="Pinned references"
-      className="m-0 flex min-h-0 flex-1 list-none flex-col gap-2 overflow-y-auto px-4 pt-0 pb-4"
-    >
+    <ul role="list" aria-label="Pinned references" className={CARD_LIST}>
       {shown.map(({ pin, index }, place) => {
         const previous = shown[place - 1]
         const next = shown[place + 1]

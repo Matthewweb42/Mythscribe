@@ -1819,7 +1819,10 @@ test('create, close, reopen a project on disk', async () => {
   // are then unpinned and the panel closed, so the steps below run on the layout they expect
   // (the reopen dropped the selection and the list view, which are put back).
   const referencesPanel = page.getByTestId('references-panel')
-  const referenceTitles = referencesPanel.getByRole('heading', { level: 3 })
+  // Scoped to the pins: since F-9.7 the panel also lists the open scene's entities above them.
+  const referenceTitles = referencesPanel
+    .getByRole('list', { name: 'Pinned references' })
+    .getByRole('heading', { level: 3 })
   await expect(referencesPanel).toHaveCount(0)
   await tomasRow.click()
   await expect(entityName).toHaveValue('Tomas')
@@ -3383,6 +3386,47 @@ test('create, close, reopen a project on disk', async () => {
   await expect(entityEditor).toHaveCount(0)
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+
+  // F-9.7: in this scene. Scene 1 names Kael and Mara, so the References panel opens with a card
+  // for each above the pins, with no pin and no click; Kael's shows what his page holds. Pin
+  // moves his card to the pins, where it stays when Opening (which names no one) is opened.
+  // No request is made by any of it. The pin and the panel are then put back.
+  const sceneRequestsBefore = openAiRequests.length
+  await page.getByRole('button', { name: 'References', exact: true }).click()
+  const inThisScene = referencesPanel.getByRole('list', { name: 'In this scene' })
+  // The cards by their labels: a card's observed facts carry a heading and list items of their own.
+  const sceneTitles = (): Promise<(string | null)[]> =>
+    inThisScene
+      .locator(':scope > li')
+      .evaluateAll((cards) => cards.map((card) => card.getAttribute('aria-label')))
+  await expect.poll(sceneTitles).toEqual(['Kael', 'Mara'])
+  await expect(inThisScene.getByRole('listitem', { name: 'Kael', exact: true })).toContainText(
+    'Personality: Watchful'
+  )
+  await expect(inThisScene.getByRole('listitem', { name: 'Mara', exact: true })).toContainText(
+    'Waits out the storm'
+  )
+  await expect(referencesPanel.getByText('Nothing pinned yet.')).toBeVisible()
+  await inThisScene.getByRole('button', { name: 'Pin Kael' }).click()
+  await expect.poll(sceneTitles).toEqual(['Mara'])
+  await expect(referenceTitles).toHaveText(['Kael'])
+  await opening.getByText('Opening', { exact: true }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Opening')
+  await expect(inThisScene).toHaveCount(0)
+  await expect(
+    referencesPanel.getByText('No one from your story bible is named in this scene yet.')
+  ).toBeVisible()
+  await expect(referenceTitles).toHaveText(['Kael'])
+  await scene1.click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await expect.poll(sceneTitles).toEqual(['Mara'])
+  await referencesPanel.getByRole('button', { name: 'Unpin Kael' }).click()
+  await expect.poll(sceneTitles).toEqual(['Kael', 'Mara'])
+  await expect.poll(referencePins).toEqual([])
+  expect(openAiRequests).toHaveLength(sceneRequestsBefore)
+  await page.getByRole('button', { name: 'References', exact: true }).click()
+  await expect(referencesPanel).toHaveCount(0)
+  await expect.poll(async () => (await getLayout()).references.open).toBe(false)
 
   // F-14.11: the beta reader. Reading up to Scene 1 sends the strong tier the scene in full
   // and the stored summaries of the manuscript documents before it: Opening has none (it is

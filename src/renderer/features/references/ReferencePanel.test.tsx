@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
 import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
+import type { TagMentions } from '@shared/mentions'
 import type { ObservedFact } from '@shared/observedFacts'
 import type { ReferencePin, ReferencePins } from '@shared/references'
 import type { TiptapNodeT } from '@shared/tiptap'
@@ -17,6 +18,9 @@ import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { resetMentionStore, useMentionStore } from '@renderer/features/tags/mentionStore'
+import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { ReferencePanel, ReferencesToggleButton } from './ReferencePanel'
 import { resetReferenceStore, useReferenceStore } from './referenceStore'
@@ -38,6 +42,8 @@ let pins: ReferencePin[]
 let entities: Entity[]
 let notes: Record<string, TiptapNodeT>
 let facts: ObservedFact[]
+let mentions: TagMentions[]
+let linkedTags: Record<string, Output<'documentTag:list'>>
 let sets: ReferencePins[]
 let calls: Channel[]
 let addAnswer: Output<'reference:addImages'>
@@ -58,6 +64,14 @@ function client(): IpcClient {
         return facts.filter((fact) => fact.entityId === entityId) as Output<C>
       }
       if (channel === 'tree:list') return treeFixture as Output<C>
+      if (channel === 'mention:listForNode') {
+        const { nodeId } = input as Input<'mention:listForNode'>
+        return mentions.filter((mention) => mention.nodeId === nodeId) as Output<C>
+      }
+      if (channel === 'documentTag:list') {
+        const { nodeId } = input as Input<'documentTag:list'>
+        return (linkedTags[nodeId] ?? []) as Output<C>
+      }
       if (channel === 'layout:set') return input as Output<C>
       if (channel === 'notes:get') {
         const { id } = input as Input<'notes:get'>
@@ -100,6 +114,8 @@ function reset(): void {
   resetReferenceStore()
   resetEntityStore()
   resetObservedFactStore()
+  resetMentionStore()
+  resetDocumentTagStore()
   resetNotesStore()
   resetLayoutStore()
   resetPendingSaves()
@@ -114,6 +130,8 @@ beforeEach(() => {
   entities = entityFixture
   notes = { 'sc-1': doc('She never takes the coast road.') }
   facts = []
+  mentions = []
+  linkedTags = {}
   sets = []
   calls = []
   addAnswer = null
@@ -382,5 +400,83 @@ describe('the cards (F-9.6)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'View Harbor-Map.png larger' }))
     await userEvent.click(screen.getByRole('button', { name: 'Close image' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+})
+
+describe('In this scene (F-9.7)', () => {
+  const linked = (id: string, tagId: string): Entity => {
+    const entity = entityFixture.find((item) => item.id === id)
+    if (!entity) throw new Error(`no entity ${id}`)
+    return { ...entity, tagId }
+  }
+  const sceneCards = (): (string | null)[] =>
+    within(screen.getByRole('list', { name: 'In this scene' }))
+      .getAllByRole('listitem')
+      .map((item) => item.getAttribute('aria-label'))
+  const base = tagFixture[0]
+  const tag = base ? { ...base, id: 't-aldous', name: 'aldous' } : undefined
+
+  beforeEach(() => {
+    if (!tag) throw new Error('the tag fixture is empty')
+    pins = []
+    entities = [
+      linked('e-mara', 't-mara'),
+      linked('e-forest', 't-forest'),
+      linked('e-aldous', tag.id)
+    ]
+    mentions = [
+      { tagId: 't-mara', nodeId: 'sc-1', count: 1, ranges: [[30, 34]] },
+      { tagId: 't-forest', nodeId: 'sc-1', count: 1, ranges: [[4, 15]] },
+      { tagId: 't-mara', nodeId: 'sc-2', count: 1, ranges: [[1, 5]] }
+    ]
+    linkedTags = { 'sc-1': [tag] }
+  })
+
+  it('is not shown while no scene is open', async () => {
+    await openPanel()
+    expect(screen.queryByRole('region', { name: 'In this scene' })).not.toBeInTheDocument()
+    expect(calls).not.toContain('mention:listForNode')
+  })
+
+  it('shows a card for every entity the open scene names or is tagged with, sheet included', async () => {
+    await openPanel()
+    act(() => useTreeStore.getState().select('sc-1'))
+    await waitFor(() => expect(sceneCards()).toEqual(['Dark Forest', 'Mara', 'Aldous']))
+    const section = screen.getByRole('region', { name: 'In this scene' })
+    expect(section).toHaveTextContent('Tall, with a scar across her left palm.')
+    expect(within(section).queryByRole('button', { name: 'Move up' })).not.toBeInTheDocument()
+    expect(screen.getByText('Nothing pinned yet.', { exact: false })).toBeInTheDocument()
+  })
+
+  it('follows the scene the author opens and the scan of the open scene', async () => {
+    await openPanel()
+    act(() => useTreeStore.getState().select('sc-1'))
+    await waitFor(() => expect(sceneCards()).toHaveLength(3))
+    act(() => useTreeStore.getState().select('sc-2'))
+    await waitFor(() => expect(sceneCards()).toEqual(['Mara']))
+    mentions = [{ tagId: 't-forest', nodeId: 'sc-2', count: 1, ranges: [[2, 13]] }]
+    await act(async () => {
+      await useMentionStore.getState().loadForNode('sc-2')
+    })
+    expect(sceneCards()).toEqual(['Dark Forest'])
+    act(() => useTreeStore.getState().select('sc-3'))
+    await waitFor(() =>
+      expect(
+        screen.getByText('No one from your story bible is named in this scene yet.')
+      ).toBeInTheDocument()
+    )
+  })
+
+  it('Pin keeps a card: it moves to the pins and stays when the scene changes', async () => {
+    await openPanel()
+    act(() => useTreeStore.getState().select('sc-1'))
+    await waitFor(() => expect(sceneCards()).toHaveLength(3))
+    await userEvent.click(screen.getByRole('button', { name: 'Pin Dark Forest' }))
+    expect(sceneCards()).toEqual(['Mara', 'Aldous'])
+    expect(titles()).toEqual(['Dark Forest'])
+    expect(sets.at(-1)).toEqual({ pins: [FOREST] })
+    act(() => useTreeStore.getState().select('sc-3'))
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'In this scene' })).toBeNull())
+    expect(titles()).toEqual(['Dark Forest'])
   })
 })

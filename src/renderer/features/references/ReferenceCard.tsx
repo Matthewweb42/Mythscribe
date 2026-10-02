@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type DragEvent, type KeyboardEvent } from 'react'
-import { ChevronDown, ChevronUp, PinOff, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Pin, PinOff, X } from 'lucide-react'
 import { assetDisplayName } from '@shared/assets'
 import { docToText } from '@shared/docText'
 import { ENTITY_FIELDS, ENTITY_KIND_NOUN, entityImageUrl, kindHasImage } from '@shared/entities'
@@ -68,20 +68,52 @@ export function ReferenceCard({
   }
 }
 
-/** The header every card shares (title, what it is, move, unpin) around the card's own body. */
+const CARD = 'flex flex-col gap-2 rounded-md border border-line bg-bg p-2.5'
+
+/**
+ * The header every card shares (title, what it is, move, unpin) around the card's own body. A
+ * card without a `frame` is one the panel put there itself (F-9.7): it has no place to move to
+ * and nothing to unpin, and offers `Pin` instead.
+ */
 function CardFrame({
   title,
   typeLabel,
   frame,
-  onUnpin,
+  onPinToggle,
   children
 }: {
   title: string
   typeLabel: string
-  frame: CardFrameProps
-  onUnpin: () => void
+  frame: CardFrameProps | null
+  /** Unpins a pinned card; pins an automatic one. */
+  onPinToggle: () => void
   children: React.ReactNode
 }): React.JSX.Element {
+  const heading = (
+    <>
+      <h3 className="m-0 truncate text-sm font-medium">{title}</h3>
+      <p className="m-0 text-xs text-fg-subtle">{typeLabel}</p>
+    </>
+  )
+  if (frame === null) {
+    return (
+      <li aria-label={title} className={CARD}>
+        <div className="flex items-start gap-1">
+          <div className="min-w-0 flex-1">{heading}</div>
+          <button
+            type="button"
+            aria-label={`Pin ${title}`}
+            title="Pin"
+            onClick={onPinToggle}
+            className={ICON_BUTTON}
+          >
+            <Pin size={14} aria-hidden="true" />
+          </button>
+        </div>
+        {children}
+      </li>
+    )
+  }
   return (
     <li
       aria-label={title}
@@ -92,13 +124,10 @@ function CardFrame({
       onDragLeave={frame.onDragLeave}
       onDrop={frame.onDrop}
       onDragEnd={frame.onDragEnd}
-      className="flex flex-col gap-2 rounded-md border border-line bg-bg p-2.5 data-[drop-target=true]:border-accent"
+      className={`${CARD} data-[drop-target=true]:border-accent`}
     >
       <div className="flex items-start gap-1">
-        <div className="min-w-0 flex-1 cursor-grab">
-          <h3 className="m-0 truncate text-sm font-medium">{title}</h3>
-          <p className="m-0 text-xs text-fg-subtle">{typeLabel}</p>
-        </div>
+        <div className="min-w-0 flex-1 cursor-grab">{heading}</div>
         <button
           type="button"
           aria-label="Move up"
@@ -123,7 +152,7 @@ function CardFrame({
           type="button"
           aria-label={`Unpin ${title}`}
           title="Unpin"
-          onClick={onUnpin}
+          onClick={onPinToggle}
           className={ICON_BUTTON}
         >
           <PinOff size={14} aria-hidden="true" />
@@ -132,6 +161,14 @@ function CardFrame({
       {children}
     </li>
   )
+}
+
+/**
+ * The card of an entity named in the open scene (F-9.7): the pinned entity card without a place
+ * in the author's order. `Pin` adds it to the pins, where it stays when the scene changes.
+ */
+export function SceneEntityCard({ id }: { id: string }): React.JSX.Element | null {
+  return <EntityCard pin={{ type: 'entity', id }} id={id} frame={null} />
 }
 
 function MoreToggle({
@@ -164,7 +201,7 @@ function EntityCard({
 }: {
   pin: ReferencePin
   id: string
-  frame: CardFrameProps
+  frame: CardFrameProps | null
 }): React.JSX.Element | null {
   const entity = useEntityStore((s) => s.byId[id])
   const [expanded, setExpanded] = useState(false)
@@ -187,7 +224,7 @@ function EntityCard({
       title={entity.name}
       typeLabel={capitalize(ENTITY_KIND_NOUN[entity.kind])}
       frame={frame}
-      onUnpin={() => unpin(pin)}
+      onPinToggle={() => (frame === null ? void useReferenceStore.getState().pin(pin) : unpin(pin))}
     >
       {kindHasImage(entity.kind) && entity.image !== null ? (
         <img
@@ -309,7 +346,7 @@ function NoteCard({
       title={title}
       typeLabel={parentTitle === undefined ? 'Notes' : `Notes · ${parentTitle}`}
       frame={frame}
-      onUnpin={() => unpin(pin)}
+      onPinToggle={() => unpin(pin)}
     >
       {text === null ? null : text === '' ? (
         <p className="m-0 text-xs text-fg-muted">No notes yet.</p>
@@ -364,7 +401,7 @@ function ImageCard({
   }
 
   return (
-    <CardFrame title={name} typeLabel="Image" frame={frame} onUnpin={() => void confirmUnpin()}>
+    <CardFrame title={name} typeLabel="Image" frame={frame} onPinToggle={() => void confirmUnpin()}>
       <button
         type="button"
         aria-label={`View ${name} larger`}
