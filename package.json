@@ -16,7 +16,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "electron-vite build && playwright test",
+    "test:e2e": "electron-vite build && node e2e/run.mjs",
     "eval:ai": "vitest run --project eval",
     "db:generate": "drizzle-kit generate",
     "postinstall": "electron-builder install-app-deps",

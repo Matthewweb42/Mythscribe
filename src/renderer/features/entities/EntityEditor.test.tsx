@@ -22,6 +22,7 @@ import { EntityEditor } from './EntityEditor'
 import { resetEntityDraftStore, useEntityDraftStore } from './entityDraftStore'
 import { entityFixture } from './entityFixture'
 import { resetEntityStore, useEntityStore } from './entityStore'
+import { resetObservedFactStore } from './observedFactStore'
 
 type Handler = (input: unknown) => unknown
 
@@ -34,6 +35,8 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       const override = overrides[channel]
       if (override) return override(input) as Output<C>
       if (channel === 'entity:list') return entityFixture as Output<C>
+      // F-5.16: the page asks for the entity's observed facts; none unless a test supplies them.
+      if (channel === 'observedFact:listForEntity') return [] as Output<C>
       // The layout store writes after its own debounce when the Tag Manager is opened (F-9.4).
       if (channel === 'layout:set') return input as Output<C>
       if (channel === 'entity:update') {
@@ -102,6 +105,7 @@ describe('EntityEditor (F-9.3)', () => {
     resetPendingSaves()
     resetEntityDraftStore()
     resetEntityStore()
+    resetObservedFactStore()
     resetReferenceStore()
     resetTagStore()
     resetDocumentTagStore()

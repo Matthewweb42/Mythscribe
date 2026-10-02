@@ -11,7 +11,7 @@ import {
 } from 'drizzle-orm/sqlite-core'
 // Relative on purpose: drizzle-kit loads this file without the `@shared` path alias.
 import { AI_PROVIDER_IDS } from '../../shared/ai'
-import { ENTITY_KINDS, ENTITY_TEMPLATES } from '../../shared/entities'
+import { ENTITY_KINDS, ENTITY_ORIGINS, ENTITY_TEMPLATES } from '../../shared/entities'
 import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
 import { TAG_CATEGORIES } from '../../shared/tags'
@@ -372,6 +372,8 @@ export const entity = sqliteTable(
     image: text('image'),
     /** F-9.4 writes it; null everywhere until then. */
     tagId: text('tag_id').references(() => tag.id, { onDelete: 'set null' }),
+    /** F-5.16: `ai` for an entity the story-bible job created, until the author's first edit. */
+    origin: text('origin', { enum: ENTITY_ORIGINS }).notNull().default('author'),
     created: text('created').notNull(),
     modified: text('modified').notNull()
   },
@@ -379,3 +381,36 @@ export const entity = sqliteTable(
 )
 export type EntityRow = typeof entity.$inferSelect
 export type EntityInsert = typeof entity.$inferInsert
+
+/**
+ * One thing the manuscript states about an entity (F-5.16): the attribute (a field id of the
+ * entity's kind, `OBSERVED_ATTRIBUTES`), the value, and the passage of the scene it was read
+ * from. Written by the background story-bible job with the scene's summary, never by the author,
+ * and kept apart from the entity's own `fields` and `body`. Cascaded from both ends: neither a
+ * deleted entity nor a deleted scene leaves facts behind. `hidden` is the author's "this one is
+ * wrong": the row stays as a tombstone so re-reading the scene does not bring the fact back.
+ */
+export const observedFact = sqliteTable(
+  'observed_fact',
+  {
+    id: text('id').primaryKey(),
+    entityId: text('entity_id')
+      .notNull()
+      .references(() => entity.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    attribute: text('attribute').notNull(),
+    value: text('value').notNull(),
+    /** The words of the scene the fact was read from; what a jump to the passage selects. */
+    quote: text('quote').notNull(),
+    hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at').notNull()
+  },
+  (t) => [
+    index('observed_fact_entity_idx').on(t.entityId),
+    index('observed_fact_node_idx').on(t.nodeId)
+  ]
+)
+export type ObservedFactRow = typeof observedFact.$inferSelect
+export type ObservedFactInsert = typeof observedFact.$inferInsert

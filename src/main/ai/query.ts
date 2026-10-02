@@ -4,6 +4,7 @@ import { findQuote, normalizeForMatch } from '@shared/critique'
 import {
   QUERY_ALSO_MAX,
   QUERY_ANSWER_MAX,
+  QUERY_BIBLE_TOKEN_BUDGET,
   QUERY_MAX_CITATIONS,
   QUERY_QUOTE_MAX,
   QUERY_SCENE_CHAR_FLOOR,
@@ -12,6 +13,7 @@ import {
   type QueryCitation,
   type QuerySceneRef
 } from '@shared/query'
+import { renderStoryBibleEntities } from '@shared/storyBible'
 import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
@@ -19,7 +21,7 @@ import { headTruncate } from './context/chatContext'
 import { rankCandidates } from './context/queryContext'
 import { assertFeatureAllowed } from './dial'
 import type { ChatTurn } from './prompts/chat.v1'
-import { buildQueryPrompt } from './prompts/query.v1'
+import { buildQueryPromptV2 } from './prompts/query.v2'
 import { AiFallbackError, type AiMessage, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -89,7 +91,10 @@ const BAD_FORMAT = 'The model did not answer in the expected format.'
  * below Ask or with the feature off), then the manuscript must hold at least one document with
  * text, then retrieval: `rankCandidates` scores every manuscript document locally and hands
  * back the top few in full, the next few as their stored summaries, and the whole ranked list.
- * Never the whole manuscript (CLAUDE.md, token rule 2).
+ * Never the whole manuscript (CLAUDE.md, token rule 2). Since F-5.16 the story bible rides along
+ * for the entities the question names — the author's sheets, then the observed facts with the
+ * scene each was read from, within `QUERY_BIBLE_TOKEN_BUDGET` — to orient the answer; it is
+ * never a citation source.
  *
  * `fitQueryPrompt` then counts before sending (token rule 8) and trims by priority rather than
  * failing: the full scenes shrink to their floor first, then the summaries go, then the
@@ -137,22 +142,27 @@ export async function runQuery(
         ]
   )
 
+  const bibleLines = renderStoryBibleEntities(candidates.bible, QUERY_BIBLE_TOKEN_BUDGET)
+  const bible = bibleLines.length > 0 ? bibleLines.join('\n') : null
+
   const fit = fitQueryPrompt(
     { full, summaries, history: input.history },
     inputBudget('query'),
     (scenes, summarised, history) =>
-      buildQueryPrompt({
+      buildQueryPromptV2({
         full: scenes,
         summaries: summarised,
         history,
-        question: input.message
+        question: input.message,
+        bible
       }).messages
   )
-  const prompt = buildQueryPrompt({
+  const prompt = buildQueryPromptV2({
     full: fit.full,
     summaries: fit.summaries,
     history: fit.history,
-    question: input.message
+    question: input.message,
+    bible
   })
 
   const result = await runAiRequest(deps, {
@@ -166,7 +176,8 @@ export async function runQuery(
         question: input.message,
         history: fit.history,
         full: fit.full.map((scene) => [scene.nodeId, scene.text]),
-        summaries: fit.summaries.map((scene) => [scene.nodeId, scene.contentHash])
+        summaries: fit.summaries.map((scene) => [scene.nodeId, scene.contentHash]),
+        bible
       })
     ),
     promptVersion: prompt.version,
@@ -203,7 +214,9 @@ export async function runQuery(
  * `QUERY_HISTORY_KEEP`, since the retrieved scenes are what the answer cites and a follow-up
  * question needs only the exchange it follows on from; then the lowest-ranked full scenes, with
  * the best match always kept; and only last the remaining history. Measured exactly as
- * `runAiRequest` measures. Pure, so the fit is tested without a project.
+ * `runAiRequest` measures. Pure, so the fit is tested without a project. The story bible
+ * (F-5.16) is not the fit's to trim: it arrives inside its own small budget and `build` simply
+ * carries it, so everything else gives way around it.
  */
 /** The most recent history turns the fit keeps ahead of dropping a full scene (one exchange). */
 export const QUERY_HISTORY_KEEP = 2
@@ -223,12 +236,10 @@ export function fitQueryPrompt(
   let summaries = input.summaries
   let history = input.history
   const scenes = (): QueryFullScene[] =>
-    input.full
-      .slice(0, kept)
-      .map((scene, index) => ({
-        ...scene,
-        text: headTruncate(originals[index] ?? '', chars[index] ?? 0)
-      }))
+    input.full.slice(0, kept).map((scene, index) => ({
+      ...scene,
+      text: headTruncate(originals[index] ?? '', chars[index] ?? 0)
+    }))
   const over = (): boolean => promptTokens(build(scenes(), summaries, history)) > budget
 
   while (over()) {

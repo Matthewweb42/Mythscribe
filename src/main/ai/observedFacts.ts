@@ -1,0 +1,178 @@
+import {
+  ENTITY_KINDS,
+  ENTITY_TAG_CATEGORY,
+  entityTagName,
+  toEntityNameKey,
+  type EntityKind
+} from '@shared/entities'
+import type { Entity } from '@shared/ipc/contract'
+import { nameWords } from '@shared/mentions'
+import { isObservedAttribute, isObservedDismissed, type ExtractedFact } from '@shared/observedFacts'
+import { SUMMARY_KNOWN_NAMES_MAX } from '@shared/summary'
+import { createEntity, listEntities, type EntityWrite } from '../entity/entityStore'
+import { replaceSceneFacts, type SceneFactInput } from '../entity/observedFactStore'
+import { getObservedDismissed } from '../project/settingsStore'
+import { findTagByName, listTags } from '../tag/tagStore'
+import type { TreeDb } from '../tree/treeStore'
+
+/**
+ * The automatic story bible's write side (F-5.16): which story-bible names a scene contains
+ * (what the summary request lists and its content hash covers), and how the facts the model
+ * answered become rows — each name resolved to an entity, a missing entity created as AI-made
+ * with its tag, and the scene's facts replaced. Everything here is local; the one request is
+ * the summary's own (`summarize.ts`).
+ */
+
+/** The story-bible names occurring in a scene, by kind, each as the bible (or the scene) spells it. */
+export type KnownNames = Record<EntityKind, string[]>
+
+/**
+ * `words` as they would stand in prose — separated by whitespace, on word boundaries of any
+ * script (a lookaround over letters and digits, since `\b` is ASCII-only) — matched without
+ * regard to case. Null for a name with no words.
+ */
+function wordsPattern(words: readonly string[]): RegExp | null {
+  if (words.length === 0) return null
+  const escaped = words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped.join('\\s+')}(?![\\p{L}\\p{N}])`, 'giu')
+}
+
+/** Whether every word of a matched name starts like a proper noun (a caseless script counts as one). */
+function isProperNoun(match: string): boolean {
+  return match.split(/\s+/u).every((word) => {
+    const first = [...word][0] ?? ''
+    return first === first.toLocaleUpperCase()
+  })
+}
+
+/**
+ * The story-bible names a scene contains (F-5.16, decision 3 of the plan): the entities of all
+ * three kinds whose name occurs in `sceneText`, as the author spells them, and then the
+ * character, setting, and world-building tags no entity carries, as the scene spells them (a
+ * tag name is kebab-case, and the entity a fact creates takes the name the model answers). A
+ * character tag must read as a proper noun, the F-4.12 rule that tells Rose from a rose. Case
+ * is otherwise ignored, each name is listed once per kind, and the whole list is capped at
+ * `SUMMARY_KNOWN_NAMES_MAX` in kind order. Only names the scene contains are listed, so an
+ * entity created from one scene changes nothing for a scene that never names it.
+ */
+export function knownNames(db: TreeDb, sceneText: string): KnownNames {
+  const known: KnownNames = { character: [], setting: [], world: [] }
+  const keys = new Set<string>()
+  const add = (kind: EntityKind, name: string): void => {
+    const key = `${kind}\u0000${toEntityNameKey(name)}`
+    if (keys.has(key)) return
+    keys.add(key)
+    known[kind].push(name)
+  }
+
+  const entities = listEntities(db)
+  for (const entity of entities) {
+    const pattern = wordsPattern(toEntityNameKey(entity.name).split(' '))
+    if (pattern?.test(sceneText)) add(entity.kind, entity.name)
+  }
+
+  const linked = new Set(entities.map((entity) => entity.tagId))
+  for (const tag of listTags(db)) {
+    if (linked.has(tag.id)) continue
+    const kind = ENTITY_KINDS.find((candidate) => ENTITY_TAG_CATEGORY[candidate] === tag.category)
+    if (kind === undefined) continue
+    const pattern = wordsPattern(nameWords(tag.name))
+    if (pattern === null) continue
+    for (const match of sceneText.matchAll(pattern)) {
+      if (kind === 'character' && !isProperNoun(match[0])) continue
+      add(kind, match[0].replace(/\s+/gu, ' '))
+      break
+    }
+  }
+
+  let room = SUMMARY_KNOWN_NAMES_MAX
+  for (const kind of ENTITY_KINDS) {
+    known[kind] = known[kind].slice(0, room)
+    room -= known[kind].length
+  }
+  return known
+}
+
+/** What a run did to the story bible: who to tell, and about what. */
+export interface ObservedFactsChange {
+  /** The entities whose visible facts may have changed, for `observedFact:changed`. */
+  entityIds: string[]
+  /** The entities created for a name that had none, each with what its tag did to the bank. */
+  created: EntityWrite[]
+  /** Facts left out here: a dismissed name, or an attribute the resolved entity's kind does not carry. */
+  skipped: number
+}
+
+/**
+ * The entity a fact's name stands for, or undefined when the story bible has none: the entity
+ * of the stated kind with that name, else one of another kind (the model took Ash the place
+ * for a person: attach, do not create a twin), else the entity linked to the tag the name
+ * makes (`entityTagName`: the sheet reads "Dr. Vell" and the scene says "Dr Vell", one tag
+ * `dr-vell`), the stated kind first.
+ */
+function resolveEntity(
+  db: TreeDb,
+  entities: readonly Entity[],
+  fact: ExtractedFact
+): Entity | undefined {
+  const key = toEntityNameKey(fact.entity)
+  const named = entities.filter((entity) => toEntityNameKey(entity.name) === key)
+  const byName = named.find((entity) => entity.kind === fact.kind) ?? named[0]
+  if (byName !== undefined) return byName
+  const tagName = entityTagName(fact.entity)
+  const tagId = tagName === '' ? undefined : findTagByName(db, tagName)
+  if (tagId === undefined) return undefined
+  const tagged = entities.filter((entity) => entity.tagId === tagId)
+  return tagged.find((entity) => entity.kind === fact.kind) ?? tagged[0]
+}
+
+/**
+ * Stores what one scene states (F-5.16), in one transaction (it nests as a savepoint inside the
+ * caller's): each fact's name is resolved to an entity (`resolveEntity`); a name with no entity
+ * gets one — AI-made, blank template, with its tag through the F-9.4 link — unless the author
+ * deleted an entity of that kind and name (`observedFacts.dismissed`), in which case the fact
+ * is left out; a fact that landed on an entity of another kind is kept only when that kind
+ * carries the attribute. Then the scene's visible facts are replaced, tombstones honoured
+ * (`replaceSceneFacts`). An empty list clears the scene's facts and creates nothing.
+ */
+export function applyObservedFacts(
+  db: TreeDb,
+  nodeId: string,
+  facts: readonly ExtractedFact[]
+): ObservedFactsChange {
+  return db.transaction((tx) => {
+    const entities = listEntities(tx)
+    const dismissed = getObservedDismissed(tx)
+    const created: EntityWrite[] = []
+    const rows: SceneFactInput[] = []
+    let skipped = 0
+    for (const fact of facts) {
+      let entity = resolveEntity(tx, entities, fact)
+      if (entity === undefined) {
+        if (isObservedDismissed(dismissed, fact.kind, fact.entity)) {
+          skipped += 1
+          continue
+        }
+        const write = createEntity(
+          tx,
+          { kind: fact.kind, name: fact.entity, template: 'blank' },
+          'ai'
+        )
+        created.push(write)
+        entities.push(write.entity)
+        entity = write.entity
+      }
+      if (!isObservedAttribute(entity.kind, fact.attribute)) {
+        skipped += 1
+        continue
+      }
+      rows.push({
+        entityId: entity.id,
+        attribute: fact.attribute,
+        value: fact.value,
+        quote: fact.quote
+      })
+    }
+    return { entityIds: replaceSceneFacts(tx, nodeId, rows), created, skipped }
+  })
+}

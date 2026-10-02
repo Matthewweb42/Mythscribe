@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`summary.v2 prompt (F-5.16) > matches the golden messages for a bare scene, with version 1's user turn and no voice block 1`] = `
+[
+  {
+    "content": "You are the scene-summary feature inside a novel-writing app. Summarize the scene below for the author's index: at most 80 words, in plain past tense, stating what happens. Do not evaluate the writing, do not give advice, and do not invent anything the scene does not show. Then give up to 4 key points, one clause each, and the characters present, by name, spelled as the story-bible names are when given. Then give up to 6 facts the scene states about a character, a place (kind "setting"), or an in-world thing (kind "world") that stay true beyond this scene; events belong in the key points, and a scene that states none gets an empty list. Each fact has the entity's name, its kind, one attribute of that kind (character: age, gender, appearance, personality, background, goals, relationships; setting: type, description, atmosphere, features; world: category, description, rules, impact), the value in at most 160 characters, and the quote: the scene's words that state it, copied exactly, at most 160 characters; a fact whose quote is not in the scene is thrown away. Reply with JSON only: {"summary":"...","keyPoints":["..."],"characters":["..."],"facts":[{"entity":"...","kind":"character","attribute":"age","value":"...","quote":"..."}]}.",
+    "role": "system",
+  },
+  {
+    "content": "Scene text:
+"""
+The ferry landing was empty when Mara reached it. The rope hung slack in the water and the bell had lost its clapper years ago. She set the lantern down on the post and waited.
+"""
+
+Summarize the scene.",
+    "role": "user",
+  },
+]
+`;

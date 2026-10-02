@@ -74,7 +74,8 @@ describe('summary.v1 prompt (F-5.6)', () => {
 
   it('asks for the feature output budget: the summary, its key points, and the cast as JSON', () => {
     expect(buildSummaryPrompt(bare).maxTokens).toBe(outputBudget('summary'))
-    expect(buildSummaryPrompt(bare).maxTokens).toBe(300)
+    // The feature's budget, not this version's: F-5.16 raised it to 600 for summary.v2's facts.
+    expect(buildSummaryPrompt(bare).maxTokens).toBe(600)
   })
 
   it('stays under the summary input budget with every cap at its limit', () => {

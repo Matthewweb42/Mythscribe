@@ -25,6 +25,7 @@ import { useMentionStore } from '@renderer/features/tags/mentionStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { sceneRowsForTag } from '@renderer/features/tags/tagUsage'
 import { describeError } from '@renderer/lib/errors'
+import { ObservedFacts } from './ObservedFacts'
 import { useEntityDraftStore } from './entityDraftStore'
 import { useEntityStore } from './entityStore'
 import { ENTITY_TEMPLATE_LABEL } from './entityView'
@@ -130,6 +131,7 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
             />
             <p className="m-0 px-1 text-sm text-fg-muted">
               {capitalize(ENTITY_KIND_NOUN[entity.kind])} · {ENTITY_TEMPLATE_LABEL[entity.template]}
+              {entity.origin === 'ai' ? ' · Added by AI' : ''}
             </p>
           </div>
           <div role="group" aria-label="Template" className="flex shrink-0 gap-0.5">
@@ -260,6 +262,8 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
             className={`${CONTROL} min-h-[60vh] resize-none leading-relaxed`}
           />
         )}
+
+        <ObservedFacts entity={entity} />
 
         <EntityScenes entity={entity} />
 

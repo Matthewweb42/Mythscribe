@@ -42,6 +42,7 @@ import { resetSearchStore, useSearchStore } from '@renderer/features/search/sear
 import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
+import { resetObservedFactStore } from '@renderer/features/entities/observedFactStore'
 import { resetMentionStore } from '@renderer/features/tags/mentionStore'
 import { resetProposedTagStore } from '@renderer/features/tags/proposedTagStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
@@ -91,6 +92,7 @@ beforeEach(() => {
   // F-9.3: the entity page is part of the main pane, so its stores belong to the fixture too.
   resetEntityDraftStore()
   resetEntityStore()
+  resetObservedFactStore()
   resetFocusStore()
   resetBackgroundStore()
   resetShellDialogStore()
@@ -110,6 +112,7 @@ beforeEach(() => {
 afterEach(() => {
   resetEntityDraftStore()
   resetEntityStore()
+  resetObservedFactStore()
   // F-10.1: a search debounce left pending must not fire into the next file's IPC fake.
   resetSearchStore()
   // F-10.2: nor a replace preview's.
@@ -138,6 +141,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'tree:list') return []
     if (channel === 'tag:list') return []
     if (channel === 'entity:list') return []
+    if (channel === 'observedFact:listForEntity') return []
     if (channel === 'documentTag:list') return []
     if (channel === 'tag:proposed') return []
     if (channel === 'sceneMeta:get')

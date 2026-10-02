@@ -32,6 +32,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
           body: value.body ?? null,
           image: null,
           tagId: null,
+          origin: 'author',
           created: '2026-09-12T08:00:00.000Z',
           modified: '2026-09-12T08:00:00.000Z'
         }
@@ -89,6 +90,17 @@ describe('EntityTab (F-9.2)', () => {
     expect(row('Mara')).toHaveTextContent('27')
     expect(screen.getByRole('button', { name: 'Cards' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.queryByRole('combobox', { name: 'Category' })).toBeNull()
+  })
+
+  it('marks an entity the AI logged until the author edits it (F-5.16)', async () => {
+    await renderLoaded('character', {
+      'entity:list': () =>
+        entityFixture.map((entity) =>
+          entity.id === 'e-aldous' ? { ...entity, origin: 'ai' as const } : entity
+        )
+    })
+    expect(row('Aldous')).toHaveTextContent('Added by AI')
+    expect(row('Mara')).not.toHaveTextContent('Added by AI')
   })
 
   it('the list view drops the excerpt and the choice is remembered per kind', async () => {
@@ -259,11 +271,11 @@ describe('EntityTab (F-9.2)', () => {
       const user = userEvent.setup()
       await renderLoaded('character')
       const menu = await openMenu(user)
-      expect(within(menu).getAllByRole('menuitem').map((el) => el.textContent)).toEqual([
-        'Export as JSON…',
-        'Export as CSV…',
-        'Import…'
-      ])
+      expect(
+        within(menu)
+          .getAllByRole('menuitem')
+          .map((el) => el.textContent)
+      ).toEqual(['Export as JSON…', 'Export as CSV…', 'Import…'])
       expect(item('Export as JSON…')).toBeEnabled()
     })
 

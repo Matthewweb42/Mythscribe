@@ -19,6 +19,7 @@ import type { FocusSettings } from '../src/shared/focus'
 import { encodeLicensePayload, formatLicenseToken, LICENSE_GRACE_MS } from '../src/shared/license'
 import type { Entity, IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
+import type { ObservedFact } from '../src/shared/observedFacts'
 import { PRESETS, type WritingPresets } from '../src/shared/presets'
 import type { ReferencePin, ReferencePins } from '../src/shared/references'
 import { matterTemplate } from '../src/shared/matterTemplates'
@@ -122,10 +123,34 @@ const SUMMARY_SENTINEL = 'You are the scene-summary feature inside a novel-writi
 const SUMMARY_TEXT = 'Mara tries to cross the rising river at night and gives up until dawn.'
 const SUMMARY_KEY_POINTS = ['The river is too high to cross.', 'Tomas refuses to row.']
 const SUMMARY_CHARACTERS = ['Mara', 'Tomas']
+/**
+ * F-5.16: the observed facts the canned summary carries (`summary.v2` keeps the sentinel above).
+ * Both quotes are sentences Scene 1 holds verbatim by the summary step, so main keeps both. No
+ * entity is left in the project by then: "Mara" attaches to a character of that name when a step
+ * has created one, and is created as AI-made otherwise; "Kael" was only ever a proposed tag, so
+ * it is always a new AI-made character with a new `kael` tag.
+ */
+const SUMMARY_FACTS = [
+  {
+    entity: 'Mara',
+    kind: 'character',
+    attribute: 'personality',
+    value: 'Waits out the storm',
+    quote: 'Mara waited on the ridge.'
+  },
+  {
+    entity: 'Kael',
+    kind: 'character',
+    attribute: 'personality',
+    value: 'Watchful',
+    quote: 'But Kael saw Kael, then Kael.'
+  }
+]
 const SUMMARY_ANSWER = JSON.stringify({
   summary: SUMMARY_TEXT,
   keyPoints: SUMMARY_KEY_POINTS,
-  characters: SUMMARY_CHARACTERS
+  characters: SUMMARY_CHARACTERS,
+  facts: SUMMARY_FACTS
 })
 const BRIEF_SENTINEL = 'You are the scene-brief feature inside a novel-writing app.'
 /**
@@ -1721,7 +1746,21 @@ test('create, close, reopen a project on disk', async () => {
   await expect(async () => {
     await editor.click()
     await page.keyboard.press('End')
-    expect(await page.evaluate(() => window.getSelection()?.isCollapsed ?? false)).toBe(true)
+    // Held for a moment before it is trusted: the jump can select the name once more after a
+    // check that passed, and the caret must sit at the very end of the paragraph's text.
+    await page.waitForTimeout(300)
+    expect(
+      await page.evaluate(() => {
+        const selection = window.getSelection()
+        const node = selection?.anchorNode
+        return (
+          selection?.isCollapsed === true &&
+          node?.nodeType === Node.TEXT_NODE &&
+          selection.anchorOffset === (node.textContent ?? '').length &&
+          node.nextSibling === null
+        )
+      })
+    ).toBe(true)
   }).toPass({ timeout: 10_000 })
   for (const _character of MARA_SENTENCE) await page.keyboard.press('Backspace')
   await expect.poll(() => documentText(scene1Row.id), { timeout: 5000 }).toBe(SENTENCE)
@@ -3213,6 +3252,71 @@ test('create, close, reopen a project on disk', async () => {
     requests: 2
   })
 
+  // F-5.16: the automatic story bible. The summary answer carried two observed facts, and no
+  // entity was left in the project, so main created both characters as AI-made blank pages with
+  // their tags. Kael is listed in the Characters tab marked "Added by AI"; his page shows the
+  // fact under "From the manuscript", and its passage button opens Scene 1 with the quoted
+  // sentence selected (nothing is typed, so the scene reads as it did). Back on his page, Add to
+  // sheet copies the fact onto the blank page (an author edit, so the AI mark goes and the row
+  // says On sheet), and Hide puts the row away. No request is made by any of it.
+  const factRequestsBefore = openAiRequests.length
+  await expect
+    .poll(async () =>
+      (await listEntities())
+        .filter((entity) => entity.kind === 'character')
+        .map((entity) => `${entity.name}:${entity.origin}:${entity.template}`)
+    )
+    .toEqual(['Kael:ai:blank', 'Mara:ai:blank'])
+  const kaelEntity = (await listEntities()).find((entity) => entity.name === 'Kael')
+  if (!kaelEntity) throw new Error('Kael was not created')
+  expect((await listTags()).find((tag) => tag.name === 'kael')).toMatchObject({
+    category: 'character'
+  })
+  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  const kaelRow = characterRows.getByRole('button', { name: /^Kael/ })
+  await expect(kaelRow).toContainText('Added by AI')
+  await kaelRow.click()
+  await expect(entityEditor).toBeVisible()
+  await expect(entityEditor).toContainText('Character · Blank page · Added by AI')
+  const observedFacts = entityEditor.getByRole('region', { name: 'From the manuscript' })
+  const watchfulRow = observedFacts.getByRole('listitem', { name: 'Personality: Watchful' })
+  await expect(watchfulRow).toBeVisible()
+  await expect(watchfulRow).not.toContainText('Differs')
+  await watchfulRow.getByRole('button', { name: 'Go to passage in Scene 1' }).click()
+  await expect(entityEditor).toHaveCount(0)
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''), { timeout: 5_000 })
+    .toBe(SUMMARY_FACTS[1]?.quote)
+  await kaelRow.click()
+  await expect(entityEditor).toBeVisible()
+  await watchfulRow.getByRole('button', { name: 'Add to sheet' }).click()
+  await expect(watchfulRow).toContainText('On sheet')
+  await expect(watchfulRow.getByRole('button', { name: 'Add to sheet' })).toHaveCount(0)
+  await expect(entityEditor.getByRole('textbox', { name: 'Page' })).toHaveValue(
+    'Personality: Watchful'
+  )
+  await expect(entityEditor).not.toContainText('Added by AI')
+  await expect(kaelRow).not.toContainText('Added by AI')
+  await expect
+    .poll(async () => (await listEntities()).find((entity) => entity.id === kaelEntity.id))
+    .toMatchObject({ origin: 'author', body: 'Personality: Watchful' })
+  await watchfulRow.getByRole('button', { name: 'Hide', exact: true }).click()
+  await expect(watchfulRow).toHaveCount(0)
+  await expect(observedFacts.getByRole('button', { name: 'Show hidden (1)' })).toBeVisible()
+  await expect
+    .poll(async () => (await observedFactsOf(kaelEntity.id)).map((fact) => fact.hidden))
+    .toEqual([true])
+  expect(openAiRequests).toHaveLength(factRequestsBefore)
+  // Back to Scene 1 for the steps below; the entity page replaced the scene's panes, so the
+  // Summary disclosure is closed again and is reopened here.
+  await entityEditor.getByRole('button', { name: 'Close Kael' }).click()
+  await expect(entityEditor).toHaveCount(0)
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await metadata.getByRole('button', { name: 'Summary' }).click()
+  await expect(metadata.getByTestId('summary-text')).toHaveText(SUMMARY_TEXT)
+
   // F-5.13: the background index queue. "Summarize all scenes" queues every scene whose summary
   // is missing or out of date and works through them one at a time, at most one request at a
   // time. With the toggle off for a moment, Scene 1 is edited without a background run, so
@@ -3260,6 +3364,25 @@ test('create, close, reopen a project on disk', async () => {
   expect(afterIndexAll.byFeature.find((f) => f.feature === 'summary')).toMatchObject({
     requests: 3
   })
+  // F-5.16: that run read Scene 1 again and its answer carried the same two facts. The one hidden
+  // on Kael's page is a tombstone, so it was not logged a second time; Mara's was replaced as
+  // usual, and no third character appeared.
+  await expect
+    .poll(async () => (await observedFactsOf(kaelEntity.id)).map((fact) => fact.hidden))
+    .toEqual([true])
+  expect(
+    (await listEntities())
+      .filter((entity) => entity.kind === 'character')
+      .map((entity) => entity.name)
+  ).toEqual(['Kael', 'Mara'])
+  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  await kaelRow.click()
+  await expect(observedFacts.getByRole('button', { name: 'Show hidden (1)' })).toBeVisible()
+  await expect(observedFacts.getByRole('list', { name: 'Observed facts' })).toHaveCount(0)
+  await entityEditor.getByRole('button', { name: 'Close Kael' }).click()
+  await expect(entityEditor).toHaveCount(0)
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
 
   // F-14.11: the beta reader. Reading up to Scene 1 sends the strong tier the scene in full
   // and the stored summaries of the manuscript documents before it: Opening has none (it is
@@ -3873,6 +3996,19 @@ async function listEntities(): Promise<Entity[]> {
     () => window.mythscribe.invoke('entity:list', undefined) as Promise<IpcResult<Entity[]>>
   )
   if (!result.ok) throw new Error(`entity:list failed: ${result.error.message}`)
+  return result.data
+}
+
+/** Every observed fact of one entity (F-5.16), the hidden ones included, as main lists them. */
+async function observedFactsOf(entityId: string): Promise<ObservedFact[]> {
+  const result = await page.evaluate<IpcResult<ObservedFact[]>, string>(
+    (id) =>
+      window.mythscribe.invoke('observedFact:listForEntity', { entityId: id }) as Promise<
+        IpcResult<ObservedFact[]>
+      >,
+    entityId
+  )
+  if (!result.ok) throw new Error(`observedFact:listForEntity failed: ${result.error.message}`)
   return result.data
 }
 

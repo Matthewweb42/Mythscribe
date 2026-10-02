@@ -8,6 +8,8 @@ import type { Entity, EntityCreateInput, EntityUpdateInput, Tag } from '@shared/
 import { entity, tag } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { getObservedDismissed } from '../project/settingsStore'
+import { listNodes } from '../tree/treeStore'
 import { createTag, deleteTag, getTagWithUsage, listTags, updateTag } from '../tag/tagStore'
 import {
   createEntity,
@@ -19,6 +21,7 @@ import {
   updateEntity,
   type EntityDb
 } from './entityStore'
+import { listFactsForEntity, replaceSceneFacts, setFactHidden } from './observedFactStore'
 
 let tmp: string
 let session: ProjectSession
@@ -80,6 +83,7 @@ describe('createEntity', () => {
       image: null,
       // F-9.4: the tag of the name comes with the entity.
       tagId: tagOf(id)?.id,
+      origin: 'author',
       created: '2026-09-22T10:00:00.000Z',
       modified: '2026-09-22T10:00:00.000Z'
     })
@@ -270,6 +274,87 @@ describe('deleteEntity', () => {
     expect(getEntity(db, ada.id)).toBeUndefined()
     expect(listEntities(db)).toEqual([brann])
     expectCode(() => deleteEntity(db, 'missing'), 'NOT_FOUND')
+  })
+})
+
+describe('origin and dismissed names (F-5.16)', () => {
+  /** Logs one fact about the entity from the seeded scene. */
+  function logFact(entityId: string): void {
+    const scene = listNodes(db).find((row) => row.kind === 'document' && row.sectionType === null)
+    if (scene === undefined) throw new Error('the seeded project has no scene')
+    replaceSceneFacts(db, scene.id, [
+      { entityId, attribute: 'age', value: 'nineteen', quote: 'She was nineteen.' }
+    ])
+  }
+
+  it('marks an entity the story-bible job creates, with its tag, and the author’s own not', () => {
+    const { entity: made, tagChange } = createEntity(
+      db,
+      { kind: 'character', name: 'Tash', template: 'blank' },
+      'ai'
+    )
+    expect(made).toMatchObject({ origin: 'ai', template: 'blank' })
+    expect(tagChange).toMatchObject({ created: true, tag: { name: 'tash' } })
+    expect(getEntity(db, made.id)?.origin).toBe('ai')
+    expect(create({ kind: 'character', name: 'Mara' }).origin).toBe('author')
+  })
+
+  it('turns an AI-made entity into the author’s on the first edit of its name, fields, or page', () => {
+    const make = (name: string): Entity =>
+      createEntity(db, { kind: 'character', name }, 'ai').entity
+    expect(update(make('Ash').id, { name: 'Ashe' }).origin).toBe('author')
+    expect(update(make('Bren').id, { fields: { age: '40' } }).origin).toBe('author')
+    expect(update(make('Cole').id, { body: 'A smith.' }).origin).toBe('author')
+    // Reading the sheet in the other template is not writing it.
+    const dara = make('Dara')
+    expect(update(dara.id, { template: 'structured' }).origin).toBe('ai')
+    expect(setEntityImage(db, dara.id, 'Dara.0a1b2c3d.png').origin).toBe('ai')
+    expect(linkEntityTag(db, dara.id).entity.origin).toBe('ai')
+    // Nothing turns it back.
+    expect(update(dara.id, { body: 'Hers.' }).origin).toBe('author')
+    expect(update(dara.id, { template: 'blank' }).origin).toBe('author')
+  })
+
+  it('remembers a deleted entity the manuscript had facts about, hidden ones included', () => {
+    const tash = createEntity(db, { kind: 'character', name: 'Tash  Vane' }, 'ai').entity
+    const mara = create({ kind: 'character', name: 'Mara' })
+    logFact(tash.id)
+    setFactHidden(db, listFactsForEntity(db, tash.id)[0]?.id ?? '', true)
+    deleteEntity(db, tash.id)
+    // Mara had no facts: nothing to keep the job from, so nothing is recorded.
+    deleteEntity(db, mara.id)
+    expect(getObservedDismissed(db)).toEqual({
+      names: [{ kind: 'character', nameKey: 'tash vane' }]
+    })
+    expect(listFactsForEntity(db, tash.id)).toEqual([])
+  })
+
+  it('forgets the dismissal when the author creates the entity by hand, not when the job does', () => {
+    const tash = create({ kind: 'character', name: 'Tash' })
+    logFact(tash.id)
+    deleteEntity(db, tash.id)
+    createEntity(db, { kind: 'character', name: 'Tash' }, 'ai')
+    create({ kind: 'setting', name: 'Tash' })
+    expect(getObservedDismissed(db).names).toEqual([{ kind: 'character', nameKey: 'tash' }])
+    deleteEntity(db, listEntities(db).find((row) => row.kind === 'character')?.id ?? '')
+    create({ kind: 'character', name: ' tash ' })
+    expect(getObservedDismissed(db).names).toEqual([])
+  })
+
+  it('remembers a deleted AI-made entity whose facts were gone by the time it was deleted', () => {
+    const tash = createEntity(
+      db,
+      { kind: 'character', name: 'Tash', template: 'blank' },
+      'ai'
+    ).entity
+    logFact(tash.id)
+    // The scene was edited and re-read, and no longer states anything about Tash.
+    const scene = listNodes(db).find((row) => row.kind === 'document' && row.sectionType === null)
+    replaceSceneFacts(db, scene?.id ?? '', [])
+    expect(listFactsForEntity(db, tash.id)).toEqual([])
+    deleteEntity(db, tash.id)
+    // Still the AI's entity, and the author deleted it: the next scene must not bring it back.
+    expect(getObservedDismissed(db).names).toEqual([{ kind: 'character', nameKey: 'tash' }])
   })
 })
 

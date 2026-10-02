@@ -22,6 +22,10 @@ export const SUMMARY_CHARACTERS_MAX = 8
 export const SUMMARY_CHARACTER_MAX = 40
 /** How many bank character names the prompt lists so the model spells them the author's way. */
 export const SUMMARY_BANK_NAMES_MAX = 40
+/** Most observed facts kept from one scene (F-5.16): durable facts only, so a short list. */
+export const SUMMARY_FACTS_MAX = 6
+/** How many story-bible names occurring in the scene the prompt lists by kind (F-5.16). */
+export const SUMMARY_KNOWN_NAMES_MAX = 40
 /** Main waits this long after the last save of a scene before summarising it. */
 export const SUMMARY_DEBOUNCE_MS = 3_000
 

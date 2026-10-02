@@ -1,12 +1,23 @@
 import { parseTagRefs } from '@shared/chat'
-import { QUERY_FULL_SCENES, QUERY_SCENE_CHAR_BUDGET, QUERY_SUMMARY_SCENES } from '@shared/query'
+import { entityTagName } from '@shared/entities'
+import type { Entity } from '@shared/ipc/contract'
+import {
+  QUERY_BIBLE_ENTITIES,
+  QUERY_FULL_SCENES,
+  QUERY_SCENE_CHAR_BUDGET,
+  QUERY_SUMMARY_SCENES
+} from '@shared/query'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
+import type { StoryBibleEntity } from '@shared/storyBible'
 import type { StoredSceneSummary } from '@shared/summary'
 import { summariesFor } from '../../document/summaryStore'
+import { listEntities } from '../../entity/entityStore'
+import { factsForEntities } from '../../entity/observedFactStore'
 import { listAllDocumentTags } from '../../tag/documentTagStore'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
 import { documentText, manuscriptDocuments } from '../../voice/profile'
 import { headTruncate } from './chatContext'
+import { storyBibleEntities } from './storyBible'
 
 /**
  * Candidate ranking for Story Intelligence (F-5.7). The author asks a question about the whole
@@ -20,6 +31,10 @@ import { headTruncate } from './chatContext'
  * both explainable and free. The weights say where a hit means most — a term in the title or in
  * a tag names the scene, a term in the body only mentions it — and a `#name` reference the
  * author typed outranks everything, because it is an explicit pointer rather than a guess.
+ *
+ * F-5.16: the story bible joins the retrieval. The entities the question names ride along as
+ * their sheet and observed facts (`QueryCandidates.bible`), and a scene one of those facts was
+ * read from is boosted, so the passage behind the fact goes out in full and can be cited.
  */
 
 /** A token shorter than this is noise ("who", "did" are also stopwords below). */
@@ -113,7 +128,9 @@ export const QUERY_WEIGHTS = {
   meta: 3,
   summary: 2,
   body: 1,
-  ref: 6
+  ref: 6,
+  /** The scene is where the manuscript states a fact about an entity the question names (F-5.16). */
+  fact: 5
 } as const
 
 /** A term repeated in the body is worth a little more, up to ten occurrences. */
@@ -212,6 +229,8 @@ export interface QueryCandidates {
   summaries: QueryCandidate[]
   /** Every candidate in rank order, for the "Also mentioned in" list. */
   ranked: QueryCandidate[]
+  /** The entities the question names, as their sheet and observed facts with scene titles (F-5.16). */
+  bible: StoryBibleEntity[]
 }
 
 export interface RankCandidatesInput {
@@ -227,6 +246,9 @@ export interface RankCandidatesInput {
  * wins them. When nothing scores at all — a question with no usable term, or one about words
  * nobody wrote — the active scene comes first and the rest follow in reading order, so the
  * feature still answers "not found" from real scenes rather than refusing.
+ *
+ * F-5.16: a scene that sourced a visible observed fact about an entity the question names
+ * scores `QUERY_WEIGHTS.fact` more, once.
  */
 export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCandidates {
   const documents = manuscriptDocuments(db)
@@ -238,6 +260,13 @@ export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCan
   )
   const terms = queryTerms(input.question)
   const refs = parseTagRefs(input.question)
+  const named = namedEntities(listEntities(db), terms, refs)
+  const factScenes = new Set(
+    factsForEntities(
+      db,
+      named.map((entity) => entity.id)
+    ).map((fact) => fact.nodeId)
+  )
 
   const scored: QueryCandidate[] = []
   for (const row of documents) {
@@ -246,7 +275,7 @@ export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCan
     const summary = stored.get(row.id) ?? null
     const meta = parseStoredSceneMeta(row.sceneMeta)
     const sceneTitle = title(row.id)
-    const score = scoreCandidate(terms, refs, {
+    const lexical = scoreCandidate(terms, refs, {
       title: sceneTitle,
       tags: tagsByNode.get(row.id) ?? [],
       meta: [meta.location, meta.pov, meta.timeline].filter((value) => value !== '').join(' '),
@@ -256,6 +285,7 @@ export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCan
           : [summary.summary, ...summary.keyPoints, ...summary.characters].join('\n'),
       body: text
     })
+    const score = lexical + (factScenes.has(row.id) ? QUERY_WEIGHTS.fact : 0)
     scored.push({ nodeId: row.id, title: sceneTitle, text, summary, score })
   }
 
@@ -282,8 +312,35 @@ export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCan
       .slice(QUERY_FULL_SCENES)
       .filter((candidate) => candidate.summary !== null)
       .slice(0, QUERY_SUMMARY_SCENES),
-    ranked
+    ranked,
+    bible: storyBibleEntities(
+      db,
+      named,
+      documents.map((row) => row.id),
+      title
+    )
   }
+}
+
+/**
+ * The entities a question names (F-5.16), in story-bible order, at most `QUERY_BIBLE_ENTITIES`:
+ * a term starts a word of the entity's name (the same word-prefix rule the scenes are scored
+ * by), or a `#name` reference is the tag its name makes.
+ */
+export function namedEntities(
+  entities: readonly Entity[],
+  terms: readonly string[],
+  refs: readonly string[]
+): Entity[] {
+  return entities
+    .filter((entity) => {
+      const name = entity.name.toLowerCase()
+      return (
+        terms.some((term) => occurrences(name, term) > 0) ||
+        refs.includes(entityTagName(entity.name))
+      )
+    })
+    .slice(0, QUERY_BIBLE_ENTITIES)
 }
 
 /**

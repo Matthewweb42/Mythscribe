@@ -56,6 +56,7 @@ import { generateGhostText } from '../ai/ghostText'
 import { detectImportStructure } from '../ai/importStructure'
 import { cancelInflight, regenRequestId, registerInflight, releaseInflight } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
+import type { ObservedFactsChange } from '../ai/observedFacts'
 import { IMPORT_STRUCTURE_PROMPT_VERSION } from '../ai/prompts/importStructure.v1'
 import { createProposal, listPendingProposals, settleProposal } from '../ai/proposalStore'
 import { AiProviderError, NoKeyError } from '../ai/providers/types'
@@ -86,6 +87,7 @@ import {
   updateEntity,
   type EntityTagChange
 } from '../entity/entityStore'
+import { listFactsForEntity, setFactHidden } from '../entity/observedFactStore'
 import { importDraft } from '../import/commit'
 import { readManuscript } from '../import/read'
 import { buildDraft } from '../import/structure'
@@ -268,7 +270,8 @@ export function registerHandlers({
       const db = manager.require().connection.orm
       const result = await summarizeScene(db, requestDeps(db), {
         nodeId: job.nodeId,
-        requestId
+        requestId,
+        onFactsChanged: (change) => publishObservedFacts(db, change)
       })
       // A stored row whose hash still matches (or a cache hit) made no request, so the rate
       // limit must not charge it a turn.
@@ -756,6 +759,21 @@ export function registerHandlers({
     emit(windows(), 'tag:changed', change.tag)
   }
 
+  /**
+   * F-5.16: a summary run logged what its scene states. An entity the job created reaches the
+   * windows as `entity:changed` and its tag through `publishTagChange`, exactly as if the author
+   * had created it; then the entities whose facts moved are named, so an open page refetches.
+   */
+  const publishObservedFacts = (db: TreeDb, change: ObservedFactsChange): void => {
+    for (const { entity: created, tagChange } of change.created) {
+      emit(windows(), 'entity:changed', created)
+      publishTagChange(db, tagChange)
+    }
+    if (change.entityIds.length > 0) {
+      emit(windows(), 'observedFact:changed', { entityIds: change.entityIds })
+    }
+  }
+
   register('entity:create', (input) => {
     const db = manager.require().connection.orm
     const { entity: created, tagChange } = createEntity(db, input)
@@ -814,6 +832,18 @@ export function registerHandlers({
     // F-9.3: the image is the entity's own file, so it goes with it.
     if (deleted.image !== null) removeImageAsset(session.folder, ENTITY_IMAGES_DIR, deleted.image)
     return null
+  })
+
+  // F-5.16: what the manuscript states about an entity. The facts are written by the index job;
+  // the author only reads them and hides or restores one, which every window then hears about.
+  register('observedFact:listForEntity', ({ entityId }) =>
+    listFactsForEntity(manager.require().connection.orm, entityId)
+  )
+
+  register('observedFact:setHidden', ({ id, hidden }) => {
+    const fact = setFactHidden(manager.require().connection.orm, id, hidden)
+    emit(windows(), 'observedFact:changed', { entityIds: [fact.entityId] })
+    return fact
   })
 
   /**

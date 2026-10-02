@@ -131,8 +131,9 @@ export interface AiDataSharing {
  * feature whose prompt includes it, so the panel and the block can never drift apart.
  */
 export const STORY_BIBLE_SENDS =
-  "the story bible (your tag names by category, the scene's tags, and the titles, " +
-  'metadata, and summaries of the scenes either side of it)'
+  "the story bible (your tag names by category, the scene's tags, the sheets of the " +
+  'story-bible entries linked to those tags with what the manuscript states about them, and ' +
+  'the titles, metadata, and summaries of the scenes either side of it)'
 
 export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   tags: {
@@ -141,16 +142,19 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     minDial: 1
   },
   summary: {
-    label: 'Scene summaries',
+    label: 'Scene summaries and story bible',
     sends:
-      "A scene's text (the first 20,000 characters), its metadata, and the names of your " +
-      'character tags, to keep its summary, key points, and characters present up to date ' +
-      'after you pause typing.',
+      "A scene's text (the first 20,000 characters), its metadata, and the names of the " +
+      'story-bible entries and tags that occur in the scene, to keep ' +
+      'its summary, key points, characters present, and the facts it states about your ' +
+      'characters, places, and world up to date after you pause typing.',
     minDial: 1
   },
   query: {
     label: 'Story Intelligence',
-    sends: 'Your question, scene summaries, and the full text of the top matching scenes.',
+    sends:
+      'Your question, scene summaries, the full text of the top matching scenes, and the sheets ' +
+      'of the story-bible entries your question names with what the manuscript states about them.',
     minDial: 1
   },
   critique: {

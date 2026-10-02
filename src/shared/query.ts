@@ -21,6 +21,10 @@ export const QUERY_SCENE_CHAR_BUDGET = 12_000
 /** The fit shrinks a full scene this many characters at a time, never below the floor. */
 export const QUERY_SHRINK_CHARS = 2_000
 export const QUERY_SCENE_CHAR_FLOOR = 3_000
+/** How many story-bible entities the question names ride along as their sheet and observed facts (F-5.16). */
+export const QUERY_BIBLE_ENTITIES = 6
+/** The estimated-token budget of that block; observed facts are dropped before sheets. */
+export const QUERY_BIBLE_TOKEN_BUDGET = 400
 /** Citations kept per answer, in the model's order. */
 export const QUERY_MAX_CITATIONS = 6
 /** A citation's quote is capped to this many characters. */

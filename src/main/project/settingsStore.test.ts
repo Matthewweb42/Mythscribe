@@ -14,6 +14,7 @@ import { CONVERSATIONS_KEY, defaultConversations } from '@shared/chat'
 import { EDITOR_SETTINGS_KEY, defaultEditorSettings } from '@shared/editorSettings'
 import { FOCUS_SETTINGS_KEY, defaultFocusSettings } from '@shared/focus'
 import type { NovelFormat } from '@shared/ipc/contract'
+import { OBSERVED_DISMISSED_KEY, defaultObservedDismissed } from '@shared/observedFacts'
 import { WRITING_PRESETS_KEY, builtinParams, defaultWritingPresets } from '@shared/presets'
 import { REFERENCE_PINS_KEY, REFERENCE_PINS_MAX, defaultReferencePins } from '@shared/references'
 import { settings } from '../db/schema'
@@ -25,6 +26,7 @@ import {
   getConversations,
   getEditorSettings,
   getFocusSettings,
+  getObservedDismissed,
   getReferencePins,
   getWritingPresets,
   setAiSettings,
@@ -32,6 +34,7 @@ import {
   setConversations,
   setEditorSettings,
   setFocusSettings,
+  setObservedDismissed,
   setReferencePins,
   setWritingPresets
 } from './settingsStore'
@@ -423,5 +426,38 @@ describe('getReferencePins / setReferencePins (F-9.6)', () => {
     }))
     expect(() => setReferencePins(db, { pins })).toThrow()
     expect(rows(REFERENCE_PINS_KEY)).toHaveLength(0)
+  })
+})
+
+describe('getObservedDismissed / setObservedDismissed (F-5.16)', () => {
+  it('answers no names for a new project, which seeds no row', () => {
+    open('novel')
+    expect(rows(OBSERVED_DISMISSED_KEY)).toHaveLength(0)
+    expect(getObservedDismissed(db)).toEqual(defaultObservedDismissed())
+  })
+
+  it('round-trips the names and overwrites the single row', () => {
+    open('novel')
+    const value = {
+      names: [
+        { kind: 'character' as const, nameKey: 'tash' },
+        { kind: 'setting' as const, nameKey: 'the salt marsh' }
+      ]
+    }
+    expect(setObservedDismissed(db, value)).toEqual(value)
+    expect(getObservedDismissed(db)).toEqual(value)
+    setObservedDismissed(db, { names: [value.names[1]!] })
+    expect(rows(OBSERVED_DISMISSED_KEY)).toHaveLength(1)
+    expect(getObservedDismissed(db)).toEqual({
+      names: [{ kind: 'setting', nameKey: 'the salt marsh' }]
+    })
+  })
+
+  it('falls back when the stored value is not JSON or no longer fits the schema', () => {
+    open('novel')
+    setRaw('{not json', OBSERVED_DISMISSED_KEY)
+    expect(getObservedDismissed(db)).toEqual(defaultObservedDismissed())
+    setRaw(JSON.stringify({ names: [{ kind: 'faction', nameKey: 'x' }] }), OBSERVED_DISMISSED_KEY)
+    expect(getObservedDismissed(db)).toEqual(defaultObservedDismissed())
   })
 })

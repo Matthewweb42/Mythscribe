@@ -59,6 +59,14 @@ interface EntityState {
    * one made before F-9.4, or one whose tag was deleted.
    */
   linkTag: (id: string) => Promise<Entity>
+  /** Upserts a row main pushed (`entity:changed`, F-5.16); a new or renamed one re-sorts. No IPC call. */
+  merge: (entity: Entity) => void
+  /**
+   * Opens the one `entity:changed` subscription (idempotent); call it where the project opens.
+   * Main emits it for an entity something other than an `entity:*` call created (F-5.16: the
+   * story-bible job met a name with no entity), so the tabs show it without a reload.
+   */
+  subscribe: () => void
   setView: (kind: EntityKind, view: EntityView) => void
   select: (id: string | null) => void
   /** Opens the creation dialog for `kind` (F-9.3: the quick-add button and the Insert menu). */
@@ -114,6 +122,8 @@ const DEFAULT_VIEW: Record<EntityKind, EntityView> = {
 
 /** Bumped by every load() and clear() so a response from a superseded load is dropped. */
 let generation = 0
+/** The subscription to main's entity writes; one for the renderer, opened by `subscribe`. */
+let unsubscribe: (() => void) | null = null
 
 export const useEntityStore = create<EntityState>((set, get) => ({
   byId: {},
@@ -211,6 +221,18 @@ export const useEntityStore = create<EntityState>((set, get) => ({
     return entity
   },
 
+  merge(entity) {
+    const previous = get().byId[entity.id]
+    const byId = { ...get().byId, [entity.id]: entity }
+    set(previous?.name === entity.name ? { byId } : { byId, ids: orderedIds(byId) })
+  },
+
+  subscribe() {
+    unsubscribe ??= ipc().on('entity:changed', (entity) => {
+      get().merge(entity)
+    })
+  },
+
   setView(kind, view) {
     if (get().view[kind] !== view) set({ view: { ...get().view, [kind]: view } })
   },
@@ -272,7 +294,9 @@ export const useEntityStore = create<EntityState>((set, get) => ({
   }
 }))
 
-/** Empties the store and invalidates in-flight loads. For tests only. */
+/** Empties the store, invalidates in-flight loads, and drops the subscription. For tests only. */
 export function resetEntityStore(): void {
+  unsubscribe?.()
+  unsubscribe = null
   useEntityStore.getState().clear()
 }

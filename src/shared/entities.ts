@@ -37,6 +37,15 @@ export const EntityTemplate = z.enum(ENTITY_TEMPLATES)
 export type EntityTemplate = z.infer<typeof EntityTemplate>
 
 /**
+ * Who made an entity (F-5.16): the author, or the background story-bible job that met a name with
+ * no entity. An `ai` entity is marked "Added by AI" until the author's first edit of its name,
+ * fields, or page makes it theirs; nothing ever turns an entity back to `ai`.
+ */
+export const ENTITY_ORIGINS = ['author', 'ai'] as const
+export const EntityOrigin = z.enum(ENTITY_ORIGINS)
+export type EntityOrigin = z.infer<typeof EntityOrigin>
+
+/**
  * Every field id of every structured template, in kind order. `name` is a column and not a
  * field (every entity has one, whatever its template), and so is `image`.
  */

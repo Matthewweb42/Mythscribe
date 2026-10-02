@@ -79,6 +79,43 @@ describe('entityStore (F-9.2)', () => {
     expect(state().ids).toEqual([])
   })
 
+  it('subscribe merges an entity main created elsewhere, once, with no IPC call (F-5.16)', async () => {
+    const listeners: ((entity: Entity) => void)[] = []
+    const { client, calls } = fakeClient()
+    client.on = (channel, listener) => {
+      if (channel !== 'entity:changed') throw new Error(`unexpected subscription ${channel}`)
+      listeners.push(listener as (entity: Entity) => void)
+      return () => {
+        listeners.splice(listeners.indexOf(listener as (entity: Entity) => void), 1)
+      }
+    }
+    setIpcClient(client)
+    state().subscribe()
+    state().subscribe()
+    expect(listeners).toHaveLength(1)
+    await state().load()
+
+    const logged: Entity = {
+      ...mara,
+      id: 'e-bram',
+      name: 'Bram',
+      template: 'blank',
+      fields: {},
+      origin: 'ai'
+    }
+    listeners[0]?.(logged)
+    expect(state().ids).toEqual(['e-aldous', 'e-bram', 'e-mara', 'e-forest', 'e-blood', 'e-guild'])
+    expect(state().byId['e-bram']?.origin).toBe('ai')
+    // The same row again (main emits to every window) changes nothing but the row itself.
+    const before = state().ids
+    listeners[0]?.(logged)
+    expect(state().ids).toBe(before)
+    expect(calls).toEqual([['entity:list', undefined]])
+
+    resetEntityStore()
+    expect(listeners).toHaveLength(0)
+  })
+
   it('create merges the returned row into its place and resolves with it', async () => {
     const created: Entity = { ...mara, id: 'e-bram', name: 'Bram', fields: {} }
     const { client, calls } = fakeClient({ 'entity:create': () => created })
@@ -312,7 +349,14 @@ describe('entityStore (F-9.2)', () => {
       await state().openImport('character')
       await expect(state().commitImport()).resolves.toEqual({ added: 1, merged: 1, replaced: 0 })
       expect(calls.at(-1)).toEqual(['entity:importCommit', { items: plan().items }])
-      expect(state().ids).toEqual(['e-aldous', 'e-ilse', 'e-mara', 'e-forest', 'e-blood', 'e-guild'])
+      expect(state().ids).toEqual([
+        'e-aldous',
+        'e-ilse',
+        'e-mara',
+        'e-forest',
+        'e-blood',
+        'e-guild'
+      ])
       expect(state().byId['e-mara']?.fields.background).toBe('Born at sea.')
       expect(state().importPlan).toBeNull()
     })

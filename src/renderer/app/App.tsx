@@ -56,6 +56,7 @@ import { EntityCreateDialog } from '@renderer/features/entities/EntityCreateDial
 import { EntityImportDialog } from '@renderer/features/entities/EntityImportDialog'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
+import { useObservedFactStore } from '@renderer/features/entities/observedFactStore'
 import {
   ReferencePanel,
   ReferencesToggleButton
@@ -190,6 +191,7 @@ export function App(): React.JSX.Element {
       useImportStore.getState().cancel()
       useTagStore.getState().clear()
       useEntityStore.getState().clear()
+      useObservedFactStore.getState().clear()
       useReferenceStore.getState().clear()
       // F-10.1: the search dialog and its last answer belong to the project that closed.
       useSearchStore.getState().reset()
@@ -210,6 +212,10 @@ export function App(): React.JSX.Element {
     // F-9.4: an entity write may create or rename a tag; the bank hears about it here rather than
     // reloading the list.
     useTagStore.getState().subscribe()
+    // F-5.16: the story-bible job creates entities and logs facts in the background; the tabs and
+    // the open page hear about both here.
+    useEntityStore.getState().subscribe()
+    useObservedFactStore.getState().subscribe()
     useProposedTagStore
       .getState()
       .load()

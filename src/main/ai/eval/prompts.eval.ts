@@ -13,6 +13,7 @@ import { checkChatFidelity, postProcessChatText } from '../chat'
 import { postProcessGhostText } from '../ghostText'
 import { buildOpenAiProvider } from '../providers/openai'
 import { PROMPT_CATALOGUE, PROMPT_VERSIONS } from '../prompts/catalogue'
+import { parseSummaryAnswer } from '../summarize'
 import { EVAL_CASES, FIXTURE_PROFILE, type EvalCase } from './fixtures'
 import { renderLiveReport, renderTokenReport, tokenRows, type LiveResult } from './report'
 
@@ -132,7 +133,8 @@ function scoreBetaReader(texts: string[], answer: string): LiveResult['verdict']
     return { kind: 'json', ok: false, problem: 'not JSON' }
   }
   const result = BetaReaderAnswer.safeParse(parsed)
-  if (!result.success) return { kind: 'json', ok: false, problem: 'not { items: [{ scene, quote }] }' }
+  if (!result.success)
+    return { kind: 'json', ok: false, problem: 'not { items: [{ scene, quote }] }' }
   const uncited = result.data.items.filter((item) => {
     const source = Number.isInteger(item.scene) ? texts[item.scene - 1] : undefined
     return source === undefined || !findQuote(source, item.quote)
@@ -197,13 +199,21 @@ function scoreStructure(
   }
   const result = StructureAnswer.safeParse(parsed)
   if (!result.success) {
-    return { kind: 'json', ok: false, problem: 'not { breaks: [{ before, kind }], scenes: [{ start }] }' }
+    return {
+      kind: 'json',
+      ok: false,
+      problem: 'not { breaks: [{ before, kind }], scenes: [{ start }] }'
+    }
   }
   const inChunk = new Set(c.scoring.indices)
   const bank = new Set(c.scoring.bank)
   const strays = [
-    ...result.data.breaks.filter((item) => !inChunk.has(item.before)).map((item) => `break ${item.before}`),
-    ...result.data.scenes.filter((item) => !inChunk.has(item.start)).map((item) => `scene ${item.start}`),
+    ...result.data.breaks
+      .filter((item) => !inChunk.has(item.before))
+      .map((item) => `break ${item.before}`),
+    ...result.data.scenes
+      .filter((item) => !inChunk.has(item.start))
+      .map((item) => `scene ${item.start}`),
     ...result.data.scenes
       .flatMap((item) => item.tags ?? [])
       .map(toTagName)
@@ -273,6 +283,25 @@ function scoreSummary(answer: string): LiveResult['verdict'] {
   }
 }
 
+/**
+ * A summary with observed facts (F-5.16) scores as the summary does and then on the rule the
+ * story bible turns on: every fact the model gave must survive `parseSummaryAnswer` — the five
+ * strings, an attribute of its kind, and a quote found in the scene as sent. A dropped fact is
+ * a token paid for nothing, so it fails the case.
+ */
+function scoreSummaryFacts(sceneText: string, answer: string): LiveResult['verdict'] {
+  const summary = scoreSummary(answer)
+  if (summary.kind !== 'json' || !summary.ok) return summary
+  const { facts, droppedFacts } = parseSummaryAnswer(answer, sceneText)
+  return droppedFacts === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : {
+        kind: 'json',
+        ok: false,
+        problem: `${droppedFacts} of ${facts.length + droppedFacts} facts dropped`
+      }
+}
+
 describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
   it('sends every case once, scores the answers, and writes the fidelity report', async () => {
     const key = process.env.OPENAI_API_KEY
@@ -320,6 +349,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
       }
       if (c.scoring.kind === 'summary') {
         results.push({ ...base, answer: reply.text, verdict: scoreSummary(reply.text) })
+        continue
+      }
+      if (c.scoring.kind === 'summaryFacts') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreSummaryFacts(c.scoring.sceneText, reply.text)
+        })
         continue
       }
       if (c.scoring.kind === 'betaReader') {

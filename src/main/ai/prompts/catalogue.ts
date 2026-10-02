@@ -22,11 +22,13 @@ import { GHOST_REGEN_PROMPT_V2_VERSION } from './ghostTextRegen.v2'
 import { GHOST_REGEN_PROMPT_V3_VERSION } from './ghostTextRegen.v3'
 import { IMPORT_STRUCTURE_PROMPT_VERSION } from './importStructure.v1'
 import { QUERY_PROMPT_VERSION } from './query.v1'
+import { QUERY_PROMPT_V2_VERSION } from './query.v2'
 import { REWRITE_PROMPT_VERSION } from './rewrite.v1'
 import { REWRITE_PROMPT_V2_VERSION } from './rewrite.v2'
 import { REWRITE_REGEN_PROMPT_VERSION } from './rewriteRegen.v1'
 import { REWRITE_REGEN_PROMPT_V2_VERSION } from './rewriteRegen.v2'
 import { SUMMARY_PROMPT_VERSION } from './summary.v1'
+import { SUMMARY_PROMPT_V2_VERSION } from './summary.v2'
 import { TAGS_PROMPT_VERSION } from './tags.v1'
 import { TAGS_REGEN_PROMPT_VERSION } from './tagsRegen.v1'
 
@@ -71,7 +73,9 @@ export const PROMPT_VERSIONS = [
   BETA_READER_REGEN_PROMPT_VERSION,
   BRIEF_PROMPT_VERSION,
   SUMMARY_PROMPT_VERSION,
+  SUMMARY_PROMPT_V2_VERSION,
   QUERY_PROMPT_VERSION,
+  QUERY_PROMPT_V2_VERSION,
   IMPORT_STRUCTURE_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
@@ -206,7 +210,14 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   },
   [BRIEF_PROMPT_VERSION]: { feature: 'brief', tier: 'fast', output: 'json', since: 'F-14.3' },
   [SUMMARY_PROMPT_VERSION]: { feature: 'summary', tier: 'fast', output: 'json', since: 'F-5.6' },
+  [SUMMARY_PROMPT_V2_VERSION]: {
+    feature: 'summary',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-5.16'
+  },
   [QUERY_PROMPT_VERSION]: { feature: 'query', tier: 'strong', output: 'json', since: 'F-5.7' },
+  [QUERY_PROMPT_V2_VERSION]: { feature: 'query', tier: 'strong', output: 'json', since: 'F-5.16' },
   [IMPORT_STRUCTURE_PROMPT_VERSION]: {
     feature: 'importStructure',
     tier: 'fast',

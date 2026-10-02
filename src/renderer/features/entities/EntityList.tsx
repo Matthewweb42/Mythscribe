@@ -74,6 +74,11 @@ export function EntityList({ kind, ids, filtered, view }: EntityListProps): Reac
               <span className={`min-w-0 truncate ${view === 'cards' ? 'font-medium' : ''}`}>
                 {entity.name}
               </span>
+              {entity.origin === 'ai' ? (
+                <span className="mt-0.5 w-fit rounded-full border border-line px-1.5 text-[11px] text-fg-muted">
+                  Added by AI
+                </span>
+              ) : null}
               {category !== undefined && category.length > 0 ? (
                 <span className="mt-0.5 w-fit max-w-full truncate rounded-full border border-line px-1.5 text-[11px] text-fg-muted">
                   {category}

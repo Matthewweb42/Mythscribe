@@ -25,6 +25,11 @@ import {
   type FocusSettingsInput
 } from '@shared/focus'
 import type { NovelFormat } from '@shared/ipc/contract'
+import {
+  OBSERVED_DISMISSED_KEY,
+  ObservedDismissed,
+  defaultObservedDismissed
+} from '@shared/observedFacts'
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
 import { DISMISSED_NAMES_KEY, DismissedNames, defaultDismissedNames } from '@shared/proposedTags'
 import { REFERENCE_PINS_KEY, ReferencePins, defaultReferencePins } from '@shared/references'
@@ -275,6 +280,36 @@ export function setReferencePins(db: TreeDb, value: ReferencePins): ReferencePin
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: REFERENCE_PINS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the entities the author deleted while the manuscript had facts about them (F-5.16) from
+ * the `settings` row under `OBSERVED_DISMISSED_KEY`. A missing row, unparsable JSON, or a value
+ * outside the schema all answer with the empty list: an unreadable row can only ever let the
+ * story-bible job create an entity again, never keep one out the author did not delete.
+ */
+export function getObservedDismissed(db: TreeDb): ObservedDismissed {
+  const row = db.select().from(settings).where(eq(settings.key, OBSERVED_DISMISSED_KEY)).get()
+  if (!row) return defaultObservedDismissed()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultObservedDismissed()
+  }
+  const parsed = ObservedDismissed.safeParse(json)
+  return parsed.success ? parsed.data : defaultObservedDismissed()
+}
+
+/** Replaces the deleted-entity names (F-5.16; upsert on the settings key) and returns what was stored. */
+export function setObservedDismissed(db: TreeDb, value: ObservedDismissed): ObservedDismissed {
+  const stored = ObservedDismissed.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: OBSERVED_DISMISSED_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

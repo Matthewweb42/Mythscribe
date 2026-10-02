@@ -1,4 +1,5 @@
 import { estimateTokens } from './ai'
+import type { EntityKind } from './entities'
 import type { TagCategory } from './tags'
 
 /**
@@ -6,8 +7,8 @@ import type { TagCategory } from './tags'
  * ground truth, rendered once and placed in the stable prefix after the voice profile
  * (CLAUDE.md, token efficiency rule 3). Today the facts are the tag bank in its four story
  * categories, the scene's tags, its place in the manuscript, and the scenes either side with
- * their metadata and their scene summaries (F-5.6); F-9 entity sheets plug into the same
- * shape later.
+ * their metadata and their scene summaries (F-5.6), and — since F-5.16 — the entity sheets of
+ * the scene's tags with what the manuscript itself states about them (observed facts).
  * `renderStoryBible` is pure; `src/main/ai/context/storyBible.ts` gathers the facts.
  */
 
@@ -61,6 +62,33 @@ export interface StoryBibleScene {
   tags: string[]
 }
 
+/** Longest value of one sheet field or observed fact in an entity line; a longer one is cut with "…". */
+export const STORY_BIBLE_VALUE_MAX = 120
+
+/** What introduces the observed facts in an entity line; the sheet before it is the author's word. */
+export const STORY_BIBLE_OBSERVED_LABEL = 'Seen in the manuscript:'
+
+/** One stated thing about an entity: the sheet field's (or the fact's attribute's) label and its value. */
+export interface StoryBibleEntry {
+  label: string
+  value: string
+}
+
+/**
+ * One entity of the story bible as a prompt carries it (F-5.16): the author's own sheet, and
+ * then what the manuscript states that the sheet does not already say. The sheet comes first
+ * and wins every conflict (F-14.9), which is why a fact whose attribute the sheet fills is left
+ * out by the gatherer rather than set beside it.
+ */
+export interface StoryBibleEntity {
+  name: string
+  kind: EntityKind
+  /** The filled fields of the author's sheet, in template order. */
+  sheet: StoryBibleEntry[]
+  /** The observed facts the sheet does not cover, merged (`groupFacts`), in template order. */
+  observed: StoryBibleEntry[]
+}
+
 export interface StoryBibleFacts {
   /** Every bank tag in a story category, in `tag:list` order. */
   bank: { category: StoryBibleCategory; name: string }[]
@@ -68,6 +96,11 @@ export interface StoryBibleFacts {
   scene: StoryBibleScene | null
   previous: SceneNeighbor | null
   next: SceneNeighbor | null
+  /**
+   * The entities linked to the scene's tags (F-5.16), in story-bible order; absent or empty for
+   * a project without entities, which renders exactly as before.
+   */
+  entities?: StoryBibleEntity[]
 }
 
 /** A cut category line keeps at least this many names before "… and N more". */
@@ -82,6 +115,11 @@ const MIN_NAMES_WHEN_CUT = 1
  * fit with "… and N more" rather than dropped, and last the neighbours' summaries (F-5.6),
  * each whole or not at all — half a summary states a fact the scene does not. A bank line
  * that cannot keep even one name is dropped whole.
+ *
+ * F-5.16: the entities of the scene's tags follow the scene line, one line each. Their sheets
+ * are admitted after the bank and ahead of the neighbours' summaries (the author's own word
+ * about who is in the scene), their observed facts last of all, so facts are dropped before
+ * sheets (`renderStoryBibleEntities`).
  */
 export function renderStoryBible(facts: StoryBibleFacts, maxTokens: number): string | null {
   const hasTags = facts.scene !== null && facts.scene.tags.length > 0
@@ -127,14 +165,116 @@ export function renderStoryBible(facts: StoryBibleFacts, maxTokens: number): str
     used += estimateTokens(`${line}\n`)
   }
 
+  const entityLines = entityAdmission(facts.entities ?? [])
+  used += entityLines.admitSheets(maxTokens - used)
+
   const summaries: string[] = []
   for (const { label, summary } of withSummary) {
     admit(`${label} scene summary: ${summary}`, summaries)
   }
 
-  return [STORY_BIBLE_HEADING, ...categories, sceneLine, ...neighbours, ...summaries]
+  entityLines.admitObserved(maxTokens - used)
+
+  return [
+    STORY_BIBLE_HEADING,
+    ...categories,
+    sceneLine,
+    ...entityLines.lines(),
+    ...neighbours,
+    ...summaries
+  ]
     .filter((line): line is string => line !== null)
     .join('\n')
+}
+
+/** A value on one line and within `STORY_BIBLE_VALUE_MAX`: a sheet field can run to pages. */
+function cutValue(value: string): string {
+  const flat = value.replace(/\s+/gu, ' ').trim()
+  return flat.length <= STORY_BIBLE_VALUE_MAX
+    ? flat
+    : `${flat.slice(0, STORY_BIBLE_VALUE_MAX).trimEnd()}…`
+}
+
+const renderEntries = (entries: readonly StoryBibleEntry[]): string =>
+  entries.map((entry) => `${entry.label}: ${cutValue(entry.value)}`).join('; ')
+
+/** One entity's line with its sheet and the first `observed` of its facts; null when both are empty. */
+function renderEntity(
+  entity: StoryBibleEntity,
+  withSheet: boolean,
+  observed: number
+): string | null {
+  const sheet = withSheet && entity.sheet.length > 0 ? renderEntries(entity.sheet) : ''
+  const seen =
+    observed > 0
+      ? `${STORY_BIBLE_OBSERVED_LABEL} ${renderEntries(entity.observed.slice(0, observed))}`
+      : ''
+  if (sheet === '' && seen === '') return null
+  // Each part closes as a sentence; a value that already ends one is not given a second stop.
+  const stated = [sheet, seen]
+    .filter((part) => part !== '')
+    .map((part) => (/[.!?…]$/u.test(part) ? part : `${part}.`))
+    .join(' ')
+  return `${entity.name} (${entity.kind}): ${stated}`
+}
+
+/**
+ * The two-pass admission of the entity lines, shared by the prose bible and the query bible so
+ * both drop the same things first: `admitSheets` lets in each entity's sheet line while it fits
+ * `room` estimated tokens, and `admitObserved` then adds each entity's observed facts — to its
+ * sheet line, or as a line of their own for an entity with no sheet (or whose sheet did not
+ * fit) — as many as fit, earliest attribute first. Both answer the tokens they spent.
+ */
+function entityAdmission(entities: readonly StoryBibleEntity[]): {
+  admitSheets: (room: number) => number
+  admitObserved: (room: number) => number
+  lines: () => string[]
+} {
+  const admitted: (string | null)[] = entities.map(() => null)
+  const cost = (line: string | null): number => (line === null ? 0 : estimateTokens(`${line}\n`))
+  return {
+    admitSheets: (room) => {
+      let spent = 0
+      entities.forEach((entity, index) => {
+        const line = renderEntity(entity, true, 0)
+        if (line === null || spent + cost(line) > room) return
+        admitted[index] = line
+        spent += cost(line)
+      })
+      return spent
+    },
+    admitObserved: (room) => {
+      let spent = 0
+      entities.forEach((entity, index) => {
+        const before = admitted[index] ?? null
+        for (let keep = entity.observed.length; keep > 0; keep -= 1) {
+          const line = renderEntity(entity, before !== null, keep)
+          const extra = cost(line) - cost(before)
+          if (line === null || spent + extra > room) continue
+          admitted[index] = line
+          spent += extra
+          break
+        }
+      })
+      return spent
+    },
+    lines: () => admitted.filter((line): line is string => line !== null)
+  }
+}
+
+/**
+ * Entity lines on their own within `maxTokens` (F-5.16): what Story Intelligence carries under
+ * its own heading. Sheets first, then the observed facts, so the facts are what a short budget
+ * drops. Empty when nothing fits or nothing is stated.
+ */
+export function renderStoryBibleEntities(
+  entities: readonly StoryBibleEntity[],
+  maxTokens: number
+): string[] {
+  const admission = entityAdmission(entities)
+  const spent = admission.admitSheets(maxTokens)
+  admission.admitObserved(maxTokens - spent)
+  return admission.lines()
 }
 
 function renderScene(scene: StoryBibleScene): string {

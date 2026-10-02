@@ -9,12 +9,19 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../../document/documentStore'
 import { setSceneMeta } from '../../document/sceneMetaStore'
 import { upsertSummary } from '../../document/summaryStore'
+import { createEntity } from '../../entity/entityStore'
+import {
+  listFactsForEntity,
+  replaceSceneFacts,
+  setFactHidden
+} from '../../entity/observedFactStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { addDocumentTag } from '../../tag/documentTagStore'
 import { createTag } from '../../tag/tagStore'
 import type { TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
 import {
+  namedEntities,
   queryTerms,
   rankCandidates,
   sceneTitles,
@@ -184,7 +191,8 @@ describe('rankCandidates (F-5.7)', () => {
     expect(rankCandidates(db, { question: 'Anything?', nodeId: null })).toEqual({
       full: [],
       summaries: [],
-      ranked: []
+      ranked: [],
+      bible: []
     })
   })
 
@@ -237,5 +245,70 @@ describe('sceneTitles (F-14.11, shared with F-5.7)', () => {
     const title = sceneTitles(db)
     expect(title(scenes[0]!)).toBe('Chapter 1 › Scene 1')
     expect(title('nope')).toBe('')
+  })
+})
+
+describe('the story bible in the retrieval (F-5.16)', () => {
+  const AGE = 'She was nineteen that spring.'
+
+  it('names the entities a question term starts a word of, or a #ref is the tag of', () => {
+    const mara = createEntity(db, { kind: 'character', name: 'Mara Vell' }).entity
+    const mill = createEntity(db, { kind: 'setting', name: 'The Old Mill' }).entity
+    createEntity(db, { kind: 'character', name: 'Tomas' })
+    const all = [mara, mill]
+    expect(namedEntities(all, ['vell'], []).map((entity) => entity.name)).toEqual(['Mara Vell'])
+    expect(namedEntities(all, ['mil'], []).map((entity) => entity.name)).toEqual(['The Old Mill'])
+    expect(namedEntities(all, ['ara'], [])).toEqual([])
+    expect(namedEntities(all, [], ['the-old-mill']).map((entity) => entity.name)).toEqual([
+      'The Old Mill'
+    ])
+  })
+
+  it('boosts the scene a fact about a named entity was read from, so it goes out in full', () => {
+    // Four scenes name Mara equally; the fact was read from the last, which would otherwise
+    // rank fourth and ride along as nothing at all (it has no summary).
+    for (const id of scenes) saveDocument(db, id, doc(`Mara waited. ${AGE}`))
+    const mara = createEntity(db, { kind: 'character', name: 'Mara' }).entity
+    expect(
+      rankCandidates(db, { question: 'How old is Mara?', nodeId: null }).full.map((c) => c.nodeId)
+    ).toEqual(scenes.slice(0, QUERY_FULL_SCENES))
+    replaceSceneFacts(db, scenes[3]!, [
+      { entityId: mara.id, attribute: 'age', value: 'nineteen', quote: AGE }
+    ])
+    const ranked = rankCandidates(db, { question: 'How old is Mara?', nodeId: null })
+    expect(ranked.full[0]?.nodeId).toBe(scenes[3])
+    expect(ranked.full[0]!.score - ranked.full[1]!.score).toBeCloseTo(QUERY_WEIGHTS.fact)
+    // A question that does not name her gets neither the boost nor the bible.
+    const other = rankCandidates(db, { question: 'Who waited?', nodeId: null })
+    expect(other.full[0]?.nodeId).toBe(scenes[0])
+    expect(other.bible).toEqual([])
+  })
+
+  it('answers the named entities as sheet and observed facts, each fact with its scene title', () => {
+    saveDocument(db, scenes[0]!, doc(`Mara waited. ${AGE}`))
+    const mara = createEntity(db, {
+      kind: 'character',
+      name: 'Mara',
+      fields: { appearance: 'Tall, with a scar.' }
+    }).entity
+    replaceSceneFacts(db, scenes[0]!, [
+      { entityId: mara.id, attribute: 'age', value: 'nineteen', quote: AGE },
+      // The sheet already says what she looks like: the author's word is the only one sent.
+      { entityId: mara.id, attribute: 'appearance', value: 'short', quote: 'Mara waited.' }
+    ])
+    const title = sceneTitles(db)(scenes[0]!)
+    expect(rankCandidates(db, { question: 'How old is Mara?', nodeId: null }).bible).toEqual([
+      {
+        name: 'Mara',
+        kind: 'character',
+        sheet: [{ label: 'Appearance', value: 'Tall, with a scar.' }],
+        observed: [{ label: 'Age', value: `nineteen (${title})` }]
+      }
+    ])
+    // A hidden fact is the author's "wrong": it neither rides along nor boosts its scene.
+    const age = listFactsForEntity(db, mara.id).find((fact) => fact.attribute === 'age')
+    setFactHidden(db, age?.id ?? '', true)
+    const hidden = rankCandidates(db, { question: 'How old is Mara?', nodeId: null })
+    expect(hidden.bible[0]?.observed).toEqual([])
   })
 })

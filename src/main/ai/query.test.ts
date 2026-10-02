@@ -15,14 +15,19 @@ import type { StoredSceneSummary } from '@shared/summary'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
 import { upsertSummary } from '../document/summaryStore'
+import { createEntity } from '../entity/entityStore'
+import { replaceSceneFacts } from '../entity/observedFactStore'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { setAiSettings } from '../project/settingsStore'
 import { createNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
+import { sceneTitles } from './context/queryContext'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import type { ChatTurn } from './prompts/chat.v1'
+import { buildQueryPrompt } from './prompts/query.v1'
+import { QUERY_BIBLE_HEADING } from './prompts/query.v2'
 import {
   fitQueryPrompt,
   QUERY_HISTORY_KEEP,
@@ -118,6 +123,8 @@ async function failure(over: Partial<QueryInput> = {}): Promise<{ code: string; 
   throw new Error('expected a failure')
 }
 
+/** How the prompt names the `index`-th manuscript scene (`Chapter › Scene`). */
+const sceneTitle = (index: number): string => sceneTitles(db)(scenes[index] ?? '')
 /** The system turn of a request, as the provider saw it. */
 const system = (call = 0): string => complete.mock.calls[call]?.[0].messages[0]?.content ?? ''
 
@@ -176,7 +183,7 @@ afterEach(() => {
 })
 
 describe('runQuery (F-5.7)', () => {
-  it('sends the ranked scenes as JSON to the strong tier under query.v1 and answers with citations', async () => {
+  it('sends the ranked scenes as JSON to the strong tier under query.v2 and answers with citations', async () => {
     answers({ citations: [{ scene: 1, quote: QUOTE }] })
     const result = await ask()
     expect(result).toEqual({
@@ -193,7 +200,7 @@ describe('runQuery (F-5.7)', () => {
       costUsd: priceFor('gpt-5.4', 900, 60).costUsd,
       cached: false,
       model: 'gpt-5.4',
-      promptVersion: 'query.v1'
+      promptVersion: 'query.v2'
     })
     const request = complete.mock.calls[0]![0]
     expect(request).toMatchObject({ tier: 'strong', json: true, maxTokens: 600 })
@@ -201,7 +208,7 @@ describe('runQuery (F-5.7)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'query',
       tier: 'strong',
-      promptVersion: 'query.v1',
+      promptVersion: 'query.v2',
       cached: false
     })
   })
@@ -544,5 +551,54 @@ describe('fitQueryPrompt (F-5.7, token rule 8)', () => {
     const input = { full: [scene(0, 12_000)], summaries: [], history: [] }
     const fit = fitQueryPrompt(input, 800, build)
     expect(fit.full[0]!.text.match(/…/g)).toHaveLength(1)
+  })
+})
+
+describe('runQuery with the story bible (F-5.16)', () => {
+  it("sends query.v1's messages exactly while no entity is named", async () => {
+    createEntity(db, { kind: 'character', name: 'Tomas', fields: { age: '50' } })
+    await ask()
+    expect(system()).not.toContain('Story bible')
+    expect(complete.mock.calls[0]?.[0].messages).toEqual(
+      buildQueryPrompt({
+        full: [
+          { title: sceneTitle(0), text: LEDGER },
+          { title: sceneTitle(1), text: QUIET },
+          { title: sceneTitle(2), text: QUIET }
+        ],
+        summaries: [],
+        history: [],
+        question: QUESTION
+      }).messages
+    )
+  })
+
+  it('carries the sheet and the observed facts of the entity the question names, before the scenes', async () => {
+    const mara = createEntity(db, {
+      kind: 'character',
+      name: 'Mara',
+      fields: { age: '31' }
+    }).entity
+    replaceSceneFacts(db, scenes[0]!, [
+      { entityId: mara.id, attribute: 'goals', value: 'Keep a copy of the ledger', quote: QUOTE }
+    ])
+    await ask()
+    expect(system()).toContain(
+      `${QUERY_BIBLE_HEADING}\nMara (character): Age: 31. Seen in the manuscript: ` +
+        `Goals / motivations: Keep a copy of the ledger (${sceneTitle(0)}).\n\nScenes (full text):`
+    )
+    expect(ledger[0]).toMatchObject({ feature: 'query', promptVersion: 'query.v2' })
+  })
+
+  it('keys the local cache on the bible: a changed sheet is a new request, an unchanged one is not', async () => {
+    const mara = createEntity(db, { kind: 'character', name: 'Mara', fields: { age: '31' } }).entity
+    await ask()
+    expect((await ask()).cached).toBe(true)
+    expect(complete).toHaveBeenCalledTimes(1)
+    replaceSceneFacts(db, scenes[1]!, [
+      { entityId: mara.id, attribute: 'personality', value: 'Patient', quote: 'Mara stood' }
+    ])
+    expect((await ask()).cached).toBe(false)
+    expect(complete).toHaveBeenCalledTimes(2)
   })
 })

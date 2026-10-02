@@ -19,10 +19,13 @@ import { PROPOSAL_NOTE_MAX } from '@shared/proposal'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX } from '@shared/rewrite'
 import {
   renderStoryBible,
+  renderStoryBibleEntities,
   STORY_BIBLE_CATEGORIES,
   STORY_BIBLE_GHOST_TOKEN_BUDGET,
   STORY_BIBLE_TOKEN_BUDGET,
+  STORY_BIBLE_VALUE_MAX,
   type StoryBibleCategory,
+  type StoryBibleEntity,
   type StoryBibleFacts
 } from '@shared/storyBible'
 import {
@@ -126,6 +129,11 @@ import {
 } from '../prompts/rewriteRegen.v2'
 import { buildSummaryPrompt, SUMMARY_PROMPT_VERSION } from '../prompts/summary.v1'
 import {
+  buildSummaryPromptV2,
+  SUMMARY_PROMPT_V2_VERSION,
+  type SummaryKnownNames
+} from '../prompts/summary.v2'
+import {
   buildBetaReaderPrompt,
   BETA_READER_PROMPT_VERSION,
   type BuildBetaReaderPromptInput
@@ -144,6 +152,11 @@ import {
   QUERY_PROMPT_VERSION,
   type BuildQueryPromptInput
 } from '../prompts/query.v1'
+import {
+  buildQueryPromptV2,
+  QUERY_PROMPT_V2_VERSION,
+  type BuildQueryPromptV2Input
+} from '../prompts/query.v2'
 import { fitQueryPrompt } from '../query'
 import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../prompts/tags.v1'
 import { buildTagsRegenPrompt, TAGS_REGEN_PROMPT_VERSION } from '../prompts/tagsRegen.v1'
@@ -151,12 +164,17 @@ import {
   SUMMARY_BANK_NAMES_MAX,
   SUMMARY_KEY_POINT_MAX,
   SUMMARY_KEY_POINTS_MAX,
+  SUMMARY_KNOWN_NAMES_MAX,
   SUMMARY_MAX_CHARS,
   SUMMARY_SCENE_CHAR_BUDGET
 } from '@shared/summary'
 import { BETA_READER_SCENE_CHAR_BUDGET } from '@shared/betaReader'
 import { IMPORT_CHUNK_WORDS } from '@shared/importStructure'
-import { QUERY_SCENE_CHAR_BUDGET } from '@shared/query'
+import {
+  QUERY_BIBLE_ENTITIES,
+  QUERY_BIBLE_TOKEN_BUDGET,
+  QUERY_SCENE_CHAR_BUDGET
+} from '@shared/query'
 import {
   BRIEF_SCENE_CHAR_BUDGET,
   EMPTY_SCENE_BRIEF,
@@ -390,6 +408,12 @@ export interface EvalCase {
     | { kind: 'brief' }
     /** A scene summary (F-5.6): the answer must parse to `SceneSummary`, caps and all. */
     | { kind: 'summary' }
+    /**
+     * A scene summary with observed facts (F-5.16): the summary must parse as above, and every
+     * fact must survive the feature's own checks — shape, attribute of its kind, and a quote
+     * found in the scene text as sent.
+     */
+    | { kind: 'summaryFacts'; sceneText: string }
     /**
      * A beta-reader report (F-14.11): the answer must parse, every item must name a scene in
      * range, and its quote must be in that scene's text as sent — one entry per scene sent, the
@@ -993,6 +1017,40 @@ function summaryCase(
   }
 }
 
+function summaryV2Case(
+  name: string,
+  note: string,
+  sceneText: string,
+  meta: typeof META | null,
+  known: SummaryKnownNames
+): EvalCase {
+  const built = buildSummaryPromptV2({ sceneText, meta, known })
+  return {
+    version: SUMMARY_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'summaryFacts', sceneText }
+  }
+}
+
+/** The story-bible names the fixture scene contains (F-5.16): its two people and the place. */
+const FIXTURE_KNOWN: SummaryKnownNames = {
+  character: ['Mara', 'Tomas'],
+  setting: ['ferry landing'],
+  world: []
+}
+/** The known-names line at its cap, every name at a realistic full length. */
+const MAXED_KNOWN: SummaryKnownNames = {
+  character: Array.from(
+    { length: SUMMARY_KNOWN_NAMES_MAX },
+    (_, index) => `Character Name ${index}`
+  ),
+  setting: [],
+  world: []
+}
+
 /** The character names a summary request lists: the bible's own cast, and the bank at its cap. */
 const FIXTURE_CHARACTERS = FIXTURE_FACTS.bank
   .filter((entry) => entry.category === 'character')
@@ -1056,10 +1114,86 @@ const queryMaxedRaw = {
 }
 const MAXED_QUESTION = 'q'.repeat(CHAT_MESSAGE_MAX)
 const queryMaxed: BuildQueryPromptInput = {
-  ...fitQueryPrompt(queryMaxedRaw, inputBudget('query'), (full, summaries, history) =>
-    buildQueryPrompt({ full, summaries, history, question: MAXED_QUESTION }).messages
+  ...fitQueryPrompt(
+    queryMaxedRaw,
+    inputBudget('query'),
+    (full, summaries, history) =>
+      buildQueryPrompt({ full, summaries, history, question: MAXED_QUESTION }).messages
   ),
   question: MAXED_QUESTION
+}
+
+/**
+ * The story bible a query carries for the entities its question names (F-5.16): the author's
+ * sheet for Mara, and for Tomas only what the manuscript states, with the scene it was read
+ * from. Rendered through the feature's own budgeted renderer.
+ */
+const QUERY_BIBLE_ENTITIES_FIXTURE: StoryBibleEntity[] = [
+  {
+    name: 'Mara',
+    kind: 'character',
+    sheet: [
+      { label: 'Age', value: '31' },
+      { label: 'Goals / motivations', value: 'Clear her brother\u2019s debt to the mill.' }
+    ],
+    observed: [
+      {
+        label: 'Relationships',
+        value: 'Her brother owes the mill (Chapter 1 \u203a The ferry landing)'
+      }
+    ]
+  },
+  {
+    name: 'Tomas',
+    kind: 'character',
+    sheet: [],
+    observed: [
+      {
+        label: 'Goals / motivations',
+        value: 'Wants the mill\u2019s debt paid (Chapter 1 \u203a The ferry landing)'
+      }
+    ]
+  }
+]
+const queryBible = (entities: StoryBibleEntity[]): string | null => {
+  const lines = renderStoryBibleEntities(entities, QUERY_BIBLE_TOKEN_BUDGET)
+  return lines.length > 0 ? lines.join('\n') : null
+}
+const queryV2Fresh: BuildQueryPromptV2Input = { ...queryFresh, bible: null }
+const queryV2Full: BuildQueryPromptV2Input = {
+  ...queryFull,
+  bible: queryBible(QUERY_BIBLE_ENTITIES_FIXTURE)
+}
+/** The block at its budget: the most entities a question can name, every sheet and fact list full. */
+const MAXED_QUERY_BIBLE = queryBible(
+  Array.from({ length: QUERY_BIBLE_ENTITIES }, (_, index) => ({
+    name: `${'N'.repeat(40)} ${index}`,
+    kind: 'character' as const,
+    sheet: Array.from({ length: 8 }, (_unused, field) => ({
+      label: `Field ${field}`,
+      value: 'v'.repeat(STORY_BIBLE_VALUE_MAX)
+    })),
+    observed: Array.from({ length: 7 }, (_unused, fact) => ({
+      label: `Attribute ${fact}`,
+      value: 'o'.repeat(STORY_BIBLE_VALUE_MAX)
+    }))
+  }))
+)
+const queryV2Maxed: BuildQueryPromptV2Input = {
+  ...fitQueryPrompt(
+    queryMaxedRaw,
+    inputBudget('query'),
+    (full, summaries, history) =>
+      buildQueryPromptV2({
+        full,
+        summaries,
+        history,
+        question: MAXED_QUESTION,
+        bible: MAXED_QUERY_BIBLE
+      }).messages
+  ),
+  question: MAXED_QUESTION,
+  bible: MAXED_QUERY_BIBLE
 }
 
 /** The fixture passage as the import draft sees it: one paragraph per block, in reading order. */
@@ -1118,6 +1252,18 @@ function queryCase(name: string, note: string, input: BuildQueryPromptInput): Ev
   const built = buildQueryPrompt(input)
   return {
     version: QUERY_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'query', texts: input.full.map((scene) => scene.text) }
+  }
+}
+
+function queryV2Case(name: string, note: string, input: BuildQueryPromptV2Input): EvalCase {
+  const built = buildQueryPromptV2(input)
+  return {
+    version: QUERY_PROMPT_V2_VERSION,
     name,
     note,
     messages: built.messages,
@@ -1542,6 +1688,32 @@ export const EVAL_CASES: EvalCase[] = [
     },
     MAXED_CHARACTERS
   ),
+  summaryV2Case(
+    'fresh',
+    'the fixture scene with no story-bible names and no metadata: the shape a new project sends',
+    FIXTURE_PASSAGE,
+    null,
+    { character: [], setting: [], world: [] }
+  ),
+  summaryV2Case(
+    'full',
+    "the fixture scene with the story-bible names it contains and the scene's metadata",
+    FIXTURE_PASSAGE,
+    META,
+    FIXTURE_KNOWN
+  ),
+  summaryV2Case(
+    'maxed',
+    `a scene at the character budget with ${SUMMARY_KNOWN_NAMES_MAX} known names and long metadata: the most a background summary with facts can cost`,
+    `${FIXTURE_PASSAGE.repeat(20).slice(0, SUMMARY_SCENE_CHAR_BUDGET)}…`,
+    {
+      location: 'L'.repeat(200),
+      pov: 'P'.repeat(200),
+      timeline: 'T'.repeat(500),
+      brief: EMPTY_SCENE_BRIEF
+    },
+    MAXED_KNOWN
+  ),
   queryCase(
     'fresh',
     'one retrieved scene, no summaries and no history: the shape a new project sends',
@@ -1556,6 +1728,21 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed',
     'the worst input (three scenes at the character budget, ten summaries at theirs, ten history turns at the message cap) as the fit leaves it',
     queryMaxed
+  ),
+  queryV2Case(
+    'fresh',
+    'one retrieved scene and no story bible: the messages are query.v1\u2019s exactly',
+    queryV2Fresh
+  ),
+  queryV2Case(
+    'full',
+    'three retrieved scenes, two summaries, two history turns, and the story bible for the two characters the question names',
+    queryV2Full
+  ),
+  queryV2Case(
+    'maxed',
+    'the worst input as the fit leaves it, with the story-bible block at its token budget',
+    queryV2Maxed
   ),
   structureCase(
     'fixture',

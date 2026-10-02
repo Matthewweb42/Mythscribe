@@ -11,6 +11,7 @@ export const entityFixture: Entity[] = [
     body: 'The old cartographer who taught Mara to read the stars.',
     image: null,
     tagId: null,
+    origin: 'author',
     created: '2026-09-01T10:00:00.000Z',
     modified: '2026-09-01T10:00:00.000Z'
   },
@@ -23,6 +24,7 @@ export const entityFixture: Entity[] = [
     body: null,
     image: null,
     tagId: null,
+    origin: 'author',
     created: '2026-09-02T10:00:00.000Z',
     modified: '2026-09-03T11:30:00.000Z'
   },
@@ -35,6 +37,7 @@ export const entityFixture: Entity[] = [
     body: null,
     image: null,
     tagId: null,
+    origin: 'author',
     created: '2026-09-02T10:00:00.000Z',
     modified: '2026-09-02T10:00:00.000Z'
   },
@@ -47,6 +50,7 @@ export const entityFixture: Entity[] = [
     body: null,
     image: null,
     tagId: null,
+    origin: 'author',
     created: '2026-09-04T10:00:00.000Z',
     modified: '2026-09-04T10:00:00.000Z'
   },
@@ -59,6 +63,7 @@ export const entityFixture: Entity[] = [
     body: null,
     image: null,
     tagId: null,
+    origin: 'author',
     created: '2026-09-05T10:00:00.000Z',
     modified: '2026-09-05T10:00:00.000Z'
   }

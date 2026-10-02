@@ -280,7 +280,10 @@ export function setWordCountInIndex(index: TreeIndex, id: string, wordCount: num
  * Every document under `id`, depth-first in position order (F-3.8): the documents a folder
  * shows stacked. A document id yields itself; an empty folder or unknown id yields nothing.
  */
-export function descendantDocuments(index: TreeIndex, id: string): string[] {
+export function descendantDocuments(
+  index: Pick<TreeIndex, 'byId' | 'childrenOf'>,
+  id: string
+): string[] {
   const ids: string[] = []
   const walk = (current: string): void => {
     const node = index.byId[current]

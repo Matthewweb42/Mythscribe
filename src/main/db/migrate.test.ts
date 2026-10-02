@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(10)
+    expect(result.version).toBe(11)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -123,6 +123,7 @@ describe('migrate', () => {
     expect(tables()).toContain('tag_mention')
     expect(tables()).toContain('mention_scan')
     expect(tables()).toContain('entity')
+    expect(tables()).toContain('observed_fact')
   })
 })
 
@@ -370,5 +371,60 @@ describe('entity table (0009_entities)', () => {
     expect(db.prepare('SELECT tag_id FROM entity WHERE id = ?').get('rose-entity')).toEqual({
       tag_id: null
     })
+  })
+})
+
+describe('observed_fact table and entity.origin (0010_observed_facts)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO entity (id, kind, name, created, modified)
+       VALUES ('mara', 'character', 'Mara', '2026-01-01', '2026-01-01')`
+    ).run()
+  })
+  afterEach(() => db.close())
+
+  const insertFact = (id: string, entityId: string, nodeId: string): void => {
+    db.prepare(
+      `INSERT INTO observed_fact (id, entity_id, node_id, attribute, value, quote, created_at)
+       VALUES (?, ?, ?, 'age', 'nineteen', 'She was nineteen.', '2026-01-01')`
+    ).run(id, entityId, nodeId)
+  }
+  const count = (): unknown => db.prepare('SELECT COUNT(*) AS n FROM observed_fact').get()
+
+  it('defaults an entity to the author’s and a fact to visible', () => {
+    expect(db.prepare('SELECT origin FROM entity WHERE id = ?').get('mara')).toEqual({
+      origin: 'author'
+    })
+    insertFact('f1', 'mara', 'scene')
+    expect(db.prepare('SELECT hidden FROM observed_fact WHERE id = ?').get('f1')).toEqual({
+      hidden: 0
+    })
+  })
+
+  it('refuses a fact about an unknown entity or scene', () => {
+    expect(() => insertFact('f1', 'ghost', 'scene')).toThrow(/FOREIGN KEY/)
+    expect(() => insertFact('f1', 'mara', 'ghost')).toThrow(/FOREIGN KEY/)
+  })
+
+  it('drops the facts with their entity and with their scene', () => {
+    insertFact('f1', 'mara', 'scene')
+    db.prepare('DELETE FROM entity WHERE id = ?').run('mara')
+    expect(count()).toEqual({ n: 0 })
+    db.prepare(
+      `INSERT INTO entity (id, kind, name, created, modified)
+       VALUES ('mara', 'character', 'Mara', '2026-01-01', '2026-01-01')`
+    ).run()
+    insertFact('f2', 'mara', 'scene')
+    db.prepare('DELETE FROM node WHERE id = ?').run('scene')
+    expect(count()).toEqual({ n: 0 })
   })
 })

@@ -115,8 +115,10 @@ describe('AI_DATA_SHARING', () => {
         "its metadata (location, POV, timeline), its brief plus the previous scene's " +
         "reader-knows-after line and the next scene's goal, the voice profile (stylometric rules " +
         'and up to 3 exemplar passages), your author rules and banned phrases, and the story ' +
-        "bible (your tag names by category, the scene's tags, and the titles, metadata, and " +
-        'summaries of the scenes either side of it). An answer that breaks the voice profile or ' +
+        "bible (your tag names by category, the scene's tags, the sheets of the story-bible " +
+        'entries linked to those tags with what the manuscript states about them, and the ' +
+        'titles, metadata, and summaries of the scenes either side of it). An answer that ' +
+        'breaks the voice profile or ' +
         'uses a banned phrase is sent back once, with the same context plus the rule it broke, ' +
         'for a second try.'
     )
@@ -128,16 +130,38 @@ describe('AI_DATA_SHARING', () => {
     }
   })
 
-  it('names what a scene summary sends (F-5.6): the scene, its metadata, and the character names', () => {
+  it('names what a scene summary sends (F-5.6, F-5.16): the scene, its metadata, and the names', () => {
+    expect(AI_DATA_SHARING.summary.label).toBe('Scene summaries and story bible')
     expect(AI_DATA_SHARING.summary.sends).toBe(
-      "A scene's text (the first 20,000 characters), its metadata, and the names of your " +
-        'character tags, to keep its summary, key points, and characters present up to date ' +
-        'after you pause typing.'
+      "A scene's text (the first 20,000 characters), its metadata, and the names of the " +
+        'story-bible entries and tags that occur in the scene, to keep ' +
+        'its summary, key points, characters present, and the facts it states about your ' +
+        'characters, places, and world up to date after you pause typing.'
+    )
+  })
+
+  it('does not claim a summary sends the character tag bank: summary.v2 sends only names the scene contains (F-5.16)', () => {
+    // summary.v1 listed every character tag; summary.v2 lists the story-bible entries and the
+    // story tags that occur in the scene, and nothing else of the bank.
+    expect(AI_DATA_SHARING.summary.sends).not.toContain('the names of your character tags')
+    expect(AI_DATA_SHARING.summary.sends).toContain(
+      'the names of the story-bible entries and tags that occur in the scene'
     )
   })
 
   it('names the neighbours’ summaries in the story bible line (F-5.6)', () => {
     expect(STORY_BIBLE_SENDS).toContain('summaries of the scenes either side of it')
+  })
+
+  it('names the entity sheets and observed facts the story bible and a query carry (F-5.16)', () => {
+    expect(STORY_BIBLE_SENDS).toContain(
+      'the sheets of the story-bible entries linked to those tags with what the manuscript ' +
+        'states about them'
+    )
+    expect(AI_DATA_SHARING.query.sends).toBe(
+      'Your question, scene summaries, the full text of the top matching scenes, and the sheets ' +
+        'of the story-bible entries your question names with what the manuscript states about them.'
+    )
   })
 
   it('names what a brief draft sends (F-14.3) and gates it at Ask', () => {

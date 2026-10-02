@@ -59,6 +59,7 @@ import { AiProviderRegistry } from '../ai/registry'
 import { getProposal } from '../ai/proposalStore'
 import { insertUsage } from '../ai/usageStore'
 import { upsertSummary } from '../document/summaryStore'
+import { replaceSceneFacts } from '../entity/observedFactStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { aiProposal } from '../db/schema'
 import { AppStateStore } from '../appState/appStateStore'
@@ -1748,7 +1749,7 @@ describe('ai:query (F-5.7)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'query',
       nodeId: null,
-      promptVersion: 'query.v1',
+      promptVersion: 'query.v2',
       content: JSON.stringify({ answer: result.answer, citations: result.citations }),
       flagged: false,
       violation: null,
@@ -1987,7 +1988,7 @@ describe('scene summaries (F-5.6)', () => {
     expect(result.state.summary).toMatchObject({
       ...ANSWER,
       nodeId: scene,
-      promptVersion: 'summary.v1',
+      promptVersion: 'summary.v2',
       model: 'gpt-fake',
       truncated: false
     })
@@ -1996,6 +1997,100 @@ describe('scene summaries (F-5.6)', () => {
     expect(usage.byFeature.map((f) => f.feature)).toEqual(['summary'])
     // The pane hears about the run without polling.
     expect(statusesSent()).toContainEqual({ nodeId: scene, status: 'idle' })
+  })
+
+  it('logs the facts the summary answers and tells the windows: the new entity, its tag, and whose facts moved (F-5.16)', async () => {
+    const { scene } = await ready()
+    complete.mockResolvedValue({
+      text: JSON.stringify({
+        ...ANSWER,
+        facts: [
+          {
+            entity: 'Mara',
+            kind: 'character',
+            attribute: 'appearance',
+            value: 'Carries a lantern',
+            quote: 'She set the lantern down on the post'
+          }
+        ]
+      }),
+      model: 'gpt-fake',
+      usage: { inputTokens: 400, outputTokens: 60 }
+    })
+    const result = await invoke('ai:summarize', { nodeId: scene, requestId: 's-f' })
+    if (!result.ok) throw new Error(result.message)
+    const entities = await invoke('entity:list', undefined)
+    expect(entities).toMatchObject([{ kind: 'character', name: 'Mara', origin: 'ai' }])
+    const mara = entities[0]
+    const sent = (channel: string): unknown[] =>
+      vi
+        .mocked(fakeWin.webContents.send)
+        .mock.calls.filter(([name]) => name === channel)
+        .map(([, payload]) => payload)
+    expect(sent('entity:changed')).toEqual([mara])
+    expect(sent('tag:changed')).toMatchObject([{ id: mara?.tagId, name: 'mara' }])
+    expect(sent('observedFact:changed')).toEqual([{ entityIds: [mara?.id] }])
+    expect(await invoke('observedFact:listForEntity', { entityId: mara?.id ?? '' })).toMatchObject([
+      { nodeId: scene, attribute: 'appearance', value: 'Carries a lantern', hidden: false }
+    ])
+    // The run created an entity the scene names and still left the scene current.
+    expect(result.state).toMatchObject({ stale: false, status: 'idle' })
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('attaches a fact to the author’s own entity: nothing is created, the sheet is untouched, and only the facts are announced (F-5.16)', async () => {
+    const { scene } = await ready()
+    const mara = await invoke('entity:create', {
+      kind: 'character',
+      name: 'Mara',
+      fields: { appearance: 'Tall, grey-eyed' }
+    })
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    complete.mockResolvedValue({
+      text: JSON.stringify({
+        ...ANSWER,
+        facts: [
+          {
+            entity: 'mara',
+            kind: 'character',
+            attribute: 'appearance',
+            value: 'Carries a lantern',
+            quote: 'She set the lantern down on the post'
+          }
+        ]
+      }),
+      model: 'gpt-fake',
+      usage: { inputTokens: 400, outputTokens: 60 }
+    })
+    const result = await invoke('ai:summarize', { nodeId: scene, requestId: 's-a' })
+    if (!result.ok) throw new Error(result.message)
+    // The request named her as the author spells her, so the model attaches rather than invents.
+    expect(complete.mock.calls[0]![0].messages[0]?.content).toContain(
+      'Story-bible names in this scene: characters Mara.'
+    )
+    // Still one entity, still the author's, sheet as written.
+    expect(await invoke('entity:list', undefined)).toEqual([mara])
+    expect(mara).toMatchObject({ origin: 'author', fields: { appearance: 'Tall, grey-eyed' } })
+    const sent = (channel: string): unknown[] =>
+      vi
+        .mocked(fakeWin.webContents.send)
+        .mock.calls.filter(([name]) => name === channel)
+        .map(([, payload]) => payload)
+    expect(sent('entity:changed')).toEqual([])
+    expect(sent('tag:changed')).toEqual([])
+    expect(sent('observedFact:changed')).toEqual([{ entityIds: [mara.id] }])
+    expect(await invoke('observedFact:listForEntity', { entityId: mara.id })).toMatchObject([
+      {
+        entityId: mara.id,
+        nodeId: scene,
+        attribute: 'appearance',
+        value: 'Carries a lantern',
+        quote: 'She set the lantern down on the post',
+        hidden: false
+      }
+    ])
+    expect(result.state).toMatchObject({ stale: false, status: 'idle' })
+    expect(complete).toHaveBeenCalledTimes(1)
   })
 
   it('answers an unchanged scene from the stored row, and calls it out of date once it is edited', async () => {
@@ -2018,7 +2113,7 @@ describe('scene summaries (F-5.6)', () => {
     expect(await invoke('ai:summarize', { nodeId: scene, requestId: 's-3' })).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Scene summaries needs the AI dial at Ask or higher (it is at Off).',
+      message: 'Scene summaries and story bible needs the AI dial at Ask or higher (it is at Off).',
       nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
       requestId: 's-3'
     })
@@ -2513,6 +2608,56 @@ describe('replace:* (F-10.2)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('observed facts (F-5.16)', () => {
+  /** The `observedFact:changed` payloads sent to the window, in order. */
+  const factsChanged = (): unknown[] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([channel]) => channel === 'observedFact:changed')
+      .map(([, payload]) => payload)
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('observedFact:listForEntity', { entityId: 'x' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+    await expect(invoke('observedFact:setHidden', { id: 'x', hidden: true })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('lists an entity’s facts, hides and restores one, and tells the windows', async () => {
+    await invoke('project:create', { name: 'Bible', format: 'novel', directory: tmp })
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara' })
+    expect(mara.origin).toBe('author')
+    expect(await invoke('observedFact:listForEntity', { entityId: mara.id })).toEqual([])
+    const scene = (await invoke('tree:list', undefined)).find(
+      (node) => node.kind === 'document' && node.sectionType === null
+    )
+    replaceSceneFacts(manager.require().connection.orm, scene?.id ?? '', [
+      { entityId: mara.id, attribute: 'age', value: 'nineteen', quote: 'She was nineteen.' }
+    ])
+    const [fact, ...rest] = await invoke('observedFact:listForEntity', { entityId: mara.id })
+    expect(rest).toEqual([])
+    expect(fact).toMatchObject({ entityId: mara.id, nodeId: scene?.id, hidden: false })
+
+    const id = fact?.id ?? ''
+    expect(await invoke('observedFact:setHidden', { id, hidden: true })).toEqual({
+      ...fact,
+      hidden: true
+    })
+    expect(await invoke('observedFact:listForEntity', { entityId: mara.id })).toEqual([
+      { ...fact, hidden: true }
+    ])
+    expect(await invoke('observedFact:setHidden', { id, hidden: false })).toEqual(fact)
+    expect(factsChanged()).toEqual([{ entityIds: [mara.id] }, { entityIds: [mara.id] }])
+
+    await expect(
+      invoke('observedFact:setHidden', { id: 'missing', hidden: true })
+    ).rejects.toThrowError(/^NOT_FOUND: /)
+    expect(factsChanged()).toHaveLength(2)
   })
 })
 

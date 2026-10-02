@@ -3,11 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
 import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
+import type { ObservedFact } from '@shared/observedFacts'
 import type { ReferencePin, ReferencePins } from '@shared/references'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { resetNotesStore, useNotesStore } from '@renderer/features/editor/notesStore'
 import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
+import { observedFactFixture } from '@renderer/features/entities/observedFactFixture'
+import { resetObservedFactStore } from '@renderer/features/entities/observedFactStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -34,6 +37,7 @@ const LONG = 'A long history. '.repeat(20).trim()
 let pins: ReferencePin[]
 let entities: Entity[]
 let notes: Record<string, TiptapNodeT>
+let facts: ObservedFact[]
 let sets: ReferencePins[]
 let calls: Channel[]
 let addAnswer: Output<'reference:addImages'>
@@ -49,6 +53,10 @@ function client(): IpcClient {
       }
       if (channel === 'reference:addImages') return addAnswer as Output<C>
       if (channel === 'entity:list') return entities as Output<C>
+      if (channel === 'observedFact:listForEntity') {
+        const { entityId } = input as Input<'observedFact:listForEntity'>
+        return facts.filter((fact) => fact.entityId === entityId) as Output<C>
+      }
       if (channel === 'tree:list') return treeFixture as Output<C>
       if (channel === 'layout:set') return input as Output<C>
       if (channel === 'notes:get') {
@@ -91,6 +99,7 @@ const stored = (): readonly ReferencePin[] => useReferenceStore.getState().pins
 function reset(): void {
   resetReferenceStore()
   resetEntityStore()
+  resetObservedFactStore()
   resetNotesStore()
   resetLayoutStore()
   resetPendingSaves()
@@ -104,6 +113,7 @@ beforeEach(() => {
   pins = [MARA, SCENE_NOTES, MAP]
   entities = entityFixture
   notes = { 'sc-1': doc('She never takes the coast road.') }
+  facts = []
   sets = []
   calls = []
   addAnswer = null
@@ -186,6 +196,25 @@ describe('the cards (F-9.6)', () => {
       'src',
       'mythscribe-asset://references/Harbor-Map.0a1b2c3d.png'
     )
+  })
+
+  it('an entity card lists the first observed facts under From the manuscript (F-5.16)', async () => {
+    facts = observedFactFixture
+    pins = [MARA, FOREST]
+    await openPanel()
+    const section = await within(card('Mara')).findByRole('region', { name: 'From the manuscript' })
+    expect(
+      within(section)
+        .getAllByRole('listitem')
+        .map((item) => item.getAttribute('aria-label'))
+    ).toEqual(['Age: 34', 'Age: 29', 'Appearance: Grey eyes'])
+    expect(section).toHaveTextContent('+ 1 more')
+    expect(within(section).queryByRole('button', { name: 'Hide' })).toBeNull()
+    // The forest has no facts: its card carries no section.
+    expect(within(card('Dark Forest')).queryByRole('region')).toBeNull()
+
+    await userEvent.click(within(section).getByRole('button', { name: 'Go to passage in Scene 4' }))
+    expect(useTreeStore.getState().selectedId).toBe('sc-4')
   })
 
   it('shows the page of a blank-template entity and its thumbnail when it has an image', async () => {

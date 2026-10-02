@@ -6,6 +6,12 @@ import { emptySceneMeta } from '@shared/sceneMeta'
 import { STORY_BIBLE_HEADING, STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
 import { setSceneMeta } from '../../document/sceneMetaStore'
 import { upsertSummary } from '../../document/summaryStore'
+import { createEntity, updateEntity } from '../../entity/entityStore'
+import {
+  listFactsForEntity,
+  replaceSceneFacts,
+  setFactHidden
+} from '../../entity/observedFactStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { addDocumentTag } from '../../tag/documentTagStore'
 import { createTag } from '../../tag/tagStore'
@@ -146,6 +152,71 @@ describe('buildStoryBible (F-14.9)', () => {
     createTag(db, { name: 'Mara', category: 'character', color: '#112233' })
     expect(buildStoryBible(db, { nodeId: front.id, ...budget })).toBe(
       `${STORY_BIBLE_HEADING}\nCharacters: mara`
+    )
+  })
+})
+
+describe('buildStoryBible with entities (F-5.16)', () => {
+  it('is unchanged by entities the scene is not tagged with', () => {
+    const before = buildStoryBible(db, { nodeId: scene, ...budget })
+    const mara = createEntity(db, { kind: 'character', name: 'Mara', fields: { age: '31' } }).entity
+    replaceSceneFacts(db, scene, [
+      { entityId: mara.id, attribute: 'goals', value: 'Cross the river', quote: 'the river' }
+    ])
+    // The entity's tag joins the bank line, as any tag does; no entity line is added.
+    expect(buildStoryBible(db, { nodeId: scene, ...budget })).toBe(
+      (before ?? '').replace(
+        `${STORY_BIBLE_HEADING}\n`,
+        `${STORY_BIBLE_HEADING}\nCharacters: mara\n`
+      )
+    )
+  })
+
+  it("carries the sheet of each entity linked to the scene's tags, then the facts the sheet does not fill, in reading order", () => {
+    const mara = createEntity(db, { kind: 'character', name: 'Mara', fields: { age: '31' } }).entity
+    addDocumentTag(db, scene, mara.tagId ?? '')
+    replaceSceneFacts(db, secondChapterScene, [
+      { entityId: mara.id, attribute: 'appearance', value: 'Green eyes', quote: 'green eyes' }
+    ])
+    replaceSceneFacts(db, scene, [
+      // The sheet gives her age: the author's word wins, the observed one is not sent.
+      { entityId: mara.id, attribute: 'age', value: 'nineteen', quote: 'nineteen' },
+      { entityId: mara.id, attribute: 'appearance', value: 'Grey eyes', quote: 'grey eyes' }
+    ])
+    expect(buildStoryBible(db, { nodeId: scene, ...budget })).toContain(
+      'scene 1 of 1; tagged mara.\n' +
+        'Mara (character): Age: 31. Seen in the manuscript: Appearance: Grey eyes; Appearance: Green eyes.\n'
+    )
+    // A hidden fact never reaches a prompt.
+    const green = listFactsForEntity(db, mara.id).find((fact) => fact.value === 'Green eyes')
+    setFactHidden(db, green?.id ?? '', true)
+    expect(buildStoryBible(db, { nodeId: scene, ...budget })).toContain(
+      'Mara (character): Age: 31. Seen in the manuscript: Appearance: Grey eyes.\n'
+    )
+  })
+
+  it('sends no fields of a blank-template entity, only what the manuscript states', () => {
+    const tash = createEntity(db, { kind: 'character', name: 'Tash', fields: { age: '40' } }).entity
+    updateEntity(db, tash.id, { template: 'blank' })
+    addDocumentTag(db, scene, tash.tagId ?? '')
+    expect(buildStoryBible(db, { nodeId: scene, ...budget })).not.toContain('Tash (character)')
+    replaceSceneFacts(db, scene, [
+      { entityId: tash.id, attribute: 'age', value: 'forty', quote: 'forty' }
+    ])
+    expect(buildStoryBible(db, { nodeId: scene, ...budget })).toContain(
+      'Tash (character): Seen in the manuscript: Age: forty.\n'
+    )
+  })
+
+  it("sends a blank-template entity's page ahead of what the manuscript states", () => {
+    const tash = createEntity(db, { kind: 'character', name: 'Tash', template: 'blank' }).entity
+    updateEntity(db, tash.id, { body: 'Tash is forty-one.\nShe limps.' })
+    addDocumentTag(db, scene, tash.tagId ?? '')
+    replaceSceneFacts(db, scene, [
+      { entityId: tash.id, attribute: 'age', value: 'forty', quote: 'forty' }
+    ])
+    expect(buildStoryBible(db, { nodeId: scene, ...budget })).toContain(
+      'Tash (character): Notes: Tash is forty-one. She limps. Seen in the manuscript: Age: forty.\n'
     )
   })
 })

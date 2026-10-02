@@ -13,13 +13,17 @@ import {
   parseEntityFields,
   toEntityNameKey,
   type EntityFields,
-  type EntityKind
+  type EntityKind,
+  type EntityOrigin
 } from '@shared/entities'
 import type { Entity, EntityCreateInput, EntityUpdateInput, Tag } from '@shared/ipc/contract'
+import { withObservedDismissed, withoutObservedDismissed } from '@shared/observedFacts'
 import type * as schema from '../db/schema'
 import { entity, type EntityInsert, type EntityRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
+import { getObservedDismissed, setObservedDismissed } from '../project/settingsStore'
 import { createTag, findTagByName, getTag, getTagWithUsage, updateTag } from '../tag/tagStore'
+import { hasFacts } from './observedFactStore'
 
 /** Accepts both the connection's orm and a transaction handle (both extend this base). */
 export type EntityDb = BaseSQLiteDatabase<'sync', RunResult, typeof schema>
@@ -35,6 +39,7 @@ function rowToEntity(row: EntityRow): Entity {
     body: row.body,
     image: row.image,
     tagId: row.tagId,
+    origin: row.origin,
     created: row.created,
     modified: row.modified
   }
@@ -227,8 +232,16 @@ function mirrorRename(db: EntityDb, before: EntityRow, after: EntityRow): Entity
  *
  * F-9.4: the same transaction creates or links the entity's tag, so an entity and its tag arrive
  * together or not at all. `tagChange` says what the bank owes the windows.
+ *
+ * F-5.16: `origin` is `ai` only when the story-bible job creates the entity for a name it met;
+ * that caller checks the dismissed names first. An entity the author creates takes its name off
+ * that list, so the job may log facts about it again.
  */
-export function createEntity(db: EntityDb, input: EntityCreateInput): EntityWrite {
+export function createEntity(
+  db: EntityDb,
+  input: EntityCreateInput,
+  origin: EntityOrigin = 'author'
+): EntityWrite {
   return db.transaction((tx) => {
     const name = normalizeName(input.name)
     assertNameFree(tx, input.kind, name)
@@ -244,10 +257,16 @@ export function createEntity(db: EntityDb, input: EntityCreateInput): EntityWrit
       body: input.body ?? null,
       image: null,
       tagId: null,
+      origin,
       created: now,
       modified: now
     }
     const inserted = tx.insert(entity).values(row).returning().get()
+    if (origin === 'author') {
+      const dismissed = getObservedDismissed(tx)
+      const kept = withoutObservedDismissed(dismissed, input.kind, name)
+      if (kept !== dismissed) setObservedDismissed(tx, kept)
+    }
     const tagChange = linkTag(tx, inserted)
     return {
       entity: rowToEntity(tagChange === null ? inserted : { ...inserted, tagId: tagChange.tag.id }),
@@ -263,6 +282,9 @@ export function createEntity(db: EntityDb, input: EntityCreateInput): EntityWrit
  *
  * F-9.4: a rename carries the entity's tag with it under `mirrorRename`'s rules; every other
  * patch leaves the bank alone.
+ *
+ * F-5.16: every caller is the author's hand, so a patch that carries a name, fields, or a body
+ * makes an AI-made entity the author's (`origin` → `author`); a template switch alone does not.
  */
 export function updateEntity(
   db: EntityDb,
@@ -291,6 +313,12 @@ export function updateEntity(
       changes.fields = JSON.stringify(merged)
     }
     if (patch.body !== undefined) changes.body = patch.body
+    if (
+      existing.origin === 'ai' &&
+      (patch.name !== undefined || patch.fields !== undefined || patch.body !== undefined)
+    ) {
+      changes.origin = 'author'
+    }
     const updated = tx
       .update(entity)
       .set({ ...changes, modified: new Date().toISOString() })
@@ -361,10 +389,19 @@ export function setEntityImage(db: EntityDb, id: string, image: string | null): 
  * Deletes an entity (F-9.1) and answers it as it stood, so the caller can take its image file
  * with it (F-9.3). Its tag (F-9.4) is a tag of the bank like any other and stays, with whatever
  * the author has linked it to; only the entity goes.
+ *
+ * F-5.16: its observed facts cascade with it, and an entity the AI made or one that had any
+ * fact (hidden ones included) leaves its kind and name on the dismissed list, so the story-bible job does not create it
+ * again from the next scene that names it.
  */
 export function deleteEntity(db: EntityDb, id: string): Entity {
-  const row = getRow(db, id)
-  if (row === undefined) throw new AppError('NOT_FOUND', 'Entity not found', { id })
-  db.delete(entity).where(eq(entity.id, id)).run()
-  return rowToEntity(row)
+  return db.transaction((tx) => {
+    const row = getRow(tx, id)
+    if (row === undefined) throw new AppError('NOT_FOUND', 'Entity not found', { id })
+    if (row.origin === 'ai' || hasFacts(tx, id)) {
+      setObservedDismissed(tx, withObservedDismissed(getObservedDismissed(tx), row.kind, row.name))
+    }
+    tx.delete(entity).where(eq(entity.id, id)).run()
+    return rowToEntity(row)
+  })
 }

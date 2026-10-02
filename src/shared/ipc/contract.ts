@@ -41,6 +41,7 @@ import {
   ENTITY_NAME_MAX,
   EntityFieldId,
   EntityKind,
+  EntityOrigin,
   EntityTemplate
 } from '../entities'
 import { EntityExchangeFormat, EntityImportItem, EntityImportPlan } from '../entityExchange'
@@ -52,6 +53,7 @@ import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
 import { AccentId, SupporterStatus } from '../license'
 import { MatterTemplateId } from '../matterTemplates'
+import { ObservedFact } from '../observedFacts'
 import { TagMentions } from '../mentions'
 import { EditRole, MenuItemId } from '../menu'
 import { WritingPresets } from '../presets'
@@ -181,6 +183,12 @@ export const Entity = z.object({
    * "???"). `entity:linkTag` makes one for an entity that has none.
    */
   tagId: z.string().nullable(),
+  /**
+   * Who made it (F-5.16): `ai` for an entity the story-bible job created from a name in the
+   * manuscript, shown as "Added by AI" until the author's first edit of its name, fields, or
+   * page turns it to `author`. Never a patch field.
+   */
+  origin: EntityOrigin,
   created: z.string(),
   modified: z.string()
 })
@@ -934,6 +942,24 @@ export const contract = {
       replaced: z.number().int().nonnegative()
     })
   },
+  /**
+   * What the manuscript states about one entity (F-5.16): every observed fact of it, oldest
+   * first, the hidden ones included and flagged so the page can offer to restore them. An
+   * unknown entity answers the empty list. `groupFacts` merges and marks them for display.
+   */
+  'observedFact:listForEntity': {
+    input: z.object({ entityId: z.string() }),
+    output: z.array(ObservedFact)
+  },
+  /**
+   * Hides a wrong observed fact, or restores a hidden one (F-5.16). A hidden fact stays stored as
+   * a tombstone, so re-reading its scene does not bring it back. Answers the fact as stored and
+   * pushes `observedFact:changed`; NOT_FOUND for an unknown id.
+   */
+  'observedFact:setHidden': {
+    input: z.object({ id: z.string(), hidden: z.boolean() }),
+    output: ObservedFact
+  },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
@@ -1474,6 +1500,13 @@ export const events = {
    * window, the asking one included — merging the same tag twice changes nothing.
    */
   'tag:changed': Tag,
+  /**
+   * An entity was created by something other than an `entity:*` call (F-5.16: the story-bible
+   * job met a name with no entity); the entity store merges it, as the tag store does a tag.
+   */
+  'entity:changed': Entity,
+  /** The observed facts of these entities changed (F-5.16): a scene was re-read, or a fact was hidden or restored. */
+  'observedFact:changed': z.object({ entityIds: z.array(z.string()) }),
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /** A native menu item was clicked or its accelerator pressed (F-7.1); the renderer runs the action. */
