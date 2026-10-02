@@ -122,6 +122,8 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   /** The row holding both panes; the split drag is measured against its width. */
   const panes = useRef<HTMLDivElement>(null)
   const ids = useDocumentTagStore((s) => s.tagIdsByNode[id])
+  /** F-4.13: the links the background job made, marked on their chips until the author takes them. */
+  const aiIds = useDocumentTagStore((s) => s.aiTagIdsByNode[id])
   const load = useDocumentTagStore((s) => s.load)
   const add = useDocumentTagStore((s) => s.add)
   const remove = useDocumentTagStore((s) => s.remove)
@@ -550,6 +552,7 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
                   <TagChip
                     key={tagId}
                     id={tagId}
+                    ai={aiIds?.includes(tagId) ?? false}
                     onRemove={() => {
                       remove(id, tagId).catch(report)
                     }}
@@ -624,13 +627,26 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   )
 }
 
-/** One chip: the tag's color dot and name from the bank, and its remove button. Nothing if the tag is gone. */
-function TagChip({ id, onRemove }: { id: string; onRemove: () => void }): React.JSX.Element | null {
+/**
+ * One chip: the tag's color dot and name from the bank, and its remove button. A link the
+ * background job made (F-4.13) carries the "Added by AI" mark and is removed like any other.
+ * Nothing if the tag is gone.
+ */
+function TagChip({
+  id,
+  ai,
+  onRemove
+}: {
+  id: string
+  ai: boolean
+  onRemove: () => void
+}): React.JSX.Element | null {
   const tag = useTagStore(useShallow((s) => s.byId[id]))
   if (!tag) return null
   return (
     <li
       role="listitem"
+      data-ai={ai ? 'true' : undefined}
       className="flex items-center gap-1.5 rounded-full border border-line bg-surface-raised py-0.5 pr-1 pl-2 text-xs"
     >
       <span
@@ -639,6 +655,12 @@ function TagChip({ id, onRemove }: { id: string; onRemove: () => void }): React.
         className="size-2.5 shrink-0 rounded-full"
       />
       <span className="max-w-48 truncate">{tag.name}</span>
+      {ai ? (
+        <span title="Added by AI" data-testid="tag-ai-mark" className="shrink-0 text-fg-subtle">
+          <Sparkles size={11} aria-hidden="true" />
+          <span className="sr-only">Added by AI</span>
+        </span>
+      ) : null}
       <button
         type="button"
         aria-label={`Remove ${tag.name}`}

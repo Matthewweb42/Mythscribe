@@ -146,11 +146,21 @@ const SUMMARY_FACTS = [
     quote: 'But Kael saw Kael, then Kael.'
   }
 ]
+/**
+ * F-4.13: the tags the canned summary carries (`summary.v3` keeps the sentinel too). The tone is
+ * new to the bank, so main creates it as AI-made and links it to the scene; "Zephyr" is a
+ * character name Scene 1 never holds, so main must drop it.
+ */
+const SUMMARY_TAGS = [
+  { name: 'stormbound', category: 'tone' },
+  { name: 'Zephyr', category: 'character' }
+]
 const SUMMARY_ANSWER = JSON.stringify({
   summary: SUMMARY_TEXT,
   keyPoints: SUMMARY_KEY_POINTS,
   characters: SUMMARY_CHARACTERS,
-  facts: SUMMARY_FACTS
+  facts: SUMMARY_FACTS,
+  tags: SUMMARY_TAGS
 })
 const BRIEF_SENTINEL = 'You are the scene-brief feature inside a novel-writing app.'
 /**
@@ -3278,6 +3288,15 @@ test('create, close, reopen a project on disk', async () => {
   const summarySystem = openAiChatBodies.at(-1)?.messages[0]
   expect(summarySystem?.role).toBe('system')
   expect(summarySystem?.content.startsWith(SUMMARY_SENTINEL)).toBe(true)
+  // F-4.13: the same request tagged the scene. The new tone is in the tag bar with the "Added
+  // by AI" mark, without a click; the character the scene never names was not created. One
+  // click takes the tag off, and it stays in the bank.
+  const aiChip = tagBar.locator('li[data-ai="true"]').filter({ hasText: 'stormbound' })
+  await expect(aiChip).toBeVisible()
+  await expect(aiChip.getByTestId('tag-ai-mark')).toHaveText('Added by AI')
+  expect((await listTags()).some((tag) => tag.name === 'zephyr')).toBe(false)
+  await aiChip.getByRole('button', { name: 'Remove stormbound' }).click()
+  await expect(aiChip).toHaveCount(0)
   await editor.click()
   await page.keyboard.press('Control+End')
   await page.keyboard.type(' She counted the boats twice.')
@@ -3287,6 +3306,13 @@ test('create, close, reopen a project on disk', async () => {
     .toBe(summaryRequestsBefore + 2)
   await expect(metadata.getByTestId('summary-status')).toHaveText('')
   await expect(metadata.getByTestId('summary-text')).toHaveText(SUMMARY_TEXT)
+  // F-4.13: the background run answered the same tag again; a tag the author took off this
+  // scene is never re-applied to it, and nothing of it is in the manuscript.
+  await expect(tagBar.getByRole('listitem').filter({ hasText: 'stormbound' })).toHaveCount(0)
+  expect((await listTags()).find((tag) => tag.name === 'stormbound')).toMatchObject({
+    usageCount: 0
+  })
+  await expect(editor).not.toContainText('stormbound')
   const afterSummary = await usageSummary()
   expect(afterSummary.byFeature.find((f) => f.feature === 'summary')).toMatchObject({
     requests: 2

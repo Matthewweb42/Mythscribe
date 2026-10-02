@@ -209,6 +209,8 @@ export function App(): React.JSX.Element {
     // F-4.12: main scans in the background and says which documents changed; the mention lists
     // are fetched by the views that show them, so only the subscription is opened here.
     useMentionStore.getState().subscribe()
+    // F-4.13: the background job links and unlinks tags on its own; main says which nodes moved.
+    useDocumentTagStore.getState().subscribe()
     // F-4.12b: the proposed names are one app-wide list main pushes on when a scan, a tag, or a
     // dismissal moves it; the tag bar shows the ones its own document carries.
     useProposedTagStore.getState().subscribe()

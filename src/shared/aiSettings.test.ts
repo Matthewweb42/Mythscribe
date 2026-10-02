@@ -131,12 +131,13 @@ describe('AI_DATA_SHARING', () => {
   })
 
   it('names what a scene summary sends (F-5.6, F-5.16): the scene, its metadata, and the names', () => {
-    expect(AI_DATA_SHARING.summary.label).toBe('Scene summaries and story bible')
+    expect(AI_DATA_SHARING.summary.label).toBe('Scene summaries, story bible, and tags')
     expect(AI_DATA_SHARING.summary.sends).toBe(
-      "A scene's text (the first 20,000 characters), its metadata, and the names of the " +
-        'story-bible entries and tags that occur in the scene, to keep ' +
-        'its summary, key points, characters present, and the facts it states about your ' +
-        'characters, places, and world up to date after you pause typing.'
+      "A scene's text (the first 20,000 characters), its metadata, the names of the " +
+        'story-bible entries and tags that occur in the scene, and the names of your tone, ' +
+        'content, plot-thread, and custom tags, to keep ' +
+        'its summary, key points, characters present, the facts it states about your ' +
+        'characters, places, and world, and its tags up to date after you pause typing.'
     )
   })
 

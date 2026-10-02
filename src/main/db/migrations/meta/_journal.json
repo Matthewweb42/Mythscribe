@@ -78,6 +78,13 @@
       "when": 1790959926728,
       "tag": "0010_observed_facts",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1790972700320,
+      "tag": "0011_auto_tags",
+      "breakpoints": true
     }
   ]
 }

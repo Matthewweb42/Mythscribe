@@ -18,6 +18,7 @@ import {
   SUMMARY_KEY_POINTS_MAX,
   SUMMARY_MAX_CHARS,
   SUMMARY_SCENE_CHAR_BUDGET,
+  SUMMARY_TAGS_MAX,
   SUMMARY_TEXT_MIN
 } from '@shared/summary'
 import type { TiptapNodeT } from '@shared/tiptap'
@@ -29,7 +30,8 @@ import { listFactsForEntity, setFactHidden } from '../entity/observedFactStore'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { setAiSettings } from '../project/settingsStore'
-import { createTag } from '../tag/tagStore'
+import { addDocumentTag, listDocumentTags, removeDocumentTag } from '../tag/documentTagStore'
+import { createTag, deleteTag, getTag, listTags } from '../tag/tagStore'
 import { node } from '../db/schema'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { resetVoiceProfileCache } from '../voice/versionCache'
@@ -42,6 +44,7 @@ import {
   type CompletionResult,
   type Provider
 } from './providers/types'
+import type { AutoTagsChange } from './autoTags'
 import type { ObservedFactsChange } from './observedFacts'
 import type { AiRequestDeps } from './request'
 import {
@@ -183,14 +186,14 @@ afterEach(() => {
 })
 
 describe('summarizeScene (F-5.6)', () => {
-  it('sends the scene as JSON to the fast tier under summary.v2 and stores the row', async () => {
+  it('sends the scene as JSON to the fast tier under summary.v3 and stores the row', async () => {
     const result = await summarize()
     expect(result).toEqual({
       summary: {
         ...ANSWER,
         nodeId: scene,
         contentHash: summarySource(db, scene)?.contentHash,
-        promptVersion: 'summary.v2',
+        promptVersion: 'summary.v3',
         model: 'gpt-5.4-mini',
         truncated: false,
         createdAt: NOW.toISOString()
@@ -199,12 +202,12 @@ describe('summarizeScene (F-5.6)', () => {
       costUsd: priceFor('gpt-5.4-mini', 600, 90).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'summary.v2',
+      promptVersion: 'summary.v3',
       droppedFacts: 0
     })
     expect(getSummary(db, scene)).toEqual(result.summary)
     const request = complete.mock.calls[0]![0]
-    expect(request).toMatchObject({ tier: 'fast', json: true, maxTokens: 600 })
+    expect(request).toMatchObject({ tier: 'fast', json: true, maxTokens: 800 })
     expect(
       sent().system.startsWith('You are the scene-summary feature inside a novel-writing app.')
     ).toBe(true)
@@ -213,7 +216,7 @@ describe('summarizeScene (F-5.6)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'summary',
       tier: 'fast',
-      promptVersion: 'summary.v2',
+      promptVersion: 'summary.v3',
       cached: false
     })
   })
@@ -222,13 +225,14 @@ describe('summarizeScene (F-5.6)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Scene summaries and story bible needs the AI dial at Ask or higher (it is at Off).'
+      message:
+        'Scene summaries, story bible, and tags needs the AI dial at Ask or higher (it is at Off).'
     })
     const on = defaultAiSettings()
     setAiSettings(db, { ...on, dial: 3, features: { ...on.features, summary: false } })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Scene summaries and story bible is turned off for this project.'
+      message: 'Scene summaries, story bible, and tags is turned off for this project.'
     })
     expect(complete).not.toHaveBeenCalled()
     expect(ledger).toHaveLength(0)
@@ -262,7 +266,7 @@ describe('summarizeScene (F-5.6)', () => {
       costUsd: 0,
       cached: true,
       model: 'gpt-5.4-mini',
-      promptVersion: 'summary.v2',
+      promptVersion: 'summary.v3',
       droppedFacts: 0
     })
     expect(complete).toHaveBeenCalledTimes(1)
@@ -401,7 +405,8 @@ describe('parseSummaryAnswer (F-5.6)', () => {
     expect(parse({ summary: 'Mara waits.', extra: 1 })).toEqual({
       summary: { summary: 'Mara waits.', keyPoints: [], characters: [] },
       facts: [],
-      droppedFacts: 0
+      droppedFacts: 0,
+      tags: []
     })
   })
 })
@@ -583,7 +588,7 @@ describe('summarizeScene logs the story bible (F-5.16)', () => {
     // The rerun rewrites the row under the current version (from the local response cache here:
     // the scene itself has not changed, so the same request is not paid for twice).
     await run()
-    expect(getSummary(db, scene)?.promptVersion).toBe('summary.v2')
+    expect(getSummary(db, scene)?.promptVersion).toBe('summary.v3')
     expect(staleSummaryNodeIds(db)).toEqual([])
   })
 
@@ -685,5 +690,194 @@ describe('staleSummaryNodeIds (F-5.13)', () => {
   it('answers in reading order', () => {
     secondScene(SCENE)
     expect(staleSummaryNodeIds(db)).toEqual([scene, 'scene-2'])
+  })
+})
+
+describe('summarizeScene tags the scene (F-4.13)', () => {
+  let changes: AutoTagsChange[]
+  const run = (): ReturnType<typeof summarizeScene> =>
+    summarize({ onTagsChanged: (change) => void changes.push(change) })
+  const links = (): Record<string, string> =>
+    Object.fromEntries(listDocumentTags(db, scene).map((tag) => [tag.name, tag.source]))
+  /** Saves the scene with one more sentence, so the next run asks again. */
+  let edits = 0
+  const edit = (): void => {
+    edits += 1
+    saveDocument(db, scene, doc(`${SCENE} ${'She waited. '.repeat(edits)}`))
+  }
+
+  beforeEach(() => {
+    changes = []
+    edits = 0
+    complete.mockReset()
+  })
+
+  it('lists the bank’s tone, content, plot-thread, and custom names, most used first, outside the hash', async () => {
+    const dread = createTag(db, { name: 'Dread', category: 'tone' })
+    createTag(db, { name: 'Calm', category: 'tone' })
+    createTag(db, { name: 'The Debt', category: 'plotThread' })
+    createTag(db, { name: 'Oslo', category: 'setting' })
+    addDocumentTag(db, folder, dread.id)
+    const before = summarySource(db, scene)?.contentHash
+    answers(ANSWER)
+    await run()
+    expect(sent().system).toContain('\n\nTag bank: tone dread, calm; plotThread the-debt.')
+    expect(sent().system).not.toContain('oslo')
+    // A new tone tag changes what the next request lists, but marks no scene out of date.
+    createTag(db, { name: 'Hope', category: 'tone' })
+    expect(summarySource(db, scene)?.contentHash).toBe(before)
+    expect(staleSummaryNodeIds(db)).toEqual([])
+  })
+
+  it('links bank tags and creates the missing ones as AI-made, in the same single request', async () => {
+    const dread = createTag(db, { name: 'Dread', category: 'tone' })
+    answers({
+      ...ANSWER,
+      tags: [
+        { name: 'dread', category: 'custom' },
+        { name: 'Waiting', category: 'custom' },
+        { name: 'Mara', category: 'character' },
+        { name: 'Ferry Landing', category: 'setting' }
+      ]
+    })
+    await run()
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(ledger).toHaveLength(1)
+    expect(links()).toEqual({ dread: 'ai', waiting: 'ai', mara: 'ai', 'ferry-landing': 'ai' })
+    // The bank's category wins for a known name; a new one takes the answered category.
+    expect(getTag(db, dread.id)).toMatchObject({ category: 'tone', origin: 'author' })
+    const made = listTags(db).filter((tag) => tag.id !== dread.id)
+    expect(made.map((tag) => [tag.name, tag.category])).toEqual([
+      ['ferry-landing', 'setting'],
+      ['mara', 'character'],
+      ['waiting', 'custom']
+    ])
+    for (const tag of made) expect(getTag(db, tag.id)?.origin).toBe('ai')
+    expect(changes).toHaveLength(1)
+    expect(changes[0]?.created.map((tag) => tag.name).sort()).toEqual([
+      'ferry-landing',
+      'mara',
+      'waiting'
+    ])
+    expect(changes[0]?.moved).toHaveLength(4)
+    expect(changes[0]?.moved.every((tag) => tag.usageCount === 1)).toBe(true)
+    // Nothing of it is in the summary row.
+    expect(getSummary(db, scene)).not.toHaveProperty('tags')
+  })
+
+  it('leaves the scene current after creating a name tag from it', async () => {
+    answers({ ...ANSWER, tags: [{ name: 'Mara', category: 'character' }] })
+    const result = await run()
+    expect(result.summary.contentHash).toBe(summarySource(db, scene)?.contentHash)
+    expect(staleSummaryNodeIds(db)).toEqual([])
+    expect((await run()).cached).toBe(true)
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates no name the scene does not hold, no common-noun character, no content tag, and at most three', async () => {
+    answers({
+      ...ANSWER,
+      tags: [
+        { name: 'Zephyr', category: 'character' },
+        { name: 'lantern', category: 'character' },
+        { name: 'lantern', category: 'worldBuilding' },
+        { name: 'dialogue', category: 'content' },
+        { name: 'loneliness', category: 'custom' },
+        { name: 'patience', category: 'custom' },
+        { name: 'duty', category: 'custom' }
+      ]
+    })
+    await run()
+    // "lantern" is deduped by name on the way in, so its first (character) entry decides.
+    expect(Object.keys(links()).sort()).toEqual(['duty', 'loneliness', 'patience'])
+    answers({
+      ...ANSWER,
+      tags: ['a', 'b', 'c', 'd'].map((name) => ({ name: `theme ${name}`, category: 'custom' }))
+    })
+    edit()
+    await run()
+    expect(Object.keys(links()).sort()).toEqual(['theme-a', 'theme-b', 'theme-c'])
+  })
+
+  it('replaces its own links on the next run and never touches the author’s', async () => {
+    const rain = createTag(db, { name: 'Rain', category: 'tone' })
+    createTag(db, { name: 'Dread', category: 'tone' })
+    createTag(db, { name: 'Hope', category: 'tone' })
+    addDocumentTag(db, scene, rain.id)
+    answers({ ...ANSWER, tags: [{ name: 'dread', category: 'tone' }] })
+    await run()
+    expect(links()).toEqual({ rain: 'author', dread: 'ai' })
+    answers({ ...ANSWER, tags: [{ name: 'hope', category: 'tone' }] })
+    edit()
+    await run()
+    expect(links()).toEqual({ rain: 'author', hope: 'ai' })
+    expect(changes[1]?.moved.map((tag) => [tag.name, tag.usageCount]).sort()).toEqual([
+      ['dread', 0],
+      ['hope', 1]
+    ])
+  })
+
+  it('never re-applies a tag the author removed from the scene, nor recreates one the author deleted', async () => {
+    answers({
+      ...ANSWER,
+      tags: [
+        { name: 'dread', category: 'tone' },
+        { name: 'waiting', category: 'custom' }
+      ]
+    })
+    await run()
+    const dread = listTags(db).find((tag) => tag.name === 'dread')
+    const waiting = listTags(db).find((tag) => tag.name === 'waiting')
+    if (!dread || !waiting) throw new Error('tags not created')
+    removeDocumentTag(db, scene, dread.id)
+    deleteTag(db, waiting.id)
+    answers({
+      ...ANSWER,
+      tags: [
+        { name: 'dread', category: 'tone' },
+        { name: 'waiting', category: 'custom' }
+      ]
+    })
+    edit()
+    await run()
+    expect(links()).toEqual({})
+    expect(listTags(db).map((tag) => tag.name)).toEqual(['dread'])
+    // The second run moved nothing, so the windows are not told.
+    expect(changes).toHaveLength(1)
+  })
+
+  it('clears its links, not the author’s, when the scene is cut back under the minimum', async () => {
+    const rain = createTag(db, { name: 'Rain', category: 'tone' })
+    addDocumentTag(db, scene, rain.id)
+    answers({ ...ANSWER, tags: [{ name: 'dread', category: 'tone' }] })
+    await run()
+    saveDocument(db, scene, doc('Too short.'))
+    await expect(run()).rejects.toMatchObject({ code: 'VALIDATION' })
+    expect(links()).toEqual({ rain: 'author' })
+    expect(changes[1]?.moved.map((tag) => tag.name)).toEqual(['dread'])
+    expect(changes[1]?.created).toEqual([])
+  })
+
+  it('reads a malformed tag list leniently and caps it', () => {
+    const parsed = parseSummaryAnswer(
+      JSON.stringify({
+        ...ANSWER,
+        tags: [
+          { name: ' Dread ', category: 'tone' },
+          { name: 'dread', category: 'custom' },
+          { name: 'x', category: 'mood' },
+          { name: '!!!', category: 'tone' },
+          { name: 'n'.repeat(61), category: 'tone' },
+          'dread',
+          { name: 7, category: 'tone' },
+          ...Array.from({ length: 10 }, (_, i) => ({ name: `tag ${i}`, category: 'custom' }))
+        ]
+      }),
+      SCENE
+    )
+    expect(parsed.tags[0]).toEqual({ name: 'Dread', category: 'tone' })
+    expect(parsed.tags).toHaveLength(SUMMARY_TAGS_MAX)
+    expect(parsed.tags.map((tag) => tag.name)).not.toContain('x')
+    expect(parseSummaryAnswer(JSON.stringify({ ...ANSWER, tags: 'dread' }), SCENE).tags).toEqual([])
   })
 })

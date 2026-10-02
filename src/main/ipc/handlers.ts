@@ -56,6 +56,7 @@ import { generateGhostText } from '../ai/ghostText'
 import { detectImportStructure } from '../ai/importStructure'
 import { cancelInflight, regenRequestId, registerInflight, releaseInflight } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
+import type { AutoTagsChange } from '../ai/autoTags'
 import type { ObservedFactsChange } from '../ai/observedFacts'
 import { IMPORT_STRUCTURE_PROMPT_VERSION } from '../ai/prompts/importStructure.v1'
 import { createProposal, listPendingProposals, settleProposal } from '../ai/proposalStore'
@@ -285,7 +286,8 @@ export function registerHandlers({
       const result = await summarizeScene(db, requestDeps(db), {
         nodeId: job.nodeId,
         requestId,
-        onFactsChanged: (change) => publishObservedFacts(db, change)
+        onFactsChanged: (change) => publishObservedFacts(db, change),
+        onTagsChanged: (change) => publishAutoTags(db, job.nodeId, change)
       })
       // A stored row whose hash still matches (or a cache hit) made no request, so the rate
       // limit must not charge it a turn.
@@ -808,6 +810,22 @@ export function registerHandlers({
     }
     // F-3.14: a name the job logged is a story name like any other.
     if (change.created.length > 0) void syncSpelling()
+  }
+
+  /**
+   * F-4.13: a summary run tagged its scene. A tag the job created is a new name in the bank, so
+   * the manuscript is rescanned, the proposals republished, and the spellchecker told, exactly as
+   * `tag:create` does; every tag whose link moved reaches the windows as `tag:changed` (its usage
+   * count moved), and the scene itself as `documentTag:changed`, so an open tag bar refetches.
+   */
+  const publishAutoTags = (db: TreeDb, nodeId: string, change: AutoTagsChange): void => {
+    if (change.created.length > 0) {
+      rescanManuscript(db)
+      publishProposed()
+      void syncSpelling()
+    }
+    for (const moved of change.moved) emit(windows(), 'tag:changed', moved)
+    emit(windows(), 'documentTag:changed', { nodeIds: [nodeId] })
   }
 
   register('entity:create', (input) => {

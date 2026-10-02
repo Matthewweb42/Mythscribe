@@ -9,7 +9,8 @@ import {
   addDocumentTag,
   listAllDocumentTagLinks,
   listDocumentTags,
-  removeDocumentTag
+  removeDocumentTag,
+  replaceAutoTags
 } from './documentTagStore'
 import { createTag, deleteTag, getTagWithUsage, listTags, type TagDb } from './tagStore'
 
@@ -56,7 +57,7 @@ describe('listDocumentTags', () => {
     addDocumentTag(db, scene, rain.id)
     addDocumentTag(db, scene, forest.id)
     expect(listDocumentTags(db, scene).map((t) => t.name)).toEqual(['dark-forest', 'rain'])
-    expect(listDocumentTags(db, scene)[0]).toEqual({ ...forest, usageCount: 1 })
+    expect(listDocumentTags(db, scene)[0]).toEqual({ ...forest, usageCount: 1, source: 'author' })
   })
 
   it('counts usage across documents, not per document', () => {
@@ -74,7 +75,7 @@ describe('listDocumentTags', () => {
     const rain = createTag(db, { name: 'Rain', category: 'tone' })
     expect(listDocumentTags(db, chapter)).toEqual([])
     addDocumentTag(db, chapter, rain.id)
-    expect(listDocumentTags(db, chapter)).toEqual([{ ...rain, usageCount: 1 }])
+    expect(listDocumentTags(db, chapter)).toEqual([{ ...rain, usageCount: 1, source: 'author' }])
     expectCode(() => listDocumentTags(db, 'missing'), 'NOT_FOUND')
     expectCode(() => listDocumentTags(db, nodeOfKind('section')), 'VALIDATION')
   })
@@ -158,5 +159,76 @@ describe('listAllDocumentTagLinks (F-4.10)', () => {
     expect(listAllDocumentTagLinks(db)).toEqual([{ nodeId: scene, tagId: rain.id }])
     deleteTag(db, rain.id)
     expect(listAllDocumentTagLinks(db)).toEqual([])
+  })
+})
+
+describe('replaceAutoTags and the link source (F-4.13)', () => {
+  const sources = (nodeId: string): Record<string, string> =>
+    Object.fromEntries(listDocumentTags(db, nodeId).map((t) => [t.name, t.source]))
+
+  it('links the named tags as ai, leaves the author’s links alone, and answers what moved', () => {
+    const scene = nodeOfKind('document')
+    const rain = createTag(db, { name: 'Rain', category: 'tone' })
+    const dread = createTag(db, { name: 'Dread', category: 'tone' })
+    addDocumentTag(db, scene, rain.id)
+    expect(replaceAutoTags(db, scene, [rain.id, dread.id])).toEqual([dread.id])
+    expect(sources(scene)).toEqual({ rain: 'author', dread: 'ai' })
+    expect(getTagWithUsage(db, dread.id)?.usageCount).toBe(1)
+    // The same answer again moves nothing.
+    expect(replaceAutoTags(db, scene, [rain.id, dread.id])).toEqual([])
+  })
+
+  it('drops a job link the next answer no longer names, and every job link for an empty answer', () => {
+    const scene = nodeOfKind('document')
+    const rain = createTag(db, { name: 'Rain', category: 'tone' })
+    const dread = createTag(db, { name: 'Dread', category: 'tone' })
+    const hope = createTag(db, { name: 'Hope', category: 'tone' })
+    addDocumentTag(db, scene, hope.id)
+    replaceAutoTags(db, scene, [rain.id, dread.id])
+    expect(replaceAutoTags(db, scene, [dread.id])).toEqual([rain.id])
+    expect(sources(scene)).toEqual({ dread: 'ai', hope: 'author' })
+    expect(replaceAutoTags(db, scene, [])).toEqual([dread.id])
+    expect(sources(scene)).toEqual({ hope: 'author' })
+  })
+
+  it('never re-applies a tag the author took off that node, until the author links it again', () => {
+    const first = nodeOfKind('document', 0)
+    const second = nodeOfKind('document', 1)
+    const dread = createTag(db, { name: 'Dread', category: 'tone' })
+    replaceAutoTags(db, first, [dread.id])
+    removeDocumentTag(db, first, dread.id)
+    expect(replaceAutoTags(db, first, [dread.id])).toEqual([])
+    expect(listDocumentTags(db, first)).toEqual([])
+    // The removal is per node: another scene still gets the tag.
+    expect(replaceAutoTags(db, second, [dread.id])).toEqual([dread.id])
+    // An author link removed is remembered the same way.
+    const rain = createTag(db, { name: 'Rain', category: 'tone' })
+    addDocumentTag(db, first, rain.id)
+    removeDocumentTag(db, first, rain.id)
+    expect(replaceAutoTags(db, first, [rain.id])).toEqual([])
+    // Linking it again lifts the removal: the link is the author's, and survives an empty answer.
+    addDocumentTag(db, first, dread.id)
+    expect(sources(first)).toEqual({ dread: 'author' })
+    removeDocumentTag(db, first, dread.id)
+    addDocumentTag(db, first, dread.id)
+    replaceAutoTags(db, first, [])
+    expect(sources(first)).toEqual({ dread: 'author' })
+  })
+
+  it('makes a job link the author’s when the author adds the same tag', () => {
+    const scene = nodeOfKind('document')
+    const dread = createTag(db, { name: 'Dread', category: 'tone' })
+    replaceAutoTags(db, scene, [dread.id])
+    expect(addDocumentTag(db, scene, dread.id).usageCount).toBe(1)
+    expect(sources(scene)).toEqual({ dread: 'author' })
+    replaceAutoTags(db, scene, [])
+    expect(sources(scene)).toEqual({ dread: 'author' })
+  })
+
+  it('does not remember a removal of a pair that was never linked', () => {
+    const scene = nodeOfKind('document')
+    const dread = createTag(db, { name: 'Dread', category: 'tone' })
+    removeDocumentTag(db, scene, dread.id)
+    expect(replaceAutoTags(db, scene, [dread.id])).toEqual([dread.id])
   })
 })

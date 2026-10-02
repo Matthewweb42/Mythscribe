@@ -36,11 +36,21 @@ type Handler = (input: unknown) => unknown
 
 /**
  * A fake main: the bank is the fixture, `sc-1` starts with `dark-forest` linked, and add/remove
- * answer with the tag and a moved usage count, like the real store does.
+ * answer with the tag and a moved usage count, like the real store does. `aiLinks` are links the
+ * background job made (F-4.13): listed after the author's with `source: 'ai'`, and the author's
+ * once they are added again.
  */
-function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, unknown][] {
+function install(
+  overrides: Partial<Record<Channel, Handler>> = {},
+  aiLinks: Record<string, string[]> = {}
+): [Channel, unknown][] {
   const calls: [Channel, unknown][] = []
   const links: Record<string, string[]> = { 'sc-1': ['t-forest'] }
+  const ai: Record<string, string[]> = {}
+  for (const [nodeId, tagIds] of Object.entries(aiLinks)) {
+    ai[nodeId] = [...tagIds]
+    links[nodeId] = [...(links[nodeId] ?? []), ...tagIds]
+  }
   const tagOf = (id: string): Tag => {
     const tag = useTagStore.getState().byId[id]
     if (!tag) throw new Error(`no tag ${id}`)
@@ -54,11 +64,15 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       if (channel === 'tag:list') return tagFixture as Output<C>
       if (channel === 'documentTag:list') {
         const { nodeId } = input as Input<'documentTag:list'>
-        return (links[nodeId] ?? []).map(tagOf) as Output<C>
+        return (links[nodeId] ?? []).map((id) => ({
+          ...tagOf(id),
+          source: ai[nodeId]?.includes(id) ? 'ai' : 'author'
+        })) as Output<C>
       }
       if (channel === 'documentTag:add') {
         const { nodeId, tagId } = input as Input<'documentTag:add'>
         const tag = tagOf(tagId)
+        ai[nodeId] = (ai[nodeId] ?? []).filter((id) => id !== tagId)
         if (links[nodeId]?.includes(tagId)) return tag as Output<C>
         links[nodeId] = [...(links[nodeId] ?? []), tagId]
         return { ...tag, usageCount: tag.usageCount + 1 } as Output<C>
@@ -68,6 +82,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
         const tag = tagOf(tagId)
         if (!links[nodeId]?.includes(tagId)) return tag as Output<C>
         links[nodeId] = links[nodeId].filter((id) => id !== tagId)
+        ai[nodeId] = (ai[nodeId] ?? []).filter((id) => id !== tagId)
         return { ...tag, usageCount: tag.usageCount - 1 } as Output<C>
       }
       if (channel === 'summary:get') return UNAVAILABLE_SUMMARY as Output<C>
@@ -295,7 +310,7 @@ describe('TagBar (F-4.4)', () => {
     view.unmount()
     resetTagStore()
     resetDocumentTagStore()
-    install({ 'documentTag:list': () => tagFixture })
+    install({ 'documentTag:list': () => tagFixture.map((tag) => ({ ...tag, source: 'author' })) })
     await mount('sc-2')
     await userEvent.click(within(bar()).getByRole('button', { name: 'Add tag' }))
     expect(screen.getByText('Every tag is already on this document.')).toBeInTheDocument()
@@ -545,6 +560,46 @@ describe('TagBar (F-4.4)', () => {
     })
     expect(useLayoutStore.getState().layout.tagBar.split).toBeLessThan(0.4)
     expect(useLayoutStore.getState().layout.tagBar.split).toBeGreaterThanOrEqual(0.3)
+  })
+
+  describe('Added by AI (F-4.13)', () => {
+    const chipOf = (name: string): HTMLElement =>
+      chips().find((chip) => chip.textContent.includes(name)) ??
+      (() => {
+        throw new Error(`no chip ${name}`)
+      })()
+
+    it('marks only the chips of the links the background job made', async () => {
+      install({}, { 'sc-1': ['t-moody'] })
+      await mount()
+      expect(chipNames()).toEqual(['Remove dark-forest', 'Remove moody'])
+      const moody = chipOf('moody')
+      expect(moody).toHaveAttribute('data-ai', 'true')
+      expect(within(moody).getByTitle('Added by AI')).toHaveTextContent('Added by AI')
+      const forest = chipOf('dark-forest')
+      expect(forest).not.toHaveAttribute('data-ai')
+      expect(within(forest).queryByTitle('Added by AI')).not.toBeInTheDocument()
+    })
+
+    it('removes an AI-made link in one click, like any other', async () => {
+      const calls = install({}, { 'sc-1': ['t-moody'] })
+      await mount()
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Remove moody' }))
+      await waitFor(() => expect(chipNames()).toEqual(['Remove dark-forest']))
+      expect(calls.at(-1)).toEqual(['documentTag:remove', { nodeId: 'sc-1', tagId: 't-moody' }])
+      expect(useDocumentTagStore.getState().aiTagIdsByNode['sc-1']).toEqual([])
+      expect(toasts()).toEqual([])
+    })
+
+    it('drops the mark once the author adds the tag again, keeping one chip', async () => {
+      install({}, { 'sc-1': ['t-moody'] })
+      await mount()
+      expect(chipOf('moody')).toHaveAttribute('data-ai', 'true')
+      await act(() => useDocumentTagStore.getState().add('sc-1', 't-moody'))
+      expect(chipNames()).toEqual(['Remove dark-forest', 'Remove moody'])
+      expect(chipOf('moody')).not.toHaveAttribute('data-ai')
+      expect(within(bar()).queryByTitle('Added by AI')).not.toBeInTheDocument()
+    })
   })
 
   describe('Recommend (F-4.7)', () => {

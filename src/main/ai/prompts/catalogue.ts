@@ -29,6 +29,7 @@ import { REWRITE_REGEN_PROMPT_VERSION } from './rewriteRegen.v1'
 import { REWRITE_REGEN_PROMPT_V2_VERSION } from './rewriteRegen.v2'
 import { SUMMARY_PROMPT_VERSION } from './summary.v1'
 import { SUMMARY_PROMPT_V2_VERSION } from './summary.v2'
+import { SUMMARY_PROMPT_V3_VERSION } from './summary.v3'
 import { TAGS_PROMPT_VERSION } from './tags.v1'
 import { TAGS_REGEN_PROMPT_VERSION } from './tagsRegen.v1'
 
@@ -74,6 +75,7 @@ export const PROMPT_VERSIONS = [
   BRIEF_PROMPT_VERSION,
   SUMMARY_PROMPT_VERSION,
   SUMMARY_PROMPT_V2_VERSION,
+  SUMMARY_PROMPT_V3_VERSION,
   QUERY_PROMPT_VERSION,
   QUERY_PROMPT_V2_VERSION,
   IMPORT_STRUCTURE_PROMPT_VERSION
@@ -215,6 +217,12 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-5.16'
+  },
+  [SUMMARY_PROMPT_V3_VERSION]: {
+    feature: 'summary',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-4.13'
   },
   [QUERY_PROMPT_VERSION]: { feature: 'query', tier: 'strong', output: 'json', since: 'F-5.7' },
   [QUERY_PROMPT_V2_VERSION]: { feature: 'query', tier: 'strong', output: 'json', since: 'F-5.16' },

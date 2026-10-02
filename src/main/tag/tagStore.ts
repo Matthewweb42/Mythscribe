@@ -4,6 +4,7 @@ import { and, asc, count, eq, ne, type SQL } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import type { Tag, TagCreateInput, TagUpdateInput } from '@shared/ipc/contract'
 import { DEFAULT_CATEGORY_COLOR, toTagName } from '@shared/tags'
+import { getDismissedNames, setDismissedNames } from '../project/settingsStore'
 import { tagTemplateById, type TagTemplateId } from '@shared/tagTemplates'
 import type * as schema from '../db/schema'
 import { documentTag, tag, type TagInsert, type TagRow } from '../db/schema'
@@ -113,22 +114,28 @@ function assertNoCycle(db: TagDb, id: string, parent: TagRow): void {
 /**
  * Creates a tag (F-4.1): the name is kebab-cased and must be unique after normalization, the
  * color defaults to the category's, and the parent (when given) must exist. Mention tracking
- * (F-4.12) starts on. Returns the tag with `usageCount: 0`.
+ * (F-4.12) starts on. Returns the tag with `usageCount: 0`. `origin` is `ai` only when the
+ * background tagging job makes the tag (F-4.13).
  */
-export function createTag(db: TagDb, input: TagCreateInput): Tag {
+export function createTag(
+  db: TagDb,
+  input: TagCreateInput,
+  origin: TagRow['origin'] = 'author'
+): Tag {
   return db.transaction((tx) => {
     const name = normalizeName(input.name)
     assertNameFree(tx, name)
     const parentId = input.parentId ?? null
     if (parentId !== null) assertParentExists(tx, parentId)
-    return insertTag(tx, { ...input, name, parentId })
+    return insertTag(tx, { ...input, name, parentId }, origin)
   })
 }
 
 /** The one insert: a validated, normalized name and a checked parent go in; the row comes back. */
 function insertTag(
   db: TagDb,
-  input: { name: string; category: Tag['category']; color?: string; parentId: string | null }
+  input: { name: string; category: Tag['category']; color?: string; parentId: string | null },
+  origin: TagRow['origin'] = 'author'
 ): Tag {
   const now = new Date().toISOString()
   const row: TagInsert = {
@@ -139,10 +146,11 @@ function insertTag(
     parentId: input.parentId,
     // F-4.12: a new tag is looked for from its first save; the author turns it off per tag.
     trackMentions: true,
+    origin,
     created: now,
     modified: now
   }
-  const inserted = db.insert(tag).values(row).returning().get()
+  const { origin: _origin, ...inserted } = db.insert(tag).values(row).returning().get()
   return { ...inserted, usageCount: 0 }
 }
 
@@ -173,7 +181,8 @@ export function loadTagTemplate(
 /**
  * Patches the given fields of a tag (F-4.1); omitted fields keep their value. The same name and
  * parent rules as `createTag` apply, and a parent that is the tag itself or one of its
- * descendants is refused with VALIDATION. Stamps `modified`.
+ * descendants is refused with VALIDATION. Stamps `modified`. A patch of the name, category,
+ * color, or parent makes an AI-made tag the author's (F-4.13); the tracking switch alone does not.
  */
 export function updateTag(db: TagDb, id: string, patch: Omit<TagUpdateInput, 'id'>): Tag {
   return db.transaction((tx) => {
@@ -194,6 +203,9 @@ export function updateTag(db: TagDb, id: string, patch: Omit<TagUpdateInput, 'id
     // F-4.12: the caller acts on the switch itself (deleting the recorded mentions, or rescanning
     // the manuscript); the store only records it.
     if (patch.trackMentions !== undefined) changes.trackMentions = patch.trackMentions
+    if (existing.origin === 'ai' && Object.keys(changes).some((key) => key !== 'trackMentions')) {
+      changes.origin = 'author'
+    }
     tx.update(tag)
       .set({ ...changes, modified: new Date().toISOString() })
       .where(eq(tag.id, id))
@@ -207,10 +219,18 @@ export function updateTag(db: TagDb, id: string, patch: Omit<TagUpdateInput, 'id
 /**
  * Deletes a tag (F-4.1). Its `document_tag` links go through the schema's `ON DELETE CASCADE`
  * and its child tags become top-level through `ON DELETE SET NULL` (`foreign_keys` is on for
- * every connection).
+ * every connection). Deleting a tag the background job made (F-4.13) records its name with the
+ * dismissed proposals (F-4.12b), in the same transaction, so neither proposes or makes it again.
  */
 export function deleteTag(db: TagDb, id: string): void {
-  const existing = getTag(db, id)
-  if (!existing) throw new AppError('NOT_FOUND', 'Tag not found', { id })
-  db.delete(tag).where(eq(tag.id, id)).run()
+  db.transaction((tx) => {
+    const existing = getTag(tx, id)
+    if (!existing) throw new AppError('NOT_FOUND', 'Tag not found', { id })
+    tx.delete(tag).where(eq(tag.id, id)).run()
+    if (existing.origin !== 'ai') return
+    const stored = getDismissedNames(tx)
+    if (!stored.names.includes(existing.name)) {
+      setDismissedNames(tx, { names: [...stored.names, existing.name] })
+    }
+  })
 }

@@ -9,6 +9,7 @@ import {
   OBSERVED_FACT_VALUE_MAX
 } from '@shared/observedFacts'
 import { parseStoredSceneMeta, type SceneMeta } from '@shared/sceneMeta'
+import { toTagName } from '@shared/tags'
 import {
   SUMMARY_CHARACTER_MAX,
   SUMMARY_CHARACTERS_MAX,
@@ -17,7 +18,9 @@ import {
   SUMMARY_KEY_POINTS_MAX,
   SUMMARY_MAX_CHARS,
   SUMMARY_SCENE_CHAR_BUDGET,
+  SUMMARY_TAGS_MAX,
   SUMMARY_TEXT_MIN,
+  ExtractedTag,
   type SceneSummary,
   type StoredSceneSummary
 } from '@shared/summary'
@@ -26,6 +29,7 @@ import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { documentText, manuscriptDocuments } from '../voice/profile'
+import { applyAutoTags, bankTagNames, type AutoTagsChange } from './autoTags'
 import { headTruncate } from './context/chatContext'
 import { assertFeatureAllowed } from './dial'
 import {
@@ -34,7 +38,7 @@ import {
   type KnownNames,
   type ObservedFactsChange
 } from './observedFacts'
-import { buildSummaryPromptV2, SUMMARY_PROMPT_V2_VERSION } from './prompts/summary.v2'
+import { buildSummaryPromptV3, SUMMARY_PROMPT_V3_VERSION } from './prompts/summary.v3'
 import { AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -57,6 +61,11 @@ import { runAiRequest, sha256, type AiRequestDeps } from './request'
  * the scene as sent is dropped and counted — no fact without a passage) and stored with the
  * summary in one transaction (`applyObservedFacts`), apart from the author's own sheets
  * (author-control rule 1). A scene that loses its summary loses its facts with it.
+ *
+ * F-4.13: and the same request tags the scene. The answer's `tags` are applied as `ai` links in
+ * that transaction (`applyAutoTags`), apart from the author's own links, and go with the
+ * summary too. The bank names the prompt lists are outside the content hash on purpose (see
+ * `bankTagNames`).
  */
 
 const BAD_FORMAT = 'The model did not answer in the expected format.'
@@ -138,7 +147,7 @@ export function staleSummaryNodeIds(db: TreeDb): string[] {
     const current = stored.get(row.id)
     if (
       current?.contentHash === source.contentHash &&
-      current.promptVersion === SUMMARY_PROMPT_V2_VERSION
+      current.promptVersion === SUMMARY_PROMPT_V3_VERSION
     ) {
       continue
     }
@@ -161,6 +170,8 @@ export interface SummarizeSceneInput {
    * the windows. Not called for a run that touched nothing.
    */
   onFactsChanged?: (change: ObservedFactsChange) => void
+  /** Told which tags the run linked, dropped, or created (F-4.13), under the same rule. */
+  onTagsChanged?: (change: AutoTagsChange) => void
 }
 
 export interface SummarizeSceneResult {
@@ -191,12 +202,17 @@ export async function summarizeScene(
   }
   if (source.length < SUMMARY_TEXT_MIN) {
     // A scene cut back below the gate keeps no summary: a stale one would state what is gone.
-    // Its observed facts go with it for the same reason (hidden ones stay, as tombstones).
+    // Its observed facts go with it for the same reason (hidden ones stay, as tombstones), and
+    // so do the tags the job applied (F-4.13); the author's own links stay.
     const cleared = db.transaction((tx) => {
       deleteSummary(tx, input.nodeId)
-      return applyObservedFacts(tx, input.nodeId, [])
+      return {
+        facts: applyObservedFacts(tx, input.nodeId, []),
+        tags: applyAutoTags(tx, input.nodeId, [], '')
+      }
     })
-    if (cleared.entityIds.length > 0) input.onFactsChanged?.(cleared)
+    if (cleared.facts.entityIds.length > 0) input.onFactsChanged?.(cleared.facts)
+    if (cleared.tags.moved.length > 0) input.onTagsChanged?.(cleared.tags)
     throw new AppError(
       'VALIDATION',
       `Write at least ${SUMMARY_TEXT_MIN} characters in this scene before summarising it`,
@@ -208,7 +224,7 @@ export async function summarizeScene(
   if (
     stored !== null &&
     stored.contentHash === source.contentHash &&
-    stored.promptVersion === SUMMARY_PROMPT_V2_VERSION
+    stored.promptVersion === SUMMARY_PROMPT_V3_VERSION
   ) {
     return {
       summary: stored,
@@ -221,10 +237,11 @@ export async function summarizeScene(
     }
   }
 
-  const prompt = buildSummaryPromptV2({
+  const prompt = buildSummaryPromptV3({
     sceneText: source.sceneText,
     meta: source.meta,
-    known: source.known
+    known: source.known,
+    bank: bankTagNames(db)
   })
   const result = await runAiRequest(deps, {
     feature: 'summary',
@@ -244,16 +261,19 @@ export async function summarizeScene(
   // stand now, or the run would mark its own scene "Out of date" and pay for it twice. Only
   // when the names had not moved while the request was out: a name the author added meanwhile
   // was never sent, so the row keeps the hash of what was and reads as out of date.
-  const { summary, change } = db.transaction((tx) => {
+  // The tags (F-4.13) follow the facts for the same reason: a name tag the job creates is a
+  // known name of this scene from then on.
+  const { summary, change, tagged } = db.transaction((tx) => {
     const unchanged =
       sourceHash(source.sceneText, source.meta, knownNames(tx, source.sceneText)) ===
       source.contentHash
     const applied = applyObservedFacts(tx, input.nodeId, parsed.facts)
+    const tags = applyAutoTags(tx, input.nodeId, parsed.tags, source.sceneText)
     const row: StoredSceneSummary = {
       ...parsed.summary,
       nodeId: input.nodeId,
       contentHash:
-        applied.created.length === 0 || !unchanged
+        (applied.created.length === 0 && tags.created.length === 0) || !unchanged
           ? source.contentHash
           : sourceHash(source.sceneText, source.meta, knownNames(tx, source.sceneText)),
       promptVersion: prompt.version,
@@ -262,9 +282,10 @@ export async function summarizeScene(
       createdAt: deps.now().toISOString()
     }
     upsertSummary(tx, row)
-    return { summary: row, change: applied }
+    return { summary: row, change: applied, tagged: tags }
   })
   if (change.entityIds.length > 0 || change.created.length > 0) input.onFactsChanged?.(change)
+  if (tagged.moved.length > 0) input.onTagsChanged?.(tagged)
 
   return {
     summary,
@@ -282,8 +303,12 @@ const ModelAnswer = z.object({
   summary: z.unknown().optional(),
   keyPoints: z.unknown().optional(),
   characters: z.unknown().optional(),
-  facts: z.unknown().optional()
+  facts: z.unknown().optional(),
+  tags: z.unknown().optional()
 })
+
+/** One tag as the model may answer it, before the name is trimmed and the category checked. */
+const ModelTag = z.object({ name: z.string(), category: z.string() })
 
 /** One fact as the model may answer it: the five strings, before they are trimmed, cut, and checked. */
 const ModelFact = z.object({
@@ -299,6 +324,8 @@ export interface ParsedSummaryAnswer {
   summary: SceneSummary
   facts: ExtractedFact[]
   droppedFacts: number
+  /** The tags to apply (F-4.13): shaped, deduped by tag name, and capped; resolved against the bank later. */
+  tags: ExtractedTag[]
 }
 
 /**
@@ -315,6 +342,10 @@ export interface ParsedSummaryAnswer {
  * list (`isObservedAttribute`), and a name over the entity cap. The value and the quote are cut
  * to their caps first. A statement given twice (same kind, name, and `factKey`) is kept once,
  * uncounted, and the list is capped at `SUMMARY_FACTS_MAX`.
+ *
+ * The tags (F-4.13) are lenient too: an entry that is not a name and a known category, a name
+ * that kebab-cases to nothing or runs over the tag cap, and a repeat of the same tag name are
+ * dropped silently, and the list is capped at `SUMMARY_TAGS_MAX`.
  */
 export function parseSummaryAnswer(text: string, sceneText: string): ParsedSummaryAnswer {
   let json: unknown
@@ -336,8 +367,30 @@ export function parseSummaryAnswer(text: string, sceneText: string): ParsedSumma
       keyPoints: cleanList(answer.data.keyPoints, SUMMARY_KEY_POINT_MAX, SUMMARY_KEY_POINTS_MAX),
       characters: cleanList(answer.data.characters, SUMMARY_CHARACTER_MAX, SUMMARY_CHARACTERS_MAX)
     },
-    ...cleanFacts(answer.data.facts, sceneText)
+    ...cleanFacts(answer.data.facts, sceneText),
+    tags: cleanTags(answer.data.tags)
   }
+}
+
+function cleanTags(value: unknown): ExtractedTag[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const tags: ExtractedTag[] = []
+  for (const entry of value) {
+    if (tags.length === SUMMARY_TAGS_MAX) break
+    const shaped = ModelTag.safeParse(entry)
+    if (!shaped.success) continue
+    const tag = ExtractedTag.safeParse({
+      name: shaped.data.name.trim(),
+      category: shaped.data.category.trim()
+    })
+    if (!tag.success) continue
+    const key = toTagName(tag.data.name)
+    if (key.length === 0 || seen.has(key)) continue
+    seen.add(key)
+    tags.push(tag.data)
+  }
+  return tags
 }
 
 function cleanFacts(

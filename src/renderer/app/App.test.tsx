@@ -43,6 +43,7 @@ import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { resetObservedFactStore } from '@renderer/features/entities/observedFactStore'
+import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { resetMentionStore } from '@renderer/features/tags/mentionStore'
 import { resetProposedTagStore } from '@renderer/features/tags/proposedTagStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
@@ -101,6 +102,7 @@ beforeEach(() => {
   resetAccountStore()
   resetViewStore()
   resetMentionStore()
+  resetDocumentTagStore()
   resetProposedTagStore()
   resetSearchStore()
   resetReplaceStore()

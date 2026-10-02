@@ -414,7 +414,9 @@ describe('In this scene (F-9.7)', () => {
       .getAllByRole('listitem')
       .map((item) => item.getAttribute('aria-label'))
   const base = tagFixture[0]
-  const tag = base ? { ...base, id: 't-aldous', name: 'aldous' } : undefined
+  const tag = base
+    ? { ...base, id: 't-aldous', name: 'aldous', source: 'author' as const }
+    : undefined
 
   beforeEach(() => {
     if (!tag) throw new Error('the tag fixture is empty')

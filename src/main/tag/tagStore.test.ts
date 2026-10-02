@@ -9,6 +9,7 @@ import { TAG_TEMPLATES } from '@shared/tagTemplates'
 import { documentTag, node, tag } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { getDismissedNames } from '../project/settingsStore'
 import { listNodes } from '../tree/treeStore'
 import {
   createTag,
@@ -273,5 +274,29 @@ describe('loadTagTemplate (F-4.3)', () => {
     const { created, skipped } = loadTagTemplate(db, 'sci-fi')
     expect(skipped).toEqual(['technology', 'mystery'])
     expect(created).toHaveLength(sciFi.tags.length - 2)
+  })
+})
+
+describe('AI-made tags (F-4.13)', () => {
+  it('records the name of a deleted AI-made tag, and nothing for the author’s own', () => {
+    const made = createTag(db, { name: 'Dread', category: 'tone' }, 'ai')
+    const own = createTag(db, { name: 'Rain', category: 'tone' })
+    expect(getTag(db, made.id)?.origin).toBe('ai')
+    expect(getTag(db, own.id)?.origin).toBe('author')
+    expect(made).not.toHaveProperty('origin')
+    deleteTag(db, own.id)
+    expect(getDismissedNames(db).names).toEqual([])
+    deleteTag(db, made.id)
+    expect(getDismissedNames(db).names).toEqual(['dread'])
+  })
+
+  it('becomes the author’s on an edit of its name, category, color, or parent, not on the tracking switch', () => {
+    const made = createTag(db, { name: 'Dread', category: 'tone' }, 'ai')
+    updateTag(db, made.id, { trackMentions: false })
+    expect(getTag(db, made.id)?.origin).toBe('ai')
+    updateTag(db, made.id, { category: 'custom' })
+    expect(getTag(db, made.id)?.origin).toBe('author')
+    deleteTag(db, made.id)
+    expect(getDismissedNames(db).names).toEqual([])
   })
 })

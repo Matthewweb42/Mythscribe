@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(11)
+    expect(result.version).toBe(12)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -124,6 +124,7 @@ describe('migrate', () => {
     expect(tables()).toContain('mention_scan')
     expect(tables()).toContain('entity')
     expect(tables()).toContain('observed_fact')
+    expect(tables()).toContain('document_tag_dismissal')
   })
 })
 
@@ -424,6 +425,66 @@ describe('observed_fact table and entity.origin (0010_observed_facts)', () => {
        VALUES ('mara', 'character', 'Mara', '2026-01-01', '2026-01-01')`
     ).run()
     insertFact('f2', 'mara', 'scene')
+    db.prepare('DELETE FROM node WHERE id = ?').run('scene')
+    expect(count()).toEqual({ n: 0 })
+  })
+})
+
+describe('document_tag.source, tag.origin, and document_tag_dismissal (0011_auto_tags)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO tag (id, name, category, color, created, modified)
+       VALUES ('dread', 'dread', 'tone', '#2563eb', '2026-01-01', '2026-01-01')`
+    ).run()
+  })
+  afterEach(() => db.close())
+
+  const dismiss = (nodeId: string, tagId: string): void => {
+    db.prepare('INSERT INTO document_tag_dismissal (node_id, tag_id) VALUES (?, ?)').run(
+      nodeId,
+      tagId
+    )
+  }
+  const count = (): unknown => db.prepare('SELECT COUNT(*) AS n FROM document_tag_dismissal').get()
+
+  it('defaults a tag and a link to the author’s', () => {
+    expect(db.prepare('SELECT origin FROM tag WHERE id = ?').get('dread')).toEqual({
+      origin: 'author'
+    })
+    db.prepare(
+      `INSERT INTO document_tag (id, node_id, tag_id, created)
+       VALUES ('l1', 'scene', 'dread', '2026-01-01')`
+    ).run()
+    expect(db.prepare('SELECT source FROM document_tag WHERE id = ?').get('l1')).toEqual({
+      source: 'author'
+    })
+  })
+
+  it('keeps one dismissal per pair and refuses an unknown node or tag', () => {
+    dismiss('scene', 'dread')
+    expect(() => dismiss('scene', 'dread')).toThrow(/UNIQUE|PRIMARY/)
+    expect(() => dismiss('ghost', 'dread')).toThrow(/FOREIGN KEY/)
+    expect(() => dismiss('scene', 'ghost')).toThrow(/FOREIGN KEY/)
+  })
+
+  it('drops the dismissal with its tag and with its node', () => {
+    dismiss('scene', 'dread')
+    db.prepare('DELETE FROM tag WHERE id = ?').run('dread')
+    expect(count()).toEqual({ n: 0 })
+    db.prepare(
+      `INSERT INTO tag (id, name, category, color, created, modified)
+       VALUES ('dread', 'dread', 'tone', '#2563eb', '2026-01-01', '2026-01-01')`
+    ).run()
+    dismiss('scene', 'dread')
     db.prepare('DELETE FROM node WHERE id = ?').run('scene')
     expect(count()).toEqual({ n: 0 })
   })

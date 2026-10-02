@@ -1993,7 +1993,7 @@ describe('scene summaries (F-5.6)', () => {
     expect(result.state.summary).toMatchObject({
       ...ANSWER,
       nodeId: scene,
-      promptVersion: 'summary.v2',
+      promptVersion: 'summary.v3',
       model: 'gpt-fake',
       truncated: false
     })
@@ -2002,6 +2002,32 @@ describe('scene summaries (F-5.6)', () => {
     expect(usage.byFeature.map((f) => f.feature)).toEqual(['summary'])
     // The pane hears about the run without polling.
     expect(statusesSent()).toContainEqual({ nodeId: scene, status: 'idle' })
+  })
+
+  it('tags the scene from the summary answer and tells the windows: the tags and the scene (F-4.13)', async () => {
+    const { scene } = await ready()
+    complete.mockResolvedValue({
+      text: JSON.stringify({ ...ANSWER, tags: [{ name: 'Dread', category: 'tone' }] }),
+      model: 'gpt-fake',
+      usage: { inputTokens: 400, outputTokens: 60 }
+    })
+    const result = await invoke('ai:summarize', { nodeId: scene, requestId: 's-t' })
+    if (!result.ok) throw new Error(result.message)
+    const linked = await invoke('documentTag:list', { nodeId: scene })
+    expect(linked).toMatchObject([{ name: 'dread', category: 'tone', source: 'ai', usageCount: 1 }])
+    const sent = (channel: string): unknown[] =>
+      vi
+        .mocked(fakeWin.webContents.send)
+        .mock.calls.filter(([name]) => name === channel)
+        .map(([, payload]) => payload)
+    expect(sent('tag:changed')).toMatchObject([{ name: 'dread', usageCount: 1 }])
+    expect(sent('documentTag:changed')).toEqual([{ nodeIds: [scene] }])
+    // One click removes it, and the removal is the author's: the tag stays in the bank.
+    const dread = linked[0]
+    if (!dread) throw new Error('no tag linked')
+    await invoke('documentTag:remove', { nodeId: scene, tagId: dread.id })
+    expect(await invoke('documentTag:list', { nodeId: scene })).toEqual([])
+    expect(await invoke('tag:list', undefined)).toMatchObject([{ name: 'dread', usageCount: 0 }])
   })
 
   it('logs the facts the summary answers and tells the windows: the new entity, its tag, and whose facts moved (F-5.16)', async () => {
@@ -2118,7 +2144,8 @@ describe('scene summaries (F-5.6)', () => {
     expect(await invoke('ai:summarize', { nodeId: scene, requestId: 's-3' })).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Scene summaries and story bible needs the AI dial at Ask or higher (it is at Off).',
+      message:
+        'Scene summaries, story bible, and tags needs the AI dial at Ask or higher (it is at Off).',
       nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
       requestId: 's-3'
     })
@@ -3494,7 +3521,9 @@ describe('documentTag handlers (F-4.4)', () => {
     const linked = await invoke('documentTag:add', { nodeId: scene, tagId: rain.id })
     expect(linked).toEqual({ ...rain, usageCount: 1 })
     expect(await invoke('documentTag:add', { nodeId: scene, tagId: rain.id })).toEqual(linked)
-    expect(await invoke('documentTag:list', { nodeId: scene })).toEqual([linked])
+    expect(await invoke('documentTag:list', { nodeId: scene })).toEqual([
+      { ...linked, source: 'author' }
+    ])
     expect(await invoke('tag:list', undefined)).toEqual([linked])
     const unlinked = await invoke('documentTag:remove', { nodeId: scene, tagId: rain.id })
     expect(unlinked).toEqual({ ...rain, usageCount: 0 })
@@ -3513,7 +3542,7 @@ describe('documentTag handlers (F-4.4)', () => {
       usageCount: 1
     })
     expect(await invoke('documentTag:list', { nodeId: folder })).toEqual([
-      { ...rain, usageCount: 1 }
+      { ...rain, usageCount: 1, source: 'author' }
     ])
   })
 
@@ -3853,12 +3882,24 @@ describe('dictionary:* / spellcheck:replace (F-3.11)', () => {
   it('adds a word, keeps the list sorted, and syncs the spellchecker to the stored list', async () => {
     await invoke('project:create', { name: 'Words', format: 'novel', directory: tmp })
     spellSync.mockClear()
-    expect(await invoke('dictionary:add', { word: ' Zorvath ' })).toEqual({ words: ['Zorvath'], notNames: [] })
-    expect(await invoke('dictionary:add', { word: 'Mara' })).toEqual({ words: ['Mara', 'Zorvath'], notNames: [] })
+    expect(await invoke('dictionary:add', { word: ' Zorvath ' })).toEqual({
+      words: ['Zorvath'],
+      notNames: []
+    })
+    expect(await invoke('dictionary:add', { word: 'Mara' })).toEqual({
+      words: ['Mara', 'Zorvath'],
+      notNames: []
+    })
     expect(spellSync.mock.calls).toEqual([[['Zorvath']], [['Mara', 'Zorvath']]])
     // A word already there stores nothing new and answers the same list.
-    expect(await invoke('dictionary:add', { word: 'Mara' })).toEqual({ words: ['Mara', 'Zorvath'], notNames: [] })
-    expect(await invoke('dictionary:get', undefined)).toEqual({ words: ['Mara', 'Zorvath'], notNames: [] })
+    expect(await invoke('dictionary:add', { word: 'Mara' })).toEqual({
+      words: ['Mara', 'Zorvath'],
+      notNames: []
+    })
+    expect(await invoke('dictionary:get', undefined)).toEqual({
+      words: ['Mara', 'Zorvath'],
+      notNames: []
+    })
   })
 
   it('refuses an empty word and a phrase', async () => {
@@ -3876,10 +3917,16 @@ describe('dictionary:* / spellcheck:replace (F-3.11)', () => {
     await invoke('dictionary:add', { word: 'Mara' })
     await invoke('dictionary:add', { word: 'Zorvath' })
     spellSync.mockClear()
-    expect(await invoke('dictionary:remove', { word: 'Mara' })).toEqual({ words: ['Zorvath'], notNames: [] })
+    expect(await invoke('dictionary:remove', { word: 'Mara' })).toEqual({
+      words: ['Zorvath'],
+      notNames: []
+    })
     expect(spellSync).toHaveBeenLastCalledWith(['Zorvath'])
     // A word that is not there changes nothing.
-    expect(await invoke('dictionary:remove', { word: 'Nobody' })).toEqual({ words: ['Zorvath'], notNames: [] })
+    expect(await invoke('dictionary:remove', { word: 'Nobody' })).toEqual({
+      words: ['Zorvath'],
+      notNames: []
+    })
   })
 
   it('syncs the spellchecker to each project as it opens and to nothing on close', async () => {
@@ -4450,7 +4497,7 @@ describe('ai:recommendTags (F-4.7)', () => {
     expect((await invoke('ai:usageSummary', undefined)).total.requests).toBe(1)
     // Nothing was linked by the suggestion itself.
     expect(await invoke('documentTag:list', { nodeId: scene })).toEqual([
-      { ...forest, usageCount: 1 }
+      { ...forest, usageCount: 1, source: 'author' }
     ])
   })
 

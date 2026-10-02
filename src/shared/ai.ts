@@ -200,8 +200,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   ghostText: 60,
   tags: 200,
   // F-5.6: the ~100-token summary, up to four key points, and the characters present as one JSON
-  // object; F-5.16 adds up to six observed facts, each with a value and a quote (300 → 600).
-  summary: 600,
+  // object; F-5.16 adds up to six observed facts, each with a value and a quote (300 → 600);
+  // F-4.13 adds up to eight tags, each a name and a category (600 → 800).
+  summary: 800,
   // F-5.4: ten paragraphs at ~120 tokens each in Agent mode; Plan answers share the cap.
   chat: 1_200,
   // F-14.10: a 4,000-character passage (~1,000 tokens) rewritten at up to 1.5× its length.

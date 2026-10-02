@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TAG_NAME_MAX, TagCategory } from './tags'
 
 /**
  * Scene summaries (F-5.6): the derived index every Story Intelligence feature reads. A summary
@@ -26,6 +27,32 @@ export const SUMMARY_BANK_NAMES_MAX = 40
 export const SUMMARY_FACTS_MAX = 6
 /** How many story-bible names occurring in the scene the prompt lists by kind (F-5.16). */
 export const SUMMARY_KNOWN_NAMES_MAX = 40
+/** Most tags the background job applies to one scene (F-4.13). */
+export const SUMMARY_TAGS_MAX = 8
+/** Most of those that may be new to the bank, so one scene cannot flood it. */
+export const SUMMARY_NEW_TAGS_MAX = 3
+/** How many tone, content, plot-thread, and custom bank names the prompt lists, most used first. */
+export const SUMMARY_BANK_TAGS_MAX = 40
+/**
+ * The categories the job may create a tag in (F-4.13): names (which must occur in the scene),
+ * tones, plot threads, and themes as `custom`. `content` holds content types the author
+ * curates, so the job links those from the bank and never adds to them.
+ */
+export const AUTO_TAG_CATEGORIES = [
+  'character',
+  'setting',
+  'worldBuilding',
+  'tone',
+  'plotThread',
+  'custom'
+] as const satisfies readonly TagCategory[]
+/** The categories whose bank names the prompt lists; names of the other three ride `knownNames`. */
+export const AUTO_TAG_BANK_CATEGORIES = [
+  'tone',
+  'content',
+  'plotThread',
+  'custom'
+] as const satisfies readonly TagCategory[]
 /** Main waits this long after the last save of a scene before summarising it. */
 export const SUMMARY_DEBOUNCE_MS = 3_000
 
@@ -36,6 +63,13 @@ export const SceneSummary = z.object({
   characters: z.array(z.string().min(1).max(SUMMARY_CHARACTER_MAX)).max(SUMMARY_CHARACTERS_MAX)
 })
 export type SceneSummary = z.infer<typeof SceneSummary>
+
+/** One tag of the model's answer (F-4.13), trimmed and checked; the name is not yet kebab-cased. */
+export const ExtractedTag = z.object({
+  name: z.string().min(1).max(TAG_NAME_MAX),
+  category: TagCategory
+})
+export type ExtractedTag = z.infer<typeof ExtractedTag>
 
 /** A stored row: the summary plus what it was made from, so staleness is a hash comparison. */
 export const StoredSceneSummary = SceneSummary.extend({

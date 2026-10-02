@@ -158,6 +158,14 @@ export const Tag = z.object({
 export type Tag = z.infer<typeof Tag>
 
 /**
+ * A tag as it is linked to one node (F-4.4): `source` is `ai` for a link the background tagging
+ * job applied (F-4.13; shown with an "Added by AI" mark, removable like any other) and `author`
+ * for one the author made or accepted.
+ */
+export const DocumentTag = Tag.extend({ source: z.enum(['author', 'ai']) })
+export type DocumentTag = z.infer<typeof DocumentTag>
+
+/**
  * One entity of the story bible (F-9.1): a character, a setting, or a world-building item.
  * `fields` holds the kind's structured template (a field with no text has no key) and `body` the
  * blank page; `template` says which of the two the author writes in, and both travel either way.
@@ -752,11 +760,12 @@ export const contract = {
   /**
    * The tags linked to a node (F-4.4), ordered by name. Documents and folders both carry tags
    * (the bar mounts on a chapter or part in the stacked view, F-4.5); NOT_FOUND for an unknown
-   * node id, VALIDATION for a section root.
+   * node id, VALIDATION for a section root. Each carries the `source` of its link (F-4.13).
    */
-  'documentTag:list': { input: z.object({ nodeId: z.string() }), output: z.array(Tag) },
+  'documentTag:list': { input: z.object({ nodeId: z.string() }), output: z.array(DocumentTag) },
   /**
-   * Links a tag to a node (F-4.4); linking an already-linked tag is a no-op. Returns the tag
+   * Links a tag to a node (F-4.4); linking an already-linked tag is a no-op, except that a link
+   * the background job made becomes the author's (F-4.13). Returns the tag
    * with its usage count after the link. Same refusals as `documentTag:list`, plus NOT_FOUND for
    * an unknown tag id.
    */
@@ -765,7 +774,8 @@ export const contract = {
     output: Tag
   },
   /**
-   * Removes a link (F-4.4); removing a link that is already gone is a no-op. Returns the tag with
+   * Removes a link (F-4.4); removing a link that is already gone is a no-op. The background
+   * tagging job never applies the tag to that node again (F-4.13). Returns the tag with
    * its usage count after the removal. Same refusals as `documentTag:add`.
    */
   'documentTag:remove': {
@@ -1512,6 +1522,8 @@ export const events = {
   'import:detectProgress': ImportDetectProgress,
   /** The recorded mentions of these documents changed (F-4.12): a scan wrote rows, or a tag's tracking was turned off or the tag deleted (then every document). */
   'mention:changed': z.object({ nodeIds: z.array(z.string()) }),
+  /** The tag links of these nodes changed without a `documentTag:*` call (F-4.13): the background tagging job applied or dropped tags. */
+  'documentTag:changed': z.object({ nodeIds: z.array(z.string()) }),
   /** The proposed tags changed (F-4.12b): a scan, a tag, or a dismissal moved the list. Only a real change is pushed. */
   'tag:proposedChanged': z.array(ProposedTag),
   /**

@@ -46,6 +46,20 @@ function isProperNoun(match: string): boolean {
 }
 
 /**
+ * Whether a scene names `tagName` (kebab-case, as the bank stores it): its words in order on
+ * word boundaries, in any case — and, when `properNoun` is asked, at least once capitalised
+ * like a name. F-4.13 uses it to keep the job from making a name tag the scene does not hold.
+ */
+export function sceneNamesTag(sceneText: string, tagName: string, properNoun: boolean): boolean {
+  const pattern = wordsPattern(nameWords(tagName))
+  if (pattern === null) return false
+  for (const match of sceneText.matchAll(pattern)) {
+    if (!properNoun || isProperNoun(match[0])) return true
+  }
+  return false
+}
+
+/**
  * The story-bible names a scene contains (F-5.16, decision 3 of the plan): the entities of all
  * three kinds whose name occurs in `sceneText`, as the author spells them, and then the
  * character, setting, and world-building tags no entity carries, as the scene spells them (a

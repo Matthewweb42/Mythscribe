@@ -134,6 +134,11 @@ import {
   type SummaryKnownNames
 } from '../prompts/summary.v2'
 import {
+  buildSummaryPromptV3,
+  SUMMARY_PROMPT_V3_VERSION,
+  type SummaryBankTags
+} from '../prompts/summary.v3'
+import {
   buildBetaReaderPrompt,
   BETA_READER_PROMPT_VERSION,
   type BuildBetaReaderPromptInput
@@ -162,6 +167,7 @@ import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../
 import { buildTagsRegenPrompt, TAGS_REGEN_PROMPT_VERSION } from '../prompts/tagsRegen.v1'
 import {
   SUMMARY_BANK_NAMES_MAX,
+  SUMMARY_BANK_TAGS_MAX,
   SUMMARY_KEY_POINT_MAX,
   SUMMARY_KEY_POINTS_MAX,
   SUMMARY_KNOWN_NAMES_MAX,
@@ -1035,6 +1041,41 @@ function summaryV2Case(
   }
 }
 
+function summaryV3Case(
+  name: string,
+  note: string,
+  sceneText: string,
+  meta: typeof META | null,
+  known: SummaryKnownNames,
+  bank: SummaryBankTags
+): EvalCase {
+  const built = buildSummaryPromptV3({ sceneText, meta, known, bank })
+  return {
+    version: SUMMARY_PROMPT_V3_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    // The tags are lenient by design (a dropped tag costs nothing), so the facts rule scores v3 too.
+    scoring: { kind: 'summaryFacts', sceneText }
+  }
+}
+
+/** The tag bank a summary request lists (F-4.13): none, a working bank, and the cap. */
+const NO_BANK_TAGS: SummaryBankTags = { tone: [], content: [], plotThread: [], custom: [] }
+const FIXTURE_BANK_TAGS: SummaryBankTags = {
+  tone: ['dread', 'tense'],
+  content: ['dialogue'],
+  plotThread: ['the-mill-debt'],
+  custom: ['duty']
+}
+const MAXED_BANK_TAGS: SummaryBankTags = {
+  tone: Array.from({ length: SUMMARY_BANK_TAGS_MAX }, (_, index) => `a-long-tone-name-${index}`),
+  content: [],
+  plotThread: [],
+  custom: []
+}
+
 /** The story-bible names the fixture scene contains (F-5.16): its two people and the place. */
 const FIXTURE_KNOWN: SummaryKnownNames = {
   character: ['Mara', 'Tomas'],
@@ -1713,6 +1754,35 @@ export const EVAL_CASES: EvalCase[] = [
       brief: EMPTY_SCENE_BRIEF
     },
     MAXED_KNOWN
+  ),
+  summaryV3Case(
+    'fresh',
+    'the fixture scene with no story-bible names, no tag bank, and no metadata: the shape a new project sends',
+    FIXTURE_PASSAGE,
+    null,
+    { character: [], setting: [], world: [] },
+    NO_BANK_TAGS
+  ),
+  summaryV3Case(
+    'full',
+    "the fixture scene with the story-bible names it contains, a working tag bank, and the scene's metadata",
+    FIXTURE_PASSAGE,
+    META,
+    FIXTURE_KNOWN,
+    FIXTURE_BANK_TAGS
+  ),
+  summaryV3Case(
+    'maxed',
+    `a scene at the character budget with ${SUMMARY_KNOWN_NAMES_MAX} known names, ${SUMMARY_BANK_TAGS_MAX} bank tags, and long metadata: the most a background summary with facts and tags can cost`,
+    `${FIXTURE_PASSAGE.repeat(20).slice(0, SUMMARY_SCENE_CHAR_BUDGET)}…`,
+    {
+      location: 'L'.repeat(200),
+      pov: 'P'.repeat(200),
+      timeline: 'T'.repeat(500),
+      brief: EMPTY_SCENE_BRIEF
+    },
+    MAXED_KNOWN,
+    MAXED_BANK_TAGS
   ),
   queryCase(
     'fresh',

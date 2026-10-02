@@ -142,12 +142,13 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     minDial: 1
   },
   summary: {
-    label: 'Scene summaries and story bible',
+    label: 'Scene summaries, story bible, and tags',
     sends:
-      "A scene's text (the first 20,000 characters), its metadata, and the names of the " +
-      'story-bible entries and tags that occur in the scene, to keep ' +
-      'its summary, key points, characters present, and the facts it states about your ' +
-      'characters, places, and world up to date after you pause typing.',
+      "A scene's text (the first 20,000 characters), its metadata, the names of the " +
+      'story-bible entries and tags that occur in the scene, and the names of your tone, ' +
+      'content, plot-thread, and custom tags, to keep ' +
+      'its summary, key points, characters present, the facts it states about your ' +
+      'characters, places, and world, and its tags up to date after you pause typing.',
     minDial: 1
   },
   query: {

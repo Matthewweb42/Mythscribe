@@ -86,7 +86,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       }
       if (channel === 'documentTag:list') {
         const { nodeId } = input as Input<'documentTag:list'>
-        return (links[nodeId] ?? []).map(tagOf) as Output<C>
+        return (links[nodeId] ?? []).map((id) => ({ ...tagOf(id), source: 'author' })) as Output<C>
       }
       // F-4.12: the tag bar asks for the document's recorded mentions; none in these tests.
       if (channel === 'mention:listForNode') return [] as Output<C>

@@ -3,6 +3,7 @@ import {
   check,
   index,
   integer,
+  primaryKey,
   real,
   sqliteTable,
   text,
@@ -95,6 +96,13 @@ export const tag = sqliteTable(
     }),
     /** F-4.12: whether the automatic mention scan looks for this name; on for every new tag. */
     trackMentions: integer('track_mentions', { mode: 'boolean' }).notNull().default(true),
+    /**
+     * F-4.13: `ai` only while the background tagging job made the tag and the author has not
+     * edited it; deleting such a tag records its name so the job does not make it again.
+     */
+    origin: text('origin', { enum: ['author', 'ai'] })
+      .notNull()
+      .default('author'),
     created: text('created').notNull(),
     modified: text('modified').notNull()
   },
@@ -114,6 +122,10 @@ export const documentTag = sqliteTable(
     tagId: text('tag_id')
       .notNull()
       .references(() => tag.id, { onDelete: 'cascade' }),
+    /** F-4.13: `ai` for a link the background tagging job applied; the author's own are `author`. */
+    source: text('source', { enum: ['author', 'ai'] })
+      .notNull()
+      .default('author'),
     created: text('created').notNull()
   },
   (t) => [
@@ -123,6 +135,23 @@ export const documentTag = sqliteTable(
 )
 export type DocumentTagRow = typeof documentTag.$inferSelect
 export type DocumentTagInsert = typeof documentTag.$inferInsert
+
+/**
+ * A tag the author took off a node (F-4.13): the background tagging job never applies that tag
+ * to that node again. The author linking it again lifts it; both ends cascade on delete.
+ */
+export const documentTagDismissal = sqliteTable(
+  'document_tag_dismissal',
+  {
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    tagId: text('tag_id')
+      .notNull()
+      .references(() => tag.id, { onDelete: 'cascade' })
+  },
+  (t) => [primaryKey({ columns: [t.nodeId, t.tagId] })]
+)
 
 /**
  * One row per completed AI request (F-5.14). Written after the provider answers, or after a

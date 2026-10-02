@@ -120,7 +120,7 @@ describe('summary.v2 prompt (F-5.16)', () => {
 
   it('asks for the feature output budget: the summary plus up to six facts as one JSON object', () => {
     expect(buildSummaryPromptV2(bare).maxTokens).toBe(outputBudget('summary'))
-    expect(buildSummaryPromptV2(bare).maxTokens).toBe(600)
+    expect(buildSummaryPromptV2(bare).maxTokens).toBe(800)
   })
 
   it('stays under the summary input budget with every cap at its limit', () => {
