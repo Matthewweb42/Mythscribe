@@ -150,6 +150,13 @@ What this changes in the design:
   `fast` call per burst of edits, through the job queue, invalidated by content hash.
 - **Continuity moves before launch.** F-13.4 reads the sheets and the observed facts, cites both
   passages, and posts findings to the chat with a diff fix.
+- **The bible comes to the author (2026-10-02).** The goal is to lock in and write: no flipping to
+  notes, no worry about spelling or consistency. So collecting facts is half the job; the other
+  half is showing them without a click and never interrupting. The References panel lists the
+  entities named in the open scene on its own (F-9.7); story names are in the spellchecker and a
+  near-miss is underlined (F-3.14); both are local and free. Observed facts are few and durable
+  (fixed attributes, at most 6 per scene, merged across scenes) so the bible needs no curating,
+  and background findings wait as a quiet count until the author looks (F-13.4).
 - **Order.** M3.5 comes before the rest of M4 (goals, word count, statistics): it is the product.
 
 ## 3. AI architecture (low level)
