@@ -3,7 +3,7 @@ import type { IpcBridge } from '@shared/ipc/contract'
 import { createIpcClient, IpcRequestError } from './ipc'
 
 function bridgeWith(invoke: IpcBridge['invoke'], on: IpcBridge['on'] = () => () => {}): IpcBridge {
-  return { invoke, on }
+  return { invoke, on, isWordMisspelled: () => false }
 }
 
 describe('createIpcClient', () => {

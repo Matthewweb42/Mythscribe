@@ -128,7 +128,8 @@ import {
   setReferencePins,
   setWritingPresets
 } from '../project/settingsStore'
-import { addWord, removeWord } from '@shared/dictionary'
+import { addNotName, addWord, removeWord, spellcheckWords } from '@shared/dictionary'
+import { storyNameWords } from '@shared/storyNames'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import { EXTERNAL_HOST, isAllowedExternalUrl, type EditRole } from '@shared/menu'
 import { normalizeProposalNote } from '@shared/proposal'
@@ -320,6 +321,22 @@ export function registerHandlers({
     if (json === lastProposed) return
     lastProposed = json
     emit(windows(), 'tag:proposedChanged', proposals)
+  }
+
+  /**
+   * F-3.14: the spellchecker accepts the open project's dictionary and the words of its story's
+   * names (entities and tags), and nothing once the project is closed. The names are read on
+   * every sync rather than stored, so everything that adds, renames, or removes one calls this
+   * and a name that is gone leaves no word behind. Local string work: no AI, whatever the dial.
+   */
+  const syncSpelling = (): Promise<void> => {
+    if (manager.current() === null) return spellDictionary.sync([])
+    const db = manager.require().connection.orm
+    const names = [
+      ...listEntities(db).map((entity) => entity.name),
+      ...listTags(db).map((tag) => tag.name)
+    ]
+    return spellDictionary.sync(spellcheckWords(getProjectDictionary(db), storyNameWords(names)))
   }
 
   const mentionQueue = createIndexQueue<{ changed: boolean; scanned: boolean }>({
@@ -608,6 +625,7 @@ export function registerHandlers({
     // F-4.12b: the new name is a tag now, so it is proposed no longer — which is what accepting
     // a proposal comes down to. The scans that follow say nothing new about it.
     publishProposed()
+    void syncSpelling()
     return created
   })
 
@@ -636,6 +654,7 @@ export function registerHandlers({
     // F-4.12b: a rename frees the old name to be proposed and takes the new one out of the list,
     // whatever tracking says — the proposals are about the bank's names, not about the scan.
     publishProposed()
+    if (before?.name !== updated.name) void syncSpelling()
     return updated
   })
 
@@ -648,6 +667,7 @@ export function registerHandlers({
     if (nodeIds.length > 0) emit(windows(), 'mention:changed', { nodeIds })
     // F-4.12b: the name the deleted tag held is a plain word again, so it may be proposed.
     publishProposed()
+    void syncSpelling()
     return null
   })
 
@@ -657,6 +677,7 @@ export function registerHandlers({
     if (result.created.length > 0) {
       rescanManuscript(db)
       publishProposed()
+      void syncSpelling()
     }
     return result
   })
@@ -785,12 +806,15 @@ export function registerHandlers({
     if (change.entityIds.length > 0) {
       emit(windows(), 'observedFact:changed', { entityIds: change.entityIds })
     }
+    // F-3.14: a name the job logged is a story name like any other.
+    if (change.created.length > 0) void syncSpelling()
   }
 
   register('entity:create', (input) => {
     const db = manager.require().connection.orm
     const { entity: created, tagChange } = createEntity(db, input)
     publishTagChange(db, tagChange)
+    void syncSpelling()
     return created
   })
 
@@ -798,6 +822,7 @@ export function registerHandlers({
     const db = manager.require().connection.orm
     const { entity: updated, tagChange } = updateEntity(db, id, patch)
     publishTagChange(db, tagChange)
+    void syncSpelling()
     return updated
   })
 
@@ -805,6 +830,7 @@ export function registerHandlers({
     const db = manager.require().connection.orm
     const { entity: linked, tagChange } = linkEntityTag(db, id)
     publishTagChange(db, tagChange)
+    void syncSpelling()
     return { entity: linked, tag: tagChange.tag }
   })
 
@@ -844,6 +870,7 @@ export function registerHandlers({
     const deleted = deleteEntity(session.connection.orm, id)
     // F-9.3: the image is the entity's own file, so it goes with it.
     if (deleted.image !== null) removeImageAsset(session.folder, ENTITY_IMAGES_DIR, deleted.image)
+    void syncSpelling()
     return null
   })
 
@@ -913,6 +940,7 @@ export function registerHandlers({
       publishProposed()
       for (const change of announce) emit(windows(), 'tag:changed', change.tag)
     }
+    void syncSpelling()
     return {
       entities: result.entities,
       added: result.added,
@@ -1718,7 +1746,7 @@ export function registerHandlers({
     const current = getProjectDictionary(db)
     const next = addWord(current, word)
     const stored = next === current ? current : setProjectDictionary(db, next)
-    await spellDictionary.sync(stored.words)
+    await syncSpelling()
     return stored
   })
 
@@ -1727,8 +1755,17 @@ export function registerHandlers({
     const current = getProjectDictionary(db)
     const next = removeWord(current, word)
     const stored = next === current ? current : setProjectDictionary(db, next)
-    await spellDictionary.sync(stored.words)
+    await syncSpelling()
     return stored
+  })
+
+  // F-3.14: the word stays underlined by the spellchecker if it is misspelled; only the
+  // near-name underline in the editor reads this list.
+  register('dictionary:notName', ({ word }) => {
+    const db = manager.require().connection.orm
+    const current = getProjectDictionary(db)
+    const next = addNotName(current, word)
+    return next === current ? current : setProjectDictionary(db, next)
   })
 
   // F-3.11: like `menu:edit`, on the window with the focus; the renderer put the focus back on
@@ -1767,10 +1804,9 @@ export function registerHandlers({
     clearSearchCache()
     // F-10.2: the last replace's undo holds another project's documents.
     clearReplaceUndo()
-    // F-3.11: the spellchecker accepts the open project's words and no other project's.
-    void spellDictionary.sync(
-      info ? getProjectDictionary(manager.require().connection.orm).words : []
-    )
+    // F-3.11, F-3.14: the spellchecker accepts the open project's words and story names and no
+    // other project's.
+    void syncSpelling()
     if (info) {
       queue.load()
       mentionQueue.load()

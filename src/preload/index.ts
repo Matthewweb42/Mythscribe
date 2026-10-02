@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from 'electron'
 import { channels, eventNames, type IpcBridge } from '@shared/ipc/contract'
 
 const allowedChannels = new Set<string>(channels)
@@ -19,6 +19,9 @@ const bridge: IpcBridge = {
     const wrapped = (_e: IpcRendererEvent, payload: unknown): void => listener(payload)
     ipcRenderer.on(event, wrapped)
     return () => ipcRenderer.removeListener(event, wrapped)
+  },
+  isWordMisspelled(word) {
+    return typeof word === 'string' && webFrame.isWordMisspelled(word)
   }
 }
 

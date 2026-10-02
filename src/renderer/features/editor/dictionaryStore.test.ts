@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { addWord, removeWord, type ProjectDictionary } from '@shared/dictionary'
+import { addNotName, addWord, removeWord, type ProjectDictionary } from '@shared/dictionary'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -27,6 +27,11 @@ function client(): IpcClient {
         stored = channel === 'dictionary:add' ? addWord(stored, word) : removeWord(stored, word)
         return stored as Output<C>
       }
+      if (channel === 'dictionary:notName') {
+        if (failWith !== null) throw new Error(failWith)
+        stored = addNotName(stored, (input as Input<'dictionary:notName'>).word)
+        return stored as Output<C>
+      }
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -39,7 +44,7 @@ const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.mes
 beforeEach(() => {
   resetDictionaryStore()
   useDialogStore.setState({ modals: [], toasts: [] })
-  stored = { words: [] }
+  stored = { words: [], notNames: [] }
   failWith = null
   holdGet = false
   releaseGet = null
@@ -48,7 +53,7 @@ beforeEach(() => {
 
 describe('dictionaryStore (F-3.11)', () => {
   it('starts unloaded and loads the stored words', async () => {
-    stored = { words: ['Mara', 'Zorvath'] }
+    stored = { words: ['Mara', 'Zorvath'], notNames: [] }
     expect(store().words).toBeNull()
     await store().load()
     expect(store().words).toEqual(['Mara', 'Zorvath'])
@@ -62,14 +67,14 @@ describe('dictionaryStore (F-3.11)', () => {
   })
 
   it('removes a word', async () => {
-    stored = { words: ['Mara', 'Zorvath'] }
+    stored = { words: ['Mara', 'Zorvath'], notNames: [] }
     await store().load()
     expect(await store().remove('Mara')).toBe(true)
     expect(store().words).toEqual(['Zorvath'])
   })
 
   it('toasts a refused write and leaves the list as it was', async () => {
-    stored = { words: ['Mara'] }
+    stored = { words: ['Mara'], notNames: [] }
     await store().load()
     failWith = 'No project is open'
     expect(await store().add('Zorvath')).toBe(false)
@@ -78,8 +83,26 @@ describe('dictionaryStore (F-3.11)', () => {
     expect(toasts()).toEqual(['No project is open', 'No project is open'])
   })
 
+  it('loads the dismissed words and remembers another, lower-cased (F-3.14)', async () => {
+    stored = { words: ['Mara'], notNames: ['mare'] }
+    expect(store().notNames).toBeNull()
+    await store().load()
+    expect(store().notNames).toEqual(['mare'])
+    expect(await store().dismissName('Maria')).toBe(true)
+    expect(store().notNames).toEqual(['mare', 'maria'])
+    expect(store().words).toEqual(['Mara'])
+  })
+
+  it('toasts a refused dismissal and leaves the list as it was (F-3.14)', async () => {
+    await store().load()
+    failWith = 'No project is open'
+    expect(await store().dismissName('Maria')).toBe(false)
+    expect(store().notNames).toEqual([])
+    expect(toasts()).toEqual(['No project is open'])
+  })
+
   it('drops a load that answers after the project closed', async () => {
-    stored = { words: ['Mara'] }
+    stored = { words: ['Mara'], notNames: [] }
     holdGet = true
     const loading = store().load()
     await Promise.resolve()
@@ -90,9 +113,10 @@ describe('dictionaryStore (F-3.11)', () => {
   })
 
   it('clear empties the store', async () => {
-    stored = { words: ['Mara'] }
+    stored = { words: ['Mara'], notNames: [] }
     await store().load()
     store().clear()
     expect(store().words).toBeNull()
+    expect(store().notNames).toBeNull()
   })
 })

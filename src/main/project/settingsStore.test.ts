@@ -474,12 +474,12 @@ describe('getProjectDictionary / setProjectDictionary (F-3.11)', () => {
 
   it('round-trips the words and overwrites the single row', () => {
     open('novel')
-    const value = { words: ['Mara', 'Zorvath'] }
+    const value = { words: ['Mara', 'Zorvath'], notNames: ['marta'] }
     expect(setProjectDictionary(db, value)).toEqual(value)
     expect(getProjectDictionary(db)).toEqual(value)
-    setProjectDictionary(db, { words: ['Zorvath'] })
+    setProjectDictionary(db, { words: ['Zorvath'], notNames: [] })
     expect(rows(DICTIONARY_KEY)).toHaveLength(1)
-    expect(getProjectDictionary(db)).toEqual({ words: ['Zorvath'] })
+    expect(getProjectDictionary(db)).toEqual({ words: ['Zorvath'], notNames: [] })
   })
 
   it('falls back when the stored value is not JSON or no longer fits the schema', () => {

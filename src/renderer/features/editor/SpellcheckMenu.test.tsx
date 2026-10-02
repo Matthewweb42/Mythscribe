@@ -1,17 +1,20 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { SpellcheckMenu } from './SpellcheckMenu'
 import { resetDictionaryStore, useDictionaryStore } from './dictionaryStore'
+import { resetNameMenuStore, useNameMenuStore } from './nameCheck'
 
 type MenuListener = (payload: EventPayload<'spellcheck:menu'>) => void
 
 let listeners: Set<MenuListener>
 let adds: string[]
 let replaces: string[]
+/** The words `dictionary:notName` was asked to remember (F-3.14). */
+let dismissed: string[]
 /** When set, `spellcheck:replace` is refused with this message. */
 let failReplace: string | null
 
@@ -22,7 +25,14 @@ function client(): IpcClient {
       if (channel === 'dictionary:add') {
         const { word } = input as Input<'dictionary:add'>
         adds.push(word)
-        return { words: [...adds] } as Output<C>
+        return { words: [...adds], notNames: [] } as Output<C>
+      }
+      if (channel === 'dictionary:notName') {
+        dismissed.push((input as Input<'dictionary:notName'>).word)
+        return {
+          words: [...adds],
+          notNames: dismissed.map((word) => word.toLocaleLowerCase())
+        } as Output<C>
       }
       if (channel === 'spellcheck:replace') {
         if (failReplace !== null) throw new Error(failReplace)
@@ -68,12 +78,18 @@ const items = (): string[] => screen.getAllByRole('menuitem').map((item) => item
 
 beforeEach(() => {
   resetDictionaryStore()
+  resetNameMenuStore()
+  dismissed = []
   useDialogStore.setState({ modals: [], toasts: [] })
   listeners = new Set()
   adds = []
   replaces = []
   failReplace = null
   setIpcClient(client())
+})
+
+afterEach(() => {
+  resetNameMenuStore()
 })
 
 describe('SpellcheckMenu (F-3.11)', () => {
@@ -144,5 +160,76 @@ describe('SpellcheckMenu (F-3.11)', () => {
     expect(listeners.size).toBe(1)
     unmount()
     expect(listeners.size).toBe(0)
+  })
+})
+
+describe('SpellcheckMenu near-name menu (F-3.14)', () => {
+  /** What the editor's name check does on a right-click on an underlined near miss. */
+  function openNameMenu(replace: () => void = () => {}): void {
+    act(() => {
+      useNameMenuStore.getState().open({ x: 12, y: 34, word: 'Marra', spelling: 'Mara', replace })
+    })
+  }
+
+  it('offers the known spelling, then Not a name, where the right-click landed', () => {
+    open()
+    openNameMenu()
+    expect(items()).toEqual(['Mara', 'Not a name'])
+    expect(screen.getByRole('menu')).toHaveStyle({ left: '12px', top: '34px' })
+  })
+
+  it('puts the known spelling in and closes', async () => {
+    const scene = open()
+    rightClick(scene, 12, 34)
+    const replace = vi.fn()
+    openNameMenu(replace)
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Mara' }))
+    expect(replace).toHaveBeenCalledTimes(1)
+    expect(dismissed).toEqual([])
+    expect(replaces).toEqual([])
+    expect(useNameMenuStore.getState().menu).toBeNull()
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(scene).toHaveFocus()
+  })
+
+  it('remembers the word as not a name for the project', async () => {
+    const scene = open()
+    rightClick(scene, 12, 34)
+    const replace = vi.fn()
+    openNameMenu(replace)
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Not a name' }))
+    await waitFor(() => expect(useDictionaryStore.getState().notNames).toEqual(['marra']))
+    expect(dismissed).toEqual(['Marra'])
+    expect(replace).not.toHaveBeenCalled()
+    expect(useNameMenuStore.getState().menu).toBeNull()
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(scene).toHaveFocus()
+  })
+
+  it('clears the store when it is closed without a choice', async () => {
+    const scene = open()
+    rightClick(scene, 12, 34)
+    openNameMenu()
+    await userEvent.keyboard('{Escape}')
+    expect(useNameMenuStore.getState().menu).toBeNull()
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(scene).toHaveFocus()
+  })
+
+  it('shows one menu at a time: each closes the other', () => {
+    const scene = open()
+    rightClick(scene, 40, 60)
+    pushMenu('recieve', ['receive'])
+    openNameMenu()
+    expect(screen.getAllByRole('menu')).toHaveLength(1)
+    expect(items()).toEqual(['Mara', 'Not a name'])
+    pushMenu('recieve', ['receive'])
+    expect(useNameMenuStore.getState().menu).toBeNull()
+    expect(screen.getAllByRole('menu')).toHaveLength(1)
+    expect(items()).toEqual(['receive', 'Add to project dictionary'])
+    openNameMenu()
+    act(() => useNameMenuStore.getState().close())
+    // The spelling menu was closed by the near-name one, not hidden behind it.
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 })

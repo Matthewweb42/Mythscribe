@@ -7,6 +7,7 @@ import { IMPORTED_ORIGIN, PARAGRAPH_ORIGIN_ATTR } from '@shared/provenance'
 import { AiOrigin } from './aiOrigin'
 import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
+import { NameCheck } from './nameCheck'
 import { RewriteTarget } from './rewriteTarget'
 import { Typewriter } from './typewriter'
 
@@ -25,8 +26,8 @@ export interface EditorSchemaOptions {
   /**
    * The manuscript document the editor shows (F-4.6): adds the inline tag token and its `#`
    * suggestion, which links picked tags to this node, the ghost-text decoration (F-5.3), the
-   * AI-origin mark its accepted text carries (F-14.6), and the rewrite target highlight
-   * (F-14.10). Left out for notes, which never get tags or suggestions.
+   * AI-origin mark its accepted text carries (F-14.6), the rewrite target highlight (F-14.10),
+   * and the near-name underline (F-3.14). Left out for notes, which never get tags or suggestions.
    */
   inlineTagNodeId?: string
 }
@@ -243,7 +244,8 @@ export function buildExtensions({
       AiOrigin,
       GhostText,
       RewriteTarget,
-      Typewriter
+      Typewriter,
+      NameCheck
     )
   }
   if (onEscape) extensions.push(EscapeShortcut.configure({ onEscape }))

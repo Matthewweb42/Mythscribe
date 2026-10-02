@@ -1463,6 +1463,11 @@ export const contract = {
   /** Takes a word out of the project's dictionary (F-3.11) and the spellchecker; answers the stored list. */
   'dictionary:remove': { input: z.object({ word: z.string() }), output: ProjectDictionary },
   /**
+   * Remembers a word as not a misspelled story name (F-3.14), so the near-name underline leaves
+   * it alone in this project; answers the stored dictionary.
+   */
+  'dictionary:notName': { input: z.object({ word: DictionaryWord }), output: ProjectDictionary },
+  /**
    * Spelling menu (F-3.11): replaces the misspelled word under the caret of the focused window
    * with the chosen suggestion, as the browser's own menu would (`webContents.replaceMisspelling`).
    */
@@ -1572,4 +1577,10 @@ export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: IpcError 
 export interface IpcBridge {
   invoke: (channel: Channel, input: unknown) => Promise<IpcResult<unknown>>
   on: (event: EventName, listener: (payload: unknown) => void) => () => void
+  /**
+   * Whether the spellchecker underlines `word` (F-3.14; `webFrame.isWordMisspelled`). Not a
+   * channel: the near-name check asks per word while the author types, so it cannot wait for a
+   * round trip. False while no spelling dictionary is loaded.
+   */
+  isWordMisspelled: (word: string) => boolean
 }

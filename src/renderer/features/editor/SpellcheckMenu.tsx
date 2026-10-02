@@ -5,10 +5,13 @@ import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useDictionaryStore } from './dictionaryStore'
+import { useNameMenuStore } from './nameCheck'
 
 const SUGGEST_PREFIX = 'suggest:'
 const ADD_ID = 'add'
 const NONE_ID = 'none'
+const NAME_ID = 'name'
+const NOT_NAME_ID = 'not-name'
 
 interface OpenMenu {
   x: number
@@ -46,10 +49,15 @@ function spellcheckMenuItems(suggestions: string[]): MenuItem[] {
  * under the caret of the focused editable, and the selection inside a contenteditable or a
  * textarea survives the focus moving to a button and back.
  *
+ * It also shows the near-name menu (F-3.14), which the editor's name check opens for a word one
+ * or two letters from a story name: the known spelling, then `Not a name`, which remembers the
+ * word for this project. One menu at a time: opening either closes the other.
+ *
  * The wrapper lifts the menu above the modal dialogs, which have text fields of their own.
  */
 export function SpellcheckMenu(): React.JSX.Element | null {
   const [menu, setMenu] = useState<OpenMenu | null>(null)
+  const nameMenu = useNameMenuStore((s) => s.menu)
   const last = useRef<LastClick>({ x: 0, y: 0, target: null })
 
   useEffect(() => {
@@ -65,19 +73,48 @@ export function SpellcheckMenu(): React.JSX.Element | null {
     }
     document.addEventListener('contextmenu', onContextMenu, true)
     const off = ipc().on('spellcheck:menu', ({ word, suggestions }) => {
+      useNameMenuStore.getState().close()
       setMenu({ x: last.current.x, y: last.current.y, word, suggestions })
+    })
+    const offNameMenu = useNameMenuStore.subscribe((state) => {
+      if (state.menu !== null) setMenu(null)
     })
     return () => {
       document.removeEventListener('contextmenu', onContextMenu, true)
       off()
+      offNameMenu()
+      useNameMenuStore.getState().close()
     }
   }, [])
 
   const close = useCallback((): void => {
     setMenu(null)
+    useNameMenuStore.getState().close()
     const target = last.current.target
     if (target?.isConnected) target.focus({ preventScroll: true })
   }, [])
+
+  if (nameMenu !== null) {
+    const { x, y, word, spelling, replace } = nameMenu
+    return (
+      <div className="relative z-50">
+        <ContextMenu
+          x={x}
+          y={y}
+          items={[
+            { id: NAME_ID, label: spelling },
+            { id: NOT_NAME_ID, label: 'Not a name' }
+          ]}
+          onSelect={(id) => {
+            close()
+            if (id === NAME_ID) replace()
+            else if (id === NOT_NAME_ID) void useDictionaryStore.getState().dismissName(word)
+          }}
+          onClose={close}
+        />
+      </div>
+    )
+  }
 
   if (menu === null) return null
 

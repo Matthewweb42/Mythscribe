@@ -213,6 +213,16 @@ select {
   border-radius: 2px;
 }
 
+/*
+ * A word one or two letters from a story name (F-3.14): a quiet dotted underline, not the
+ * spellchecker's red one and never a background, so it reads as a question rather than an error.
+ */
+.ms-editor .name-near-miss {
+  text-decoration: underline dotted var(--ms-fg-subtle);
+  text-underline-offset: 0.2em;
+  cursor: text;
+}
+
 .rewrite-diff del {
   text-decoration: line-through;
   color: var(--ms-danger);

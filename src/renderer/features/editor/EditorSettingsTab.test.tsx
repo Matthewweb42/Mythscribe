@@ -57,7 +57,7 @@ beforeEach(() => {
   resetEditorSettingsStore()
   resetBackgroundStore()
   resetDictionaryStore()
-  dictionary = { words: [] }
+  dictionary = { words: [], notNames: [] }
   resetPendingSaves()
   useDialogStore.setState({ modals: [], toasts: [] })
   const recording = recordingClient()
@@ -285,6 +285,16 @@ describe('EditorSettingsTab project dictionary (F-3.11)', () => {
     expect(group().queryByRole('list')).not.toBeInTheDocument()
   })
 
+  it('says the story names are accepted without being listed (F-3.14)', () => {
+    useDictionaryStore.setState({ words: [] })
+    open()
+    expect(
+      group().getByText(
+        'The names of your characters, places, and tags are accepted automatically.'
+      )
+    ).toBeInTheDocument()
+  })
+
   it('lists the words of the project', () => {
     useDictionaryStore.setState({ words: ['Mara', 'Zorvath'] })
     open()
@@ -302,7 +312,7 @@ describe('EditorSettingsTab project dictionary (F-3.11)', () => {
     expect(field).toHaveValue('')
     await userEvent.type(field, 'Mara{Enter}')
     await waitFor(() => expect(listed()).toEqual(['Mara', 'Zorvath']))
-    expect(dictionary).toEqual({ words: ['Mara', 'Zorvath'] })
+    expect(dictionary).toEqual({ words: ['Mara', 'Zorvath'], notNames: [] })
   })
 
   it('refuses an empty word and a phrase without asking main', async () => {
@@ -316,15 +326,15 @@ describe('EditorSettingsTab project dictionary (F-3.11)', () => {
     await userEvent.keyboard('{Enter}')
     expect(group().getByRole('alert')).toHaveTextContent('One word at a time, without spaces')
     expect(field).toHaveValue('salt marsh')
-    expect(dictionary).toEqual({ words: [] })
+    expect(dictionary).toEqual({ words: [], notNames: [] })
   })
 
   it('removes a word', async () => {
-    dictionary = { words: ['Mara', 'Zorvath'] }
+    dictionary = { words: ['Mara', 'Zorvath'], notNames: [] }
     useDictionaryStore.setState({ words: ['Mara', 'Zorvath'] })
     open()
     await userEvent.click(group().getByRole('button', { name: 'Remove Mara' }))
     await waitFor(() => expect(listed()).toEqual(['Zorvath']))
-    expect(dictionary).toEqual({ words: ['Zorvath'] })
+    expect(dictionary).toEqual({ words: ['Zorvath'], notNames: [] })
   })
 })

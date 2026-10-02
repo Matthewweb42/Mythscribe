@@ -3847,18 +3847,18 @@ describe('dictionary:* / spellcheck:replace (F-3.11)', () => {
     expect(closed.ok).toBe(false)
     if (!closed.ok) expect(closed.error.code).toBe('NO_PROJECT')
     await invoke('project:create', { name: 'Words', format: 'novel', directory: tmp })
-    expect(await invoke('dictionary:get', undefined)).toEqual({ words: [] })
+    expect(await invoke('dictionary:get', undefined)).toEqual({ words: [], notNames: [] })
   })
 
   it('adds a word, keeps the list sorted, and syncs the spellchecker to the stored list', async () => {
     await invoke('project:create', { name: 'Words', format: 'novel', directory: tmp })
     spellSync.mockClear()
-    expect(await invoke('dictionary:add', { word: ' Zorvath ' })).toEqual({ words: ['Zorvath'] })
-    expect(await invoke('dictionary:add', { word: 'Mara' })).toEqual({ words: ['Mara', 'Zorvath'] })
+    expect(await invoke('dictionary:add', { word: ' Zorvath ' })).toEqual({ words: ['Zorvath'], notNames: [] })
+    expect(await invoke('dictionary:add', { word: 'Mara' })).toEqual({ words: ['Mara', 'Zorvath'], notNames: [] })
     expect(spellSync.mock.calls).toEqual([[['Zorvath']], [['Mara', 'Zorvath']]])
     // A word already there stores nothing new and answers the same list.
-    expect(await invoke('dictionary:add', { word: 'Mara' })).toEqual({ words: ['Mara', 'Zorvath'] })
-    expect(await invoke('dictionary:get', undefined)).toEqual({ words: ['Mara', 'Zorvath'] })
+    expect(await invoke('dictionary:add', { word: 'Mara' })).toEqual({ words: ['Mara', 'Zorvath'], notNames: [] })
+    expect(await invoke('dictionary:get', undefined)).toEqual({ words: ['Mara', 'Zorvath'], notNames: [] })
   })
 
   it('refuses an empty word and a phrase', async () => {
@@ -3868,7 +3868,7 @@ describe('dictionary:* / spellcheck:replace (F-3.11)', () => {
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     }
-    expect(await invoke('dictionary:get', undefined)).toEqual({ words: [] })
+    expect(await invoke('dictionary:get', undefined)).toEqual({ words: [], notNames: [] })
   })
 
   it('removes a word and syncs the spellchecker without it', async () => {
@@ -3876,10 +3876,10 @@ describe('dictionary:* / spellcheck:replace (F-3.11)', () => {
     await invoke('dictionary:add', { word: 'Mara' })
     await invoke('dictionary:add', { word: 'Zorvath' })
     spellSync.mockClear()
-    expect(await invoke('dictionary:remove', { word: 'Mara' })).toEqual({ words: ['Zorvath'] })
+    expect(await invoke('dictionary:remove', { word: 'Mara' })).toEqual({ words: ['Zorvath'], notNames: [] })
     expect(spellSync).toHaveBeenLastCalledWith(['Zorvath'])
     // A word that is not there changes nothing.
-    expect(await invoke('dictionary:remove', { word: 'Nobody' })).toEqual({ words: ['Zorvath'] })
+    expect(await invoke('dictionary:remove', { word: 'Nobody' })).toEqual({ words: ['Zorvath'], notNames: [] })
   })
 
   it('syncs the spellchecker to each project as it opens and to nothing on close', async () => {
@@ -3892,6 +3892,51 @@ describe('dictionary:* / spellcheck:replace (F-3.11)', () => {
     expect(spellSync).toHaveBeenLastCalledWith(['Mara'])
     await invoke('project:close', undefined)
     expect(spellSync).toHaveBeenLastCalledWith([])
+  })
+
+  it('accepts the story names with the dictionary and follows renames and deletions (F-3.14)', async () => {
+    await invoke('project:create', { name: 'Names', format: 'novel', directory: tmp })
+    await invoke('dictionary:add', { word: 'Zorvath' })
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara Voss' })
+    // The entity's own words and its tag's (F-9.4: "mara-voss").
+    expect(spellSync).toHaveBeenLastCalledWith(['Zorvath', 'mara', 'Mara', 'voss', 'Voss'])
+    const tag = await invoke('tag:create', { name: 'rose-marsh', category: 'setting' })
+    expect(spellSync.mock.lastCall?.[0]).toEqual(expect.arrayContaining(['rose', 'marsh', 'Mara']))
+    // The stored dictionary holds only what the author added.
+    expect(await invoke('dictionary:get', undefined)).toEqual({ words: ['Zorvath'], notNames: [] })
+
+    await invoke('entity:update', { id: mara?.id ?? '', name: 'Maren Voss' })
+    const renamed = spellSync.mock.lastCall?.[0] ?? []
+    expect(renamed).toContain('Maren')
+    expect(renamed).not.toContain('Mara')
+
+    await invoke('tag:delete', { id: tag?.id ?? '' })
+    expect(spellSync.mock.lastCall?.[0]).not.toContain('marsh')
+    await invoke('entity:delete', { id: mara?.id ?? '' })
+    expect(spellSync.mock.lastCall?.[0]).not.toContain('Maren')
+
+    await invoke('project:close', undefined)
+    expect(spellSync).toHaveBeenLastCalledWith([])
+  })
+
+  it('remembers a word as not a name, lower-cased and once (F-3.14)', async () => {
+    await invoke('project:create', { name: 'Names', format: 'novel', directory: tmp })
+    spellSync.mockClear()
+    expect(await invoke('dictionary:notName', { word: 'Marta' })).toEqual({
+      words: [],
+      notNames: ['marta']
+    })
+    expect(await invoke('dictionary:notName', { word: 'MARTA' })).toEqual({
+      words: [],
+      notNames: ['marta']
+    })
+    await invoke('dictionary:add', { word: 'Zorvath' })
+    expect(await invoke('dictionary:get', undefined)).toEqual({
+      words: ['Zorvath'],
+      notNames: ['marta']
+    })
+    // Dismissing a near name says nothing to the spellchecker; the added word does.
+    expect(spellSync.mock.calls).toEqual([[['Zorvath']]])
   })
 
   it('replaces the misspelled word on the focused window', async () => {

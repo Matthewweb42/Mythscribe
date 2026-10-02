@@ -129,8 +129,9 @@ function DictionaryGroup(): React.JSX.Element {
       className="flex flex-col gap-2 border-t border-line pt-4"
     >
       <p className="m-0 text-xs font-medium text-fg-muted">Project dictionary</p>
+      <p className="m-0 text-xs text-fg-muted">Words the spellchecker accepts in this project.</p>
       <p className="m-0 text-xs text-fg-muted">
-        Words the spellchecker accepts in this project, such as the names of your story.
+        The names of your characters, places, and tags are accepted automatically.
       </p>
       <form
         className="flex items-center gap-2"

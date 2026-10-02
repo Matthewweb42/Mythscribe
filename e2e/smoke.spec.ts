@@ -1686,6 +1686,10 @@ test('create, close, reopen a project on disk', async () => {
   const maraRow = characterRows.getByRole('button', { name: 'Mara', exact: true })
   await expect(maraRow).toHaveAttribute('aria-current', 'true')
   await expect(characterForm.getByRole('textbox', { name: 'Character name' })).toHaveValue('')
+  // F-3.14: her name is a word the spellchecker accepts from now on, without the author adding
+  // it to the project dictionary. (As with F-3.11, no assertion on the underline itself: the
+  // Hunspell dictionary is downloaded, not bundled.)
+  await expect.poll(spellcheckerWords).toContain('Mara')
   const characterSearch = charactersPanel.getByRole('searchbox', { name: 'Search characters' })
   await characterSearch.fill('zed')
   await expect(charactersPanel.getByText('No characters match.')).toBeVisible()
@@ -1797,6 +1801,8 @@ test('create, close, reopen a project on disk', async () => {
   // F-9.4: the rename carried her tag with it, in the bank and on the page.
   await expect(entityTag).toContainText('#mara-vell')
   await expect.poll(async () => (await listTags()).map((tag) => tag.name)).toContain('mara-vell')
+  // F-3.14: the rename taught the spellchecker the new word of her name.
+  await expect.poll(spellcheckerWords).toEqual(expect.arrayContaining(['Mara', 'Vell']))
   const storedMara = (await listEntities()).find((entity) => entity.name === 'Mara Vell')
   expect(storedMara).toMatchObject({
     kind: 'character',
@@ -2066,6 +2072,15 @@ test('create, close, reopen a project on disk', async () => {
   const tagsAfterEntities = (await listTags()).map((tag) => tag.name)
   expect(tagsAfterEntities).toContain('mara-vell')
   expect(tagsAfterEntities).toContain('tomas')
+  // F-3.14: the deleted characters' names left the spellchecker with them; what it still accepts
+  // is the tags that outlived them, spelled the way a tag is.
+  await expect
+    .poll(async () => {
+      const words = await spellcheckerWords()
+      return ['Mara', 'Vell', 'Tomas', 'Ilse'].filter((word) => words.includes(word))
+    })
+    .toEqual([])
+  expect(await spellcheckerWords()).toEqual(expect.arrayContaining(['mara', 'vell', 'tomas']))
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
   await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
   await expect(tree).toBeVisible()
@@ -4054,6 +4069,11 @@ async function listTags(): Promise<Tag[]> {
   )
   if (!result.ok) throw new Error(`tag:list failed: ${result.error.message}`)
   return result.data
+}
+
+/** The words the spellchecker accepts beyond its own dictionary (F-3.11, F-3.14), as the session holds them. */
+function spellcheckerWords(): Promise<string[]> {
+  return app.evaluate(({ session }) => session.defaultSession.listWordsInSpellCheckerDictionary())
 }
 
 /** Every stored entity (F-9.1), as `entity:list` answers. */
