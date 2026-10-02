@@ -116,6 +116,7 @@ import {
   getConversations,
   getEditorSettings,
   getFocusSettings,
+  getProjectDictionary,
   getReferencePins,
   getWritingPresets,
   setAiSettings,
@@ -123,9 +124,11 @@ import {
   setConversations,
   setEditorSettings,
   setFocusSettings,
+  setProjectDictionary,
   setReferencePins,
   setWritingPresets
 } from '../project/settingsStore'
+import { addWord, removeWord } from '@shared/dictionary'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import { EXTERNAL_HOST, isAllowedExternalUrl, type EditRole } from '@shared/menu'
 import { normalizeProposalNote } from '@shared/proposal'
@@ -168,7 +171,11 @@ export interface ClosableWindow extends EmitTarget {
    * zoom factor, which carries the interface size (F-7.10).
    */
   webContents: EmitTarget['webContents'] &
-    Record<EditRole, () => void> & { setZoomFactor(factor: number): void }
+    Record<EditRole, () => void> & {
+      setZoomFactor(factor: number): void
+      /** F-3.11: swaps the misspelled word under the caret for a suggestion. */
+      replaceMisspelling(word: string): void
+    }
 }
 
 export interface HandlerDeps {
@@ -198,6 +205,11 @@ export interface HandlerDeps {
   windows: () => ClosableWindow[]
   /** The window with keyboard focus, for the edit commands (F-7.1); null when none has it. */
   focusedWindow: () => ClosableWindow | null
+  /**
+   * F-3.11: the spellchecker's custom words, kept equal to the open project's dictionary. Built
+   * in `index.ts` from the default session; it never rejects (its own error handler logs).
+   */
+  spellDictionary: { sync(words: string[]): Promise<void> }
   /** Opens a URL in the default browser (F-7.1); `shell.openExternal` in the app. */
   openExternal: (url: string) => Promise<void>
   /** The renderer abandoned a window close (its flush failed); forget any quit that asked for it. */
@@ -215,6 +227,7 @@ export function registerHandlers({
   dialogs,
   windows,
   focusedWindow,
+  spellDictionary,
   openExternal,
   onCloseCancelled
 }: HandlerDeps): void {
@@ -1696,6 +1709,36 @@ export function registerHandlers({
     return null
   })
 
+  register('dictionary:get', () => getProjectDictionary(manager.require().connection.orm))
+
+  // F-3.11: the stored list is the truth and the spellchecker follows it; a word already there
+  // (or already gone) writes nothing, and the sync is awaited so the underline is gone on answer.
+  register('dictionary:add', async ({ word }) => {
+    const db = manager.require().connection.orm
+    const current = getProjectDictionary(db)
+    const next = addWord(current, word)
+    const stored = next === current ? current : setProjectDictionary(db, next)
+    await spellDictionary.sync(stored.words)
+    return stored
+  })
+
+  register('dictionary:remove', async ({ word }) => {
+    const db = manager.require().connection.orm
+    const current = getProjectDictionary(db)
+    const next = removeWord(current, word)
+    const stored = next === current ? current : setProjectDictionary(db, next)
+    await spellDictionary.sync(stored.words)
+    return stored
+  })
+
+  // F-3.11: like `menu:edit`, on the window with the focus; the renderer put the focus back on
+  // the editable before asking, so the misspelled word is the one under its caret.
+  register('spellcheck:replace', ({ word }) => {
+    const win = focusedWindow() ?? windows().find((w) => !w.isDestroyed())
+    if (win && !win.isDestroyed()) win.webContents.replaceMisspelling(word)
+    return null
+  })
+
   register('menu:openExternal', async ({ url }) => {
     if (!isAllowedExternalUrl(url)) {
       throw new AppError('VALIDATION', `Only pages on ${EXTERNAL_HOST} can be opened`)
@@ -1724,6 +1767,10 @@ export function registerHandlers({
     clearSearchCache()
     // F-10.2: the last replace's undo holds another project's documents.
     clearReplaceUndo()
+    // F-3.11: the spellchecker accepts the open project's words and no other project's.
+    void spellDictionary.sync(
+      info ? getProjectDictionary(manager.require().connection.orm).words : []
+    )
     if (info) {
       queue.load()
       mentionQueue.load()

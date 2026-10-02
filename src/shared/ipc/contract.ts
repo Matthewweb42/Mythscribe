@@ -34,6 +34,7 @@ import {
   RENDERER_ERROR_NAME_MAX,
   RENDERER_ERROR_STACK_MAX
 } from '../diagnostics'
+import { DictionaryWord, ProjectDictionary } from '../dictionary'
 import { EditorSettings } from '../editorSettings'
 import {
   ENTITY_BODY_MAX,
@@ -1452,6 +1453,20 @@ export const contract = {
    * the native role does, on the focused window, so both bars edit whatever has the focus.
    */
   'menu:edit': { input: z.object({ role: EditRole }), output: z.null() },
+  /** The project's spelling dictionary (F-3.11); a missing or unreadable row answers with no words. */
+  'dictionary:get': { input: z.undefined(), output: ProjectDictionary },
+  /**
+   * Adds a word to the project's dictionary (F-3.11) and to the spellchecker at once, so its
+   * underline goes; answers the stored list. A word already there changes nothing.
+   */
+  'dictionary:add': { input: z.object({ word: DictionaryWord }), output: ProjectDictionary },
+  /** Takes a word out of the project's dictionary (F-3.11) and the spellchecker; answers the stored list. */
+  'dictionary:remove': { input: z.object({ word: z.string() }), output: ProjectDictionary },
+  /**
+   * Spelling menu (F-3.11): replaces the misspelled word under the caret of the focused window
+   * with the chosen suggestion, as the browser's own menu would (`webContents.replaceMisspelling`).
+   */
+  'spellcheck:replace': { input: z.object({ word: z.string().min(1).max(100) }), output: z.null() },
   /**
    * Help › Documentation (F-7.1): opens the page in the default browser. Only `https` URLs on
    * mythscribe.app are accepted (`isAllowedExternalUrl`); anything else is VALIDATION.
@@ -1509,6 +1524,11 @@ export const events = {
   'observedFact:changed': z.object({ entityIds: z.array(z.string()) }),
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
+  /**
+   * The author right-clicked a word the spellchecker underlined (F-3.11): the word and up to
+   * `MAX_SPELL_SUGGESTIONS` replacements. Sent to that window only, which shows the menu.
+   */
+  'spellcheck:menu': z.object({ word: z.string(), suggestions: z.array(z.string()) }),
   /** A native menu item was clicked or its accelerator pressed (F-7.1); the renderer runs the action. */
   'menu:action': z.object({ id: MenuItemId }),
   /** The account state changed without a renderer call (F-15.2): a pending link was opened or expired. */

@@ -1,0 +1,53 @@
+import { z } from 'zod'
+
+/**
+ * The per-project spelling dictionary (F-3.11): the words the author told the spellchecker to
+ * accept in this project. It is a local list, no AI and nothing sent anywhere. Main keeps the
+ * spellchecker's own custom list equal to the open project's words, so a name accepted in one
+ * novel is still underlined in another.
+ */
+
+/** Settings-table key under which the project dictionary is stored as JSON. */
+export const DICTIONARY_KEY = 'dictionary'
+
+/** Longest word the dictionary takes; the spellchecker itself refuses anything much longer. */
+export const DICTIONARY_WORD_MAX = 64
+
+/** Most suggestions the spelling menu lists for one misspelled word. */
+export const MAX_SPELL_SUGGESTIONS = 5
+
+/** One dictionary word: trimmed, not empty, and a single word (the spellchecker checks word by word). */
+export const DictionaryWord = z
+  .string()
+  .trim()
+  .min(1, 'Type a word')
+  .max(DICTIONARY_WORD_MAX, `A word can be at most ${DICTIONARY_WORD_MAX} characters`)
+  .regex(/^\S+$/, 'One word at a time, without spaces')
+export type DictionaryWord = z.infer<typeof DictionaryWord>
+
+/** The project's accepted words, unique and sorted. */
+export const ProjectDictionary = z.object({
+  words: z.array(z.string()).default([])
+})
+export type ProjectDictionary = z.infer<typeof ProjectDictionary>
+
+/** The empty dictionary a project without a stored row (or with an unreadable one) starts from. */
+export function defaultProjectDictionary(): ProjectDictionary {
+  return { words: [] }
+}
+
+/**
+ * The dictionary with `word` in it. Case-sensitive, as the spellchecker is ("Mara" does not
+ * accept "mara"); the list stays unique and sorted. Answers the same object when the word is
+ * already there, so a caller can tell that nothing changed.
+ */
+export function addWord(dict: ProjectDictionary, word: string): ProjectDictionary {
+  if (dict.words.includes(word)) return dict
+  return { words: [...dict.words, word].sort((a, b) => a.localeCompare(b)) }
+}
+
+/** The dictionary without `word`; the same object when the word was not in it. */
+export function removeWord(dict: ProjectDictionary, word: string): ProjectDictionary {
+  if (!dict.words.includes(word)) return dict
+  return { words: dict.words.filter((w) => w !== word) }
+}

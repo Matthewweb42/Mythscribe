@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, net, protocol, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, net, protocol, safeStorage, session, shell } from 'electron'
 import icon from '../../resources/icon.png?asset'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -24,6 +24,8 @@ import { installSingleInstance } from './lifecycle'
 import { installApplicationMenu } from './menu'
 import { assetPathFor } from './project/assetUrl'
 import { ProjectManager } from './project/manager'
+import { spellMenuPayload } from './spellcheck/contextMenu'
+import { createSessionDictionary } from './spellcheck/sessionDictionary'
 import { loadAutoUpdater } from './updates/autoUpdater'
 import { UpdateService } from './updates/updateService'
 
@@ -156,6 +158,14 @@ function createWindow(uiScale: UiScale): BrowserWindow {
   })
   win.on('leave-full-screen', () => emit([win], 'window:fullScreenChanged', { on: false }))
 
+  // F-3.11: a right-click on a word the spellchecker underlined opens the in-app spelling menu
+  // (suggestions, add to the project dictionary). An inline-tag token prevents the default in the
+  // renderer, so this never fires for one.
+  win.webContents.on('context-menu', (_event, params) => {
+    const payload = spellMenuPayload(params)
+    if (payload !== null) emit([win], 'spellcheck:menu', payload)
+  })
+
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
@@ -260,6 +270,13 @@ if (!primaryInstance) {
     })
     // The first counted event of the run; a no-op unless the author turned diagnostics on.
     diagnostics.count('app.launch')
+    // F-3.11: Electron keeps custom spelling words in the profile, shared by every project, so
+    // they are synced to the open project's dictionary on every change. No project is open yet:
+    // start from none, which also clears what a crash left behind.
+    const spellDictionary = createSessionDictionary(session.defaultSession, (err) => {
+      console.warn('Could not sync the spelling dictionary', err)
+    })
+    void spellDictionary.sync([])
     registerHandlers({
       manager,
       appState,
@@ -273,6 +290,7 @@ if (!primaryInstance) {
       ),
       windows: () => BrowserWindow.getAllWindows(),
       focusedWindow: () => BrowserWindow.getFocusedWindow(),
+      spellDictionary,
       openExternal: (url) => shell.openExternal(url),
       onCloseCancelled: () => {
         quitRequested = false

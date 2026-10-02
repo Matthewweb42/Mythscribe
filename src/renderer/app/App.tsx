@@ -28,6 +28,8 @@ import { wheelZoomStepFor, zoomStepFor } from '@renderer/features/shell/zoom'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
+import { SpellcheckMenu } from '@renderer/features/editor/SpellcheckMenu'
+import { useDictionaryStore } from '@renderer/features/editor/dictionaryStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
@@ -201,6 +203,7 @@ export function App(): React.JSX.Element {
       useMentionStore.getState().clear()
       useProposedTagStore.getState().clear()
       useBackgroundStore.getState().clear()
+      useDictionaryStore.getState().clear()
       return
     }
     // F-4.12: main scans in the background and says which documents changed; the mention lists
@@ -264,6 +267,12 @@ export function App(): React.JSX.Element {
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
     useBackgroundStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    // F-3.11: the project's spelling dictionary, for the Settings list; main already synced the
+    // spellchecker itself when the project opened.
+    useDictionaryStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
@@ -332,6 +341,8 @@ export function App(): React.JSX.Element {
       {/* The dialog service last, so a confirm from inside a shell dialog stacks above it. */}
       <ShellDialogs format={current?.format ?? null} />
       <DialogHost />
+      {/* F-3.11: the spelling menu, after the dialogs so it opens above their text fields too. */}
+      {current ? <SpellcheckMenu /> : null}
     </div>
   )
 }

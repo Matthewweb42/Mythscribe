@@ -3,19 +3,33 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultEditorSettings, type EditorSettings } from '@shared/editorSettings'
+import { addWord, removeWord, type ProjectDictionary } from '@shared/dictionary'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { resetBackgroundStore, useBackgroundStore } from '@renderer/features/focus/backgroundStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { EditorSettingsTab } from './EditorSettingsTab'
+import { resetDictionaryStore, useDictionaryStore } from './dictionaryStore'
 import { resetEditorSettingsStore, useEditorSettingsStore } from './settingsStore'
 
-/** Records every `editorSettings:set` and resolves it at once. */
+/** The project dictionary as the fake main keeps it (F-3.11). */
+let dictionary: ProjectDictionary
+
+/**
+ * Records every `editorSettings:set` and resolves it at once; the dictionary channels (F-3.11)
+ * keep `dictionary` the way the real handlers do.
+ */
 function recordingClient(): { client: IpcClient; sets: Input<'editorSettings:set'>[] } {
   const sets: Input<'editorSettings:set'>[] = []
   const client: IpcClient = {
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
+      if (channel === 'dictionary:add' || channel === 'dictionary:remove') {
+        const { word } = input as Input<'dictionary:add'>
+        dictionary =
+          channel === 'dictionary:add' ? addWord(dictionary, word) : removeWord(dictionary, word)
+        return dictionary as Output<C>
+      }
       if (channel !== 'editorSettings:set') throw new Error(`unexpected ${channel}`)
       const value = input as Input<'editorSettings:set'>
       sets.push(value)
@@ -42,6 +56,8 @@ function open(): void {
 beforeEach(() => {
   resetEditorSettingsStore()
   resetBackgroundStore()
+  resetDictionaryStore()
+  dictionary = { words: [] }
   resetPendingSaves()
   useDialogStore.setState({ modals: [], toasts: [] })
   const recording = recordingClient()
@@ -53,6 +69,7 @@ beforeEach(() => {
 afterEach(() => {
   resetEditorSettingsStore()
   resetBackgroundStore()
+  resetDictionaryStore()
 })
 
 describe('EditorSettingsTab (F-3.6, F-7.5)', () => {
@@ -249,5 +266,65 @@ describe('EditorSettingsTab focus-mode group (F-6.2)', () => {
     fireEvent.change(group.getByRole('slider', { name: /^Width/ }), { target: { value: '55' } })
     expect(useBackgroundStore.getState().settings?.overlay).toEqual({ darkness: 25, width: 55 })
     resetBackgroundStore()
+  })
+})
+
+describe('EditorSettingsTab project dictionary (F-3.11)', () => {
+  const group = () => within(screen.getByRole('region', { name: 'Project dictionary' }))
+  const listed = (): string[] =>
+    within(group().getByRole('list', { name: 'Dictionary words' }))
+      .getAllByRole('listitem')
+      .map((item) => item.querySelector('span')?.textContent ?? '')
+
+  it('says how words get here while the dictionary is empty', () => {
+    useDictionaryStore.setState({ words: [] })
+    open()
+    expect(
+      group().getByText('Right-click an underlined word in the manuscript to add it here.')
+    ).toBeInTheDocument()
+    expect(group().queryByRole('list')).not.toBeInTheDocument()
+  })
+
+  it('lists the words of the project', () => {
+    useDictionaryStore.setState({ words: ['Mara', 'Zorvath'] })
+    open()
+    expect(listed()).toEqual(['Mara', 'Zorvath'])
+  })
+
+  it('adds a word with the button and with Enter, and empties the field', async () => {
+    useDictionaryStore.setState({ words: [] })
+    open()
+    const field = group().getByRole('textbox', { name: 'Word to add' })
+    expect(field).toHaveAttribute('spellcheck', 'false')
+    await userEvent.type(field, ' Zorvath ')
+    await userEvent.click(group().getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(listed()).toEqual(['Zorvath']))
+    expect(field).toHaveValue('')
+    await userEvent.type(field, 'Mara{Enter}')
+    await waitFor(() => expect(listed()).toEqual(['Mara', 'Zorvath']))
+    expect(dictionary).toEqual({ words: ['Mara', 'Zorvath'] })
+  })
+
+  it('refuses an empty word and a phrase without asking main', async () => {
+    useDictionaryStore.setState({ words: [] })
+    open()
+    const field = group().getByRole('textbox', { name: 'Word to add' })
+    await userEvent.click(group().getByRole('button', { name: 'Add' }))
+    expect(group().getByRole('alert')).toHaveTextContent('Type a word')
+    await userEvent.type(field, 'salt marsh')
+    expect(group().queryByRole('alert')).not.toBeInTheDocument()
+    await userEvent.keyboard('{Enter}')
+    expect(group().getByRole('alert')).toHaveTextContent('One word at a time, without spaces')
+    expect(field).toHaveValue('salt marsh')
+    expect(dictionary).toEqual({ words: [] })
+  })
+
+  it('removes a word', async () => {
+    dictionary = { words: ['Mara', 'Zorvath'] }
+    useDictionaryStore.setState({ words: ['Mara', 'Zorvath'] })
+    open()
+    await userEvent.click(group().getByRole('button', { name: 'Remove Mara' }))
+    await waitFor(() => expect(listed()).toEqual(['Zorvath']))
+    expect(dictionary).toEqual({ words: ['Zorvath'] })
   })
 })

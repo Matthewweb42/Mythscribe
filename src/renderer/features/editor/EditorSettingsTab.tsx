@@ -4,6 +4,7 @@ import {
   defaultEditorSettings,
   type EditorSettings
 } from '@shared/editorSettings'
+import { DICTIONARY_WORD_MAX, DictionaryWord } from '@shared/dictionary'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { BackgroundManager } from '@renderer/features/focus/BackgroundManager'
 import { useBackgroundStore, useCurrentBackground } from '@renderer/features/focus/backgroundStore'
@@ -15,6 +16,7 @@ import {
   defaultFocusSettings
 } from '@shared/focus'
 import { COLUMN, editorStyle } from './column'
+import { useDictionaryStore } from './dictionaryStore'
 import { useEditorSettings, useEditorSettingsStore } from './settingsStore'
 
 type NumberKey = Exclude<keyof EditorSettings, 'sceneBreak' | 'typewriter'>
@@ -93,7 +95,94 @@ export function EditorSettingsTab({ format }: { format: NovelFormat }): React.JS
       </div>
       <EditorPreview settings={settings} />
       <FocusModeGroup />
+      <DictionaryGroup />
     </div>
+  )
+}
+
+/**
+ * The project dictionary (F-3.11): the words the spellchecker accepts in this project. Words
+ * arrive here from the editor's spelling menu or from the form; each can be taken out again,
+ * which underlines it once more. The store awaits main for every change, so the list is always
+ * what is stored.
+ */
+function DictionaryGroup(): React.JSX.Element {
+  const words = useDictionaryStore((s) => s.words) ?? []
+  const add = useDictionaryStore((s) => s.add)
+  const remove = useDictionaryStore((s) => s.remove)
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (): Promise<void> => {
+    const parsed = DictionaryWord.safeParse(draft)
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'That word cannot be added')
+      return
+    }
+    setError(null)
+    if (await add(parsed.data)) setDraft('')
+  }
+
+  return (
+    <section
+      aria-label="Project dictionary"
+      className="flex flex-col gap-2 border-t border-line pt-4"
+    >
+      <p className="m-0 text-xs font-medium text-fg-muted">Project dictionary</p>
+      <p className="m-0 text-xs text-fg-muted">
+        Words the spellchecker accepts in this project, such as the names of your story.
+      </p>
+      <form
+        className="flex items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void submit()
+        }}
+      >
+        <input
+          type="text"
+          aria-label="Word to add"
+          placeholder="Add a word"
+          spellCheck={false}
+          maxLength={DICTIONARY_WORD_MAX}
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.target.value)
+            setError(null)
+          }}
+          className="min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-1 text-sm"
+        />
+        <button type="submit" className="rounded-md border border-line px-2 py-1 hover:bg-surface">
+          Add
+        </button>
+      </form>
+      {error !== null ? (
+        <p role="alert" className="m-0 text-xs text-danger">
+          {error}
+        </p>
+      ) : null}
+      {words.length === 0 ? (
+        <p className="m-0 text-xs text-fg-muted">
+          Right-click an underlined word in the manuscript to add it here.
+        </p>
+      ) : (
+        <ul aria-label="Dictionary words" className="m-0 flex list-none flex-col gap-1 p-0">
+          {words.map((word) => (
+            <li key={word} className={ROW}>
+              <span spellCheck={false}>{word}</span>
+              <button
+                type="button"
+                aria-label={`Remove ${word}`}
+                onClick={() => void remove(word)}
+                className="rounded-md border border-line px-2 py-0.5 text-xs hover:bg-surface"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 

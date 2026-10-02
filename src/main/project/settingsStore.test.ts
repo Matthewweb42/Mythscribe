@@ -11,6 +11,7 @@ import {
   defaultAuthorRules
 } from '@shared/authorRules'
 import { CONVERSATIONS_KEY, defaultConversations } from '@shared/chat'
+import { DICTIONARY_KEY, defaultProjectDictionary } from '@shared/dictionary'
 import { EDITOR_SETTINGS_KEY, defaultEditorSettings } from '@shared/editorSettings'
 import { FOCUS_SETTINGS_KEY, defaultFocusSettings } from '@shared/focus'
 import type { NovelFormat } from '@shared/ipc/contract'
@@ -27,6 +28,7 @@ import {
   getEditorSettings,
   getFocusSettings,
   getObservedDismissed,
+  getProjectDictionary,
   getReferencePins,
   getWritingPresets,
   setAiSettings,
@@ -35,6 +37,7 @@ import {
   setEditorSettings,
   setFocusSettings,
   setObservedDismissed,
+  setProjectDictionary,
   setReferencePins,
   setWritingPresets
 } from './settingsStore'
@@ -459,5 +462,31 @@ describe('getObservedDismissed / setObservedDismissed (F-5.16)', () => {
     expect(getObservedDismissed(db)).toEqual(defaultObservedDismissed())
     setRaw(JSON.stringify({ names: [{ kind: 'faction', nameKey: 'x' }] }), OBSERVED_DISMISSED_KEY)
     expect(getObservedDismissed(db)).toEqual(defaultObservedDismissed())
+  })
+})
+
+describe('getProjectDictionary / setProjectDictionary (F-3.11)', () => {
+  it('answers no words for a new project, which seeds no row', () => {
+    open('novel')
+    expect(rows(DICTIONARY_KEY)).toHaveLength(0)
+    expect(getProjectDictionary(db)).toEqual(defaultProjectDictionary())
+  })
+
+  it('round-trips the words and overwrites the single row', () => {
+    open('novel')
+    const value = { words: ['Mara', 'Zorvath'] }
+    expect(setProjectDictionary(db, value)).toEqual(value)
+    expect(getProjectDictionary(db)).toEqual(value)
+    setProjectDictionary(db, { words: ['Zorvath'] })
+    expect(rows(DICTIONARY_KEY)).toHaveLength(1)
+    expect(getProjectDictionary(db)).toEqual({ words: ['Zorvath'] })
+  })
+
+  it('falls back when the stored value is not JSON or no longer fits the schema', () => {
+    open('novel')
+    setRaw('{not json', DICTIONARY_KEY)
+    expect(getProjectDictionary(db)).toEqual(defaultProjectDictionary())
+    setRaw(JSON.stringify({ words: [1, 2] }), DICTIONARY_KEY)
+    expect(getProjectDictionary(db)).toEqual(defaultProjectDictionary())
   })
 })

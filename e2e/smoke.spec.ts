@@ -1516,6 +1516,20 @@ test('create, close, reopen a project on disk', async () => {
   await expect(notes.locator('p')).toHaveText(CHAPTER_NOTE)
   expect(await notesText(chapter1Row.id)).toBeNull()
 
+  // F-3.11: the project dictionary. Settings → Editor adds a word the spellchecker should accept
+  // in this project; it is listed at once and, below, still there after the project is reopened.
+  // (No assertion on the red underline: the Hunspell dictionary is downloaded, not bundled.)
+  const dictionary = settingsDialog.getByRole('region', { name: 'Project dictionary' })
+  const dictionaryWords = dictionary.getByRole('list', { name: 'Dictionary words' })
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(dictionary.getByText('Right-click an underlined word')).toBeVisible()
+  await dictionary.getByRole('textbox', { name: 'Word to add' }).fill('Zorvath')
+  await dictionary.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(dictionaryWords.getByRole('listitem')).toHaveText(['ZorvathRemove'])
+  await expect(dictionary.getByRole('textbox', { name: 'Word to add' })).toHaveValue('')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+
   await page.getByRole('button', { name: 'Close project' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
@@ -1534,6 +1548,14 @@ test('create, close, reopen a project on disk', async () => {
   expect(reopened.ok).toBe(true)
   if (reopened.ok && reopened.data) expect(reopened.data.id).toBe(created.data.id)
   expect(fs.existsSync(path.join(tmp, 'userData', 'app-state.json'))).toBe(true)
+  // F-3.11: the dictionary came back with the project; removing the word empties it again.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(dictionaryWords.getByRole('listitem')).toHaveText(['ZorvathRemove'])
+  await dictionary.getByRole('button', { name: 'Remove Zorvath' }).click()
+  await expect(dictionaryWords).toHaveCount(0)
+  await expect(dictionary.getByText('Right-click an underlined word')).toBeVisible()
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
   // F-2.2/F-2.3/F-2.6: the two created scenes, the rename, and the Title Page survived the
   // close; the duplicate was deleted again, so the count is 17 + 3.
   const persisted = await listTree()

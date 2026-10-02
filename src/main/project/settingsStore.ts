@@ -12,6 +12,7 @@ import {
   type AuthorRulesInput
 } from '@shared/authorRules'
 import { CONVERSATIONS_KEY, Conversations, parseStoredConversations } from '@shared/chat'
+import { DICTIONARY_KEY, ProjectDictionary, defaultProjectDictionary } from '@shared/dictionary'
 import {
   EDITOR_SETTINGS_KEY,
   EditorSettings,
@@ -310,6 +311,35 @@ export function setObservedDismissed(db: TreeDb, value: ObservedDismissed): Obse
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: OBSERVED_DISMISSED_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the project's spelling dictionary (F-3.11) from the `settings` row under
+ * `DICTIONARY_KEY`. A missing row, unparsable JSON, or a value outside the schema all answer
+ * with no words: an unreadable row can only ever underline a word again, never block the project.
+ */
+export function getProjectDictionary(db: TreeDb): ProjectDictionary {
+  const row = db.select().from(settings).where(eq(settings.key, DICTIONARY_KEY)).get()
+  if (!row) return defaultProjectDictionary()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultProjectDictionary()
+  }
+  const parsed = ProjectDictionary.safeParse(json)
+  return parsed.success ? parsed.data : defaultProjectDictionary()
+}
+
+/** Replaces the project's dictionary (F-3.11; upsert on the settings key) and returns what was stored. */
+export function setProjectDictionary(db: TreeDb, value: ProjectDictionary): ProjectDictionary {
+  const stored = ProjectDictionary.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: DICTIONARY_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

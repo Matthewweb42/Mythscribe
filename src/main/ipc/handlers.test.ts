@@ -88,6 +88,8 @@ let onCloseCancelled: ReturnType<typeof vi.fn<() => void>>
 /** The window `menu:edit` should use (F-7.1); null means none has the focus. */
 let focusedWindow: ClosableWindow | null
 let openExternal: ReturnType<typeof vi.fn<(url: string) => Promise<void>>>
+/** Every list the handlers synced the spellchecker to (F-3.11), in order. */
+let spellSync: ReturnType<typeof vi.fn<(words: string[]) => Promise<void>>>
 let safe: ReturnType<typeof fakeSafeStorage>
 let keyFile: string
 /** What the fake provider's `testConnection` does; the registry builds it for any saved key. */
@@ -206,7 +208,8 @@ beforeEach(() => {
       cut: vi.fn(),
       copy: vi.fn(),
       paste: vi.fn(),
-      setZoomFactor: vi.fn()
+      setZoomFactor: vi.fn(),
+      replaceMisspelling: vi.fn()
     },
     setFullScreen: vi.fn((on: boolean) => {
       fullScreen = on
@@ -216,6 +219,7 @@ beforeEach(() => {
   onCloseCancelled = vi.fn<() => void>()
   focusedWindow = null
   openExternal = vi.fn<(url: string) => Promise<void>>(() => Promise.resolve())
+  spellSync = vi.fn<(words: string[]) => Promise<void>>(() => Promise.resolve())
   safe = fakeSafeStorage()
   keyFile = path.join(tmp, 'userData', 'ai-keys.json')
   const keyStore = new AiKeyStore(keyFile, safe, 'win32')
@@ -289,6 +293,7 @@ beforeEach(() => {
     dialogs,
     windows: () => [fakeWin],
     focusedWindow: () => focusedWindow,
+    spellDictionary: { sync: spellSync },
     openExternal,
     onCloseCancelled
   })
@@ -3836,6 +3841,79 @@ describe('menu:edit / menu:openExternal (F-7.1)', () => {
   })
 })
 
+describe('dictionary:* / spellcheck:replace (F-3.11)', () => {
+  it('answers no words for a new project and refuses without one', async () => {
+    const closed = await handlerFor('dictionary:get')(null, undefined)
+    expect(closed.ok).toBe(false)
+    if (!closed.ok) expect(closed.error.code).toBe('NO_PROJECT')
+    await invoke('project:create', { name: 'Words', format: 'novel', directory: tmp })
+    expect(await invoke('dictionary:get', undefined)).toEqual({ words: [] })
+  })
+
+  it('adds a word, keeps the list sorted, and syncs the spellchecker to the stored list', async () => {
+    await invoke('project:create', { name: 'Words', format: 'novel', directory: tmp })
+    spellSync.mockClear()
+    expect(await invoke('dictionary:add', { word: ' Zorvath ' })).toEqual({ words: ['Zorvath'] })
+    expect(await invoke('dictionary:add', { word: 'Mara' })).toEqual({ words: ['Mara', 'Zorvath'] })
+    expect(spellSync.mock.calls).toEqual([[['Zorvath']], [['Mara', 'Zorvath']]])
+    // A word already there stores nothing new and answers the same list.
+    expect(await invoke('dictionary:add', { word: 'Mara' })).toEqual({ words: ['Mara', 'Zorvath'] })
+    expect(await invoke('dictionary:get', undefined)).toEqual({ words: ['Mara', 'Zorvath'] })
+  })
+
+  it('refuses an empty word and a phrase', async () => {
+    await invoke('project:create', { name: 'Words', format: 'novel', directory: tmp })
+    for (const word of ['   ', 'salt marsh']) {
+      const result = await handlerFor('dictionary:add')(null, { word })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    }
+    expect(await invoke('dictionary:get', undefined)).toEqual({ words: [] })
+  })
+
+  it('removes a word and syncs the spellchecker without it', async () => {
+    await invoke('project:create', { name: 'Words', format: 'novel', directory: tmp })
+    await invoke('dictionary:add', { word: 'Mara' })
+    await invoke('dictionary:add', { word: 'Zorvath' })
+    spellSync.mockClear()
+    expect(await invoke('dictionary:remove', { word: 'Mara' })).toEqual({ words: ['Zorvath'] })
+    expect(spellSync).toHaveBeenLastCalledWith(['Zorvath'])
+    // A word that is not there changes nothing.
+    expect(await invoke('dictionary:remove', { word: 'Nobody' })).toEqual({ words: ['Zorvath'] })
+  })
+
+  it('syncs the spellchecker to each project as it opens and to nothing on close', async () => {
+    const a = await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
+    expect(spellSync).toHaveBeenLastCalledWith([])
+    await invoke('dictionary:add', { word: 'Mara' })
+    await invoke('project:create', { name: 'B', format: 'novel', directory: tmp })
+    expect(spellSync).toHaveBeenLastCalledWith([])
+    await invoke('project:open', { path: a?.path ?? '' })
+    expect(spellSync).toHaveBeenLastCalledWith(['Mara'])
+    await invoke('project:close', undefined)
+    expect(spellSync).toHaveBeenLastCalledWith([])
+  })
+
+  it('replaces the misspelled word on the focused window', async () => {
+    const other: ClosableWindow = {
+      ...fakeWin,
+      webContents: { ...fakeWin.webContents, replaceMisspelling: vi.fn() }
+    }
+    focusedWindow = other
+    expect(await invoke('spellcheck:replace', { word: 'receive' })).toBeNull()
+    expect(other.webContents.replaceMisspelling).toHaveBeenCalledWith('receive')
+    expect(fakeWin.webContents.replaceMisspelling).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the first live window, and does nothing when it is gone', async () => {
+    await invoke('spellcheck:replace', { word: 'receive' })
+    expect(fakeWin.webContents.replaceMisspelling).toHaveBeenCalledTimes(1)
+    fakeWin.isDestroyed = () => true
+    await invoke('spellcheck:replace', { word: 'relieve' })
+    expect(fakeWin.webContents.replaceMisspelling).toHaveBeenCalledTimes(1)
+  })
+})
+
 /**
  * account:getCredits and account:buyCredits (F-15.3): unlike the other account channels (a plain
  * forward to the service, tested at that layer), `account:buyCredits` adds its own gate
@@ -3927,6 +4005,7 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
       dialogs,
       windows: () => [fakeWin],
       focusedWindow: () => focusedWindow,
+      spellDictionary: { sync: spellSync },
       openExternal,
       onCloseCancelled
     })
