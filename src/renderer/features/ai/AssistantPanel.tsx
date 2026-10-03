@@ -26,6 +26,8 @@ import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { useAiSettingsStore } from './aiSettingsStore'
 import { AGENT_NOTICE, useActiveConversation, useAssistantStore } from './assistantStore'
+import { ContinuityButton, ContinuityView } from './ContinuityPanel'
+import { useContinuityStore } from './continuityStore'
 import { describeRequest } from './usageFormat'
 
 const ICON_BUTTON =
@@ -120,9 +122,12 @@ export function AssistantPanel(): React.JSX.Element | null {
 /**
  * The conversation tabs, the open conversation's turns, and the composer: everything under
  * the heading. The docked panel and the floating window in focus mode (F-6.6) share it, and
- * so the same store, so a conversation started in one continues in the other.
+ * so the same store, so a conversation started in one continues in the other. While the
+ * Continuity button is pressed (F-13.4) the findings view takes the place of the chat.
  */
 export function AssistantBody(): React.JSX.Element {
+  const continuity = useContinuityStore((s) => s.viewOpen)
+  if (continuity) return <ContinuityView />
   return (
     <>
       <ConversationTabs />
@@ -136,6 +141,7 @@ function PanelHeader(): React.JSX.Element {
   return (
     <div className="flex shrink-0 items-center gap-1 px-3 pt-3 pb-1">
       <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Assistant</h2>
+      <ContinuityButton />
       <NewConversationButton />
     </div>
   )
@@ -152,7 +158,11 @@ export function NewConversationButton(): React.JSX.Element {
       aria-label="New conversation"
       title="New conversation"
       disabled={!loaded || count >= CHAT_MAX_CONVERSATIONS}
-      onClick={newConversation}
+      onClick={() => {
+        // F-13.4: the new conversation is what the author wants to see, not the findings.
+        useContinuityStore.getState().setViewOpen(false)
+        newConversation()
+      }}
       className={ICON_BUTTON}
     >
       <Plus size={14} aria-hidden="true" />

@@ -147,9 +147,11 @@ What this changes in the design:
   removable in one click, costed in the ledger, never in the manuscript. Every change to the
   author's words stays a proposal (F-14.5). The author's own entity sheet wins over observed facts.
 - **One background request per scene.** Summary, observed facts, and tags come from one structured
-  `fast` call per burst of edits, through the job queue, invalidated by content hash.
+  `fast` call per burst of edits, through the job queue, invalidated by content hash. The one
+  exception (F-13.4, 2026-10-02): when that call's facts differ from a sheet or another scene, a
+  second small `fast` request checks only the paragraphs concerned.
 - **Continuity moves before launch.** F-13.4 reads the sheets and the observed facts, cites both
-  passages, and posts findings to the chat with a diff fix.
+  passages, and lists findings in the assistant panel's Continuity view with a diff fix.
 - **The bible comes to the author (2026-10-02).** The goal is to lock in and write: no flipping to
   notes, no worry about spelling or consistency. So collecting facts is half the job; the other
   half is showing them without a click and never interrupting. The References panel lists the

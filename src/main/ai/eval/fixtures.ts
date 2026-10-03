@@ -1,4 +1,4 @@
-import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS, inputBudget } from '@shared/ai'
+import { estimateTokens, GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS, inputBudget } from '@shared/ai'
 import { AUTHOR_RULES_TEXT_MAX, defaultAuthorRules } from '@shared/authorRules'
 import {
   CHAT_HISTORY_TURNS,
@@ -8,6 +8,13 @@ import {
   CHAT_REF_NOTES_CHAR_BUDGET,
   CHAT_SCENE_CHAR_BUDGET
 } from '@shared/chat'
+import {
+  CONTINUITY_REF_VALUE_MAX,
+  CONTINUITY_REFS_TOKEN_BUDGET,
+  CONTINUITY_SCENE_CHAR_BUDGET,
+  CONTINUITY_TEXT_MIN,
+  type ContinuityRef
+} from '@shared/continuity'
 import {
   CRITIQUE_NOTES_CHAR_CAP,
   CRITIQUE_SCENE_CHAR_BUDGET,
@@ -60,6 +67,11 @@ import {
 import { buildChatRegenPrompt, CHAT_REGEN_PROMPT_VERSION } from '../prompts/chatRegen.v1'
 import { buildChatRegenPromptV2, CHAT_REGEN_PROMPT_V2_VERSION } from '../prompts/chatRegen.v2'
 import { buildChatRegenPromptV3, CHAT_REGEN_PROMPT_V3_VERSION } from '../prompts/chatRegen.v3'
+import {
+  buildContinuityPrompt,
+  CONTINUITY_PROMPT_VERSION,
+  continuityRefLine
+} from '../prompts/continuity.v1'
 import {
   buildCritiquePrompt,
   CRITIQUE_PROMPT_VERSION,
@@ -162,6 +174,7 @@ import {
   QUERY_PROMPT_V2_VERSION,
   type BuildQueryPromptV2Input
 } from '../prompts/query.v2'
+import { fitSceneToBudget } from '../critique'
 import { fitQueryPrompt } from '../query'
 import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../prompts/tags.v1'
 import { buildTagsRegenPrompt, TAGS_REGEN_PROMPT_VERSION } from '../prompts/tagsRegen.v1'
@@ -437,6 +450,12 @@ export interface EvalCase {
      * runner enforces before a suggestion reaches the draft.
      */
     | { kind: 'structure'; bank: string[]; indices: number[] }
+    /**
+     * A consistency check (F-13.4): the answer must parse, every finding must name one of the
+     * `references` numbered references that were sent, and its quote must be in the scene text
+     * as sent — the two citations the feature turns on.
+     */
+    | { kind: 'continuity'; sceneText: string; references: number }
 }
 
 const general = builtinParams('general')
@@ -1314,6 +1333,91 @@ function queryV2Case(name: string, note: string, input: BuildQueryPromptV2Input)
 }
 
 /** Every case, grouped by version in catalogue order. */
+/** A sheet field, a fact of another scene with its passage, and the previous scene's timeline: one of each kind. */
+const sheetRef = (attribute: string, label: string, value: string): ContinuityRef => ({
+  kind: 'sheet',
+  entityId: 'entity-mara',
+  entityName: 'Mara',
+  entityKind: 'character',
+  attribute,
+  label,
+  value,
+  nodeId: null,
+  quote: null
+})
+const factRef = (
+  attribute: string,
+  label: string,
+  value: string,
+  quote: string
+): ContinuityRef => ({
+  kind: 'fact',
+  entityId: 'entity-tomas',
+  entityName: 'Tomas',
+  entityKind: 'character',
+  attribute,
+  label,
+  value,
+  nodeId: 'scene-2',
+  quote
+})
+const TIMELINE_REF: ContinuityRef = {
+  kind: 'timeline',
+  entityId: null,
+  entityName: null,
+  entityKind: null,
+  attribute: null,
+  label: 'Timeline',
+  value: 'Night, first thaw',
+  nodeId: 'scene-1',
+  quote: null
+}
+const CONTINUITY_FULL_REFS: ContinuityRef[] = [
+  sheetRef('age', 'Age', '34'),
+  sheetRef('appearance', 'Appearance', 'Grey eyes, a burn scar on the left wrist.'),
+  sheetRef('relationships', 'Relationships', 'Sister of Pell, who kept the mill ledger.'),
+  factRef(
+    'background',
+    'Background',
+    'Holds the mill\u2019s debt',
+    'The mill owes me. That is the whole of it.'
+  ),
+  TIMELINE_REF
+]
+/** Sheet fields at the value cap, as many as the reference budget admits (`continuityRefs` counts the same way). */
+const CONTINUITY_MAXED_REFS: ContinuityRef[] = (() => {
+  const ref = sheetRef('background', 'Background', 'v'.repeat(CONTINUITY_REF_VALUE_MAX))
+  const cost = estimateTokens(`${continuityRefLine(ref, 10)}\n`)
+  return Array<ContinuityRef>(Math.floor(CONTINUITY_REFS_TOKEN_BUDGET / cost)).fill(ref)
+})()
+
+function continuityCase(
+  name: string,
+  note: string,
+  text: string,
+  references: ContinuityRef[],
+  timeline: string | null,
+  brief: string | null
+): EvalCase {
+  const voice = voiceBlock(FIXTURE_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' })
+  // The scene is fitted to the input budget exactly as the feature fits it (token rule 8).
+  const { sceneText } = fitSceneToBudget(
+    text,
+    inputBudget('continuity'),
+    (cut) => buildContinuityPrompt({ sceneText: cut, references, timeline, voice, brief }).messages,
+    { chars: CONTINUITY_SCENE_CHAR_BUDGET, min: CONTINUITY_TEXT_MIN }
+  )
+  const built = buildContinuityPrompt({ sceneText, references, timeline, voice, brief })
+  return {
+    version: CONTINUITY_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'continuity', sceneText, references: references.length }
+  }
+}
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -1825,5 +1929,29 @@ export const EVAL_CASES: EvalCase[] = [
     `a chunk at the ${IMPORT_CHUNK_WORDS}-word cap against every template name: the most one chunk of an import can cost`,
     maxedChunk(),
     MAXED_BANK
+  ),
+  continuityCase(
+    'background',
+    'the background run: the voice block, the brief, the one paragraph that states something the sheet states differently, and that one reference',
+    FIXTURE_PASSAGE.split('\n\n')[4] ?? '',
+    [sheetRef('personality', 'Personality', 'Never goes anywhere unarmed.')],
+    null,
+    BRIEF_BLOCK
+  ),
+  continuityCase(
+    'full',
+    'Check consistency on the fixture scene with the voice block and the brief: three sheet fields, a fact of another scene with its passage, and the previous scene\u2019s timeline',
+    FIXTURE_PASSAGE,
+    CONTINUITY_FULL_REFS,
+    'The next morning',
+    BRIEF_BLOCK
+  ),
+  continuityCase(
+    'maxed',
+    'the worst input as the fit leaves it: a scene at the character budget against references at their token budget',
+    FIXTURE_PASSAGE.repeat(20),
+    CONTINUITY_MAXED_REFS,
+    'T'.repeat(500),
+    MAXED_BRIEF_BLOCK
   )
 ]

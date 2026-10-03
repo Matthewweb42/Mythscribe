@@ -167,6 +167,18 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       `phrases, and ${STORY_BIBLE_SENDS}.`,
     minDial: 1
   },
+  continuity: {
+    label: 'Consistency check',
+    sends:
+      'The sheets of the story-bible entries named in a scene, what the manuscript states about ' +
+      "them in other scenes with the passages, the previous scene's timeline and this scene's, " +
+      "the scene's brief plus the previous scene's reader-knows-after line and the next " +
+      "scene's goal, and the voice profile (stylometric rules and up to 3 exemplar passages) " +
+      "with your author rules and banned phrases; with them, the scene's text (the first " +
+      '20,000 characters) when you ask for a check, or only the paragraphs that state ' +
+      'something different when it runs after you pause typing.',
+    minDial: 1
+  },
   betaReader: {
     label: 'Beta reader',
     sends:

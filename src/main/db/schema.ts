@@ -12,6 +12,11 @@ import {
 } from 'drizzle-orm/sqlite-core'
 // Relative on purpose: drizzle-kit loads this file without the `@shared` path alias.
 import { AI_PROVIDER_IDS } from '../../shared/ai'
+import {
+  CONTINUITY_ORIGINS,
+  CONTINUITY_REF_KINDS,
+  CONTINUITY_STATUSES
+} from '../../shared/continuity'
 import { ENTITY_KINDS, ENTITY_ORIGINS, ENTITY_TEMPLATES } from '../../shared/entities'
 import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
@@ -443,3 +448,50 @@ export const observedFact = sqliteTable(
 )
 export type ObservedFactRow = typeof observedFact.$inferSelect
 export type ObservedFactInsert = typeof observedFact.$inferInsert
+
+/**
+ * One contradiction the consistency checker found (F-13.4): a passage of a scene (`quote`)
+ * against one reference of the story bible as it was when the check ran (`ref_*`: a sheet field,
+ * an observed fact of another scene with its passage, or the previous scene's timeline). Derived
+ * data, never in the manuscript: the fix enters the text only through its proposal (F-14.5).
+ * A run replaces the scene's `open` rows; a `dismissed` row stays as a tombstone, and
+ * `dedupe_key` (`continuityDedupeKey`) is what a later run is checked against so the same
+ * contradiction is not raised again for that scene. Cascaded with the scene and the entity; the
+ * referenced scene and the proposal are cleared, not cascaded.
+ */
+export const continuityFinding = sqliteTable(
+  'continuity_finding',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    refKind: text('ref_kind', { enum: CONTINUITY_REF_KINDS }).notNull(),
+    entityId: text('entity_id').references(() => entity.id, { onDelete: 'cascade' }),
+    /** The entity's name and kind when the check ran; null for a timeline reference. */
+    entityName: text('entity_name'),
+    entityKind: text('entity_kind', { enum: ENTITY_KINDS }),
+    attribute: text('attribute'),
+    refLabel: text('ref_label').notNull(),
+    refValue: text('ref_value').notNull(),
+    refNodeId: text('ref_node_id').references(() => node.id, { onDelete: 'set null' }),
+    refQuote: text('ref_quote'),
+    /** The words of the scene that contradict the reference; what a jump selects and the fix replaces. */
+    quote: text('quote').notNull(),
+    why: text('why').notNull(),
+    fix: text('fix'),
+    flagged: integer('flagged', { mode: 'boolean' }).notNull().default(false),
+    violation: text('violation'),
+    status: text('status', { enum: CONTINUITY_STATUSES }).notNull().default('open'),
+    origin: text('origin', { enum: CONTINUITY_ORIGINS }).notNull(),
+    dedupeKey: text('dedupe_key').notNull(),
+    proposalId: text('proposal_id').references(() => aiProposal.id, { onDelete: 'set null' }),
+    createdAt: text('created_at').notNull()
+  },
+  (t) => [
+    index('continuity_finding_node_idx').on(t.nodeId),
+    index('continuity_finding_status_idx').on(t.status)
+  ]
+)
+export type ContinuityFindingRow = typeof continuityFinding.$inferSelect
+export type ContinuityFindingInsert = typeof continuityFinding.$inferInsert

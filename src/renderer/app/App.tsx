@@ -40,6 +40,7 @@ import { useIndexingStore } from '@renderer/features/ai/indexingStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { useAuthorRulesStore } from '@renderer/features/ai/authorRulesStore'
 import { AssistantPanel, AssistantToggleButton } from '@renderer/features/ai/AssistantPanel'
+import { useContinuityStore } from '@renderer/features/ai/continuityStore'
 import { useAssistantStore } from '@renderer/features/ai/assistantStore'
 import { usePresetsStore } from '@renderer/features/ai/presetsStore'
 import { useProvenanceStore } from '@renderer/features/ai/provenanceStore'
@@ -187,6 +188,7 @@ export function App(): React.JSX.Element {
       useVoiceStore.getState().clear()
       useProvenanceStore.getState().clear()
       useAssistantStore.getState().clear()
+      useContinuityStore.getState().clear()
       // F-7.1: a shell dialog left open over the closing project must not reappear over the next one.
       useShellDialogStore.getState().close()
       // F-12.2: a draft under review belongs to the project it would be written into.
@@ -251,6 +253,12 @@ export function App(): React.JSX.Element {
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
     useIndexingStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    // F-13.4: the open continuity findings, for the quiet count on the assistant panel; main
+    // says when a background or on-demand check changed them.
+    useContinuityStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))

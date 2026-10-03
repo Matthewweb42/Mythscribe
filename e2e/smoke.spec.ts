@@ -164,6 +164,58 @@ const SUMMARY_ANSWER = JSON.stringify({
 })
 const BRIEF_SENTINEL = 'You are the scene-brief feature inside a novel-writing app.'
 /**
+ * F-13.4: the opening of the consistency-checker prompt's system turn (`CONTINUITY_RULES` in
+ * `src/main/ai/prompts/continuity.v1.ts`, repeated here for the same reason). A JSON request
+ * carrying it is answered from what it carries, so the same server serves `Check consistency`
+ * and the background run: when the user turn holds `CONTINUITY_QUOTE`, one finding against
+ * reference 1 quoting it, with `CONTINUITY_FIX`; when it also holds `CONTINUITY_SECOND_QUOTE`, a
+ * second finding against reference 1 with no fix (the one a step dismisses); and always one
+ * finding quoting a passage that is nowhere in the scene plus one naming reference 99, which
+ * main must drop. Without `CONTINUITY_QUOTE` in the request only the two droppable ones come
+ * back, so the panel shows nothing.
+ */
+const CONTINUITY_SENTINEL = 'You are the continuity feature inside a novel-writing app.'
+/** The passage the canned finding cites; a step types it into the scene. */
+const CONTINUITY_QUOTE = 'Mara was twenty-nine that winter.'
+/** What Applying that finding puts in its place. */
+const CONTINUITY_FIX = 'Mara was thirty-four that winter.'
+const CONTINUITY_WHY = 'The sheet gives her age as 34.'
+/** The passage the canned second finding cites, when a step has typed it. */
+const CONTINUITY_SECOND_QUOTE = 'She had turned twenty-nine in the spring.'
+const CONTINUITY_SECOND_WHY =
+  'The sheet gives her age as 34, so she cannot have turned twenty-nine.'
+/** The canned answer for one request: built from its user turn, so it is the same every time for the same scene. */
+function continuityAnswer(messages: { role: string; content: string }[]): string {
+  const user = messages.find((m) => m.role === 'user')?.content ?? ''
+  const findings: { ref: number; quote: string; why: string; fix: string | null }[] = []
+  if (user.includes(CONTINUITY_QUOTE)) {
+    findings.push({ ref: 1, quote: CONTINUITY_QUOTE, why: CONTINUITY_WHY, fix: CONTINUITY_FIX })
+    if (user.includes(CONTINUITY_SECOND_QUOTE)) {
+      findings.push({
+        ref: 1,
+        quote: CONTINUITY_SECOND_QUOTE,
+        why: CONTINUITY_SECOND_WHY,
+        fix: null
+      })
+    }
+  }
+  findings.push(
+    {
+      ref: 1,
+      quote: CRITIQUE_FABRICATED_QUOTE,
+      why: 'Never written; the app must drop this one.',
+      fix: null
+    },
+    {
+      ref: 99,
+      quote: CONTINUITY_QUOTE,
+      why: 'Reference 99 was never sent; the app must drop this one too.',
+      fix: null
+    }
+  )
+  return JSON.stringify({ findings })
+}
+/**
  * F-12.3: the opening of the import structure prompt's system turn (`IMPORT_STRUCTURE_RULES` in
  * `src/main/ai/prompts/importStructure.v1.ts`, repeated here for the same reason). A JSON
  * request carrying it gets one scene break inside the imported Chapter One, a title for the
@@ -320,6 +372,10 @@ function startFakeOpenAi(): Promise<string> {
           const critique = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(CRITIQUE_SENTINEL)
           )
+          // F-13.4: a consistency check comes back as findings built from the request itself.
+          const continuity = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(CONTINUITY_SENTINEL)
+          )
           // F-14.11: a beta read comes back as three JSON items, two of them uncitable.
           const betaReader = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(BETA_READER_SENTINEL)
@@ -394,21 +450,23 @@ function startFakeOpenAi(): Promise<string> {
                   message: {
                     role: 'assistant',
                     content: json
-                      ? importStructure
-                        ? IMPORT_STRUCTURE_ANSWER
-                        : critique
-                          ? CRITIQUE_ANSWER
-                          : betaReader
-                            ? BETA_READER_ANSWER
-                            : query
-                              ? QUERY_ANSWER
-                              : brief
-                                ? BRIEF_ANSWER
-                                : summary
-                                  ? SUMMARY_ANSWER
-                                  : regen
-                                    ? '{"tags":["antagonist","protagonist"]}'
-                                    : '{"tags":["dark-forest","protagonist"]}'
+                      ? continuity
+                        ? continuityAnswer(request.messages)
+                        : importStructure
+                          ? IMPORT_STRUCTURE_ANSWER
+                          : critique
+                            ? CRITIQUE_ANSWER
+                            : betaReader
+                              ? BETA_READER_ANSWER
+                              : query
+                                ? QUERY_ANSWER
+                                : brief
+                                  ? BRIEF_ANSWER
+                                  : summary
+                                    ? SUMMARY_ANSWER
+                                    : regen
+                                      ? '{"tags":["antagonist","protagonist"]}'
+                                      : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -4003,6 +4061,97 @@ test('create, close, reopen a project on disk', async () => {
   await tagBar.getByRole('button', { name: 'Accept antagonist' }).click()
   await expect(importedChips.getByRole('listitem')).toHaveText(['antagonist'])
   await expect(importedSuggested).toHaveCount(0)
+  // F-13.4: the consistency checker. Mara's sheet says she is 34; the imported Scene 2 is made to
+  // say twenty-nine twice. `Check this scene` in the assistant's Continuity view sends the scene
+  // with the sheet as reference 1; the fake answer carries two findings against it and two main
+  // must drop (a quote that is not in the scene, a reference number that was never sent). The
+  // first finding's fix is applied through its proposal and is in the text; the second is
+  // dismissed as "changed in the story", which also retires the reference for this scene: a
+  // second check never sends that sheet line again.
+  const maraSheet = await page.evaluate(async () => {
+    const listed = (await window.mythscribe.invoke('entity:list', undefined)) as IpcResult<Entity[]>
+    if (!listed.ok) throw new Error(listed.error.message)
+    const existing = listed.data.find((e) => e.kind === 'character' && e.name === 'Mara')
+    const saved = (await (existing
+      ? window.mythscribe.invoke('entity:update', {
+          id: existing.id,
+          template: 'structured',
+          fields: { age: '34' }
+        })
+      : window.mythscribe.invoke('entity:create', {
+          kind: 'character',
+          name: 'Mara',
+          template: 'structured',
+          fields: { age: '34' }
+        }))) as IpcResult<Entity>
+    if (!saved.ok) throw new Error(saved.error.message)
+    return saved.data
+  })
+  expect(maraSheet.fields.age).toBe('34')
+  await tree.getByRole('treeitem', { name: 'Scene 2', exact: true }).last().click()
+  await expect(editor).toContainText('Below, the lanterns')
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(
+    ` The road down was slick with old rain and the carts had left ruts a hand deep, so the going was slow and nobody spoke until the gate. ${CONTINUITY_QUOTE} ${CONTINUITY_SECOND_QUOTE}`
+  )
+  await dismissToasts()
+  if (!(await assistant.isVisible())) await page.keyboard.press('Control+k')
+  await expect(assistant).toBeVisible()
+  const continuityBodies = (): string[] =>
+    openAiChatBodies
+      .filter((body) => body.messages[0]?.content.startsWith(CONTINUITY_SENTINEL))
+      .map((body) => body.messages.at(-1)?.content ?? '')
+  // Counted by sentinel: the typing above also queues the scene's background summary.
+  const continuityRequestsBefore = continuityBodies().length
+  await assistant.getByTestId('continuity-button').click()
+  const continuityPanel = assistant.getByTestId('continuity-panel')
+  await expect(continuityPanel).toBeVisible()
+  await continuityPanel.getByTestId('continuity-check').click()
+  const findingCards = continuityPanel.getByTestId('continuity-finding')
+  await expect(findingCards).toHaveCount(2, { timeout: 15_000 })
+  expect(continuityBodies()).toHaveLength(continuityRequestsBefore + 1)
+  await expect(continuityPanel.getByTestId('continuity-result')).toContainText(
+    '2 contradictions found'
+  )
+  await expect(assistant.getByTestId('continuity-count')).toHaveText('2')
+  const ageFinding = findingCards.filter({ hasText: CONTINUITY_WHY })
+  await expect(ageFinding).toHaveAttribute('data-ref-kind', 'sheet')
+  await expect(ageFinding.getByTestId('continuity-quote')).toContainText(CONTINUITY_QUOTE)
+  await expect(ageFinding.getByTestId('continuity-ref')).toContainText('Mara · Age: 34')
+  await expect(ageFinding.getByTestId('continuity-fix-diff')).toBeVisible()
+  const continuityScene = imported[4]
+  await ageFinding.getByTestId('continuity-apply').click()
+  await expect(findingCards).toHaveCount(1)
+  await expect
+    .poll(() => documentText(continuityScene?.id ?? ''), { timeout: 5_000 })
+    .toContain(CONTINUITY_FIX)
+  expect(await documentText(continuityScene?.id ?? '')).not.toContain(CONTINUITY_QUOTE)
+  await expect(editor.locator('.ai-origin', { hasText: CONTINUITY_FIX })).toHaveCount(1)
+  await findingCards.first().getByTestId('continuity-dismiss').click()
+  await expect(findingCards).toHaveCount(0)
+  await expect(assistant.getByTestId('continuity-count')).toHaveCount(0)
+  const continuityBodiesBefore = continuityBodies()
+  expect(continuityBodiesBefore.at(-1)).toContain('Age: 34')
+  // Other references may remain (what other scenes state about Mara), so the second check may
+  // still ask; what it never does is send the dismissed sheet line or raise the finding again.
+  await continuityPanel.getByTestId('continuity-check').click()
+  await expect(
+    continuityPanel
+      .getByTestId('continuity-result')
+      .or(continuityPanel.getByTestId('continuity-no-references'))
+  ).toBeVisible({ timeout: 15_000 })
+  await expect(continuityPanel.getByTestId('continuity-pending')).toHaveCount(0)
+  await expect(findingCards).toHaveCount(0)
+  for (const body of continuityBodies().slice(continuityBodiesBefore.length)) {
+    expect(body).not.toContain('Age: 34')
+  }
+  const afterContinuity = await usageSummary()
+  expect(
+    afterContinuity.byFeature.find((f) => f.feature === 'continuity')?.requests
+  ).toBeGreaterThanOrEqual(1)
+  await assistant.getByTestId('continuity-button').click()
+  await expect(continuityPanel).toHaveCount(0)
   // Back to Off and no key, as before this step.
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()

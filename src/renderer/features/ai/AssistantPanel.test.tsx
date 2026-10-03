@@ -16,6 +16,7 @@ import { resetAiActivityStore } from './aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
 import { AssistantPanel, AssistantToggleButton } from './AssistantPanel'
 import { AGENT_NOTICE, resetAssistantStore, useAssistantStore } from './assistantStore'
+import { resetContinuityStore, useContinuityStore } from './continuityStore'
 import { resetProposalStore } from './proposalStore'
 
 interface PendingChat {
@@ -173,6 +174,7 @@ beforeEach(() => {
   cancels = []
   resetLayoutStore()
   resetAssistantStore()
+  resetContinuityStore()
   resetAiSettingsStore()
   resetAiActivityStore()
   resetActiveEditorStore()
@@ -183,6 +185,7 @@ beforeEach(() => {
 afterEach(() => {
   resetLayoutStore()
   resetAssistantStore()
+  resetContinuityStore()
   resetAiSettingsStore()
   resetAiActivityStore()
   vi.unstubAllGlobals()
@@ -249,11 +252,11 @@ describe('AssistantPanel (F-5.4)', () => {
       'false'
     )
     // F-5.8: the radios read Query, Author, Plan in that order.
-    expect(within(modes).getAllByRole('radio').map((radio) => radio.textContent)).toEqual([
-      'Query',
-      'Author',
-      'Plan'
-    ])
+    expect(
+      within(modes)
+        .getAllByRole('radio')
+        .map((radio) => radio.textContent)
+    ).toEqual(['Query', 'Author', 'Plan'])
     expect(screen.queryByRole('combobox', { name: 'Paragraphs' })).not.toBeInTheDocument()
     expect(box()).toBeEnabled()
     expect(sendButton()).toBeDisabled()
@@ -383,6 +386,16 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(sendButton()).toBeDisabled()
     await userEvent.keyboard('{Enter}')
     expect(chats).toHaveLength(0)
+  })
+
+  it('New conversation closes the Continuity view, so the new tab is what shows (F-13.4)', async () => {
+    await mountOpen()
+    useContinuityStore.getState().setViewOpen(true)
+    await screen.findByTestId('continuity-panel')
+    await userEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+    expect(screen.queryByTestId('continuity-panel')).toBeNull()
+    expect(useContinuityStore.getState().viewOpen).toBe(false)
+    expect(tabs().map((t) => t.textContent)).toEqual(['Why the ridge?', 'New conversation'])
   })
 
   it('New conversation adds a tab; closing one with messages confirms; the tablist has a roving tabindex', async () => {

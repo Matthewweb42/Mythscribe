@@ -8,10 +8,9 @@ import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
+import { applyFixToPassage } from './applyFix'
 import { useDocumentStore } from './documentStore'
 import { locateText } from './locateText'
-import { passageText } from './rewriteTarget'
-import { useRewriteStore } from './rewriteStore'
 
 /**
  * Where a critique stands: `pending` while main reads the scene and asks the model, `ready`
@@ -196,25 +195,13 @@ export const useCritiqueStore = create<CritiqueState>((set, get) => ({
   applyFix(index, editor) {
     const session = get().session
     if (session?.status !== 'ready' || session.result === null || editor.isDestroyed) return
-    // The rewrite target is one per editor: a rewrite in progress owns it.
-    if (useRewriteStore.getState().session !== null) return
     const note = session.notes[index]
     if (note?.fix === undefined || note.fix === null) return
     if (session.applied[index] === true || session.stale[index] === true) return
-    const range = locateText(editor.state.doc, note.quote)
-    if (range === null) {
-      markStale(index)
-      return
-    }
-    const { from, to } = range
-    // Two commands, not one chain: `acceptRewrite` reads the target from the state the chain
-    // started in, so the target has to be set in its own transaction first.
-    if (!editor.commands.setRewriteTarget(from, to, passageText(editor.state.doc, from, to))) {
-      markStale(index)
-      return
-    }
-    if (!editor.chain().focus().acceptRewrite(note.fix, session.result.proposalId).run()) {
-      editor.commands.clearRewriteTarget()
+    const outcome = applyFixToPassage(editor, note.quote, note.fix, session.result.proposalId)
+    // A rewrite in progress owns the editor's target: nothing changed, the note stays as it is.
+    if (outcome === 'busy') return
+    if (outcome === 'gone') {
       markStale(index)
       return
     }

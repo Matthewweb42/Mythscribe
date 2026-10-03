@@ -27,6 +27,7 @@ import { AccountStatus } from '../account'
 import { AuthorRules } from '../authorRules'
 import { CheckoutBody, CreditsResult, EMAIL_MAX } from '../cloudApi'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
+import { ContinuityFinding } from '../continuity'
 import { CritiqueNotes } from '../critique'
 import {
   DiagnosticsState,
@@ -360,6 +361,38 @@ export const AiCritiqueResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiCritiqueResult = z.infer<typeof AiCritiqueResult>
+
+/**
+ * What `ai:continuity` answers (F-13.4): the scene's open findings after the check, every one
+ * citing a passage main located in the scene text it sent and a reference it built itself
+ * (`dropped` counts the findings that failed either citation or were dismissed before), whether
+ * the scene or the references were cut, what it cost, and the proposal the fixes belong to
+ * (null when nothing was found); or an expected AI failure as data.
+ */
+export const AiContinuityResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    findings: z.array(ContinuityFinding),
+    truncated: z.boolean(),
+    dropped: z.number().int().nonnegative(),
+    /** How many references the prompt carried; 0 means there was nothing to check against and no request was made. */
+    references: z.number().int().nonnegative(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    proposalId: z.string().nullable(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiContinuityResult = z.infer<typeof AiContinuityResult>
 
 /**
  * What `ai:betaReader` answers (F-14.11): the reader's report, every item citing a passage main
@@ -1243,6 +1276,34 @@ export const contract = {
     output: AiCritiqueResult
   },
   /**
+   * Check consistency (F-13.4), on demand. The renderer sends only the node; main reads the
+   * scene head-truncated to `CONTINUITY_SCENE_CHAR_BUDGET` and builds the numbered references
+   * (the sheets of the entities named in the scene, the observed facts of other scenes, the
+   * previous scene's timeline), asks the strong tier for JSON, drops every finding whose quote
+   * is not in the text sent, whose reference number it did not send, or that was dismissed
+   * before, replaces the scene's open findings, and pushes `continuity:changed`. With no
+   * reference to check against, no request is made and the answer is empty at no cost. Nothing
+   * in the manuscript is changed. NOT_FOUND for an unknown id, VALIDATION for a node that is
+   * not a manuscript document or holds under `CONTINUITY_TEXT_MIN` characters; the AI failures
+   * come back as data with the echoed `requestId`.
+   */
+  'ai:continuity': {
+    input: z.object({ nodeId: z.string(), requestId: z.string() }),
+    output: AiContinuityResult
+  },
+  /** Every open finding of the project (F-13.4), in reading order of their scenes, oldest first within a scene. */
+  'continuity:list': { input: z.undefined(), output: z.array(ContinuityFinding) },
+  /**
+   * Settles one finding (F-13.4): `dismissed` is "changed in the story" (kept as a tombstone, so
+   * the same contradiction is not raised again for that scene), `applied` records that the
+   * author put its fix in the text. Answers the finding as stored and pushes
+   * `continuity:changed`; NOT_FOUND for an unknown id.
+   */
+  'continuity:settle': {
+    input: z.object({ id: z.string(), status: z.enum(['dismissed', 'applied']) }),
+    output: ContinuityFinding
+  },
+  /**
    * The beta-reader read-through up to a scene (F-14.11). The renderer sends only the node;
    * main reads every manuscript document before it in reading order through its stored
    * summary and key points (F-5.6; one without a summary is counted in `missing`), the scene
@@ -1539,6 +1600,8 @@ export const events = {
   'entity:changed': Entity,
   /** The observed facts of these entities changed (F-5.16): a scene was re-read, or a fact was hidden or restored. */
   'observedFact:changed': z.object({ entityIds: z.array(z.string()) }),
+  /** The findings of these scenes changed (F-13.4): a check ran in the background or on demand, or one was settled; the store refetches `continuity:list`. */
+  'continuity:changed': z.object({ nodeIds: z.array(z.string()) }),
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /**

@@ -60,6 +60,17 @@ export function sceneNamesTag(sceneText: string, tagName: string, properNoun: bo
 }
 
 /**
+ * The entities whose name occurs in `sceneText`: its words in order on word boundaries, in any
+ * case. One owner for "this scene names that entity": the known names below and the consistency
+ * checker's references (F-13.4) both read it.
+ */
+export function entitiesNamedIn(entities: readonly Entity[], sceneText: string): Entity[] {
+  return entities.filter(
+    (entity) => wordsPattern(toEntityNameKey(entity.name).split(' '))?.test(sceneText) === true
+  )
+}
+
+/**
  * The story-bible names a scene contains (F-5.16, decision 3 of the plan): the entities of all
  * three kinds whose name occurs in `sceneText`, as the author spells them, and then the
  * character, setting, and world-building tags no entity carries, as the scene spells them (a
@@ -80,10 +91,7 @@ export function knownNames(db: TreeDb, sceneText: string): KnownNames {
   }
 
   const entities = listEntities(db)
-  for (const entity of entities) {
-    const pattern = wordsPattern(toEntityNameKey(entity.name).split(' '))
-    if (pattern?.test(sceneText)) add(entity.kind, entity.name)
-  }
+  for (const entity of entitiesNamedIn(entities, sceneText)) add(entity.kind, entity.name)
 
   const linked = new Set(entities.map((entity) => entity.tagId))
   for (const tag of listTags(db)) {

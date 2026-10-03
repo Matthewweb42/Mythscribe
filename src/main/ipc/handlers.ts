@@ -26,6 +26,7 @@ import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
 import type {
   AiBetaReaderResult,
   AiChatResult,
+  AiContinuityResult,
   AiCritiqueResult,
   AiDraftBriefResult,
   AiGhostTextResult,
@@ -48,6 +49,13 @@ import type { DiagnosticsService } from '../diagnostics/diagnosticsService'
 import type { UpdateService } from '../updates/updateService'
 import { runBetaReader } from '../ai/betaReader'
 import { runChat } from '../ai/chat'
+import {
+  runBackgroundContinuity,
+  runContinuity,
+  settleContinuityFinding,
+  storeContinuityRun
+} from '../ai/continuity'
+import { listOpenFindings } from '../ai/continuityFindingStore'
 import { runCritique } from '../ai/critique'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
 import { assertFeatureAllowed } from '../ai/dial'
@@ -60,7 +68,7 @@ import type { AutoTagsChange } from '../ai/autoTags'
 import type { ObservedFactsChange } from '../ai/observedFacts'
 import { IMPORT_STRUCTURE_PROMPT_VERSION } from '../ai/prompts/importStructure.v1'
 import { createProposal, listPendingProposals, settleProposal } from '../ai/proposalStore'
-import { AiProviderError, NoKeyError } from '../ai/providers/types'
+import { AiCancelledError, AiProviderError, NoKeyError } from '../ai/providers/types'
 import { runQuery } from '../ai/query'
 import { recommendTags } from '../ai/recommendTags'
 import { runRewrite } from '../ai/rewrite'
@@ -278,20 +286,49 @@ export function registerHandlers({
    * share `index_job` and each passes its `kind`, so neither ever sees the other's rows (no
    * provider batch API at launch, see `FEATURES.md` F-5.13).
    */
+  /**
+   * F-13.4: the context each scene's last background consistency check was made from, for this
+   * session and this project (`manager.onChange` clears it). A summary run over a scene whose
+   * candidate paragraphs and references have not moved asks nothing again.
+   */
+  const continuityChecked = new Map<string, string>()
   const queue = createIndexQueue<Awaited<ReturnType<typeof summarizeScene>>>({
     kind: 'summary',
     db: () => (manager.current() === null ? null : manager.require().connection.orm),
     run: async (job, requestId) => {
       const db = manager.require().connection.orm
-      const result = await summarizeScene(db, requestDeps(db), {
+      const deps = requestDeps(db)
+      const result = await summarizeScene(db, deps, {
         nodeId: job.nodeId,
         requestId,
         onFactsChanged: (change) => publishObservedFacts(db, change),
         onTagsChanged: (change) => publishAutoTags(db, job.nodeId, change)
       })
+      // F-13.4: with the scene's facts in place, the quiet consistency check. Local unless a
+      // fact of this scene differs from the sheet or from another scene, silent when the dial
+      // or its toggle forbids it, and never the summary's failure: the summary is stored and
+      // paid for by now, so any error of the check (provider, parse, budget) is dropped here.
+      // The memo is not set on a throw, so the scene's next summary run checks again. Only a
+      // cancel is passed on, so Stop still stops the job. Nothing is shown but the panel's count.
+      let checked: Awaited<ReturnType<typeof runBackgroundContinuity>>
+      try {
+        checked = await runBackgroundContinuity(db, deps, {
+          nodeId: job.nodeId,
+          requestId,
+          memo: continuityChecked
+        })
+        if (checked !== null) {
+          const stored = storeContinuityRun(db, job.nodeId, 'background', checked, deps.now())
+          if (stored.changed) emit(windows(), 'continuity:changed', { nodeIds: [job.nodeId] })
+        }
+      } catch (err) {
+        if (err instanceof AiCancelledError) throw err
+        checked = null
+      }
       // A stored row whose hash still matches (or a cache hit) made no request, so the rate
-      // limit must not charge it a turn.
-      return { requested: !result.cached, value: result }
+      // limit must not charge it a turn; a check that went out is a request like any other.
+      const asked = checked !== null && checked.requested && !checked.cached
+      return { requested: !result.cached || asked, value: result }
     },
     cancelRequest: (requestId) => void cancelInflight(requestId),
     debounceMs: SUMMARY_DEBOUNCE_MS,
@@ -450,6 +487,8 @@ export function registerHandlers({
 
   register('tree:delete', ({ id }) => {
     deleteNode(manager.require().connection.orm, id)
+    // F-13.4: the scene's findings went with it (cascade), and the panel holds a copy.
+    emit(windows(), 'continuity:changed', { nodeIds: [id] })
     return null
   })
 
@@ -889,6 +928,8 @@ export function registerHandlers({
     // F-9.3: the image is the entity's own file, so it goes with it.
     if (deleted.image !== null) removeImageAsset(session.folder, ENTITY_IMAGES_DIR, deleted.image)
     void syncSpelling()
+    // F-13.4: the findings against the entity's sheet and facts went with it (cascade).
+    emit(windows(), 'continuity:changed', { nodeIds: [] })
     return null
   })
 
@@ -1374,6 +1415,53 @@ export function registerHandlers({
     }
   )
 
+  // F-13.4: Check consistency on one scene, JSON from the strong tier, not streamed. The run
+  // replaces the scene's open findings (dismissed ones stay dismissed) and every window hears
+  // `continuity:changed`; the reply carries the scene's open findings as stored, each citing a
+  // passage of the text that was sent and a reference main built itself. A run that found
+  // something records one proposal (F-14.5) holding the findings as JSON, flagged when any fix
+  // failed the fidelity check (F-14.7). Nothing enters the manuscript here.
+  register('ai:continuity', async ({ nodeId, requestId }): Promise<AiContinuityResult> => {
+    try {
+      const db = manager.require().connection.orm
+      const deps = requestDeps(db)
+      const run = await runContinuity(db, deps, { nodeId, requestId })
+      const stored = storeContinuityRun(db, nodeId, 'request', run, deps.now())
+      if (stored.changed) emit(windows(), 'continuity:changed', { nodeIds: [nodeId] })
+      return {
+        ok: true,
+        findings: stored.findings,
+        truncated: run.truncated,
+        dropped: run.dropped,
+        references: run.references,
+        usage: run.usage,
+        costUsd: run.costUsd,
+        cached: run.cached,
+        model: run.model,
+        proposalId: stored.proposalId,
+        requestId
+      }
+    } catch (err) {
+      if (err instanceof AiProviderError) return { ...aiFailure(err.code, err.message), requestId }
+      throw err
+    }
+  })
+
+  // F-13.4: what the Continuity panel lists and its quiet count counts.
+  register('continuity:list', () => listOpenFindings(manager.require().connection.orm))
+
+  // F-13.4: Dismiss ("changed in the story": never raised again for that scene) or the record
+  // that a fix was applied. The proposal the finding belongs to is settled with its last open
+  // finding, and counted as `proposal:settle` counts one.
+  register('continuity:settle', ({ id, status }) => {
+    const db = manager.require().connection.orm
+    const { finding, proposal } = settleContinuityFinding(db, id, status)
+    if (proposal === 'rejected') diagnostics.count('proposal.reject')
+    else if (proposal !== null && proposal !== 'regenerated') diagnostics.count('proposal.accept')
+    emit(windows(), 'continuity:changed', { nodeIds: [finding.nodeId] })
+    return finding
+  })
+
   // F-14.11: the beta-reader read-through up to one scene, JSON from the strong tier, not
   // streamed (a report is only useful whole). The reply carries the items as main located them
   // — every quote is in the scene the item names, as that scene was sent — with the scenes the
@@ -1809,6 +1897,8 @@ export function registerHandlers({
     // the rows stay in that project's database, so opening it again takes the work up where it
     // stopped (`load` on an empty table does nothing, which is what a create lands on).
     queue.clear()
+    // F-13.4: what was last checked belongs to the project that left.
+    continuityChecked.clear()
     // F-4.12: the same for the mention queue, and a project that was written before this feature
     // (or by an older build) is backfilled from its own rows, silently, as soon as it opens.
     mentionQueue.clear()

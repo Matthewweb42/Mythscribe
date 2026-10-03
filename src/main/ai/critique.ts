@@ -208,12 +208,17 @@ export async function runCritique(
 export function fitSceneToBudget(
   fullText: string,
   budget: number,
-  build: (sceneText: string) => AiMessage[]
+  build: (sceneText: string) => AiMessage[],
+  /** Another feature's own caps (F-13.4 fits its scene the same way); critique's by default. */
+  limits: { chars: number; min: number } = {
+    chars: CRITIQUE_SCENE_CHAR_BUDGET,
+    min: CRITIQUE_TEXT_MIN
+  }
 ): { sceneText: string; truncated: boolean } {
-  let chars = Math.min(fullText.length, CRITIQUE_SCENE_CHAR_BUDGET)
+  let chars = Math.min(fullText.length, limits.chars)
   let sceneText = headTruncate(fullText, chars)
-  while (promptTokens(build(sceneText)) > budget && chars > CRITIQUE_TEXT_MIN) {
-    chars = Math.max(CRITIQUE_TEXT_MIN, chars - CRITIQUE_SHRINK_CHARS)
+  while (promptTokens(build(sceneText)) > budget && chars > limits.min) {
+    chars = Math.max(limits.min, chars - CRITIQUE_SHRINK_CHARS)
     sceneText = headTruncate(fullText, chars)
   }
   return { sceneText, truncated: fullText.length > chars }
@@ -230,14 +235,18 @@ function promptTokens(messages: AiMessage[]): number {
  * on a project whose profile is too thin for a stylometric signal.
  */
 function score(note: ParsedNote, profile: VoiceProfile | null): CritiqueNote {
-  if (profile === null || note.fix === null) return { ...note, flagged: false, violation: null }
+  return { ...note, ...scoreFix(note.fix, profile) }
+}
+
+/** The verdict on one suggested fix; the consistency checker (F-13.4) scores its fixes through it too. */
+export function scoreFix(
+  fix: string | null,
+  profile: VoiceProfile | null
+): { flagged: boolean; violation: string | null } {
+  if (profile === null || fix === null) return { flagged: false, violation: null }
   const banned = profile.authorRules.bannedPhrases
-  const violation = checkGhostTextFidelity(profile.stats, note.fix, banned).violations[0]
-  return {
-    ...note,
-    flagged: violation !== undefined,
-    violation: violation?.message ?? null
-  }
+  const violation = checkGhostTextFidelity(profile.stats, fix, banned).violations[0]
+  return { flagged: violation !== undefined, violation: violation?.message ?? null }
 }
 
 /**

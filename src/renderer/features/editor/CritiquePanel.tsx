@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import type { Editor } from '@tiptap/core'
 import {
   CRITIQUE_CATEGORY_LABEL,
@@ -6,24 +5,17 @@ import {
   type CritiqueNote
 } from '@shared/critique'
 import { normalizeProposalNote, PROPOSAL_NOTE_MAX } from '@shared/proposal'
-import { diffWords } from '@shared/rewrite'
 import { describeRequest } from '@renderer/features/ai/usageFormat'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
+import { REWRITE_BUSY_MESSAGE } from './applyFix'
 import { useCritiqueStore, type CritiqueSession } from './critiqueStore'
+import { FIX_BUTTON, FIX_PRIMARY_BUTTON, FIX_QUOTE_BUTTON, FixDiff, OffVoiceFlag } from './FixDiff'
 import { HonestySelect } from './HonestySelect'
 import { useRewriteStore } from './rewriteStore'
 
-const BUTTON =
-  'flex items-center gap-1 rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
-const PRIMARY_BUTTON =
-  'flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-50 disabled:hover:bg-accent'
-const QUOTE_BUTTON =
-  'm-0 block w-full cursor-pointer border-0 border-l-2 border-line bg-transparent px-2 py-0.5 text-left text-sm italic text-fg-muted hover:border-accent hover:text-fg'
-
 /** What the panel says under a note whose quote is no longer in the document. */
 export const PASSAGE_GONE_MESSAGE = 'That passage has changed; ask again for notes on it'
-/** Why Apply is refused while the rewrite panel owns the editor's target. */
-export const REWRITE_BUSY_MESSAGE = 'Finish the rewrite first'
+export { REWRITE_BUSY_MESSAGE }
 
 /**
  * The editor's notes on this scene (F-14.8), shown while the critique store holds a session
@@ -76,7 +68,7 @@ function Body({
           Your editor is making notes.
         </p>
         <div className="flex gap-2">
-          <button type="button" data-testid="critique-stop" onClick={stop} className={BUTTON}>
+          <button type="button" data-testid="critique-stop" onClick={stop} className={FIX_BUTTON}>
             Stop
           </button>
         </div>
@@ -92,7 +84,7 @@ function Body({
           {session.error ?? 'Something went wrong'}
         </p>
         <div className="flex gap-2">
-          <button type="button" data-testid="critique-close" onClick={close} className={BUTTON}>
+          <button type="button" data-testid="critique-close" onClick={close} className={FIX_BUTTON}>
             Close
           </button>
         </div>
@@ -148,11 +140,11 @@ function Body({
           type="button"
           data-testid="critique-regenerate"
           onClick={askAndRegenerate}
-          className={BUTTON}
+          className={FIX_BUTTON}
         >
           Ask again…
         </button>
-        <button type="button" data-testid="critique-close" onClick={close} className={BUTTON}>
+        <button type="button" data-testid="critique-close" onClick={close} className={FIX_BUTTON}>
           Close
         </button>
         <span data-testid="critique-cost" className="text-xs text-fg-subtle">
@@ -182,10 +174,6 @@ function Note({
   const show = useCritiqueStore((s) => s.show)
   const applyFix = useCritiqueStore((s) => s.applyFix)
   const rewriting = useRewriteStore((s) => s.session !== null)
-  const segments = useMemo(
-    () => (note.fix === null ? [] : diffWords(note.quote, note.fix)),
-    [note.quote, note.fix]
-  )
   const applied = session.applied[index] === true
   const stale = session.stale[index] === true
   const praise = note.kind === 'praise'
@@ -210,15 +198,7 @@ function Note({
             ? `Works: ${CRITIQUE_CATEGORY_LABEL[note.category]}`
             : CRITIQUE_CATEGORY_LABEL[note.category]}
         </span>
-        {note.flagged ? (
-          <span
-            data-testid="critique-flag"
-            className="text-xs text-warning"
-            title={note.violation ?? 'does not match the voice profile'}
-          >
-            {`⚠ Off-voice fix: ${note.violation ?? 'does not match the voice profile'}`}
-          </span>
-        ) : null}
+        {note.flagged ? <OffVoiceFlag violation={note.violation} testId="critique-flag" /> : null}
       </div>
       <button
         type="button"
@@ -227,23 +207,13 @@ function Note({
         onClick={() => {
           if (editor) show(index, editor)
         }}
-        className={QUOTE_BUTTON}
+        className={FIX_QUOTE_BUTTON}
       >
         {note.quote}
       </button>
       <p className="m-0 text-xs text-fg-muted">{note.why}</p>
       {note.fix === null ? null : (
-        <p data-testid="critique-fix-diff" className="rewrite-diff m-0 whitespace-pre-wrap text-sm">
-          {segments.map((segment, i) =>
-            segment.kind === 'del' ? (
-              <del key={i}>{segment.text}</del>
-            ) : segment.kind === 'ins' ? (
-              <ins key={i}>{segment.text}</ins>
-            ) : (
-              <span key={i}>{segment.text}</span>
-            )
-          )}
-        </p>
+        <FixDiff quote={note.quote} fix={note.fix} testId="critique-fix-diff" />
       )}
       {note.fix === null ? null : (
         <div className="flex flex-wrap items-center gap-2">
@@ -255,7 +225,7 @@ function Note({
             onClick={() => {
               if (editor) applyFix(index, editor)
             }}
-            className={PRIMARY_BUTTON}
+            className={FIX_PRIMARY_BUTTON}
           >
             {applied ? 'Applied' : 'Apply'}
           </button>

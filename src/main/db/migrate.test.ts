@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(12)
+    expect(result.version).toBe(13)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -125,6 +125,7 @@ describe('migrate', () => {
     expect(tables()).toContain('entity')
     expect(tables()).toContain('observed_fact')
     expect(tables()).toContain('document_tag_dismissal')
+    expect(tables()).toContain('continuity_finding')
   })
 })
 
@@ -487,5 +488,82 @@ describe('document_tag.source, tag.origin, and document_tag_dismissal (0011_auto
     dismiss('scene', 'dread')
     db.prepare('DELETE FROM node WHERE id = ?').run('scene')
     expect(count()).toEqual({ n: 0 })
+  })
+})
+
+describe('continuity_finding table (0012_continuity_findings)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '2026-01-01', '2026-01-01'),
+              ('other', 'ms', NULL, 'document', 'Scene 2', 1, '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO entity (id, kind, name, created, modified)
+       VALUES ('mara', 'character', 'Mara', '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO ai_proposal (id, created_at, feature, node_id, prompt_version, model,
+         prompt_tokens, completion_tokens, cost_usd, cached, content)
+       VALUES ('p1', '2026-01-01', 'continuity', 'scene', 'continuity.v1', 'gpt', 1, 1, 0, 0, '[]')`
+    ).run()
+  })
+  afterEach(() => db.close())
+
+  const insertFinding = (id: string, nodeId = 'scene', entityId: string | null = 'mara'): void => {
+    db.prepare(
+      `INSERT INTO continuity_finding (id, node_id, ref_kind, entity_id, entity_name, entity_kind,
+         attribute, ref_label, ref_value, ref_node_id, ref_quote, quote, why, origin, dedupe_key,
+         proposal_id, created_at)
+       VALUES (?, ?, 'fact', ?, 'Mara', 'character', 'age', 'Age', '34', 'other',
+         'She was thirty-four.', 'Mara was twenty-nine.', 'Both cannot be true.', 'background',
+         'k', 'p1', '2026-01-01')`
+    ).run(id, nodeId, entityId)
+  }
+  const row = (id: string): unknown =>
+    db
+      .prepare(
+        'SELECT status, flagged, fix, ref_node_id, proposal_id FROM continuity_finding WHERE id = ?'
+      )
+      .get(id)
+  const count = (): unknown => db.prepare('SELECT COUNT(*) AS n FROM continuity_finding').get()
+
+  it('defaults a finding to open and unflagged, with no fix', () => {
+    insertFinding('f1')
+    expect(row('f1')).toEqual({
+      status: 'open',
+      flagged: 0,
+      fix: null,
+      ref_node_id: 'other',
+      proposal_id: 'p1'
+    })
+  })
+
+  it('refuses a finding about an unknown scene or entity, and takes one with no entity (a timeline)', () => {
+    expect(() => insertFinding('f1', 'ghost')).toThrow(/FOREIGN KEY/)
+    expect(() => insertFinding('f1', 'scene', 'ghost')).toThrow(/FOREIGN KEY/)
+    insertFinding('f1', 'scene', null)
+    expect(count()).toEqual({ n: 1 })
+  })
+
+  it('drops the findings with their scene and with their entity', () => {
+    insertFinding('f1')
+    db.prepare('DELETE FROM entity WHERE id = ?').run('mara')
+    expect(count()).toEqual({ n: 0 })
+    insertFinding('f2', 'scene', null)
+    db.prepare('DELETE FROM node WHERE id = ?').run('scene')
+    expect(count()).toEqual({ n: 0 })
+  })
+
+  it('keeps a finding whose referenced scene or proposal is gone, with the link cleared', () => {
+    insertFinding('f1')
+    db.prepare('DELETE FROM node WHERE id = ?').run('other')
+    db.prepare('DELETE FROM ai_proposal WHERE id = ?').run('p1')
+    expect(row('f1')).toMatchObject({ ref_node_id: null, proposal_id: null })
   })
 })

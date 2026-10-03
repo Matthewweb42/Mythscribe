@@ -48,6 +48,7 @@ import { AiKeyStore } from '../ai/keyStore'
 import { fakeSafeStorage } from '../ai/keyStoreFixture'
 import {
   AiCancelledError,
+  AiNetworkError,
   AiProviderError,
   InvalidKeyError,
   type CompletionRequest,
@@ -1517,6 +1518,299 @@ describe('ai:critique (F-14.8)', () => {
   })
 })
 
+describe('continuity (F-13.4)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const OPENING =
+    'The ferry landing was empty when Mara reached it. The rope hung slack in the water and ' +
+    'the bell had lost its clapper years ago.'
+  const AGE_LINE = 'Mara was twenty-nine that winter, and she had stopped counting the crossings.'
+  const CLOSING = 'She set the lantern down on the post and waited. She did not turn.'
+  const QUOTE = 'Mara was twenty-nine that winter'
+  const FINDING = {
+    ref: 1,
+    quote: QUOTE,
+    why: 'The sheet gives her age as 34.',
+    fix: 'Mara was thirty-four that winter'
+  }
+  /** What the summary job answers for the scene: a summary and the one fact that differs from the sheet. */
+  const SUMMARY = {
+    summary: 'Mara waits at the ferry landing.',
+    keyPoints: [],
+    characters: ['Mara'],
+    facts: [
+      { entity: 'Mara', kind: 'character', attribute: 'age', value: 'twenty-nine', quote: QUOTE }
+    ]
+  }
+
+  /** A project at Ask with a key, a three-paragraph scene, and a sheet that says Mara is 34. */
+  async function ready(): Promise<{ scene: string; mara: string }> {
+    await invoke('project:create', { name: 'Continuity', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [OPENING, AGE_LINE, CLOSING].map((text) => ({
+          type: 'paragraph',
+          content: [{ type: 'text', text }]
+        }))
+      }
+    })
+    const mara = await invoke('entity:create', {
+      kind: 'character',
+      name: 'Mara',
+      fields: { age: '34' }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    await invoke('ai:setKey', { key: KEY })
+    return { scene: scene.id, mara: mara.id }
+  }
+
+  function answerOnce(answer: unknown): void {
+    complete.mockResolvedValueOnce({
+      text: typeof answer === 'string' ? answer : JSON.stringify(answer),
+      model: 'gpt-fake',
+      usage: { inputTokens: 700, outputTokens: 90 }
+    })
+  }
+
+  /** The `continuity:changed` payloads sent to the window, in order. */
+  const changed = (): unknown[] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([channel]) => channel === 'continuity:changed')
+      .map(([, payload]) => payload)
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('ai:continuity', { nodeId: 'x', requestId: 'c-0' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+    await expect(invoke('continuity:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(
+      invoke('continuity:settle', { id: 'x', status: 'dismissed' })
+    ).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('checks a scene on the strong tier, stores the cited findings under one proposal, and tells the windows', async () => {
+    const { scene, mara } = await ready()
+    answerOnce({
+      findings: [
+        FINDING,
+        { ...FINDING, quote: 'The dragon circled the keep.' },
+        { ...FINDING, ref: 7 }
+      ]
+    })
+    const result = await invoke('ai:continuity', { nodeId: scene, requestId: 'c-1' })
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toEqual({
+      ok: true,
+      findings: [
+        {
+          id: result.findings[0]?.id,
+          nodeId: scene,
+          ref: {
+            kind: 'sheet',
+            entityId: mara,
+            entityName: 'Mara',
+            entityKind: 'character',
+            attribute: 'age',
+            label: 'Age',
+            value: '34',
+            nodeId: null,
+            quote: null
+          },
+          quote: QUOTE,
+          why: FINDING.why,
+          fix: FINDING.fix,
+          flagged: false,
+          violation: null,
+          status: 'open',
+          origin: 'request',
+          proposalId: result.proposalId,
+          createdAt: result.findings[0]?.createdAt
+        }
+      ],
+      truncated: false,
+      dropped: 2,
+      references: 1,
+      usage: { inputTokens: 700, outputTokens: 90 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      proposalId: result.proposalId,
+      requestId: 'c-1'
+    })
+    expect(complete.mock.calls.at(-1)?.[0]).toMatchObject({ tier: 'strong', json: true })
+    expect(getProposal(manager.require().connection.orm, result.proposalId ?? '')).toMatchObject({
+      feature: 'continuity',
+      nodeId: scene,
+      promptVersion: 'continuity.v1',
+      status: 'pending'
+    })
+    expect(await invoke('continuity:list', undefined)).toEqual(result.findings)
+    expect(changed()).toEqual([{ nodeIds: [scene] }])
+    const usage = await invoke('ai:usageSummary', undefined)
+    expect(usage.byFeature.map((f) => f.feature)).toEqual(['continuity'])
+  })
+
+  it('dismisses a finding as changed in the story: it leaves the list and is never raised again for that scene', async () => {
+    const { scene } = await ready()
+    answerOnce({ findings: [FINDING] })
+    const first = await invoke('ai:continuity', { nodeId: scene, requestId: 'c-2' })
+    if (!first.ok) throw new Error(first.message)
+    const finding = first.findings[0]
+    if (!finding) throw new Error('expected a finding')
+
+    expect(await invoke('continuity:settle', { id: finding.id, status: 'dismissed' })).toEqual({
+      ...finding,
+      status: 'dismissed'
+    })
+    expect(await invoke('continuity:list', undefined)).toEqual([])
+    expect(changed()).toEqual([{ nodeIds: [scene] }, { nodeIds: [scene] }])
+    // The last open finding of the proposal settles it; nothing was applied.
+    expect(getProposal(manager.require().connection.orm, first.proposalId ?? '')?.status).toBe(
+      'rejected'
+    )
+
+    // The sheet's age was the only reference and it is dismissed: nothing to check against.
+    const again = await invoke('ai:continuity', { nodeId: scene, requestId: 'c-3' })
+    expect(again).toMatchObject({
+      ok: true,
+      findings: [],
+      references: 0,
+      costUsd: 0,
+      proposalId: null
+    })
+    expect(complete).toHaveBeenCalledTimes(1)
+
+    await expect(
+      invoke('continuity:settle', { id: 'missing', status: 'applied' })
+    ).rejects.toThrowError(/^NOT_FOUND: /)
+  })
+
+  it('records an applied fix and settles the proposal as accepted', async () => {
+    const { scene } = await ready()
+    answerOnce({ findings: [FINDING] })
+    const result = await invoke('ai:continuity', { nodeId: scene, requestId: 'c-4' })
+    if (!result.ok) throw new Error(result.message)
+    const settled = await invoke('continuity:settle', {
+      id: result.findings[0]?.id ?? '',
+      status: 'applied'
+    })
+    expect(settled.status).toBe('applied')
+    expect(await invoke('continuity:list', undefined)).toEqual([])
+    expect(getProposal(manager.require().connection.orm, result.proposalId ?? '')?.status).toBe(
+      'accepted'
+    )
+  })
+
+  it('answers the dial, the toggle, and an unreadable answer as data with the echoed id, and bad nodes through the envelope', async () => {
+    const { scene } = await ready()
+    answerOnce('I found nothing.')
+    expect(await invoke('ai:continuity', { nodeId: scene, requestId: 'c-5' })).toEqual({
+      ok: false,
+      code: 'PROVIDER',
+      message: 'The model did not answer in the expected format.',
+      nextStep: AI_NEXT_STEP.PROVIDER,
+      requestId: 'c-5'
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 0 })
+    expect(await invoke('ai:continuity', { nodeId: scene, requestId: 'c-6' })).toMatchObject({
+      ok: false,
+      code: 'DISABLED',
+      requestId: 'c-6'
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    const unknown = await handlerFor('ai:continuity')(undefined, {
+      nodeId: 'nope',
+      requestId: 'c-7'
+    })
+    expect(unknown).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } })
+    expect(changed()).toEqual([])
+  })
+
+  it('checks quietly after the summary job stored the scene’s facts: fast tier, the one paragraph, a background finding', async () => {
+    const { scene } = await ready()
+    answerOnce(SUMMARY)
+    answerOnce({ findings: [FINDING] })
+    const summarized = await invoke('ai:summarize', { nodeId: scene, requestId: 's-1' })
+    expect(summarized.ok).toBe(true)
+
+    expect(complete).toHaveBeenCalledTimes(2)
+    const check = complete.mock.calls[1]![0]
+    expect(check).toMatchObject({ tier: 'fast', json: true })
+    expect(check.messages[1]?.content).toBe(
+      'References:\n[1] Mara (character), sheet, Age: 34\n\n' +
+        `Scene text:\n"""\n${AGE_LINE}\n"""\n\nList the contradictions.`
+    )
+    const findings = await invoke('continuity:list', undefined)
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({
+      nodeId: scene,
+      quote: QUOTE,
+      fix: FINDING.fix,
+      status: 'open',
+      origin: 'background'
+    })
+    expect(changed()).toEqual([{ nodeIds: [scene] }])
+    const usage = await invoke('ai:usageSummary', undefined)
+    expect(usage.byFeature.map((f) => f.feature).sort()).toEqual(['continuity', 'summary'])
+
+    // Summarize now over the unchanged scene: the stored summary answers, and the check, whose
+    // paragraph and reference have not moved, asks nothing and leaves the finding as it is.
+    await invoke('ai:summarize', { nodeId: scene, requestId: 's-2' })
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(await invoke('continuity:list', undefined)).toEqual(findings)
+    expect(changed()).toHaveLength(1)
+  })
+
+  it('costs nothing in the background when the scene agrees with the story bible', async () => {
+    const { scene } = await ready()
+    answerOnce({
+      ...SUMMARY,
+      facts: [{ ...SUMMARY.facts[0], attribute: 'personality', value: 'Patient' }]
+    })
+    expect((await invoke('ai:summarize', { nodeId: scene, requestId: 's-3' })).ok).toBe(true)
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(await invoke('continuity:list', undefined)).toEqual([])
+    expect(changed()).toEqual([])
+  })
+
+  it('stays silent in the background with the toggle off, and never fails the summary for an answer it cannot read', async () => {
+    const { scene } = await ready()
+    const on = defaultAiSettings()
+    await invoke('aiSettings:set', {
+      ...on,
+      dial: 1,
+      features: { ...on.features, continuity: false }
+    })
+    answerOnce(SUMMARY)
+    expect((await invoke('ai:summarize', { nodeId: scene, requestId: 's-4' })).ok).toBe(true)
+    expect(complete).toHaveBeenCalledTimes(1)
+
+    await invoke('aiSettings:set', { ...on, dial: 1 })
+    answerOnce('Sure! Here is what I found:')
+    const again = await invoke('ai:summarize', { nodeId: scene, requestId: 's-5' })
+    expect(again.ok).toBe(true)
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(await invoke('continuity:list', undefined)).toEqual([])
+    expect(changed()).toEqual([])
+  })
+
+  // Verifier (F-13.4): the summary was stored and charged before the check went out, so a
+  // provider failure of the check alone must not turn the author's Summarize now into a failure.
+  it('never fails Summarize now for a provider failure of the background check', async () => {
+    const { scene } = await ready()
+    answerOnce(SUMMARY)
+    complete.mockRejectedValueOnce(new AiNetworkError('The network is unreachable.'))
+    const summarized = await invoke('ai:summarize', { nodeId: scene, requestId: 's-6' })
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(summarized.ok).toBe(true)
+  })
+})
+
 describe('ai:betaReader (F-14.11)', () => {
   const KEY = 'sk-test-secret-1234abcd'
   const SCENE =
@@ -2121,7 +2415,16 @@ describe('scene summaries (F-5.6)', () => {
       }
     ])
     expect(result.state).toMatchObject({ stale: false, status: 'idle' })
-    expect(complete).toHaveBeenCalledTimes(1)
+    // One summary request. The sheet fills `appearance` and the fact says something else, so
+    // the background consistency check (F-13.4) asks its own question after it.
+    const summaries = complete.mock.calls.filter(([request]) =>
+      request.messages[0]?.content.startsWith('You are the scene-summary feature')
+    )
+    expect(summaries).toHaveLength(1)
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(complete.mock.calls[1]![0].messages[0]?.content).toContain(
+      'You are the continuity feature'
+    )
   })
 
   it('answers an unchanged scene from the stored row, and calls it out of date once it is edited', async () => {

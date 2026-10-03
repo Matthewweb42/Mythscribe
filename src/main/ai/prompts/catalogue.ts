@@ -8,6 +8,7 @@ import { CHAT_PROMPT_V3_VERSION } from './chat.v3'
 import { CHAT_REGEN_PROMPT_VERSION } from './chatRegen.v1'
 import { CHAT_REGEN_PROMPT_V2_VERSION } from './chatRegen.v2'
 import { CHAT_REGEN_PROMPT_V3_VERSION } from './chatRegen.v3'
+import { CONTINUITY_PROMPT_VERSION } from './continuity.v1'
 import { CRITIQUE_PROMPT_VERSION } from './critique.v1'
 import { CRITIQUE_PROMPT_V2_VERSION } from './critique.v2'
 import { CRITIQUE_PROMPT_V3_VERSION } from './critique.v3'
@@ -78,7 +79,8 @@ export const PROMPT_VERSIONS = [
   SUMMARY_PROMPT_V3_VERSION,
   QUERY_PROMPT_VERSION,
   QUERY_PROMPT_V2_VERSION,
-  IMPORT_STRUCTURE_PROMPT_VERSION
+  IMPORT_STRUCTURE_PROMPT_VERSION,
+  CONTINUITY_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -231,6 +233,14 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-12.3'
+  },
+  // On demand the feature asks the strong tier; the background run sends the same prompt to
+  // the fast one (CLAUDE.md, token rule 1). The catalogue names the tier the author asks on.
+  [CONTINUITY_PROMPT_VERSION]: {
+    feature: 'continuity',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-13.4'
   }
 }
 

@@ -225,6 +225,43 @@ function scoreStructure(
     : { kind: 'json', ok: false, problem: `outside the chunk or the bank: ${strays.join(', ')}` }
 }
 
+const ContinuityAnswer = z.object({
+  findings: z.array(z.object({ ref: z.number(), quote: z.string() }))
+})
+
+/**
+ * A consistency check (F-13.4) scores on the rule the feature turns on: it must parse to the
+ * shape the prompt asks for, and every finding must carry both citations — the number of a
+ * reference that was sent and a quote found in the scene text as sent, matched exactly as
+ * `parseContinuityAnswer` matches it.
+ */
+function scoreContinuity(
+  sceneText: string,
+  references: number,
+  answer: string
+): LiveResult['verdict'] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(answer)
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not JSON' }
+  }
+  const result = ContinuityAnswer.safeParse(parsed)
+  if (!result.success) {
+    return { kind: 'json', ok: false, problem: 'not { findings: [{ ref, quote }] }' }
+  }
+  const uncited = result.data.findings.filter(
+    (finding) =>
+      !Number.isInteger(finding.ref) ||
+      finding.ref < 1 ||
+      finding.ref > references ||
+      !findQuote(sceneText, finding.quote)
+  ).length
+  return uncited === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `${uncited} of ${result.data.findings.length} uncited` }
+}
+
 const BriefAnswer = z.object({
   goal: z.string(),
   conflict: z.string(),
@@ -372,6 +409,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreQuery(c.scoring.texts, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'continuity') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreContinuity(c.scoring.sceneText, c.scoring.references, reply.text)
         })
         continue
       }

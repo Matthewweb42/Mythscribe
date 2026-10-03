@@ -60,6 +60,20 @@ export function factsForEntities(db: ObservedFactDb, entityIds: readonly string[
     .map(rowToFact)
 }
 
+/**
+ * The visible facts one scene states (F-5.16), oldest first: what the consistency checker
+ * (F-13.4) holds against the rest of the story bible.
+ */
+export function factsForNode(db: ObservedFactDb, nodeId: string): ObservedFact[] {
+  return db
+    .select()
+    .from(observedFact)
+    .where(and(eq(observedFact.nodeId, nodeId), eq(observedFact.hidden, false)))
+    .orderBy(asc(observedFact.createdAt), asc(observedFact.id))
+    .all()
+    .map(rowToFact)
+}
+
 /** Whether the manuscript has stated anything about this entity, hidden facts included. */
 export function hasFacts(db: ObservedFactDb, entityId: string): boolean {
   return (

@@ -30,6 +30,7 @@ import {
   resetEditorSettingsStore,
   useEditorSettingsStore
 } from '@renderer/features/editor/settingsStore'
+import { resetContinuityStore } from '@renderer/features/ai/continuityStore'
 import { resetIndexingStore } from '@renderer/features/ai/indexingStore'
 import { resetBackgroundStore } from '@renderer/features/focus/backgroundStore'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
@@ -99,6 +100,7 @@ beforeEach(() => {
   resetShellDialogStore()
   resetWelcomeStore()
   resetIndexingStore()
+  resetContinuityStore()
   resetAccountStore()
   resetViewStore()
   resetMentionStore()
@@ -124,6 +126,7 @@ afterEach(() => {
   resetAssistantStore()
   resetBackgroundStore()
   resetIndexingStore()
+  resetContinuityStore()
   resetViewStore()
   vi.unstubAllGlobals()
 })
@@ -162,6 +165,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'dictionary:get') return { words: [], notNames: [] }
     if (channel === 'reference:get') return { pins: [] }
     if (channel === 'jobs:status') return IDLE_INDEX_QUEUE
+    if (channel === 'continuity:list') return []
     if (channel === 'view:get') return defaultViewSettings()
     return null
   })
