@@ -10,7 +10,7 @@ import { APP_SHORTCUTS, type Chord, type ShortcutId } from './shortcuts'
  * built are absent, never disabled or stubbed: Export… (F-12.1),
  * Statistics, Drafts, Snapshots (F-10.x, F-8.x) join the definition with their features;
  * Character, Setting, and World-building note arrived with F-9.3, References with F-9.6, Search
- * project… with F-10.1, Replace in project… with F-10.2, Find… and Replace… with F-3.10, Goals… with F-10.3, Word count… with F-10.4. Edit items carry an Electron role, so the native menu
+ * project… with F-10.1, Replace in project… with F-10.2, Find… and Replace… with F-3.10, Goals… with F-10.3, Word count… with F-10.4, Compiled preview with F-3.12. Edit items carry an Electron role, so the native menu
  * edits natively; the in-app bar routes them through `menu:edit` to the same `webContents`
  * commands.
  */
@@ -40,6 +40,7 @@ export const MENU_ITEM_IDS = [
   'toggleNotes',
   'toggleAssistant',
   'toggleReferences',
+  'openCompile',
   'toggleFocusMode',
   'togglePageEdges',
   'zoomIn',
@@ -173,6 +174,8 @@ export const MENU: readonly MenuSection[] = [
       { id: 'toggleAssistant', label: 'AI assistant', shortcut: 'assistant', when: 'project' },
       // F-9.6: the quick reference panel.
       { id: 'toggleReferences', label: 'References', when: 'project' },
+      // F-3.12: the read-only compiled preview of the manuscript.
+      { id: 'openCompile', label: 'Compiled preview', when: 'project' },
       SEPARATOR,
       { id: 'toggleFocusMode', label: 'Focus mode', shortcut: 'focusMode', when: 'project' },
       SEPARATOR,

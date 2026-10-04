@@ -1,6 +1,7 @@
-import { canInsertNode, Extension, Node, type Extensions } from '@tiptap/core'
+import { canInsertNode, Extension, getSchema, Node, type Extensions } from '@tiptap/core'
 import Paragraph from '@tiptap/extension-paragraph'
 import TextAlign from '@tiptap/extension-text-align'
+import type { Schema } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import { IMPORTED_ORIGIN, PARAGRAPH_ORIGIN_ATTR } from '@shared/provenance'
@@ -254,4 +255,15 @@ export function buildExtensions({
   }
   if (onEscape) extensions.push(EscapeShortcut.configure({ onEscape }))
   return extensions
+}
+
+/**
+ * The manuscript editor's schema without an editor (F-3.12), for rendering stored documents
+ * read-only (the compiled preview). Built from the same `buildExtensions` a manuscript document
+ * uses, so every node and mark a stored document can hold (the inline tag token, the AI-origin
+ * mark, the provenance paragraph) parses. `getSchema` only reads the node and mark specs: no
+ * plugin is instantiated, so the save callback and the tag node id are never used.
+ */
+export function manuscriptSchema(sceneBreak: string): Schema {
+  return getSchema(buildExtensions({ sceneBreak, onSave: () => undefined, inlineTagNodeId: '' }))
 }

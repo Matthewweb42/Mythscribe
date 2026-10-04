@@ -446,6 +446,17 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useFocusStore.getState().active).toBe(true)
     expect(useShellDialogStore.getState().open).toBe('statistics')
   })
+
+  it('View › Compiled preview opens the compiled preview, over focus mode too (F-3.12)', async () => {
+    await runMenuAction('openCompile')
+    expect(useShellDialogStore.getState().open).toBeNull()
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE])
+    await withProject()
+    await useFocusStore.getState().enter()
+    await runMenuAction('openCompile')
+    expect(useFocusStore.getState().active).toBe(true)
+    expect(useShellDialogStore.getState().open).toBe('compile')
+  })
 })
 
 describe('closeProjectWithConfirm', () => {

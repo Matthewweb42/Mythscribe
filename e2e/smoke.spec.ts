@@ -1694,6 +1694,34 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('Escape')
   await expect(statistics).toHaveCount(0)
 
+  // F-3.12: View › Compiled preview reads the manuscript top to bottom, read-only: chapter
+  // headings above their scenes and Scene 1's saved sentence; Scene details hides the scene
+  // headers; Escape closes it.
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'View' })
+    .click()
+  await page
+    .getByRole('menu', { name: 'View' })
+    .getByRole('menuitem', { name: 'Compiled preview' })
+    .click()
+  const compiled = page.getByRole('dialog', { name: 'Compiled preview' })
+  const compiledText = compiled.getByTestId('compile-preview')
+  await expect(compiledText).toContainText(SENTENCE)
+  await expect(
+    compiledText.locator('[data-testid="compile-heading"][data-level="chapter"]', {
+      hasText: 'Chapter 1'
+    })
+  ).not.toHaveCount(0)
+  await expect(compiledText.locator('[contenteditable]')).toHaveCount(0)
+  const sceneDetails = compiled.getByRole('checkbox', { name: 'Scene details' })
+  await expect(sceneDetails).toBeChecked()
+  await sceneDetails.click()
+  await expect(sceneDetails).not.toBeChecked()
+  await expect(compiledText.getByTestId('compile-scene-meta')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(compiled).toHaveCount(0)
+
   // F-3.7: Notes from the toolbar opens a side panel beside the editor with the scene's notes;
   // selecting Chapter 1 swaps in the chapter's own notes and saves the scene's at once. The
   // chapter note is still pending when the project closes, so the close flushes it.

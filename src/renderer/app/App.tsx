@@ -25,6 +25,7 @@ import { ShortcutsDialog } from '@renderer/features/shell/ShortcutsDialog'
 import { APP_SHORTCUTS, matchesShortcut, type Chord } from '@renderer/features/shell/shortcuts'
 import { SidebarTabs } from '@renderer/features/shell/SidebarTabs'
 import { useViewStore } from '@renderer/features/shell/viewStore'
+import { CompileDialog } from '@renderer/features/compile/CompileDialog'
 import { StatsDialog } from '@renderer/features/stats/StatsDialog'
 import { WordCountDialog } from '@renderer/features/stats/WordCountDialog'
 import { wheelZoomStepFor, zoomStepFor } from '@renderer/features/shell/zoom'
@@ -376,8 +377,8 @@ export function App(): React.JSX.Element {
 
 /**
  * The app-level dialogs (F-7.1): Settings (F-7.5; without a project only its app-wide tabs,
- * F-15.2), the shortcuts reference (F-7.7), About, the word count (F-10.4), and the statistics
- * (F-10.5), one at a time
+ * F-15.2), the shortcuts reference (F-7.7), About, the word count (F-10.4), the statistics
+ * (F-10.5), and the compiled preview (F-3.12), one at a time
  * from the shell dialog store, which the header button, Ctrl+, the in-app bar, and the native
  * menu all open through.
  */
@@ -399,6 +400,9 @@ function ShellDialogs({ format }: { format: NovelFormat | null }): React.JSX.Ele
     case 'statistics':
       // F-10.5: reads the open project, so it shows only while one is open.
       return format ? <StatsDialog onClose={close} /> : null
+    case 'compile':
+      // F-3.12: reads the open project, so it shows only while one is open.
+      return format ? <CompileDialog format={format} onClose={close} /> : null
     case null:
       return null
   }

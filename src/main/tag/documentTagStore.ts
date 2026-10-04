@@ -151,26 +151,44 @@ export function replaceAutoTags(db: TagDb, nodeId: string, tagIds: readonly stri
   })
 }
 
+/** A linked tag as the whole-project reads below answer it: what a name match or a chip needs. */
+export interface LinkedTag {
+  id: string
+  name: string
+  color: string
+}
+
 /**
- * Every node ↔ tag link in one query, as the tag names of each node (name order), keyed by node
- * id. The query ranker (F-5.7) scores every manuscript document in one pass and must not run a
- * query per scene; a node with no tag is simply absent from the map. Unlike `listDocumentTags`
- * this reads across the whole project, so it takes no target and checks nothing: it is a read
- * for ranking, not for the tag bar.
+ * Every node ↔ tag link in one query, as the tags of each node (name order), keyed by node id.
+ * The query ranker (F-5.7) and the compiled preview (F-3.12) read every manuscript document in
+ * one pass and must not run a query per scene; a node with no tag is simply absent from the map.
+ * Unlike `listDocumentTags` this reads across the whole project, so it takes no target and
+ * checks nothing.
  */
-export function listAllDocumentTags(db: TagDb): Map<string, string[]> {
+export function listAllLinkedTags(db: TagDb): Map<string, LinkedTag[]> {
   const rows = db
-    .select({ nodeId: documentTag.nodeId, name: tag.name })
+    .select({ nodeId: documentTag.nodeId, id: tag.id, name: tag.name, color: tag.color })
     .from(documentTag)
     .innerJoin(tag, eq(tag.id, documentTag.tagId))
-    .orderBy(asc(documentTag.nodeId), asc(tag.name))
+    .orderBy(asc(documentTag.nodeId), asc(tag.name), asc(tag.id))
     .all()
-  const byNode = new Map<string, string[]>()
-  for (const row of rows) {
-    const names = byNode.get(row.nodeId)
-    if (names === undefined) byNode.set(row.nodeId, [row.name])
-    else names.push(row.name)
+  const byNode = new Map<string, LinkedTag[]>()
+  for (const { nodeId, ...linked } of rows) {
+    const tags = byNode.get(nodeId)
+    if (tags === undefined) byNode.set(nodeId, [linked])
+    else tags.push(linked)
   }
+  return byNode
+}
+
+/** `listAllLinkedTags` as tag names only, for the query ranker (F-5.7). */
+export function listAllDocumentTags(db: TagDb): Map<string, string[]> {
+  const byNode = new Map<string, string[]>()
+  for (const [nodeId, tags] of listAllLinkedTags(db))
+    byNode.set(
+      nodeId,
+      tags.map((linked) => linked.name)
+    )
   return byNode
 }
 

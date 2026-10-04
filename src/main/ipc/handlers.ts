@@ -85,6 +85,7 @@ import { createIndexQueue } from '../jobs/indexQueue'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
+import { compileManuscript } from '../document/compileStore'
 import { getDocumentContent, saveDocument } from '../document/documentStore'
 import {
   goalsStatus,
@@ -688,6 +689,8 @@ export function registerHandlers({
   )
 
   register('stats:dashboard', () => statsDashboard(manager.require().connection.orm))
+
+  register('manuscript:compile', () => compileManuscript(manager.require().connection.orm))
 
   register('goals:set', (patch) => {
     const db = manager.require().connection.orm

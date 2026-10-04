@@ -97,6 +97,7 @@ describe('menu definition (F-7.1)', () => {
       'toggleNotes',
       'toggleAssistant',
       'toggleReferences',
+      'openCompile',
       'separator',
       'toggleFocusMode',
       'separator',
@@ -123,6 +124,14 @@ describe('menu definition (F-7.1)', () => {
     expect(menuItemChord(byId.toggleReferences!)).toBeNull()
     expect(isMenuItemEnabled(byId.toggleReferences!, false)).toBe(false)
     expect(isMenuItemEnabled(byId.toggleReferences!, true)).toBe(true)
+  })
+
+  it('offers Compiled preview in View after References, only with a project and without a shortcut (F-3.12)', () => {
+    const byId = Object.fromEntries(menuItems().map((item) => [item.id, item]))
+    expect(byId.openCompile?.label).toBe('Compiled preview')
+    expect(menuItemChord(byId.openCompile!)).toBeNull()
+    expect(isMenuItemEnabled(byId.openCompile!, false)).toBe(false)
+    expect(isMenuItemEnabled(byId.openCompile!, true)).toBe(true)
   })
 
   it('offers Search project… after the clipboard items of Edit, on Ctrl+Shift+F, only with a project (F-10.1)', () => {

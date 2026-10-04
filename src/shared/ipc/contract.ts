@@ -27,6 +27,7 @@ import { AccountStatus } from '../account'
 import { AuthorRules } from '../authorRules'
 import { CheckoutBody, CreditsResult, EMAIL_MAX } from '../cloudApi'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
+import { CompiledManuscript } from '../compile'
 import { ContinuityFinding } from '../continuity'
 import { CritiqueNotes } from '../critique'
 import {
@@ -843,6 +844,13 @@ export const contract = {
    * rows of manuscript documents (content-free). The renderer flushes its drafts first.
    */
   'stats:dashboard': { input: z.undefined(), output: StatsDashboard },
+  /**
+   * The compiled preview (F-3.12): every node under the manuscript root in reading order (front
+   * and end matter left out), each with its level, depth, title, scene metadata, linked tags, and
+   * (documents) stored content; unreadable content is null. The renderer flushes the document and
+   * scene metadata stores first.
+   */
+  'manuscript:compile': { input: z.undefined(), output: CompiledManuscript },
   /** Every tag of the open project (F-4.1), ordered by name. */
   'tag:list': { input: z.undefined(), output: z.array(Tag) },
   /**
