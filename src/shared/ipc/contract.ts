@@ -83,6 +83,7 @@ import { TiptapNode } from '../tiptap'
 import { UpdateChannel, UpdateState } from '../updates'
 import { WHAT_NEXT_CHAR_BUDGET, WhatNextDirections } from '../whatNext'
 import { VOICE_EXEMPLAR_TEXT_MAX, VOICE_EXEMPLAR_TEXT_MIN, VoiceExemplarKind } from '../voice'
+import { StatsDashboard } from '../statsDashboard'
 import { WordCountReport } from '../wordCount'
 import { UiScale, ViewSettings, ZoomStep } from '../zoom'
 
@@ -835,6 +836,12 @@ export const contract = {
     input: z.object({ nodeId: z.string().nullable() }),
     output: WordCountReport
   },
+  /**
+   * The statistics dashboard (F-10.5): the writing log by day (the last `STATS_LOG_DAYS`) and by
+   * hour, scene lengths, POVs, character appearances, and setting usage, all read from the stored
+   * rows of manuscript documents (content-free). The renderer flushes its drafts first.
+   */
+  'stats:dashboard': { input: z.undefined(), output: StatsDashboard },
   /** Every tag of the open project (F-4.1), ordered by name. */
   'tag:list': { input: z.undefined(), output: z.array(Tag) },
   /**

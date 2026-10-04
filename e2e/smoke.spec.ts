@@ -16,6 +16,7 @@ import { LOGIN_ATTEMPT_TTL_MS } from '../src/shared/cloudApi'
 import { cloudChargeMicros, cloudPriceFor, MICROS_PER_USD } from '../src/shared/cloudRates'
 import { USAGE_PERIOD_DAYS } from '../src/shared/cloudUsage'
 import type { FocusSettings } from '../src/shared/focus'
+import { localDay } from '../src/shared/goals'
 import { encodeLicensePayload, formatLicenseToken, LICENSE_GRACE_MS } from '../src/shared/license'
 import type { Entity, IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
@@ -1673,6 +1674,25 @@ test('create, close, reopen a project on disk', async () => {
   await expect(wordCount.getByTestId('word-count-manuscript').getByTestId('words')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(wordCount).toHaveCount(0)
+
+  // F-10.5: Tools › Statistics… shows today's words on the writing calendar (Scene 1 was saved
+  // with the sentence above) and the manuscript's scenes; Escape closes it.
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'Tools' })
+    .click()
+  await page
+    .getByRole('menu', { name: 'Tools' })
+    .getByRole('menuitem', { name: 'Statistics…' })
+    .click()
+  const statistics = page.getByRole('dialog', { name: 'Statistics' })
+  const todayCell = statistics.locator(
+    `[data-testid="heat-cell"][data-day="${localDay(new Date())}"]`
+  )
+  await expect(todayCell).not.toHaveAttribute('data-level', '0')
+  await expect(statistics.getByTestId('scene-count')).toContainText(/\d+ scenes?/)
+  await page.keyboard.press('Escape')
+  await expect(statistics).toHaveCount(0)
 
   // F-3.7: Notes from the toolbar opens a side panel beside the editor with the scene's notes;
   // selecting Chapter 1 swaps in the chapter's own notes and saves the scene's at once. The

@@ -409,6 +409,17 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useFocusStore.getState().active).toBe(true)
     expect(useShellDialogStore.getState().open).toBe('wordCount')
   })
+
+  it('Tools › Statistics… opens the statistics dialog, over focus mode too (F-10.5)', async () => {
+    await runMenuAction('openStatistics')
+    expect(useShellDialogStore.getState().open).toBeNull()
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE])
+    await withProject()
+    await useFocusStore.getState().enter()
+    await runMenuAction('openStatistics')
+    expect(useFocusStore.getState().active).toBe(true)
+    expect(useShellDialogStore.getState().open).toBe('statistics')
+  })
 })
 
 describe('closeProjectWithConfirm', () => {

@@ -675,6 +675,39 @@ describe('stats:wordCount (F-10.4)', () => {
   })
 })
 
+describe('stats:dashboard (F-10.5)', () => {
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('stats:dashboard', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it("shows today's saved words, the scene's POV, and its character", async () => {
+    await invoke('project:create', { name: 'Stats', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = manuscriptReadingOrder(rows)[0] ?? ''
+    await invoke('document:save', {
+      id: scene,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Mara ran.' }] }]
+      }
+    })
+    await invoke('sceneMeta:set', { id: scene, meta: { ...EMPTY_SCENE_META, pov: 'Mara' } })
+    const mara = await invoke('tag:create', { name: 'mara', category: 'character' })
+    await invoke('documentTag:add', { nodeId: scene, tagId: mara.id })
+    const stats = await invoke('stats:dashboard', undefined)
+    expect(stats.days).toEqual([expect.objectContaining({ day: stats.today, words: 2 })])
+    expect(stats.pov).toContainEqual({ pov: 'Mara', scenes: 1, words: 2 })
+    // Mentions depend on the background scan; the link alone puts the scene in.
+    expect(stats.characters).toHaveLength(1)
+    expect(stats.characters[0]).toMatchObject({
+      tagId: mara.id,
+      name: 'mara',
+      scenes: 1,
+      povScenes: 1
+    })
+  })
+})
+
 describe('goals:get / goals:set (F-10.3)', () => {
   const para = (text: string): Input<'document:save'>['content'] => ({
     type: 'doc',

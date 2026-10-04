@@ -3,9 +3,15 @@ import type { SettingsDialogTabId } from './settingsDialogTabs'
 
 /**
  * The app-level dialogs the menu opens (F-7.1): Settings (F-7.5), the shortcuts reference (F-7.7),
- * About, and the word count (F-10.4, project only).
+ * About, the word count (F-10.4), and the statistics (F-10.5); the last two only with a project.
  */
-export const SHELL_DIALOG_IDS = ['settings', 'shortcuts', 'about', 'wordCount'] as const
+export const SHELL_DIALOG_IDS = [
+  'settings',
+  'shortcuts',
+  'about',
+  'wordCount',
+  'statistics'
+] as const
 export type ShellDialogId = (typeof SHELL_DIALOG_IDS)[number]
 
 /**

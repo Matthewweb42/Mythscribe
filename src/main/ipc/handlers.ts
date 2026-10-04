@@ -132,6 +132,7 @@ import {
 import { clearSearchCache, searchProject } from '../search/searchStore'
 import { buildProvenanceReport } from '../provenance/report'
 import { projectSpellingWords } from '../spellcheck/projectWords'
+import { statsDashboard } from '../stats/dashboardStore'
 import {
   getAiSettings,
   getAuthorRules,
@@ -670,6 +671,8 @@ export function registerHandlers({
   register('stats:wordCount', ({ nodeId }) =>
     wordCountReport(manager.require().connection.orm, nodeId)
   )
+
+  register('stats:dashboard', () => statsDashboard(manager.require().connection.orm))
 
   register('goals:set', (patch) => {
     const db = manager.require().connection.orm

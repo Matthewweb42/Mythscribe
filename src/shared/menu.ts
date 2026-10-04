@@ -46,6 +46,7 @@ export const MENU_ITEM_IDS = [
   'openTags',
   'openGoals',
   'openWordCount',
+  'openStatistics',
   'openSettings',
   'openDocumentation',
   'openShortcuts',
@@ -185,6 +186,7 @@ export const MENU: readonly MenuSection[] = [
       { id: 'openTags', label: 'Tags', when: 'project' },
       { id: 'openGoals', label: 'Goals…', when: 'project' },
       { id: 'openWordCount', label: 'Word count…', when: 'project' },
+      { id: 'openStatistics', label: 'Statistics…', when: 'project' },
       SEPARATOR,
       { id: 'openSettings', label: 'Settings', shortcut: 'settings', when: 'always' }
     ]

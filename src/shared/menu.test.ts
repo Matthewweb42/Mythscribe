@@ -153,7 +153,14 @@ describe('menu definition (F-7.1)', () => {
     const tools = MENU.find((section) => section.id === 'tools')
     expect(
       (tools?.entries ?? []).map((entry) => (isSeparator(entry) ? 'separator' : entry.id))
-    ).toEqual(['openTags', 'openGoals', 'openWordCount', 'separator', 'openSettings'])
+    ).toEqual([
+      'openTags',
+      'openGoals',
+      'openWordCount',
+      'openStatistics',
+      'separator',
+      'openSettings'
+    ])
     const [item] = menuItems().filter((entry) => entry.id === 'openGoals')
     expect(item?.label).toBe('Goals…')
     expect(menuItemChord(item!)).toBeNull()
@@ -164,6 +171,14 @@ describe('menu definition (F-7.1)', () => {
   it('offers Word count… after Goals…, only with a project and without a shortcut (F-10.4)', () => {
     const [item] = menuItems().filter((entry) => entry.id === 'openWordCount')
     expect(item?.label).toBe('Word count…')
+    expect(menuItemChord(item!)).toBeNull()
+    expect(isMenuItemEnabled(item!, false)).toBe(false)
+    expect(isMenuItemEnabled(item!, true)).toBe(true)
+  })
+
+  it('offers Statistics… after Word count…, only with a project and without a shortcut (F-10.5)', () => {
+    const [item] = menuItems().filter((entry) => entry.id === 'openStatistics')
+    expect(item?.label).toBe('Statistics…')
     expect(menuItemChord(item!)).toBeNull()
     expect(isMenuItemEnabled(item!, false)).toBe(false)
     expect(isMenuItemEnabled(item!, true)).toBe(true)
