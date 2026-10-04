@@ -28,6 +28,7 @@ import type {
   AiChatResult,
   AiContinuityResult,
   AiCritiqueResult,
+  AiProofreadResult,
   AiDraftBriefResult,
   AiGhostTextResult,
   AiQueryResult,
@@ -57,6 +58,7 @@ import {
 } from '../ai/continuity'
 import { listOpenFindings } from '../ai/continuityFindingStore'
 import { runCritique } from '../ai/critique'
+import { runProofread } from '../ai/proofread'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
 import { assertFeatureAllowed } from '../ai/dial'
 import { draftBrief } from '../ai/draftBrief'
@@ -119,6 +121,7 @@ import {
 } from '../search/replaceStore'
 import { clearSearchCache, searchProject } from '../search/searchStore'
 import { buildProvenanceReport } from '../provenance/report'
+import { projectSpellingWords } from '../spellcheck/projectWords'
 import {
   getAiSettings,
   getAuthorRules,
@@ -137,8 +140,7 @@ import {
   setReferencePins,
   setWritingPresets
 } from '../project/settingsStore'
-import { addNotName, addWord, removeWord, spellcheckWords } from '@shared/dictionary'
-import { storyNameWords } from '@shared/storyNames'
+import { addNotName, addWord, removeWord } from '@shared/dictionary'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import { EXTERNAL_HOST, isAllowedExternalUrl, type EditRole } from '@shared/menu'
 import { normalizeProposalNote } from '@shared/proposal'
@@ -370,12 +372,7 @@ export function registerHandlers({
    */
   const syncSpelling = (): Promise<void> => {
     if (manager.current() === null) return spellDictionary.sync([])
-    const db = manager.require().connection.orm
-    const names = [
-      ...listEntities(db).map((entity) => entity.name),
-      ...listTags(db).map((tag) => tag.name)
-    ]
-    return spellDictionary.sync(spellcheckWords(getProjectDictionary(db), storyNameWords(names)))
+    return spellDictionary.sync(projectSpellingWords(manager.require().connection.orm))
   }
 
   const mentionQueue = createIndexQueue<{ changed: boolean; scanned: boolean }>({
@@ -1414,6 +1411,51 @@ export function registerHandlers({
       }
     }
   )
+
+  // F-14.12: Proofread a scene or the selection, JSON from the fast tier, not streamed. The
+  // reply carries the fixes main kept — each a small correction of a passage that is in the
+  // text sent and occurs once in the saved scene, `dropped` counts the rest — and one proposal
+  // (F-14.5) holds them as JSON, even when there is none, so the cost still shows; it is
+  // flagged when any fix failed the fidelity check (F-14.7). The renderer applies a fix on accept.
+  register('ai:proofread', async ({ nodeId, requestId, selection }): Promise<AiProofreadResult> => {
+    try {
+      const db = manager.require().connection.orm
+      const deps = requestDeps(db)
+      const result = await runProofread(db, deps, { nodeId, selection, requestId })
+      const { fixes, usage, costUsd, cached, model } = result
+      const flaggedFix = fixes.find((entry) => entry.flagged)
+      const proposal = createProposal(db, {
+        feature: 'proofread',
+        nodeId,
+        promptVersion: result.promptVersion,
+        model,
+        promptTokens: usage.inputTokens,
+        completionTokens: usage.outputTokens,
+        costUsd,
+        cached,
+        content: JSON.stringify(fixes),
+        flagged: flaggedFix !== undefined,
+        violation: flaggedFix?.violation ?? null,
+        regeneratedFrom: null
+      })
+      return {
+        ok: true,
+        fixes,
+        scope: result.scope,
+        truncated: result.truncated,
+        dropped: result.dropped,
+        usage,
+        costUsd,
+        cached,
+        model,
+        proposalId: proposal.id,
+        requestId
+      }
+    } catch (err) {
+      if (err instanceof AiProviderError) return { ...aiFailure(err.code, err.message), requestId }
+      throw err
+    }
+  })
 
   // F-13.4: Check consistency on one scene, JSON from the strong tier, not streamed. The run
   // replaces the scene's open findings (dismissed ones stay dismissed) and every window hears

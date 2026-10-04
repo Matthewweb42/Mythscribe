@@ -59,6 +59,7 @@ import { ObservedFact } from '../observedFacts'
 import { TagMentions } from '../mentions'
 import { EditRole, MenuItemId } from '../menu'
 import { WritingPresets } from '../presets'
+import { PROOFREAD_CHAR_BUDGET, ProofreadFixes, ProofreadScope } from '../proofread'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
 import { ProposedTag } from '../proposedTags'
 import { QueryCitation, QuerySceneRef } from '../query'
@@ -393,6 +394,37 @@ export const AiContinuityResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiContinuityResult = z.infer<typeof AiContinuityResult>
+
+/**
+ * What `ai:proofread` answers (F-14.12): the fixes in document order, each quoting a passage
+ * main found in the text it sent and exactly once in the saved scene (`dropped` counts the ones
+ * that failed that, overlapped another, were larger than a correction, or only "corrected" a
+ * story name or a dictionary word), what was proofread, whether it was head-truncated, what it
+ * cost, and the proposal the fixes belong to (F-14.5); or an expected AI failure as data.
+ */
+export const AiProofreadResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    fixes: ProofreadFixes,
+    scope: ProofreadScope,
+    truncated: z.boolean(),
+    dropped: z.number().int().nonnegative(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    proposalId: z.string(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiProofreadResult = z.infer<typeof AiProofreadResult>
 
 /**
  * What `ai:betaReader` answers (F-14.11): the reader's report, every item citing a passage main
@@ -1290,6 +1322,25 @@ export const contract = {
   'ai:continuity': {
     input: z.object({ nodeId: z.string(), requestId: z.string() }),
     output: AiContinuityResult
+  },
+  /**
+   * Proofread (F-14.12). The renderer sends the node and, to proofread only part of it, the
+   * selection as plain text (`captureRewriteText`'s rendering; it flushes the autosave first,
+   * so the saved row is what the author sees). Main proofreads the selection or the saved
+   * scene, head-truncated to `PROOFREAD_CHAR_BUDGET`, with the voice profile, the brief, and
+   * the story's names and dictionary words as "leave these alone", on the fast tier as JSON,
+   * and keeps only fixes that are small corrections of a passage occurring exactly once in the
+   * saved scene. Nothing in the manuscript is changed: the renderer applies a fix on accept.
+   * NOT_FOUND for an unknown id, VALIDATION for a folder or text under `PROOFREAD_TEXT_MIN`
+   * characters; the AI failures come back as data with the echoed `requestId`.
+   */
+  'ai:proofread': {
+    input: z.object({
+      nodeId: z.string(),
+      requestId: z.string(),
+      selection: z.string().max(PROOFREAD_CHAR_BUDGET).nullable().optional()
+    }),
+    output: AiProofreadResult
   },
   /** Every open finding of the project (F-13.4), in reading order of their scenes, oldest first within a scene. */
   'continuity:list': { input: z.undefined(), output: z.array(ContinuityFinding) },

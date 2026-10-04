@@ -108,6 +108,33 @@ const CRITIQUE_ANSWER = JSON.stringify({
   ]
 })
 /**
+ * F-14.12: the opening of the proofread prompt's system turn (`PROOFREAD_RULES` in
+ * `src/main/ai/prompts/proofread.v1.ts`, repeated here for the same reason; its golden test pins
+ * the two together). A JSON request carrying it gets the canned fixes below: two for the errors
+ * the proofread step types into Scene 1, and one quoting a passage that is nowhere in it, which
+ * main must drop.
+ */
+const PROOFREAD_SENTINEL = 'You are the proofreading feature inside a novel-writing app.'
+/** What the proofread step types at the end of Scene 1: one misspelling and one doubled word. */
+const PROOFREAD_TYPED = ' The ferryman was laet that night, and and the river rose under the dock.'
+const PROOFREAD_TYPO_QUOTE = 'was laet that'
+const PROOFREAD_TYPO_FIX = 'was late that'
+const PROOFREAD_DOUBLED_QUOTE = 'and and the river'
+const PROOFREAD_DOUBLED_FIX = 'and the river'
+/** What the typed sentence reads once both fixes are in. */
+const PROOFREAD_CORRECTED = 'The ferryman was late that night, and the river rose under the dock.'
+const PROOFREAD_ANSWER = JSON.stringify({
+  fixes: [
+    { kind: 'spelling', quote: PROOFREAD_TYPO_QUOTE, fix: PROOFREAD_TYPO_FIX },
+    { kind: 'doubledWord', quote: PROOFREAD_DOUBLED_QUOTE, fix: PROOFREAD_DOUBLED_FIX },
+    {
+      kind: 'punctuation',
+      quote: CRITIQUE_FABRICATED_QUOTE,
+      fix: 'The lighthouse blinked twice, and went dark.'
+    }
+  ]
+})
+/**
  * F-14.3: the opening of the brief prompt's system turn (`BRIEF_RULES` in
  * `src/main/ai/prompts/brief.v1.ts`; main is outside the e2e tsconfig, so it is repeated here).
  * A JSON request carrying it gets the canned brief below.
@@ -372,6 +399,11 @@ function startFakeOpenAi(): Promise<string> {
           const critique = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(CRITIQUE_SENTINEL)
           )
+          // F-14.12: a proofread comes back as three JSON fixes, one of them quoting a passage
+          // that is not in the scene.
+          const proofread = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(PROOFREAD_SENTINEL)
+          )
           // F-13.4: a consistency check comes back as findings built from the request itself.
           const continuity = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(CONTINUITY_SENTINEL)
@@ -450,23 +482,25 @@ function startFakeOpenAi(): Promise<string> {
                   message: {
                     role: 'assistant',
                     content: json
-                      ? continuity
-                        ? continuityAnswer(request.messages)
-                        : importStructure
-                          ? IMPORT_STRUCTURE_ANSWER
-                          : critique
-                            ? CRITIQUE_ANSWER
-                            : betaReader
-                              ? BETA_READER_ANSWER
-                              : query
-                                ? QUERY_ANSWER
-                                : brief
-                                  ? BRIEF_ANSWER
-                                  : summary
-                                    ? SUMMARY_ANSWER
-                                    : regen
-                                      ? '{"tags":["antagonist","protagonist"]}'
-                                      : '{"tags":["dark-forest","protagonist"]}'
+                      ? proofread
+                        ? PROOFREAD_ANSWER
+                        : continuity
+                          ? continuityAnswer(request.messages)
+                          : importStructure
+                            ? IMPORT_STRUCTURE_ANSWER
+                            : critique
+                              ? CRITIQUE_ANSWER
+                              : betaReader
+                                ? BETA_READER_ANSWER
+                                : query
+                                  ? QUERY_ANSWER
+                                  : brief
+                                    ? BRIEF_ANSWER
+                                    : summary
+                                      ? SUMMARY_ANSWER
+                                      : regen
+                                        ? '{"tags":["antagonist","protagonist"]}'
+                                        : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -3317,6 +3351,76 @@ test('create, close, reopen a project on disk', async () => {
   })
   await critiquePanel.getByTestId('critique-close').click()
   await expect(critiquePanel).toHaveCount(0)
+
+  // F-14.12: proofread. A sentence with a misspelling and a doubled word is typed at the end of
+  // Scene 1; with the caret collapsed the toolbar button proofreads the whole scene. The fake
+  // server answers three fixes, one quoting a passage that was never written, and main drops it,
+  // so two cards show. Accept takes the first, Accept all the other, each replacing exactly its
+  // quoted passage as AI-origin text from the one proposal (how it settles is a store test).
+  await dismissToasts()
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(PROOFREAD_TYPED)
+  await expect
+    .poll(async () => ((await documentText(scene1Row.id)) ?? '').includes(PROOFREAD_TYPED.trim()), {
+      timeout: 3000
+    })
+    .toBe(true)
+  const proofreadBodies = (): number =>
+    openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(PROOFREAD_SENTINEL))
+      .length
+  const proofreadRequestsBefore = proofreadBodies()
+  const proofreadButton = page.getByRole('button', { name: 'Proofread', exact: true })
+  await expect(proofreadButton).toBeEnabled()
+  await expect(proofreadButton).toHaveAttribute('title', 'Proofread this scene')
+  await proofreadButton.click()
+  const proofreadPanel = page.getByTestId('proofread-panel')
+  await expect(proofreadPanel).toBeVisible()
+  const proofreadFixes = proofreadPanel.getByTestId('proofread-fix')
+  await expect(proofreadFixes).toHaveCount(2)
+  expect(proofreadBodies()).toBe(proofreadRequestsBefore + 1)
+  await expect(proofreadPanel.getByTestId('proofread-scope')).toHaveText('Scene')
+  await expect(proofreadPanel.getByTestId('proofread-quote')).toHaveText([
+    PROOFREAD_TYPO_QUOTE,
+    PROOFREAD_DOUBLED_QUOTE
+  ])
+  await expect(proofreadFixes.first()).toHaveAttribute('data-kind', 'spelling')
+  await expect(proofreadFixes.nth(1)).toHaveAttribute('data-kind', 'doubledWord')
+  await expect(proofreadPanel).not.toContainText(CRITIQUE_FABRICATED_QUOTE)
+  await expect(proofreadPanel.getByTestId('proofread-cost')).toContainText('gpt-5.4-mini')
+  await proofreadFixes.first().getByTestId('proofread-accept').click()
+  await expect(proofreadFixes.first()).toHaveAttribute('data-state', 'applied')
+  await expect(proofreadFixes.nth(1)).toHaveAttribute('data-state', 'open')
+  await proofreadPanel.getByTestId('proofread-accept-all').click()
+  await expect(proofreadFixes.nth(1)).toHaveAttribute('data-state', 'applied')
+  await expect(
+    proofreadPanel.locator('[data-testid="proofread-fix"][data-state="open"]')
+  ).toHaveCount(0)
+  await expect(proofreadPanel.getByTestId('proofread-accept-all')).toBeDisabled()
+  await expect(editor).toContainText(PROOFREAD_CORRECTED)
+  await expect(editor).not.toContainText(PROOFREAD_TYPO_QUOTE)
+  await expect(editor).not.toContainText(PROOFREAD_DOUBLED_QUOTE)
+  const typoSpan = editor
+    .locator('.ai-origin[data-proposal-id]')
+    .filter({ hasText: PROOFREAD_TYPO_FIX })
+  await expect(typoSpan).toHaveCount(1)
+  const proofreadProposalId = await typoSpan.getAttribute('data-proposal-id')
+  expect(proofreadProposalId).toBeTruthy()
+  await expect(editor.locator(`.ai-origin[data-proposal-id="${proofreadProposalId}"]`)).toHaveText([
+    PROOFREAD_TYPO_FIX,
+    PROOFREAD_DOUBLED_FIX
+  ])
+  await expect
+    .poll(async () => ((await documentText(scene1Row.id)) ?? '').includes(PROOFREAD_CORRECTED), {
+      timeout: 3000
+    })
+    .toBe(true)
+  const afterProofread = await usageSummary()
+  expect(afterProofread.byFeature.find((f) => f.feature === 'proofread')).toMatchObject({
+    requests: 1
+  })
+  await proofreadPanel.getByTestId('proofread-close').click()
+  await expect(proofreadPanel).toHaveCount(0)
 
   // F-5.6: scene summaries. With the toggle back on, the metadata pane's Summary disclosure
   // shows Scene 1 has none yet (out of date: the text is long past the floor). Summarize now

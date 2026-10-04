@@ -20,7 +20,7 @@ export const AI_DIAL_LABEL: Record<AiDial, string> = {
 /** One-line meaning per level (PLAN.md §2.3's table); shown under each radio. */
 export const AI_DIAL_MEANING: Record<AiDial, string> = {
   0: 'Nothing leaves this machine.',
-  1: 'Queries, summaries, tag suggestions, and critique, on request.',
+  1: 'Queries, summaries, tag suggestions, critique, and proofreading, on request.',
   2: 'Adds ghost text and rewrite-in-my-voice.',
   3: 'Adds multi-paragraph drafting proposals.'
 }
@@ -177,6 +177,16 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "with your author rules and banned phrases; with them, the scene's text (the first " +
       '20,000 characters) when you ask for a check, or only the paragraphs that state ' +
       'something different when it runs after you pause typing.',
+    minDial: 1
+  },
+  proofread: {
+    label: 'Proofread',
+    sends:
+      "The scene's text (the first 20,000 characters), or only the passage you selected, its " +
+      "brief plus the previous scene's reader-knows-after line and the next scene's goal, the " +
+      'voice profile (stylometric rules and up to 3 exemplar passages) with your author rules ' +
+      'and banned phrases, and up to 200 words to leave alone: the names of your story-bible ' +
+      'entries and tags and the words in the project dictionary.',
     minDial: 1
   },
   betaReader: {

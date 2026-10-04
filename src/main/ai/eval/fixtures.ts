@@ -22,6 +22,11 @@ import {
 } from '@shared/critique'
 import type { VoiceProfile } from '@shared/ipc/contract'
 import { builtinParams } from '@shared/presets'
+import {
+  PROOFREAD_CHAR_BUDGET,
+  PROOFREAD_KEEP_WORDS_MAX,
+  PROOFREAD_TEXT_MIN
+} from '@shared/proofread'
 import { PROPOSAL_NOTE_MAX } from '@shared/proposal'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX } from '@shared/rewrite'
 import {
@@ -174,6 +179,7 @@ import {
   QUERY_PROMPT_V2_VERSION,
   type BuildQueryPromptV2Input
 } from '../prompts/query.v2'
+import { buildProofreadPrompt, PROOFREAD_PROMPT_VERSION } from '../prompts/proofread.v1'
 import { fitSceneToBudget } from '../critique'
 import { fitQueryPrompt } from '../query'
 import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../prompts/tags.v1'
@@ -456,6 +462,11 @@ export interface EvalCase {
      * as sent — the two citations the feature turns on.
      */
     | { kind: 'continuity'; sceneText: string; references: number }
+    /**
+     * A proofread (F-14.12): the answer must parse, and every fix must survive the feature's own
+     * checks against the text as sent (here the whole scene) and the keep words.
+     */
+    | { kind: 'proofread'; text: string; keepWords: string[] }
 }
 
 const general = builtinParams('general')
@@ -1418,6 +1429,45 @@ function continuityCase(
   }
 }
 
+/** The fixture passage with four planted errors: a misspelled name, a doubled word, a typo, a missing comma. */
+const PROOFREAD_PASSAGE = FIXTURE_PASSAGE.replace('when Mara reached', 'when Marra reached')
+  .replace('The rope hung', 'The the rope hung')
+  .replace('the far bank', 'teh far bank')
+  .replace('"Then we talk here."', '"Then we talk here" she said.')
+/** The names of the fixture story: what the keep list carries for a project with its characters linked. */
+const PROOFREAD_KEEP_WORDS = ['Mara', 'Tomas', 'Pell']
+/** Dictionary words at the length cap the keep list allows, names first. */
+const PROOFREAD_MAXED_KEEP_WORDS = [
+  ...PROOFREAD_KEEP_WORDS,
+  ...Array.from(
+    { length: PROOFREAD_KEEP_WORDS_MAX - PROOFREAD_KEEP_WORDS.length },
+    (_, i) => `${'k'.repeat(20)}${i}`
+  )
+]
+
+function proofreadCase(
+  name: string,
+  note: string,
+  input: { text: string; voice: string | null; brief: string | null; keepWords: string[] }
+): EvalCase {
+  // The text is fitted to the input budget exactly as the feature fits it (token rule 8).
+  const { sceneText: text } = fitSceneToBudget(
+    input.text,
+    inputBudget('proofread'),
+    (cut) => buildProofreadPrompt({ ...input, text: cut }).messages,
+    { chars: PROOFREAD_CHAR_BUDGET, min: PROOFREAD_TEXT_MIN }
+  )
+  const built = buildProofreadPrompt({ ...input, text })
+  return {
+    version: PROOFREAD_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'proofread', text, keepWords: input.keepWords }
+  }
+}
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -1953,5 +2003,30 @@ export const EVAL_CASES: EvalCase[] = [
     CONTINUITY_MAXED_REFS,
     'T'.repeat(500),
     MAXED_BRIEF_BLOCK
+  ),
+  proofreadCase(
+    'fresh',
+    'the fixture scene with four planted errors, no voice block, no brief, and no names: the shape a new project sends',
+    { text: PROOFREAD_PASSAGE, voice: null, brief: null, keepWords: [] }
+  ),
+  proofreadCase(
+    'full',
+    'the same scene with the voice block, the brief, and the story\u2019s three names as the keep list',
+    {
+      text: PROOFREAD_PASSAGE,
+      voice: voiceBlock(FIXTURE_PROFILE, { text: PROOFREAD_PASSAGE, pov: 'Mara' }),
+      brief: BRIEF_BLOCK,
+      keepWords: PROOFREAD_KEEP_WORDS
+    }
+  ),
+  proofreadCase(
+    'maxed',
+    `the worst input as the fit leaves it: a scene at the character budget, the voice block and the brief at their caps, and ${PROOFREAD_KEEP_WORDS_MAX} keep words`,
+    {
+      text: PROOFREAD_PASSAGE.repeat(20),
+      voice: voiceBlock(MAXED_PROFILE, { text: PROOFREAD_PASSAGE, pov: 'Mara' }),
+      brief: MAXED_BRIEF_BLOCK,
+      keepWords: PROOFREAD_MAXED_KEEP_WORDS
+    }
   )
 ]

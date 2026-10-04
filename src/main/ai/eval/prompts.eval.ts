@@ -13,6 +13,7 @@ import { checkChatFidelity, postProcessChatText } from '../chat'
 import { postProcessGhostText } from '../ghostText'
 import { buildOpenAiProvider } from '../providers/openai'
 import { PROMPT_CATALOGUE, PROMPT_VERSIONS } from '../prompts/catalogue'
+import { parseProofreadAnswer } from '../proofread'
 import { parseSummaryAnswer } from '../summarize'
 import { EVAL_CASES, FIXTURE_PROFILE, type EvalCase } from './fixtures'
 import { renderLiveReport, renderTokenReport, tokenRows, type LiveResult } from './report'
@@ -262,6 +263,23 @@ function scoreContinuity(
     : { kind: 'json', ok: false, problem: `${uncited} of ${result.data.findings.length} uncited` }
 }
 
+/**
+ * A proofread (F-14.12) scores through the feature's own parser, so the verdict is what the
+ * author would see: the answer must parse to `{ fixes: [...] }`, and every fix must survive the
+ * checks main applies (quote in the text and once in the scene, a correction rather than a
+ * rewrite, keep words left alone, no overlap); a dropped fix is tokens the model wasted.
+ */
+function scoreProofread(text: string, keepWords: string[], answer: string): LiveResult['verdict'] {
+  try {
+    const { fixes, dropped } = parseProofreadAnswer(answer, text, text, keepWords)
+    return dropped === 0
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: `${dropped} of ${fixes.length + dropped} dropped` }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not { fixes: [{ kind, quote, fix }] }' }
+  }
+}
+
 const BriefAnswer = z.object({
   goal: z.string(),
   conflict: z.string(),
@@ -417,6 +435,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreContinuity(c.scoring.sceneText, c.scoring.references, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'proofread') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreProofread(c.scoring.text, c.scoring.keepWords, reply.text)
         })
         continue
       }

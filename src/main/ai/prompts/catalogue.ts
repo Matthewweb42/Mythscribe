@@ -22,6 +22,7 @@ import { GHOST_REGEN_PROMPT_VERSION } from './ghostTextRegen.v1'
 import { GHOST_REGEN_PROMPT_V2_VERSION } from './ghostTextRegen.v2'
 import { GHOST_REGEN_PROMPT_V3_VERSION } from './ghostTextRegen.v3'
 import { IMPORT_STRUCTURE_PROMPT_VERSION } from './importStructure.v1'
+import { PROOFREAD_PROMPT_VERSION } from './proofread.v1'
 import { QUERY_PROMPT_VERSION } from './query.v1'
 import { QUERY_PROMPT_V2_VERSION } from './query.v2'
 import { REWRITE_PROMPT_VERSION } from './rewrite.v1'
@@ -80,7 +81,8 @@ export const PROMPT_VERSIONS = [
   QUERY_PROMPT_VERSION,
   QUERY_PROMPT_V2_VERSION,
   IMPORT_STRUCTURE_PROMPT_VERSION,
-  CONTINUITY_PROMPT_VERSION
+  CONTINUITY_PROMPT_VERSION,
+  PROOFREAD_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -241,6 +243,12 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'strong',
     output: 'json',
     since: 'F-13.4'
+  },
+  [PROOFREAD_PROMPT_VERSION]: {
+    feature: 'proofread',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-14.12'
   }
 }
 

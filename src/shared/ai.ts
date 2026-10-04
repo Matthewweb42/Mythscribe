@@ -22,7 +22,7 @@ export type Tier = z.infer<typeof Tier>
 
 /** What each tier serves (CLAUDE.md, token efficiency rule 1); shown under the model fields in Settings. */
 export const TIER_USE: Record<Tier, string> = {
-  fast: 'Ghost text, tags, summaries, and classification.',
+  fast: 'Ghost text, tags, summaries, proofreading, and classification.',
   strong:
     'Author mode, critique, the beta reader, Story Intelligence queries, and Check consistency.'
 }
@@ -164,7 +164,7 @@ export const GHOST_AFTER_CHARS = 100
  * rows, so a member is never renamed. A feature's budget lines join `FEATURE_BUDGETS` and
  * `FEATURE_INPUT_BUDGETS` in the change that builds it (F-5.3 ghost text, F-4.7 tags, F-5.6
  * summaries, F-5.4 chat, F-5.5 Author mode, F-5.7 queries, F-14.8 critique, F-5.8 embeddings,
- * F-14.10 rewrite, F-14.3 brief, F-13.4 continuity).
+ * F-14.10 rewrite, F-14.3 brief, F-13.4 continuity, F-14.12 proofread).
  */
 export const AI_FEATURE_IDS = [
   'ghostText',
@@ -184,7 +184,9 @@ export const AI_FEATURE_IDS = [
   // F-12.3: chapter and scene boundaries, titles, and tag candidates for an imported manuscript.
   'importStructure',
   // F-13.4: the consistency checker, a scene against the story bible.
-  'continuity'
+  'continuity',
+  // F-14.12: the proofreading pass over a scene or a selection.
+  'proofread'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -221,7 +223,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-12.3: one chunk's breaks, scene titles, and tag candidates as JSON.
   importStructure: 400,
   // F-13.4: up to 6 contradictions as JSON, each with a reference number, a quote, a reason, and a fix.
-  continuity: 800
+  continuity: 800,
+  // F-14.12: up to 30 fixes as JSON, each a kind, a short quote, and its corrected form.
+  proofread: 2_000
 }
 
 /**
@@ -256,7 +260,10 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   importStructure: 6_000,
   // F-13.4: one scene head-truncated to 20,000 characters (in the background only the paragraphs
   // holding a candidate) plus the numbered references within `CONTINUITY_REFS_TOKEN_BUDGET`.
-  continuity: 6_000
+  continuity: 6_000,
+  // F-14.12: one scene or selection head-truncated to 20,000 characters, the brief, the voice
+  // block, and up to 200 names and dictionary words to leave alone.
+  proofread: 8_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

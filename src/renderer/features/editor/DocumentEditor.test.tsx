@@ -24,12 +24,13 @@ import { resetActiveEditorStore, useActiveEditorStore } from './activeEditorStor
 import { DocumentEditor } from './DocumentEditor'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { resetBetaReaderStore, useBetaReaderStore } from './betaReaderStore'
+import { resetProofreadStore, useProofreadStore } from './proofreadStore'
 import { resetRewriteStore, useRewriteStore } from './rewriteStore'
 import { resetSceneMetaStore } from './sceneMetaStore'
 import { resetVoiceStore } from '@renderer/features/ai/voiceStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { defaultAiSettings } from '@shared/aiSettings'
-import type { AiBetaReaderResult, AiRewriteResult } from '@shared/ipc/contract'
+import type { AiBetaReaderResult, AiProofreadResult, AiRewriteResult } from '@shared/ipc/contract'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultFocusSettings } from '@shared/focus'
 import { resetBackgroundStore, useBackgroundStore } from '@renderer/features/focus/backgroundStore'
@@ -197,6 +198,7 @@ beforeEach(() => {
   resetActiveEditorStore()
   resetRewriteStore()
   resetBetaReaderStore()
+  resetProofreadStore()
   resetAiSettingsStore()
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
@@ -214,6 +216,7 @@ afterEach(() => {
   resetActiveEditorStore()
   resetRewriteStore()
   resetBetaReaderStore()
+  resetProofreadStore()
   resetAiSettingsStore()
 })
 
@@ -640,5 +643,42 @@ describe('DocumentEditor inline tags (F-4.6)', () => {
       { type: 'inlineTag', attrs: { id: 't-forest', name: 'dark-forest' } },
       { type: 'text', text: ' forest' }
     ])
+  })
+})
+
+describe('DocumentEditor proofread (F-14.12)', () => {
+  const SCENE = 'Into the dark woods they went, without a word.'
+
+  it('the toolbar button proofreads the selection, and unmounting dismisses the pass', async () => {
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
+    let sent: Input<'ai:proofread'> | null = null
+    let cancelled: string | null = null
+    const editor = await mountReadyWithEditor({
+      'document:get': () => ({ id: 'sc-1', content: doc(SCENE) }),
+      'ai:proofread': (input) =>
+        new Promise<AiProofreadResult>(() => {
+          sent = input as Input<'ai:proofread'>
+        }),
+      'ai:cancel': (input) => {
+        cancelled = (input as Input<'ai:cancel'>).requestId
+        return { cancelled: true }
+      }
+    })
+    const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
+    const proofread = within(toolbar).getByRole('button', { name: 'Proofread' })
+    await waitFor(() => expect(proofread).toBeEnabled())
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 31 })
+    })
+    await waitFor(() => expect(proofread).toHaveAttribute('title', 'Proofread the selection'))
+    await userEvent.click(proofread)
+    await waitFor(() => expect(sent).not.toBeNull())
+    expect(sent).toMatchObject({ nodeId: 'sc-1', selection: 'Into the dark woods they went,' })
+    expect(screen.getByTestId('proofread-pending')).toBeInTheDocument()
+    expect(screen.getByTestId('proofread-scope')).toHaveTextContent('Selection')
+    const requestId = useProofreadStore.getState().session?.requestId ?? null
+    cleanup()
+    expect(useProofreadStore.getState().session).toBeNull()
+    await waitFor(() => expect(cancelled).toBe(requestId))
   })
 })

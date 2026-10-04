@@ -29,6 +29,9 @@ import { BetaReaderPanel } from './BetaReaderPanel'
 import { useBetaReaderStore } from './betaReaderStore'
 import { CritiqueButton } from './CritiqueButton'
 import { CritiquePanel } from './CritiquePanel'
+import { ProofreadButton } from './ProofreadButton'
+import { ProofreadPanel } from './ProofreadPanel'
+import { useProofreadStore } from './proofreadStore'
 import { useCritiqueStore } from './critiqueStore'
 import { NotesToggleButton } from './NotesPanel'
 import { RewriteButton } from './RewriteButton'
@@ -116,10 +119,11 @@ const TOKEN_MENU_ITEMS: MenuItem[] = [
  * runs only in the single-document view: the controller arms itself there and the toggle sits
  * in the toolbar's right slot, so a stacked region never shows ghost text. The voice exemplar
  * button (F-14.1), the rewrite button (F-14.10), and the editor's-notes button (F-14.8) sit
- * beside it, for the same reason, and so does the beta-reader button (F-14.11); the rewrite
- * panel shows between the tag bar and the text while this document's rewrite runs, with the
- * editor's-notes panel under it while its critique runs and the beta-reader panel under that
- * while its read runs, and all three are dismissed when the instance goes (unmount, switch,
+ * beside it, for the same reason, and so do the proofread button (F-14.12) and the
+ * beta-reader button (F-14.11); the rewrite panel shows between the tag bar and the text while
+ * this document's rewrite runs, with the editor's-notes panel under it while its critique runs,
+ * the proofread panel under that while its pass runs, and the beta-reader panel under that
+ * while its read runs, and all four are dismissed when the instance goes (unmount, switch,
  * or rebuild).
  * Once ready, the instance registers as the active editor (F-5.4; again on focus, so the
  * last-focused region of a stack wins) and releases itself on unmount, which is how the
@@ -205,6 +209,8 @@ function RegionEditor({
   useEffect(() => () => useRewriteStore.getState().dismissFor(id), [editor, id])
 
   useEffect(() => () => useCritiqueStore.getState().dismissFor(id), [editor, id])
+
+  useEffect(() => () => useProofreadStore.getState().dismissFor(id), [editor, id])
 
   useEffect(() => () => useBetaReaderStore.getState().dismissFor(id), [editor, id])
 
@@ -298,6 +304,7 @@ function RegionEditor({
           right={
             <>
               <CritiqueButton editor={ready ? editor : null} nodeId={id} />
+              <ProofreadButton editor={ready ? editor : null} nodeId={id} />
               <BetaReaderButton editor={ready ? editor : null} nodeId={id} />
               <RewriteButton editor={ready ? editor : null} nodeId={id} />
               <MarkVoiceExemplarButton editor={ready ? editor : null} nodeId={id} />
@@ -311,6 +318,7 @@ function RegionEditor({
       {focus ? null : <TagBar id={id} />}
       {focus ? null : <RewritePanel id={id} editor={ready ? editor : null} />}
       {focus ? null : <CritiquePanel id={id} editor={ready ? editor : null} />}
+      {focus ? null : <ProofreadPanel id={id} editor={ready ? editor : null} />}
       {focus ? null : <BetaReaderPanel id={id} editor={ready ? editor : null} />}
       <div className={`flex min-h-0 flex-1 flex-col overflow-y-auto ${deskClass(sheet)}`}>
         <EditorContent

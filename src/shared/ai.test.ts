@@ -68,7 +68,8 @@ describe('budgets', () => {
       brief: 200,
       betaReader: 1_200,
       importStructure: 400,
-      continuity: 800
+      continuity: 800,
+      proofread: 2_000
     })
     expect(Object.keys(FEATURE_INPUT_BUDGETS).sort()).toEqual(Object.keys(FEATURE_BUDGETS).sort())
     for (const feature of AI_FEATURE_IDS) {

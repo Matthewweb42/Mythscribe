@@ -1518,6 +1518,122 @@ describe('ai:critique (F-14.8)', () => {
   })
 })
 
+describe('ai:proofread (F-14.12)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const SCENE =
+    'The ferry landing was empty when Mara reached it. The the rope hung slack in the water ' +
+    'and teh bell had lost its clapper years ago.'
+  const TYPO = { kind: 'typo', quote: 'and teh bell', fix: 'and the bell' }
+
+  /** A project with the dial at Ask, a key, a scene with two errors, and one fix waiting. */
+  async function ready(dial: AiDial = 1): Promise<{ scene: string }> {
+    await invoke('project:create', { name: 'Proofread', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: SCENE }] }]
+      }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+    await invoke('ai:setKey', { key: KEY })
+    answersWith({ fixes: [TYPO] })
+    return { scene: scene.id }
+  }
+
+  function answersWith(answer: unknown): void {
+    complete.mockResolvedValue({
+      text: JSON.stringify(answer),
+      model: 'gpt-fake',
+      usage: { inputTokens: 700, outputTokens: 90 }
+    })
+  }
+
+  const ask = (scene: string, requestId = 'pr-1'): Input<'ai:proofread'> => ({
+    nodeId: scene,
+    requestId
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('ai:proofread', ask('x'))).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers the kept fixes, drops a fabricated one, and records them as one pending proposal', async () => {
+    const { scene } = await ready()
+    answersWith({
+      fixes: [TYPO, { kind: 'spelling', quote: 'The dragon circled', fix: 'The dragon circles' }]
+    })
+    const result = await invoke('ai:proofread', ask(scene, 'pr-7'))
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toEqual({
+      ok: true,
+      fixes: [{ ...TYPO, flagged: false, violation: null }],
+      scope: 'scene',
+      truncated: false,
+      dropped: 1,
+      usage: { inputTokens: 700, outputTokens: 90 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      proposalId: result.proposalId,
+      requestId: 'pr-7'
+    })
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'proofread',
+      nodeId: scene,
+      promptVersion: 'proofread.v1',
+      content: JSON.stringify(result.fixes),
+      flagged: false,
+      violation: null,
+      regeneratedFrom: null,
+      status: 'pending'
+    })
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['proofread'])
+  })
+
+  it('records a proposal for a clean result too, and proofreads only the selection when one is sent', async () => {
+    const { scene } = await ready()
+    answersWith({ fixes: [] })
+    const clean = await invoke('ai:proofread', {
+      ...ask(scene, 'pr-8'),
+      selection: 'The ferry landing was empty when Mara reached it.'
+    })
+    if (!clean.ok) throw new Error(clean.message)
+    expect(clean.fixes).toEqual([])
+    expect(clean.scope).toBe('selection')
+    expect(getProposal(manager.require().connection.orm, clean.proposalId)).toMatchObject({
+      feature: 'proofread',
+      content: '[]'
+    })
+  })
+
+  it('answers an expected AI failure as data with the requestId, and an unknown or too-short node through the error envelope', async () => {
+    const { scene } = await ready(0)
+    expect(await invoke('ai:proofread', ask(scene, 'pr-3'))).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Proofread needs the AI dial at Ask or higher (it is at Off).',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      requestId: 'pr-3'
+    })
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    const unknown = await handlerFor('ai:proofread')(undefined, ask('nope'))
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    const short = await handlerFor('ai:proofread')(undefined, {
+      ...ask(scene),
+      selection: 'Too short.'
+    })
+    expect(short.ok).toBe(false)
+    if (!short.ok) expect(short.error.code).toBe('VALIDATION')
+  })
+})
+
 describe('continuity (F-13.4)', () => {
   const KEY = 'sk-test-secret-1234abcd'
   const OPENING =
