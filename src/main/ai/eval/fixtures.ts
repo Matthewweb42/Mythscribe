@@ -46,7 +46,7 @@ import {
   renderVoiceRules,
   type Stylometrics
 } from '@shared/stylometry'
-import type { TagCategory } from '@shared/tags'
+import { TAG_NAME_MAX, type TagCategory } from '@shared/tags'
 import { TAG_TEMPLATES, type TagTemplateTag } from '@shared/tagTemplates'
 import { voiceConfidence, VOICE_EXEMPLAR_TEXT_MAX } from '@shared/voice'
 import { voiceBlock } from '../../voice/voiceBlock'
@@ -72,6 +72,12 @@ import {
 import { buildChatRegenPrompt, CHAT_REGEN_PROMPT_VERSION } from '../prompts/chatRegen.v1'
 import { buildChatRegenPromptV2, CHAT_REGEN_PROMPT_V2_VERSION } from '../prompts/chatRegen.v2'
 import { buildChatRegenPromptV3, CHAT_REGEN_PROMPT_V3_VERSION } from '../prompts/chatRegen.v3'
+import {
+  buildChatPromptV4,
+  CHAT_PROMPT_V4_VERSION,
+  type BuildChatPromptV4Input
+} from '../prompts/chat.v4'
+import { buildChatRegenPromptV4, CHAT_REGEN_PROMPT_V4_VERSION } from '../prompts/chatRegen.v4'
 import {
   buildContinuityPrompt,
   CONTINUITY_PROMPT_VERSION,
@@ -130,6 +136,15 @@ import {
   GHOST_REGEN_PROMPT_V3_VERSION
 } from '../prompts/ghostTextRegen.v3'
 import {
+  buildGhostTextPromptV4,
+  GHOST_PROMPT_V4_VERSION,
+  type BuildGhostTextPromptV4Input
+} from '../prompts/ghostText.v4'
+import {
+  buildGhostTextRegenPromptV4,
+  GHOST_REGEN_PROMPT_V4_VERSION
+} from '../prompts/ghostTextRegen.v4'
+import {
   buildRewritePrompt,
   REWRITE_PROMPT_VERSION,
   type BuildRewritePromptInput
@@ -144,6 +159,15 @@ import {
   buildRewriteRegenPromptV2,
   REWRITE_REGEN_PROMPT_V2_VERSION
 } from '../prompts/rewriteRegen.v2'
+import {
+  buildRewritePromptV3,
+  REWRITE_PROMPT_V3_VERSION,
+  type BuildRewritePromptV3Input
+} from '../prompts/rewrite.v3'
+import {
+  buildRewriteRegenPromptV3,
+  REWRITE_REGEN_PROMPT_V3_VERSION
+} from '../prompts/rewriteRegen.v3'
 import { buildSummaryPrompt, SUMMARY_PROMPT_VERSION } from '../prompts/summary.v1'
 import {
   buildSummaryPromptV2,
@@ -181,6 +205,7 @@ import {
 } from '../prompts/query.v2'
 import { buildProofreadPrompt, PROOFREAD_PROMPT_VERSION } from '../prompts/proofread.v1'
 import { buildWhatNextPrompt, WHAT_NEXT_PROMPT_VERSION } from '../prompts/whatNext.v1'
+import { buildWhatNextPromptV2, WHAT_NEXT_PROMPT_V2_VERSION } from '../prompts/whatNext.v2'
 import { fitTailToBudget } from '../whatNext'
 import { fitSceneToBudget } from '../critique'
 import { fitQueryPrompt } from '../query'
@@ -209,6 +234,7 @@ import {
   SCENE_BRIEF_FIELD_MAX,
   type SceneBrief
 } from '@shared/sceneMeta'
+import { renderSceneSteer, SCENE_STEER_CATEGORIES, SCENE_STEER_NAMES_MAX } from '@shared/sceneSteer'
 
 /**
  * The eval harness's fixtures (F-5.12): one manuscript passage, the voice profile it yields,
@@ -411,6 +437,23 @@ const FIXTURE_GHOST_BIBLE = renderStoryBible(FIXTURE_FACTS, STORY_BIBLE_GHOST_TO
 const MAXED_BIBLE = renderStoryBible(MAXED_FACTS, STORY_BIBLE_TOKEN_BUDGET)
 const MAXED_GHOST_BIBLE = renderStoryBible(MAXED_FACTS, STORY_BIBLE_GHOST_TOKEN_BUDGET)
 
+/** The scene steer a full request carries (F-14.13): a tone, a content tag, a plot thread, and a theme. */
+const FIXTURE_STEER = renderSceneSteer([
+  { category: 'tone', name: 'suspenseful' },
+  { category: 'content', name: 'dialogue' },
+  { category: 'plotThread', name: 'main-plot' },
+  { category: 'custom', name: 'debt' }
+])
+/** Every steer category over its name cap, each name at the tag-name cap: the steer at its worst. */
+const MAXED_STEER = renderSceneSteer(
+  SCENE_STEER_CATEGORIES.flatMap((category) =>
+    Array.from({ length: SCENE_STEER_NAMES_MAX + 1 }, (_, i) => ({
+      category,
+      name: `${category}-${i}-`.padEnd(TAG_NAME_MAX, 'x')
+    }))
+  )
+)
+
 export interface EvalCase {
   version: PromptVersion
   name: string
@@ -593,6 +636,37 @@ function ghostCaseV3(
   }
 }
 
+/** The same three shapes under `ghostText.v4` (F-14.13): no steer, the fixture steer, the steer at its cap. */
+const ghostFreshV4: BuildGhostTextPromptV4Input = { ...ghostFreshV3, steer: null }
+const ghostFullV4: BuildGhostTextPromptV4Input = { ...ghostFullV3, steer: FIXTURE_STEER }
+const ghostMaxedV4: BuildGhostTextPromptV4Input = { ...ghostMaxedV3, steer: MAXED_STEER }
+
+function ghostCaseV4(
+  name: string,
+  note: string,
+  input: BuildGhostTextPromptV4Input,
+  violation: string | null
+): EvalCase {
+  const built =
+    violation === null
+      ? buildGhostTextPromptV4(input)
+      : buildGhostTextRegenPromptV4({ ...input, violation })
+  return {
+    version: violation === null ? GHOST_PROMPT_V4_VERSION : GHOST_REGEN_PROMPT_V4_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    temperature: built.temperature,
+    scoring: {
+      kind: 'prose',
+      before: input.before,
+      after: input.after,
+      profile: input.voice === null ? null : FIXTURE_STATS
+    }
+  }
+}
+
 function tagsCase(
   name: string,
   note: string,
@@ -748,6 +822,43 @@ function chatCaseV3(
   }
 }
 
+/** The same four shapes under `chat.v4` (F-14.13): Agent mode carries the steer; Plan mode never does. */
+const planFreshV4: BuildChatPromptV4Input = { ...planFreshV3, steer: null }
+const planFullV4: BuildChatPromptV4Input = { ...planFullV3, steer: FIXTURE_STEER }
+const agentFullV4: BuildChatPromptV4Input = { ...agentFullV3, steer: FIXTURE_STEER }
+const agentMaxedV4: BuildChatPromptV4Input = { ...agentMaxedV3, steer: MAXED_STEER }
+
+function chatCaseV4(
+  name: string,
+  note: string,
+  given: BuildChatPromptV4Input,
+  violation: string | null
+): EvalCase {
+  // The oldest history turns are dropped until the first prompt fits, exactly as `runChat`
+  // drops them (token rule 8); the regenerate reuses the trimmed history, as it does there.
+  const fits = (candidate: BuildChatPromptV4Input): boolean =>
+    estimateTokens(
+      buildChatPromptV4(candidate)
+        .messages.map((m) => m.content)
+        .join('\n')
+    ) <= inputBudget('chat')
+  let input = given
+  while (input.history.length > 0 && !fits(input)) {
+    input = { ...input, history: input.history.slice(1) }
+  }
+  const built =
+    violation === null ? buildChatPromptV4(input) : buildChatRegenPromptV4({ ...input, violation })
+  return {
+    version: violation === null ? CHAT_PROMPT_V4_VERSION : CHAT_REGEN_PROMPT_V4_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
 /** The paragraph an author would select for a rewrite, with the manuscript text each side of it. */
 const REWRITE_PASSAGE =
   'He looked at the lantern, then at the far bank, where the dark trees ran down to the water ' +
@@ -822,6 +933,29 @@ function rewriteCaseV2(
     regen === null ? buildRewritePromptV2(input) : buildRewriteRegenPromptV2({ ...input, ...regen })
   return {
     version: regen === null ? REWRITE_PROMPT_V2_VERSION : REWRITE_REGEN_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
+/** The same three shapes under `rewrite.v3` (F-14.13): no steer, the fixture steer, the steer at its cap. */
+const rewriteFreshV3: BuildRewritePromptV3Input = { ...rewriteFreshV2, steer: null }
+const rewriteFullV3: BuildRewritePromptV3Input = { ...rewriteFullV2, steer: FIXTURE_STEER }
+const rewriteMaxedV3: BuildRewritePromptV3Input = { ...rewriteMaxedV2, steer: MAXED_STEER }
+
+function rewriteCaseV3(
+  name: string,
+  note: string,
+  input: BuildRewritePromptV3Input,
+  regen: { note: string | null; violation: string | null } | null
+): EvalCase {
+  const built =
+    regen === null ? buildRewritePromptV3(input) : buildRewriteRegenPromptV3({ ...input, ...regen })
+  return {
+    version: regen === null ? REWRITE_PROMPT_V3_VERSION : REWRITE_REGEN_PROMPT_V3_VERSION,
     name,
     note,
     messages: built.messages,
@@ -1497,6 +1631,28 @@ function whatNextCase(
   }
 }
 
+function whatNextCaseV2(
+  name: string,
+  note: string,
+  input: { text: string; brief: string | null; steer: string | null; bible: string | null }
+): EvalCase {
+  // The tail is fitted to the input budget exactly as the feature fits it (token rule 8).
+  const { text } = fitTailToBudget(
+    input.text,
+    inputBudget('whatNext'),
+    (cut) => buildWhatNextPromptV2({ ...input, text: cut }).messages
+  )
+  const built = buildWhatNextPromptV2({ ...input, text })
+  return {
+    version: WHAT_NEXT_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'whatNext' }
+  }
+}
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -1566,6 +1722,36 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed',
     'the maxed case with its bible, regenerated after a tense violation',
     ghostMaxedV3,
+    VIOLATION
+  ),
+  ghostCaseV4(
+    'fresh',
+    'the v3 fresh case with no scene steer: a scene with no tone, content, plot thread, or theme tag',
+    ghostFreshV4,
+    null
+  ),
+  ghostCaseV4(
+    'full',
+    'the v3 full case plus the scene steer (a tone, a content tag, a plot thread, a theme)',
+    ghostFullV4,
+    null
+  ),
+  ghostCaseV4(
+    'maxed',
+    'every cap at its limit, the steer with every category over its name cap at the tag-name cap',
+    ghostMaxedV4,
+    null
+  ),
+  ghostCaseV4(
+    'full',
+    'the full case with its steer, regenerated after a tense violation',
+    ghostFullV4,
+    VIOLATION
+  ),
+  ghostCaseV4(
+    'maxed',
+    'the maxed case with its steer, regenerated after a tense violation',
+    ghostMaxedV4,
     VIOLATION
   ),
   tagsCase(
@@ -1694,6 +1880,32 @@ export const EVAL_CASES: EvalCase[] = [
     agentMaxedV3,
     VIOLATION
   ),
+  chatCaseV4('plan fresh', 'the v3 plan fresh case with no scene steer', planFreshV4, null),
+  chatCaseV4(
+    'plan full',
+    'the v3 plan full case with a steer passed in, which Plan mode leaves out',
+    planFullV4,
+    null
+  ),
+  chatCaseV4('agent full', 'the v3 agent full case plus the scene steer', agentFullV4, null),
+  chatCaseV4(
+    'agent maxed',
+    'every cap at its limit, the steer at its cap too, the oldest history turn dropped to fit as the feature does',
+    agentMaxedV4,
+    null
+  ),
+  chatCaseV4(
+    'agent full',
+    'the agent full case with its steer, regenerated after a tense violation',
+    agentFullV4,
+    VIOLATION
+  ),
+  chatCaseV4(
+    'agent maxed',
+    'the agent maxed case with its steer and trimmed history, regenerated after a tense violation',
+    agentMaxedV4,
+    VIOLATION
+  ),
   rewriteCase('fresh', 'no voice block, no context either side, no metadata', rewriteFresh, null),
   rewriteCase(
     'full',
@@ -1752,6 +1964,27 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed both',
     'the maxed case with its bible, regenerated with an author note and a tense violation',
     rewriteMaxedV2,
+    { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: VIOLATION }
+  ),
+  rewriteCaseV3('fresh', 'the v2 fresh case with no scene steer', rewriteFreshV3, null),
+  rewriteCaseV3('full', 'the v2 full case plus the scene steer', rewriteFullV3, null),
+  rewriteCaseV3('maxed', 'every cap at its limit, the steer at its cap too', rewriteMaxedV3, null),
+  rewriteCaseV3(
+    'full note',
+    'the full case with its steer, regenerated with an author note at the length limit',
+    rewriteFullV3,
+    { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: null }
+  ),
+  rewriteCaseV3(
+    'full violation',
+    'the full case with its steer, regenerated after a tense violation',
+    rewriteFullV3,
+    { note: null, violation: VIOLATION }
+  ),
+  rewriteCaseV3(
+    'maxed both',
+    'the maxed case with its steer, regenerated with an author note and a tense violation',
+    rewriteMaxedV3,
     { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: VIOLATION }
   ),
   critiqueCase(
@@ -2067,5 +2300,27 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed',
     'the worst input as the fit leaves it: the tail of a long scene at the character budget, the brief and the story bible at their caps',
     { text: FIXTURE_PASSAGE.repeat(20), brief: MAXED_BRIEF_BLOCK, bible: MAXED_BIBLE }
+  ),
+  whatNextCaseV2('fresh', 'the v1 fresh case with no scene steer', {
+    text: FIXTURE_PASSAGE,
+    brief: null,
+    steer: null,
+    bible: null
+  }),
+  whatNextCaseV2('full', 'the fixture scene with its brief, the scene steer, and the story bible', {
+    text: FIXTURE_PASSAGE,
+    brief: BRIEF_BLOCK,
+    steer: FIXTURE_STEER,
+    bible: FIXTURE_BIBLE
+  }),
+  whatNextCaseV2(
+    'maxed',
+    'the worst input as the fit leaves it: the tail of a long scene at the character budget, the brief, the steer, and the story bible at their caps',
+    {
+      text: FIXTURE_PASSAGE.repeat(20),
+      brief: MAXED_BRIEF_BLOCK,
+      steer: MAXED_STEER,
+      bible: MAXED_BIBLE
+    }
   )
 ]

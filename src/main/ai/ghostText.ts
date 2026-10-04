@@ -13,9 +13,10 @@ import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
 import { voiceBlock } from '../voice/voiceBlock'
 import { assertFeatureAllowed } from './dial'
 import { regenRequestId } from './inflight'
+import { buildSceneSteer } from './context/sceneSteer'
 import { buildStoryBible } from './context/storyBible'
-import { buildGhostTextPromptV3 } from './prompts/ghostText.v3'
-import { buildGhostTextRegenPromptV3 } from './prompts/ghostTextRegen.v3'
+import { buildGhostTextPromptV4 } from './prompts/ghostText.v4'
+import { buildGhostTextRegenPromptV4 } from './prompts/ghostTextRegen.v4'
 import { AiCancelledError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from './request'
 
@@ -58,12 +59,12 @@ export interface GhostTextResult {
  * (F-14.3: its own five lines, the previous scene's reader-knows-after line, and the next
  * scene's goal) as the context the data-sharing panel lists, builds the voice block (F-14.1: the locally computed
  * profile for the scene's POV, with the exemplars closest to the passage at the caret), builds
- * `ghostText.v3` with the active writing preset (F-5.2), runs it through the one request path
+ * `ghostText.v4` (the scene steer, F-14.13, after the brief) with the active writing preset (F-5.2), runs it through the one request path
  * (`fast` tier, the preset's temperature, at most 60 tokens), and post-processes the answer
  * into a one-or-two-sentence continuation. Then the fidelity check (F-14.7): the answer is
  * scored locally against the profile's stylometrics and against the author's banned phrases
  * (F-14.2, which come first, so a banned phrase is what the regenerate names); an off-voice
- * answer is regenerated once through `ghostTextRegen.v3` with the first violation named,
+ * answer is regenerated once through `ghostTextRegen.v4` with the first violation named,
  * re-scored, and shown flagged
  * when it still fails. A regenerate that fails for any reason (provider, budget, cap) falls
  * back to the first answer, flagged: the author always gets the suggestion that exists. A
@@ -71,7 +72,7 @@ export interface GhostTextResult {
  * author rules) skips the check, so a fresh project only ever warns about a banned phrase.
  *
  * The context hash covers everything that shaped the messages: the caret window, the notes,
- * the metadata, the brief, the preset, the author's rules, and the voice profile's version (the version
+ * the metadata, the brief, the steer, the bible, the preset, the author's rules, and the voice profile's version (the version
  * stands in for the stylometrics and the exemplars: it moves on every save and exemplar write,
  * so a changed profile misses the cache while an unchanged one keeps hitting it); the
  * regenerate adds the violation's message, which names the banned phrase, so two phrases never
@@ -107,6 +108,7 @@ export async function generateGhostText(
     nodeId: input.nodeId,
     maxTokens: STORY_BIBLE_GHOST_TOKEN_BUDGET
   })
+  const steer = buildSceneSteer(db, input.nodeId)
 
   const promptInput = {
     before: input.before,
@@ -114,17 +116,19 @@ export async function generateGhostText(
     notes,
     meta,
     brief,
+    steer,
     voice,
     bible,
     preset
   }
-  const prompt = buildGhostTextPromptV3(promptInput)
+  const prompt = buildGhostTextPromptV4(promptInput)
   const context = {
     before: input.before,
     after: input.after,
     notes,
     meta,
     brief,
+    steer,
     bible,
     preset,
     authorRules: profile.authorRules,
@@ -160,7 +164,7 @@ export async function generateGhostText(
   const violation = checkGhostTextFidelity(profile.stats, firstText, banned).violations[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
-  const regen = buildGhostTextRegenPromptV3({ ...promptInput, violation: violation.message })
+  const regen = buildGhostTextRegenPromptV4({ ...promptInput, violation: violation.message })
   const flaggedFirst: GhostTextResult = {
     ...shown(first, firstText, prompt.version),
     flagged: true,

@@ -1154,7 +1154,7 @@ describe('ai:chat (F-5.4)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'chat',
       nodeId: scene,
-      promptVersion: 'chat.v3',
+      promptVersion: 'chat.v4',
       model: 'gpt-fake',
       promptTokens: 90,
       completionTokens: 8,
@@ -1351,7 +1351,7 @@ describe('ai:rewrite (F-14.10)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'rewrite',
       nodeId: scene,
-      promptVersion: 'rewrite.v2',
+      promptVersion: 'rewrite.v3',
       content: 'The storm broke at dusk. Mara counted the gaps.',
       flagged: false,
       violation: null,
@@ -1378,7 +1378,7 @@ describe('ai:rewrite (F-14.10)', () => {
     expect(again.text).toBe('Dusk, and the storm over the forest.')
     expect(getProposal(manager.require().connection.orm, again.proposalId)).toMatchObject({
       feature: 'rewrite',
-      promptVersion: 'rewriteRegen.v2',
+      promptVersion: 'rewriteRegen.v3',
       regeneratedFrom: first.proposalId
     })
   })
@@ -1716,7 +1716,7 @@ describe('ai:whatNext (F-5.17)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'whatNext',
       nodeId: scene,
-      promptVersion: 'whatNext.v1',
+      promptVersion: 'whatNext.v2',
       content: JSON.stringify(DIRECTIONS),
       flagged: false,
       violation: null,
@@ -5267,7 +5267,7 @@ describe('ai:ghostText (F-5.3)', () => {
     expect(getProposal(db, shown.proposalId)).toMatchObject({
       feature: 'ghostText',
       nodeId: scene,
-      promptVersion: 'ghostText.v3',
+      promptVersion: 'ghostText.v4',
       model: 'gpt-fake',
       promptTokens: 120,
       completionTokens: 12,

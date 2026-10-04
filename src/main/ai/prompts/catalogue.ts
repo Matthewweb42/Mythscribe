@@ -5,9 +5,11 @@ import { BRIEF_PROMPT_VERSION } from './brief.v1'
 import { CHAT_PROMPT_VERSION } from './chat.v1'
 import { CHAT_PROMPT_V2_VERSION } from './chat.v2'
 import { CHAT_PROMPT_V3_VERSION } from './chat.v3'
+import { CHAT_PROMPT_V4_VERSION } from './chat.v4'
 import { CHAT_REGEN_PROMPT_VERSION } from './chatRegen.v1'
 import { CHAT_REGEN_PROMPT_V2_VERSION } from './chatRegen.v2'
 import { CHAT_REGEN_PROMPT_V3_VERSION } from './chatRegen.v3'
+import { CHAT_REGEN_PROMPT_V4_VERSION } from './chatRegen.v4'
 import { CONTINUITY_PROMPT_VERSION } from './continuity.v1'
 import { CRITIQUE_PROMPT_VERSION } from './critique.v1'
 import { CRITIQUE_PROMPT_V2_VERSION } from './critique.v2'
@@ -18,23 +20,28 @@ import { CRITIQUE_REGEN_PROMPT_V3_VERSION } from './critiqueRegen.v3'
 import { GHOST_PROMPT_VERSION } from './ghostText.v1'
 import { GHOST_PROMPT_V2_VERSION } from './ghostText.v2'
 import { GHOST_PROMPT_V3_VERSION } from './ghostText.v3'
+import { GHOST_PROMPT_V4_VERSION } from './ghostText.v4'
 import { GHOST_REGEN_PROMPT_VERSION } from './ghostTextRegen.v1'
 import { GHOST_REGEN_PROMPT_V2_VERSION } from './ghostTextRegen.v2'
 import { GHOST_REGEN_PROMPT_V3_VERSION } from './ghostTextRegen.v3'
+import { GHOST_REGEN_PROMPT_V4_VERSION } from './ghostTextRegen.v4'
 import { IMPORT_STRUCTURE_PROMPT_VERSION } from './importStructure.v1'
 import { PROOFREAD_PROMPT_VERSION } from './proofread.v1'
 import { QUERY_PROMPT_VERSION } from './query.v1'
 import { QUERY_PROMPT_V2_VERSION } from './query.v2'
 import { REWRITE_PROMPT_VERSION } from './rewrite.v1'
 import { REWRITE_PROMPT_V2_VERSION } from './rewrite.v2'
+import { REWRITE_PROMPT_V3_VERSION } from './rewrite.v3'
 import { REWRITE_REGEN_PROMPT_VERSION } from './rewriteRegen.v1'
 import { REWRITE_REGEN_PROMPT_V2_VERSION } from './rewriteRegen.v2'
+import { REWRITE_REGEN_PROMPT_V3_VERSION } from './rewriteRegen.v3'
 import { SUMMARY_PROMPT_VERSION } from './summary.v1'
 import { SUMMARY_PROMPT_V2_VERSION } from './summary.v2'
 import { SUMMARY_PROMPT_V3_VERSION } from './summary.v3'
 import { TAGS_PROMPT_VERSION } from './tags.v1'
 import { TAGS_REGEN_PROMPT_VERSION } from './tagsRegen.v1'
 import { WHAT_NEXT_PROMPT_VERSION } from './whatNext.v1'
+import { WHAT_NEXT_PROMPT_V2_VERSION } from './whatNext.v2'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -55,6 +62,8 @@ export const PROMPT_VERSIONS = [
   GHOST_REGEN_PROMPT_V2_VERSION,
   GHOST_PROMPT_V3_VERSION,
   GHOST_REGEN_PROMPT_V3_VERSION,
+  GHOST_PROMPT_V4_VERSION,
+  GHOST_REGEN_PROMPT_V4_VERSION,
   TAGS_PROMPT_VERSION,
   TAGS_REGEN_PROMPT_VERSION,
   CHAT_PROMPT_VERSION,
@@ -63,10 +72,14 @@ export const PROMPT_VERSIONS = [
   CHAT_REGEN_PROMPT_V2_VERSION,
   CHAT_PROMPT_V3_VERSION,
   CHAT_REGEN_PROMPT_V3_VERSION,
+  CHAT_PROMPT_V4_VERSION,
+  CHAT_REGEN_PROMPT_V4_VERSION,
   REWRITE_PROMPT_VERSION,
   REWRITE_REGEN_PROMPT_VERSION,
   REWRITE_PROMPT_V2_VERSION,
   REWRITE_REGEN_PROMPT_V2_VERSION,
+  REWRITE_PROMPT_V3_VERSION,
+  REWRITE_REGEN_PROMPT_V3_VERSION,
   CRITIQUE_PROMPT_VERSION,
   CRITIQUE_REGEN_PROMPT_VERSION,
   CRITIQUE_PROMPT_V2_VERSION,
@@ -84,7 +97,8 @@ export const PROMPT_VERSIONS = [
   IMPORT_STRUCTURE_PROMPT_VERSION,
   CONTINUITY_PROMPT_VERSION,
   PROOFREAD_PROMPT_VERSION,
-  WHAT_NEXT_PROMPT_VERSION
+  WHAT_NEXT_PROMPT_VERSION,
+  WHAT_NEXT_PROMPT_V2_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -131,6 +145,18 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     output: 'text',
     since: 'F-14.9'
   },
+  [GHOST_PROMPT_V4_VERSION]: {
+    feature: 'ghostText',
+    tier: 'fast',
+    output: 'text',
+    since: 'F-14.13'
+  },
+  [GHOST_REGEN_PROMPT_V4_VERSION]: {
+    feature: 'ghostText',
+    tier: 'fast',
+    output: 'text',
+    since: 'F-14.13'
+  },
   [TAGS_PROMPT_VERSION]: { feature: 'tags', tier: 'fast', output: 'json', since: 'F-4.7' },
   [TAGS_REGEN_PROMPT_VERSION]: { feature: 'tags', tier: 'fast', output: 'json', since: 'F-14.5' },
   [CHAT_PROMPT_VERSION]: { feature: 'chat', tier: 'fast', output: 'text', since: 'F-5.4' },
@@ -148,6 +174,18 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'text',
     since: 'F-14.9'
+  },
+  [CHAT_PROMPT_V4_VERSION]: {
+    feature: 'chat',
+    tier: 'fast',
+    output: 'text',
+    since: 'F-14.13'
+  },
+  [CHAT_REGEN_PROMPT_V4_VERSION]: {
+    feature: 'chat',
+    tier: 'fast',
+    output: 'text',
+    since: 'F-14.13'
   },
   [REWRITE_PROMPT_VERSION]: { feature: 'rewrite', tier: 'fast', output: 'text', since: 'F-14.10' },
   [REWRITE_REGEN_PROMPT_VERSION]: {
@@ -167,6 +205,18 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'text',
     since: 'F-14.9'
+  },
+  [REWRITE_PROMPT_V3_VERSION]: {
+    feature: 'rewrite',
+    tier: 'fast',
+    output: 'text',
+    since: 'F-14.13'
+  },
+  [REWRITE_REGEN_PROMPT_V3_VERSION]: {
+    feature: 'rewrite',
+    tier: 'fast',
+    output: 'text',
+    since: 'F-14.13'
   },
   [CRITIQUE_PROMPT_VERSION]: {
     feature: 'critique',
@@ -257,6 +307,12 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-5.17'
+  },
+  [WHAT_NEXT_PROMPT_V2_VERSION]: {
+    feature: 'whatNext',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-14.13'
   }
 }
 

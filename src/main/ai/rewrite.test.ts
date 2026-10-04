@@ -11,6 +11,8 @@ import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
 import { setAiSettings, setAuthorRules } from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { addDocumentTag } from '../tag/documentTagStore'
+import { createTag } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { defaultAiUsageState, dayOf } from './dailyCap'
@@ -29,6 +31,7 @@ import type { AiRequestDeps } from './request'
 import { runRewrite, type RewriteInput } from './rewrite'
 import type { UsageEntry } from './usageStore'
 import { EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
+import { SCENE_STEER_HEADING } from '@shared/sceneSteer'
 
 const NOW = new Date(2026, 8, 15, 10, 0, 0)
 type Complete = (request: CompletionRequest) => Promise<CompletionResult>
@@ -179,7 +182,7 @@ afterEach(() => {
 })
 
 describe('runRewrite (F-14.10)', () => {
-  it('streams the draft through onDelta, resolves the post-processed passage, and logs one fast-tier rewrite.v2 row with no temperature', async () => {
+  it('streams the draft through onDelta, resolves the post-processed passage, and logs one fast-tier rewrite.v3 row with no temperature', async () => {
     chunks = [
       { delta: '"She turned back to the ridge ' },
       { delta: 'and he followed."', usage: { inputTokens: 90, outputTokens: 8 } }
@@ -193,7 +196,7 @@ describe('runRewrite (F-14.10)', () => {
       costUsd: priceFor('gpt-5.4-mini', 90, 8).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'rewrite.v2',
+      promptVersion: 'rewrite.v3',
       flagged: false,
       violation: null
     })
@@ -209,7 +212,7 @@ describe('runRewrite (F-14.10)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'rewrite',
       tier: 'fast',
-      promptVersion: 'rewrite.v2',
+      promptVersion: 'rewrite.v3',
       cached: false
     })
     expect(ledger[0]!.contextHash).toMatch(/^[0-9a-f]{64}$/)
@@ -235,6 +238,21 @@ describe('runRewrite (F-14.10)', () => {
     const system = (await rewrite().then(() => stream.mock.calls[0]![0].messages[0]?.content)) ?? ''
     expect(system).not.toContain("Match the author's voice:")
     expect(system).not.toContain('Scene: location')
+  })
+
+  it("opens the user turn with the scene's tone tags as the scene steer, and misses the cache when they change (F-14.13)", async () => {
+    await rewrite()
+    expect(stream.mock.calls[0]![0].messages[1]?.content).not.toContain(SCENE_STEER_HEADING)
+    addDocumentTag(db, scene, createTag(db, { name: 'tense', category: 'tone' }).id)
+    await rewrite()
+    expect(stream).toHaveBeenCalledTimes(2)
+    const messages = stream.mock.calls[1]![0].messages
+    expect(messages[0]?.content).not.toContain(SCENE_STEER_HEADING)
+    expect(messages[1]?.content).toBe(
+      `${SCENE_STEER_HEADING}\nTone: tense\nWrite in this tone.\n\n` +
+        `Passage to rewrite:\n"""\n${PASSAGE}\n"""\n\nRewrite the passage.`
+    )
+    expect(ledger[1]?.contextHash).not.toBe(ledger[0]?.contextHash)
   })
 
   it('answers the same passage from the cache and misses it when the passage, the context, or the voice version change', async () => {
@@ -311,7 +329,7 @@ describe('runRewrite (F-14.10)', () => {
 })
 
 describe('runRewrite fidelity check (F-14.7)', () => {
-  it('regenerates an off-voice draft once through rewriteRegen.v2, unstreamed, with the violation named, and shows the clean second draft with both calls summed', async () => {
+  it('regenerates an off-voice draft once through rewriteRegen.v3, unstreamed, with the violation named, and shows the clean second draft with both calls summed', async () => {
     strongProfile()
     streams(OFF_VOICE)
     answers(CLEAN)
@@ -325,7 +343,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
       `${REGEN_CLAUSE_PREFIX} switches to present tense. Rewrite it again, keeping the manuscript's voice.`
     )
     expect(second.messages.slice(1)).toEqual(stream.mock.calls[0]![0].messages.slice(1))
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewrite.v2', 'rewriteRegen.v2'])
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewrite.v3', 'rewriteRegen.v3'])
     expect(ledger[0]!.contextHash).not.toBe(ledger[1]!.contextHash)
     expect(result).toEqual({
       text: CLEAN,
@@ -333,7 +351,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 90, 8).costUsd + priceFor('gpt-5.4-mini', 120, 12).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'rewriteRegen.v2',
+      promptVersion: 'rewriteRegen.v3',
       flagged: false,
       violation: null
     })
@@ -347,7 +365,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
       text: OFF_VOICE,
       flagged: true,
       violation: 'switches to present tense',
-      promptVersion: 'rewriteRegen.v2'
+      promptVersion: 'rewriteRegen.v3'
     })
     // A different passage each time, so nothing answers from the cache.
     streams(OFF_VOICE)
@@ -356,7 +374,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
       text: OFF_VOICE,
       flagged: true,
       violation: 'switches to present tense',
-      promptVersion: 'rewrite.v2',
+      promptVersion: 'rewrite.v3',
       usage: { inputTokens: 90, outputTokens: 8 }
     })
     streams(OFF_VOICE)
@@ -364,7 +382,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
     expect(await rewrite({ text: `${PASSAGE} Once more.` })).toMatchObject({
       text: OFF_VOICE,
       flagged: true,
-      promptVersion: 'rewrite.v2',
+      promptVersion: 'rewrite.v3',
       usage: { inputTokens: 210, outputTokens: 20 }
     })
   })
@@ -408,7 +426,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
 })
 
 describe('runRewrite author regenerate (F-14.5)', () => {
-  it('sends rewriteRegen.v2 from the start with the note clause, and misses the cache on the note and the predecessor', async () => {
+  it('sends rewriteRegen.v3 from the start with the note clause, and misses the cache on the note and the predecessor', async () => {
     await rewrite()
     expect(stream).toHaveBeenCalledTimes(1)
     const note = 'Less lightning, more of the rope.'
@@ -417,8 +435,8 @@ describe('runRewrite author regenerate (F-14.5)', () => {
     expect(stream.mock.calls[1]![0].messages[0]?.content).toContain(
       `The writer asked for a different rewrite and said: "${note}".`
     )
-    expect(result.promptVersion).toBe('rewriteRegen.v2')
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewrite.v2', 'rewriteRegen.v2'])
+    expect(result.promptVersion).toBe('rewriteRegen.v3')
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewrite.v3', 'rewriteRegen.v3'])
     // A different note, and a predecessor with no note, are each their own request.
     await rewrite({ note: 'Colder.', regeneratedFrom: 'p-1' })
     expect(stream).toHaveBeenCalledTimes(3)
@@ -427,7 +445,7 @@ describe('runRewrite author regenerate (F-14.5)', () => {
     // A blank note with no predecessor is no regenerate at all: the plain prompt, cached.
     const plain = await rewrite({ note: '   ' })
     expect(stream).toHaveBeenCalledTimes(4)
-    expect(plain.promptVersion).toBe('rewrite.v2')
+    expect(plain.promptVersion).toBe('rewrite.v3')
   })
 
   it('carries the note clause and the violation clause together when the fidelity check fires on a regenerate', async () => {
@@ -439,6 +457,6 @@ describe('runRewrite author regenerate (F-14.5)', () => {
     const system = complete.mock.calls[0]![0].messages[0]?.content ?? ''
     expect(system).toContain(`The writer asked for a different rewrite and said: "${note}". `)
     expect(system.endsWith("Rewrite it again, keeping the manuscript's voice.")).toBe(true)
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewriteRegen.v2', 'rewriteRegen.v2'])
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewriteRegen.v3', 'rewriteRegen.v3'])
   })
 })

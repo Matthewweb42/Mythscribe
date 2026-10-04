@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { priceFor } from '@shared/ai'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { EMPTY_SCENE_BRIEF, emptySceneMeta } from '@shared/sceneMeta'
+import { SCENE_STEER_HEADING } from '@shared/sceneSteer'
 import type { TiptapNodeT } from '@shared/tiptap'
 import {
   WHAT_NEXT_CHAR_BUDGET,
@@ -18,6 +19,7 @@ import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { setAiSettings } from '../project/settingsStore'
+import { addDocumentTag } from '../tag/documentTagStore'
 import { createTag } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
@@ -142,7 +144,7 @@ afterEach(() => {
 })
 
 describe('runWhatNext (F-5.17)', () => {
-  it('sends the scene as JSON to the fast tier under whatNext.v1 and answers the directions', async () => {
+  it('sends the scene as JSON to the fast tier under whatNext.v2 and answers the directions', async () => {
     const result = await whatNext()
     expect(result).toEqual({
       directions: DIRECTIONS,
@@ -152,7 +154,7 @@ describe('runWhatNext (F-5.17)', () => {
       costUsd: priceFor('gpt-5.4-mini', 600, 80).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'whatNext.v1'
+      promptVersion: 'whatNext.v2'
     })
     const request = complete.mock.calls[0]![0]
     expect(request).toMatchObject({ tier: 'fast', json: true, maxTokens: 300 })
@@ -167,7 +169,7 @@ describe('runWhatNext (F-5.17)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'whatNext',
       tier: 'fast',
-      promptVersion: 'whatNext.v1'
+      promptVersion: 'whatNext.v2'
     })
   })
 
@@ -241,6 +243,24 @@ describe('runWhatNext (F-5.17)', () => {
       'Scene brief (the author\'s intent):\n"""\nScene brief:\n- Goal: Mara wants the ledger back.'
     )
     expect(sent().system).toMatch(/tomas/i)
+  })
+
+  it("carries the scene's tone tags as the scene steer between the brief and the text, and misses the cache when they change (F-14.13)", async () => {
+    setSceneMeta(db, scene, {
+      ...emptySceneMeta(),
+      brief: { ...EMPTY_SCENE_BRIEF, goal: 'Mara wants the ledger back.' }
+    })
+    await whatNext()
+    expect(sent().user).not.toContain(SCENE_STEER_HEADING)
+    addDocumentTag(db, scene, createTag(db, { name: 'tense', category: 'tone' }).id)
+    answers(DIRECTIONS)
+    await whatNext()
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(sent(1).user).toContain(
+      `Mara wants the ledger back.\n"""\n\n${SCENE_STEER_HEADING}\nTone: tense\nWrite in this tone.\n\nText so far:`
+    )
+    expect(sent(1).system).not.toContain(SCENE_STEER_HEADING)
+    expect(ledger[1]?.contextHash).not.toBe(ledger[0]?.contextHash)
   })
 
   it('answers the same request from the cache, and misses it when the text, the brief, or the bible change', async () => {

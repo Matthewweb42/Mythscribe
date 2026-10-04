@@ -9,6 +9,7 @@ import {
   outputBudget,
   priceFor
 } from '@shared/ai'
+import { SCENE_STEER_HEADING } from '@shared/sceneSteer'
 import { STORY_BIBLE_GHOST_TOKEN_BUDGET, STORY_BIBLE_HEADING } from '@shared/storyBible'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { builtinParams, defaultWritingPresets } from '@shared/presets'
@@ -138,7 +139,7 @@ afterEach(() => {
 })
 
 describe('generateGhostText (F-5.3)', () => {
-  it('sends the caret window as ghostText.v3 on the fast tier with the preset temperature and cap, and logs one row', async () => {
+  it('sends the caret window as ghostText.v4 on the fast tier with the preset temperature and cap, and logs one row', async () => {
     const result = await ask(BEFORE, 'The ferry would not wait.')
     expect(result).toEqual({
       text: ' Somewhere ahead the river was rising. ',
@@ -146,7 +147,7 @@ describe('generateGhostText (F-5.3)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'ghostText.v3',
+      promptVersion: 'ghostText.v4',
       flagged: false,
       violation: null
     })
@@ -170,7 +171,7 @@ describe('generateGhostText (F-5.3)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'ghostText',
       tier: 'fast',
-      promptVersion: 'ghostText.v3',
+      promptVersion: 'ghostText.v4',
       cached: false
     })
     expect(ledger[0]!.contextHash).toMatch(/^[0-9a-f]{64}$/)
@@ -267,6 +268,23 @@ describe('generateGhostText (F-5.3)', () => {
     const bible = system.slice(system.indexOf(STORY_BIBLE_HEADING))
     expect(estimateTokens(bible)).toBeLessThanOrEqual(STORY_BIBLE_GHOST_TOKEN_BUDGET)
     expect(bible).toMatch(/Characters: .* … and \d+ more\n/)
+  })
+
+  it("folds the scene's tone tags into the user turn as the scene steer, and misses the cache when they change (F-14.13)", async () => {
+    await ask()
+    expect(complete.mock.calls[0]![0].messages[1]?.content).not.toContain(SCENE_STEER_HEADING)
+    const tense = createTag(db, { name: 'tense', category: 'tone', color: '#112233' })
+    addDocumentTag(db, scene, tense.id)
+    await ask()
+    expect(complete).toHaveBeenCalledTimes(2)
+    const request = complete.mock.calls[1]![0]
+    expect(request.messages[0]?.content).not.toContain(SCENE_STEER_HEADING)
+    expect(request.messages[1]?.content).toMatch(
+      new RegExp(
+        `^${SCENE_STEER_HEADING.replace(/[()]/g, '\\$&')}\\nTone: tense\\nWrite in this tone\\.\\n\\nPassage so far:`
+      )
+    )
+    expect(ledger[1]?.contextHash).not.toBe(ledger[0]?.contextHash)
   })
 
   it('folds the voice profile into the system turn after the rules and misses the cache when the profile version moves (F-14.1)', async () => {
@@ -414,7 +432,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       tier: 'fast',
       maxTokens: builtinParams('general').maxSuggestionTokens
     })
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['ghostText.v3', 'ghostTextRegen.v3'])
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['ghostText.v4', 'ghostTextRegen.v4'])
     expect(ledger[0]!.contextHash).not.toBe(ledger[1]!.contextHash)
     expect(result).toEqual({
       text: ` ${CLEAN}`,
@@ -422,7 +440,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd * 2,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'ghostTextRegen.v3',
+      promptVersion: 'ghostTextRegen.v4',
       flagged: false,
       violation: null
     })
@@ -437,7 +455,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       text: ` ${OFF_VOICE}`,
       flagged: true,
       violation: 'switches to present tense',
-      promptVersion: 'ghostTextRegen.v3',
+      promptVersion: 'ghostTextRegen.v4',
       usage: { inputTokens: 240, outputTokens: 24 }
     })
   })
@@ -454,7 +472,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'ghostText.v3',
+      promptVersion: 'ghostText.v4',
       flagged: true,
       violation: 'switches to present tense'
     })
@@ -487,7 +505,7 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
     expect(result).toMatchObject({
       text: ` ${OFF_VOICE}`,
       flagged: true,
-      promptVersion: 'ghostText.v3'
+      promptVersion: 'ghostText.v4'
     })
     expect(result.usage).toEqual({ inputTokens: 240, outputTokens: 24 })
   })
@@ -536,7 +554,7 @@ describe('generateGhostText author rules (F-14.2)', () => {
       text: ` ${CLEAN}`,
       flagged: false,
       violation: null,
-      promptVersion: 'ghostTextRegen.v3'
+      promptVersion: 'ghostTextRegen.v4'
     })
   })
 

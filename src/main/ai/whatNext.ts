@@ -16,9 +16,10 @@ import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
+import { buildSceneSteer } from './context/sceneSteer'
 import { buildStoryBible } from './context/storyBible'
 import { assertFeatureAllowed } from './dial'
-import { buildWhatNextPrompt } from './prompts/whatNext.v1'
+import { buildWhatNextPromptV2 } from './prompts/whatNext.v2'
 import { AiFallbackError, type AiMessage, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -63,11 +64,11 @@ const SHRINK_CHARS = 500
  * `before` when the renderer sent one (the document up to the selection's end), else the saved
  * scene; either needs `WHAT_NEXT_TEXT_MIN` characters. Exactly the context the data-sharing
  * panel lists goes with it: the tail of that text within `WHAT_NEXT_CHAR_BUDGET` (shorter still
- * if the prompt is over `inputBudget('whatNext')`, token rule 8), the scene brief, and the story
- * bible. No voice block: directions are advice, not prose.
+ * if the prompt is over `inputBudget('whatNext')`, token rule 8), the scene brief, the scene
+ * steer (F-14.13: its tone, content, plot thread, and theme tags), and the story bible. No voice block: directions are advice, not prose.
  *
  * The answer is JSON from the fast tier, not streamed. The context hash covers the text, the
- * brief, and the bible, everything that shaped the messages.
+ * brief, the steer, and the bible, everything that shaped the messages.
  */
 export async function runWhatNext(
   db: TreeDb,
@@ -95,8 +96,9 @@ export async function runWhatNext(
 
   const brief = sceneBriefBlock(db, input.nodeId)
   const bible = buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
-  const build = (text: string): ReturnType<typeof buildWhatNextPrompt> =>
-    buildWhatNextPrompt({ text, brief, bible })
+  const steer = buildSceneSteer(db, input.nodeId)
+  const build = (text: string): ReturnType<typeof buildWhatNextPromptV2> =>
+    buildWhatNextPromptV2({ text, brief, steer, bible })
 
   const { text, truncated } = fitTailToBudget(
     fullText,
@@ -111,7 +113,7 @@ export async function runWhatNext(
     messages: prompt.messages,
     maxTokens: prompt.maxTokens,
     json: true,
-    contextHash: sha256(JSON.stringify({ text, brief, bible })),
+    contextHash: sha256(JSON.stringify({ text, brief, steer, bible })),
     promptVersion: prompt.version,
     ...(input.requestId === undefined ? {} : { requestId: input.requestId })
   })
