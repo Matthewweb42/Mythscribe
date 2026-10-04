@@ -15,6 +15,7 @@ import { MenuBar } from '@renderer/features/shell/MenuBar'
 import {
   closeProjectWithConfirm,
   insertLevel,
+  openFindInDocument,
   runMenuAction
 } from '@renderer/features/shell/menuActions'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
@@ -28,6 +29,8 @@ import { StatsDialog } from '@renderer/features/stats/StatsDialog'
 import { WordCountDialog } from '@renderer/features/stats/WordCountDialog'
 import { wheelZoomStepFor, zoomStepFor } from '@renderer/features/shell/zoom'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
+import { FindBar } from '@renderer/features/editor/FindBar'
+import { resetFindStore } from '@renderer/features/editor/findStore'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
 import { SpellcheckMenu } from '@renderer/features/editor/SpellcheckMenu'
@@ -212,6 +215,8 @@ export function App(): React.JSX.Element {
       useProposedTagStore.getState().clear()
       useBackgroundStore.getState().clear()
       useDictionaryStore.getState().clear()
+      // F-3.10: the find bar and what was typed in it.
+      resetFindStore()
       return
     }
     // F-4.12: main scans in the background and says which documents changed; the mention lists
@@ -345,6 +350,7 @@ export function App(): React.JSX.Element {
       <ZoomShortcuts />
       {current ? <InsertShortcuts format={current.format} /> : null}
       {current ? <SearchShortcut /> : null}
+      {current ? <FindShortcuts /> : null}
       <main
         className={
           current
@@ -595,6 +601,28 @@ function SearchShortcut(): null {
 }
 
 /**
+ * Ctrl+F opens find in document and Ctrl+H find and replace in document (F-3.10), through the
+ * same `openFindInDocument` as Edit › Find… / Replace…. Capture phase and stopped, like
+ * `SearchShortcut`, so the editor never sees the chord and `preventDefault` keeps the native
+ * accelerator from firing a second time. Mounted while a project is open, focus mode included;
+ * renders nothing.
+ */
+function FindShortcuts(): null {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const find = matchesShortcut(event, APP_SHORTCUTS.find.chord)
+      if (!find && !matchesShortcut(event, APP_SHORTCUTS.replace.chord)) return
+      event.preventDefault()
+      event.stopPropagation()
+      openFindInDocument(!find)
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [])
+  return null
+}
+
+/**
  * Focus mode shortcuts (F-6.1): F11 toggles it; Escape leaves it, but only when nothing closer
  * to the keystroke claimed the key (the dialogs and popups handle their own Escape and prevent
  * default), so the listener runs in the bubble phase. Inside the editor ProseMirror prevents
@@ -788,11 +816,18 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
         </p>
       </div>
       <div className="flex min-h-0 flex-1">
-        {node.kind === 'document' ? (
-          <EditorPane id={node.id} format={format} />
-        ) : (
-          <StackedEditor folderId={node.id} format={format} />
-        )}
+        {/* F-3.10: the find bar docks above the editor's toolbar, so it hides no control and
+            never spans the notes beside it. */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <FindBar />
+          <div className="flex min-h-0 min-w-0 flex-1">
+            {node.kind === 'document' ? (
+              <EditorPane id={node.id} format={format} />
+            ) : (
+              <StackedEditor folderId={node.id} format={format} />
+            )}
+          </div>
+        </div>
         {focus ? null : <NotesPanel id={node.id} />}
       </div>
     </>

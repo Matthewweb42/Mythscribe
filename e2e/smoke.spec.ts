@@ -2249,6 +2249,41 @@ test('create, close, reopen a project on disk', async () => {
   await expect(replaceDialog).toHaveCount(0)
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
 
+  // F-3.10: find and replace in the open document. Ctrl+F opens the bar on its Find box; "the"
+  // highlights "The" and the start of "Then" in Scene 1, and Enter moves to the other match
+  // (which one is first depends on where the caret was, so only the change is asserted). Ctrl+H
+  // adds the replace row; Replace all rewrites both in the editor, Escape closes the bar and gives
+  // the editor the focus back, and one Ctrl+Z undoes the whole replace, so Scene 1 is exactly as
+  // the steps below expect.
+  const findBar = page.getByRole('search', { name: 'Find in document' })
+  await expect(findBar).toHaveCount(0)
+  await page.keyboard.press('Control+F')
+  await expect(findBar).toBeVisible()
+  const findInput = findBar.getByRole('textbox', { name: 'Find' })
+  await expect(findInput).toBeFocused()
+  await findInput.fill('the')
+  const findStatus = findBar.getByTestId('find-status')
+  await expect(findStatus).toHaveText(/^[12] of 2$/)
+  await expect(editor.locator('.find-match')).toHaveCount(2)
+  await expect(editor.locator('.find-match-current')).toHaveCount(1)
+  const firstStatus = await findStatus.textContent()
+  await page.keyboard.press('Enter')
+  await expect(findStatus).toHaveText(firstStatus === '1 of 2' ? '2 of 2' : '1 of 2')
+  await page.keyboard.press('Control+H')
+  const replaceInput = findBar.getByRole('textbox', { name: 'Replace with' })
+  await expect(replaceInput).toBeVisible()
+  await replaceInput.fill('Thy')
+  await findBar.getByRole('button', { name: 'Replace all' }).click()
+  await expect(findStatus).toHaveText('Replaced 2')
+  await expect(editor).toContainText('Thy storm broke at dusk. Rain followed. Thyn silence.')
+  await expect(editor.locator('.find-match')).toHaveCount(0)
+  await replaceInput.press('Escape')
+  await expect(findBar).toHaveCount(0)
+  await expect(editor).toBeFocused()
+  await page.keyboard.press('Control+Z')
+  await expect(editor).toContainText(SENTENCE)
+  await expect.poll(() => documentText(scene1Row.id), { timeout: 5000 }).toBe(SENTENCE)
+
   await tomasRow.hover()
   await characterRows.getByRole('button', { name: 'Delete Tomas' }).click()
   await page

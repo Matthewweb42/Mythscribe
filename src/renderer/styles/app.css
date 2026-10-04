@@ -214,6 +214,21 @@ select {
 }
 
 /*
+ * Find in document (F-3.10): every match tinted in the warning tone (apart from the accent the
+ * rewrite target uses), the current one stronger and outlined. Mixed with transparent, so the
+ * text keeps its own colour in either theme.
+ */
+.ms-editor .find-match {
+  background: color-mix(in srgb, var(--ms-warning) 25%, transparent);
+  border-radius: 2px;
+}
+
+.ms-editor .find-match-current {
+  background: color-mix(in srgb, var(--ms-warning) 55%, transparent);
+  outline: 1px solid var(--ms-warning);
+}
+
+/*
  * A word one or two letters from a story name (F-3.14): a quiet dotted underline, not the
  * spellchecker's red one and never a background, so it reads as a question rather than an error.
  */

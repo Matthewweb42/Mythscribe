@@ -177,6 +177,9 @@ describe('buildExtensions', () => {
     // So does the near-name underline (F-3.14).
     expect(tagged.extensionManager.extensions.some((e) => e.name === 'nameCheck')).toBe(true)
     expect(editor.extensionManager.extensions.some((e) => e.name === 'nameCheck')).toBe(false)
+    // And find and replace in document (F-3.10): notes have no find bar.
+    expect(tagged.extensionManager.extensions.some((e) => e.name === 'findReplace')).toBe(true)
+    expect(editor.extensionManager.extensions.some((e) => e.name === 'findReplace')).toBe(false)
     tagged.destroy()
     for (const name of ['bold', 'italic', 'underline', 'strike', 'code']) {
       expect(marks[name], name).toBeDefined()

@@ -12,6 +12,7 @@ import {
 import { resetDocumentStore, useDocumentStore } from '@renderer/features/editor/documentStore'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
+import { resetFindStore, useFindStore } from '@renderer/features/editor/findStore'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
 import { resetGoalsStore, useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { draftFixture } from '@renderer/features/import/draftFixture'
@@ -32,7 +33,12 @@ import {
 import { resetViewStore, useViewStore } from '@renderer/features/shell/viewStore'
 import { resetUpdateStore, useUpdateStore } from '@renderer/features/updates/updateStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
-import { NO_PROJECT_MESSAGE, closeProjectWithConfirm, runMenuAction } from './menuActions'
+import {
+  NO_DOCUMENT_TO_FIND_MESSAGE,
+  NO_PROJECT_MESSAGE,
+  closeProjectWithConfirm,
+  runMenuAction
+} from './menuActions'
 
 const info: ProjectInfo = {
   id: '1',
@@ -99,6 +105,7 @@ beforeEach(() => {
   resetDocumentStore()
   resetActiveEditorStore()
   resetEntityStore()
+  resetFindStore()
   resetFocusStore()
   resetGoalsStore()
   resetImportStore()
@@ -348,6 +355,25 @@ describe('runMenuAction (F-7.1)', () => {
     await runMenuAction('toggleReferences')
     expect(useFocusStore.getState().active).toBe(false)
     expect(useLayoutStore.getState().layout.references.open).toBe(true)
+  })
+
+  it('Edit › Find… / Replace… open the find bar over the active editor, and need one (F-3.10)', async () => {
+    await runMenuAction('findInDocument')
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE])
+    await withProject()
+    await runMenuAction('findInDocument')
+    expect(useFindStore.getState().open).toBe(false)
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE, NO_DOCUMENT_TO_FIND_MESSAGE])
+    const editor = new Editor({
+      extensions: buildExtensions({ sceneBreak: '* * *', onSave: vi.fn() }),
+      content: EMPTY_DOC
+    })
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await runMenuAction('findInDocument')
+    expect(useFindStore.getState()).toMatchObject({ open: true, showReplace: false })
+    await runMenuAction('replaceInDocument')
+    expect(useFindStore.getState()).toMatchObject({ open: true, showReplace: true })
+    editor.destroy()
   })
 
   it('Edit › Search project… opens the search dialog, in focus mode too, and needs a project (F-10.1)', async () => {

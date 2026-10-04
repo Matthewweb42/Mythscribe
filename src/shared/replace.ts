@@ -111,6 +111,18 @@ export function isReplaceable(options: Pick<ReplaceOptions, 'query'>): boolean {
 const WORD_BEFORE = /[\p{L}\p{M}\p{N}_]$/u
 const WORD_AFTER = /^[\p{L}\p{M}\p{N}_]/u
 
+/**
+ * Whether `[from, to)` of `text` stands as a whole word: neither the character before nor the
+ * one after is a word character. Two code units each side, so a surrogate pair is seen whole.
+ * Shared with find in document (F-3.10), so both draw the word boundary alike.
+ */
+export function isWholeWordAt(text: string, from: number, to: number): boolean {
+  return (
+    !WORD_BEFORE.test(text.slice(Math.max(0, from - 2), from)) &&
+    !WORD_AFTER.test(text.slice(to, to + 2))
+  )
+}
+
 /** The form both sides are compared in; one character for one, so offsets hold. */
 function comparable(text: string, matchCase: boolean): string {
   const straight = straightenQuotes(text)
@@ -134,10 +146,7 @@ export function findInRun(
   let at = haystack.indexOf(needle)
   while (at !== -1) {
     const end = at + needle.length
-    const whole =
-      !options.wholeWord ||
-      (!WORD_BEFORE.test(text.slice(Math.max(0, at - 2), at)) &&
-        !WORD_AFTER.test(text.slice(end, end + 2)))
+    const whole = !options.wholeWord || isWholeWordAt(text, at, end)
     if (whole) found.push([at, end])
     at = haystack.indexOf(needle, whole ? end : at + 1)
   }

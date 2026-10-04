@@ -41,6 +41,7 @@ import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layou
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetReplaceStore, useReplaceStore } from '@renderer/features/search/replaceStore'
+import { resetFindStore, useFindStore } from '@renderer/features/editor/findStore'
 import { resetSearchStore, useSearchStore } from '@renderer/features/search/searchStore'
 import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
@@ -111,6 +112,7 @@ beforeEach(() => {
   resetSearchStore()
   resetReplaceStore()
   resetGoalsStore()
+  resetFindStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -801,6 +803,37 @@ describe('App', () => {
     // No project: the chord does nothing.
     await userEvent.keyboard('{Control>}{Shift>}h{/Shift}{/Control}')
     expect(useReplaceStore.getState().open).toBe(false)
+  })
+
+  it('Ctrl+F and Ctrl+H open the find bar over the open document, and it closes with the project (F-3.10)', async () => {
+    install({ 'project:current': info, 'tree:list': treeFixture })
+    render(<App />)
+    const scene = await screen.findByRole('treeitem', { name: 'Scene 1' })
+    // No document open yet: the chord says so and opens nothing.
+    await userEvent.keyboard('{Control>}f{/Control}')
+    expect(useFindStore.getState().open).toBe(false)
+    expect(useDialogStore.getState().toasts.map((t) => t.message)).toContain(
+      'Open a document first.'
+    )
+
+    await userEvent.click(within(scene).getByText('Scene 1'))
+    const box = await screen.findByRole('textbox', { name: 'Document' })
+    await waitFor(() => expect(box).toHaveAttribute('contenteditable', 'true'))
+    await userEvent.keyboard('{Control>}f{/Control}')
+    const bar = await screen.findByRole('search', { name: 'Find in document' })
+    expect(within(bar).getByRole('textbox', { name: 'Find' })).toHaveFocus()
+    expect(within(bar).queryByRole('textbox', { name: 'Replace with' })).not.toBeInTheDocument()
+    await userEvent.keyboard('{Control>}h{/Control}')
+    expect(within(bar).getByRole('textbox', { name: 'Replace with' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('search', { name: 'Find in document' })).not.toBeInTheDocument()
+
+    await userEvent.keyboard('{Control>}f{/Control}')
+    await userEvent.type(screen.getByRole('textbox', { name: 'Find' }), 'lantern')
+    await userEvent.click(screen.getByRole('button', { name: /close project/i }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    await screen.findByRole('button', { name: /new project/i })
+    expect(useFindStore.getState()).toMatchObject({ open: false, query: '' })
   })
 
   it('a project created with AI on opens in the assistant panel, Query mode, quick actions showing (F-5.18)', async () => {

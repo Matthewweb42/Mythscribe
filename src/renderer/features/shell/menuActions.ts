@@ -13,6 +13,7 @@ import type { EntityKind } from '@shared/entities'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
+import { useFindStore } from '@renderer/features/editor/findStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { useImportStore } from '@renderer/features/import/importStore'
@@ -33,6 +34,9 @@ import { ipc } from '@renderer/lib/ipc'
 
 /** What a `project` item says when it runs with nothing open (a native accelerator can still reach it). */
 export const NO_PROJECT_MESSAGE = 'Open a project first.'
+
+/** What Find… / Replace… and Ctrl+F / Ctrl+H say with no document open to search (F-3.10). */
+export const NO_DOCUMENT_TO_FIND_MESSAGE = 'Open a document first.'
 
 /** The three Insert items that open the entity creation dialog (F-9.3), and the kind each makes. */
 const INSERT_ENTITY_KIND = {
@@ -116,6 +120,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         // F-12.2: main opens the file dialog and answers a draft; the review dialog takes over
         // from there. The store toasts its own failures, so a cancelled dialog is silent.
         await useImportStore.getState().open()
+        return
+      case 'findInDocument':
+      case 'replaceInDocument':
+        openFindInDocument(id === 'replaceInDocument')
         return
       case 'searchProject':
         // F-10.1: the dialog is part of the project screen and works in focus mode too.
@@ -211,6 +219,19 @@ function togglePanel(panel: FloatingPanel): void {
   const focus = useFocusStore.getState()
   if (focus.active) focus.togglePanel(panel)
   else useLayoutStore.getState().toggle(panel)
+}
+
+/**
+ * Edit › Find… / Replace… and Ctrl+F / Ctrl+H (F-3.10): opens the find bar over the active
+ * editor, with the replace row for `replace`. With no document open (an entity page, nothing
+ * selected) a toast says so instead of opening a bar with nothing to search.
+ */
+export function openFindInDocument(replace: boolean): void {
+  if (useActiveEditorStore.getState().active === null) {
+    toast.warning(NO_DOCUMENT_TO_FIND_MESSAGE)
+    return
+  }
+  useFindStore.getState().openFind(replace)
 }
 
 /**

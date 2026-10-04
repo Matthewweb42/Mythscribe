@@ -28,6 +28,8 @@ export const SHORTCUT_IDS = [
   'save',
   'settings',
   'assistant',
+  'find',
+  'replace',
   'search',
   'replaceProject',
   'focusMode',
@@ -50,7 +52,16 @@ export const APP_SHORTCUTS: Record<ShortcutId, Shortcut> = {
     chord: { key: 'k', ctrl: true },
     group: 'app'
   },
-  /** F-10.1: the project-wide search dialog. Ctrl+F stays free for find in document (F-3.10). */
+  /** F-3.10: the find bar of the open document. */
+  find: { id: 'find', label: 'Find in document', chord: { key: 'f', ctrl: true }, group: 'app' },
+  /** F-3.10: the find bar with its replace row. */
+  replace: {
+    id: 'replace',
+    label: 'Replace in document',
+    chord: { key: 'h', ctrl: true },
+    group: 'app'
+  },
+  /** F-10.1: the project-wide search dialog; Ctrl+F (without Shift) is find in document (F-3.10). */
   search: {
     id: 'search',
     label: 'Search project',

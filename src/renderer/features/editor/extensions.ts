@@ -5,6 +5,7 @@ import { TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import { IMPORTED_ORIGIN, PARAGRAPH_ORIGIN_ATTR } from '@shared/provenance'
 import { AiOrigin } from './aiOrigin'
+import { FindReplace } from './findReplace'
 import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
 import { NameCheck } from './nameCheck'
@@ -27,7 +28,8 @@ export interface EditorSchemaOptions {
    * The manuscript document the editor shows (F-4.6): adds the inline tag token and its `#`
    * suggestion, which links picked tags to this node, the ghost-text decoration (F-5.3), the
    * AI-origin mark its accepted text carries (F-14.6), the rewrite target highlight (F-14.10),
-   * and the near-name underline (F-3.14). Left out for notes, which never get tags or suggestions.
+   * the near-name underline (F-3.14), and find and replace in document (F-3.10). Left out for
+   * notes, which never get tags, suggestions, or the find bar.
    */
   inlineTagNodeId?: string
 }
@@ -194,7 +196,8 @@ export const OriginParagraph = Paragraph.extend({
  * import provenance (F-12.2), text alignment on headings and paragraphs, the scene-break block, the Ctrl+S save shortcut (F-3.2), and, for a manuscript
  * document, the inline tag token with its `#` suggestion (F-4.6), the AI-origin mark (F-14.6,
  * wherever ghost text can insert), the ghost-text decoration (F-5.3, always in the schema
- * so toggling VibeWrite never rebuilds the editor), the rewrite target (F-14.10), and the
+ * so toggling VibeWrite never rebuilds the editor), the rewrite target (F-14.10), find and
+ * replace in document (F-3.10), and the
  * Escape hand-off (F-6.1) when the caller wants one. Lists, links, code blocks, horizontal rules, and the trailing node are off
  * so the document model stays what the compile views (F-3.12) and the AI post-processors
  * expect.
@@ -245,7 +248,8 @@ export function buildExtensions({
       GhostText,
       RewriteTarget,
       Typewriter,
-      NameCheck
+      NameCheck,
+      FindReplace
     )
   }
   if (onEscape) extensions.push(EscapeShortcut.configure({ onEscape }))

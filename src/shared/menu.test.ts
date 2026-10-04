@@ -137,6 +137,8 @@ describe('menu definition (F-7.1)', () => {
       'copy',
       'paste',
       'separator',
+      'findInDocument',
+      'replaceInDocument',
       'searchProject',
       'replaceProject'
     ])
@@ -147,6 +149,17 @@ describe('menu definition (F-7.1)', () => {
     expect(menuAccelerator(menuItemChord(item!)!)).toBe('CmdOrCtrl+Shift+F')
     expect(isMenuItemEnabled(item!, false)).toBe(false)
     expect(isMenuItemEnabled(item!, true)).toBe(true)
+  })
+
+  it('offers Find… and Replace… before Search project…, on Ctrl+F and Ctrl+H, only with a project (F-3.10)', () => {
+    const byId = Object.fromEntries(menuItems().map((item) => [item.id, item]))
+    const find = byId.findInDocument!
+    const replace = byId.replaceInDocument!
+    expect([find.label, replace.label]).toEqual(['Find…', 'Replace…'])
+    expect(menuAccelerator(menuItemChord(find)!)).toBe('CmdOrCtrl+F')
+    expect(menuAccelerator(menuItemChord(replace)!)).toBe('CmdOrCtrl+H')
+    expect(isMenuItemEnabled(find, false)).toBe(false)
+    expect(isMenuItemEnabled(replace, true)).toBe(true)
   })
 
   it('offers Goals… in Tools after Tags, only with a project and without a shortcut (F-10.3)', () => {
