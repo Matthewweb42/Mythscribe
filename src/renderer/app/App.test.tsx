@@ -34,6 +34,8 @@ import { resetContinuityStore } from '@renderer/features/ai/continuityStore'
 import { resetIndexingStore } from '@renderer/features/ai/indexingStore'
 import { resetBackgroundStore } from '@renderer/features/focus/backgroundStore'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
+import { goalsStatusFixture } from '@renderer/features/goals/goalsFixture'
+import { resetGoalsStore } from '@renderer/features/goals/goalsStore'
 import { dialogs, useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
@@ -108,6 +110,7 @@ beforeEach(() => {
   resetProposedTagStore()
   resetSearchStore()
   resetReplaceStore()
+  resetGoalsStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -121,6 +124,8 @@ afterEach(() => {
   resetSearchStore()
   // F-10.2: nor a replace preview's.
   resetReplaceStore()
+  // F-10.3: nor a goals refresh after a save.
+  resetGoalsStore()
   resetAiSettingsStore()
   resetAuthorRulesStore()
   resetAssistantStore()
@@ -164,6 +169,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'background:list') return []
     if (channel === 'dictionary:get') return { words: [], notNames: [] }
     if (channel === 'reference:get') return { pins: [] }
+    if (channel === 'goals:get') return goalsStatusFixture()
     if (channel === 'jobs:status') return IDLE_INDEX_QUEUE
     if (channel === 'continuity:list') return []
     if (channel === 'view:get') return defaultViewSettings()

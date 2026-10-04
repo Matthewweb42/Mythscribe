@@ -650,6 +650,87 @@ describe('document:save', () => {
   })
 })
 
+describe('goals:get / goals:set (F-10.3)', () => {
+  const para = (text: string): Input<'document:save'>['content'] => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('goals:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('goals:set', { dailyTarget: 5 })).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('counts net words of manuscript saves only, and resets the session on reopen', async () => {
+    const created = await invoke('project:create', {
+      name: 'Goals',
+      format: 'novel',
+      directory: tmp
+    })
+    const rows = await invoke('tree:list', undefined)
+    const scene = manuscriptReadingOrder(rows)[0] ?? ''
+    const front = rows.find((r) => r.sectionType === 'front')
+    const matter = await invoke('tree:create', {
+      parentId: front?.id ?? '',
+      kind: 'document',
+      hierarchyLevel: null
+    })
+    await invoke('document:save', { id: scene, content: para('The storm broke at dusk.') })
+    await invoke('document:save', { id: scene, content: para('The storm broke at dusk again.') })
+    await invoke('document:save', { id: matter.id, content: para('For my mother, always.') })
+    // A replace rewrites the scene but writes no words.
+    await invoke('replace:commit', {
+      query: 'storm',
+      replacement: 'great storm',
+      matchCase: false,
+      wholeWord: false,
+      scopeId: null,
+      ids: [scene]
+    })
+    const status = await invoke('goals:get', undefined)
+    expect(status.today.words).toBe(6)
+    expect(status.session.words).toBe(6)
+    expect(status.manuscriptWords).toBe(7)
+
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    const reopened = await invoke('goals:get', undefined)
+    expect(reopened.session).toEqual({ words: 0, activeMs: 0 })
+    expect(reopened.today.words).toBe(6)
+  })
+
+  it('stores targets, sets and clears a node target, and refuses one outside the manuscript', async () => {
+    await invoke('project:create', { name: 'Goals', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const chapter = rows.find((r) => r.hierarchyLevel === 'chapter')?.id ?? ''
+    const front = rows.find((r) => r.sectionType === 'front')?.id ?? ''
+    const set = await invoke('goals:set', {
+      projectTarget: 80000,
+      deadline: '2099-12-31',
+      dailyTarget: 500,
+      nodeTargets: [{ nodeId: chapter, target: 4000 }]
+    })
+    expect(set.goals).toEqual({
+      projectTarget: 80000,
+      deadline: '2099-12-31',
+      dailyTarget: 500,
+      nodeTargets: { [chapter]: 4000 }
+    })
+    expect(set.perDayNeeded).toBeGreaterThan(0)
+    expect((await invoke('goals:get', undefined)).goals).toEqual(set.goals)
+    const cleared = await invoke('goals:set', {
+      deadline: null,
+      nodeTargets: [{ nodeId: chapter, target: null }]
+    })
+    expect(cleared.goals).toMatchObject({ deadline: null, nodeTargets: {}, dailyTarget: 500 })
+    expect(cleared.perDayNeeded).toBeNull()
+    await expect(
+      invoke('goals:set', { nodeTargets: [{ nodeId: front, target: 10 }] })
+    ).rejects.toThrowError(/^VALIDATION: /)
+    await expect(invoke('goals:set', { dailyTarget: 0 })).rejects.toThrowError(/^VALIDATION: /)
+  })
+})
+
 describe('notes:get / notes:save', () => {
   const para = (text: string): Input<'notes:save'>['notes'] => ({
     type: 'doc',

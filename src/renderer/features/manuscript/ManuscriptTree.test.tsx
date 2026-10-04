@@ -8,10 +8,12 @@ import {
   within
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TreeNode } from '@shared/ipc/contract'
 import { MatterTemplateId, matterTemplate } from '@shared/matterTemplates'
 import { countWords } from '@shared/wordCount'
+import { goalsStatusFixture } from '@renderer/features/goals/goalsFixture'
+import { resetGoalsStore, useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import {
@@ -184,10 +186,15 @@ const treeNames = (): (string | null)[] =>
 
 beforeEach(() => {
   useTreeStore.getState().clear()
+  resetGoalsStore()
   resetTagStore()
   resetDocumentTagStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+})
+afterEach(() => {
+  // F-10.3: the word-target tests leave a goals status behind for the next file otherwise.
+  resetGoalsStore()
 })
 
 /** Puts dark-forest in the bank, links it to `nodeIds`, and filters the tree by it (F-4.10). */
@@ -433,14 +440,15 @@ describe('ManuscriptTree', () => {
       'New folder',
       'Rename',
       'Duplicate',
-      'Delete'
+      'Delete',
+      'Set word target…'
     ])
     expect(within(menu).queryByText(/template/i)).not.toBeInTheDocument()
     expect(within(menu).getByRole('menuitem', { name: 'New Arc' })).toHaveFocus()
     await userEvent.keyboard('{ArrowDown}')
     expect(within(menu).getByRole('menuitem', { name: 'New Chapter' })).toHaveFocus()
     await userEvent.keyboard('{ArrowUp}{ArrowUp}')
-    expect(within(menu).getByRole('menuitem', { name: 'Delete' })).toHaveFocus()
+    expect(within(menu).getByRole('menuitem', { name: 'Set word target…' })).toHaveFocus()
     await userEvent.keyboard('{Escape}')
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(item('Chapter 2')).toHaveFocus()
@@ -1082,6 +1090,74 @@ describe('ManuscriptTree', () => {
       })
       rerender(<ManuscriptTree format="webnovel" />)
       expect(treeNames()).toHaveLength(18)
+    })
+  })
+
+  describe('word targets (F-10.3)', () => {
+    const withTargets = (nodeTargets: Record<string, number>): void => {
+      useGoalsStore.setState({
+        status: goalsStatusFixture({
+          goals: { ...goalsStatusFixture().goals, nodeTargets }
+        })
+      })
+    }
+
+    it('shows a row’s count against its target, with a check once it is met', () => {
+      withTargets({ 'sc-1': 2000, 'sc-4': 2000, 'title-page': 10 })
+      render(<ManuscriptTree format="webnovel" />)
+      const open = within(item('Scene 1')).getByTestId('node-target')
+      expect(open).toHaveTextContent(`${(1200).toLocaleString()} / ${(2000).toLocaleString()}`)
+      expect(open).toHaveTextContent('1.2k / 2k')
+      expect(open).not.toHaveAttribute('data-met')
+      expect(within(item('Scene 4')).getByTestId('node-target')).toHaveAttribute('data-met', 'true')
+      // Matter rows never show a target, even one main has not pruned yet.
+      expect(within(item('Title Page')).queryByTestId('node-target')).not.toBeInTheDocument()
+      expect(within(item('Scene 2')).queryByTestId('node-target')).not.toBeInTheDocument()
+    })
+
+    it('sets a target through the prompt and clears it from the menu', async () => {
+      withTargets({})
+      const invoke = vi.fn(async (channel: string, input: unknown) => {
+        if (channel !== 'goals:set') throw new Error(`unexpected ${channel}`)
+        const patch = input as { nodeTargets: { nodeId: string; target: number | null }[] }
+        const nodeTargets: Record<string, number> = {}
+        for (const change of patch.nodeTargets)
+          if (change.target !== null) nodeTargets[change.nodeId] = change.target
+        return goalsStatusFixture({ goals: { ...goalsStatusFixture().goals, nodeTargets } })
+      })
+      setIpcClient({ invoke: invoke as IpcClient['invoke'], on: () => () => {} })
+      render(
+        <>
+          <ManuscriptTree format="webnovel" />
+          <DialogHost />
+        </>
+      )
+      fireEvent.contextMenu(row('Chapter 2'), { clientX: 40, clientY: 50 })
+      expect(screen.queryByRole('menuitem', { name: 'Clear word target' })).not.toBeInTheDocument()
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Set word target…' }))
+      const dialog = await screen.findByRole('dialog', { name: "Word target for 'Chapter 2'" })
+      const input = within(dialog).getByRole('textbox')
+      await userEvent.type(input, 'lots')
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Set target' }))
+      expect(invoke).not.toHaveBeenCalled()
+      await userEvent.clear(input)
+      await userEvent.type(input, '3,000')
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Set target' }))
+      expect(invoke).toHaveBeenCalledWith('goals:set', {
+        nodeTargets: [{ nodeId: 'ch-2', target: 3000 }]
+      })
+      await waitFor(() =>
+        expect(within(item('Chapter 2')).getByTestId('node-target')).toHaveTextContent('800 / 3k')
+      )
+
+      fireEvent.contextMenu(row('Chapter 2'), { clientX: 40, clientY: 50 })
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Clear word target' }))
+      expect(invoke).toHaveBeenLastCalledWith('goals:set', {
+        nodeTargets: [{ nodeId: 'ch-2', target: null }]
+      })
+      await waitFor(() =>
+        expect(within(item('Chapter 2')).queryByTestId('node-target')).not.toBeInTheDocument()
+      )
     })
   })
 })

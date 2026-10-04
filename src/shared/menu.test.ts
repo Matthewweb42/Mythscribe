@@ -149,6 +149,18 @@ describe('menu definition (F-7.1)', () => {
     expect(isMenuItemEnabled(item!, true)).toBe(true)
   })
 
+  it('offers Goals… in Tools after Tags, only with a project and without a shortcut (F-10.3)', () => {
+    const tools = MENU.find((section) => section.id === 'tools')
+    expect(
+      (tools?.entries ?? []).map((entry) => (isSeparator(entry) ? 'separator' : entry.id))
+    ).toEqual(['openTags', 'openGoals', 'separator', 'openSettings'])
+    const [item] = menuItems().filter((entry) => entry.id === 'openGoals')
+    expect(item?.label).toBe('Goals…')
+    expect(menuItemChord(item!)).toBeNull()
+    expect(isMenuItemEnabled(item!, false)).toBe(false)
+    expect(isMenuItemEnabled(item!, true)).toBe(true)
+  })
+
   it('offers Replace in project… right after it, on Ctrl+Shift+H, only with a project (F-10.2)', () => {
     const [item] = menuItems().filter((entry) => entry.id === 'replaceProject')
     expect(item?.label).toBe('Replace in project…')

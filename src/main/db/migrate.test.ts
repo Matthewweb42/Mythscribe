@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(13)
+    expect(result.version).toBe(14)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -126,6 +126,7 @@ describe('migrate', () => {
     expect(tables()).toContain('observed_fact')
     expect(tables()).toContain('document_tag_dismissal')
     expect(tables()).toContain('continuity_finding')
+    expect(tables()).toContain('writing_log')
   })
 })
 
@@ -565,5 +566,40 @@ describe('continuity_finding table (0012_continuity_findings)', () => {
     db.prepare('DELETE FROM node WHERE id = ?').run('other')
     db.prepare('DELETE FROM ai_proposal WHERE id = ?').run('p1')
     expect(row('f1')).toMatchObject({ ref_node_id: null, proposal_id: null })
+  })
+})
+
+describe('writing_log table (0013_writing_log)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db)
+  })
+  afterEach(() => db.close())
+
+  it('defaults words and active time to 0', () => {
+    db.prepare("INSERT INTO writing_log (day, hour) VALUES ('2026-10-04', 9)").run()
+    expect(db.prepare('SELECT words, active_ms FROM writing_log').get()).toEqual({
+      words: 0,
+      active_ms: 0
+    })
+  })
+
+  it('keeps one bucket per day and hour, and takes a negative hour of cutting', () => {
+    const insert = db.prepare('INSERT INTO writing_log (day, hour, words) VALUES (?, ?, ?)')
+    insert.run('2026-10-04', 9, 120)
+    insert.run('2026-10-04', 10, -40)
+    insert.run('2026-10-05', 9, 10)
+    expect(() => insert.run('2026-10-04', 9, 5)).toThrow(/UNIQUE|PRIMARY KEY/)
+    expect(db.prepare('SELECT SUM(words) AS n FROM writing_log').get()).toEqual({ n: 90 })
+  })
+
+  it('refuses a bucket without a day or an hour', () => {
+    expect(() => db.prepare('INSERT INTO writing_log (day, hour) VALUES (NULL, 1)').run()).toThrow(
+      /NOT NULL/
+    )
+    expect(() =>
+      db.prepare("INSERT INTO writing_log (day, hour) VALUES ('2026-10-04', NULL)").run()
+    ).toThrow(/NOT NULL/)
   })
 })

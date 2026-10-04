@@ -48,6 +48,7 @@ import {
 } from '../entities'
 import { EntityExchangeFormat, EntityImportItem, EntityImportPlan } from '../entityExchange'
 import { Background, FocusSettings } from '../focus'
+import { GoalsPatch, GoalsStatus } from '../goals'
 import { ImportDraft } from '../import'
 import { ImportDetectProgress, ImportDetectResult, PendingTagProposal } from '../importStructure'
 import { IndexQueueStatus } from '../jobs'
@@ -810,6 +811,19 @@ export const contract = {
     input: z.undefined(),
     output: z.object({ pins: ReferencePins, skipped: z.array(z.string()) }).nullable()
   },
+  /**
+   * The writing goals (F-10.3) and where the author stands: the targets (node targets on nodes
+   * that are gone or left the manuscript are pruned, and the row rewritten), the manuscript's
+   * words, today's words, the streaks, the deadline pace, and the session since the project was
+   * opened. Words written are the net change of manuscript documents saved from the editor.
+   */
+  'goals:get': { input: z.undefined(), output: GoalsStatus },
+  /**
+   * Changes only the fields given (null clears a target or the deadline; a node target change
+   * with `target: null` removes it) and answers the new status. A target on a node outside the
+   * manuscript is VALIDATION.
+   */
+  'goals:set': { input: GoalsPatch, output: GoalsStatus },
   /** Every tag of the open project (F-4.1), ordered by name. */
   'tag:list': { input: z.undefined(), output: z.array(Tag) },
   /**

@@ -14,6 +14,7 @@ import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
+import { useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { useImportStore } from '@renderer/features/import/importStore'
 import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -173,6 +174,13 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
       case 'toggleFocusMode':
         await useFocusStore.getState().toggle()
         return
+      case 'openGoals': {
+        // F-10.3: the dialog is part of the project screen, so focus mode is left first, like Tools › Tags.
+        const focus = useFocusStore.getState()
+        if (focus.active) await focus.exit()
+        useGoalsStore.getState().show()
+        return
+      }
       case 'openTags': {
         const focus = useFocusStore.getState()
         if (focus.active) await focus.exit()

@@ -25,6 +25,7 @@ import {
   defaultFocusSettings,
   type FocusSettingsInput
 } from '@shared/focus'
+import { GOALS_KEY, Goals, defaultGoals } from '@shared/goals'
 import type { NovelFormat } from '@shared/ipc/contract'
 import {
   OBSERVED_DISMISSED_KEY,
@@ -340,6 +341,35 @@ export function setProjectDictionary(db: TreeDb, value: ProjectDictionary): Proj
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: DICTIONARY_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the project's writing goals (F-10.3) from the `settings` row under `GOALS_KEY`. A
+ * missing row, unparsable JSON, or a value outside the schema all answer with no targets: an
+ * unreadable row can only ever hide a goal, never block the project.
+ */
+export function getGoals(db: TreeDb): Goals {
+  const row = db.select().from(settings).where(eq(settings.key, GOALS_KEY)).get()
+  if (!row) return defaultGoals()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultGoals()
+  }
+  const parsed = Goals.safeParse(json)
+  return parsed.success ? parsed.data : defaultGoals()
+}
+
+/** Replaces the project's goals (F-10.3; upsert on the settings key) and returns what was stored. */
+export function setGoals(db: TreeDb, value: Goals): Goals {
+  const stored = Goals.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: GOALS_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

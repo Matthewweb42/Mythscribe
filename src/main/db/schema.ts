@@ -495,3 +495,23 @@ export const continuityFinding = sqliteTable(
 )
 export type ContinuityFindingRow = typeof continuityFinding.$inferSelect
 export type ContinuityFindingInsert = typeof continuityFinding.$inferInsert
+
+/**
+ * Words written, by local day and hour (F-10.3): the net word-count change of manuscript
+ * documents saved from the editor, plus the active writing time those saves covered. One row per
+ * `(day, hour)` bucket, upserted on every counted save; import, replace, delete, move, and
+ * duplicate never write here. `day` is `YYYY-MM-DD` and `hour` 0–23 on the machine's local
+ * clock; `words` may be negative for an hour spent cutting. Hourly so the statistics dashboard
+ * (F-10.5: heatmap, words per day, productive hours) reads the same table.
+ */
+export const writingLog = sqliteTable(
+  'writing_log',
+  {
+    day: text('day').notNull(),
+    hour: integer('hour').notNull(),
+    words: integer('words').notNull().default(0),
+    activeMs: integer('active_ms').notNull().default(0)
+  },
+  (t) => [primaryKey({ columns: [t.day, t.hour] })]
+)
+export type WritingLogRow = typeof writingLog.$inferSelect

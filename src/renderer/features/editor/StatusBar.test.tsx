@@ -1,7 +1,9 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { resetAccountStore } from '@renderer/features/account/accountStore'
 import { resetAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { goalsStatusFixture } from '@renderer/features/goals/goalsFixture'
+import { resetGoalsStore, useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { StatusBar } from './StatusBar'
 import { formatDelta, formatWords } from './wordFormat'
 
@@ -10,10 +12,12 @@ import { formatDelta, formatWords } from './wordFormat'
 beforeEach(() => {
   resetAccountStore()
   resetAiSettingsStore()
+  resetGoalsStore()
 })
 afterEach(() => {
   resetAccountStore()
   resetAiSettingsStore()
+  resetGoalsStore()
 })
 
 describe('StatusBar (F-3.3)', () => {
@@ -52,5 +56,40 @@ describe('StatusBar (F-3.3)', () => {
   it('carries no credit notice for a project on the author’s own key (F-15.5)', () => {
     render(<StatusBar words={9} />)
     expect(screen.queryByTestId('credit-notice')).not.toBeInTheDocument()
+  })
+})
+
+describe('StatusBar goals strip (F-10.3)', () => {
+  it('shows nothing before the goals load, then today against the target and the streak', () => {
+    const { rerender } = render(<StatusBar words={9} />)
+    expect(screen.queryByTestId('status-goals')).not.toBeInTheDocument()
+    const base = goalsStatusFixture()
+    useGoalsStore.setState({
+      status: goalsStatusFixture({
+        goals: { ...base.goals, dailyTarget: 500, projectTarget: 80000 },
+        today: { day: base.today.day, words: 120 },
+        streak: { current: 3, best: 4 },
+        manuscriptWords: 40000
+      })
+    })
+    rerender(<StatusBar words={9} />)
+    expect(screen.getByTestId('status-goals-today')).toHaveTextContent('Today 120 / 500')
+    expect(screen.getByTestId('status-goals-streak')).toHaveTextContent('3-day streak')
+    expect(screen.getByRole('progressbar', { name: 'Project progress' })).toHaveAttribute(
+      'aria-valuenow',
+      '40000'
+    )
+  })
+
+  it('shows today alone without targets, and opens the dialog on a click', () => {
+    useGoalsStore.setState({
+      status: goalsStatusFixture({ today: { day: '2026-10-04', words: 7 } })
+    })
+    render(<StatusBar words={9} />)
+    expect(screen.getByTestId('status-goals-today')).toHaveTextContent('Today 7')
+    expect(screen.queryByTestId('status-goals-streak')).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('status-goals'))
+    expect(useGoalsStore.getState().open).toBe(true)
   })
 })

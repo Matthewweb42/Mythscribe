@@ -65,6 +65,8 @@ import {
   ReferencesToggleButton
 } from '@renderer/features/references/ReferencePanel'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
+import { GoalsDialog } from '@renderer/features/goals/GoalsDialog'
+import { useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { ReplaceDialog } from '@renderer/features/search/ReplaceDialog'
 import { useReplaceStore } from '@renderer/features/search/replaceStore'
 import { SearchButton, SearchDialog } from '@renderer/features/search/SearchDialog'
@@ -197,6 +199,8 @@ export function App(): React.JSX.Element {
       useEntityStore.getState().clear()
       useObservedFactStore.getState().clear()
       useReferenceStore.getState().clear()
+      // F-10.3: the goals, and the dialog if it was open.
+      useGoalsStore.getState().clear()
       // F-10.1: the search dialog and its last answer belong to the project that closed.
       useSearchStore.getState().reset()
       // F-10.2: and so do the replace dialog, its preview, and the offer to undo.
@@ -277,6 +281,11 @@ export function App(): React.JSX.Element {
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
     useBackgroundStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    // F-10.3: the goals and today's words, for the status strip and the tree's targets.
+    useGoalsStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
@@ -727,6 +736,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <SearchDialog />
       {/* F-10.2: find and replace across documents, open while the replace store says so. */}
       <ReplaceDialog />
+      {/* F-10.3: the Goals dialog, open while the goals store says so. */}
+      <GoalsDialog />
     </>
   )
 }

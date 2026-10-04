@@ -86,6 +86,13 @@ import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
 import { getDocumentContent, saveDocument } from '../document/documentStore'
+import {
+  goalsStatus,
+  manuscriptWordCount,
+  recordWriting,
+  resetGoalsSession,
+  updateGoals
+} from '../goals/goalsStore'
 import { importEntities, readEntityFile, writeEntityFile } from '../entity/entityExchange'
 import { getNotes, saveNotes } from '../document/notesStore'
 import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
@@ -528,7 +535,11 @@ export function registerHandlers({
 
   register('document:save', ({ id, content }) => {
     const db = manager.require().connection.orm
+    // F-10.3: only the editor's saves of manuscript documents count as words written, so the
+    // count before the save is read here and not in `documentsWritten` (replace writes too).
+    const previous = manuscriptWordCount(db, id)
     const saved = saveDocument(db, id, content)
+    if (previous !== null) recordWriting(db, saved.wordCount - previous)
     documentsWritten(db, [id])
     return saved
   })
@@ -651,6 +662,14 @@ export function registerHandlers({
       }
     }
     return { pins: setReferencePins(session.connection.orm, { pins }), skipped }
+  })
+
+  register('goals:get', () => goalsStatus(manager.require().connection.orm))
+
+  register('goals:set', (patch) => {
+    const db = manager.require().connection.orm
+    updateGoals(db, patch)
+    return goalsStatus(db)
   })
 
   register('conversations:get', () => getConversations(manager.require().connection.orm))
@@ -2005,6 +2024,8 @@ export function registerHandlers({
     clearSearchCache()
     // F-10.2: the last replace's undo holds another project's documents.
     clearReplaceUndo()
+    // F-10.3: the session's words and active time start again with every project.
+    resetGoalsSession()
     // F-3.11, F-3.14: the spellchecker accepts the open project's words and story names and no
     // other project's.
     void syncSpelling()

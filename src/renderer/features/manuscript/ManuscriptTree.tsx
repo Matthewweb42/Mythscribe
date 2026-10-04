@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   BookOpen,
+  Check,
   ChevronDown,
   ChevronRight,
   File,
@@ -10,7 +11,11 @@ import {
   Layers
 } from 'lucide-react'
 import type { NovelFormat, TreeNode } from '@shared/ipc/contract'
+import { goalTargetError, parseGoalTarget } from '@shared/goals'
 import { HierarchyLevel, sectionLabel, type SectionType } from '@shared/labels'
+import { formatCompactWords } from '@renderer/features/editor/wordFormat'
+import { GoalBar } from '@renderer/features/goals/GoalBar'
+import { useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
@@ -226,6 +231,10 @@ function TreeItem({
   const busy = useTreeStore((s) => s.busy)
   const select = useTreeStore((s) => s.select)
   const toggle = useTreeStore((s) => s.toggle)
+  // F-10.3: a word target, on manuscript rows only (main prunes the rest on its next read).
+  const target = useGoalsStore((s) =>
+    section === 'manuscript' ? s.status?.goals.nodeTargets[id] : undefined
+  )
   if (!node) return null
 
   const isSection = node.sectionType !== null
@@ -315,12 +324,16 @@ function TreeItem({
             className="ml-auto size-2 shrink-0 rounded-full"
           />
         ) : null}
-        <span
-          aria-hidden="true"
-          className={`text-xs text-fg-subtle tabular-nums ${matched ? '' : 'ml-auto'}`}
-        >
-          {wordCount.toLocaleString()}
-        </span>
+        {target !== undefined ? (
+          <NodeTarget words={wordCount} target={target} title={label} pushRight={!matched} />
+        ) : (
+          <span
+            aria-hidden="true"
+            className={`text-xs text-fg-subtle tabular-nums ${matched ? '' : 'ml-auto'}`}
+          >
+            {wordCount.toLocaleString()}
+          </span>
+        )}
         {zone === 'before' || zone === 'after' ? (
           <span
             aria-hidden="true"
@@ -353,6 +366,72 @@ function TreeItem({
   )
 }
 
+/**
+ * A row's word count against its target (F-10.3): `1,234 / 2,000` where the tree is wide enough,
+ * `1.2k / 2k` where it is not, a thin bar, and a check once the target is met. Decorative for
+ * the tree's accessible names (like the plain count); the title spells it out.
+ */
+function NodeTarget({
+  words,
+  target,
+  title,
+  pushRight
+}: {
+  words: number
+  target: number
+  title: string
+  pushRight: boolean
+}): React.JSX.Element {
+  const met = words >= target
+  return (
+    <span
+      data-testid="node-target"
+      data-met={met ? 'true' : undefined}
+      title={`${title}: ${words.toLocaleString()} of ${target.toLocaleString()} words`}
+      className={`flex shrink-0 items-center gap-1 text-xs tabular-nums ${
+        met ? 'text-success' : 'text-fg-subtle'
+      } ${pushRight ? 'ml-auto' : ''}`}
+    >
+      <span aria-hidden="true" className="hidden @[18rem]:inline">
+        {words.toLocaleString()} / {target.toLocaleString()}
+      </span>
+      <span aria-hidden="true" className="@[18rem]:hidden">
+        {formatCompactWords(words)} / {formatCompactWords(target)}
+      </span>
+      {met ? (
+        <Check size={12} aria-hidden="true" />
+      ) : (
+        <span aria-hidden="true">
+          <GoalBar words={words} target={target} label={`${title} word target`} className="w-8" />
+        </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * Set word target… (F-10.3): asks for the number through the dialog service and writes it with
+ * `goals:set`; the store toasts a refusal. Clear word target removes it without asking.
+ */
+async function promptNodeTarget(nodeId: string): Promise<void> {
+  const node = useTreeStore.getState().byId[nodeId]
+  const goals = useGoalsStore.getState()
+  if (!node) return
+  const current = goals.status?.goals.nodeTargets[nodeId]
+  const answer = await dialogs.prompt({
+    title: `Word target for '${node.title}'`,
+    message: 'Words this part of the manuscript should reach.',
+    placeholder: 'e.g. 2,000',
+    initialValue: current?.toString() ?? '',
+    confirmLabel: 'Set target',
+    validate: (value) => goalTargetError(value)
+  })
+  if (answer === null) return
+  const target = parseGoalTarget(answer)
+  if (target === null) return
+  await useGoalsStore.getState().set({ nodeTargets: [{ nodeId, target }] })
+}
+
 /** Delete asks first (F-2.3): folders warn that their contents go too; nothing is undoable. */
 async function confirmRemove(nodeId: string): Promise<void> {
   const { byId, remove } = useTreeStore.getState()
@@ -378,6 +457,11 @@ async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
   if (itemId === 'rename') return startRename(nodeId)
   if (itemId === 'duplicate') return duplicate(nodeId)
   if (itemId === 'delete') return confirmRemove(nodeId)
+  if (itemId === 'set-target') return promptNodeTarget(nodeId)
+  if (itemId === 'clear-target') {
+    await useGoalsStore.getState().set({ nodeTargets: [{ nodeId, target: null }] })
+    return
+  }
   if (itemId === 'new-generic-document') return createGeneric('document', nodeId)
   if (itemId === 'new-generic-folder') return createGeneric('folder', nodeId)
   const template = templateIdOf(itemId)
@@ -394,6 +478,8 @@ async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
  * deletes after confirmation (F-2.3), and in front and end matter adds templated documents
  * (F-2.6). Rows drag within their section (F-2.4): onto a folder to
  * nest, onto a row's top or bottom edge to become its sibling; sections only accept nesting.
+ * Manuscript rows with a word target (F-10.3) show their count against it; the menu sets and
+ * clears it.
  */
 export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.Element | null {
   const loaded = useTreeStore((s) => s.loaded)
@@ -410,6 +496,7 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
   // A tag deleted while its filter was on reads as no filter, so the tree never blanks out.
   const filterTag = useTagStore((s) => (tagFilterId === null ? undefined : s.byId[tagFilterId]))
   const tagIdsByNode = useDocumentTagStore((s) => s.tagIdsByNode)
+  const nodeTargets = useGoalsStore((s) => s.status?.goals.nodeTargets)
   const items = useRef(new Map<string, HTMLLIElement>())
   const [menu, setMenu] = useState<MenuAnchor | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -453,8 +540,11 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
   }
 
   const menuItems = useMemo(
-    () => (menu ? treeContextMenuItems(index, menu.id, format) : []),
-    [index, menu, format]
+    () =>
+      menu
+        ? treeContextMenuItems(index, menu.id, format, nodeTargets?.[menu.id] !== undefined)
+        : [],
+    [index, menu, format, nodeTargets]
   )
 
   const setOver = (over: DragOver | null): void => {
@@ -566,7 +656,7 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
         onKeyDown={onKeyDown}
         onDragOver={onTreeDragOver}
         onDragLeave={onTreeDragLeave}
-        className="m-0 list-none p-1"
+        className="@container m-0 list-none p-1"
       >
         {(filter ? rootIds.filter((id) => filter.visible.has(id)) : rootIds).map((id) => (
           <TreeItem

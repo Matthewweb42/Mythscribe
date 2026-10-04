@@ -1621,6 +1621,40 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('Control+s')
   await expect.poll(() => documentText(scene1Row.id), { timeout: 3000 }).toBe(SENTENCE)
 
+  // F-10.3: goals. Every word saved into Scene 1 counts as written today, so the status strip
+  // reads the sentence's words; Tools › Goals… sets a daily target of 5, and the strip then
+  // shows today against it with a one-day streak. A word target set on Scene 1 from the tree's
+  // menu shows on its row as count / target, and Clear word target takes it off again.
+  const goalsToday = page.getByTestId('status-goals-today')
+  await expect(goalsToday).toHaveText(`Today ${SENTENCE_WORDS}`, { timeout: 5000 })
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'Tools' })
+    .click()
+  await page.getByRole('menu', { name: 'Tools' }).getByRole('menuitem', { name: 'Goals…' }).click()
+  const goalsDialog = page.getByRole('dialog', { name: 'Goals' })
+  await expect(goalsDialog.getByTestId('goals-today-words')).toHaveText(
+    `${SENTENCE_WORDS} words today`
+  )
+  await goalsDialog.getByLabel('Daily target (words)').fill('5')
+  await goalsDialog.getByRole('button', { name: 'Save' }).click()
+  await expect(goalsDialog).toHaveCount(0)
+  await expect(goalsToday).toHaveText(`Today ${SENTENCE_WORDS} / 5`)
+  await expect(page.getByTestId('status-goals-streak')).toHaveText('1-day streak')
+  const scene1Item = page.locator(`[data-node-id="${scene1Row.id}"]`)
+  await scene1Item.click({ button: 'right' })
+  await page.getByRole('menu').getByRole('menuitem', { name: 'Set word target…' }).click()
+  const targetPrompt = page.getByRole('dialog', { name: "Word target for 'Scene 1'" })
+  await targetPrompt.getByRole('textbox').fill('2,000')
+  await targetPrompt.getByRole('button', { name: 'Set target' }).click()
+  await expect(targetPrompt).toHaveCount(0)
+  await expect(scene1Item.getByTestId('node-target')).toContainText(
+    `${SENTENCE_WORDS} / ${(2000).toLocaleString()}`
+  )
+  await scene1Item.click({ button: 'right' })
+  await page.getByRole('menu').getByRole('menuitem', { name: 'Clear word target' }).click()
+  await expect(scene1Item.getByTestId('node-target')).toHaveCount(0)
+
   // F-3.7: Notes from the toolbar opens a side panel beside the editor with the scene's notes;
   // selecting Chapter 1 swaps in the chapter's own notes and saves the scene's at once. The
   // chapter note is still pending when the project closes, so the close flushes it.

@@ -25,12 +25,14 @@ export function templateIdOf(itemId: string): MatterTemplateId | null {
  * The right-click menu for a tree row (F-2.2), section-aware: manuscript rows offer the levels
  * that can be placed relative to them plus a generic document and folder; front and end matter
  * rows offer the generic items followed by their section's templates as `New <Title>` (F-2.6).
- * Documents and folders (never sections) also offer Rename, Duplicate, and Delete (F-2.3).
+ * Documents and folders (never sections) also offer Rename, Duplicate, and Delete (F-2.3), and
+ * those in the manuscript `Set word target…`, plus `Clear word target` when `hasTarget` (F-10.3).
  */
 export function treeContextMenuItems(
   index: TreeIndex,
   nodeId: string,
-  format: NovelFormat
+  format: NovelFormat,
+  hasTarget = false
 ): MenuItem[] {
   const items: MenuItem[] = []
   if (index.sectionOf[nodeId] === 'manuscript') {
@@ -54,6 +56,10 @@ export function treeContextMenuItems(
     items.push({ id: 'rename', label: 'Rename' })
     items.push({ id: 'duplicate', label: 'Duplicate' })
     items.push({ id: 'delete', label: 'Delete' })
+    if (section === 'manuscript') {
+      items.push({ id: 'set-target', label: 'Set word target…' })
+      if (hasTarget) items.push({ id: 'clear-target', label: 'Clear word target' })
+    }
   }
   return items
 }

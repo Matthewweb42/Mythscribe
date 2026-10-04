@@ -13,6 +13,7 @@ import { resetDocumentStore, useDocumentStore } from '@renderer/features/editor/
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
+import { resetGoalsStore, useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { draftFixture } from '@renderer/features/import/draftFixture'
 import { resetImportStore, useImportStore } from '@renderer/features/import/importStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
@@ -99,6 +100,7 @@ beforeEach(() => {
   resetActiveEditorStore()
   resetEntityStore()
   resetFocusStore()
+  resetGoalsStore()
   resetImportStore()
   resetLayoutStore()
   resetSearchStore()
@@ -384,6 +386,17 @@ describe('runMenuAction (F-7.1)', () => {
     await runMenuAction('openTags')
     expect(useFocusStore.getState().active).toBe(false)
     expect(useLayoutStore.getState().layout.sidebar).toMatchObject({ open: true, tab: 'tags' })
+  })
+
+  it('Tools › Goals… opens the Goals dialog, leaving focus mode first (F-10.3)', async () => {
+    await runMenuAction('openGoals')
+    expect(useGoalsStore.getState().open).toBe(false)
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE])
+    await withProject()
+    await useFocusStore.getState().enter()
+    await runMenuAction('openGoals')
+    expect(useFocusStore.getState().active).toBe(false)
+    expect(useGoalsStore.getState().open).toBe(true)
   })
 })
 

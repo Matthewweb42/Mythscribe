@@ -22,7 +22,8 @@ describe('treeContextMenuItems', () => {
       { id: 'new-generic-folder', label: 'New folder' },
       { id: 'rename', label: 'Rename' },
       { id: 'duplicate', label: 'Duplicate' },
-      { id: 'delete', label: 'Delete' }
+      { id: 'delete', label: 'Delete' },
+      { id: 'set-target', label: 'Set word target…' }
     ])
     expect(treeContextMenuItems(index, 'ch-1', 'novel')[0]?.label).toBe('New Part')
   })
@@ -36,7 +37,8 @@ describe('treeContextMenuItems', () => {
       'new-generic-folder',
       'rename',
       'duplicate',
-      'delete'
+      'delete',
+      'set-target'
     ])
     expect(ids('manuscript')).toEqual([
       'new-part',
@@ -58,7 +60,8 @@ describe('treeContextMenuItems', () => {
       'new-generic-folder',
       'rename',
       'duplicate',
-      'delete'
+      'delete',
+      'set-target'
     ])
   })
 
@@ -116,6 +119,18 @@ describe('treeContextMenuItems', () => {
       expect(ids(section)).not.toContain('duplicate')
       expect(ids(section)).not.toContain('delete')
     }
+  })
+
+  it('offers Clear word target only on a manuscript row that has one, never on matter or sections (F-10.3)', () => {
+    expect(
+      treeContextMenuItems(index, 'sc-1', 'novel', true)
+        .slice(-2)
+        .map((item) => item.label)
+    ).toEqual(['Set word target…', 'Clear word target'])
+    expect(ids('sc-1')).not.toContain('clear-target')
+    expect(ids('title-page')).not.toContain('set-target')
+    for (const section of ['front', 'manuscript', 'end'])
+      expect(ids(section)).not.toContain('set-target')
   })
 
   it('returns nothing for an unknown row', () => {
