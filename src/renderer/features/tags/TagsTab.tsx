@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { CATEGORY_FILTERS, filterLabel, type CategoryFilter } from './categoryFilter'
+import { TagBankActions } from './TagBankActions'
+import { TagBulkBar } from './TagBulkBar'
 import { TagDetail } from './TagDetail'
 import { TagForm } from './TagForm'
 import { TagList } from './TagList'
@@ -16,7 +18,9 @@ const filterElementId = (filter: CategoryFilter): string => `tag-category-${filt
  * Picking a category closes the detail view so the selection can never point outside the
  * visible list. A selection request from the store (F-4.6, "Open in Tag Manager" on a token)
  * opens that tag's detail view under All, then is consumed, so a later remount of the tab does
- * not replay it.
+ * not replay it. Select mode (F-4.9) turns the rows into checkboxes and the create form into the
+ * bulk bar; the checked set is pruned to the visible rows at render, so a bulk action never
+ * touches a tag the category or the search hides.
  */
 export function TagsTab(): React.JSX.Element {
   const [filter, setFilter] = useState<CategoryFilter>('all')
@@ -46,6 +50,20 @@ export function TagsTab(): React.JSX.Element {
     )
   )
   const total = useTagStore((s) => s.ids.length)
+  const [selecting, setSelecting] = useState(false)
+  const [checkedIds, setCheckedIds] = useState<string[]>([])
+  const visible = new Set(visibleIds)
+  const picked = checkedIds.filter((id) => visible.has(id))
+  const pickedSet = new Set(picked)
+
+  const toggleChecked = (id: string): void => {
+    setCheckedIds(pickedSet.has(id) ? picked.filter((other) => other !== id) : [...picked, id])
+  }
+
+  const endSelecting = (): void => {
+    setSelecting(false)
+    setCheckedIds([])
+  }
 
   const pick = (next: CategoryFilter): void => {
     setFilter(next)
@@ -120,7 +138,13 @@ export function TagsTab(): React.JSX.Element {
           />
         ) : (
           <>
-            <TemplateLoader />
+            {/* Select mode needs the height for its rows and bar, not the template row. */}
+            {selecting ? null : <TemplateLoader />}
+            <TagBankActions
+              selecting={selecting}
+              empty={total === 0}
+              onToggleSelect={() => (selecting ? endSelecting() : setSelecting(true))}
+            />
             <div className="shrink-0 px-2 pt-2">
               <input
                 type="search"
@@ -132,9 +156,23 @@ export function TagsTab(): React.JSX.Element {
               />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <TagList ids={visibleIds} filtered={total > 0} onSelect={setSelectedId} />
+              <TagList
+                ids={visibleIds}
+                filtered={total > 0}
+                onSelect={selecting ? toggleChecked : setSelectedId}
+                checked={selecting ? pickedSet : undefined}
+              />
             </div>
-            <TagForm key={filter} filter={filter} />
+            {selecting ? (
+              <TagBulkBar
+                ids={visibleIds.filter((id) => pickedSet.has(id))}
+                visibleIds={visibleIds}
+                onChange={setCheckedIds}
+                onDone={endSelecting}
+              />
+            ) : (
+              <TagForm key={filter} filter={filter} />
+            )}
           </>
         )}
       </div>

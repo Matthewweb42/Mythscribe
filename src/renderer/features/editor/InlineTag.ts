@@ -5,6 +5,7 @@ import { ReactRenderer } from '@tiptap/react'
 import { Suggestion, type SuggestionProps } from '@tiptap/suggestion'
 import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
 import type { Tag } from '@shared/ipc/contract'
+import { resolveTagId, type TagAliases } from '@shared/tagExchange'
 import { toTagName } from '@shared/tags'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
@@ -57,14 +58,31 @@ function readAttrs(attrs: Attrs): InlineTagAttrs {
 }
 
 /**
+ * The bank tag a token's stored id stands for now: the tag itself, or the tag it was merged
+ * into (F-4.9, through the merge aliases); undefined when it was deleted.
+ */
+export function tokenTag(
+  id: string,
+  byId: Record<string, Tag>,
+  aliases: TagAliases
+): Tag | undefined {
+  return byId[resolveTagId(id, aliases, (candidate) => byId[candidate] !== undefined)]
+}
+
+/**
  * Paints the bank's current name and color onto every token in `dom` (F-4.6): the resync pass
  * that stands in for a node view. A rename or recolor in the Tags tab lands here at once; a
- * token whose tag was deleted falls back to the name it stored and loses its color. Tokens are
- * atoms, so ProseMirror ignores these mutations inside them.
+ * token of a merged tag paints as the tag it was merged into (F-4.9); a token whose tag was
+ * deleted falls back to the name it stored and loses its color. Tokens are atoms, so ProseMirror
+ * ignores these mutations inside them.
  */
-export function resyncInlineTags(dom: HTMLElement, byId: Record<string, Tag>): void {
+export function resyncInlineTags(
+  dom: HTMLElement,
+  byId: Record<string, Tag>,
+  aliases: TagAliases
+): void {
   for (const span of dom.querySelectorAll<HTMLElement>(INLINE_TAG_SELECTOR)) {
-    const tag = byId[span.dataset.id ?? '']
+    const tag = tokenTag(span.dataset.id ?? '', byId, aliases)
     const label = `#${tag?.name ?? span.dataset.name ?? ''}`
     if (span.textContent !== label) span.textContent = label
     if (tag) span.style.setProperty('--tag-color', tag.color)
@@ -118,7 +136,8 @@ export const InlineTag = Node.create<InlineTagOptions>({
 
   renderHTML({ node, HTMLAttributes }) {
     const { id, name } = readAttrs(node.attrs)
-    const tag = useTagStore.getState().byId[id]
+    const bank = useTagStore.getState()
+    const tag = tokenTag(id, bank.byId, bank.aliases)
     const attrs: Record<string, string> = { 'data-inline-tag': '', class: 'inline-tag' }
     if (tag) attrs.style = `--tag-color: ${tag.color}`
     return ['span', mergeAttributes(HTMLAttributes, attrs), `#${tag?.name ?? name}`]
@@ -127,7 +146,8 @@ export const InlineTag = Node.create<InlineTagOptions>({
   /** Copied as plain text (F-3.13): the token reads as the `#name` it shows, never as nothing. */
   renderText({ node }) {
     const { id, name } = readAttrs(node.attrs)
-    return `#${useTagStore.getState().byId[id]?.name ?? name}`
+    const bank = useTagStore.getState()
+    return `#${tokenTag(id, bank.byId, bank.aliases)?.name ?? name}`
   },
 
   addProseMirrorPlugins() {

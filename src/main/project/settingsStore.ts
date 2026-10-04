@@ -35,6 +35,7 @@ import {
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
 import { DISMISSED_NAMES_KEY, DismissedNames, defaultDismissedNames } from '@shared/proposedTags'
 import { REFERENCE_PINS_KEY, ReferencePins, defaultReferencePins } from '@shared/references'
+import { TAG_ALIASES_KEY, TagAliases } from '@shared/tagExchange'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
 
@@ -253,6 +254,35 @@ export function setDismissedNames(db: TreeDb, value: DismissedNames): DismissedN
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: DISMISSED_NAMES_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the tag merge aliases (F-4.9) from the `settings` row under `TAG_ALIASES_KEY`. A missing
+ * row, unparsable JSON, or a value outside the schema all answer with no aliases: a token of a
+ * merged tag then falls back to its stored name, as for a deleted tag.
+ */
+export function getTagAliases(db: TreeDb): TagAliases {
+  const row = db.select().from(settings).where(eq(settings.key, TAG_ALIASES_KEY)).get()
+  if (!row) return {}
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return {}
+  }
+  const parsed = TagAliases.safeParse(json)
+  return parsed.success ? parsed.data : {}
+}
+
+/** Replaces the tag merge aliases (F-4.9; upsert on the settings key) and returns what was stored. */
+export function setTagAliases(db: TreeDb, value: TagAliases): TagAliases {
+  const stored = TagAliases.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: TAG_ALIASES_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

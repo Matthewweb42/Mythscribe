@@ -5,7 +5,7 @@ import { TiptapNode } from '@shared/tiptap'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { buildExtensions } from './extensions'
-import { INLINE_TAG_SUGGESTION_KEY, resyncInlineTags, suggestItems } from './InlineTag'
+import { INLINE_TAG_SUGGESTION_KEY, resyncInlineTags, suggestItems, tokenTag } from './InlineTag'
 
 const token = (id: string, name: string) => ({ type: 'inlineTag', attrs: { id, name } })
 const bank = (): Tag[] => tagFixture
@@ -114,9 +114,11 @@ describe('InlineTag node (F-4.6)', () => {
     editor.commands.insertContent([token('t-forest', 'old-name'), token('t-mara', 'mara')])
     const spans = editor.view.dom.querySelectorAll<HTMLElement>('[data-inline-tag]')
     expect(spans).toHaveLength(2)
-    resyncInlineTags(editor.view.dom, {
-      't-forest': { ...tagFixture[0]!, name: 'gloomy-wood', color: '#112233' }
-    })
+    resyncInlineTags(
+      editor.view.dom,
+      { 't-forest': { ...tagFixture[0]!, name: 'gloomy-wood', color: '#112233' } },
+      {}
+    )
     expect(spans[0]?.textContent).toBe('#gloomy-wood')
     expect(spans[0]?.style.getPropertyValue('--tag-color')).toBe('#112233')
     expect(spans[1]?.textContent).toBe('#mara')
@@ -126,6 +128,22 @@ describe('InlineTag node (F-4.6)', () => {
       id: 't-forest',
       name: 'old-name'
     })
+  })
+
+  it('resyncInlineTags paints a merged tag’s token as the tag it was merged into (F-4.9)', () => {
+    editor.commands.focus('end')
+    editor.commands.insertContent([token('t-old', 'old-wood'), token('t-gone', 'gone')])
+    const spans = editor.view.dom.querySelectorAll<HTMLElement>('[data-inline-tag]')
+    const byId = { 't-forest': tagFixture[0]! }
+    resyncInlineTags(editor.view.dom, byId, { 't-old': 't-mid', 't-mid': 't-forest' })
+    expect(spans[0]?.textContent).toBe('#dark-forest')
+    expect(spans[0]?.style.getPropertyValue('--tag-color')).toBe('#ea580c')
+    // An id with no alias and no tag reads as deleted: its stored name, no color.
+    expect(spans[1]?.textContent).toBe('#gone')
+    expect(spans[1]?.style.getPropertyValue('--tag-color')).toBe('')
+    expect(tokenTag('t-old', byId, { 't-old': 't-forest' })?.id).toBe('t-forest')
+    expect(tokenTag('t-forest', byId, {})?.id).toBe('t-forest')
+    expect(tokenTag('t-gone', byId, {})).toBeUndefined()
   })
 
   it('leaves the token and the suggestion out of a schema built without a node id (notes)', () => {

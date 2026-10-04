@@ -140,6 +140,7 @@ let exportAsked: { defaultName: string; directory: string | undefined } | null
 let manuscriptPath: string | null
 /** What the fake entity-library dialog answers (F-9.5); null cancels. */
 let entityFilePath: string | null
+let tagBankPath: string | null
 
 const UNSUPPORTED_UPDATES =
   'This is a development build; updates are installed by the released app.'
@@ -184,7 +185,8 @@ const dialogs: ProjectDialogs = {
   chooseImages: async () => chosenImages,
   chooseEntityImage: async () => chosenEntityImage,
   chooseManuscriptFile: async () => manuscriptPath,
-  chooseEntityLibraryFile: async () => entityFilePath
+  chooseEntityLibraryFile: async () => entityFilePath,
+  chooseTagBankFile: async () => tagBankPath
 }
 
 beforeEach(() => {
@@ -197,6 +199,7 @@ beforeEach(() => {
   chosenEntityImage = null
   manuscriptPath = null
   entityFilePath = null
+  tagBankPath = null
   manager = new ProjectManager()
   fullScreen = false
   fakeWin = {
@@ -4170,6 +4173,192 @@ describe('tag:loadTemplate (F-4.3)', () => {
     const result = await handlerFor('tag:loadTemplate')(undefined, { template: 'western' })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+  })
+})
+
+describe('tag bulk operations and exchange (F-4.9)', () => {
+  /** The debounce is 1.5 s; 3 s covers it and the scan that follows. */
+  const SCAN = 3_000
+
+  const sent = (channel: string): unknown[] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([name]) => name === channel)
+      .map(([, payload]) => payload)
+
+  /** A project with its first scene saved with `text`; the scene id. */
+  async function ready(text?: string): Promise<string> {
+    await invoke('project:create', { name: 'My Book', format: 'novel', directory: tmp })
+    const scene = manuscriptReadingOrder(await invoke('tree:list', undefined))[0]
+    if (scene === undefined) throw new Error('skeleton not seeded')
+    if (text !== undefined) {
+      await invoke('document:save', {
+        id: scene,
+        content: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+        }
+      })
+    }
+    return scene
+  }
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('tag:recolor', { ids: ['x'], color: '#000000' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+    await expect(invoke('tag:deleteMany', { ids: ['x'] })).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('tag:merge', { targetId: 'x', sourceIds: ['y'] })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+    await expect(invoke('tag:aliases', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('tag:export', {})).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('tag:import', {})).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('recolors and deletes several tags, refusing an unknown id and an empty list', async () => {
+    await ready()
+    const rain = await invoke('tag:create', { name: 'Rain', category: 'tone' })
+    const fog = await invoke('tag:create', { name: 'Fog', category: 'tone' })
+    expect(
+      (await invoke('tag:recolor', { ids: [rain.id, fog.id], color: '#123456' })).map((t) => [
+        t.name,
+        t.color
+      ])
+    ).toEqual([
+      ['rain', '#123456'],
+      ['fog', '#123456']
+    ])
+    await expect(
+      invoke('tag:recolor', { ids: [rain.id, 'missing'], color: '#000000' })
+    ).rejects.toThrowError(/^NOT_FOUND: /)
+    await expect(invoke('tag:deleteMany', { ids: [rain.id, 'missing'] })).rejects.toThrowError(
+      /^NOT_FOUND: /
+    )
+    expect(await invoke('tag:list', undefined)).toHaveLength(2)
+    const empty = await handlerFor('tag:deleteMany')(undefined, { ids: [] })
+    expect(empty.ok).toBe(false)
+    if (!empty.ok) expect(empty.error.code).toBe('VALIDATION')
+
+    expect(await invoke('tag:deleteMany', { ids: [rain.id, fog.id] })).toBeNull()
+    expect(await invoke('tag:list', undefined)).toEqual([])
+  })
+
+  it('tells the windows which documents lost mentions when several tags go', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await ready('Rose met Kael.')
+      const rose = await invoke('tag:create', { name: 'Rose', category: 'character' })
+      const kael = await invoke('tag:create', { name: 'Kael', category: 'character' })
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForNode', { nodeId: scene })).toHaveLength(2)
+      vi.mocked(fakeWin.webContents.send).mockClear()
+      await invoke('tag:deleteMany', { ids: [rose.id, kael.id] })
+      expect(sent('mention:changed')).toEqual([{ nodeIds: [scene] }])
+      expect(await invoke('mention:listForNode', { nodeId: scene })).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('merges into the target, announces the moved links, rescans, and stores the aliases', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await ready('Rose waited for Rosie.')
+      const rose = await invoke('tag:create', { name: 'Rose', category: 'character' })
+      const rosie = await invoke('tag:create', { name: 'Rosie', category: 'character' })
+      await invoke('documentTag:add', { nodeId: scene, tagId: rosie.id })
+      const character = await invoke('entity:create', { kind: 'character', name: 'Rosie' })
+      expect(character.tagId).toBe(rosie.id)
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForTag', { tagId: rosie.id })).toHaveLength(1)
+      vi.mocked(fakeWin.webContents.send).mockClear()
+
+      const result = await invoke('tag:merge', { targetId: rose.id, sourceIds: [rosie.id] })
+      expect(result.target).toMatchObject({ id: rose.id, name: 'rose', usageCount: 1 })
+      expect(result.removedIds).toEqual([rosie.id])
+      expect(result.aliases).toEqual({ [rosie.id]: rose.id })
+      expect(await invoke('tag:aliases', undefined)).toEqual({ [rosie.id]: rose.id })
+      expect(sent('documentTag:changed')).toEqual([{ nodeIds: [scene] }])
+      expect(sent('mention:changed')).toContainEqual({ nodeIds: [scene] })
+      expect(sent('entity:changed')).toEqual([
+        expect.objectContaining({ id: character.id, tagId: rose.id })
+      ])
+      expect((await invoke('documentTag:list', { nodeId: scene })).map((t) => t.id)).toEqual([
+        rose.id
+      ])
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForTag', { tagId: rose.id })).toHaveLength(1)
+
+      await expect(
+        invoke('tag:merge', { targetId: rose.id, sourceIds: [rose.id] })
+      ).rejects.toThrowError(/^VALIDATION: /)
+      await expect(
+        invoke('tag:merge', { targetId: rose.id, sourceIds: ['missing'] })
+      ).rejects.toThrowError(/^NOT_FOUND: /)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('exports the bank beside the project folder and answers null on a cancel', async () => {
+    await ready()
+    await expect(invoke('tag:export', {})).rejects.toThrowError(/^VALIDATION: No tags to export/)
+    await invoke('tag:create', { name: 'Rain', category: 'tone', color: '#123456' })
+    expect(await invoke('tag:export', {})).toBeNull()
+    expect(exportAsked).toEqual({ defaultName: 'My Book tags.json', directory: tmp })
+
+    exportPath = path.join(tmp, 'bank.json')
+    expect(await invoke('tag:export', {})).toEqual({ path: exportPath, count: 1 })
+    expect(JSON.parse(fs.readFileSync(exportPath, 'utf8'))).toEqual({
+      format: 'mythscribe-tags',
+      version: 1,
+      tags: [
+        { name: 'rain', category: 'tone', color: '#123456', parent: null, trackMentions: true }
+      ]
+    })
+    expect(fs.existsSync(`${exportPath}.tmp`)).toBe(false)
+  })
+
+  it('imports new names from the chosen file, skips taken ones, and refuses a bad file', async () => {
+    await ready()
+    await invoke('tag:create', { name: 'Rain', category: 'tone' })
+    expect(await invoke('tag:import', {})).toBeNull()
+
+    tagBankPath = path.join(tmp, 'bank.json')
+    fs.writeFileSync(
+      tagBankPath,
+      JSON.stringify({
+        format: 'mythscribe-tags',
+        version: 1,
+        tags: [
+          { name: 'Rain', category: 'custom', color: '#000000' },
+          { name: 'Dark Forest', category: 'setting', color: '#abcdef' }
+        ]
+      })
+    )
+    const result = await invoke('tag:import', {})
+    expect(result?.skipped).toEqual(['rain'])
+    expect(result?.created).toMatchObject([
+      { name: 'dark-forest', category: 'setting', color: '#abcdef' }
+    ])
+    expect((await invoke('tag:list', undefined)).map((t) => t.name)).toEqual([
+      'dark-forest',
+      'rain'
+    ])
+
+    const bad = path.join(tmp, 'bad.json')
+    fs.writeFileSync(bad, '{"format":"mythscribe-tags","version":1,"tags":[{"name":"x"}]}')
+    await expect(invoke('tag:import', { path: bad })).rejects.toThrowError(
+      /^VALIDATION: Tag 1 is not valid/
+    )
+    fs.writeFileSync(bad, '{"format":"mythscribe-tags","version":1,"tags":[]}')
+    await expect(invoke('tag:import', { path: bad })).rejects.toThrowError(
+      /^VALIDATION: That file has no tags/
+    )
+    await expect(
+      invoke('tag:import', { path: path.join(tmp, 'missing.json') })
+    ).rejects.toThrowError(/^VALIDATION: Could not read the file/)
   })
 })
 

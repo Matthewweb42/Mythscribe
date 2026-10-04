@@ -1866,6 +1866,66 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByRole('status')).toContainText('Added 28 tags')
   await expect(tagRows.getByRole('button')).toHaveCount(29)
   await expect(tagRows.getByRole('button', { name: /^protagonist/ })).toBeVisible()
+  // F-4.9: the bank goes out as a JSON file (all 29 tags) and a hand-written one comes in: the new
+  // tag is created, the name already in the bank is skipped. Under Custom, select mode then
+  // recolors the imported tag and one made in the form, merges them, and deletes what is left, so
+  // the bank is back to the 29 the later steps expect.
+  const tagBank = tagsPanel.getByRole('group', { name: 'Tag bank' })
+  const bankPath = path.join(tmp, 'tags.json')
+  await stubSaveDialog(bankPath)
+  await tagBank.getByRole('button', { name: 'Export…' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Exported' })).toContainText(
+    'Exported 29 tags to tags.json'
+  )
+  const bankFile: unknown = JSON.parse(fs.readFileSync(bankPath, 'utf8'))
+  expect(bankFile).toMatchObject({ format: 'mythscribe-tags', version: 1 })
+  expect(bankFile).toHaveProperty('tags.length', 29)
+  const incomingTagsPath = path.join(tmp, 'incoming-tags.json')
+  fs.writeFileSync(
+    incomingTagsPath,
+    JSON.stringify({
+      format: 'mythscribe-tags',
+      version: 1,
+      tags: [
+        { name: 'Gloomy', category: 'custom', color: '#123456' },
+        { name: 'protagonist', category: 'character', color: '#dc2626' }
+      ]
+    })
+  )
+  await stubOpenDialog(incomingTagsPath)
+  await tagBank.getByRole('button', { name: 'Import…' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Imported' })).toContainText(
+    'Imported 1 tag, skipped 1 already in the bank'
+  )
+  await categories.getByRole('tab', { name: 'Custom' }).click()
+  await expect(tagRows.getByRole('button')).toHaveText(['gloomy 0 uses'])
+  await tagForm.getByRole('textbox', { name: 'Tag name' }).fill('gloom')
+  await tagForm.getByRole('button', { name: 'Create tag' }).click()
+  await expect(tagRows.getByRole('button')).toHaveText(['gloom 0 uses', 'gloomy 0 uses'])
+  await tagBank.getByRole('button', { name: 'Select' }).click()
+  const bulkBar = tagsPanel.getByRole('group', { name: 'Selected tags' })
+  await tagRows.getByRole('checkbox', { name: /^gloom 0/ }).check()
+  await tagRows.getByRole('checkbox', { name: /^gloomy/ }).check()
+  await expect(bulkBar).toContainText('2 selected')
+  await bulkBar.getByLabel('Color for selected tags').fill('#ff0000')
+  for (const row of await tagRows.getByRole('listitem').all()) {
+    await expect(row.locator('span[aria-hidden]')).toHaveCSS('background-color', 'rgb(255, 0, 0)')
+  }
+  await bulkBar.getByRole('combobox', { name: 'Merge into' }).selectOption({ label: 'gloom' })
+  await bulkBar.getByRole('button', { name: 'Merge' }).click()
+  const mergeDialog = page.getByRole('dialog', { name: 'Merge 1 tag into "gloom"?' })
+  await mergeDialog.getByRole('button', { name: 'Merge' }).click()
+  await expect(mergeDialog).toBeHidden()
+  await expect(tagRows.getByRole('checkbox')).toHaveCount(1)
+  await expect(tagRows.getByRole('checkbox', { name: /^gloom 0/ })).toBeChecked()
+  await bulkBar.getByRole('button', { name: 'Delete' }).click()
+  const bulkDeleteDialog = page.getByRole('dialog', { name: 'Delete 1 tag?' })
+  await bulkDeleteDialog.getByRole('button', { name: 'Delete' }).click()
+  await expect(bulkDeleteDialog).toBeHidden()
+  await expect(tagsPanel.getByText('No tags match.')).toBeVisible()
+  await bulkBar.getByRole('button', { name: 'Done' }).click()
+  await categories.getByRole('tab', { name: 'All' }).click()
+  await expect(tagRows.getByRole('button')).toHaveCount(29)
 
   // F-9.4: Scene 1 gains a sentence naming Mara, so the character created next has somewhere to
   // appear; it is taken out again once her page has shown it, so the text the later steps assert

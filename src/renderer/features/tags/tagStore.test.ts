@@ -7,7 +7,7 @@ import { orderedIds, resetTagStore, useTagStore } from './tagStore'
 type Handler = (input: unknown) => unknown
 type Listener = (tag: Tag) => void
 
-/** Answers `tag:list` with the fixture and the mutations with `handlers`; records every call. */
+/** Answers `tag:list` with the fixture, `tag:aliases` with none, and the mutations with `handlers`; records every call. */
 function fakeClient(handlers: Partial<Record<Channel, Handler>> = {}): {
   client: IpcClient
   calls: [Channel, unknown][]
@@ -23,6 +23,7 @@ function fakeClient(handlers: Partial<Record<Channel, Handler>> = {}): {
       const handler = handlers[channel]
       if (handler) return handler(input) as Output<C>
       if (channel === 'tag:list') return tagFixture as Output<C>
+      if (channel === 'tag:aliases') return {} as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: (channel, listener) => {
@@ -138,7 +139,7 @@ describe('tagStore (F-4.2)', () => {
     expect(state().ids).toEqual(['t-forest', 't-eerie', 't-mara', 't-moody'])
     state().merge({ ...tagFixture[1]!, name: 'zed' })
     expect(state().ids).toEqual(['t-forest', 't-eerie', 't-moody', 't-mara'])
-    expect(calls.map(([channel]) => channel)).toEqual(['tag:list'])
+    expect(calls.map(([channel]) => channel)).toEqual(['tag:list', 'tag:aliases'])
   })
 
   it('requestSelection bumps the token for a repeat of the same tag; clear and clearSelectionRequest drop it (F-4.6)', () => {
@@ -268,5 +269,132 @@ describe('tagStore (F-4.2)', () => {
     release(created)
     await expect(pending).resolves.toEqual(created)
     expect(state().ids).toEqual([])
+  })
+})
+
+describe('tagStore bulk operations (F-4.9)', () => {
+  beforeEach(() => {
+    resetTagStore()
+  })
+
+  it('load reads the aliases beside the bank, and clear drops them', async () => {
+    setIpcClient(fakeClient({ 'tag:aliases': () => ({ 't-old': 't-mara' }) }).client)
+    await state().load()
+    expect(state().aliases).toEqual({ 't-old': 't-mara' })
+    state().clear()
+    expect(state().aliases).toEqual({})
+  })
+
+  it('recolorMany replaces every returned row in place without re-sorting', async () => {
+    const answer = [
+      { ...tagFixture[0]!, color: '#111111' },
+      { ...tagFixture[2]!, color: '#111111' }
+    ]
+    const { client, calls } = fakeClient({ 'tag:recolor': () => answer })
+    setIpcClient(client)
+    await state().load()
+    const idsBefore = state().ids
+    await state().recolorMany(['t-forest', 't-moody'], '#111111')
+    expect(state().byId['t-forest']?.color).toBe('#111111')
+    expect(state().byId['t-moody']?.color).toBe('#111111')
+    expect(state().byId['t-mara']?.color).toBe('#dc2626')
+    expect(state().ids).toBe(idsBefore)
+    expect(calls.at(-1)).toEqual([
+      'tag:recolor',
+      { ids: ['t-forest', 't-moody'], color: '#111111' }
+    ])
+  })
+
+  it('removeMany drops the rows and the aliases that led to them', async () => {
+    const { client, calls } = fakeClient({
+      'tag:aliases': () => ({ 't-old': 't-mara', 't-older': 't-forest' }),
+      'tag:deleteMany': () => null
+    })
+    setIpcClient(client)
+    await state().load()
+    await state().removeMany(['t-mara', 't-moody'])
+    expect(state().ids).toEqual(['t-forest'])
+    expect(state().byId['t-mara']).toBeUndefined()
+    expect(state().aliases).toEqual({ 't-older': 't-forest' })
+    expect(calls.at(-1)).toEqual(['tag:deleteMany', { ids: ['t-mara', 't-moody'] }])
+  })
+
+  it('mergeInto replaces the target, drops the merged tags, and stores main’s aliases', async () => {
+    const target: Tag = { ...tagFixture[1]!, usageCount: 4 }
+    const answer = {
+      target,
+      removedIds: ['t-forest', 't-moody'],
+      aliases: { 't-forest': 't-mara', 't-moody': 't-mara' }
+    }
+    const { client, calls } = fakeClient({ 'tag:merge': () => answer })
+    setIpcClient(client)
+    await state().load()
+    await state().mergeInto('t-mara', ['t-forest', 't-moody'])
+    expect(state().ids).toEqual(['t-mara'])
+    expect(state().byId['t-mara']?.usageCount).toBe(4)
+    expect(state().aliases).toEqual(answer.aliases)
+    expect(calls.at(-1)).toEqual([
+      'tag:merge',
+      { targetId: 't-mara', sourceIds: ['t-forest', 't-moody'] }
+    ])
+  })
+
+  it('a failed recolorMany, removeMany, or mergeInto propagates and leaves the store untouched', async () => {
+    setIpcClient(
+      fakeClient({ 'tag:recolor': failure, 'tag:deleteMany': failure, 'tag:merge': failure }).client
+    )
+    await state().load()
+    const before = state()
+    await expect(state().recolorMany(['t-mara'], '#000000')).rejects.toBeInstanceOf(IpcRequestError)
+    await expect(state().removeMany(['t-mara'])).rejects.toBeInstanceOf(IpcRequestError)
+    await expect(state().mergeInto('t-mara', ['t-moody'])).rejects.toBeInstanceOf(IpcRequestError)
+    expect(state().byId).toBe(before.byId)
+    expect(state().ids).toBe(before.ids)
+    expect(state().aliases).toBe(before.aliases)
+  })
+
+  it('importBank merges the created tags in name order; a cancel or nothing new leaves the store', async () => {
+    const created: Tag[] = [{ ...tagFixture[2]!, id: 't-alpha', name: 'alpha', usageCount: 0 }]
+    let answer: { created: Tag[]; skipped: string[] } | null = null
+    const { client, calls } = fakeClient({ 'tag:import': () => answer })
+    setIpcClient(client)
+    await state().load()
+    const before = state()
+    await expect(state().importBank()).resolves.toBeNull()
+    expect(state().ids).toBe(before.ids)
+    expect(calls.at(-1)).toEqual(['tag:import', {}])
+
+    answer = { created: [], skipped: ['mara'] }
+    await expect(state().importBank()).resolves.toEqual(answer)
+    expect(state().ids).toBe(before.ids)
+
+    answer = { created, skipped: ['mara'] }
+    await expect(state().importBank()).resolves.toEqual(answer)
+    expect(state().ids).toEqual(['t-alpha', 't-forest', 't-mara', 't-moody'])
+  })
+
+  it('exportBank answers what main wrote, or null when cancelled', async () => {
+    let answer: { path: string; count: number } | null = { path: '/x/Book tags.json', count: 3 }
+    const { client, calls } = fakeClient({ 'tag:export': () => answer })
+    setIpcClient(client)
+    await expect(state().exportBank()).resolves.toEqual({ path: '/x/Book tags.json', count: 3 })
+    expect(calls.at(-1)).toEqual(['tag:export', {}])
+    answer = null
+    await expect(state().exportBank()).resolves.toBeNull()
+  })
+
+  it('a mergeInto that resolves after clear does not repopulate the store', async () => {
+    let release: (value: Output<'tag:merge'>) => void = () => {}
+    const slow = new Promise<Output<'tag:merge'>>((resolve) => {
+      release = resolve
+    })
+    setIpcClient(fakeClient({ 'tag:merge': () => slow }).client)
+    await state().load()
+    const pending = state().mergeInto('t-mara', ['t-moody'])
+    state().clear()
+    release({ target: tagFixture[1]!, removedIds: ['t-moody'], aliases: { 't-moody': 't-mara' } })
+    await pending
+    expect(state().ids).toEqual([])
+    expect(state().aliases).toEqual({})
   })
 })

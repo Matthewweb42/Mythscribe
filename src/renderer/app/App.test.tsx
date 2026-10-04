@@ -150,6 +150,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'recents:list') return []
     if (channel === 'tree:list') return []
     if (channel === 'tag:list') return []
+    if (channel === 'tag:aliases') return {}
     if (channel === 'entity:list') return []
     if (channel === 'observedFact:listForEntity') return []
     if (channel === 'documentTag:list') return []

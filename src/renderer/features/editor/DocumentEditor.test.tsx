@@ -62,6 +62,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       const override = overrides[channel]
       if (override) return override(input) as Output<C>
       if (channel === 'tag:list') return tagFixture as Output<C>
+      if (channel === 'tag:aliases') return {} as Output<C>
       if (channel === 'tag:create') {
         const value = input as Input<'tag:create'>
         const tag: Tag = {
@@ -598,6 +599,28 @@ describe('DocumentEditor inline tags (F-4.6)', () => {
     expect(useLayoutStore.getState().layout.sidebar.open).toBe(true)
     expect(useTagStore.getState().pendingSelection).toEqual({ id: 't-forest', token: 1 })
     expect(tokens()).toHaveLength(1)
+  })
+
+  it('a token of a merged tag paints as the tag it was merged into and opens it in the Tag Manager (F-4.9)', async () => {
+    await mountReady()
+    await userEvent.keyboard(' #dar')
+    await waitFor(() => expect(options()).toEqual(['dark-forest', 'Create #dar']))
+    await userEvent.keyboard('{Tab}')
+    await waitFor(() => expect(tokens()).toHaveLength(1))
+    act(() => {
+      const byId = Object.fromEntries(
+        Object.entries(useTagStore.getState().byId).filter(([id]) => id !== 't-forest')
+      )
+      useTagStore.setState({
+        byId,
+        ids: Object.keys(byId),
+        aliases: { 't-forest': 't-mara' }
+      })
+    })
+    expect(tokens()[0]).toHaveTextContent('#mara')
+    fireEvent.contextMenu(tokens()[0]!, { clientX: 40, clientY: 50 })
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Open in Tag Manager' }))
+    expect(useTagStore.getState().pendingSelection).toEqual({ id: 't-mara', token: 1 })
   })
 
   it('a right-click on plain text opens no menu', async () => {

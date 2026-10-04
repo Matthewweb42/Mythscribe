@@ -33,6 +33,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       const override = overrides[channel]
       if (override) return override(input) as Output<C>
       if (channel === 'tag:list') return tagFixture as Output<C>
+      if (channel === 'tag:aliases') return {} as Output<C>
       if (channel === 'tag:create') {
         const value = input as Input<'tag:create'>
         const tag: Tag = {
@@ -624,5 +625,195 @@ describe('TagDetail mentions (F-4.12)', () => {
     await waitFor(() => expect(toasts()).toEqual(['Database is locked']))
     expect(screen.getByRole('textbox', { name: 'Tag name' })).toHaveValue('mara')
     expect(useMentionStore.getState().byTag).toEqual({})
+  })
+})
+
+describe('TagsTab bulk operations and the tag bank file (F-4.9)', () => {
+  beforeEach(() => {
+    resetTagStore()
+    resetDocumentTagStore()
+    resetMentionStore()
+    useTreeStore.getState().clear()
+    useDialogStore.setState({ modals: [], toasts: [] })
+  })
+
+  const box = (name: string): HTMLElement =>
+    within(list()).getByRole('checkbox', { name: new RegExp(`^${name} `) })
+  const bulk = (): HTMLElement => screen.getByRole('group', { name: 'Selected tags' })
+  const confirmTop = async (answer: boolean): Promise<void> => {
+    const modal = useDialogStore.getState().modals[0]
+    if (modal?.kind !== 'confirm') throw new Error('expected a confirm')
+    await act(async () => {
+      useDialogStore.getState().resolveConfirm(modal.id, answer)
+    })
+  }
+
+  it('Select turns the rows into checkboxes and the create form into the bulk bar; Done leaves', async () => {
+    const user = userEvent.setup()
+    await renderLoaded()
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('form', { name: 'New tag' })).not.toBeInTheDocument()
+    expect(within(bulk()).getByText('0 selected')).toBeInTheDocument()
+    await user.click(box('mara'))
+    expect(box('mara')).toBeChecked()
+    expect(within(bulk()).getByText('1 selected')).toBeInTheDocument()
+    // A checked row does not open the detail view.
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+    await user.click(within(bulk()).getByRole('button', { name: 'All' }))
+    expect(within(bulk()).getByText('3 selected')).toBeInTheDocument()
+    await user.click(within(bulk()).getByRole('button', { name: 'None' }))
+    expect(within(bulk()).getByText('0 selected')).toBeInTheDocument()
+    await user.click(box('moody'))
+    await user.click(within(bulk()).getByRole('button', { name: 'Done' }))
+    expect(form()).toBeInTheDocument()
+    expect(row('moody')).toBeInTheDocument()
+    // Re-entering starts empty.
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    expect(within(bulk()).getByText('0 selected')).toBeInTheDocument()
+  })
+
+  it('the selection is pruned to the visible rows, so a hidden tag is never acted on', async () => {
+    const user = userEvent.setup()
+    const calls = await renderLoaded({ 'tag:deleteMany': () => null })
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    await user.click(within(bulk()).getByRole('button', { name: 'All' }))
+    await user.type(screen.getByRole('searchbox', { name: 'Search tags' }), 'm')
+    expect(within(bulk()).getByText('2 selected')).toBeInTheDocument()
+    await user.click(within(bulk()).getByRole('button', { name: 'Delete' }))
+    const modal = useDialogStore.getState().modals[0]
+    if (modal?.kind !== 'confirm') throw new Error('expected a confirm')
+    expect(modal.options).toMatchObject({
+      title: 'Delete 2 tags?',
+      message: 'This removes them from every document. This cannot be undone.',
+      danger: true
+    })
+    await confirmTop(true)
+    expect(calls.at(-1)).toEqual(['tag:deleteMany', { ids: ['t-mara', 't-moody'] }])
+    expect(useTagStore.getState().ids).toEqual(['t-forest'])
+    expect(toasts()).toEqual(['Deleted 2 tags'])
+    expect(within(bulk()).getByText('0 selected')).toBeInTheDocument()
+  })
+
+  it('a cancelled delete sends nothing', async () => {
+    const user = userEvent.setup()
+    const calls = await renderLoaded()
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    await user.click(box('mara'))
+    await user.click(within(bulk()).getByRole('button', { name: 'Delete' }))
+    await confirmTop(false)
+    expect(calls.filter(([channel]) => channel === 'tag:deleteMany')).toHaveLength(0)
+    expect(box('mara')).toBeChecked()
+  })
+
+  it('a color pick recolors every checked tag in one request', async () => {
+    const user = userEvent.setup()
+    const calls = await renderLoaded({
+      'tag:recolor': (input) => {
+        const { ids, color } = input as Input<'tag:recolor'>
+        return ids.map((id) => ({ ...useTagStore.getState().byId[id]!, color }))
+      }
+    })
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    const color = within(bulk()).getByLabelText('Color for selected tags')
+    expect(color).toBeDisabled()
+    await user.click(box('dark-forest'))
+    await user.click(box('moody'))
+    fireEvent.change(color, { target: { value: '#123456' } })
+    await waitFor(() => expect(useTagStore.getState().byId['t-moody']?.color).toBe('#123456'))
+    expect(calls.filter(([channel]) => channel === 'tag:recolor')).toEqual([
+      ['tag:recolor', { ids: ['t-forest', 't-moody'], color: '#123456' }]
+    ])
+    expect(useTagStore.getState().byId['t-forest']?.color).toBe('#123456')
+    expect(useTagStore.getState().byId['t-mara']?.color).toBe('#dc2626')
+  })
+
+  it('Merge needs two tags, asks first, and folds the others into the chosen one', async () => {
+    const user = userEvent.setup()
+    const calls = await renderLoaded({
+      'tag:merge': () => ({
+        target: { ...tagFixture[1]!, usageCount: 4 },
+        removedIds: ['t-forest'],
+        aliases: { 't-forest': 't-mara' }
+      })
+    })
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    const mergeButton = within(bulk()).getByRole('button', { name: 'Merge' })
+    await user.click(box('dark-forest'))
+    expect(mergeButton).toBeDisabled()
+    await user.click(box('mara'))
+    expect(mergeButton).toBeEnabled()
+    await user.selectOptions(within(bulk()).getByRole('combobox', { name: 'Merge into' }), 'mara')
+    await user.click(mergeButton)
+    const modal = useDialogStore.getState().modals[0]
+    if (modal?.kind !== 'confirm') throw new Error('expected a confirm')
+    expect(modal.options).toMatchObject({
+      title: 'Merge 1 tag into "mara"?',
+      confirmLabel: 'Merge',
+      danger: true
+    })
+    await confirmTop(true)
+    expect(calls.at(-1)).toEqual(['tag:merge', { targetId: 't-mara', sourceIds: ['t-forest'] }])
+    expect(within(list()).getAllByRole('checkbox')).toHaveLength(2)
+    expect(box('mara')).toBeChecked()
+    expect(box('mara')).toHaveAccessibleName(/4 uses/)
+    expect(useTagStore.getState().aliases).toEqual({ 't-forest': 't-mara' })
+    expect(toasts()).toEqual(['Merged 1 tag into "mara"'])
+  })
+
+  it('a failed merge toasts and keeps the bank and the selection', async () => {
+    const user = userEvent.setup()
+    await renderLoaded({ 'tag:merge': failing('Database is locked') })
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    await user.click(box('dark-forest'))
+    await user.click(box('mara'))
+    await user.click(within(bulk()).getByRole('button', { name: 'Merge' }))
+    await confirmTop(true)
+    expect(toasts()).toEqual(['Database is locked'])
+    expect(useTagStore.getState().ids).toEqual(['t-forest', 't-mara', 't-moody'])
+    expect(within(bulk()).getByText('2 selected')).toBeInTheDocument()
+  })
+
+  it('Import… merges what main created and reports both counts; a cancel says nothing', async () => {
+    const user = userEvent.setup()
+    let answer: Output<'tag:import'> = null
+    const calls = await renderLoaded({ 'tag:import': () => answer })
+    const importButton = screen.getByRole('button', { name: 'Import…' })
+    await user.click(importButton)
+    await waitFor(() => expect(importButton).toBeEnabled())
+    expect(calls.at(-1)).toEqual(['tag:import', {}])
+    expect(toasts()).toEqual([])
+    answer = {
+      created: [{ ...tagFixture[2]!, id: 't-alpha', name: 'alpha', usageCount: 0 }],
+      skipped: ['mara', 'moody']
+    }
+    await user.click(importButton)
+    await waitFor(() => expect(toasts()).toEqual(['Imported 1 tag, skipped 2 already in the bank']))
+    expect(rowNames()).toEqual(['alpha', 'dark-forest', 'mara', 'moody'])
+  })
+
+  it('Export… reports the path and count; an error toasts with its cause', async () => {
+    const user = userEvent.setup()
+    let fail = false
+    await renderLoaded({
+      'tag:export': () => {
+        if (fail) throw new IpcRequestError({ code: 'IO', message: 'Disk full' })
+        return { path: '/books/Saga tags.json', count: 3 }
+      }
+    })
+    const exportButton = screen.getByRole('button', { name: 'Export…' })
+    await user.click(exportButton)
+    await waitFor(() => expect(toasts()).toEqual(['Exported 3 tags to Saga tags.json']))
+    fail = true
+    await user.click(exportButton)
+    await waitFor(() => expect(toasts()).toHaveLength(2))
+    expect(toasts()[1]).toContain('Disk full')
+  })
+
+  it('an empty bank cannot export or select', async () => {
+    await renderLoaded({ 'tag:list': () => [] })
+    expect(screen.getByRole('button', { name: 'Export…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Select' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Import…' })).toBeEnabled()
   })
 })

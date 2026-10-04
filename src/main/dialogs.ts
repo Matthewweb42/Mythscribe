@@ -4,6 +4,7 @@ import { IMAGE_EXTENSIONS } from '@shared/assets'
 import { ENTITY_EXCHANGE_EXTENSIONS } from '@shared/entityExchange'
 import { BACKGROUND_EXTENSIONS } from '@shared/focus'
 import { IMPORT_EXTENSIONS } from '@shared/import'
+import { TAG_EXCHANGE_EXTENSION } from '@shared/tagExchange'
 import { DB_FILE, PROJECT_EXTENSION, sanitizeName } from './project/projectStore'
 
 export interface ProjectDialogs {
@@ -31,6 +32,8 @@ export interface ProjectDialogs {
   chooseManuscriptFile: () => Promise<string | null>
   /** Returns the entity library or CSV the user chose to import (F-9.5), or null if cancelled. */
   chooseEntityLibraryFile: () => Promise<string | null>
+  /** Returns the tag bank file the user chose to import (F-4.9), or null if cancelled. */
+  chooseTagBankFile: () => Promise<string | null>
 }
 
 export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDialogs {
@@ -108,6 +111,23 @@ export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDia
     },
     async chooseEntityLibraryFile() {
       const options = entityLibraryOptions(defaultDir())
+      const result = await show((win) =>
+        win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
+      )
+      if (result.canceled) return null
+      return result.filePaths[0] ?? null
+    },
+    async chooseTagBankFile() {
+      const options: Electron.OpenDialogOptions = {
+        title: 'Import tags',
+        buttonLabel: 'Import',
+        defaultPath: defaultDir(),
+        properties: ['openFile'],
+        filters: [
+          { name: `Tag bank (*.${TAG_EXCHANGE_EXTENSION})`, extensions: [TAG_EXCHANGE_EXTENSION] },
+          { name: 'All files', extensions: ['*'] }
+        ]
+      }
       const result = await show((win) =>
         win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
       )

@@ -6,18 +6,23 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
-import { documentTag, node, tag } from '../db/schema'
+import { documentTag, documentTagDismissal, entity, node, tag } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
-import { getDismissedNames } from '../project/settingsStore'
+import { getDismissedNames, getTagAliases, setTagAliases } from '../project/settingsStore'
 import { listNodes } from '../tree/treeStore'
 import {
   createTag,
   deleteTag,
+  deleteTags,
+  exportTagBank,
   getTag,
   getTagWithUsage,
+  importTagBank,
   listTags,
   loadTagTemplate,
+  mergeTags,
+  recolorTags,
   updateTag,
   type TagDb
 } from './tagStore'
@@ -298,5 +303,234 @@ describe('AI-made tags (F-4.13)', () => {
     expect(getTag(db, made.id)?.origin).toBe('author')
     deleteTag(db, made.id)
     expect(getDismissedNames(db).names).toEqual([])
+  })
+})
+
+/** Two node ids of the seeded skeleton; `document_tag` links any node, folders included. */
+function twoNodes(): [string, string] {
+  const [first, second] = listNodes(db)
+  if (!first || !second) throw new Error('skeleton not seeded')
+  return [first.id, second.id]
+}
+
+function link(tagId: string, nodeId: string, source: 'author' | 'ai' = 'author'): void {
+  db.insert(documentTag)
+    .values({ id: randomUUID(), nodeId, tagId, source, created: new Date().toISOString() })
+    .run()
+}
+
+function insertEntity(name: string, tagId: string | null): string {
+  const id = randomUUID()
+  const now = new Date().toISOString()
+  db.insert(entity)
+    .values({ id, kind: 'character', name, tagId, created: now, modified: now })
+    .run()
+  return id
+}
+
+describe('recolorTags (F-4.9)', () => {
+  it('recolors every tag in one write, answers them in the given order, and claims AI-made ones', () => {
+    const a = createTag(db, { name: 'Rain', category: 'tone' })
+    const b = createTag(db, { name: 'Dread', category: 'tone' }, 'ai')
+    const c = createTag(db, { name: 'Fog', category: 'tone' })
+    const updated = recolorTags(db, [b.id, a.id, b.id], '#123456')
+    expect(updated.map((t) => [t.name, t.color])).toEqual([
+      ['dread', '#123456'],
+      ['rain', '#123456']
+    ])
+    expect(getTag(db, b.id)?.origin).toBe('author')
+    expect(getTag(db, c.id)?.color).toBe(c.color)
+  })
+
+  it('writes nothing when any id is unknown', () => {
+    const a = createTag(db, { name: 'Rain', category: 'tone' })
+    expectCode(() => recolorTags(db, [a.id, 'missing'], '#123456'), 'NOT_FOUND')
+    expect(getTag(db, a.id)?.color).toBe(a.color)
+  })
+})
+
+describe('deleteTags (F-4.9)', () => {
+  it('deletes every tag, records AI-made names, and drops aliases that led to them', () => {
+    const a = createTag(db, { name: 'Rain', category: 'tone' })
+    const b = createTag(db, { name: 'Dread', category: 'tone' }, 'ai')
+    const kept = createTag(db, { name: 'Fog', category: 'tone' })
+    setTagAliases(db, { old1: a.id, old2: kept.id })
+    deleteTags(db, [a.id, b.id])
+    expect(listTags(db).map((t) => t.id)).toEqual([kept.id])
+    expect(getDismissedNames(db).names).toEqual(['dread'])
+    expect(getTagAliases(db)).toEqual({ old2: kept.id })
+  })
+
+  it('deletes nothing when any id is unknown', () => {
+    const a = createTag(db, { name: 'Rain', category: 'tone' })
+    expectCode(() => deleteTags(db, [a.id, 'missing']), 'NOT_FOUND')
+    expect(getTag(db, a.id)).toBeDefined()
+  })
+
+  it('drops the aliases to a tag deleted on its own too', () => {
+    const a = createTag(db, { name: 'Rain', category: 'tone' })
+    setTagAliases(db, { old: a.id })
+    deleteTag(db, a.id)
+    expect(getTagAliases(db)).toEqual({})
+  })
+})
+
+describe('mergeTags (F-4.9)', () => {
+  it('moves links, dismissals, and entities to the target, deletes the sources, and aliases them', () => {
+    const [n1, n2] = twoNodes()
+    const target = createTag(db, { name: 'Mara', category: 'character', color: '#111111' })
+    const s1 = createTag(db, { name: 'Mara Vell', category: 'custom' }, 'ai')
+    const s2 = createTag(db, { name: 'M', category: 'plotThread' })
+    link(target.id, n1, 'ai')
+    link(s1.id, n1, 'author')
+    link(s1.id, n2, 'ai')
+    db.insert(documentTagDismissal).values({ nodeId: n1, tagId: s2.id }).run()
+    const otherNode = listNodes(db)[2]?.id
+    if (otherNode) db.insert(documentTagDismissal).values({ nodeId: otherNode, tagId: s2.id }).run()
+    const person = insertEntity('Mara Vell', s1.id)
+    setTagAliases(db, { older: s2.id })
+
+    const result = mergeTags(db, target.id, [s1.id, s2.id])
+    expect(result.target).toMatchObject({
+      id: target.id,
+      name: 'mara',
+      category: 'character',
+      color: '#111111',
+      usageCount: 2
+    })
+    expect(result.removedIds).toEqual([s1.id, s2.id])
+    expect(result.aliases).toEqual({ older: target.id, [s1.id]: target.id, [s2.id]: target.id })
+    expect(getTagAliases(db)).toEqual(result.aliases)
+    expect(new Set(result.nodeIds)).toEqual(new Set([n1, n2]))
+
+    const links = db.select().from(documentTag).all()
+    expect(links.map((row) => [row.nodeId, row.tagId, row.source]).sort()).toEqual(
+      [
+        [n1, target.id, 'author'],
+        [n2, target.id, 'ai']
+      ].sort()
+    )
+    // n1 carries the target, so the dismissal there does not move; the other one does.
+    const dismissals = db.select().from(documentTagDismissal).all()
+    expect(dismissals).toEqual(otherNode ? [{ nodeId: otherNode, tagId: target.id }] : [])
+    expect(db.select().from(entity).where(eq(entity.id, person)).get()?.tagId).toBe(target.id)
+    expect(listTags(db).map((t) => t.id)).toEqual([target.id])
+    expect(getDismissedNames(db).names).toEqual(['mara-vell'])
+  })
+
+  it('refuses the target among the sources and an unknown id, writing nothing', () => {
+    const target = createTag(db, { name: 'Mara', category: 'character' })
+    const source = createTag(db, { name: 'Vell', category: 'character' })
+    expectCode(() => mergeTags(db, target.id, [source.id, target.id]), 'VALIDATION')
+    expectCode(() => mergeTags(db, 'missing', [source.id]), 'NOT_FOUND')
+    expectCode(() => mergeTags(db, target.id, [source.id, 'missing']), 'NOT_FOUND')
+    expect(listTags(db)).toHaveLength(2)
+    expect(getTagAliases(db)).toEqual({})
+  })
+
+  it('merges a chain: an alias to a merged-away tag follows it to the new target', () => {
+    const a = createTag(db, { name: 'A', category: 'custom' })
+    const b = createTag(db, { name: 'B', category: 'custom' })
+    const c = createTag(db, { name: 'C', category: 'custom' })
+    mergeTags(db, b.id, [a.id])
+    const { aliases } = mergeTags(db, c.id, [b.id])
+    expect(aliases).toEqual({ [a.id]: c.id, [b.id]: c.id })
+  })
+})
+
+describe('exportTagBank / importTagBank (F-4.9)', () => {
+  it('exports every tag by name with its parent by name', () => {
+    const realm = createTag(db, { name: 'Realm', category: 'worldBuilding', color: '#123456' })
+    createTag(db, { name: 'Forest', category: 'setting', parentId: realm.id })
+    const quiet = createTag(db, { name: 'Quiet', category: 'tone' })
+    updateTag(db, quiet.id, { trackMentions: false })
+    expect(exportTagBank(db)).toEqual([
+      {
+        name: 'forest',
+        category: 'setting',
+        color: DEFAULT_CATEGORY_COLOR.setting,
+        parent: 'realm',
+        trackMentions: true
+      },
+      {
+        name: 'quiet',
+        category: 'tone',
+        color: DEFAULT_CATEGORY_COLOR.tone,
+        parent: null,
+        trackMentions: false
+      },
+      {
+        name: 'realm',
+        category: 'worldBuilding',
+        color: '#123456',
+        parent: null,
+        trackMentions: true
+      }
+    ])
+  })
+
+  it('creates new names with their fields and parents, and skips taken names untouched', () => {
+    const existing = createTag(db, { name: 'Realm', category: 'custom', color: '#000000' })
+    const { created, skipped } = importTagBank(db, [
+      {
+        name: 'forest',
+        category: 'setting',
+        color: '#abcdef',
+        parent: 'realm',
+        trackMentions: false
+      },
+      {
+        name: 'realm',
+        category: 'worldBuilding',
+        color: '#123456',
+        parent: null,
+        trackMentions: true
+      },
+      {
+        name: 'grove',
+        category: 'setting',
+        color: '#abcdef',
+        parent: 'forest',
+        trackMentions: true
+      },
+      { name: 'lost', category: 'custom', color: '#abcdef', parent: 'nowhere', trackMentions: true }
+    ])
+    expect(skipped).toEqual(['realm'])
+    expect(getTag(db, existing.id)).toMatchObject({ category: 'custom', color: '#000000' })
+    const byName = new Map(created.map((t) => [t.name, t]))
+    expect(created.map((t) => t.name)).toEqual(['forest', 'grove', 'lost'])
+    expect(byName.get('forest')).toMatchObject({
+      category: 'setting',
+      color: '#abcdef',
+      parentId: existing.id,
+      trackMentions: false,
+      usageCount: 0
+    })
+    expect(byName.get('grove')?.parentId).toBe(byName.get('forest')?.id)
+    expect(byName.get('lost')?.parentId).toBeNull()
+    expect(getTag(db, byName.get('forest')?.id ?? '')?.origin).toBe('author')
+  })
+
+  it('leaves a cycle in the file unlinked rather than nesting a tag under itself', () => {
+    const { created } = importTagBank(db, [
+      { name: 'a', category: 'custom', color: '#000000', parent: 'b', trackMentions: true },
+      { name: 'b', category: 'custom', color: '#000000', parent: 'a', trackMentions: true }
+    ])
+    expect(created.map((t) => [t.name, t.parentId === null])).toEqual([
+      ['a', false],
+      ['b', true]
+    ])
+  })
+
+  it('round-trips a bank into an empty project', () => {
+    const realm = createTag(db, { name: 'Realm', category: 'worldBuilding', color: '#123456' })
+    createTag(db, { name: 'Forest', category: 'setting', parentId: realm.id })
+    const records = exportTagBank(db)
+    deleteTags(
+      db,
+      listTags(db).map((t) => t.id)
+    )
+    importTagBank(db, records)
+    expect(exportTagBank(db)).toEqual(records)
   })
 })

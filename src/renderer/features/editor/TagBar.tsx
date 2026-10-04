@@ -18,6 +18,7 @@ import { TAG_BAR_MAX_FRACTION, TAG_BAR_MIN_HEIGHT, TAG_BAR_SPLIT_LIMITS } from '
 import type { MentionRange } from '@shared/mentions'
 import { PROPOSAL_NOTE_MAX, normalizeProposalNote } from '@shared/proposal'
 import type { ProposedTag } from '@shared/proposedTags'
+import { resolveTagId } from '@shared/tagExchange'
 import { toTagName } from '@shared/tags'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
@@ -146,7 +147,19 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   )
   const content = useDocumentStore((s) => s.docs[id]?.content ?? null)
   const flush = useDocumentStore((s) => s.flush)
-  const inlineCounts = useMemo(() => (content ? countInlineTags(content) : {}), [content])
+  const aliases = useTagStore((s) => s.aliases)
+  // Tokens keep the id they were inserted with; a token of a merged tag counts toward the tag it
+  // was merged into (F-4.9), so two tokens of what is now one tag show as one row.
+  const inlineCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    if (!content) return counts
+    const exists = (tagId: string): boolean => bank[tagId] !== undefined
+    for (const [tagId, count] of Object.entries(countInlineTags(content))) {
+      const resolved = resolveTagId(tagId, aliases, exists)
+      counts[resolved] = (counts[resolved] ?? 0) + count
+    }
+    return counts
+  }, [content, bank, aliases])
   const inlineIds = Object.keys(inlineCounts)
   const textLength = useMemo(() => (content ? docToText(content).length : 0), [content])
   const canRecommend = textLength >= TAGS_MIN_CHARS

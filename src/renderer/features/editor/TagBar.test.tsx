@@ -62,6 +62,7 @@ function install(
       const override = overrides[channel]
       if (override) return override(input) as Output<C>
       if (channel === 'tag:list') return tagFixture as Output<C>
+      if (channel === 'tag:aliases') return {} as Output<C>
       if (channel === 'documentTag:list') {
         const { nodeId } = input as Input<'documentTag:list'>
         return (links[nodeId] ?? []).map((id) => ({
@@ -426,6 +427,32 @@ describe('TagBar (F-4.4)', () => {
       })
     })
     expect(within(bar()).queryByRole('list', { name: 'Inline tags' })).not.toBeInTheDocument()
+  })
+
+  it('counts a merged tag’s inline tokens toward the tag it was merged into (F-4.9)', async () => {
+    install({ 'tag:aliases': () => ({ 't-old-wood': 't-forest' }) })
+    await mount()
+    const token = (id: string) => ({ type: 'inlineTag', attrs: { id, name: id } })
+    act(() => {
+      useDocumentStore.setState({
+        docs: {
+          'sc-1': {
+            content: {
+              type: 'doc',
+              content: [
+                { type: 'paragraph', content: [token('t-old-wood'), token('t-moody')] },
+                { type: 'paragraph', content: [token('t-forest')] }
+              ]
+            },
+            dirty: false
+          }
+        }
+      })
+    })
+    const rows = within(within(bar()).getByRole('list', { name: 'Inline tags' })).getAllByRole(
+      'listitem'
+    )
+    expect(rows.map((row) => row.textContent)).toEqual(['dark-forest ×2', 'moody ×1'])
   })
 
   it('lists the mentions main recorded for the document and jumps to the first one (F-4.12)', async () => {

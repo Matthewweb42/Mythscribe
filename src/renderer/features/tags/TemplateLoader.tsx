@@ -2,16 +2,10 @@ import { useState } from 'react'
 import { TAG_TEMPLATES, TagTemplateId, tagTemplateById } from '@shared/tagTemplates'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
+import { loadSummary } from './loadSummary'
 import { useTagStore } from './tagStore'
 
 const FIELD = 'min-w-0 rounded-md border border-line bg-bg px-2 py-1 text-sm'
-
-/** "Added 27 tags" / "Added 24 tags, skipped 3 already in the bank" / "All 27 tags are already in the bank". */
-function loadSummary(created: number, skipped: number): string {
-  if (created === 0) return `All ${skipped} tags are already in the bank`
-  const added = created === 1 ? 'Added 1 tag' : `Added ${created} tags`
-  return skipped === 0 ? added : `${added}, skipped ${skipped} already in the bank`
-}
 
 /**
  * The template row of the Tags tab (F-4.3): pick one of the seeded templates and load it into the

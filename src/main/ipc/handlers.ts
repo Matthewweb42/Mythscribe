@@ -141,6 +141,7 @@ import {
   getFocusSettings,
   getProjectDictionary,
   getReferencePins,
+  getTagAliases,
   getWritingPresets,
   setAiSettings,
   setAuthorRules,
@@ -156,6 +157,7 @@ import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import { EXTERNAL_HOST, isAllowedExternalUrl, type EditRole } from '@shared/menu'
 import { normalizeProposalNote } from '@shared/proposal'
 import { REFERENCE_PINS_MAX, dedupePins, hasPin } from '@shared/references'
+import { TAG_EXCHANGE_EXTENSION, tagExportFileName } from '@shared/tagExchange'
 import {
   addDocumentTag,
   listAllDocumentTagLinks,
@@ -165,7 +167,20 @@ import {
 import { deleteMentionsForTag, listMentionsForNode, listMentionsForTag } from '../tag/mentionStore'
 import { dismissName, listProposedTags, resetProposedTagCache } from '../tag/proposedTags'
 import { scanMentions, staleMentionNodeIds } from '../tag/scanMentions'
-import { createTag, deleteTag, getTag, listTags, loadTagTemplate, updateTag } from '../tag/tagStore'
+import { readTagBankFile, writeTagBankFile } from '../tag/tagExchange'
+import {
+  createTag,
+  deleteTag,
+  deleteTags,
+  exportTagBank,
+  getTag,
+  importTagBank,
+  listTags,
+  loadTagTemplate,
+  mergeTags,
+  recolorTags,
+  updateTag
+} from '../tag/tagStore'
 import {
   createNode,
   deleteNode,
@@ -746,6 +761,89 @@ export function registerHandlers({
   register('tag:loadTemplate', ({ template }) => {
     const db = manager.require().connection.orm
     const result = loadTagTemplate(db, template)
+    if (result.created.length > 0) {
+      rescanManuscript(db)
+      publishProposed()
+      void syncSpelling()
+    }
+    return result
+  })
+
+  // F-4.9: a color changes nothing a scan, a proposal, or the spellchecker reads.
+  register('tag:recolor', ({ ids, color }) =>
+    recolorTags(manager.require().connection.orm, ids, color)
+  )
+
+  register('tag:deleteMany', ({ ids }) => {
+    const db = manager.require().connection.orm
+    // As `tag:delete`: the mention rows cascade away, so their documents are collected first.
+    const nodeIds = [
+      ...new Set(ids.flatMap((id) => listMentionsForTag(db, id).map((mention) => mention.nodeId)))
+    ]
+    deleteTags(db, ids)
+    if (nodeIds.length > 0) emit(windows(), 'mention:changed', { nodeIds })
+    publishProposed()
+    void syncSpelling()
+    return null
+  })
+
+  /**
+   * F-4.9: the sources' document links now sit on the target, so the windows hear which nodes
+   * changed; their mention rows cascaded away, and the rescan finds the target's names again.
+   */
+  register('tag:merge', ({ targetId, sourceIds }) => {
+    const db = manager.require().connection.orm
+    const mentionNodeIds = [
+      ...new Set(
+        sourceIds.flatMap((id) => listMentionsForTag(db, id).map((mention) => mention.nodeId))
+      )
+    ]
+    const result = mergeTags(db, targetId, sourceIds)
+    if (result.nodeIds.length > 0) {
+      emit(windows(), 'documentTag:changed', { nodeIds: result.nodeIds })
+    }
+    if (mentionNodeIds.length > 0) emit(windows(), 'mention:changed', { nodeIds: mentionNodeIds })
+    // An entity that lived on a source lives on the target now; an open page shows its new tag.
+    for (const id of result.entityIds) {
+      const moved = getEntity(db, id)
+      if (moved) emit(windows(), 'entity:changed', moved)
+    }
+    rescanManuscript(db)
+    publishProposed()
+    void syncSpelling()
+    return { target: result.target, removedIds: result.removedIds, aliases: result.aliases }
+  })
+
+  register('tag:aliases', () => getTagAliases(manager.require().connection.orm))
+
+  /**
+   * F-4.9: the whole bank out of the project, so another book of the series can read it in. The
+   * default sits beside the project folder, as the entity library's does.
+   */
+  register('tag:export', async ({ path: given }) => {
+    const session = manager.require()
+    const records = exportTagBank(session.connection.orm)
+    if (records.length === 0) throw new AppError('VALIDATION', 'No tags to export')
+    const chosen =
+      given ??
+      (await dialogs.chooseExportPath(
+        tagExportFileName(sanitizeName(session.info.name)),
+        [{ name: 'Tag bank', extensions: [TAG_EXCHANGE_EXTENSION] }],
+        path.dirname(session.folder)
+      ))
+    if (chosen === null) return null
+    writeTagBankFile(chosen, records)
+    diagnostics.count('export.run')
+    return { path: chosen, count: records.length }
+  })
+
+  // F-4.9: picking the file is the confirmation; new names are created, taken ones skipped.
+  register('tag:import', async ({ path: given }) => {
+    const session = manager.require()
+    const chosen = given ?? (await dialogs.chooseTagBankFile())
+    if (chosen === null) return null
+    const db = session.connection.orm
+    const result = importTagBank(db, readTagBankFile(chosen))
     if (result.created.length > 0) {
       rescanManuscript(db)
       publishProposed()

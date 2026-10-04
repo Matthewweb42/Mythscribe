@@ -21,7 +21,7 @@ import { columnClass, deskClass, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
 import { buildExtensions, EDITOR_CORE_OPTIONS } from './extensions'
 import { useGhostTextController } from './ghostTextController'
-import { INLINE_TAG_SELECTOR, resyncInlineTags } from './InlineTag'
+import { INLINE_TAG_SELECTOR, resyncInlineTags, tokenTag } from './InlineTag'
 import { useLiveDocStats } from './liveDocStats'
 import { MarkVoiceExemplarButton } from './MarkVoiceExemplarButton'
 import { BetaReaderButton } from './BetaReaderButton'
@@ -157,6 +157,7 @@ function RegionEditor({
   )
   const ready = content !== null
   const tagsById = useTagStore((s) => s.byId)
+  const tagAliases = useTagStore((s) => s.aliases)
   const focus = useFocusStore((s) => s.active)
   // F-3.9 / F-6.7: typewriter scrolling follows the setting, and focus mode turns it on.
   const typewriter = focus || settings.typewriter
@@ -202,8 +203,8 @@ function RegionEditor({
   }, [editor, id, ready])
 
   useEffect(() => {
-    resyncInlineTags(editor.view.dom, tagsById)
-  }, [editor, tagsById])
+    resyncInlineTags(editor.view.dom, tagsById, tagAliases)
+  }, [editor, tagsById, tagAliases])
 
   useEffect(() => () => useRewriteStore.getState().dismissFor(id), [editor, id])
 
@@ -258,7 +259,9 @@ function RegionEditor({
       const layout = useLayoutStore.getState()
       if (!layout.layout.sidebar.open) layout.toggle('sidebar')
       layout.setSidebarTab('tags')
-      useTagStore.getState().requestSelection(menu.tagId)
+      // A token of a merged tag (F-4.9) opens the tag it was merged into.
+      const bank = useTagStore.getState()
+      bank.requestSelection(tokenTag(menu.tagId, bank.byId, bank.aliases)?.id ?? menu.tagId)
     }
   }
 

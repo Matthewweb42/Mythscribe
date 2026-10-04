@@ -78,6 +78,7 @@ import { SceneBrief, SceneMeta } from '../sceneMeta'
 import { Stylometrics } from '../stylometry'
 import { SceneSummaryState, SummaryStatus } from '../summary'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
+import { TagAliases } from '../tagExchange'
 import { TagTemplateId } from '../tagTemplates'
 import { TiptapNode } from '../tiptap'
 import { UpdateChannel, UpdateState } from '../updates'
@@ -883,6 +884,53 @@ export const contract = {
   'tag:loadTemplate': {
     input: z.object({ template: TagTemplateId }),
     output: z.object({ created: z.array(Tag), skipped: z.array(z.string()) })
+  },
+  /**
+   * Recolors several tags at once (F-4.9) in one transaction; answers the updated rows in the
+   * given order. NOT_FOUND (and nothing written) if any id is unknown.
+   */
+  'tag:recolor': {
+    input: z.object({ ids: z.array(z.string()).min(1), color: z.string().regex(HEX_COLOR) }),
+    output: z.array(Tag)
+  },
+  /**
+   * Deletes several tags at once (F-4.9) in one transaction, each as `tag:delete` does. NOT_FOUND
+   * (and nothing deleted) if any id is unknown.
+   */
+  'tag:deleteMany': { input: z.object({ ids: z.array(z.string()).min(1) }), output: z.null() },
+  /**
+   * Merges tags into one (F-4.9), in one transaction: every document link, tagging dismissal,
+   * and entity of a source moves to the target (a node carrying both keeps one link, the author's
+   * if either was), the sources are deleted, and each source id becomes an alias of the target so
+   * inline tokens keep resolving. The target keeps its name, category, and color. VALIDATION when
+   * the target is among the sources; NOT_FOUND for an unknown id. Answers the target with its new
+   * usage, the deleted ids, and the aliases as now stored.
+   */
+  'tag:merge': {
+    input: z.object({ targetId: z.string(), sourceIds: z.array(z.string()).min(1) }),
+    output: z.object({ target: Tag, removedIds: z.array(z.string()), aliases: TagAliases })
+  },
+  /** The merge aliases of the open project (F-4.9): merged-away tag id → the tag it lives on in. */
+  'tag:aliases': { input: z.undefined(), output: TagAliases },
+  /**
+   * Writes the whole tag bank to a JSON file (F-4.9): name, category, color, parent name, and
+   * mention tracking per tag. Without `path` a save dialog asks, defaulting beside the project
+   * folder; null when cancelled. VALIDATION when the bank is empty.
+   */
+  'tag:export': {
+    input: z.object({ path: z.string().optional() }),
+    output: z.object({ path: z.string(), count: z.number().int().nonnegative() }).nullable()
+  },
+  /**
+   * Reads a tag bank file (F-4.9) and creates, in one transaction, every tag whose normalized name
+   * is not in the bank yet; existing names are skipped, never overwritten, as templates do. A
+   * parent is linked by name when it exists after the import. Without `path` an open dialog asks;
+   * null when cancelled. An unreadable file, one that is not a tag bank (`row` in the details for
+   * a bad record), or one with no tags is VALIDATION.
+   */
+  'tag:import': {
+    input: z.object({ path: z.string().optional() }),
+    output: z.object({ created: z.array(Tag), skipped: z.array(z.string()) }).nullable()
   },
   /**
    * The tags linked to a node (F-4.4), ordered by name. Documents and folders both carry tags

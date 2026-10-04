@@ -26,6 +26,7 @@ function fakeClient(handlers: Partial<Record<Channel, Handler>> = {}): {
       const handler = handlers[channel]
       if (handler) return handler(input) as Output<C>
       if (channel === 'tag:list') return tagFixture as Output<C>
+      if (channel === 'tag:aliases') return {} as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: (channel, listener) => {
