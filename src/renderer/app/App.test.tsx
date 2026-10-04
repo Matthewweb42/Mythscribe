@@ -194,14 +194,22 @@ function fire<E extends EventName>(event: E, payload: EventPayload<E>): void {
   act(() => listener(payload as never))
 }
 
-async function fillWizard(name: string, format: RegExp, source?: RegExp): Promise<void> {
+/** Off unless `dial` says otherwise, so a test that is not about F-5.18 keeps the panel closed. */
+async function fillWizard(
+  name: string,
+  format: RegExp,
+  source?: RegExp,
+  dial = /^off/i
+): Promise<void> {
   await userEvent.click(await screen.findByRole('button', { name: /new project/i }))
   await userEvent.type(await screen.findByRole('textbox', { name: 'Project name' }), name)
   await userEvent.click(screen.getByRole('button', { name: 'Next' }))
   await userEvent.click(await screen.findByRole('radio', { name: format }))
   await userEvent.click(screen.getByRole('button', { name: 'Next' }))
   if (source) await userEvent.click(await screen.findByRole('radio', { name: source }))
-  await userEvent.click(await screen.findByRole('button', { name: 'Create' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+  await userEvent.click(await screen.findByRole('radio', { name: dial }))
+  await userEvent.click(screen.getByRole('button', { name: 'Create' }))
 }
 
 const createdScene = {
@@ -225,13 +233,16 @@ describe('App', () => {
     render(<App />)
     await fillWizard('Smoke', /^epic/i, /^mythscribe cloud/i)
     expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
-    // F-15.11: the wizard's third step travels with the create, so main stores it with the project.
+    // F-15.11, F-5.18: the wizard's AI steps travel with the create, so main stores them with the project.
     expect(invoke).toHaveBeenCalledWith('project:create', {
       name: 'Smoke',
       format: 'epic',
       directory: undefined,
-      aiSource: 'cloud'
+      aiSource: 'cloud',
+      aiDial: 0
     })
+    // At Off the assistant panel stays as it was.
+    expect(useLayoutStore.getState().layout.assistant.open).toBe(false)
     expect(screen.getByRole('status')).toHaveTextContent('Created "Smoke"')
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
@@ -785,6 +796,24 @@ describe('App', () => {
     expect(useReplaceStore.getState().open).toBe(false)
   })
 
+  it('a project created with AI on opens in the assistant panel, Query mode, quick actions showing (F-5.18)', async () => {
+    const invoke = install({ 'project:create': info, 'tree:list': treeFixture })
+    render(<App />)
+    await fillWizard('Smoke', /^novel/i, undefined, /^ask/i)
+    expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
+    expect(invoke).toHaveBeenCalledWith('project:create', {
+      name: 'Smoke',
+      format: 'novel',
+      directory: undefined,
+      aiSource: 'ownKey',
+      aiDial: 1
+    })
+    const panel = await screen.findByRole('complementary', { name: 'Assistant' })
+    expect(within(panel).getByRole('radio', { name: /^query/i })).toBeChecked()
+    expect(within(panel).getByTestId('quick-action-whatNext')).toBeInTheDocument()
+    expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
+  })
+
   it('Ctrl+K opens the assistant panel beside the main pane; the conversations load with the project and drop on close (F-5.4)', async () => {
     const stored: Conversations = {
       active: 'c-1',
@@ -893,7 +922,7 @@ describe('App', () => {
     install({ 'project:create': new Error('Folder is not empty: /x') })
     render(<App />)
     await fillWizard('Smoke', /^novel/i)
-    const wizard = screen.getByRole('dialog', { name: 'Choose an AI source' })
+    const wizard = screen.getByRole('dialog', { name: 'Choose how much AI helps' })
     expect(await within(wizard).findByRole('alert')).toHaveTextContent('Folder is not empty: /x')
     expect(screen.getByRole('status')).toBeEmptyDOMElement()
   })
@@ -906,10 +935,11 @@ describe('App', () => {
       name: 'Smoke',
       format: 'novel',
       directory: undefined,
-      aiSource: 'ownKey'
+      aiSource: 'ownKey',
+      aiDial: 0
     })
     expect(screen.getByRole('status')).toBeEmptyDOMElement()
-    expect(screen.getByRole('dialog', { name: 'Choose an AI source' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Choose how much AI helps' })).toBeInTheDocument()
   })
 
   it('Cancel in the wizard returns to the welcome buttons', async () => {

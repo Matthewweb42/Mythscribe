@@ -1,17 +1,34 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { AI_SOURCE_LABEL, AI_SOURCE_MEANING, AiSource } from '@shared/aiSettings'
+import {
+  AI_DATA_SHARING,
+  AI_DIAL_LABEL,
+  AI_DIAL_LEVELS,
+  AI_DIAL_MEANING,
+  AI_SOURCE_LABEL,
+  AI_SOURCE_MEANING,
+  type AiDial,
+  AiSource
+} from '@shared/aiSettings'
 import { PROJECT_NAME_MAX, type NovelFormat } from '@shared/ipc/contract'
 import { PROJECT_FORMATS } from './formats'
 
-type Step = 'name' | 'format' | 'source'
+type Step = 'name' | 'format' | 'source' | 'dial'
 
-const STEPS: readonly Step[] = ['name', 'format', 'source']
+const STEPS: readonly Step[] = ['name', 'format', 'source', 'dial']
 
 const STEP_TITLE: Record<Step, string> = {
   name: 'New project',
   format: 'Choose a format',
-  source: 'Choose an AI source'
+  source: 'Choose an AI source',
+  dial: 'Choose how much AI helps'
 }
+
+/**
+ * The level the wizard recommends and preselects (F-5.18): the lowest one at which the
+ * background work runs (summaries with the story bible and tags, PLAN.md §2.6). The author
+ * still chooses; Off is one click away.
+ */
+const RECOMMENDED_DIAL: AiDial = AI_DATA_SHARING.summary.minDial
 
 /**
  * What the choice asks of the author next (F-15.11). Neither option is a dead end: the key and
@@ -23,6 +40,13 @@ const sourceHint = (source: AiSource, signedInEmail: string | null): string =>
     : signedInEmail !== null
       ? `Signed in as ${signedInEmail}. Buy credits under Settings › Account.`
       : 'Sign in and buy credits under Settings › Account once the project is open.'
+
+/** What the previous step leads to: the dial step, or back to the source. */
+const PREVIOUS: Record<Exclude<Step, 'name'>, Step> = {
+  format: 'name',
+  source: 'format',
+  dial: 'source'
+}
 
 function validateName(name: string): string | null {
   if (name.length === 0) return 'A name is required'
@@ -38,8 +62,9 @@ const OPTION =
   'block cursor-pointer rounded-md border border-line bg-surface px-3 py-2 hover:bg-bg has-checked:border-accent has-focus-visible:outline-2 has-focus-visible:outline-accent'
 
 /**
- * Three-step create-project form: name, then format (F-1.2), then where AI requests go
- * (F-15.11; switchable later in the AI tab). The caller owns the save location.
+ * Four-step create-project form: name, then format (F-1.2), then where AI requests go
+ * (F-15.11), then how much AI helps (F-5.18); both AI choices are switchable later in the AI
+ * tab. The caller owns the save location.
  */
 export function CreateProjectWizard({
   busy,
@@ -51,13 +76,14 @@ export function CreateProjectWizard({
   /** The MythScribe account this machine is signed in to, or null; only the Cloud hint reads it. */
   signedInEmail: string | null
   onCancel: () => void
-  onCreate: (name: string, format: NovelFormat, aiSource: AiSource) => Promise<void>
+  onCreate: (name: string, format: NovelFormat, aiSource: AiSource, aiDial: AiDial) => Promise<void>
 }): React.JSX.Element {
   const titleId = useId()
   const [step, setStep] = useState<Step>('name')
   const [name, setName] = useState('')
   const [format, setFormat] = useState<NovelFormat>('novel')
   const [aiSource, setAiSource] = useState<AiSource>('ownKey')
+  const [aiDial, setAiDial] = useState<AiDial>(RECOMMENDED_DIAL)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fieldsetRef = useRef<HTMLFieldSetElement>(null)
@@ -90,9 +116,13 @@ export function CreateProjectWizard({
       setStep('source')
       return
     }
+    if (step === 'source') {
+      setStep('dial')
+      return
+    }
     setError(null)
     try {
-      await onCreate(trimmed, format, aiSource)
+      await onCreate(trimmed, format, aiSource, aiDial)
     } catch (err) {
       // The author is looking at this form, so the failure belongs here, not in a toast.
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -165,7 +195,7 @@ export function CreateProjectWizard({
                 </label>
               ))}
             </fieldset>
-          ) : (
+          ) : step === 'source' ? (
             <>
               <fieldset ref={fieldsetRef} className="mt-4 m-0 flex flex-col gap-2 border-0 p-0">
                 <legend className="mb-2 p-0 text-sm font-medium">AI source</legend>
@@ -185,11 +215,46 @@ export function CreateProjectWizard({
                 ))}
               </fieldset>
               <p data-testid="wizard-source-hint" className="mt-3 mb-0 text-xs text-fg-muted">
-                {sourceHint(aiSource, signedInEmail)} AI stays off until you turn it on, and you can
-                switch the source any time in Settings › AI.
+                {sourceHint(aiSource, signedInEmail)} You can switch the source any time in
+                Settings › AI.
               </p>
-              <p className="mt-2 mb-0 text-xs text-fg-muted">
-                Next, choose where to save it (defaults to Documents/MythScribe).
+            </>
+          ) : (
+            <>
+              <p data-testid="wizard-dial-explainer" className="mt-4 mb-0 text-sm text-fg-muted">
+                You write; at {AI_DIAL_LABEL[RECOMMENDED_DIAL]} the AI works behind you. When you
+                pause typing it summarizes the scene, notes what it states about your characters,
+                places, and world in the story bible, tags it, and flags contradictions. The
+                assistant panel opens beside the editor for questions and one-click actions. Every
+                change to your prose stays a proposal you accept or reject.
+              </p>
+              <fieldset ref={fieldsetRef} className="mt-3 m-0 flex flex-col gap-2 border-0 p-0">
+                <legend className="mb-2 p-0 text-sm font-medium">AI level</legend>
+                {AI_DIAL_LEVELS.map((level) => (
+                  <label key={level} className={OPTION}>
+                    <input
+                      type="radio"
+                      name="aiDial"
+                      value={level}
+                      className="sr-only"
+                      checked={aiDial === level}
+                      onChange={() => setAiDial(level)}
+                    />
+                    <span className="block text-sm font-medium">
+                      {AI_DIAL_LABEL[level]}
+                      {level === RECOMMENDED_DIAL ? (
+                        <span className="ml-2 rounded-sm bg-accent px-1.5 py-0.5 text-xs font-medium text-accent-fg">
+                          Recommended
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="block text-sm text-fg-muted">{AI_DIAL_MEANING[level]}</span>
+                  </label>
+                ))}
+              </fieldset>
+              <p className="mt-3 mb-0 text-xs text-fg-muted">
+                Change it any time in Settings › AI. Next, choose where to save the project
+                (defaults to Documents/MythScribe).
               </p>
             </>
           )}
@@ -204,7 +269,7 @@ export function CreateProjectWizard({
               disabled={busy}
               onClick={() => {
                 setError(null)
-                setStep(step === 'source' ? 'format' : 'name')
+                setStep(PREVIOUS[step])
               }}
               className={SECONDARY_BUTTON}
             >
@@ -214,7 +279,7 @@ export function CreateProjectWizard({
               Cancel
             </button>
             <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
-              {step === 'source' ? 'Create' : 'Next'}
+              {step === 'dial' ? 'Create' : 'Next'}
             </button>
           </div>
         </>

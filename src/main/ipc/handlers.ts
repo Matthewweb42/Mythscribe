@@ -430,19 +430,24 @@ export function registerHandlers({
 
   register('app:info', () => ({ version: app.getVersion(), platform: process.platform }))
 
-  register('project:create', async ({ name, format, directory, aiSource }) => {
+  register('project:create', async ({ name, format, directory, aiSource, aiDial }) => {
     const folder = directory
       ? projectFolderFor(directory, name)
       : await dialogs.chooseProjectSavePath(name)
     if (!folder) return null
     const info = manager.create(folder, name, format)
     diagnostics.count('project.create')
-    // F-15.11: the wizard's choice is written before this answers, so the renderer's first
-    // `aiSettings:get` already reads it.
-    if (aiSource !== undefined) {
+    // F-15.11, F-5.18: the wizard's choices are written before this answers, so the renderer's
+    // first `aiSettings:get` already reads them.
+    if (aiSource !== undefined || aiDial !== undefined) {
       const orm = manager.require().connection.orm
       const settings = getAiSettings(orm)
-      if (settings.source !== aiSource) setAiSettings(orm, { ...settings, source: aiSource })
+      const next = {
+        ...settings,
+        source: aiSource ?? settings.source,
+        dial: aiDial ?? settings.dial
+      }
+      if (next.source !== settings.source || next.dial !== settings.dial) setAiSettings(orm, next)
     }
     return info
   })

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
-import type { AiSource } from '@shared/aiSettings'
+import { AI_DATA_SHARING, type AiDial, type AiSource } from '@shared/aiSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, levelLabel, sectionLabel, type HierarchyLevel } from '@shared/labels'
 import { LAYOUT_LIMITS } from '@shared/layout'
@@ -399,9 +399,22 @@ function WelcomeScreen(): React.JSX.Element {
   useEffect(() => () => setCreating(false), [setCreating])
 
   /** Failures propagate: the wizard shows them inline where the author is looking. */
-  const onCreate = async (name: string, format: NovelFormat, aiSource: AiSource): Promise<void> => {
-    const info = await create(name, format, undefined, aiSource)
-    if (info) toast.success(`Created "${info.name}"`)
+  const onCreate = async (
+    name: string,
+    format: NovelFormat,
+    aiSource: AiSource,
+    aiDial: AiDial
+  ): Promise<void> => {
+    const info = await create(name, format, undefined, aiSource, aiDial)
+    if (!info) return
+    toast.success(`Created "${info.name}"`)
+    // F-5.18: a project created with AI on arrives in the assisted workflow, the assistant panel
+    // open (a new conversation starts in Query mode, the quick actions above it). Only a new
+    // project does this; opening an existing one leaves the layout as the author left it.
+    const layout = useLayoutStore.getState()
+    if (aiDial >= AI_DATA_SHARING.query.minDial && !layout.layout.assistant.open) {
+      layout.toggle('assistant')
+    }
   }
 
   /** Opens via the native dialog, or a recent project when `path` is given. */

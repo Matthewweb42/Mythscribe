@@ -32,10 +32,16 @@ async function goToSourceStep(name: string): Promise<void> {
   await screen.findByRole('dialog', { name: 'Choose an AI source' })
 }
 
+async function goToDialStep(name: string): Promise<void> {
+  await goToSourceStep(name)
+  await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+  await screen.findByRole('dialog', { name: 'Choose how much AI helps' })
+}
+
 describe('CreateProjectWizard', () => {
   it('rejects an empty or whitespace name', async () => {
     const { onCreate } = setup()
-    expect(screen.getByRole('dialog', { name: 'New project' })).toHaveTextContent('Step 1 of 3')
+    expect(screen.getByRole('dialog', { name: 'New project' })).toHaveTextContent('Step 1 of 4')
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('A name is required')
     await userEvent.type(screen.getByRole('textbox', { name: 'Project name' }), '   {Enter}')
@@ -58,7 +64,7 @@ describe('CreateProjectWizard', () => {
   it('shows the three format cards with Novel selected by default', async () => {
     setup()
     await goToFormatStep('My Book')
-    expect(screen.getByRole('dialog')).toHaveTextContent('Step 2 of 3')
+    expect(screen.getByRole('dialog')).toHaveTextContent('Step 2 of 4')
     expect(screen.getAllByRole('radio')).toHaveLength(3)
     expect(screen.getByRole('radio', { name: /^novel/i })).toBeChecked()
     expect(screen.getByRole('radio', { name: /^epic/i })).not.toBeChecked()
@@ -68,20 +74,21 @@ describe('CreateProjectWizard', () => {
     expect(webnovel.closest('label')).toHaveTextContent('Volume 1')
   })
 
-  it('creates with the trimmed name, the chosen format, and the own-key default', async () => {
+  it('creates with the trimmed name, the chosen format, the own-key default, and the recommended level', async () => {
     const { onCreate } = setup()
     await goToFormatStep('  My Book  ')
     await userEvent.click(screen.getByRole('radio', { name: /^web novel/i }))
     expect(screen.getByRole('radio', { name: /^web novel/i })).toBeChecked()
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Next' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Create' }))
-    expect(onCreate).toHaveBeenCalledWith('My Book', 'webnovel', 'ownKey')
+    expect(onCreate).toHaveBeenCalledWith('My Book', 'webnovel', 'ownKey', 1)
   })
 
   it('offers both AI sources on step 3, own key first, and creates with the chosen one (F-15.11)', async () => {
     const { onCreate } = setup()
     await goToSourceStep('My Book')
-    expect(screen.getByRole('dialog')).toHaveTextContent('Step 3 of 3')
+    expect(screen.getByRole('dialog')).toHaveTextContent('Step 3 of 4')
     expect(screen.getAllByRole('radio')).toHaveLength(2)
     expect(screen.getByRole('radio', { name: /^my own key/i })).toBeChecked()
     expect(screen.getByTestId('wizard-source-hint')).toHaveTextContent('Settings › AI')
@@ -89,8 +96,27 @@ describe('CreateProjectWizard', () => {
     expect(screen.getByTestId('wizard-source-hint')).toHaveTextContent(
       'Sign in and buy credits under Settings › Account'
     )
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Create' }))
+    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'cloud', 1)
+  })
+
+  it('explains the background work and recommends Ask on step 4, with Off one click away (F-5.18)', async () => {
+    const { onCreate } = setup()
+    await goToDialStep('My Book')
+    expect(screen.getByRole('dialog')).toHaveTextContent('Step 4 of 4')
+    expect(screen.getAllByRole('radio')).toHaveLength(4)
+    expect(screen.getByTestId('wizard-dial-explainer')).toHaveTextContent('summarizes the scene')
+    expect(screen.getByTestId('wizard-dial-explainer')).toHaveTextContent('flags contradictions')
+    const ask = screen.getByRole('radio', { name: /^ask/i })
+    expect(ask).toBeChecked()
+    expect(ask.closest('label')).toHaveTextContent('Recommended')
+    expect(screen.getByRole('radio', { name: /^off/i }).closest('label')).not.toHaveTextContent(
+      'Recommended'
+    )
+    await userEvent.click(screen.getByRole('radio', { name: /^off/i }))
     await userEvent.click(screen.getByRole('button', { name: 'Create' }))
-    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'cloud')
+    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'ownKey', 0)
   })
 
   it('names the signed-in account under the Cloud option', async () => {
@@ -102,22 +128,28 @@ describe('CreateProjectWizard', () => {
     )
   })
 
-  it('moves on with Enter from the format step and submits with Enter from the source step', async () => {
+  it('moves on with Enter from the format and source steps and submits with Enter from the level step', async () => {
     const { onCreate } = setup()
     await goToFormatStep('My Book')
     await userEvent.keyboard('{Enter}')
     await screen.findByRole('dialog', { name: 'Choose an AI source' })
+    await userEvent.keyboard('{Enter}')
+    await screen.findByRole('dialog', { name: 'Choose how much AI helps' })
     expect(onCreate).not.toHaveBeenCalled()
     await userEvent.keyboard('{Enter}')
-    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'ownKey')
+    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'ownKey', 1)
   })
 
-  it('Back returns a step at a time with the format and the name preserved', async () => {
+  it('Back returns a step at a time with the choices and the name preserved', async () => {
     setup()
     await goToFormatStep('My Book')
     await userEvent.click(screen.getByRole('radio', { name: /^epic/i }))
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /^mythscribe cloud/i }))
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Back' }))
+    expect(await screen.findByRole('radio', { name: /^mythscribe cloud/i })).toBeChecked()
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(await screen.findByRole('radio', { name: /^epic/i })).toBeChecked()
     await userEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(await screen.findByRole('dialog', { name: 'New project' })).toBeInTheDocument()
@@ -139,15 +171,19 @@ describe('CreateProjectWizard', () => {
     await screen.findByRole('dialog', { name: 'Choose an AI source' })
     await userEvent.keyboard('{Escape}')
     expect(onCancel).toHaveBeenCalledTimes(5)
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByRole('dialog', { name: 'Choose how much AI helps' })
+    await userEvent.keyboard('{Escape}')
+    expect(onCancel).toHaveBeenCalledTimes(6)
   })
 
   it('shows a failed create inline and clears it on Back', async () => {
     const { onCreate } = setup()
     onCreate.mockRejectedValueOnce(new Error('A project already exists at /x'))
-    await goToSourceStep('My Book')
+    await goToDialStep('My Book')
     await userEvent.click(screen.getByRole('button', { name: 'Create' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('A project already exists at /x')
-    expect(screen.getByRole('dialog', { name: 'Choose an AI source' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Choose how much AI helps' })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(screen.queryByRole('alert')).toBeNull()
   })
@@ -156,7 +192,7 @@ describe('CreateProjectWizard', () => {
     const onCancel = vi.fn()
     const props = { signedInEmail: null, onCancel, onCreate: vi.fn(async () => {}) }
     const { rerender } = render(<CreateProjectWizard busy={false} {...props} />)
-    await goToSourceStep('My Book')
+    await goToDialStep('My Book')
     rerender(<CreateProjectWizard busy {...props} />)
     expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled()

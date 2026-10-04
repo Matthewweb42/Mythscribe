@@ -830,6 +830,23 @@ describe('aiSettings:get / aiSettings:set (F-14.4)', () => {
     expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
   })
 
+  it("stores the wizard's AI level with the new project; omitted keeps Off (F-5.18)", async () => {
+    await invoke('project:create', {
+      name: 'Assisted',
+      format: 'novel',
+      directory: tmp,
+      aiSource: 'cloud',
+      aiDial: 1
+    })
+    expect(await invoke('aiSettings:get', undefined)).toEqual({
+      ...defaultAiSettings(),
+      source: 'cloud',
+      dial: 1
+    })
+    await invoke('project:create', { name: 'Plain', format: 'novel', directory: tmp })
+    expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
+  })
+
   it('answers the defaults (dial Off) for a new project, then what set wrote, also after a reopen', async () => {
     const created = await invoke('project:create', {
       name: 'Dial',

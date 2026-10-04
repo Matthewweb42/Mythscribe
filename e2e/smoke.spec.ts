@@ -869,7 +869,7 @@ test('create, close, reopen a project on disk', async () => {
   }, projectPath)
 
   // F-1.2: the wizard — name, then format cards. Back keeps the name. F-15.11 adds a third
-  // step: where AI requests go.
+  // step: where AI requests go; F-5.18 a fourth: how much AI helps.
   await page.getByRole('button', { name: 'New project' }).click()
   const wizard = page.getByRole('dialog')
   // The name field takes focus as the wizard opens, so a key the author happens to press on the
@@ -888,13 +888,21 @@ test('create, close, reopen a project on disk', async () => {
   await wizard.getByRole('button', { name: 'Next' }).click()
   await wizard.getByRole('button', { name: 'Next' }).click()
   // F-15.11: own key is the default; the Cloud card says what it needs (nobody is signed in yet).
-  await expect(wizard).toContainText('Step 3 of 3')
+  await expect(wizard).toContainText('Step 3 of 4')
   await expect(wizard.getByRole('radio', { name: /^my own key/i })).toBeChecked()
   await wizard.getByText('MythScribe Cloud', { exact: true }).click()
   await expect(wizard.getByRole('radio', { name: /^mythscribe cloud/i })).toBeChecked()
   await expect(wizard.getByTestId('wizard-source-hint')).toContainText(
     'Sign in and buy credits under Settings › Account'
   )
+  // F-5.18: the level step explains the background work and recommends Ask; Off is one click.
+  // The rest of this test raises the dial itself, so it starts at Off.
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await expect(wizard).toContainText('Step 4 of 4')
+  await expect(wizard.getByTestId('wizard-dial-explainer')).toContainText('flags contradictions')
+  await expect(wizard.getByRole('radio', { name: /^ask/i })).toBeChecked()
+  await wizard.getByText('Off', { exact: true }).click()
+  await expect(wizard.getByRole('radio', { name: /^off/i })).toBeChecked()
   await wizard.getByRole('button', { name: 'Create' }).click()
 
   await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
@@ -902,6 +910,8 @@ test('create, close, reopen a project on disk', async () => {
   // beside each model (2x the provider price), and it switches back: the rest of this test runs
   // on the author's own key.
   expect((await aiSettings()).source).toBe('cloud')
+  expect((await aiSettings()).dial).toBe(0)
+  await expect(page.getByRole('complementary', { name: 'Assistant' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Settings' }).click()
   const firstSettings = page.getByRole('dialog', { name: 'Settings' })
   await firstSettings.getByRole('tab', { name: 'AI' }).click()
