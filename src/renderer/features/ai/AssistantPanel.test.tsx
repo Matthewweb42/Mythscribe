@@ -1,3 +1,4 @@
+import { Editor } from '@tiptap/core'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,7 +7,11 @@ import type { Conversation, Conversations } from '@shared/chat'
 import type { AiChatResult, AiQueryResult, Channel, Input, Output } from '@shared/ipc/contract'
 import { QUERY_NOT_FOUND, type QueryTurn } from '@shared/query'
 import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
-import { resetActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
+import {
+  resetActiveEditorStore,
+  useActiveEditorStore
+} from '@renderer/features/editor/activeEditorStore'
+import { buildExtensions } from '@renderer/features/editor/extensions'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -14,8 +19,14 @@ import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layou
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAiActivityStore } from './aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
-import { AssistantPanel, AssistantToggleButton } from './AssistantPanel'
-import { AGENT_NOTICE, resetAssistantStore, useAssistantStore } from './assistantStore'
+import { AssistantPanel, AssistantToggleButton, NO_DIRECTIONS_MESSAGE } from './AssistantPanel'
+import {
+  AGENT_NOTICE,
+  NO_EDITOR_MESSAGE,
+  resetAssistantStore,
+  useAssistantStore
+} from './assistantStore'
+import { CONVERSATION_BUSY_MESSAGE } from './QuickActions'
 import { resetContinuityStore, useContinuityStore } from './continuityStore'
 import { resetProposalStore } from './proposalStore'
 
@@ -88,6 +99,7 @@ const message = (
   usage: null,
   mode: null,
   query: null,
+  directions: null,
   ...over
 })
 
@@ -624,5 +636,99 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     const turn = turns()[1]!
     expect(within(turn).getAllByTestId('query-cite')).toHaveLength(1)
     expect(turn).toHaveTextContent('She crosses [1] at dawn [4].')
+  })
+})
+
+describe('AssistantPanel quick actions (F-5.17)', () => {
+  const DIRECTIONS = [
+    { title: 'The storm breaks', text: 'Rain drives them into the shepherd hut.' },
+    { title: 'A light below', text: 'Someone is camped in the valley.' }
+  ]
+  const withDirections = (directions = DIRECTIONS): Conversations => ({
+    active: 'c-1',
+    items: [
+      conversation({
+        mode: 'query',
+        messages: [
+          message('m-1', 'user', 'What should come next?'),
+          message('m-2', 'assistant', '1. The storm breaks: …', {
+            mode: 'plan',
+            model: 'gpt-fast',
+            costUsd: 0.0004,
+            proposalId: 'p-3',
+            directions
+          })
+        ]
+      })
+    ]
+  })
+  const writes = (): HTMLElement[] => screen.getAllByTestId('what-next-write')
+
+  let editor: Editor
+  beforeEach(() => {
+    editor = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' })
+    })
+  })
+  afterEach(() => {
+    resetActiveEditorStore()
+    editor.destroy()
+  })
+
+  it('shows the row above the chat and above the Continuity view', async () => {
+    await mountOpen()
+    const group = (): HTMLElement => within(panel()).getByRole('group', { name: 'Quick actions' })
+    expect(group()).toBeInTheDocument()
+    act(() => useContinuityStore.getState().setViewOpen(true))
+    await screen.findByTestId('continuity-panel')
+    expect(group()).toBeInTheDocument()
+  })
+
+  it('renders a turn’s directions as cards, and Write this sends one as an Author turn', async () => {
+    act(() => useActiveEditorStore.getState().set('sc-1', editor))
+    await mountOpen(withDirections())
+    const cards = within(log()).getAllByTestId('what-next-direction')
+    expect(cards).toHaveLength(2)
+    expect(cards[0]).toHaveTextContent('The storm breaks')
+    expect(cards[0]).toHaveTextContent('Rain drives them into the shepherd hut.')
+    expect(turns()[1]).toHaveTextContent('gpt-fast')
+    expect(writes()[1]).toBeEnabled()
+    await userEvent.click(writes()[1]!)
+    expect(chats[0]?.input).toMatchObject({
+      mode: 'agent',
+      nodeId: 'sc-1',
+      message:
+        'Continue the scene in this direction: A light below. Someone is camped in the valley.'
+    })
+    // The conversation keeps its mode; while the turn waits, Write this waits too.
+    expect(useAssistantStore.getState().conversations?.items[0]?.mode).toBe('query')
+    expect(writes()[0]).toBeDisabled()
+    expect(writes()[0]).toHaveAttribute('title', CONVERSATION_BUSY_MESSAGE)
+  })
+
+  it('Write this is off with the reason below Suggest, with the chat off, or without an editor', async () => {
+    await mountOpen(withDirections(), settings({ dial: 1 }))
+    expect(writes()[0]).toBeDisabled()
+    expect(writes()[0]).toHaveAttribute(
+      'title',
+      'Author needs the AI dial at Suggest or higher (Settings, AI tab)'
+    )
+    const on = settings()
+    act(() =>
+      useAiSettingsStore.setState({
+        settings: { ...on, features: { ...on.features, chat: false } }
+      })
+    )
+    expect(writes()[0]?.getAttribute('title')).toContain('with Assistant chat on')
+    act(() => useAiSettingsStore.setState({ settings: on }))
+    expect(writes()[0]).toHaveAttribute('title', NO_EDITOR_MESSAGE)
+    act(() => useActiveEditorStore.getState().set('sc-1', editor))
+    expect(writes()[0]).toBeEnabled()
+  })
+
+  it('says so when no direction came back', async () => {
+    await mountOpen(withDirections([]))
+    expect(within(log()).getByText(NO_DIRECTIONS_MESSAGE)).toBeInTheDocument()
+    expect(screen.queryByTestId('what-next-direction')).not.toBeInTheDocument()
   })
 })

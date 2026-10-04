@@ -38,7 +38,8 @@ describe('chat model (F-5.4)', () => {
               costUsd: null,
               usage: null,
               mode: null,
-              query: null
+              query: null,
+              directions: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',
@@ -99,7 +100,8 @@ describe('chat model (F-5.4)', () => {
               model: 'gpt-5.4-mini',
               costUsd: 0.0012,
               mode: 'plan',
-              query: null
+              query: null,
+              directions: null
               // no `usage` field at all, as a turn written before F-5.9 has.
             }
           ],
@@ -132,7 +134,8 @@ describe('chat model (F-5.4)', () => {
               costUsd: 0.0012,
               usage: { inputTokens: 300, outputTokens: 20 },
               mode: 'plan',
-              query: null
+              query: null,
+              directions: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',

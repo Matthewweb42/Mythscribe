@@ -80,6 +80,7 @@ import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
 import { TagTemplateId } from '../tagTemplates'
 import { TiptapNode } from '../tiptap'
 import { UpdateChannel, UpdateState } from '../updates'
+import { WHAT_NEXT_CHAR_BUDGET, WhatNextDirections } from '../whatNext'
 import { VOICE_EXEMPLAR_TEXT_MAX, VOICE_EXEMPLAR_TEXT_MIN, VoiceExemplarKind } from '../voice'
 import { UiScale, ViewSettings, ZoomStep } from '../zoom'
 
@@ -425,6 +426,33 @@ export const AiProofreadResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiProofreadResult = z.infer<typeof AiProofreadResult>
+
+/**
+ * What `ai:whatNext` answers (F-5.17): up to three directions (`dropped` counts the ones that
+ * were blank or past the third), what it cost, and the proposal they belong to (F-14.5); or an
+ * expected AI failure as data.
+ */
+export const AiWhatNextResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    directions: WhatNextDirections,
+    dropped: z.number().int().nonnegative(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    proposalId: z.string(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiWhatNextResult = z.infer<typeof AiWhatNextResult>
 
 /**
  * What `ai:betaReader` answers (F-14.11): the reader's report, every item citing a passage main
@@ -1247,8 +1275,9 @@ export const contract = {
   /**
    * One Story Intelligence turn (F-5.7). `nodeId` is the active document (null with none open;
    * it breaks ranking ties and is the fallback candidate); `history` is the recent turns of the
-   * conversation; the answer is JSON on the strong tier and is not streamed. Expected AI
-   * failures come back as data.
+   * conversation; the answer is JSON on the strong tier and is not streamed. `pinActive`
+   * (F-5.17, the What happened here? recap) ranks the active document first whatever it
+   * scores. Expected AI failures come back as data.
    */
   'ai:query': {
     input: z.object({
@@ -1257,7 +1286,8 @@ export const contract = {
       history: z
         .array(z.object({ role: ChatRole, content: z.string().max(CHAT_MESSAGE_MAX) }))
         .max(CHAT_HISTORY_TURNS),
-      requestId: z.string()
+      requestId: z.string(),
+      pinActive: z.boolean().optional()
     }),
     output: AiQueryResult
   },
@@ -1341,6 +1371,24 @@ export const contract = {
       selection: z.string().max(PROOFREAD_CHAR_BUDGET).nullable().optional()
     }),
     output: AiProofreadResult
+  },
+  /**
+   * What should come next? (F-5.17). The renderer sends the node and, when the author selected
+   * a passage, `before`: the document's text up to the selection's end (tail-capped at
+   * `WHAT_NEXT_CHAR_BUDGET`); otherwise it flushes the autosave and main reads the saved scene.
+   * Main sends the tail of that text, the scene brief, and the story bible on the fast tier as
+   * JSON and answers up to three directions; nothing enters the manuscript. NOT_FOUND for an
+   * unknown id, VALIDATION for a node that is not a manuscript document or text under
+   * `WHAT_NEXT_TEXT_MIN` characters; the AI failures come back as data with the echoed
+   * `requestId`.
+   */
+  'ai:whatNext': {
+    input: z.object({
+      nodeId: z.string(),
+      requestId: z.string(),
+      before: z.string().max(WHAT_NEXT_CHAR_BUDGET).nullable().optional()
+    }),
+    output: AiWhatNextResult
   },
   /** Every open finding of the project (F-13.4), in reading order of their scenes, oldest first within a scene. */
   'continuity:list': { input: z.undefined(), output: z.array(ContinuityFinding) },

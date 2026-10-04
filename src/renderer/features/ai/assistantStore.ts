@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { Editor } from '@tiptap/core'
 import {
   CHAT_HISTORY_TURNS,
   CHAT_MAX_CONVERSATIONS,
@@ -11,10 +12,16 @@ import {
   type ChatMode,
   type Conversation
 } from '@shared/chat'
-import type { AiChatResult, AiQueryResult, Input } from '@shared/ipc/contract'
+import type { AiChatResult, AiQueryResult, AiWhatNextResult, Input } from '@shared/ipc/contract'
 import type { QuerySceneRef } from '@shared/query'
+import { WHAT_NEXT_QUESTION, directionMessage, recapQuestion } from '@shared/quickActions'
+import { WHAT_NEXT_CHAR_BUDGET, directionsText, type WhatNextDirection } from '@shared/whatNext'
 import { SETTINGS_SAVE_DELAY_MS } from '@renderer/features/editor/settingsStore'
-import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
+import {
+  useActiveEditorStore,
+  type ActiveEditor
+} from '@renderer/features/editor/activeEditorStore'
+import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import type { GhostSettleHandler } from '@renderer/features/editor/ghostText'
 import { locateText } from '@renderer/features/editor/locateText'
 import {
@@ -36,6 +43,8 @@ export const NEW_CONVERSATION_TITLE = 'New conversation'
 export const AGENT_NOTICE = 'Placed in the editor. Tab accepts, Escape dismisses.'
 /** The toast when Author mode has no document editor to place its answer in. */
 export const NO_EDITOR_MESSAGE = 'Open a scene to place text'
+/** The toast when What should come next? has no open scene to read (F-5.17). */
+export const NO_SCENE_MESSAGE = 'Open a scene first'
 /** The toast when Author mode came back with nothing to place. */
 export const EMPTY_ANSWER_MESSAGE = 'The assistant returned no text. Try again.'
 // The passage jump lives in the editor feature (F-4.12 reuses it for mentions); the two
@@ -56,6 +65,11 @@ export { OPEN_SCENE_TIMEOUT_MS, PASSAGE_GONE_MESSAGE }
  * A Query answer (F-5.7) comes back whole, not streamed, and rides on its turn as `query`: the
  * citations main verified, the ranked scenes it did not cite, and the two flags the panel
  * shows; `openScene` opens a cited scene and selects the passage.
+ * The quick actions (F-5.17) write into the active conversation through the same turns:
+ * `recap` is a Query turn with a fixed question that pins the open scene first, `whatNext`
+ * asks `ai:whatNext` and records the directions on the assistant turn, and `writeDirection`
+ * sends one of them as an Author turn, so it lands as ghost text. One busy rule covers them
+ * all: nothing new starts while the active conversation has a request in flight.
  * Every request is tracked in the activity store and can be stopped (F-5.10): `stop` drops the
  * unanswered turn (with whatever streamed into it) and keeps the author's turn to resend; the
  * `CANCELLED` reply is silent. Loaded with the tree on project open and cleared on close
@@ -80,8 +94,23 @@ interface AssistantState {
   setParagraphs: (paragraphs: number) => void
   /** Empties the active conversation's turns and resets its title. */
   clearMessages: () => void
-  /** Sends one turn in the active conversation; ignored while one is in flight or for a blank message. */
-  send: (message: string) => Promise<void>
+  /**
+   * Sends one turn in the active conversation; ignored while one is in flight or for a blank
+   * message. `override.mode` runs this turn in another mode than the conversation's (the
+   * conversation keeps its own); `override.pinActive` asks a Query turn to rank the open scene
+   * first (F-5.17).
+   */
+  send: (message: string, override?: SendOverride) => Promise<void>
+  /**
+   * What should come next? (F-5.17): three directions for the open scene, as a turn in the
+   * active conversation. With a selection the text up to its end goes along; without one the
+   * autosave is flushed and main reads the saved scene.
+   */
+  whatNext: () => Promise<void>
+  /** What happened here? (F-5.17): a cited recap of the open scene, or of the selection, as a Query turn. */
+  recap: () => Promise<void>
+  /** Write this (F-5.17): sends a direction as an Author turn, so the text lands as ghost text. */
+  writeDirection: (direction: WhatNextDirection) => Promise<void>
   /** Stops the active conversation's request in flight: the unanswered turn goes, the author's turn stays. */
   stop: () => void
   /**
@@ -89,6 +118,12 @@ interface AssistantState {
    * it. A quote the scene no longer holds toasts; a null quote just opens the scene.
    */
   openScene: (ref: QuerySceneRef, quote: string | null) => Promise<void>
+}
+
+/** A turn sent in another mode than its conversation's, or a Query turn pinned to the open scene. */
+export interface SendOverride {
+  mode?: ChatMode
+  pinActive?: boolean
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -187,7 +222,8 @@ const turn = (role: ChatMessage['role'], content: string, mode: ChatMode | null)
   costUsd: null,
   usage: null,
   mode,
-  query: null
+  query: null,
+  directions: null
 })
 
 /** `value` with the active conversation replaced by `patch(conversation)`, its `modified` bumped. */
@@ -254,6 +290,39 @@ function dropUnanswered(value: Conversations, id: string): Conversations {
     if (last?.role !== 'assistant' || last.model !== null) return c
     return { ...c, messages: c.messages.slice(0, -1) }
   })
+}
+
+/**
+ * Fills the unanswered assistant turn at the end of conversation `id` with `answer` (its text,
+ * cost, and whatever rides on it) and clears the pending request; a cached answer is noted.
+ */
+function finishTurn(id: string, answer: Partial<ChatMessage>, cached: boolean): void {
+  setPending(id, null)
+  const current = useAssistantStore.getState().conversations
+  if (current === null) return
+  const turnId = current.items.find((c) => c.id === id)?.messages.at(-1)?.id ?? null
+  commit(
+    patchOne(current, id, (c) => {
+      const last = c.messages[c.messages.length - 1]
+      if (last?.role !== 'assistant') return c
+      return { ...c, messages: [...c.messages.slice(0, -1), { ...last, ...answer }] }
+    })
+  )
+  if (cached && turnId !== null) {
+    useAssistantStore.setState((s) => ({ cached: { ...s.cached, [turnId]: true } }))
+  }
+}
+
+/** The live editor the author last worked in, or null. */
+function liveEditor(): ActiveEditor | null {
+  const active = useActiveEditorStore.getState().active
+  return active !== null && !active.editor.isDestroyed ? active : null
+}
+
+/** The selected text of `editor`, or null for a caret. */
+function selectedText(editor: Editor): string | null {
+  const { from, to, empty } = editor.state.selection
+  return empty ? null : editor.state.doc.textBetween(from, to, '\n\n')
 }
 
 /** Stops the request `id` is waiting on, if any, through the activity store; its reply is then dropped. */
@@ -360,14 +429,15 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     commit(patchActive(value, (c) => ({ ...c, title: NEW_CONVERSATION_TITLE, messages: [] })))
   },
 
-  async send(message) {
+  async send(message, override) {
     const value = get().conversations
     const text = message.trim().slice(0, CHAT_MESSAGE_MAX)
     if (value?.active == null || !text) return
     const id = value.active
     const conversation = value.items.find((c) => c.id === id)
     if (!conversation || get().pending[id] !== undefined) return
-    const { mode, paragraphs } = conversation
+    const mode = override?.mode ?? conversation.mode
+    const { paragraphs } = conversation
     if (mode === 'agent' && useActiveEditorStore.getState().active === null) {
       toast.error(NO_EDITOR_MESSAGE)
       return
@@ -389,7 +459,13 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     )
     const nodeId = useActiveEditorStore.getState().active?.id ?? null
     if (mode === 'query') {
-      await sendQuery(id, { nodeId, message: text, history, requestId })
+      await sendQuery(id, {
+        nodeId,
+        message: text,
+        history,
+        requestId,
+        ...(override?.pinActive === true ? { pinActive: true } : {})
+      })
       return
     }
     let result: AiChatResult
@@ -433,33 +509,98 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       settleFailure(id, requestId, NO_EDITOR_MESSAGE)
       return
     }
-    setPending(id, null)
-    const current = get().conversations
-    if (current === null) return
-    const turnId = current.items.find((c) => c.id === id)?.messages.at(-1)?.id ?? null
-    commit(
-      patchOne(current, id, (c) => {
-        const last = c.messages[c.messages.length - 1]
-        if (last?.role !== 'assistant') return c
-        return {
-          ...c,
-          messages: [
-            ...c.messages.slice(0, -1),
-            {
-              ...last,
-              content: result.text,
-              model: result.model,
-              costUsd: result.costUsd,
-              usage: result.usage,
-              proposalId: result.proposalId
-            }
-          ]
-        }
-      })
+    finishTurn(
+      id,
+      {
+        content: result.text,
+        model: result.model,
+        costUsd: result.costUsd,
+        usage: result.usage,
+        proposalId: result.proposalId
+      },
+      result.cached
     )
-    if (result.cached && turnId !== null) {
-      set((s) => ({ cached: { ...s.cached, [turnId]: true } }))
+  },
+
+  async whatNext() {
+    const value = get().conversations
+    if (value?.active == null) return
+    const id = value.active
+    const conversation = value.items.find((c) => c.id === id)
+    if (!conversation || get().pending[id] !== undefined) return
+    const active = liveEditor()
+    if (active === null) {
+      toast.error(NO_SCENE_MESSAGE)
+      return
     }
+    const { editor } = active
+    const nodeId = active.id
+    // With a selection the directions follow from the text up to its end; the contract caps it.
+    const before = editor.state.selection.empty
+      ? null
+      : editor.state.doc
+          .textBetween(0, editor.state.selection.to, '\n\n')
+          .slice(-WHAT_NEXT_CHAR_BUDGET)
+    const requestId = nextId('r')
+    setPending(id, requestId)
+    commit(
+      patchOne(value, id, (c) => ({
+        ...c,
+        title: c.messages.length === 0 ? titleFor(WHAT_NEXT_QUESTION) : c.title,
+        messages: [
+          ...c.messages,
+          turn('user', WHAT_NEXT_QUESTION, null),
+          turn('assistant', '', 'plan')
+        ].slice(-CHAT_MAX_MESSAGES)
+      }))
+    )
+    let result: AiWhatNextResult
+    try {
+      // Main reads the saved scene when no selection rides along: the author's typing goes first.
+      await useDocumentStore.getState().flush()
+      if (get().pending[id] !== requestId) return // stopped or closed while saving
+      result = await useAiActivityStore
+        .getState()
+        .track('whatNext', requestId, ipc().invoke('ai:whatNext', { nodeId, requestId, before }))
+    } catch (err) {
+      settleFailure(id, requestId, describeError(err))
+      return
+    }
+    if (get().pending[id] !== requestId) {
+      // The conversation was closed or the store cleared meanwhile: nothing shows the answer.
+      if (result.ok) void proposalStore.settle(result.proposalId, 'rejected', null)
+      return
+    }
+    if (!result.ok) {
+      settleFailure(
+        id,
+        requestId,
+        result.code === 'CANCELLED' ? null : `${result.message} ${result.nextStep}`.trim()
+      )
+      return
+    }
+    finishTurn(
+      id,
+      {
+        content: directionsText(result.directions),
+        directions: result.directions,
+        model: result.model,
+        costUsd: result.costUsd,
+        usage: result.usage,
+        proposalId: result.proposalId
+      },
+      result.cached
+    )
+  },
+
+  async recap() {
+    const active = liveEditor()
+    const selection = active === null ? null : selectedText(active.editor)
+    await get().send(recapQuestion(selection), { mode: 'query', pinActive: true })
+  },
+
+  async writeDirection(direction) {
+    await get().send(directionMessage(direction), { mode: 'agent' })
   },
 
   stop() {
@@ -513,39 +654,23 @@ async function sendQuery(id: string, input: Input<'ai:query'>): Promise<void> {
     )
     return
   }
-  setPending(id, null)
-  const current = useAssistantStore.getState().conversations
-  if (current === null) return
-  const turnId = current.items.find((c) => c.id === id)?.messages.at(-1)?.id ?? null
-  commit(
-    patchOne(current, id, (c) => {
-      const last = c.messages[c.messages.length - 1]
-      if (last?.role !== 'assistant') return c
-      return {
-        ...c,
-        messages: [
-          ...c.messages.slice(0, -1),
-          {
-            ...last,
-            content: result.answer,
-            model: result.model,
-            costUsd: result.costUsd,
-            usage: result.usage,
-            proposalId: result.proposalId,
-            query: {
-              found: result.found,
-              uncited: result.uncited,
-              citations: result.citations,
-              also: result.also
-            }
-          }
-        ]
+  finishTurn(
+    id,
+    {
+      content: result.answer,
+      model: result.model,
+      costUsd: result.costUsd,
+      usage: result.usage,
+      proposalId: result.proposalId,
+      query: {
+        found: result.found,
+        uncited: result.uncited,
+        citations: result.citations,
+        also: result.also
       }
-    })
+    },
+    result.cached
   )
-  if (result.cached && turnId !== null) {
-    useAssistantStore.setState((s) => ({ cached: { ...s.cached, [turnId]: true } }))
-  }
 }
 
 /**

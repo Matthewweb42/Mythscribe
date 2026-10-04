@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { AiUsage } from './ai'
 import { QueryTurn } from './query'
 import { toTagName } from './tags'
+import { WhatNextDirection } from './whatNext'
 
 /**
  * The AI assistant panel (F-5.4): conversations are per project and live as JSON under the
@@ -65,7 +66,9 @@ export const ChatMessage = z.object({
   /** The mode the turn was made in; an Author turn's text went to the editor, not the chat. */
   mode: ChatMode.nullable(),
   /** A Query turn's citations and flags (F-5.7); null for every other turn and for rows written before it. */
-  query: QueryTurn.nullable().default(null)
+  query: QueryTurn.nullable().default(null),
+  /** A What should come next? turn's directions (F-5.17); null for every other turn and for rows written before it. */
+  directions: z.array(WhatNextDirection).nullable().default(null)
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
 

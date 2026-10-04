@@ -180,6 +180,8 @@ import {
   type BuildQueryPromptV2Input
 } from '../prompts/query.v2'
 import { buildProofreadPrompt, PROOFREAD_PROMPT_VERSION } from '../prompts/proofread.v1'
+import { buildWhatNextPrompt, WHAT_NEXT_PROMPT_VERSION } from '../prompts/whatNext.v1'
+import { fitTailToBudget } from '../whatNext'
 import { fitSceneToBudget } from '../critique'
 import { fitQueryPrompt } from '../query'
 import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../prompts/tags.v1'
@@ -467,6 +469,11 @@ export interface EvalCase {
      * checks against the text as sent (here the whole scene) and the keep words.
      */
     | { kind: 'proofread'; text: string; keepWords: string[] }
+    /**
+     * What should come next? (F-5.17): the answer must parse, and every direction must survive
+     * the feature's own parser (shape, non-blank, within the caps), three of them.
+     */
+    | { kind: 'whatNext' }
 }
 
 const general = builtinParams('general')
@@ -1468,6 +1475,28 @@ function proofreadCase(
   }
 }
 
+function whatNextCase(
+  name: string,
+  note: string,
+  input: { text: string; brief: string | null; bible: string | null }
+): EvalCase {
+  // The tail is fitted to the input budget exactly as the feature fits it (token rule 8).
+  const { text } = fitTailToBudget(
+    input.text,
+    inputBudget('whatNext'),
+    (cut) => buildWhatNextPrompt({ ...input, text: cut }).messages
+  )
+  const built = buildWhatNextPrompt({ ...input, text })
+  return {
+    version: WHAT_NEXT_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'whatNext' }
+  }
+}
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -2028,5 +2057,15 @@ export const EVAL_CASES: EvalCase[] = [
       brief: MAXED_BRIEF_BLOCK,
       keepWords: PROOFREAD_MAXED_KEEP_WORDS
     }
+  ),
+  whatNextCase(
+    'fresh',
+    'the fixture scene with no brief and no story bible: the shape a new project sends',
+    { text: FIXTURE_PASSAGE, brief: null, bible: null }
+  ),
+  whatNextCase(
+    'maxed',
+    'the worst input as the fit leaves it: the tail of a long scene at the character budget, the brief and the story bible at their caps',
+    { text: FIXTURE_PASSAGE.repeat(20), brief: MAXED_BRIEF_BLOCK, bible: MAXED_BIBLE }
   )
 ]

@@ -9,12 +9,14 @@ import { SCENE_BRIEF_FIELD_MAX } from '@shared/sceneMeta'
 import { SceneSummary } from '@shared/summary'
 import { toTagName } from '@shared/tags'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
+import { WHAT_NEXT_DIRECTIONS } from '@shared/whatNext'
 import { checkChatFidelity, postProcessChatText } from '../chat'
 import { postProcessGhostText } from '../ghostText'
 import { buildOpenAiProvider } from '../providers/openai'
 import { PROMPT_CATALOGUE, PROMPT_VERSIONS } from '../prompts/catalogue'
 import { parseProofreadAnswer } from '../proofread'
 import { parseSummaryAnswer } from '../summarize'
+import { parseWhatNextAnswer } from '../whatNext'
 import { EVAL_CASES, FIXTURE_PROFILE, type EvalCase } from './fixtures'
 import { renderLiveReport, renderTokenReport, tokenRows, type LiveResult } from './report'
 
@@ -280,6 +282,26 @@ function scoreProofread(text: string, keepWords: string[], answer: string): Live
   }
 }
 
+/**
+ * What should come next? (F-5.17) scores through the feature's own parser: the answer must
+ * parse to `{ directions: [...] }`, and all three directions asked for must survive it (shape,
+ * non-blank, within the caps); a dropped or missing one is tokens the model wasted.
+ */
+function scoreWhatNext(answer: string): LiveResult['verdict'] {
+  try {
+    const { directions, dropped } = parseWhatNextAnswer(answer)
+    return dropped === 0 && directions.length === WHAT_NEXT_DIRECTIONS
+      ? { kind: 'json', ok: true, problem: null }
+      : {
+          kind: 'json',
+          ok: false,
+          problem: `${directions.length} kept, ${dropped} dropped`
+        }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not { directions: [{ title, text }] }' }
+  }
+}
+
 const BriefAnswer = z.object({
   goal: z.string(),
   conflict: z.string(),
@@ -444,6 +466,10 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           answer: reply.text,
           verdict: scoreProofread(c.scoring.text, c.scoring.keepWords, reply.text)
         })
+        continue
+      }
+      if (c.scoring.kind === 'whatNext') {
+        results.push({ ...base, answer: reply.text, verdict: scoreWhatNext(reply.text) })
         continue
       }
       if (c.scoring.kind === 'structure') {

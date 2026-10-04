@@ -1,10 +1,6 @@
-import { useCallback } from 'react'
 import type { Editor } from '@tiptap/core'
-import { useEditorState } from '@tiptap/react'
-import { AI_DATA_SHARING, AI_DIAL_LABEL, isFeatureAllowed } from '@shared/aiSettings'
 import {
   CONTINUITY_SCENE_CHAR_BUDGET,
-  CONTINUITY_TEXT_MIN,
   type ContinuityFinding,
   type ContinuityRef
 } from '@shared/continuity'
@@ -22,7 +18,6 @@ import { openPassage } from '@renderer/features/editor/openPassage'
 import { useRewriteStore } from '@renderer/features/editor/rewriteStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
-import { useAiSettingsStore } from './aiSettingsStore'
 import { useContinuityFindings, useContinuityStore } from './continuityStore'
 import { describeRequest } from './usageFormat'
 
@@ -37,7 +32,6 @@ export const CONTINUITY_NO_PROPOSAL =
 /** The title of a scene that has left the tree. */
 const MISSING_SCENE = 'Deleted scene'
 
-const MIN_LABEL = CONTINUITY_TEXT_MIN.toLocaleString()
 const HEADER_BUTTON =
   'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:bg-surface-raised aria-pressed:text-fg'
 const LINK =
@@ -77,8 +71,8 @@ export function ContinuityButton(): React.JSX.Element {
 }
 
 /**
- * The findings view of the assistant panel (F-13.4): `Check this scene` on top with what the
- * last check said, then every open finding grouped by scene in the order received. Each card
+ * The findings view of the assistant panel (F-13.4): what the last check said on top (the check
+ * itself is the Check consistency quick action above the view, F-5.17), then every open finding grouped by scene in the order received. Each card
  * cites both sides: the scene's passage (a click opens the scene and selects it) and the
  * reference it contradicts (the sheet field with a link to the entity, or the other scene's
  * passage as a jump), with the reason, the word diff of the passage against the fix, Apply, and
@@ -111,74 +105,31 @@ export function ContinuityView(): React.JSX.Element {
   )
 }
 
-/** `Check this scene`, why it is off when it is, the wait with Stop, and what the last check said. */
+/** The wait with Stop, the failure, and what the last check said. */
 function CheckScene(): React.JSX.Element {
-  const active = useActiveEditorStore((s) => s.active)
-  const editor = active !== null && !active.editor.isDestroyed ? active.editor : null
-  const selector = useCallback(() => (editor ? editor.state.doc.textContent.length : 0), [editor])
-  const length = useEditorState({ editor, selector }) ?? 0
-  const settings = useAiSettingsStore((s) => s.settings)
   const running = useContinuityStore((s) => s.running)
   const outcome = useContinuityStore((s) => s.outcome)
   const error = useContinuityStore((s) => s.error)
-  const check = useContinuityStore((s) => s.check)
   const stop = useContinuityStore((s) => s.stop)
-  const nodeId = active?.id ?? null
-  const isScene = useTreeStore(
-    (s) =>
-      nodeId !== null && s.byId[nodeId]?.kind === 'document' && s.sectionOf[nodeId] === 'manuscript'
-  )
   const outcomeTitle = useTreeStore((s) =>
     outcome === null ? null : (s.byId[outcome.nodeId]?.title ?? MISSING_SCENE)
   )
 
-  const { minDial, label } = AI_DATA_SHARING.continuity
-  let reason: string | null = null
-  if (settings === null || settings.dial < minDial) {
-    reason = `${label} needs the AI dial at ${AI_DIAL_LABEL[minDial]} or higher (Settings, AI tab)`
-  } else if (!isFeatureAllowed(settings, 'continuity')) {
-    reason = `${label} is turned off for this project (Settings, AI tab)`
-  } else if (running !== null) {
-    reason = 'A check is already running'
-  } else if (editor === null || nodeId === null || !isScene) {
-    reason = 'Open a manuscript scene to check it'
-  } else if (length < CONTINUITY_TEXT_MIN) {
-    reason = `Write ${MIN_LABEL} characters before checking this scene`
-  }
-
   return (
     <div className="flex shrink-0 flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          data-testid="continuity-check"
-          disabled={reason !== null}
-          title={reason ?? 'Compare this scene with the story bible'}
-          onClick={() => {
-            if (nodeId !== null) check(nodeId)
-          }}
-          className={FIX_PRIMARY_BUTTON}
-        >
-          Check this scene
-        </button>
-        {running !== null ? (
+      {running !== null ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <p
+            data-testid="continuity-pending"
+            aria-live="polite"
+            className="m-0 text-xs text-fg-muted"
+          >
+            Reading the scene against the story bible…
+          </p>
           <button type="button" data-testid="continuity-stop" onClick={stop} className={FIX_BUTTON}>
             Stop
           </button>
-        ) : null}
-      </div>
-      {running !== null ? (
-        <p
-          data-testid="continuity-pending"
-          aria-live="polite"
-          className="m-0 text-xs text-fg-muted"
-        >
-          Reading the scene against the story bible…
-        </p>
-      ) : reason !== null ? (
-        <p data-testid="continuity-check-reason" className="m-0 text-xs text-fg-muted">
-          {reason}
-        </p>
+        </div>
       ) : null}
       {error !== null ? (
         <p role="alert" data-testid="continuity-error" className="m-0 text-xs text-danger">

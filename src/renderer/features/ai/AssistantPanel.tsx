@@ -20,14 +20,22 @@ import {
   type QuerySceneRef,
   type QueryTurn
 } from '@shared/query'
+import type { WhatNextDirection } from '@shared/whatNext'
+import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { useAiSettingsStore } from './aiSettingsStore'
-import { AGENT_NOTICE, useActiveConversation, useAssistantStore } from './assistantStore'
+import {
+  AGENT_NOTICE,
+  NO_EDITOR_MESSAGE,
+  useActiveConversation,
+  useAssistantStore
+} from './assistantStore'
 import { ContinuityButton, ContinuityView } from './ContinuityPanel'
 import { useContinuityStore } from './continuityStore'
+import { CONVERSATION_BUSY_MESSAGE, QuickActions } from './QuickActions'
 import { describeRequest } from './usageFormat'
 
 const ICON_BUTTON =
@@ -44,6 +52,9 @@ const CHIP_BUTTON =
 /** The warning a Query answer no citation survived carries (F-5.7, author-control rule 4). */
 export const QUERY_UNCITED_WARNING =
   'No cited passage supports this answer; treat it as unverified.'
+
+/** What a What should come next? turn says when no direction survived (F-5.17). */
+export const NO_DIRECTIONS_MESSAGE = 'No directions came back. Try again.'
 
 /** The paragraph counts Author mode offers, 1–10. */
 const PARAGRAPH_OPTIONS = Array.from(
@@ -123,16 +134,23 @@ export function AssistantPanel(): React.JSX.Element | null {
  * The conversation tabs, the open conversation's turns, and the composer: everything under
  * the heading. The docked panel and the floating window in focus mode (F-6.6) share it, and
  * so the same store, so a conversation started in one continues in the other. While the
- * Continuity button is pressed (F-13.4) the findings view takes the place of the chat.
+ * Continuity button is pressed (F-13.4) the findings view takes the place of the chat. The
+ * quick actions (F-5.17) sit above both views.
  */
 export function AssistantBody(): React.JSX.Element {
   const continuity = useContinuityStore((s) => s.viewOpen)
-  if (continuity) return <ContinuityView />
   return (
     <>
-      <ConversationTabs />
-      <MessageLog />
-      <Composer />
+      <QuickActions />
+      {continuity ? (
+        <ContinuityView />
+      ) : (
+        <>
+          <ConversationTabs />
+          <MessageLog />
+          <Composer />
+        </>
+      )}
     </>
   )
 }
@@ -307,6 +325,7 @@ function MessageLog(): React.JSX.Element {
           key={message.id}
           message={message}
           pending={pending && index === messages.length - 1}
+          busy={pending}
           cached={cached[message.id] === true}
         />
       ))}
@@ -318,15 +337,19 @@ function MessageLog(): React.JSX.Element {
  * One turn. The author's on the right; the assistant's on the left with its cost line once it
  * has one (`model · cost · cached`, F-4.7's note). An empty assistant turn with a request in
  * flight reads as thinking; an Author turn shows the notice, its text went to the editor; a
- * Query turn (F-5.7) shows its citations through `QueryAnswer`.
+ * Query turn (F-5.7) shows its citations through `QueryAnswer`; a What should come next? turn
+ * (F-5.17) shows its directions as cards through `Directions`. `busy` is whether the
+ * conversation has a request in flight.
  */
 function Turn({
   message,
   pending,
+  busy,
   cached
 }: {
   message: ChatMessage
   pending: boolean
+  busy: boolean
   cached: boolean
 }): React.JSX.Element {
   const mine = message.role === 'user'
@@ -341,6 +364,8 @@ function Turn({
         <p role="status" data-testid="chat-pending" className="m-0 text-xs text-fg-muted">
           Thinking…
         </p>
+      ) : !mine && message.directions !== null ? (
+        <Directions directions={message.directions} busy={busy} />
       ) : !mine && message.mode === 'agent' ? (
         <p className="m-0 text-xs text-fg-muted italic">{AGENT_NOTICE}</p>
       ) : !mine && message.query !== null ? (
@@ -359,6 +384,63 @@ function Turn({
         </p>
       ) : null}
     </article>
+  )
+}
+
+/**
+ * The directions of a What should come next? turn (F-5.17), one card each with `Write this`,
+ * which sends the direction as an Author turn so the text lands in the editor as ghost text
+ * (with the voice profile and the fidelity check that path carries). Disabled with the reason
+ * while Author mode is not allowed, without an open editor, or while the conversation waits.
+ */
+function Directions({
+  directions,
+  busy
+}: {
+  directions: readonly WhatNextDirection[]
+  busy: boolean
+}): React.JSX.Element {
+  const settings = useAiSettingsStore((s) => s.settings)
+  const hasEditor = useActiveEditorStore((s) => s.active !== null && !s.active.editor.isDestroyed)
+  const writeDirection = useAssistantStore((s) => s.writeDirection)
+  const agentDial = AI_DATA_SHARING.ghostText.minDial
+  let reason: string | null = null
+  if (settings === null || !isFeatureAllowed(settings, 'chat')) {
+    reason = `Author needs the AI dial at ${AI_DIAL_LABEL[AI_DATA_SHARING.chat.minDial]} or higher, with ${AI_DATA_SHARING.chat.label} on (Settings, AI tab)`
+  } else if (settings.dial < agentDial) {
+    reason = modeTitle('agent', true, agentDial)
+  } else if (!hasEditor) {
+    reason = NO_EDITOR_MESSAGE
+  } else if (busy) {
+    reason = CONVERSATION_BUSY_MESSAGE
+  }
+  if (directions.length === 0) {
+    return <p className="m-0 text-xs text-fg-muted italic">{NO_DIRECTIONS_MESSAGE}</p>
+  }
+  return (
+    <ol className="m-0 flex list-none flex-col gap-1.5 p-0">
+      {directions.map((direction, index) => (
+        <li
+          key={`${index}-${direction.title}`}
+          data-testid="what-next-direction"
+          className="flex flex-col gap-1 rounded-md bg-surface-raised p-2"
+        >
+          <p className="m-0 text-sm font-medium">{direction.title}</p>
+          <p className="m-0 break-words text-xs text-fg-muted">{direction.text}</p>
+          <button
+            type="button"
+            data-testid="what-next-write"
+            disabled={reason !== null}
+            title={reason ?? 'Continue the scene this way, as ghost text in the editor'}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => void writeDirection(direction)}
+            className={`self-start ${LINK_BUTTON}`}
+          >
+            Write this
+          </button>
+        </li>
+      ))}
+    </ol>
   )
 }
 

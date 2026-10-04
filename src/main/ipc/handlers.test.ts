@@ -1634,6 +1634,114 @@ describe('ai:proofread (F-14.12)', () => {
   })
 })
 
+describe('ai:whatNext (F-5.17)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const SCENE =
+    'The ferry landing was empty when Mara reached it. The rope hung slack in the water and ' +
+    'the bell had lost its clapper years ago.'
+  const DIRECTIONS = [
+    { title: 'Tomas arrives late', text: 'He comes without the ledger and lies about why.' },
+    { title: 'The bell rings', text: 'Someone upriver rings a bell that has no clapper.' },
+    { title: 'Mara leaves', text: 'She gives up waiting and takes the ferry alone.' }
+  ]
+
+  /** A project with the dial at Ask, a key, a written scene, and three directions waiting. */
+  async function ready(dial: AiDial = 1): Promise<{ scene: string }> {
+    await invoke('project:create', { name: 'What next', format: 'novel', directory: tmp })
+    const scene = manuscriptDocuments(manager.require().connection.orm)[0]
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: SCENE }] }]
+      }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+    await invoke('ai:setKey', { key: KEY })
+    answersWith({ directions: DIRECTIONS })
+    return { scene: scene.id }
+  }
+
+  function answersWith(answer: unknown): void {
+    complete.mockResolvedValue({
+      text: JSON.stringify(answer),
+      model: 'gpt-fake',
+      usage: { inputTokens: 600, outputTokens: 80 }
+    })
+  }
+
+  const ask = (scene: string, requestId = 'wn-1'): Input<'ai:whatNext'> => ({
+    nodeId: scene,
+    requestId
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('ai:whatNext', ask('x'))).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers the directions, drops the blank ones, and records them as one pending proposal', async () => {
+    const { scene } = await ready()
+    answersWith({ directions: [{ title: ' ', text: 'Blank title.' }, ...DIRECTIONS] })
+    const result = await invoke('ai:whatNext', ask(scene, 'wn-7'))
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toEqual({
+      ok: true,
+      directions: DIRECTIONS,
+      dropped: 1,
+      usage: { inputTokens: 600, outputTokens: 80 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      proposalId: result.proposalId,
+      requestId: 'wn-7'
+    })
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'whatNext',
+      nodeId: scene,
+      promptVersion: 'whatNext.v1',
+      content: JSON.stringify(DIRECTIONS),
+      flagged: false,
+      violation: null,
+      regeneratedFrom: null,
+      status: 'pending'
+    })
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['whatNext'])
+  })
+
+  it('sends the text up to the selection when the renderer sent it', async () => {
+    const { scene } = await ready()
+    const before = 'The ferry landing was empty when Mara reached it.'
+    const result = await invoke('ai:whatNext', { ...ask(scene, 'wn-8'), before })
+    expect(result.ok).toBe(true)
+    const user = complete.mock.calls.at(-1)?.[0].messages[1]?.content ?? ''
+    expect(user).toContain(`Text so far:\n"""\n${before}\n"""`)
+  })
+
+  it('answers an expected AI failure as data with the requestId, and an unknown or too-short node through the error envelope', async () => {
+    const { scene } = await ready(0)
+    expect(await invoke('ai:whatNext', ask(scene, 'wn-3'))).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'What comes next needs the AI dial at Ask or higher (it is at Off).',
+      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      requestId: 'wn-3'
+    })
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    const unknown = await handlerFor('ai:whatNext')(undefined, ask('nope'))
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    const short = await handlerFor('ai:whatNext')(undefined, {
+      ...ask(scene),
+      before: 'Too short.'
+    })
+    expect(short.ok).toBe(false)
+    if (!short.ok) expect(short.error.code).toBe('VALIDATION')
+  })
+})
+
 describe('continuity (F-13.4)', () => {
   const KEY = 'sk-test-secret-1234abcd'
   const OPENING =
@@ -2185,6 +2293,27 @@ describe('ai:query (F-5.7)', () => {
       requestId: 'q-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+  })
+
+  it('ranks the active scene first with pinActive (F-5.17), so the best match cites as [2]', async () => {
+    const { first, second } = await ready()
+    answersWith({
+      found: true,
+      answer: 'Under the elm. [2]',
+      citations: [{ scene: 2, quote: QUOTE }]
+    })
+    const result = await invoke('ai:query', {
+      ...ask('q-9'),
+      nodeId: second,
+      message: 'What happens in this scene? Give a short recap, citing the passages.',
+      pinActive: true
+    })
+    if (!result.ok) throw new Error(result.message)
+    expect(result.citations).toEqual([
+      { nodeId: first, title: 'Chapter 1 \u203a Scene 1', scene: 2, quote: QUOTE }
+    ])
+    const sent = complete.mock.calls.at(-1)?.[0].messages[0]?.content ?? ''
+    expect(sent).toContain(`[1] Chapter 2 \u203a Scene 1\n"""\n${QUIET}`)
   })
 
   it('refuses through the error envelope when no scene has been written yet', async () => {

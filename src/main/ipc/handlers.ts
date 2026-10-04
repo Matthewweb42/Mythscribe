@@ -35,6 +35,7 @@ import type {
   AiRecommendTagsResult,
   AiRewriteResult,
   AiSummarizeResult,
+  AiWhatNextResult,
   Entity,
   JobsIndexAllResult
 } from '@shared/ipc/contract'
@@ -72,6 +73,7 @@ import { IMPORT_STRUCTURE_PROMPT_VERSION } from '../ai/prompts/importStructure.v
 import { createProposal, listPendingProposals, settleProposal } from '../ai/proposalStore'
 import { AiCancelledError, AiProviderError, NoKeyError } from '../ai/providers/types'
 import { runQuery } from '../ai/query'
+import { runWhatNext } from '../ai/whatNext'
 import { recommendTags } from '../ai/recommendTags'
 import { runRewrite } from '../ai/rewrite'
 import type { AiProviderRegistry } from '../ai/registry'
@@ -1457,6 +1459,46 @@ export function registerHandlers({
     }
   })
 
+  // F-5.17: What should come next? on a scene, JSON from the fast tier, not streamed. The reply
+  // carries up to three directions (`dropped` counts the rest) and one proposal (F-14.5) holds
+  // them as JSON, pending and never flagged: directions are advice in the chat, and one becomes
+  // prose only through Author mode, which writes its own proposal. Nothing enters the manuscript.
+  register('ai:whatNext', async ({ nodeId, requestId, before }): Promise<AiWhatNextResult> => {
+    try {
+      const db = manager.require().connection.orm
+      const deps = requestDeps(db)
+      const result = await runWhatNext(db, deps, { nodeId, before, requestId })
+      const { directions, dropped, usage, costUsd, cached, model } = result
+      const proposal = createProposal(db, {
+        feature: 'whatNext',
+        nodeId,
+        promptVersion: result.promptVersion,
+        model,
+        promptTokens: usage.inputTokens,
+        completionTokens: usage.outputTokens,
+        costUsd,
+        cached,
+        content: JSON.stringify(directions),
+        flagged: false,
+        violation: null
+      })
+      return {
+        ok: true,
+        directions,
+        dropped,
+        usage,
+        costUsd,
+        cached,
+        model,
+        proposalId: proposal.id,
+        requestId
+      }
+    } catch (err) {
+      if (err instanceof AiProviderError) return { ...aiFailure(err.code, err.message), requestId }
+      throw err
+    }
+  })
+
   // F-13.4: Check consistency on one scene, JSON from the strong tier, not streamed. The run
   // replaces the scene's open findings (dismissed ones stay dismissed) and every window hears
   // `continuity:changed`; the reply carries the scene's open findings as stored, each citing a
@@ -1561,46 +1603,50 @@ export function registerHandlers({
   // streamed (the citations are checked before anything is shown). The proposal (F-14.5) holds
   // the answer and its citations and stays pending, as a Plan answer does: nothing here enters
   // the manuscript.
-  register('ai:query', async ({ nodeId, message, history, requestId }): Promise<AiQueryResult> => {
-    try {
-      const db = manager.require().connection.orm
-      const deps = requestDeps(db)
-      const result = await runQuery(db, deps, { nodeId, message, history, requestId })
-      const { answer, found, uncited, citations, also, dropped, usage, costUsd, cached, model } =
-        result
-      const proposal = createProposal(db, {
-        feature: 'query',
-        nodeId,
-        promptVersion: result.promptVersion,
-        model,
-        promptTokens: usage.inputTokens,
-        completionTokens: usage.outputTokens,
-        costUsd,
-        cached,
-        content: JSON.stringify({ answer, citations }),
-        flagged: false,
-        violation: null
-      })
-      return {
-        ok: true,
-        answer,
-        found,
-        uncited,
-        citations,
-        also,
-        dropped,
-        usage,
-        costUsd,
-        cached,
-        model,
-        proposalId: proposal.id,
-        requestId
+  register(
+    'ai:query',
+    async ({ nodeId, message, history, requestId, pinActive }): Promise<AiQueryResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const deps = requestDeps(db)
+        const result = await runQuery(db, deps, { nodeId, message, history, requestId, pinActive })
+        const { answer, found, uncited, citations, also, dropped, usage, costUsd, cached, model } =
+          result
+        const proposal = createProposal(db, {
+          feature: 'query',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model,
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          costUsd,
+          cached,
+          content: JSON.stringify({ answer, citations }),
+          flagged: false,
+          violation: null
+        })
+        return {
+          ok: true,
+          answer,
+          found,
+          uncited,
+          citations,
+          also,
+          dropped,
+          usage,
+          costUsd,
+          cached,
+          model,
+          proposalId: proposal.id,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
       }
-    } catch (err) {
-      if (err instanceof AiProviderError) return { ...aiFailure(err.code, err.message), requestId }
-      throw err
     }
-  })
+  )
 
   // F-14.3: the scene brief drafted from the scene's text, JSON from the fast tier, not
   // streamed (five short lines are only useful whole). Nothing is stored on the node: the

@@ -34,6 +34,7 @@ import { SUMMARY_PROMPT_V2_VERSION } from './summary.v2'
 import { SUMMARY_PROMPT_V3_VERSION } from './summary.v3'
 import { TAGS_PROMPT_VERSION } from './tags.v1'
 import { TAGS_REGEN_PROMPT_VERSION } from './tagsRegen.v1'
+import { WHAT_NEXT_PROMPT_VERSION } from './whatNext.v1'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -82,7 +83,8 @@ export const PROMPT_VERSIONS = [
   QUERY_PROMPT_V2_VERSION,
   IMPORT_STRUCTURE_PROMPT_VERSION,
   CONTINUITY_PROMPT_VERSION,
-  PROOFREAD_PROMPT_VERSION
+  PROOFREAD_PROMPT_VERSION,
+  WHAT_NEXT_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -249,6 +251,12 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-14.12'
+  },
+  [WHAT_NEXT_PROMPT_VERSION]: {
+    feature: 'whatNext',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-5.17'
   }
 }
 

@@ -221,6 +221,12 @@ describe('runQuery (F-5.7)', () => {
     expect(system()).not.toContain('[4]')
   })
 
+  it('sends the active scene first in full with pinActive (F-5.17), whatever it scores', async () => {
+    await ask({ nodeId: scenes[2]!, pinActive: true })
+    expect(system()).toContain(`[1] Chapter 3 › Scene 1\n"""\n${QUIET}\n"""`)
+    expect(system()).toContain(`[2] Chapter 1 › Scene 1\n"""\n${LEDGER}\n"""`)
+  })
+
   it('sends the candidates below the full ones as their stored summaries only', async () => {
     const documents = manuscriptDocuments(db)
     expect(documents.length).toBeGreaterThan(4)

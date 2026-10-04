@@ -284,6 +284,20 @@ const BETA_READER_ANSWER = JSON.stringify({
   ]
 })
 /**
+ * F-5.17: the opening of the What should come next? prompt's system turn (`WHAT_NEXT_RULES` in
+ * `src/main/ai/prompts/whatNext.v1.ts`, repeated here for the same reason). A JSON request
+ * carrying it gets three canned directions; Write this on the first sends an Author-mode turn.
+ */
+const WHAT_NEXT_SENTINEL = 'You are the what-comes-next feature inside a novel-writing app.'
+const WHAT_NEXT_TITLES = ['Mara turns back', 'The bell rings twice', 'A stranger on the road']
+const WHAT_NEXT_ANSWER = JSON.stringify({
+  directions: [
+    { title: WHAT_NEXT_TITLES[0], text: 'She doubts the crossing and heads back to the camp.' },
+    { title: WHAT_NEXT_TITLES[1], text: 'A signal from the valley forces her decision.' },
+    { title: WHAT_NEXT_TITLES[2], text: 'Someone she does not know waits at the gate.' }
+  ]
+})
+/**
  * F-5.7: the opening of the Story Intelligence prompt's system turn (`QUERY_RULES` in
  * `src/main/ai/prompts/query.v1.ts`, repeated here for the same reason). A JSON request
  * carrying it gets the canned answer below: one citation quoting a passage of the scene that
@@ -417,6 +431,10 @@ function startFakeOpenAi(): Promise<string> {
           const query = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(QUERY_SENTINEL)
           )
+          // F-5.17: What should come next? comes back as three JSON directions.
+          const whatNext = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(WHAT_NEXT_SENTINEL)
+          )
           // F-14.3: a brief draft comes back as the five JSON lines.
           const brief = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(BRIEF_SENTINEL)
@@ -482,25 +500,27 @@ function startFakeOpenAi(): Promise<string> {
                   message: {
                     role: 'assistant',
                     content: json
-                      ? proofread
-                        ? PROOFREAD_ANSWER
-                        : continuity
-                          ? continuityAnswer(request.messages)
-                          : importStructure
-                            ? IMPORT_STRUCTURE_ANSWER
-                            : critique
-                              ? CRITIQUE_ANSWER
-                              : betaReader
-                                ? BETA_READER_ANSWER
-                                : query
-                                  ? QUERY_ANSWER
-                                  : brief
-                                    ? BRIEF_ANSWER
-                                    : summary
-                                      ? SUMMARY_ANSWER
-                                      : regen
-                                        ? '{"tags":["antagonist","protagonist"]}'
-                                        : '{"tags":["dark-forest","protagonist"]}'
+                      ? whatNext
+                        ? WHAT_NEXT_ANSWER
+                        : proofread
+                          ? PROOFREAD_ANSWER
+                          : continuity
+                            ? continuityAnswer(request.messages)
+                            : importStructure
+                              ? IMPORT_STRUCTURE_ANSWER
+                              : critique
+                                ? CRITIQUE_ANSWER
+                                : betaReader
+                                  ? BETA_READER_ANSWER
+                                  : query
+                                    ? QUERY_ANSWER
+                                    : brief
+                                      ? BRIEF_ANSWER
+                                      : summary
+                                        ? SUMMARY_ANSWER
+                                        : regen
+                                          ? '{"tags":["antagonist","protagonist"]}'
+                                          : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -3219,6 +3239,40 @@ test('create, close, reopen a project on disk', async () => {
   await expect(editor).toContainText(AGENT_SECOND)
   await expect(editor.locator('.ai-origin[data-proposal-id]')).toHaveCount(2)
   await expect(page.getByTestId('status-ai')).toHaveText(/^[1-9]\d*% AI$/)
+  // F-5.17: What should come next?. The quick action asks the fast tier once (the scene's tail,
+  // its brief, and the story bible) and lands three directions in the conversation as chat;
+  // Write this on the first sends it through Author mode, which places ghost text at the caret.
+  const whatNextBodies = (): { role: string; content: string }[][] =>
+    openAiChatBodies
+      .filter((body) => body.messages[0]?.content.startsWith(WHAT_NEXT_SENTINEL))
+      .map((body) => body.messages)
+  const whatNextBefore = whatNextBodies().length
+  const whatNextButton = assistant.getByTestId('quick-action-whatNext')
+  await expect(whatNextButton).toBeEnabled()
+  await expect(whatNextButton).toContainText('fast')
+  await expect(assistant.getByTestId('quick-action-continuity')).toContainText('strong')
+  await whatNextButton.click()
+  const directions = assistant.getByTestId('what-next-direction')
+  await expect(directions).toHaveCount(3)
+  await expect(directions.first()).toContainText(WHAT_NEXT_TITLES[0] ?? '')
+  await expect(turns).toHaveCount(7)
+  await expect(turns.nth(5)).toContainText('What should come next?')
+  expect(whatNextBodies()).toHaveLength(whatNextBefore + 1)
+  expect(whatNextBodies().at(-1)?.[0]?.content).toContain(STORY_BIBLE_HEADING)
+  await directions.first().getByTestId('what-next-write').click()
+  await expect(turns).toHaveCount(9)
+  await expect(turns.nth(8)).toContainText('Placed in the editor. Tab accepts, Escape dismisses.')
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe(
+    `Write 2 paragraphs. Continue the scene in this direction: ${WHAT_NEXT_TITLES[0]}. She doubts the crossing and heads back to the camp.`
+  )
+  await expect(agentGhost).toContainText(AGENT_FIRST)
+  await page.keyboard.press('Escape')
+  await expect(agentGhost).toHaveCount(0)
+  await expect(editor.locator('.ai-origin[data-proposal-id]')).toHaveCount(2)
+  const afterWhatNext = await usageSummary()
+  expect(afterWhatNext.byFeature.find((f) => f.feature === 'whatNext')).toMatchObject({
+    requests: 1
+  })
   await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
   await expect(turns).toHaveCount(0)
   await expect(assistant.getByRole('radio', { name: 'Query' })).toHaveAttribute(
@@ -3353,7 +3407,8 @@ test('create, close, reopen a project on disk', async () => {
   await expect(critiquePanel).toHaveCount(0)
 
   // F-14.12: proofread. A sentence with a misspelling and a doubled word is typed at the end of
-  // Scene 1; with the caret collapsed the toolbar button proofreads the whole scene. The fake
+  // Scene 1; with the caret collapsed the Proofread quick action in the assistant (F-5.17)
+  // proofreads the whole scene. The fake
   // server answers three fixes, one quoting a passage that was never written, and main drops it,
   // so two cards show. Accept takes the first, Accept all the other, each replacing exactly its
   // quoted passage as AI-origin text from the one proposal (how it settles is a store test).
@@ -3370,9 +3425,10 @@ test('create, close, reopen a project on disk', async () => {
     openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(PROOFREAD_SENTINEL))
       .length
   const proofreadRequestsBefore = proofreadBodies()
-  const proofreadButton = page.getByRole('button', { name: 'Proofread', exact: true })
+  if (!(await assistant.isVisible())) await page.keyboard.press('Control+k')
+  await expect(assistant).toBeVisible()
+  const proofreadButton = assistant.getByTestId('quick-action-proofread')
   await expect(proofreadButton).toBeEnabled()
-  await expect(proofreadButton).toHaveAttribute('title', 'Proofread this scene')
   await proofreadButton.click()
   const proofreadPanel = page.getByTestId('proofread-panel')
   await expect(proofreadPanel).toBeVisible()
@@ -3737,6 +3793,20 @@ test('create, close, reopen a project on disk', async () => {
   await expect
     .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''), { timeout: 5_000 })
     .toBe(CRITIQUE_PRAISE_QUOTE)
+  // F-5.17: What happened here?. With the cited passage still selected, the quick action asks
+  // Query for a recap of that passage, with the open scene pinned first so it goes out as [1];
+  // the canned answer's citation of Scene 1 survives.
+  const recapBodiesBefore = openAiChatBodies.length
+  await assistant.getByTestId('quick-action-recap').click()
+  await expect(turns).toHaveCount(4)
+  await expect(turns.nth(2)).toContainText('What happens in this passage?')
+  await expect(turns.nth(3)).toContainText(QUERY_ANSWER_KEPT)
+  await expect(turns.nth(3).getByTestId('query-citation')).toContainText('Chapter 1 › Scene 1')
+  expect(openAiChatBodies).toHaveLength(recapBodiesBefore + 1)
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe(
+    `What happens in this passage? Give a short recap, citing it: "${CRITIQUE_PRAISE_QUOTE}"`
+  )
+  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toMatch(/\[1\] Chapter 1 › Scene 1/)
 
   // F-15.4: MythScribe Cloud. Signing in again (the account step signed out), the AI tab's
   // source picker points this project at the proxy; the next assistant question streams through
@@ -3762,8 +3832,8 @@ test('create, close, reopen a project on disk', async () => {
   await assistant.getByRole('radio', { name: 'Plan' }).click()
   await messageBox.fill(CLOUD_QUESTION)
   await messageBox.press('Enter')
-  await expect(turns).toHaveCount(4)
-  await expect(turns.nth(3)).toContainText(CLOUD_AI_ANSWER)
+  await expect(turns).toHaveCount(6)
+  await expect(turns.nth(5)).toContainText(CLOUD_AI_ANSWER)
   const cloudCost = cloudPriceFor(
     'gpt-5.4-mini',
     CLOUD_AI_USAGE.inputTokens,
@@ -3775,7 +3845,7 @@ test('create, close, reopen a project on disk', async () => {
     CLOUD_AI_USAGE.outputTokens
   )
   expect(cloudCost.costUsd).toBeCloseTo(ownKeyCost.costUsd * 2, 8)
-  await expect(turns.nth(3).getByTestId('chat-turn-cost')).toHaveText(
+  await expect(turns.nth(5).getByTestId('chat-turn-cost')).toHaveText(
     `gpt-5.4-mini · $${cloudCost.costUsd.toFixed(4)} · 10,000 in · 2,000 out`
   )
   expect(openAiChatBodies).toHaveLength(cloudBodiesBefore)
@@ -4208,10 +4278,10 @@ test('create, close, reopen a project on disk', async () => {
       .map((body) => body.messages.at(-1)?.content ?? '')
   // Counted by sentinel: the typing above also queues the scene's background summary.
   const continuityRequestsBefore = continuityBodies().length
-  await assistant.getByTestId('continuity-button').click()
+  // F-5.17: the Check consistency quick action runs the check and opens the findings view.
+  await assistant.getByTestId('quick-action-continuity').click()
   const continuityPanel = assistant.getByTestId('continuity-panel')
   await expect(continuityPanel).toBeVisible()
-  await continuityPanel.getByTestId('continuity-check').click()
   const findingCards = continuityPanel.getByTestId('continuity-finding')
   await expect(findingCards).toHaveCount(2, { timeout: 15_000 })
   expect(continuityBodies()).toHaveLength(continuityRequestsBefore + 1)
@@ -4239,7 +4309,7 @@ test('create, close, reopen a project on disk', async () => {
   expect(continuityBodiesBefore.at(-1)).toContain('Age: 34')
   // Other references may remain (what other scenes state about Mara), so the second check may
   // still ask; what it never does is send the dismissed sheet line or raise the finding again.
-  await continuityPanel.getByTestId('continuity-check').click()
+  await assistant.getByTestId('quick-action-continuity').click()
   await expect(
     continuityPanel
       .getByTestId('continuity-result')

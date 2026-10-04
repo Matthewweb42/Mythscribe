@@ -29,7 +29,6 @@ import { BetaReaderPanel } from './BetaReaderPanel'
 import { useBetaReaderStore } from './betaReaderStore'
 import { CritiqueButton } from './CritiqueButton'
 import { CritiquePanel } from './CritiquePanel'
-import { ProofreadButton } from './ProofreadButton'
 import { ProofreadPanel } from './ProofreadPanel'
 import { useProofreadStore } from './proofreadStore'
 import { useCritiqueStore } from './critiqueStore'
@@ -119,8 +118,8 @@ const TOKEN_MENU_ITEMS: MenuItem[] = [
  * runs only in the single-document view: the controller arms itself there and the toggle sits
  * in the toolbar's right slot, so a stacked region never shows ghost text. The voice exemplar
  * button (F-14.1), the rewrite button (F-14.10), and the editor's-notes button (F-14.8) sit
- * beside it, for the same reason, and so do the proofread button (F-14.12) and the
- * beta-reader button (F-14.11); the rewrite panel shows between the tag bar and the text while
+ * beside it, for the same reason, and so does the beta-reader button (F-14.11) (Proofread,
+ * F-14.12, is a quick action in the assistant, F-5.17); the rewrite panel shows between the tag bar and the text while
  * this document's rewrite runs, with the editor's-notes panel under it while its critique runs,
  * the proofread panel under that while its pass runs, and the beta-reader panel under that
  * while its read runs, and all four are dismissed when the instance goes (unmount, switch,
@@ -304,7 +303,6 @@ function RegionEditor({
           right={
             <>
               <CritiqueButton editor={ready ? editor : null} nodeId={id} />
-              <ProofreadButton editor={ready ? editor : null} nodeId={id} />
               <BetaReaderButton editor={ready ? editor : null} nodeId={id} />
               <RewriteButton editor={ready ? editor : null} nodeId={id} />
               <MarkVoiceExemplarButton editor={ready ? editor : null} nodeId={id} />

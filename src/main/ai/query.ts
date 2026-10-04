@@ -37,6 +37,8 @@ export interface QueryInput {
    * one; then the request cannot be stopped.
    */
   requestId?: string
+  /** F-5.17: rank the active document first whatever it scores (the What happened here? recap). */
+  pinActive?: boolean
 }
 
 export interface QueryResult {
@@ -116,7 +118,11 @@ export async function runQuery(
   const settings = getAiSettings(db)
   assertFeatureAllowed(settings, 'query')
 
-  const candidates = rankCandidates(db, { question: input.message, nodeId: input.nodeId })
+  const candidates = rankCandidates(db, {
+    question: input.message,
+    nodeId: input.nodeId,
+    pinActive: input.pinActive === true
+  })
   if (candidates.ranked.length === 0) {
     throw new AppError('VALIDATION', 'Write a scene before asking about the manuscript', {
       nodeId: input.nodeId

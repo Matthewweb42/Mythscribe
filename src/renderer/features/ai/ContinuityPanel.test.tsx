@@ -98,7 +98,6 @@ const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
 
 const flush = (): Promise<void> => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)))
 const cards = (): HTMLElement[] => screen.queryAllByTestId('continuity-finding')
-const checkButton = (): HTMLElement => screen.getByTestId('continuity-check')
 const paragraphs = (): string[] => {
   const out: string[] = []
   editor.state.doc.forEach((p) => out.push(p.textContent))
@@ -372,49 +371,18 @@ describe('ContinuityView (F-13.4)', () => {
     expect(paragraphs()[1]).toBe(CONTINUITY_SECOND)
   })
 
-  describe('Check this scene', () => {
-    const reason = (): HTMLElement => screen.getByTestId('continuity-check-reason')
-
-    it('is off with the reason when the dial or the toggle forbids it', () => {
-      openScene()
-      useAiSettingsStore.setState({ settings: settings({ dial: 0 }) })
-      render(<ContinuityView />)
-      expect(checkButton()).toBeDisabled()
-      expect(reason()).toHaveTextContent('Consistency check needs the AI dial at')
-      const on = settings()
-      act(() =>
-        useAiSettingsStore.setState({
-          settings: { ...on, features: { ...on.features, continuity: false } }
-        })
-      )
-      expect(checkButton()).toBeDisabled()
-      expect(reason()).toHaveTextContent('Consistency check is turned off for this project')
-    })
-
-    it('is off without an open manuscript scene, or with too little text', () => {
-      render(<ContinuityView />)
-      expect(checkButton()).toBeDisabled()
-      expect(reason()).toHaveTextContent('Open a manuscript scene to check it')
-      // A front-matter page is not a scene.
-      act(() => useActiveEditorStore.getState().set('title-page', editor))
-      expect(reason()).toHaveTextContent('Open a manuscript scene to check it')
-      act(() => {
-        editor.commands.setContent('<p>Too short.</p>')
-      })
-      openScene()
-      expect(checkButton()).toBeDisabled()
-      expect(reason()).toHaveTextContent('Write 200 characters before checking this scene')
-    })
+  describe('the check (F-5.17: started by the Check consistency quick action)', () => {
+    /** What the quick action does: asks the store to check the open scene. */
+    const check = (): void => act(() => useContinuityStore.getState().check('sc-1'))
 
     it('runs the check with Stop, then lists what it found with the cost', async () => {
       openScene()
       render(<ContinuityView />)
-      expect(checkButton()).toBeEnabled()
-      await userEvent.click(checkButton())
+      expect(screen.queryByText('Check this scene')).not.toBeInTheDocument()
+      check()
       await flush()
       expect(requests).toHaveLength(1)
       expect(requests[0]?.input.nodeId).toBe('sc-1')
-      expect(checkButton()).toBeDisabled()
       expect(screen.getByTestId('continuity-pending')).toBeInTheDocument()
       expect(screen.getByTestId('continuity-stop')).toBeInTheDocument()
       const request = requests[0]!
@@ -434,24 +402,23 @@ describe('ContinuityView (F-13.4)', () => {
       expect(screen.getByTestId('continuity-dropped')).toHaveTextContent('1 uncited or dismissed')
       expect(screen.getByTestId('continuity-truncated')).toBeInTheDocument()
       expect(screen.queryByTestId('continuity-stop')).not.toBeInTheDocument()
-      expect(checkButton()).toBeEnabled()
     })
 
     it('Stop cancels the request', async () => {
       openScene()
       render(<ContinuityView />)
-      await userEvent.click(checkButton())
+      check()
       await flush()
       await userEvent.click(screen.getByTestId('continuity-stop'))
       expect(cancels).toEqual([requests[0]?.input.requestId])
       expect(screen.queryByTestId('continuity-pending')).not.toBeInTheDocument()
-      expect(checkButton()).toBeEnabled()
+      expect(useContinuityStore.getState().running).toBeNull()
     })
 
     it('says there is nothing to check against when no reference was found', async () => {
       openScene()
       render(<ContinuityView />)
-      await userEvent.click(checkButton())
+      check()
       await flush()
       const request = requests[0]!
       act(() =>
@@ -469,7 +436,7 @@ describe('ContinuityView (F-13.4)', () => {
     it('shows an AI failure with the cause and the next step', async () => {
       openScene()
       render(<ContinuityView />)
-      await userEvent.click(checkButton())
+      check()
       await flush()
       const request = requests[0]!
       act(() =>
@@ -485,7 +452,7 @@ describe('ContinuityView (F-13.4)', () => {
       expect(screen.getByRole('alert')).toHaveTextContent(
         'No API key is set. Add one in Settings, AI tab.'
       )
-      expect(checkButton()).toBeEnabled()
+      expect(useContinuityStore.getState().running).toBeNull()
     })
   })
 })

@@ -649,7 +649,7 @@ describe('DocumentEditor inline tags (F-4.6)', () => {
 describe('DocumentEditor proofread (F-14.12)', () => {
   const SCENE = 'Into the dark woods they went, without a word.'
 
-  it('the toolbar button proofreads the selection, and unmounting dismisses the pass', async () => {
+  it('drops the toolbar button (F-5.17 moved it to the quick actions), shows the pass of the selection, and unmounting dismisses it', async () => {
     useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
     let sent: Input<'ai:proofread'> | null = null
     let cancelled: string | null = null
@@ -665,13 +665,11 @@ describe('DocumentEditor proofread (F-14.12)', () => {
       }
     })
     const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
-    const proofread = within(toolbar).getByRole('button', { name: 'Proofread' })
-    await waitFor(() => expect(proofread).toBeEnabled())
+    expect(within(toolbar).queryByRole('button', { name: 'Proofread' })).not.toBeInTheDocument()
     act(() => {
       editor.commands.setTextSelection({ from: 1, to: 31 })
+      useProofreadStore.getState().start('sc-1', editor)
     })
-    await waitFor(() => expect(proofread).toHaveAttribute('title', 'Proofread the selection'))
-    await userEvent.click(proofread)
     await waitFor(() => expect(sent).not.toBeNull())
     expect(sent).toMatchObject({ nodeId: 'sc-1', selection: 'Into the dark woods they went,' })
     expect(screen.getByTestId('proofread-pending')).toBeInTheDocument()

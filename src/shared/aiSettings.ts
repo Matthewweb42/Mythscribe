@@ -189,6 +189,14 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'entries and tags and the words in the project dictionary.',
     minDial: 1
   },
+  whatNext: {
+    label: 'What comes next',
+    sends:
+      "The last 6,000 characters of the scene, or of the text up to the end of the passage you " +
+      "selected, its brief plus the previous scene's reader-knows-after line and the next " +
+      `scene's goal, and ${STORY_BIBLE_SENDS}, only when you click What should come next?.`,
+    minDial: 1
+  },
   betaReader: {
     label: 'Beta reader',
     sends:

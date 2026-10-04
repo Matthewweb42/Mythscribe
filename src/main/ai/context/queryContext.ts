@@ -238,6 +238,11 @@ export interface RankCandidatesInput {
   question: string
   /** The active document; it breaks ties and is the first fallback when nothing scores. */
   nodeId: string | null
+  /**
+   * F-5.17 (the What happened here? recap): the active document ranks first whatever it
+   * scores, so it is always sent in full as `[1]`; the rest keep their order.
+   */
+  pinActive?: boolean
 }
 
 /**
@@ -248,7 +253,8 @@ export interface RankCandidatesInput {
  * feature still answers "not found" from real scenes rather than refusing.
  *
  * F-5.16: a scene that sourced a visible observed fact about an entity the question names
- * scores `QUERY_WEIGHTS.fact` more, once.
+ * scores `QUERY_WEIGHTS.fact` more, once. F-5.17: with `pinActive` the active scene (when it
+ * has text) comes first whatever it scored, ahead of the ranking above.
  */
 export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCandidates {
   const documents = manuscriptDocuments(db)
@@ -290,7 +296,7 @@ export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCan
   }
 
   const hits = scored.filter((candidate) => candidate.score > 0)
-  const ranked =
+  const byScore =
     hits.length > 0
       ? [...hits].sort((a, b) => {
           if (a.score !== b.score) return b.score - a.score
@@ -302,6 +308,13 @@ export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCan
           ...scored.filter((candidate) => candidate.nodeId === input.nodeId),
           ...scored.filter((candidate) => candidate.nodeId !== input.nodeId)
         ]
+  const active = input.pinActive
+    ? scored.find((candidate) => candidate.nodeId === input.nodeId)
+    : undefined
+  const ranked =
+    active === undefined
+      ? byScore
+      : [active, ...byScore.filter((candidate) => candidate.nodeId !== active.nodeId)]
 
   return {
     full: ranked.slice(0, QUERY_FULL_SCENES).map((candidate) => ({

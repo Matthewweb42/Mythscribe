@@ -187,6 +187,30 @@ describe('rankCandidates (F-5.7)', () => {
     expect(result.ranked.every((candidate) => candidate.score === 0)).toBe(true)
   })
 
+  it('puts the active scene first whatever it scores with pinActive (F-5.17), the rest by score', () => {
+    saveDocument(db, scenes[0]!, doc('The ledger sat on the mill desk. The ledger again.'))
+    saveDocument(db, scenes[1]!, doc('Mara crossed the yard. Nobody spoke of the ledger.'))
+    saveDocument(db, scenes[2]!, doc('The storm broke at dusk.'))
+    const question = 'What happens with the ledger?'
+    expect(
+      rankCandidates(db, { question, nodeId: scenes[2]! }).ranked.map((c) => c.nodeId)
+    ).toEqual([scenes[0], scenes[1]])
+    const pinned = rankCandidates(db, { question, nodeId: scenes[2]!, pinActive: true })
+    expect(pinned.ranked.map((c) => c.nodeId)).toEqual([scenes[2], scenes[0], scenes[1]])
+    expect(pinned.ranked[0]!.score).toBe(0)
+    expect(pinned.full[0]!.nodeId).toBe(scenes[2])
+    // An active scene that already leads stays where it is, once.
+    expect(
+      rankCandidates(db, { question, nodeId: scenes[0]!, pinActive: true }).ranked.map(
+        (c) => c.nodeId
+      )
+    ).toEqual([scenes[0], scenes[1]])
+    // With nothing open there is nothing to pin.
+    expect(
+      rankCandidates(db, { question, nodeId: null, pinActive: true }).ranked.map((c) => c.nodeId)
+    ).toEqual([scenes[0], scenes[1]])
+  })
+
   it('answers nothing at all for a manuscript with no written scene', () => {
     expect(rankCandidates(db, { question: 'Anything?', nodeId: null })).toEqual({
       full: [],

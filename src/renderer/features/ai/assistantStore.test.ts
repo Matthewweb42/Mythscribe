@@ -10,6 +10,7 @@ import {
 import type {
   AiChatResult,
   AiQueryResult,
+  AiWhatNextResult,
   Channel,
   EventName,
   EventPayload,
@@ -17,10 +18,13 @@ import type {
   Output
 } from '@shared/ipc/contract'
 import { QUERY_NOT_FOUND } from '@shared/query'
+import { RECAP_SCENE_QUESTION, WHAT_NEXT_QUESTION } from '@shared/quickActions'
+import { WHAT_NEXT_CHAR_BUDGET } from '@shared/whatNext'
 import {
   resetActiveEditorStore,
   useActiveEditorStore
 } from '@renderer/features/editor/activeEditorStore'
+import { resetDocumentStore } from '@renderer/features/editor/documentStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
 import { locateText } from '@renderer/features/editor/locateText'
 import { ghostOf, type GhostSettleHandler } from '@renderer/features/editor/ghostText'
@@ -36,6 +40,7 @@ import {
   EMPTY_ANSWER_MESSAGE,
   NEW_CONVERSATION_TITLE,
   NO_EDITOR_MESSAGE,
+  NO_SCENE_MESSAGE,
   OPEN_SCENE_TIMEOUT_MS,
   PASSAGE_GONE_MESSAGE,
   resetAssistantStore,
@@ -60,8 +65,14 @@ interface PendingQuery {
   resolve: (result: AiQueryResult) => void
   reject: (err: Error) => void
 }
+interface PendingWhatNext {
+  input: Input<'ai:whatNext'>
+  resolve: (result: AiWhatNextResult) => void
+  reject: (err: Error) => void
+}
 
 let sets: PendingSet[]
+let whatNexts: PendingWhatNext[]
 let chats: PendingChat[]
 let queries: PendingQuery[]
 let settles: Input<'proposal:settle'>[]
@@ -98,6 +109,15 @@ function deferredClient(stored: Conversations): IpcClient {
         return new Promise<Output<C>>((resolve, reject) => {
           queries.push({
             input: input as Input<'ai:query'>,
+            resolve: (result) => resolve(result as Output<C>),
+            reject
+          })
+        })
+      }
+      if (channel === 'ai:whatNext') {
+        return new Promise<Output<C>>((resolve, reject) => {
+          whatNexts.push({
+            input: input as Input<'ai:whatNext'>,
             resolve: (result) => resolve(result as Output<C>),
             reject
           })
@@ -141,7 +161,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       costUsd: null,
       usage: null,
       mode: null,
-      query: null
+      query: null,
+      directions: null
     },
     {
       id: 'm-2',
@@ -153,7 +174,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       costUsd: 0.0002,
       usage: { inputTokens: 300, outputTokens: 20 },
       mode: 'plan',
-      query: null
+      query: null,
+      directions: null
     }
   ],
   created: '2026-09-15T10:00:00.000Z',
@@ -206,11 +228,13 @@ beforeEach(() => {
   sets = []
   chats = []
   queries = []
+  whatNexts = []
   settles = []
   cancels = []
   deltaListener = null
   unsubscribed = 0
   resetAssistantStore()
+  resetDocumentStore()
   resetActiveEditorStore()
   resetAiActivityStore()
   resetProposalStore()
@@ -222,6 +246,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   resetAssistantStore()
+  resetDocumentStore()
   resetActiveEditorStore()
   resetAiActivityStore()
   useTreeStore.getState().clear()
@@ -420,7 +445,8 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
       costUsd: null,
       usage: null,
       mode: null,
-      query: null
+      query: null,
+      directions: null
     }))
     setIpcClient(
       deferredClient({
@@ -937,5 +963,205 @@ describe('useAssistantStore openScene (F-5.7)', () => {
     expect(useTreeStore.getState().selectedId).toBe('sc-1')
     expect(selectedText()).toBe('')
     expect(toasts()).toEqual([PASSAGE_GONE_MESSAGE])
+  })
+})
+
+describe('useAssistantStore quick actions (F-5.17)', () => {
+  const SCENE = 'Mara climbed the ridge at dusk. The storm had not broken yet.'
+  const DIRECTIONS = [
+    { title: 'The storm breaks', text: 'Rain drives them into the shepherd hut.' },
+    { title: 'A light below', text: 'Someone is camped in the valley.' }
+  ]
+  let editor: Editor
+
+  type WhatNextOk = Extract<AiWhatNextResult, { ok: true }>
+  const whatNextOk = (requestId: string, over: Partial<WhatNextOk> = {}): AiWhatNextResult => ({
+    ok: true,
+    directions: DIRECTIONS,
+    dropped: 0,
+    usage: { inputTokens: 1200, outputTokens: 90 },
+    costUsd: 0.0004,
+    cached: false,
+    model: 'gpt-fast',
+    proposalId: `prop-${requestId}`,
+    requestId,
+    ...over
+  })
+
+  beforeEach(() => {
+    editor = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' }),
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: 'Mara climbed the ridge at dusk.' }]
+          },
+          { type: 'paragraph', content: [{ type: 'text', text: 'The storm had not broken yet.' }] }
+        ]
+      }
+    })
+    editor.commands.focus('end')
+  })
+  afterEach(() => {
+    editor.destroy()
+  })
+
+  async function askWhatNext(): Promise<PendingWhatNext & { done: Promise<void> }> {
+    const asking = store().whatNext()
+    await settle()
+    const request = whatNexts[whatNexts.length - 1]
+    if (!request) throw new Error('nothing was asked')
+    return Object.assign(request, { done: asking })
+  }
+
+  it('whatNext asks for the open scene without a selection and records the directions as a turn', async () => {
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await store().load()
+    const request = await askWhatNext()
+    expect(request.input).toEqual({
+      nodeId: 'sc-1',
+      requestId: expect.any(String) as string,
+      before: null
+    })
+    expect(useAiActivityStore.getState().inflight).toEqual({
+      [request.input.requestId]: { feature: 'whatNext', startedAt: expect.any(Number) as number }
+    })
+    expect(active().messages.slice(2)).toMatchObject([
+      { role: 'user', content: WHAT_NEXT_QUESTION },
+      { role: 'assistant', content: '', directions: null }
+    ])
+    // One busy rule: nothing else starts while the conversation waits.
+    await store().whatNext()
+    await store().recap()
+    expect(whatNexts).toHaveLength(1)
+    expect(queries).toHaveLength(0)
+
+    request.resolve(whatNextOk(request.input.requestId, { cached: true }))
+    await request.done
+    expect(store().pending).toEqual({})
+    const answer = active().messages[3]
+    expect(answer).toMatchObject({
+      role: 'assistant',
+      content:
+        '1. The storm breaks: Rain drives them into the shepherd hut.\n2. A light below: Someone is camped in the valley.',
+      directions: DIRECTIONS,
+      model: 'gpt-fast',
+      costUsd: 0.0004,
+      usage: { inputTokens: 1200, outputTokens: 90 },
+      proposalId: `prop-${request.input.requestId}`
+    })
+    expect(store().cached[answer?.id ?? '']).toBe(true)
+    expect(settles).toEqual([])
+    await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
+    expect(sets[0]?.value.items[0]?.messages[3]).toMatchObject({ directions: DIRECTIONS })
+  })
+
+  it('whatNext sends the text up to the selection end, tail-capped at the budget', async () => {
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await store().load()
+    editor.commands.setTextSelection({ from: 3, to: 12 })
+    const request = await askWhatNext()
+    expect(request.input.before).toBe('Mara climbe')
+
+    request.resolve(whatNextOk(request.input.requestId))
+    await request.done
+    const long = 'word '.repeat(2_000)
+    editor.commands.setContent(`<p>${long}</p>`)
+    editor.commands.setTextSelection({ from: 1, to: editor.state.doc.content.size - 1 })
+    const again = await askWhatNext()
+    expect(again.input.before).toHaveLength(WHAT_NEXT_CHAR_BUDGET)
+    expect(long.trimEnd().endsWith(again.input.before ?? '')).toBe(true)
+  })
+
+  it('whatNext toasts without an open scene, and a failure drops the unanswered turn and toasts', async () => {
+    await store().load()
+    await store().whatNext()
+    expect(whatNexts).toHaveLength(0)
+    expect(toasts()).toEqual([NO_SCENE_MESSAGE])
+
+    useActiveEditorStore.getState().set('sc-1', editor)
+    const request = await askWhatNext()
+    request.resolve({
+      ok: false,
+      code: 'RATE_LIMIT',
+      message: 'The provider is busy.',
+      nextStep: 'Try again in a minute.',
+      requestId: request.input.requestId
+    })
+    await request.done
+    expect(active().messages).toHaveLength(3)
+    expect(active().messages.at(-1)).toMatchObject({ role: 'user', content: WHAT_NEXT_QUESTION })
+    expect(store().pending).toEqual({})
+    expect(toasts()).toEqual([NO_SCENE_MESSAGE, 'The provider is busy. Try again in a minute.'])
+
+    const stopped = await askWhatNext()
+    store().stop()
+    expect(cancels).toEqual([stopped.input.requestId])
+    stopped.resolve(whatNextOk(stopped.input.requestId))
+    await stopped.done
+    expect(settles).toEqual([
+      { id: `prop-${stopped.input.requestId}`, status: 'rejected', note: null }
+    ])
+    expect(toasts()).toHaveLength(2)
+  })
+
+  it('recap asks a pinned Query turn about the scene, or the selection, whatever the conversation mode', async () => {
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await store().load()
+    expect(active().mode).toBe('plan')
+    const asking = store().recap()
+    await settle()
+    expect(chats).toHaveLength(0)
+    expect(queries[0]?.input).toMatchObject({
+      nodeId: 'sc-1',
+      message: RECAP_SCENE_QUESTION,
+      pinActive: true
+    })
+    expect(active().messages.at(-1)).toMatchObject({ role: 'assistant', mode: 'query' })
+    expect(active().mode).toBe('plan')
+    queries[0]?.reject(new Error('offline'))
+    await asking
+
+    editor.commands.setTextSelection({ from: 1, to: SCENE.indexOf(' The storm') + 1 })
+    const again = store().recap()
+    await settle()
+    expect(queries[1]?.input.message).toBe(
+      'What happens in this passage? Give a short recap, citing it: "Mara climbed the ridge at dusk."'
+    )
+    queries[1]?.reject(new Error('offline'))
+    await again
+  })
+
+  it('a plain Query send carries no pin', async () => {
+    await store().load()
+    store().setMode('query')
+    const asking = store().send('Where is Mara?')
+    await settle()
+    expect(queries[0]?.input).not.toHaveProperty('pinActive')
+    queries[0]?.reject(new Error('offline'))
+    await asking
+  })
+
+  it('writeDirection sends the direction as an Author turn and places the answer as ghost text', async () => {
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await store().load()
+    const writing = store().writeDirection(DIRECTIONS[0]!)
+    await settle()
+    expect(chats[0]?.input).toMatchObject({
+      nodeId: 'sc-1',
+      mode: 'agent',
+      paragraphs: 1,
+      message:
+        'Continue the scene in this direction: The storm breaks. Rain drives them into the shepherd hut.'
+    })
+    const request = chats[0]!
+    request.resolve(ok(request.input.requestId, ' Rain came hard.'))
+    await writing
+    expect(ghostOf(editor.state)).toMatchObject({ text: ' Rain came hard.' })
+    expect(active().messages.at(-1)).toMatchObject({ role: 'assistant', mode: 'agent' })
+    // The conversation keeps its own mode.
+    expect(active().mode).toBe('plan')
   })
 })
