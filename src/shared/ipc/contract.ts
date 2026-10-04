@@ -65,6 +65,7 @@ import { PROOFREAD_CHAR_BUDGET, ProofreadFixes, ProofreadScope } from '../proofr
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
 import { ProposedTag } from '../proposedTags'
 import { QueryCitation, QuerySceneRef } from '../query'
+import { RecoveryItem, RecoveryKind, RecoveryRestored } from '../recovery'
 import {
   ReplaceCommitRequest,
   ReplaceCommitResult,
@@ -743,6 +744,33 @@ export const contract = {
     input: z.object({ id: z.string(), notes: TiptapNode }),
     output: z.object({ modified: z.string() })
   },
+  /**
+   * Crash recovery (F-8.3): writes the editor's latest unsaved state of one record to the
+   * project's recovery journal (`recovery/<kind>-<id>.json`, atomic replace), overwriting any
+   * earlier entry. Ids outside `[A-Za-z0-9-]` are VALIDATION.
+   */
+  'recovery:stash': {
+    input: z.object({ kind: RecoveryKind, id: z.string(), content: TiptapNode }),
+    output: z.null()
+  },
+  /** Deletes one record's journal entry once its real save landed (F-8.3); a missing entry is fine. */
+  'recovery:clear': {
+    input: z.object({ kind: RecoveryKind, id: z.string() }),
+    output: z.null()
+  },
+  /**
+   * The journal entries a crash left behind (F-8.3) that still differ from what is stored. Entries
+   * whose node is gone or is no longer a valid target for the kind, entries equal to the stored
+   * content, and malformed files are deleted on the way.
+   */
+  'recovery:list': { input: z.undefined(), output: z.array(RecoveryItem) },
+  /**
+   * Writes every remaining journal entry back (F-8.3) through the same paths as the editor's
+   * saves (`document:save`, `notes:save`), deletes each entry, and answers what was written.
+   */
+  'recovery:restore': { input: z.undefined(), output: z.array(RecoveryRestored) },
+  /** Deletes the whole recovery journal of the open project (F-8.3): the author chose to discard it. */
+  'recovery:discard': { input: z.undefined(), output: z.null() },
   /**
    * A node's scene metadata (F-4.5): location, POV, and timeline position; empty strings until
    * something is written. Documents and folders both qualify (scenes, chapters, parts); section

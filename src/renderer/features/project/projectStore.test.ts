@@ -42,6 +42,7 @@ function fakeClient(): {
     if (channel === 'project:create' || channel === 'project:open') return info
     if (channel === 'recents:list') return [recent]
     if (channel === 'recents:remove') return []
+    if (channel === 'recovery:list') return []
     return null
   })
   const client: IpcClient = {
@@ -81,6 +82,23 @@ describe('projectStore', () => {
       directory: '/tmp'
     })
     expect(useProjectStore.getState()).toMatchObject({ current: info, busy: false })
+  })
+
+  it('open and a start-up with a project open ask for crash recovery; create does not (F-8.3)', async () => {
+    const { client, invoke } = fakeClient()
+    setIpcClient(client)
+    await useProjectStore.getState().create('Book', 'novel', '/tmp')
+    expect(invoke).not.toHaveBeenCalledWith('recovery:list', undefined)
+    await useProjectStore.getState().open('/tmp/Book.mythscribe')
+    expect(invoke).toHaveBeenCalledWith('recovery:list', undefined)
+    invoke.mockClear()
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'project:current') return info
+      if (channel === 'recovery:list') return []
+      return null
+    })
+    await useProjectStore.getState().init()
+    expect(invoke).toHaveBeenCalledWith('recovery:list', undefined)
   })
 
   it('close clears the project even if the request throws', async () => {

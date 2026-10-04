@@ -4551,6 +4551,71 @@ test('create, close, reopen a project on disk', async () => {
     page.getByRole('textbox', { name: 'Document' }).locator('em', { hasText: 'until dusk' })
   ).toHaveCount(1)
 
+  // F-8.3: crash recovery. Typing lands in the project's recovery journal within a quarter
+  // second, long before the 1 s autosave; a renderer crash inside that window (main then closes
+  // the project) loses nothing: reopening offers the text back and Recover writes it.
+  const recoveryDir = path.join(projectPath, 'recovery')
+  const crashSentence = 'The lanterns guttered out one by one.'
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(` ${crashSentence}`)
+  const journalText = (): string => {
+    if (!fs.existsSync(recoveryDir)) return ''
+    return fs
+      .readdirSync(recoveryDir)
+      .filter((name) => name.startsWith('document-') && name.endsWith('.json'))
+      .map((name) => {
+        try {
+          const entry = JSON.parse(fs.readFileSync(path.join(recoveryDir, name), 'utf8')) as {
+            content: TiptapNodeT
+          }
+          return plainText(entry.content)
+        } catch {
+          return '' // caught between the temp write and the rename
+        }
+      })
+      .join('\n')
+  }
+  await expect.poll(journalText, { intervals: [50], timeout: 2_000 }).toContain(crashSentence)
+  const crashed = page.waitForEvent('crash')
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer()
+  )
+  await crashed
+  // Playwright keeps a crashed page dead even after Electron reloads it, so the step swaps the
+  // window for a fresh one, as main would build at start: destroying the last window must not
+  // quit the app, then `activate` creates the new one. Main closed the project when the renderer
+  // died, so the fresh window starts on the welcome screen with the journal still on disk.
+  const freshWindow = app.waitForEvent('window')
+  await app.evaluate(({ app: electronApp, BrowserWindow }) => {
+    const keepAlive = (event: { preventDefault: () => void }): void => event.preventDefault()
+    electronApp.on('before-quit', keepAlive)
+    BrowserWindow.getAllWindows()[0]?.destroy()
+    electronApp.removeListener('before-quit', keepAlive)
+    electronApp.emit('activate')
+  })
+  page = await freshWindow
+  await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
+  expect(journalText()).toContain(crashSentence)
+  await page
+    .getByRole('list', { name: 'Recent projects' })
+    .getByRole('button', { name: 'Smoke Novel', exact: true })
+    .click()
+  const recoverDialog = page.getByRole('dialog', { name: 'Recover unsaved changes?' })
+  await expect(recoverDialog).toContainText('"Scene 1 (split)" (text)')
+  await recoverDialog.getByRole('button', { name: 'Recover' }).click()
+  await expect(recoverDialog).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: 'Recovered' })).toContainText(
+    'Recovered 1 unsaved change.'
+  )
+  expect(await documentText(imported[3]?.id ?? '')).toBe(`She waited until dusk. ${crashSentence}`)
+  expect(fs.existsSync(recoveryDir) ? fs.readdirSync(recoveryDir) : []).toEqual([])
+  await page
+    .getByRole('tree', { name: 'Document tree' })
+    .getByRole('treeitem', { name: 'Scene 1 (split)', exact: true })
+    .click()
+  await expect(page.getByRole('textbox', { name: 'Document' })).toContainText(crashSentence)
+
   const closed = app.waitForEvent('close')
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
   await closed

@@ -176,6 +176,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'jobs:status') return IDLE_INDEX_QUEUE
     if (channel === 'continuity:list') return []
     if (channel === 'view:get') return defaultViewSettings()
+    if (channel === 'recovery:list') return []
     return null
   })
   const on = <E extends EventName>(

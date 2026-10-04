@@ -3,6 +3,7 @@ import type { AiDial, AiSource } from '@shared/aiSettings'
 import type { NovelFormat, ProjectInfo, RecentProject } from '@shared/ipc/contract'
 import { ipc } from '@renderer/lib/ipc'
 import { flushPendingSaves } from './pendingSaves'
+import { offerRecovery } from './recovery'
 
 interface ProjectState {
   current: ProjectInfo | null
@@ -55,6 +56,9 @@ export const useProjectStore = create<ProjectState>((set) => {
       unsubscribe = ipc().on('project:changed', (current) => set({ current }))
       const current = await ipc().invoke('project:current', undefined)
       set({ current, ready: true })
+      // F-8.3: a renderer that starts (or restarts after a crash) with a project open offers back
+      // what the crash left unsaved.
+      if (current) void offerRecovery()
     },
 
     create(name, format, directory, aiSource, aiDial) {
@@ -76,7 +80,10 @@ export const useProjectStore = create<ProjectState>((set) => {
       return run(async () => {
         await flushPendingSaves()
         const info = await ipc().invoke('project:open', { path })
-        if (info) set({ current: info })
+        if (info) {
+          set({ current: info })
+          void offerRecovery() // F-8.3; a new project (`create`) has no journal
+        }
         return info
       })
     },

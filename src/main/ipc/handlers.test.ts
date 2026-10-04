@@ -653,6 +653,80 @@ describe('document:save', () => {
   })
 })
 
+describe('recovery:* (F-8.3)', () => {
+  const para = (text: string): Input<'document:save'>['content'] => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('recovery:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('lists only entries that differ from what is stored, then restores them', async () => {
+    await invoke('project:create', { name: 'Crash', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    const chapter = rows.find((r) => r.hierarchyLevel === 'chapter')
+    const sceneId = scene?.id ?? ''
+    const chapterId = chapter?.id ?? ''
+    await invoke('document:save', { id: sceneId, content: para('Saved already.') })
+    await invoke('recovery:stash', {
+      kind: 'document',
+      id: sceneId,
+      content: para('Lost words here.')
+    })
+    await invoke('recovery:stash', {
+      kind: 'notes',
+      id: chapterId,
+      content: para('A chapter note.')
+    })
+    // Equal to the stored notes (none stored → the empty document): dropped.
+    await invoke('recovery:stash', {
+      kind: 'notes',
+      id: sceneId,
+      content: { type: 'doc', content: [{ type: 'paragraph' }] }
+    })
+    // A chapter has no document content: dropped.
+    await invoke('recovery:stash', { kind: 'document', id: chapterId, content: para('x') })
+    await invoke('recovery:stash', { kind: 'document', id: 'gone-node', content: para('x') })
+
+    const listed = await invoke('recovery:list', undefined)
+    expect(listed).toEqual([
+      { kind: 'document', id: sceneId, title: scene?.title },
+      { kind: 'notes', id: chapterId, title: chapter?.title }
+    ])
+
+    const restored = await invoke('recovery:restore', undefined)
+    expect(restored).toEqual([
+      { kind: 'document', id: sceneId, wordCount: 3 },
+      { kind: 'notes', id: chapterId, wordCount: null }
+    ])
+    expect((await invoke('document:get', { id: sceneId })).content).toEqual(
+      para('Lost words here.')
+    )
+    expect((await invoke('notes:get', { id: chapterId })).notes).toEqual(para('A chapter note.'))
+    expect(await invoke('recovery:list', undefined)).toEqual([])
+    const goals = await invoke('goals:get', undefined)
+    expect(goals.today.words).toBe(3) // 2 saved, then +1 recovered
+  })
+
+  it('clears one entry and discards the whole journal', async () => {
+    await invoke('project:create', { name: 'Crash', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const sceneId = rows.find((r) => r.kind === 'document')?.id ?? ''
+    await invoke('recovery:stash', { kind: 'document', id: sceneId, content: para('One.') })
+    await invoke('recovery:clear', { kind: 'document', id: sceneId })
+    expect(await invoke('recovery:list', undefined)).toEqual([])
+    await invoke('recovery:stash', { kind: 'document', id: sceneId, content: para('Two.') })
+    await invoke('recovery:discard', undefined)
+    expect(fs.existsSync(path.join(projectFolderFor(tmp, 'Crash'), 'recovery'))).toBe(false)
+    await expect(
+      invoke('recovery:stash', { kind: 'document', id: '../x', content: para('x') })
+    ).rejects.toThrowError(/^VALIDATION: /)
+  })
+})
+
 describe('stats:wordCount (F-10.4)', () => {
   it('reports NO_PROJECT when nothing is open', async () => {
     await expect(invoke('stats:wordCount', { nodeId: null })).rejects.toThrowError(/^NO_PROJECT: /)

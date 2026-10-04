@@ -10,12 +10,17 @@ export type LoadedNotes = LoadedRecord<TiptapNodeT>
 /**
  * The one owner of the loaded notes (F-3.7) and their autosave: a second autosave store, over
  * `notes:get` and `notes:save`, independent of the document store so a document and its notes
- * save side by side under the same id and a failure in one never blocks the other.
+ * save side by side under the same id and a failure in one never blocks the other. Unsaved
+ * notes are kept in the crash-recovery journal too (F-8.3).
  */
 const notesStore = createAutosaveStore({
   empty: EMPTY_DOC,
   get: async (id) => (await ipc().invoke('notes:get', { id })).notes,
-  save: (id, notes) => ipc().invoke('notes:save', { id, notes })
+  save: (id, notes) => ipc().invoke('notes:save', { id, notes }),
+  journal: {
+    stash: (id, content) => ipc().invoke('recovery:stash', { kind: 'notes', id, content }),
+    clear: (id) => ipc().invoke('recovery:clear', { kind: 'notes', id })
+  }
 })
 
 export const useNotesStore = notesStore.useStore

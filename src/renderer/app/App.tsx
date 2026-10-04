@@ -87,6 +87,7 @@ import { useUpdateStore } from '@renderer/features/updates/updateStore'
 import { CreateProjectWizard } from '@renderer/features/project/CreateProjectWizard'
 import { RecentProjects } from '@renderer/features/project/RecentProjects'
 import { useProjectStore } from '@renderer/features/project/projectStore'
+import { installSaveOnBlur } from '@renderer/features/project/saveOnBlur'
 import { useWelcomeStore } from '@renderer/features/project/welcomeStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -141,7 +142,10 @@ export function App(): React.JSX.Element {
     // F-15.8: diagnostics are app-wide as well, and main pushes the state after a report is sent,
     // so the subscription is opened here once rather than by the Settings tab.
     const offDiagnostics = useDiagnosticsStore.getState().subscribe()
+    // F-8.3: leaving the window writes every pending save at once, not after the debounce.
+    const offBlur = installSaveOnBlur()
     return () => {
+      offBlur()
       offClose()
       offFocus()
       offMenu()

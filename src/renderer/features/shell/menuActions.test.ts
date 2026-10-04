@@ -75,6 +75,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): void {
     if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }
     if (channel === 'document:save') return { wordCount: 1, modified: 'm' }
     if (channel === 'tree:list') return treeFixture
+    if (channel === 'recovery:list') return []
     return null
   })
   const client: IpcClient = {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPendingSaves, resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient } from '@renderer/lib/ipc'
+import { RECOVERY_STASH_MS } from '@shared/recovery'
 import { AUTOSAVE_DELAY_MS, createAutosaveStore, type AutosaveStore } from './autosaveStore'
 import { resetDocumentStore } from './documentStore'
 import { resetNotesStore } from './notesStore'
@@ -23,6 +24,8 @@ interface Instance {
   gets: PendingGet[]
   saves: PendingSave[]
   saved: [string, number][]
+  /** The recovery journal calls (F-8.3), in order: `['stash', id, content]` or `['clear', id]`. */
+  journal: string[][]
 }
 
 /** An instance over plain strings whose reads and writes resolve only when the test says so. */
@@ -30,15 +33,26 @@ function instance(delayMs?: number): Instance {
   const gets: PendingGet[] = []
   const saves: PendingSave[] = []
   const saved: [string, number][] = []
+  const journal: string[][] = []
   const store = createAutosaveStore<string, number>({
     empty: '',
     get: (id) => new Promise((resolve) => gets.push({ id, resolve })),
     save: (id, content) =>
       new Promise((resolve, reject) => saves.push({ id, content, resolve, reject })),
     onSaved: (id, result) => saved.push([id, result]),
+    journal: {
+      stash: (id, content) => {
+        journal.push(['stash', id, content])
+        return Promise.resolve()
+      },
+      clear: (id) => {
+        journal.push(['clear', id])
+        return Promise.resolve()
+      }
+    },
     ...(delayMs === undefined ? {} : { delayMs })
   })
-  return { store, gets, saves, saved }
+  return { store, gets, saves, saved, journal }
 }
 
 /** Loads `id` on `inst` and resolves its read with `value`. */
@@ -219,5 +233,85 @@ describe('createAutosaveStore', () => {
     a.gets[1]?.resolve('as stored')
     await reloading
     expect(a.store.useStore.getState().docs.n1).toEqual({ content: 'as stored', dirty: false })
+  })
+})
+
+describe('createAutosaveStore recovery journal (F-8.3)', () => {
+  it('stashes the latest content once the throttle runs out, then clears after the save', async () => {
+    await loaded(a, 'n1')
+    a.store.useStore.getState().edit('n1', 'one')
+    await vi.advanceTimersByTimeAsync(RECOVERY_STASH_MS - 1)
+    a.store.useStore.getState().edit('n1', 'one two') // does not restart the throttle
+    expect(a.journal).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(a.journal).toEqual([['stash', 'n1', 'one two']])
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    a.saves[0]?.resolve(2)
+    await settle()
+    expect(a.journal).toEqual([
+      ['stash', 'n1', 'one two'],
+      ['clear', 'n1']
+    ])
+  })
+
+  it('keeps the entry while a newer edit is pending when a save lands', async () => {
+    await loaded(a, 'n1')
+    a.store.useStore.getState().edit('n1', 'first')
+    const flushing = a.store.useStore.getState().flush()
+    await settle()
+    a.store.useStore.getState().edit('n1', 'newer')
+    a.saves[0]?.resolve(1)
+    await flushing
+    expect(a.journal).toEqual([])
+    await vi.advanceTimersByTimeAsync(RECOVERY_STASH_MS)
+    expect(a.journal).toEqual([['stash', 'n1', 'newer']])
+  })
+
+  it('neither stashes nor clears when the save beat the throttle, and keeps the entry after a failed save', async () => {
+    await loaded(a, 'n1')
+    a.store.useStore.getState().edit('n1', 'quick')
+    const flushing = a.store.useStore.getState().flush()
+    a.saves[0]?.resolve(1)
+    await flushing
+    await vi.advanceTimersByTimeAsync(RECOVERY_STASH_MS)
+    expect(a.journal).toEqual([])
+
+    a.store.useStore.getState().edit('n1', 'doomed')
+    await vi.advanceTimersByTimeAsync(RECOVERY_STASH_MS)
+    const failing = a.store.useStore.getState().flush()
+    a.saves[1]?.reject(new Error('disk full'))
+    await expect(failing).rejects.toThrow('disk full')
+    expect(a.journal).toEqual([['stash', 'n1', 'doomed']])
+  })
+
+  it('reload clears the journal of the dropped drafts', async () => {
+    await loaded(a, 'n1')
+    a.store.useStore.getState().edit('n1', 'a stale draft')
+    await vi.advanceTimersByTimeAsync(RECOVERY_STASH_MS)
+    const reloading = a.store.useStore.getState().reload(['n1'])
+    a.gets[1]?.resolve('rewritten by main')
+    await reloading
+    expect(a.journal).toEqual([
+      ['stash', 'n1', 'a stale draft'],
+      ['clear', 'n1']
+    ])
+  })
+
+  it('swallows journal failures', async () => {
+    const failing = createAutosaveStore<string, number>({
+      empty: '',
+      get: () => Promise.resolve('stored'),
+      save: () => Promise.resolve(1),
+      journal: {
+        stash: () => Promise.reject(new Error('no disk')),
+        clear: () => Promise.reject(new Error('no disk'))
+      }
+    })
+    await failing.useStore.getState().load('n1')
+    failing.useStore.getState().edit('n1', 'x')
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    expect(toasts()).toEqual([])
+    expect(failing.useStore.getState().docs.n1?.dirty).toBe(false)
+    failing.reset()
   })
 })

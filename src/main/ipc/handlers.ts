@@ -46,6 +46,7 @@ import {
   type SceneSummaryState
 } from '@shared/summary'
 import { UI_SCALE_FACTORS, nextZoom } from '@shared/zoom'
+import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import type { AccountService } from '../account/accountService'
 import type { DiagnosticsService } from '../diagnostics/diagnosticsService'
 import type { UpdateService } from '../updates/updateService'
@@ -86,7 +87,7 @@ import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
 import { compileManuscript } from '../document/compileStore'
-import { getDocumentContent, saveDocument } from '../document/documentStore'
+import { getDocumentContent, saveDocument, type SaveResult } from '../document/documentStore'
 import {
   goalsStatus,
   manuscriptWordCount,
@@ -115,6 +116,13 @@ import { readManuscript } from '../import/read'
 import { buildDraft } from '../import/structure'
 import { addBackground, listBackgrounds, removeBackground } from '../project/backgroundStore'
 import { addImageAsset, removeImageAsset } from '../project/imageAssets'
+import {
+  clearRecovery,
+  discardRecovery,
+  readRecovery,
+  stashRecovery,
+  type RecoveryEntry
+} from '../project/recoveryJournal'
 import {
   addReferenceImage,
   pruneReferencePins,
@@ -551,8 +559,11 @@ export function registerHandlers({
     }
   }
 
-  register('document:save', ({ id, content }) => {
-    const db = manager.require().connection.orm
+  /**
+   * The editor's write of one document: `document:save` and crash recovery (F-8.3) both end
+   * here, so a recovered scene counts as words written and is re-summarized like a typed one.
+   */
+  const saveFromEditor = (db: TreeDb, id: string, content: TiptapNodeT): SaveResult => {
     // F-10.3: only the editor's saves of manuscript documents count as words written, so the
     // count before the save is read here and not in `documentsWritten` (replace writes too).
     const previous = manuscriptWordCount(db, id)
@@ -560,11 +571,80 @@ export function registerHandlers({
     if (previous !== null) recordWriting(db, saved.wordCount - previous)
     documentsWritten(db, [id])
     return saved
-  })
+  }
+
+  register('document:save', ({ id, content }) =>
+    saveFromEditor(manager.require().connection.orm, id, content)
+  )
 
   register('notes:get', ({ id }) => getNotes(manager.require().connection.orm, id))
 
   register('notes:save', ({ id, notes }) => saveNotes(manager.require().connection.orm, id, notes))
+
+  /**
+   * The journal entries that still differ from what is stored (F-8.3). Entries whose node is gone
+   * or no longer fits the kind (the getters refuse with an AppError), and entries equal to the
+   * stored content, are deleted on the way.
+   */
+  const liveRecoveryEntries = (db: TreeDb, folder: string): RecoveryEntry[] => {
+    const live: RecoveryEntry[] = []
+    for (const entry of readRecovery(folder)) {
+      let stored: TiptapNodeT | null
+      try {
+        stored =
+          entry.kind === 'document'
+            ? getDocumentContent(db, entry.id).content
+            : getNotes(db, entry.id).notes
+      } catch (err) {
+        if (!(err instanceof AppError)) throw err
+        clearRecovery(folder, entry.kind, entry.id)
+        continue
+      }
+      if (JSON.stringify(stored ?? EMPTY_DOC) === JSON.stringify(entry.content)) {
+        clearRecovery(folder, entry.kind, entry.id)
+        continue
+      }
+      live.push(entry)
+    }
+    return live
+  }
+
+  register('recovery:stash', ({ kind, id, content }) => {
+    stashRecovery(manager.require().folder, kind, id, content)
+    return null
+  })
+
+  register('recovery:clear', ({ kind, id }) => {
+    clearRecovery(manager.require().folder, kind, id)
+    return null
+  })
+
+  register('recovery:list', () => {
+    const session = manager.require()
+    const db = session.connection.orm
+    return liveRecoveryEntries(db, session.folder).map(({ kind, id }) => ({
+      kind,
+      id,
+      title: getNode(db, id)?.title ?? ''
+    }))
+  })
+
+  register('recovery:restore', () => {
+    const session = manager.require()
+    const db = session.connection.orm
+    return liveRecoveryEntries(db, session.folder).map(({ kind, id, content }) => {
+      let wordCount: number | null = null
+      if (kind === 'document') wordCount = saveFromEditor(db, id, content).wordCount
+      else saveNotes(db, id, content)
+      clearRecovery(session.folder, kind, id)
+      return { kind, id, wordCount }
+    })
+  })
+
+  register('recovery:discard', () => {
+    discardRecovery(manager.require().folder)
+    return null
+  })
 
   register('sceneMeta:get', ({ id }) => getSceneMeta(manager.require().connection.orm, id))
 

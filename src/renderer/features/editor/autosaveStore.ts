@@ -1,4 +1,5 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
+import { RECOVERY_STASH_MS } from '@shared/recovery'
 import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -66,6 +67,16 @@ export interface AutosaveConfig<T, R> {
   onSaved?: (id: string, result: R) => void
   /** The debounce; `AUTOSAVE_DELAY_MS` unless a test shortens it. */
   delayMs?: number
+  /**
+   * The crash-recovery journal (F-8.3): `stash` keeps the latest unsaved state of a record
+   * outside the database a short while after an edit (`RECOVERY_STASH_MS`), and `clear` drops it
+   * once a save landed with nothing newer pending. Failures are ignored: the real save reports
+   * disk trouble.
+   */
+  journal?: {
+    stash: (id: string, content: T) => Promise<unknown>
+    clear: (id: string) => Promise<unknown>
+  }
 }
 
 export interface AutosaveStore<T> {
@@ -95,12 +106,17 @@ export function createAutosaveStore<T, R>({
   get: read,
   save,
   onSaved,
-  delayMs = AUTOSAVE_DELAY_MS
+  delayMs = AUTOSAVE_DELAY_MS,
+  journal
 }: AutosaveConfig<T, R>): AutosaveStore<T> {
   /** The latest unsaved edit per record id; empty when everything is written. */
   const pending = new Map<string, SaveJob<T>>()
   /** The running debounce timer per record id. */
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** The running recovery-stash throttle per record id (F-8.3). */
+  const stashTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Ids with a journal entry this session, so a save that beat its stash sends no clear (F-8.3). */
+  const stashed = new Set<string>()
   /** The token of the latest `load` per id, so a response from a superseded load is dropped. */
   const loadTokens = new Map<string, number>()
   let lastToken = 0
@@ -121,6 +137,40 @@ export function createAutosaveStore<T, R>({
     for (const id of [...timers.keys()]) cancelTimer(id)
   }
 
+  function cancelStash(id: string): void {
+    const timer = stashTimers.get(id)
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      stashTimers.delete(id)
+    }
+  }
+
+  function cancelAllStashes(): void {
+    for (const id of [...stashTimers.keys()]) cancelStash(id)
+  }
+
+  /** Starts the trailing stash throttle for `id` unless one is running (F-8.3). */
+  function scheduleStash(id: string): void {
+    if (!journal || stashTimers.has(id)) return
+    stashTimers.set(
+      id,
+      setTimeout(() => {
+        stashTimers.delete(id)
+        const job = pending.get(id)
+        if (!job) return
+        stashed.add(id)
+        journal.stash(id, job.content).catch(() => undefined)
+      }, RECOVERY_STASH_MS)
+    )
+  }
+
+  /** Drops the journal entry of `id` now that nothing of it is unsaved (F-8.3). */
+  function clearJournal(id: string): void {
+    cancelStash(id)
+    if (!journal || !stashed.delete(id)) return
+    journal.clear(id).catch(() => undefined)
+  }
+
   /** Clears `dirty` on a record that is still loaded; a no-op for anything else. */
   function markClean(id: string): void {
     useStore.setState((s) => {
@@ -134,7 +184,10 @@ export function createAutosaveStore<T, R>({
     try {
       const result = await save(job.id, job.content)
       onSaved?.(job.id, result)
-      if (!pending.has(job.id)) markClean(job.id)
+      if (!pending.has(job.id)) {
+        markClean(job.id)
+        clearJournal(job.id)
+      }
     } catch (err) {
       if (!pending.has(job.id)) pending.set(job.id, job) // keep it for the next attempt; a newer edit wins
       throw err
@@ -200,6 +253,8 @@ export function createAutosaveStore<T, R>({
       for (const id of loaded) {
         cancelTimer(id)
         pending.delete(id)
+        // The draft is unwanted (it predates main's rewrite), so its journal entry is too.
+        clearJournal(id)
       }
       while (inflight !== null) await inflight.catch(() => undefined)
       await Promise.all(loaded.map((id) => get().load(id)))
@@ -222,6 +277,7 @@ export function createAutosaveStore<T, R>({
       if (!doc) return
       pending.set(id, { id, content })
       set((s) => ({ docs: { ...s.docs, [id]: { content, dirty: true } } }))
+      scheduleStash(id)
       cancelTimer(id)
       timers.set(
         id,
@@ -246,6 +302,8 @@ export function createAutosaveStore<T, R>({
     },
 
     clear() {
+      // The flush's saves clear their own journal entries; a failed one keeps its entry.
+      cancelAllStashes()
       get().flush().catch(reportFailure)
       unregister?.()
       unregister = null
@@ -256,6 +314,8 @@ export function createAutosaveStore<T, R>({
 
   function reset(): void {
     cancelAllTimers()
+    cancelAllStashes()
+    stashed.clear()
     pending.clear()
     inflight = null
     unregister?.()
