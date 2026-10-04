@@ -1,8 +1,11 @@
 import { create } from 'zustand'
 import type { SettingsDialogTabId } from './settingsDialogTabs'
 
-/** The app-level dialogs the menu opens (F-7.1): Settings (F-7.5), the shortcuts reference (F-7.7), About. */
-export const SHELL_DIALOG_IDS = ['settings', 'shortcuts', 'about'] as const
+/**
+ * The app-level dialogs the menu opens (F-7.1): Settings (F-7.5), the shortcuts reference (F-7.7),
+ * About, and the word count (F-10.4, project only).
+ */
+export const SHELL_DIALOG_IDS = ['settings', 'shortcuts', 'about', 'wordCount'] as const
 export type ShellDialogId = (typeof SHELL_DIALOG_IDS)[number]
 
 /**

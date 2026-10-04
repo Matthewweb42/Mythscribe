@@ -181,6 +181,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         useGoalsStore.getState().show()
         return
       }
+      case 'openWordCount':
+        // F-10.4: a shell dialog, so it opens over focus mode too.
+        useShellDialogStore.getState().show('wordCount')
+        return
       case 'openTags': {
         const focus = useFocusStore.getState()
         if (focus.active) await focus.exit()

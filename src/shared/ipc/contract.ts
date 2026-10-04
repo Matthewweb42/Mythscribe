@@ -83,6 +83,7 @@ import { TiptapNode } from '../tiptap'
 import { UpdateChannel, UpdateState } from '../updates'
 import { WHAT_NEXT_CHAR_BUDGET, WhatNextDirections } from '../whatNext'
 import { VOICE_EXEMPLAR_TEXT_MAX, VOICE_EXEMPLAR_TEXT_MIN, VoiceExemplarKind } from '../voice'
+import { WordCountReport } from '../wordCount'
 import { UiScale, ViewSettings, ZoomStep } from '../zoom'
 
 /**
@@ -824,6 +825,16 @@ export const contract = {
    * manuscript is VALIDATION.
    */
   'goals:set': { input: GoalsPatch, output: GoalsStatus },
+  /**
+   * The word count dialog (F-10.4): counts from the stored documents for the chapter around
+   * `nodeId` (its nearest chapter-level ancestor or itself, under the manuscript) and the whole
+   * manuscript. The renderer flushes its drafts first and counts the selection and the open
+   * document from the live editor.
+   */
+  'stats:wordCount': {
+    input: z.object({ nodeId: z.string().nullable() }),
+    output: WordCountReport
+  },
   /** Every tag of the open project (F-4.1), ordered by name. */
   'tag:list': { input: z.undefined(), output: z.array(Tag) },
   /**

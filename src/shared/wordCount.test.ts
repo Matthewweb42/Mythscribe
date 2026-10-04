@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { EMPTY_DOC, type TiptapNodeT } from './tiptap'
-import { countWords } from './wordCount'
+import { addTextStats, countWords, estimatedPages, textStats } from './wordCount'
 
 const paragraph = (...texts: string[]): TiptapNodeT => ({
   type: 'paragraph',
@@ -82,5 +82,57 @@ describe('countWords', () => {
     expect(countWords(paragraph('  spaced \n\t out   words  '))).toBe(3)
     expect(countWords(paragraph('   '))).toBe(0)
     expect(countWords(paragraph(''))).toBe(0)
+  })
+})
+
+describe('textStats (F-10.4)', () => {
+  it('counts words, characters, and characters without whitespace', () => {
+    const doc: TiptapNodeT = {
+      type: 'doc',
+      content: [paragraph('The storm  broke.'), { type: 'sceneBreak' }, paragraph('Rain\tfell')]
+    }
+    expect(textStats(doc)).toEqual({ words: 5, characters: 26, charactersNoSpaces: 22 })
+  })
+
+  it('counts an inline tag as one word with its name, and nothing for a nameless token', () => {
+    const doc: TiptapNodeT = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Into ' },
+            { type: 'inlineTag', attrs: { id: 't-forest', name: 'dark-forest' } },
+            { type: 'inlineTag', attrs: { id: 't-odd' } }
+          ]
+        }
+      ]
+    }
+    expect(textStats(doc)).toEqual({ words: 3, characters: 16, charactersNoSpaces: 15 })
+  })
+
+  it('agrees with countWords and counts the empty document as zeros', () => {
+    expect(textStats(EMPTY_DOC)).toEqual({ words: 0, characters: 0, charactersNoSpaces: 0 })
+    const doc: TiptapNodeT = { type: 'doc', content: [paragraph('  spaced \n out  ')] }
+    expect(textStats(doc).words).toBe(countWords(doc))
+  })
+
+  it('adds stats field by field', () => {
+    expect(
+      addTextStats(
+        { words: 1, characters: 2, charactersNoSpaces: 3 },
+        { words: 10, characters: 20, charactersNoSpaces: 30 }
+      )
+    ).toEqual({ words: 11, characters: 22, charactersNoSpaces: 33 })
+  })
+})
+
+describe('estimatedPages (F-10.4)', () => {
+  it('rounds up at 250 words a page, with 0 for no words', () => {
+    expect(estimatedPages(0)).toBe(0)
+    expect(estimatedPages(1)).toBe(1)
+    expect(estimatedPages(250)).toBe(1)
+    expect(estimatedPages(251)).toBe(2)
+    expect(estimatedPages(80_000)).toBe(320)
   })
 })

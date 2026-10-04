@@ -97,6 +97,7 @@ import { importEntities, readEntityFile, writeEntityFile } from '../entity/entit
 import { getNotes, saveNotes } from '../document/notesStore'
 import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
 import { getSummary } from '../document/summaryStore'
+import { wordCountReport } from '../document/wordCountReport'
 import {
   createEntity,
   deleteEntity,
@@ -665,6 +666,10 @@ export function registerHandlers({
   })
 
   register('goals:get', () => goalsStatus(manager.require().connection.orm))
+
+  register('stats:wordCount', ({ nodeId }) =>
+    wordCountReport(manager.require().connection.orm, nodeId)
+  )
 
   register('goals:set', (patch) => {
     const db = manager.require().connection.orm

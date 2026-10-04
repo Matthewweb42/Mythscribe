@@ -650,6 +650,31 @@ describe('document:save', () => {
   })
 })
 
+describe('stats:wordCount (F-10.4)', () => {
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('stats:wordCount', { nodeId: null })).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('counts the chapter around a scene and the manuscript from the stored documents', async () => {
+    await invoke('project:create', { name: 'Counts', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = manuscriptReadingOrder(rows)[0] ?? ''
+    const chapter = rows.find((r) => r.id === rows.find((n) => n.id === scene)?.parentId)
+    await invoke('document:save', {
+      id: scene,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'The storm broke.' }] }]
+      }
+    })
+    const stats = { words: 3, characters: 16, charactersNoSpaces: 14 }
+    expect(await invoke('stats:wordCount', { nodeId: scene })).toEqual({
+      chapter: { id: chapter?.id, title: chapter?.title, stats },
+      manuscript: stats
+    })
+  })
+})
+
 describe('goals:get / goals:set (F-10.3)', () => {
   const para = (text: string): Input<'document:save'>['content'] => ({
     type: 'doc',

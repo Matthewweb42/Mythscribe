@@ -398,6 +398,17 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useFocusStore.getState().active).toBe(false)
     expect(useGoalsStore.getState().open).toBe(true)
   })
+
+  it('Tools › Word count… opens the word count dialog, over focus mode too (F-10.4)', async () => {
+    await runMenuAction('openWordCount')
+    expect(useShellDialogStore.getState().open).toBeNull()
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE])
+    await withProject()
+    await useFocusStore.getState().enter()
+    await runMenuAction('openWordCount')
+    expect(useFocusStore.getState().active).toBe(true)
+    expect(useShellDialogStore.getState().open).toBe('wordCount')
+  })
 })
 
 describe('closeProjectWithConfirm', () => {

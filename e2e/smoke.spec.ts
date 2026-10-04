@@ -1655,6 +1655,25 @@ test('create, close, reopen a project on disk', async () => {
   await page.getByRole('menu').getByRole('menuitem', { name: 'Clear word target' }).click()
   await expect(scene1Item.getByTestId('node-target')).toHaveCount(0)
 
+  // F-10.4: Tools › Word count… counts Scene 1 from the live editor and its chapter and the
+  // manuscript from main; Escape closes it.
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'Tools' })
+    .click()
+  await page
+    .getByRole('menu', { name: 'Tools' })
+    .getByRole('menuitem', { name: 'Word count…' })
+    .click()
+  const wordCount = page.getByRole('dialog', { name: 'Word count' })
+  await expect(wordCount.getByTestId('word-count-document').getByTestId('words')).toHaveText(
+    String(SENTENCE_WORDS)
+  )
+  await expect(wordCount.getByTestId('word-count-chapter')).toContainText('Chapter 1')
+  await expect(wordCount.getByTestId('word-count-manuscript').getByTestId('words')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(wordCount).toHaveCount(0)
+
   // F-3.7: Notes from the toolbar opens a side panel beside the editor with the scene's notes;
   // selecting Chapter 1 swaps in the chapter's own notes and saves the scene's at once. The
   // chapter note is still pending when the project closes, so the close flushes it.

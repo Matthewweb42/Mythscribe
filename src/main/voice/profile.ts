@@ -74,10 +74,10 @@ function compute(db: TreeDb, pov: string): VoiceProfile {
  * positions from the root (the order the tree shows), since `listNodes` sorts by parent id and
  * position, which is reading order inside one chapter but not across chapters. The consistency
  * report (F-14.7), the provenance report (F-14.6), and the scene neighbours (F-14.3) all walk
- * these rows, so "the previous scene" and every per-scene table agree with the tree.
+ * these rows, so "the previous scene" and every per-scene table agree with the tree. A caller
+ * that already read every row (the word count report, F-10.4) passes them in.
  */
-export function manuscriptDocuments(db: TreeDb): NodeRow[] {
-  const rows = listNodes(db)
+export function manuscriptDocuments(db: TreeDb, rows: NodeRow[] = listNodes(db)): NodeRow[] {
   const root = rows.find((row) => row.parentId === null && row.sectionType === 'manuscript')
   if (!root) return []
   const byId = new Map(rows.map((row) => [row.id, row]))
@@ -121,7 +121,7 @@ export function documentText(row: NodeRow): string {
 }
 
 /** The stored document as Tiptap JSON; null for an empty or unreadable row, never a throw. The provenance report (F-14.6) parses the same way. */
-export function documentJson(row: NodeRow): TiptapNodeT | null {
+export function documentJson(row: Pick<NodeRow, 'content'>): TiptapNodeT | null {
   if (row.content === null) return null
   let json: unknown
   try {

@@ -24,6 +24,7 @@ import { ShortcutsDialog } from '@renderer/features/shell/ShortcutsDialog'
 import { APP_SHORTCUTS, matchesShortcut, type Chord } from '@renderer/features/shell/shortcuts'
 import { SidebarTabs } from '@renderer/features/shell/SidebarTabs'
 import { useViewStore } from '@renderer/features/shell/viewStore'
+import { WordCountDialog } from '@renderer/features/stats/WordCountDialog'
 import { wheelZoomStepFor, zoomStepFor } from '@renderer/features/shell/zoom'
 import { EditorPane } from '@renderer/features/editor/EditorPane'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
@@ -368,8 +369,9 @@ export function App(): React.JSX.Element {
 
 /**
  * The app-level dialogs (F-7.1): Settings (F-7.5; without a project only its app-wide tabs,
- * F-15.2), the shortcuts reference (F-7.7), and About, one at a time from the shell dialog store, which
- * the header button, Ctrl+, the in-app bar, and the native menu all open through.
+ * F-15.2), the shortcuts reference (F-7.7), About, and the word count (F-10.4), one at a time
+ * from the shell dialog store, which the header button, Ctrl+, the in-app bar, and the native
+ * menu all open through.
  */
 function ShellDialogs({ format }: { format: NovelFormat | null }): React.JSX.Element | null {
   const open = useShellDialogStore((s) => s.open)
@@ -383,6 +385,9 @@ function ShellDialogs({ format }: { format: NovelFormat | null }): React.JSX.Ele
       return <ShortcutsDialog onClose={close} />
     case 'about':
       return <AboutDialog onClose={close} />
+    case 'wordCount':
+      // F-10.4: counts the open project, so it shows only while one is open.
+      return format ? <WordCountDialog format={format} onClose={close} /> : null
     case null:
       return null
   }
