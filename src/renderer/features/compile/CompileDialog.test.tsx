@@ -12,7 +12,7 @@ import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { CompileDialog } from './CompileDialog'
-import { compiledBlocks } from './compiledBlocks'
+import { compiledBlocks } from '@shared/compiledBlocks'
 
 const para = (text: string): TiptapNodeT => ({
   type: 'doc',

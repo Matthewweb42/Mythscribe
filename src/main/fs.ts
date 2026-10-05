@@ -10,3 +10,10 @@ export function writeTextAtomic(file: string, text: string): void {
   fs.writeFileSync(tmp, text, 'utf8')
   fs.renameSync(tmp, file)
 }
+
+/** `writeTextAtomic` for bytes: the binary exports (F-12.1 PDF, DOCX, EPUB). */
+export function writeBufferAtomic(file: string, data: Buffer): void {
+  const tmp = `${file}.tmp`
+  fs.writeFileSync(tmp, data)
+  fs.renameSync(tmp, file)
+}

@@ -6,6 +6,11 @@ interface StatsFrameProps {
   widthClassName: string
   onClose: () => void
   children: ReactNode
+  /**
+   * The dialog's own primary action (F-12.1 Export), shown before Close in the footer; Close then
+   * turns secondary so the action carries the accent.
+   */
+  action?: ReactNode
 }
 
 /**
@@ -17,7 +22,8 @@ export function StatsFrame({
   title,
   widthClassName,
   onClose,
-  children
+  children,
+  action
 }: StatsFrameProps): React.JSX.Element {
   const titleId = useId()
   const closeButton = useRef<HTMLButtonElement>(null)
@@ -51,15 +57,20 @@ export function StatsFrame({
           {title}
         </h2>
         {children}
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
           <button
             ref={closeButton}
             type="button"
             onClick={onClose}
-            className="rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+            className={
+              action === undefined
+                ? 'rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover'
+                : 'rounded-md border border-line px-4 py-1.5 text-sm font-medium hover:bg-surface'
+            }
           >
             Close
           </button>
+          {action}
         </div>
       </div>
     </div>

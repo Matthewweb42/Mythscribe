@@ -6,8 +6,7 @@ import {
   type SnapshotInfo,
   type SnapshotScope
 } from '@shared/snapshots'
-import { useEntityStore } from '@renderer/features/entities/entityStore'
-import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { useOpenDocument } from '@renderer/features/manuscript/useOpenDocument'
 import { flushPendingSaves } from '@renderer/features/project/pendingSaves'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { StatsFrame } from '@renderer/features/stats/StatsFrame'
@@ -37,14 +36,6 @@ function snapshotScopeText(snapshot: SnapshotInfo): string {
 
 const FILTERS = ['all', 'document', 'milestones'] as const
 type Filter = (typeof FILTERS)[number]
-
-/** The document open in the editor (not a folder, not an entity page), or null. */
-function useOpenDocument(): { id: string; title: string } | null {
-  const entityId = useEntityStore((s) => s.selectedId)
-  const node = useTreeStore((s) => (s.selectedId === null ? undefined : s.byId[s.selectedId]))
-  if (entityId !== null || node?.kind !== 'document') return null
-  return { id: node.id, title: node.title }
-}
 
 /**
  * The Snapshots dialog (F-8.6), shell dialog `snapshots` from Tools › Snapshots…: a form that

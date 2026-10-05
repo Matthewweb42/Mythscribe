@@ -14,6 +14,7 @@ import {
   GHOST_BEFORE_CHARS
 } from '../ai'
 import { AiDial, AiSettings, AiSource } from '../aiSettings'
+import { ExportOptions, ExportProgress, ExportResult } from '../bookExport'
 import {
   CHAT_HISTORY_TURNS,
   CHAT_MESSAGE_MAX,
@@ -888,6 +889,17 @@ export const contract = {
    * scene metadata stores first.
    */
   'manuscript:compile': { input: z.undefined(), output: CompiledManuscript },
+  /**
+   * Exports the book (F-12.1): main asks for the file path (`<project>.<ext>` beside the project
+   * folder), collects the chosen scope in reading order (front and end matter when asked), renders
+   * it in the format, and writes the file, pushing `export:progress` with `requestId` as it goes.
+   * Null when the save dialog is cancelled. A scope with nothing to print is VALIDATION. The
+   * renderer flushes the document and scene metadata stores first.
+   */
+  'export:run': {
+    input: z.object({ options: ExportOptions, requestId: z.string() }),
+    output: ExportResult.nullable()
+  },
   /** Every tag of the open project (F-4.1), ordered by name. */
   'tag:list': { input: z.undefined(), output: z.array(Tag) },
   /**
@@ -1900,6 +1912,8 @@ export const events = {
   'jobs:changed': IndexQueueStatus,
   /** One more chunk of the import structure pass (F-12.3) was answered; the dialog shows chunks done and the spend so far. */
   'import:detectProgress': ImportDetectProgress,
+  /** A running export (F-12.1) moved on: the stage and how far through it; the dialog shows a progress bar. */
+  'export:progress': ExportProgress,
   /** The recorded mentions of these documents changed (F-4.12): a scan wrote rows, or a tag's tracking was turned off or the tag deleted (then every document). */
   'mention:changed': z.object({ nodeIds: z.array(z.string()) }),
   /** The tag links of these nodes changed without a `documentTag:*` call (F-4.13): the background tagging job applied or dropped tags. */

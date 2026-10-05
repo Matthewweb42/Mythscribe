@@ -31,6 +31,8 @@ import { DraftsDialog } from '@renderer/features/drafts/DraftsDialog'
 import { useDraftStore } from '@renderer/features/drafts/draftStore'
 import { SnapshotsDialog } from '@renderer/features/snapshots/SnapshotsDialog'
 import { useSnapshotStore } from '@renderer/features/snapshots/snapshotStore'
+import { ExportDialog } from '@renderer/features/export/ExportDialog'
+import { useExportStore } from '@renderer/features/export/exportStore'
 import { StatsDialog } from '@renderer/features/stats/StatsDialog'
 import { WordCountDialog } from '@renderer/features/stats/WordCountDialog'
 import { wheelZoomStepFor, zoomStepFor } from '@renderer/features/shell/zoom'
@@ -233,6 +235,8 @@ export function App(): React.JSX.Element {
       useDraftStore.getState().clear()
       // F-8.6: and so do the snapshots.
       useSnapshotStore.getState().clear()
+      // F-12.1: and so do the export choices (the chapters ticked) and any run in flight.
+      useExportStore.getState().clear()
       // F-3.10: the find bar and what was typed in it.
       resetFindStore()
       return
@@ -406,7 +410,8 @@ export function App(): React.JSX.Element {
 /**
  * The app-level dialogs (F-7.1): Settings (F-7.5; without a project only its app-wide tabs,
  * F-15.2), the shortcuts reference (F-7.7), About, the word count (F-10.4), the statistics
- * (F-10.5), the compiled preview (F-3.12), the drafts (F-8.5), and the snapshots (F-8.6), one at a time
+ * (F-10.5), the compiled preview (F-3.12), the drafts (F-8.5), the snapshots (F-8.6), and the
+ * export (F-12.1), one at a time
  * from the shell dialog store, which the header button, Ctrl+, the in-app bar, and the native
  * menu all open through.
  */
@@ -437,6 +442,9 @@ function ShellDialogs({ format }: { format: NovelFormat | null }): React.JSX.Ele
     case 'snapshots':
       // F-8.6: the open project's snapshots, so it shows only while one is open.
       return format ? <SnapshotsDialog onClose={close} /> : null
+    case 'export':
+      // F-12.1: exports the open project, so it shows only while one is open.
+      return format ? <ExportDialog format={format} onClose={close} /> : null
     case null:
       return null
   }

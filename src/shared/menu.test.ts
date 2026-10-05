@@ -242,6 +242,7 @@ describe('menu definition (F-7.1)', () => {
       'newProject',
       'openProject',
       'importManuscript',
+      'exportManuscript',
       'separator',
       'saveDocument',
       'separator',

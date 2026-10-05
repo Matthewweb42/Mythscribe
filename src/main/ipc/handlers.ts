@@ -11,6 +11,7 @@ import {
   type AiUsageSummary
 } from '@shared/ai'
 import { type AiSource, isFeatureAllowed } from '@shared/aiSettings'
+import { EXPORT_EXTENSIONS, EXPORT_FORMAT_LABELS } from '@shared/bookExport'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl } from '@shared/cloudApi'
 import { aiRequestCounter } from '@shared/diagnostics'
 import { ENTITY_IMAGES_DIR, ENTITY_KIND_LABEL } from '@shared/entities'
@@ -89,6 +90,8 @@ import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
 import { compileManuscript } from '../document/compileStore'
+import { renderPdf } from '../export/pdf'
+import { exportBook } from '../export/run'
 import {
   compareDrafts,
   deleteDraft,
@@ -803,6 +806,31 @@ export function registerHandlers({
   register('stats:dashboard', () => statsDashboard(manager.require().connection.orm))
 
   register('manuscript:compile', () => compileManuscript(manager.require().connection.orm))
+
+  /**
+   * F-12.1: the book out of the project in one format. The default sits beside the project
+   * folder, as the other exports' do; progress goes to every window under the caller's id.
+   */
+  register('export:run', async ({ options, requestId }) => {
+    const session = manager.require()
+    const extension = EXPORT_EXTENSIONS[options.format]
+    const chosen = await dialogs.chooseExportPath(
+      `${sanitizeName(session.info.name)}.${extension}`,
+      [{ name: EXPORT_FORMAT_LABELS[options.format], extensions: [extension] }],
+      path.dirname(session.folder)
+    )
+    if (chosen === null) return null
+    const result = await exportBook(session.connection.orm, {
+      options,
+      projectName: session.info.name,
+      path: chosen,
+      requestId,
+      onProgress: (progress) => emit(windows(), 'export:progress', progress),
+      renderPdf
+    })
+    diagnostics.count('export.run')
+    return result
+  })
 
   register('goals:set', (patch) => {
     const db = manager.require().connection.orm

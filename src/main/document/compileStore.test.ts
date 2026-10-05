@@ -10,7 +10,7 @@ import { createProject, projectFolderFor, type ProjectSession } from '../project
 import { addDocumentTag } from '../tag/documentTagStore'
 import { createTag } from '../tag/tagStore'
 import { createNode, deleteNode, listNodes, type TreeDb } from '../tree/treeStore'
-import { compileManuscript } from './compileStore'
+import { compileManuscript, compileSection } from './compileStore'
 import { saveDocument } from './documentStore'
 import { setSceneMeta } from './sceneMetaStore'
 
@@ -130,5 +130,51 @@ describe('compileManuscript (F-3.12)', () => {
     for (const row of listNodes(db).filter((r) => r.parentId === manuscript.id))
       deleteNode(db, row.id)
     expect(compileManuscript(db)).toEqual({ entries: [] })
+  })
+})
+
+describe('compileSection (F-12.1)', () => {
+  it('keeps a chosen chapter with the part above it and the scenes below it', () => {
+    const [part2] = byTitle('Part 2', 'part')
+    const chapter = listNodes(db).find(
+      (r) => r.parentId === part2?.id && r.hierarchyLevel === 'chapter' && r.title === 'Chapter 2'
+    )
+    if (!part2 || !chapter) throw new Error('seed changed')
+    const entries = compileSection(db, 'manuscript', { only: new Set([chapter.id]) })
+    expect(entries.map((e) => [e.depth, e.level, e.title])).toEqual([
+      [0, 'part', 'Part 2'],
+      [1, 'chapter', 'Chapter 2'],
+      [2, 'scene', 'Scene 1']
+    ])
+    expect(entries[1]?.id).toBe(chapter.id)
+  })
+
+  it('keeps every chosen node in reading order and nothing for an unknown id', () => {
+    // By part, not by `listNodes` order: that sorts by the parents' random ids.
+    const [part1] = byTitle('Part 1', 'part')
+    const [part2] = byTitle('Part 2', 'part')
+    const rows = listNodes(db)
+    const first = rows.find((r) => r.parentId === part1?.id && r.title === 'Chapter 1')
+    const last = rows.find((r) => r.parentId === part2?.id && r.title === 'Chapter 3')
+    if (!first || !last) throw new Error('seed changed')
+    const titles = compileSection(db, 'manuscript', { only: new Set([last.id, first.id]) }).map(
+      (e) => e.title
+    )
+    expect(titles).toEqual(['Part 1', 'Chapter 1', 'Scene 1', 'Part 2', 'Chapter 3', 'Scene 1'])
+    expect(compileSection(db, 'manuscript', { only: new Set(['missing']) })).toEqual([])
+  })
+
+  it('walks front matter the same way', () => {
+    const dedication = createNode(db, 'novel', {
+      parentId: section('front').id,
+      kind: 'document',
+      hierarchyLevel: null,
+      title: 'Dedication'
+    })
+    saveDocument(db, dedication.id, para('For M.'))
+    const entries = compileSection(db, 'front')
+    expect(entries.map((e) => [e.depth, e.title, e.content])).toEqual([
+      [0, 'Dedication', para('For M.')]
+    ])
   })
 })

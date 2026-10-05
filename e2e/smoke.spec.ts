@@ -1722,6 +1722,43 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('Escape')
   await expect(compiled).toHaveCount(0)
 
+  // F-12.1: File › Export… writes the manuscript in each format to the path the (stubbed) save
+  // dialog answers; the dialog closes on success and a toast names the file. Markdown carries
+  // Scene 1's sentence as text; PDF starts with `%PDF`; DOCX and EPUB are zips (`PK`).
+  const exportAs = async (formatLabel: string, ext: string): Promise<Buffer> => {
+    const exportPath = path.join(tmp, `export-${ext}.${ext}`)
+    await app.evaluate(({ dialog }, filePath) => {
+      dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
+    }, exportPath)
+    await page
+      .getByRole('menubar', { name: 'Application menu' })
+      .getByRole('menuitem', { name: 'File' })
+      .click()
+    await page
+      .getByRole('menu', { name: 'File' })
+      .getByRole('menuitem', { name: 'Export…' })
+      .click()
+    const exportDialog = page.getByRole('dialog', { name: 'Export' })
+    await exportDialog.getByRole('radio', { name: formatLabel }).check()
+    await exportDialog.getByRole('button', { name: 'Export', exact: true }).click()
+    await expect(page.getByRole('status').filter({ hasText: exportPath })).toContainText(
+      `Exported to ${exportPath}`,
+      { timeout: 30_000 }
+    )
+    await expect(exportDialog).toHaveCount(0)
+    return fs.readFileSync(exportPath)
+  }
+  expect((await exportAs('Markdown', 'md')).toString('utf8')).toContain(SENTENCE)
+  expect((await exportAs('PDF', 'pdf')).subarray(0, 4).toString('latin1')).toBe('%PDF')
+  expect((await exportAs('Word document (DOCX)', 'docx')).subarray(0, 2).toString('latin1')).toBe(
+    'PK'
+  )
+  expect((await exportAs('EPUB', 'epub')).subarray(0, 2).toString('latin1')).toBe('PK')
+  // Put back the stub the project was created with; no step in between relied on another.
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
+  }, projectPath)
+
   // F-3.7: Notes from the toolbar opens a side panel beside the editor with the scene's notes;
   // selecting Chapter 1 swaps in the chapter's own notes and saves the scene's at once. The
   // chapter note is still pending when the project closes, so the close flushes it.

@@ -121,6 +121,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         // from there. The store toasts its own failures, so a cancelled dialog is silent.
         await useImportStore.getState().open()
         return
+      case 'exportManuscript':
+        // F-12.1: a shell dialog, so it opens over focus mode; main asks for the path on Export.
+        useShellDialogStore.getState().show('export')
+        return
       case 'findInDocument':
       case 'replaceInDocument':
         openFindInDocument(id === 'replaceInDocument')

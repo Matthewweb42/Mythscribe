@@ -11,7 +11,7 @@ import { useEditorSettings } from '@renderer/features/editor/settingsStore'
 import { StatsFrame } from '@renderer/features/stats/StatsFrame'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
-import { compiledBlocks, type Block } from './compiledBlocks'
+import { compiledBlocks, type Block } from '@shared/compiledBlocks'
 
 interface CompileDialogProps {
   format: NovelFormat

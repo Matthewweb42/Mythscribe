@@ -480,6 +480,17 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useFocusStore.getState().active).toBe(true)
     expect(useShellDialogStore.getState().open).toBe('snapshots')
   })
+
+  it('File › Export… opens the export dialog, over focus mode too (F-12.1)', async () => {
+    await runMenuAction('exportManuscript')
+    expect(useShellDialogStore.getState().open).toBeNull()
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE])
+    await withProject()
+    await useFocusStore.getState().enter()
+    await runMenuAction('exportManuscript')
+    expect(useFocusStore.getState().active).toBe(true)
+    expect(useShellDialogStore.getState().open).toBe('export')
+  })
 })
 
 describe('closeProjectWithConfirm', () => {

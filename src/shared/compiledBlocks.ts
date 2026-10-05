@@ -1,5 +1,5 @@
-import type { CompiledEntry } from '@shared/compile'
-import type { TiptapNodeT } from '@shared/tiptap'
+import type { CompiledEntry } from './compile'
+import type { TiptapNodeT } from './tiptap'
 
 /**
  * One block of the compiled text: a heading, a scene header, a scene break, or a document's text.
