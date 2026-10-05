@@ -32,6 +32,7 @@ import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetStructureStore, useStructureStore } from '@renderer/features/outline/structureStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { resetTimelineStore, useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { orderedIds, resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -176,7 +177,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): {
 }
 
 const field = (name: string): HTMLElement => screen.getByRole('combobox', { name })
-const timeline = (): HTMLElement => screen.getByRole('textbox', { name: 'Timeline' })
+const timeline = (): HTMLElement => screen.getByRole('combobox', { name: 'Timeline' })
 const briefToggle = (): HTMLElement => screen.getByRole('button', { name: 'Brief' })
 const summaryToggle = (): HTMLElement => screen.getByRole('button', { name: 'Summary' })
 const refreshButton = (): HTMLElement => screen.getByTestId('summary-refresh')
@@ -221,6 +222,7 @@ beforeEach(() => {
   resetProposalStore()
   resetLayoutStore()
   resetStructureStore()
+  resetTimelineStore()
   useTreeStore.setState({ ...buildIndex([]), loaded: false })
   useDialogStore.setState({ modals: [], toasts: [] })
   const byId = Object.fromEntries(tagFixture.map((t) => [t.id, t]))
@@ -234,6 +236,7 @@ afterEach(() => {
   resetAiSettingsStore()
   resetProposalStore()
   resetLayoutStore()
+  resetTimelineStore()
   resetPendingSaves()
   setIpcClient(null)
 })
@@ -370,6 +373,48 @@ describe('MetadataPane beat (F-11.1b)', () => {
     expect(sets.at(-1)?.meta.beats).toEqual({ threeAct: 'midpoint' })
     act(() => useStructureStore.setState({ template: 'threeAct' }))
     expect(beatSelect().value).toBe('midpoint')
+  })
+})
+
+describe('MetadataPane timeline picker (F-11.2)', () => {
+  const siege = { id: 'ev-1', label: 'The siege begins', when: 'Spring', year: null, note: '' }
+  const fall = { id: 'ev-2', label: 'The fall', when: '', year: null, note: '' }
+
+  async function opened(): Promise<Input<'sceneMeta:set'>[]> {
+    useTimelineStore.setState({ events: [siege, fall], loaded: true })
+    const { sets, release } = install()
+    release()
+    render(<MetadataPane id="sc-2" />)
+    await waitFor(() => expect(timeline()).toBeEnabled())
+    return sets
+  }
+
+  it('offers the events as "When: Label" in story order, and picking one links the node', async () => {
+    const sets = await opened()
+    fireEvent.keyDown(timeline(), { key: 'ArrowDown' })
+    expect(
+      within(screen.getByRole('listbox'))
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['Spring: The siege begins', 'The fall'])
+    fireEvent.click(screen.getByRole('option', { name: 'Spring: The siege begins' }))
+    expect(timeline()).toHaveValue('Spring: The siege begins')
+    await act(() => useSceneMetaStore.getState().flush())
+    expect(sets.at(-1)?.meta).toMatchObject({
+      timeline: 'Spring: The siege begins',
+      eventId: 'ev-1'
+    })
+  })
+
+  it('typing free text unlinks the node and keeps the text', async () => {
+    const sets = await opened()
+    fireEvent.change(timeline(), { target: { value: 'The fall' } })
+    await act(() => useSceneMetaStore.getState().flush())
+    expect(sets.at(-1)?.meta.eventId).toBe('ev-2')
+    fireEvent.change(timeline(), { target: { value: 'The fall, later' } })
+    await act(() => useSceneMetaStore.getState().flush())
+    expect(sets.at(-1)?.meta.timeline).toBe('The fall, later')
+    expect(sets.at(-1)?.meta).not.toHaveProperty('eventId')
   })
 })
 

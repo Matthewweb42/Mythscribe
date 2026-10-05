@@ -37,6 +37,7 @@ import { DISMISSED_NAMES_KEY, DismissedNames, defaultDismissedNames } from '@sha
 import { REFERENCE_PINS_KEY, ReferencePins, defaultReferencePins } from '@shared/references'
 import { STRUCTURE_KEY, ProjectStructure, defaultProjectStructure } from '@shared/structure'
 import { TAG_ALIASES_KEY, TagAliases } from '@shared/tagExchange'
+import { TIMELINE_KEY, ProjectTimeline, defaultProjectTimeline } from '@shared/timeline'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
 
@@ -161,6 +162,26 @@ export function setProjectStructure(db: TreeDb, value: ProjectStructure): Projec
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored
+}
+
+/**
+ * Reads the project's timeline events (F-11.2) from the `settings` row under `TIMELINE_KEY`. A
+ * missing row, unparsable JSON, or a value that no longer fits the schema all answer with
+ * `defaultProjectTimeline()` (no events): a linked scene then reads as unlinked and keeps its
+ * text. `setProjectTimeline` (`timelineStore.ts`) is the write path, since it rewrites the
+ * linked scenes too.
+ */
+export function getProjectTimeline(db: TreeDb): ProjectTimeline {
+  const row = db.select().from(settings).where(eq(settings.key, TIMELINE_KEY)).get()
+  if (!row) return defaultProjectTimeline()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultProjectTimeline()
+  }
+  const parsed = ProjectTimeline.safeParse(json)
+  return parsed.success ? parsed.data : defaultProjectTimeline()
 }
 
 /**

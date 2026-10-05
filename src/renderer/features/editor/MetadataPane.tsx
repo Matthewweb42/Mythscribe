@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Loader2, Sparkles } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { TAG_BAR_BRIEF_HEIGHT } from '@shared/layout'
@@ -12,12 +12,14 @@ import {
 } from '@shared/sceneMeta'
 import { STRUCTURE_TEMPLATES, isTemplateBeat, type StructureTemplateId } from '@shared/structure'
 import type { TagCategory } from '@shared/tags'
+import { eventForText, eventText } from '@shared/timeline'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { StatusSelect } from '@renderer/features/outline/status'
 import { useStructureStore } from '@renderer/features/outline/structureStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
+import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { describeError } from '@renderer/lib/errors'
 import { useBriefDraft } from './briefDraft'
 import { BriefDraftPanel } from './BriefDraftPanel'
@@ -44,8 +46,8 @@ function useTagNames(category: TagCategory): string[] {
 
 /**
  * The metadata pane of the tag bar (F-4.5) for a scene, chapter, or part: Location (autocomplete
- * from the setting tags), POV (from the character tags), the timeline position (free text until
- * F-11.2), the outline's status and synopsis (F-11.1, the same record the index cards edit), and
+ * from the setting tags), POV (from the character tags), the timeline position (autocomplete
+ * from the project's timeline events, F-11.2: picking one links the node, free text unlinks), the outline's status and synopsis (F-11.1, the same record the index cards edit), and
  * the scene brief (F-14.3) behind a disclosure. Takes only `id`: it loads the
  * node's metadata through `useSceneMetaStore` on mount (and again when `id` changes) and unloads
  * on unmount; every change goes through the store's `edit`, so it debounces and flushes like
@@ -66,7 +68,6 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   const edit = useSceneMetaStore((s) => s.edit)
   const settings = useTagNames('setting')
   const characters = useTagNames('character')
-  const timelineId = useId()
   const synopsisId = useId()
   const briefId = useId()
   const [briefOpen, setBriefOpen] = useState(false)
@@ -82,6 +83,8 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   }
   const draft = useBriefDraft(id, openBrief)
   const template = useStructureStore((s) => s.template)
+  const events = useTimelineStore((s) => s.events)
+  const eventTexts = useMemo(() => events.map(eventText), [events])
   const inManuscript = useTreeStore((s) => s.sectionOf[id] === 'manuscript')
 
   useEffect(() => {
@@ -96,6 +99,18 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   }
   const setBriefField = (field: SceneBriefField, text: string): void => {
     if (meta !== null) edit(id, { ...meta, brief: { ...meta.brief, [field]: text } })
+  }
+  /**
+   * The Timeline field (F-11.2): picking an event's text links the node to the event (main keeps
+   * the text in step when the event changes); typing anything else is free text and unlinks it.
+   */
+  const setTimeline = (text: string): void => {
+    if (meta === null) return
+    const next: SceneMeta = { ...meta, timeline: text }
+    const linked = eventForText(events, text)
+    if (linked === null) delete next.eventId
+    else next.eventId = linked.id
+    edit(id, next)
   }
   /** Puts the node on `beatId` in `on`'s template, or takes it off that template's beats for null. */
   const setBeat = (on: StructureTemplateId, beatId: string | null): void => {
@@ -128,20 +143,14 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
         placeholder="Whose eyes"
         disabled={disabled}
       />
-      <div className="flex items-center gap-2">
-        <label htmlFor={timelineId} className="w-16 shrink-0 text-xs text-fg-muted">
-          Timeline
-        </label>
-        <input
-          id={timelineId}
-          type="text"
-          value={value.timeline}
-          placeholder="e.g. Day 3, after the storm"
-          disabled={disabled}
-          onChange={(event) => set({ timeline: event.target.value })}
-          className={FIELD}
-        />
-      </div>
+      <SuggestInput
+        label="Timeline"
+        value={value.timeline}
+        onChange={setTimeline}
+        options={eventTexts}
+        placeholder="e.g. Day 3, after the storm"
+        disabled={disabled}
+      />
       <StatusSelect
         value={value.status}
         onChange={(status) => set({ status })}

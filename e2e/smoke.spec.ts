@@ -1197,6 +1197,7 @@ test('create, close, reopen a project on disk', async () => {
     'Settings',
     'World',
     'Outline',
+    'Timeline',
     'Tags'
   ])
   const manuscriptTab = sidebarTabs.getByRole('tab', { name: 'Manuscript' })
@@ -2620,7 +2621,7 @@ test('create, close, reopen a project on disk', async () => {
   await location.press('Enter')
   await expect(location).toHaveValue('dark-forest')
   await metadata.getByRole('combobox', { name: 'POV' }).fill('Mara')
-  await metadata.getByRole('textbox', { name: 'Timeline' }).fill('Day 3, after the storm')
+  await metadata.getByRole('combobox', { name: 'Timeline' }).fill('Day 3, after the storm')
   await opening.getByText('Opening', { exact: true }).click()
   await expect(page.getByTestId('selected-title')).toHaveText('Opening')
   await expect(metadata.getByRole('combobox', { name: 'Location' })).toHaveValue('')
@@ -2628,7 +2629,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
   await expect(metadata.getByRole('combobox', { name: 'Location' })).toHaveValue('dark-forest')
   await expect(metadata.getByRole('combobox', { name: 'POV' })).toHaveValue('Mara')
-  await expect(metadata.getByRole('textbox', { name: 'Timeline' })).toHaveValue(
+  await expect(metadata.getByRole('combobox', { name: 'Timeline' })).toHaveValue(
     'Day 3, after the storm'
   )
   const splitHandle = tagBar.getByRole('separator', { name: 'Resize metadata pane' })
@@ -2780,6 +2781,77 @@ test('create, close, reopen a project on disk', async () => {
   await structureSelect.selectOption({ label: 'None' })
   await expect(outlineView.getByRole('button', { name: 'Beats' })).toHaveCount(0)
   await expect(beatSelect).toHaveCount(0)
+
+  // F-11.2: the timeline. The Timeline tab adds two events; Opening (still selected) goes on
+  // "Spring: The siege begins" from the metadata pane's Timeline picker, which links it. Renaming
+  // the event in the tab rewrites Opening's text in the open pane and on disk; the Reading order
+  // view lists Opening on the event. Deleting both events keeps Opening's text and drops the
+  // link; clearing the field leaves the scene as it was, and the Manuscript tab comes back.
+  await sidebarTabs.getByRole('tab', { name: 'Timeline' }).click()
+  const timelinePanel = page.getByRole('tabpanel', { name: 'Timeline' })
+  await expect(timelinePanel.getByText('No events yet.')).toBeVisible()
+  const addEventForm = timelinePanel.getByRole('form', { name: 'Add event' })
+  const timelineEvents = timelinePanel.getByTestId('timeline-event')
+  await addEventForm.getByLabel('Event', { exact: true }).fill('The siege begins')
+  await addEventForm.getByLabel('When', { exact: true }).fill('Spring')
+  await addEventForm.getByRole('button', { name: 'Add event' }).click()
+  await expect(timelineEvents).toHaveCount(1)
+  await addEventForm.getByLabel('Event', { exact: true }).fill('The fall')
+  await addEventForm.getByRole('button', { name: 'Add event' }).click()
+  await expect(timelineEvents).toHaveCount(2)
+  await expect(timelineEvents.nth(0)).toHaveAttribute('aria-label', 'The siege begins')
+  await expect(timelineEvents.nth(1)).toHaveAttribute('aria-label', 'The fall')
+  const timelineField = metadata.getByRole('combobox', { name: 'Timeline' })
+  await expect(timelineField).toBeEnabled()
+  await timelineField.fill('Spr')
+  await metadata
+    .getByRole('listbox', { name: 'Timeline suggestions' })
+    .getByRole('option', { name: 'Spring: The siege begins' })
+    .click()
+  await expect(timelineField).toHaveValue('Spring: The siege begins')
+  await expect
+    .poll(
+      async () => {
+        const meta = await sceneMetaOf(openingRow.id)
+        return { timeline: meta.timeline, linked: typeof meta.eventId === 'string' }
+      },
+      { timeout: 3000 }
+    )
+    .toEqual({ timeline: 'Spring: The siege begins', linked: true })
+  const siegeEvent = timelineEvents.filter({ hasText: 'The siege begins' })
+  await expect(siegeEvent.getByRole('button', { name: 'Opening', exact: true })).toBeVisible()
+  await expect(timelinePanel.getByTestId('timeline-unplaced')).toContainText('Not on the timeline:')
+  await timelinePanel.getByRole('button', { name: 'Edit The siege begins' }).click()
+  const editEventForm = timelinePanel.getByRole('form', { name: 'Edit event' })
+  await editEventForm.getByLabel('Event', { exact: true }).fill('The siege')
+  await editEventForm.getByRole('button', { name: 'Save' }).click()
+  await expect(editEventForm).toHaveCount(0)
+  await expect(timelineField).toHaveValue('Spring: The siege')
+  await expect
+    .poll(async () => (await sceneMetaOf(openingRow.id)).timeline, { timeout: 3000 })
+    .toBe('Spring: The siege')
+  const timelineView = timelinePanel.getByRole('group', { name: 'Timeline view' })
+  await timelineView.getByRole('button', { name: 'Reading order' }).click()
+  const openingTimelineRow = timelinePanel
+    .getByTestId('timeline-row')
+    .filter({ has: page.getByRole('button', { name: 'Opening', exact: true }) })
+  await expect(openingTimelineRow).toContainText('The siege')
+  await timelineView.getByRole('button', { name: 'Events' }).click()
+  for (const label of ['The siege', 'The fall']) {
+    await timelinePanel.getByRole('button', { name: `Delete ${label}` }).click()
+    const deleteEventDialog = page.getByRole('dialog', { name: `Delete "${label}"?` })
+    await deleteEventDialog.getByRole('button', { name: 'Delete' }).click()
+    await expect(deleteEventDialog).toBeHidden()
+  }
+  await expect(timelinePanel.getByText('No events yet.')).toBeVisible()
+  await expect(timelineField).toHaveValue('Spring: The siege')
+  await expect
+    .poll(async () => (await sceneMetaOf(openingRow.id)).eventId, { timeout: 3000 })
+    .toBeUndefined()
+  await timelineField.fill('')
+  await expect
+    .poll(async () => (await sceneMetaOf(openingRow.id)).timeline, { timeout: 3000 })
+    .toBe('')
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
 
   // F-4.6: inline tags. Back in Scene 1, `#` at the end of the text opens a suggestion list at

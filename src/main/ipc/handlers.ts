@@ -181,6 +181,7 @@ import {
   getFocusSettings,
   getProjectDictionary,
   getProjectStructure,
+  getProjectTimeline,
   getReferencePins,
   getTagAliases,
   getWritingPresets,
@@ -194,6 +195,7 @@ import {
   setReferencePins,
   setWritingPresets
 } from '../project/settingsStore'
+import { setProjectTimeline } from '../project/timelineStore'
 import { addNotName, addWord, removeWord } from '@shared/dictionary'
 import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import { EXTERNAL_HOST, isAllowedExternalUrl, type EditRole } from '@shared/menu'
@@ -723,6 +725,10 @@ export function registerHandlers({
   register('structure:get', () => getProjectStructure(manager.require().connection.orm))
 
   register('structure:set', (value) => setProjectStructure(manager.require().connection.orm, value))
+
+  register('timeline:get', () => getProjectTimeline(manager.require().connection.orm))
+
+  register('timeline:set', (value) => setProjectTimeline(manager.require().connection.orm, value))
 
   register('focusSettings:get', () => getFocusSettings(manager.require().connection.orm))
 

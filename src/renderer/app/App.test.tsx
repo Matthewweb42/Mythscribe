@@ -62,6 +62,7 @@ import { resetDraftStore } from '@renderer/features/drafts/draftStore'
 import { resetSnapshotStore } from '@renderer/features/snapshots/snapshotStore'
 import { resetViewStore, useViewStore } from '@renderer/features/shell/viewStore'
 import { resetStructureStore } from '@renderer/features/outline/structureStore'
+import { resetTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { App } from './App'
 
 const info: ProjectInfo = {
@@ -128,6 +129,7 @@ beforeEach(() => {
   resetBackupStore()
   resetViewStore()
   resetStructureStore()
+  resetTimelineStore()
   resetMentionStore()
   resetDocumentTagStore()
   resetProposedTagStore()
@@ -162,6 +164,7 @@ afterEach(() => {
   resetContinuityStore()
   resetViewStore()
   resetStructureStore()
+  resetTimelineStore()
   vi.unstubAllGlobals()
 })
 
@@ -208,6 +211,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'drafts:list') return DRAFTS_ONE
     if (channel === 'snapshots:list') return []
     if (channel === 'structure:get') return { template: null }
+    if (channel === 'timeline:get') return { events: [] }
     return null
   })
   const on = <E extends EventName>(
@@ -326,7 +330,7 @@ describe('App', () => {
       within(aside)
         .getAllByRole('tab')
         .map((t) => t.textContent)
-    ).toEqual(['Manuscript', 'Characters', 'Settings', 'World', 'Outline', 'Tags'])
+    ).toEqual(['Manuscript', 'Characters', 'Settings', 'World', 'Outline', 'Timeline', 'Tags'])
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))

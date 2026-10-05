@@ -1,11 +1,21 @@
 import { createElement, type ReactNode } from 'react'
-import { BookOpen, Globe, ListTree, MapPin, Tag, Users, type LucideIcon } from 'lucide-react'
+import {
+  BookOpen,
+  CalendarRange,
+  Globe,
+  ListTree,
+  MapPin,
+  Tag,
+  Users,
+  type LucideIcon
+} from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import type { SidebarTabId } from '@shared/sidebarTabs'
 import { EntityTab } from '@renderer/features/entities/EntityTab'
 import { ManuscriptTab } from '@renderer/features/manuscript/ManuscriptTab'
 import { OutlineTab } from '@renderer/features/outline/OutlineTab'
 import { TagsTab } from '@renderer/features/tags/TagsTab'
+import { TimelineTab } from '@renderer/features/timeline/TimelineTab'
 
 /** One entry of the sidebar tab bar (F-7.3). */
 export interface SidebarTab {
@@ -18,9 +28,9 @@ export interface SidebarTab {
 
 /**
  * The registry of built sidebar tabs, in display order (F-7.3). Only the tabs that exist are
- * listed, so there is never a placeholder to click: Timeline (F-11.x) inserts its entry here, in
- * `SIDEBAR_TAB_IDS` order, when it lands. The three entity tabs (F-9.2)
- * are one component told apart by kind.
+ * listed, so there is never a placeholder to click; every id of `SIDEBAR_TAB_IDS` is built now
+ * (Timeline landed with F-11.2). The three entity tabs (F-9.2) are one component told apart by
+ * kind.
  */
 export const SIDEBAR_TABS: readonly [SidebarTab, ...SidebarTab[]] = [
   {
@@ -52,6 +62,12 @@ export const SIDEBAR_TABS: readonly [SidebarTab, ...SidebarTab[]] = [
     label: 'Outline',
     icon: ListTree,
     render: () => createElement(OutlineTab)
+  },
+  {
+    id: 'timeline',
+    label: 'Timeline',
+    icon: CalendarRange,
+    render: () => createElement(TimelineTab)
   },
   {
     id: 'tags',

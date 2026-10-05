@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { assetUrl } from './assets'
+import { moveItem } from './listMove'
 
 /**
  * The quick reference panel (F-9.6): what the author pinned beside the page, as one ordered list
@@ -91,14 +92,7 @@ export function movePin(
   from: number,
   to: number
 ): readonly ReferencePin[] {
-  if (!Number.isInteger(from) || from < 0 || from >= pins.length) return pins
-  const target = Math.min(pins.length - 1, Math.max(0, Math.trunc(to)))
-  if (target === from) return pins
-  const next = [...pins]
-  const [moved] = next.splice(from, 1)
-  if (moved === undefined) return pins
-  next.splice(target, 0, moved)
-  return next
+  return moveItem(pins, from, to)
 }
 
 /** The list with every later copy of a pin dropped; the first one keeps its place. */

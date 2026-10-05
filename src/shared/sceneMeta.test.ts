@@ -237,4 +237,19 @@ describe('promptSceneMeta', () => {
     expect(Object.keys(prompt ?? {})).toEqual(['location', 'pov', 'timeline', 'brief'])
     expect(promptSceneMeta({ ...emptySceneMeta(), beats: { threeAct: 'climax' } })).toBeNull()
   })
+
+  it('leaves the timeline event id out (F-11.2): the linked text is what the AI reads', () => {
+    const prompt = promptSceneMeta({
+      ...emptySceneMeta(),
+      timeline: 'Spring: The siege begins',
+      eventId: 'event-1'
+    })
+    expect(prompt).toEqual({
+      location: '',
+      pov: '',
+      timeline: 'Spring: The siege begins',
+      brief: EMPTY_SCENE_BRIEF
+    })
+    expect(promptSceneMeta({ ...emptySceneMeta(), eventId: 'event-1' })).toBeNull()
+  })
 })

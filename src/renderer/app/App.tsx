@@ -45,6 +45,7 @@ import { StackedEditor } from '@renderer/features/editor/StackedEditor'
 import { CorkBoard, FolderViewToggle } from '@renderer/features/outline/CorkBoard'
 import { useOutlineViewStore } from '@renderer/features/outline/outlineViewStore'
 import { useStructureStore } from '@renderer/features/outline/structureStore'
+import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { SpellcheckMenu } from '@renderer/features/editor/SpellcheckMenu'
 import { useDictionaryStore } from '@renderer/features/editor/dictionaryStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
@@ -235,6 +236,8 @@ export function App(): React.JSX.Element {
       usePresetsStore.getState().clear()
       // F-11.1b: and the structure template.
       useStructureStore.getState().clear()
+      // F-11.2: and the timeline events.
+      useTimelineStore.getState().clear()
       useVoiceStore.getState().clear()
       useProvenanceStore.getState().clear()
       useAssistantStore.getState().clear()
@@ -306,6 +309,11 @@ export function App(): React.JSX.Element {
       .catch((err: unknown) => toast.error(describeError(err)))
     // F-11.1b: the structure template the Outline tab and the metadata pane read.
     useStructureStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    // F-11.2: the timeline events the Timeline tab and the metadata pane's picker read.
+    useTimelineStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))

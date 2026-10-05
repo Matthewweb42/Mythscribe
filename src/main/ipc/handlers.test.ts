@@ -1205,6 +1205,56 @@ describe('structure:get / structure:set (F-11.1b)', () => {
   })
 })
 
+describe('timeline:get / timeline:set (F-11.2)', () => {
+  const siege = { id: 'a', label: 'The siege begins', when: 'Spring', year: 1201, note: '' }
+
+  it('reports NO_PROJECT for both when nothing is open', async () => {
+    await expect(invoke('timeline:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('timeline:set', { events: [] })).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('round-trips the events, syncs a linked scene, and keeps them after a reopen', async () => {
+    const created = await invoke('project:create', {
+      name: 'Timeline',
+      format: 'novel',
+      directory: tmp
+    })
+    expect(await invoke('timeline:get', undefined)).toEqual({ events: [] })
+    expect(await invoke('timeline:set', { events: [siege] })).toEqual({
+      timeline: { events: [siege] },
+      changedNodeIds: []
+    })
+    const tree = await invoke('tree:list', undefined)
+    const scene = tree.find((row) => row.kind === 'document' && row.sectionType === null)
+    if (!scene) throw new Error('no scene')
+    const { meta } = await invoke('sceneMeta:get', { id: scene.id })
+    await invoke('sceneMeta:set', {
+      id: scene.id,
+      meta: { ...meta, timeline: 'Spring: The siege begins', eventId: 'a' }
+    })
+    const renamed = { ...siege, label: 'The siege' }
+    expect((await invoke('timeline:set', { events: [renamed] })).changedNodeIds).toEqual([
+      scene.id
+    ])
+    expect((await invoke('sceneMeta:get', { id: scene.id })).meta.timeline).toBe(
+      'Spring: The siege'
+    )
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    expect(await invoke('timeline:get', undefined)).toEqual({ events: [renamed] })
+  })
+
+  it('refuses a duplicate label with VALIDATION and keeps the stored value', async () => {
+    await invoke('project:create', { name: 'Timeline', format: 'novel', directory: tmp })
+    const result = await handlerFor('timeline:set')(undefined, {
+      events: [siege, { ...siege, id: 'b', label: 'the siege BEGINS' }]
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(await invoke('timeline:get', undefined)).toEqual({ events: [] })
+  })
+})
+
 describe('presets:get / presets:set (F-5.2)', () => {
   it('reports NO_PROJECT for both when nothing is open', async () => {
     await expect(invoke('presets:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)

@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { groupByBeat, isTemplateBeat, type StructureTemplateId } from '@shared/structure'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
+import { useHeldSceneMeta } from '@renderer/features/editor/useHeldSceneMeta'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { listOutline } from './outlineRows'
 
@@ -19,19 +20,11 @@ export function BeatBoard({ template }: { template: StructureTemplateId }): Reac
   const sectionOf = useTreeStore((s) => s.sectionOf)
   const byId = useTreeStore((s) => s.byId)
   const metas = useSceneMetaStore((s) => s.docs)
-  const load = useSceneMetaStore((s) => s.load)
-  const unload = useSceneMetaStore((s) => s.unload)
   const ids = useMemo(
     () => listOutline(rootIds, childrenOf, sectionOf).map((row) => row.id),
     [rootIds, childrenOf, sectionOf]
   )
-
-  useEffect(() => {
-    for (const id of ids) void load(id)
-    return () => {
-      for (const id of ids) unload(id)
-    }
-  }, [ids, load, unload])
+  useHeldSceneMeta(ids)
 
   const beatOf = (id: string): string | undefined => {
     const beat = metas[id]?.content?.beats[template]
@@ -92,22 +85,35 @@ export function BeatBoard({ template }: { template: StructureTemplateId }): Reac
 
 /** One node on a beat: its title as a button that opens it, like an outline row. */
 function BeatNode({ id }: { id: string }): React.JSX.Element | null {
+  const exists = useTreeStore((s) => s.byId[id] !== undefined)
+  if (!exists) return null
+  return (
+    <li className="flex min-w-0">
+      <NodeTitleButton id={id} />
+    </li>
+  )
+}
+
+/**
+ * A node's title as a button that selects (opens) it, marked `aria-current` while it is the
+ * active node; folders in medium weight. Shared by the beat board (F-11.1b) and the Timeline tab
+ * (F-11.2). Renders nothing for a node the tree no longer has.
+ */
+export function NodeTitleButton({ id }: { id: string }): React.JSX.Element | null {
   const node = useTreeStore((s) => s.byId[id])
   const selected = useTreeStore((s) => s.selectedId === id)
   const select = useTreeStore((s) => s.select)
   if (!node) return null
   return (
-    <li className="flex min-w-0">
-      <button
-        type="button"
-        aria-current={selected ? 'true' : undefined}
-        onClick={() => select(id)}
-        className={`min-w-0 truncate rounded-md px-1 py-0.5 text-left text-sm hover:bg-surface-raised ${
-          selected ? 'bg-accent/15 text-fg' : ''
-        } ${node.kind === 'document' ? '' : 'font-medium'}`}
-      >
-        {node.title}
-      </button>
-    </li>
+    <button
+      type="button"
+      aria-current={selected ? 'true' : undefined}
+      onClick={() => select(id)}
+      className={`min-w-0 truncate rounded-md px-1 py-0.5 text-left text-sm hover:bg-surface-raised ${
+        selected ? 'bg-accent/15 text-fg' : ''
+      } ${node.kind === 'document' ? '' : 'font-medium'}`}
+    >
+      {node.title}
+    </button>
   )
 }

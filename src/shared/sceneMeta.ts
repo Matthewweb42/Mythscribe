@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { STRUCTURE_BEAT_ID_MAX, StructureTemplateId } from './structure'
+import { TIMELINE_EVENT_ID_MAX } from './timeline'
 
 /** Caps for the three free-text fields; generous, but bounded like every stored string. */
 export const SCENE_META_FIELD_MAX = 200
@@ -76,7 +77,10 @@ export function isBriefEmpty(brief: SceneBrief): boolean {
 /**
  * The metadata of a scene, chapter, or part (F-4.5): Location and POV are free text with
  * autocomplete from the setting and character tags (plain strings, so a location that is not a
- * tag yet still works), the timeline position is free text until F-11.2 replaces it, and the
+ * tag yet still works), the timeline position (free text, or an event's text picked from the
+ * project timeline, F-11.2, which also stores the event's id in `eventId` so main can rewrite
+ * the text when the event changes; absent means unlinked, and an id the timeline no longer has
+ * reads as unlinked), and the
  * brief (F-14.3), the index-card synopsis and status (F-11.1), and the structure beat the node
  * sits on in each template (F-11.1b, template id to beat id; one beat per template, so switching
  * templates keeps every template's assignments; a beat id the template does not have reads as
@@ -93,7 +97,8 @@ export const SceneMeta = z.object({
   status: SceneStatus.default('none'),
   beats: z
     .partialRecord(StructureTemplateId, z.string().max(STRUCTURE_BEAT_ID_MAX))
-    .default(() => ({}))
+    .default(() => ({})),
+  eventId: z.string().max(TIMELINE_EVENT_ID_MAX).optional()
 })
 export type SceneMeta = z.infer<typeof SceneMeta>
 
@@ -169,8 +174,8 @@ export function renderSceneBriefBlock(input: SceneBriefBlockInput): string | nul
 
 /**
  * The part of `SceneMeta` the AI reads: the three metadata fields and the brief. Prompt inputs
- * take this rather than `SceneMeta`, so the outline's synopsis and status (F-11.1) and the structure beats (F-11.1b) never
- * reach a prompt or a context hash.
+ * take this rather than `SceneMeta`, so the outline's synopsis and status (F-11.1), the structure
+ * beats (F-11.1b), and the timeline event id (F-11.2) never reach a prompt or a context hash.
  */
 export type PromptSceneMeta = Pick<SceneMeta, 'location' | 'pov' | 'timeline' | 'brief'>
 

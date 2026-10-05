@@ -89,6 +89,7 @@ import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../re
 import { SceneBrief, SceneMeta } from '../sceneMeta'
 import { ProjectStructure } from '../structure'
 import { Stylometrics } from '../stylometry'
+import { ProjectTimeline } from '../timeline'
 import { SceneSummaryState, SummaryStatus } from '../summary'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
 import { TagAliases } from '../tagExchange'
@@ -817,6 +818,18 @@ export const contract = {
   'structure:get': { input: z.undefined(), output: ProjectStructure },
   /** Replaces the project's structure template (F-11.1b); an unknown template is refused with VALIDATION. */
   'structure:set': { input: ProjectStructure, output: ProjectStructure },
+  /** The project's timeline events in story order (F-11.2); a missing or unreadable row answers with none. */
+  'timeline:get': { input: z.undefined(), output: ProjectTimeline },
+  /**
+   * Replaces the project's timeline (F-11.2) and syncs the linked scenes in the same transaction:
+   * a scene whose event changed gets the event's new text, one whose event is gone keeps its text
+   * and loses the link. Answers what was stored and the ids of the nodes it rewrote. Duplicate ids
+   * or labels, a blank label, or a value over the caps are refused with VALIDATION.
+   */
+  'timeline:set': {
+    input: ProjectTimeline,
+    output: z.object({ timeline: ProjectTimeline, changedNodeIds: z.array(z.string()) })
+  },
   /** The project's focus-mode settings (F-6.2); a missing or unreadable row answers with the defaults (no background). */
   'focusSettings:get': { input: z.undefined(), output: FocusSettings },
   /** Replaces the project's focus-mode settings (F-6.2); a value outside the schema is refused with VALIDATION. */
