@@ -1,6 +1,11 @@
 /*
  * Design tokens. Every color, radius, and font the UI uses is defined here and nowhere else.
  * Themes (FEATURES.md F-7.8) override these variables; components never hard-code values.
+ * `:root` is the Dark theme; the other built-ins are the `data-theme` blocks below, which App.tsx
+ * sets on <html>. The eight surface and text colours of each block (`--ms-bg` … `--ms-sheet`) are
+ * the same hexes as `BUILT_IN_THEMES` in `src/shared/themes.ts` (CSS cannot import the
+ * TypeScript, so change both; `themes.test.ts` compares them). A custom theme sets those eight
+ * as inline variables on <html> over its base block.
  */
 :root {
   color-scheme: dark;
@@ -66,6 +71,135 @@
 }
 
 /*
+ * Light (F-7.8): cool grey paper, near-black text. Every colour that is read as text (the
+ * accent, the status and tree colours) is a darker shade than Dark's, so it holds its contrast
+ * on the light surfaces.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --ms-bg: #eeeef0;
+  --ms-surface: #e4e4e8;
+  --ms-surface-raised: #f8f8f9;
+  --ms-surface-overlay: rgb(28 28 33 / 0.35);
+  --ms-line: #cfcfd6;
+  --ms-line-strong: #b0b0ba;
+
+  --ms-fg: #1c1c21;
+  --ms-fg-muted: #585864;
+  --ms-fg-subtle: #74747f;
+
+  --ms-accent: #2f8a57;
+  --ms-accent-hover: #26754a;
+  --ms-accent-fg: #ffffff;
+
+  --ms-danger: #c62a2f;
+  --ms-danger-fg: #ffffff;
+  --ms-warning: #a65f00;
+  --ms-success: #1f7a43;
+  --ms-info: #2563c9;
+
+  --ms-level-part: #6d4fc4;
+  --ms-level-chapter: #2c66b0;
+  --ms-level-scene: #217a72;
+  --ms-level-generic: #686874;
+  --ms-matter: #8c6a0c;
+
+  --ms-desk: #eeeef0;
+  --ms-sheet: #f8f8f9;
+
+  --ms-focus-scrim: rgb(238 238 240);
+  --ms-focus-surface: rgb(248 248 249 / 0.8);
+  --ms-focus-bar: rgb(228 228 232 / 0.9);
+
+  --ms-shadow: 0 10px 30px rgb(28 28 33 / 0.18);
+}
+
+/*
+ * High contrast (F-7.8): pure black, white text, strong lines, and one yellow accent that the
+ * Supporter accents do not replace (the block after the accents below).
+ */
+:root[data-theme='high-contrast'] {
+  color-scheme: dark;
+
+  --ms-bg: #000000;
+  --ms-surface: #0a0a0a;
+  --ms-surface-raised: #161616;
+  --ms-surface-overlay: rgb(0 0 0 / 0.8);
+  --ms-line: #8a8a8a;
+  --ms-line-strong: #c4c4c4;
+
+  --ms-fg: #ffffff;
+  --ms-fg-muted: #e0e0e0;
+  --ms-fg-subtle: #c4c4c4;
+
+  --ms-accent: #ffd60a;
+  --ms-accent-hover: #ffe45c;
+  --ms-accent-fg: #000000;
+
+  --ms-danger: #ff6b6b;
+  --ms-danger-fg: #000000;
+  --ms-warning: #ffb020;
+  --ms-success: #5cff95;
+  --ms-info: #7cc0ff;
+
+  --ms-level-part: #cdb8ff;
+  --ms-level-chapter: #a3cfff;
+  --ms-level-scene: #86e6dc;
+  --ms-level-generic: #e0e0e0;
+  --ms-matter: #ffd166;
+
+  --ms-desk: #000000;
+  --ms-sheet: #121212;
+
+  --ms-focus-surface: rgb(0 0 0 / 0.85);
+  --ms-focus-bar: rgb(10 10 10 / 0.95);
+
+  --ms-shadow: 0 10px 30px rgb(0 0 0 / 0.6);
+}
+
+/* Sepia (F-7.8, a Supporter extra): warm paper and brown ink, the light scheme. */
+:root[data-theme='sepia'] {
+  color-scheme: light;
+
+  --ms-bg: #efe4cc;
+  --ms-surface: #e6d8ba;
+  --ms-surface-raised: #f7eedb;
+  --ms-surface-overlay: rgb(59 47 34 / 0.35);
+  --ms-line: #d3c29d;
+  --ms-line-strong: #b8a47a;
+
+  --ms-fg: #3b2f22;
+  --ms-fg-muted: #6e5d48;
+  --ms-fg-subtle: #85725a;
+
+  --ms-accent: #9b5f2a;
+  --ms-accent-hover: #844f20;
+  --ms-accent-fg: #fffaf0;
+
+  --ms-danger: #b3282c;
+  --ms-danger-fg: #ffffff;
+  --ms-warning: #9a5800;
+  --ms-success: #3d7329;
+  --ms-info: #2f5d99;
+
+  --ms-level-part: #74489c;
+  --ms-level-chapter: #2f6496;
+  --ms-level-scene: #2c7268;
+  --ms-level-generic: #6e5d48;
+  --ms-matter: #85600c;
+
+  --ms-desk: #efe4cc;
+  --ms-sheet: #f7eedb;
+
+  --ms-focus-scrim: rgb(239 228 204);
+  --ms-focus-surface: rgb(247 238 219 / 0.8);
+  --ms-focus-bar: rgb(230 216 186 / 0.9);
+
+  --ms-shadow: 0 10px 30px rgb(59 47 34 / 0.2);
+}
+
+/*
  * Supporter accents (F-15.9): the one cosmetic extra the license unlocks. App.tsx sets
  * `data-accent` on <html> from the license status; `default` (the moss green in `:root` above) is
  * the attribute's absence. The values are the same hex triples as `ACCENTS` in
@@ -99,4 +233,45 @@
   --ms-accent: #a78bfa;
   --ms-accent-hover: #bda8fb;
   --ms-accent-fg: #15102a;
+}
+
+/*
+ * The same accents on a light theme (F-7.8): App.tsx sets `data-scheme` from the theme, and these
+ * darker shades keep `text-accent` readable on light surfaces, with white text on the buttons.
+ */
+:root[data-scheme='light'][data-accent='ember'] {
+  --ms-accent: #b8522a;
+  --ms-accent-hover: #9e4522;
+  --ms-accent-fg: #ffffff;
+}
+
+:root[data-scheme='light'][data-accent='sky'] {
+  --ms-accent: #2a6db3;
+  --ms-accent-hover: #225b98;
+  --ms-accent-fg: #ffffff;
+}
+
+:root[data-scheme='light'][data-accent='rose'] {
+  --ms-accent: #b03f66;
+  --ms-accent-hover: #963455;
+  --ms-accent-fg: #ffffff;
+}
+
+:root[data-scheme='light'][data-accent='gold'] {
+  --ms-accent: #8a660c;
+  --ms-accent-hover: #73550a;
+  --ms-accent-fg: #ffffff;
+}
+
+:root[data-scheme='light'][data-accent='violet'] {
+  --ms-accent: #6a4cc8;
+  --ms-accent-hover: #583cb0;
+  --ms-accent-fg: #ffffff;
+}
+
+/* High contrast keeps its own yellow whatever accent is chosen (F-7.8). */
+:root[data-theme='high-contrast'][data-accent] {
+  --ms-accent: #ffd60a;
+  --ms-accent-hover: #ffe45c;
+  --ms-accent-fg: #000000;
 }

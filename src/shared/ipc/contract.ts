@@ -100,6 +100,7 @@ import { StatsDashboard } from '../statsDashboard'
 import { WordCountReport } from '../wordCount'
 import { StartupSettings } from '../windowState'
 import { UiScale, ViewSettings, ZoomStep } from '../zoom'
+import { CustomThemeId, CustomThemeInput, ThemeId } from '../themes'
 
 /**
  * The single IPC contract shared by main, preload, and renderer.
@@ -1849,6 +1850,31 @@ export const contract = {
    */
   'view:setPageEdges': {
     input: z.object({ on: z.boolean() }),
+    output: ViewSettings
+  },
+  /**
+   * Theme (F-7.8): main persists the choice and answers the set; the renderer paints it. A
+   * Supporter theme (Sepia, any custom one) without the license, or an id that names no theme,
+   * is refused (VALIDATION).
+   */
+  'view:setTheme': {
+    input: z.object({ theme: ThemeId }),
+    output: ViewSettings
+  },
+  /**
+   * Custom theme (F-7.8): creates one (no id; at most `CUSTOM_THEMES_MAX`) or replaces the one
+   * with that id, and makes it the current theme. Supporter only (VALIDATION without it).
+   */
+  'view:saveCustomTheme': {
+    input: z.object({ theme: CustomThemeInput }),
+    output: ViewSettings
+  },
+  /**
+   * Custom theme (F-7.8): deletes it; when it was the current theme, its base becomes current.
+   * Allowed without the license, so a lapsed one can still tidy up.
+   */
+  'view:deleteCustomTheme': {
+    input: z.object({ id: CustomThemeId }),
     output: ViewSettings
   },
   /** Startup (F-7.9): whether the project open at the last quit opens again on launch. */

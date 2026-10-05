@@ -12,8 +12,9 @@ const LOCKED = 'Supporter license needed'
  * from `ACCENTS`; the pick goes to main, which writes it to `app-state.json` and answers the new
  * status, so `<html data-accent>` follows it app-wide (App.tsx) and `tokens.css` swaps the three
  * accent variables. Shown to everyone, with the five presets disabled without a license, because
- * a locked extra the author can see is the honest version of what the purchase is for. F-7.8
- * (themes) gates on the same flag and will move this beside the theme choice.
+ * a locked extra the author can see is the honest version of what the purchase is for. It sits on
+ * the Appearance tab beside the theme choice (F-7.8), which gates on the same flag; the light
+ * themes get darker shades of each accent from `tokens.css`, and High contrast keeps its own.
  */
 export function AccentPicker(): React.JSX.Element {
   const supporter = useAccountStore((s) => s.supporter)

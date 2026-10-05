@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
-import { nextZoom, type ViewSettings } from '@shared/zoom'
+import {
+  THEME_NEEDS_LICENSE_MESSAGE,
+  builtInTheme,
+  type CustomTheme,
+  type CustomThemeInput
+} from '@shared/themes'
+import { defaultViewSettings, nextZoom, type ViewSettings } from '@shared/zoom'
+import { resetAccountStore, useAccountStore } from '@renderer/features/account/accountStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetViewStore, useViewStore } from './viewStore'
@@ -17,7 +24,7 @@ interface Fake {
 function fakeClient(): Fake {
   const fake: Fake = {
     calls: [],
-    view: { editorZoom: 1, uiScale: 'medium', pageEdges: true },
+    view: defaultViewSettings(),
     fail: null,
     client: {
       async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
@@ -41,6 +48,28 @@ function fakeClient(): Fake {
             fake.view = { ...fake.view, pageEdges: on }
             return fake.view as Output<C>
           }
+          case 'view:setTheme': {
+            const { theme } = input as { theme: string }
+            fake.view = { ...fake.view, theme }
+            return fake.view as Output<C>
+          }
+          case 'view:saveCustomTheme': {
+            const { theme } = input as { theme: CustomThemeInput }
+            const saved: CustomTheme = { ...theme, id: theme.id ?? 'custom-a1b2c3d4e5f6' }
+            const others = fake.view.customThemes.filter((t) => t.id !== saved.id)
+            fake.view = { ...fake.view, theme: saved.id, customThemes: [...others, saved] }
+            return fake.view as Output<C>
+          }
+          case 'view:deleteCustomTheme': {
+            const { id } = input as { id: string }
+            const gone = fake.view.customThemes.find((t) => t.id === id)
+            fake.view = {
+              ...fake.view,
+              theme: fake.view.theme === id && gone ? gone.base : fake.view.theme,
+              customThemes: fake.view.customThemes.filter((t) => t.id !== id)
+            }
+            return fake.view as Output<C>
+          }
           default:
             throw new Error(`unexpected ${channel}`)
         }
@@ -59,11 +88,13 @@ beforeEach(() => {
   fake = fakeClient()
   setIpcClient(fake.client)
   resetViewStore()
+  resetAccountStore()
   useDialogStore.setState({ modals: [], toasts: [] })
 })
 
 afterEach(() => {
   resetViewStore()
+  resetAccountStore()
 })
 
 describe('viewStore (F-7.10)', () => {
@@ -74,12 +105,14 @@ describe('viewStore (F-7.10)', () => {
       pageEdges: true,
       loaded: false
     })
-    fake.view = { editorZoom: 1.25, uiScale: 'large', pageEdges: false }
+    fake.view = { ...defaultViewSettings(), editorZoom: 1.25, uiScale: 'large', pageEdges: false }
     await useViewStore.getState().load()
     expect(useViewStore.getState()).toMatchObject({
       editorZoom: 1.25,
       uiScale: 'large',
       pageEdges: false,
+      theme: 'dark',
+      customThemes: [],
       loaded: true
     })
     expect(fake.calls).toEqual([{ channel: 'view:get', input: undefined }])
@@ -142,5 +175,81 @@ describe('viewStore (F-7.10)', () => {
     resetViewStore()
     await pending
     expect(useViewStore.getState()).toMatchObject({ editorZoom: 1, loaded: false })
+  })
+})
+
+const MIDNIGHT: CustomThemeInput = {
+  name: 'Midnight',
+  base: 'dark',
+  colors: { ...builtInTheme('dark').colors, bg: '#000814' }
+}
+
+function license(licensed: boolean): void {
+  useAccountStore.setState({
+    supporter: {
+      licensed,
+      since: licensed ? '2026-09-20T10:00:00.000Z' : null,
+      validUntil: null,
+      offline: false,
+      product: null,
+      accent: 'default'
+    }
+  })
+}
+
+describe('viewStore themes (F-7.8)', () => {
+  it('sets a theme silently from Settings', async () => {
+    await useViewStore.getState().setTheme('light')
+    expect(fake.calls).toEqual([{ channel: 'view:setTheme', input: { theme: 'light' } }])
+    expect(useViewStore.getState().theme).toBe('light')
+    expect(toasts()).toEqual([])
+  })
+
+  it('switches through the free themes without a license, naming each one', async () => {
+    for (let i = 0; i < 3; i++) await useViewStore.getState().switchTheme()
+    expect(fake.calls.map((c) => c.input)).toEqual([
+      { theme: 'light' },
+      { theme: 'high-contrast' },
+      { theme: 'dark' }
+    ])
+    expect(toasts()).toEqual(['Theme: Light', 'Theme: High contrast', 'Theme: Dark'])
+  })
+
+  it('switches through Sepia and the custom themes with a license', async () => {
+    license(true)
+    await useViewStore.getState().saveCustomTheme(MIDNIGHT)
+    await useViewStore.getState().setTheme('high-contrast')
+    await useViewStore.getState().switchTheme()
+    await useViewStore.getState().switchTheme()
+    await useViewStore.getState().switchTheme()
+    expect(fake.calls.slice(-3).map((c) => c.input)).toEqual([
+      { theme: 'sepia' },
+      { theme: 'custom-a1b2c3d4e5f6' },
+      { theme: 'dark' }
+    ])
+    expect(toasts()).toEqual(['Theme: Sepia', 'Theme: Midnight', 'Theme: Dark'])
+  })
+
+  it('saves a custom theme, selects it, and reports success; a refusal toasts and reports failure', async () => {
+    license(true)
+    expect(await useViewStore.getState().saveCustomTheme(MIDNIGHT)).toBe(true)
+    expect(useViewStore.getState()).toMatchObject({
+      theme: 'custom-a1b2c3d4e5f6',
+      customThemes: [{ ...MIDNIGHT, id: 'custom-a1b2c3d4e5f6' }]
+    })
+    fake.fail = new Error(THEME_NEEDS_LICENSE_MESSAGE)
+    expect(await useViewStore.getState().saveCustomTheme(MIDNIGHT)).toBe(false)
+    expect(toasts()).toEqual([THEME_NEEDS_LICENSE_MESSAGE])
+  })
+
+  it('deletes a custom theme and takes main’s fallback to its base', async () => {
+    license(true)
+    await useViewStore.getState().saveCustomTheme({ ...MIDNIGHT, base: 'sepia' })
+    await useViewStore.getState().deleteCustomTheme('custom-a1b2c3d4e5f6')
+    expect(fake.calls.at(-1)).toEqual({
+      channel: 'view:deleteCustomTheme',
+      input: { id: 'custom-a1b2c3d4e5f6' }
+    })
+    expect(useViewStore.getState()).toMatchObject({ theme: 'sepia', customThemes: [] })
   })
 })

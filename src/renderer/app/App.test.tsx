@@ -21,7 +21,7 @@ import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultViewSettings } from '@shared/zoom'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
-import { resetAccountStore } from '@renderer/features/account/accountStore'
+import { resetAccountStore, useAccountStore } from '@renderer/features/account/accountStore'
 import { resetBackupStore } from '@renderer/features/backups/backupStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetAuthorRulesStore, useAuthorRulesStore } from '@renderer/features/ai/authorRulesStore'
@@ -1734,6 +1734,65 @@ describe('App', () => {
         ])
       )
       expect(invoke).not.toHaveBeenCalledWith('tree:create', expect.anything())
+    })
+  })
+
+  describe('theme (F-7.8)', () => {
+    const SEPIA_LIKE = {
+      id: 'custom-0123456789ab',
+      name: 'Parchment',
+      base: 'sepia',
+      colors: {
+        bg: '#f0e0c0',
+        surface: '#e6d8ba',
+        surfaceRaised: '#f7eedb',
+        line: '#d3c29d',
+        fg: '#3b2f22',
+        fgMuted: '#6e5d48',
+        desk: '#f0e0c0',
+        sheet: '#f7eedb'
+      }
+    } as const
+    const licensed = (on: boolean): unknown => ({
+      licensed: on,
+      since: on ? '2026-09-20T10:00:00.000Z' : null,
+      validUntil: null,
+      offline: false,
+      product: null,
+      accent: 'default'
+    })
+    const html = document.documentElement
+    afterEach(() => {
+      delete html.dataset.theme
+      delete html.dataset.scheme
+      html.removeAttribute('style')
+    })
+
+    it('paints the stored built-in theme on <html>, scheme included, and Dark as no attribute', async () => {
+      install({ 'view:get': { ...defaultViewSettings(), theme: 'light' } })
+      render(<App />)
+      await waitFor(() => expect(html.dataset.theme).toBe('light'))
+      expect(html.dataset.scheme).toBe('light')
+      expect(html.style.colorScheme).toBe('light')
+      act(() => useViewStore.setState({ theme: 'dark' }))
+      expect(html.dataset.theme).toBeUndefined()
+      expect(html.dataset.scheme).toBe('dark')
+    })
+
+    it('lays a licensed custom theme over its base as inline variables, and paints Dark without the license', async () => {
+      install({
+        'view:get': { ...defaultViewSettings(), theme: SEPIA_LIKE.id, customThemes: [SEPIA_LIKE] },
+        'account:getSupporter': licensed(true)
+      })
+      render(<App />)
+      await waitFor(() => expect(html.dataset.theme).toBe('sepia'))
+      expect(html.style.getPropertyValue('--ms-bg')).toBe('#f0e0c0')
+      expect(html.style.getPropertyValue('--ms-surface-raised')).toBe('#f7eedb')
+      // The license lapses (a sign-out): the choice stays stored, the window paints Dark.
+      act(() => useAccountStore.setState({ supporter: null }))
+      expect(html.dataset.theme).toBeUndefined()
+      expect(html.style.getPropertyValue('--ms-bg')).toBe('')
+      expect(useViewStore.getState().theme).toBe(SEPIA_LIKE.id)
     })
   })
 

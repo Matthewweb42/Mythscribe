@@ -4,6 +4,7 @@ import { AI_DATA_SHARING, type AiDial, type AiSource } from '@shared/aiSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, levelLabel, sectionLabel, type HierarchyLevel } from '@shared/labels'
 import { LAYOUT_LIMITS } from '@shared/layout'
+import { DEFAULT_THEME, THEME_TOKENS, THEME_TOKEN_VARS, resolveTheme } from '@shared/themes'
 import { useAccountStore } from '@renderer/features/account/accountStore'
 import { useBackupStore } from '@renderer/features/backups/backupStore'
 import { useDiagnosticsStore } from '@renderer/features/diagnostics/diagnosticsStore'
@@ -179,6 +180,27 @@ export function App(): React.JSX.Element {
     if (accent === 'default') delete document.documentElement.dataset.accent
     else document.documentElement.dataset.accent = accent
   }, [accent])
+
+  // F-7.8: the theme is app-wide too. The built-in block is picked by `data-theme` (Dark is
+  // `:root` itself, so the attribute's absence), `data-scheme` picks the accent shades that read
+  // on it, and a custom theme's eight colours go on as inline variables over its base. A locked
+  // or deleted choice resolves to Dark here while main keeps it stored.
+  const theme = useViewStore((s) => s.theme)
+  const customThemes = useViewStore((s) => s.customThemes)
+  const supporterLicensed = useAccountStore((s) => s.supporter?.licensed === true)
+  useEffect(() => {
+    const resolved = resolveTheme({ theme, customThemes }, supporterLicensed)
+    const root = document.documentElement
+    if (resolved.base.id === DEFAULT_THEME) delete root.dataset.theme
+    else root.dataset.theme = resolved.base.id
+    root.dataset.scheme = resolved.base.scheme
+    root.style.colorScheme = resolved.base.scheme
+    for (const token of THEME_TOKENS) {
+      const name = THEME_TOKEN_VARS[token]
+      if (resolved.overrides) root.style.setProperty(name, resolved.overrides[token])
+      else root.style.removeProperty(name)
+    }
+  }, [theme, customThemes, supporterLicensed])
 
   // F-2.1: the document tree follows the open project. App owns when it loads and clears, keyed
   // on the project id so a refreshed `ProjectInfo` for the same project does not reload it.

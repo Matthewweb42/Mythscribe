@@ -414,7 +414,7 @@ describe('AccountSettingsTab supporter (F-15.9)', () => {
     useAccountStore.setState({ status, supporter, credits: CREDITS, creditsAt: Date.now() })
   }
 
-  it('badges a license with the day it was last confirmed and unlocks the accents', async () => {
+  it('badges a license with the day it was last confirmed', () => {
     showSupporter(LICENSED, SIGNED_IN)
     render(<AccountSettingsTab />)
     const section = screen.getByRole('region', { name: 'Supporter' })
@@ -423,13 +423,8 @@ describe('AccountSettingsTab supporter (F-15.9)', () => {
     )
     expect(screen.queryByTestId('account-supporter-buy')).not.toBeInTheDocument()
     expect(within(section).queryByText(/Extras stay on until/)).not.toBeInTheDocument()
-
-    const swatch = within(section).getByTestId('account-accent-sky')
-    expect(swatch).toBeEnabled()
-    await userEvent.click(swatch)
-    await waitFor(() => {
-      expect(fake.calls.at(-1)).toEqual({ channel: 'account:setAccent', input: { accent: 'sky' } })
-    })
+    // The extras moved to the Appearance tab with the themes (F-7.8).
+    expect(screen.queryByTestId('account-accent-sky')).not.toBeInTheDocument()
   })
 
   it('says how long the extras last while the Worker cannot be reached', () => {
@@ -447,7 +442,7 @@ describe('AccountSettingsTab supporter (F-15.9)', () => {
     render(<AccountSettingsTab />)
     expect(
       screen.getByText(
-        'A one-time purchase that supports the project and unlocks the accent colours. Nothing else changes: every writing and AI feature works without it.'
+        'A one-time purchase that supports the project and unlocks the accent colours, the Sepia theme, and custom themes (Settings › Appearance). Nothing else changes: every writing and AI feature works without it.'
       )
     ).toBeInTheDocument()
     const buy = screen.getByTestId('account-supporter-buy')
@@ -457,8 +452,6 @@ describe('AccountSettingsTab supporter (F-15.9)', () => {
     await waitFor(() => {
       expect(fake.calls.at(-1)).toEqual({ channel: 'account:buySupporter', input: undefined })
     })
-    // The locked extra is on screen, so what the purchase is for is visible, not just described.
-    expect(screen.getByTestId('account-accent-rose')).toBeDisabled()
     expect(screen.queryByTestId('account-supporter-badge')).not.toBeInTheDocument()
   })
 
@@ -514,11 +507,10 @@ describe('AccountSettingsTab supporter (F-15.9)', () => {
     expect(useDialogStore.getState().toasts).toHaveLength(0)
   })
 
-  it('shows the section with the accents locked before anything is loaded', () => {
+  it('shows the section before anything is loaded', () => {
     show(SIGNED_OUT)
     render(<AccountSettingsTab />)
     expect(screen.getByRole('region', { name: 'Supporter' })).toBeInTheDocument()
-    expect(screen.getByTestId('account-accent-ember')).toBeDisabled()
     expect(screen.getByText('The Supporter license is not on sale yet.')).toBeInTheDocument()
   })
 })

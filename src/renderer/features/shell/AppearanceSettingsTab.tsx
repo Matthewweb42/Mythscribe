@@ -8,9 +8,11 @@ import {
   ZOOM_MIN,
   formatZoom
 } from '@shared/zoom'
+import { AccentPicker } from '@renderer/features/account/AccentPicker'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
+import { ThemePicker } from './ThemePicker'
 import { useViewStore } from './viewStore'
 
 const BUTTON =
@@ -43,8 +45,9 @@ const REOPEN_NOTE =
   'at the size and place you left it.'
 
 /**
- * The Appearance tab of the Settings dialog (F-7.10, F-7.11, F-7.9): the interface size, the
- * document zoom, and the page edges, the three app-wide view settings, then the startup choice,
+ * The Appearance tab of the Settings dialog (F-7.8, F-7.10, F-7.11, F-7.9): the theme and the
+ * Supporter accent (moved here from the Account tab with F-7.8, beside the theme it colours),
+ * then the interface size, the document zoom, and the page edges, then the startup choice,
  * with a sentence each saying what they move — the first two are easy to confuse, and confusing them is how an author ends up
  * with an unreadable window. App-scoped, so it is there on the welcome screen too, where the
  * writing surface is not. Main owns the values and applies the interface size to the window
@@ -91,7 +94,10 @@ export function AppearanceSettingsTab(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-4 text-sm">
-      <div className="flex flex-col gap-1.5">
+      <ThemePicker />
+      <AccentPicker />
+
+      <div className="flex flex-col gap-1.5 border-t border-line pt-3">
         <span className="text-xs text-fg-muted">Interface size</span>
         <div role="radiogroup" aria-label="Interface size" className="flex gap-2">
           {UI_SCALES.map((scale) => (

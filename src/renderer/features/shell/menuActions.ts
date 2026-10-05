@@ -100,6 +100,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         // F-7.11: app-wide like the zoom; the store announces which way it went.
         await useViewStore.getState().togglePageEdges()
         return
+      case 'switchTheme':
+        // F-7.8: app-wide too; the store cycles to the next unlocked theme and names it.
+        await useViewStore.getState().switchTheme()
+        return
       case 'checkForUpdates':
         // F-15.7: the Updates tab is where the answer shows, so it opens with the check.
         useShellDialogStore.getState().show('settings', 'updates')

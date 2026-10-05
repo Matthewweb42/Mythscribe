@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CustomTheme, CUSTOM_THEMES_MAX, DEFAULT_THEME } from './themes'
 
 /**
  * Document zoom (F-7.10): Ctrl+= / Ctrl+- / Ctrl+0 and the View › Zoom items scale the writing
@@ -86,11 +87,28 @@ export const ViewSettings = z.object({
    * where the page ends at any zoom. Off is the borderless column. A file from before the
    * setting parses as on.
    */
-  pageEdges: z.boolean().default(true)
+  pageEdges: z.boolean().default(true),
+  /**
+   * Theme (F-7.8): a built-in id or a custom theme's id. Kept even while it is locked (no
+   * Supporter license) or names a deleted theme; `resolveTheme` paints Dark then. A file from
+   * before the setting, or a hand-edited one that does not parse, opens in Dark.
+   */
+  theme: z.string().default(DEFAULT_THEME).catch(DEFAULT_THEME),
+  /** Custom themes (F-7.8), at most `CUSTOM_THEMES_MAX`; an unreadable list is dropped. */
+  customThemes: z.array(CustomTheme).max(CUSTOM_THEMES_MAX).default([]).catch([])
 })
 export type ViewSettings = z.infer<typeof ViewSettings>
 
-/** A fresh install: the document at 100 %, the interface at its normal size, page edges shown. */
+/**
+ * A fresh install: the document at 100 %, the interface at its normal size, page edges shown,
+ * the Dark theme.
+ */
 export function defaultViewSettings(): ViewSettings {
-  return { editorZoom: DEFAULT_ZOOM, uiScale: 'medium', pageEdges: true }
+  return {
+    editorZoom: DEFAULT_ZOOM,
+    uiScale: 'medium',
+    pageEdges: true,
+    theme: DEFAULT_THEME,
+    customThemes: []
+  }
 }

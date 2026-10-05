@@ -5,7 +5,6 @@ import { creditWarning, periodSpentMicros, projectedDaysLeft } from '@shared/clo
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { featureLabel, formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { describeError } from '@renderer/lib/errors'
-import { AccentPicker } from './AccentPicker'
 import { useAccountStore } from './accountStore'
 import { creditWarningText, runOutText } from './creditMeter'
 
@@ -30,8 +29,9 @@ const RATES_NOTE =
 
 /** What the Supporter license (F-15.9) is, in one sentence, with no feature held hostage. */
 const SUPPORTER_INTRO =
-  'A one-time purchase that supports the project and unlocks the accent colours. Nothing else ' +
-  'changes: every writing and AI feature works without it.'
+  'A one-time purchase that supports the project and unlocks the accent colours, the Sepia ' +
+  'theme, and custom themes (Settings › Appearance). Nothing else changes: every writing and AI ' +
+  'feature works without it.'
 
 /**
  * The Account tab of the Settings dialog (F-15.2). Three states, one at a time, from the store
@@ -309,9 +309,10 @@ function UsageMeter({ credits, now }: { credits: CreditsResult; now: number }): 
  * The Supporter license (F-15.9): a one-time purchase, bought through the same Lemon Squeezy
  * checkout as the credit packs and granted to the account. Licensed shows the badge and, while
  * the Worker cannot be reached, how long the extras stay on from the cached token; unlicensed
- * explains what the purchase is and offers it. The accent picker is here either way, so the
- * locked extra is visible rather than described. App loads the status at start (the cache is
- * local and works signed out), so this section never asks on mount; Refresh needs the account.
+ * explains what the purchase is and offers it. The extras themselves (the accent and the
+ * themes) are on the Appearance tab since F-7.8, shown locked there without the license. App
+ * loads the status at start (the cache is local and works signed out), so this section never
+ * asks on mount; Refresh needs the account.
  */
 function SupporterSection({ signedIn }: { signedIn: boolean }): React.JSX.Element {
   const supporter = useAccountStore((s) => s.supporter)
@@ -378,8 +379,6 @@ function SupporterSection({ signedIn }: { signedIn: boolean }): React.JSX.Elemen
           )}
         </>
       )}
-
-      <AccentPicker />
 
       {error === null ? null : (
         <p role="alert" className="m-0 text-xs text-danger">

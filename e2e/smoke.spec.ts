@@ -1102,9 +1102,13 @@ test('create, close, reopen a project on disk', async () => {
   await expect.poll(async () => (await documentSize()).font, { timeout: 3000 }).toBe(16)
   const storedView = (): unknown =>
     (JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { view: unknown }).view
-  await expect
-    .poll(storedView, { timeout: 3000 })
-    .toEqual({ editorZoom: 1, uiScale: 'medium', pageEdges: true })
+  await expect.poll(storedView, { timeout: 3000 }).toEqual({
+    editorZoom: 1,
+    uiScale: 'medium',
+    pageEdges: true,
+    theme: 'dark',
+    customThemes: []
+  })
 
   // F-7.11: the column is a sheet on the desk by default (the edge is the column element's own
   // border); View › Page edges turns it into the borderless column and announces it, the
@@ -1134,6 +1138,40 @@ test('create, close, reopen a project on disk', async () => {
   await expect(appearance).toHaveCount(0)
   await expect(sheet).toHaveClass(/ms-sheet/)
   await expect.poll(storedView, { timeout: 3000 }).toMatchObject({ pageEdges: true })
+
+  // F-7.8: View › Switch theme steps from Dark to Light, names it, and main keeps it; the
+  // Appearance tab picks High contrast, and Dark again so the rest of the test looks as before.
+  const html = page.locator('html')
+  await expect(html).not.toHaveAttribute('data-theme')
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'View' })
+    .click()
+  await page
+    .getByRole('menu', { name: 'View' })
+    .getByRole('menuitem', { name: 'Switch theme' })
+    .click()
+  await expect(html).toHaveAttribute('data-theme', 'light')
+  await expect(html).toHaveAttribute('data-scheme', 'light')
+  await expect(page.getByRole('status').filter({ hasText: 'Theme:' })).toContainText('Theme: Light')
+  await expect.poll(storedView, { timeout: 3000 }).toMatchObject({ theme: 'light' })
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await appearance.getByRole('tab', { name: 'Appearance' }).click()
+  await expect(appearance.getByTestId('appearance-theme-light')).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  // Sepia is a Supporter extra; nothing is licensed yet.
+  await expect(appearance.getByTestId('appearance-theme-sepia')).toBeDisabled()
+  await appearance.getByTestId('appearance-theme-high-contrast').click()
+  await expect(html).toHaveAttribute('data-theme', 'high-contrast')
+  await expect(html).toHaveAttribute('data-scheme', 'dark')
+  await expect.poll(storedView, { timeout: 3000 }).toMatchObject({ theme: 'high-contrast' })
+  await appearance.getByTestId('appearance-theme-dark').click()
+  await expect(html).not.toHaveAttribute('data-theme')
+  await expect.poll(storedView, { timeout: 3000 }).toMatchObject({ theme: 'dark' })
+  await appearance.getByRole('button', { name: 'Close settings' }).click()
+  await expect(appearance).toHaveCount(0)
 
   const sidebarToggle = page.getByRole('button', { name: 'Sidebar', exact: true })
   await expect(sidebarToggle).toHaveAttribute('aria-pressed', 'true')
@@ -1542,12 +1580,15 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('tab', { name: 'Account' }).click()
   // F-15.9: the Supporter license. The fake Worker signs a token for this account, main verifies
   // it against the fixture public key and caches it, and the background refresh that follows the
-  // sign-in is what puts the badge on the tab — nothing here clicks Refresh. The accent is the
-  // cosmetic extra the license unlocks: it lands on <html>, is written to app-state.json, and is
-  // still there after the window is reloaded from main's state alone.
+  // sign-in is what puts the badge on the tab — nothing here clicks Refresh. The extras the
+  // license unlocks are on the Appearance tab (F-7.8): the accent lands on <html> and is written
+  // to app-state.json; Sepia unlocks; a custom theme (its Background changed) is saved, selected,
+  // and laid over its base as inline variables. Both are still there after the window is
+  // reloaded from main's state alone.
   await expect(settingsDialog.getByTestId('account-supporter-badge')).toBeVisible({
     timeout: 15_000
   })
+  await settingsDialog.getByRole('tab', { name: 'Appearance' }).click()
   await settingsDialog.getByTestId('account-accent-ember').click()
   await expect(page.locator('html')).toHaveAttribute('data-accent', 'ember')
   await expect
@@ -1558,11 +1599,37 @@ test('create, close, reopen a project on disk', async () => {
       { timeout: 3000 }
     )
     .toBe('ember')
+  await expect(settingsDialog.getByTestId('appearance-theme-sepia')).toBeEnabled()
+  await settingsDialog.getByTestId('appearance-theme-new').click()
+  const themeEditor = settingsDialog.getByTestId('theme-editor')
+  await themeEditor.getByLabel('Name').fill('Midnight')
+  await themeEditor.getByLabel('Background').fill('#102030')
+  await themeEditor.getByRole('button', { name: 'Save' }).click()
+  await expect(themeEditor).toHaveCount(0)
+  const inlineBg = (): Promise<string> =>
+    page.evaluate(() => document.documentElement.style.getPropertyValue('--ms-bg'))
+  await expect.poll(inlineBg, { timeout: 3000 }).toBe('#102030')
+  const storedTheme = (): { theme: string; customThemes: { id: string; name: string }[] } =>
+    (
+      JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as {
+        view: { theme: string; customThemes: { id: string; name: string }[] }
+      }
+    ).view
+  await expect
+    .poll(() => storedTheme().customThemes.map((t) => t.name), { timeout: 3000 })
+    .toEqual(['Midnight'])
+  const midnightId = storedTheme().customThemes[0]?.id ?? ''
+  expect(storedTheme().theme).toBe(midnightId)
+  await expect(settingsDialog.getByTestId(`appearance-theme-${midnightId}`)).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
   await page.reload()
   await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
   await expect(page.locator('html')).toHaveAttribute('data-accent', 'ember')
+  await expect.poll(inlineBg, { timeout: 5000 }).toBe('#102030')
   // The reload dropped the renderer's selection (main keeps the project open, not the caret), so
   // put the scene and the dialog back for the steps that follow.
   await scene1.click()
@@ -1572,6 +1639,15 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('tab', { name: 'Account' }).click()
   await settingsDialog.getByRole('button', { name: 'Sign out' }).click()
   await expect(settingsDialog.getByLabel('Email')).toBeVisible()
+  // F-7.8: signed out, the license is gone, so the custom theme paints Dark while main keeps the
+  // choice; the Appearance tab then picks Dark for the rest of the test.
+  await expect.poll(inlineBg, { timeout: 5000 }).toBe('')
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme')
+  expect(storedTheme().theme).toBe(midnightId)
+  await settingsDialog.getByRole('tab', { name: 'Appearance' }).click()
+  await expect(settingsDialog.getByTestId(`appearance-theme-${midnightId}`)).toBeDisabled()
+  await settingsDialog.getByTestId('appearance-theme-dark').click()
+  await expect.poll(() => storedTheme().theme, { timeout: 3000 }).toBe('dark')
   // Signed out, Cloud says so and Test connection has nothing to test with.
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   await settingsDialog.getByTestId('ai-source-cloud').click()

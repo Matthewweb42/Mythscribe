@@ -42,6 +42,7 @@ import {
   type LicenseClaims
 } from '@shared/license'
 import type { ViewSettings } from '@shared/zoom'
+import { builtInTheme, CUSTOM_THEMES_MAX } from '@shared/themes'
 import { AccountService } from '../account/accountService'
 import type { CloudAuthClient } from '../account/cloudAuthClient'
 import { registerInflight, resetInflight } from '../ai/inflight'
@@ -238,6 +239,7 @@ beforeEach(() => {
       setZoomFactor: vi.fn(),
       replaceMisspelling: vi.fn()
     },
+    setBackgroundColor: vi.fn(),
     setFullScreen: vi.fn((on: boolean) => {
       fullScreen = on
     }),
@@ -4779,7 +4781,9 @@ describe('view (F-7.10)', () => {
     expect(await invoke('view:get', undefined)).toEqual({
       editorZoom: 1,
       uiScale: 'medium',
-      pageEdges: true
+      pageEdges: true,
+      theme: 'dark',
+      customThemes: []
     })
   })
 
@@ -4787,7 +4791,9 @@ describe('view (F-7.10)', () => {
     expect(await invoke('view:zoomDocument', { step: 'in' })).toEqual({
       editorZoom: 1.1,
       uiScale: 'medium',
-      pageEdges: true
+      pageEdges: true,
+      theme: 'dark',
+      customThemes: []
     })
     expect(storedView().editorZoom).toBe(1.1)
     // The document zoom is the renderer's to apply; the window keeps the interface size.
@@ -4811,7 +4817,9 @@ describe('view (F-7.10)', () => {
     expect(await invoke('view:setUiScale', { scale: 'large' })).toEqual({
       editorZoom: 1,
       uiScale: 'large',
-      pageEdges: true
+      pageEdges: true,
+      theme: 'dark',
+      customThemes: []
     })
     expect(fakeWin.webContents.setZoomFactor).toHaveBeenLastCalledWith(1.15)
     expect(storedView().uiScale).toBe('large')
@@ -4825,12 +4833,16 @@ describe('view (F-7.10)', () => {
     expect(await invoke('view:setUiScale', { scale: 'small' })).toEqual({
       editorZoom: 1.1,
       uiScale: 'small',
-      pageEdges: true
+      pageEdges: true,
+      theme: 'dark',
+      customThemes: []
     })
     expect(await invoke('view:zoomDocument', { step: 'reset' })).toEqual({
       editorZoom: 1,
       uiScale: 'small',
-      pageEdges: true
+      pageEdges: true,
+      theme: 'dark',
+      customThemes: []
     })
   })
 
@@ -4846,15 +4858,46 @@ describe('view (F-7.10)', () => {
     expect(await invoke('view:setPageEdges', { on: false })).toEqual({
       editorZoom: 1.1,
       uiScale: 'medium',
-      pageEdges: false
+      pageEdges: false,
+      theme: 'dark',
+      customThemes: []
     })
     expect(storedView().pageEdges).toBe(false)
     expect(fakeWin.webContents.setZoomFactor).not.toHaveBeenCalled()
     expect((await invoke('view:setPageEdges', { on: true })).pageEdges).toBe(true)
-    expect(storedView()).toEqual({ editorZoom: 1.1, uiScale: 'medium', pageEdges: true })
+    expect(storedView()).toEqual({
+      editorZoom: 1.1,
+      uiScale: 'medium',
+      pageEdges: true,
+      theme: 'dark',
+      customThemes: []
+    })
     const bad = await handlerFor('view:setPageEdges')(null, { on: 'yes' })
     expect(bad.ok).toBe(false)
     if (!bad.ok) expect(bad.error.code).toBe('VALIDATION')
+  })
+
+  it('switches between the free themes and paints the window behind them (F-7.8)', async () => {
+    const view = await invoke('view:setTheme', { theme: 'light' })
+    expect(view.theme).toBe('light')
+    expect(storedView().theme).toBe('light')
+    expect(fakeWin.setBackgroundColor).toHaveBeenLastCalledWith('#eeeef0')
+    expect((await invoke('view:setTheme', { theme: 'high-contrast' })).theme).toBe('high-contrast')
+    expect(fakeWin.setBackgroundColor).toHaveBeenLastCalledWith('#000000')
+  })
+
+  it('refuses the Supporter themes without a license, and an id that names nothing (F-7.8)', async () => {
+    const codes = async (channel: Channel, input: unknown): Promise<string | null> => {
+      const result = await handlerFor(channel)(null, input)
+      return result.ok ? null : result.error.code
+    }
+    expect(await codes('view:setTheme', { theme: 'sepia' })).toBe('VALIDATION')
+    expect(await codes('view:setTheme', { theme: 'custom-gone' })).toBe('VALIDATION')
+    expect(await codes('view:setTheme', { theme: 'neon' })).toBe('VALIDATION')
+    const theme = { name: 'Night', base: 'dark', colors: builtInTheme('dark').colors }
+    expect(await codes('view:saveCustomTheme', { theme })).toBe('VALIDATION')
+    expect(storedView().theme).toBe('dark')
+    expect(storedView().customThemes).toEqual([])
   })
 
   it('rejects a step and a size that are not one of the named ones', async () => {
@@ -5214,6 +5257,47 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
     const accented = await creditsInvoke('account:setAccent', { accent: 'ember' })
     expect(accented.accent).toBe('ember')
     expect((await creditsInvoke('account:getSupporter', undefined)).accent).toBe('ember')
+  })
+
+  it('unlocks Sepia and custom themes with the license (F-7.8)', async () => {
+    license.mockResolvedValue({ token: LICENSE_TOKEN, product: SUPPORTER })
+    await creditsInvoke('account:refreshSupporter', undefined)
+    expect((await creditsInvoke('view:setTheme', { theme: 'sepia' })).theme).toBe('sepia')
+
+    const colors = { ...builtInTheme('light').colors, bg: '#102030' }
+    const created = await creditsInvoke('view:saveCustomTheme', {
+      theme: { name: ' Harbour ', base: 'light', colors }
+    })
+    const [harbour] = created.customThemes
+    expect(harbour).toMatchObject({ name: 'Harbour', base: 'light', colors })
+    expect(harbour?.id).toMatch(/^custom-[a-z0-9]{12}$/)
+    // Saving makes it current.
+    expect(created.theme).toBe(harbour?.id)
+
+    const id = harbour?.id ?? ''
+    const edited = await creditsInvoke('view:saveCustomTheme', {
+      theme: { id, name: 'Harbour at night', base: 'dark', colors }
+    })
+    expect(edited.customThemes).toEqual([{ id, name: 'Harbour at night', base: 'dark', colors }])
+
+    // Deleting the current one falls back to its base.
+    const deleted = await creditsInvoke('view:deleteCustomTheme', { id })
+    expect(deleted).toMatchObject({ theme: 'dark', customThemes: [] })
+    const again = await creditsHandlerFor('view:deleteCustomTheme')(null, { id })
+    expect(again.ok).toBe(false)
+  })
+
+  it('keeps at most eight custom themes (F-7.8)', async () => {
+    license.mockResolvedValue({ token: LICENSE_TOKEN, product: SUPPORTER })
+    await creditsInvoke('account:refreshSupporter', undefined)
+    const theme = { name: 'T', base: 'dark' as const, colors: builtInTheme('dark').colors }
+    for (let i = 0; i < CUSTOM_THEMES_MAX; i++) {
+      await creditsInvoke('view:saveCustomTheme', { theme })
+    }
+    const over = await creditsHandlerFor('view:saveCustomTheme')(null, { theme })
+    expect(over.ok).toBe(false)
+    if (!over.ok) expect(over.error.code).toBe('VALIDATION')
+    expect((await creditsInvoke('view:get', undefined)).customThemes).toHaveLength(8)
   })
 
   it('refuses an accent without a license (F-15.9)', async () => {

@@ -18,6 +18,7 @@ import { ASSET_SCHEME } from '@shared/focus'
 import { licensePublicKey } from '@shared/license'
 import { projectToReopen, restorableBounds } from '@shared/windowState'
 import { UI_SCALE_FACTORS } from '@shared/zoom'
+import { themeBackground } from '@shared/themes'
 import { AccountService } from './account/accountService'
 import { createCloudAuthClient } from './account/cloudAuthClient'
 import { AiKeyStore } from './ai/keyStore'
@@ -152,7 +153,10 @@ function createWindow(appState: AppStateStore): BrowserWindow {
     minHeight: WINDOW_MIN.height,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#1b1b1f',
+    // F-7.8: the stored theme's background, so the first frame is not the dark one under a light
+    // theme. Painted as if licensed: the license is not checked yet, and a lapsed one only costs
+    // a frame before the renderer paints Dark.
+    backgroundColor: themeBackground(view),
     // macOS takes the icon from the bundle; Windows and Linux windows need it here.
     ...(process.platform === 'darwin' ? {} : { icon }),
     webPreferences: {

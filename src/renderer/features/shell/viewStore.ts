@@ -1,5 +1,7 @@
 import { create } from 'zustand'
+import { nextTheme, resolveTheme, type CustomTheme, type CustomThemeInput } from '@shared/themes'
 import { defaultViewSettings, formatZoom, type UiScale, type ZoomStep } from '@shared/zoom'
+import { useAccountStore } from '@renderer/features/account/accountStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -12,13 +14,17 @@ import { ipc } from '@renderer/lib/ipc'
  * project's font size and column width by the zoom and draws itself as a sheet
  * (`editor/column.ts`), which is why they live in a store rather than in the window. The
  * interface size needs nothing here; the window is already scaled when main answers. App-wide,
- * not per project, so `load()` runs once at app start and there is no per-project clear.
+ * not per project, so `load()` runs once at app start and there is no per-project clear. The
+ * theme (F-7.8) is the same: main keeps the choice and the custom themes, App.tsx paints them.
  */
 interface ViewState {
   /** The defaults until `load` resolves, so the shell renders before app-state.json is read. */
   editorZoom: number
   uiScale: UiScale
   pageEdges: boolean
+  /** The chosen theme (F-7.8), kept even while locked; `resolveTheme` says what is painted. */
+  theme: string
+  customThemes: CustomTheme[]
   /** False until the first answer arrives; the Appearance tab waits on it. */
   loaded: boolean
   load: () => Promise<void>
@@ -30,6 +36,19 @@ interface ViewState {
   setPageEdges: (on: boolean) => Promise<void>
   /** Flips the page edges and announces the new state (the View menu runs this). */
   togglePageEdges: () => Promise<void>
+  /** Chooses a theme silently (the Appearance picker runs this). */
+  setTheme: (theme: string) => Promise<void>
+  /** Moves to the next available theme and announces it (View › Switch theme runs this). */
+  switchTheme: () => Promise<void>
+  /** Creates or replaces a custom theme and selects it; true when main took it. */
+  saveCustomTheme: (theme: CustomThemeInput) => Promise<boolean>
+  /** Deletes a custom theme; when it was current, main falls back to its base. */
+  deleteCustomTheme: (id: string) => Promise<void>
+}
+
+/** Whether the Supporter extras (Sepia, custom themes) are unlocked; unknown counts as locked. */
+function licensed(): boolean {
+  return useAccountStore.getState().supporter?.licensed === true
 }
 
 /** Bumped by every load and reset so a response from a superseded request is dropped. */
@@ -90,6 +109,58 @@ export const useViewStore = create<ViewState>((set, get) => ({
       set({ ...view, loaded: true })
       // A menu item with no check mark: the toast says which way it went, welcome screen included.
       toast.info(view.pageEdges ? 'Page edges shown' : 'Page edges hidden')
+    } catch (err) {
+      toast.error(describeError(err))
+    }
+  },
+
+  async setTheme(theme) {
+    const mine = generation
+    try {
+      const view = await ipc().invoke('view:setTheme', { theme })
+      if (mine !== generation) return
+      set({ ...view, loaded: true })
+    } catch (err) {
+      toast.error(describeError(err))
+    }
+  },
+
+  async switchTheme() {
+    const mine = generation
+    const unlocked = licensed()
+    const { theme, customThemes } = get()
+    try {
+      const view = await ipc().invoke('view:setTheme', {
+        theme: nextTheme({ theme, customThemes }, unlocked)
+      })
+      if (mine !== generation) return
+      set({ ...view, loaded: true })
+      // A menu item with no check mark, like Page edges: the toast names where it landed.
+      toast.info(`Theme: ${resolveTheme(view, unlocked).label}`)
+    } catch (err) {
+      toast.error(describeError(err))
+    }
+  },
+
+  async saveCustomTheme(theme) {
+    const mine = generation
+    try {
+      const view = await ipc().invoke('view:saveCustomTheme', { theme })
+      if (mine !== generation) return false
+      set({ ...view, loaded: true })
+      return true
+    } catch (err) {
+      toast.error(describeError(err))
+      return false
+    }
+  },
+
+  async deleteCustomTheme(id) {
+    const mine = generation
+    try {
+      const view = await ipc().invoke('view:deleteCustomTheme', { id })
+      if (mine !== generation) return
+      set({ ...view, loaded: true })
     } catch (err) {
       toast.error(describeError(err))
     }

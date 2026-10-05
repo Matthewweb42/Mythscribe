@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
@@ -47,7 +48,15 @@ import {
   UNAVAILABLE_SUMMARY,
   type SceneSummaryState
 } from '@shared/summary'
-import { UI_SCALE_FACTORS, nextZoom } from '@shared/zoom'
+import { UI_SCALE_FACTORS, nextZoom, type ViewSettings } from '@shared/zoom'
+import {
+  BUILT_IN_THEME_IDS,
+  CUSTOM_THEMES_MAX,
+  THEME_NEEDS_LICENSE_MESSAGE,
+  THEME_NOT_FOUND_MESSAGE,
+  themeBackground,
+  themeNeedsLicense
+} from '@shared/themes'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import type { AccountService } from '../account/accountService'
 import type { BackupService } from '../backups/backupService'
@@ -233,6 +242,8 @@ import { emit, register, type EmitTarget } from './registry'
 /** The parts of a BrowserWindow the handlers need; structural so tests can pass a fake. */
 export interface ClosableWindow extends EmitTarget {
   close(): void
+  /** F-7.8: the colour behind the page, so a resize or a reload never flashes the old theme. */
+  setBackgroundColor(color: string): void
   setFullScreen(on: boolean): void
   isFullScreen(): boolean
   /**
@@ -2311,6 +2322,68 @@ export function registerHandlers({
   // F-7.11: the sheet is the renderer's to draw; main only keeps the choice for the next launch.
   register('view:setPageEdges', ({ on }) => {
     return appState.update((s) => ({ ...s, view: { ...s.view, pageEdges: on } })).view
+  })
+
+  // F-7.8: the theme is the renderer's to paint; main keeps the choice and the custom themes,
+  // refuses a Supporter theme without the license (the extras are cosmetic, so the check lives
+  // here, beside the accent's), and gives every window the theme's background.
+  const licensed = (): boolean => account.supporter().licensed
+  const paintWindows = (view: ViewSettings): ViewSettings => {
+    const color = themeBackground(view, licensed())
+    for (const w of windows()) if (!w.isDestroyed()) w.setBackgroundColor(color)
+    return view
+  }
+
+  register('view:setTheme', ({ theme }) => {
+    const known =
+      (BUILT_IN_THEME_IDS as readonly string[]).includes(theme) ||
+      appState.get().view.customThemes.some((t) => t.id === theme)
+    if (!known) throw new AppError('VALIDATION', THEME_NOT_FOUND_MESSAGE)
+    if (themeNeedsLicense(theme) && !licensed()) {
+      throw new AppError('VALIDATION', THEME_NEEDS_LICENSE_MESSAGE)
+    }
+    return paintWindows(appState.update((s) => ({ ...s, view: { ...s.view, theme } })).view)
+  })
+
+  register('view:saveCustomTheme', ({ theme }) => {
+    if (!licensed()) throw new AppError('VALIDATION', THEME_NEEDS_LICENSE_MESSAGE)
+    const { customThemes } = appState.get().view
+    const id = theme.id ?? `custom-${randomUUID().replaceAll('-', '').slice(0, 12)}`
+    const saved = { ...theme, id }
+    let next: typeof customThemes
+    if (theme.id) {
+      if (!customThemes.some((t) => t.id === theme.id)) {
+        throw new AppError('VALIDATION', THEME_NOT_FOUND_MESSAGE)
+      }
+      next = customThemes.map((t) => (t.id === id ? saved : t))
+    } else {
+      if (customThemes.length >= CUSTOM_THEMES_MAX) {
+        throw new AppError(
+          'VALIDATION',
+          `You can keep up to ${CUSTOM_THEMES_MAX} custom themes. Delete one to make another.`
+        )
+      }
+      next = [...customThemes, saved]
+    }
+    return paintWindows(
+      appState.update((s) => ({ ...s, view: { ...s.view, customThemes: next, theme: id } })).view
+    )
+  })
+
+  register('view:deleteCustomTheme', ({ id }) => {
+    const { customThemes, theme } = appState.get().view
+    const gone = customThemes.find((t) => t.id === id)
+    if (!gone) throw new AppError('VALIDATION', THEME_NOT_FOUND_MESSAGE)
+    return paintWindows(
+      appState.update((s) => ({
+        ...s,
+        view: {
+          ...s.view,
+          customThemes: customThemes.filter((t) => t.id !== id),
+          theme: theme === id ? gone.base : theme
+        }
+      })).view
+    )
   })
 
   // F-7.1: the in-app Edit menu edits whatever has the focus, like the native roles do. A click

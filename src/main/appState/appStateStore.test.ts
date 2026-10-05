@@ -313,25 +313,43 @@ describe('AppStateStore', () => {
     expect(warn).toHaveBeenCalledOnce()
   })
 
+  const VIEW = { editorZoom: 1.25, uiScale: 'large', pageEdges: false } as const
+
+  it('opens a file from before themes, or with an unreadable theme list, in Dark (F-7.8)', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [], view: VIEW }), 'utf8')
+    expect(new AppStateStore(file).get().view).toEqual({ ...VIEW, theme: 'dark', customThemes: [] })
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        recents: [],
+        view: { ...VIEW, theme: 7, customThemes: [{ id: 'x' }] }
+      }),
+      'utf8'
+    )
+    expect(new AppStateStore(file).get().view).toEqual({ ...VIEW, theme: 'dark', customThemes: [] })
+  })
+
   it('round-trips the view settings and refuses a zoom outside 67–200 %', () => {
     const store = new AppStateStore(file)
     expect(
       store.update((s) => ({
         ...s,
-        view: { editorZoom: 1.25, uiScale: 'large', pageEdges: false }
+        view: { ...VIEW, theme: 'light', customThemes: [] }
       })).view
-    ).toEqual({ editorZoom: 1.25, uiScale: 'large', pageEdges: false })
+    ).toEqual({ ...VIEW, theme: 'light', customThemes: [] })
     expect(new AppStateStore(file).get().view).toEqual({
-      editorZoom: 1.25,
-      uiScale: 'large',
-      pageEdges: false
+      ...VIEW,
+      theme: 'light',
+      customThemes: []
     })
     expect(() => store.update((s) => ({ ...s, view: { ...s.view, editorZoom: 2.5 } }))).toThrow()
     expect(() => store.update((s) => ({ ...s, view: { ...s.view, editorZoom: 0.5 } }))).toThrow()
     expect(new AppStateStore(file).get().view).toEqual({
-      editorZoom: 1.25,
-      uiScale: 'large',
-      pageEdges: false
+      ...VIEW,
+      theme: 'light',
+      customThemes: []
     })
   })
 

@@ -5,6 +5,7 @@ import { defaultLayout } from '@shared/layout'
 import { DOCS_URL } from '@shared/menu'
 import type { UpdateState } from '@shared/updates'
 import { EMPTY_DOC } from '@shared/tiptap'
+import { defaultViewSettings } from '@shared/zoom'
 import {
   resetActiveEditorStore,
   useActiveEditorStore
@@ -314,6 +315,14 @@ describe('runMenuAction (F-7.1)', () => {
     expect(invoke).toHaveBeenLastCalledWith('view:setPageEdges', { on: true })
     expect(useViewStore.getState().pageEdges).toBe(true)
     expect(toasts()).toEqual(['Page edges hidden', 'Page edges shown'])
+  })
+
+  it('View › Switch theme steps to the next theme without a project and names it (F-7.8)', async () => {
+    install({ 'view:setTheme': { ...defaultViewSettings(), theme: 'light' } })
+    await runMenuAction('switchTheme')
+    expect(invoke).toHaveBeenLastCalledWith('view:setTheme', { theme: 'light' })
+    expect(useViewStore.getState().theme).toBe('light')
+    expect(toasts()).toEqual(['Theme: Light'])
   })
 
   it('View › Notes / AI assistant float on the focus flags in focus mode, leaving the layout alone', async () => {

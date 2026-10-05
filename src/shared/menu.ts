@@ -43,6 +43,7 @@ export const MENU_ITEM_IDS = [
   'openCompile',
   'toggleFocusMode',
   'togglePageEdges',
+  'switchTheme',
   'zoomIn',
   'zoomOut',
   'zoomReset',
@@ -183,9 +184,10 @@ export const MENU: readonly MenuSection[] = [
       SEPARATOR,
       { id: 'toggleFocusMode', label: 'Focus mode', shortcut: 'focusMode', when: 'project' },
       SEPARATOR,
-      // F-7.11 and F-7.10: the sheet and the zoom are app-wide, so they work on the welcome
-      // screen too.
+      // F-7.11, F-7.8, and F-7.10: the sheet, the theme, and the zoom are app-wide, so they work
+      // on the welcome screen too. Switch theme cycles (the menu model has no submenus).
       { id: 'togglePageEdges', label: 'Page edges', when: 'always' },
+      { id: 'switchTheme', label: 'Switch theme', when: 'always' },
       { id: 'zoomIn', label: 'Zoom in', shortcut: 'zoomIn', when: 'always' },
       { id: 'zoomOut', label: 'Zoom out', shortcut: 'zoomOut', when: 'always' },
       { id: 'zoomReset', label: 'Reset zoom', shortcut: 'zoomReset', when: 'always' }
