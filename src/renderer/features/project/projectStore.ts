@@ -23,6 +23,12 @@ interface ProjectState {
     aiDial?: AiDial
   ) => Promise<ProjectInfo | null>
   open: (path?: string) => Promise<ProjectInfo | null>
+  /**
+   * Restores a backup as a new project and opens it (F-8.4): `file` is one of the open
+   * project's backups; omitted, main asks for a backup file and where to put the copy. Null
+   * when a dialog was cancelled.
+   */
+  restoreBackup: (file?: string) => Promise<ProjectInfo | null>
   close: () => Promise<void>
   /**
    * Answers `window:close-requested`: flushes pending saves, then lets main close the window.
@@ -84,6 +90,16 @@ export const useProjectStore = create<ProjectState>((set) => {
           set({ current: info })
           void offerRecovery() // F-8.3; a new project (`create`) has no journal
         }
+        return info
+      })
+    },
+
+    restoreBackup(file) {
+      return run(async () => {
+        await flushPendingSaves()
+        const info = await ipc().invoke('backups:restore', { file })
+        // No recovery offer: a backup never carries the crash journal.
+        if (info) set({ current: info })
         return info
       })
     },

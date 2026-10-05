@@ -5,6 +5,7 @@ import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, levelLabel, sectionLabel, type HierarchyLevel } from '@shared/labels'
 import { LAYOUT_LIMITS } from '@shared/layout'
 import { useAccountStore } from '@renderer/features/account/accountStore'
+import { useBackupStore } from '@renderer/features/backups/backupStore'
 import { useDiagnosticsStore } from '@renderer/features/diagnostics/diagnosticsStore'
 import { AboutDialog } from '@renderer/features/shell/AboutDialog'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
@@ -142,6 +143,9 @@ export function App(): React.JSX.Element {
     // F-15.8: diagnostics are app-wide as well, and main pushes the state after a report is sent,
     // so the subscription is opened here once rather than by the Settings tab.
     const offDiagnostics = useDiagnosticsStore.getState().subscribe()
+    // F-8.4: backups are app-wide, and main pushes the state after a scheduled or on-close
+    // backup (a failure is toasted once), so the subscription is opened here once as well.
+    const offBackups = useBackupStore.getState().subscribe()
     // F-8.3: leaving the window writes every pending save at once, not after the debounce.
     const offBlur = installSaveOnBlur()
     return () => {
@@ -152,6 +156,7 @@ export function App(): React.JSX.Element {
       offAccount()
       offUpdates()
       offDiagnostics()
+      offBackups()
     }
   }, [])
 

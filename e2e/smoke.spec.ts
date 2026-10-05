@@ -4616,6 +4616,60 @@ test('create, close, reopen a project on disk', async () => {
     .click()
   await expect(page.getByRole('textbox', { name: 'Document' })).toContainText(crashSentence)
 
+  // F-8.4: automatic backups. The closes earlier in this run already backed the project up (on
+  // close, into userData/backups under the e2e override); "Back up now" writes one more, and
+  // Restore opens the newest as a copy next to the original, with the recovered text in it.
+  const backupsRoot = path.join(tmp, 'userData', 'backups')
+  const newestBackupTime = (): number =>
+    fs.existsSync(backupsRoot)
+      ? Math.max(
+          0,
+          ...fs
+            .readdirSync(backupsRoot, { recursive: true, encoding: 'utf8' })
+            .filter((name) => name.endsWith('.zip'))
+            .map((name) => fs.statSync(path.join(backupsRoot, name)).mtimeMs)
+        )
+      : 0
+  const backupsSettings = page.getByRole('dialog', { name: 'Settings' })
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await backupsSettings.getByRole('tab', { name: 'Backups' }).click()
+  await expect(backupsSettings.getByTestId('backups-folder')).toHaveText(backupsRoot)
+  const backupRows = backupsSettings.getByTestId('backup-row')
+  await expect(backupRows.first()).toBeVisible()
+  const newestBefore = newestBackupTime()
+  expect(newestBefore).toBeGreaterThan(0)
+  await backupsSettings.getByRole('button', { name: 'Back up now' }).click()
+  await expect.poll(newestBackupTime, { timeout: 5_000 }).toBeGreaterThan(newestBefore)
+  await backupRows
+    .first()
+    .getByRole('button', { name: /Restore the backup from/ })
+    .click()
+  const restoreConfirm = page.getByRole('dialog', { name: 'Restore as a copy?' })
+  await expect(restoreConfirm).toContainText('Nothing is overwritten')
+  await restoreConfirm.getByRole('button', { name: 'Restore' }).click()
+  await expect(backupsSettings).toHaveCount(0)
+  const currentProject = async (): Promise<ProjectInfo | null> => {
+    const result = await page.evaluate<IpcResult<ProjectInfo | null>>(
+      () =>
+        window.mythscribe.invoke('project:current', undefined) as Promise<
+          IpcResult<ProjectInfo | null>
+        >
+    )
+    if (!result.ok) throw new Error(`project:current failed: ${result.error.message}`)
+    return result.data
+  }
+  await expect.poll(async () => (await currentProject())?.path ?? '').toContain('(restored ')
+  const restoredPath = (await currentProject())?.path ?? ''
+  expect(path.dirname(restoredPath)).toBe(path.dirname(projectPath))
+  expect(fs.existsSync(path.join(projectPath, 'project.db'))).toBe(true)
+  await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  expect(await documentText(imported[3]?.id ?? '')).toBe(`She waited until dusk. ${crashSentence}`)
+  await page
+    .getByRole('tree', { name: 'Document tree' })
+    .getByRole('treeitem', { name: 'Scene 1 (split)', exact: true })
+    .click()
+  await expect(page.getByRole('textbox', { name: 'Document' })).toContainText(crashSentence)
+
   const closed = app.waitForEvent('close')
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
   await closed

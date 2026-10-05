@@ -14,6 +14,7 @@ import { buildCloudProvider } from './ai/providers/cloud'
 import { AiProviderRegistry } from './ai/registry'
 import type { Provider } from './ai/providers/types'
 import { AppStateStore } from './appState/appStateStore'
+import { BackupService } from './backups/backupService'
 import { createDialogs } from './dialogs'
 import { installCrashHandlers, processGoneError } from './diagnostics/crashHandlers'
 import { createDiagnosticsSend } from './diagnostics/diagnosticsClient'
@@ -37,6 +38,17 @@ let account: AccountService | null = null
 let updates: UpdateService | null = null
 /** F-15.8: built once the app is ready; off until the author turns it on. */
 let diagnostics: DiagnosticsService | null = null
+/** F-8.4: built once the app is ready; its schedule timer is dropped on quit. */
+let backups: BackupService | null = null
+
+/**
+ * Where backups go unless the author picks a folder (F-8.4): `Documents/MythScribe Backups`,
+ * or inside userData when it is overridden (the e2e), so a test never writes to real Documents.
+ */
+function defaultBackupFolder(): string {
+  if (process.env.MYTHSCRIBE_USER_DATA) return join(app.getPath('userData'), 'backups')
+  return join(app.getPath('documents'), 'MythScribe Backups')
+}
 
 /**
  * Why this build cannot update itself, or null when it can (F-15.7). Only a packaged build has
@@ -277,6 +289,14 @@ if (!primaryInstance) {
       console.warn('Could not sync the spelling dictionary', err)
     })
     void spellDictionary.sync([])
+    // F-8.4: backups run on their own schedule and push `backups:changed` when one is made or
+    // fails, so the service is built here like the update service.
+    backups = new BackupService({
+      appState,
+      projects: manager,
+      defaultFolder: defaultBackupFolder(),
+      onChange: (state) => emit(BrowserWindow.getAllWindows(), 'backups:changed', state)
+    })
     registerHandlers({
       manager,
       appState,
@@ -285,6 +305,7 @@ if (!primaryInstance) {
       account,
       updates,
       diagnostics,
+      backups,
       dialogs: createDialogs(
         () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
       ),
@@ -292,6 +313,7 @@ if (!primaryInstance) {
       focusedWindow: () => BrowserWindow.getFocusedWindow(),
       spellDictionary,
       openExternal: (url) => shell.openExternal(url),
+      openPath: (folder) => shell.openPath(folder),
       onCloseCancelled: () => {
         quitRequested = false
       }
@@ -321,6 +343,8 @@ app.on('will-quit', () => {
   account?.dispose()
   updates?.dispose()
   diagnostics?.dispose()
+  // Only the timer stops: the close below still runs the on-close backup (F-8.4).
+  backups?.dispose()
   manager.close()
 })
 

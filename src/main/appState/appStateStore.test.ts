@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, defaultAiModels } from '@shared/ai'
+import { defaultBackupSettings } from '@shared/backups'
 import { defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultSupporterSettings } from '@shared/license'
@@ -48,7 +49,8 @@ describe('AppStateStore', () => {
       updates: defaultUpdateSettings(),
       diagnostics: defaultDiagnosticsSettings(),
       supporter: defaultSupporterSettings(),
-      view: defaultViewSettings()
+      view: defaultViewSettings(),
+      backups: defaultBackupSettings()
     })
   })
 
@@ -260,6 +262,34 @@ describe('AppStateStore', () => {
     fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
     expect(new AppStateStore(file).get().view).toEqual(defaultViewSettings())
     expect(EMPTY_APP_STATE.view).toEqual(defaultViewSettings())
+  })
+
+  it('parses a file written before F-8.4 (no backups) to backups on, every 30 minutes', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().backups).toEqual(defaultBackupSettings())
+    expect(EMPTY_APP_STATE.backups).toEqual(defaultBackupSettings())
+  })
+
+  it('round-trips the backup settings and refuses an interval off the choices', () => {
+    const store = new AppStateStore(file)
+    const backups = {
+      enabled: false,
+      folder: '/b',
+      intervalMinutes: 60 as const,
+      onClose: false,
+      keep: 20 as const
+    }
+    store.update((s) => ({ ...s, backups }))
+    expect(new AppStateStore(file).get().backups).toEqual(backups)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ version: 1, recents: [], backups: { intervalMinutes: 45 } }),
+      'utf8'
+    )
+    expect(new AppStateStore(file).get().backups).toEqual(defaultBackupSettings())
+    expect(warn).toHaveBeenCalledOnce()
   })
 
   it('round-trips the view settings and refuses a zoom outside 67–200 %', () => {

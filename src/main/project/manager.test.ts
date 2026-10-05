@@ -43,4 +43,33 @@ describe('ProjectManager', () => {
     manager.close()
     expect(manager.open(projectFolderFor(tmp, 'A')).name).toBe('A')
   })
+
+  it('runs the before-close listeners with the old session on close and on replace (F-8.4)', () => {
+    const seen: string[] = []
+    manager.onBeforeClose((session) => {
+      // The database is still open here.
+      session.connection.sqlite.prepare('SELECT 1').get()
+      seen.push(session.info.name)
+    })
+    manager.create(projectFolderFor(tmp, 'A'), 'A', 'novel')
+    manager.create(projectFolderFor(tmp, 'B'), 'B', 'novel')
+    manager.close()
+    manager.close()
+    expect(seen).toEqual(['A', 'B'])
+  })
+
+  it('closes even when a before-close listener throws (F-8.4)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const seen: (string | null)[] = []
+    manager.onBeforeClose(() => {
+      throw new Error('disk full')
+    })
+    manager.onChange((info) => seen.push(info?.name ?? null))
+    manager.create(projectFolderFor(tmp, 'A'), 'A', 'novel')
+    manager.close()
+    expect(manager.current()).toBeNull()
+    expect(seen).toEqual(['A', null])
+    expect(warn).toHaveBeenCalledOnce()
+    warn.mockRestore()
+  })
 })

@@ -25,6 +25,7 @@ import {
 } from '../chat'
 import { AccountStatus } from '../account'
 import { AuthorRules } from '../authorRules'
+import { BackupSettingsPatch, BackupState } from '../backups'
 import { CheckoutBody, CreditsResult, EMAIL_MAX } from '../cloudApi'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { CompiledManuscript } from '../compile'
@@ -1269,6 +1270,33 @@ export const contract = {
    */
   'updates:install': { input: z.undefined(), output: z.null() },
   /**
+   * Where automatic backups stand (F-8.4): the settings (app-wide), the folder in use and the
+   * default one, the open project's backups newest first (none with no project open), and why
+   * the last automatic backup failed, if it did.
+   */
+  'backups:get': { input: z.undefined(), output: BackupState },
+  /** Changes the backup settings (F-8.4); the schedule follows at once. `folder: null` resets to the default. */
+  'backups:setSettings': { input: z.object({ patch: BackupSettingsPatch }), output: BackupState },
+  /** Picks the backup folder with the OS dialog (F-8.4); a cancel answers the state unchanged. */
+  'backups:chooseFolder': { input: z.undefined(), output: BackupState },
+  /**
+   * Backs the open project up now (F-8.4), whether it changed or not, then applies retention.
+   * NO_PROJECT with nothing open; a failure rejects with its cause.
+   */
+  'backups:now': { input: z.undefined(), output: BackupState },
+  /** Opens the backup folder in the OS file manager (F-8.4), creating it first. IO when the OS refuses. */
+  'backups:reveal': { input: z.undefined(), output: z.null() },
+  /**
+   * Restores a backup as a new project next to the original and opens it (F-8.4); nothing is
+   * overwritten. `file` must be one of the open project's listed backups; omitted, main asks
+   * for a backup file and then for the folder to restore into (works with no project open).
+   * Null when a dialog was cancelled; VALIDATION for a file that is not a MythScribe backup.
+   */
+  'backups:restore': {
+    input: z.object({ file: z.string().min(1).optional() }),
+    output: ProjectInfo.nullable()
+  },
+  /**
    * Where diagnostics stand (F-15.8): whether they are on (off on every install), the next
    * report verbatim so the author can read exactly what would be sent, and the last day one
    * left the machine. App-wide, no project needed.
@@ -1837,7 +1865,9 @@ export const events = {
   /** The update state changed without a renderer call (F-15.7): a background check, a download, or a ready build. */
   'updates:changed': UpdateState,
   /** Diagnostics were switched, or a report was sent (F-15.8); the tab shows what is pending now. */
-  'diagnostics:changed': DiagnosticsState
+  'diagnostics:changed': DiagnosticsState,
+  /** The backup state changed without a renderer call (F-8.4): a scheduled or on-close backup ran or failed, or a project opened or closed. */
+  'backups:changed': BackupState
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

@@ -64,6 +64,7 @@ import { replaceSceneFacts } from '../entity/observedFactStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { aiProposal } from '../db/schema'
 import { AppStateStore } from '../appState/appStateStore'
+import { BackupService } from '../backups/backupService'
 import { DiagnosticsService } from '../diagnostics/diagnosticsService'
 import { UpdateService } from '../updates/updateService'
 import type { ProjectDialogs } from '../dialogs'
@@ -89,6 +90,12 @@ let onCloseCancelled: ReturnType<typeof vi.fn<() => void>>
 /** The window `menu:edit` should use (F-7.1); null means none has the focus. */
 let focusedWindow: ClosableWindow | null
 let openExternal: ReturnType<typeof vi.fn<(url: string) => Promise<void>>>
+/** F-8.4: what `shell.openPath` answers (empty = opened); tests set it per case. */
+let openPath: ReturnType<typeof vi.fn<(folder: string) => Promise<string>>>
+/** What the fake backup dialogs answer (F-8.4); null cancels. */
+let backupFile: string | null
+let restoreParent: string | null
+let backupFolder: string | null
 /** Every list the handlers synced the spellchecker to (F-3.11), in order. */
 let spellSync: ReturnType<typeof vi.fn<(words: string[]) => Promise<void>>>
 let safe: ReturnType<typeof fakeSafeStorage>
@@ -167,6 +174,18 @@ const DIAGNOSTICS_ENVIRONMENT = {
  * get: it records and answers, and nothing ever leaves. It is tested in
  * `diagnostics/diagnosticsService.test.ts`.
  */
+/**
+ * F-8.4: the real backup service with its defaults, writing under this test's temp folder (so a
+ * project closed here is backed up like in the app). It is tested in `backups/backupService.test.ts`.
+ */
+const localBackups = (appState: AppStateStore): BackupService =>
+  new BackupService({
+    appState,
+    projects: manager,
+    defaultFolder: path.join(tmp, 'backups'),
+    onChange: () => {}
+  })
+
 const localDiagnostics = (appState: AppStateStore): DiagnosticsService =>
   new DiagnosticsService({
     appState,
@@ -186,7 +205,10 @@ const dialogs: ProjectDialogs = {
   chooseEntityImage: async () => chosenEntityImage,
   chooseManuscriptFile: async () => manuscriptPath,
   chooseEntityLibraryFile: async () => entityFilePath,
-  chooseTagBankFile: async () => tagBankPath
+  chooseTagBankFile: async () => tagBankPath,
+  chooseBackupFolder: async () => backupFolder,
+  chooseBackupFile: async () => backupFile,
+  chooseRestoreParent: async () => restoreParent
 }
 
 beforeEach(() => {
@@ -223,6 +245,10 @@ beforeEach(() => {
   onCloseCancelled = vi.fn<() => void>()
   focusedWindow = null
   openExternal = vi.fn<(url: string) => Promise<void>>(() => Promise.resolve())
+  openPath = vi.fn<(folder: string) => Promise<string>>(() => Promise.resolve(''))
+  backupFile = null
+  restoreParent = null
+  backupFolder = null
   spellSync = vi.fn<(words: string[]) => Promise<void>>(() => Promise.resolve())
   safe = fakeSafeStorage()
   keyFile = path.join(tmp, 'userData', 'ai-keys.json')
@@ -294,11 +320,13 @@ beforeEach(() => {
     // itself is tested in `updates/updateService.test.ts`.
     updates: unsupportedUpdates(appState),
     diagnostics: localDiagnostics(appState),
+    backups: localBackups(appState),
     dialogs,
     windows: () => [fakeWin],
     focusedWindow: () => focusedWindow,
     spellDictionary: { sync: spellSync },
     openExternal,
+    openPath,
     onCloseCancelled
   })
   const handlers = new Map<string, (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>>()
@@ -5061,11 +5089,13 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
       account,
       updates: unsupportedUpdates(appState),
       diagnostics: localDiagnostics(appState),
+      backups: localBackups(appState),
       dialogs,
       windows: () => [fakeWin],
       focusedWindow: () => focusedWindow,
       spellDictionary: { sync: spellSync },
       openExternal,
+      openPath,
       onCloseCancelled
     })
     // A second registration on the shared `ipcMain.handle` mock: rebuild the map from every call
@@ -5193,6 +5223,82 @@ describe('updates handlers (F-15.7)', () => {
     const result = await handlerFor('updates:install')(undefined, undefined)
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+  })
+})
+
+describe('backups handlers (F-8.4)', () => {
+  const backupsRoot = (): string => path.join(tmp, 'backups')
+
+  it('backs up now, lists the backup, and restores it as a new project beside the original', async () => {
+    const created = await invoke('project:create', {
+      name: 'Ridge',
+      format: 'novel',
+      directory: tmp
+    })
+    const state = await invoke('backups:now', undefined)
+    expect(state.folder).toBe(backupsRoot())
+    expect(state.backups).toHaveLength(1)
+    const file = state.backups[0]?.file ?? ''
+    expect(file.startsWith(backupsRoot())).toBe(true)
+
+    const restored = await invoke('backups:restore', { file })
+    expect(restored?.id).toBe(created?.id)
+    expect(path.dirname(restored?.path ?? '')).toBe(tmp)
+    expect(path.basename(restored?.path ?? '')).toMatch(/^Ridge \(restored .+\)\.mythscribe$/)
+    expect(manager.current()?.path).toBe(restored?.path)
+    // The original is untouched and still opens.
+    expect(fs.existsSync(path.join(created?.path ?? '', 'project.db'))).toBe(true)
+  })
+
+  it("refuses a file that is not one of the open project's backups", async () => {
+    await invoke('project:create', { name: 'Ridge', format: 'novel', directory: tmp })
+    const stray = path.join(tmp, 'Ridge 2026-10-04 120000.zip')
+    fs.writeFileSync(stray, 'x')
+    await expect(invoke('backups:restore', { file: stray })).rejects.toThrow(/NOT_FOUND/)
+  })
+
+  it('restores from a chosen file with no project open, and refuses a zip that is not a backup', async () => {
+    await invoke('project:create', { name: 'Ridge', format: 'novel', directory: tmp })
+    const { backups } = await invoke('backups:now', undefined)
+    await invoke('project:close', undefined)
+    expect(await invoke('backups:restore', {})).toBeNull()
+    backupFile = backups[0]?.file ?? null
+    expect(await invoke('backups:restore', {})).toBeNull()
+    const into = path.join(tmp, 'restored-here')
+    fs.mkdirSync(into)
+    restoreParent = into
+    const restored = await invoke('backups:restore', {})
+    expect(path.dirname(restored?.path ?? '')).toBe(into)
+
+    const notBackup = path.join(tmp, 'photos.zip')
+    fs.writeFileSync(notBackup, 'not a zip')
+    backupFile = notBackup
+    await expect(invoke('backups:restore', {})).rejects.toThrow(
+      'VALIDATION: This file is not a MythScribe backup'
+    )
+  })
+
+  it('changes settings, picks a folder from the dialog, and reveals it', async () => {
+    const changed = await invoke('backups:setSettings', { patch: { keep: 20, onClose: false } })
+    expect(changed.settings).toMatchObject({ keep: 20, onClose: false, enabled: true })
+    expect((await invoke('backups:chooseFolder', undefined)).folder).toBe(backupsRoot())
+    backupFolder = path.join(tmp, 'elsewhere')
+    expect((await invoke('backups:chooseFolder', undefined)).folder).toBe(backupFolder)
+    expect(await invoke('backups:reveal', undefined)).toBeNull()
+    expect(openPath).toHaveBeenCalledWith(backupFolder)
+    expect(fs.existsSync(backupFolder)).toBe(true)
+    openPath.mockResolvedValueOnce('No application is associated')
+    await expect(invoke('backups:reveal', undefined)).rejects.toThrow('IO: No application')
+    const reset = await invoke('backups:setSettings', { patch: { folder: null } })
+    expect(reset.folder).toBe(backupsRoot())
+  })
+
+  it('backs a changed project up when it closes', async () => {
+    await invoke('project:create', { name: 'Ridge', format: 'novel', directory: tmp })
+    await invoke('project:close', undefined)
+    const dirs = fs.readdirSync(backupsRoot())
+    expect(dirs).toHaveLength(1)
+    expect(fs.readdirSync(path.join(backupsRoot(), dirs[0] ?? ''))).toHaveLength(1)
   })
 })
 

@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { AiModels, defaultAiModels } from '@shared/ai'
+import { BackupSettings, defaultBackupSettings } from '@shared/backups'
 import { RecentProjectEntry } from '@shared/ipc/contract'
 import { DiagnosticsSettings, defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { StoredLayout, defaultLayout } from '@shared/layout'
@@ -41,7 +42,12 @@ export const AppState = z.object({
    * so older files open at 100 % and Medium. Main is the only writer, so a zoom off the step
    * table can only come from a hand-edited file, and the next keystroke snaps it back on.
    */
-  view: ViewSettings.default(defaultViewSettings)
+  view: ViewSettings.default(defaultViewSettings),
+  /**
+   * F-8.4: automatic backups — on, every 30 minutes and on close, ten kept, in the default
+   * folder; defaulted so older files back up the same way a fresh install does.
+   */
+  backups: BackupSettings.default(defaultBackupSettings)
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -54,7 +60,8 @@ export const EMPTY_APP_STATE: AppState = {
   updates: defaultUpdateSettings(),
   diagnostics: defaultDiagnosticsSettings(),
   supporter: defaultSupporterSettings(),
-  view: defaultViewSettings()
+  view: defaultViewSettings(),
+  backups: defaultBackupSettings()
 }
 
 export class AppStateStore {

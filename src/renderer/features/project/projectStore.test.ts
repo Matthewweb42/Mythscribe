@@ -101,6 +101,36 @@ describe('projectStore', () => {
     expect(invoke).toHaveBeenCalledWith('recovery:list', undefined)
   })
 
+  it('restoreBackup flushes, opens the restored copy, and offers no recovery (F-8.4)', async () => {
+    const { client, invoke } = fakeClient()
+    const restored = { ...info, path: '/tmp/Book (restored 2026-10-04 1200).mythscribe' }
+    const order: string[] = []
+    registerPendingSave(async () => {
+      order.push('flushed')
+    })
+    invoke.mockImplementation(async (channel: string) => {
+      order.push(channel)
+      return channel === 'backups:restore' ? restored : null
+    })
+    setIpcClient(client)
+    useProjectStore.setState({ current: info })
+    const result = await useProjectStore.getState().restoreBackup('/b/Book 2026-10-04 120000.zip')
+    expect(result).toEqual(restored)
+    expect(invoke).toHaveBeenCalledWith('backups:restore', {
+      file: '/b/Book 2026-10-04 120000.zip'
+    })
+    expect(order).toEqual(['flushed', 'backups:restore'])
+    expect(useProjectStore.getState()).toMatchObject({ current: restored, busy: false })
+  })
+
+  it('restoreBackup keeps the open project when a dialog is cancelled (F-8.4)', async () => {
+    const { client } = fakeClient()
+    setIpcClient(client)
+    useProjectStore.setState({ current: info })
+    expect(await useProjectStore.getState().restoreBackup()).toBeNull()
+    expect(useProjectStore.getState().current).toEqual(info)
+  })
+
   it('close clears the project even if the request throws', async () => {
     const { client, invoke } = fakeClient()
     invoke.mockImplementationOnce(async () => {

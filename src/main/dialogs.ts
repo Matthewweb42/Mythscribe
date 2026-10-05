@@ -34,6 +34,12 @@ export interface ProjectDialogs {
   chooseEntityLibraryFile: () => Promise<string | null>
   /** Returns the tag bank file the user chose to import (F-4.9), or null if cancelled. */
   chooseTagBankFile: () => Promise<string | null>
+  /** Returns the folder the author chose for backups (F-8.4), or null if cancelled. */
+  chooseBackupFolder: (current: string) => Promise<string | null>
+  /** Returns the backup zip the author chose to restore (F-8.4), or null if cancelled. */
+  chooseBackupFile: (directory: string) => Promise<string | null>
+  /** Returns the folder a restored backup is unpacked into (F-8.4), or null if cancelled. */
+  chooseRestoreParent: () => Promise<string | null>
 }
 
 export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDialogs {
@@ -127,6 +133,49 @@ export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDia
           { name: `Tag bank (*.${TAG_EXCHANGE_EXTENSION})`, extensions: [TAG_EXCHANGE_EXTENSION] },
           { name: 'All files', extensions: ['*'] }
         ]
+      }
+      const result = await show((win) =>
+        win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
+      )
+      if (result.canceled) return null
+      return result.filePaths[0] ?? null
+    },
+    async chooseBackupFolder(current) {
+      const options: Electron.OpenDialogOptions = {
+        title: 'Choose the backup folder',
+        buttonLabel: 'Use this folder',
+        defaultPath: current,
+        properties: ['openDirectory', 'createDirectory']
+      }
+      const result = await show((win) =>
+        win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
+      )
+      if (result.canceled) return null
+      return result.filePaths[0] ?? null
+    },
+    async chooseBackupFile(directory) {
+      const options: Electron.OpenDialogOptions = {
+        title: 'Restore from a backup',
+        buttonLabel: 'Restore',
+        defaultPath: directory,
+        properties: ['openFile'],
+        filters: [
+          { name: 'MythScribe backup (*.zip)', extensions: ['zip'] },
+          { name: 'All files', extensions: ['*'] }
+        ]
+      }
+      const result = await show((win) =>
+        win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
+      )
+      if (result.canceled) return null
+      return result.filePaths[0] ?? null
+    },
+    async chooseRestoreParent() {
+      const options: Electron.OpenDialogOptions = {
+        title: 'Where should the restored project go?',
+        buttonLabel: 'Restore here',
+        defaultPath: defaultDir(),
+        properties: ['openDirectory', 'createDirectory']
       }
       const result = await show((win) =>
         win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)

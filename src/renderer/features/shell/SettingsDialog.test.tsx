@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Sparkles, Type } from 'lucide-react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defaultBackupSettings } from '@shared/backups'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { defaultViewSettings } from '@shared/zoom'
@@ -10,6 +11,7 @@ import {
   useEditorSettingsStore
 } from '@renderer/features/editor/settingsStore'
 import { resetAccountStore } from '@renderer/features/account/accountStore'
+import { resetBackupStore } from '@renderer/features/backups/backupStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -30,8 +32,9 @@ const tabs: readonly [SettingsDialogTab, ...SettingsDialogTab[]] = [
 ]
 
 /**
- * Accepts every `editorSettings:set` and answers `view:get` for the real Appearance tab (F-7.10),
- * which is the first tab on the welcome screen; anything else is unexpected here.
+ * Accepts every `editorSettings:set`, answers `backups:get` for the real Backups tab (F-8.4),
+ * the first tab on the welcome screen, and `view:get` for the real Appearance tab (F-7.10);
+ * anything else is unexpected here.
  */
 const client: IpcClient = {
   async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
@@ -40,6 +43,17 @@ const client: IpcClient = {
       return value as Output<C>
     }
     if (channel === 'view:get') return defaultViewSettings() as Output<C>
+    if (channel === 'backups:get') {
+      const state: Output<'backups:get'> = {
+        settings: defaultBackupSettings(),
+        folder: '/backups',
+        defaultFolder: '/backups',
+        backups: [],
+        lastBackupAt: null,
+        lastError: null
+      }
+      return state as Output<C>
+    }
     throw new Error(`unexpected ${channel}`)
   },
   on: () => () => {}
@@ -56,6 +70,7 @@ beforeEach(() => {
   // signed-in account left over from another file, which would send it looking for credits.
   resetAccountStore()
   resetViewStore()
+  resetBackupStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   setIpcClient(client)
   useEditorSettingsStore.setState({ settings: { ...defaultEditorSettings('novel') } })
@@ -64,6 +79,7 @@ beforeEach(() => {
 afterEach(() => {
   resetEditorSettingsStore()
   resetViewStore()
+  resetBackupStore()
 })
 
 describe('SettingsDialog (F-7.5)', () => {
@@ -74,6 +90,7 @@ describe('SettingsDialog (F-7.5)', () => {
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
       'Editor',
       'AI',
+      'Backups',
       'Appearance',
       'Account',
       'Updates',
@@ -126,15 +143,16 @@ describe('SettingsDialog (F-7.5)', () => {
 
   it('falls back to the first tab when the named one is not shown (F-15.5)', () => {
     render(<SettingsDialog format={null} onClose={vi.fn()} initialTab="editor" />)
-    // F-7.10 / F-15.7 / F-15.8: Appearance, Updates, and Diagnostics are app-wide too, so the
-    // welcome screen shows them beside Account.
+    // F-7.10 / F-15.7 / F-15.8 / F-8.4: Backups, Appearance, Updates, and Diagnostics are
+    // app-wide too, so the welcome screen shows them beside Account.
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
+      'Backups',
       'Appearance',
       'Account',
       'Updates',
       'Diagnostics'
     ])
-    expect(tab('Appearance')).toHaveAttribute('aria-selected', 'true')
+    expect(tab('Backups')).toHaveAttribute('aria-selected', 'true')
   })
 
   it('switches between injected tabs by click and by the arrow keys, one panel at a time', async () => {

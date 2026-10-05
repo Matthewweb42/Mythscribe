@@ -1,6 +1,7 @@
 import { createElement, type ReactNode } from 'react'
 import {
   Activity,
+  Archive,
   Download,
   Monitor,
   Sparkles,
@@ -11,6 +12,7 @@ import {
 import type { NovelFormat } from '@shared/ipc/contract'
 import { AccountSettingsTab } from '@renderer/features/account/AccountSettingsTab'
 import { AiSettingsTab } from '@renderer/features/ai/AiSettingsTab'
+import { BackupsSettingsTab } from '@renderer/features/backups/BackupsSettingsTab'
 import { DiagnosticsSettingsTab } from '@renderer/features/diagnostics/DiagnosticsSettingsTab'
 import { EditorSettingsTab } from '@renderer/features/editor/EditorSettingsTab'
 import { UpdatesSettingsTab } from '@renderer/features/updates/UpdatesSettingsTab'
@@ -18,7 +20,7 @@ import { AppearanceSettingsTab } from './AppearanceSettingsTab'
 
 /** The ids of the Settings dialog tabs (F-7.5). Not persisted: the dialog opens on the first. */
 export type SettingsDialogTabId =
-  'editor' | 'ai' | 'appearance' | 'account' | 'updates' | 'diagnostics'
+  'editor' | 'ai' | 'backups' | 'appearance' | 'account' | 'updates' | 'diagnostics'
 
 interface SettingsDialogTabBase {
   id: SettingsDialogTabId
@@ -43,7 +45,9 @@ export type SettingsDialogTabs = readonly [SettingsDialogTab, ...SettingsDialogT
  * key with the dial, presets, and behaviour (F-14.4, F-5.2); the Account tab (F-15.2) the
  * optional MythScribe account; the Updates tab (F-15.7) the channel and the update state; the
  * Diagnostics tab (F-15.8) the opt-in crash and usage reports, which install off. The Appearance
- * tab (F-7.10) is app-wide, so the interface size can be fixed from the welcome screen.
+ * tab (F-7.10) is app-wide, so the interface size can be fixed from the welcome screen. The
+ * Backups tab (F-8.4) is app-wide too: its settings apply to every project, and a backup can be
+ * restored with no project open.
  */
 export const SETTINGS_DIALOG_TABS: SettingsDialogTabs = [
   {
@@ -59,6 +63,13 @@ export const SETTINGS_DIALOG_TABS: SettingsDialogTabs = [
     icon: Sparkles,
     scope: 'project',
     render: () => createElement(AiSettingsTab)
+  },
+  {
+    id: 'backups',
+    label: 'Backups',
+    icon: Archive,
+    scope: 'app',
+    render: () => createElement(BackupsSettingsTab)
   },
   {
     id: 'appearance',

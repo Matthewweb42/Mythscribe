@@ -21,6 +21,7 @@ import { defaultViewSettings } from '@shared/zoom'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAccountStore } from '@renderer/features/account/accountStore'
+import { resetBackupStore } from '@renderer/features/backups/backupStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetAuthorRulesStore, useAuthorRulesStore } from '@renderer/features/ai/authorRulesStore'
 import { resetAssistantStore, useAssistantStore } from '@renderer/features/ai/assistantStore'
@@ -105,6 +106,7 @@ beforeEach(() => {
   resetIndexingStore()
   resetContinuityStore()
   resetAccountStore()
+  resetBackupStore()
   resetViewStore()
   resetMentionStore()
   resetDocumentTagStore()
@@ -903,7 +905,7 @@ describe('App', () => {
     expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
   })
 
-  it('opens Settings on the welcome screen with only the app-wide tabs (F-7.5, F-15.2, F-15.7, F-15.8, F-7.10)', async () => {
+  it('opens Settings on the welcome screen with only the app-wide tabs (F-7.5, F-15.2, F-15.7, F-15.8, F-7.10, F-8.4)', async () => {
     install()
     render(<App />)
     await screen.findByRole('button', { name: /new project/i })
@@ -914,7 +916,7 @@ describe('App', () => {
       within(dialog)
         .getAllByRole('tab')
         .map((t) => t.textContent)
-    ).toEqual(['Appearance', 'Account', 'Updates', 'Diagnostics'])
+    ).toEqual(['Backups', 'Appearance', 'Account', 'Updates', 'Diagnostics'])
     // The dialog opens on the first app-wide tab, so Account's text is a tab click away.
     await userEvent.click(within(dialog).getByRole('tab', { name: 'Account' }))
     expect(

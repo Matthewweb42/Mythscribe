@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
 import {
@@ -48,6 +49,7 @@ import {
 import { UI_SCALE_FACTORS, nextZoom } from '@shared/zoom'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import type { AccountService } from '../account/accountService'
+import type { BackupService } from '../backups/backupService'
 import type { DiagnosticsService } from '../diagnostics/diagnosticsService'
 import type { UpdateService } from '../updates/updateService'
 import { runBetaReader } from '../ai/betaReader'
@@ -248,6 +250,12 @@ export interface HandlerDeps {
    * through the same service at the places that own those events.
    */
   diagnostics: DiagnosticsService
+  /**
+   * F-8.4: automatic backups. Like the update service it owns its settings, its timer, and what
+   * it pushes (`backups:changed`); these handlers forward the author's choices and wire it to
+   * the project's open and close.
+   */
+  backups: BackupService
   dialogs: ProjectDialogs
   windows: () => ClosableWindow[]
   /** The window with keyboard focus, for the edit commands (F-7.1); null when none has it. */
@@ -259,6 +267,11 @@ export interface HandlerDeps {
   spellDictionary: { sync(words: string[]): Promise<void> }
   /** Opens a URL in the default browser (F-7.1); `shell.openExternal` in the app. */
   openExternal: (url: string) => Promise<void>
+  /**
+   * Opens a folder in the OS file manager (F-8.4); `shell.openPath` in the app, which answers
+   * an error message (empty on success) rather than throwing.
+   */
+  openPath: (folder: string) => Promise<string>
   /** The renderer abandoned a window close (its flush failed); forget any quit that asked for it. */
   onCloseCancelled: () => void
 }
@@ -271,11 +284,13 @@ export function registerHandlers({
   account,
   updates,
   diagnostics,
+  backups,
   dialogs,
   windows,
   focusedWindow,
   spellDictionary,
   openExternal,
+  openPath,
   onCloseCancelled
 }: HandlerDeps): void {
   /**
@@ -1315,6 +1330,47 @@ export function registerHandlers({
     return null
   })
 
+  // F-8.4: automatic backups. The service owns the settings, the schedule, and the files; a
+  // backup it makes by itself (on the schedule, on close) arrives as `backups:changed`.
+  register('backups:get', () => backups.state())
+
+  register('backups:setSettings', ({ patch }) => backups.setSettings(patch))
+
+  register('backups:chooseFolder', async () => {
+    const folder = await dialogs.chooseBackupFolder(backups.state().folder)
+    return folder === null ? backups.state() : backups.setFolder(folder)
+  })
+
+  register('backups:now', () => backups.backupNow())
+
+  register('backups:reveal', async () => {
+    const { folder } = backups.state()
+    fs.mkdirSync(folder, { recursive: true })
+    const failure = await openPath(folder)
+    if (failure !== '') throw new AppError('IO', failure)
+    return null
+  })
+
+  // Restoring never overwrites: the backup becomes a new project next to the original (or in
+  // the folder the author picks) and opens in place of the current one, which closes — and is
+  // backed up on close — first.
+  register('backups:restore', async ({ file }) => {
+    let zip: string
+    let parent: string
+    if (file !== undefined) {
+      zip = backups.listedBackup(file).file
+      parent = path.dirname(manager.require().folder)
+    } else {
+      const chosen = await dialogs.chooseBackupFile(backups.state().folder)
+      if (chosen === null) return null
+      const into = await dialogs.chooseRestoreParent()
+      if (into === null) return null
+      zip = chosen
+      parent = into
+    }
+    return backups.restore(zip, parent, (folder) => manager.open(folder))
+  })
+
   // F-5.1: the key is accepted by `ai:setKey` once and never returned; status carries a mask.
   const aiStatus = (): AiStatus => ({
     provider: 'openai',
@@ -2231,6 +2287,14 @@ export function registerHandlers({
     }
     emit(windows(), 'project:changed', info)
   })
+
+  // F-8.4: registered after the listener above, so whatever it writes into the project while
+  // opening it is already in the baseline and does not count as the author's change.
+  manager.onChange((info) => {
+    if (info) backups.projectOpened()
+    else backups.projectClosed()
+  })
+  manager.onBeforeClose((session) => backups.projectClosing(session))
 }
 
 /** A tag proposal's stored content (F-12.3): the names as JSON, or none when it is anything else. */
