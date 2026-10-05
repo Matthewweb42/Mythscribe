@@ -25,12 +25,14 @@ import { replaceSceneFacts, setFactHidden, factsForNode } from '../entity/observ
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { setAiSettings, setAuthorRules } from '../project/settingsStore'
+import { setProjectTimeline } from '../project/timelineStore'
 import { addDocumentTag } from '../tag/documentTagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import {
   candidateContext,
+  computedAgeValue,
   continuityRefs,
   localCandidates,
   parseContinuityAnswer,
@@ -247,7 +249,8 @@ describe('continuityRefs (F-13.4)', () => {
         }
       ],
       truncated: false,
-      timeline: 'Day 2, morning'
+      timeline: 'Day 2, morning',
+      ages: new Map()
     })
   })
 
@@ -260,7 +263,8 @@ describe('continuityRefs (F-13.4)', () => {
     expect(continuityRefs(db, scene, text())).toEqual({
       refs: [ageRef()],
       truncated: false,
-      timeline: null
+      timeline: null,
+      ages: new Map()
     })
   })
 
@@ -350,11 +354,63 @@ describe('continuityRefs (F-13.4)', () => {
     expect(refs.length).toBeLessThan(33)
   })
 
+  describe('a computed age (F-11.2b)', () => {
+    /** The scene under check on an event of year `year`, and Mara born in `born`. */
+    const placeScene = (year: number | null, born: string): void => {
+      setProjectTimeline(db, {
+        events: [{ id: 'siege', label: 'The siege begins', when: '', year, note: '' }]
+      })
+      setSceneMeta(db, scene, { ...emptySceneMeta(), eventId: 'siege' })
+      updateEntity(db, mara, { fields: { born } })
+    }
+
+    it('replaces the sheet’s static age with the age at the scene, and keeps Born as a sheet reference', () => {
+      placeScene(1200, '1170')
+      const { refs, ages } = continuityRefs(db, scene, text())
+      expect(refs).toEqual([
+        { ...ageRef(), value: '30 at this scene (born 1170, scene year 1200)' },
+        { ...ageRef(), attribute: 'born', label: 'Born (story year)', value: '1170' }
+      ])
+      expect(ages).toEqual(new Map([[mara, 30]]))
+    })
+
+    it('adds the age where the sheet has none, and leaves other scenes’ ages out', () => {
+      updateEntity(db, mara, { fields: { age: '' } })
+      replaceSceneFacts(db, earlier, [
+        { entityId: mara, attribute: 'age', value: 'twenty', quote: 'She was twenty.' }
+      ])
+      placeScene(1200, '1170')
+      expect(continuityRefs(db, scene, text()).refs.map((ref) => ref.value)).toEqual([
+        '30 at this scene (born 1170, scene year 1200)',
+        '1170'
+      ])
+    })
+
+    it('says "not born yet" before the birth year', () => {
+      expect(computedAgeValue(1170, 1160)).toBe(
+        'not born yet at this scene (born 1170, scene year 1160)'
+      )
+    })
+
+    it('keeps the static age without a scene year, or without a whole-number birth year', () => {
+      placeScene(null, '1170')
+      expect(continuityRefs(db, scene, text()).refs[0]).toEqual(ageRef())
+      expect(continuityRefs(db, scene, text()).ages).toEqual(new Map())
+      placeScene(1200, 'Year 1170')
+      expect(continuityRefs(db, scene, text()).refs[0]).toEqual(ageRef())
+      // An unlinked scene has no year, whatever its timeline text says.
+      setSceneMeta(db, scene, { ...emptySceneMeta(), timeline: 'The siege begins' })
+      updateEntity(db, mara, { fields: { born: '1170' } })
+      expect(continuityRefs(db, scene, text()).refs[0]).toEqual(ageRef())
+    })
+  })
+
   it('has nothing for a node outside the manuscript', () => {
     expect(continuityRefs(db, folder, text())).toEqual({
       refs: [],
       truncated: false,
-      timeline: null
+      timeline: null,
+      ages: new Map()
     })
   })
 })
@@ -404,6 +460,21 @@ describe('localCandidates and candidateContext (F-13.4)', () => {
         [ref({ kind: 'timeline', entityId: null, attribute: null, value: 'Day 3' })]
       )
     ).toEqual([])
+  })
+
+  it('compares a computed age as a number: the first whole number of the fact, or none (F-11.2b)', () => {
+    const age = ref({ value: '30 at this scene (born 1170, scene year 1200)' })
+    const ages = new Map([['mara', 30]])
+    expect(localCandidates([fact({ value: '30 years old' })], [age], ages)).toEqual([])
+    expect(localCandidates([fact({ value: 'nearly 29' })], [age], ages)).toEqual([
+      { quote: QUOTE, ref: age }
+    ])
+    // No digits: the model decides whether "twenty-nine" is thirty.
+    expect(localCandidates([fact()], [age], ages)).toEqual([{ quote: QUOTE, ref: age }])
+    // Without a computed age the folded strings are compared, as before.
+    expect(localCandidates([fact({ value: '30 years old' })], [ref({ value: '30' })])).toEqual([
+      { quote: QUOTE, ref: ref({ value: '30' }) }
+    ])
   })
 
   it('keeps only the paragraphs holding a candidate’s passage, each once, and only those candidates’ references', () => {
@@ -700,6 +771,25 @@ describe('runBackgroundContinuity (F-13.4)', () => {
         `Scene text:\n"""\n${AGE_LINE}\n"""\n\nList the contradictions.`
     )
     expect(ledger[0]).toMatchObject({ feature: 'continuity', tier: 'fast' })
+  })
+
+  it('checks a stated age against the computed age at the scene, not the sheet’s static age (F-11.2b)', async () => {
+    replaceSceneFacts(db, scene, [{ entityId: mara, attribute: 'age', value: '29', quote: QUOTE }])
+    setProjectTimeline(db, {
+      events: [{ id: 'siege', label: 'The siege begins', when: '', year: 1200, note: '' }]
+    })
+    setSceneMeta(db, scene, { ...emptySceneMeta(), eventId: 'siege' })
+    // Born 1171: 29 at the siege, as the scene says, though the sheet's age reads 34.
+    updateEntity(db, mara, { fields: { born: '1171' } })
+    expect(await background()).toMatchObject({ requested: false, references: 0 })
+    expect(complete).not.toHaveBeenCalled()
+
+    updateEntity(db, mara, { fields: { born: '1166' } })
+    answers([found()])
+    expect(await background()).toMatchObject({ requested: true, references: 1 })
+    expect(sent().user).toContain(
+      '[1] Mara (character), sheet, Age: 34 at this scene (born 1166, scene year 1200)'
+    )
   })
 
   it('finds a candidate in what another scene states when the sheet is silent', async () => {

@@ -5,17 +5,25 @@ import {
   TIMELINE_EVENTS_MAX,
   TIMELINE_EVENT_TEXT_MAX,
   addEvent,
+  ageAt,
+  characterBirthYear,
   defaultProjectTimeline,
   eventForText,
   eventText,
   moveEvent,
+  parseYear,
   removeEvent,
   timelineProblem,
   updateEvent,
   type TimelineEvent
 } from './timeline'
 
-const event = (id: string, label: string, when = '', year: number | null = null): TimelineEvent => ({
+const event = (
+  id: string,
+  label: string,
+  when = '',
+  year: number | null = null
+): TimelineEvent => ({
   id,
   label,
   when,
@@ -35,9 +43,9 @@ describe('ProjectTimeline', () => {
     expect(ProjectTimeline.safeParse({ events: [event('a', '   ')] }).success).toBe(false)
     expect(ProjectTimeline.safeParse({ events: [event('a', 'A', '', 1.5)] }).success).toBe(false)
     expect(ProjectTimeline.safeParse({ events: [event('a', 'A', '', 2e6)] }).success).toBe(false)
-    expect(
-      ProjectTimeline.safeParse({ events: [event('a', 'A'), event('a', 'B')] }).success
-    ).toBe(false)
+    expect(ProjectTimeline.safeParse({ events: [event('a', 'A'), event('a', 'B')] }).success).toBe(
+      false
+    )
     expect(
       ProjectTimeline.safeParse({ events: [event('a', 'The Fall'), event('b', ' the  fall')] })
         .success
@@ -45,7 +53,9 @@ describe('ProjectTimeline', () => {
   })
 
   it('caps the list', () => {
-    const events = Array.from({ length: TIMELINE_EVENTS_MAX + 1 }, (_, i) => event(`e${i}`, `E${i}`))
+    const events = Array.from({ length: TIMELINE_EVENTS_MAX + 1 }, (_, i) =>
+      event(`e${i}`, `E${i}`)
+    )
     expect(ProjectTimeline.safeParse({ events }).success).toBe(false)
   })
 })
@@ -109,5 +119,29 @@ describe('SceneMeta.eventId', () => {
     expect(parseStoredSceneMeta(JSON.stringify(linked))).toEqual(linked)
     const older = parseStoredSceneMeta(JSON.stringify({ location: '', pov: '', timeline: 'x' }))
     expect('eventId' in older).toBe(false)
+  })
+})
+
+describe('story years and ages (F-11.2b)', () => {
+  it('reads a year typed as text: blank is none, whole numbers only, within the limit', () => {
+    expect(parseYear(' ')).toBeNull()
+    expect(parseYear('1201')).toBe(1201)
+    expect(parseYear(' -40 ')).toBe(-40)
+    expect(parseYear('12.5')).toBe('invalid')
+    expect(parseYear('Year 1170')).toBe('invalid')
+    expect(parseYear('2000000')).toBe('invalid')
+  })
+
+  it('counts an age from the birth year, negative before it', () => {
+    expect(ageAt(1170, 1200)).toBe(30)
+    expect(ageAt(1170, 1170)).toBe(0)
+    expect(ageAt(1170, 1160)).toBe(-10)
+  })
+
+  it('reads a character’s birth year from its Born field, only when it is a whole number', () => {
+    expect(characterBirthYear({ fields: { born: '1170' } })).toBe(1170)
+    expect(characterBirthYear({ fields: { born: ' -5 ' } })).toBe(-5)
+    expect(characterBirthYear({ fields: {} })).toBeNull()
+    expect(characterBirthYear({ fields: { born: 'Year 1170' } })).toBeNull()
   })
 })

@@ -5,15 +5,23 @@ import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { EMPTY_SCENE_META, type SceneMeta } from '@shared/sceneMeta'
 import type { TimelineEvent } from '@shared/timeline'
 import { resetSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
+import { entityFixture } from '@renderer/features/entities/entityFixture'
+import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { TimelineTab } from './TimelineTab'
 import { resetTimelineStore, useTimelineStore } from './timelineStore'
 
-const event = (id: string, label: string, when = '', year: number | null = null): TimelineEvent => ({
+const event = (
+  id: string,
+  label: string,
+  when = '',
+  year: number | null = null
+): TimelineEvent => ({
   id,
   label,
   when,
@@ -26,7 +34,7 @@ const meta = (over: Partial<SceneMeta>): SceneMeta => ({ ...EMPTY_SCENE_META, ..
 /** Scene 1 is on the fall, Scene 2 on the siege (so it reads as a flashback), Chapter 1 on the siege. */
 const stored: Record<string, SceneMeta> = {
   'sc-1': meta({ timeline: 'The fall', eventId: 'b' }),
-  'sc-2': meta({ timeline: 'Spring: The siege', eventId: 'a' }),
+  'sc-2': meta({ timeline: 'Spring: The siege', eventId: 'a', pov: ' tobin ' }),
   'ch-1': meta({ timeline: 'Spring: The siege', eventId: 'a' }),
   'sc-3': meta({ timeline: 'Gone', eventId: 'deleted' })
 }
@@ -40,6 +48,10 @@ function install(): void {
       if (channel === 'sceneMeta:get') {
         const { id } = input as Input<'sceneMeta:get'>
         return { id, meta: stored[id] ?? { ...EMPTY_SCENE_META } } as Output<C>
+      }
+      // F-11.2b: Mara's tag is on Chapter 1, which is on the siege.
+      if (channel === 'documentTag:listAll') {
+        return [{ nodeId: 'ch-1', tagId: 't-mara' }] as Output<C>
       }
       if (channel === 'timeline:set') {
         const value = input as Input<'timeline:set'>
@@ -71,6 +83,8 @@ beforeEach(() => {
   resetPendingSaves()
   resetSceneMetaStore()
   resetTimelineStore()
+  resetEntityStore()
+  resetDocumentTagStore()
   useTreeStore.setState({ ...buildIndex(treeFixture), selectedId: null, loaded: true })
   useDialogStore.setState({ modals: [], toasts: [] })
   install()
@@ -78,6 +92,8 @@ beforeEach(() => {
 afterEach(() => {
   resetSceneMetaStore()
   resetTimelineStore()
+  resetEntityStore()
+  resetDocumentTagStore()
   resetPendingSaves()
   setIpcClient(null)
 })
@@ -209,5 +225,31 @@ describe('TimelineTab (F-11.2)', () => {
     expect(row(0)).not.toHaveAttribute('data-flashback')
     expect(within(row(0)).getByText('The fall')).toBeVisible()
     expect(within(row(2)).getByText('—')).toBeVisible()
+  })
+
+  it('lists the ages of the characters tagged on or POV of an event´s scenes (F-11.2b)', async () => {
+    const characters = [
+      ...entityFixture.map((entity) =>
+        entity.id === 'e-mara'
+          ? { ...entity, tagId: 't-mara', fields: { ...entity.fields, born: '1170' } }
+          : entity
+      ),
+      { ...entityFixture[1]!, id: 'e-tobin', name: 'Tobin', fields: { born: '1205' } },
+      // Born, but in no scene of any event.
+      { ...entityFixture[1]!, id: 'e-ines', name: 'Ines', fields: { born: '1180' } }
+    ]
+    useEntityStore.setState({
+      byId: Object.fromEntries(characters.map((entity) => [entity.id, entity])),
+      ids: characters.map((entity) => entity.id),
+      loaded: true
+    })
+    await renderTab([event('a', 'The siege', 'Spring', 1200), event('b', 'The fall')])
+    await waitFor(() =>
+      expect(within(eventItem('The siege')).getByTestId('event-ages')).toHaveTextContent(
+        'Ages: Mara 30, Tobin not born yet'
+      )
+    )
+    // No year, no ages.
+    expect(within(eventItem('The fall')).queryByTestId('event-ages')).toBeNull()
   })
 })

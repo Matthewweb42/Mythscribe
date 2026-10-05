@@ -51,6 +51,7 @@ export type EntityOrigin = z.infer<typeof EntityOrigin>
  */
 export const ENTITY_FIELD_IDS = [
   'age',
+  'born',
   'gender',
   'appearance',
   'personality',
@@ -86,6 +87,7 @@ export interface EntityFieldDef {
 export const ENTITY_FIELDS: Record<EntityKind, readonly EntityFieldDef[]> = {
   character: [
     { id: 'age', label: 'Age', multiline: false },
+    { id: 'born', label: 'Born (story year)', multiline: false },
     { id: 'gender', label: 'Gender', multiline: false },
     { id: 'appearance', label: 'Appearance', multiline: true },
     { id: 'personality', label: 'Personality', multiline: true },

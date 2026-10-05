@@ -1,24 +1,30 @@
-import { useId, useMemo, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { useEffect, useId, useMemo, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { Pencil, Trash2 } from 'lucide-react'
 import {
   TIMELINE_LABEL_MAX,
   TIMELINE_NOTE_MAX,
   TIMELINE_WHEN_MAX,
+  parseYear,
   type TimelineEvent
 } from '@shared/timeline'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
+import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useHeldSceneMeta } from '@renderer/features/editor/useHeldSceneMeta'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { NodeTitleButton } from '@renderer/features/outline/BeatsView'
 import { listOutline } from '@renderer/features/outline/outlineRows'
-import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
+import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { describeError } from '@renderer/lib/errors'
 import {
+  ageText,
+  eventAges,
   linkedEventId,
   nodesByEvent,
-  parseYear,
   readingOrderRows,
   unplacedCount,
   yearWarnings,
+  type EventAge,
   type EventOf
 } from './timelineView'
 import { useTimelineStore } from './timelineStore'
@@ -47,6 +53,8 @@ const ICON_BUTTON =
  * position, and marks a document set earlier than one read before it ("Earlier"). Both views
  * hold every manuscript node's scene metadata while on screen (`useHeldSceneMeta`), which is
  * where the links live (`SceneMeta.eventId`); a scene is linked from the metadata pane's picker.
+ * An event with a year lists the ages of the characters in its scenes (F-11.2b: tag-linked or
+ * named as POV, with a whole-number Born), so the Events view reads every document's tags.
  */
 export function TimelineTab(): React.JSX.Element {
   const [view, setView] = useState<TimelineView>('events')
@@ -132,11 +140,32 @@ function EventsView({
 }): React.JSX.Element {
   const events = useTimelineStore((s) => s.events)
   const move = useTimelineStore((s) => s.move)
+  const metas = useSceneMetaStore((s) => s.docs)
+  const entityIds = useEntityStore((s) => s.ids)
+  const entitiesById = useEntityStore((s) => s.byId)
+  const tagIdsByNode = useDocumentTagStore((s) => s.tagIdsByNode)
+  useEffect(() => {
+    useDocumentTagStore
+      .getState()
+      .loadAll()
+      .catch((err: unknown) => toast.error(describeError(err)))
+  }, [])
   /** The position of the event being dragged, and the one it is over. */
   const [dragFrom, setDragFrom] = useState<number | null>(null)
   const [dragOver, setDragOver] = useState<number | null>(null)
   const linked = nodesByEvent(events, ids, eventOf)
   const warned = yearWarnings(events)
+  const entities = useMemo(
+    () => entityIds.flatMap((id) => entitiesById[id] ?? []),
+    [entityIds, entitiesById]
+  )
+  const ages = eventAges(
+    events,
+    linked,
+    entities,
+    (id) => tagIdsByNode[id],
+    (id) => metas[id]?.content?.pov
+  )
   const endDrag = (): void => {
     setDragFrom(null)
     setDragOver(null)
@@ -154,6 +183,7 @@ function EventsView({
               key={event.id}
               event={event}
               nodeIds={linked.get(event.id) ?? []}
+              ages={ages.get(event.id) ?? []}
               warning={warned.has(event.id)}
               onStep={(step) => void move(index, index + step)}
               drag={{
@@ -229,7 +259,10 @@ function EventFields({
       {row('when', 'When', TIMELINE_WHEN_MAX, 'e.g. Spring, Day 3')}
       {row('year', 'Year', 12, 'Story year, optional')}
       <div className="flex items-start gap-2">
-        <label htmlFor={`${id}-note`} className="w-12 shrink-0 pt-px text-xs leading-5 text-fg-muted">
+        <label
+          htmlFor={`${id}-note`}
+          className="w-12 shrink-0 pt-px text-xs leading-5 text-fg-muted"
+        >
           Note
         </label>
         <textarea
@@ -289,12 +322,14 @@ interface EventDrag {
 function EventItem({
   event,
   nodeIds,
+  ages,
   warning,
   onStep,
   drag
 }: {
   event: TimelineEvent
   nodeIds: readonly string[]
+  ages: readonly EventAge[]
   warning: boolean
   onStep: (step: -1 | 1) => void
   drag: EventDrag
@@ -399,6 +434,11 @@ function EventItem({
           ) : null}
           {event.note ? (
             <p className="m-0 line-clamp-2 text-xs text-fg-muted">{event.note}</p>
+          ) : null}
+          {ages.length > 0 ? (
+            <p data-testid="event-ages" className="m-0 text-xs text-fg-muted">
+              Ages: {ages.map((age) => `${age.name} ${ageText(age.age)}`).join(', ')}
+            </p>
           ) : null}
         </>
       )}

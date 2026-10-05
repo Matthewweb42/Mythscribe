@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { TimelineEvent } from '@shared/timeline'
 import {
+  ageText,
+  agesOnTimeline,
+  eventAges,
   linkedEventId,
   nodesByEvent,
-  parseYear,
   readingOrderRows,
   unplacedCount,
   yearWarnings
@@ -53,13 +55,66 @@ describe('timelineView (F-11.2)', () => {
       { id: 's6', eventIndex: 1, flashback: true }
     ])
   })
+})
 
-  it('reads the year field: blank is none, whole numbers only, within the limit', () => {
-    expect(parseYear(' ')).toBeNull()
-    expect(parseYear('1201')).toBe(1201)
-    expect(parseYear('-40')).toBe(-40)
-    expect(parseYear('12.5')).toBe('invalid')
-    expect(parseYear('soon')).toBe('invalid')
-    expect(parseYear('2000000')).toBe('invalid')
+describe('ages on the timeline (F-11.2b)', () => {
+  const character = (
+    id: string,
+    name: string,
+    born: string | null,
+    tagId: string | null = null
+  ) => ({
+    id,
+    kind: 'character' as const,
+    name,
+    fields: born === null ? {} : { born },
+    tagId
+  })
+  const dated = [event('a', 1200), event('b'), event('c', 1150)]
+  const linked = new Map([
+    ['a', ['s1', 's2']],
+    ['b', ['s3']],
+    ['c', ['s4']]
+  ])
+  const tags: Record<string, string[]> = { s1: ['t-mara'], s3: ['t-mara'], s4: ['t-mara'] }
+  const povs: Record<string, string> = { s2: 'TOBIN', s4: '' }
+
+  it('lists the tagged and POV characters with a birth year per event with a year, by name', () => {
+    const ages = eventAges(
+      dated,
+      linked,
+      [
+        character('e-tobin', 'Tobin', '1190'),
+        character('e-mara', 'Mara', '1170', 't-mara'),
+        character('e-ines', 'Ines', '1180', 't-ines'),
+        character('e-vell', 'Vell', 'old', 't-mara'),
+        { ...character('e-mill', 'Tobin', '1100'), kind: 'setting' as const }
+      ],
+      (id) => tags[id],
+      (id) => povs[id]
+    )
+    expect(ages).toEqual(
+      new Map([
+        [
+          'a',
+          [
+            { entityId: 'e-mara', name: 'Mara', age: 30 },
+            { entityId: 'e-tobin', name: 'Tobin', age: 10 }
+          ]
+        ],
+        ['c', [{ entityId: 'e-mara', name: 'Mara', age: -20 }]]
+      ])
+    )
+  })
+
+  it('lists a character’s age at every event with a year, in story order', () => {
+    expect(agesOnTimeline(dated, 1170).map(({ event: e, year, age }) => [e.id, year, age])).toEqual(
+      [
+        ['a', 1200, 30],
+        ['c', 1150, -20]
+      ]
+    )
+    expect(ageText(-20)).toBe('not born yet')
+    expect(ageText(0)).toBe('0')
   })
 })

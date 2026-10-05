@@ -38,6 +38,7 @@ describe('the templates', () => {
   it('give every kind the spec’s fields, each with a label', () => {
     expect(fieldIdsFor('character')).toEqual([
       'age',
+      'born',
       'gender',
       'appearance',
       'personality',

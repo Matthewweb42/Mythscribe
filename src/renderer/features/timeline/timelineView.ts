@@ -1,4 +1,6 @@
-import { TIMELINE_YEAR_LIMIT, type TimelineEvent } from '@shared/timeline'
+import { toEntityNameKey } from '@shared/entities'
+import type { Entity } from '@shared/ipc/contract'
+import { ageAt, characterBirthYear, type TimelineEvent } from '@shared/timeline'
 
 /**
  * The pure arithmetic of the Timeline tab (F-11.2). `eventOf(id)` answers the event id a node's
@@ -12,9 +14,7 @@ export function linkedEventId(
   events: readonly TimelineEvent[],
   eventId: string | undefined
 ): string | undefined {
-  return eventId !== undefined && events.some((event) => event.id === eventId)
-    ? eventId
-    : undefined
+  return eventId !== undefined && events.some((event) => event.id === eventId) ? eventId : undefined
 }
 
 /** Each event's linked nodes, in the reading order of `ids`; every event has an entry. */
@@ -86,14 +86,64 @@ export function readingOrderRows(
   })
 }
 
+/** One character's age at an event (F-11.2b); negative = not born yet. */
+export interface EventAge {
+  entityId: string
+  name: string
+  age: number
+}
+
 /**
- * The year field's text as a story year: blank is no year (null), a whole number within
- * `TIMELINE_YEAR_LIMIT` is that year, anything else is `'invalid'` and keeps the form from saving.
+ * The ages at each event with a year (F-11.2b), per event id, sorted by name: every character
+ * with a whole-number birth year whose entity tag is linked to one of the event's nodes, or whose
+ * name is a linked node's POV (same name key). Inline mentions are not consulted. Events without
+ * a year, or with no such character, have no entry.
  */
-export function parseYear(text: string): number | null | 'invalid' {
-  const trimmed = text.trim()
-  if (trimmed === '') return null
-  if (!/^-?\d+$/.test(trimmed)) return 'invalid'
-  const year = Number(trimmed)
-  return Math.abs(year) <= TIMELINE_YEAR_LIMIT ? year : 'invalid'
+export function eventAges(
+  events: readonly TimelineEvent[],
+  linked: ReadonlyMap<string, readonly string[]>,
+  entities: readonly Pick<Entity, 'id' | 'kind' | 'name' | 'fields' | 'tagId'>[],
+  tagIdsOf: (nodeId: string) => readonly string[] | undefined,
+  povOf: (nodeId: string) => string | undefined
+): Map<string, EventAge[]> {
+  const characters = entities.flatMap((entity) => {
+    const born = entity.kind === 'character' ? characterBirthYear(entity) : null
+    return born === null ? [] : [{ entity, born, key: toEntityNameKey(entity.name) }]
+  })
+  const map = new Map<string, EventAge[]>()
+  if (characters.length === 0) return map
+  for (const event of events) {
+    const year = event.year
+    if (year === null) continue
+    const nodeIds = linked.get(event.id) ?? []
+    const tags = new Set(nodeIds.flatMap((id) => tagIdsOf(id) ?? []))
+    const povs = new Set(nodeIds.map((id) => toEntityNameKey(povOf(id) ?? '')))
+    const ages = characters
+      .filter(
+        ({ entity, key }) => (entity.tagId !== null && tags.has(entity.tagId)) || povs.has(key)
+      )
+      .map(({ entity, born }) => ({
+        entityId: entity.id,
+        name: entity.name,
+        age: ageAt(born, year)
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+    if (ages.length > 0) map.set(event.id, ages)
+  }
+  return map
+}
+
+/** An age as the timeline shows it: the number, or "not born yet". */
+export function ageText(age: number): string {
+  return age < 0 ? 'not born yet' : String(age)
+}
+
+/** The events with a year, in story order, each with the age of a character born in `born`. */
+export function agesOnTimeline(
+  events: readonly TimelineEvent[],
+  born: number
+): { event: TimelineEvent; year: number; age: number }[] {
+  return events.flatMap((event) =>
+    event.year === null ? [] : [{ event, year: event.year, age: ageAt(born, event.year) }]
+  )
 }

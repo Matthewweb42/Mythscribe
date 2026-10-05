@@ -26,13 +26,14 @@ import {
 } from '@shared/observedFacts'
 import type { SettledStatus } from '@shared/proposal'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
+import { ageAt, characterBirthYear } from '@shared/timeline'
 import type { NodeRow } from '../db/schema'
 import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { getDocumentContent } from '../document/documentStore'
 import { listEntities } from '../entity/entityStore'
 import { factsForEntities, factsForNode } from '../entity/observedFactStore'
 import { AppError } from '../ipc/errors'
-import { getAiSettings } from '../project/settingsStore'
+import { getAiSettings, getProjectTimeline } from '../project/settingsStore'
 import { listDocumentTags } from '../tag/documentTagStore'
 import type { TreeDb } from '../tree/treeStore'
 import {
@@ -102,6 +103,11 @@ export interface ContinuityRefs {
   truncated: boolean
   /** This scene's timeline, when the previous scene's is one of the references; else null. */
   timeline: string | null
+  /**
+   * The computed age at this scene (F-11.2b) per entity id, for the characters whose `age`
+   * reference is computed from their birth year and the scene's event year.
+   */
+  ages: ReadonlyMap<string, number>
 }
 
 /** A reference value as sent and stored: one line, cut to `CONTINUITY_REF_VALUE_MAX` with "…". */
@@ -112,8 +118,22 @@ function clip(value: string): string {
     : `${flat.slice(0, CONTINUITY_REF_VALUE_MAX - 1).trimEnd()}…`
 }
 
-/** The author's own statements about one entity: its filled sheet fields, or a blank page as `Notes`. */
-function sheetRefs(entity: Entity): ContinuityRef[] {
+/**
+ * The `age` reference's value when it is computed (F-11.2b): the age, or "not born yet", at the
+ * scene, with the birth year and the scene's year it comes from.
+ */
+export function computedAgeValue(born: number, year: number): string {
+  const age = ageAt(born, year)
+  return `${age < 0 ? 'not born yet' : String(age)} at this scene (born ${born}, scene year ${year})`
+}
+
+/**
+ * The author's own statements about one entity: its filled sheet fields, or a blank page as
+ * `Notes`. With `age` (a character's computed age at the scene, F-11.2b), the `age` reference
+ * carries it in place of the sheet's static age, which cannot be right at every point of the
+ * story, or is added where the sheet has none.
+ */
+function sheetRefs(entity: Entity, age: { born: number; year: number } | null): ContinuityRef[] {
   const base = {
     kind: 'sheet' as const,
     entityId: entity.id,
@@ -127,7 +147,10 @@ function sheetRefs(entity: Entity): ContinuityRef[] {
     return page ? [{ ...base, attribute: 'notes', label: 'Notes', value: page }] : []
   }
   return ENTITY_FIELDS[entity.kind].flatMap((field) => {
-    const value = clip(entity.fields[field.id] ?? '')
+    const value =
+      field.id === 'age' && age !== null
+        ? computedAgeValue(age.born, age.year)
+        : clip(entity.fields[field.id] ?? '')
     return value ? [{ ...base, attribute: field.id, label: field.label, value }] : []
   })
 }
@@ -142,6 +165,10 @@ function sheetRefs(entity: Entity): ContinuityRef[] {
  *    author's sheet wins every conflict (F-14.9).
  * 3. `timeline`: the previous scene's timeline metadata, when both scenes have one.
  *
+ * A character with a birth year (`born`) in a scene whose linked event has a year gets its age
+ * at the scene as the `age` sheet reference (`computedAgeValue`, F-11.2b); the year comes from
+ * the scene's `eventId` on the stored timeline, never from the free-text timeline field.
+ *
  * The entities are the ones the scene names (`entitiesNamedIn`), the ones linked to its tags,
  * and the ones it has observed facts about (F-5.16 resolves "Dr Vell" to the sheet's "Dr.
  * Vell"), in story-bible order. A reference whose dedupe key the author dismissed for this scene
@@ -153,7 +180,12 @@ export function continuityRefs(db: TreeDb, nodeId: string, sceneText: string): C
   const documents = manuscriptDocuments(db)
   const at = documents.findIndex((row) => row.id === nodeId)
   const current = documents[at]
-  if (current === undefined) return { refs: [], truncated: false, timeline: null }
+  if (current === undefined) return { refs: [], truncated: false, timeline: null, ages: new Map() }
+  const meta = parseStoredSceneMeta(current.sceneMeta)
+  const year =
+    meta.eventId === undefined
+      ? null
+      : (getProjectTimeline(db).events.find((event) => event.id === meta.eventId)?.year ?? null)
 
   const all = listEntities(db)
   const named = new Set(entitiesNamedIn(all, sceneText).map((entity) => entity.id))
@@ -171,6 +203,7 @@ export function continuityRefs(db: TreeDb, nodeId: string, sceneText: string): C
 
   const sheets: ContinuityRef[] = []
   const facts: ContinuityRef[] = []
+  const ages = new Map<string, number>()
   const groups = groupFacts(
     factsForEntities(
       db,
@@ -179,7 +212,13 @@ export function continuityRefs(db: TreeDb, nodeId: string, sceneText: string): C
     documents.map((row) => row.id)
   )
   for (const entity of entities) {
-    const sheet = sheetRefs(entity)
+    const born =
+      entity.kind === 'character' && entity.template === 'structured'
+        ? characterBirthYear(entity)
+        : null
+    const age = born === null || year === null ? null : { born, year }
+    if (age !== null) ages.set(entity.id, ageAt(age.born, age.year))
+    const sheet = sheetRefs(entity, age)
     // The sheet's own fields decide what the facts may add, dismissed or not.
     const filled = new Set(sheet.map((ref) => ref.attribute))
     sheets.push(...sheet.filter(live))
@@ -202,7 +241,7 @@ export function continuityRefs(db: TreeDb, nodeId: string, sceneText: string): C
   }
 
   const previous = at > 0 ? documents[at - 1] : undefined
-  const own = parseStoredSceneMeta(current.sceneMeta).timeline.trim()
+  const own = meta.timeline.trim()
   const before = previous ? parseStoredSceneMeta(previous.sceneMeta).timeline.trim() : ''
   const timeline: ContinuityRef[] =
     previous !== undefined && own && before
@@ -241,7 +280,8 @@ export function continuityRefs(db: TreeDb, nodeId: string, sceneText: string): C
   return {
     refs: [...sheets, ...facts, ...timeline],
     truncated,
-    timeline: timeline.length > 0 ? own : null
+    timeline: timeline.length > 0 ? own : null,
+    ages
   }
 }
 
@@ -260,10 +300,15 @@ export interface ContinuityCandidate {
  * "thirty-four" really conflict is the model's call. What the fact extractor did not log
  * (dialogue tone, who knows what, the timeline) is never a candidate: `Check consistency` covers
  * those.
+ *
+ * A character's computed age (`ages`, from `continuityRefs`, F-11.2b) is compared as a number: an
+ * `age` fact is a candidate when its first whole number differs from the age at this scene, or
+ * when it has none ("about thirty" is the model's call); one stating that number is not.
  */
 export function localCandidates(
   facts: readonly ObservedFact[],
-  refs: readonly ContinuityRef[]
+  refs: readonly ContinuityRef[],
+  ages: ReadonlyMap<string, number> = new Map()
 ): ContinuityCandidate[] {
   const candidates: ContinuityCandidate[] = []
   for (const fact of facts) {
@@ -271,11 +316,21 @@ export function localCandidates(
     for (const ref of refs) {
       if (ref.kind === 'timeline' || ref.entityId !== fact.entityId) continue
       if (ref.attribute !== fact.attribute) continue
-      if (factKey(fact.attribute, fact.value) === factKey(fact.attribute, ref.value)) continue
+      const age = fact.attribute === 'age' ? ages.get(fact.entityId) : undefined
+      if (age !== undefined) {
+        if (firstWholeNumber(fact.value) === age) continue
+      } else if (factKey(fact.attribute, fact.value) === factKey(fact.attribute, ref.value))
+        continue
       candidates.push({ quote: fact.quote, ref })
     }
   }
   return candidates
+}
+
+/** The first whole number written in digits in `text`, or null when it has none. */
+function firstWholeNumber(text: string): number | null {
+  const match = /\d+/u.exec(text)
+  return match === null ? null : Number(match[0])
 }
 
 /**
@@ -608,7 +663,7 @@ export async function runBackgroundContinuity(
   const all = continuityRefs(db, input.nodeId, fullText)
   const context = candidateContext(
     fullText,
-    localCandidates(factsForNode(db, input.nodeId), all.refs),
+    localCandidates(factsForNode(db, input.nodeId), all.refs, all.ages),
     all.refs
   )
   if (context.refs.length === 0) {

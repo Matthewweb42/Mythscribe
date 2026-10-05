@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { toEntityNameKey } from './entities'
+import { toEntityNameKey, type EntityFields } from './entities'
 import { moveItem } from './listMove'
 
 /**
@@ -113,7 +113,10 @@ export function updateEvent(
 }
 
 /** The list without event `id`; the same array when it was not in it. */
-export function removeEvent(events: readonly TimelineEvent[], id: string): readonly TimelineEvent[] {
+export function removeEvent(
+  events: readonly TimelineEvent[],
+  id: string
+): readonly TimelineEvent[] {
   return events.some((event) => event.id === id)
     ? events.filter((event) => event.id !== id)
     : events
@@ -126,4 +129,28 @@ export function moveEvent(
   to: number
 ): readonly TimelineEvent[] {
   return moveItem(events, from, to)
+}
+
+/**
+ * A story year typed as text (the timeline's year input, a character's `born` field): blank is no
+ * year (null), a whole number within `TIMELINE_YEAR_LIMIT` is that year, anything else is
+ * `'invalid'` ("Year 1170" included), so the form refuses it and ages are not computed from it.
+ */
+export function parseYear(text: string): number | null | 'invalid' {
+  const trimmed = text.trim()
+  if (trimmed === '') return null
+  if (!/^-?\d+$/.test(trimmed)) return 'invalid'
+  const year = Number(trimmed)
+  return Math.abs(year) <= TIMELINE_YEAR_LIMIT ? year : 'invalid'
+}
+
+/** A character's age in story year `year` when born in `born` (F-11.2b); negative = not born yet. */
+export function ageAt(born: number, year: number): number {
+  return year - born
+}
+
+/** A character's birth year from the sheet's `born` field, or null when it is blank or not a whole number. */
+export function characterBirthYear(entity: { fields: EntityFields }): number | null {
+  const year = parseYear(entity.fields.born ?? '')
+  return year === 'invalid' ? null : year
 }

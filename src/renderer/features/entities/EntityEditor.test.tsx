@@ -17,6 +17,7 @@ import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { resetMentionStore } from '@renderer/features/tags/mentionStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
+import { resetTimelineStore, useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { EntityEditor } from './EntityEditor'
 import { resetEntityDraftStore, useEntityDraftStore } from './entityDraftStore'
@@ -111,6 +112,7 @@ describe('EntityEditor (F-9.3)', () => {
     resetDocumentTagStore()
     resetMentionStore()
     resetLayoutStore()
+    resetTimelineStore()
     useTreeStore.getState().clear()
     resetActiveEditorStore()
     useDialogStore.setState({ modals: [], toasts: [] })
@@ -126,6 +128,7 @@ describe('EntityEditor (F-9.3)', () => {
     resetMentionStore()
     // The layout store's write is debounced; leaving it pending leaks into the next file.
     resetLayoutStore()
+    resetTimelineStore()
   })
 
   it('pins the entity to References and unpins it again, opening the panel (F-9.6)', async () => {
@@ -389,5 +392,51 @@ describe('EntityEditor (F-9.3)', () => {
     const { container } = render(<EntityEditor id="e-gone" />)
     expect(container).toBeEmptyDOMElement()
     expect(useEntityStore.getState().selectedId).toBeNull()
+  })
+
+  it('shows Mara´s age at every timeline event with a year, from the Born field as typed (F-11.2b)', async () => {
+    const user = userEvent.setup()
+    useTimelineStore.setState({
+      loaded: true,
+      events: [
+        { id: 'a', label: 'The flood', when: 'Spring', year: 1160, note: '' },
+        { id: 'b', label: 'Undated', when: '', year: null, note: '' },
+        { id: 'c', label: 'The siege begins', when: '', year: 1200, note: '' }
+      ]
+    })
+    await openPage('e-mara')
+    // Blank Born: nothing to show.
+    expect(screen.queryByRole('region', { name: 'Age on the timeline' })).toBeNull()
+    await user.type(field('Born (story year)'), 'Year 1170')
+    expect(screen.getByText(/Use a whole number to track age/)).toBeVisible()
+    expect(screen.queryByRole('region', { name: 'Age on the timeline' })).toBeNull()
+    await user.clear(field('Born (story year)'))
+    await user.type(field('Born (story year)'), '1170')
+    const section = screen.getByRole('region', { name: 'Age on the timeline' })
+    expect(
+      within(section)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent)
+    ).toEqual(['The floodSpringYear 1160not born yet', 'The siege beginsYear 1200age 30'])
+  })
+
+  it('says when no timeline event has a year, and shows no ages for a setting (F-11.2b)', async () => {
+    useTimelineStore.setState({
+      loaded: true,
+      events: [{ id: 'b', label: 'Undated', when: '', year: null, note: '' }]
+    })
+    await openPage('e-mara', {
+      'entity:list': () =>
+        entityFixture.map((entity) =>
+          entity.id === 'e-mara'
+            ? { ...entity, fields: { ...entity.fields, born: '1170' } }
+            : entity
+        )
+    })
+    const section = screen.getByRole('region', { name: 'Age on the timeline' })
+    expect(section).toHaveTextContent('No timeline event has a year yet.')
+    cleanup()
+    render(<EntityEditor id="e-forest" />)
+    expect(screen.queryByRole('region', { name: 'Age on the timeline' })).toBeNull()
   })
 })

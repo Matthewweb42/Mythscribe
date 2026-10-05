@@ -15,6 +15,7 @@ import {
   type EntityTemplate
 } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
+import { parseYear } from '@shared/timeline'
 import { openMention } from '@renderer/features/editor/openPassage'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
@@ -24,6 +25,8 @@ import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { sceneRowsForTag } from '@renderer/features/tags/tagUsage'
+import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
+import { agesOnTimeline, ageText } from '@renderer/features/timeline/timelineView'
 import { describeError } from '@renderer/lib/errors'
 import { ObservedFacts } from './ObservedFacts'
 import { useEntityDraftStore } from './entityDraftStore'
@@ -263,6 +266,10 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
           />
         )}
 
+        {entity.kind === 'character' && entity.template === 'structured' ? (
+          <AgeOnTimeline born={values.fields.born ?? ''} />
+        ) : null}
+
         <ObservedFacts entity={entity} />
 
         <EntityScenes entity={entity} />
@@ -276,6 +283,48 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
         </p>
       </div>
     </article>
+  )
+}
+
+/**
+ * A character's age at every timeline event with a year (F-11.2b), from the Born field as typed
+ * (the draft, so it follows the keystrokes), in story order. Nothing while Born is blank; a hint
+ * while it is not a whole number ("Year 1170" is not), since the age needs one.
+ */
+function AgeOnTimeline({ born }: { born: string }): React.JSX.Element | null {
+  const events = useTimelineStore((s) => s.events)
+  const year = parseYear(born)
+  if (year === null) return null
+  if (year === 'invalid') {
+    return (
+      <p className="m-0 text-xs text-fg-muted">
+        Use a whole number to track age (1170, not "Year 1170").
+      </p>
+    )
+  }
+  const rows = agesOnTimeline(events, year)
+  return (
+    <section aria-label="Age on the timeline" className="flex flex-col gap-1">
+      <h3 className={`m-0 font-normal ${LABEL}`}>Age on the timeline</h3>
+      {rows.length === 0 ? (
+        <p className="m-0 text-xs text-fg-muted">No timeline event has a year yet.</p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+          {rows.map((row) => (
+            <li key={row.event.id} className="flex items-baseline gap-2 text-sm">
+              <span className="min-w-0 flex-1 truncate">{row.event.label}</span>
+              {row.event.when ? (
+                <span className="shrink-0 text-xs text-fg-subtle">{row.event.when}</span>
+              ) : null}
+              <span className="shrink-0 text-xs text-fg-subtle">Year {row.year}</span>
+              <span className="shrink-0 text-xs text-fg-muted">
+                {row.age < 0 ? ageText(row.age) : `age ${row.age}`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
