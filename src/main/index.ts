@@ -1,4 +1,14 @@
-import { app, BrowserWindow, dialog, net, protocol, safeStorage, session, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  net,
+  protocol,
+  safeStorage,
+  screen,
+  session,
+  shell
+} from 'electron'
 import icon from '../../resources/icon.png?asset'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -6,7 +16,8 @@ import { pathToFileURL } from 'node:url'
 import { cloudApiUrl } from '@shared/account'
 import { ASSET_SCHEME } from '@shared/focus'
 import { licensePublicKey } from '@shared/license'
-import { UI_SCALE_FACTORS, type UiScale } from '@shared/zoom'
+import { projectToReopen, restorableBounds } from '@shared/windowState'
+import { UI_SCALE_FACTORS } from '@shared/zoom'
 import { AccountService } from './account/accountService'
 import { createCloudAuthClient } from './account/cloudAuthClient'
 import { AiKeyStore } from './ai/keyStore'
@@ -25,6 +36,7 @@ import { installSingleInstance } from './lifecycle'
 import { installApplicationMenu } from './menu'
 import { assetPathFor } from './project/assetUrl'
 import { ProjectManager } from './project/manager'
+import { isProjectFolder } from './project/projectStore'
 import { spellMenuPayload } from './spellcheck/contextMenu'
 import { createSessionDictionary } from './spellcheck/sessionDictionary'
 import { loadAutoUpdater } from './updates/autoUpdater'
@@ -119,13 +131,25 @@ protocol.registerSchemesAsPrivileged([
 /** The lock lives in userData, so it must be requested after the override above. */
 const primaryInstance = installSingleInstance(app, () => BrowserWindow.getAllWindows()[0] ?? null)
 
-/** `uiScale` is the persisted F-7.10 interface size, applied before the window is shown. */
-function createWindow(uiScale: UiScale): BrowserWindow {
+const WINDOW_MIN = { width: 900, height: 600 } as const
+
+/**
+ * The window comes back at the persisted F-7.10 interface size and, F-7.9, where the author left
+ * it: the same size and place when that is still on a display, maximized if it was, else the
+ * default size centered. Its bounds are written back as it closes.
+ */
+function createWindow(appState: AppStateStore): BrowserWindow {
+  const { view, window: saved } = appState.get()
+  const uiScale = view.uiScale
+  const bounds = restorableBounds(
+    saved.bounds,
+    screen.getAllDisplays().map((d) => d.workArea),
+    WINDOW_MIN
+  )
   const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 900,
-    minHeight: 600,
+    ...(bounds ?? { width: 1400, height: 900 }),
+    minWidth: WINDOW_MIN.width,
+    minHeight: WINDOW_MIN.height,
     show: false,
     autoHideMenuBar: true,
     backgroundColor: '#1b1b1f',
@@ -138,6 +162,7 @@ function createWindow(uiScale: UiScale): BrowserWindow {
       nodeIntegration: false
     }
   })
+  if (saved.maximized) win.maximize()
 
   // Under the e2e harness the window must not steal the desktop's keyboard focus: on WSLg a
   // shown window takes focus, and anything typed on the machine lands in the test's inputs.
@@ -153,6 +178,16 @@ function createWindow(uiScale: UiScale): BrowserWindow {
   // F-1.4: with a project open, the renderer flushes pending saves first and then invokes
   // `window:close`, which closes the project so this guard lets the second close through.
   win.on('close', (e) => {
+    // F-7.9: the normal bounds, so a maximized or fullscreen window remembers the size under it.
+    // Runs on the first (prevented) close too; the second one writes the same values.
+    try {
+      appState.update((s) => ({
+        ...s,
+        window: { ...s.window, bounds: win.getNormalBounds(), maximized: win.isMaximized() }
+      }))
+    } catch (err) {
+      console.warn('Could not save the window state', err)
+    }
     if (!manager.current()) return
     e.preventDefault()
     emit([win], 'window:close-requested', null)
@@ -318,13 +353,24 @@ if (!primaryInstance) {
         quitRequested = false
       }
     })
-    createWindow(appState.get().view.uiScale)
+    // F-7.9: the project open at the last quit, opened before the window so the renderer's first
+    // `project:current` finds it (and offers crash recovery as usual). One that will not open
+    // leaves the welcome screen, which lists it under recents.
+    const reopen = projectToReopen(appState.get().window, isProjectFolder)
+    if (reopen !== null) {
+      try {
+        manager.open(reopen)
+      } catch (err) {
+        console.warn(`Could not reopen ${reopen}`, err)
+      }
+    }
+    createWindow(appState)
     // The first check waits for the window: nothing about an update is urgent (F-15.7).
     updates.start()
     // Same for the first diagnostics flush (F-15.8), which is also a no-op while it is off.
     diagnostics.start()
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow(appState.get().view.uiScale)
+      if (BrowserWindow.getAllWindows().length === 0) createWindow(appState)
     })
   })
 }

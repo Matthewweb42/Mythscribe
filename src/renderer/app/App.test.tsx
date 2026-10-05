@@ -200,6 +200,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'jobs:status') return IDLE_INDEX_QUEUE
     if (channel === 'continuity:list') return []
     if (channel === 'view:get') return defaultViewSettings()
+    if (channel === 'startup:get') return { reopenLastProject: true }
     if (channel === 'recovery:list') return []
     if (channel === 'drafts:list') return DRAFTS_ONE
     if (channel === 'snapshots:list') return []

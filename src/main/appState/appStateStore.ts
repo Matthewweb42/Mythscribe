@@ -8,6 +8,7 @@ import { DiagnosticsSettings, defaultDiagnosticsSettings } from '@shared/diagnos
 import { StoredLayout, defaultLayout } from '@shared/layout'
 import { SupporterSettings, defaultSupporterSettings } from '@shared/license'
 import { UpdateSettings, defaultUpdateSettings } from '@shared/updates'
+import { WindowState, defaultWindowState } from '@shared/windowState'
 import { ViewSettings, defaultViewSettings } from '@shared/zoom'
 import { AiUsageState, defaultAiUsageState } from '../ai/dailyCap'
 
@@ -47,7 +48,12 @@ export const AppState = z.object({
    * F-8.4: automatic backups — on, every 30 minutes and on close, ten kept, in the default
    * folder; defaulted so older files back up the same way a fresh install does.
    */
-  backups: BackupSettings.default(defaultBackupSettings)
+  backups: BackupSettings.default(defaultBackupSettings),
+  /**
+   * F-7.9: the window's last size and position, the project open at the last quit, and whether
+   * it opens again on launch; defaulted so older files open at the default size and reopen.
+   */
+  window: WindowState.default(defaultWindowState)
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -61,7 +67,8 @@ export const EMPTY_APP_STATE: AppState = {
   diagnostics: defaultDiagnosticsSettings(),
   supporter: defaultSupporterSettings(),
   view: defaultViewSettings(),
-  backups: defaultBackupSettings()
+  backups: defaultBackupSettings(),
+  window: defaultWindowState()
 }
 
 export class AppStateStore {

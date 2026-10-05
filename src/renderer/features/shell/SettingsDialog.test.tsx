@@ -33,7 +33,8 @@ const tabs: readonly [SettingsDialogTab, ...SettingsDialogTab[]] = [
 
 /**
  * Accepts every `editorSettings:set`, answers `backups:get` for the real Backups tab (F-8.4),
- * the first tab on the welcome screen, and `view:get` for the real Appearance tab (F-7.10);
+ * the first tab on the welcome screen, and `view:get` and `startup:get` for the real Appearance
+ * tab (F-7.10, F-7.9);
  * anything else is unexpected here.
  */
 const client: IpcClient = {
@@ -43,6 +44,7 @@ const client: IpcClient = {
       return value as Output<C>
     }
     if (channel === 'view:get') return defaultViewSettings() as Output<C>
+    if (channel === 'startup:get') return { reopenLastProject: true } as Output<C>
     if (channel === 'backups:get') {
       const state: Output<'backups:get'> = {
         settings: defaultBackupSettings(),

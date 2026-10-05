@@ -11,9 +11,19 @@ import { resetViewStore, useViewStore } from './viewStore'
 let calls: { channel: Channel; input: unknown }[]
 /** What main holds; it steps and answers exactly as the handlers do. */
 let view: ViewSettings
+/** F-7.9: the startup choice main holds; its requests are kept apart from the view ones. */
+let reopenLastProject: boolean
+let startupCalls: { channel: Channel; input: unknown }[]
 
 const client: IpcClient = {
   async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
+    if (channel === 'startup:get' || channel === 'startup:setReopenLastProject') {
+      startupCalls.push({ channel, input })
+      if (channel === 'startup:setReopenLastProject') {
+        reopenLastProject = (input as { on: boolean }).on
+      }
+      return { reopenLastProject } as Output<C>
+    }
     calls.push({ channel, input })
     switch (channel) {
       case 'view:get':
@@ -48,6 +58,8 @@ const sizes = (): HTMLElement[] => screen.getAllByRole('radio')
 beforeEach(() => {
   resetViewStore()
   calls = []
+  startupCalls = []
+  reopenLastProject = true
   view = { editorZoom: 1, uiScale: 'medium', pageEdges: true }
   setIpcClient(client)
   useDialogStore.setState({ modals: [], toasts: [] })
@@ -137,5 +149,24 @@ describe('AppearanceSettingsTab (F-7.10)', () => {
     act(() => useViewStore.setState({ editorZoom: 0.67 }))
     expect(screen.getByRole('button', { name: 'Zoom out' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Zoom in' })).toBeEnabled()
+  })
+})
+
+describe('AppearanceSettingsTab startup (F-7.9)', () => {
+  it('shows whether the last project reopens and changes it in main', async () => {
+    useViewStore.setState({ ...view, loaded: true })
+    reopenLastProject = false
+    render(<AppearanceSettingsTab />)
+    const reopen = screen.getByRole('checkbox', { name: 'Reopen the last project on launch' })
+    await waitFor(() => expect(reopen).toBeEnabled())
+    expect(reopen).not.toBeChecked()
+    await userEvent.click(reopen)
+    await waitFor(() => expect(reopen).toBeChecked())
+    expect(reopenLastProject).toBe(true)
+    expect(startupCalls).toEqual([
+      { channel: 'startup:get', input: undefined },
+      { channel: 'startup:setReopenLastProject', input: { on: true } }
+    ])
+    expect(useDialogStore.getState().toasts).toEqual([])
   })
 })

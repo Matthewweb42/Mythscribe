@@ -8,6 +8,7 @@ import { defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultSupporterSettings } from '@shared/license'
 import { RELEASE_NOTES_MAX, defaultUpdateSettings } from '@shared/updates'
+import { defaultWindowState } from '@shared/windowState'
 import { defaultViewSettings } from '@shared/zoom'
 import { defaultAiUsageState } from '../ai/dailyCap'
 import { AppStateStore, EMPTY_APP_STATE } from './appStateStore'
@@ -50,7 +51,8 @@ describe('AppStateStore', () => {
       diagnostics: defaultDiagnosticsSettings(),
       supporter: defaultSupporterSettings(),
       view: defaultViewSettings(),
-      backups: defaultBackupSettings()
+      backups: defaultBackupSettings(),
+      window: defaultWindowState()
     })
   })
 
@@ -269,6 +271,25 @@ describe('AppStateStore', () => {
     fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
     expect(new AppStateStore(file).get().backups).toEqual(defaultBackupSettings())
     expect(EMPTY_APP_STATE.backups).toEqual(defaultBackupSettings())
+  })
+
+  it('parses a file written before F-7.9 (no window) to the default size, reopening on', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().window).toEqual(defaultWindowState())
+    expect(EMPTY_APP_STATE.window).toEqual(defaultWindowState())
+  })
+
+  it('round-trips the window state', () => {
+    const store = new AppStateStore(file)
+    const window = {
+      bounds: { x: -1200, y: 40, width: 1100, height: 760 },
+      maximized: true,
+      lastProject: '/p/A.mythscribe',
+      reopenLastProject: false
+    }
+    store.update((s) => ({ ...s, window }))
+    expect(new AppStateStore(file).get().window).toEqual(window)
   })
 
   it('round-trips the backup settings and refuses an interval off the choices', () => {

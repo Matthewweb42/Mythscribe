@@ -530,6 +530,9 @@ export function registerHandlers({
 
   register('project:close', () => {
     manager.close()
+    // F-7.9: closing the project on purpose means the next launch starts on the welcome screen;
+    // a window close or a quit leaves it, so the project opens again.
+    appState.update((s) => ({ ...s, window: { ...s.window, lastProject: null } }))
     return null
   })
 
@@ -2295,6 +2298,16 @@ export function registerHandlers({
     return view
   })
 
+  // F-7.9: main reads the choice at launch, before any window exists; the tab only asks.
+  register('startup:get', () => ({
+    reopenLastProject: appState.get().window.reopenLastProject
+  }))
+
+  register('startup:setReopenLastProject', ({ on }) => {
+    const next = appState.update((s) => ({ ...s, window: { ...s.window, reopenLastProject: on } }))
+    return { reopenLastProject: next.window.reopenLastProject }
+  })
+
   // F-7.11: the sheet is the renderer's to draw; main only keeps the choice for the next launch.
   register('view:setPageEdges', ({ on }) => {
     return appState.update((s) => ({ ...s, view: { ...s.view, pageEdges: on } })).view
@@ -2388,7 +2401,12 @@ export function registerHandlers({
       mentionQueue.indexAll('mentions', staleMentionNodeIds(manager.require().connection.orm))
       publishProposed()
       try {
-        appState.update((s) => ({ ...s, recents: touchRecent(s.recents, toRecentEntry(info)) }))
+        // F-7.9: the project open now is the one a relaunch opens again.
+        appState.update((s) => ({
+          ...s,
+          recents: touchRecent(s.recents, toRecentEntry(info)),
+          window: { ...s.window, lastProject: info.path }
+        }))
       } catch (err) {
         console.warn('Could not record recent project', err)
       }

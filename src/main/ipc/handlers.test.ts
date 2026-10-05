@@ -367,6 +367,32 @@ function manuscriptReadingOrder(rows: TreeNode[]): string[] {
   return root ? walk(root.id) : []
 }
 
+describe('window state handlers (F-7.9)', () => {
+  const stored = (): AppStateStore =>
+    new AppStateStore(path.join(tmp, 'userData', 'app-state.json'))
+
+  it('remembers the open project, keeps it on a window close, and forgets it on Close project', async () => {
+    const a = await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })
+    expect(stored().get().window.lastProject).toBe(a?.path)
+    const b = await invoke('project:create', { name: 'B', format: 'novel', directory: tmp })
+    expect(stored().get().window.lastProject).toBe(b?.path)
+    await invoke('window:close', undefined)
+    expect(stored().get().window.lastProject).toBe(b?.path)
+    await invoke('project:open', { path: a?.path ?? '' })
+    await invoke('project:close', undefined)
+    expect(stored().get().window.lastProject).toBeNull()
+  })
+
+  it('answers and persists the reopen choice, on by default', async () => {
+    expect(await invoke('startup:get', undefined)).toEqual({ reopenLastProject: true })
+    expect(await invoke('startup:setReopenLastProject', { on: false })).toEqual({
+      reopenLastProject: false
+    })
+    expect(stored().get().window.reopenLastProject).toBe(false)
+    expect(await invoke('startup:get', undefined)).toEqual({ reopenLastProject: false })
+  })
+})
+
 describe('recents handlers', () => {
   it('records created and opened projects newest first', async () => {
     const a = await invoke('project:create', { name: 'A', format: 'novel', directory: tmp })

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import {
   DEFAULT_ZOOM,
   UI_SCALES,
@@ -10,6 +10,7 @@ import {
 } from '@shared/zoom'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
+import { ipc } from '@renderer/lib/ipc'
 import { useViewStore } from './viewStore'
 
 const BUTTON =
@@ -35,10 +36,16 @@ const PAGE_EDGES_NOTE =
   'can see where the page ends and zoom it to the size you want. One continuous sheet, not ' +
   'pages. Also under View › Page edges.'
 
+/** What reopening covers; the window's size and place come back either way. */
+const REOPEN_NOTE =
+  'Opens the project you had open when you last quit. Closing the project with File › Close ' +
+  'project starts the next launch on the welcome screen instead. The window always comes back ' +
+  'at the size and place you left it.'
+
 /**
- * The Appearance tab of the Settings dialog (F-7.10, F-7.11): the interface size, the document
- * zoom, and the page edges, the three app-wide view settings, with a sentence each saying what
- * they move — the first two are easy to confuse, and confusing them is how an author ends up
+ * The Appearance tab of the Settings dialog (F-7.10, F-7.11, F-7.9): the interface size, the
+ * document zoom, and the page edges, the three app-wide view settings, then the startup choice,
+ * with a sentence each saying what they move — the first two are easy to confuse, and confusing them is how an author ends up
  * with an unreadable window. App-scoped, so it is there on the welcome screen too, where the
  * writing surface is not. Main owns the values and applies the interface size to the window
  * itself, so these controls only ask.
@@ -52,6 +59,29 @@ export function AppearanceSettingsTab(): React.JSX.Element {
   const setUiScale = useViewStore((s) => s.setUiScale)
   const pageEdges = useViewStore((s) => s.pageEdges)
   const setPageEdges = useViewStore((s) => s.setPageEdges)
+
+  // F-7.9: main reads this once, at launch, so nothing else in the renderer mirrors it.
+  const [reopenLastProject, setReopenLastProject] = useState<boolean | null>(null)
+  useEffect(() => {
+    let live = true
+    ipc()
+      .invoke('startup:get', undefined)
+      .then((startup) => {
+        if (live) setReopenLastProject(startup.reopenLastProject)
+      })
+      .catch((err: unknown) => toast.error(describeError(err)))
+    return () => {
+      live = false
+    }
+  }, [])
+  const changeReopen = async (on: boolean): Promise<void> => {
+    try {
+      const startup = await ipc().invoke('startup:setReopenLastProject', { on })
+      setReopenLastProject(startup.reopenLastProject)
+    } catch (err) {
+      toast.error(describeError(err))
+    }
+  }
 
   // `App` loads the settings at start; this only covers the tab being opened before that first
   // answer arrived.
@@ -129,6 +159,21 @@ export function AppearanceSettingsTab(): React.JSX.Element {
           <span>Show page edges</span>
         </label>
         <p className="m-0 text-xs text-fg-muted">{PAGE_EDGES_NOTE}</p>
+      </div>
+
+      <div className="flex flex-col gap-1.5 border-t border-line pt-3">
+        <span className="text-xs text-fg-muted">Startup</span>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            data-testid="appearance-reopen-last-project"
+            disabled={reopenLastProject === null}
+            checked={reopenLastProject ?? false}
+            onChange={(event) => void changeReopen(event.target.checked)}
+          />
+          <span>Reopen the last project on launch</span>
+        </label>
+        <p className="m-0 text-xs text-fg-muted">{REOPEN_NOTE}</p>
       </div>
     </div>
   )

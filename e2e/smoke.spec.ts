@@ -358,6 +358,8 @@ let app: ElectronApplication
 let page: Page
 let tmp: string
 let exited = false
+/** The environment every launch gets, set once the fake servers are listening. */
+let launchEnv: Record<string, string>
 let fakeOpenAi: http.Server
 /** Every request the fake OpenAI server saw: the path and the Authorization header. */
 const openAiRequests: { url: string; auth: string | undefined }[] = []
@@ -833,23 +835,29 @@ test.beforeAll(async () => {
   // Point app-level state (recents, the AI key, the Cloud session) at the temp dir so the
   // developer's real userData is untouched, the OpenAI SDK at the fake provider, and the account
   // routes (F-15.2) at the fake Worker, so nothing leaves the machine.
-  app = await electron.launch({
-    args: ['.'],
-    env: {
-      ...process.env,
-      NODE_ENV: 'test',
-      MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData'),
-      OPENAI_BASE_URL: openAiBaseUrl,
-      MYTHSCRIBE_CLOUD_API_URL: cloudApiUrl,
-      // F-15.9: verify licenses against the fixture keypair, not the key the release ships with.
-      MYTHSCRIBE_LICENSE_PUBLIC_KEY: JSON.stringify(LICENSE_FIXTURE.publicKey)
-    }
-  })
+  launchEnv = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined)
+    ),
+    NODE_ENV: 'test',
+    MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData'),
+    OPENAI_BASE_URL: openAiBaseUrl,
+    MYTHSCRIBE_CLOUD_API_URL: cloudApiUrl,
+    // F-15.9: verify licenses against the fixture keypair, not the key the release ships with.
+    MYTHSCRIBE_LICENSE_PUBLIC_KEY: JSON.stringify(LICENSE_FIXTURE.publicKey)
+  }
+  await launch()
+})
+
+/** Starts the app on the e2e's userData; F-7.9 starts it a second time to see what it remembers. */
+async function launch(): Promise<void> {
+  exited = false
+  app = await electron.launch({ args: ['.'], env: launchEnv })
   app.on('close', () => {
     exited = true
   })
   page = await app.firstWindow()
-})
+}
 
 test.afterAll(async () => {
   // The last step closes the window, which quits the app on Linux; only close it if still up.
@@ -4835,10 +4843,39 @@ test('create, close, reopen a project on disk', async () => {
   await snapshotsDialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(snapshotsDialog).toHaveCount(0)
 
+  // F-7.9: the window closes somewhere else at another size, with the project still open; the
+  // next launch puts the window back there and opens the project again.
+  const left = await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    win?.setBounds({ x: 40, y: 30, width: 1000, height: 700 })
+    return win?.getNormalBounds()
+  })
+  const openProject = await page.evaluate(
+    () =>
+      window.mythscribe.invoke('project:current', undefined) as Promise<
+        IpcResult<{ path: string } | null>
+      >
+  )
+  if (!openProject.ok || openProject.data === null) throw new Error('no project open at the end')
+
   const closed = app.waitForEvent('close')
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
   await closed
   expect(exited).toBe(true)
+
+  await launch()
+  await expect(page.getByRole('tabpanel', { name: 'Manuscript' }).getByRole('tree')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New project' })).toHaveCount(0)
+  const relaunched = await page.evaluate(
+    () =>
+      window.mythscribe.invoke('project:current', undefined) as Promise<
+        IpcResult<{ path: string } | null>
+      >
+  )
+  expect(relaunched.ok && relaunched.data?.path).toBe(openProject.data.path)
+  expect(
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getNormalBounds())
+  ).toEqual(left)
 })
 
 /** The single-document editor's text with the ghost-text widget (F-5.3) left out. */

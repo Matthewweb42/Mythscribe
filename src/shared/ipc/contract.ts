@@ -98,6 +98,7 @@ import { WHAT_NEXT_CHAR_BUDGET, WhatNextDirections } from '../whatNext'
 import { VOICE_EXEMPLAR_TEXT_MAX, VOICE_EXEMPLAR_TEXT_MIN, VoiceExemplarKind } from '../voice'
 import { StatsDashboard } from '../statsDashboard'
 import { WordCountReport } from '../wordCount'
+import { StartupSettings } from '../windowState'
 import { UiScale, ViewSettings, ZoomStep } from '../zoom'
 
 /**
@@ -1849,6 +1850,13 @@ export const contract = {
   'view:setPageEdges': {
     input: z.object({ on: z.boolean() }),
     output: ViewSettings
+  },
+  /** Startup (F-7.9): whether the project open at the last quit opens again on launch. */
+  'startup:get': { input: z.undefined(), output: StartupSettings },
+  /** Startup (F-7.9): main persists the choice and answers the settings. */
+  'startup:setReopenLastProject': {
+    input: z.object({ on: z.boolean() }),
+    output: StartupSettings
   },
   /**
    * Menu bar (F-7.1): an Edit item of the in-app bar runs the same `webContents` edit command
