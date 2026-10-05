@@ -1,3 +1,4 @@
+import { promptSceneMeta } from '@shared/sceneMeta'
 import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS } from '@shared/ai'
 import { STORY_BIBLE_GHOST_TOKEN_BUDGET } from '@shared/storyBible'
 import { docToText } from '@shared/docText'
@@ -98,7 +99,7 @@ export async function generateGhostText(
   const notesText = notesDoc ? docToText(notesDoc).trim() : ''
   const notes = notesText ? notesText : null
   const { meta: sceneMeta } = getSceneMeta(db, input.nodeId)
-  const meta = sceneMeta.location || sceneMeta.pov || sceneMeta.timeline ? sceneMeta : null
+  const meta = promptSceneMeta(sceneMeta)
   const brief = sceneBriefBlock(db, input.nodeId)
   const preset = resolvePreset(getWritingPresets(db))
   const pov = sceneMeta.pov.trim()

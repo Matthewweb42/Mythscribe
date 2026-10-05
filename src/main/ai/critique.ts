@@ -1,3 +1,4 @@
+import { promptSceneMeta } from '@shared/sceneMeta'
 import { z } from 'zod'
 import { estimateTokens, inputBudget } from '@shared/ai'
 import {
@@ -131,7 +132,7 @@ export async function runCritique(
 
   const brief = sceneBriefBlock(db, input.nodeId)
   const { meta: sceneMeta } = getSceneMeta(db, input.nodeId)
-  const meta = sceneMeta.location || sceneMeta.pov || sceneMeta.timeline ? sceneMeta : null
+  const meta = promptSceneMeta(sceneMeta)
   const pov = sceneMeta.pov.trim()
   const honesty = settings.critique.honesty
 

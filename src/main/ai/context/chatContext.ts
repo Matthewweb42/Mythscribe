@@ -1,7 +1,7 @@
 import { asc, eq } from 'drizzle-orm'
 import { CHAT_REF_NOTES_CHAR_BUDGET, CHAT_SCENE_CHAR_BUDGET, parseTagRefs } from '@shared/chat'
 import { docToText } from '@shared/docText'
-import type { SceneMeta } from '@shared/sceneMeta'
+import { promptSceneMeta, type PromptSceneMeta } from '@shared/sceneMeta'
 import { documentTag, node } from '../../db/schema'
 import { getDocumentContent, parseStoredTiptap } from '../../document/documentStore'
 import { getSceneMeta } from '../../document/sceneMetaStore'
@@ -27,7 +27,7 @@ export interface ChatContext {
   /** The active document's plain text, head-truncated to `CHAT_SCENE_CHAR_BUDGET`; '' with no scene. */
   sceneText: string
   /** The scene's metadata when any field is set, else null (Agent mode folds it in). */
-  sceneMeta: SceneMeta | null
+  sceneMeta: PromptSceneMeta | null
   /**
    * The scene brief block (F-14.3) for the active document — its own lines with the previous
    * scene's reader-knows-after line and the next scene's goal — or null with no scene open or
@@ -52,13 +52,13 @@ export interface ChatContext {
  */
 export function buildChatContext(db: TreeDb, input: ChatContextInput): ChatContext {
   let sceneText = ''
-  let sceneMeta: SceneMeta | null = null
+  let sceneMeta: PromptSceneMeta | null = null
   let brief: string | null = null
   if (input.nodeId !== null) {
     const { content } = getDocumentContent(db, input.nodeId)
     sceneText = headTruncate(content ? docToText(content).trim() : '', CHAT_SCENE_CHAR_BUDGET)
     const { meta } = getSceneMeta(db, input.nodeId)
-    sceneMeta = meta.location || meta.pov || meta.timeline ? meta : null
+    sceneMeta = promptSceneMeta(meta)
     brief = sceneBriefBlock(db, input.nodeId)
   }
 

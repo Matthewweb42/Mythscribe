@@ -4,7 +4,8 @@ import {
   BRIEF_SCENE_CHAR_BUDGET,
   BRIEF_TEXT_MIN,
   SCENE_BRIEF_FIELD_MAX,
-  type SceneBrief
+  type SceneBrief,
+  promptSceneMeta
 } from '@shared/sceneMeta'
 import { getDocumentContent } from '../document/documentStore'
 import { getSceneMeta } from '../document/sceneMetaStore'
@@ -84,7 +85,7 @@ export async function draftBrief(
   }
   const sceneText = headTruncate(fullText, BRIEF_SCENE_CHAR_BUDGET)
   const { meta: sceneMeta } = getSceneMeta(db, input.nodeId)
-  const meta = sceneMeta.location || sceneMeta.pov || sceneMeta.timeline ? sceneMeta : null
+  const meta = promptSceneMeta(sceneMeta)
 
   const prompt = buildBriefPrompt({ sceneText, meta })
   const result = await runAiRequest(deps, {

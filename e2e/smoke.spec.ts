@@ -1195,6 +1195,7 @@ test('create, close, reopen a project on disk', async () => {
     'Characters',
     'Settings',
     'World',
+    'Outline',
     'Tags'
   ])
   const manuscriptTab = sidebarTabs.getByRole('tab', { name: 'Manuscript' })
@@ -2661,6 +2662,56 @@ test('create, close, reopen a project on disk', async () => {
   // F-3.3: the folder's status bar shows the combined saved count and no session delta.
   await expect(page.getByTestId('status-words')).toHaveText(`${SENTENCE_WORDS + 3} words`)
   await expect(page.getByTestId('status-delta')).toHaveCount(0)
+
+  // F-11.1: the cork board. The folder view switch turns Chapter 1 into index cards of its
+  // scenes in tree order; a synopsis typed on Opening's card and its status save to Opening's
+  // own metadata. Dragging Scene 1's card onto the left half of Opening's reorders the
+  // Manuscript tree at once, and Alt+ArrowLeft on Opening's card (focused title) moves it back.
+  // The synopsis is still there after a round trip through the stacked view.
+  const folderView = page.getByRole('group', { name: 'Folder view' })
+  await folderView.getByRole('button', { name: 'Cork board' }).click()
+  const corkBoard = page.getByRole('list', { name: 'Cork board' })
+  const cards = corkBoard.getByRole('listitem')
+  await expect(cards).toHaveCount(2)
+  await expect(cards.nth(0)).toHaveAttribute('aria-label', 'Opening')
+  await expect(cards.nth(1)).toHaveAttribute('aria-label', 'Scene 1')
+  const openingCard = corkBoard.getByRole('listitem', { name: 'Opening', exact: true })
+  const scene1Card = corkBoard.getByRole('listitem', { name: 'Scene 1', exact: true })
+  await expect(openingCard.getByTestId('card-words')).toHaveText('3 words')
+  const cardSynopsis = openingCard.getByRole('textbox', { name: 'Synopsis' })
+  await expect(cardSynopsis).toBeEnabled()
+  await cardSynopsis.fill('Kael watches the sky darken.')
+  await openingCard.getByRole('combobox', { name: 'Status' }).selectOption('draft')
+  await expect(openingCard.getByTestId('card-status-stripe')).toHaveClass(/bg-status-draft/)
+  await expect
+    .poll(
+      async () => {
+        const meta = await sceneMetaOf(openingRow.id)
+        return { synopsis: meta.synopsis, status: meta.status }
+      },
+      { timeout: 3000 }
+    )
+    .toEqual({ synopsis: 'Kael watches the sky darken.', status: 'draft' })
+  const openingCardBox = await openingCard.boundingBox()
+  if (!openingCardBox) throw new Error('the Opening card has no box')
+  await scene1Card
+    .getByRole('button', { name: 'Scene 1', exact: true })
+    .dragTo(openingCard, { targetPosition: { x: 8, y: openingCardBox.height / 2 } })
+  await expect(chapter1.getByRole('treeitem')).toHaveText([/^Scene 1/, /^Opening/])
+  await expect(cards.nth(0)).toHaveAttribute('aria-label', 'Scene 1')
+  await expect(corkBoard.locator('[data-drop]')).toHaveCount(0)
+  await openingCard.getByRole('button', { name: 'Opening', exact: true }).focus()
+  await page.keyboard.press('Alt+ArrowLeft')
+  await expect(chapter1.getByRole('treeitem')).toHaveText([/^Opening/, /^Scene 1/])
+  await expect(cards.nth(0)).toHaveAttribute('aria-label', 'Opening')
+  await folderView.getByRole('button', { name: 'Stacked' }).click()
+  await expect(corkBoard).toHaveCount(0)
+  await expect(regions).toHaveCount(2)
+  await folderView.getByRole('button', { name: 'Cork board' }).click()
+  await expect(cardSynopsis).toHaveValue('Kael watches the sky darken.')
+  await expect(openingCard.getByRole('combobox', { name: 'Status' })).toHaveValue('draft')
+  await folderView.getByRole('button', { name: 'Stacked' }).click()
+  await expect(regions).toHaveCount(2)
 
   // F-4.6: inline tags. Back in Scene 1, `#` at the end of the text opens a suggestion list at
   // the caret, filtered by what follows it (the template's "dark" tone tag and dark-forest);
@@ -4957,12 +5008,17 @@ test('create, close, reopen a project on disk', async () => {
 /** The single-document editor's text with the ghost-text widget (F-5.3) left out. */
 /**
  * Dismisses every toast on screen, first one first: clicking one removes it and moves the rest
- * up, so a snapshot of the list goes stale after the first click.
+ * up, so a snapshot of the list goes stale after the first click. A toast may also time out on
+ * its own between the count and the click, so the list is counted again before every click and
+ * a click on a toast that just left is not an error.
  */
 async function dismissToasts(): Promise<void> {
   const buttons = page.getByRole('button', { name: 'Dismiss notification' })
-  for (let left = await buttons.count(); left > 0; left -= 1) {
-    await buttons.first().click()
+  while ((await buttons.count()) > 0) {
+    await buttons
+      .first()
+      .click({ timeout: 2_000 })
+      .catch(() => undefined)
   }
 }
 

@@ -1,18 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import {
-  BookOpen,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  File,
-  FileText,
-  Folder,
-  FolderOpen,
-  Layers
-} from 'lucide-react'
+import { Check, ChevronDown, ChevronRight } from 'lucide-react'
 import type { NovelFormat, TreeNode } from '@shared/ipc/contract'
 import { goalTargetError, parseGoalTarget } from '@shared/goals'
-import { HierarchyLevel, sectionLabel, type SectionType } from '@shared/labels'
+import { HierarchyLevel, sectionLabel } from '@shared/labels'
 import { formatCompactWords } from '@renderer/features/editor/wordFormat'
 import { GoalBar } from '@renderer/features/goals/GoalBar'
 import { useGoalsStore } from '@renderer/features/goals/goalsStore'
@@ -21,6 +11,7 @@ import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
 import { ContextMenu } from './ContextMenu'
+import { LevelIcon } from './LevelIcon'
 import { templateIdOf, treeContextMenuItems } from './contextMenuItems'
 import { resolveDropTarget, type DropZone } from './placement'
 import { tagFilterView } from './tagFilter'
@@ -62,46 +53,6 @@ function listVisibleRows(
   }
   walk(rootIds, 1)
   return rows
-}
-
-function levelColor(node: TreeNode, section: SectionType): string {
-  if (node.kind === 'document' && section !== 'manuscript') return 'text-matter'
-  switch (node.hierarchyLevel) {
-    case 'part':
-      return 'text-level-part'
-    case 'chapter':
-      return 'text-level-chapter'
-    case 'scene':
-      return 'text-level-scene'
-    case null:
-      return 'text-level-generic'
-  }
-}
-
-/** Per-level icon: sections and generic folders show a folder, levels their own glyph, generic documents a plain file. */
-function LevelIcon({
-  node,
-  expanded,
-  className
-}: {
-  node: TreeNode
-  expanded: boolean
-  className: string
-}): React.JSX.Element {
-  const props = { size: 14, 'aria-hidden': true, className }
-  if (node.sectionType !== null || (node.kind === 'folder' && node.hierarchyLevel === null)) {
-    return expanded ? <FolderOpen {...props} /> : <Folder {...props} />
-  }
-  switch (node.hierarchyLevel) {
-    case 'part':
-      return <Layers {...props} />
-    case 'chapter':
-      return <BookOpen {...props} />
-    case 'scene':
-      return <FileText {...props} />
-    case null:
-      return <File {...props} />
-  }
 }
 
 /** Inline title editor (F-2.2): Enter or blur commits, Escape cancels, empty or unchanged is a no-op. */
@@ -307,11 +258,7 @@ function TreeItem({
         ) : (
           <span aria-hidden="true" className="h-4 w-4 shrink-0" />
         )}
-        <LevelIcon
-          node={node}
-          expanded={expanded}
-          className={`shrink-0 ${levelColor(node, section)}`}
-        />
+        <LevelIcon node={node} section={section} expanded={expanded} />
         {renaming ? (
           <RenameInput id={id} title={node.title} />
         ) : (

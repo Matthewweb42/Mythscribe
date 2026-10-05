@@ -1,6 +1,6 @@
 import { outputBudget } from '@shared/ai'
 import type { Honesty } from '@shared/critique'
-import type { SceneMeta } from '@shared/sceneMeta'
+import type { PromptSceneMeta } from '@shared/sceneMeta'
 import type { AiMessage } from '../providers/types'
 import { CRITIQUE_RULES, HONESTY_INSTRUCTION } from './critique.v1'
 
@@ -28,7 +28,7 @@ export interface BuildCritiquePromptV2Input {
    */
   brief: string | null
   /** The scene's metadata when any field is set, else null. */
-  meta: SceneMeta | null
+  meta: PromptSceneMeta | null
   /**
    * The voice profile block (F-14.1, `voiceBlock`), or null when the project has neither rules
    * nor exemplars yet (then the fidelity check on each fix is skipped too).

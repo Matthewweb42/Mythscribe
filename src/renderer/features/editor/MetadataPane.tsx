@@ -6,10 +6,12 @@ import {
   EMPTY_SCENE_META,
   SCENE_BRIEF_FIELDS,
   SCENE_BRIEF_FIELD_MAX,
+  SCENE_SYNOPSIS_MAX,
   type SceneBriefField,
   type SceneMeta
 } from '@shared/sceneMeta'
 import type { TagCategory } from '@shared/tags'
+import { StatusSelect } from '@renderer/features/outline/status'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
@@ -40,7 +42,8 @@ function useTagNames(category: TagCategory): string[] {
 /**
  * The metadata pane of the tag bar (F-4.5) for a scene, chapter, or part: Location (autocomplete
  * from the setting tags), POV (from the character tags), the timeline position (free text until
- * F-11.2), and the scene brief (F-14.3) behind a disclosure. Takes only `id`: it loads the
+ * F-11.2), the outline's status and synopsis (F-11.1, the same record the index cards edit), and
+ * the scene brief (F-14.3) behind a disclosure. Takes only `id`: it loads the
  * node's metadata through `useSceneMetaStore` on mount (and again when `id` changes) and unloads
  * on unmount; every change goes through the store's `edit`, so it debounces and flushes like
  * notes do (Ctrl+S, close, quit). The fields are disabled until the load resolves. The pane
@@ -59,6 +62,7 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   const settings = useTagNames('setting')
   const characters = useTagNames('character')
   const timelineId = useId()
+  const synopsisId = useId()
   const briefId = useId()
   const [briefOpen, setBriefOpen] = useState(false)
   const tagBarHeight = useLayoutStore((s) => s.layout.tagBar.height)
@@ -121,6 +125,26 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
           disabled={disabled}
           onChange={(event) => set({ timeline: event.target.value })}
           className={FIELD}
+        />
+      </div>
+      <StatusSelect
+        value={value.status}
+        onChange={(status) => set({ status })}
+        disabled={disabled}
+      />
+      <div className="flex items-start gap-2">
+        <label htmlFor={synopsisId} className="w-16 shrink-0 pt-px text-xs leading-5 text-fg-muted">
+          Synopsis
+        </label>
+        <textarea
+          id={synopsisId}
+          rows={2}
+          value={value.synopsis}
+          placeholder="The index card: what happens here"
+          maxLength={SCENE_SYNOPSIS_MAX}
+          disabled={disabled}
+          onChange={(event) => set({ synopsis: event.target.value })}
+          className={`${FIELD} resize-none`}
         />
       </div>
       {/* The labels never break inside a button, so a narrow pane wraps the row instead. */}

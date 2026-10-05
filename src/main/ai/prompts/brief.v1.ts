@@ -1,5 +1,5 @@
 import { outputBudget } from '@shared/ai'
-import { SCENE_BRIEF_FIELD_MAX, type SceneMeta } from '@shared/sceneMeta'
+import { SCENE_BRIEF_FIELD_MAX, type PromptSceneMeta } from '@shared/sceneMeta'
 import type { AiMessage } from '../providers/types'
 
 /**
@@ -35,7 +35,7 @@ export interface BuildBriefPromptInput {
   /** The scene as plain text, head-truncated to `BRIEF_SCENE_CHAR_BUDGET` by the caller. */
   sceneText: string
   /** The scene's metadata when any field is set, else null. */
-  meta: SceneMeta | null
+  meta: PromptSceneMeta | null
 }
 
 export interface BuiltBriefPrompt {

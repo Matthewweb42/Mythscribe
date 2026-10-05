@@ -51,7 +51,14 @@ function getRow(id: string): NodeRow {
   return row
 }
 
-const filled: SceneMeta = { location: 'dark-forest', pov: 'mara', timeline: 'Day 3, after the storm', brief: EMPTY_SCENE_BRIEF }
+const filled: SceneMeta = {
+  location: 'dark-forest',
+  pov: 'mara',
+  timeline: 'Day 3, after the storm',
+  brief: EMPTY_SCENE_BRIEF,
+  synopsis: 'Mara reaches the river.',
+  status: 'draft'
+}
 
 function expectCode(fn: () => unknown, code: AppError['code']): void {
   try {
@@ -117,7 +124,10 @@ describe('setSceneMeta', () => {
     setSceneMeta(db, chapter.id, { ...EMPTY_SCENE_META, location: 'the coast' })
     setSceneMeta(db, matter.id, { ...EMPTY_SCENE_META, pov: 'author' })
     expect(getSceneMeta(db, scene.id)).toEqual({ id: scene.id, meta: filled })
-    expect(getSceneMeta(db, chapter.id).meta).toEqual({ ...EMPTY_SCENE_META, location: 'the coast' })
+    expect(getSceneMeta(db, chapter.id).meta).toEqual({
+      ...EMPTY_SCENE_META,
+      location: 'the coast'
+    })
     expect(getSceneMeta(db, matter.id).meta).toEqual({ ...EMPTY_SCENE_META, pov: 'author' })
   })
 

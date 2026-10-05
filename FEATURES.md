@@ -177,7 +177,9 @@ Target users: solo fiction writers (novels, epics/series, web novels). Single us
 
 ### 2.11 Outline and timeline
 
-- [ ] **F-11.1 Outline** (v0 ⬜) — Cork-board/index-card view of scenes with synopsis, status color, drag to reorder; outline tree; act/beat structure templates; plot-thread tracking.
+- [x] **F-11.1 Outline** (v0 ⬜; M6: built 2026-10-05, unit-tested, e2e verified; split 2026-10-05 by the author: structure templates moved to F-11.1b, plot-thread tracking to F-11.1c. No migration, no new channel: `SceneMeta` gains `synopsis` and `status` (none, idea, draft, revised, final), defaulted so older rows parse, read and written through `sceneMeta:get`/`sceneMeta:set`; prompts take `PromptSceneMeta`, so neither reaches the AI. The synopsis is the author's; an empty one shows the F-5.6 summary greyed with an AI mark, display only. Status and synopsis also sit in the metadata pane, which scrolls to reach them on a short tag bar; the folder view choice is in memory, not persisted; the Outline tab is read-only) — Cork-board/index-card view of a selected folder's children (a main-pane toggle beside the stacked view) with synopsis, status color, drag to reorder; outline tree in the Outline sidebar tab.
+- [ ] **F-11.1b Structure templates** (v0 ⬜; split from F-11.1 on 2026-10-05) — Act/beat structure templates (e.g. three-act, Save the Cat, Hero's Journey); assign scenes to beats; show empty beats.
+- [ ] **F-11.1c Plot-thread tracking** (v0 ⬜; split from F-11.1 on 2026-10-05) — Which plot threads (Plot Threads tags) run through which scenes, in reading order; gaps visible at a glance.
 - [ ] **F-11.2 Timeline** (v0 ⬜) — Visual story timeline with events; timeline picker replaces the free-text field in F-4.5 and syncs back; character age tracking; continuity checks; character appearance and location usage logs.
 
 ### 2.12 Export and import
@@ -285,5 +287,5 @@ Parity first, then voice and control, then the differentiator, then launch, then
 | **M3.5 Assisted workflow** (added 2026-10-01; before the rest of M4) | The author writes; the AI tags, logs the story bible, answers, and flags contradictions on its own | F-5.16 (done), F-9.7 (done), F-3.11 (done; pulled forward from M6 for F-3.14), F-3.14 (done), F-4.13 (done), F-13.4 (done), F-14.12 (done), F-5.17 (done), F-5.18 (done), F-14.13 (done; in this order; F-9.7 and F-3.14 added 2026-10-02) |
 | **M4 Entities, search, goals** | Structured story bible; find anything; motivation | F-9.1–9.6 (absorbs F-7.4), F-10.1–10.5 (done), F-4.9 (done), F-4.11, F-4.12 (done), F-4.12b (done), F-3.10 (done), F-3.12 (done) |
 | **M5 Safety and output** | Never lose words; get the book out; bring a finished book in | F-12.2, F-12.3 (import first: the author flagged it high priority on 2026-09-18), F-8.3–8.6, F-12.1, F-7.9 |
-| **M6 Polish** | Themes, outline, timeline, local models, reader features, v0 import | F-7.8, F-11.1, F-11.2, F-5.15, F-4.8, F-2.8, F-1.6 |
+| **M6 Polish** | Themes, outline, timeline, local models, reader features, v0 import | F-7.8, F-11.1, F-11.1b, F-11.1c, F-11.2, F-5.15, F-4.8, F-2.8, F-1.6 |
 | **Later** | Horizons | F-13.1–13.3 |

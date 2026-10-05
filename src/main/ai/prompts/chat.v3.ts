@@ -1,7 +1,7 @@
 import { outputBudget } from '@shared/ai'
 import { CHAT_TOKENS_PER_PARAGRAPH, type ChatMode } from '@shared/chat'
 import type { PresetParams } from '@shared/presets'
-import type { SceneMeta } from '@shared/sceneMeta'
+import type { PromptSceneMeta } from '@shared/sceneMeta'
 import type { AiMessage } from '../providers/types'
 import type { ChatTurn } from './chat.v1'
 
@@ -48,7 +48,7 @@ export interface BuildChatPromptV3Input {
   /** The active scene's plain text, already head-truncated; '' when no scene is open. */
   sceneText: string
   /** The scene's metadata when any field is set; folded in only in Agent mode. */
-  sceneMeta: SceneMeta | null
+  sceneMeta: PromptSceneMeta | null
   /** The scene brief block (F-14.3, `sceneBriefBlock`), Agent mode only; null when there is none. */
   brief: string | null
   /** The `#name` references that resolved, each with its linked notes. */

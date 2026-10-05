@@ -322,7 +322,7 @@ describe('App', () => {
       within(aside)
         .getAllByRole('tab')
         .map((t) => t.textContent)
-    ).toEqual(['Manuscript', 'Characters', 'Settings', 'World', 'Tags'])
+    ).toEqual(['Manuscript', 'Characters', 'Settings', 'World', 'Outline', 'Tags'])
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))

@@ -3,6 +3,7 @@ import {
   EMPTY_SCENE_BRIEF,
   EMPTY_SCENE_META,
   SCENE_BRIEF_FIELD_MAX,
+  SCENE_SYNOPSIS_MAX,
   SCENE_BRIEF_FIELDS,
   SCENE_META_FIELD_MAX,
   SCENE_META_TIMELINE_MAX,
@@ -29,24 +30,49 @@ describe('SceneMeta', () => {
       location: 'dark-forest',
       pov: 'mara',
       timeline: 'Day 3, after the storm',
-      brief: BRIEF
+      brief: BRIEF,
+      synopsis: 'Mara wants to cross; the river says no.',
+      status: 'draft'
     }
     expect(SceneMeta.parse(filled)).toEqual(filled)
-    expect(SceneMeta.safeParse({ ...filled, location: 'x'.repeat(SCENE_META_FIELD_MAX + 1) }).success).toBe(false)
-    expect(SceneMeta.safeParse({ ...filled, pov: 'x'.repeat(SCENE_META_FIELD_MAX + 1) }).success).toBe(false)
-    expect(SceneMeta.safeParse({ ...filled, timeline: 'x'.repeat(SCENE_META_TIMELINE_MAX + 1) }).success).toBe(false)
+    expect(
+      SceneMeta.safeParse({ ...filled, location: 'x'.repeat(SCENE_META_FIELD_MAX + 1) }).success
+    ).toBe(false)
+    expect(
+      SceneMeta.safeParse({ ...filled, pov: 'x'.repeat(SCENE_META_FIELD_MAX + 1) }).success
+    ).toBe(false)
+    expect(
+      SceneMeta.safeParse({ ...filled, timeline: 'x'.repeat(SCENE_META_TIMELINE_MAX + 1) }).success
+    ).toBe(false)
     expect(SceneMeta.safeParse({ location: 'x', pov: 'y' }).success).toBe(false)
     expect(
-      SceneMeta.safeParse({ ...filled, brief: { ...BRIEF, goal: 'x'.repeat(SCENE_BRIEF_FIELD_MAX + 1) } })
-        .success
+      SceneMeta.safeParse({
+        ...filled,
+        brief: { ...BRIEF, goal: 'x'.repeat(SCENE_BRIEF_FIELD_MAX + 1) }
+      }).success
     ).toBe(false)
   })
 
   it('reads a row stored before F-14.3 (no brief) with an empty brief, as a fresh object', () => {
     const stored = { location: 'dark-forest', pov: 'mara', timeline: 'Day 3' }
     const parsed = SceneMeta.parse(stored)
-    expect(parsed).toEqual({ ...stored, brief: EMPTY_SCENE_BRIEF })
+    expect(parsed).toEqual({ ...stored, brief: EMPTY_SCENE_BRIEF, synopsis: '', status: 'none' })
     expect(parsed.brief).not.toBe(EMPTY_SCENE_BRIEF)
+  })
+
+  it('reads a row stored before F-11.1 with no synopsis and no status; refuses an unknown status and an over-long synopsis', () => {
+    const stored = { location: '', pov: '', timeline: '', brief: EMPTY_SCENE_BRIEF }
+    expect(SceneMeta.parse(stored)).toMatchObject({ synopsis: '', status: 'none' })
+    expect(
+      SceneMeta.parse({ ...stored, synopsis: 'She crosses.', status: 'revised' })
+    ).toMatchObject({
+      synopsis: 'She crosses.',
+      status: 'revised'
+    })
+    expect(SceneMeta.safeParse({ ...stored, status: 'done' }).success).toBe(false)
+    expect(
+      SceneMeta.safeParse({ ...stored, synopsis: 'x'.repeat(SCENE_SYNOPSIS_MAX + 1) }).success
+    ).toBe(false)
   })
 
   it('emptySceneMeta shares no object with EMPTY_SCENE_META', () => {
@@ -69,11 +95,15 @@ describe('parseStoredSceneMeta', () => {
     const filled = { location: 'dark-forest', pov: 'mara', timeline: 'Day 3' }
     expect(parseStoredSceneMeta(JSON.stringify(filled))).toEqual({
       ...filled,
-      brief: EMPTY_SCENE_BRIEF
+      brief: EMPTY_SCENE_BRIEF,
+      synopsis: '',
+      status: 'none'
     })
     expect(parseStoredSceneMeta(JSON.stringify({ ...filled, brief: BRIEF }))).toEqual({
       ...filled,
-      brief: BRIEF
+      brief: BRIEF,
+      synopsis: '',
+      status: 'none'
     })
   })
 
@@ -89,7 +119,9 @@ describe('parseStoredSceneMeta', () => {
       )
     ).toEqual(EMPTY_SCENE_META)
     expect(
-      parseStoredSceneMeta(JSON.stringify({ location: '', pov: '', timeline: '', brief: { goal: 1 } }))
+      parseStoredSceneMeta(
+        JSON.stringify({ location: '', pov: '', timeline: '', brief: { goal: 1 } })
+      )
     ).toEqual(EMPTY_SCENE_META)
   })
 })
@@ -133,7 +165,9 @@ describe('renderSceneBriefBlock', () => {
         previous: { ...EMPTY_SCENE_BRIEF, turn: 'The bell rang once.' },
         next: EMPTY_SCENE_BRIEF
       })
-    ).toBe('Scene brief:\n- Goal: Cross tonight.\nPrevious scene, reader knows after: The bell rang once.')
+    ).toBe(
+      'Scene brief:\n- Goal: Cross tonight.\nPrevious scene, reader knows after: The bell rang once.'
+    )
   })
 
   it('renders only the neighbours when the current brief is empty, and null when there is nothing', () => {
@@ -144,7 +178,9 @@ describe('renderSceneBriefBlock', () => {
         next: { ...EMPTY_SCENE_BRIEF, goal: 'Find the boat.' }
       })
     ).toBe("Next scene's goal: Find the boat.")
-    expect(renderSceneBriefBlock({ current: EMPTY_SCENE_BRIEF, previous: null, next: null })).toBeNull()
+    expect(
+      renderSceneBriefBlock({ current: EMPTY_SCENE_BRIEF, previous: null, next: null })
+    ).toBeNull()
     expect(
       renderSceneBriefBlock({
         current: EMPTY_SCENE_BRIEF,

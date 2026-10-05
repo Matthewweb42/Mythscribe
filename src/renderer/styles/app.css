@@ -24,6 +24,10 @@
   --color-level-scene: var(--ms-level-scene);
   --color-level-generic: var(--ms-level-generic);
   --color-matter: var(--ms-matter);
+  --color-status-idea: var(--ms-status-idea);
+  --color-status-draft: var(--ms-status-draft);
+  --color-status-revised: var(--ms-status-revised);
+  --color-status-final: var(--ms-status-final);
   --color-desk: var(--ms-desk);
   --color-sheet: var(--ms-sheet);
   --radius-md: var(--ms-radius);

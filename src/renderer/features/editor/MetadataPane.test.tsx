@@ -49,8 +49,15 @@ const STORED_BRIEF: SceneBrief = {
 }
 
 const stored: Record<string, SceneMeta> = {
-  'sc-1': { location: 'dark-forest', pov: 'mara', timeline: 'Day 1', brief: EMPTY_SCENE_BRIEF },
-  'sc-4': { location: '', pov: '', timeline: '', brief: STORED_BRIEF }
+  'sc-1': {
+    location: 'dark-forest',
+    pov: 'mara',
+    timeline: 'Day 1',
+    brief: EMPTY_SCENE_BRIEF,
+    synopsis: '',
+    status: 'none'
+  },
+  'sc-4': { location: '', pov: '', timeline: '', brief: STORED_BRIEF, synopsis: '', status: 'none' }
 }
 
 type Handler = (input: unknown) => unknown
@@ -241,11 +248,19 @@ describe('MetadataPane (F-4.5)', () => {
     render(<MetadataPane id="sc-2" />)
     await waitFor(() => expect(field('Location')).toBeEnabled())
     fireEvent.change(field('Location'), { target: { value: 'd' } })
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['dark-forest'])
+    expect(
+      within(screen.getByRole('listbox'))
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['dark-forest'])
     fireEvent.keyDown(field('Location'), { key: 'Escape' })
     fireEvent.change(field('POV'), { target: { value: 'm' } })
     // "moody" is a tone tag and "mara" a character: only the character is offered.
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['mara'])
+    expect(
+      within(screen.getByRole('listbox'))
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['mara'])
   })
 
   it('every edit goes through the autosave store and flushes as one merged record', async () => {
@@ -255,6 +270,8 @@ describe('MetadataPane (F-4.5)', () => {
     await waitFor(() => expect(field('Location')).toBeEnabled())
     fireEvent.change(field('Location'), { target: { value: 'docks' } })
     fireEvent.change(timeline(), { target: { value: 'Day 2, dawn' } })
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'revised' } })
+    fireEvent.change(screen.getByLabelText('Synopsis'), { target: { value: 'Mara bargains.' } })
     expect(field('Location')).toHaveValue('docks')
     expect(useSceneMetaStore.getState().docs['sc-1']?.dirty).toBe(true)
     expect(sets).toHaveLength(0)
@@ -266,7 +283,9 @@ describe('MetadataPane (F-4.5)', () => {
           location: 'docks',
           pov: 'mara',
           timeline: 'Day 2, dawn',
-          brief: EMPTY_SCENE_BRIEF
+          brief: EMPTY_SCENE_BRIEF,
+          synopsis: 'Mara bargains.',
+          status: 'revised'
         }
       }
     ])
@@ -344,7 +363,9 @@ describe('MetadataPane brief (F-14.3)', () => {
             ...EMPTY_SCENE_BRIEF,
             goal: 'Cross before dawn.',
             after: 'The bridge is out.'
-          }
+          },
+          synopsis: '',
+          status: 'none'
         }
       }
     ])
@@ -389,7 +410,14 @@ describe('MetadataPane brief (F-14.3)', () => {
     expect(sets).toEqual([
       {
         id: 'sc-1',
-        meta: { location: 'dark-forest', pov: 'mara', timeline: 'Day 1', brief: DRAFTED }
+        meta: {
+          location: 'dark-forest',
+          pov: 'mara',
+          timeline: 'Day 1',
+          brief: DRAFTED,
+          synopsis: '',
+          status: 'none'
+        }
       }
     ])
     await waitFor(() =>

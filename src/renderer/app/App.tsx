@@ -42,6 +42,8 @@ import { FindBar } from '@renderer/features/editor/FindBar'
 import { resetFindStore } from '@renderer/features/editor/findStore'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
+import { CorkBoard, FolderViewToggle } from '@renderer/features/outline/CorkBoard'
+import { useOutlineViewStore } from '@renderer/features/outline/outlineViewStore'
 import { SpellcheckMenu } from '@renderer/features/editor/SpellcheckMenu'
 import { useDictionaryStore } from '@renderer/features/editor/dictionaryStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
@@ -857,6 +859,7 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
   const section = useTreeStore((s) =>
     s.selectedId === null ? undefined : s.sectionOf[s.selectedId]
   )
+  const folderView = useOutlineViewStore((s) => s.folderView)
   if (entityId !== null) return <EntityEditor key={entityId} id={entityId} />
   if (!node) {
     // F-3.5: the empty state, centered in the pane.
@@ -872,16 +875,23 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
       : node.kind === 'folder'
         ? 'Folder'
         : 'Document'
+  // F-11.1: a folder shows as a stack of its documents or as a cork board of its children; focus
+  // mode is for writing, so it always gets the stack and hides the switch.
+  const folder = node.kind === 'folder'
+  const cork = folder && folderView === 'cork' && !focus
   return (
     <>
-      <div className="shrink-0 px-6 pt-6 pb-4">
-        <h1 className="m-0 text-2xl font-semibold" data-testid="selected-title">
-          {node.title}
-        </h1>
-        <p className="mt-1 mb-0 text-sm text-fg-muted">
-          {kind}
-          {section ? ` · ${sectionLabel(format, section)}` : ''}
-        </p>
+      <div className="flex shrink-0 items-start gap-4 px-6 pt-6 pb-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="m-0 text-2xl font-semibold" data-testid="selected-title">
+            {node.title}
+          </h1>
+          <p className="mt-1 mb-0 text-sm text-fg-muted">
+            {kind}
+            {section ? ` · ${sectionLabel(format, section)}` : ''}
+          </p>
+        </div>
+        {folder && !focus ? <FolderViewToggle /> : null}
       </div>
       <div className="flex min-h-0 flex-1">
         {/* F-3.10: the find bar docks above the editor's toolbar, so it hides no control and
@@ -889,8 +899,10 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <FindBar />
           <div className="flex min-h-0 min-w-0 flex-1">
-            {node.kind === 'document' ? (
+            {!folder ? (
               <EditorPane id={node.id} format={format} />
+            ) : cork ? (
+              <CorkBoard folderId={node.id} format={format} />
             ) : (
               <StackedEditor folderId={node.id} format={format} />
             )}

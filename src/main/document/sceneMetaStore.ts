@@ -1,5 +1,6 @@
+import type { z } from 'zod'
 import { eq } from 'drizzle-orm'
-import { parseStoredSceneMeta, type SceneMeta } from '@shared/sceneMeta'
+import { parseStoredSceneMeta, SceneMeta } from '@shared/sceneMeta'
 import { node } from '../db/schema'
 import { requireContentTarget } from '../tree/contentTarget'
 import type { TreeDb } from '../tree/treeStore'
@@ -25,9 +26,18 @@ export function getSceneMeta(db: TreeDb, id: string): NodeSceneMeta {
   return { id, meta: parseStoredSceneMeta(row.sceneMeta) }
 }
 
-/** Replaces a node's scene metadata (F-4.5) and stamps `modified`. Same refusals as `getSceneMeta`. */
-export function setSceneMeta(db: TreeDb, id: string, meta: SceneMeta): SceneMetaSetResult {
+/**
+ * Replaces a node's scene metadata (F-4.5) and stamps `modified`. Same refusals as
+ * `getSceneMeta`. Takes the schema's input shape, so a caller may leave out the defaulted fields
+ * (the brief, synopsis, status); they are stored filled in.
+ */
+export function setSceneMeta(
+  db: TreeDb,
+  id: string,
+  input: z.input<typeof SceneMeta>
+): SceneMetaSetResult {
   requireContentTarget(db, id, 'metadata')
+  const meta = SceneMeta.parse(input)
   const modified = new Date().toISOString()
   db.update(node)
     .set({ sceneMeta: JSON.stringify(meta), modified })

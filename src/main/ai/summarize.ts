@@ -8,7 +8,7 @@ import {
   OBSERVED_FACT_QUOTE_MAX,
   OBSERVED_FACT_VALUE_MAX
 } from '@shared/observedFacts'
-import { parseStoredSceneMeta, type SceneMeta } from '@shared/sceneMeta'
+import { parseStoredSceneMeta, promptSceneMeta, type PromptSceneMeta } from '@shared/sceneMeta'
 import { toTagName } from '@shared/tags'
 import {
   SUMMARY_CHARACTER_MAX,
@@ -78,7 +78,7 @@ export interface SummarySource {
   length: number
   truncated: boolean
   /** The scene's metadata when any field is set, else null. */
-  meta: SceneMeta | null
+  meta: PromptSceneMeta | null
   /** The story-bible names the scene contains, by kind, capped for the prompt (F-5.16). */
   known: KnownNames
   /** sha256 over everything that shapes the messages; a different hash means a stale row. */
@@ -100,7 +100,7 @@ export function summarySource(db: TreeDb, nodeId: string): SummarySource | null 
   const fullText = documentText(row).trim()
   const sceneText = headTruncate(fullText, SUMMARY_SCENE_CHAR_BUDGET)
   const stored = parseStoredSceneMeta(row.sceneMeta)
-  const meta = stored.location || stored.pov || stored.timeline ? stored : null
+  const meta = promptSceneMeta(stored)
   const known = knownNames(db, sceneText)
 
   return {
@@ -114,7 +114,7 @@ export function summarySource(db: TreeDb, nodeId: string): SummarySource | null 
 }
 
 /** The hash of what shapes the messages: the text as sent, the metadata line, and the known names. */
-function sourceHash(sceneText: string, meta: SceneMeta | null, known: KnownNames): string {
+function sourceHash(sceneText: string, meta: PromptSceneMeta | null, known: KnownNames): string {
   return sha256(
     JSON.stringify({
       sceneText,

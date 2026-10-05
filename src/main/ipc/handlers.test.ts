@@ -999,7 +999,9 @@ describe('sceneMeta:get / sceneMeta:set (F-4.5)', () => {
     location: 'dark-forest',
     pov: 'mara',
     timeline: 'Day 3, after the storm',
-    brief: { ...EMPTY_SCENE_BRIEF, goal: 'Cross the river tonight.' }
+    brief: { ...EMPTY_SCENE_BRIEF, goal: 'Cross the river tonight.' },
+    synopsis: 'Mara bargains for a crossing.',
+    status: 'idea' as const
   }
 
   it('reports NO_PROJECT for both when nothing is open', async () => {

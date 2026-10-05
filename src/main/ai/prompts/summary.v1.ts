@@ -1,5 +1,5 @@
 import { outputBudget } from '@shared/ai'
-import type { SceneMeta } from '@shared/sceneMeta'
+import type { PromptSceneMeta } from '@shared/sceneMeta'
 import { SUMMARY_BANK_NAMES_MAX, SUMMARY_KEY_POINTS_MAX } from '@shared/summary'
 import type { AiMessage } from '../providers/types'
 
@@ -34,7 +34,7 @@ export interface BuildSummaryPromptInput {
   /** The scene as plain text, head-truncated to `SUMMARY_SCENE_CHAR_BUDGET` by the caller. */
   sceneText: string
   /** The scene's metadata when any field is set, else null. */
-  meta: SceneMeta | null
+  meta: PromptSceneMeta | null
   /** The bank's character names, so the model spells the cast the author's way; cut to the cap here. */
   characters: string[]
 }

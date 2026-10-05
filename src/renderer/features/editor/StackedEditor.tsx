@@ -161,9 +161,10 @@ function RegionSeparator({
 /**
  * The invitation for a folder with no documents. In the manuscript the button adds a scene where
  * `resolveCreateTarget` puts it; an empty part has no scene target (a chapter must come first),
- * so it gets the text only. Front and end matter get a generic document.
+ * so it gets the text only. Front and end matter get a generic document. The cork board (F-11.1)
+ * shows the same invitation for a folder with no children.
  */
-function EmptyFolder({
+export function EmptyFolder({
   folderId,
   format,
   section

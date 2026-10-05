@@ -107,6 +107,32 @@ describe('createAutosaveStore', () => {
     expect(b.store.useStore.getState().docs.n1).toEqual({ content: 'B', dirty: false })
   })
 
+  it('reads a record once for two holders and forgets it only when the last one unloads (F-11.1)', async () => {
+    await loaded(a, 'n1', 'A')
+    await a.store.useStore.getState().load('n1')
+    expect(a.gets).toHaveLength(1)
+    a.store.useStore.getState().edit('n1', 'A2')
+    a.store.useStore.getState().unload('n1')
+    expect(a.store.useStore.getState().docs.n1).toEqual({ content: 'A2', dirty: true })
+    a.store.useStore.getState().unload('n1')
+    expect(a.store.useStore.getState().docs.n1).toBeUndefined()
+    await settle()
+    expect(a.saves.map((s) => [s.id, s.content])).toEqual([['n1', 'A2']])
+    // Held again from zero, it is read again.
+    await loaded(a, 'n1', 'A2')
+    expect(a.gets).toHaveLength(2)
+  })
+
+  it('reload reads a held record again without adding a holder', async () => {
+    await loaded(a, 'n1', 'A')
+    const reloading = a.store.useStore.getState().reload(['n1'])
+    await settle()
+    a.gets[a.gets.length - 1]?.resolve('B')
+    await reloading
+    a.store.useStore.getState().unload('n1')
+    expect(a.store.useStore.getState().docs.n1).toBeUndefined()
+  })
+
   it('a never-written record loads as `empty`', async () => {
     await loaded(a, 'n1', null)
     expect(a.store.useStore.getState().docs.n1).toEqual({ content: '', dirty: false })

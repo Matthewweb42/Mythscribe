@@ -5,7 +5,7 @@ import {
   CRITIQUE_QUOTE_MAX,
   type Honesty
 } from '@shared/critique'
-import type { SceneMeta } from '@shared/sceneMeta'
+import type { PromptSceneMeta } from '@shared/sceneMeta'
 import type { AiMessage } from '../providers/types'
 
 /**
@@ -53,7 +53,7 @@ export interface BuildCritiquePromptInput {
   /** The scene's own notes as the brief (F-3.7), cut to `CRITIQUE_NOTES_CHAR_CAP`, or null. */
   notes: string | null
   /** The scene's metadata when any field is set, else null. */
-  meta: SceneMeta | null
+  meta: PromptSceneMeta | null
   /**
    * The voice profile block (F-14.1, `voiceBlock`), or null when the project has neither rules
    * nor exemplars yet (then the fidelity check on each fix is skipped too).

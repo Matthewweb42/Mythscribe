@@ -10,6 +10,24 @@ export const SCENE_BRIEF_FIELD_MAX = 200
 export const BRIEF_SCENE_CHAR_BUDGET = 20_000
 /** Below this much text there is nothing to draft a brief from (the same floor as critique). */
 export const BRIEF_TEXT_MIN = 200
+/** The longest synopsis an index card holds (F-11.1): a paragraph, not a scene. */
+export const SCENE_SYNOPSIS_MAX = 1000
+
+/**
+ * The writing status of a scene, chapter, or part (F-11.1), shown as the colour of its index
+ * card and outline row. `none` is the unset state and draws no colour.
+ */
+export const SCENE_STATUSES = ['none', 'idea', 'draft', 'revised', 'final'] as const
+export const SceneStatus = z.enum(SCENE_STATUSES)
+export type SceneStatus = z.infer<typeof SceneStatus>
+
+export const SCENE_STATUS_LABELS: Record<SceneStatus, string> = {
+  none: 'No status',
+  idea: 'Idea',
+  draft: 'Draft',
+  revised: 'Revised',
+  final: 'Final'
+}
 
 /**
  * The scene brief (F-14.3, PLAN.md §2.2): the author's stated intent for a scene, one line
@@ -58,14 +76,17 @@ export function isBriefEmpty(brief: SceneBrief): boolean {
  * The metadata of a scene, chapter, or part (F-4.5): Location and POV are free text with
  * autocomplete from the setting and character tags (plain strings, so a location that is not a
  * tag yet still works), the timeline position is free text until F-11.2 replaces it, and the
- * brief (F-14.3). Stored as JSON in `node.scene_meta`. `brief` is defaulted so a row stored
- * before F-14.3 (no `brief` key) still parses instead of reading as empty metadata.
+ * brief (F-14.3), and the index-card synopsis and status (F-11.1). Stored as JSON in
+ * `node.scene_meta`. `brief`, `synopsis`, and `status` are defaulted so a row stored before
+ * their feature still parses instead of reading as empty metadata.
  */
 export const SceneMeta = z.object({
   location: z.string().max(SCENE_META_FIELD_MAX),
   pov: z.string().max(SCENE_META_FIELD_MAX),
   timeline: z.string().max(SCENE_META_TIMELINE_MAX),
-  brief: SceneBrief.default(() => ({ ...EMPTY_SCENE_BRIEF }))
+  brief: SceneBrief.default(() => ({ ...EMPTY_SCENE_BRIEF })),
+  synopsis: z.string().max(SCENE_SYNOPSIS_MAX).default(''),
+  status: SceneStatus.default('none')
 })
 export type SceneMeta = z.infer<typeof SceneMeta>
 
@@ -73,12 +94,21 @@ export const EMPTY_SCENE_META: SceneMeta = {
   location: '',
   pov: '',
   timeline: '',
-  brief: EMPTY_SCENE_BRIEF
+  brief: EMPTY_SCENE_BRIEF,
+  synopsis: '',
+  status: 'none'
 }
 
 /** A fresh empty metadata record, no object shared with `EMPTY_SCENE_META`. */
 export function emptySceneMeta(): SceneMeta {
-  return { location: '', pov: '', timeline: '', brief: { ...EMPTY_SCENE_BRIEF } }
+  return {
+    location: '',
+    pov: '',
+    timeline: '',
+    brief: { ...EMPTY_SCENE_BRIEF },
+    synopsis: '',
+    status: 'none'
+  }
 }
 
 /**
@@ -126,4 +156,21 @@ export function renderSceneBriefBlock(input: SceneBriefBlockInput): string | nul
   const ahead = input.next ? input.next.goal.trim() : ''
   if (ahead) lines.push(`Next scene's goal: ${ahead}`)
   return lines.length ? lines.join('\n') : null
+}
+
+/**
+ * The part of `SceneMeta` the AI reads: the three metadata fields and the brief. Prompt inputs
+ * take this rather than `SceneMeta`, so the outline's synopsis and status (F-11.1) never reach a
+ * prompt or a context hash.
+ */
+export type PromptSceneMeta = Pick<SceneMeta, 'location' | 'pov' | 'timeline' | 'brief'>
+
+/**
+ * The metadata a prompt carries, or null when no metadata field is set (the brief alone travels
+ * in its own block). A fresh object with only the `PromptSceneMeta` keys, in the stored order,
+ * so the synopsis and status never reach a prompt or a context hash and older hashes still match.
+ */
+export function promptSceneMeta(meta: SceneMeta): PromptSceneMeta | null {
+  const { location, pov, timeline, brief } = meta
+  return location || pov || timeline ? { location, pov, timeline, brief } : null
 }

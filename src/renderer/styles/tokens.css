@@ -38,6 +38,12 @@
   --ms-level-generic: #9a9aa6;
   --ms-matter: #d4a72c;
 
+  /* Writing status (F-11.1): the colour of an index card and an outline row; `none` draws none. */
+  --ms-status-idea: #c084fc;
+  --ms-status-draft: #f5a524;
+  --ms-status-revised: #60a5fa;
+  --ms-status-final: #4ade80;
+
   /* Editor text (F-3.4, F-3.6): the pane sets these from the project's formatting settings. */
   --ms-editor-max-width: 700px;
   --ms-editor-font-size: 16px;
@@ -104,6 +110,10 @@
   --ms-level-scene: #217a72;
   --ms-level-generic: #686874;
   --ms-matter: #8c6a0c;
+  --ms-status-idea: #8b3fd1;
+  --ms-status-draft: #a85f00;
+  --ms-status-revised: #1d6fd8;
+  --ms-status-final: #1f8a4c;
 
   --ms-desk: #eeeef0;
   --ms-sheet: #f8f8f9;
@@ -148,6 +158,10 @@
   --ms-level-scene: #86e6dc;
   --ms-level-generic: #e0e0e0;
   --ms-matter: #ffd166;
+  --ms-status-idea: #e0b0ff;
+  --ms-status-draft: #ffc857;
+  --ms-status-revised: #8cc8ff;
+  --ms-status-final: #7dffa8;
 
   --ms-desk: #000000;
   --ms-sheet: #121212;
@@ -188,6 +202,10 @@
   --ms-level-scene: #2c7268;
   --ms-level-generic: #6e5d48;
   --ms-matter: #85600c;
+  --ms-status-idea: #7a4a9c;
+  --ms-status-draft: #9a5a0c;
+  --ms-status-revised: #2f5f8f;
+  --ms-status-final: #3d7a3d;
 
   --ms-desk: #efe4cc;
   --ms-sheet: #f7eedb;

@@ -120,6 +120,12 @@ export function createAutosaveStore<T, R>({
   /** The token of the latest `load` per id, so a response from a superseded load is dropped. */
   const loadTokens = new Map<string, number>()
   let lastToken = 0
+  /**
+   * How many mounted views hold each record (F-11.1): the metadata pane and an outline row or
+   * cork card can show the same node, so a record is read once on its first `load` and only
+   * forgotten when its last holder unloads.
+   */
+  const holders = new Map<string, number>()
   /** The write currently on the wire, so every flush (and the close/quit path) waits for it. */
   let inflight: Promise<void> | null = null
   /** Removes this store's flusher from the pending-save registry; null while nothing is registered. */
@@ -222,26 +228,35 @@ export function createAutosaveStore<T, R>({
     if (failure) throw failure.err
   }
 
+  /** Reads `id` from main into the store, without touching its holder count (`load` and `reload`). */
+  async function fetchRecord(id: string): Promise<void> {
+    const { flush } = useStore.getState()
+    const set = useStore.setState
+    const mine = ++lastToken
+    loadTokens.set(id, mine)
+    set((s) => ({ docs: { ...s.docs, [id]: { content: null, dirty: false } } }))
+    // An editor that remounts right after its unload must read back its own last write, which
+    // may still be queued behind another record's save. Failures are reported by the flush
+    // that queued the job.
+    if (pending.has(id)) {
+      await flush().catch(() => undefined)
+      if (loadTokens.get(id) !== mine) return
+    }
+    const stored = await read(id)
+    if (loadTokens.get(id) !== mine) return // unloaded, cleared, or loaded again while in flight
+    set((s) => ({ docs: { ...s.docs, [id]: { content: stored ?? empty, dirty: false } } }))
+  }
+
   const useStore = create<AutosaveState<T>>((set, get) => ({
     docs: {},
 
     async load(id) {
       unregister ??= registerPendingSave(() => get().flush())
-      const mine = ++lastToken
-      loadTokens.set(id, mine)
-      set((s) => ({ docs: { ...s.docs, [id]: { content: null, dirty: false } } }))
-      // An editor that remounts right after its unload must read back its own last write, which
-      // may still be queued behind another record's save. Failures are reported by the flush
-      // that queued the job.
-      if (pending.has(id)) {
-        await get()
-          .flush()
-          .catch(() => undefined)
-        if (loadTokens.get(id) !== mine) return
-      }
-      const stored = await read(id)
-      if (loadTokens.get(id) !== mine) return // unloaded, cleared, or loaded again while in flight
-      set((s) => ({ docs: { ...s.docs, [id]: { content: stored ?? empty, dirty: false } } }))
+      const held = holders.get(id) ?? 0
+      holders.set(id, held + 1)
+      // Already held: the first holder's read (finished or in flight) serves this one too.
+      if (held > 0 && id in get().docs) return
+      await fetchRecord(id)
     },
 
     async reload(ids) {
@@ -257,10 +272,16 @@ export function createAutosaveStore<T, R>({
         clearJournal(id)
       }
       while (inflight !== null) await inflight.catch(() => undefined)
-      await Promise.all(loaded.map((id) => get().load(id)))
+      await Promise.all(loaded.map((id) => fetchRecord(id)))
     },
 
     unload(id) {
+      const held = holders.get(id) ?? 0
+      if (held > 1) {
+        holders.set(id, held - 1)
+        return
+      }
+      holders.delete(id)
       cancelTimer(id)
       loadTokens.delete(id)
       if (pending.has(id)) drain((jobId) => jobId === id).catch(reportFailure)
@@ -308,6 +329,7 @@ export function createAutosaveStore<T, R>({
       unregister?.()
       unregister = null
       loadTokens.clear()
+      holders.clear()
       set({ docs: {} })
     }
   }))
@@ -321,6 +343,7 @@ export function createAutosaveStore<T, R>({
     unregister?.()
     unregister = null
     loadTokens.clear()
+    holders.clear()
     useStore.setState({ docs: {} })
   }
 

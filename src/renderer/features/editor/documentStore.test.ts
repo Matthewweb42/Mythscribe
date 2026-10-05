@@ -125,7 +125,10 @@ describe('useDocumentStore load', () => {
   })
 
   it('drops a response from a superseded load of the same id', async () => {
+    // Unloaded and loaded again while the first read is in flight (a remount). A second holder
+    // with no unload between would share the first read instead (F-11.1).
     const first = store().load('scene-1')
+    store().unload('scene-1')
     const second = store().load('scene-1')
     gets[1]?.resolve(hello)
     await second

@@ -1,3 +1,4 @@
+import { promptSceneMeta } from '@shared/sceneMeta'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '@shared/rewrite'
 import { normalizeProposalNote } from '@shared/proposal'
 import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
@@ -97,7 +98,7 @@ export async function runRewrite(
   requireDocument(db, input.nodeId)
 
   const { meta: sceneMeta } = getSceneMeta(db, input.nodeId)
-  const meta = sceneMeta.location || sceneMeta.pov || sceneMeta.timeline ? sceneMeta : null
+  const meta = promptSceneMeta(sceneMeta)
   const pov = sceneMeta.pov.trim()
   const profile = buildVoiceProfile(db, { pov: pov || undefined })
   const voice = voiceBlock(profile, { text: input.text, pov: pov || null })

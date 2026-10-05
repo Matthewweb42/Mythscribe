@@ -43,6 +43,18 @@ afterEach(() => {
 })
 
 describe('buildChatContext (F-5.4)', () => {
+  it('leaves the outline synopsis and status out of the scene metadata that is sent and hashed (F-11.1)', () => {
+    setSceneMeta(db, scene, {
+      ...emptySceneMeta(),
+      location: 'Ridge',
+      synopsis: 'Mara reaches the river.',
+      status: 'final'
+    })
+    const sent = buildChatContext(db, { nodeId: scene, message: 'Why?' }).sceneMeta
+    expect(sent).not.toBeNull()
+    expect(Object.keys(sent ?? {}).sort()).toEqual(['brief', 'location', 'pov', 'timeline'])
+  })
+
   it('carries the scene text and its metadata, and nothing with no scene open', () => {
     saveDocument(db, scene, doc('The storm broke at dusk.'))
     setSceneMeta(db, scene, { location: 'Ridge', pov: '', timeline: '', brief: EMPTY_SCENE_BRIEF })

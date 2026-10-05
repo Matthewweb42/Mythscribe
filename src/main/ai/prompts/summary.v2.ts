@@ -5,7 +5,7 @@ import {
   OBSERVED_FACT_QUOTE_MAX,
   OBSERVED_FACT_VALUE_MAX
 } from '@shared/observedFacts'
-import type { SceneMeta } from '@shared/sceneMeta'
+import type { PromptSceneMeta } from '@shared/sceneMeta'
 import { SUMMARY_FACTS_MAX, SUMMARY_KEY_POINTS_MAX, SUMMARY_KNOWN_NAMES_MAX } from '@shared/summary'
 import type { AiMessage } from '../providers/types'
 
@@ -66,7 +66,7 @@ export interface BuildSummaryPromptV2Input {
   /** The scene as plain text, head-truncated to `SUMMARY_SCENE_CHAR_BUDGET` by the caller. */
   sceneText: string
   /** The scene's metadata when any field is set, else null. */
-  meta: SceneMeta | null
+  meta: PromptSceneMeta | null
   /** The story-bible names occurring in the scene; cut to `SUMMARY_KNOWN_NAMES_MAX` in all here. */
   known: SummaryKnownNames
 }

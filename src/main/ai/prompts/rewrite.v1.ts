@@ -1,5 +1,5 @@
 import { estimateTokens, outputBudget } from '@shared/ai'
-import type { SceneMeta } from '@shared/sceneMeta'
+import type { PromptSceneMeta } from '@shared/sceneMeta'
 import type { AiMessage } from '../providers/types'
 
 /**
@@ -41,7 +41,7 @@ export interface BuildRewritePromptInput {
   /** Up to `REWRITE_CONTEXT_CHARS` of manuscript text immediately after the selection; '' at the end. */
   after: string
   /** The scene's metadata when any field is set, else null. */
-  meta: SceneMeta | null
+  meta: PromptSceneMeta | null
   /**
    * The voice profile block (F-14.1, `voiceBlock`), or null when the project has neither rules
    * nor exemplars yet (then the fidelity check is skipped too).
