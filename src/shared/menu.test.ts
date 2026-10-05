@@ -181,6 +181,7 @@ describe('menu definition (F-7.1)', () => {
       'openWordCount',
       'openStatistics',
       'openDrafts',
+      'openSnapshots',
       'separator',
       'openSettings'
     ])
@@ -194,6 +195,14 @@ describe('menu definition (F-7.1)', () => {
   it('offers Drafts… after Statistics…, only with a project and without a shortcut (F-8.5)', () => {
     const [item] = menuItems().filter((entry) => entry.id === 'openDrafts')
     expect(item?.label).toBe('Drafts…')
+    expect(menuItemChord(item!)).toBeNull()
+    expect(isMenuItemEnabled(item!, false)).toBe(false)
+    expect(isMenuItemEnabled(item!, true)).toBe(true)
+  })
+
+  it('offers Snapshots… after Drafts…, only with a project and without a shortcut (F-8.6)', () => {
+    const [item] = menuItems().filter((entry) => entry.id === 'openSnapshots')
+    expect(item?.label).toBe('Snapshots…')
     expect(menuItemChord(item!)).toBeNull()
     expect(isMenuItemEnabled(item!, false)).toBe(false)
     expect(isMenuItemEnabled(item!, true)).toBe(true)

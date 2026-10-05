@@ -100,6 +100,14 @@ import {
 } from '../draft/draftStore'
 import { getDocumentContent, saveDocument, type SaveResult } from '../document/documentStore'
 import {
+  compareSnapshot,
+  deleteSnapshot,
+  listSnapshots,
+  restoreSnapshot,
+  takeSnapshot,
+  updateSnapshot
+} from '../snapshot/snapshotStore'
+import {
   goalsStatus,
   manuscriptWordCount,
   recordWriting,
@@ -1078,6 +1086,30 @@ export function registerHandlers({
   register('drafts:revert', ({ fromId, nodeIds }) => {
     const db = manager.require().connection.orm
     const result = revertDocuments(db, fromId, nodeIds)
+    documentsWritten(
+      db,
+      result.changed.map((each) => each.id)
+    )
+    return result
+  })
+
+  // F-8.6: snapshots. A restore rewrites live text like a draft revert: `documentsWritten` for
+  // what moved, never `recordWriting` (restoring is not words written).
+  register('snapshots:list', () => listSnapshots(manager.require().connection.orm))
+
+  register('snapshots:take', (input) => takeSnapshot(manager.require().connection.orm, input))
+
+  register('snapshots:update', (input) => updateSnapshot(manager.require().connection.orm, input))
+
+  register('snapshots:delete', ({ id }) => deleteSnapshot(manager.require().connection.orm, id))
+
+  register('snapshots:compare', ({ id, againstId }) =>
+    compareSnapshot(manager.require().connection.orm, id, againstId)
+  )
+
+  register('snapshots:restore', ({ id, nodeIds }) => {
+    const db = manager.require().connection.orm
+    const result = restoreSnapshot(db, id, nodeIds)
     documentsWritten(
       db,
       result.changed.map((each) => each.id)

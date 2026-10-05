@@ -10,8 +10,8 @@ import {
   type DraftList
 } from '@shared/drafts'
 import { diffWordCount, diffWords } from '@shared/textDiff'
-import { draft, draftText, node, settings, type DraftRow, type NodeRow } from '../db/schema'
-import { parseStoredTiptap, requireDocument, saveDocument } from '../document/documentStore'
+import { draft, draftText, settings, type DraftRow, type NodeRow } from '../db/schema'
+import { parseStoredTiptap, writeDocumentText, type StoredText } from '../document/documentStore'
 import { AppError } from '../ipc/errors'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
@@ -24,18 +24,15 @@ import { manuscriptDocuments } from '../voice/profile'
  * titles, notes, metadata, and tags are shared by every draft.
  *
  * Every operation runs in one transaction. Switching and reverting rewrite live text through
- * `saveDocument`, so word counts and `modified` move as for a save; the caller follows up with
- * `documentsWritten` and never `recordWriting` (a switch is not words written).
+ * `writeDocumentText`, so word counts and `modified` move as for a save; the caller follows up
+ * with `documentsWritten` and never `recordWriting` (a switch is not words written).
  */
 
 /** The settings key holding the active draft's id (a JSON string). */
 export const ACTIVE_DRAFT_KEY = 'activeDraft'
 
 /** One document's text as a draft reads it: the stored Tiptap JSON (null = empty) and its words. */
-interface DraftText {
-  content: string | null
-  wordCount: number
-}
+type DraftText = StoredText
 
 /** The drafts and the active id, after `ensureDrafts` made sure there is at least one. */
 interface DraftState {
@@ -64,6 +61,17 @@ function writeActiveId(db: TreeDb, id: string): void {
 
 function listDraftRows(db: TreeDb): DraftRow[] {
   return db.select().from(draft).orderBy(asc(draft.position), asc(draft.created)).all()
+}
+
+/**
+ * The active draft's name without creating any draft (snapshots record it, F-8.6): null while
+ * the project has no drafts; the first draft when the active id dangles, as `ensureDrafts`
+ * would repair it.
+ */
+export function activeDraftName(db: TreeDb): string | null {
+  const drafts = listDraftRows(db)
+  const stored = readActiveId(db)
+  return (drafts.find((each) => each.id === stored) ?? drafts[0])?.name ?? null
 }
 
 /**
@@ -149,22 +157,6 @@ function readerOf(db: TreeDb, draftId: string, activeId: string): Map<string, Dr
   return draftId === activeId ? new Map<string, DraftText>() : rowsOf(db, draftId)
 }
 
-/**
- * Makes `text` the live content of document `id`. A stored JSON goes through `saveDocument` (word
- * count recounted, `modified` stamped); an empty (null) text is written as null with no words.
- */
-function writeLive(db: TreeDb, id: string, text: DraftText): number {
-  if (text.content === null) {
-    requireDocument(db, id)
-    db.update(node)
-      .set({ content: null, wordCount: 0, modified: new Date().toISOString() })
-      .where(eq(node.id, id))
-      .run()
-    return 0
-  }
-  return saveDocument(db, id, parseStoredTiptap(text.content, id, 'draft text')).wordCount
-}
-
 function stampModified(db: TreeDb, id: string): void {
   db.update(draft).set({ modified: new Date().toISOString() }).where(eq(draft.id, id)).run()
 }
@@ -235,7 +227,7 @@ export function switchDraft(db: TreeDb, id: string): DraftChange {
     for (const doc of docs) {
       const text = target.get(doc.id)
       if (text === undefined || text.content === doc.content) continue
-      changed.push({ id: doc.id, wordCount: writeLive(tx, doc.id, text) })
+      changed.push({ id: doc.id, wordCount: writeDocumentText(tx, doc.id, text) })
     }
     tx.delete(draftText).where(eq(draftText.draftId, id)).run()
     writeActiveId(tx, id)
@@ -320,6 +312,32 @@ function pathOf(byId: ReadonlyMap<string, NodeRow>, doc: NodeRow): string[] {
 }
 
 /**
+ * The word-level difference of `doc` from stored text `a` to `b` (drafts F-8.5, snapshots
+ * F-8.6), or null when their plain text reads the same (formatting-only differences included).
+ * `byId` holds every node, for the ancestor path.
+ */
+export function diffDocument(
+  byId: ReadonlyMap<string, NodeRow>,
+  doc: NodeRow,
+  a: string | null,
+  b: string | null
+): DraftDocDiff | null {
+  if (a === b) return null
+  const left = plainText(doc.id, a)
+  const right = plainText(doc.id, b)
+  if (left === right) return null
+  const segments = diffWords(left, right)
+  return {
+    nodeId: doc.id,
+    title: doc.title,
+    path: pathOf(byId, doc),
+    segments,
+    wordsAdded: diffWordCount(segments, 'add'),
+    wordsRemoved: diffWordCount(segments, 'del')
+  }
+}
+
+/**
  * The word-level differences from draft `fromId` to `toId` per manuscript document in tree
  * order. A document whose plain text reads the same in both (formatting-only differences
  * included) counts as unchanged. Read-only.
@@ -338,21 +356,9 @@ export function compareDrafts(db: TreeDb, fromId: string, toId: string): DraftCo
     for (const doc of manuscriptDocuments(tx, rows)) {
       const a = textOf(fromId, state.activeId, from, doc).content
       const b = textOf(toId, state.activeId, to, doc).content
-      const left = a === b ? '' : plainText(doc.id, a)
-      const right = a === b ? '' : plainText(doc.id, b)
-      if (left === right) {
-        unchanged += 1
-        continue
-      }
-      const segments = diffWords(left, right)
-      docs.push({
-        nodeId: doc.id,
-        title: doc.title,
-        path: pathOf(byId, doc),
-        segments,
-        wordsAdded: diffWordCount(segments, 'add'),
-        wordsRemoved: diffWordCount(segments, 'del')
-      })
+      const diff = diffDocument(byId, doc, a, b)
+      if (diff === null) unchanged += 1
+      else docs.push(diff)
     }
     return { fromId, toId, docs, unchanged }
   })
@@ -381,7 +387,7 @@ export function revertDocuments(
       if (wanted !== null && !wanted.has(doc.id)) continue
       const text = source.get(doc.id)
       if (text === undefined || text.content === doc.content) continue
-      changed.push({ id: doc.id, wordCount: writeLive(tx, doc.id, text) })
+      changed.push({ id: doc.id, wordCount: writeDocumentText(tx, doc.id, text) })
     }
     if (changed.length > 0) stampModified(tx, state.activeId)
     return { list: buildList(tx, state, manuscriptDocuments(tx)), changed }

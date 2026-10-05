@@ -1,10 +1,10 @@
-import { useEffect, useId, useMemo, useState } from 'react'
-import type { DraftComparison, DraftDocDiff, DraftInfo } from '@shared/drafts'
+import { useEffect, useId, useState } from 'react'
+import type { DraftComparison, DraftInfo } from '@shared/drafts'
 import { flushPendingSaves } from '@renderer/features/project/pendingSaves'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
-import { collapseUnchanged } from './diffContext'
+import { DocDiff } from './DocDiff'
 import { useDraftStore } from './draftStore'
 
 /** The answer for one request, keyed so an answer for other pickers reads as still loading. */
@@ -108,9 +108,9 @@ export function DraftCompare({
           <DocDiff
             key={doc.nodeId}
             doc={doc}
-            revertLabel={source !== null ? `Revert this scene to "${sourceName}"` : null}
+            actionLabel={source !== null ? `Revert this scene to "${sourceName}"` : null}
             busy={busy}
-            onRevert={() => void revertDocs([doc.nodeId])}
+            onAction={() => void revertDocs([doc.nodeId])}
           />
         ))}
         {docs.length > 0 && source !== null ? (
@@ -164,64 +164,5 @@ export function DraftCompare({
       </div>
       {body}
     </div>
-  )
-}
-
-/** One changed document: where it sits, how many words moved, the diff, and its revert button. */
-function DocDiff({
-  doc,
-  revertLabel,
-  busy,
-  onRevert
-}: {
-  doc: DraftDocDiff
-  revertLabel: string | null
-  busy: boolean
-  onRevert: () => void
-}): React.JSX.Element {
-  const shown = useMemo(() => collapseUnchanged(doc.segments), [doc.segments])
-  const title = doc.title || 'Untitled'
-  return (
-    <section
-      aria-label={title}
-      data-testid="draft-diff"
-      className="flex flex-col gap-1.5 rounded-md border border-line bg-surface px-3 py-2"
-    >
-      <div className="flex flex-wrap items-baseline gap-x-3 text-sm">
-        <h3 className="m-0 text-sm font-semibold">
-          {doc.path.length > 0 ? (
-            <span className="font-normal text-fg-muted">{`${doc.path.join(' › ')} › `}</span>
-          ) : null}
-          {title}
-        </h3>
-        <span className="text-xs text-fg-muted">
-          {`+${doc.wordsAdded.toLocaleString()} / −${doc.wordsRemoved.toLocaleString()} words`}
-        </span>
-        {revertLabel !== null ? (
-          <button type="button" disabled={busy} onClick={onRevert} className={`${BUTTON} ml-auto`}>
-            {revertLabel}
-          </button>
-        ) : null}
-      </div>
-      <p data-testid="draft-diff-text" className="rewrite-diff m-0 whitespace-pre-wrap text-sm">
-        {shown.map((segment, i) =>
-          segment.op === 'gap' ? (
-            <span
-              key={i}
-              className="text-fg-subtle"
-              title={`${segment.chars} unchanged characters`}
-            >
-              {' … '}
-            </span>
-          ) : segment.op === 'del' ? (
-            <del key={i}>{segment.text}</del>
-          ) : segment.op === 'add' ? (
-            <ins key={i}>{segment.text}</ins>
-          ) : (
-            <span key={i}>{segment.text}</span>
-          )
-        )}
-      </p>
-    </section>
   )
 }

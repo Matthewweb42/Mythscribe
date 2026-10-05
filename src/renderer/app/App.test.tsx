@@ -59,6 +59,7 @@ import { useProjectStore } from '@renderer/features/project/projectStore'
 import { resetWelcomeStore } from '@renderer/features/project/welcomeStore'
 import { resetShellDialogStore } from '@renderer/features/shell/shellDialogStore'
 import { resetDraftStore } from '@renderer/features/drafts/draftStore'
+import { resetSnapshotStore } from '@renderer/features/snapshots/snapshotStore'
 import { resetViewStore, useViewStore } from '@renderer/features/shell/viewStore'
 import { App } from './App'
 
@@ -133,6 +134,7 @@ beforeEach(() => {
   resetGoalsStore()
   resetFindStore()
   resetDraftStore()
+  resetSnapshotStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
@@ -140,6 +142,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   resetDraftStore()
+  resetSnapshotStore()
   resetEntityDraftStore()
   resetEntityStore()
   resetObservedFactStore()
@@ -199,6 +202,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'view:get') return defaultViewSettings()
     if (channel === 'recovery:list') return []
     if (channel === 'drafts:list') return DRAFTS_ONE
+    if (channel === 'snapshots:list') return []
     return null
   })
   const on = <E extends EventName>(

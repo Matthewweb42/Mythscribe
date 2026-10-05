@@ -39,6 +39,13 @@ import {
 } from '../diagnostics'
 import { DictionaryWord, ProjectDictionary } from '../dictionary'
 import { DraftChange, DraftComparison, DraftList, DraftName } from '../drafts'
+import {
+  SnapshotComparison,
+  SnapshotList,
+  SnapshotRestore,
+  TakeSnapshot,
+  UpdateSnapshot
+} from '../snapshots'
 import { EditorSettings } from '../editorSettings'
 import {
   ENTITY_BODY_MAX,
@@ -1333,6 +1340,35 @@ export const contract = {
   'drafts:revert': {
     input: z.object({ fromId: z.string(), nodeIds: z.array(z.string()).min(1).optional() }),
     output: DraftChange
+  },
+  /** The open project's snapshots (F-8.6), newest first. */
+  'snapshots:list': { input: z.undefined(), output: SnapshotList },
+  /**
+   * Takes a snapshot (F-8.6) of one document's live text or of every document in the project.
+   * NOT_FOUND for an unknown document; VALIDATION for a folder. Flush pending saves first.
+   */
+  'snapshots:take': { input: TakeSnapshot, output: SnapshotList },
+  /** Renames a snapshot, edits its note, or flags it as a milestone or not (F-8.6). */
+  'snapshots:update': { input: UpdateSnapshot, output: SnapshotList },
+  /** Deletes a snapshot and its texts (F-8.6). */
+  'snapshots:delete': { input: z.object({ id: z.string() }), output: SnapshotList },
+  /**
+   * Word-level differences from a snapshot to another one, or to the current text when
+   * `againstId` is omitted (F-8.6). Read-only. Flush pending saves first.
+   */
+  'snapshots:compare': {
+    input: z.object({ id: z.string(), againstId: z.string().optional() }),
+    output: SnapshotComparison
+  },
+  /**
+   * Restores documents to a snapshot's text (F-8.6): the listed node ids, or every document it
+   * holds when `nodeIds` is omitted. The text that is about to be overwritten is first kept as an
+   * automatic snapshot. Writes the live (active draft's) text; not counted as words written.
+   * Flush pending saves first.
+   */
+  'snapshots:restore': {
+    input: z.object({ id: z.string(), nodeIds: z.array(z.string()).min(1).optional() }),
+    output: SnapshotRestore
   },
   /**
    * Where diagnostics stand (F-15.8): whether they are on (off on every install), the next

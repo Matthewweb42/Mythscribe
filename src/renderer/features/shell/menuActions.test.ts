@@ -469,6 +469,17 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useFocusStore.getState().active).toBe(true)
     expect(useShellDialogStore.getState().open).toBe('drafts')
   })
+
+  it('Tools › Snapshots… opens the snapshots dialog, over focus mode too (F-8.6)', async () => {
+    await runMenuAction('openSnapshots')
+    expect(useShellDialogStore.getState().open).toBeNull()
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE])
+    await withProject()
+    await useFocusStore.getState().enter()
+    await runMenuAction('openSnapshots')
+    expect(useFocusStore.getState().active).toBe(true)
+    expect(useShellDialogStore.getState().open).toBe('snapshots')
+  })
 })
 
 describe('closeProjectWithConfirm', () => {

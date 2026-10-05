@@ -4737,6 +4737,67 @@ test('create, close, reopen a project on disk', async () => {
   await draftsDialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(draftsDialog).toHaveCount(0)
 
+  // F-8.6: snapshots, still in the restored copy on Draft 1 with Scene 1 (split) open. A
+  // whole-project snapshot holds the scene as it reads now; a word typed afterwards shows as an
+  // insert against it, "Restore this document" takes it out again, and the restore leaves an
+  // automatic snapshot of the text it overwrote.
+  const snapshotWord = 'Lanternwick'
+  const snapshotName = 'Before the lantern'
+  const snapshotsDialog = page.getByRole('dialog', { name: 'Snapshots' })
+  const snapshotRows = snapshotsDialog.getByTestId('snapshot-row')
+  const openSnapshots = async (): Promise<void> => {
+    await page
+      .getByRole('menubar', { name: 'Application menu' })
+      .getByRole('menuitem', { name: 'Tools' })
+      .click()
+    await page
+      .getByRole('menu', { name: 'Tools' })
+      .getByRole('menuitem', { name: 'Snapshots…' })
+      .click()
+    await expect(snapshotsDialog).toBeVisible()
+  }
+  await openSnapshots()
+  const takeForm = snapshotsDialog.getByRole('form', { name: 'Take snapshot' })
+  await expect(
+    takeForm.getByRole('radio', { name: 'This document (Scene 1 (split))' })
+  ).toBeChecked()
+  await takeForm.getByRole('radio', { name: 'Whole project' }).check()
+  await takeForm.getByLabel('Name', { exact: true }).fill(snapshotName)
+  await takeForm.getByRole('button', { name: 'Take snapshot' }).click()
+  await expect(snapshotRows).toHaveCount(1)
+  await expect(snapshotRows.first()).toContainText(snapshotName)
+  await expect(snapshotRows.first()).toContainText('Whole project')
+  await snapshotsDialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(snapshotsDialog).toHaveCount(0)
+  await dismissToasts()
+  await draftEditor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(` ${snapshotWord}`)
+  await expect.poll(() => documentText(draftScene)).toContain(snapshotWord)
+  await dismissToasts()
+  await openSnapshots()
+  await snapshotsDialog
+    .getByRole('button', { name: `Compare ${snapshotName} with current` })
+    .click()
+  const snapshotDiff = snapshotsDialog.getByRole('region', { name: 'Scene 1 (split)' })
+  await expect(snapshotDiff.locator('ins', { hasText: snapshotWord })).toHaveCount(1)
+  await expect(snapshotsDialog.getByTestId('snapshot-compare-summary')).toContainText(
+    '1 document differs'
+  )
+  await snapshotDiff.getByRole('button', { name: 'Restore this document' }).click()
+  await expect(snapshotsDialog.getByTestId('snapshot-compare-summary')).toHaveText(
+    'The snapshot reads the same as the current text.'
+  )
+  await expect(draftEditor).not.toContainText(snapshotWord)
+  await expect(draftEditor).toContainText(crashSentence)
+  expect(await documentText(draftScene)).not.toContain(snapshotWord)
+  await snapshotsDialog.getByRole('button', { name: 'Back to snapshots' }).click()
+  await expect(snapshotRows).toHaveCount(2)
+  await expect(snapshotRows.first()).toContainText(`Before restoring "${snapshotName}"`)
+  await expect(snapshotRows.first()).toContainText('Auto')
+  await snapshotsDialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(snapshotsDialog).toHaveCount(0)
+
   const closed = app.waitForEvent('close')
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
   await closed

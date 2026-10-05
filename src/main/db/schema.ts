@@ -20,6 +20,7 @@ import {
 import { ENTITY_KINDS, ENTITY_ORIGINS, ENTITY_TEMPLATES } from '../../shared/entities'
 import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
+import { SNAPSHOT_KINDS, SNAPSHOT_SCOPES } from '../../shared/snapshots'
 import { TAG_CATEGORIES } from '../../shared/tags'
 import { EXEMPLAR_KINDS } from '../../shared/voice'
 
@@ -551,3 +552,40 @@ export const draftText = sqliteTable(
   (t) => [primaryKey({ columns: [t.draftId, t.nodeId] })]
 )
 export type DraftTextRow = typeof draftText.$inferSelect
+
+/**
+ * A snapshot (F-8.6): a frozen copy of document text, of one document (`scope` `document`,
+ * `node_id` set, deleted with it) or several (`project`, `node_id` null). `draft_name` is the
+ * draft that was active when it was taken. Kinds and pruning are in `snapshotStore.ts`.
+ */
+export const snapshot = sqliteTable('snapshot', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  note: text('note').notNull().default(''),
+  kind: text('kind', { enum: SNAPSHOT_KINDS }).notNull(),
+  scope: text('scope', { enum: SNAPSHOT_SCOPES }).notNull(),
+  nodeId: text('node_id').references(() => node.id, { onDelete: 'cascade' }),
+  draftName: text('draft_name'),
+  created: text('created').notNull()
+})
+export type SnapshotRow = typeof snapshot.$inferSelect
+
+/**
+ * One document's text in a snapshot (F-8.6): the stored Tiptap JSON (null = empty) and its word
+ * count. Both ends cascade on delete.
+ */
+export const snapshotText = sqliteTable(
+  'snapshot_text',
+  {
+    snapshotId: text('snapshot_id')
+      .notNull()
+      .references(() => snapshot.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    content: text('content'),
+    wordCount: integer('word_count').notNull().default(0)
+  },
+  (t) => [primaryKey({ columns: [t.snapshotId, t.nodeId] })]
+)
+export type SnapshotTextRow = typeof snapshotText.$inferSelect

@@ -90,6 +90,20 @@ export function manuscriptDocuments(db: TreeDb, rows: NodeRow[] = listNodes(db))
     under.set(id, result)
     return result
   }
+  return documentsInTreeOrder(rows, (row) => isUnder(row.id))
+}
+
+/**
+ * Every document row of the project (front matter, the manuscript, end matter) in the order the
+ * tree shows them, sections in their own order. Snapshots (F-8.6) walk these.
+ */
+export function projectDocuments(db: TreeDb, rows: NodeRow[] = listNodes(db)): NodeRow[] {
+  return documentsInTreeOrder(rows, () => true)
+}
+
+/** The document rows `keep` accepts, sorted by each row's chain of positions from its root. */
+function documentsInTreeOrder(rows: NodeRow[], keep: (row: NodeRow) => boolean): NodeRow[] {
+  const byId = new Map(rows.map((row) => [row.id, row]))
   const paths = new Map<string, number[]>()
   const pathOf = (row: NodeRow): number[] => {
     const known = paths.get(row.id)
@@ -100,7 +114,7 @@ export function manuscriptDocuments(db: TreeDb, rows: NodeRow[] = listNodes(db))
     return path
   }
   return rows
-    .filter((row) => row.kind === 'document' && isUnder(row.id))
+    .filter((row) => row.kind === 'document' && keep(row))
     .sort((a, b) => comparePaths(pathOf(a), pathOf(b)))
 }
 

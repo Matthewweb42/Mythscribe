@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(15)
+    expect(result.version).toBe(16)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -129,6 +129,8 @@ describe('migrate', () => {
     expect(tables()).toContain('writing_log')
     expect(tables()).toContain('draft')
     expect(tables()).toContain('draft_text')
+    expect(tables()).toContain('snapshot')
+    expect(tables()).toContain('snapshot_text')
   })
 })
 
@@ -651,5 +653,63 @@ describe('draft and draft_text tables (0014_drafts)', () => {
     insertText('d1', 'scene')
     db.prepare('DELETE FROM node WHERE id = ?').run('scene')
     expect(count()).toEqual({ n: 0 })
+  })
+})
+
+describe('snapshot and snapshot_text tables (0015_snapshots)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '2026-01-01', '2026-01-01')`
+    ).run()
+  })
+  afterEach(() => db.close())
+
+  const insertSnapshot = (id: string, nodeId: string | null): void => {
+    db.prepare(
+      `INSERT INTO snapshot (id, name, kind, scope, node_id, created)
+       VALUES (?, 'Snap', 'manual', ?, ?, '2026-01-01')`
+    ).run(id, nodeId === null ? 'project' : 'document', nodeId)
+  }
+  const insertText = (snapshotId: string, nodeId: string): void => {
+    db.prepare('INSERT INTO snapshot_text (snapshot_id, node_id, content) VALUES (?, ?, NULL)').run(
+      snapshotId,
+      nodeId
+    )
+  }
+  const count = (table: string): unknown => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()
+
+  it('defaults the note and word count, keeps one text per node, and refuses unknown ends', () => {
+    insertSnapshot('s1', null)
+    expect(db.prepare('SELECT note, draft_name FROM snapshot').get()).toEqual({
+      note: '',
+      draft_name: null
+    })
+    insertText('s1', 'scene')
+    expect(db.prepare('SELECT word_count FROM snapshot_text').get()).toEqual({ word_count: 0 })
+    expect(() => insertText('s1', 'scene')).toThrow(/UNIQUE|PRIMARY/)
+    expect(() => insertText('ghost', 'scene')).toThrow(/FOREIGN KEY/)
+    expect(() => insertText('s1', 'ghost')).toThrow(/FOREIGN KEY/)
+    expect(() => insertSnapshot('s2', 'ghost')).toThrow(/FOREIGN KEY/)
+  })
+
+  it('drops texts with their snapshot, and texts and document snapshots with their node', () => {
+    insertSnapshot('s1', null)
+    insertText('s1', 'scene')
+    db.prepare('DELETE FROM snapshot WHERE id = ?').run('s1')
+    expect(count('snapshot_text')).toEqual({ n: 0 })
+
+    insertSnapshot('s1', null)
+    insertSnapshot('s2', 'scene')
+    insertText('s1', 'scene')
+    insertText('s2', 'scene')
+    db.prepare('DELETE FROM node WHERE id = ?').run('scene')
+    expect(count('snapshot_text')).toEqual({ n: 0 })
+    expect(db.prepare('SELECT id FROM snapshot').all()).toEqual([{ id: 's1' }])
   })
 })

@@ -60,6 +60,30 @@ export function saveDocument(db: TreeDb, id: string, content: TiptapNodeT): Save
   return { wordCount, modified }
 }
 
+/** One document's text as stored on the row: the Tiptap JSON (null = empty) and its words. */
+export interface StoredText {
+  content: string | null
+  wordCount: number
+}
+
+/**
+ * Makes a stored text the live content of document `id` (draft switch and revert F-8.5,
+ * snapshot restore F-8.6). A JSON text goes through `saveDocument` (word count recounted,
+ * `modified` stamped); an empty (null) text is written as null with no words. Returns the new
+ * word count.
+ */
+export function writeDocumentText(db: TreeDb, id: string, text: StoredText): number {
+  if (text.content === null) {
+    requireDocument(db, id)
+    db.update(node)
+      .set({ content: null, wordCount: 0, modified: new Date().toISOString() })
+      .where(eq(node.id, id))
+      .run()
+    return 0
+  }
+  return saveDocument(db, id, parseStoredTiptap(text.content, id, 'document text')).wordCount
+}
+
 /**
  * Parses a stored Tiptap JSON column (content, or notes for F-3.7) and reports a corrupt value as
  * INTERNAL; `what` names the column in the message.
