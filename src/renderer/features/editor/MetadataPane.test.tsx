@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings } from '@shared/aiSettings'
@@ -30,6 +30,7 @@ import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetStructureStore, useStructureStore } from '@renderer/features/outline/structureStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { orderedIds, resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
@@ -55,9 +56,18 @@ const stored: Record<string, SceneMeta> = {
     timeline: 'Day 1',
     brief: EMPTY_SCENE_BRIEF,
     synopsis: '',
-    status: 'none'
+    status: 'none',
+    beats: {}
   },
-  'sc-4': { location: '', pov: '', timeline: '', brief: STORED_BRIEF, synopsis: '', status: 'none' }
+  'sc-4': {
+    location: '',
+    pov: '',
+    timeline: '',
+    brief: STORED_BRIEF,
+    synopsis: '',
+    status: 'none',
+    beats: {}
+  }
 }
 
 type Handler = (input: unknown) => unknown
@@ -210,6 +220,7 @@ beforeEach(() => {
   resetAiSettingsStore()
   resetProposalStore()
   resetLayoutStore()
+  resetStructureStore()
   useTreeStore.setState({ ...buildIndex([]), loaded: false })
   useDialogStore.setState({ modals: [], toasts: [] })
   const byId = Object.fromEntries(tagFixture.map((t) => [t.id, t]))
@@ -285,7 +296,8 @@ describe('MetadataPane (F-4.5)', () => {
           timeline: 'Day 2, dawn',
           brief: EMPTY_SCENE_BRIEF,
           synopsis: 'Mara bargains.',
-          status: 'revised'
+          status: 'revised',
+          beats: {}
         }
       }
     ])
@@ -304,6 +316,60 @@ describe('MetadataPane (F-4.5)', () => {
     view.unmount()
     expect(useSceneMetaStore.getState().docs['sc-2']).toBeUndefined()
     expect(toasts()).toEqual([])
+  })
+})
+
+describe('MetadataPane beat (F-11.1b)', () => {
+  const beatSelect = (): HTMLSelectElement => screen.getByRole('combobox', { name: 'Beat' })
+
+  async function opened(id: string): Promise<Input<'sceneMeta:set'>[]> {
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    const { sets, release } = install()
+    release()
+    render(<MetadataPane id={id} />)
+    await waitFor(() => expect(timeline()).toBeEnabled())
+    return sets
+  }
+
+  it('offers no beat picker without a template or outside the manuscript', async () => {
+    await opened('sc-1')
+    expect(screen.queryByRole('combobox', { name: 'Beat' })).not.toBeInTheDocument()
+    cleanup()
+    useStructureStore.setState({ template: 'saveTheCat', loaded: true })
+    await opened('title-page')
+    expect(screen.queryByRole('combobox', { name: 'Beat' })).not.toBeInTheDocument()
+  })
+
+  it('lists the template beats by act and writes the chosen beat beside the others', async () => {
+    useStructureStore.setState({ template: 'saveTheCat', loaded: true })
+    const sets = await opened('sc-1')
+    expect(beatSelect().value).toBe('')
+    const groups = within(beatSelect()).getAllByRole('group')
+    expect(groups.map((g) => g.getAttribute('label'))).toEqual(['Act 1', 'Act 2', 'Act 3'])
+    expect(within(beatSelect()).getAllByRole('option')).toHaveLength(16)
+
+    await userEvent.selectOptions(beatSelect(), 'Catalyst')
+    expect(beatSelect().value).toBe('catalyst')
+    await act(() => useSceneMetaStore.getState().flush())
+    expect(sets.at(-1)?.meta.beats).toEqual({ saveTheCat: 'catalyst' })
+  })
+
+  it('keeps another template’s beat, and No beat removes only this one', async () => {
+    useStructureStore.setState({ template: 'threeAct', loaded: true })
+    const sets = await opened('sc-1')
+    await userEvent.selectOptions(beatSelect(), 'Midpoint')
+    await act(() => useSceneMetaStore.getState().flush())
+    act(() => useStructureStore.setState({ template: 'saveTheCat' }))
+    expect(beatSelect().value).toBe('')
+    await userEvent.selectOptions(beatSelect(), 'Debate')
+    await act(() => useSceneMetaStore.getState().flush())
+    expect(sets.at(-1)?.meta.beats).toEqual({ threeAct: 'midpoint', saveTheCat: 'debate' })
+
+    await userEvent.selectOptions(beatSelect(), 'No beat')
+    await act(() => useSceneMetaStore.getState().flush())
+    expect(sets.at(-1)?.meta.beats).toEqual({ threeAct: 'midpoint' })
+    act(() => useStructureStore.setState({ template: 'threeAct' }))
+    expect(beatSelect().value).toBe('midpoint')
   })
 })
 
@@ -365,7 +431,8 @@ describe('MetadataPane brief (F-14.3)', () => {
             after: 'The bridge is out.'
           },
           synopsis: '',
-          status: 'none'
+          status: 'none',
+          beats: {}
         }
       }
     ])
@@ -416,7 +483,8 @@ describe('MetadataPane brief (F-14.3)', () => {
           timeline: 'Day 1',
           brief: DRAFTED,
           synopsis: '',
-          status: 'none'
+          status: 'none',
+          beats: {}
         }
       }
     ])

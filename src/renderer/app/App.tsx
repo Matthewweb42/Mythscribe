@@ -44,6 +44,7 @@ import { NotesPanel } from '@renderer/features/editor/NotesPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
 import { CorkBoard, FolderViewToggle } from '@renderer/features/outline/CorkBoard'
 import { useOutlineViewStore } from '@renderer/features/outline/outlineViewStore'
+import { useStructureStore } from '@renderer/features/outline/structureStore'
 import { SpellcheckMenu } from '@renderer/features/editor/SpellcheckMenu'
 import { useDictionaryStore } from '@renderer/features/editor/dictionaryStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
@@ -232,6 +233,8 @@ export function App(): React.JSX.Element {
       useAiSettingsStore.getState().clear()
       useAuthorRulesStore.getState().clear()
       usePresetsStore.getState().clear()
+      // F-11.1b: and the structure template.
+      useStructureStore.getState().clear()
       useVoiceStore.getState().clear()
       useProvenanceStore.getState().clear()
       useAssistantStore.getState().clear()
@@ -298,6 +301,11 @@ export function App(): React.JSX.Element {
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
     usePresetsStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    // F-11.1b: the structure template the Outline tab and the metadata pane read.
+    useStructureStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))

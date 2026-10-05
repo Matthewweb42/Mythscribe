@@ -18,6 +18,7 @@ import type { NovelFormat } from '@shared/ipc/contract'
 import { OBSERVED_DISMISSED_KEY, defaultObservedDismissed } from '@shared/observedFacts'
 import { WRITING_PRESETS_KEY, builtinParams, defaultWritingPresets } from '@shared/presets'
 import { REFERENCE_PINS_KEY, REFERENCE_PINS_MAX, defaultReferencePins } from '@shared/references'
+import { STRUCTURE_KEY, defaultProjectStructure } from '@shared/structure'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
 import { createProject, projectFolderFor, type ProjectSession } from './projectStore'
@@ -29,6 +30,7 @@ import {
   getFocusSettings,
   getObservedDismissed,
   getProjectDictionary,
+  getProjectStructure,
   getReferencePins,
   getWritingPresets,
   setAiSettings,
@@ -38,6 +40,7 @@ import {
   setFocusSettings,
   setObservedDismissed,
   setProjectDictionary,
+  setProjectStructure,
   setReferencePins,
   setWritingPresets
 } from './settingsStore'
@@ -489,5 +492,31 @@ describe('getProjectDictionary / setProjectDictionary (F-3.11)', () => {
     expect(getProjectDictionary(db)).toEqual(defaultProjectDictionary())
     setRaw(JSON.stringify({ words: [1, 2] }), DICTIONARY_KEY)
     expect(getProjectDictionary(db)).toEqual(defaultProjectDictionary())
+  })
+})
+
+describe('getProjectStructure / setProjectStructure (F-11.1b)', () => {
+  it('answers no template for a new project, which seeds no row', () => {
+    open('novel')
+    expect(rows(STRUCTURE_KEY)).toHaveLength(0)
+    expect(getProjectStructure(db)).toEqual(defaultProjectStructure())
+    expect(getProjectStructure(db)).toEqual({ template: null })
+  })
+
+  it('round-trips a template and overwrites the single row', () => {
+    open('novel')
+    expect(setProjectStructure(db, { template: 'saveTheCat' })).toEqual({ template: 'saveTheCat' })
+    expect(getProjectStructure(db)).toEqual({ template: 'saveTheCat' })
+    setProjectStructure(db, { template: null })
+    expect(rows(STRUCTURE_KEY)).toHaveLength(1)
+    expect(getProjectStructure(db)).toEqual({ template: null })
+  })
+
+  it('falls back when the stored value is not JSON or no longer fits the schema', () => {
+    open('novel')
+    setRaw('{not json', STRUCTURE_KEY)
+    expect(getProjectStructure(db)).toEqual(defaultProjectStructure())
+    setRaw(JSON.stringify({ template: 'fiveAct' }), STRUCTURE_KEY)
+    expect(getProjectStructure(db)).toEqual(defaultProjectStructure())
   })
 })

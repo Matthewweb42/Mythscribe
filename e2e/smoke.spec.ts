@@ -2713,6 +2713,44 @@ test('create, close, reopen a project on disk', async () => {
   await folderView.getByRole('button', { name: 'Stacked' }).click()
   await expect(regions).toHaveCount(2)
 
+  // F-11.1b: structure templates. In the Outline tab, choosing Save the Cat adds a Beat picker to
+  // the metadata pane; Opening (opened from its outline row) goes on Catalyst, which saves to its
+  // own metadata under the template's id. The Beats view lists Opening under Catalyst, marks the
+  // empty beats, and counts one of fifteen filled. Back to the outline, no template, and the
+  // Manuscript tab so the later steps find the tree as they left it.
+  await sidebarTabs.getByRole('tab', { name: 'Outline' }).click()
+  const outlinePanel = page.getByRole('tabpanel', { name: 'Outline' })
+  const structureSelect = outlinePanel.getByRole('combobox', { name: 'Structure' })
+  await expect(structureSelect).toBeEnabled()
+  await structureSelect.selectOption({ label: 'Save the Cat' })
+  const outlineView = outlinePanel.getByRole('group', { name: 'Outline view' })
+  await expect(outlineView.getByRole('button', { name: 'Outline' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await outlinePanel.getByRole('button', { name: 'Opening', exact: true }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Opening')
+  const beatSelect = metadata.getByRole('combobox', { name: 'Beat' })
+  await expect(beatSelect).toBeEnabled()
+  await beatSelect.selectOption({ label: 'Catalyst' })
+  await expect
+    .poll(async () => (await sceneMetaOf(openingRow.id)).beats, { timeout: 3000 })
+    .toEqual({ saveTheCat: 'catalyst' })
+  await outlineView.getByRole('button', { name: 'Beats' }).click()
+  await expect(outlinePanel.getByTestId('beat-counts')).toHaveText('1 of 15 beats filled')
+  const catalystBeat = outlinePanel.locator('[data-testid="beat"][data-beat="catalyst"]')
+  await expect(catalystBeat.getByRole('button')).toHaveText(['Opening'])
+  await expect(catalystBeat).toHaveAttribute('data-empty', 'false')
+  const openingImageBeat = outlinePanel.locator('[data-testid="beat"][data-beat="opening-image"]')
+  await expect(openingImageBeat).toHaveAttribute('data-empty', 'true')
+  await expect(openingImageBeat.getByText('Empty beat')).toBeVisible()
+  await outlineView.getByRole('button', { name: 'Outline' }).click()
+  await expect(outlinePanel.getByTestId('beat')).toHaveCount(0)
+  await structureSelect.selectOption({ label: 'None' })
+  await expect(outlineView).toHaveCount(0)
+  await expect(beatSelect).toHaveCount(0)
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+
   // F-4.6: inline tags. Back in Scene 1, `#` at the end of the text opens a suggestion list at
   // the caret, filtered by what follows it (the template's "dark" tone tag and dark-forest);
   // ArrowDown and Tab insert the highlighted tag as a token colored from the bank, followed by

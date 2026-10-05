@@ -22,4 +22,12 @@ describe('outlineViewStore', () => {
     before.setFolderView('stacked')
     expect(useOutlineViewStore.getState()).toBe(before)
   })
+
+  it('starts the Outline tab on the outline and switches to the beats and back (F-11.1b)', () => {
+    expect(useOutlineViewStore.getState().outlineMode).toBe('outline')
+    useOutlineViewStore.getState().setOutlineMode('beats')
+    expect(useOutlineViewStore.getState().outlineMode).toBe('beats')
+    useOutlineViewStore.getState().setOutlineMode('outline')
+    expect(useOutlineViewStore.getState().outlineMode).toBe('outline')
+  })
 })

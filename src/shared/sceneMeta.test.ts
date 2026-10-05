@@ -12,8 +12,10 @@ import {
   emptySceneMeta,
   isBriefEmpty,
   parseStoredSceneMeta,
+  promptSceneMeta,
   renderSceneBriefBlock
 } from './sceneMeta'
+import { STRUCTURE_BEAT_ID_MAX } from './structure'
 
 const BRIEF: SceneBrief = {
   goal: 'Mara wants to cross tonight.',
@@ -32,7 +34,8 @@ describe('SceneMeta', () => {
       timeline: 'Day 3, after the storm',
       brief: BRIEF,
       synopsis: 'Mara wants to cross; the river says no.',
-      status: 'draft'
+      status: 'draft',
+      beats: { threeAct: 'midpoint' }
     }
     expect(SceneMeta.parse(filled)).toEqual(filled)
     expect(
@@ -56,7 +59,13 @@ describe('SceneMeta', () => {
   it('reads a row stored before F-14.3 (no brief) with an empty brief, as a fresh object', () => {
     const stored = { location: 'dark-forest', pov: 'mara', timeline: 'Day 3' }
     const parsed = SceneMeta.parse(stored)
-    expect(parsed).toEqual({ ...stored, brief: EMPTY_SCENE_BRIEF, synopsis: '', status: 'none' })
+    expect(parsed).toEqual({
+      ...stored,
+      brief: EMPTY_SCENE_BRIEF,
+      synopsis: '',
+      status: 'none',
+      beats: {}
+    })
     expect(parsed.brief).not.toBe(EMPTY_SCENE_BRIEF)
   })
 
@@ -75,11 +84,32 @@ describe('SceneMeta', () => {
     ).toBe(false)
   })
 
+  it('reads a row stored before F-11.1b with no beats as on no beat; keeps unknown beat ids, refuses an unknown template and an over-long id', () => {
+    const stored = {
+      location: '',
+      pov: '',
+      timeline: '',
+      brief: EMPTY_SCENE_BRIEF,
+      synopsis: '',
+      status: 'none'
+    }
+    expect(SceneMeta.parse(stored).beats).toEqual({})
+    expect(
+      SceneMeta.parse({ ...stored, beats: { saveTheCat: 'catalyst', threeAct: 'gone' } }).beats
+    ).toEqual({ saveTheCat: 'catalyst', threeAct: 'gone' })
+    expect(SceneMeta.safeParse({ ...stored, beats: { fiveAct: 'x' } }).success).toBe(false)
+    expect(
+      SceneMeta.safeParse({ ...stored, beats: { threeAct: 'x'.repeat(STRUCTURE_BEAT_ID_MAX + 1) } })
+        .success
+    ).toBe(false)
+  })
+
   it('emptySceneMeta shares no object with EMPTY_SCENE_META', () => {
     const meta = emptySceneMeta()
     expect(meta).toEqual(EMPTY_SCENE_META)
     expect(meta).not.toBe(EMPTY_SCENE_META)
     expect(meta.brief).not.toBe(EMPTY_SCENE_META.brief)
+    expect(meta.beats).not.toBe(EMPTY_SCENE_META.beats)
   })
 })
 
@@ -97,13 +127,15 @@ describe('parseStoredSceneMeta', () => {
       ...filled,
       brief: EMPTY_SCENE_BRIEF,
       synopsis: '',
-      status: 'none'
+      status: 'none',
+      beats: {}
     })
     expect(parseStoredSceneMeta(JSON.stringify({ ...filled, brief: BRIEF }))).toEqual({
       ...filled,
       brief: BRIEF,
       synopsis: '',
-      status: 'none'
+      status: 'none',
+      beats: {}
     })
   })
 
@@ -188,5 +220,21 @@ describe('renderSceneBriefBlock', () => {
         next: EMPTY_SCENE_BRIEF
       })
     ).toBeNull()
+  })
+})
+
+describe('promptSceneMeta', () => {
+  it('carries only location, POV, timeline, and brief, never the synopsis, status, or beats', () => {
+    const meta = {
+      ...emptySceneMeta(),
+      location: 'river',
+      synopsis: 'She crosses.',
+      status: 'draft' as const,
+      beats: { saveTheCat: 'catalyst' }
+    }
+    const prompt = promptSceneMeta(meta)
+    expect(prompt).toEqual({ location: 'river', pov: '', timeline: '', brief: EMPTY_SCENE_BRIEF })
+    expect(Object.keys(prompt ?? {})).toEqual(['location', 'pov', 'timeline', 'brief'])
+    expect(promptSceneMeta({ ...emptySceneMeta(), beats: { threeAct: 'climax' } })).toBeNull()
   })
 })

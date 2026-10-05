@@ -61,6 +61,7 @@ import { resetShellDialogStore } from '@renderer/features/shell/shellDialogStore
 import { resetDraftStore } from '@renderer/features/drafts/draftStore'
 import { resetSnapshotStore } from '@renderer/features/snapshots/snapshotStore'
 import { resetViewStore, useViewStore } from '@renderer/features/shell/viewStore'
+import { resetStructureStore } from '@renderer/features/outline/structureStore'
 import { App } from './App'
 
 const info: ProjectInfo = {
@@ -126,6 +127,7 @@ beforeEach(() => {
   resetAccountStore()
   resetBackupStore()
   resetViewStore()
+  resetStructureStore()
   resetMentionStore()
   resetDocumentTagStore()
   resetProposedTagStore()
@@ -159,6 +161,7 @@ afterEach(() => {
   resetIndexingStore()
   resetContinuityStore()
   resetViewStore()
+  resetStructureStore()
   vi.unstubAllGlobals()
 })
 
@@ -204,6 +207,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'recovery:list') return []
     if (channel === 'drafts:list') return DRAFTS_ONE
     if (channel === 'snapshots:list') return []
+    if (channel === 'structure:get') return { template: null }
     return null
   })
   const on = <E extends EventName>(

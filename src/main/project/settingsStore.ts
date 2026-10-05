@@ -35,6 +35,7 @@ import {
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
 import { DISMISSED_NAMES_KEY, DismissedNames, defaultDismissedNames } from '@shared/proposedTags'
 import { REFERENCE_PINS_KEY, ReferencePins, defaultReferencePins } from '@shared/references'
+import { STRUCTURE_KEY, ProjectStructure, defaultProjectStructure } from '@shared/structure'
 import { TAG_ALIASES_KEY, TagAliases } from '@shared/tagExchange'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
@@ -127,6 +128,36 @@ export function setWritingPresets(db: TreeDb, value: WritingPresets): WritingPre
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: WRITING_PRESETS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the project's structure template choice (F-11.1b) from the `settings` row under
+ * `STRUCTURE_KEY`. A missing row, unparsable JSON, or a value that no longer fits the schema all
+ * answer with `defaultProjectStructure()` (no template); the beats themselves live in each node's
+ * scene metadata, so a refused row loses no assignment.
+ */
+export function getProjectStructure(db: TreeDb): ProjectStructure {
+  const row = db.select().from(settings).where(eq(settings.key, STRUCTURE_KEY)).get()
+  if (!row) return defaultProjectStructure()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultProjectStructure()
+  }
+  const parsed = ProjectStructure.safeParse(json)
+  return parsed.success ? parsed.data : defaultProjectStructure()
+}
+
+/** Replaces the project's structure template choice (upsert on the settings key) and returns what was stored. */
+export function setProjectStructure(db: TreeDb, value: ProjectStructure): ProjectStructure {
+  const stored = ProjectStructure.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: STRUCTURE_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

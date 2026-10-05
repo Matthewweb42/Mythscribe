@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { STRUCTURE_BEAT_ID_MAX, StructureTemplateId } from './structure'
 
 /** Caps for the three free-text fields; generous, but bounded like every stored string. */
 export const SCENE_META_FIELD_MAX = 200
@@ -76,9 +77,12 @@ export function isBriefEmpty(brief: SceneBrief): boolean {
  * The metadata of a scene, chapter, or part (F-4.5): Location and POV are free text with
  * autocomplete from the setting and character tags (plain strings, so a location that is not a
  * tag yet still works), the timeline position is free text until F-11.2 replaces it, and the
- * brief (F-14.3), and the index-card synopsis and status (F-11.1). Stored as JSON in
- * `node.scene_meta`. `brief`, `synopsis`, and `status` are defaulted so a row stored before
- * their feature still parses instead of reading as empty metadata.
+ * brief (F-14.3), the index-card synopsis and status (F-11.1), and the structure beat the node
+ * sits on in each template (F-11.1b, template id to beat id; one beat per template, so switching
+ * templates keeps every template's assignments; a beat id the template does not have reads as
+ * unassigned). Stored as JSON in `node.scene_meta`. `brief`, `synopsis`, `status`, and `beats`
+ * are defaulted so a row stored before their feature still parses instead of reading as empty
+ * metadata.
  */
 export const SceneMeta = z.object({
   location: z.string().max(SCENE_META_FIELD_MAX),
@@ -86,7 +90,10 @@ export const SceneMeta = z.object({
   timeline: z.string().max(SCENE_META_TIMELINE_MAX),
   brief: SceneBrief.default(() => ({ ...EMPTY_SCENE_BRIEF })),
   synopsis: z.string().max(SCENE_SYNOPSIS_MAX).default(''),
-  status: SceneStatus.default('none')
+  status: SceneStatus.default('none'),
+  beats: z
+    .partialRecord(StructureTemplateId, z.string().max(STRUCTURE_BEAT_ID_MAX))
+    .default(() => ({}))
 })
 export type SceneMeta = z.infer<typeof SceneMeta>
 
@@ -96,7 +103,8 @@ export const EMPTY_SCENE_META: SceneMeta = {
   timeline: '',
   brief: EMPTY_SCENE_BRIEF,
   synopsis: '',
-  status: 'none'
+  status: 'none',
+  beats: {}
 }
 
 /** A fresh empty metadata record, no object shared with `EMPTY_SCENE_META`. */
@@ -107,7 +115,8 @@ export function emptySceneMeta(): SceneMeta {
     timeline: '',
     brief: { ...EMPTY_SCENE_BRIEF },
     synopsis: '',
-    status: 'none'
+    status: 'none',
+    beats: {}
   }
 }
 
@@ -160,8 +169,8 @@ export function renderSceneBriefBlock(input: SceneBriefBlockInput): string | nul
 
 /**
  * The part of `SceneMeta` the AI reads: the three metadata fields and the brief. Prompt inputs
- * take this rather than `SceneMeta`, so the outline's synopsis and status (F-11.1) never reach a
- * prompt or a context hash.
+ * take this rather than `SceneMeta`, so the outline's synopsis and status (F-11.1) and the structure beats (F-11.1b) never
+ * reach a prompt or a context hash.
  */
 export type PromptSceneMeta = Pick<SceneMeta, 'location' | 'pov' | 'timeline' | 'brief'>
 

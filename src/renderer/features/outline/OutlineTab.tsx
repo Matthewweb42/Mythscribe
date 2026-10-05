@@ -1,36 +1,22 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useId, useMemo } from 'react'
 import { SCENE_STATUSES, SCENE_STATUS_LABELS, type SceneStatus } from '@shared/sceneMeta'
+import { STRUCTURE_TEMPLATES, STRUCTURE_TEMPLATE_IDS } from '@shared/structure'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useSummaryStore } from '@renderer/features/editor/summaryStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { BeatBoard } from './BeatsView'
+import { listOutline } from './outlineRows'
+import { useOutlineViewStore, type OutlineMode } from './outlineViewStore'
 import { AiSummaryLine, StatusDot } from './status'
+import { useStructureStore } from './structureStore'
 
 /** Indentation per outline depth, spelled out so Tailwind sees every class; deeper rows stay at the last step. */
 const INDENT = ['pl-2', 'pl-5', 'pl-8', 'pl-11', 'pl-14', 'pl-17'] as const
 
-interface OutlineRowEntry {
-  id: string
-  depth: number
-}
-
-/** The manuscript section's nodes depth-first in tree order, the section root itself left out. */
-function listOutline(
-  rootIds: string[],
-  childrenOf: Record<string, string[]>,
-  sectionOf: Record<string, string>
-): OutlineRowEntry[] {
-  const root = rootIds.find((id) => sectionOf[id] === 'manuscript')
-  if (root === undefined) return []
-  const rows: OutlineRowEntry[] = []
-  const walk = (ids: string[], depth: number): void => {
-    for (const id of ids) {
-      rows.push({ id, depth })
-      walk(childrenOf[id] ?? [], depth + 1)
-    }
-  }
-  walk(childrenOf[root] ?? [], 0)
-  return rows
-}
+const OUTLINE_MODES: readonly { mode: OutlineMode; label: string }[] = [
+  { mode: 'outline', label: 'Outline' },
+  { mode: 'beats', label: 'Beats' }
+]
 
 /**
  * The Outline tab of the sidebar (F-11.1): the Manuscript section as an always-expanded,
@@ -39,8 +25,78 @@ function listOutline(
  * greyed with an AI mark while the author has not written one. A header line counts the
  * manuscript documents per status. Editing, reordering, and drag live in the Manuscript tab and
  * the cork board; this tab only reads.
+ *
+ * F-11.1b: a header picks the project's structure template (or none). With one chosen, an
+ * Outline/Beats switch shows the manuscript laid against the template's beats instead
+ * (`BeatBoard`); the beat itself is set per node in the metadata pane.
  */
 export function OutlineTab(): React.JSX.Element {
+  const template = useStructureStore((s) => s.template)
+  const mode = useOutlineViewStore((s) => s.outlineMode)
+  const showBeats = template !== null && mode === 'beats'
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <StructureHeader />
+      {showBeats ? <BeatBoard template={template} /> : <OutlineList />}
+    </div>
+  )
+}
+
+/** The structure template picker and, while a template is chosen, the Outline/Beats switch. */
+function StructureHeader(): React.JSX.Element {
+  const template = useStructureStore((s) => s.template)
+  const loaded = useStructureStore((s) => s.loaded)
+  const setTemplate = useStructureStore((s) => s.setTemplate)
+  const mode = useOutlineViewStore((s) => s.outlineMode)
+  const setMode = useOutlineViewStore((s) => s.setOutlineMode)
+  const selectId = useId()
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-2">
+      <label htmlFor={selectId} className="text-xs text-fg-muted">
+        Structure
+      </label>
+      <select
+        id={selectId}
+        value={template ?? ''}
+        disabled={!loaded}
+        onChange={(event) => {
+          const next = STRUCTURE_TEMPLATE_IDS.find((id) => id === event.target.value) ?? null
+          void setTemplate(next)
+        }}
+        className="min-w-0 flex-1 basis-36 rounded-md border border-line bg-bg px-1 py-px text-xs leading-5 disabled:opacity-50"
+      >
+        <option value="">None</option>
+        {STRUCTURE_TEMPLATE_IDS.map((id) => (
+          <option key={id} value={id}>
+            {STRUCTURE_TEMPLATES[id].name}
+          </option>
+        ))}
+      </select>
+      {template !== null ? (
+        <div
+          role="group"
+          aria-label="Outline view"
+          className="flex shrink-0 gap-0.5 rounded-md border border-line p-0.5"
+        >
+          {OUTLINE_MODES.map((option) => (
+            <button
+              key={option.mode}
+              type="button"
+              aria-pressed={option.mode === mode}
+              onClick={() => setMode(option.mode)}
+              className="rounded px-2 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:bg-surface-raised aria-pressed:text-fg"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** The read-only outline of the manuscript section (F-11.1). */
+function OutlineList(): React.JSX.Element {
   const rootIds = useTreeStore((s) => s.rootIds)
   const childrenOf = useTreeStore((s) => s.childrenOf)
   const sectionOf = useTreeStore((s) => s.sectionOf)

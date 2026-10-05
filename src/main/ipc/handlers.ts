@@ -180,6 +180,7 @@ import {
   getEditorSettings,
   getFocusSettings,
   getProjectDictionary,
+  getProjectStructure,
   getReferencePins,
   getTagAliases,
   getWritingPresets,
@@ -189,6 +190,7 @@ import {
   setEditorSettings,
   setFocusSettings,
   setProjectDictionary,
+  setProjectStructure,
   setReferencePins,
   setWritingPresets
 } from '../project/settingsStore'
@@ -717,6 +719,10 @@ export function registerHandlers({
   register('presets:get', () => getWritingPresets(manager.require().connection.orm))
 
   register('presets:set', (value) => setWritingPresets(manager.require().connection.orm, value))
+
+  register('structure:get', () => getProjectStructure(manager.require().connection.orm))
+
+  register('structure:set', (value) => setProjectStructure(manager.require().connection.orm, value))
 
   register('focusSettings:get', () => getFocusSettings(manager.require().connection.orm))
 

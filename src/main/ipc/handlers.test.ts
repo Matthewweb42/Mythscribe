@@ -1001,7 +1001,8 @@ describe('sceneMeta:get / sceneMeta:set (F-4.5)', () => {
     timeline: 'Day 3, after the storm',
     brief: { ...EMPTY_SCENE_BRIEF, goal: 'Cross the river tonight.' },
     synopsis: 'Mara bargains for a crossing.',
-    status: 'idea' as const
+    status: 'idea' as const,
+    beats: { threeAct: 'inciting-incident' }
   }
 
   it('reports NO_PROJECT for both when nothing is open', async () => {
@@ -1171,6 +1172,36 @@ describe('aiSettings:get / aiSettings:set (F-14.4)', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
+  })
+})
+
+describe('structure:get / structure:set (F-11.1b)', () => {
+  it('reports NO_PROJECT for both when nothing is open', async () => {
+    await expect(invoke('structure:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('structure:set', { template: null })).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('answers no template for a new project, then what set wrote, also after a reopen', async () => {
+    const created = await invoke('project:create', {
+      name: 'Structure',
+      format: 'novel',
+      directory: tmp
+    })
+    expect(await invoke('structure:get', undefined)).toEqual({ template: null })
+    expect(await invoke('structure:set', { template: 'herosJourney' })).toEqual({
+      template: 'herosJourney'
+    })
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    expect(await invoke('structure:get', undefined)).toEqual({ template: 'herosJourney' })
+  })
+
+  it('refuses an unknown template with VALIDATION and keeps the stored value', async () => {
+    await invoke('project:create', { name: 'Structure', format: 'novel', directory: tmp })
+    const result = await handlerFor('structure:set')(undefined, { template: 'fiveAct' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(await invoke('structure:get', undefined)).toEqual({ template: null })
   })
 })
 

@@ -10,8 +10,11 @@ import {
   type SceneBriefField,
   type SceneMeta
 } from '@shared/sceneMeta'
+import { STRUCTURE_TEMPLATES, isTemplateBeat, type StructureTemplateId } from '@shared/structure'
 import type { TagCategory } from '@shared/tags'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { StatusSelect } from '@renderer/features/outline/status'
+import { useStructureStore } from '@renderer/features/outline/structureStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
@@ -52,7 +55,9 @@ function useTagNames(category: TagCategory): string[] {
  * shorter, never shrinking a taller one. For a document, "Draft with AI" asks main for a brief
  * drafted from the scene (`useBriefDraft`); the author reviews the five lines and fills the
  * fields with one click. Under the brief, `SummaryBlock` shows the scene summary main keeps up
- * to date in the background (F-5.6) for a manuscript document.
+ * to date in the background (F-5.6) for a manuscript document. While the project has a
+ * structure template (F-11.1b) and the node is in the manuscript, a Beat picker after Status
+ * sets the beat the node sits on in that template (stored per template in `meta.beats`).
  */
 export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   const meta = useSceneMetaStore((s) => s.docs[id]?.content ?? null)
@@ -76,6 +81,8 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
     growBar()
   }
   const draft = useBriefDraft(id, openBrief)
+  const template = useStructureStore((s) => s.template)
+  const inManuscript = useTreeStore((s) => s.sectionOf[id] === 'manuscript')
 
   useEffect(() => {
     load(id).catch((err: unknown) => toast.error(describeError(err)))
@@ -89,6 +96,14 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   }
   const setBriefField = (field: SceneBriefField, text: string): void => {
     if (meta !== null) edit(id, { ...meta, brief: { ...meta.brief, [field]: text } })
+  }
+  /** Puts the node on `beatId` in `on`'s template, or takes it off that template's beats for null. */
+  const setBeat = (on: StructureTemplateId, beatId: string | null): void => {
+    if (meta === null) return
+    const beats = { ...meta.beats }
+    if (beatId === null) delete beats[on]
+    else beats[on] = beatId
+    edit(id, { ...meta, beats })
   }
 
   return (
@@ -132,6 +147,14 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
         onChange={(status) => set({ status })}
         disabled={disabled}
       />
+      {template !== null && inManuscript ? (
+        <BeatSelect
+          template={template}
+          value={value.beats[template] ?? null}
+          onChange={(beatId) => setBeat(template, beatId)}
+          disabled={disabled}
+        />
+      ) : null}
       <div className="flex items-start gap-2">
         <label htmlFor={synopsisId} className="w-16 shrink-0 pt-px text-xs leading-5 text-fg-muted">
           Synopsis
@@ -196,6 +219,53 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
         </div>
       ) : null}
       <SummaryBlock id={id} onOpen={growBar} />
+    </div>
+  )
+}
+
+/**
+ * The beat picker (F-11.1b): "No beat", then each act of the template as an option group. A
+ * stored beat id the template does not have reads as no beat.
+ */
+function BeatSelect({
+  template,
+  value,
+  onChange,
+  disabled
+}: {
+  template: StructureTemplateId
+  value: string | null
+  onChange: (beatId: string | null) => void
+  disabled: boolean
+}): React.JSX.Element {
+  const selectId = useId()
+  const current = value !== null && isTemplateBeat(template, value) ? value : ''
+  return (
+    <div className="flex items-center gap-2">
+      <label htmlFor={selectId} className="w-16 shrink-0 text-xs text-fg-muted">
+        Beat
+      </label>
+      <select
+        id={selectId}
+        value={current}
+        disabled={disabled}
+        onChange={(event) => {
+          const next = event.target.value
+          onChange(next !== '' && isTemplateBeat(template, next) ? next : null)
+        }}
+        className="min-w-0 flex-1 rounded-md border border-line bg-bg px-1 py-px text-xs leading-5 disabled:opacity-50"
+      >
+        <option value="">No beat</option>
+        {STRUCTURE_TEMPLATES[template].acts.map((act) => (
+          <optgroup key={act.name} label={act.name}>
+            {act.beats.map((beat) => (
+              <option key={beat.id} value={beat.id} title={beat.hint}>
+                {beat.name}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
     </div>
   )
 }

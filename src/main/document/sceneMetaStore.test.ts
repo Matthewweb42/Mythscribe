@@ -57,7 +57,8 @@ const filled: SceneMeta = {
   timeline: 'Day 3, after the storm',
   brief: EMPTY_SCENE_BRIEF,
   synopsis: 'Mara reaches the river.',
-  status: 'draft'
+  status: 'draft',
+  beats: { saveTheCat: 'catalyst' }
 }
 
 function expectCode(fn: () => unknown, code: AppError['code']): void {

@@ -87,6 +87,7 @@ import { SearchRequest, SearchResponse } from '../search'
 import { ReferencePins } from '../references'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../rewrite'
 import { SceneBrief, SceneMeta } from '../sceneMeta'
+import { ProjectStructure } from '../structure'
 import { Stylometrics } from '../stylometry'
 import { SceneSummaryState, SummaryStatus } from '../summary'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
@@ -812,6 +813,10 @@ export const contract = {
   'presets:get': { input: z.undefined(), output: WritingPresets },
   /** Replaces the project's writing presets (F-5.2); a value outside the schema is refused with VALIDATION. */
   'presets:set': { input: WritingPresets, output: WritingPresets },
+  /** The project's structure template (F-11.1b); a missing or unreadable row answers with none. */
+  'structure:get': { input: z.undefined(), output: ProjectStructure },
+  /** Replaces the project's structure template (F-11.1b); an unknown template is refused with VALIDATION. */
+  'structure:set': { input: ProjectStructure, output: ProjectStructure },
   /** The project's focus-mode settings (F-6.2); a missing or unreadable row answers with the defaults (no background). */
   'focusSettings:get': { input: z.undefined(), output: FocusSettings },
   /** Replaces the project's focus-mode settings (F-6.2); a value outside the schema is refused with VALIDATION. */
