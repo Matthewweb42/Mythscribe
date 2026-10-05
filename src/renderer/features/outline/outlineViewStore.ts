@@ -8,14 +8,17 @@ export const FOLDER_VIEW_LABEL: Record<FolderView, string> = {
   cork: 'Cork board'
 }
 
-/** How the Outline tab shows the manuscript (F-11.1b): the outline tree, or laid against the structure template's beats. */
-export type OutlineMode = 'outline' | 'beats'
+/**
+ * How the Outline tab shows the manuscript: the outline tree, laid against the structure
+ * template's beats (F-11.1b), or as the plot-thread grid (F-11.1c).
+ */
+export type OutlineMode = 'outline' | 'beats' | 'threads'
 
 /**
  * The folder view choice (F-11.1): session-only view state, like the entity tabs' list/card
  * choice (F-9.2), so it is held in memory and never persisted. One choice for every folder: the
  * author who plans on the cork board keeps it while moving between chapters. The Outline tab's
- * outline/beats choice (F-11.1b) is held the same way.
+ * outline/beats/threads choice (F-11.1b, F-11.1c) is held the same way.
  */
 interface OutlineViewState {
   folderView: FolderView

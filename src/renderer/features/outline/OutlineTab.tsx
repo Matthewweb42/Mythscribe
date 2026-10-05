@@ -9,14 +9,23 @@ import { listOutline } from './outlineRows'
 import { useOutlineViewStore, type OutlineMode } from './outlineViewStore'
 import { AiSummaryLine, StatusDot } from './status'
 import { useStructureStore } from './structureStore'
+import { ThreadBoard } from './ThreadsView'
 
 /** Indentation per outline depth, spelled out so Tailwind sees every class; deeper rows stay at the last step. */
 const INDENT = ['pl-2', 'pl-5', 'pl-8', 'pl-11', 'pl-14', 'pl-17'] as const
 
 const OUTLINE_MODES: readonly { mode: OutlineMode; label: string }[] = [
   { mode: 'outline', label: 'Outline' },
+  { mode: 'threads', label: 'Threads' },
   { mode: 'beats', label: 'Beats' }
 ]
+
+/** The view on screen: Beats needs a template, so without one the stored choice reads as Outline. */
+function useShownMode(): OutlineMode {
+  const template = useStructureStore((s) => s.template)
+  const mode = useOutlineViewStore((s) => s.outlineMode)
+  return mode === 'beats' && template === null ? 'outline' : mode
+}
 
 /**
  * The Outline tab of the sidebar (F-11.1): the Manuscript section as an always-expanded,
@@ -29,25 +38,32 @@ const OUTLINE_MODES: readonly { mode: OutlineMode; label: string }[] = [
  * F-11.1b: a header picks the project's structure template (or none). With one chosen, an
  * Outline/Beats switch shows the manuscript laid against the template's beats instead
  * (`BeatBoard`); the beat itself is set per node in the metadata pane.
+ *
+ * F-11.1c: a Threads view shows which plot threads run through which documents (`ThreadBoard`).
  */
 export function OutlineTab(): React.JSX.Element {
   const template = useStructureStore((s) => s.template)
-  const mode = useOutlineViewStore((s) => s.outlineMode)
-  const showBeats = template !== null && mode === 'beats'
+  const mode = useShownMode()
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <StructureHeader />
-      {showBeats ? <BeatBoard template={template} /> : <OutlineList />}
+      {mode === 'beats' && template !== null ? (
+        <BeatBoard template={template} />
+      ) : mode === 'threads' ? (
+        <ThreadBoard />
+      ) : (
+        <OutlineList />
+      )}
     </div>
   )
 }
 
-/** The structure template picker and, while a template is chosen, the Outline/Beats switch. */
+/** The structure template picker and the view switch (Outline, Threads, and Beats while a template is chosen). */
 function StructureHeader(): React.JSX.Element {
   const template = useStructureStore((s) => s.template)
   const loaded = useStructureStore((s) => s.loaded)
   const setTemplate = useStructureStore((s) => s.setTemplate)
-  const mode = useOutlineViewStore((s) => s.outlineMode)
+  const mode = useShownMode()
   const setMode = useOutlineViewStore((s) => s.setOutlineMode)
   const selectId = useId()
   return (
@@ -72,13 +88,13 @@ function StructureHeader(): React.JSX.Element {
           </option>
         ))}
       </select>
-      {template !== null ? (
-        <div
-          role="group"
-          aria-label="Outline view"
-          className="flex shrink-0 gap-0.5 rounded-md border border-line p-0.5"
-        >
-          {OUTLINE_MODES.map((option) => (
+      <div
+        role="group"
+        aria-label="Outline view"
+        className="flex shrink-0 gap-0.5 rounded-md border border-line p-0.5"
+      >
+        {OUTLINE_MODES.filter((option) => option.mode !== 'beats' || template !== null).map(
+          (option) => (
             <button
               key={option.mode}
               type="button"
@@ -88,9 +104,9 @@ function StructureHeader(): React.JSX.Element {
             >
               {option.label}
             </button>
-          ))}
-        </div>
-      ) : null}
+          )
+        )}
+      </div>
     </div>
   )
 }

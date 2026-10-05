@@ -1,12 +1,14 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Channel, Input, Output } from '@shared/ipc/contract'
+import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
 import { EMPTY_SCENE_META, type SceneMeta } from '@shared/sceneMeta'
 import { UNAVAILABLE_SUMMARY, type SceneSummaryState } from '@shared/summary'
 import { resetSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { resetSummaryStore } from '@renderer/features/editor/summaryStore'
 import { resetEntityStore } from '@renderer/features/entities/entityStore'
+import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -49,6 +51,33 @@ const summaries: Record<string, SceneSummaryState> = {
   }
 }
 
+/** Plot threads (F-11.1c): main-plot in Scenes 1 and 4 (a gap at 2 and 3), romance in Scene 2, subplot nowhere. */
+const tag = (id: string, name: string, category: Tag['category'], color: string): Tag => ({
+  id,
+  name,
+  category,
+  color,
+  parentId: null,
+  usageCount: 0,
+  trackMentions: true,
+  created: '2026-10-05T10:00:00.000Z',
+  modified: '2026-10-05T10:00:00.000Z'
+})
+const bank: Tag[] = [
+  tag('t-main', 'main-plot', 'plotThread', '#9333ea'),
+  tag('t-rom', 'romance', 'plotThread', '#db2777'),
+  tag('t-sub', 'subplot', 'plotThread', '#0891b2'),
+  tag('t-dark', 'dark', 'tone', '#111111')
+]
+let links: Output<'documentTag:listAll'> = []
+const LINKS: Output<'documentTag:listAll'> = [
+  { nodeId: 'sc-1', tagId: 't-main' },
+  { nodeId: 'sc-1', tagId: 't-dark' },
+  { nodeId: 'sc-2', tagId: 't-rom' },
+  { nodeId: 'sc-4', tagId: 't-main' },
+  { nodeId: 'title-page', tagId: 't-sub' }
+]
+
 let calls: [Channel, unknown][] = []
 
 function install(): void {
@@ -65,6 +94,7 @@ function install(): void {
         return (summaries[id] ?? UNAVAILABLE_SUMMARY) as Output<C>
       }
       if (channel === 'structure:set') return input as Output<C>
+      if (channel === 'documentTag:listAll') return links as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -86,6 +116,9 @@ beforeEach(() => {
   resetEntityStore()
   resetStructureStore()
   resetOutlineViewStore()
+  resetTagStore()
+  resetDocumentTagStore()
+  links = LINKS
   useTreeStore.setState({ ...buildIndex(treeFixture), selectedId: null, loaded: true })
   useDialogStore.setState({ modals: [], toasts: [] })
   install()
@@ -207,11 +240,15 @@ describe('OutlineTab structure (F-11.1b)', () => {
     return found
   }
 
-  it('picks a template, writes it, and offers the Outline/Beats switch only while one is chosen', async () => {
+  it('picks a template, writes it, and offers Beats only while one is chosen', async () => {
     useStructureStore.setState({ template: null, loaded: true })
     render(<OutlineTab />)
     expect(structureSelect().value).toBe('')
-    expect(screen.queryByRole('group', { name: 'Outline view' })).not.toBeInTheDocument()
+    expect(
+      within(screen.getByRole('group', { name: 'Outline view' }))
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual(['Outline', 'Threads'])
 
     await userEvent.selectOptions(structureSelect(), 'Save the Cat')
     expect(calls.filter(([c]) => c === 'structure:set').map(([, i]) => i)).toEqual([
@@ -224,9 +261,13 @@ describe('OutlineTab structure (F-11.1b)', () => {
       'true'
     )
 
+    await userEvent.click(within(group).getByRole('button', { name: 'Beats' }))
     await userEvent.selectOptions(structureSelect(), 'None')
     expect(useStructureStore.getState().template).toBeNull()
-    expect(screen.queryByRole('group', { name: 'Outline view' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Beats' })).not.toBeInTheDocument()
+    // The Beats choice reads as the outline once there is no template.
+    expect(screen.getByRole('button', { name: 'Outline' })).toHaveAttribute('aria-pressed', 'true')
+    expect(rows()).toHaveLength(14)
   })
 
   it('keeps the picker disabled until the template has loaded', () => {
@@ -273,5 +314,63 @@ describe('OutlineTab structure (F-11.1b)', () => {
       expect(screen.getByTestId('beat-counts')).toHaveTextContent('1 of 8 beats filled')
     )
     expect(within(beat('climax')).getByRole('button', { name: 'Scene 4' })).toBeInTheDocument()
+  })
+})
+
+describe('OutlineTab plot threads (F-11.1c)', () => {
+  const threadRow = (id: string): HTMLElement => {
+    const found = screen.getAllByTestId('thread-row').find((r) => r.dataset.node === id)
+    if (!found) throw new Error(`no thread row ${id}`)
+    return found
+  }
+  const states = (id: string): (string | undefined)[] =>
+    Array.from(threadRow(id).querySelectorAll('td')).map((td) => td.dataset.state)
+
+  it('lays the manuscript against its plot threads in reading order and marks the gaps', async () => {
+    for (const t of bank) useTagStore.getState().merge(t)
+    render(<OutlineTab />)
+    await userEvent.click(screen.getByRole('button', { name: 'Threads' }))
+    expect(calls.filter(([c]) => c === 'documentTag:listAll')).toHaveLength(1)
+
+    const table = await screen.findByRole('table', { name: 'Plot threads' })
+    expect(
+      within(table)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent)
+    ).toEqual(['Scene', 'main-plot', 'romance'])
+    await waitFor(() => expect(states('sc-1')).toEqual(['on', 'off']))
+    expect(states('sc-2')).toEqual(['gap', 'on'])
+    expect(states('sc-3')).toEqual(['gap', 'off'])
+    expect(states('sc-4')).toEqual(['on', 'off'])
+    expect(states('sc-5')).toEqual(['off', 'off'])
+    // A folder is a heading row with no cells.
+    expect(states('ch-1')).toEqual([undefined, undefined])
+    expect(screen.getByTestId('thread-counts')).toHaveTextContent('2 threads · 2 gaps')
+    expect(screen.getAllByTestId('thread-summary').map((li) => li.textContent)).toEqual([
+      '#main-plot 2 scenes, 2 gaps',
+      '#romance 1 scene, 0 gaps'
+    ])
+    // subplot is linked only outside the manuscript.
+    expect(screen.getByTestId('thread-unused')).toHaveTextContent('Not in any scene: #subplot')
+
+    await userEvent.click(within(threadRow('sc-4')).getByRole('button', { name: 'Scene 4' }))
+    expect(useTreeStore.getState().selectedId).toBe('sc-4')
+  })
+
+  it('says how to start when the bank has no plot threads, and when no scene carries one', async () => {
+    render(<OutlineTab />)
+    await userEvent.click(screen.getByRole('button', { name: 'Threads' }))
+    expect(screen.getByText(/No plot threads yet/)).toBeInTheDocument()
+
+    for (const t of bank) useTagStore.getState().merge(t)
+    links = []
+    await userEvent.click(screen.getByRole('button', { name: 'Outline' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Threads' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('thread-counts')).toHaveTextContent(
+        'No scene carries a plot thread yet.'
+      )
+    )
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
   })
 })

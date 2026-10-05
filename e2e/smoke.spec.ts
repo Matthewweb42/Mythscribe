@@ -7,6 +7,7 @@ import {
   expect,
   test,
   type ElectronApplication,
+  type Locator,
   type Page
 } from '@playwright/test'
 import { priceFor, type AiStatus, type AiUsageSummary } from '../src/shared/ai'
@@ -2746,8 +2747,38 @@ test('create, close, reopen a project on disk', async () => {
   await expect(openingImageBeat.getByText('Empty beat')).toBeVisible()
   await outlineView.getByRole('button', { name: 'Outline' }).click()
   await expect(outlinePanel.getByTestId('beat')).toHaveCount(0)
+
+  // F-11.1c: plot threads. Opening gets the template's main-plot from its tag bar; the Threads
+  // view lists main-plot as the one used thread column, Opening's cell filled and Scene 1's
+  // empty, the other plot threads named as unused. Removing the chip empties the grid again.
+  await tagBar.getByRole('button', { name: 'Add tag' }).click()
+  await tagSearch.fill('main-plot')
+  await expect(
+    page.getByRole('listbox', { name: 'Unassigned tags' }).getByRole('option')
+  ).toHaveText(['main-plot'])
+  await tagSearch.press('Enter')
+  await expect(tagBar.getByRole('listitem')).toContainText(['main-plot'])
+  await outlineView.getByRole('button', { name: 'Threads' }).click()
+  const threadTable = outlinePanel.getByRole('table', { name: 'Plot threads' })
+  await expect(threadTable.getByRole('columnheader')).toHaveText(['Scene', 'main-plot'])
+  const threadRow = (title: string): Locator =>
+    threadTable
+      .getByTestId('thread-row')
+      .filter({ has: page.getByRole('button', { name: title, exact: true }) })
+  await expect(threadRow('Opening').locator('td')).toHaveAttribute('data-state', 'on')
+  await expect(threadRow('Scene 1').first().locator('td')).toHaveAttribute('data-state', 'off')
+  await expect(outlinePanel.getByTestId('thread-summary')).toHaveText([
+    '#main-plot 1 scene, 0 gaps'
+  ])
+  await expect(outlinePanel.getByTestId('thread-unused')).toContainText('#subplot')
+  await tagBar.getByRole('button', { name: 'Remove main-plot' }).click()
+  await expect(outlinePanel.getByTestId('thread-counts')).toHaveText(
+    'No scene carries a plot thread yet.'
+  )
+  await outlineView.getByRole('button', { name: 'Outline' }).click()
+
   await structureSelect.selectOption({ label: 'None' })
-  await expect(outlineView).toHaveCount(0)
+  await expect(outlineView.getByRole('button', { name: 'Beats' })).toHaveCount(0)
   await expect(beatSelect).toHaveCount(0)
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
 
