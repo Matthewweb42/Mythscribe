@@ -8,9 +8,9 @@ import { APP_SHORTCUTS, type Chord, type ShortcutId } from './shortcuts'
  * F-2.7 chords as accelerators) and the renderer as the in-app menu bar, and every click on
  * either side becomes one `menu:action` handled by `runMenuAction`. Items whose feature is not
  * built are absent, never disabled or stubbed: Export… (F-12.1),
- * Statistics, Drafts, Snapshots (F-10.x, F-8.x) join the definition with their features;
+ * Snapshots (F-8.x) join the definition with their features;
  * Character, Setting, and World-building note arrived with F-9.3, References with F-9.6, Search
- * project… with F-10.1, Replace in project… with F-10.2, Find… and Replace… with F-3.10, Goals… with F-10.3, Word count… with F-10.4, Compiled preview with F-3.12. Edit items carry an Electron role, so the native menu
+ * project… with F-10.1, Replace in project… with F-10.2, Find… and Replace… with F-3.10, Goals… with F-10.3, Word count… with F-10.4, Compiled preview with F-3.12, Drafts… with F-8.5. Edit items carry an Electron role, so the native menu
  * edits natively; the in-app bar routes them through `menu:edit` to the same `webContents`
  * commands.
  */
@@ -50,6 +50,7 @@ export const MENU_ITEM_IDS = [
   'openGoals',
   'openWordCount',
   'openStatistics',
+  'openDrafts',
   'openSettings',
   'openDocumentation',
   'openShortcuts',
@@ -195,6 +196,8 @@ export const MENU: readonly MenuSection[] = [
       { id: 'openGoals', label: 'Goals…', when: 'project' },
       { id: 'openWordCount', label: 'Word count…', when: 'project' },
       { id: 'openStatistics', label: 'Statistics…', when: 'project' },
+      // F-8.5: the project's named drafts of the manuscript text.
+      { id: 'openDrafts', label: 'Drafts…', when: 'project' },
       SEPARATOR,
       { id: 'openSettings', label: 'Settings', shortcut: 'settings', when: 'always' }
     ]

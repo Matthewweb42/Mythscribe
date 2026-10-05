@@ -201,6 +201,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         // F-3.12: a shell dialog as well, so it opens over focus mode.
         useShellDialogStore.getState().show('compile')
         return
+      case 'openDrafts':
+        // F-8.5: a shell dialog as well, so it opens over focus mode.
+        useShellDialogStore.getState().show('drafts')
+        return
       case 'openTags': {
         const focus = useFocusStore.getState()
         if (focus.active) await focus.exit()

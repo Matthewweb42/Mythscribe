@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { defaultAuthorRules } from '@shared/authorRules'
 import type { Conversations } from '@shared/chat'
+import type { DraftList } from '@shared/drafts'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type {
   Channel,
@@ -57,6 +58,7 @@ import { registerPendingSave, resetPendingSaves } from '@renderer/features/proje
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { resetWelcomeStore } from '@renderer/features/project/welcomeStore'
 import { resetShellDialogStore } from '@renderer/features/shell/shellDialogStore'
+import { resetDraftStore } from '@renderer/features/drafts/draftStore'
 import { resetViewStore, useViewStore } from '@renderer/features/shell/viewStore'
 import { App } from './App'
 
@@ -80,6 +82,21 @@ const recent: RecentProject = {
 }
 
 /** Main→renderer event listeners captured by `install()`, keyed by event name. */
+/** F-8.5: a project that never used drafts answers its one, active first draft. */
+const DRAFTS_ONE: DraftList = {
+  drafts: [
+    {
+      id: 'draft-1',
+      name: 'Draft 1',
+      wordCount: 0,
+      active: true,
+      created: '2026-10-04T10:00:00.000Z',
+      modified: '2026-10-04T10:00:00.000Z'
+    }
+  ],
+  activeId: 'draft-1'
+}
+
 const listeners = new Map<string, (payload: never) => void>()
 
 beforeEach(() => {
@@ -115,12 +132,14 @@ beforeEach(() => {
   resetReplaceStore()
   resetGoalsStore()
   resetFindStore()
+  resetDraftStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   document.title = ''
   // jsdom has no layout; the drag deltas of the resize handles are divided by this.
   vi.stubGlobal('innerWidth', 1000)
 })
 afterEach(() => {
+  resetDraftStore()
   resetEntityDraftStore()
   resetEntityStore()
   resetObservedFactStore()
@@ -179,6 +198,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'continuity:list') return []
     if (channel === 'view:get') return defaultViewSettings()
     if (channel === 'recovery:list') return []
+    if (channel === 'drafts:list') return DRAFTS_ONE
     return null
   })
   const on = <E extends EventName>(

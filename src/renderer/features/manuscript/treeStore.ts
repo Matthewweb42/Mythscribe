@@ -80,6 +80,11 @@ interface TreeState extends TreeIndex {
   move: (id: string, parentId: string, afterId?: string | null) => Promise<void>
   /** Records a document's saved word count (F-3.2) and adjusts its ancestors' rollups by the delta. */
   setWordCount: (id: string, wordCount: number) => void
+  /**
+   * Like `setWordCount`, but the session baseline moves with it, so the session delta stays put:
+   * for text that changed without being written this session (a draft switch or revert, F-8.5).
+   */
+  rebaseWordCount: (id: string, wordCount: number) => void
 }
 
 /** `keepSelection`: leave the current selection alone (the stacked view adds a region in place, F-3.8). */
@@ -468,6 +473,20 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 
   setWordCount(id, wordCount) {
     set((s) => setWordCountInIndex(s, id, wordCount))
+  },
+
+  rebaseWordCount(id, wordCount) {
+    set((s) => {
+      const next = setWordCountInIndex(s, id, wordCount)
+      if (next === s) return s
+      const sessionBaseline = { ...s.sessionBaseline }
+      for (const [key, rollup] of Object.entries(next.wordCountRollup)) {
+        const moved = rollup - (s.wordCountRollup[key] ?? 0)
+        const base = sessionBaseline[key]
+        if (moved !== 0 && base !== undefined) sessionBaseline[key] = base + moved
+      }
+      return { ...next, sessionBaseline }
+    })
   }
 }))
 

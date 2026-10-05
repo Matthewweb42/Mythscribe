@@ -180,11 +180,20 @@ describe('menu definition (F-7.1)', () => {
       'openGoals',
       'openWordCount',
       'openStatistics',
+      'openDrafts',
       'separator',
       'openSettings'
     ])
     const [item] = menuItems().filter((entry) => entry.id === 'openGoals')
     expect(item?.label).toBe('Goals…')
+    expect(menuItemChord(item!)).toBeNull()
+    expect(isMenuItemEnabled(item!, false)).toBe(false)
+    expect(isMenuItemEnabled(item!, true)).toBe(true)
+  })
+
+  it('offers Drafts… after Statistics…, only with a project and without a shortcut (F-8.5)', () => {
+    const [item] = menuItems().filter((entry) => entry.id === 'openDrafts')
+    expect(item?.label).toBe('Drafts…')
     expect(menuItemChord(item!)).toBeNull()
     expect(isMenuItemEnabled(item!, false)).toBe(false)
     expect(isMenuItemEnabled(item!, true)).toBe(true)

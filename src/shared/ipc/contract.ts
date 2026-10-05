@@ -38,6 +38,7 @@ import {
   RENDERER_ERROR_STACK_MAX
 } from '../diagnostics'
 import { DictionaryWord, ProjectDictionary } from '../dictionary'
+import { DraftChange, DraftComparison, DraftList, DraftName } from '../drafts'
 import { EditorSettings } from '../editorSettings'
 import {
   ENTITY_BODY_MAX,
@@ -1295,6 +1296,43 @@ export const contract = {
   'backups:restore': {
     input: z.object({ file: z.string().min(1).optional() }),
     output: ProjectInfo.nullable()
+  },
+  /**
+   * The open project's drafts (F-8.5), oldest first, with the active one marked. A project that
+   * has never used drafts gets its first one ("Draft 1", active) on this call.
+   */
+  'drafts:list': { input: z.undefined(), output: DraftList },
+  /**
+   * Makes another draft the active one (F-8.5): the live text goes into the draft being left, and
+   * the target's own texts become the live manuscript. Not counted as words written. NOT_FOUND
+   * for an unknown id; switching to the active draft changes nothing. Flush pending saves first.
+   */
+  'drafts:switch': { input: z.object({ id: z.string() }), output: DraftChange },
+  /** Copies a draft's text into a new, inactive draft (F-8.5). VALIDATION for a taken name. */
+  'drafts:duplicate': {
+    input: z.object({ id: z.string(), name: DraftName }),
+    output: DraftList
+  },
+  /** Renames a draft (F-8.5). VALIDATION for a name another draft has (case-insensitive). */
+  'drafts:rename': { input: z.object({ id: z.string(), name: DraftName }), output: DraftList },
+  /** Deletes an inactive draft and its texts (F-8.5). VALIDATION for the active draft. */
+  'drafts:delete': { input: z.object({ id: z.string() }), output: DraftList },
+  /**
+   * Word-level differences between two drafts (F-8.5), per manuscript document, from `fromId`
+   * to `toId`. Read-only.
+   */
+  'drafts:compare': {
+    input: z.object({ fromId: z.string(), toId: z.string() }),
+    output: DraftComparison
+  },
+  /**
+   * Reverts documents of the active draft to another draft's text (F-8.5): the listed node ids,
+   * or every manuscript document when `nodeIds` is omitted. Not counted as words written.
+   * VALIDATION when `fromId` is the active draft. Flush pending saves first.
+   */
+  'drafts:revert': {
+    input: z.object({ fromId: z.string(), nodeIds: z.array(z.string()).min(1).optional() }),
+    output: DraftChange
   },
   /**
    * Where diagnostics stand (F-15.8): whether they are on (off on every install), the next

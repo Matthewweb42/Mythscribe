@@ -89,6 +89,15 @@ import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
 import { compileManuscript } from '../document/compileStore'
+import {
+  compareDrafts,
+  deleteDraft,
+  duplicateDraft,
+  listDrafts,
+  renameDraft,
+  revertDocuments,
+  switchDraft
+} from '../draft/draftStore'
 import { getDocumentContent, saveDocument, type SaveResult } from '../document/documentStore'
 import {
   goalsStatus,
@@ -1034,6 +1043,45 @@ export function registerHandlers({
         result.restored.map((each) => each.id)
       )
     }
+    return result
+  })
+
+  // F-8.5: drafts. A switch and a revert rewrite live text, so each ends in `documentsWritten`
+  // for what moved (re-summarized and rescanned like a save) and never in `recordWriting`:
+  // changing drafts is not words written.
+  register('drafts:list', () => listDrafts(manager.require().connection.orm))
+
+  register('drafts:switch', ({ id }) => {
+    const db = manager.require().connection.orm
+    const result = switchDraft(db, id)
+    documentsWritten(
+      db,
+      result.changed.map((each) => each.id)
+    )
+    return result
+  })
+
+  register('drafts:duplicate', ({ id, name }) =>
+    duplicateDraft(manager.require().connection.orm, id, name)
+  )
+
+  register('drafts:rename', ({ id, name }) =>
+    renameDraft(manager.require().connection.orm, id, name)
+  )
+
+  register('drafts:delete', ({ id }) => deleteDraft(manager.require().connection.orm, id))
+
+  register('drafts:compare', ({ fromId, toId }) =>
+    compareDrafts(manager.require().connection.orm, fromId, toId)
+  )
+
+  register('drafts:revert', ({ fromId, nodeIds }) => {
+    const db = manager.require().connection.orm
+    const result = revertDocuments(db, fromId, nodeIds)
+    documentsWritten(
+      db,
+      result.changed.map((each) => each.id)
+    )
     return result
   })
 

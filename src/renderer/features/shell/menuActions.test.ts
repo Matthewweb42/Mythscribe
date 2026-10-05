@@ -458,6 +458,17 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useFocusStore.getState().active).toBe(true)
     expect(useShellDialogStore.getState().open).toBe('compile')
   })
+
+  it('Tools › Drafts… opens the drafts dialog, over focus mode too (F-8.5)', async () => {
+    await runMenuAction('openDrafts')
+    expect(useShellDialogStore.getState().open).toBeNull()
+    expect(toasts()).toEqual([NO_PROJECT_MESSAGE])
+    await withProject()
+    await useFocusStore.getState().enter()
+    await runMenuAction('openDrafts')
+    expect(useFocusStore.getState().active).toBe(true)
+    expect(useShellDialogStore.getState().open).toBe('drafts')
+  })
 })
 
 describe('closeProjectWithConfirm', () => {

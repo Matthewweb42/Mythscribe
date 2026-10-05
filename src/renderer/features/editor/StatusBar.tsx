@@ -1,4 +1,5 @@
 import { CreditNotice } from '@renderer/features/account/CreditNotice'
+import { DraftStatus } from '@renderer/features/drafts/DraftStatus'
 import { GoalsStrip } from '@renderer/features/goals/GoalsStrip'
 import { formatDelta, formatWords } from './wordFormat'
 
@@ -8,8 +9,9 @@ import { formatDelta, formatWords } from './wordFormat'
  * rollup also moves when scenes are moved, duplicated, or deleted, so a delta there would not
  * mean "written". Presentational; the counts come from the caller so one document can count
  * live while a folder reads the saved rollup. `aiPercent` is the share of the document's
- * characters accepted from the AI (F-14.6), shown only while it is above zero. Two pieces read
- * a store of their own: `GoalsStrip` (F-10.3, today's words against the targets; a click opens
+ * characters accepted from the AI (F-14.6), shown only while it is above zero. Three pieces read
+ * a store of their own: `DraftStatus` (F-8.5, the active draft's name once there are two or
+ * more; a click opens the Drafts dialog), `GoalsStrip` (F-10.3, today's words against the targets; a click opens
  * the Goals dialog) and `CreditNotice` (F-15.5), pushed to the far end, which renders nothing
  * unless this project spends Cloud credits and they are running out.
  */
@@ -39,6 +41,7 @@ export function StatusBar({
           {aiPercent}% AI
         </span>
       ) : null}
+      <DraftStatus />
       <GoalsStrip />
       <CreditNotice />
     </footer>

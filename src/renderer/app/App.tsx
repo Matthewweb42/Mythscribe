@@ -27,6 +27,8 @@ import { APP_SHORTCUTS, matchesShortcut, type Chord } from '@renderer/features/s
 import { SidebarTabs } from '@renderer/features/shell/SidebarTabs'
 import { useViewStore } from '@renderer/features/shell/viewStore'
 import { CompileDialog } from '@renderer/features/compile/CompileDialog'
+import { DraftsDialog } from '@renderer/features/drafts/DraftsDialog'
+import { useDraftStore } from '@renderer/features/drafts/draftStore'
 import { StatsDialog } from '@renderer/features/stats/StatsDialog'
 import { WordCountDialog } from '@renderer/features/stats/WordCountDialog'
 import { wheelZoomStepFor, zoomStepFor } from '@renderer/features/shell/zoom'
@@ -225,6 +227,8 @@ export function App(): React.JSX.Element {
       useProposedTagStore.getState().clear()
       useBackgroundStore.getState().clear()
       useDictionaryStore.getState().clear()
+      // F-8.5: the drafts belong to the project that closed.
+      useDraftStore.getState().clear()
       // F-3.10: the find bar and what was typed in it.
       resetFindStore()
       return
@@ -312,6 +316,12 @@ export function App(): React.JSX.Element {
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
+    // F-8.5: the drafts, for the status bar's label; a project that never used drafts gets its
+    // first one on this call.
+    useDraftStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
   }, [projectId])
 
   // F-6.1: focus mode hides the header with the rest of the chrome; the header's shortcut
@@ -387,7 +397,7 @@ export function App(): React.JSX.Element {
 /**
  * The app-level dialogs (F-7.1): Settings (F-7.5; without a project only its app-wide tabs,
  * F-15.2), the shortcuts reference (F-7.7), About, the word count (F-10.4), the statistics
- * (F-10.5), and the compiled preview (F-3.12), one at a time
+ * (F-10.5), the compiled preview (F-3.12), and the drafts (F-8.5), one at a time
  * from the shell dialog store, which the header button, Ctrl+, the in-app bar, and the native
  * menu all open through.
  */
@@ -412,6 +422,9 @@ function ShellDialogs({ format }: { format: NovelFormat | null }): React.JSX.Ele
     case 'compile':
       // F-3.12: reads the open project, so it shows only while one is open.
       return format ? <CompileDialog format={format} onClose={close} /> : null
+    case 'drafts':
+      // F-8.5: the open project's drafts, so it shows only while one is open.
+      return format ? <DraftsDialog onClose={close} /> : null
     case null:
       return null
   }

@@ -515,3 +515,39 @@ export const writingLog = sqliteTable(
   (t) => [primaryKey({ columns: [t.day, t.hour] })]
 )
 export type WritingLogRow = typeof writingLog.$inferSelect
+
+/**
+ * Named drafts of the manuscript's text (F-8.5). The tree is shared; only the text of manuscript
+ * documents differs between drafts. The active draft (settings key `activeDraft`) has no rows of
+ * its own: its text is the live `node.content`. Names are unique case-insensitively, checked in
+ * `draftStore.ts`. `position` is the list order (oldest first).
+ */
+export const draft = sqliteTable('draft', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  position: integer('position').notNull(),
+  created: text('created').notNull(),
+  modified: text('modified').notNull()
+})
+export type DraftRow = typeof draft.$inferSelect
+
+/**
+ * An inactive draft's text of one document (F-8.5): the stored Tiptap JSON (null = empty, as on
+ * `node.content`) and its cached word count. A document with no row reads its live text in that
+ * draft. Both ends cascade on delete.
+ */
+export const draftText = sqliteTable(
+  'draft_text',
+  {
+    draftId: text('draft_id')
+      .notNull()
+      .references(() => draft.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    content: text('content'),
+    wordCount: integer('word_count').notNull().default(0)
+  },
+  (t) => [primaryKey({ columns: [t.draftId, t.nodeId] })]
+)
+export type DraftTextRow = typeof draftText.$inferSelect

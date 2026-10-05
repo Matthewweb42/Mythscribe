@@ -862,6 +862,29 @@ describe('goals:get / goals:set (F-10.3)', () => {
     expect(reopened.today.words).toBe(6)
   })
 
+  it('switches and reverts drafts (F-8.5) without counting words written', async () => {
+    await expect(invoke('drafts:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await invoke('project:create', { name: 'Drafts', format: 'novel', directory: tmp })
+    const scene = manuscriptReadingOrder(await invoke('tree:list', undefined))[0] ?? ''
+    await invoke('document:save', { id: scene, content: para('The storm broke.') })
+    const first = (await invoke('drafts:list', undefined)).activeId
+    const list = await invoke('drafts:duplicate', { id: first, name: ' Draft 2 ' })
+    const second = list.drafts.find((each) => each.name === 'Draft 2')?.id ?? ''
+    await invoke('drafts:switch', { id: second })
+    await invoke('document:save', { id: scene, content: para('The storm broke at dawn.') })
+    const words = (await invoke('goals:get', undefined)).today.words
+
+    const back = await invoke('drafts:switch', { id: first })
+    expect(back.changed).toEqual([{ id: scene, wordCount: 3 }])
+    expect((await invoke('document:get', { id: scene })).content).toEqual(para('The storm broke.'))
+    const compared = await invoke('drafts:compare', { fromId: first, toId: second })
+    expect(compared.docs.map((each) => [each.nodeId, each.wordsAdded])).toEqual([[scene, 3]])
+    const reverted = await invoke('drafts:revert', { fromId: second, nodeIds: [scene] })
+    expect(reverted.changed).toEqual([{ id: scene, wordCount: 5 }])
+    expect((await invoke('goals:get', undefined)).today.words).toBe(words)
+    await expect(invoke('drafts:delete', { id: first })).rejects.toThrowError(/^VALIDATION: /)
+  })
+
   it('stores targets, sets and clears a node target, and refuses one outside the manuscript', async () => {
     await invoke('project:create', { name: 'Goals', format: 'novel', directory: tmp })
     const rows = await invoke('tree:list', undefined)

@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(14)
+    expect(result.version).toBe(15)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -127,6 +127,8 @@ describe('migrate', () => {
     expect(tables()).toContain('document_tag_dismissal')
     expect(tables()).toContain('continuity_finding')
     expect(tables()).toContain('writing_log')
+    expect(tables()).toContain('draft')
+    expect(tables()).toContain('draft_text')
   })
 })
 
@@ -601,5 +603,53 @@ describe('writing_log table (0013_writing_log)', () => {
     expect(() =>
       db.prepare("INSERT INTO writing_log (day, hour) VALUES ('2026-10-04', NULL)").run()
     ).toThrow(/NOT NULL/)
+  })
+})
+
+describe('draft and draft_text tables (0014_drafts)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO draft (id, name, position, created, modified)
+       VALUES ('d1', 'Draft 1', 0, '2026-01-01', '2026-01-01')`
+    ).run()
+  })
+  afterEach(() => db.close())
+
+  const insertText = (draftId: string, nodeId: string): void => {
+    db.prepare('INSERT INTO draft_text (draft_id, node_id, content) VALUES (?, ?, NULL)').run(
+      draftId,
+      nodeId
+    )
+  }
+  const count = (): unknown => db.prepare('SELECT COUNT(*) AS n FROM draft_text').get()
+
+  it('keeps one text per draft and node, defaults words to 0, and refuses unknown ends', () => {
+    insertText('d1', 'scene')
+    expect(db.prepare('SELECT word_count FROM draft_text').get()).toEqual({ word_count: 0 })
+    expect(() => insertText('d1', 'scene')).toThrow(/UNIQUE|PRIMARY/)
+    expect(() => insertText('ghost', 'scene')).toThrow(/FOREIGN KEY/)
+    expect(() => insertText('d1', 'ghost')).toThrow(/FOREIGN KEY/)
+  })
+
+  it('drops the texts with their draft and with their node', () => {
+    insertText('d1', 'scene')
+    db.prepare('DELETE FROM draft WHERE id = ?').run('d1')
+    expect(count()).toEqual({ n: 0 })
+    db.prepare(
+      `INSERT INTO draft (id, name, position, created, modified)
+       VALUES ('d1', 'Draft 1', 0, '2026-01-01', '2026-01-01')`
+    ).run()
+    insertText('d1', 'scene')
+    db.prepare('DELETE FROM node WHERE id = ?').run('scene')
+    expect(count()).toEqual({ n: 0 })
   })
 })

@@ -1,8 +1,6 @@
 import type { RecoveryItem } from '@shared/recovery'
-import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
-import { useGoalsStore } from '@renderer/features/goals/goalsStore'
-import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { refreshRewrittenDocuments } from '@renderer/features/editor/rewrittenDocuments'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -39,16 +37,11 @@ export async function offerRecovery(): Promise<void> {
     if (recover) {
       await flushPendingSaves()
       const restored = await ipc().invoke('recovery:restore', undefined)
-      const documents = restored.filter((r) => r.kind === 'document').map((r) => r.id)
       const notes = restored.filter((r) => r.kind === 'notes').map((r) => r.id)
-      for (const r of restored) {
-        if (r.wordCount !== null) useTreeStore.getState().setWordCount(r.id, r.wordCount)
-      }
       await Promise.all([
-        useDocumentStore.getState().reload(documents),
+        refreshRewrittenDocuments(restored.filter((r) => r.kind === 'document')),
         useNotesStore.getState().reload(notes)
       ])
-      if (documents.length > 0) useGoalsStore.getState().refreshSoon()
       toast.success(
         restored.length === 1
           ? 'Recovered 1 unsaved change.'

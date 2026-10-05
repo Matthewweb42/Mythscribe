@@ -424,6 +424,20 @@ describe('setWordCountInIndex', () => {
     expect(state.wordCountRollup.front).toBe(20)
     expect(state.wordCountRollup.manuscript).toBe(4800)
   })
+
+  it('rebaseWordCount moves the counts and the session baseline together (F-8.5)', async () => {
+    setIpcClient(fakeClient().client)
+    await useTreeStore.getState().load()
+    const before = useTreeStore.getState().byId['sc-2']?.wordCount ?? 0
+    const total = useTreeStore.getState().wordCountRollup.manuscript ?? 0
+    useTreeStore.getState().setWordCount('sc-2', before + 100)
+    useTreeStore.getState().rebaseWordCount('sc-2', 2000)
+    const state = useTreeStore.getState()
+    expect(state.byId['sc-2']?.wordCount).toBe(2000)
+    expect(state.wordCountRollup.manuscript).toBe(total - before + 2000)
+    expect(sessionDelta(state, 'sc-2')).toBe(100)
+    expect(sessionDelta(state, 'manuscript')).toBe(100)
+  })
 })
 
 describe('buildIndex', () => {

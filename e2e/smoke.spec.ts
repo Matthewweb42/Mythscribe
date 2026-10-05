@@ -4670,6 +4670,73 @@ test('create, close, reopen a project on disk', async () => {
     .click()
   await expect(page.getByRole('textbox', { name: 'Document' })).toContainText(crashSentence)
 
+  // F-8.5: drafts, in the restored copy (nothing after this step reads its text). The project
+  // starts with one draft, so the status bar has no draft label until a second exists. Draft 2
+  // is a duplicate; a word typed there shows as an insert against Draft 1, a revert takes it out,
+  // and typed again it lives in Draft 2 only. The step ends back on Draft 1.
+  const draftScene = imported[3]?.id ?? ''
+  const draftWord = 'Quillmarrow'
+  const draftEditor = page.getByRole('textbox', { name: 'Document' })
+  const draftsDialog = page.getByRole('dialog', { name: 'Drafts' })
+  const draftRows = draftsDialog.getByTestId('draft-row')
+  await expect(page.getByTestId('status-draft')).toHaveCount(0)
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'Tools' })
+    .click()
+  await page.getByRole('menu', { name: 'Tools' }).getByRole('menuitem', { name: 'Drafts…' }).click()
+  await expect(draftRows).toHaveCount(1)
+  await expect(draftRows.first()).toHaveAttribute('aria-current', 'true')
+  await expect(draftRows.first()).toContainText('Draft 1')
+  await draftsDialog.getByRole('button', { name: 'Duplicate Draft 1…' }).click()
+  const duplicatePrompt = page.getByRole('dialog', { name: 'Duplicate draft' })
+  await expect(duplicatePrompt.getByRole('textbox', { name: 'Duplicate draft' })).toHaveValue(
+    'Draft 2'
+  )
+  await duplicatePrompt.getByRole('button', { name: 'Duplicate', exact: true }).click()
+  await expect(draftRows).toHaveCount(2)
+  await draftsDialog.getByRole('button', { name: 'Switch to Draft 2' }).click()
+  await expect(draftRows.nth(1)).toHaveAttribute('aria-current', 'true')
+  await expect(page.getByTestId('status-draft')).toHaveText('Draft 2')
+  await draftsDialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(draftsDialog).toHaveCount(0)
+  // The switch rebuilt the editor; type at the end of the scene and wait for the autosave.
+  await draftEditor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(` ${draftWord}`)
+  await expect.poll(() => documentText(draftScene)).toContain(draftWord)
+  await dismissToasts()
+  await page.getByTestId('status-draft').click()
+  await draftsDialog.getByRole('button', { name: 'Compare Draft 1 with current' }).click()
+  const draftDiff = draftsDialog.getByRole('region', { name: 'Scene 1 (split)' })
+  await expect(draftDiff.locator('ins', { hasText: draftWord })).toHaveCount(1)
+  await expect(draftsDialog.getByTestId('draft-compare-summary')).toContainText('1 scene differs')
+  await draftDiff.getByRole('button', { name: 'Revert this scene to "Draft 1"' }).click()
+  await expect(draftsDialog.getByTestId('draft-compare-summary')).toHaveText(
+    'The two drafts read the same.'
+  )
+  await expect(draftEditor).not.toContainText(draftWord)
+  expect(await documentText(draftScene)).not.toContain(draftWord)
+  await draftsDialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await draftEditor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(` ${draftWord}`)
+  await expect.poll(() => documentText(draftScene)).toContain(draftWord)
+  await dismissToasts()
+  await page.getByTestId('status-draft').click()
+  await draftsDialog.getByRole('button', { name: 'Switch to Draft 1' }).click()
+  await expect(page.getByTestId('status-draft')).toHaveText('Draft 1')
+  await expect(draftEditor).toContainText(crashSentence)
+  await expect(draftEditor).not.toContainText(draftWord)
+  await draftsDialog.getByRole('button', { name: 'Switch to Draft 2' }).click()
+  await expect(page.getByTestId('status-draft')).toHaveText('Draft 2')
+  await expect(draftEditor).toContainText(draftWord)
+  await draftsDialog.getByRole('button', { name: 'Switch to Draft 1' }).click()
+  await expect(page.getByTestId('status-draft')).toHaveText('Draft 1')
+  await expect(draftEditor).not.toContainText(draftWord)
+  await draftsDialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(draftsDialog).toHaveCount(0)
+
   const closed = app.waitForEvent('close')
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
   await closed
