@@ -81,6 +81,8 @@ export interface StoryBibleEntry {
  * out by the gatherer rather than set beside it.
  */
 export interface StoryBibleEntity {
+  /** The entity's id when it came from the project (query.v3 names the sheets it sent by it). */
+  entityId?: string
   name: string
   kind: EntityKind
   /** The filled fields of the author's sheet, in template order. */
@@ -187,27 +189,26 @@ export function renderStoryBible(facts: StoryBibleFacts, maxTokens: number): str
     .join('\n')
 }
 
-/** A value on one line and within `STORY_BIBLE_VALUE_MAX`: a sheet field can run to pages. */
-function cutValue(value: string): string {
+/** A value on one line and within `valueMax` characters: a sheet field can run to pages. */
+function cutValue(value: string, valueMax: number): string {
   const flat = value.replace(/\s+/gu, ' ').trim()
-  return flat.length <= STORY_BIBLE_VALUE_MAX
-    ? flat
-    : `${flat.slice(0, STORY_BIBLE_VALUE_MAX).trimEnd()}…`
+  return flat.length <= valueMax ? flat : `${flat.slice(0, valueMax).trimEnd()}…`
 }
 
-const renderEntries = (entries: readonly StoryBibleEntry[]): string =>
-  entries.map((entry) => `${entry.label}: ${cutValue(entry.value)}`).join('; ')
+const renderEntries = (entries: readonly StoryBibleEntry[], valueMax: number): string =>
+  entries.map((entry) => `${entry.label}: ${cutValue(entry.value, valueMax)}`).join('; ')
 
 /** One entity's line with its sheet and the first `observed` of its facts; null when both are empty. */
 function renderEntity(
   entity: StoryBibleEntity,
   withSheet: boolean,
-  observed: number
+  observed: number,
+  valueMax: number
 ): string | null {
-  const sheet = withSheet && entity.sheet.length > 0 ? renderEntries(entity.sheet) : ''
+  const sheet = withSheet && entity.sheet.length > 0 ? renderEntries(entity.sheet, valueMax) : ''
   const seen =
     observed > 0
-      ? `${STORY_BIBLE_OBSERVED_LABEL} ${renderEntries(entity.observed.slice(0, observed))}`
+      ? `${STORY_BIBLE_OBSERVED_LABEL} ${renderEntries(entity.observed.slice(0, observed), valueMax)}`
       : ''
   if (sheet === '' && seen === '') return null
   // Each part closes as a sentence; a value that already ends one is not given a second stop.
@@ -225,7 +226,10 @@ function renderEntity(
  * sheet line, or as a line of their own for an entity with no sheet (or whose sheet did not
  * fit) — as many as fit, earliest attribute first. Both answer the tokens they spent.
  */
-function entityAdmission(entities: readonly StoryBibleEntity[]): {
+function entityAdmission(
+  entities: readonly StoryBibleEntity[],
+  valueMax: number = STORY_BIBLE_VALUE_MAX
+): {
   admitSheets: (room: number) => number
   admitObserved: (room: number) => number
   lines: () => string[]
@@ -236,7 +240,7 @@ function entityAdmission(entities: readonly StoryBibleEntity[]): {
     admitSheets: (room) => {
       let spent = 0
       entities.forEach((entity, index) => {
-        const line = renderEntity(entity, true, 0)
+        const line = renderEntity(entity, true, 0, valueMax)
         if (line === null || spent + cost(line) > room) return
         admitted[index] = line
         spent += cost(line)
@@ -248,7 +252,7 @@ function entityAdmission(entities: readonly StoryBibleEntity[]): {
       entities.forEach((entity, index) => {
         const before = admitted[index] ?? null
         for (let keep = entity.observed.length; keep > 0; keep -= 1) {
-          const line = renderEntity(entity, before !== null, keep)
+          const line = renderEntity(entity, before !== null, keep, valueMax)
           const extra = cost(line) - cost(before)
           if (line === null || spent + extra > room) continue
           admitted[index] = line
@@ -269,9 +273,11 @@ function entityAdmission(entities: readonly StoryBibleEntity[]): {
  */
 export function renderStoryBibleEntities(
   entities: readonly StoryBibleEntity[],
-  maxTokens: number
+  maxTokens: number,
+  /** Characters per value; query.v3 sends longer sheet values than the prose bible's default. */
+  valueMax: number = STORY_BIBLE_VALUE_MAX
 ): string[] {
-  const admission = entityAdmission(entities)
+  const admission = entityAdmission(entities, valueMax)
   const spent = admission.admitSheets(maxTokens)
   admission.admitObserved(maxTokens - spent)
   return admission.lines()

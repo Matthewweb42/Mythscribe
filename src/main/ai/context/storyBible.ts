@@ -161,7 +161,7 @@ export function storyBibleEntities(
         }
       })
     if (sheet.length === 0 && observed.length === 0) return []
-    return [{ name: entity.name, kind: entity.kind, sheet, observed }]
+    return [{ entityId: entity.id, name: entity.name, kind: entity.kind, sheet, observed }]
   })
 }
 

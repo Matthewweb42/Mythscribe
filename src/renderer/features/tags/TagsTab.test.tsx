@@ -15,6 +15,7 @@ import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStor
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetCustomTemplateStore } from './customTemplateStore'
 import { resetDocumentTagStore, useDocumentTagStore } from './documentTagStore'
 import { resetMentionStore, useMentionStore } from './mentionStore'
 import { tagFixture } from './tagFixture'
@@ -34,6 +35,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       if (override) return override(input) as Output<C>
       if (channel === 'tag:list') return tagFixture as Output<C>
       if (channel === 'tag:aliases') return {} as Output<C>
+      if (channel === 'tagTemplate:list') return [] as Output<C>
       if (channel === 'tag:create') {
         const value = input as Input<'tag:create'>
         const tag: Tag = {
@@ -108,6 +110,7 @@ async function renderLoaded(
 describe('TagsTab (F-4.2)', () => {
   beforeEach(() => {
     resetTagStore()
+    resetCustomTemplateStore()
     resetDocumentTagStore()
     resetMentionStore()
     useTreeStore.getState().clear()
@@ -428,6 +431,7 @@ describe('TagDetail documents (F-4.10)', () => {
 
   beforeEach(() => {
     resetTagStore()
+    resetCustomTemplateStore()
     resetDocumentTagStore()
     resetMentionStore()
     useTreeStore.getState().clear()
@@ -521,6 +525,7 @@ describe('TagDetail mentions (F-4.12)', () => {
 
   beforeEach(() => {
     resetTagStore()
+    resetCustomTemplateStore()
     resetDocumentTagStore()
     resetMentionStore()
     resetActiveEditorStore()
@@ -631,6 +636,7 @@ describe('TagDetail mentions (F-4.12)', () => {
 describe('TagsTab bulk operations and the tag bank file (F-4.9)', () => {
   beforeEach(() => {
     resetTagStore()
+    resetCustomTemplateStore()
     resetDocumentTagStore()
     resetMentionStore()
     useTreeStore.getState().clear()

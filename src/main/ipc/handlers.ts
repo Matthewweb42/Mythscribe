@@ -43,6 +43,7 @@ import type {
   JobsIndexAllResult
 } from '@shared/ipc/contract'
 import {
+  SUMMARY_BACKFILL_DELAY_MS,
   SUMMARY_DEBOUNCE_MS,
   SUMMARY_TEXT_MIN,
   UNAVAILABLE_SUMMARY,
@@ -203,6 +204,7 @@ import { EXTERNAL_HOST, isAllowedExternalUrl, type EditRole } from '@shared/menu
 import { normalizeProposalNote } from '@shared/proposal'
 import { REFERENCE_PINS_MAX, dedupePins, hasPin } from '@shared/references'
 import { TAG_EXCHANGE_EXTENSION, tagExportFileName } from '@shared/tagExchange'
+import { keepTemplateRecords } from '@shared/tagTemplates'
 import {
   addDocumentTag,
   listAllDocumentTagLinks,
@@ -242,6 +244,11 @@ import { buildConsistencyReport } from '../voice/consistency'
 import { buildVoiceProfile, manuscriptDocuments } from '../voice/profile'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { AppError } from './errors'
+import {
+  addCustomTemplate,
+  removeCustomTemplate,
+  updateCustomTemplate
+} from '../tag/customTemplates'
 import { emit, register, type EmitTarget } from './registry'
 
 /** The parts of a BrowserWindow the handlers need; structural so tests can pass a fake. */
@@ -614,6 +621,39 @@ export function registerHandlers({
   }
 
   /**
+   * The core workflow: the AI keeps track of the whole book on its own. Whenever background
+   * indexing is allowed and a provider can answer, every scene without a current summary is
+   * queued, so text written before AI was on, or brought in by an import, is indexed without the
+   * author pressing "Summarize all scenes". Called on open, on an AI settings change, on a saved
+   * key, and after an import; a scene whose summary is current costs nothing, so repeating it
+   * is free. `resume` lifts a pause the author's action may have just fixed (a key, the dial).
+   */
+  let backfillTimer: ReturnType<typeof setTimeout> | null = null
+  let backfillResume = false
+  const backfillSummaries = (resume: boolean): void => {
+    // One pass a moment later rather than one per trigger: the dial and the key are usually set
+    // one after the other, and an open is followed by the window's own first reads.
+    backfillResume ||= resume
+    if (backfillTimer !== null) clearTimeout(backfillTimer)
+    backfillTimer = setTimeout(() => {
+      backfillTimer = null
+      const lift = backfillResume
+      backfillResume = false
+      if (manager.current() === null) return
+      const db = manager.require().connection.orm
+      if (!isFeatureAllowed(getAiSettings(db), 'summary') || !ai.get(sourceOf(db))) return
+      if (lift && queue.status().paused !== null) queue.resume()
+      queue.indexAll('summary', staleSummaryNodeIds(db))
+    }, SUMMARY_BACKFILL_DELAY_MS)
+  }
+  /** A project change drops a pass meant for the project that left. */
+  const cancelBackfill = (): void => {
+    if (backfillTimer !== null) clearTimeout(backfillTimer)
+    backfillTimer = null
+    backfillResume = false
+  }
+
+  /**
    * The editor's write of one document: `document:save` and crash recovery (F-8.3) both end
    * here, so a recovered scene counts as words written and is re-summarized like a typed one.
    */
@@ -717,7 +757,11 @@ export function registerHandlers({
 
   register('aiSettings:get', () => getAiSettings(manager.require().connection.orm))
 
-  register('aiSettings:set', (value) => setAiSettings(manager.require().connection.orm, value))
+  register('aiSettings:set', (value) => {
+    const settings = setAiSettings(manager.require().connection.orm, value)
+    backfillSummaries(true)
+    return settings
+  })
 
   register('presets:get', () => getWritingPresets(manager.require().connection.orm))
 
@@ -1014,6 +1058,53 @@ export function registerHandlers({
     if (chosen === null) return null
     const db = session.connection.orm
     const result = importTagBank(db, readTagBankFile(chosen))
+    if (result.created.length > 0) {
+      rescanManuscript(db)
+      publishProposed()
+      void syncSpelling()
+    }
+    return result
+  })
+
+  // F-4.11: custom tag templates live in app state, so every project sees the same list.
+  register('tagTemplate:list', () => appState.get().tagTemplates)
+
+  register('tagTemplate:save', ({ name, tagIds }) => {
+    const db = manager.require().connection.orm
+    let records = exportTagBank(db)
+    if (tagIds !== undefined) {
+      const nameById = new Map(listTags(db).map((row) => [row.id, row.name]))
+      const keep = new Set(
+        tagIds.map((id) => {
+          const tagName = nameById.get(id)
+          if (tagName === undefined) throw new AppError('NOT_FOUND', 'Tag not found', { id })
+          return tagName
+        })
+      )
+      records = keepTemplateRecords(records, keep)
+    }
+    const next = addCustomTemplate(appState.get().tagTemplates, name, records)
+    appState.update((s) => ({ ...s, tagTemplates: next.templates }))
+    return next.template
+  })
+
+  register('tagTemplate:update', ({ id, name, keep }) => {
+    const next = updateCustomTemplate(appState.get().tagTemplates, id, { name, keep })
+    appState.update((s) => ({ ...s, tagTemplates: next.templates }))
+    return next.template
+  })
+
+  register('tagTemplate:delete', ({ id }) => {
+    appState.update((s) => ({ ...s, tagTemplates: removeCustomTemplate(s.tagTemplates, id) }))
+    return null
+  })
+
+  // F-4.11: loading a saved template is an import of its records, with the same follow-ups.
+  register('tag:loadCustomTemplate', ({ id }) => {
+    const template = appState.get().tagTemplates.find((t) => t.id === id)
+    if (!template) throw new AppError('NOT_FOUND', 'Tag template not found', { id })
+    const db = manager.require().connection.orm
+    const result = importTagBank(db, template.tags)
     if (result.created.length > 0) {
       rescanManuscript(db)
       publishProposed()
@@ -1523,6 +1614,7 @@ export function registerHandlers({
 
   register('ai:setKey', ({ key }) => {
     keyStore.setKey('openai', key)
+    backfillSummaries(true)
     return aiStatus()
   })
 
@@ -2017,8 +2109,19 @@ export function registerHandlers({
         const db = manager.require().connection.orm
         const deps = requestDeps(db)
         const result = await runQuery(db, deps, { nodeId, message, history, requestId, pinActive })
-        const { answer, found, uncited, citations, also, dropped, usage, costUsd, cached, model } =
-          result
+        const {
+          answer,
+          found,
+          uncited,
+          citations,
+          sheets,
+          also,
+          dropped,
+          usage,
+          costUsd,
+          cached,
+          model
+        } = result
         const proposal = createProposal(db, {
           feature: 'query',
           nodeId,
@@ -2028,7 +2131,7 @@ export function registerHandlers({
           completionTokens: usage.outputTokens,
           costUsd,
           cached,
-          content: JSON.stringify({ answer, citations }),
+          content: JSON.stringify({ answer, citations, sheets }),
           flagged: false,
           violation: null
         })
@@ -2038,6 +2141,7 @@ export function registerHandlers({
           found,
           uncited,
           citations,
+          sheets,
           also,
           dropped,
           usage,
@@ -2282,6 +2386,9 @@ export function registerHandlers({
         })
       }
     }
+    // The imported scenes are tracked like typed ones: mentions scanned, summaries queued.
+    mentionQueue.indexAll('mentions', staleMentionNodeIds(db))
+    backfillSummaries(false)
     return { nodes: result.rows.map(toTreeNode), words: result.words }
   })
 
@@ -2484,10 +2591,12 @@ export function registerHandlers({
     // F-3.11, F-3.14: the spellchecker accepts the open project's words and story names and no
     // other project's.
     void syncSpelling()
+    cancelBackfill()
     if (info) {
       queue.load()
       mentionQueue.load()
       mentionQueue.indexAll('mentions', staleMentionNodeIds(manager.require().connection.orm))
+      backfillSummaries(false)
       publishProposed()
       try {
         // F-7.9: the project open now is the one a relaunch opens again.

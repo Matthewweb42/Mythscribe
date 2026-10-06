@@ -203,6 +203,11 @@ import {
   QUERY_PROMPT_V2_VERSION,
   type BuildQueryPromptV2Input
 } from '../prompts/query.v2'
+import {
+  buildQueryPromptV3,
+  QUERY_PROMPT_V3_VERSION,
+  type BuildQueryPromptV3Input
+} from '../prompts/query.v3'
 import { buildProofreadPrompt, PROOFREAD_PROMPT_VERSION } from '../prompts/proofread.v1'
 import { buildWhatNextPrompt, WHAT_NEXT_PROMPT_VERSION } from '../prompts/whatNext.v1'
 import { buildWhatNextPromptV2, WHAT_NEXT_PROMPT_V2_VERSION } from '../prompts/whatNext.v2'
@@ -225,7 +230,9 @@ import { IMPORT_CHUNK_WORDS } from '@shared/importStructure'
 import {
   QUERY_BIBLE_ENTITIES,
   QUERY_BIBLE_TOKEN_BUDGET,
-  QUERY_SCENE_CHAR_BUDGET
+  QUERY_SCENE_CHAR_BUDGET,
+  QUERY_V3_BIBLE_TOKEN_BUDGET,
+  QUERY_V3_BIBLE_VALUE_MAX
 } from '@shared/query'
 import {
   BRIEF_SCENE_CHAR_BUDGET,
@@ -1408,6 +1415,52 @@ const queryV2Maxed: BuildQueryPromptV2Input = {
   bible: MAXED_QUERY_BIBLE
 }
 
+/** query.v3's bible: the same entities through the larger budget and the longer value cap. */
+const queryBibleV3 = (entities: StoryBibleEntity[]): string | null => {
+  const lines = renderStoryBibleEntities(
+    entities,
+    QUERY_V3_BIBLE_TOKEN_BUDGET,
+    QUERY_V3_BIBLE_VALUE_MAX
+  )
+  return lines.length > 0 ? lines.join('\n') : null
+}
+const queryV3Fresh: BuildQueryPromptV3Input = { ...queryFresh, bible: null }
+const queryV3Full: BuildQueryPromptV3Input = {
+  ...queryFull,
+  bible: queryBibleV3(QUERY_BIBLE_ENTITIES_FIXTURE)
+}
+/** The v3 block at its budget: the most entities, every sheet and fact list full at the v3 cap. */
+const MAXED_QUERY_BIBLE_V3 = queryBibleV3(
+  Array.from({ length: QUERY_BIBLE_ENTITIES }, (_, index) => ({
+    name: `${'N'.repeat(40)} ${index}`,
+    kind: 'character' as const,
+    sheet: Array.from({ length: 8 }, (_unused, field) => ({
+      label: `Field ${field}`,
+      value: 'v'.repeat(QUERY_V3_BIBLE_VALUE_MAX)
+    })),
+    observed: Array.from({ length: 7 }, (_unused, fact) => ({
+      label: `Attribute ${fact}`,
+      value: 'o'.repeat(QUERY_V3_BIBLE_VALUE_MAX)
+    }))
+  }))
+)
+const queryV3Maxed: BuildQueryPromptV3Input = {
+  ...fitQueryPrompt(
+    queryMaxedRaw,
+    inputBudget('query'),
+    (full, summaries, history) =>
+      buildQueryPromptV3({
+        full,
+        summaries,
+        history,
+        question: MAXED_QUESTION,
+        bible: MAXED_QUERY_BIBLE_V3
+      }).messages
+  ),
+  question: MAXED_QUESTION,
+  bible: MAXED_QUERY_BIBLE_V3
+}
+
 /** The fixture passage as the import draft sees it: one paragraph per block, in reading order. */
 const IMPORT_PARAGRAPHS = FIXTURE_PASSAGE.split('\n\n')
 
@@ -1464,6 +1517,18 @@ function queryCase(name: string, note: string, input: BuildQueryPromptInput): Ev
   const built = buildQueryPrompt(input)
   return {
     version: QUERY_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'query', texts: input.full.map((scene) => scene.text) }
+  }
+}
+
+function queryV3Case(name: string, note: string, input: BuildQueryPromptV3Input): EvalCase {
+  const built = buildQueryPromptV3(input)
+  return {
+    version: QUERY_PROMPT_V3_VERSION,
     name,
     note,
     messages: built.messages,
@@ -2229,6 +2294,21 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed',
     'the worst input as the fit leaves it, with the story-bible block at its token budget',
     queryV2Maxed
+  ),
+  queryV3Case(
+    'fresh',
+    'one retrieved scene and no story bible: the v3 rules over query.v1\u2019s scene block',
+    queryV3Fresh
+  ),
+  queryV3Case(
+    'full',
+    'three retrieved scenes, two summaries, two history turns, and the author\u2019s sheets as a citable source',
+    queryV3Full
+  ),
+  queryV3Case(
+    'maxed',
+    'the worst input as the fit leaves it, with the story-bible block at the v3 budget and value cap',
+    queryV3Maxed
   ),
   structureCase(
     'fixture',

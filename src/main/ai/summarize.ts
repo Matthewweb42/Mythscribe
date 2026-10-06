@@ -29,6 +29,7 @@ import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { documentText, manuscriptDocuments } from '../voice/profile'
+import type { NodeRow } from '../db/schema'
 import { applyAutoTags, bankTagNames, type AutoTagsChange } from './autoTags'
 import { headTruncate } from './context/chatContext'
 import { assertFeatureAllowed } from './dial'
@@ -95,8 +96,11 @@ export interface SummarySource {
  */
 export function summarySource(db: TreeDb, nodeId: string): SummarySource | null {
   const row = manuscriptDocuments(db).find((document) => document.id === nodeId)
-  if (row === undefined) return null
+  return row === undefined ? null : sourceOfRow(db, row)
+}
 
+/** `summarySource` for a row already read, so a pass over the book reads the tree once. */
+function sourceOfRow(db: TreeDb, row: NodeRow): SummarySource {
   const fullText = documentText(row).trim()
   const sceneText = headTruncate(fullText, SUMMARY_SCENE_CHAR_BUDGET)
   const stored = parseStoredSceneMeta(row.sceneMeta)
@@ -142,8 +146,8 @@ export function staleSummaryNodeIds(db: TreeDb): string[] {
   )
   const stale: string[] = []
   for (const row of rows) {
-    const source = summarySource(db, row.id)
-    if (source === null || source.length < SUMMARY_TEXT_MIN) continue
+    const source = sourceOfRow(db, row)
+    if (source.length < SUMMARY_TEXT_MIN) continue
     const current = stored.get(row.id)
     if (
       current?.contentHash === source.contentHash &&

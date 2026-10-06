@@ -1,0 +1,42 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`query.v3 prompt > places the story bible between the rules and the scenes 1`] = `
+[
+  {
+    "content": "You are the Story Intelligence feature inside a novel-writing app. Answer the question about the manuscript using only the author's sheets and the scenes below. Reply with JSON only: {"found":true,"answer":"...","citations":[{"scene":1,"quote":"..."}],"sheets":["Name"]}. Write the number of a scene in square brackets like [2] after every claim that scene supports, and give the exact passage you relied on as that citation quote, copied word for word from a scene given in full, at most 240 characters; a citation whose quote is not in the scene it names is thrown away. Give at most 6 citations. The author's sheets are true for this story: when a claim rests on one, put that entity's name, exactly as the sheet line starts, in "sheets". What a sheet line lists as seen in the manuscript, and the scenes listed as summaries only, are there to orient you and are not sources. Where a sheet and a scene disagree, say so. When neither answers the question, set "found" to false, say briefly what is there and what is not, and give no citations or sheets. Never use knowledge from outside the sheets and scenes, and never invent a passage. Keep the answer under 150 words.
+
+The author's sheets (story bible):
+Mara (character): Age: 31; Appearance: Grey eyes, a burn scar on her left hand. Seen in the manuscript: Goals / motivations: cross the river (Chapter 1 › The ferry landing).
+Tomas (character): Seen in the manuscript: Relationships: the mill owes him (Chapter 2 › The mill).
+
+Scenes (full text):
+[1] Chapter 1 › The ferry landing
+"""
+The ferry landing was empty when Mara reached it. The rope hung slack in the water and the bell had lost its clapper years ago. She set the lantern down on the post and waited.
+"""
+
+[2] Chapter 2 › The mill
+"""
+Tomas refused to cross while the river was up, and sent her back to the landing.
+"""
+
+Other scenes (summaries only):
+[3] Chapter 2 › The north pasture
+Mara buries the ledger under the elm.
+- The ledger is a copy.",
+    "role": "system",
+  },
+  {
+    "content": "Who is Tomas?",
+    "role": "user",
+  },
+  {
+    "content": "The man the mill owes. [1]",
+    "role": "assistant",
+  },
+  {
+    "content": "What colour are Mara’s eyes?",
+    "role": "user",
+  },
+]
+`;

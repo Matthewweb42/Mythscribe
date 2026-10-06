@@ -30,6 +30,8 @@ interface TagState {
   remove: (id: string) => Promise<void>
   /** Loads a template (F-4.3) and merges every created tag in one update; resolves with main's counts. */
   loadTemplate: (template: TagTemplateId) => Promise<{ created: Tag[]; skipped: string[] }>
+  /** Loads one of the author's saved templates (F-4.11), merged like a built-in one. */
+  loadCustomTemplate: (id: string) => Promise<{ created: Tag[]; skipped: string[] }>
   /** Recolors several tags in one request (F-4.9) and replaces each returned row in place. */
   recolorMany: (ids: string[], color: string) => Promise<void>
   /** Deletes several tags in one request (F-4.9) and drops them from the list. */
@@ -157,11 +159,14 @@ export const useTagStore = create<TagState>((set, get) => ({
   async loadTemplate(template) {
     const mine = generation
     const result = await ipc().invoke('tag:loadTemplate', { template })
-    if (mine === generation && result.created.length > 0) {
-      const byId = { ...get().byId }
-      for (const tag of result.created) byId[tag.id] = tag
-      set({ byId, ids: orderedIds(byId) })
-    }
+    if (mine === generation) mergeCreated(result.created)
+    return result
+  },
+
+  async loadCustomTemplate(id) {
+    const mine = generation
+    const result = await ipc().invoke('tag:loadCustomTemplate', { id })
+    if (mine === generation) mergeCreated(result.created)
     return result
   },
 
@@ -193,11 +198,7 @@ export const useTagStore = create<TagState>((set, get) => ({
   async importBank() {
     const mine = generation
     const result = await ipc().invoke('tag:import', {})
-    if (result !== null && mine === generation && result.created.length > 0) {
-      const byId = { ...get().byId }
-      for (const tag of result.created) byId[tag.id] = tag
-      set({ byId, ids: orderedIds(byId) })
-    }
+    if (result !== null && mine === generation) mergeCreated(result.created)
     return result
   },
 
@@ -205,6 +206,14 @@ export const useTagStore = create<TagState>((set, get) => ({
     return ipc().invoke('tag:export', {})
   }
 }))
+
+/** Merges the tags a template or an import created (F-4.3, F-4.9, F-4.11), in one update. */
+function mergeCreated(created: readonly Tag[]): void {
+  if (created.length === 0) return
+  const byId = { ...useTagStore.getState().byId }
+  for (const tag of created) byId[tag.id] = tag
+  useTagStore.setState({ byId, ids: orderedIds(byId) })
+}
 
 /**
  * The bank without `removed`; deleting tags never reorders the rest. Aliases that led to a

@@ -7,6 +7,7 @@ import { RecentProjectEntry } from '@shared/ipc/contract'
 import { DiagnosticsSettings, defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { StoredLayout, defaultLayout } from '@shared/layout'
 import { SupporterSettings, defaultSupporterSettings } from '@shared/license'
+import { CustomTagTemplate } from '@shared/tagTemplates'
 import { UpdateSettings, defaultUpdateSettings } from '@shared/updates'
 import { WindowState, defaultWindowState } from '@shared/windowState'
 import { ViewSettings, defaultViewSettings } from '@shared/zoom'
@@ -53,7 +54,9 @@ export const AppState = z.object({
    * F-7.9: the window's last size and position, the project open at the last quit, and whether
    * it opens again on launch; defaulted so older files open at the default size and reopen.
    */
-  window: WindowState.default(defaultWindowState)
+  window: WindowState.default(defaultWindowState),
+  /** F-4.11: the author's saved tag templates, loadable in any project; none in older files. */
+  tagTemplates: z.array(CustomTagTemplate).default([])
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -68,7 +71,8 @@ export const EMPTY_APP_STATE: AppState = {
   supporter: defaultSupporterSettings(),
   view: defaultViewSettings(),
   backups: defaultBackupSettings(),
-  window: defaultWindowState()
+  window: defaultWindowState(),
+  tagTemplates: []
 }
 
 export class AppStateStore {

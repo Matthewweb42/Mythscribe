@@ -748,6 +748,7 @@ describe('useAssistantStore send, Query mode (F-5.7)', () => {
     answer: 'She waits for the storm [1].',
     found: true,
     uncited: false,
+    sheets: [],
     citations: [CITATION],
     also: [{ nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' }],
     dropped: 1,

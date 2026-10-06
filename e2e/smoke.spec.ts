@@ -311,6 +311,15 @@ const QUERY_QUESTION = 'Where does the storm reach the ridge?'
 const QUERY_ANSWER_TEXT = 'She waits out the storm on the ridge [1], then crosses at dawn [3].'
 /** What the answer reads once main drops the uncited scene and strips its marker. */
 const QUERY_ANSWER_KEPT = 'She waits out the storm on the ridge [1], then crosses at dawn.'
+/** query.v3: a question about a character answered from the author's sheet alone. */
+const SHEET_QUESTION = 'What does Wren look like?'
+const SHEET_APPEARANCE = 'Grey eyes, a burn scar across the left hand.'
+const SHEET_ANSWER = JSON.stringify({
+  found: true,
+  answer: 'Wren has grey eyes and a burn scar across the left hand.',
+  citations: [],
+  sheets: ['Wren', 'Nobody']
+})
 const QUERY_ANSWER = JSON.stringify({
   found: true,
   answer: QUERY_ANSWER_TEXT,
@@ -517,7 +526,11 @@ function startFakeOpenAi(): Promise<string> {
                                 : betaReader
                                   ? BETA_READER_ANSWER
                                   : query
-                                    ? QUERY_ANSWER
+                                    ? request.messages.some((m) =>
+                                        m.content.includes('Wren (character):')
+                                      )
+                                      ? SHEET_ANSWER
+                                      : QUERY_ANSWER
                                     : brief
                                       ? BRIEF_ANSWER
                                       : summary
@@ -2009,7 +2022,9 @@ test('create, close, reopen a project on disk', async () => {
   await expect(tagRows.getByRole('button')).toHaveText(['dark-forest 0 uses'])
   // F-4.3: loading a template after the confirm adds its tags (28 for Standard Fiction) and toasts.
   const templates = tagsPanel.getByRole('form', { name: 'Tag templates' })
-  await templates.getByRole('combobox', { name: 'Template' }).selectOption('standard-fiction')
+  await templates
+    .getByRole('combobox', { name: 'Template' })
+    .selectOption({ label: 'Standard Fiction' })
   await templates.getByRole('button', { name: 'Load' }).click()
   const loadDialog = page.getByRole('dialog', { name: 'Load the Standard Fiction template?' })
   await expect(loadDialog).toBeVisible()
@@ -2018,6 +2033,31 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByRole('status')).toContainText('Added 28 tags')
   await expect(tagRows.getByRole('button')).toHaveCount(29)
   await expect(tagRows.getByRole('button', { name: /^protagonist/ })).toBeVisible()
+  // F-4.11: the bank saved as a custom template joins the list under "Your templates" (app-wide),
+  // and the manager deletes it again after a confirm.
+  await tagsPanel.getByRole('button', { name: 'Save bank as template…' }).click()
+  const saveTemplatePrompt = page.getByRole('dialog', { name: 'Save as tag template' })
+  await saveTemplatePrompt.getByRole('textbox').fill('Series bank')
+  await saveTemplatePrompt.getByRole('button', { name: 'Save' }).click()
+  await expect(saveTemplatePrompt).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: 'Saved' })).toContainText(
+    'Saved "Series bank" with 29 tags'
+  )
+  await expect(templates.getByRole('combobox', { name: 'Template' })).toHaveValue(/^custom:/)
+  await tagsPanel.getByRole('button', { name: 'Manage…' }).click()
+  const templateManager = page.getByRole('dialog', { name: 'Tag templates' })
+  await expect(templateManager.getByRole('listitem', { name: 'Series bank' })).toContainText(
+    '29 tags'
+  )
+  await templateManager.getByRole('button', { name: 'Delete' }).click()
+  const deleteTemplateDialog = page.getByRole('dialog', { name: 'Delete "Series bank"?' })
+  await deleteTemplateDialog.getByRole('button', { name: 'Delete' }).click()
+  await expect(templateManager.getByText('No saved templates.')).toBeVisible()
+  await templateManager.getByRole('button', { name: 'Close tag templates' }).click()
+  await expect(templateManager).toHaveCount(0)
+  await expect(templates.getByRole('combobox', { name: 'Template' })).toHaveValue(
+    'builtin:standard-fiction'
+  )
   // F-4.9: the bank goes out as a JSON file (all 29 tags) and a hand-written one comes in: the new
   // tag is created, the name already in the bank is skipped. Under Custom, select mode then
   // recolors the imported tag and one made in the form, merges them, and deletes what is left, so
@@ -4467,6 +4507,34 @@ test('create, close, reopen a project on disk', async () => {
     `What happens in this passage? Give a short recap, citing it: "${CRITIQUE_PRAISE_QUOTE}"`
   )
   expect(openAiChatBodies.at(-1)?.messages[0]?.content).toMatch(/\[1\] Chapter 1 › Scene 1/)
+  // query.v3: a question the author's own sheet answers. Wren's appearance is only on her sheet;
+  // the sheet goes out as a source, the answer names it, and the panel lists it under "From your
+  // notes" instead of flagging the answer as uncited. A name the model invents is ignored.
+  const wren = await page.evaluate(
+    (appearance) =>
+      window.mythscribe.invoke('entity:create', {
+        kind: 'character',
+        name: 'Wren',
+        fields: { appearance }
+      }) as Promise<IpcResult<Entity>>,
+    SHEET_APPEARANCE
+  )
+  if (!wren.ok) throw new Error(`entity:create failed: ${wren.error.message}`)
+  await messageBox.fill(SHEET_QUESTION)
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(6)
+  const sheetTurn = turns.nth(5)
+  await expect(sheetTurn).toContainText('Wren has grey eyes')
+  await expect(sheetTurn.getByTestId('query-uncited')).toHaveCount(0)
+  await expect(sheetTurn.getByText('From your notes')).toBeVisible()
+  await expect(sheetTurn.getByTestId('query-sheet')).toHaveText(['Wren'])
+  const sheetSystem = openAiChatBodies.at(-1)?.messages[0]?.content ?? ''
+  expect(sheetSystem).toContain(`Wren (character): Appearance: ${SHEET_APPEARANCE}`)
+  const removed = await page.evaluate(
+    (id) => window.mythscribe.invoke('entity:delete', { id }) as Promise<IpcResult<null>>,
+    wren.data.id
+  )
+  if (!removed.ok) throw new Error(`entity:delete failed: ${removed.error.message}`)
 
   // F-15.4: MythScribe Cloud. Signing in again (the account step signed out), the AI tab's
   // source picker points this project at the proxy; the next assistant question streams through
@@ -4492,8 +4560,8 @@ test('create, close, reopen a project on disk', async () => {
   await assistant.getByRole('radio', { name: 'Plan' }).click()
   await messageBox.fill(CLOUD_QUESTION)
   await messageBox.press('Enter')
-  await expect(turns).toHaveCount(6)
-  await expect(turns.nth(5)).toContainText(CLOUD_AI_ANSWER)
+  await expect(turns).toHaveCount(8)
+  await expect(turns.nth(7)).toContainText(CLOUD_AI_ANSWER)
   const cloudCost = cloudPriceFor(
     'gpt-5.4-mini',
     CLOUD_AI_USAGE.inputTokens,
@@ -4505,7 +4573,7 @@ test('create, close, reopen a project on disk', async () => {
     CLOUD_AI_USAGE.outputTokens
   )
   expect(cloudCost.costUsd).toBeCloseTo(ownKeyCost.costUsd * 2, 8)
-  await expect(turns.nth(5).getByTestId('chat-turn-cost')).toHaveText(
+  await expect(turns.nth(7).getByTestId('chat-turn-cost')).toHaveText(
     `gpt-5.4-mini · $${cloudCost.costUsd.toFixed(4)} · 10,000 in · 2,000 out`
   )
   expect(openAiChatBodies).toHaveLength(cloudBodiesBefore)
