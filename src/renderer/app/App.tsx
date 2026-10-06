@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
 import { AI_DATA_SHARING, type AiDial, type AiSource } from '@shared/aiSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
-import { formatLabel, levelLabel, sectionLabel, type HierarchyLevel } from '@shared/labels'
+import { formatLabel, type HierarchyLevel } from '@shared/labels'
 import { LAYOUT_LIMITS } from '@shared/layout'
 import { DEFAULT_THEME, THEME_TOKENS, THEME_TOKEN_VARS, resolveTheme } from '@shared/themes'
 import { useAccountStore } from '@renderer/features/account/accountStore'
@@ -42,7 +42,8 @@ import { FindBar } from '@renderer/features/editor/FindBar'
 import { resetFindStore } from '@renderer/features/editor/findStore'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
-import { CorkBoard, FolderViewToggle } from '@renderer/features/outline/CorkBoard'
+import { CorkBoard } from '@renderer/features/outline/CorkBoard'
+import { SelectionCrumb } from '@renderer/features/shell/SelectionCrumb'
 import { useOutlineViewStore } from '@renderer/features/outline/outlineViewStore'
 import { useStructureStore } from '@renderer/features/outline/structureStore'
 import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
@@ -405,6 +406,7 @@ export function App(): React.JSX.Element {
                 <span data-testid="project-name">{current.name}</span> ·{' '}
                 {formatLabel(current.format)}
               </span>
+              <SelectionCrumb format={current.format} />
             </>
           ) : null}
           <div className="ml-auto flex items-center gap-2">
@@ -877,9 +879,6 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
   // (`treeStore.select`), so the manuscript comes back exactly where it was.
   const entityId = useEntityStore((s) => s.selectedId)
   const node = useTreeStore((s) => (s.selectedId === null ? undefined : s.byId[s.selectedId]))
-  const section = useTreeStore((s) =>
-    s.selectedId === null ? undefined : s.sectionOf[s.selectedId]
-  )
   const folderView = useOutlineViewStore((s) => s.folderView)
   if (entityId !== null) return <EntityEditor key={entityId} id={entityId} />
   if (!node) {
@@ -890,30 +889,12 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
       </div>
     )
   }
-  const kind =
-    node.hierarchyLevel !== null
-      ? levelLabel(format, node.hierarchyLevel)
-      : node.kind === 'folder'
-        ? 'Folder'
-        : 'Document'
   // F-11.1: a folder shows as a stack of its documents or as a cork board of its children; focus
   // mode is for writing, so it always gets the stack and hides the switch.
   const folder = node.kind === 'folder'
   const cork = folder && folderView === 'cork' && !focus
   return (
     <>
-      <div className="flex shrink-0 items-start gap-4 px-6 pt-6 pb-4">
-        <div className="min-w-0 flex-1">
-          <h1 className="m-0 text-2xl font-semibold" data-testid="selected-title">
-            {node.title}
-          </h1>
-          <p className="mt-1 mb-0 text-sm text-fg-muted">
-            {kind}
-            {section ? ` · ${sectionLabel(format, section)}` : ''}
-          </p>
-        </div>
-        {folder && !focus ? <FolderViewToggle /> : null}
-      </div>
       <div className="flex min-h-0 flex-1">
         {/* F-3.10: the find bar docks above the editor's toolbar, so it hides no control and
             never spans the notes beside it. */}

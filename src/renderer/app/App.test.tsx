@@ -363,7 +363,7 @@ describe('App', () => {
     await userEvent.click(within(scene).getByText('Scene 1'))
     expect(scene).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByTestId('selected-title')).toHaveTextContent('Scene 1')
-    expect(screen.getByText('Scene · Volume 1')).toBeInTheDocument()
+    expect(screen.getByText('(Scene · Volume 1)', { exact: false })).toBeInTheDocument()
     // F-3.1: a document mounts the editor and its toolbar, loaded through document:get.
     expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
     const box = await screen.findByRole('textbox', { name: 'Document' })
@@ -374,7 +374,7 @@ describe('App', () => {
       within(screen.getByRole('treeitem', { name: 'Arc 2' })).getByText('Arc 2')
     )
     expect(screen.getByTestId('selected-title')).toHaveTextContent('Arc 2')
-    expect(screen.getByText('Arc · Volume 1')).toBeInTheDocument()
+    expect(screen.getByText('(Arc · Volume 1)', { exact: false })).toBeInTheDocument()
     // F-2.5/F-3.8: a folder stacks every descendant document in tree order under one toolbar,
     // each loaded under its own id; the single document was unloaded with its pane.
     expect(documentRegions().map((r) => r.getAttribute('aria-label'))).toEqual([
