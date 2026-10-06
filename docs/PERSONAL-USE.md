@@ -67,6 +67,17 @@ and `npm run test:e2e` for anything that touches saving.
    published releases yet, so the check can only report an error. You update by re-running the
    script.
 
+## Bringing in old projects and running AI offline
+
+- **A project from the old prototype (v0):** open it as usual (the single `.mythscribe` file, or
+  the `project.db` inside an old project folder). MythScribe asks before converting it; the
+  converted project keeps the same name and the untouched original is kept beside it as
+  `<Name> (v0 backup <date>).mythscribe`.
+- **AI without the internet:** install [Ollama](https://ollama.com), run `ollama pull llama3.1`,
+  then in Settings › AI choose **Local model**, set the model names to what you downloaded, and
+  press Test connection. Requests cost nothing and stay on your computer; answers are weaker than
+  OpenAI's.
+
 ## If something goes wrong
 
 - **The app will not open a book:** read the message. "Newer version" means reinstall from the
