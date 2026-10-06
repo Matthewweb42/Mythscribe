@@ -2,8 +2,6 @@ import { create } from 'zustand'
 import {
   clampForEditorMin,
   clampRect,
-  clampTagBarHeight,
-  clampTagBarSplit,
   defaultLayout,
   normalizeLayout,
   rectEquals,
@@ -42,23 +40,12 @@ interface LayoutState {
   /**
    * Opens or closes a panel; a panel opening gives way first if the editor would get too little,
    * and when even its floor is too much beside two wide panels (F-5.4 made three possible) the
-   * others give way in `normalizeLayout`'s order, so main never refuses the write.
+   * others give way in `normalizeLayout`'s order (closing as a last resort, never the panel
+   * being opened), so main never refuses the write.
    */
   toggle: (panel: LayoutPanel) => void
   /** Shows a sidebar tab (F-7.3); a no-op for the tab already shown, so no write is scheduled. */
   setSidebarTab: (tab: SidebarTabId) => void
-  /** Collapses or expands the document tag bar (F-4.4); its height is kept either way. */
-  toggleTagBar: () => void
-  /**
-   * Sets the tag bar's height in px (F-4.4), clamped to its floor and to 60 % of the current
-   * window height, then schedules the write; a no-op when the clamp lands on the current value.
-   */
-  setTagBarHeight: (height: number) => void
-  /**
-   * Sets the metadata pane's share of the tag bar's width (F-4.5), clamped to 30–70 %, then
-   * schedules the write; a no-op when the clamp lands on the current value.
-   */
-  setTagBarSplit: (split: number) => void
   /**
    * Sets a floating window's geometry in px (F-6.6), clamped into the current window with
    * `clampRect`, then schedules the write; a no-op when the clamp lands on the current rect
@@ -143,32 +130,16 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     const base = get().layout
     const current = base[panel]
     const size = current.open ? current.size : clampForEditorMin(base, panel, current.size)
-    schedule(normalizeLayout({ ...base, [panel]: { ...current, open: !current.open, size } }), base)
+    schedule(
+      normalizeLayout({ ...base, [panel]: { ...current, open: !current.open, size } }, panel),
+      base
+    )
   },
 
   setSidebarTab(tab) {
     const base = get().layout
     if (base.sidebar.tab === tab) return
     schedule({ ...base, sidebar: { ...base.sidebar, tab } }, base)
-  },
-
-  toggleTagBar() {
-    const base = get().layout
-    schedule({ ...base, tagBar: { ...base.tagBar, open: !base.tagBar.open } }, base)
-  },
-
-  setTagBarHeight(height) {
-    const base = get().layout
-    const clamped = clampTagBarHeight(height, window.innerHeight)
-    if (clamped === base.tagBar.height) return
-    schedule({ ...base, tagBar: { ...base.tagBar, height: clamped } }, base)
-  },
-
-  setTagBarSplit(split) {
-    const base = get().layout
-    const clamped = clampTagBarSplit(split)
-    if (clamped === base.tagBar.split) return
-    schedule({ ...base, tagBar: { ...base.tagBar, split: clamped } }, base)
   },
 
   setFloatingRect(panel, rect) {
@@ -191,24 +162,6 @@ export function useLayout(): Layout {
 export function resizePanelBy(panel: LayoutPanel, deltaPx: number): void {
   const state = useLayoutStore.getState()
   state.setSize(panel, state.layout[panel].size + deltaPx / window.innerWidth)
-}
-
-/** Applies a drag or key step from the tag bar's `ResizeHandle` (F-4.4): the px delta is added to its height. */
-export function resizeTagBarBy(deltaPx: number): void {
-  const state = useLayoutStore.getState()
-  state.setTagBarHeight(state.layout.tagBar.height + deltaPx)
-}
-
-/**
- * Applies a drag or key step from the tag bar's split handle (F-4.5): the px delta becomes a
- * fraction of the bar's own rendered width (`barWidthPx`, measured by the bar at drag time),
- * not of the window, and is added to the metadata pane's share. Ignored while the bar has no
- * width (not laid out yet).
- */
-export function resizeTagBarSplitBy(deltaPx: number, barWidthPx: number): void {
-  if (barWidthPx <= 0) return
-  const state = useLayoutStore.getState()
-  state.setTagBarSplit(state.layout.tagBar.split + deltaPx / barWidthPx)
 }
 
 /** Applies a drag or key step on a floating window's title bar (F-6.6): the px deltas move it. */

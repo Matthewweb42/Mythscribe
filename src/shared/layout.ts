@@ -8,13 +8,15 @@ import { SidebarTabId } from './sidebarTabs'
  * a field `StoredLayout` defaults, so a layout written before them still loads.
  */
 
-export const LAYOUT_PANELS = ['sidebar', 'notes', 'assistant', 'references'] as const
+export const LAYOUT_PANELS = ['sidebar', 'notes', 'tags', 'assistant', 'references'] as const
 export type LayoutPanel = (typeof LAYOUT_PANELS)[number]
 
 /** Per-panel `[min, max]` fractions, plus the share the editor always keeps. */
 export const LAYOUT_LIMITS = {
   sidebar: [0.15, 0.35],
   notes: [0.15, 0.5],
+  // The tags column (replaced the tag bar above the editor, 2026-10-06): chips in a narrow column.
+  tags: [0.15, 0.35],
   // F-5.4: wide enough at its floor for the tab strip, the mode radios, and the composer.
   assistant: [0.2, 0.5],
   // F-9.6: a column of cards, as narrow and as wide as the sidebar.
@@ -29,39 +31,15 @@ const panelSchema = ([min, max]: readonly [number, number]): z.ZodObject<{
 
 const sidebarSchema = panelSchema(LAYOUT_LIMITS.sidebar)
 
-/**
- * Floor of the draggable tag bar (F-4.4), in px. The ceiling is 60 % of the window height,
- * enforced by the renderer against the live window (`clampTagBarHeight`) and by `max-height`
- * at render, not by this schema: a static bound cannot express it, and unlike the width
- * panels the height is stored in px rather than as a scale-invariant fraction.
- */
-export const TAG_BAR_MIN_HEIGHT = 100
-/** The share of the window height the tag bar may take at most. */
-export const TAG_BAR_MAX_FRACTION = 0.6
-/**
- * The height the tag bar grows to when the scene brief (F-14.3) is opened below it, if it is
- * shorter: the three metadata rows, the Brief row, and the five brief lines. Only ever grows
- * the bar; the author's own taller height stays.
- */
-export const TAG_BAR_BRIEF_HEIGHT = 300
-
-/** The share of the tag bar's width the metadata pane may take (F-4.5), as `[min, max]`. */
-export const TAG_BAR_SPLIT_LIMITS = [0.3, 0.7] as const
-
-const tagBarSchema = z.object({
-  open: z.boolean(),
-  height: z.number().min(TAG_BAR_MIN_HEIGHT),
-  // F-4.5: the metadata pane's share of the bar's width; a fraction of the bar, not the window.
-  split: z.number().min(TAG_BAR_SPLIT_LIMITS[0]).max(TAG_BAR_SPLIT_LIMITS[1])
-})
-
-// 180 px since F-14.3 (was 120): the metadata pane's three rows plus the Brief row (128 px)
-// fit under the bar's own header row without a scrollbar.
-const DEFAULT_TAG_BAR = { open: true, height: 180, split: 0.4 } as const
 /** The assistant panel (F-5.4) starts closed; Ctrl+K opens it at just under a third. */
 const DEFAULT_ASSISTANT = { open: false, size: 0.3 } as const
 
 const assistantSchema = panelSchema(LAYOUT_LIMITS.assistant)
+
+/** The tags column starts closed at a fifth of the window; the header's Tags button opens it. */
+const DEFAULT_TAGS = { open: false, size: 0.2 } as const
+
+const tagsSchema = panelSchema(LAYOUT_LIMITS.tags)
 
 /** The references panel (F-9.6) starts closed; the first pin opens it at just under a quarter. */
 const DEFAULT_REFERENCES = { open: false, size: 0.22 } as const
@@ -114,8 +92,8 @@ export const Layout = z.object({
   // F-7.3: the sidebar's active tab.
   sidebar: sidebarSchema.extend({ tab: SidebarTabId }),
   notes: panelSchema(LAYOUT_LIMITS.notes),
-  // F-4.4: the document tag bar above the editor; a height, so it never joins LAYOUT_PANELS.
-  tagBar: tagBarSchema,
+  // The tags column (2026-10-06), which replaced the F-4.4 tag bar above the editor.
+  tags: tagsSchema,
   // F-5.4: the AI assistant panel on the right, beside the notes.
   assistant: assistantSchema,
   // F-9.6: the quick reference panel on the right, between the main pane and the assistant.
@@ -132,11 +110,9 @@ export type Layout = z.infer<typeof Layout>
 export const StoredLayout = z.object({
   sidebar: sidebarSchema.extend({ tab: SidebarTabId.default('manuscript') }),
   notes: Layout.shape.notes,
-  // A layout written before F-4.4 has no tag bar and parses to the default one; one written
-  // before F-4.5 has a tag bar without `split`, which parses to the default split on its own.
-  tagBar: tagBarSchema
-    .extend({ split: tagBarSchema.shape.split.default(DEFAULT_TAG_BAR.split) })
-    .default({ ...DEFAULT_TAG_BAR }),
+  // A layout written before the tags column has none and parses to the closed default; the old
+  // `tagBar` key (F-4.4) is unknown to this schema and dropped on parse.
+  tags: tagsSchema.default({ ...DEFAULT_TAGS }),
   // A layout written before F-5.4 has no assistant panel and parses to the closed default.
   assistant: assistantSchema.default({ ...DEFAULT_ASSISTANT }),
   // A layout written before F-9.6 has no references panel and parses to the closed default.
@@ -147,7 +123,7 @@ export const StoredLayout = z.object({
 
 /**
  * A fresh install: the Manuscript tab open at just under a quarter, the notes closed at a
- * quarter, the tag bar open at 180 px with the metadata pane at 40 % of it, the assistant
+ * quarter, the tags closed at a fifth, the assistant
  * closed at just under a third, the references closed at just under a quarter, the floating
  * windows at their default geometry.
  */
@@ -155,7 +131,7 @@ export function defaultLayout(): Layout {
   return {
     sidebar: { open: true, size: 0.22, tab: 'manuscript' },
     notes: { open: false, size: 0.25 },
-    tagBar: { ...DEFAULT_TAG_BAR },
+    tags: { ...DEFAULT_TAGS },
     assistant: { ...DEFAULT_ASSISTANT },
     references: { ...DEFAULT_REFERENCES },
     floating: defaultFloating()
@@ -187,18 +163,6 @@ export function clampRect(
 /** True when two rects have the same geometry. */
 export function rectEquals(a: Rect, b: Rect): boolean {
   return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
-}
-
-/** The tag bar height clamped to `[TAG_BAR_MIN_HEIGHT, 60 % of the given window height]` (F-4.4). */
-export function clampTagBarHeight(height: number, windowInnerHeight: number): number {
-  const max = Math.max(TAG_BAR_MIN_HEIGHT, windowInnerHeight * TAG_BAR_MAX_FRACTION)
-  return Math.min(max, Math.max(TAG_BAR_MIN_HEIGHT, height))
-}
-
-/** The metadata pane's share of the tag bar clamped to `TAG_BAR_SPLIT_LIMITS` (F-4.5). */
-export function clampTagBarSplit(split: number): number {
-  const [min, max] = TAG_BAR_SPLIT_LIMITS
-  return Math.min(max, Math.max(min, split))
 }
 
 /** `size` clamped to the panel's own `[min, max]`. */
@@ -234,16 +198,31 @@ export function fitsEditorMin(layout: Layout): boolean {
   return editorFraction(layout) >= LAYOUT_LIMITS.editorMin - EPSILON
 }
 
-/** The order in which open panels give way when the editor would get too little: assistant, references, notes, sidebar. */
-const GIVE_WAY_ORDER: readonly LayoutPanel[] = ['assistant', 'references', 'notes', 'sidebar']
+/** The order in which open panels give way when the editor would get too little: assistant, references, tags, notes, sidebar. */
+const GIVE_WAY_ORDER: readonly LayoutPanel[] = [
+  'assistant',
+  'references',
+  'tags',
+  'notes',
+  'sidebar'
+]
+
+/**
+ * The order in which open panels close when shrinking every one to its floor still leaves the
+ * editor too little (five panels at their floors do): the tags column first, then the
+ * references, the notes, the assistant, and the sidebar last.
+ */
+const CLOSE_ORDER: readonly LayoutPanel[] = ['tags', 'references', 'notes', 'assistant', 'sidebar']
 
 /**
  * A layout that respects the editor minimum: an already-valid layout is returned as is; an
  * over-wide one (a hand-edited app-state file, or another panel opening beside wide ones)
- * gives way assistant first, then the references, then notes, then the sidebar. Every panel at its floor still
- * leaves the editor its minimum, so the result always fits.
+ * gives way assistant first, then the references, the tags, the notes, and the sidebar. Five
+ * panels at their floors no longer leave the editor its minimum (the tags column made five), so
+ * when shrinking is not enough panels close in `CLOSE_ORDER`, never `keep` (the panel the author
+ * just opened), until the editor has its share.
  */
-export function normalizeLayout(layout: Layout): Layout {
+export function normalizeLayout(layout: Layout, keep?: LayoutPanel): Layout {
   let next = layout
   for (const panel of GIVE_WAY_ORDER) {
     if (fitsEditorMin(next)) return next
@@ -252,6 +231,11 @@ export function normalizeLayout(layout: Layout): Layout {
       ...next,
       [panel]: { ...next[panel], size: clampForEditorMin(next, panel, next[panel].size) }
     }
+  }
+  for (const panel of CLOSE_ORDER) {
+    if (fitsEditorMin(next)) return next
+    if (panel === keep || !next[panel].open) continue
+    next = { ...next, [panel]: { ...next[panel], open: false } }
   }
   return next
 }

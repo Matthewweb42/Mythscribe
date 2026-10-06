@@ -18,15 +18,8 @@ const CHIP = 'rounded-full border border-line bg-surface-raised px-2 py-0.5 text
  * of the node's run, the summary with its key points and the characters present, and a
  * Summarize now button for the author who will not wait for the debounce. It shows for a
  * manuscript document alone (`available`); front matter, end matter, and folders get no block.
- * `onOpen` grows the tag bar the way opening the brief does.
  */
-export function SummaryBlock({
-  id,
-  onOpen
-}: {
-  id: string
-  onOpen: () => void
-}): React.JSX.Element | null {
+export function SummaryBlock({ id }: { id: string }): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
   const sectionId = useId()
   const state = useSummaryStore((s) => s.byNode[id] ?? null)
@@ -67,14 +60,7 @@ export function SummaryBlock({
           type="button"
           aria-expanded={open}
           aria-controls={open ? sectionId : undefined}
-          onClick={() => {
-            if (open) {
-              setOpen(false)
-            } else {
-              setOpen(true)
-              onOpen()
-            }
-          }}
+          onClick={() => setOpen(!open)}
           className={BUTTON}
         >
           {open ? (

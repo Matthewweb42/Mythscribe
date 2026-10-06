@@ -3,7 +3,11 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
+import { EMPTY_SCENE_META } from '@shared/sceneMeta'
+import { UNAVAILABLE_SUMMARY } from '@shared/summary'
 import type { TiptapNodeT } from '@shared/tiptap'
+import { treeFixture } from '@renderer/features/manuscript/treeFixture'
+import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -15,6 +19,8 @@ import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetDocumentStore } from './documentStore'
 import { NotesPanel, NotesToggleButton } from './NotesPanel'
 import { resetNotesStore } from './notesStore'
+import { resetSceneMetaStore } from './sceneMetaStore'
+import { resetSummaryStore } from './summaryStore'
 
 const doc = (text: string): TiptapNodeT => ({
   type: 'doc',
@@ -45,6 +51,12 @@ function client(stored: Record<string, TiptapNodeT>): {
         }
         // F-9.6: the pin button writes the list; main answers what it stored.
         if (channel === 'reference:set') return input as Output<C>
+        // The synopsis box and the scene details read the node's metadata.
+        if (channel === 'sceneMeta:get') {
+          const { id } = input as Input<'sceneMeta:get'>
+          return { id, meta: { ...EMPTY_SCENE_META, synopsis: `About ${id}` } } as Output<C>
+        }
+        if (channel === 'summary:get') return UNAVAILABLE_SUMMARY as Output<C>
         throw new Error(`unexpected ${channel}`)
       },
       on: () => () => {}
@@ -65,7 +77,7 @@ const size = (): number => useLayoutStore.getState().layout.notes.size
 const panel = (): HTMLElement => screen.getByTestId('notes-panel')
 const openNotes = (): void => act(() => useLayoutStore.getState().toggle('notes'))
 
-function Host({ id }: { id: string }): React.JSX.Element {
+function Host({ id }: { id: string | null }): React.JSX.Element {
   return (
     <div>
       <NotesToggleButton />
@@ -82,8 +94,11 @@ beforeEach(() => {
   resetLayoutStore()
   resetReferenceStore()
   resetNotesStore()
+  resetSceneMetaStore()
+  resetSummaryStore()
   resetDocumentStore()
   resetPendingSaves()
+  useTreeStore.setState({ ...buildIndex([]), loaded: false })
   useDialogStore.setState({ modals: [], toasts: [] })
   const fake = client({ 'sc-1': doc('Scene note'), 'ch-1': doc('Chapter note') })
   gets = fake.gets
@@ -93,6 +108,8 @@ beforeEach(() => {
 afterEach(() => {
   // The layout store's write is debounced; leaving it pending leaks into the next file.
   resetLayoutStore()
+  resetSceneMetaStore()
+  resetSummaryStore()
   vi.unstubAllGlobals()
 })
 
@@ -202,5 +219,38 @@ describe('NotesPanel (F-3.7)', () => {
     expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument()
     await userEvent.click(button)
     expect(size()).toBeCloseTo(DEFAULT_SIZE + 16 / WINDOW_WIDTH)
+  })
+
+  it('shows a hint and no pin while no node is selected', () => {
+    openNotes()
+    render(<Host id={null} />)
+    expect(panel()).toHaveTextContent('Select a document to see its notes.')
+    expect(screen.queryByRole('button', { name: 'Pin notes' })).not.toBeInTheDocument()
+    expect(gets).toEqual([])
+  })
+
+  it('puts the synopsis box above the notes and keeps the scene details collapsed for a scene', async () => {
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    openNotes()
+    render(<Host id="sc-1" />)
+    const synopsis = screen.getByRole('textbox', { name: 'Synopsis' })
+    await waitFor(() => expect(synopsis).toHaveValue('About sc-1'))
+    const details = screen.getByRole('button', { name: 'Scene details' })
+    expect(details).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('group', { name: 'Scene metadata' })).not.toBeInTheDocument()
+    await userEvent.click(details)
+    expect(details).toHaveAttribute('aria-expanded', 'true')
+    const metadata = screen.getByRole('group', { name: 'Scene metadata' })
+    // The synopsis is the box at the top, never repeated in the details.
+    expect(screen.getAllByRole('textbox', { name: 'Synopsis' })).toHaveLength(1)
+    expect(metadata).not.toContainElement(synopsis)
+  })
+
+  it('has notes only, no synopsis or details, for a node without a hierarchy level', () => {
+    openNotes()
+    // The empty tree knows no level for `sc-1`.
+    render(<Host id="sc-1" />)
+    expect(screen.queryByRole('textbox', { name: 'Synopsis' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Scene details' })).not.toBeInTheDocument()
   })
 })

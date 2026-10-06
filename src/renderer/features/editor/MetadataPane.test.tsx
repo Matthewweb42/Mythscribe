@@ -2,7 +2,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings } from '@shared/aiSettings'
-import { TAG_BAR_BRIEF_HEIGHT } from '@shared/layout'
 import type {
   AiDraftBriefResult,
   AiSummarizeResult,
@@ -31,13 +30,13 @@ import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStor
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetStructureStore, useStructureStore } from '@renderer/features/outline/structureStore'
-import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { resetLayoutStore } from '@renderer/features/shell/layoutStore'
 import { resetTimelineStore, useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { orderedIds, resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
-import { MetadataPane } from './MetadataPane'
+import { MetadataPane, SynopsisBox } from './MetadataPane'
 import { resetSceneMetaStore, useSceneMetaStore } from './sceneMetaStore'
 import { resetSummaryStore } from './summaryStore'
 
@@ -285,7 +284,6 @@ describe('MetadataPane (F-4.5)', () => {
     fireEvent.change(field('Location'), { target: { value: 'docks' } })
     fireEvent.change(timeline(), { target: { value: 'Day 2, dawn' } })
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'revised' } })
-    fireEvent.change(screen.getByLabelText('Synopsis'), { target: { value: 'Mara bargains.' } })
     expect(field('Location')).toHaveValue('docks')
     expect(useSceneMetaStore.getState().docs['sc-1']?.dirty).toBe(true)
     expect(sets).toHaveLength(0)
@@ -298,7 +296,7 @@ describe('MetadataPane (F-4.5)', () => {
           pov: 'mara',
           timeline: 'Day 2, dawn',
           brief: EMPTY_SCENE_BRIEF,
-          synopsis: 'Mara bargains.',
+          synopsis: '',
           status: 'revised',
           beats: {}
         }
@@ -319,6 +317,49 @@ describe('MetadataPane (F-4.5)', () => {
     view.unmount()
     expect(useSceneMetaStore.getState().docs['sc-2']).toBeUndefined()
     expect(toasts()).toEqual([])
+  })
+})
+
+describe('SynopsisBox (the notes column, 2026-10-06)', () => {
+  it('is not in the metadata pane, which would duplicate it', async () => {
+    const { release } = install()
+    release()
+    render(<MetadataPane id="sc-1" />)
+    await waitFor(() => expect(field('Location')).toBeEnabled())
+    expect(screen.queryByLabelText('Synopsis')).not.toBeInTheDocument()
+  })
+
+  it('is disabled until the load resolves, then edits the synopsis through the autosave store', async () => {
+    const { sets, release } = install()
+    render(<SynopsisBox id="sc-1" />)
+    const box = screen.getByRole('textbox', { name: 'Synopsis' })
+    expect(box).toBeDisabled()
+    release()
+    await waitFor(() => expect(box).toBeEnabled())
+    fireEvent.change(box, { target: { value: 'Mara bargains.' } })
+    expect(box).toHaveValue('Mara bargains.')
+    await act(() => useSceneMetaStore.getState().flush())
+    expect(sets).toEqual([{ id: 'sc-1', meta: { ...stored['sc-1'], synopsis: 'Mara bargains.' } }])
+  })
+
+  it('shares the record with the metadata pane, so edits in both land in one write', async () => {
+    const { sets, release } = install()
+    release()
+    const view = render(
+      <>
+        <SynopsisBox id="sc-1" />
+        <MetadataPane id="sc-1" />
+      </>
+    )
+    await waitFor(() => expect(field('Location')).toBeEnabled())
+    fireEvent.change(screen.getByRole('textbox', { name: 'Synopsis' }), {
+      target: { value: 'Mara bargains.' }
+    })
+    fireEvent.change(field('Location'), { target: { value: 'docks' } })
+    await act(() => useSceneMetaStore.getState().flush())
+    expect(sets.at(-1)?.meta).toMatchObject({ synopsis: 'Mara bargains.', location: 'docks' })
+    view.unmount()
+    expect(useSceneMetaStore.getState().docs['sc-1']).toBeUndefined()
   })
 })
 
@@ -419,20 +460,6 @@ describe('MetadataPane timeline picker (F-11.2)', () => {
 })
 
 describe('MetadataPane brief (F-14.3)', () => {
-  it('grows a short tag bar to fit the brief when it opens and never shrinks a taller one', async () => {
-    const { release } = install()
-    release()
-    ready('sc-4')
-    render(<MetadataPane id="sc-4" />)
-    await waitFor(() => expect(field('Location')).toBeEnabled())
-    await userEvent.click(briefToggle())
-    expect(useLayoutStore.getState().layout.tagBar.height).toBe(TAG_BAR_BRIEF_HEIGHT)
-    await userEvent.click(briefToggle())
-    act(() => useLayoutStore.getState().setTagBarHeight(TAG_BAR_BRIEF_HEIGHT + 40))
-    await userEvent.click(briefToggle())
-    expect(useLayoutStore.getState().layout.tagBar.height).toBe(TAG_BAR_BRIEF_HEIGHT + 40)
-  })
-
   it('keeps the brief collapsed until its toggle is clicked, then shows the stored lines', async () => {
     const { release } = install()
     release()
@@ -656,8 +683,6 @@ describe('MetadataPane summary (F-5.6)', () => {
         .map((li) => li.textContent)
     ).toEqual(ROW.characters)
     expect(screen.getByTestId('summary-section')).toHaveTextContent('gpt-5.4-mini')
-    // Opening it grows a short tag bar, the way the brief does.
-    expect(useLayoutStore.getState().layout.tagBar.height).toBe(TAG_BAR_BRIEF_HEIGHT)
   })
 
   it('says a scene with no row yet is summarised after a pause', async () => {

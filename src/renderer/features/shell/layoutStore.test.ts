@@ -11,8 +11,6 @@ import {
   resetLayoutStore,
   resizeFloatingBy,
   resizePanelBy,
-  resizeTagBarBy,
-  resizeTagBarSplitBy,
   useLayout,
   useLayoutStore
 } from './layoutStore'
@@ -54,7 +52,7 @@ function deferredClient(stored: Layout): {
 const stored: Layout = {
   sidebar: { open: true, size: 0.3, tab: 'manuscript' },
   notes: { open: true, size: 0.2 },
-  tagBar: { open: true, height: 150, split: 0.4 },
+  tags: { open: false, size: 0.2 },
   assistant: { open: false, size: 0.3 },
   references: { open: false, size: 0.22 },
   floating: defaultFloating()
@@ -132,7 +130,7 @@ describe('useLayoutStore', () => {
     expect(sets[0]?.value).toEqual({
       sidebar: { open: true, size: 0.26, tab: 'manuscript' },
       notes: { open: false, size: 0.2 },
-      tagBar: { open: true, height: 150, split: 0.4 },
+      tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
       floating: defaultFloating()
@@ -200,7 +198,7 @@ describe('useLayoutStore', () => {
       layout: {
         sidebar: { open: true, size: 0.35, tab: 'manuscript' },
         notes: { open: false, size: 0.5 },
-        tagBar: { open: true, height: 120, split: 0.4 },
+        tags: { open: false, size: 0.2 },
         assistant: { open: false, size: 0.3 },
         references: { open: false, size: 0.22 },
         floating: defaultFloating()
@@ -217,7 +215,7 @@ describe('useLayoutStore', () => {
       layout: {
         sidebar: { open: true, size: 0.35, tab: 'manuscript' },
         notes: { open: true, size: 0.35 },
-        tagBar: { open: true, height: 120, split: 0.4 },
+        tags: { open: false, size: 0.2 },
         assistant: { open: false, size: 0.3 },
         references: { open: false, size: 0.22 },
         floating: defaultFloating()
@@ -307,94 +305,17 @@ describe('resizePanelBy', () => {
   })
 })
 
-describe('tag bar (F-4.4)', () => {
-  it('toggleTagBar flips the bar, keeps its height, and writes once after the debounce', async () => {
+describe('tags column', () => {
+  it('toggle opens and closes it beside the others and writes once after the debounce', async () => {
     await load()
-    store().toggleTagBar()
-    expect(store().layout.tagBar).toEqual({ open: false, height: 150, split: 0.4 })
-    store().toggleTagBar()
-    expect(store().layout.tagBar).toEqual({ open: true, height: 150, split: 0.4 })
+    store().toggle('tags')
+    // Beside the 0.3 sidebar and the 0.2 notes, 0.2 is exactly what the editor minimum leaves.
+    expect(store().layout.tags.open).toBe(true)
+    expect(store().layout.tags.size).toBeCloseTo(0.2, 9)
     await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
     expect(sets).toHaveLength(1)
-    expect(sets[0]?.value).toEqual(stored)
-  })
-
-  it('setTagBarHeight clamps to the floor and to 60 % of the window height', async () => {
-    await load()
-    store().setTagBarHeight(300)
-    expect(store().layout.tagBar.height).toBe(300)
-    store().setTagBarHeight(20)
-    expect(store().layout.tagBar.height).toBe(100)
-    store().setTagBarHeight(900)
-    expect(store().layout.tagBar.height).toBe(480) // 60 % of the stubbed 800
-    vi.stubGlobal('innerHeight', 400)
-    store().setTagBarHeight(900)
-    expect(store().layout.tagBar.height).toBe(240)
-    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
-    expect(sets).toHaveLength(1)
-    expect(sets[0]?.value.tagBar).toEqual({ open: true, height: 240, split: 0.4 })
-    expect(sets[0]?.value.sidebar).toEqual(stored.sidebar)
-  })
-
-  it('setTagBarHeight ignores a height that clamps to the current value without scheduling a write', async () => {
-    await load()
-    store().setTagBarHeight(150)
-    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
-    expect(sets).toHaveLength(0)
-    store().setTagBarHeight(100)
-    store().setTagBarHeight(50) // clamps to 100, already there
-    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
-    expect(sets).toHaveLength(1)
-    expect(sets[0]?.value.tagBar.height).toBe(100)
-  })
-
-  it('resizeTagBarBy adds the px delta to the height', async () => {
-    await load()
-    resizeTagBarBy(40)
-    expect(store().layout.tagBar.height).toBe(190)
-    resizeTagBarBy(-120)
-    expect(store().layout.tagBar.height).toBe(100)
-    resizeTagBarBy(1000)
-    expect(store().layout.tagBar.height).toBe(480)
-  })
-})
-
-describe('tag bar split (F-4.5)', () => {
-  it('setTagBarSplit clamps to 30–70 % of the bar and writes once after the debounce', async () => {
-    await load()
-    store().setTagBarSplit(0.5)
-    expect(store().layout.tagBar.split).toBe(0.5)
-    store().setTagBarSplit(0.1)
-    expect(store().layout.tagBar.split).toBe(0.3)
-    store().setTagBarSplit(0.9)
-    expect(store().layout.tagBar.split).toBe(0.7)
-    expect(sets).toHaveLength(0)
-    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
-    expect(sets).toHaveLength(1)
-    expect(sets[0]?.value.tagBar).toEqual({ open: true, height: 150, split: 0.7 })
-    expect(sets[0]?.value.sidebar).toEqual(stored.sidebar)
-  })
-
-  it('setTagBarSplit ignores a split that clamps to the current value without scheduling a write', async () => {
-    await load()
-    store().setTagBarSplit(0.4)
-    store().setTagBarSplit(0.3)
-    store().setTagBarSplit(0.05) // clamps to 0.3, already there
-    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
-    expect(sets).toHaveLength(1)
-    expect(sets[0]?.value.tagBar.split).toBe(0.3)
-  })
-
-  it("resizeTagBarSplitBy turns a px delta into a fraction of the bar's own width, not the window", async () => {
-    await load()
-    resizeTagBarSplitBy(50, 500)
-    expect(store().layout.tagBar.split).toBeCloseTo(0.5)
-    resizeTagBarSplitBy(-100, 500)
-    expect(store().layout.tagBar.split).toBeCloseTo(0.3)
-    resizeTagBarSplitBy(1000, 500)
-    expect(store().layout.tagBar.split).toBe(0.7)
-    resizeTagBarSplitBy(100, 0) // not laid out: ignored
-    expect(store().layout.tagBar.split).toBe(0.7)
+    expect(sets[0]?.value.tags.open).toBe(true)
+    expect(sets[0]?.value.notes).toEqual(stored.notes)
   })
 })
 

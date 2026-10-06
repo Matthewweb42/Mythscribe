@@ -30,7 +30,7 @@ import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { buildExtensions } from './extensions'
 import { resetSceneMetaStore } from './sceneMetaStore'
 import { resetSummaryStore } from './summaryStore'
-import { TagBar } from './TagBar'
+import { TagsColumn, TagsPanel, TagsToggleButton } from './TagsPanel'
 
 type Handler = (input: unknown) => unknown
 
@@ -181,7 +181,7 @@ const noteDialog = (): HTMLElement =>
 /** Renders the bar for `id` once the bank is loaded, and waits for its links. */
 async function mount(id = 'sc-1'): Promise<ReturnType<typeof render>> {
   await useTagStore.getState().load()
-  const view = render(<TagBar id={id} />)
+  const view = render(<TagsPanel id={id} />)
   await waitFor(() => expect(useDocumentTagStore.getState().tagIdsByNode[id]).toBeDefined())
   return view
 }
@@ -209,7 +209,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('TagBar (F-4.4)', () => {
+describe('TagsPanel (F-4.4, the tags column)', () => {
   it('loads the document links and shows each linked tag as a chip with its color and a remove button', async () => {
     const calls = install()
     await mount()
@@ -218,7 +218,7 @@ describe('TagBar (F-4.4)', () => {
     const chip = chips()[0]!
     expect(chip).toHaveTextContent('dark-forest')
     expect(chip.querySelector('span[aria-hidden]')).toHaveStyle({ backgroundColor: '#ea580c' })
-    expect(within(bar()).getByRole('button', { name: /^Tags/ })).toHaveTextContent('Tags1')
+    expect(within(bar()).getByRole('heading', { name: /^Tags/ })).toHaveTextContent('Tags1')
     expect(within(bar()).getByRole('list', { name: 'Document tags' })).toBeInTheDocument()
   })
 
@@ -242,7 +242,7 @@ describe('TagBar (F-4.4)', () => {
     expect(calls.at(-1)).toEqual(['documentTag:remove', { nodeId: 'sc-1', tagId: 't-forest' }])
     expect(useTagStore.getState().byId['t-forest']?.usageCount).toBe(2)
     expect(within(bar()).getByText('No tags on this document.')).toBeInTheDocument()
-    expect(within(bar()).getByRole('button', { name: /^Tags/ })).toHaveTextContent('Tags0')
+    expect(within(bar()).getByRole('heading', { name: /^Tags/ })).toHaveTextContent('Tags0')
   })
 
   it('Add tag opens a picker of the unassigned tags only; typing filters; Enter links the active one and closes', async () => {
@@ -333,47 +333,37 @@ describe('TagBar (F-4.4)', () => {
     expect(chipNames()).toEqual(['Remove dark-forest'])
   })
 
-  it('collapses and expands through the layout store, hiding the chips, the picker, and the handle', async () => {
+  it('the column follows the layout store, sizes itself in vw, and shows a hint without a node', async () => {
     install()
-    await mount()
-    const toggle = within(bar()).getByRole('button', { name: /^Tags/ })
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(bar().style.height).toBe('180px')
-    expect(within(bar()).getByRole('separator', { name: 'Resize tag bar' })).toBeInTheDocument()
+    await useTagStore.getState().load()
+    const view = render(
+      <>
+        <TagsToggleButton />
+        <TagsColumn id={null} />
+      </>
+    )
+    const toggle = screen.getByRole('button', { name: 'Tags' })
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByTestId('tags-panel')).not.toBeInTheDocument()
     await userEvent.click(toggle)
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(useLayoutStore.getState().layout.tagBar).toEqual({
-      open: false,
-      height: 180,
-      split: 0.4
-    })
-    expect(chips()).toHaveLength(0)
-    expect(within(bar()).queryByRole('button', { name: 'Add tag' })).not.toBeInTheDocument()
-    expect(within(bar()).queryByRole('separator')).not.toBeInTheDocument()
-    expect(bar().style.height).toBe('')
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    const column = screen.getByTestId('tags-panel')
+    expect(column.style.width).toBe('20vw')
+    expect(column).toHaveTextContent('Select a document to see its tags.')
+    expect(screen.getByRole('separator', { name: 'Resize tags' })).toHaveAttribute(
+      'aria-valuemax',
+      '35'
+    )
+    view.rerender(
+      <>
+        <TagsToggleButton />
+        <TagsColumn id="sc-1" />
+      </>
+    )
+    await waitFor(() => expect(chipNames()).toEqual(['Remove dark-forest']))
     await userEvent.click(toggle)
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(chipNames()).toEqual(['Remove dark-forest'])
-  })
-
-  it('the bottom handle resizes the bar in px within the floor and 60 % of the window', async () => {
-    install()
-    await mount()
-    const handle = within(bar()).getByRole('separator', { name: 'Resize tag bar' })
-    expect(handle).toHaveAttribute('aria-orientation', 'horizontal')
-    expect(handle).toHaveAttribute('aria-valuenow', '180')
-    expect(handle).toHaveAttribute('aria-valuemin', '100')
-    expect(handle).toHaveAttribute('aria-valuemax', '480')
-    fireEvent.pointerDown(handle, { clientY: 300, button: 0 })
-    fireEvent.pointerMove(window, { clientY: 380 })
-    expect(useLayoutStore.getState().layout.tagBar.height).toBe(260)
-    expect(bar().style.height).toBe('260px')
-    fireEvent.pointerMove(window, { clientY: 1380 })
-    expect(useLayoutStore.getState().layout.tagBar.height).toBe(480)
-    fireEvent.pointerMove(window, { clientY: 0 })
-    fireEvent.pointerUp(window)
-    expect(useLayoutStore.getState().layout.tagBar.height).toBe(100)
-    expect(handle).toHaveAttribute('aria-valuenow', '100')
+    expect(useLayoutStore.getState().layout.tags.open).toBe(false)
+    expect(screen.queryByTestId('tags-panel')).not.toBeInTheDocument()
   })
 
   it('switching documents loads the new links and closes an open picker', async () => {
@@ -381,7 +371,7 @@ describe('TagBar (F-4.4)', () => {
     const view = await mount()
     await userEvent.click(addButton())
     expect(search()).toBeInTheDocument()
-    view.rerender(<TagBar id="sc-2" />)
+    view.rerender(<TagsPanel id="sc-2" />)
     await waitFor(() => expect(useDocumentTagStore.getState().tagIdsByNode['sc-2']).toEqual([]))
     expect(calls).toContainEqual(['documentTag:list', { nodeId: 'sc-2' }])
     expect(screen.queryByRole('searchbox', { name: 'Search tags' })).not.toBeInTheDocument()
@@ -654,29 +644,12 @@ describe('TagBar (F-4.4)', () => {
     })
   })
 
-  it('shows the metadata pane behind a persisted split only for a node with a hierarchy level (F-4.5)', async () => {
+  it('has no metadata pane: the scene details live in the notes column', async () => {
     install()
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
     await mount()
     expect(screen.queryByRole('group', { name: 'Scene metadata' })).toBeNull()
-    expect(screen.queryByRole('separator', { name: 'Resize metadata pane' })).toBeNull()
-    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
-    const pane = await screen.findByRole('group', { name: 'Scene metadata' })
-    expect(pane).toBeInTheDocument()
-    const split = screen.getByRole('separator', { name: 'Resize metadata pane' })
-    expect(split).toHaveAttribute('aria-valuenow', '40')
-    expect(split).toHaveAttribute('aria-valuemin', '30')
-    expect(split).toHaveAttribute('aria-valuemax', '70')
     expect(chipNames()).toEqual(['Remove dark-forest'])
-    // jsdom lays nothing out: give the pane row a width so a key step becomes a fraction.
-    const toggle = screen.getByRole('button', { name: /^Tags/ })
-    const row = document.getElementById(toggle.getAttribute('aria-controls') ?? '')
-    if (!row) throw new Error('pane row not found')
-    Object.defineProperty(row, 'clientWidth', { value: 800, configurable: true })
-    await act(async () => {
-      fireEvent.keyDown(split, { key: 'ArrowLeft' })
-    })
-    expect(useLayoutStore.getState().layout.tagBar.split).toBeLessThan(0.4)
-    expect(useLayoutStore.getState().layout.tagBar.split).toBeGreaterThanOrEqual(0.3)
   })
 
   describe('Added by AI (F-4.13)', () => {
@@ -953,7 +926,7 @@ describe('TagBar (F-4.4)', () => {
       loadText('sc-1', 80)
       await userEvent.click(recommendButton())
       await waitFor(() => expect(suggestionNames()).toEqual(['mara']))
-      view.rerender(<TagBar id="sc-2" />)
+      view.rerender(<TagsPanel id="sc-2" />)
       await waitFor(() => expect(useDocumentTagStore.getState().tagIdsByNode['sc-2']).toEqual([]))
       expect(screen.queryByRole('group', { name: 'Tag suggestions' })).not.toBeInTheDocument()
       expect(recommendButton()).toBeDisabled()
@@ -1037,7 +1010,7 @@ describe('TagBar (F-4.4)', () => {
       await useTagStore.getState().load()
       render(
         <>
-          <TagBar id="sc-1" />
+          <TagsPanel id="sc-1" />
           <DialogHost />
         </>
       )
@@ -1088,7 +1061,7 @@ describe('TagBar (F-4.4)', () => {
       await useTagStore.getState().load()
       render(
         <>
-          <TagBar id="sc-1" />
+          <TagsPanel id="sc-1" />
           <DialogHost />
         </>
       )

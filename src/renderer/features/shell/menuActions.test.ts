@@ -367,6 +367,18 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useLayoutStore.getState().layout.references.open).toBe(true)
   })
 
+  it('View › Tags toggles the tags column, leaving focus mode first', async () => {
+    await withProject()
+    await runMenuAction('toggleTags')
+    expect(useLayoutStore.getState().layout.tags.open).toBe(true)
+    await runMenuAction('toggleTags')
+    expect(useLayoutStore.getState().layout.tags.open).toBe(false)
+    await useFocusStore.getState().enter()
+    await runMenuAction('toggleTags')
+    expect(useFocusStore.getState().active).toBe(false)
+    expect(useLayoutStore.getState().layout.tags.open).toBe(true)
+  })
+
   it('Edit › Find… / Replace… open the find bar over the active editor, and need one (F-3.10)', async () => {
     await runMenuAction('findInDocument')
     expect(toasts()).toEqual([NO_PROJECT_MESSAGE])

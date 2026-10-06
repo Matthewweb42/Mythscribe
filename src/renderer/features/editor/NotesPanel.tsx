@@ -1,8 +1,11 @@
-import { Pin, StickyNote } from 'lucide-react'
+import { useId, useState } from 'react'
+import { ChevronDown, ChevronRight, Pin, StickyNote } from 'lucide-react'
 import { LAYOUT_LIMITS } from '@shared/layout'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
+import { MetadataPane, SynopsisBox } from './MetadataPane'
 import { NotesEditor } from './NotesEditor'
 
 const BUTTON =
@@ -27,15 +30,22 @@ export function NotesToggleButton(): React.JSX.Element {
 }
 
 /**
- * The notes side panel (F-3.7): a column beside the editor hosting the `NotesEditor` for the
- * selected node, resizable by dragging its left edge or with the arrow keys on the handle.
- * Its open state and width live in the layout store (F-7.2), as a fraction of the window
- * rendered in `vw`, so it follows a window resize on its own and is back after a restart.
- * Renders nothing while closed, so the editor gets the whole pane and no notes are loaded.
- * Not mounted in focus mode, where `NotesBody` floats instead (F-6.6).
+ * The notes column (F-3.7): a column beside the editor for the selected node (`id`; null while an
+ * entity page or nothing is selected), resizable by dragging its left edge or with the arrow keys
+ * on the handle. Since 2026-10-06 it is the node's whole side panel: for a scene, chapter, or
+ * part a compact Synopsis box at the top (`SynopsisBox`), then the notes editor filling the rest
+ * as a scratch pad, then a collapsed "Scene details" disclosure with the rest of the metadata
+ * (`MetadataPane`: location, POV, timeline, status, beat, brief, AI summary). Its open state and
+ * width live in the layout store (F-7.2), as a fraction of the window rendered in `vw`, so it
+ * follows a window resize on its own and is back after a restart. Renders nothing while closed,
+ * so the editor gets the whole pane and no notes are loaded. Not mounted in focus mode, where
+ * `NotesBody` floats instead (F-6.6).
  */
-export function NotesPanel({ id }: { id: string }): React.JSX.Element | null {
+export function NotesPanel({ id }: { id: string | null }): React.JSX.Element | null {
   const notes = useLayoutStore((s) => s.layout.notes)
+  // Held here, not in the disclosure, so it stays open across an entity page or a front-matter
+  // document in between; it resets when the column closes.
+  const [detailsOpen, setDetailsOpen] = useState(false)
   if (!notes.open) return null
   return (
     <div
@@ -51,11 +61,86 @@ export function NotesPanel({ id }: { id: string }): React.JSX.Element | null {
         ariaLabel="Resize notes"
         onChange={(deltaPx) => resizePanelBy('notes', deltaPx)}
       />
-      <div className="flex shrink-0 items-center justify-between gap-2 px-4 pt-4 pb-2">
-        <h2 className="m-0 text-sm font-medium text-fg-muted">Notes</h2>
-        <PinNotesButton id={id} />
-      </div>
+      <NotesHeading id={id} />
+      <NotesContent id={id} detailsOpen={detailsOpen} onDetailsOpen={setDetailsOpen} />
+    </div>
+  )
+}
+
+/** The column's heading, with the pin button while a node is shown. */
+export function NotesHeading({ id }: { id: string | null }): React.JSX.Element {
+  return (
+    <div className="flex shrink-0 items-center justify-between gap-2 px-4 pt-4 pb-2">
+      <h2 className="m-0 text-sm font-medium text-fg-muted">Notes</h2>
+      {id === null ? null : <PinNotesButton id={id} />}
+    </div>
+  )
+}
+
+/**
+ * The synopsis, the notes, and the scene details of one node, under the column's heading; a
+ * hint while no node is selected. A node without a hierarchy level (front or end matter) has
+ * notes only.
+ */
+export function NotesContent({
+  id,
+  detailsOpen,
+  onDetailsOpen
+}: {
+  id: string | null
+  detailsOpen: boolean
+  onDetailsOpen: (open: boolean) => void
+}): React.JSX.Element {
+  const withMetadata = useTreeStore((s) =>
+    id === null ? false : (s.byId[id]?.hierarchyLevel ?? null) !== null
+  )
+  if (id === null)
+    return <p className="m-0 px-4 text-sm text-fg-muted">Select a document to see its notes.</p>
+  return (
+    <>
+      {withMetadata ? <SynopsisBox id={id} /> : null}
       <NotesBody id={id} />
+      {withMetadata ? <SceneDetails id={id} open={detailsOpen} onOpen={onDetailsOpen} /> : null}
+    </>
+  )
+}
+
+/**
+ * The "Scene details" disclosure at the foot of the notes column: collapsed by default, so the
+ * notes keep the column; open, the metadata scrolls in up to half the column's height. The
+ * metadata pane is only mounted while it is open; the column owns the open state.
+ */
+function SceneDetails({
+  id,
+  open,
+  onOpen
+}: {
+  id: string
+  open: boolean
+  onOpen: (open: boolean) => void
+}): React.JSX.Element {
+  const bodyId = useId()
+  return (
+    <div className="flex max-h-[50%] shrink-0 flex-col border-t border-line">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={open ? bodyId : undefined}
+        onClick={() => onOpen(!open)}
+        className="flex shrink-0 items-center gap-1 px-4 py-2 text-xs font-medium text-fg-muted hover:text-fg aria-expanded:text-fg"
+      >
+        {open ? (
+          <ChevronDown size={14} aria-hidden="true" />
+        ) : (
+          <ChevronRight size={14} aria-hidden="true" />
+        )}
+        Scene details
+      </button>
+      {open ? (
+        <div id={bodyId} className="min-h-0 overflow-y-auto px-4 pb-4">
+          <MetadataPane id={id} />
+        </div>
+      ) : null}
     </div>
   )
 }

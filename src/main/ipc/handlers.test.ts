@@ -4895,7 +4895,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const next = {
       sidebar: { open: false, size: 0.3, tab: 'manuscript' as const },
       notes: { open: true, size: 0.4 },
-      tagBar: { open: true, height: 120, split: 0.4 },
+      tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
       floating: defaultFloating()
@@ -4911,7 +4911,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const stored = {
       sidebar: { open: true, size: 0.2, tab: 'manuscript' as const },
       notes: { open: false, size: 0.25 },
-      tagBar: { open: true, height: 120, split: 0.4 },
+      tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
       floating: defaultFloating()
@@ -4937,7 +4937,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const next = {
       sidebar: { open: true, size: 0.3, tab: 'manuscript' as const },
       notes: { open: true, size: 0.3 },
-      tagBar: { open: true, height: 120, split: 0.4 },
+      tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
       floating: defaultFloating()
@@ -4955,7 +4955,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
     const bothMaxed = {
       sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
       notes: { open: true, size: 0.5 },
-      tagBar: { open: true, height: 120, split: 0.4 },
+      tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
       floating: defaultFloating()
@@ -4980,7 +4980,7 @@ describe('layout:get / layout:set (F-7.2)', () => {
         layout: {
           sidebar: { open: true, size: 0.35, tab: 'manuscript' as const },
           notes: { open: true, size: 0.5 },
-          tagBar: { open: true, height: 120, split: 0.4 },
+          tags: { open: false, size: 0.2 },
           assistant: { open: false, size: 0.3 },
           references: { open: false, size: 0.22 },
           floating: defaultFloating()

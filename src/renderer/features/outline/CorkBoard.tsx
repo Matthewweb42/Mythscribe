@@ -7,7 +7,6 @@ import { SCENE_SYNOPSIS_MAX, type SceneMeta } from '@shared/sceneMeta'
 import { EmptyFolder } from '@renderer/features/editor/StackedEditor'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useSummaryStore } from '@renderer/features/editor/summaryStore'
-import { TagBar } from '@renderer/features/editor/TagBar'
 import { LevelIcon } from '@renderer/features/manuscript/LevelIcon'
 import type { DropTarget } from '@renderer/features/manuscript/placement'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -79,7 +78,7 @@ interface DragState {
  * only: it is never copied into the synopsis. Cards reorder by dragging one onto another (the
  * pointer's horizontal half picks before or after) or with Alt+ArrowLeft / Alt+ArrowRight, both
  * through the tree store's `move` (F-2.4), so the Manuscript tree follows at once. The folder's
- * own tag bar stays on top, like the stacked view's.
+ * own tags are in the tags column.
  */
 export function CorkBoard({
   folderId,
@@ -90,14 +89,12 @@ export function CorkBoard({
 }): React.JSX.Element {
   const childIds = useTreeStore(useShallow((s) => s.childrenOf[folderId] ?? NO_CHILDREN))
   const section = useTreeStore((s) => s.sectionOf[folderId] ?? 'manuscript')
-  const taggable = useTreeStore((s) => (s.byId[folderId]?.parentId ?? null) !== null)
   const [drag, setDrag] = useState<DragState | null>(null)
   const titles = useRef(new Map<string, HTMLButtonElement>())
 
   if (childIds.length === 0)
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {taggable ? <TagBar id={folderId} /> : null}
         <EmptyFolder folderId={folderId} format={format} section={section} />
       </div>
     )
@@ -152,7 +149,6 @@ export function CorkBoard({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {taggable ? <TagBar id={folderId} /> : null}
       <ol
         aria-label="Cork board"
         className="m-0 grid min-h-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-4 overflow-y-auto bg-desk p-4"

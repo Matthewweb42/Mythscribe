@@ -179,12 +179,13 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
       case 'toggleAssistant':
         togglePanel('assistant')
         return
-      case 'toggleReferences': {
+      case 'toggleReferences':
+      case 'toggleTags': {
         // F-9.6: the panel is part of the project screen and does not float, so focus mode is
-        // left first, like Tools › Tags.
+        // left first, like Tools › Tags; the tags column is the same.
         const focus = useFocusStore.getState()
         if (focus.active) await focus.exit()
-        useLayoutStore.getState().toggle('references')
+        useLayoutStore.getState().toggle(id === 'toggleTags' ? 'tags' : 'references')
         return
       }
       case 'toggleFocusMode':

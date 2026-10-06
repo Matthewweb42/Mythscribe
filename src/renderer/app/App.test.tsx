@@ -168,7 +168,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** The stacked document regions (`<section>`), leaving out the folder's own tag bar region (F-4.5). */
+/** The stacked document regions (`<section>`). */
 const documentRegions = (): HTMLElement[] =>
   screen.getAllByRole('region').filter((r) => r.tagName === 'SECTION')
 
@@ -546,7 +546,7 @@ describe('App', () => {
       'layout:get': {
         sidebar: { open: true, size: 0.3, tab: 'manuscript' },
         notes: { open: false, size: 0.25 },
-        tagBar: { open: true, height: 180, split: 0.4 },
+        tags: { open: false, size: 0.2 },
         assistant: { open: false, size: 0.3 },
         references: { open: false, size: 0.22 },
         floating: defaultFloating()
@@ -597,7 +597,7 @@ describe('App', () => {
           tab: 'manuscript'
         },
         notes: { open: false, size: 0.25 },
-        tagBar: { open: true, height: 180, split: 0.4 },
+        tags: { open: false, size: 0.2 },
         assistant: { open: false, size: 0.3 },
         references: { open: false, size: 0.22 },
         floating: defaultFloating()
@@ -1110,7 +1110,7 @@ describe('App', () => {
 
   describe('focus mode (F-6.1)', () => {
     const asides = (): HTMLElement[] => screen.queryAllByRole('complementary')
-    /** What was asked of the window, in order (leaving fullscreen remounts the tag bar, whose own calls follow). */
+    /** What was asked of the window, in order (leaving fullscreen remounts the tags column, whose own calls follow). */
     const fullScreenCalls = (invoke: ReturnType<typeof vi.fn>): unknown[] =>
       invoke.mock.calls
         .filter(([c]) => c === 'window:setFullScreen')
@@ -1126,6 +1126,10 @@ describe('App', () => {
       await userEvent.click(within(scene).getByText('Scene 1'))
       const editor = await screen.findByRole('textbox', { name: 'Document' })
       await waitFor(() => expect(editor).toHaveAttribute('contenteditable', 'true'))
+      // The tags column starts closed; the header's Tags button opens it beside the editor.
+      await userEvent.click(
+        within(screen.getByRole('banner')).getByRole('button', { name: 'Tags' })
+      )
       expect(screen.getByRole('region', { name: 'Tags' })).toBeInTheDocument()
       editor.focus()
 
@@ -1154,7 +1158,8 @@ describe('App', () => {
       expect(fullScreenCalls(invoke)).toEqual([{ on: true }, { on: false }])
       await waitFor(() => expect(useFocusStore.getState().active).toBe(false))
       expect(screen.getByRole('banner')).toBeInTheDocument()
-      expect(screen.getByRole('complementary')).toBeInTheDocument()
+      // The sidebar and the tags column are back.
+      expect(asides()).toHaveLength(2)
       expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
       expect(screen.getByRole('region', { name: 'Tags' })).toBeInTheDocument()
       expect(screen.getByRole('treeitem', { name: 'Scene 1' })).toHaveAttribute(

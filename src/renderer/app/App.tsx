@@ -41,6 +41,7 @@ import { EditorPane } from '@renderer/features/editor/EditorPane'
 import { FindBar } from '@renderer/features/editor/FindBar'
 import { resetFindStore } from '@renderer/features/editor/findStore'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
+import { TagsColumn, TagsToggleButton } from '@renderer/features/editor/TagsPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
 import { CorkBoard } from '@renderer/features/outline/CorkBoard'
 import { SelectionCrumb } from '@renderer/features/shell/SelectionCrumb'
@@ -416,6 +417,7 @@ export function App(): React.JSX.Element {
                 <IndexingIndicator />
                 <SearchButton />
                 <ReferencesToggleButton />
+                <TagsToggleButton />
                 <AssistantToggleButton />
               </>
             ) : null}
@@ -835,6 +837,12 @@ function SettingsButton(): React.JSX.Element {
 function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
   const sidebar = useLayoutStore((s) => s.layout.sidebar)
   const focus = useFocusStore((s) => s.active)
+  const nodeId = useMainNodeId()
+  // Every non-root node carries tags; a section root is never selectable, but the guard keeps a
+  // stray id from asking main for links it refuses.
+  const taggable = useTreeStore((s) =>
+    nodeId === null ? false : (s.byId[nodeId]?.parentId ?? null) !== null
+  )
   return (
     <>
       {sidebar.open && !focus ? (
@@ -856,6 +864,10 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <MainPane format={format} />
       </section>
+      {/* F-3.7 and the tags column: the selected node's notes and tags; not shown in focus mode,
+          where the notes float instead (F-6.6). */}
+      {focus ? null : <NotesPanel id={nodeId} />}
+      {focus ? null : <TagsColumn id={taggable ? nodeId : null} />}
       {/* F-9.6: the pins dock between the main pane and the assistant; not shown in focus mode. */}
       {focus ? null : <ReferencePanel />}
       {focus ? <FocusFloatingPanels /> : <AssistantPanel />}
@@ -870,6 +882,19 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       {/* F-10.3: the Goals dialog, open while the goals store says so. */}
       <GoalsDialog />
     </>
+  )
+}
+
+/**
+ * The node the manuscript shows in the main pane, which the notes and tags columns follow: the
+ * selected document or folder, or null while an entity page (F-9.3) or nothing is selected.
+ */
+function useMainNodeId(): string | null {
+  const entityId = useEntityStore((s) => s.selectedId)
+  return useTreeStore((s) =>
+    entityId === null && s.selectedId !== null && s.byId[s.selectedId] !== undefined
+      ? s.selectedId
+      : null
   )
 }
 
@@ -894,24 +919,19 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
   const folder = node.kind === 'folder'
   const cork = folder && folderView === 'cork' && !focus
   return (
-    <>
-      <div className="flex min-h-0 flex-1">
-        {/* F-3.10: the find bar docks above the editor's toolbar, so it hides no control and
-            never spans the notes beside it. */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <FindBar />
-          <div className="flex min-h-0 min-w-0 flex-1">
-            {!folder ? (
-              <EditorPane id={node.id} format={format} />
-            ) : cork ? (
-              <CorkBoard folderId={node.id} format={format} />
-            ) : (
-              <StackedEditor folderId={node.id} format={format} />
-            )}
-          </div>
-        </div>
-        {focus ? null : <NotesPanel id={node.id} />}
+    // F-3.10: the find bar docks above the editor's toolbar, so it hides no control and never
+    // spans the columns beside it.
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FindBar />
+      <div className="flex min-h-0 min-w-0 flex-1">
+        {!folder ? (
+          <EditorPane id={node.id} format={format} />
+        ) : cork ? (
+          <CorkBoard folderId={node.id} format={format} />
+        ) : (
+          <StackedEditor folderId={node.id} format={format} />
+        )}
       </div>
-    </>
+    </div>
   )
 }
