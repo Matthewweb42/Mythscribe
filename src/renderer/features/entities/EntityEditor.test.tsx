@@ -3,7 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { WORLD_CATEGORY_SUGGESTIONS } from '@shared/entities'
 import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
+import { EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { resetActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
+import { resetSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -40,6 +42,11 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       if (channel === 'observedFact:listForEntity') return [] as Output<C>
       // The layout store writes after its own debounce when the Tag Manager is opened (F-9.4).
       if (channel === 'layout:set') return input as Output<C>
+      // F-11.2c: the usage log holds every manuscript document's scene metadata; all empty here.
+      if (channel === 'sceneMeta:get') {
+        const { id } = input as Input<'sceneMeta:get'>
+        return { id, meta: { ...EMPTY_SCENE_META } } as Output<C>
+      }
       if (channel === 'entity:update') {
         const patch = input as Input<'entity:update'>
         const stored = useEntityStore.getState().byId[patch.id]
@@ -96,14 +103,17 @@ const linkedFixture: Entity[] = entityFixture.map((entity) =>
 )
 
 /** The Scenes rows of the open page, as "<title> <folder> [Tagged] [×n]". */
+/** A character's or setting's scene list: the appearance log (F-11.2c), which replaced F-9.4's Scenes. */
+const scenesList = (): HTMLElement => screen.getByRole('list', { name: 'Appearances' })
 const sceneRows = (): string[] =>
-  within(screen.getByRole('list', { name: /^Scenes with / }))
+  within(scenesList())
     .getAllByRole('button')
     .map((button) => button.textContent ?? '')
 
 describe('EntityEditor (F-9.3)', () => {
   beforeEach(() => {
     resetPendingSaves()
+    resetSceneMetaStore()
     resetEntityDraftStore()
     resetEntityStore()
     resetObservedFactStore()
@@ -122,6 +132,7 @@ describe('EntityEditor (F-9.3)', () => {
     // Gives up the wait the F-9.4 jump leaves open (no editor is mounted here).
     resetActiveEditorStore()
     resetEntityDraftStore()
+    resetSceneMetaStore()
     resetPendingSaves()
     resetTagStore()
     resetDocumentTagStore()
@@ -349,7 +360,7 @@ describe('EntityEditor (F-9.3)', () => {
     })
     // Both lists are asked for when the page opens.
     expect(calls.map(([channel]) => channel)).toContain('documentTag:listAll')
-    expect(calls.at(-1)).toEqual(['mention:listForTag', { tagId: 't-mara' }])
+    expect(calls).toContainEqual(['mention:listForTag', { tagId: 't-mara' }])
 
     expect(await screen.findByText('In 2 scenes')).toBeInTheDocument()
     expect(sceneRows()).toEqual(['Scene 1Chapter 1×2', 'Scene 4Chapter 4Tagged×1'])
@@ -357,7 +368,7 @@ describe('EntityEditor (F-9.3)', () => {
     // A mentioned row jumps to the first occurrence: `openMention` (F-4.12) selects the scene at
     // once and waits for its editor, which nothing mounts here. The real module on purpose: a
     // `vi.mock` does not reach an `EntityEditor` another file in this worker already imported.
-    await user.click(screen.getByRole('button', { name: /^Scene 1/ }))
+    await user.click(within(scenesList()).getByRole('button', { name: /^Scene 1/ }))
     expect(useTreeStore.getState().selectedId).toBe('sc-1')
   })
 
@@ -371,16 +382,41 @@ describe('EntityEditor (F-9.3)', () => {
       'mention:listForTag': () => []
     })
     expect(await screen.findByText('In 1 scene')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /^Scene 2/ }))
+    await user.click(within(scenesList()).getByRole('button', { name: /^Scene 2/ }))
     expect(useTreeStore.getState().selectedId).toBe('sc-2')
     // F-9.3: opening a document closes the entity page.
     expect(useEntityStore.getState().selectedId).toBeNull()
   })
 
-  it('offers the tag first for an entity that has none (F-9.4)', async () => {
-    await openPage('e-forest')
-    expect(page()).toHaveTextContent('Create the tag to see where Dark Forest appears.')
+  it('offers the tag first for a world item that has none (F-9.4)', async () => {
+    await openPage('e-blood')
+    expect(page()).toHaveTextContent('Create the tag to see where Blood magic appears.')
     expect(screen.queryByRole('list', { name: /^Scenes with / })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Appearances' })).toBeNull()
+  })
+
+  it('a world item lists its scenes; a setting has the appearance log instead (F-9.4, F-11.2c)', async () => {
+    useTagStore.getState().merge(tagFixture[1]!)
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    await openPage('e-blood', {
+      'entity:list': () =>
+        entityFixture.map((entity) =>
+          entity.id === 'e-blood' || entity.id === 'e-forest'
+            ? { ...entity, tagId: 't-mara' }
+            : entity
+        ),
+      'documentTag:listAll': () => [{ nodeId: 'sc-2', tagId: 't-mara' }],
+      'mention:listForTag': () => []
+    })
+    expect(await screen.findByRole('list', { name: 'Scenes with Blood magic' })).toHaveTextContent(
+      'Scene 2Chapter 2Tagged'
+    )
+    cleanup()
+    render(<EntityEditor id="e-forest" />)
+    expect(screen.queryByRole('list', { name: /^Scenes with / })).toBeNull()
+    expect(await screen.findByRole('list', { name: 'Appearances' })).toHaveTextContent(
+      'Scene 2Chapter 2Tagged'
+    )
   })
 
   it('an entity deleted while its page is open leaves the page', async () => {

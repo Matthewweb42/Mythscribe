@@ -2,8 +2,10 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
+import { EMPTY_SCENE_META } from '@shared/sceneMeta'
 import type { ObservedFact } from '@shared/observedFacts'
 import { resetActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
+import { resetSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -37,6 +39,11 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       if (override) return override(input) as Output<C>
       if (channel === 'entity:list') return entities as Output<C>
       if (channel === 'layout:set') return input as Output<C>
+      // F-11.2c: the usage log holds every manuscript document's scene metadata; all empty here.
+      if (channel === 'sceneMeta:get') {
+        const { id } = input as Input<'sceneMeta:get'>
+        return { id, meta: { ...EMPTY_SCENE_META } } as Output<C>
+      }
       if (channel === 'observedFact:listForEntity') {
         const { entityId } = input as Input<'observedFact:listForEntity'>
         return facts.filter((fact) => fact.entityId === entityId) as Output<C>
@@ -101,6 +108,7 @@ const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.mes
 
 function reset(): void {
   resetPendingSaves()
+  resetSceneMetaStore()
   resetEntityDraftStore()
   resetEntityStore()
   resetObservedFactStore()

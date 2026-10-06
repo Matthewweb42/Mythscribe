@@ -20,6 +20,12 @@ export const ENTITY_TEMPLATE_LABEL: Record<EntityTemplate, string> = {
   blank: 'Blank page'
 }
 
+/** "In 3 scenes" / "In 1 scene" / "Not in any scene yet" (F-9.4, F-11.2c). */
+export function inScenesLabel(count: number): string {
+  if (count === 0) return 'Not in any scene yet'
+  return count === 1 ? 'In 1 scene' : `In ${count} scenes`
+}
+
 /** Longest excerpt a card shows, in characters. */
 export const EXCERPT_MAX = 120
 

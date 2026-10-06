@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ImagePlus, Pin, Tag as TagIcon, Trash2, X } from 'lucide-react'
+import { ImagePlus, Pin, Trash2, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   ENTITY_BODY_MAX,
@@ -16,7 +16,6 @@ import {
 } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
 import { parseYear } from '@shared/timeline'
-import { openMention } from '@renderer/features/editor/openPassage'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -29,9 +28,12 @@ import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { agesOnTimeline, ageText } from '@renderer/features/timeline/timelineView'
 import { describeError } from '@renderer/lib/errors'
 import { ObservedFacts } from './ObservedFacts'
+import { SceneRowButton } from './SceneRowButton'
+import { UsageLog } from './UsageLog'
 import { useEntityDraftStore } from './entityDraftStore'
 import { useEntityStore } from './entityStore'
-import { ENTITY_TEMPLATE_LABEL } from './entityView'
+import { ENTITY_TEMPLATE_LABEL, inScenesLabel } from './entityView'
+import { useEntityUsage } from './useEntityUsage'
 
 const CONTROL = 'w-full rounded-md border border-line bg-bg px-2 py-1.5 text-sm'
 const LABEL = 'text-xs font-medium text-fg-muted'
@@ -270,9 +272,13 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
           <AgeOnTimeline born={values.fields.born ?? ''} />
         ) : null}
 
+        {entity.kind === 'character' || entity.kind === 'setting' ? (
+          <UsageLog entity={entity} />
+        ) : null}
+
         <ObservedFacts entity={entity} />
 
-        <EntityScenes entity={entity} />
+        {entity.kind === 'world' ? <EntityScenes entity={entity} /> : null}
 
         <p role="status" className="m-0 h-4 text-xs text-fg-subtle">
           {draft === null || status === 'idle' || status === 'dirty'
@@ -386,18 +392,10 @@ function EntityTagBlock({ entity }: { entity: Entity }): React.JSX.Element {
   )
 }
 
-/** "In 3 scenes" / "In 1 scene" / "Not in any scene yet" (F-9.4). */
-function inScenesLabel(count: number): string {
-  if (count === 0) return 'Not in any scene yet'
-  return count === 1 ? 'In 1 scene' : `In ${count} scenes`
-}
-
 /**
- * Where the entity appears (F-9.4): every document its tag is linked to (F-4.4) or its name
- * occurs in (F-4.12), in tree order. A row that carries a mention jumps to the first occurrence;
- * one that is only tagged selects the document, which closes this page (F-9.3). The lists are
- * asked for when the page opens and refreshed by main's own events, so a scan that lands while
- * the page is open shows up without a reload.
+ * Where a world item appears (F-9.4): every document its tag is linked to (F-4.4) or its name
+ * occurs in (F-4.12), in tree order. Characters and settings show the appearance log instead
+ * (F-11.2c `UsageLog`), which lists the same rows plus the POV and the scenes set there.
  */
 function EntityScenes({ entity }: { entity: Entity }): React.JSX.Element {
   const tagId = entity.tagId
@@ -406,15 +404,7 @@ function EntityScenes({ entity }: { entity: Entity }): React.JSX.Element {
   const index = useTreeStore(useShallow((s) => ({ rootIds: s.rootIds, childrenOf: s.childrenOf })))
   const tagIdsByNode = useDocumentTagStore((s) => s.tagIdsByNode)
   const mentions = useMentionStore((s) => (tagId === null ? undefined : s.byTag[tagId]))
-
-  useEffect(() => {
-    if (tagId === null) return
-    const report = (err: unknown): void => {
-      toast.error(describeError(err))
-    }
-    useDocumentTagStore.getState().loadAll().catch(report)
-    useMentionStore.getState().loadForTag(tagId).catch(report)
-  }, [tagId])
+  useEntityUsage(tagId)
 
   const rows = useMemo(
     () => (tagId === null ? [] : sceneRowsForTag(index, byId, tagIdsByNode, mentions, tagId)),
@@ -435,32 +425,7 @@ function EntityScenes({ entity }: { entity: Entity }): React.JSX.Element {
             <ul role="list" aria-label={`Scenes with ${entity.name}`} className="m-0 list-none p-0">
               {rows.map((row) => (
                 <li key={row.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (row.first !== null) void openMention(row.id, row.first, tag.name)
-                      else useTreeStore.getState().select(row.id)
-                    }}
-                    className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
-                  >
-                    <span className="min-w-0 flex-1 truncate">{row.title}</span>
-                    {row.parentTitle === null ? null : (
-                      <span className="shrink-0 truncate text-xs text-fg-subtle">
-                        {row.parentTitle}
-                      </span>
-                    )}
-                    {row.tagged ? (
-                      <span title="Tagged" className="shrink-0 text-fg-subtle">
-                        <TagIcon size={12} aria-hidden="true" />
-                        <span className="sr-only">Tagged</span>
-                      </span>
-                    ) : null}
-                    {row.mentionCount === 0 ? null : (
-                      <span className="shrink-0 text-xs text-fg-subtle tabular-nums">
-                        ×{row.mentionCount}
-                      </span>
-                    )}
-                  </button>
+                  <SceneRowButton row={row} tagName={tag.name} />
                 </li>
               ))}
             </ul>

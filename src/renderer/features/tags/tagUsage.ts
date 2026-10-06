@@ -42,15 +42,13 @@ export function sceneRowsForTag(
   }
   for (const row of rows) union[row.nodeId] = [tagId]
   return tagFilterView(index, union, tagId).matches.flatMap((id) => {
-    const node = byId[id]
-    if (!node) return []
-    const parent = node.parentId === null ? undefined : byId[node.parentId]
+    const heading = nodeHeading(id, byId)
+    if (!heading) return []
     const mention = byNode.get(id)
     return [
       {
         id,
-        title: node.title,
-        parentTitle: parent?.sectionType === null ? parent.title : null,
+        ...heading,
         tagged: tagIdsByNode[id]?.includes(tagId) === true,
         mentionCount: mention?.count ?? 0,
         // A mention row always carries at least one range; `[0, 0]` would make the jump search.
@@ -58,4 +56,38 @@ export function sceneRowsForTag(
       }
     ]
   })
+}
+
+/**
+ * A row's title and its parent folder's title (null when the parent is a section root, whose
+ * label is generic), or null for a node the tree does not hold. Shared by the scene rows here and
+ * the entity page's appearance log (F-11.2c).
+ */
+export function nodeHeading(
+  id: string,
+  byId: Record<string, TreeNode | undefined>
+): { title: string; parentTitle: string | null } | null {
+  const node = byId[id]
+  if (!node) return null
+  const parent = node.parentId === null ? undefined : byId[node.parentId]
+  return { title: node.title, parentTitle: parent?.sectionType === null ? parent.title : null }
+}
+
+/**
+ * Every document of the tree in display order (depth-first, position order, all sections), the
+ * order `sceneRowsForTag` lists its rows in; the manuscript's documents read in reading order.
+ */
+export function documentsInTreeOrder(
+  index: Pick<TreeIndex, 'rootIds' | 'childrenOf'>,
+  byId: Record<string, TreeNode | undefined>
+): string[] {
+  const ids: string[] = []
+  const walk = (children: string[]): void => {
+    for (const id of children) {
+      if (byId[id]?.kind === 'document') ids.push(id)
+      walk(index.childrenOf[id] ?? [])
+    }
+  }
+  walk(index.rootIds)
+  return ids
 }

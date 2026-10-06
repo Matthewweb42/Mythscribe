@@ -2176,7 +2176,8 @@ test('create, close, reopen a project on disk', async () => {
   expect((await listTags()).find((tag) => tag.name === 'mara')).toMatchObject({
     category: 'character'
   })
-  const entityScenes = entityEditor.getByRole('list', { name: 'Scenes with Mara' })
+  // F-11.2c: a character's page lists them in its Appearances log (the F-9.4 rows, POV added).
+  const entityScenes = entityEditor.getByRole('list', { name: 'Appearances' })
   await expect(entityScenes.getByRole('button')).toHaveText([/^Scene 1.*×1$/], { timeout: 15_000 })
   await entityScenes.getByRole('button', { name: /^Scene 1/ }).click()
   await expect(entityEditor).toHaveCount(0)
@@ -2861,6 +2862,19 @@ test('create, close, reopen a project on disk', async () => {
   await expect(
     timelineEvents.filter({ hasText: 'The siege' }).getByTestId('event-ages')
   ).toHaveText('Ages: Rowan 30')
+  // F-11.2c: as Opening's POV, Rowan appears in Opening; her page's Appearances log says so, and
+  // in story order lists it under the siege. (The location conflict is covered by unit tests.)
+  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  await characterRows.getByRole('button', { name: 'Rowan', exact: true }).click()
+  await expect(entityName).toHaveValue('Rowan')
+  const appearances = entityEditor.getByRole('region', { name: 'Appearances' })
+  await expect(appearances.getByRole('listitem')).toHaveText([/Opening.*POV/])
+  await entityEditor.getByRole('button', { name: 'Story order' }).click()
+  await expect(
+    appearances.getByRole('list', { name: 'Appearances: The siege' }).getByRole('listitem')
+  ).toHaveText([/Opening/])
+  await entityEditor.getByRole('button', { name: 'Close Rowan' }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Opening')
   await openingPov.fill('')
   await expect.poll(async () => (await sceneMetaOf(openingRow.id)).pov, { timeout: 3000 }).toBe('')
   await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()

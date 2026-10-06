@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
+import type { TagMentions } from '@shared/mentions'
 import { EMPTY_SCENE_META, type SceneMeta } from '@shared/sceneMeta'
 import type { TimelineEvent } from '@shared/timeline'
 import { resetSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
@@ -12,6 +13,7 @@ import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStor
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { resetMentionStore } from '@renderer/features/tags/mentionStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { TimelineTab } from './TimelineTab'
 import { resetTimelineStore, useTimelineStore } from './timelineStore'
@@ -39,6 +41,10 @@ const stored: Record<string, SceneMeta> = {
   'sc-3': meta({ timeline: 'Gone', eventId: 'deleted' })
 }
 
+/** Per-test replacements of `stored`, and the mentions main recorded per document (F-11.2c). */
+let metaOverrides: Record<string, SceneMeta> = {}
+let nodeMentions: Record<string, TagMentions[]> = {}
+
 let sets: Input<'timeline:set'>[] = []
 
 function install(): void {
@@ -47,7 +53,14 @@ function install(): void {
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
       if (channel === 'sceneMeta:get') {
         const { id } = input as Input<'sceneMeta:get'>
-        return { id, meta: stored[id] ?? { ...EMPTY_SCENE_META } } as Output<C>
+        return {
+          id,
+          meta: metaOverrides[id] ?? stored[id] ?? { ...EMPTY_SCENE_META }
+        } as Output<C>
+      }
+      if (channel === 'mention:listForNode') {
+        const { nodeId } = input as Input<'mention:listForNode'>
+        return (nodeMentions[nodeId] ?? []) as Output<C>
       }
       // F-11.2b: Mara's tag is on Chapter 1, which is on the siege.
       if (channel === 'documentTag:listAll') {
@@ -80,6 +93,9 @@ async function renderTab(list: TimelineEvent[]): Promise<void> {
 }
 
 beforeEach(() => {
+  metaOverrides = {}
+  nodeMentions = {}
+  resetMentionStore()
   resetPendingSaves()
   resetSceneMetaStore()
   resetTimelineStore()
@@ -94,6 +110,7 @@ afterEach(() => {
   resetTimelineStore()
   resetEntityStore()
   resetDocumentTagStore()
+  resetMentionStore()
   resetPendingSaves()
   setIpcClient(null)
 })
@@ -251,5 +268,30 @@ describe('TimelineTab (F-11.2)', () => {
     )
     // No year, no ages.
     expect(within(eventItem('The fall')).queryByTestId('event-ages')).toBeNull()
+  })
+
+  it('flags a character in two locations at one event (F-11.2c)', async () => {
+    // Tobin is POV of Scene 2 at the Keep and mentioned in Scene 4 at the Harbor, both on the siege.
+    metaOverrides = {
+      'sc-2': meta({ eventId: 'a', pov: 'Tobin', location: 'Keep' }),
+      'sc-4': meta({ eventId: 'a', location: 'Harbor' })
+    }
+    nodeMentions = { 'sc-4': [{ tagId: 't-tobin', nodeId: 'sc-4', count: 1, ranges: [[1, 6]] }] }
+    const characters = [
+      ...entityFixture,
+      { ...entityFixture[1]!, id: 'e-tobin', name: 'Tobin', tagId: 't-tobin' }
+    ]
+    useEntityStore.setState({
+      byId: Object.fromEntries(characters.map((entity) => [entity.id, entity])),
+      ids: characters.map((entity) => entity.id),
+      loaded: true
+    })
+    await renderTab([event('a', 'The siege'), event('b', 'The fall')])
+    await waitFor(() =>
+      expect(within(eventItem('The siege')).getByTestId('event-conflict')).toHaveTextContent(
+        'Tobin: Keep, Harbor'
+      )
+    )
+    expect(within(eventItem('The fall')).queryByTestId('event-conflict')).toBeNull()
   })
 })

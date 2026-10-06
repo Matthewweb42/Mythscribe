@@ -15,6 +15,7 @@ import { NodeTitleButton } from '@renderer/features/outline/BeatsView'
 import { listOutline } from '@renderer/features/outline/outlineRows'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { useMentionStore } from '@renderer/features/tags/mentionStore'
 import { describeError } from '@renderer/lib/errors'
 import {
   ageText,
@@ -28,6 +29,7 @@ import {
   type EventOf
 } from './timelineView'
 import { useTimelineStore } from './timelineStore'
+import { appearsBy, locationConflicts, type LocationConflict } from './usageLog'
 
 type TimelineView = 'events' | 'reading'
 
@@ -55,6 +57,9 @@ const ICON_BUTTON =
  * where the links live (`SceneMeta.eventId`); a scene is linked from the metadata pane's picker.
  * An event with a year lists the ages of the characters in its scenes (F-11.2b: tag-linked or
  * named as POV, with a whole-number Born), so the Events view reads every document's tags.
+ * An event whose scenes put one character in two different locations says so (F-11.2c, display
+ * only: tag linked, mentioned, or POV; Locations compared by name key), so the Events view also
+ * reads the recorded mentions of every document on an event.
  */
 export function TimelineTab(): React.JSX.Element {
   const [view, setView] = useState<TimelineView>('events')
@@ -144,6 +149,7 @@ function EventsView({
   const entityIds = useEntityStore((s) => s.ids)
   const entitiesById = useEntityStore((s) => s.byId)
   const tagIdsByNode = useDocumentTagStore((s) => s.tagIdsByNode)
+  const mentionsByNode = useMentionStore((s) => s.byNode)
   useEffect(() => {
     useDocumentTagStore
       .getState()
@@ -159,13 +165,32 @@ function EventsView({
     () => entityIds.flatMap((id) => entitiesById[id] ?? []),
     [entityIds, entitiesById]
   )
-  const ages = eventAges(
+  const povOf = (id: string): string | undefined => metas[id]?.content?.pov
+  const ages = eventAges(events, linked, entities, (id) => tagIdsByNode[id], povOf)
+  // F-11.2c: the recorded mentions of the documents on an event, for the location conflicts;
+  // keyed by the joined ids so a re-render with the same links asks for nothing.
+  const linkedDocuments = documentIds.filter((id) => eventOf(id) !== undefined).join('\n')
+  useEffect(() => {
+    if (linkedDocuments === '') return
+    const mentions = useMentionStore.getState()
+    for (const id of linkedDocuments.split('\n')) {
+      mentions.loadForNode(id).catch((err: unknown) => toast.error(describeError(err)))
+    }
+  }, [linkedDocuments])
+  const conflicts = new Map<string, LocationConflict[]>()
+  for (const conflict of locationConflicts(
     events,
-    linked,
-    entities,
-    (id) => tagIdsByNode[id],
-    (id) => metas[id]?.content?.pov
-  )
+    nodesByEvent(events, documentIds, eventOf),
+    entities.filter((entity) => entity.kind === 'character'),
+    appearsBy(
+      (id) => tagIdsByNode[id],
+      (tagId, nodeId) => mentionsByNode[nodeId]?.some((row) => row.tagId === tagId) === true,
+      povOf
+    ),
+    (id) => metas[id]?.content?.location
+  )) {
+    conflicts.set(conflict.eventId, [...(conflicts.get(conflict.eventId) ?? []), conflict])
+  }
   const endDrag = (): void => {
     setDragFrom(null)
     setDragOver(null)
@@ -184,6 +209,7 @@ function EventsView({
               event={event}
               nodeIds={linked.get(event.id) ?? []}
               ages={ages.get(event.id) ?? []}
+              conflicts={conflicts.get(event.id) ?? []}
               warning={warned.has(event.id)}
               onStep={(step) => void move(index, index + step)}
               drag={{
@@ -323,6 +349,7 @@ function EventItem({
   event,
   nodeIds,
   ages,
+  conflicts,
   warning,
   onStep,
   drag
@@ -330,6 +357,7 @@ function EventItem({
   event: TimelineEvent
   nodeIds: readonly string[]
   ages: readonly EventAge[]
+  conflicts: readonly LocationConflict[]
   warning: boolean
   onStep: (step: -1 | 1) => void
   drag: EventDrag
@@ -440,6 +468,16 @@ function EventItem({
               Ages: {ages.map((age) => `${age.name} ${ageText(age.age)}`).join(', ')}
             </p>
           ) : null}
+          {conflicts.map((conflict) => (
+            <p
+              key={conflict.entityId}
+              role="note"
+              data-testid="event-conflict"
+              className="m-0 text-xs text-warning"
+            >
+              {conflict.name}: {conflict.locations.join(', ')}
+            </p>
+          ))}
         </>
       )}
       {nodeIds.length > 0 ? (
