@@ -9,7 +9,8 @@ import { countWords } from '@shared/wordCount'
 import { node, type NodeRow } from '../db/schema'
 import { getDocumentContent } from '../document/documentStore'
 import { AppError } from '../ipc/errors'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import {
   createNode,
   deleteNode,
@@ -25,7 +26,7 @@ let session: ProjectSession
 let db: TreeDb
 
 function openFixture(format: NovelFormat): void {
-  session = createProject(projectFolderFor(tmp, format), format, format)
+  session = createSeededProject(projectFolderFor(tmp, format), format, format)
   db = session.connection.orm
 }
 

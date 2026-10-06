@@ -17,11 +17,17 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
 import { upsertSummary } from '../document/summaryStore'
 import { AppError } from '../ipc/errors'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { setAiSettings } from '../project/settingsStore'
 import { createNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
-import { fitReadThrough, parseBetaReaderAnswer, runBetaReader, type BetaReaderInput } from './betaReader'
+import {
+  fitReadThrough,
+  parseBetaReaderAnswer,
+  runBetaReader,
+  type BetaReaderInput
+} from './betaReader'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import {
@@ -140,7 +146,7 @@ const untilCancelled = (request: CompletionRequest): Promise<never> =>
 beforeEach(() => {
   resetInflight()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-beta-reader-'))
-  session = createProject(projectFolderFor(tmp, 'Reader'), 'Reader', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Reader'), 'Reader', 'novel')
   db = session.connection.orm
   const documents = manuscriptDocuments(db)
   scene = documents[2]?.id ?? ''
@@ -291,7 +297,8 @@ describe('runBetaReader (F-14.11)', () => {
     answers([item()])
     const result = await read()
     expect(result.truncated).toBe(true)
-    const scenePart = sent().user.split('(this scene, full text):\n"""\n')[1]?.split('\n"""')[0] ?? ''
+    const scenePart =
+      sent().user.split('(this scene, full text):\n"""\n')[1]?.split('\n"""')[0] ?? ''
     expect(scenePart).toHaveLength(BETA_READER_SCENE_CHAR_BUDGET + 1)
   })
 

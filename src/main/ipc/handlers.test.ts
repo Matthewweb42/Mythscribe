@@ -1,4 +1,5 @@
 import { defaultFocusSettings } from '@shared/focus'
+import { growLegacyStarter } from '../project/testProject'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -489,10 +490,10 @@ describe('tree:list', () => {
   it('returns the seeded skeleton of the open project (F-1.3)', async () => {
     await invoke('project:create', { name: 'Seeded', format: 'webnovel', directory: tmp })
     const rows = z.array(TreeNode).parse(await invoke('tree:list', undefined))
-    expect(rows).toHaveLength(17)
+    expect(rows).toHaveLength(6)
     expect(rows.filter((r) => r.sectionType !== null)).toHaveLength(3)
     expect(rows.map((r) => r.title)).toContain('Arc 1')
-    expect(rows.filter((r) => r.kind === 'document')).toHaveLength(6)
+    expect(rows.filter((r) => r.kind === 'document')).toHaveLength(1)
   })
 })
 
@@ -505,6 +506,7 @@ describe('tree:create / tree:rename / tree:duplicate / tree:delete', () => {
 
   it('creates a node that tree:list then shows at the expected position', async () => {
     await invoke('project:create', { name: 'Tree', format: 'webnovel', directory: tmp })
+    growLegacyStarter(manager.require(), 'webnovel')
     const before = await invoke('tree:list', undefined)
     const manuscript = before.find((r) => r.sectionType === 'manuscript')
     const arc1 = before.find((r) => r.parentId === manuscript?.id && r.position === 0)
@@ -535,6 +537,7 @@ describe('tree:create / tree:rename / tree:duplicate / tree:delete', () => {
 
   it('duplicates a node and its subtree; tree:list shows the copy after the original', async () => {
     await invoke('project:create', { name: 'Tree', format: 'webnovel', directory: tmp })
+    growLegacyStarter(manager.require(), 'webnovel')
     const before = await invoke('tree:list', undefined)
     const chapter = before.find((r) => r.hierarchyLevel === 'chapter' && r.position === 0)
     const rows = await invoke('tree:duplicate', { id: chapter?.id ?? '' })
@@ -554,6 +557,7 @@ describe('tree:create / tree:rename / tree:duplicate / tree:delete', () => {
 
   it('deletes a node with its subtree and closes the sibling gap', async () => {
     await invoke('project:create', { name: 'Tree', format: 'webnovel', directory: tmp })
+    growLegacyStarter(manager.require(), 'webnovel')
     const before = await invoke('tree:list', undefined)
     const chapter = before.find((r) => r.hierarchyLevel === 'chapter' && r.position === 1)
     expect(await invoke('tree:delete', { id: chapter?.id ?? '' })).toBeNull()
@@ -612,6 +616,7 @@ describe('tree:move', () => {
 
   it('moves a chapter into another arc and tree:list shows both parents contiguous', async () => {
     await invoke('project:create', { name: 'Tree', format: 'webnovel', directory: tmp })
+    growLegacyStarter(manager.require(), 'webnovel')
     const before = await invoke('tree:list', undefined)
     const manuscript = before.find((r) => r.sectionType === 'manuscript')
     const arc1 = before.find((r) => r.parentId === manuscript?.id && r.position === 0)
@@ -645,6 +650,7 @@ describe('tree:move', () => {
 
   it('reorders within the same parent when afterId is a later sibling', async () => {
     await invoke('project:create', { name: 'Tree', format: 'webnovel', directory: tmp })
+    growLegacyStarter(manager.require(), 'webnovel')
     const before = await invoke('tree:list', undefined)
     const arc1 = before.find((r) => r.hierarchyLevel === 'part' && r.position === 0)
     const chapters = before.filter((r) => r.parentId === arc1?.id)
@@ -2487,6 +2493,7 @@ describe('ai:betaReader (F-14.11)', () => {
    */
   async function ready(dial: AiDial = 1): Promise<{ scene: string; first: string }> {
     await invoke('project:create', { name: 'Reader', format: 'novel', directory: tmp })
+    growLegacyStarter(manager.require(), 'novel')
     // Reading order, not tree:list order: the reader reads the manuscript as the tree shows it.
     const documents = manuscriptDocuments(manager.require().connection.orm)
     const first = documents[0]
@@ -2636,6 +2643,7 @@ describe('ai:query (F-5.7)', () => {
   /** A project with the dial at Ask, a key, and the first two manuscript scenes written. */
   async function ready(dial: AiDial = 1): Promise<{ first: string; second: string }> {
     await invoke('project:create', { name: 'Query', format: 'novel', directory: tmp })
+    growLegacyStarter(manager.require(), 'novel')
     const documents = manuscriptDocuments(manager.require().connection.orm)
     const first = documents[0]
     const second = documents[1]

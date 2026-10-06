@@ -969,15 +969,22 @@ test('create, close, reopen a project on disk', async () => {
   if (!created.ok || !created.data) throw new Error('project was not created')
   expect(created.data.path).toBe(projectPath)
 
-  // F-1.3: the new project is seeded with the three sections and the starter skeleton.
+  // F-1.3: the new project is seeded with the three sections and Arc 1 → Chapter 1 → Scene 1.
   const seeded = await listTree()
-  expect(seeded).toHaveLength(17)
+  expect(seeded).toHaveLength(6)
   expect(seeded.filter((n) => n.sectionType !== null)).toHaveLength(3)
-  const titles = seeded.map((n) => n.title)
-  expect(titles).toContain('Arc 1')
-  expect(titles).toContain('Arc 2')
-  expect(titles.filter((t) => t.startsWith('Chapter'))).toHaveLength(6)
-  expect(titles.filter((t) => t === 'Scene 1')).toHaveLength(6)
+  expect(
+    seeded
+      .filter((n) => n.sectionType === null)
+      .map((n) => n.title)
+      .sort()
+  ).toEqual(['Arc 1', 'Chapter 1', 'Scene 1'])
+  // The steps below were written against the older starter (Arc 1–2 → Chapter 1–3 → Scene 1), so
+  // grow it through the bridge, in the old row order, and reload so the renderer shows it.
+  await growLegacyStarter(seeded)
+  await page.reload()
+  await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
+  expect(await listTree()).toHaveLength(17)
 
   // F-4.1: the tag bank works through the bridge (the Tags tab arrives with F-4.2): a created
   // tag comes back kebab-cased with its category's default color and no usage yet.
@@ -5640,6 +5647,39 @@ async function getLayout(): Promise<Layout> {
   )
   if (!result.ok) throw new Error(`layout:get failed: ${result.error.message}`)
   return result.data
+}
+
+/** Adds Chapter 2–3 under Arc 1 and Arc 2 → Chapter 1–3, each chapter with a Scene 1. */
+async function growLegacyStarter(seeded: TreeNode[]): Promise<void> {
+  const manuscript = seeded.find((n) => n.sectionType === 'manuscript')
+  const arc1 = seeded.find((n) => n.parentId === manuscript?.id)
+  if (!manuscript || !arc1) throw new Error('starter has no Arc 1')
+  const make = async (
+    parentId: string,
+    kind: 'folder' | 'document',
+    hierarchyLevel: 'part' | 'chapter' | 'scene',
+    title: string
+  ): Promise<string> => {
+    const created = await page.evaluate(
+      (input) => window.mythscribe.invoke('tree:create', input) as Promise<IpcResult<TreeNode>>,
+      { parentId, kind, hierarchyLevel }
+    )
+    if (!created.ok) throw new Error(`tree:create failed: ${created.error.message}`)
+    const renamed = await page.evaluate(
+      (input) => window.mythscribe.invoke('tree:rename', input) as Promise<IpcResult<TreeNode>>,
+      { id: created.data.id, title }
+    )
+    if (!renamed.ok) throw new Error(`tree:rename failed: ${renamed.error.message}`)
+    return created.data.id
+  }
+  const chapters = async (partId: string, from: number): Promise<void> => {
+    for (let c = from; c < 3; c++) {
+      const chapter = await make(partId, 'folder', 'chapter', `Chapter ${c + 1}`)
+      await make(chapter, 'document', 'scene', 'Scene 1')
+    }
+  }
+  await chapters(arc1.id, 1)
+  await chapters(await make(manuscript.id, 'folder', 'part', 'Arc 2'), 0)
 }
 
 async function listTree(): Promise<TreeNode[]> {

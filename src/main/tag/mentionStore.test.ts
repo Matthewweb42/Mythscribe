@@ -5,7 +5,8 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { MentionRange } from '@shared/mentions'
 import { mentionScan, node, tag, tagMention } from '../db/schema'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import {
   deleteMentionsForTag,
@@ -37,7 +38,7 @@ const found = (...entries: [string, MentionRange[]][]): Map<string, MentionRange
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-mentions-'))
-  session = createProject(projectFolderFor(tmp, 'Mentions'), 'Mentions', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Mentions'), 'Mentions', 'novel')
   db = session.connection.orm
   scenes = listNodes(db)
     .filter((row) => row.kind === 'document' && row.sectionType === null)

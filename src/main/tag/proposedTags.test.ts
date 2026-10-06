@@ -4,12 +4,8 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
-import {
-  createProject,
-  openProject,
-  projectFolderFor,
-  type ProjectSession
-} from '../project/projectStore'
+import { openProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { getDismissedNames } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
@@ -45,7 +41,7 @@ const thrice = (name: string): string => `The road bent. Then ${name} saw ${name
 beforeEach(() => {
   resetProposedTagCache()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-proposed-'))
-  session = createProject(projectFolderFor(tmp, 'Proposed'), 'Proposed', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Proposed'), 'Proposed', 'novel')
   db = session.connection.orm
   documents = manuscriptDocuments(db).map((row) => row.id)
 })

@@ -19,7 +19,8 @@ import { setSceneMeta } from '../document/sceneMetaStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { AppError } from '../ipc/errors'
 import { setAiSettings, setAuthorRules } from '../project/settingsStore'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { fitSceneToBudget, parseCritiqueAnswer, runCritique, type CritiqueInput } from './critique'
@@ -152,7 +153,7 @@ beforeEach(() => {
   resetVoiceProfileCache()
   resetInflight()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-critique-'))
-  session = createProject(projectFolderFor(tmp, 'Critique'), 'Critique', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Critique'), 'Critique', 'novel')
   db = session.connection.orm
   const documents = manuscriptDocuments(db)
   scene = documents[0]?.id ?? ''

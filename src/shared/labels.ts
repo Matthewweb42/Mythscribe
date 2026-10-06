@@ -98,5 +98,5 @@ export function defaultNodeTitle(
 
 /** One-line description of the starter skeleton seeded into a new project (F-1.3). */
 export function skeletonSummary(format: NovelFormat): string {
-  return `${sectionLabel(format, 'manuscript')} → ${levelLabel(format, 'part')} 1–2 → ${levelLabel(format, 'chapter')} 1–3 → ${levelLabel(format, 'scene')} 1`
+  return `${sectionLabel(format, 'manuscript')} → ${levelLabel(format, 'part')} 1 → ${levelLabel(format, 'chapter')} 1 → ${levelLabel(format, 'scene')} 1`
 }

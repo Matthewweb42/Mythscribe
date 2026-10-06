@@ -3,7 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AppError } from '../ipc/errors'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { listNodes } from '../tree/treeStore'
 import {
   addDocumentTag,
@@ -40,7 +41,7 @@ function nodeOfKind(kind: 'document' | 'folder' | 'section', index = 0): string 
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-doctags-'))
-  session = createProject(projectFolderFor(tmp, 'Tags'), 'Tags', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Tags'), 'Tags', 'novel')
   db = session.connection.orm
 })
 afterEach(() => {

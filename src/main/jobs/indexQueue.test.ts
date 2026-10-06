@@ -14,7 +14,8 @@ import {
 } from '../ai/providers/types'
 import { node, type NodeRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { createIndexQueue, type IndexQueue, type JobRun, type QueuedJob } from './indexQueue'
 import { enqueueJob, jobId, listJobs, markFailed } from './jobStore'
@@ -79,7 +80,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date(2026, 8, 17, 10, 0, 0))
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-queue-'))
-  session = createProject(projectFolderFor(tmp, 'Queue'), 'Queue', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Queue'), 'Queue', 'novel')
   db = session.connection.orm
   scenes = listNodes(db)
     .filter((row: NodeRow) => row.kind === 'document' && row.sectionType === null)

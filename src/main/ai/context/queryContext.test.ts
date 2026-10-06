@@ -15,7 +15,8 @@ import {
   replaceSceneFacts,
   setFactHidden
 } from '../../entity/observedFactStore'
-import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../../project/projectStore'
+import { createSeededProject } from '../../project/testProject'
 import { addDocumentTag } from '../../tag/documentTagStore'
 import { createTag } from '../../tag/tagStore'
 import type { TreeDb } from '../../tree/treeStore'
@@ -65,7 +66,7 @@ const fields = (over: Partial<CandidateFields> = {}): CandidateFields => ({
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-queryctx-'))
-  session = createProject(projectFolderFor(tmp, 'Query'), 'Query', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Query'), 'Query', 'novel')
   db = session.connection.orm
   scenes = manuscriptDocuments(db)
     .slice(0, 4)

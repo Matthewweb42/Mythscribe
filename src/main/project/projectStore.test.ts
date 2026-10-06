@@ -68,7 +68,7 @@ describe('createProject', () => {
     const session = createProject(projectFolderFor(tmp, 'Seeded'), 'Seeded', 'novel')
     open.push(session)
     const nodes = listNodes(session.connection.orm)
-    expect(nodes).toHaveLength(17)
+    expect(nodes).toHaveLength(6)
     expect(nodes.filter((n) => n.parentId === null).map((n) => n.sectionType)).toEqual([
       'front',
       'manuscript',
@@ -107,7 +107,6 @@ describe('createProject', () => {
     open.push(session)
     const titles = listNodes(session.connection.orm).map((n) => n.title)
     expect(titles).toContain('Arc 1')
-    expect(titles).toContain('Arc 2')
     expect(editorSettings(session).sceneBreak).toBe('~~~')
   })
 })
@@ -142,7 +141,7 @@ describe('openProject', () => {
     const second = openProject(folder)
     open.push(second)
     const again = listNodes(second.connection.orm)
-    expect(again).toHaveLength(17)
+    expect(again).toHaveLength(6)
     expect(again.map((n) => n.id)).toEqual(ids)
   })
 

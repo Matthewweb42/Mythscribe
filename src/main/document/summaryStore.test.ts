@@ -5,7 +5,8 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { StoredSceneSummary } from '@shared/summary'
 import { node, sceneSummary, type NodeRow } from '../db/schema'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { deleteSummary, getSummary, summariesFor, upsertSummary } from './summaryStore'
 
@@ -37,7 +38,7 @@ const summaryFor = (nodeId: string): StoredSceneSummary => ({
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-summary-'))
-  session = createProject(projectFolderFor(tmp, 'Summaries'), 'Summaries', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Summaries'), 'Summaries', 'novel')
   db = session.connection.orm
 })
 afterEach(() => {

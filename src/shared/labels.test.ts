@@ -54,9 +54,9 @@ describe('levelLabel', () => {
 
 describe('skeletonSummary', () => {
   it('describes the seeded skeleton per format', () => {
-    expect(skeletonSummary('novel')).toBe('Manuscript → Part 1–2 → Chapter 1–3 → Scene 1')
-    expect(skeletonSummary('epic')).toBe('Series → Part 1–2 → Chapter 1–3 → Scene 1')
-    expect(skeletonSummary('webnovel')).toBe('Volume 1 → Arc 1–2 → Chapter 1–3 → Scene 1')
+    expect(skeletonSummary('novel')).toBe('Manuscript → Part 1 → Chapter 1 → Scene 1')
+    expect(skeletonSummary('epic')).toBe('Series → Part 1 → Chapter 1 → Scene 1')
+    expect(skeletonSummary('webnovel')).toBe('Volume 1 → Arc 1 → Chapter 1 → Scene 1')
   })
 })
 

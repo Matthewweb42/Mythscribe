@@ -6,7 +6,8 @@ import { defaultExportFormatting, type ExportOptions } from '@shared/bookExport'
 import type { TiptapNodeT } from '@shared/tiptap'
 import type { NodeRow } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { createNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { collectBook } from './collect'
 import type { BookBlock } from './model'
@@ -73,7 +74,7 @@ function matter(type: 'front' | 'end', title: string, text: string | null): Node
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-export-'))
-  session = createProject(projectFolderFor(tmp, 'Export'), 'Export', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Export'), 'Export', 'novel')
   db = session.connection.orm
 })
 afterEach(() => {

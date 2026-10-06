@@ -12,7 +12,8 @@ import {
   replaceSceneFacts,
   setFactHidden
 } from '../../entity/observedFactStore'
-import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../../project/projectStore'
+import { createSeededProject } from '../../project/testProject'
 import { addDocumentTag } from '../../tag/documentTagStore'
 import { createTag } from '../../tag/tagStore'
 import { createNode, listNodes, renameNode, type TreeDb } from '../../tree/treeStore'
@@ -33,7 +34,7 @@ const budget = { maxTokens: STORY_BIBLE_TOKEN_BUDGET }
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-bible-'))
-  session = createProject(projectFolderFor(tmp, 'Bible'), 'Bible', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Bible'), 'Bible', 'novel')
   db = session.connection.orm
   const rows = listNodes(db)
   part = rows.find((r) => r.hierarchyLevel === 'part')?.id ?? ''

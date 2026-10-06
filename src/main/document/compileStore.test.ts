@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { emptySceneMeta } from '@shared/sceneMeta'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { node, type NodeRow } from '../db/schema'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { addDocumentTag } from '../tag/documentTagStore'
 import { createTag } from '../tag/tagStore'
 import { createNode, deleteNode, listNodes, type TreeDb } from '../tree/treeStore'
@@ -35,7 +36,7 @@ function byTitle(title: string, level: NodeRow['hierarchyLevel']): NodeRow[] {
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-compile-'))
-  session = createProject(projectFolderFor(tmp, 'Compile'), 'Compile', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Compile'), 'Compile', 'novel')
   db = session.connection.orm
 })
 afterEach(() => {

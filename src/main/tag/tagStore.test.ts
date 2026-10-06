@@ -8,7 +8,8 @@ import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
 import { documentTag, documentTagDismissal, entity, node, tag } from '../db/schema'
 import { AppError } from '../ipc/errors'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { getDismissedNames, getTagAliases, setTagAliases } from '../project/settingsStore'
 import { listNodes } from '../tree/treeStore'
 import {
@@ -54,7 +55,7 @@ function linkToScene(tagId: string, index = 0): string {
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-tags-'))
-  session = createProject(projectFolderFor(tmp, 'Tags'), 'Tags', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Tags'), 'Tags', 'novel')
   db = session.connection.orm
 })
 afterEach(() => {

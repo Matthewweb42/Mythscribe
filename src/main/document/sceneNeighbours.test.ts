@@ -4,7 +4,8 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { emptySceneMeta, type SceneBrief } from '@shared/sceneMeta'
 import { node, type NodeRow } from '../db/schema'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { setSceneMeta } from './sceneMetaStore'
@@ -28,7 +29,7 @@ function setBrief(id: string, over: Partial<SceneBrief>): void {
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-neighbours-'))
-  session = createProject(projectFolderFor(tmp, 'Briefs'), 'Briefs', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Briefs'), 'Briefs', 'novel')
   db = session.connection.orm
   scenes = manuscriptDocuments(db)
 })

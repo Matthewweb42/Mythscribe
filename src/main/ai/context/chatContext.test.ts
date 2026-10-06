@@ -7,7 +7,8 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../../document/documentStore'
 import { saveNotes } from '../../document/notesStore'
 import { setSceneMeta } from '../../document/sceneMetaStore'
-import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../../project/projectStore'
+import { createSeededProject } from '../../project/testProject'
 import { addDocumentTag } from '../../tag/documentTagStore'
 import { createTag } from '../../tag/tagStore'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
@@ -29,7 +30,7 @@ const doc = (text: string): TiptapNodeT => ({
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-chatctx-'))
-  session = createProject(projectFolderFor(tmp, 'Ctx'), 'Ctx', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Ctx'), 'Ctx', 'novel')
   db = session.connection.orm
   const rows = listNodes(db)
   scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')?.id ?? ''

@@ -18,7 +18,8 @@ import { upsertSummary } from '../document/summaryStore'
 import { createEntity } from '../entity/entityStore'
 import { replaceSceneFacts } from '../entity/observedFactStore'
 import { AppError } from '../ipc/errors'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { setAiSettings } from '../project/settingsStore'
 import { createNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
@@ -145,7 +146,7 @@ const untilCancelled = (request: CompletionRequest): Promise<never> =>
 beforeEach(() => {
   resetInflight()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-query-'))
-  session = createProject(projectFolderFor(tmp, 'Query'), 'Query', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Query'), 'Query', 'novel')
   db = session.connection.orm
   scenes = manuscriptDocuments(db).map((row) => row.id)
   if (scenes.length < 4) throw new Error('skeleton not seeded')

@@ -10,9 +10,9 @@ function stubIds(): () => string {
 }
 
 describe('seedSkeleton', () => {
-  it('produces the 17-row starter structure with contiguous positions', () => {
+  it('produces the 6-row starter structure with contiguous positions', () => {
     const rows = seedSkeleton('novel', NOW, stubIds())
-    expect(rows).toHaveLength(17)
+    expect(rows).toHaveLength(6)
 
     const roots = rows.filter((r) => r.parentId === null)
     expect(roots.map((r) => r.sectionType)).toEqual(['front', 'manuscript', 'end'])
@@ -21,7 +21,7 @@ describe('seedSkeleton', () => {
     expect(rows.filter((r) => r.sectionType).length).toBe(3)
 
     const ids = new Set(rows.map((r) => r.id))
-    expect(ids.size).toBe(17)
+    expect(ids.size).toBe(6)
     for (const r of rows) {
       if (r.parentId !== null) expect(ids.has(r.parentId ?? '')).toBe(true)
       expect(r).toMatchObject({ created: NOW, modified: NOW, wordCount: 0 })
@@ -46,11 +46,11 @@ describe('seedSkeleton', () => {
     const rows = seedSkeleton('novel', NOW, stubIds())
     const manuscript = rows.find((r) => r.sectionType === 'manuscript')
     const parts = rows.filter((r) => r.parentId === manuscript?.id)
-    expect(parts.map((r) => r.title)).toEqual(['Part 1', 'Part 2'])
+    expect(parts.map((r) => r.title)).toEqual(['Part 1'])
     expect(parts.every((r) => r.kind === 'folder' && r.hierarchyLevel === 'part')).toBe(true)
     for (const part of parts) {
       const chapters = rows.filter((r) => r.parentId === part.id)
-      expect(chapters.map((r) => r.title)).toEqual(['Chapter 1', 'Chapter 2', 'Chapter 3'])
+      expect(chapters.map((r) => r.title)).toEqual(['Chapter 1'])
       expect(chapters.every((r) => r.kind === 'folder' && r.hierarchyLevel === 'chapter')).toBe(
         true
       )
@@ -67,7 +67,6 @@ describe('seedSkeleton', () => {
   it('labels webnovel parts as arcs', () => {
     const titles = seedSkeleton('webnovel', NOW, stubIds()).map((r) => r.title)
     expect(titles).toContain('Arc 1')
-    expect(titles).toContain('Arc 2')
     expect(titles).not.toContain('Part 1')
   })
 
@@ -75,7 +74,7 @@ describe('seedSkeleton', () => {
     const a = seedSkeleton('epic', NOW, stubIds())
     const b = seedSkeleton('epic', NOW, stubIds())
     expect(a).toEqual(b)
-    expect(a.map((r) => r.id)).toEqual(Array.from({ length: 17 }, (_, i) => `id-${i + 1}`))
+    expect(a.map((r) => r.id)).toEqual(Array.from({ length: 6 }, (_, i) => `id-${i + 1}`))
   })
 })
 

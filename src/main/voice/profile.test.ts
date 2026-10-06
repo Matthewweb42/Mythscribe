@@ -6,7 +6,8 @@ import { DEFAULT_BANNED_PHRASES, defaultAuthorRules } from '@shared/authorRules'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { setAuthorRules } from '../project/settingsStore'
 import { createNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { addExemplar } from './exemplarStore'
@@ -52,7 +53,7 @@ function fill(id: string, sentence: string, words: number): void {
 beforeEach(() => {
   resetVoiceProfileCache()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-profile-'))
-  session = createProject(projectFolderFor(tmp, 'Profile'), 'Profile', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Profile'), 'Profile', 'novel')
   db = session.connection.orm
   const rows = listNodes(db)
   scenes = rows
@@ -96,7 +97,12 @@ describe('buildVoiceProfile', () => {
   it('narrows to the POV group when it holds 2,000 words and falls back to the manuscript below that', () => {
     fill(scenes[0]!, PAST_THIRD, 2_500)
     fill(scenes[1]!, PRESENT_FIRST, POV_MIN_WORDS)
-    setSceneMeta(db, scenes[1]!, { location: '', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF })
+    setSceneMeta(db, scenes[1]!, {
+      location: '',
+      pov: 'Mara',
+      timeline: '',
+      brief: EMPTY_SCENE_BRIEF
+    })
     const all = buildVoiceProfile(db)
     expect(all.rules).toContain('Narration is in past tense.')
     const mara = buildVoiceProfile(db, { pov: ' mara ' })
@@ -112,8 +118,18 @@ describe('buildVoiceProfile', () => {
   })
 
   it('lists every exemplar, POV-matching first when a POV is asked for, and adds the bonus at six', () => {
-    setSceneMeta(db, scenes[0]!, { location: '', pov: 'Tomas', timeline: '', brief: EMPTY_SCENE_BRIEF })
-    setSceneMeta(db, scenes[1]!, { location: '', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF })
+    setSceneMeta(db, scenes[0]!, {
+      location: '',
+      pov: 'Tomas',
+      timeline: '',
+      brief: EMPTY_SCENE_BRIEF
+    })
+    setSceneMeta(db, scenes[1]!, {
+      location: '',
+      pov: 'Mara',
+      timeline: '',
+      brief: EMPTY_SCENE_BRIEF
+    })
     const tomas = addExemplar(db, scenes[0]!, `${PAST_THIRD} one`)
     const mara = addExemplar(db, scenes[1]!, `${PAST_THIRD} two`)
     expect(buildVoiceProfile(db).exemplars.map((e) => e.id)).toEqual([tomas.id, mara.id])

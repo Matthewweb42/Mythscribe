@@ -8,7 +8,8 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { node, snapshot, snapshotText, writingLog, type NodeRow } from '../db/schema'
 import { getDocumentContent, saveDocument } from '../document/documentStore'
 import { listDrafts } from '../draft/draftStore'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { createNode, deleteNode, getNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments, projectDocuments } from '../voice/profile'
 import {
@@ -59,7 +60,7 @@ const takeProject = (name: string, milestone = false): SnapshotList =>
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-snapshots-'))
-  session = createProject(projectFolderFor(tmp, 'Snapshots'), 'Snapshots', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Snapshots'), 'Snapshots', 'novel')
   db = session.connection.orm
   preface = createNode(db, 'novel', {
     parentId: sectionRoot('front').id,

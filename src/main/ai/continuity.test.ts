@@ -23,7 +23,8 @@ import { setSceneMeta } from '../document/sceneMetaStore'
 import { createEntity, updateEntity } from '../entity/entityStore'
 import { replaceSceneFacts, setFactHidden, factsForNode } from '../entity/observedFactStore'
 import { AppError } from '../ipc/errors'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { setAiSettings, setAuthorRules } from '../project/settingsStore'
 import { setProjectTimeline } from '../project/timelineStore'
 import { addDocumentTag } from '../tag/documentTagStore'
@@ -159,7 +160,7 @@ beforeEach(() => {
   resetVoiceProfileCache()
   resetInflight()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-continuity-'))
-  session = createProject(projectFolderFor(tmp, 'Continuity'), 'Continuity', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Continuity'), 'Continuity', 'novel')
   db = session.connection.orm
   const documents = manuscriptDocuments(db)
   earlier = documents[0]?.id ?? ''

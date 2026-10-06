@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { continuityDedupeKey, type ContinuityRef } from '@shared/continuity'
 import { createEntity, deleteEntity } from '../entity/entityStore'
 import { AppError } from '../ipc/errors'
-import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createSeededProject } from '../project/testProject'
 import { deleteNode, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import {
@@ -69,7 +70,7 @@ const proposal = (): string =>
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-findings-'))
-  session = createProject(projectFolderFor(tmp, 'Findings'), 'Findings', 'novel')
+  session = createSeededProject(projectFolderFor(tmp, 'Findings'), 'Findings', 'novel')
   db = session.connection.orm
   const documents = manuscriptDocuments(db)
   first = documents[0]?.id ?? ''
