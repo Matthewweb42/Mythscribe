@@ -220,7 +220,7 @@ describe('GET /credits', () => {
   it('reports the balance and what each feature spent', async () => {
     expect(await webhookStatus(await webhook(orderEvent()))).toBe('applied')
 
-    // gpt-5.4-mini at the Cloud rate: (1000 * 0.5 + 100 * 4) / 1e6 USD = 900 micros.
+    // gpt-5.4-mini at the Cloud rate: (1000 * 1.5 + 100 * 9) / 1e6 USD = 2400 micros.
     await meterRequest(deps, USER_ID, {
       feature: 'ghostText',
       model: 'gpt-5.4-mini',
@@ -235,7 +235,7 @@ describe('GET /credits', () => {
       tokensOut: 100,
       requestId: 'req-2'
     })
-    // gpt-5.4: (2000 * 2.5 + 500 * 20) / 1e6 USD = 15000 micros.
+    // gpt-5.4: (2000 * 5 + 500 * 30) / 1e6 USD = 25000 micros.
     const chat = await meterRequest(deps, USER_ID, {
       feature: 'chat',
       model: 'gpt-5.4',
@@ -244,12 +244,12 @@ describe('GET /credits', () => {
       requestId: 'req-3'
     })
 
-    expect(chat.micros).toBe(15_000)
+    expect(chat.micros).toBe(25_000)
     const body = await credits()
-    expect(body.balanceMicros).toBe(5_000_000 - 900 - 900 - 15_000)
+    expect(body.balanceMicros).toBe(5_000_000 - 2400 - 2400 - 25_000)
     expect(body.spend).toEqual([
-      { feature: 'chat', micros: 15_000, requests: 1, tokens: 2500 },
-      { feature: 'ghostText', micros: 1800, requests: 2, tokens: 2200 }
+      { feature: 'chat', micros: 25_000, requests: 1, tokens: 2500 },
+      { feature: 'ghostText', micros: 4800, requests: 2, tokens: 2200 }
     ])
     // Everything was charged just now, so the period breakdown is the lifetime one.
     expect(body.periodSpend).toEqual(body.spend)
@@ -287,12 +287,12 @@ describe('GET /credits', () => {
 
     expect(body.periodDays).toBe(30)
     expect(body.spend).toEqual([
-      { feature: 'chat', micros: 15_000, requests: 1, tokens: 2500 },
-      { feature: 'ghostText', micros: 1800, requests: 2, tokens: 2200 }
+      { feature: 'chat', micros: 25_000, requests: 1, tokens: 2500 },
+      { feature: 'ghostText', micros: 4800, requests: 2, tokens: 2200 }
     ])
     expect(body.periodSpend).toEqual([
-      { feature: 'chat', micros: 15_000, requests: 1, tokens: 2500 },
-      { feature: 'ghostText', micros: 900, requests: 1, tokens: 1100 }
+      { feature: 'chat', micros: 25_000, requests: 1, tokens: 2500 },
+      { feature: 'ghostText', micros: 2400, requests: 1, tokens: 1100 }
     ])
     // The oldest charge inside the window, not the oldest charge of the account.
     expect(body.periodFirstChargeAt).toBe(START.getTime() - 20 * DAY_MS)
@@ -311,7 +311,7 @@ describe('GET /credits', () => {
 
     const body = await credits()
 
-    expect(body.spend).toEqual([{ feature: 'chat', micros: 15_000, requests: 1, tokens: 2500 }])
+    expect(body.spend).toEqual([{ feature: 'chat', micros: 25_000, requests: 1, tokens: 2500 }])
     expect(body.periodSpend).toEqual([])
     expect(body.periodFirstChargeAt).toBeNull()
   })
@@ -553,8 +553,8 @@ describe('meterRequest and hasCredit', () => {
       requestId: 'req-9'
     })
 
-    // (4000 * 2.5 + 800 * 20) / 1e6 USD = 26000 micros.
-    expect(charge).toEqual({ micros: 26_000, balanceMicros: 5_000_000 - 26_000 })
+    // (4000 * 5 + 800 * 30) / 1e6 USD = 44000 micros.
+    expect(charge).toEqual({ micros: 44_000, balanceMicros: 5_000_000 - 44_000 })
   })
 
   it('charges even when it overdraws, so the next request is refused', async () => {
@@ -568,7 +568,7 @@ describe('meterRequest and hasCredit', () => {
       requestId: 'req-over'
     })
 
-    expect(await deps.store.getBalance(USER_ID)).toBe(-4500)
+    expect(await deps.store.getBalance(USER_ID)).toBe(-8000)
     expect(await hasCredit(deps.store, USER_ID)).toBe(false)
   })
 

@@ -927,10 +927,10 @@ test('create, close, reopen a project on disk', async () => {
   await firstSettings.getByRole('tab', { name: 'AI' }).click()
   await expect(firstSettings.getByTestId('ai-source-cloud')).toHaveAttribute('aria-checked', 'true')
   await expect(firstSettings.getByTestId('ai-model-rate-fast')).toHaveText(
-    'MythScribe Cloud rate: $0.50 input, $4.00 output per 1M tokens.'
+    'MythScribe Cloud rate: $1.50 input, $9.00 output per 1M tokens.'
   )
   await expect(firstSettings.getByTestId('ai-model-rate-strong')).toHaveText(
-    'MythScribe Cloud rate: $2.50 input, $20.00 output per 1M tokens.'
+    'MythScribe Cloud rate: $5.00 input, $30.00 output per 1M tokens.'
   )
   await firstSettings.getByTestId('ai-source-ownKey').click()
   await expect(firstSettings.getByTestId('ai-model-rate-fast')).toHaveCount(0)
@@ -3151,7 +3151,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(recommendResult).toHaveCount(0)
   // F-5.9: the line names the model, the cost, and the tokens the request spent.
   await expect(tagBar.getByTestId('tag-recommend-cost')).toHaveText(
-    'gpt-5.4-mini · $0.0001 · 400 in · 12 out'
+    'gpt-5.4-mini · $0.0004 · 400 in · 12 out'
   )
   expect(openAiRequests.at(-1)).toEqual({
     url: '/v1/chat/completions',

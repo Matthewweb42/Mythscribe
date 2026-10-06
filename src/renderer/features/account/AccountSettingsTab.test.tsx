@@ -307,9 +307,9 @@ describe('AccountSettingsTab credits (F-15.3)', () => {
     const rates = screen.getByRole('table', { name: 'MythScribe Cloud rates' })
     const row = within(rates).getByRole('rowheader', { name: 'gpt-5.4-mini' }).closest('tr')
     expect(row).not.toBeNull()
-    // 0.25 and 2.00 per 1M at the provider, doubled by CLOUD_RATE_MULTIPLIER.
-    expect(within(row as HTMLElement).getByText('$0.50')).toBeInTheDocument()
-    expect(within(row as HTMLElement).getByText('$4.00')).toBeInTheDocument()
+    // 0.75 and 4.50 per 1M at the provider, doubled by CLOUD_RATE_MULTIPLIER.
+    expect(within(row as HTMLElement).getByText('$1.50')).toBeInTheDocument()
+    expect(within(row as HTMLElement).getByText('$9.00')).toBeInTheDocument()
     expect(within(row as HTMLElement).getByText('fast')).toBeInTheDocument()
     expect(
       screen.getByText(

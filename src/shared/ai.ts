@@ -294,12 +294,15 @@ export interface ModelPrice {
  * Published OpenAI rates (USD per million tokens, standard tier, no batch discount), keyed by
  * the exact model id since the tier → model mapping is a setting. Copied from OpenAI's pricing
  * page; nothing fetches it, so keep it current by hand when a default model changes. A model
- * outside this table costs 0 with `priced: false` (the ledger never invents a price).
+ * outside this table costs 0 with `priced: false` (the ledger never invents a price). Checked
+ * against developers.openai.com/api/docs/pricing on 2026-10-05 (`gpt-5.4` at the under-272K
+ * context rate). Cached input (a tenth of the input rate) is billed here at the full input rate,
+ * so a cache hit is over-counted, never under-counted.
  */
 export const MODEL_PRICING: Record<string, ModelPrice> = {
-  'gpt-5.4': { inUsdPerM: 1.25, outUsdPerM: 10, priced: true },
-  'gpt-5.4-mini': { inUsdPerM: 0.25, outUsdPerM: 2, priced: true },
-  'gpt-5.4-nano': { inUsdPerM: 0.05, outUsdPerM: 0.4, priced: true }
+  'gpt-5.4': { inUsdPerM: 2.5, outUsdPerM: 15, priced: true },
+  'gpt-5.4-mini': { inUsdPerM: 0.75, outUsdPerM: 4.5, priced: true },
+  'gpt-5.4-nano': { inUsdPerM: 0.2, outUsdPerM: 1.25, priced: true }
 }
 
 const UNPRICED: ModelPrice = { inUsdPerM: 0, outUsdPerM: 0, priced: false }

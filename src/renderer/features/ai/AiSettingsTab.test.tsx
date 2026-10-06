@@ -574,9 +574,9 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
     })
     expect(screen.queryByTestId('ai-model-rate-fast')).not.toBeInTheDocument()
     await userEvent.click(sourceRadio('cloud'))
-    // 0.25 and 2.00 per 1M at the provider, doubled by CLOUD_RATE_MULTIPLIER.
+    // 0.75 and 4.50 per 1M at the provider, doubled by CLOUD_RATE_MULTIPLIER.
     expect(await screen.findByTestId('ai-model-rate-fast')).toHaveTextContent(
-      'MythScribe Cloud rate: $0.50 input, $4.00 output per 1M tokens.'
+      'MythScribe Cloud rate: $1.50 input, $9.00 output per 1M tokens.'
     )
     // A model outside the rate table cannot be billed, so the proxy refuses it; the line says so.
     expect(screen.getByTestId('ai-model-rate-strong')).toHaveTextContent(
