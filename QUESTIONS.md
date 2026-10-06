@@ -29,3 +29,15 @@ do. Review, then confirm, change, or delete the entry.
 - Chosen: for characters and settings, Appearances replaces the F-9.4 list and shows each scene's chapter as the old list did; world entities keep the F-9.4 list.
 - Alternatives: keep both; add POV to the F-9.4 list and drop the log's reading-order view.
 - To change it: `features/entities/EntityEditor.tsx`, `UsageLog.tsx`.
+
+## 2026-10-05 · F-4.8 · Tagged ranges are a mark in the text, not stored character offsets
+- Question: the spec says "ranges tracked as character offsets"; offsets stored beside the text drift whenever the author edits before them (the v0 schema's problem).
+- Chosen: a `tagRange` mark in the document JSON (like the AI-origin mark), so the editor moves each range with every edit; offsets are derived when needed. Different tags overlap; the same tag over touching ranges merges; typing at a range's edge does not grow it. No migration.
+- Alternatives: a `tag_range` table with offsets re-mapped on every save (drift-prone, needs a migration and a channel).
+- To change it: `src/renderer/features/editor/TagRange.ts`.
+
+## 2026-10-05 · F-4.8 · How tagged ranges show and where you tag from
+- Question: "margin/overlay indicators" and the entry point were open.
+- Chosen: a thin underline per tag in its colour under the text (stacked when tags overlap; hover names them) and a gutter bar beside each paragraph that holds a range; tag from the editor's right-click menu ("Tag selection…", "Clear tags in selection") or the shortcut in the menu. Tagging also links the tag to the document; clearing ranges keeps the link. Manuscript documents only; export and the compiled preview ignore ranges.
+- Alternatives: background tint instead of underlines; a toolbar button; clearing a range also unlinks the tag when no range or mention remains.
+- To change it: `TagRange.ts`, `DocumentEditor.tsx`, `src/renderer/styles/app.css`.

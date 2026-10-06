@@ -61,6 +61,29 @@ describe('docBlocks (F-12.1)', () => {
     ])
   })
 
+  it('never prints a tag range (F-4.8): the tagged text reads as the text around it', () => {
+    const blocks = docBlocks(
+      doc(
+        para(
+          text('Mara '),
+          { type: 'text', text: 'waited', marks: [{ type: 'tagRange', attrs: { tagId: 't-1' } }] },
+          {
+            type: 'text',
+            text: ' long',
+            marks: [{ type: 'italic' }, { type: 'tagRange', attrs: { tagId: 't-2' } }]
+          }
+        )
+      )
+    )
+    expect(blocks).toEqual([
+      {
+        kind: 'paragraph',
+        align: null,
+        runs: [run('Mara '), run('waited'), run(' long', { italic: true })]
+      }
+    ])
+  })
+
   it('prints inline tags as their name, keeps hard breaks, and drops empty paragraphs', () => {
     const blocks = docBlocks(
       doc(

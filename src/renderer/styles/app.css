@@ -185,6 +185,33 @@ select {
 }
 
 /*
+ * Granular tags (F-4.8): a tagged run carries one 2px line per tag in the tag's colour, stacked
+ * under the text (the decoration's inline style sets the images, offsets, and padding); a block
+ * holding a range gets a gutter bar in its tags' colours (`--range-colors`, equal bands) just
+ * left of the column. Neither shows in the compiled preview, which renders the schema only.
+ */
+.ms-editor .tag-range-run {
+  background-repeat: no-repeat;
+  background-size: 100% 2px;
+}
+
+.ms-editor .tag-range-block {
+  position: relative;
+}
+
+.ms-editor .tag-range-block::before {
+  content: '';
+  position: absolute;
+  top: 0.15em;
+  bottom: 0.15em;
+  left: -0.75rem;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--range-colors);
+  pointer-events: none;
+}
+
+/*
  * Ghost text (F-5.3): the AI's proposed continuation as a dimmed widget at the caret. Not part
  * of the document; inert to the pointer and to selection so it can never be copied or clicked.
  */

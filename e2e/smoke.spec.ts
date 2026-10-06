@@ -2957,6 +2957,75 @@ test('create, close, reopen a project on disk', async () => {
   await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest', 'stormfront'])
   await expect(page.getByTestId('status-words')).toHaveText(`${SENTENCE_WORDS + 2} words`)
 
+  // F-4.8: granular tags. "storm" selected in Scene 1 and right-clicked offers Tag selection…,
+  // whose picker puts dark-forest on just that word: a range span under the word with the
+  // tag's colour as a line, and a gutter bar on its paragraph. It is stored in the document, so
+  // it survives a save and a switch to Opening and back; Clear tags in selection takes it off
+  // again and leaves the link (the chips are unchanged).
+  const tagRanges = editor.locator('[data-tag-range]')
+  // The selection is set on the DOM (ProseMirror reads it back): arrow keys stepping across the
+  // range's spans after the reload lost presses once. Focus, not a click: ProseMirror writes its
+  // own selection back to the DOM shortly after a click's mouseup.
+  const selectStorm = async (): Promise<void> => {
+    await editor.focus()
+    await page.evaluate(() => {
+      const root = document.querySelector('[role="textbox"][aria-label="Document"]')
+      if (!root) throw new Error('no editor')
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const at = node.textContent?.indexOf('storm') ?? -1
+        if (at < 0) continue
+        const range = document.createRange()
+        range.setStart(node, at)
+        range.setEnd(node, at + 'storm'.length)
+        window.getSelection()?.removeAllRanges()
+        window.getSelection()?.addRange(range)
+        return
+      }
+      throw new Error('no "storm" in the editor')
+    })
+    await expect
+      .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+      .toBe('storm')
+  }
+  const rightClickSelection = async (): Promise<void> => {
+    const box = await page.evaluate(() => {
+      const rect = window.getSelection()?.getRangeAt(0).getBoundingClientRect()
+      return rect ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } : null
+    })
+    if (!box) throw new Error('no selection to right-click')
+    await page.mouse.click(box.x, box.y, { button: 'right' })
+  }
+  await selectStorm()
+  await rightClickSelection()
+  await page.getByRole('menuitem', { name: 'Tag selection…' }).click()
+  const rangePicker = page.getByRole('group', { name: 'Tag selection' })
+  await rangePicker.getByRole('option', { name: 'dark-forest' }).click()
+  await expect(rangePicker).toHaveCount(0)
+  await expect(tagRanges).toHaveText(['storm'])
+  await expect(editor.locator('p').first()).toHaveClass(/tag-range-block/)
+  expect(
+    await editor
+      .locator('.tag-range-run')
+      .first()
+      .evaluate((el) => el.style.backgroundImage)
+  ).toContain('rgb(234, 88, 12)')
+  await page.keyboard.press('Control+s')
+  await expect.poll(() => savedTagRanges(scene1Row.id), { timeout: 3000 }).toHaveLength(1)
+  await opening.click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Opening')
+  await scene1.click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await expect(tagRanges).toHaveText(['storm'])
+  await selectStorm()
+  await rightClickSelection()
+  await page.getByRole('menuitem', { name: 'Clear tags in selection' }).click()
+  await expect(tagRanges).toHaveCount(0)
+  await expect(editor.locator('p').first()).not.toHaveClass(/tag-range-block/)
+  await page.keyboard.press('Control+s')
+  await expect.poll(() => savedTagRanges(scene1Row.id), { timeout: 3000 }).toEqual([])
+  await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest', 'stormfront'])
+
   // F-4.12: automatic mentions. A character tag created through the bridge is found in the
   // text once the save and the scan's debounce have run: the tag bar's Mentions list counts it
   // apart from the chips (nothing is linked, nothing is inserted), Jump selects the word, the
@@ -5258,6 +5327,31 @@ async function documentText(id: string): Promise<string | null> {
   )
   if (!result.ok) throw new Error(`document:get failed: ${result.error.message}`)
   return result.data.content ? plainText(result.data.content) : null
+}
+
+/** The tag ids of every tag range (F-4.8) in a saved document, one per marked text node. */
+async function savedTagRanges(id: string): Promise<string[]> {
+  const result = await page.evaluate<
+    IpcResult<{ id: string; content: TiptapNodeT | null }>,
+    string
+  >(
+    (nodeId) =>
+      window.mythscribe.invoke('document:get', { id: nodeId }) as Promise<
+        IpcResult<{ id: string; content: TiptapNodeT | null }>
+      >,
+    id
+  )
+  if (!result.ok) throw new Error(`document:get failed: ${result.error.message}`)
+  const ids: string[] = []
+  const walk = (n: TiptapNodeT): void => {
+    for (const mark of n.marks ?? []) {
+      if (mark.type === 'tagRange' && typeof mark.attrs?.tagId === 'string')
+        ids.push(mark.attrs.tagId)
+    }
+    for (const child of n.content ?? []) walk(child)
+  }
+  if (result.data.content) walk(result.data.content)
+  return ids
 }
 
 /** Every stored tag (F-4.1), as `tag:list` answers. */

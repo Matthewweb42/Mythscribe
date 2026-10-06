@@ -117,8 +117,8 @@ export interface EditorShortcut {
 /**
  * The chords bound inside the editing surface, in the order the reference lists them: the
  * StarterKit marks and blocks (F-3.1), the alignment keymap, save (F-3.2), ghost text (F-5.3),
- * the `#` suggestion (F-4.6), and the Escape that leaves focus mode (F-6.1). Strikethrough has
- * no chord: Ctrl+Shift+S is Insert scene (F-2.7).
+ * the `#` suggestion (F-4.6), tagging the selection (F-4.8), and the Escape that leaves focus
+ * mode (F-6.1). Strikethrough has no chord: Ctrl+Shift+S is Insert scene (F-2.7).
  */
 export const EDITOR_SHORTCUTS: readonly EditorShortcut[] = [
   { label: 'Bold', chord: { key: 'b', ctrl: true } },
@@ -140,5 +140,6 @@ export const EDITOR_SHORTCUTS: readonly EditorShortcut[] = [
   { label: 'Accept one word of the ghost text', chord: { key: 'Tab', shift: true } },
   { label: 'Dismiss the ghost text', chord: { key: 'Escape' } },
   { label: 'Insert a #tag', chord: { key: '#' } },
+  { label: 'Tag the selection', chord: { key: 't', ctrl: true, alt: true } },
   { label: 'Leave focus mode', chord: { key: 'Escape' } }
 ]

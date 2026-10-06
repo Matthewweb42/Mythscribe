@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Editor } from '@tiptap/core'
 import type { CSSProperties } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
+import { TAG_RANGE_MARK } from '@shared/tagRanges'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
@@ -14,6 +15,7 @@ import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useEditorZoom, usePageEdges } from '@renderer/features/shell/viewStore'
+import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
 import { useActiveEditorStore } from './activeEditorStore'
@@ -40,6 +42,8 @@ import { FocusModeButton } from './FocusModeButton'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
 import { TagBar } from './TagBar'
+import { TagPicker } from './TagPicker'
+import { TAG_RANGE_SELECTOR } from './TagRange'
 import { Toolbar } from './Toolbar'
 import { VibeWriteToggle } from './VibeWriteToggle'
 
@@ -106,6 +110,48 @@ const TOKEN_MENU_ITEMS: MenuItem[] = [
 ]
 
 /**
+ * A right-click over a selection or a tag range (F-4.8): where the menu opens and the text it
+ * acts on, `from < to` for a selection; `at` is the clicked range's position when there was none.
+ */
+interface RangeMenu {
+  x: number
+  y: number
+  from: number
+  to: number
+  at: number | null
+}
+
+/** The tag picker for a selection (F-4.8): where it opens and the text it tags, captured on open. */
+interface RangePicker {
+  x: number
+  y: number
+  from: number
+  to: number
+}
+
+/** The range picker's width (`w-64`) plus a margin, to keep it inside the window. */
+const RANGE_PICKER_WIDTH = 272
+const NO_EXCLUSIONS: string[] = []
+
+/** The menu over a selection; Clear is shown but not choosable when no range lies in it. */
+function rangeMenuItems(editor: Editor, menu: RangeMenu): MenuItem[] {
+  if (menu.at !== null) return [{ id: 'clear-tags-here', label: 'Clear tags here' }]
+  const type = editor.schema.marks[TAG_RANGE_MARK]
+  const tagged = type !== undefined && editor.state.doc.rangeHasMark(menu.from, menu.to, type)
+  return [
+    { id: 'tag-selection', label: 'Tag selection…' },
+    { id: 'clear-tags', label: 'Clear tags in selection', disabled: !tagged }
+  ]
+}
+
+/** The picker for the editor's selection, opened under its end (Mod+Alt+T). */
+function pickerAtSelection(editor: Editor): RangePicker {
+  const { from, to } = editor.state.selection
+  const coords = editor.view.coordsAtPos(to)
+  return { x: coords.left, y: coords.bottom, from, to }
+}
+
+/**
  * One editor instance for one loaded document; `content === null` is the read-only loading
  * state. The formatting settings (F-3.6) apply live: five of them are custom properties on the
  * pane (no remount); the scene-break text is an extension option, so changing it rebuilds the
@@ -114,9 +160,12 @@ const TOKEN_MENU_ITEMS: MenuItem[] = [
  * author's unsaved typing and a keystroke never resets the editor. Inline tag tokens (F-4.6)
  * are repainted from the bank whenever it changes (the resync pass; the `#` suggestion lives in
  * the extension), and a right-click on one opens the Remove / Open in Tag Manager menu. Remove
- * deletes the token only: links are the author's explicit choice and stay. VibeWrite (F-5.3)
- * runs only in the single-document view: the controller arms itself there and the toggle sits
- * in the toolbar's right slot, so a stacked region never shows ghost text. The voice exemplar
+ * deletes the token only: links are the author's explicit choice and stay. A right-click over a
+ * selection, or over a tag range (F-4.8), opens Tag selection… / Clear tags in selection (or
+ * Clear tags here); Tag selection… and Mod+Alt+T open the tag picker for the selected text, and
+ * the picked tag is linked to the document as an inline tag's is. Clearing ranges leaves links.
+ * VibeWrite (F-5.3) runs only in the single-document view: the controller arms itself there and
+ * the toggle sits in the toolbar's right slot, so a stacked region never shows ghost text. The voice exemplar
  * button (F-14.1), the rewrite button (F-14.10), and the editor's-notes button (F-14.8) sit
  * beside it, for the same reason, and so does the beta-reader button (F-14.11) (Proofread,
  * F-14.12, is a quick action in the assistant, F-5.17); the rewrite panel shows between the tag bar and the text while
@@ -143,6 +192,7 @@ function RegionEditor({
   onFocus: ((editor: Editor) => void) | undefined
 }): React.JSX.Element {
   const edit = useDocumentStore((s) => s.edit)
+  const [picker, setPicker] = useState<RangePicker | null>(null)
   const settings = useEditorSettings(format)
   const { sceneBreak } = settings
   const extensions = useMemo(
@@ -151,7 +201,8 @@ function RegionEditor({
         sceneBreak,
         onSave: () => void useDocumentStore.getState().saveNow(),
         onEscape: escapeFocusMode,
-        inlineTagNodeId: id
+        inlineTagNodeId: id,
+        onTagSelection: (editor) => setPicker(pickerAtSelection(editor))
       }),
     [sceneBreak, id]
   )
@@ -170,6 +221,8 @@ function RegionEditor({
   const sheet = usePageEdges() && !focus
   const surface = focus && background !== null
   const [menu, setMenu] = useState<TokenMenu | null>(null)
+  const [rangeMenu, setRangeMenu] = useState<RangeMenu | null>(null)
+  const closePicker = useCallback(() => setPicker(null), [])
 
   const editor = useEditor(
     {
@@ -226,22 +279,49 @@ function RegionEditor({
 
   useEffect(() => {
     const dom = editor.view.dom
+    // F-4.8: the selection as it was before the right button went down. The browser may select
+    // the misspelled word under the pointer before `contextmenu` fires; that word is main's
+    // spelling menu (F-3.11), not a selection the author made.
+    let before: { from: number; to: number } | null = null
+    const onMouseDown = (event: MouseEvent): void => {
+      if (event.button !== 2) return
+      const { from, to } = editor.state.selection
+      before = { from, to }
+    }
     const onContextMenu = (event: MouseEvent): void => {
-      const token =
-        event.target instanceof Element
-          ? event.target.closest<HTMLElement>(INLINE_TAG_SELECTOR)
-          : null
-      if (!token) return
+      const selection = before ?? editor.state.selection
+      before = null
+      const target = event.target instanceof Element ? event.target : null
+      const token = target?.closest<HTMLElement>(INLINE_TAG_SELECTOR) ?? null
+      if (token) {
+        event.preventDefault()
+        setMenu({
+          x: event.clientX,
+          y: event.clientY,
+          pos: editor.view.posAtDOM(token, 0),
+          tagId: token.dataset.id ?? ''
+        })
+        return
+      }
+      if (!editor.isEditable) return
+      const { from, to } = selection
+      const range = target?.closest<HTMLElement>(TAG_RANGE_SELECTOR) ?? null
+      if (from === to && !range) return
       event.preventDefault()
-      setMenu({
+      setRangeMenu({
         x: event.clientX,
         y: event.clientY,
-        pos: editor.view.posAtDOM(token, 0),
-        tagId: token.dataset.id ?? ''
+        from,
+        to,
+        at: from === to && range ? editor.view.posAtDOM(range, 0) : null
       })
     }
+    dom.addEventListener('mousedown', onMouseDown, true)
     dom.addEventListener('contextmenu', onContextMenu)
-    return () => dom.removeEventListener('contextmenu', onContextMenu)
+    return () => {
+      dom.removeEventListener('mousedown', onMouseDown, true)
+      dom.removeEventListener('contextmenu', onContextMenu)
+    }
   }, [editor])
 
   const onMenuSelect = (itemId: string): void => {
@@ -265,6 +345,35 @@ function RegionEditor({
     }
   }
 
+  const onRangeMenuSelect = (itemId: string): void => {
+    if (!rangeMenu) return
+    setRangeMenu(null)
+    const { from, to, at } = rangeMenu
+    if (Math.max(to, at ?? 0) > editor.state.doc.content.size) return
+    if (itemId === 'tag-selection') {
+      const x = Math.max(0, Math.min(rangeMenu.x, window.innerWidth - RANGE_PICKER_WIDTH))
+      setPicker({ x, y: rangeMenu.y, from, to })
+    } else if (itemId === 'clear-tags') {
+      editor.chain().focus().setTextSelection({ from, to }).clearTagRanges().run()
+    } else if (itemId === 'clear-tags-here' && at !== null) {
+      editor.chain().focus().clearTagRangesAt(at).run()
+    }
+  }
+
+  // F-4.8: the picked tag goes on the text captured when the picker opened (the search box has
+  // the focus meanwhile) and is linked to the document, as inserting an inline tag does.
+  const onRangePick = (tagId: string): void => {
+    if (!picker) return
+    setPicker(null)
+    const { from, to } = picker
+    if (to > editor.state.doc.content.size) return
+    editor.chain().focus().setTextSelection({ from, to }).setTagRange(tagId).run()
+    useDocumentTagStore
+      .getState()
+      .add(id, tagId)
+      .catch((err: unknown) => toast.error(describeError(err)))
+  }
+
   const tokenMenu = menu ? (
     <ContextMenu
       x={menu.x}
@@ -275,13 +384,39 @@ function RegionEditor({
     />
   ) : null
 
+  const popups = (
+    <>
+      {tokenMenu}
+      {rangeMenu ? (
+        <ContextMenu
+          x={rangeMenu.x}
+          y={rangeMenu.y}
+          items={rangeMenuItems(editor, rangeMenu)}
+          onSelect={onRangeMenuSelect}
+          onClose={() => setRangeMenu(null)}
+        />
+      ) : null}
+      {picker ? (
+        <div className="fixed z-40 w-64" style={{ left: picker.x, top: picker.y }}>
+          <TagPicker
+            excludeIds={NO_EXCLUSIONS}
+            label="Tag selection"
+            listLabel="Tags"
+            onPick={onRangePick}
+            onClose={closePicker}
+          />
+        </div>
+      ) : null}
+    </>
+  )
+
   // A region of a stack (F-3.8): the stack owns the column (and the sheet, F-7.11), so the
   // region is only its vertical padding.
   if (!toolbar)
     return (
       <>
         <EditorContent editor={editor} className="py-6" />
-        {tokenMenu}
+        {popups}
       </>
     )
   // The column and the surface inside it are flex items, so an empty document still fills the
@@ -328,7 +463,7 @@ function RegionEditor({
         />
       </div>
       <DocumentStatusBar id={id} editor={ready ? editor : null} />
-      {tokenMenu}
+      {popups}
     </div>
   )
 }

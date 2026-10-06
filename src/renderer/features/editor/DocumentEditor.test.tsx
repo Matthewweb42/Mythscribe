@@ -669,6 +669,103 @@ describe('DocumentEditor inline tags (F-4.6)', () => {
   })
 })
 
+describe('DocumentEditor granular tags (F-4.8)', () => {
+  const SCENE = 'Mara waited by the gate.'
+  const tagged = (): TiptapNodeT[] =>
+    paragraph().filter((n) => n.marks?.some((m) => m.type === 'tagRange'))
+  const ranges = (): HTMLElement[] =>
+    Array.from(box().querySelectorAll<HTMLElement>('[data-tag-range]'))
+  const menuItems = (): (string | null)[] =>
+    within(screen.getByRole('menu'))
+      .getAllByRole('menuitem')
+      .map((el) => el.textContent)
+  const mountScene = () =>
+    mountReadyWithEditor({ 'document:get': () => ({ id: 'sc-1', content: doc(SCENE) }) })
+
+  /** Selects `from..to`, right-clicks the paragraph, picks Tag selection… and then `tag`. */
+  async function tagSelection(editor: Editor, from: number, to: number, tag: string) {
+    act(() => {
+      editor.commands.setTextSelection({ from, to })
+    })
+    fireEvent.contextMenu(box().querySelector('p')!, { clientX: 40, clientY: 50 })
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Tag selection…' }))
+    const picker = screen.getByRole('group', { name: 'Tag selection' })
+    await userEvent.click(within(picker).getByRole('option', { name: tag }))
+    expect(screen.queryByRole('group', { name: 'Tag selection' })).not.toBeInTheDocument()
+  }
+
+  it('right-click over a selection: Tag selection… marks the text, paints it, and links the tag', async () => {
+    const editor = await mountScene()
+    const calls = install({ 'document:get': () => ({ id: 'sc-1', content: doc(SCENE) }) })
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 5 })
+    })
+    fireEvent.contextMenu(box().querySelector('p')!, { clientX: 40, clientY: 50 })
+    expect(menuItems()).toEqual(['Tag selection…', 'Clear tags in selection'])
+    expect(screen.getByRole('menuitem', { name: 'Clear tags in selection' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Tag selection…' }))
+    const picker = screen.getByRole('group', { name: 'Tag selection' })
+    expect(
+      within(picker)
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(tagFixture.map((t) => t.name))
+    await userEvent.click(within(picker).getByRole('option', { name: 'mara' }))
+    expect(tagged()).toEqual([
+      { type: 'text', text: 'Mara', marks: [{ type: 'tagRange', attrs: { tagId: 't-mara' } }] }
+    ])
+    expect(ranges()).toHaveLength(1)
+    expect(ranges()[0]).toHaveAttribute('data-tag-id', 't-mara')
+    expect(box().querySelector('p')).toHaveClass('tag-range-block')
+    await waitFor(() =>
+      expect(calls).toContainEqual(['documentTag:add', { nodeId: 'sc-1', tagId: 't-mara' }])
+    )
+  })
+
+  it('Clear tags in selection removes the ranges in it and leaves the link', async () => {
+    const editor = await mountScene()
+    await tagSelection(editor, 1, 5, 'mara')
+    await waitFor(() => expect(chips()).toEqual(['Remove mara']))
+    const calls = install({ 'document:get': () => ({ id: 'sc-1', content: doc(SCENE) }) })
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 12 })
+    })
+    fireEvent.contextMenu(box().querySelector('p')!, { clientX: 40, clientY: 50 })
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Clear tags in selection' }))
+    expect(tagged()).toEqual([])
+    expect(ranges()).toHaveLength(0)
+    expect(box().querySelector('p')).not.toHaveClass('tag-range-block')
+    expect(calls.filter(([channel]) => channel === 'documentTag:remove')).toHaveLength(0)
+    expect(chips()).toEqual(['Remove mara'])
+  })
+
+  it('right-click on a range without a selection offers Clear tags here, which clears it whole', async () => {
+    const editor = await mountScene()
+    await tagSelection(editor, 1, 12, 'dark-forest')
+    act(() => {
+      editor.commands.setTextSelection(3)
+    })
+    fireEvent.contextMenu(ranges()[0]!, { clientX: 40, clientY: 50 })
+    expect(menuItems()).toEqual(['Clear tags here'])
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Clear tags here' }))
+    expect(tagged()).toEqual([])
+  })
+
+  it('a word the browser selects on the right-click itself (a misspelling) opens no menu', async () => {
+    const editor = await mountScene()
+    act(() => {
+      editor.commands.setTextSelection(3)
+    })
+    const p = box().querySelector('p')!
+    fireEvent.mouseDown(p, { button: 2 })
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 5 })
+    })
+    fireEvent.contextMenu(p, { clientX: 40, clientY: 50 })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+})
+
 describe('DocumentEditor proofread (F-14.12)', () => {
   const SCENE = 'Into the dark woods they went, without a word.'
 

@@ -1,4 +1,11 @@
-import { canInsertNode, Extension, getSchema, Node, type Extensions } from '@tiptap/core'
+import {
+  canInsertNode,
+  Extension,
+  getSchema,
+  Node,
+  type Editor,
+  type Extensions
+} from '@tiptap/core'
 import Paragraph from '@tiptap/extension-paragraph'
 import TextAlign from '@tiptap/extension-text-align'
 import type { Schema } from '@tiptap/pm/model'
@@ -11,6 +18,7 @@ import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
 import { NameCheck } from './nameCheck'
 import { RewriteTarget } from './rewriteTarget'
+import { TagRange } from './TagRange'
 import { Typewriter } from './typewriter'
 
 export interface EditorSchemaOptions {
@@ -29,10 +37,12 @@ export interface EditorSchemaOptions {
    * The manuscript document the editor shows (F-4.6): adds the inline tag token and its `#`
    * suggestion, which links picked tags to this node, the ghost-text decoration (F-5.3), the
    * AI-origin mark its accepted text carries (F-14.6), the rewrite target highlight (F-14.10),
-   * the near-name underline (F-3.14), and find and replace in document (F-3.10). Left out for
-   * notes, which never get tags, suggestions, or the find bar.
+   * the near-name underline (F-3.14), find and replace in document (F-3.10), and the tag range
+   * mark (F-4.8). Left out for notes, which never get tags, suggestions, or the find bar.
    */
   inlineTagNodeId?: string
+  /** Runs on Mod+Alt+T over a selection in a manuscript document (F-4.8): open the range tag picker. */
+  onTagSelection?: (editor: Editor) => void
 }
 
 export interface SaveShortcutOptions {
@@ -198,7 +208,7 @@ export const OriginParagraph = Paragraph.extend({
  * document, the inline tag token with its `#` suggestion (F-4.6), the AI-origin mark (F-14.6,
  * wherever ghost text can insert), the ghost-text decoration (F-5.3, always in the schema
  * so toggling VibeWrite never rebuilds the editor), the rewrite target (F-14.10), find and
- * replace in document (F-3.10), and the
+ * replace in document (F-3.10), the tag range mark (F-4.8), and the
  * Escape hand-off (F-6.1) when the caller wants one. Lists, links, code blocks, horizontal rules, and the trailing node are off
  * so the document model stays what the compile views (F-3.12) and the AI post-processors
  * expect.
@@ -218,7 +228,8 @@ export function buildExtensions({
   sceneBreak,
   onSave,
   onEscape,
-  inlineTagNodeId
+  inlineTagNodeId,
+  onTagSelection
 }: EditorSchemaOptions): Extensions {
   const extensions: Extensions = [
     StarterKit.configure({
@@ -250,7 +261,8 @@ export function buildExtensions({
       RewriteTarget,
       Typewriter,
       NameCheck,
-      FindReplace
+      FindReplace,
+      TagRange.configure({ onTagSelection: onTagSelection ?? null })
     )
   }
   if (onEscape) extensions.push(EscapeShortcut.configure({ onEscape }))

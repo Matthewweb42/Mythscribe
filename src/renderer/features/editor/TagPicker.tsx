@@ -8,6 +8,10 @@ interface TagPickerProps {
   excludeIds: string[]
   onPick: (tagId: string) => void
   onClose: () => void
+  /** The popover's accessible name; the tag bar's "Add tag" by default. */
+  label?: string
+  /** The option list's accessible name; "Unassigned tags" by default. */
+  listLabel?: string
 }
 
 /** The unassigned tags whose name contains `query` (case-insensitive), in bank order. */
@@ -24,9 +28,16 @@ function pickerOptions(tags: (Tag | undefined)[], excludeIds: string[], query: s
  * The "Add tag" popover of the tag bar (F-4.4): a search box over the tags not yet on the
  * document, as a listbox. ArrowUp/ArrowDown move the active option, Enter or a click picks it,
  * Escape or a click outside closes. Linking only; tags are created in the Tags tab, which the
- * empty state points to.
+ * empty state points to. Tagging a selection (F-4.8) reuses it with its own labels and no
+ * exclusions, inside a wrapper placed where the menu opened.
  */
-export function TagPicker({ excludeIds, onPick, onClose }: TagPickerProps): React.JSX.Element {
+export function TagPicker({
+  excludeIds,
+  onPick,
+  onClose,
+  label = 'Add tag',
+  listLabel = 'Unassigned tags'
+}: TagPickerProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const root = useRef<HTMLDivElement>(null)
@@ -77,7 +88,7 @@ export function TagPicker({ excludeIds, onPick, onClose }: TagPickerProps): Reac
     <div
       ref={root}
       role="group"
-      aria-label="Add tag"
+      aria-label={label}
       className="absolute top-full right-0 z-30 mt-1 flex w-64 flex-col gap-1 rounded-md border border-line bg-surface-raised p-2 text-sm shadow-panel"
     >
       <input
@@ -101,7 +112,7 @@ export function TagPicker({ excludeIds, onPick, onClose }: TagPickerProps): Reac
         <ul
           id={listId}
           role="listbox"
-          aria-label="Unassigned tags"
+          aria-label={listLabel}
           className="m-0 max-h-48 list-none overflow-y-auto p-0"
         >
           {options.map((tag, index) => (
