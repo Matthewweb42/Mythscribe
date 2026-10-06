@@ -8,6 +8,7 @@ import type {
   ProjectInfo
 } from '@shared/ipc/contract'
 import type { UpdateState } from '@shared/updates'
+import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -105,6 +106,8 @@ beforeEach(() => {
   resetUpdateStore()
   fake = fakeClient()
   setIpcClient(fake.client)
+  // Closing the project flushes pending saves: none may be left registered by another file.
+  resetPendingSaves()
   useProjectStore.setState({ current: null, ready: true, busy: false, recents: [] })
   useDialogStore.setState({ modals: [], toasts: [] })
 })

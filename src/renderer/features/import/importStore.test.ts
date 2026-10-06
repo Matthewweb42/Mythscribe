@@ -18,6 +18,8 @@ import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { resetDocumentStore } from '@renderer/features/editor/documentStore'
+import { resetGoalsStore } from '@renderer/features/goals/goalsStore'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -169,6 +171,9 @@ beforeEach(() => {
   resetProposalStore()
   progress = null
   resetPendingSaves()
+  // A commit that rewrote scenes reloads their loaded copies: none may be left from another file.
+  resetDocumentStore()
+  resetGoalsStore()
   useProjectStore.setState({ current: project, busy: false })
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
