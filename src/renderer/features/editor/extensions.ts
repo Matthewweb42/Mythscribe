@@ -8,8 +8,8 @@ import {
 } from '@tiptap/core'
 import Paragraph from '@tiptap/extension-paragraph'
 import TextAlign from '@tiptap/extension-text-align'
-import type { Schema } from '@tiptap/pm/model'
-import { TextSelection } from '@tiptap/pm/state'
+import { DOMSerializer, type Schema } from '@tiptap/pm/model'
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import { IMPORTED_ORIGIN, PARAGRAPH_ORIGIN_ATTR } from '@shared/provenance'
 import { AiOrigin } from './aiOrigin'
@@ -220,6 +220,41 @@ export const OriginParagraph = Paragraph.extend({
  * a plain-text target. The HTML clipboard flavour is untouched, so rich targets still receive
  * paragraphs.
  */
+/**
+ * The rich-text clipboard flavour (F-3.13): the default HTML, with every copied paragraph set to
+ * `margin: 0`. Word, Google Docs, and mail clients give a bare `<p>` their own space after it,
+ * which reads as a blank line between paragraphs once pasted; the editor itself shows spacing and
+ * indent from its settings, never an empty line. Headings and scene breaks keep their spacing.
+ */
+export function clipboardSerializer(schema: Schema): DOMSerializer {
+  const base = DOMSerializer.fromSchema(schema)
+  const serializer = new DOMSerializer(base.nodes, base.marks)
+  const serialize = serializer.serializeFragment.bind(serializer)
+  serializer.serializeFragment = (fragment, options, target) => {
+    const dom = serialize(fragment, options, target)
+    if (dom instanceof DocumentFragment || dom instanceof HTMLElement) {
+      for (const p of dom.querySelectorAll('p')) {
+        p.style.marginTop = '0'
+        p.style.marginBottom = '0'
+      }
+    }
+    return dom
+  }
+  return serializer
+}
+
+const ClipboardParagraphs = Extension.create({
+  name: 'clipboardParagraphs',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('clipboardParagraphs'),
+        props: { clipboardSerializer: clipboardSerializer(this.editor.schema) }
+      })
+    ]
+  }
+})
+
 export const EDITOR_CORE_OPTIONS = {
   clipboardTextSerializer: { blockSeparator: '\n' }
 } as const
@@ -251,7 +286,8 @@ export function buildExtensions({
     OriginParagraph,
     TextAlign.configure({ types: ['heading', 'paragraph'], alignments: [...ALIGNMENTS] }),
     SceneBreak.configure({ text: sceneBreak }),
-    SaveShortcut.configure({ onSave })
+    SaveShortcut.configure({ onSave }),
+    ClipboardParagraphs
   ]
   if (inlineTagNodeId !== undefined) {
     extensions.push(

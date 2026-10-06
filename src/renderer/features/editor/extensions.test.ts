@@ -243,6 +243,33 @@ describe('imported paragraphs (F-12.2)', () => {
   })
 })
 
+describe('rich-text copy (F-3.13)', () => {
+  it('copies paragraphs with no margin, so a paste into Word shows no blank line between them', () => {
+    const built = new Editor({
+      extensions: buildExtensions({ sceneBreak: '* * *', onSave }),
+      coreExtensionOptions: EDITOR_CORE_OPTIONS,
+      content: {
+        type: 'doc',
+        content: [
+          { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'One' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'First.' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'Second.' }] }
+        ]
+      }
+    })
+    built.commands.selectAll()
+    const html = built.view.someProp('clipboardSerializer', (serializer) => {
+      const box = document.createElement('div')
+      box.append(serializer.serializeFragment(built.state.selection.content().content))
+      return box.innerHTML
+    })
+    built.destroy()
+    expect(html).toContain('<p style="margin-top: 0px; margin-bottom: 0px;">First.</p>')
+    expect(html).toContain('<p style="margin-top: 0px; margin-bottom: 0px;">Second.</p>')
+    expect(html).toMatch(/<h2[^>]*>One<\/h2>/)
+  })
+})
+
 describe('plain-text copy (F-3.13)', () => {
   /** What the clipboard's text/plain flavour gets for the whole document, as the component builds it. */
   const copiedText = (content: TiptapNodeT, inlineTagNodeId?: string): string => {

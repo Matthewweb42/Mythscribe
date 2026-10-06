@@ -10,7 +10,7 @@ describe('defaultEditorSettings', () => {
   it('uses manuscript style for novel and epic', () => {
     const expected = {
       fontSize: 16,
-      lineHeight: 2,
+      lineHeight: 1.5,
       paragraphSpacing: 0,
       paragraphIndent: 1.5,
       maxWidth: 700,

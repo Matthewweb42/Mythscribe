@@ -7,7 +7,7 @@ describe('editorStyle', () => {
     expect(editorStyle(defaultEditorSettings('novel'))).toEqual({
       '--ms-editor-max-width': '700px',
       '--ms-editor-font-size': '16px',
-      '--ms-editor-line-height': '2',
+      '--ms-editor-line-height': '1.5',
       '--ms-editor-paragraph-spacing': '0em',
       '--ms-editor-paragraph-indent': '1.5em'
     })
@@ -25,7 +25,7 @@ describe('editorStyle', () => {
     expect(editorStyle(defaultEditorSettings('novel'), 1.25)).toEqual({
       '--ms-editor-max-width': '875px',
       '--ms-editor-font-size': '20px',
-      '--ms-editor-line-height': '2',
+      '--ms-editor-line-height': '1.5',
       '--ms-editor-paragraph-spacing': '0em',
       '--ms-editor-paragraph-indent': '1.5em'
     })

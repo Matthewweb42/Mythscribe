@@ -76,7 +76,7 @@ describe('EditorSettingsTab (F-3.6, F-7.5)', () => {
   it('shows the store values and follows a change made elsewhere', async () => {
     open()
     expect(spin('Font size')).toHaveValue(16)
-    expect(spin('Line height')).toHaveValue(2)
+    expect(spin('Line height')).toHaveValue(1.5)
     expect(spin('Paragraph spacing')).toHaveValue(0)
     expect(spin('First-line indent')).toHaveValue(1.5)
     expect(spin('Max width')).toHaveValue(700)
@@ -210,7 +210,7 @@ describe('EditorSettingsTab (F-3.6, F-7.5)', () => {
     expect(box).toHaveAccessibleName('Preview')
     expect(box.style.getPropertyValue('--ms-editor-font-size')).toBe('18px')
     expect(box.style.getPropertyValue('--ms-editor-max-width')).toBe('800px')
-    expect(box.style.getPropertyValue('--ms-editor-line-height')).toBe('2')
+    expect(box.style.getPropertyValue('--ms-editor-line-height')).toBe('1.5')
     expect(box.style.getPropertyValue('--ms-editor-paragraph-spacing')).toBe('0em')
     expect(box.style.getPropertyValue('--ms-editor-paragraph-indent')).toBe('1.5em')
     // The sample uses the editor's own classes, so `app.css` styles it like the real pane.

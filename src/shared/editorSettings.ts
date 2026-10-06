@@ -38,9 +38,11 @@ export function defaultEditorSettings(format: NovelFormat): EditorSettings {
       typewriter: false
     }
   }
+  // A printed book's line height: between single spacing and the double-spaced manuscript look
+  // (the author's call, 2026-10-06); Settings › Editor changes it per project.
   return {
     fontSize: 16,
-    lineHeight: 2,
+    lineHeight: 1.5,
     paragraphSpacing: 0,
     paragraphIndent: 1.5,
     maxWidth: 700,
