@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_MODELS,
+  LOCAL_DEFAULT_MODELS,
   type AiErrorCode,
   type AiModelMap,
   type AiStatus,
@@ -29,7 +30,8 @@ const NO_KEY: AiStatus = {
   hasKey: false,
   hint: null,
   encryption: 'os',
-  models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS }
+  models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS, local: LOCAL_DEFAULT_MODELS },
+  local: { baseUrl: 'http://localhost:11434/v1' }
 }
 const WITH_KEY: AiStatus = { ...NO_KEY, hasKey: true, hint: 'sk-…abcd' }
 const ZERO = { requests: 0, tokens: 0, costUsd: 0 }
@@ -82,7 +84,7 @@ interface Fake {
   testAnswer: () => AiTestConnectionResult
   setKeyAnswer: () => AiStatus
   /** What `ai:setModels` answers; by default the status with the sent mapping. */
-  setModelsAnswer: (provider: 'openai' | 'cloud', models: AiModelMap) => AiStatus
+  setModelsAnswer: (provider: 'openai' | 'cloud' | 'local', models: AiModelMap) => AiStatus
   /** What `ai:setDailyCap` answers; by default the usage with the sent cap. */
   setDailyCapAnswer: (dailyCapUsd: number) => AiUsageSummary
 }
@@ -115,9 +117,15 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
             return fake.status as Output<C>
           case 'ai:setModels':
             fake.status = fake.setModelsAnswer(
-              (input as { provider: 'openai' | 'cloud' }).provider,
+              (input as { provider: 'openai' | 'cloud' | 'local' }).provider,
               (input as { models: AiModelMap }).models
             )
+            return fake.status as Output<C>
+          case 'ai:setLocalEndpoint':
+            fake.status = {
+              ...fake.status,
+              local: { baseUrl: (input as { baseUrl: string }).baseUrl }
+            }
             return fake.status as Output<C>
           case 'ai:testConnection':
             return fake.testAnswer() as Output<C>
@@ -379,7 +387,11 @@ describe('AiSettingsTab models (F-5.11)', () => {
   it('resets both tiers to the defaults through one save', async () => {
     await open({
       ...NO_KEY,
-      models: { openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-pro' }, cloud: DEFAULT_MODELS }
+      models: {
+        openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-pro' },
+        cloud: DEFAULT_MODELS,
+        local: LOCAL_DEFAULT_MODELS
+      }
     })
     expect(modelField('Fast tier')).toHaveValue('gpt-5.4-nano')
     await userEvent.click(button('Reset to defaults'))
@@ -518,7 +530,7 @@ describe('AiSettingsTab: Summarize all scenes (F-5.13)', () => {
 describe('AiSettingsTab AI source (F-15.4)', () => {
   const sets = (): unknown[] =>
     fake.calls.filter((c) => c.channel === 'aiSettings:set').map((c) => c.input)
-  const sourceRadio = (source: 'ownKey' | 'cloud'): HTMLElement =>
+  const sourceRadio = (source: 'ownKey' | 'cloud' | 'local'): HTMLElement =>
     screen.getByTestId(`ai-source-${source}`)
   const signIn = (): void => {
     useAccountStore.setState({
@@ -534,6 +546,35 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
     expect(keyField()).toBeInTheDocument()
     expect(screen.queryByTestId('ai-cloud-account')).not.toBeInTheDocument()
     expect(screen.getByText(/sent only to OpenAI/)).toBeInTheDocument()
+  })
+
+  it('offers a local model: the server form, the quality warning, the local map, and no key (F-5.15)', async () => {
+    await open()
+    await userEvent.click(sourceRadio('local'))
+    await waitFor(() => expect(sets()).toHaveLength(1))
+    expect(sets()[0]).toMatchObject({ source: 'local' })
+    expect(screen.queryByLabelText('API key', { selector: 'input' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('ai-local-warning')).toHaveTextContent('Local models are smaller')
+    expect(screen.getByText(/Nothing leaves this computer/)).toBeInTheDocument()
+    expect(modelField('Fast tier')).toHaveValue(LOCAL_DEFAULT_MODELS.fast)
+    // Test connection needs no key here.
+    expect(button('Test connection')).toBeEnabled()
+    const address = screen.getByLabelText('Server address', { selector: 'input' })
+    expect(address).toHaveValue('http://localhost:11434/v1')
+    expect(button('Save')).toBeDisabled()
+    await userEvent.clear(address)
+    await userEvent.type(address, 'localhost:1234')
+    expect(button('Save')).toBeDisabled()
+    await userEvent.clear(address)
+    await userEvent.type(address, 'http://192.168.1.20:1234/v1')
+    await userEvent.click(button('Save'))
+    await waitFor(() =>
+      expect(fake.calls.filter((c) => c.channel === 'ai:setLocalEndpoint')).toEqual([
+        { channel: 'ai:setLocalEndpoint', input: { baseUrl: 'http://192.168.1.20:1234/v1' } }
+      ])
+    )
+    // An address off this computer is said to be one.
+    expect(await screen.findByText(/your text leaves the machine/)).toBeInTheDocument()
   })
 
   it('writes the source, hides the key form, and names the signed-in account', async () => {
@@ -570,7 +611,11 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
   it('shows the Cloud rate beside each model only while Cloud is the source (F-15.11)', async () => {
     await open({
       ...NO_KEY,
-      models: { openai: DEFAULT_MODELS, cloud: { fast: 'gpt-5.4-mini', strong: 'my-finetune' } }
+      models: {
+        openai: DEFAULT_MODELS,
+        cloud: { fast: 'gpt-5.4-mini', strong: 'my-finetune' },
+        local: LOCAL_DEFAULT_MODELS
+      }
     })
     expect(screen.queryByTestId('ai-model-rate-fast')).not.toBeInTheDocument()
     await userEvent.click(sourceRadio('cloud'))
@@ -589,7 +634,11 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
   it('edits the Cloud map, leaving the key map alone', async () => {
     await open({
       ...NO_KEY,
-      models: { openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' }, cloud: DEFAULT_MODELS }
+      models: {
+        openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
+        cloud: DEFAULT_MODELS,
+        local: LOCAL_DEFAULT_MODELS
+      }
     })
     expect(modelField('Fast tier')).toHaveValue('gpt-5.4-nano')
     await userEvent.click(sourceRadio('cloud'))

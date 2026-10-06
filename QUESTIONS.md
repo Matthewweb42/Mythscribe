@@ -72,3 +72,9 @@ do. Review, then confirm, change, or delete the entry.
 - Alternatives: convert into a new folder next to the original; carry over only the documents, as the spec said; import background images too.
 - To change it: `src/main/project/legacyImport.ts`, `legacyTree.ts`, `legacySlate.ts`, `project:open` in `handlers.ts`.
 
+## 2026-10-06 · F-5.15 · Local model defaults and scope
+- Question: which models to ask a local server for before the author names theirs, whether the address is per project, and what "nothing leaves the machine" means for a server on the network.
+- Chosen: default `llama3.1` for both tiers (one model fits in memory on most machines); the server address is app-wide (default Ollama's `http://localhost:11434/v1`), the source stays per project like the key and Cloud; the AI tab says nothing leaves the computer only when the address is loopback, and warns otherwise. Local requests always cost $0 in the usage meter.
+- Alternatives: smaller defaults (`llama3.2` 3B) for speed; a per-project address; refusing non-loopback addresses.
+- To change it: `LOCAL_DEFAULT_MODELS` and `LOCAL_AI_DEFAULT_BASE_URL` in `src/shared/ai.ts`, `LocalEndpointForm` in `AiSettingsTab.tsx`.
+

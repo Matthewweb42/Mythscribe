@@ -5,6 +5,7 @@ import {
   AiErrorCode,
   AiModelMap,
   AiProviderId,
+  LocalAiBaseUrl,
   AiStatus,
   AiTestConnectionResult,
   AiUsage,
@@ -1493,6 +1494,14 @@ export const contract = {
    */
   'ai:setModels': {
     input: z.object({ provider: AiProviderId, models: AiModelMap }),
+    output: AiStatus
+  },
+  /**
+   * Sets where the local model server answers (F-5.15), app-wide; the next request goes there.
+   * An address that is not http(s) is VALIDATION.
+   */
+  'ai:setLocalEndpoint': {
+    input: z.object({ baseUrl: LocalAiBaseUrl }),
     output: AiStatus
   },
   /**

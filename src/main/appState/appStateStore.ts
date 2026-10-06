@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
-import { AiModels, defaultAiModels } from '@shared/ai'
+import { AiModels, LocalAiSettings, defaultAiModels, defaultLocalAiSettings } from '@shared/ai'
 import { BackupSettings, defaultBackupSettings } from '@shared/backups'
 import { RecentProjectEntry } from '@shared/ipc/contract'
 import { DiagnosticsSettings, defaultDiagnosticsSettings } from '@shared/diagnostics'
@@ -56,7 +56,9 @@ export const AppState = z.object({
    */
   window: WindowState.default(defaultWindowState),
   /** F-4.11: the author's saved tag templates, loadable in any project; none in older files. */
-  tagTemplates: z.array(CustomTagTemplate).default([])
+  tagTemplates: z.array(CustomTagTemplate).default([]),
+  /** F-5.15: where the local model server answers; Ollama's default address in older files. */
+  localAi: LocalAiSettings.default(defaultLocalAiSettings)
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -72,7 +74,8 @@ export const EMPTY_APP_STATE: AppState = {
   view: defaultViewSettings(),
   backups: defaultBackupSettings(),
   window: defaultWindowState(),
-  tagTemplates: []
+  tagTemplates: [],
+  localAi: defaultLocalAiSettings()
 }
 
 export class AppStateStore {

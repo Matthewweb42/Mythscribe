@@ -19,7 +19,13 @@ import {
   inputBudget,
   outputBudget,
   priceFor,
-  testConnectionFailure
+  testConnectionFailure,
+  LOCAL_DEFAULT_MODELS,
+  LOCAL_AI_DEFAULT_BASE_URL,
+  LocalAiBaseUrl,
+  defaultLocalAiSettings,
+  defaultModelsFor,
+  isLoopbackUrl
 } from './ai'
 
 describe('priceFor (F-5.14)', () => {
@@ -142,12 +148,17 @@ describe('AiModels (F-15.4)', () => {
       openai: { ...DEFAULT_MODELS },
       cloud: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-mini' }
     }
-    expect(AiModels.parse(models)).toEqual(models)
+    // A map stored before F-5.15 gains the local map with its defaults.
+    expect(AiModels.parse(models)).toEqual({ ...models, local: LOCAL_DEFAULT_MODELS })
     expect(AiModels.parse(defaultAiModels())).toEqual(defaultAiModels())
   })
 
-  it('defaults both provider maps to the default models', () => {
-    expect(defaultAiModels()).toEqual({ openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS })
+  it('defaults the OpenAI and Cloud maps to the default models, and the local map to its own', () => {
+    expect(defaultAiModels()).toEqual({
+      openai: DEFAULT_MODELS,
+      cloud: DEFAULT_MODELS,
+      local: LOCAL_DEFAULT_MODELS
+    })
   })
 })
 
@@ -157,5 +168,31 @@ describe('AiErrorCode (F-15.4)', () => {
     expect(AiErrorCode.parse('NO_CREDIT')).toBe('NO_CREDIT')
     expect(AI_NEXT_STEP.SIGNED_OUT).toBe('Sign in on the Account tab in Settings.')
     expect(AI_NEXT_STEP.NO_CREDIT).toBe('Buy credits on the Account tab in Settings.')
+  })
+})
+
+describe('local model settings (F-5.15)', () => {
+  it('accepts http and https addresses only, and tells a loopback one from a network one', () => {
+    expect(LocalAiBaseUrl.safeParse('http://localhost:11434/v1').success).toBe(true)
+    expect(LocalAiBaseUrl.safeParse(' https://models.lan/v1 ').data).toBe('https://models.lan/v1')
+    for (const bad of ['', 'localhost:11434', 'ftp://host', 'http://', 'x'.repeat(301)]) {
+      expect(LocalAiBaseUrl.safeParse(bad).success).toBe(false)
+    }
+    for (const near of [
+      'http://localhost:11434/v1',
+      'http://127.0.0.1:1234/v1',
+      'http://[::1]:8080'
+    ]) {
+      expect(isLoopbackUrl(near)).toBe(true)
+    }
+    for (const far of ['http://192.168.1.20:1234/v1', 'https://api.example.com', 'not a url']) {
+      expect(isLoopbackUrl(far)).toBe(false)
+    }
+  })
+
+  it('resets each provider to its own defaults', () => {
+    expect(defaultModelsFor('local')).toEqual(LOCAL_DEFAULT_MODELS)
+    expect(defaultModelsFor('cloud')).toEqual(DEFAULT_MODELS)
+    expect(defaultLocalAiSettings()).toEqual({ baseUrl: LOCAL_AI_DEFAULT_BASE_URL })
   })
 })

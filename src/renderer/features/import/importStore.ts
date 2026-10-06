@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { DEFAULT_MODELS } from '@shared/ai'
-import { isFeatureAllowed } from '@shared/aiSettings'
+import { isFeatureAllowed, providerForSource } from '@shared/aiSettings'
 import type { ImportDraft, ImportPlacement } from '@shared/import'
 import {
   estimateStructureCost,
@@ -73,7 +73,7 @@ const nextRequestId = (): string => `imp-${Date.now().toString(36)}-${++counter}
 /** The model the pass would run on: the fast tier of the provider this project's source sends through (F-15.4). */
 function fastModel(): string {
   const source = useAiSettingsStore.getState().settings?.source ?? 'ownKey'
-  const provider = source === 'cloud' ? 'cloud' : 'openai'
+  const provider = providerForSource(source)
   return useAiStore.getState().status?.models[provider].fast ?? DEFAULT_MODELS.fast
 }
 

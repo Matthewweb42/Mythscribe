@@ -5,7 +5,7 @@ import OpenAI, {
   AuthenticationError,
   RateLimitError
 } from 'openai'
-import { DEFAULT_MODELS, type Tier } from '@shared/ai'
+import { DEFAULT_MODELS, type AiProviderId, type Tier } from '@shared/ai'
 import {
   AiCancelledError,
   AiFallbackError,
@@ -30,6 +30,15 @@ export interface OpenAiProviderOptions {
    * to the next call without rebuilding the client. Defaults to `DEFAULT_MODELS`.
    */
   resolveModel?: (tier: Tier) => string
+  /**
+   * F-5.15: an OpenAI-compatible server other than OpenAI (a local Ollama or LM Studio). Its
+   * requests are logged under `id`, named `label` in error messages, and cap the output with
+   * `max_tokens`, the field every compatible server reads (OpenAI's reasoning-era
+   * `max_completion_tokens` is not universal).
+   */
+  baseURL?: string
+  id?: AiProviderId
+  label?: string
 }
 
 /**
@@ -39,19 +48,29 @@ export interface OpenAiProviderOptions {
  * This is the only file that imports the `openai` package.
  */
 export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions = {}): Provider {
-  const client = new OpenAI({ apiKey: key, fetch: options.fetch, maxRetries: 0 })
+  const client = new OpenAI({
+    apiKey: key,
+    fetch: options.fetch,
+    maxRetries: 0,
+    ...(options.baseURL === undefined ? {} : { baseURL: options.baseURL })
+  })
   const resolveModel = options.resolveModel ?? ((tier: Tier): string => DEFAULT_MODELS[tier])
+  const label = options.label ?? 'OpenAI'
+  const mapError = (err: unknown): AiProviderError => mapOpenAiError(err, label)
+  const compatible = options.baseURL !== undefined
 
   const params = (request: CompletionRequest): OpenAI.ChatCompletionCreateParamsNonStreaming => ({
     model: resolveModel(request.tier),
     messages: request.messages,
-    max_completion_tokens: request.maxTokens,
+    ...(compatible
+      ? { max_tokens: request.maxTokens }
+      : { max_completion_tokens: request.maxTokens }),
     ...(request.json ? { response_format: { type: 'json_object' as const } } : {}),
     ...(request.temperature === undefined ? {} : { temperature: request.temperature })
   })
 
   return {
-    id: 'openai',
+    id: options.id ?? 'openai',
     resolveModel,
 
     async complete(request): Promise<CompletionResult> {
@@ -68,7 +87,7 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
           }
         }
       } catch (err) {
-        throw mapOpenAiError(err)
+        throw mapError(err)
       }
     },
 
@@ -96,7 +115,7 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
         // request must not read as a short answer that gets logged and cached.
         assertNotCancelled(request.signal)
       } catch (err) {
-        throw mapOpenAiError(err)
+        throw mapError(err)
       }
     },
 
@@ -106,7 +125,7 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
         const model = await client.models.retrieve(resolveModel('fast'))
         return { model: model.id }
       } catch (err) {
-        throw mapOpenAiError(err)
+        throw mapError(err)
       }
     }
   }
@@ -123,24 +142,30 @@ function assertNotCancelled(signal: AbortSignal | undefined): void {
  * 401 text echoes (a masked form of) the key, and a 400 can echo the request, so neither is
  * passed through. The original error stays reachable as `cause` for the console.
  */
-export function mapOpenAiError(err: unknown): AiProviderError {
+export function mapOpenAiError(err: unknown, label = 'OpenAI'): AiProviderError {
   if (err instanceof AiProviderError) return err
   if (err instanceof APIUserAbortError || (err instanceof Error && err.name === 'AbortError')) {
     return new AiCancelledError(CANCELLED_MESSAGE, err)
   }
-  if (err instanceof APIConnectionError) return new AiNetworkError('Could not reach OpenAI.', err)
+  if (err instanceof APIConnectionError) return new AiNetworkError(`Could not reach ${label}.`, err)
   if (err instanceof AuthenticationError) {
-    return new InvalidKeyError('OpenAI rejected the API key.', err)
+    return new InvalidKeyError(`${label} rejected the API key.`, err)
   }
   if (err instanceof RateLimitError) {
     if (err.code === 'insufficient_quota') {
-      return new AiQuotaError("This key's OpenAI account has no credit left.", err)
+      return new AiQuotaError(`This key's ${label} account has no credit left.`, err)
     }
-    return new AiRateLimitError('OpenAI is rate-limiting this key.', err)
+    return new AiRateLimitError(`${label} is rate-limiting this key.`, err)
   }
   if (err instanceof APIError) {
+    if (err.status === 404 && label !== 'OpenAI') {
+      return new AiFallbackError(
+        `${label} does not have that model. Check the model names in Settings, or download it (for Ollama: ollama pull <model>).`,
+        err
+      )
+    }
     const status = typeof err.status === 'number' ? ` (HTTP ${err.status})` : ''
-    return new AiFallbackError(`OpenAI reported a problem${status}.`, err)
+    return new AiFallbackError(`${label} reported a problem${status}.`, err)
   }
-  return new AiFallbackError('OpenAI reported a problem.', err)
+  return new AiFallbackError(`${label} reported a problem.`, err)
 }

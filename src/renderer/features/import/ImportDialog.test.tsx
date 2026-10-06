@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { defaultAiModels } from '@shared/ai'
+import { defaultAiModels, defaultLocalAiSettings } from '@shared/ai'
 import { defaultAiSettings } from '@shared/aiSettings'
 import type { ImportDetectProgress, ImportDetectResult } from '@shared/importStructure'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
@@ -59,7 +59,8 @@ function allowDetect(): void {
       hasKey: true,
       hint: 'sk-…1234',
       encryption: 'os',
-      models: defaultAiModels()
+      models: defaultAiModels(),
+      local: defaultLocalAiSettings()
     }
   })
 }

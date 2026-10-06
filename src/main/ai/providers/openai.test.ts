@@ -337,3 +337,58 @@ describe('mapOpenAiError', () => {
     expect(mapOpenAiError(abortError()).code).toBe('CANCELLED')
   })
 })
+
+describe('an OpenAI-compatible local server (F-5.15)', () => {
+  const answer = (): Response =>
+    json(200, {
+      id: 'c',
+      object: 'chat.completion',
+      created: 0,
+      model: 'llama3.1',
+      choices: [
+        { index: 0, message: { role: 'assistant', content: 'Hello.' }, finish_reason: 'stop' }
+      ],
+      usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 }
+    })
+
+  it('posts to the server address, caps the output with max_tokens, and logs as local', async () => {
+    const { fetch, calls } = answering(answer)
+    const provider = buildOpenAiProvider('local', {
+      fetch,
+      baseURL: 'http://localhost:11434/v1',
+      id: 'local',
+      label: 'the local model server',
+      resolveModel: () => 'llama3.1'
+    })
+    expect(provider.id).toBe('local')
+    const result = await provider.complete({
+      tier: 'fast',
+      messages: [{ role: 'user', content: 'Hi' }],
+      maxTokens: 60
+    })
+    expect(result).toMatchObject({ text: 'Hello.', model: 'llama3.1' })
+    expect(calls[0]?.url).toBe('http://localhost:11434/v1/chat/completions')
+    const body = bodyOf(calls[0])
+    expect(body).toMatchObject({ model: 'llama3.1', max_tokens: 60 })
+    expect('max_completion_tokens' in body).toBe(false)
+  })
+
+  it('names the server in its errors and tells the author how to get a missing model', async () => {
+    const missing = buildOpenAiProvider('local', {
+      fetch: answering(() => apiError(404, null, 'model "nope" not found')).fetch,
+      baseURL: 'http://localhost:11434/v1',
+      label: 'the local model server'
+    })
+    await expect(
+      missing.complete({ tier: 'fast', messages: [{ role: 'user', content: 'Hi' }], maxTokens: 10 })
+    ).rejects.toThrowError(/the local model server does not have that model.*ollama pull/)
+    const down = buildOpenAiProvider('local', {
+      fetch: () => Promise.reject(new TypeError('fetch failed')),
+      baseURL: 'http://localhost:11434/v1',
+      label: 'the local model server'
+    })
+    await expect(
+      down.complete({ tier: 'fast', messages: [{ role: 'user', content: 'Hi' }], maxTokens: 10 })
+    ).rejects.toMatchObject({ code: 'NETWORK', message: 'Could not reach the local model server.' })
+  })
+})

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_MODELS, defaultAiModels } from '@shared/ai'
+import { DEFAULT_MODELS, defaultAiModels, defaultLocalAiSettings } from '@shared/ai'
 import { defaultBackupSettings } from '@shared/backups'
 import { defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { defaultFloating, defaultLayout } from '@shared/layout'
@@ -53,8 +53,29 @@ describe('AppStateStore', () => {
       view: defaultViewSettings(),
       backups: defaultBackupSettings(),
       window: defaultWindowState(),
-      tagTemplates: []
+      tagTemplates: [],
+      localAi: defaultLocalAiSettings()
     })
+  })
+
+  it("parses a file written before F-5.15 with Ollama's address and the local default models", () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        recents: [entry],
+        models: {
+          openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
+          cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' }
+        }
+      }),
+      'utf8'
+    )
+    const state = new AppStateStore(file).get()
+    expect(state.localAi).toEqual({ baseUrl: 'http://localhost:11434/v1' })
+    expect(state.models.local).toEqual(defaultAiModels().local)
+    expect(state.models.openai.fast).toBe('gpt-5.4-nano')
   })
 
   it('parses a file written before F-4.11 (no tag templates) as having none', () => {
@@ -148,7 +169,8 @@ describe('AppStateStore', () => {
     const store = new AppStateStore(file)
     const models = {
       openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
-      cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' }
+      cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' },
+      local: { fast: 'llama3.2', strong: 'qwen2.5:14b' }
     }
     expect(
       store.update((s) => ({
@@ -204,7 +226,11 @@ describe('AppStateStore', () => {
     const models = { openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' } }
     fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry], models }), 'utf8')
     const state = new AppStateStore(file).get()
-    expect(state.models).toEqual({ ...models, cloud: DEFAULT_MODELS })
+    expect(state.models).toEqual({
+      ...models,
+      cloud: DEFAULT_MODELS,
+      local: defaultAiModels().local
+    })
     expect(state.recents).toEqual([entry])
   })
 

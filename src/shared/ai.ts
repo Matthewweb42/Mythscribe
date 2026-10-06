@@ -7,13 +7,14 @@ import { z } from 'zod'
  */
 
 /** The provider ids as a tuple, so Drizzle enum columns and the zod enum share one owner. */
-export const AI_PROVIDER_IDS = ['openai', 'cloud'] as const
+export const AI_PROVIDER_IDS = ['openai', 'cloud', 'local'] as const
 export const AiProviderId = z.enum(AI_PROVIDER_IDS)
 export type AiProviderId = z.infer<typeof AiProviderId>
 
 export const AI_PROVIDER_LABEL: Record<AiProviderId, string> = {
   openai: 'OpenAI',
-  cloud: 'MythScribe Cloud'
+  cloud: 'MythScribe Cloud',
+  local: 'Local model'
 }
 
 /** Feature code requests a tier, never a model name (CLAUDE.md, token efficiency rule 1). */
@@ -34,6 +35,45 @@ export const TIER_USE: Record<Tier, string> = {
  */
 export const DEFAULT_MODELS: Record<Tier, string> = { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' }
 
+/**
+ * F-5.15: what a local server is asked for until the author names their own models. Ollama's
+ * names; one model for both tiers, since most machines hold one model in memory at a time.
+ */
+export const LOCAL_DEFAULT_MODELS: Record<Tier, string> = { fast: 'llama3.1', strong: 'llama3.1' }
+
+/** The default tier → model mapping of one provider (F-5.11 "Reset to defaults"). */
+export function defaultModelsFor(provider: AiProviderId): Record<Tier, string> {
+  return { ...(provider === 'local' ? LOCAL_DEFAULT_MODELS : DEFAULT_MODELS) }
+}
+
+/**
+ * F-5.15: where the local model answers. Any OpenAI-compatible server: Ollama's default is
+ * below; LM Studio's is `http://localhost:1234/v1`. App-wide, like the key.
+ */
+export const LOCAL_AI_DEFAULT_BASE_URL = 'http://localhost:11434/v1'
+export const LOCAL_AI_BASE_URL_MAX = 300
+export const LocalAiBaseUrl = z
+  .string()
+  .trim()
+  .max(LOCAL_AI_BASE_URL_MAX)
+  .refine((value) => /^https?:\/\/[^\s/]+/i.test(value), 'Enter an http:// or https:// address')
+export const LocalAiSettings = z.object({ baseUrl: LocalAiBaseUrl })
+export type LocalAiSettings = z.infer<typeof LocalAiSettings>
+
+export function defaultLocalAiSettings(): LocalAiSettings {
+  return { baseUrl: LOCAL_AI_DEFAULT_BASE_URL }
+}
+
+/** Whether an endpoint is on this computer, so "nothing leaves the machine" holds (F-5.15). */
+export function isLoopbackUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname.replace(/^\[|\]$/g, '')
+    return host === 'localhost' || host === '::1' || host.startsWith('127.')
+  } catch {
+    return false
+  }
+}
+
 export const AI_MODEL_MAX = 100
 /** A model id as entered in Settings (F-5.11); non-empty, trimmed, bounded. */
 export const ModelName = z.string().trim().min(1).max(AI_MODEL_MAX)
@@ -49,12 +89,18 @@ export type AiModelMap = z.infer<typeof AiModelMap>
 export const AiModels = z.object({
   openai: AiModelMap,
   /** F-15.4: the models the MythScribe Cloud proxy is asked for; same defaults as the key path. */
-  cloud: AiModelMap.default(() => ({ ...DEFAULT_MODELS }))
+  cloud: AiModelMap.default(() => ({ ...DEFAULT_MODELS })),
+  /** F-5.15: the models a local OpenAI-compatible server is asked for. */
+  local: AiModelMap.default(() => ({ ...LOCAL_DEFAULT_MODELS }))
 })
 export type AiModels = z.infer<typeof AiModels>
 
 export function defaultAiModels(): AiModels {
-  return { openai: { ...DEFAULT_MODELS }, cloud: { ...DEFAULT_MODELS } }
+  return {
+    openai: { ...DEFAULT_MODELS },
+    cloud: { ...DEFAULT_MODELS },
+    local: { ...LOCAL_DEFAULT_MODELS }
+  }
 }
 
 /** Length bounds for a key as entered; a shape outside them is refused with VALIDATION. */
@@ -116,7 +162,9 @@ export const AiStatus = z.object({
    * The effective tier → model mapping of every provider (F-5.11); the AI tab edits the map of
    * the source the project sends through (F-15.4), so both are carried rather than one.
    */
-  models: AiModels
+  models: AiModels,
+  /** F-5.15: the local server's address. */
+  local: LocalAiSettings
 })
 export type AiStatus = z.infer<typeof AiStatus>
 

@@ -85,13 +85,15 @@ describe('CreateProjectWizard', () => {
     expect(onCreate).toHaveBeenCalledWith('My Book', 'webnovel', 'ownKey', 1)
   })
 
-  it('offers both AI sources on step 3, own key first, and creates with the chosen one (F-15.11)', async () => {
+  it('offers the three AI sources on step 3, own key first, and creates with the chosen one (F-15.11, F-5.15)', async () => {
     const { onCreate } = setup()
     await goToSourceStep('My Book')
     expect(screen.getByRole('dialog')).toHaveTextContent('Step 3 of 4')
-    expect(screen.getAllByRole('radio')).toHaveLength(2)
+    expect(screen.getAllByRole('radio')).toHaveLength(3)
     expect(screen.getByRole('radio', { name: /^my own key/i })).toBeChecked()
     expect(screen.getByTestId('wizard-source-hint')).toHaveTextContent('Settings › AI')
+    await userEvent.click(screen.getByRole('radio', { name: /^local model/i }))
+    expect(screen.getByTestId('wizard-source-hint')).toHaveTextContent('Start Ollama or LM Studio')
     await userEvent.click(screen.getByRole('radio', { name: /^mythscribe cloud/i }))
     expect(screen.getByTestId('wizard-source-hint')).toHaveTextContent(
       'Sign in and buy credits under Settings › Account'
