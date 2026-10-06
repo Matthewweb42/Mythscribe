@@ -171,9 +171,10 @@ export function App(): React.JSX.Element {
     }
   }, [])
 
-  // F-1.5: the OS window title follows the open project.
+  // F-1.5: the OS window title names the app once and then the open project's file, as
+  // Scrivener does, so the in-app header carries neither the logo nor the app name.
   useEffect(() => {
-    document.title = current ? `${current.name} — MythScribe` : 'MythScribe'
+    document.title = current ? `MythScribe — ${current.path}` : 'MythScribe'
   }, [current])
 
   // F-15.9: the Supporter accent is app-wide, so it rides on <html> and `tokens.css` swaps the
@@ -391,16 +392,20 @@ export function App(): React.JSX.Element {
   return (
     <div className="flex h-full flex-col">
       {focus ? null : (
-        <header className="flex h-11 items-center gap-2 border-b border-line bg-surface px-4 text-sm">
-          {current ? <SidebarToggleButton /> : null}
-          <Logo size={16} />
-          <span className="font-semibold">MythScribe</span>
-          <MenuBar />
+        // The welcome screen's bar is only Settings (and an update notice) at the right; the
+        // menus live in the native menu (Alt) until a project is open.
+        <header
+          className={`flex h-11 items-center gap-2 px-4 text-sm ${current ? 'border-b border-line bg-surface' : ''}`}
+        >
           {current ? (
-            <span className="text-fg-muted">
-              / <span data-testid="project-name">{current.name}</span> ·{' '}
-              {formatLabel(current.format)}
-            </span>
+            <>
+              <SidebarToggleButton />
+              <MenuBar />
+              <span className="text-fg-muted">
+                <span data-testid="project-name">{current.name}</span> ·{' '}
+                {formatLabel(current.format)}
+              </span>
+            </>
           ) : null}
           <div className="ml-auto flex items-center gap-2">
             {current ? (

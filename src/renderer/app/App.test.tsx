@@ -306,8 +306,9 @@ describe('App', () => {
     render(<App />)
     await fillWizard('Serial', /^web novel/i)
     expect(await screen.findByTestId('project-name')).toHaveTextContent('Serial')
-    expect(screen.getByRole('banner')).toHaveTextContent('/ Serial · Web novel')
-    expect(document.title).toBe('Serial — MythScribe')
+    expect(screen.getByRole('banner')).toHaveTextContent('Serial · Web novel')
+    expect(screen.getByRole('banner')).not.toHaveTextContent('MythScribe')
+    expect(document.title).toBe(`MythScribe — ${info.path}`)
     // The tree labels the manuscript section by format and starts with nothing selected.
     expect(await screen.findByRole('treeitem', { name: 'Volume 1' })).toBeInTheDocument()
     expect(screen.getByRole('treeitem', { name: 'Arc 1' })).toBeInTheDocument()
@@ -337,8 +338,11 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
     expect(document.title).toBe('MythScribe')
-    // F-7.1: the menu bar stays; the project segment is gone.
-    expect(screen.getByRole('banner')).toHaveTextContent(/^MythScribeFileEditInsertViewToolsHelp$/)
+    // The welcome screen's bar is minimal: no menu bar, no project segment, Settings at the right.
+    expect(screen.queryByRole('menubar')).not.toBeInTheDocument()
+    expect(
+      within(screen.getByRole('banner')).getByRole('button', { name: /settings/i })
+    ).toBeInTheDocument()
     // Closing the project clears the tree store.
     expect(screen.queryByRole('tree')).not.toBeInTheDocument()
     expect(useTreeStore.getState().rootIds).toEqual([])
@@ -1485,24 +1489,12 @@ describe('App', () => {
   })
 
   describe('menu bar (F-7.1, F-7.7)', () => {
-    it('shows the bar on the welcome screen with the project items disabled, and File › New project opens the wizard', async () => {
+    it('hides the bar on the welcome screen, and File › New project from the native menu opens the wizard', async () => {
       install()
       render(<App />)
       await screen.findByRole('button', { name: /new project/i })
-      const bar = screen.getByRole('menubar', { name: 'Application menu' })
-      expect(
-        within(bar)
-          .getAllByRole('menuitem')
-          .map((m) => m.textContent)
-      ).toEqual(['File', 'Edit', 'Insert', 'View', 'Tools', 'Help'])
-      await userEvent.click(within(bar).getByRole('menuitem', { name: 'File' }))
-      const file = screen.getByRole('menu', { name: 'File' })
-      expect(within(file).getByRole('menuitem', { name: 'Save' })).toHaveAttribute(
-        'aria-disabled',
-        'true'
-      )
-      await userEvent.click(within(file).getByRole('menuitem', { name: 'New project' }))
-      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+      expect(screen.queryByRole('menubar')).not.toBeInTheDocument()
+      fire('menu:action', { id: 'newProject' })
       expect(await screen.findByRole('textbox', { name: 'Project name' })).toBeInTheDocument()
       // Cancel returns to the buttons, and the flag does not leak into the next welcome screen.
       await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))

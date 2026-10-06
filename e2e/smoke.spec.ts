@@ -954,7 +954,7 @@ test('create, close, reopen a project on disk', async () => {
   await firstSettings.getByRole('button', { name: 'Close settings' }).click()
   await expect(firstSettings).toHaveCount(0)
   // F-1.5: the shell header and window title carry the project name and format.
-  await expect(page).toHaveTitle('Smoke Novel — MythScribe')
+  await expect(page).toHaveTitle(`MythScribe — ${projectPath}`)
   await expect(page.locator('header')).toContainText('Web novel')
   expect(fs.existsSync(path.join(projectPath, 'project.db'))).toBe(true)
   expect(fs.existsSync(path.join(projectPath, 'assets'))).toBe(true)
