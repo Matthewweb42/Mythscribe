@@ -1,6 +1,7 @@
+import path from 'node:path'
 import type { NovelFormat, ProjectInfo } from '@shared/ipc/contract'
 import { AppError } from '../ipc/errors'
-import { createProject, openProject, type ProjectSession } from './projectStore'
+import { DB_FILE, createProject, openProject, type ProjectSession } from './projectStore'
 
 type Listener = (info: ProjectInfo | null) => void
 type BeforeCloseListener = (session: ProjectSession) => void
@@ -28,9 +29,19 @@ export class ProjectManager {
   }
 
   open(folder: string): ProjectInfo {
+    this.closeIfOpen(folder)
     const next = openProject(folder)
     this.replace(next)
     return next.info
+  }
+
+  /**
+   * Closes the open project when `input` (its folder or its project.db) names it. The database is
+   * held with an exclusive lock, so reopening it, or even reading it to locate it, needs this first.
+   */
+  closeIfOpen(input: string): void {
+    const target = path.basename(input).toLowerCase() === DB_FILE ? path.dirname(input) : input
+    if (this.session && path.resolve(this.session.folder) === path.resolve(target)) this.close()
   }
 
   close(): void {

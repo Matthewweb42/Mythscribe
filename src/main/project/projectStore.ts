@@ -8,6 +8,7 @@ import { project as projectTable, settings } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { insertNodes } from '../tree/treeStore'
 import { isLegacyDatabase } from './legacy'
+import { OPEN_LOCK_FILE, OpenLock } from './openLock'
 import { seedSettings, seedSkeleton } from './seed'
 
 /**
@@ -38,11 +39,16 @@ export class ProjectSession {
   constructor(
     readonly folder: string,
     readonly connection: Connection,
-    public info: ProjectInfo
+    public info: ProjectInfo,
+    private readonly lock: OpenLock | null = null
   ) {}
 
   close(): void {
-    this.connection.close()
+    try {
+      this.connection.close()
+    } finally {
+      this.lock?.release()
+    }
   }
 }
 
@@ -82,8 +88,10 @@ export function createProject(
   const createdFolder = !fs.existsSync(folder)
 
   let connection: Connection | null = null
+  let lock: OpenLock | null = null
   try {
     fs.mkdirSync(path.join(folder, ASSETS_DIR), { recursive: true })
+    lock = OpenLock.acquire(folder)
     connection = openDatabase(path.join(folder, DB_FILE))
     const now = new Date().toISOString()
     const row: ProjectRow = {
@@ -100,9 +108,15 @@ export function createProject(
       insertNodes(tx, skeleton ? rows : rows.filter((row) => row.sectionType != null))
       tx.insert(settings).values(seedSettings(format)).run()
     })
-    return new ProjectSession(folder, connection, toInfo(row, folder, connection.schemaVersion))
+    return new ProjectSession(
+      folder,
+      connection,
+      toInfo(row, folder, connection.schemaVersion),
+      lock
+    )
   } catch (err) {
     connection?.close()
+    lock?.release()
     removeCreateLeftovers(folder, createdFolder)
     throw err
   }
@@ -120,6 +134,7 @@ function removeCreateLeftovers(folder: string, createdFolder: boolean): void {
   for (const suffix of ['', '-wal', '-shm']) {
     fs.rmSync(path.join(folder, `${DB_FILE}${suffix}`), { force: true })
   }
+  fs.rmSync(path.join(folder, OPEN_LOCK_FILE), { force: true })
   const assets = path.join(folder, ASSETS_DIR)
   if (fs.existsSync(assets) && fs.readdirSync(assets).length === 0) fs.rmdirSync(assets)
 }
@@ -175,7 +190,14 @@ export function openProject(input: string): ProjectSession {
   const folder = location.folder
   fs.mkdirSync(path.join(folder, ASSETS_DIR), { recursive: true })
 
-  const connection = openDatabase(path.join(folder, DB_FILE))
+  const lock = OpenLock.acquire(folder)
+  let connection: Connection
+  try {
+    connection = openDatabase(path.join(folder, DB_FILE))
+  } catch (err) {
+    lock.release()
+    throw err
+  }
   try {
     const row = connection.orm.select().from(projectTable).get()
     if (!row) {
@@ -186,10 +208,12 @@ export function openProject(input: string): ProjectSession {
     return new ProjectSession(
       folder,
       connection,
-      toInfo({ ...row, lastOpened }, folder, connection.schemaVersion)
+      toInfo({ ...row, lastOpened }, folder, connection.schemaVersion),
+      lock
     )
   } catch (err) {
     connection.close()
+    lock.release()
     throw err
   }
 }

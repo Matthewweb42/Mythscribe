@@ -553,6 +553,7 @@ export function registerHandlers({
     const chosen = path ?? (await dialogs.chooseProjectToOpen())
     if (!chosen) return null
     let folder = chosen
+    manager.closeIfOpen(chosen)
     // F-1.6: a v0 project is converted after the author agrees; the original is kept beside it.
     const location = locateProject(chosen)
     if (location.kind === 'legacy') {

@@ -11,6 +11,7 @@ import {
   type BackupEntry
 } from '@shared/backups'
 import { AppError } from '../ipc/errors'
+import { OPEN_LOCK_FILE } from '../project/openLock'
 import { DB_FILE, type ProjectSession } from '../project/projectStore'
 import { RECOVERY_DIR } from '../project/recoveryJournal'
 import { readZipDirectory, readZipEntry, zipBuffer, type ZipEntryInput } from './zip'
@@ -24,7 +25,13 @@ import { readZipDirectory, readZipEntry, zipBuffer, type ZipEntryInput } from '.
  */
 
 /** Top-level names that never go into a backup: the live database is replaced by the snapshot. */
-const EXCLUDED_TOP = new Set([DB_FILE, `${DB_FILE}-wal`, `${DB_FILE}-shm`, RECOVERY_DIR])
+const EXCLUDED_TOP = new Set([
+  DB_FILE,
+  `${DB_FILE}-wal`,
+  `${DB_FILE}-shm`,
+  OPEN_LOCK_FILE,
+  RECOVERY_DIR
+])
 
 /** Formats that are compressed already; deflating them again only costs time. */
 const STORED_EXTENSIONS = new Set([

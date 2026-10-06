@@ -77,10 +77,12 @@ function build(
 }
 
 beforeEach(() => {
-  vi.useFakeTimers()
-  vi.setSystemTime(new Date(2026, 8, 17, 10, 0, 0))
+  // The project first, so its open-marker heartbeat runs on a real timer the queue's timer
+  // counts do not see.
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-queue-'))
   session = createSeededProject(projectFolderFor(tmp, 'Queue'), 'Queue', 'novel')
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date(2026, 8, 17, 10, 0, 0))
   db = session.connection.orm
   scenes = listNodes(db)
     .filter((row: NodeRow) => row.kind === 'document' && row.sectionType === null)

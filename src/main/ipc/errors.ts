@@ -12,6 +12,9 @@ export class AppError extends Error {
   }
 }
 
+/** SQLite failures of the disk or the file, as opposed to bad SQL or a constraint. */
+const SQLITE_IO = /^SQLITE_(IOERR|BUSY|LOCKED|CANTOPEN|FULL|READONLY|CORRUPT|NOTADB)/
+
 export function toIpcError(err: unknown): IpcError {
   if (err instanceof AppError) {
     return { code: err.code, message: err.message, details: err.details }
@@ -22,6 +25,11 @@ export function toIpcError(err: unknown): IpcError {
     if (code === 'EEXIST') return { code: 'ALREADY_EXISTS', message: err.message }
     if (code === 'EACCES' || code === 'EPERM' || code === 'EBUSY') {
       return { code: 'IO', message: err.message }
+    }
+    // SQLite's extended code (SQLITE_IOERR_WRITE, SQLITE_IOERR_SHMMAP, …) says which file
+    // operation failed, so it travels in the message: "disk I/O error" alone cannot be diagnosed.
+    if (typeof code === 'string' && SQLITE_IO.test(code)) {
+      return { code: 'IO', message: `${err.message} (${code})`, details: { sqliteCode: code } }
     }
     return { code: 'INTERNAL', message: err.message }
   }

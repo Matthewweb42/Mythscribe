@@ -15,6 +15,10 @@ export interface Connection {
 /** Opens (creating if needed) a project database, applies pragmas and pending migrations. */
 export function openDatabase(file: string): Connection {
   const sqlite = new Database(file)
+  // Exclusive locking before WAL (decided 2026-10-06): SQLite then keeps the WAL index in memory
+  // instead of a memory-mapped `-shm` file, which Google Drive and other virtual drives cannot
+  // serve (the "disk I/O error" the author hit). One connection per project is all the app uses.
+  sqlite.pragma('locking_mode = EXCLUSIVE')
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   sqlite.pragma('synchronous = NORMAL')

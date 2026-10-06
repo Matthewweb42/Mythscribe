@@ -71,6 +71,7 @@ describe('createBackupArchive / extractBackup (F-8.4)', () => {
     expect(names).toContain('project.db')
     expect(names).toContain('assets/backgrounds/dusk.png')
     expect(names.some((n) => n.startsWith('recovery'))).toBe(false)
+    expect(names).not.toContain('.mythscribe-open')
     expect(names.some((n) => n.endsWith('-wal') || n.endsWith('-shm') || n.endsWith('.tmp'))).toBe(
       false
     )
