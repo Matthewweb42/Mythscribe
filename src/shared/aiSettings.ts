@@ -180,7 +180,7 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       "The scene's text (the first 20,000 characters), its metadata, its brief plus the " +
       "previous scene's reader-knows-after line and the next scene's goal, the voice profile " +
-      '(stylometric rules and up to 3 exemplar passages), your author rules and banned ' +
+      '(stylometric rules, learned style notes, and up to 3 exemplar passages), your author rules and banned ' +
       `phrases, and ${STORY_BIBLE_SENDS}.`,
     minDial: 1
   },
@@ -190,7 +190,7 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'The sheets of the story-bible entries named in a scene, what the manuscript states about ' +
       "them in other scenes with the passages, the previous scene's timeline and this scene's, " +
       "the scene's brief plus the previous scene's reader-knows-after line and the next " +
-      "scene's goal, and the voice profile (stylometric rules and up to 3 exemplar passages) " +
+      "scene's goal, and the voice profile (stylometric rules, learned style notes, and up to 3 exemplar passages) " +
       "with your author rules and banned phrases; with them, the scene's text (the first " +
       '20,000 characters) when you ask for a check, or only the paragraphs that state ' +
       'something different when it runs after you pause typing.',
@@ -201,7 +201,7 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       "The scene's text (the first 20,000 characters), or only the passage you selected, its " +
       "brief plus the previous scene's reader-knows-after line and the next scene's goal, the " +
-      'voice profile (stylometric rules and up to 3 exemplar passages) with your author rules ' +
+      'voice profile (stylometric rules, learned style notes, and up to 3 exemplar passages) with your author rules ' +
       'and banned phrases, and up to 200 words to leave alone: the names of your story-bible ' +
       'entries and tags and the words in the project dictionary.',
     minDial: 1
@@ -236,6 +236,14 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "notes (the first 1,500 characters), its brief plus the previous scene's " +
       "reader-knows-after line and the next scene's goal, " +
       `${STORY_BIBLE_SENDS}, and what you asked to focus on, only when you ask for suggested notes.`,
+    minDial: 1
+  },
+  voiceNotes: {
+    label: 'Learned style notes',
+    sends:
+      'Up to 6,000 characters of your own paragraphs from across the manuscript (never text ' +
+      'accepted from the AI) and the previous notes, about once per 5,000 new words, to keep ' +
+      'a few notes on how you write that the voice profile carries.',
     minDial: 1
   },
   betaReader: {
@@ -276,8 +284,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes, ' +
       "its metadata (location, POV, timeline), its brief plus the previous scene's " +
-      "reader-knows-after line and the next scene's goal, the voice profile (stylometric rules " +
-      'and up to 3 exemplar passages), your author rules and banned phrases, and ' +
+      "reader-knows-after line and the next scene's goal, the voice profile (stylometric rules, " +
+      'learned style notes, and up to 3 exemplar passages), your author rules and banned phrases, and ' +
       `${STORY_BIBLE_SENDS}. An answer that breaks the voice profile or uses a banned phrase is ` +
       'sent back once, with the same context plus the rule it broke, for a second try.',
     minDial: 2
@@ -294,7 +302,7 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       'The selected passage (up to 4,000 characters), up to 300 characters of manuscript text ' +
       'before and after it, the scene metadata (location, POV, timeline), the voice profile ' +
-      '(stylometric rules and up to 3 exemplar passages), your author rules and banned ' +
+      '(stylometric rules, learned style notes, and up to 3 exemplar passages), your author rules and banned ' +
       `phrases, and ${STORY_BIBLE_SENDS}. An off-voice rewrite is sent back once with the rule ` +
       'it broke; a regenerate carries your note.',
     minDial: 2

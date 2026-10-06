@@ -28,7 +28,13 @@ export const JOB_MAX_ATTEMPTS = 3
  * local scan on its own queue instance, so a missing key never holds it up. A new kind is a
  * new member and a new runner.
  */
-export const JobKind = z.enum(['summary', 'mentions'])
+export const JobKind = z.enum([
+  'summary',
+  'mentions',
+  // F-14.14: the voice job, one per project (keyed to the manuscript root): it re-picks the
+  // automatic exemplars locally and, when due and allowed, refreshes the learned style notes.
+  'voice'
+])
 export type JobKind = z.infer<typeof JobKind>
 
 /** What a persisted job can be: a running job is memory-only, so a crash resumes it as queued. */

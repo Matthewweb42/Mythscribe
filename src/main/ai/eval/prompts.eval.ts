@@ -18,6 +18,7 @@ import { parseProofreadAnswer } from '../proofread'
 import { parseRouteAnswer } from '../route'
 import { parseNotesSuggestAnswer, parseSynopsisAnswer } from '../sceneSuggest'
 import { parseSummaryAnswer } from '../summarize'
+import { parseVoiceNotesAnswer } from '../voiceNotes'
 import { parseWhatNextAnswer } from '../whatNext'
 import { EVAL_CASES, FIXTURE_PROFILE, type EvalCase } from './fixtures'
 import { renderLiveReport, renderTokenReport, tokenRows, type LiveResult } from './report'
@@ -343,6 +344,18 @@ function scoreNotesSuggest(answer: string): LiveResult['verdict'] {
   }
 }
 
+/** Learned style notes (F-14.14) score like the other JSON answers: they must parse to at least one note. */
+function scoreVoiceNotes(answer: string): LiveResult['verdict'] {
+  try {
+    const notes = parseVoiceNotesAnswer(answer)
+    return notes.length > 0
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: 'no notes kept' }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not { notes: string[] }' }
+  }
+}
+
 const BriefAnswer = z.object({
   goal: z.string(),
   conflict: z.string(),
@@ -527,6 +540,10 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
       }
       if (c.scoring.kind === 'notesSuggest') {
         results.push({ ...base, answer: reply.text, verdict: scoreNotesSuggest(reply.text) })
+        continue
+      }
+      if (c.scoring.kind === 'voiceNotes') {
+        results.push({ ...base, answer: reply.text, verdict: scoreVoiceNotes(reply.text) })
         continue
       }
       if (c.scoring.kind === 'structure') {

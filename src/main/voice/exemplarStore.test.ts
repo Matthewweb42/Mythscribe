@@ -7,7 +7,14 @@ import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { deleteNode, listNodes, type TreeDb } from '../tree/treeStore'
-import { addExemplar, listExemplars, removeExemplar } from './exemplarStore'
+import { getVoiceAutoState } from '../project/settingsStore'
+import {
+  addExemplar,
+  listExemplars,
+  passageHash,
+  removeExemplar,
+  replaceAutoExemplars
+} from './exemplarStore'
 import { currentVoiceVersion } from './versionCache'
 import { EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
 
@@ -113,5 +120,68 @@ describe('removeExemplar', () => {
     expect(listExemplars(db)).toEqual([])
     expectCode(() => removeExemplar(db, added.id), 'NOT_FOUND')
     expect(currentVoiceVersion()).toBe(before + 1)
+  })
+})
+
+describe('automatic exemplars (F-14.14)', () => {
+  const NOW = new Date('2099-01-01T09:00:00.000Z')
+  const pick = (
+    nodeId: string,
+    text: string
+  ): Parameters<typeof replaceAutoExemplars>[1][number] => ({
+    nodeId,
+    text,
+    pov: null,
+    kind: 'mixed'
+  })
+
+  it('marks a hand-marked exemplar as the author’s', () => {
+    expect(addExemplar(db, nodeOfKind('document'), PASSAGE).source).toBe('author')
+  })
+
+  it('replaces only the automatic rows, in pick order, and bumps the version only on a change', () => {
+    const scene = nodeOfKind('document')
+    const own = addExemplar(db, scene, PASSAGE)
+    const before = currentVoiceVersion()
+    expect(
+      replaceAutoExemplars(db, [pick(scene, 'First pick.'), pick(scene, 'Second pick.')], NOW)
+    ).toBe(true)
+    expect(currentVoiceVersion()).toBe(before + 1)
+    expect(listExemplars(db).map((e) => [e.text, e.source])).toEqual([
+      [PASSAGE, 'author'],
+      ['First pick.', 'auto'],
+      ['Second pick.', 'auto']
+    ])
+    // The same picks again write nothing and keep the profile's version.
+    expect(
+      replaceAutoExemplars(db, [pick(scene, 'First pick.'), pick(scene, 'Second pick.')], NOW)
+    ).toBe(false)
+    expect(currentVoiceVersion()).toBe(before + 1)
+    expect(replaceAutoExemplars(db, [pick(scene, 'Another.')], NOW)).toBe(true)
+    expect(listExemplars(db).map((e) => e.id)).toEqual([own.id, expect.any(String)])
+    expect(listExemplars(db)[1]).toMatchObject({ text: 'Another.', source: 'auto' })
+  })
+
+  it('does not count automatic rows against the hand-marked maximum', () => {
+    const scene = nodeOfKind('document')
+    replaceAutoExemplars(
+      db,
+      Array.from({ length: 6 }, (_, i) => pick(scene, `Pick ${i}.`)),
+      NOW
+    )
+    for (let i = 0; i < VOICE_EXEMPLAR_MAX; i++) addExemplar(db, scene, `${PASSAGE} ${i}`)
+    expectCode(() => addExemplar(db, scene, PASSAGE), 'VALIDATION')
+  })
+
+  it('remembers a removed automatic passage by its hash, and forgets nothing for a hand-marked one', () => {
+    const scene = nodeOfKind('document')
+    const own = addExemplar(db, scene, PASSAGE)
+    replaceAutoExemplars(db, [pick(scene, 'Picked passage.')], NOW)
+    const auto = listExemplars(db).find((e) => e.source === 'auto')
+    removeExemplar(db, own.id)
+    expect(getVoiceAutoState(db).dismissed).toEqual([])
+    removeExemplar(db, auto?.id ?? '')
+    expect(getVoiceAutoState(db).dismissed).toEqual([passageHash('Picked passage.')])
+    expect(listExemplars(db)).toEqual([])
   })
 })

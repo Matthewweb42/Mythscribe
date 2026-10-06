@@ -22,7 +22,7 @@ import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
 import { SNAPSHOT_KINDS, SNAPSHOT_SCOPES } from '../../shared/snapshots'
 import { TAG_CATEGORIES } from '../../shared/tags'
-import { EXEMPLAR_KINDS } from '../../shared/voice'
+import { EXEMPLAR_KINDS, VOICE_EXEMPLAR_SOURCES } from '../../shared/voice'
 
 /**
  * Drizzle schema. Migrations are generated from this file with `npm run db:generate`
@@ -225,7 +225,9 @@ export const voiceExemplar = sqliteTable(
     /** The source document's `scene_meta.pov` at mark time, trimmed; null when empty. */
     pov: text('pov'),
     kind: text('kind', { enum: EXEMPLAR_KINDS }).notNull(),
-    created: text('created').notNull()
+    created: text('created').notNull(),
+    /** F-14.14: `author` (marked by hand) or `auto` (picked by the local voice job). */
+    source: text('source', { enum: VOICE_EXEMPLAR_SOURCES }).notNull().default('author')
   },
   (t) => [index('voice_exemplar_created_idx').on(t.created)]
 )

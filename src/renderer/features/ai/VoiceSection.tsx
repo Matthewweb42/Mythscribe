@@ -3,9 +3,13 @@ import type { VoiceConsistencyReport } from '@shared/ipc/contract'
 import { RULE_MIN_WORDS } from '@shared/stylometry'
 import {
   EXEMPLAR_KIND_LABEL,
+  VOICE_AUTO_EXEMPLAR_MAX,
   VOICE_EXEMPLAR_MAX,
   VOICE_EXEMPLAR_TEXT_MAX,
-  VOICE_EXEMPLAR_TEXT_MIN
+  VOICE_EXEMPLAR_TEXT_MIN,
+  VOICE_NOTES_MIN_WORDS,
+  VOICE_NOTES_REFRESH_WORDS,
+  type VoiceNotes
 } from '@shared/voice'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -32,7 +36,10 @@ const preview = (text: string): string =>
  * loaded on mount (local, cached in main) and nothing renders until it lands; the exemplars
  * come from the store the project loaded, so a mark from the toolbar shows here at once. The
  * consistency report (F-14.7) is on demand: the button scores every scene against the profile
- * and lists the drifting ones first; a title selects that scene in the tree.
+ * and lists the drifting ones first; a title selects that scene in the tree. Since F-14.14 the
+ * section also shows what was learned automatically: the AI-made style notes with Clear, and
+ * the exemplars the voice job picked, marked "Picked automatically"; it re-lists the
+ * exemplars and loads the notes on mount, since both change in the background.
  */
 export function VoiceSection(): React.JSX.Element | null {
   const profile = useVoiceStore((s) => s.profile)
@@ -41,6 +48,10 @@ export function VoiceSection(): React.JSX.Element | null {
   const loadProfile = useVoiceStore((s) => s.loadProfile)
   const loadReport = useVoiceStore((s) => s.loadReport)
   const remove = useVoiceStore((s) => s.remove)
+  const notes = useVoiceStore((s) => s.notes)
+  const load = useVoiceStore((s) => s.load)
+  const loadNotes = useVoiceStore((s) => s.loadNotes)
+  const clearNotes = useVoiceStore((s) => s.clearNotes)
   const select = useTreeStore((s) => s.select)
   const [checking, setChecking] = useState(false)
   const headingId = useId()
@@ -48,7 +59,9 @@ export function VoiceSection(): React.JSX.Element | null {
 
   useEffect(() => {
     loadProfile().catch(report)
-  }, [loadProfile])
+    load().catch(report)
+    loadNotes().catch(report)
+  }, [loadProfile, load, loadNotes])
 
   const check = (): void => {
     setChecking(true)
@@ -60,6 +73,8 @@ export function VoiceSection(): React.JSX.Element | null {
   if (profile === null) return null
   const list = exemplars ?? profile.exemplars
   const percent = Math.round(profile.confidence * 100)
+  const marked = list.filter((exemplar) => exemplar.source === 'author').length
+  const picked = list.length - marked
 
   return (
     <section
@@ -71,8 +86,9 @@ export function VoiceSection(): React.JSX.Element | null {
         Voice profile
       </h3>
       <p className="m-0 text-xs text-fg-muted">
-        Built on this machine from your manuscript and the passages you mark; ghost text carries it
-        so continuations sound like you. Nothing here calls the AI.
+        Learned from your manuscript as you write: the rules and the example passages are worked out
+        on this machine, and the style notes come from the AI when it is on. Ghost text and the
+        other writing features carry the profile so suggestions sound like you.
       </p>
 
       <div className="flex flex-col gap-1">
@@ -89,8 +105,9 @@ export function VoiceSection(): React.JSX.Element | null {
           className="h-1.5 w-full"
         />
         <p data-testid="voice-words" className="m-0 text-xs text-fg-muted">
-          Built from {profile.wordCount.toLocaleString()} words of manuscript and {list.length} of{' '}
-          {VOICE_EXEMPLAR_MAX} exemplars. Add more scenes or mark exemplars to raise this.
+          Built from {profile.wordCount.toLocaleString()} words of manuscript, {marked} of{' '}
+          {VOICE_EXEMPLAR_MAX} marked exemplars, and {picked} picked automatically. It rises as you
+          write.
         </p>
       </div>
 
@@ -109,6 +126,13 @@ export function VoiceSection(): React.JSX.Element | null {
         )}
       </div>
 
+      <LearnedNotes
+        notes={notes}
+        onClear={() => {
+          clearNotes().catch(report)
+        }}
+      />
+
       <div className="flex flex-col gap-1">
         <span className="font-medium">Exemplars</span>
         {list.length > 0 ? (
@@ -121,6 +145,7 @@ export function VoiceSection(): React.JSX.Element | null {
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="text-xs text-fg-muted">
                     {EXEMPLAR_KIND_LABEL[exemplar.kind]} · POV {exemplar.pov ?? '—'}
+                    {exemplar.source === 'auto' ? ' · Picked automatically' : ''}
                   </span>
                   <span className="text-xs break-words">{preview(exemplar.text)}</span>
                 </div>
@@ -138,8 +163,12 @@ export function VoiceSection(): React.JSX.Element | null {
             ))}
           </ul>
         ) : (
-          <p className="m-0 text-xs text-fg-muted">No exemplars marked yet.</p>
+          <p className="m-0 text-xs text-fg-muted">No exemplars yet.</p>
         )}
+        <p className="m-0 text-xs text-fg-muted">
+          MythScribe picks up to {VOICE_AUTO_EXEMPLAR_MAX} passages of your own prose (never text
+          accepted from the AI) as you write; removing one keeps it from being picked again.
+        </p>
         <p className="m-0 text-xs text-fg-muted">
           Select {VOICE_EXEMPLAR_TEXT_MIN}–{VOICE_EXEMPLAR_TEXT_MAX.toLocaleString()} characters in
           the editor and use Mark voice exemplar in the toolbar. Up to {VOICE_EXEMPLAR_MAX}.
@@ -159,6 +188,58 @@ export function VoiceSection(): React.JSX.Element | null {
         {consistency !== null ? <ConsistencyList report={consistency} onOpen={select} /> : null}
       </div>
     </section>
+  )
+}
+
+/**
+ * The learned style notes (F-14.14): AI-made, so labelled as such with the date and model, and
+ * removable with Clear; before the first refresh, a line saying when they will come.
+ */
+function LearnedNotes({
+  notes,
+  onClear
+}: {
+  notes: VoiceNotes | null
+  onClear: () => void
+}): React.JSX.Element {
+  const headingId = useId()
+  const learned = notes?.notes ?? []
+  return (
+    <div className="flex flex-col gap-1" data-testid="voice-notes">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span id={headingId} className="font-medium">
+          What MythScribe has learned about your style
+        </span>
+        {learned.length > 0 ? (
+          <button type="button" onClick={onClear} className={BUTTON}>
+            Clear
+          </button>
+        ) : null}
+      </div>
+      {notes !== null && learned.length > 0 ? (
+        <>
+          <ul
+            aria-labelledby={headingId}
+            className="m-0 flex list-disc flex-col gap-0.5 pl-5 text-xs"
+          >
+            {learned.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+          <p data-testid="voice-notes-updated" className="m-0 text-xs text-fg-muted">
+            AI-made{notes.model === null ? '' : ` by ${notes.model}`}, updated{' '}
+            {new Date(notes.updated).toLocaleDateString()}. Refreshed about every{' '}
+            {VOICE_NOTES_REFRESH_WORDS.toLocaleString()} words you write.
+          </p>
+        </>
+      ) : (
+        <p className="m-0 text-xs text-fg-muted">
+          {notes === null
+            ? `Nothing yet. With the AI dial at Ask or higher, MythScribe notes how you write once the manuscript holds ${VOICE_NOTES_MIN_WORDS.toLocaleString()} words.`
+            : `Cleared. MythScribe learns again after about ${VOICE_NOTES_REFRESH_WORDS.toLocaleString()} more words.`}
+        </p>
+      )}
+    </div>
   )
 }
 

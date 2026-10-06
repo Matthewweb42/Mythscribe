@@ -26,7 +26,8 @@ const exemplar = (text: string, id = 'e-new'): VoiceExemplar => ({
   text,
   pov: null,
   kind: 'mixed',
-  created: '2026-09-14T08:00:00.000Z'
+  created: '2026-09-14T08:00:00.000Z',
+  source: 'author'
 })
 
 const button = (): HTMLElement => screen.getByRole('button', { name: 'Mark voice exemplar' })

@@ -243,7 +243,9 @@ export const AI_FEATURE_IDS = [
   // F-5.20: a suggested synopsis for the side panel.
   'synopsis',
   // F-5.20: suggested key points for the scene's notes.
-  'notesSuggest'
+  'notesSuggest',
+  // F-14.14: the learned style notes, refreshed in the background from the author's own prose.
+  'voiceNotes'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -290,7 +292,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-5.20: one synopsis of up to 1,000 characters as JSON.
   synopsis: 350,
   // F-5.20: up to 8 key points as JSON, each up to 200 characters.
-  notesSuggest: 600
+  notesSuggest: 600,
+  // F-14.14: up to 8 style notes of at most 160 characters each as JSON.
+  voiceNotes: 400
 }
 
 /**
@@ -339,7 +343,9 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   synopsis: 4_000,
   // F-5.20: the scene head-truncated to 12,000 characters, its summary, brief, current notes,
   // the author's focus, and the story bible at its 400-token budget.
-  notesSuggest: 6_000
+  notesSuggest: 6_000,
+  // F-14.14: up to 6,000 characters of the author's paragraphs, the previous notes, and the rules.
+  voiceNotes: 2_500
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

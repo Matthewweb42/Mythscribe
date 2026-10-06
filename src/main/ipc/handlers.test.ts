@@ -67,6 +67,9 @@ import { insertUsage } from '../ai/usageStore'
 import { upsertSummary } from '../document/summaryStore'
 import { replaceSceneFacts } from '../entity/observedFactStore'
 import { manuscriptDocuments } from '../voice/profile'
+import { passageHash, replaceAutoExemplars } from '../voice/exemplarStore'
+import { bumpVoiceVersion } from '../voice/versionCache'
+import { getVoiceAutoState, setVoiceNotes } from '../project/settingsStore'
 import { aiProposal } from '../db/schema'
 import { AppStateStore } from '../appState/appStateStore'
 import { BackupService } from '../backups/backupService'
@@ -6880,6 +6883,40 @@ describe('voice handlers (F-14.1)', () => {
     expect(gone.ok).toBe(false)
     if (!gone.ok) expect(gone.error.code).toBe('NOT_FOUND')
     expect(await invoke('voice:listExemplars', undefined)).toEqual([])
+  })
+
+  it('answers the learned style notes and clears them, and the profile follows (F-14.14)', async () => {
+    await ready()
+    await expect(invoke('voice:notes', undefined)).resolves.toBeNull()
+    await expect(invoke('voice:clearNotes', undefined)).resolves.toBeNull()
+    const orm = manager.require().connection.orm
+    setVoiceNotes(orm, {
+      notes: ['Opens on a concrete object.'],
+      basedOnWords: 0,
+      model: 'gpt-5.4-mini',
+      updated: '2026-10-06T09:00:00.000Z'
+    })
+    bumpVoiceVersion()
+    expect((await invoke('voice:notes', undefined))?.notes).toEqual(['Opens on a concrete object.'])
+    expect((await invoke('voice:profile', {})).notes).toEqual(['Opens on a concrete object.'])
+    const cleared = await invoke('voice:clearNotes', undefined)
+    expect(cleared).toMatchObject({ notes: [], model: null })
+    expect(await invoke('voice:notes', undefined)).toEqual(cleared)
+    expect((await invoke('voice:profile', {})).notes).toEqual([])
+  })
+
+  it('remembers a removed automatic exemplar so the voice job does not pick it again (F-14.14)', async () => {
+    const scene = await ready()
+    const orm = manager.require().connection.orm
+    replaceAutoExemplars(
+      orm,
+      [{ nodeId: scene, text: PASSAGE, pov: null, kind: 'mixed' }],
+      new Date('2099-01-01T00:00:00.000Z')
+    )
+    const [auto] = await invoke('voice:listExemplars', undefined)
+    expect(auto).toMatchObject({ text: PASSAGE, source: 'auto' })
+    expect(await invoke('voice:removeExemplar', { id: auto?.id ?? '' })).toBeNull()
+    expect(getVoiceAutoState(orm).dismissed).toEqual([passageHash(PASSAGE)])
   })
 
   it('never serves the profile of a previous project', async () => {

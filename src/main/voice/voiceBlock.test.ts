@@ -11,8 +11,8 @@ import {
 } from '@shared/authorRules'
 import type { VoiceExemplar, VoiceProfile } from '@shared/ipc/contract'
 import { computeStylometrics } from '@shared/stylometry'
-import { VOICE_BLOCK_TOKEN_BUDGET } from '@shared/voice'
-import { voiceBlock } from './voiceBlock'
+import { VOICE_BLOCK_TOKEN_BUDGET, VOICE_NOTES_TOKEN_BUDGET } from '@shared/voice'
+import { VOICE_NOTES_HEADING, voiceBlock } from './voiceBlock'
 
 const words = (n: number, word = 'word'): string => Array(n).fill(word).join(' ')
 
@@ -26,6 +26,7 @@ function exemplar(over: Partial<VoiceExemplar>): VoiceExemplar {
     pov: null,
     kind: 'mixed',
     created: `2026-09-14T00:00:${String(counter).padStart(2, '0')}.000Z`,
+    source: 'author',
     ...over
   }
 }
@@ -36,7 +37,8 @@ const NO_AUTHOR_RULES: AuthorRules = { rules: '', bannedPhrases: [] }
 function profile(
   rules: string[],
   exemplars: VoiceExemplar[],
-  authorRules: AuthorRules = NO_AUTHOR_RULES
+  authorRules: AuthorRules = NO_AUTHOR_RULES,
+  notes: string[] = []
 ): VoiceProfile {
   return {
     rules,
@@ -44,7 +46,8 @@ function profile(
     exemplars,
     authorRules,
     confidence: 0,
-    wordCount: 0
+    wordCount: 0,
+    notes
   }
 }
 
@@ -174,5 +177,67 @@ describe('voiceBlock author rules (F-14.2)', () => {
     )
     // The exemplar section is unchanged: the author block is budgeted apart from it.
     expect((withAuthor ?? '').replace(`\n\n${author}`, '')).toBe(without)
+  })
+
+  describe('learned style notes (F-14.14)', () => {
+    const NOTES = ['Opens scenes on a concrete object.', 'Uses said and nothing else.']
+
+    it('lists the notes after the rules and before the author rules', () => {
+      const block = voiceBlock(
+        profile(
+          ['Write in past tense.'],
+          [],
+          { rules: 'Mara never swears.', bannedPhrases: [] },
+          NOTES
+        ),
+        { text: DIALOGUE, pov: null }
+      )
+      expect(block).toBe(
+        [
+          "Match the author's voice:",
+          '- Write in past tense.',
+          '',
+          VOICE_NOTES_HEADING,
+          '- Opens scenes on a concrete object.',
+          '- Uses said and nothing else.',
+          '',
+          renderAuthorRulesBlock({ rules: 'Mara never swears.', bannedPhrases: [] })
+        ].join('\n')
+      )
+    })
+
+    it('carries notes alone when there are no rules or exemplars', () => {
+      expect(
+        voiceBlock(profile([], [], NO_AUTHOR_RULES, NOTES), { text: DIALOGUE, pov: null })
+      ).toBe(`Match the author's voice:\n\n${VOICE_NOTES_HEADING}\n- ${NOTES[0]}\n- ${NOTES[1]}`)
+    })
+
+    it('keeps the notes within their own token budget, dropping the later ones', () => {
+      const long = Array.from({ length: 8 }, (_, i) => `${i} ${words(30)}`.slice(0, 160))
+      const block =
+        voiceBlock(profile([], [], NO_AUTHOR_RULES, long), { text: DIALOGUE, pov: null }) ?? ''
+      const notes = block.slice(block.indexOf(VOICE_NOTES_HEADING))
+      expect(estimateTokens(notes)).toBeLessThanOrEqual(VOICE_NOTES_TOKEN_BUDGET)
+      expect(notes.split('\n- ').length - 1).toBeLessThan(long.length)
+      expect(notes).toContain(`- ${long[0]}`)
+    })
+
+    it('ranks a hand-marked exemplar ahead of an automatic one of the same score', () => {
+      const auto = exemplar({ text: `Auto ${words(20)}`, source: 'auto' })
+      const own = exemplar({ text: `Own ${words(20)}`, source: 'author' })
+      const block =
+        voiceBlock(profile(['Rule.'], [auto, own]), { text: words(50), pov: null }) ?? ''
+      expect(block.indexOf('Own ')).toBeLessThan(block.indexOf('Auto '))
+    })
+
+    it('keeps the whole block within the voice budget with notes and long exemplars', () => {
+      const long = Array.from({ length: 8 }, (_, i) => `${i} ${words(30)}`.slice(0, 160))
+      const exemplars = [1, 2, 3].map(() => exemplar({ text: words(400) }))
+      const block = voiceBlock(profile(['Rule.'], exemplars, NO_AUTHOR_RULES, long), {
+        text: words(50),
+        pov: null
+      })
+      expect(estimateTokens(block ?? '')).toBeLessThanOrEqual(VOICE_BLOCK_TOKEN_BUDGET)
+    })
   })
 })

@@ -29,7 +29,8 @@ export function MarkVoiceExemplarButton({
 }): React.JSX.Element {
   const selector = useCallback(() => (editor ? selectedText(editor).length : 0), [editor])
   const length = useEditorState({ editor, selector }) ?? 0
-  const count = useVoiceStore((s) => s.exemplars?.length ?? 0)
+  // F-14.14: only hand-marked exemplars count against the maximum; the automatic ones never do.
+  const count = useVoiceStore((s) => markedCount(s.exemplars))
   const add = useVoiceStore((s) => s.add)
 
   const full = count >= VOICE_EXEMPLAR_MAX
@@ -47,7 +48,7 @@ export function MarkVoiceExemplarButton({
     if (!editor) return
     add(nodeId, selectedText(editor))
       .then(() => {
-        const total = useVoiceStore.getState().exemplars?.length ?? count + 1
+        const total = markedCount(useVoiceStore.getState().exemplars)
         toast.success(`Added to your voice profile (${total} of ${VOICE_EXEMPLAR_MAX})`)
       })
       .catch((err: unknown) => toast.error(describeError(err)))
@@ -67,4 +68,8 @@ export function MarkVoiceExemplarButton({
       Voice exemplar
     </button>
   )
+}
+
+function markedCount(exemplars: readonly { source: 'author' | 'auto' }[] | null): number {
+  return exemplars?.filter((exemplar) => exemplar.source === 'author').length ?? 0
 }
