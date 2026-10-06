@@ -137,6 +137,34 @@ describe('flattenDraft', () => {
       partId: 'p1'
     })
   })
+
+  it('never sends the project’s own scenes (the combined outline, F-12.2)', () => {
+    const first = draft.parts[0]
+    if (!first) throw new Error('fixture')
+    const mixed: ImportDraft = {
+      ...draft,
+      parts: [
+        {
+          ...first,
+          chapters: first.chapters.map((chapter, index) =>
+            index === 0
+              ? {
+                  ...chapter,
+                  scenes: chapter.scenes.map((scene) =>
+                    scene.id === 'p1c1s1' ? { ...scene, existing: true } : scene
+                  )
+                }
+              : chapter
+          )
+        },
+        ...draft.parts.slice(1)
+      ]
+    }
+    const flat = flattenDraft(mixed)
+    expect(flat.map((p) => p.text)).toEqual(['Third.', 'Fourth.'])
+    // The chapter already started with the existing scene, so the next one does not start it.
+    expect(flat.map((p) => p.chapterStart)).toEqual([false, true])
+  })
 })
 
 describe('chunkParagraphs', () => {

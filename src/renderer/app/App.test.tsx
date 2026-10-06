@@ -23,6 +23,7 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAccountStore, useAccountStore } from '@renderer/features/account/accountStore'
 import { resetBackupStore } from '@renderer/features/backups/backupStore'
+import { draftFixture } from '@renderer/features/import/draftFixture'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetAuthorRulesStore, useAuthorRulesStore } from '@renderer/features/ai/authorRulesStore'
 import { resetAssistantStore, useAssistantStore } from '@renderer/features/ai/assistantStore'
@@ -1031,6 +1032,20 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /new project/i })).toBeInTheDocument()
+  })
+
+  it('imports a manuscript to start a project: the review names the project (F-12.2)', async () => {
+    const invoke = install({ 'import:open': draftFixture() })
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /import manuscript/i }))
+    expect(invoke).toHaveBeenCalledWith('import:open', {})
+    const review = await screen.findByTestId('import-dialog')
+    expect(within(review).getByRole('textbox', { name: 'Project name' })).toHaveValue('novel')
+    expect(within(review).getByTestId('import-commit')).toHaveTextContent('Create project')
+    // Cancel writes nothing and leaves the welcome screen as it was.
+    await userEvent.click(within(review).getByTestId('import-cancel'))
+    expect(screen.queryByTestId('import-dialog')).not.toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('import:createProject', expect.anything())
   })
 
   it('surfaces open errors as toasts', async () => {

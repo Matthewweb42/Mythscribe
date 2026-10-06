@@ -119,29 +119,10 @@ export function renameNode(draft: ImportDraft, id: string, title: string): Impor
 }
 
 /**
- * Keeps a node out of the import, or puts it back. Excluding a container excludes what is inside
- * it at commit; the children keep their own flags, so unexcluding the container restores them.
+ * Sends a chapter to the manuscript, the front matter, or the back matter (F-2.6's sections).
+ * A chapter already in the project stays in the manuscript: it is a folder with its own scenes,
+ * tags, and notes, not text to flatten into one matter document.
  */
-export function setExcluded(draft: ImportDraft, id: string, excluded: boolean): ImportDraft {
-  const found = findNode(draft, id)
-  if (!found) return draft
-  switch (found.kind) {
-    case 'part':
-      if (found.part.excluded === excluded) return draft
-      return replacePart(draft, found.partIndex, { ...found.part, excluded })
-    case 'chapter':
-      if (found.chapter.excluded === excluded) return draft
-      return replaceChapter(draft, found, { ...found.chapter, excluded })
-    case 'scene': {
-      if (found.scene.excluded === excluded) return draft
-      const scenes = [...found.chapter.scenes]
-      scenes[found.sceneIndex] = { ...found.scene, excluded }
-      return replaceChapter(draft, found, withScenes(found.chapter, scenes))
-    }
-  }
-}
-
-/** Sends a chapter to the manuscript, the front matter, or the back matter (F-2.6's sections). */
 export function setPlacement(
   draft: ImportDraft,
   chapterId: string,
@@ -149,6 +130,7 @@ export function setPlacement(
 ): ImportDraft {
   const found = findNode(draft, chapterId)
   if (found?.kind !== 'chapter' || found.chapter.placement === placement) return draft
+  if (found.chapter.existing === true) return draft
   return replaceChapter(draft, found, { ...found.chapter, placement })
 }
 
@@ -247,10 +229,7 @@ export function mergeScene(draft: ImportDraft, sceneId: string): ImportDraft {
   const previous = found.chapter.scenes[found.sceneIndex - 1]
   if (!previous) return draft
   const scenes = [...found.chapter.scenes]
-  scenes[found.sceneIndex - 1] = {
-    ...previous,
-    paragraphs: [...previous.paragraphs, ...found.scene.paragraphs]
-  }
+  scenes[found.sceneIndex - 1] = absorb(previous, [found.scene])
   scenes.splice(found.sceneIndex, 1)
   return replaceChapter(draft, found, withScenes(found.chapter, scenes))
 }
@@ -434,5 +413,217 @@ export function rejectSuggestion(draft: ImportDraft, id: string): ImportDraft {
   const found = findNode(draft, id)
   if (found?.kind === 'scene') return mergeScene(draft, id)
   if (found?.kind === 'chapter') return mergeChapter(draft, id)
+  return draft
+}
+
+/**
+ * `into` with `from` appended in order: the paragraphs follow on, `into` keeps its id, title,
+ * tags, and AI marks (the author named the opening, not the tail), and the existing scenes among
+ * `from` (and whatever they had absorbed) are recorded as absorbed, so Import deletes those
+ * nodes once their text is here and the dialog counts them as merged, not deleted.
+ */
+function absorb(into: ImportScene, from: readonly ImportScene[]): ImportScene {
+  const absorbed = [
+    ...(into.absorbed ?? []),
+    ...from.flatMap((scene) => [
+      ...(scene.existing === true ? [scene.id] : []),
+      ...(scene.absorbed ?? [])
+    ])
+  ]
+  return {
+    ...into,
+    paragraphs: [...into.paragraphs, ...from.flatMap((scene) => scene.paragraphs)],
+    ...(absorbed.length > 0 ? { absorbed } : {})
+  }
+}
+
+/** Every scene id in reading order. */
+export function sceneIds(draft: ImportDraft): string[] {
+  return draft.parts.flatMap((part) =>
+    part.chapters.flatMap((chapter) => chapter.scenes.map((scene) => scene.id))
+  )
+}
+
+/** Every chapter id in reading order. */
+export function chapterIds(draft: ImportDraft): string[] {
+  return draft.parts.flatMap((part) => part.chapters.map((chapter) => chapter.id))
+}
+
+/** The ids of one level in reading order: what a shift-click range selects over. */
+export function idsOfKind(draft: ImportDraft, kind: ImportLocation['kind']): string[] {
+  switch (kind) {
+    case 'part':
+      return draft.parts.map((part) => part.id)
+    case 'chapter':
+      return chapterIds(draft)
+    case 'scene':
+      return sceneIds(draft)
+  }
+}
+
+/**
+ * Takes parts, chapters, and scenes out of the draft (the row's ×, Delete selected). Whatever is
+ * inside a removed container goes with it. Imported text removed here is simply not imported;
+ * an existing node removed here is deleted at Import, which the dialog spells out first
+ * (`existingChanges`). Ids not in the draft are ignored; removing nothing answers the same draft.
+ */
+export function removeNodes(draft: ImportDraft, ids: readonly string[]): ImportDraft {
+  const gone = new Set(ids)
+  let changed = false
+  const parts = draft.parts.flatMap((part): ImportPart[] => {
+    if (gone.has(part.id)) {
+      changed = true
+      return []
+    }
+    let partChanged = false
+    const chapters = part.chapters.flatMap((chapter): ImportChapter[] => {
+      if (gone.has(chapter.id)) {
+        partChanged = true
+        return []
+      }
+      const scenes = chapter.scenes.filter((scene) => !gone.has(scene.id))
+      if (scenes.length === chapter.scenes.length) return [chapter]
+      partChanged = true
+      return [withScenes(chapter, scenes)]
+    })
+    if (!partChanged) return [part]
+    changed = true
+    return [withChapters(part, chapters)]
+  })
+  return changed ? { ...draft, parts } : draft
+}
+
+/**
+ * Merges scenes into one (Merge into one scene): their paragraphs in reading order, wherever
+ * they sit, become the first one's, which keeps its place, title, and id; the others leave the
+ * draft (`absorb` records the existing ones). Fewer than two scenes answers the same draft.
+ */
+export function mergeScenes(draft: ImportDraft, ids: readonly string[]): ImportDraft {
+  const wanted = new Set(ids)
+  const order = sceneIds(draft).filter((id) => wanted.has(id))
+  const [firstId, ...restIds] = order
+  if (firstId === undefined || restIds.length === 0) return draft
+  const rest = restIds.flatMap((id) => {
+    const found = findNode(draft, id)
+    return found?.kind === 'scene' ? [found.scene] : []
+  })
+  const without = removeNodes(draft, restIds)
+  return updateScene(without, firstId, (scene) => absorb(scene, rest))
+}
+
+/**
+ * Merges chapters into one: the first keeps its place, title, and placement, and the scenes of
+ * the others follow its own in reading order; the other chapters leave the draft. Fewer than two
+ * chapters answers the same draft.
+ */
+export function mergeChapters(draft: ImportDraft, ids: readonly string[]): ImportDraft {
+  const wanted = new Set(ids)
+  const order = chapterIds(draft).filter((id) => wanted.has(id))
+  const [firstId, ...restIds] = order
+  if (firstId === undefined || restIds.length === 0) return draft
+  const moving = restIds.flatMap((id) => {
+    const found = findNode(draft, id)
+    return found?.kind === 'chapter' ? found.chapter.scenes : []
+  })
+  const without = removeNodes(draft, restIds)
+  const found = findNode(without, firstId)
+  if (found?.kind !== 'chapter') return draft
+  return replaceChapter(
+    without,
+    found,
+    withScenes(found.chapter, [...found.chapter.scenes, ...moving])
+  )
+}
+
+/**
+ * Merge with next: a scene takes in the scene after it in reading order (across a chapter
+ * boundary too), a chapter the chapter after it. The last one has nothing to merge with.
+ */
+export function mergeWithNext(draft: ImportDraft, id: string): ImportDraft {
+  const found = findNode(draft, id)
+  if (found?.kind === 'scene') {
+    const order = sceneIds(draft)
+    const next = order[order.indexOf(id) + 1]
+    return next === undefined ? draft : mergeScenes(draft, [id, next])
+  }
+  if (found?.kind === 'chapter') {
+    const order = chapterIds(draft)
+    const next = order[order.indexOf(id) + 1]
+    return next === undefined ? draft : mergeChapters(draft, [id, next])
+  }
+  return draft
+}
+
+/**
+ * Move up / Move down, the keyboard alternative to dragging: among its siblings first, and at
+ * either end across into the neighbouring container (a scene to the end of the previous chapter
+ * or the start of the next, a chapter likewise between parts). At the very ends nothing happens.
+ */
+export function shiftNode(draft: ImportDraft, id: string, by: -1 | 1): ImportDraft {
+  const found = findNode(draft, id)
+  if (!found) return draft
+  const within = moveNode(draft, id, by)
+  if (within !== draft || found.kind === 'part') return within
+  const to = by < 0 ? 'prev' : 'next'
+  return found.kind === 'scene' ? moveScene(draft, id, to) : nestChapter(draft, id, to)
+}
+
+/** Where a dragged row lands relative to the row it was dropped on. */
+export type DropZone = 'before' | 'after' | 'into'
+
+/**
+ * Drag and drop: `id` lands before or after `targetId` when both are the same level, or at the
+ * end of `targetId` when that is the level above (`into`: a scene into a chapter, a chapter into
+ * a part). Anything else (a chapter dropped on a scene, a row on itself) answers the same draft.
+ */
+export function moveTo(
+  draft: ImportDraft,
+  id: string,
+  targetId: string,
+  zone: DropZone
+): ImportDraft {
+  if (id === targetId) return draft
+  const source = findNode(draft, id)
+  const target = findNode(draft, targetId)
+  if (!source || !target) return draft
+  const without = removeNodes(draft, [id])
+  const at = findNode(without, targetId)
+  if (!at) return draft
+
+  if (source.kind === 'scene') {
+    if (zone === 'into' && at.kind === 'chapter') {
+      return replaceChapter(
+        without,
+        at,
+        withScenes(at.chapter, [...at.chapter.scenes, source.scene])
+      )
+    }
+    if (zone !== 'into' && at.kind === 'scene') {
+      const scenes = [...at.chapter.scenes]
+      scenes.splice(at.sceneIndex + (zone === 'after' ? 1 : 0), 0, source.scene)
+      return replaceChapter(without, at, withScenes(at.chapter, scenes))
+    }
+    return draft
+  }
+  if (source.kind === 'chapter') {
+    if (zone === 'into' && at.kind === 'part') {
+      return replacePart(
+        without,
+        at.partIndex,
+        withChapters(at.part, [...at.part.chapters, source.chapter])
+      )
+    }
+    if (zone !== 'into' && at.kind === 'chapter') {
+      const chapters = [...at.part.chapters]
+      chapters.splice(at.chapterIndex + (zone === 'after' ? 1 : 0), 0, source.chapter)
+      return replacePart(without, at.partIndex, withChapters(at.part, chapters))
+    }
+    return draft
+  }
+  if (zone !== 'into' && at.kind === 'part') {
+    const parts = [...without.parts]
+    parts.splice(at.partIndex + (zone === 'after' ? 1 : 0), 0, source.part)
+    return { ...without, parts }
+  }
   return draft
 }

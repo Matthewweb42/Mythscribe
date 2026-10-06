@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { AiDial, AiSource } from '@shared/aiSettings'
+import type { ImportDraft } from '@shared/import'
 import type { NovelFormat, ProjectInfo, RecentProject } from '@shared/ipc/contract'
 import { ipc } from '@renderer/lib/ipc'
 import { flushPendingSaves } from './pendingSaves'
@@ -23,6 +24,15 @@ interface ProjectState {
     aiDial?: AiDial
   ) => Promise<ProjectInfo | null>
   open: (path?: string) => Promise<ProjectInfo | null>
+  /**
+   * Import to start (F-12.2): creates a project from a reviewed manuscript draft (no starter
+   * skeleton) and opens it. Null when the save dialog was cancelled; nothing was written then.
+   */
+  createFromImport: (
+    draft: ImportDraft,
+    name: string,
+    format: NovelFormat
+  ) => Promise<ProjectInfo | null>
   /**
    * Restores a backup as a new project and opens it (F-8.4): `file` is one of the open
    * project's backups; omitted, main asks for a backup file and where to put the copy. Null
@@ -77,6 +87,15 @@ export const useProjectStore = create<ProjectState>((set) => {
           aiSource,
           aiDial
         })
+        if (info) set({ current: info })
+        return info
+      })
+    },
+
+    createFromImport(draft, name, format) {
+      return run(async () => {
+        await flushPendingSaves()
+        const info = await ipc().invoke('import:createProject', { draft, name, format })
         if (info) set({ current: info })
         return info
       })

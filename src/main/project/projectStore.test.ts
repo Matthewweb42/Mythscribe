@@ -89,6 +89,30 @@ describe('createProject', () => {
     expect(isProjectFolder(folder)).toBe(true)
   })
 
+  it('writes its first content through fill, and removes the folder when fill throws (F-12.2)', () => {
+    const folder = projectFolderFor(tmp, 'Imported')
+    expect(() =>
+      createProject(folder, 'Imported', 'novel', {
+        skeleton: false,
+        fill: () => {
+          throw new Error('nothing to import')
+        }
+      })
+    ).toThrowError('nothing to import')
+    expect(fs.existsSync(folder)).toBe(false)
+
+    let filled = 0
+    const session = createProject(folder, 'Imported', 'novel', {
+      skeleton: false,
+      fill: (db) => {
+        filled = listNodes(db).length
+      }
+    })
+    open.push(session)
+    // Only the three section roots were there for fill to see: no starter skeleton.
+    expect(filled).toBe(3)
+  })
+
   it('leaves a pre-existing empty folder in place (but empty) when seeding fails', () => {
     const folder = path.join(tmp, 'Chosen.mythscribe')
     fs.mkdirSync(folder)

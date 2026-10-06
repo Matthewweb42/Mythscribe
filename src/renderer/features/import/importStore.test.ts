@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiModels, defaultLocalAiSettings } from '@shared/ai'
 import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
 import type { ImportDetectProgress, ImportDetectResult } from '@shared/importStructure'
@@ -8,6 +8,7 @@ import type {
   EventPayload,
   Input,
   Output,
+  ProjectInfo,
   TreeNode
 } from '@shared/ipc/contract'
 import { resetAiActivityStore, useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
@@ -16,9 +17,11 @@ import { resetAiStore, useAiStore } from '@renderer/features/ai/aiStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { useProjectStore } from '@renderer/features/project/projectStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
-import { draftFixture } from './draftFixture'
+import { draftFixture, mixedDraftFixture } from './draftFixture'
 import { resetImportStore, useImportStore } from './importStore'
 
 let invoke: ReturnType<typeof vi.fn<(channel: string, input: unknown) => Promise<unknown>>>
@@ -70,7 +73,15 @@ function install(overrides: Partial<Record<string, unknown>> = {}): void {
     }
     if (channel === 'tree:list') return treeFixture
     if (channel === 'import:open') return draftFixture()
-    if (channel === 'import:commit') return { nodes: importedRows(), words: 9 }
+    if (channel === 'import:commit') {
+      return {
+        nodes: importedRows(),
+        words: 9,
+        tree: [...treeFixture, ...importedRows()],
+        rewritten: []
+      }
+    }
+    if (channel === 'import:createProject') return project
     if (channel === 'proposal:settle') {
       settles.push(input as Input<'proposal:settle'>)
       return null
@@ -130,7 +141,24 @@ const detectOk = (over: Partial<Extract<ImportDetectResult, { ok: true }>> = {})
 
 const detect = () => useImportStore.getState().detect
 
+/** The open project an import writes into (and the one `import:createProject` answers). */
+const project: ProjectInfo = {
+  id: 'p-1',
+  name: 'Book',
+  format: 'novel',
+  path: '/tmp/Book.mythscribe',
+  created: 'c',
+  modified: 'm',
+  lastOpened: 'l',
+  schemaVersion: 1
+}
+
 const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.message)
+
+// The project store is app-wide: other files expect it to start with no project open.
+afterEach(() => {
+  useProjectStore.setState({ current: null, busy: false })
+})
 
 beforeEach(() => {
   install()
@@ -140,6 +168,8 @@ beforeEach(() => {
   resetAiActivityStore()
   resetProposalStore()
   progress = null
+  resetPendingSaves()
+  useProjectStore.setState({ current: project, busy: false })
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
 })
@@ -175,7 +205,7 @@ describe('useImportStore (F-12.2)', () => {
     await useImportStore.getState().open()
     const store = useImportStore.getState()
     store.rename('p2c1', 'The Return')
-    store.setExcluded('p1c2', true)
+    store.remove('p1c2')
     store.setPlacement('p1c1', 'front')
     store.move('p2', -1)
     store.splitScene('p2c1s1', 1)
@@ -183,8 +213,7 @@ describe('useImportStore (F-12.2)', () => {
     expect(draft?.parts.map((p) => p.id)).toEqual(['p2', 'p1'])
     expect(draft?.parts[0]?.chapters[0]?.title).toBe('The Return')
     expect(draft?.parts[0]?.chapters[0]?.scenes).toHaveLength(2)
-    expect(draft?.parts[1]?.chapters[0]?.placement).toBe('front')
-    expect(draft?.parts[1]?.chapters[1]?.excluded).toBe(true)
+    expect(draft?.parts[1]?.chapters.map((c) => [c.id, c.placement])).toEqual([['p1c1', 'front']])
     expect(invoke).toHaveBeenCalledTimes(1)
   })
 
@@ -196,7 +225,7 @@ describe('useImportStore (F-12.2)', () => {
     expect(useImportStore.getState().renamingId).toBeNull()
 
     useImportStore.getState().selectScene('p1c1s2')
-    useImportStore.getState().mergeScene('p1c1s2')
+    useImportStore.getState().mergeWithNext('p1c1s1')
     expect(useImportStore.getState().sceneId).toBeNull()
     expect(useImportStore.getState().draft?.parts[0]?.chapters[0]?.scenes).toHaveLength(1)
   })
@@ -247,6 +276,123 @@ describe('useImportStore (F-12.2)', () => {
   })
 })
 
+describe('useImportStore, selection, undo, and the combined outline (F-12.2 rework)', () => {
+  it('ticks rows, extends a range with Shift within one level, and merges the ticked scenes', async () => {
+    await useImportStore.getState().open()
+    const store = useImportStore.getState()
+    store.toggleSelect('p1c1s1', false)
+    store.toggleSelect('p1c2s1', true)
+    expect(useImportStore.getState().selected).toEqual(['p1c1s1', 'p1c1s2', 'p1c2s1'])
+    // A range never crosses levels: Shift on a chapter just ticks it.
+    store.toggleSelect('p2c1', true)
+    expect(useImportStore.getState().selected).toContain('p2c1')
+    store.toggleSelect('p2c1', false)
+    store.mergeSelected()
+    const scenes = useImportStore.getState().draft?.parts[0]?.chapters
+    expect(scenes?.map((c) => c.scenes.length)).toEqual([1, 0])
+    expect(useImportStore.getState().selected).toEqual([])
+  })
+
+  it('refuses to merge a mix of levels and deletes the selection instead when asked', async () => {
+    await useImportStore.getState().open()
+    const store = useImportStore.getState()
+    store.toggleSelect('p1c1s1', false)
+    store.toggleSelect('p2c1', false)
+    const before = useImportStore.getState().draft
+    store.mergeSelected()
+    expect(useImportStore.getState().draft).toBe(before)
+    store.removeSelected()
+    const draft = useImportStore.getState().draft
+    expect(draft?.parts[0]?.chapters[0]?.scenes.map((s) => s.id)).toEqual(['p1c1s2'])
+    expect(draft?.parts[1]?.chapters).toEqual([])
+  })
+
+  it('undoes edits one at a time and drops ids that left the draft from the selection', async () => {
+    await useImportStore.getState().open()
+    const original = useImportStore.getState().draft
+    useImportStore.getState().toggleSelect('p1c1s2', false)
+    useImportStore.getState().remove('p1c1s2')
+    expect(useImportStore.getState().selected).toEqual([])
+    useImportStore.getState().rename('p1', 'Book One')
+    expect(useImportStore.getState().history).toHaveLength(2)
+    useImportStore.getState().undo()
+    useImportStore.getState().undo()
+    expect(useImportStore.getState().draft).toBe(original)
+    useImportStore.getState().undo()
+    expect(useImportStore.getState().draft).toBe(original)
+  })
+
+  it('moves a dropped row through the pure edit', async () => {
+    await useImportStore.getState().open()
+    useImportStore.getState().moveTo('p2c1s1', 'p1c1s1', 'before')
+    const first = useImportStore.getState().draft?.parts[0]?.chapters[0]?.scenes[0]
+    expect(first?.id).toBe('p2c1s1')
+  })
+
+  it('rebuilds the tree from main’s answer, so deleted and moved rows follow', async () => {
+    install({
+      'import:open': mixedDraftFixture(),
+      'import:commit': {
+        nodes: importedRows(),
+        words: 9,
+        tree: [...treeFixture.filter((row) => row.id !== 'sc-1'), ...importedRows()],
+        rewritten: ['sc-2']
+      }
+    })
+    await useTreeStore.getState().load()
+    useTreeStore.getState().select('sc-1')
+    await useImportStore.getState().open()
+    await useImportStore.getState().commit()
+    const tree = useTreeStore.getState()
+    expect(tree.byId['sc-1']).toBeUndefined()
+    expect(tree.selectedId).toBe('i-s1')
+    expect(useImportStore.getState().draft).toBeNull()
+  })
+})
+
+describe('useImportStore, import to start (F-12.2)', () => {
+  it('reviews into a new project named after the file, and creates and opens it at Import', async () => {
+    useProjectStore.setState({ current: null })
+    allowDetect()
+    await useImportStore.getState().open()
+    expect(useImportStore.getState()).toMatchObject({
+      target: 'new',
+      projectName: 'novel',
+      projectFormat: 'novel',
+      // The new project has no AI settings yet: no pass is offered.
+      detect: null
+    })
+    useImportStore.getState().setProjectName('The Storm')
+    useImportStore.getState().setProjectFormat('epic')
+    const draft = useImportStore.getState().draft
+    await useImportStore.getState().commit()
+    expect(invoke).toHaveBeenCalledWith('import:createProject', {
+      draft,
+      name: 'The Storm',
+      format: 'epic'
+    })
+    expect(useProjectStore.getState().current).toEqual(project)
+    expect(useImportStore.getState().draft).toBeNull()
+    expect(toasts()).toEqual(['Created "Book" from novel.docx'])
+  })
+
+  it('keeps the review when the save dialog is cancelled, and refuses a blank name', async () => {
+    useProjectStore.setState({ current: null })
+    install({ 'import:createProject': null })
+    await useImportStore.getState().open()
+    await useImportStore.getState().commit()
+    expect(useImportStore.getState().draft).not.toBeNull()
+    expect(useImportStore.getState().busy).toBe(false)
+    expect(useProjectStore.getState().current).toBeNull()
+
+    useImportStore.getState().setProjectName('   ')
+    invoke.mockClear()
+    await useImportStore.getState().commit()
+    expect(invoke).not.toHaveBeenCalled()
+    expect(toasts()).toEqual(['Give the project a name first.'])
+  })
+})
+
 describe('useImportStore, the AI structure pass (F-12.3)', () => {
   it('offers the pass with an estimate, and nothing at all when the feature is not allowed', async () => {
     // No settings loaded: no offer, and nothing about AI in the dialog.
@@ -266,11 +412,11 @@ describe('useImportStore, the AI structure pass (F-12.3)', () => {
     expect(detect()?.estimate.costUsd).toBeGreaterThan(0)
   })
 
-  it('follows the author’s exclusions, so the price is for what would really be sent', async () => {
+  it('follows the author’s deletions, so the price is for what would really be sent', async () => {
     allowDetect()
     await useImportStore.getState().open()
     const before = detect()?.words ?? 0
-    useImportStore.getState().setExcluded('p2', true)
+    useImportStore.getState().remove('p2')
     expect(detect()?.words).toBe(before - 9)
     expect(detect()?.status).toBe('offer')
   })

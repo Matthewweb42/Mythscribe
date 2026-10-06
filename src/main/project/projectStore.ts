@@ -67,15 +67,26 @@ function toInfo(row: ProjectRow, folder: string, schemaVersion: number): Project
   }
 }
 
-/**
- * `skeleton: false` (F-1.6) seeds only the three sections, for a project whose tree comes from
- * elsewhere (a converted v0 project).
- */
+/** How a project starts: the starter skeleton (F-1.3) or not, and what to write into it first. */
+export interface CreateProjectOptions {
+  /**
+   * `false` (F-1.6) seeds only the three sections, for a project whose tree comes from
+   * elsewhere (a converted v0 project, a manuscript imported from the welcome screen).
+   */
+  skeleton?: boolean
+  /**
+   * Writes the project's first content once the database is seeded (F-12.2: the reviewed
+   * import). A throw undoes the whole create, folder included, as any other failed create does,
+   * so a refused import never leaves a half-made project behind.
+   */
+  fill?: (db: Connection['orm']) => void
+}
+
 export function createProject(
   folder: string,
   name: string,
   format: NovelFormat,
-  { skeleton = true }: { skeleton?: boolean } = {}
+  { skeleton = true, fill }: CreateProjectOptions = {}
 ): ProjectSession {
   if (fs.existsSync(folder)) {
     if (isProjectFolder(folder)) {
@@ -108,6 +119,7 @@ export function createProject(
       insertNodes(tx, skeleton ? rows : rows.filter((row) => row.sectionType != null))
       tx.insert(settings).values(seedSettings(format)).run()
     })
+    fill?.(connection.orm)
     return new ProjectSession(
       folder,
       connection,

@@ -6813,9 +6813,14 @@ describe('manuscript import', () => {
 
     const draft = await invoke('import:open', {})
     expect(draft?.source).toEqual({ name: 'Book.md', format: 'md', words: 7, paragraphs: 3 })
-    expect(draft?.parts[0]?.title).toBe('Book')
+    // The combined outline: the project's starter part first, the file's after it.
+    expect(draft?.parts.map((part) => [part.title, part.existing === true])).toEqual([
+      ['Part 1', true],
+      ['Book', false]
+    ])
+    expect(draft?.existing?.scenes).toHaveLength(1)
     expect(
-      draft?.parts[0]?.chapters.map((chapter) => [chapter.title, chapter.scenes.length])
+      draft?.parts[1]?.chapters.map((chapter) => [chapter.title, chapter.scenes.length])
     ).toEqual([
       ['Chapter One', 2],
       ['Chapter Two', 1]
@@ -6848,6 +6853,8 @@ describe('manuscript import', () => {
 
     const result = await invoke('import:commit', { draft })
     expect(result.words).toBe(7)
+    expect(result.rewritten).toEqual([])
+    expect(result.tree).toEqual(await invoke('tree:list', undefined))
     expect(result.nodes.map((node) => node.title)).toEqual([
       'Book',
       'Chapter One',
@@ -6867,14 +6874,60 @@ describe('manuscript import', () => {
     await ready()
     const draft = await invoke('import:open', { path: write('Book.md', MARKDOWN) })
     if (!draft) throw new Error('expected a draft')
-    const empty = { ...draft, parts: draft.parts.map((part) => ({ ...part, excluded: true })) }
+    // Everything imported left out, the project's own part untouched: nothing changes.
+    const empty = {
+      ...draft,
+      parts: draft.parts.map((part) => (part.existing ? part : { ...part, excluded: true }))
+    }
     await expect(invoke('import:commit', { draft: empty })).rejects.toThrowError(
       /^VALIDATION: Nothing selected to import\./
     )
   })
 
-  it('reports NO_PROJECT for both channels when nothing is open', async () => {
-    await expect(invoke('import:open', {})).rejects.toThrowError(/^NO_PROJECT: /)
+  it('reads a file for a new project when nothing is open, and refuses a commit', async () => {
+    const draft = await invoke('import:open', { path: write('Book.md', MARKDOWN) })
+    expect(draft?.existing).toBeUndefined()
+    expect(draft?.parts.map((part) => part.title)).toEqual(['Book'])
+    if (!draft) throw new Error('expected a draft')
+    await expect(invoke('import:commit', { draft })).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  // Import to start: the welcome screen's Import manuscript… creates the project from the draft.
+  it('creates a project without the skeleton, writes the draft, and opens it', async () => {
+    const draft = await invoke('import:open', { path: write('Book.md', MARKDOWN) })
+    if (!draft) throw new Error('expected a draft')
+    const info = await invoke('import:createProject', {
+      draft,
+      name: 'From File',
+      format: 'epic',
+      directory: tmp
+    })
+    expect(info).toMatchObject({ name: 'From File', format: 'epic' })
+    expect(await invoke('project:current', undefined)).toEqual(info)
+    const rows = await invoke('tree:list', undefined)
+    const outline = rows.filter((row) => row.hierarchyLevel !== null).map((row) => row.title)
+    expect(outline.sort()).toEqual(
+      ['Book', 'Chapter One', 'Chapter Two', 'Scene 1', 'Scene 1', 'Scene 2'].sort()
+    )
+  })
+
+  it('answers null when the save dialog is cancelled and leaves no folder for a refused draft', async () => {
+    const draft = await invoke('import:open', { path: write('Book.md', MARKDOWN) })
+    if (!draft) throw new Error('expected a draft')
+    expect(
+      await invoke('import:createProject', { draft, name: 'Nope', format: 'novel' })
+    ).toBeNull()
+    const empty = { ...draft, parts: draft.parts.map((part) => ({ ...part, excluded: true })) }
+    await expect(
+      invoke('import:createProject', {
+        draft: empty,
+        name: 'Empty',
+        format: 'novel',
+        directory: tmp
+      })
+    ).rejects.toThrowError(/^VALIDATION: Nothing selected to import\./)
+    expect(fs.readdirSync(tmp).some((name) => name.startsWith('Empty'))).toBe(false)
+    expect(await invoke('project:current', undefined)).toBeNull()
   })
 
   // F-12.3: the AI pass and what it leaves behind. The runner and the merge have their own

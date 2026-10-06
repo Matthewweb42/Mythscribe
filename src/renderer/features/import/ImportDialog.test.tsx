@@ -1,20 +1,29 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiModels, defaultLocalAiSettings } from '@shared/ai'
 import { defaultAiSettings } from '@shared/aiSettings'
 import type { ImportDetectProgress, ImportDetectResult } from '@shared/importStructure'
-import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
+import type {
+  Channel,
+  EventName,
+  EventPayload,
+  Input,
+  Output,
+  ProjectInfo
+} from '@shared/ipc/contract'
 import { resetAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetAiStore, useAiStore } from '@renderer/features/ai/aiStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { useProjectStore } from '@renderer/features/project/projectStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { ImportDialog } from './ImportDialog'
-import { draftFixture } from './draftFixture'
+import { draftFixture, mixedDraftFixture } from './draftFixture'
 import { resetImportStore, useImportStore } from './importStore'
 
 let invoke: ReturnType<typeof vi.fn<(channel: string, input: unknown) => Promise<unknown>>>
@@ -30,7 +39,8 @@ function install(overrides: Partial<Record<string, unknown>> = {}): void {
     }
     if (channel === 'tree:list') return treeFixture
     if (channel === 'import:open') return draftFixture()
-    if (channel === 'import:commit') return { nodes: [], words: 0 }
+    if (channel === 'import:commit')
+      return { nodes: [], words: 0, tree: treeFixture, rewritten: [] }
     if (channel === 'proposal:settle') return null
     if (channel === 'ai:cancel') return { cancelled: true }
     throw new Error(`unexpected ${channel}`)
@@ -103,8 +113,27 @@ const rowTitles = (): string[] =>
     return input instanceof HTMLInputElement ? input.value : (element.textContent ?? '')
   })
 
+/** The open project an import writes into. */
+const project: ProjectInfo = {
+  id: 'p-1',
+  name: 'Book',
+  format: 'novel',
+  path: '/tmp/Book.mythscribe',
+  created: 'c',
+  modified: 'm',
+  lastOpened: 'l',
+  schemaVersion: 1
+}
+
+// The project store is app-wide: other files expect it to start with no project open.
+afterEach(() => {
+  useProjectStore.setState({ current: null, busy: false })
+})
+
 beforeEach(() => {
   install()
+  resetPendingSaves()
+  useProjectStore.setState({ current: project, busy: false })
   resetImportStore()
   resetAiSettingsStore()
   resetAiStore()
@@ -151,16 +180,98 @@ describe('ImportDialog (F-12.2)', () => {
     expect(screen.queryByTestId('import-rename')).not.toBeInTheDocument()
   })
 
-  it('excludes a chapter and the summary follows', async () => {
+  it('deletes a chapter with its × and the summary follows; Undo brings it back', async () => {
     await open()
-    const exclude = within(row('p1c1')).getByTestId('import-exclude')
-    expect(exclude).toHaveAccessibleName('Exclude chapter Chapter One')
-    await userEvent.click(exclude)
-    expect(useImportStore.getState().draft?.parts[0]?.chapters[0]?.excluded).toBe(true)
+    expect(screen.getByTestId('import-undo')).toBeDisabled()
+    const remove = within(row('p1c1')).getByTestId('import-delete')
+    expect(remove).toHaveAccessibleName('Delete chapter Chapter One')
+    await userEvent.click(remove)
     expect(screen.getByTestId('import-summary')).toHaveTextContent('1 part · 1 chapter · 1 scene')
-    expect(row('p1c1')).toHaveAttribute('data-excluded', 'true')
-    // The scenes under it read as left out too.
-    expect(row('p1c1s1')).toHaveAttribute('data-excluded', 'true')
+    expect(screen.queryAllByTestId('import-node').map((e) => e.dataset.importId)).not.toContain(
+      'p1c1s1'
+    )
+    await userEvent.click(screen.getByTestId('import-undo'))
+    expect(row('p1c1s1')).toBeInTheDocument()
+    expect(screen.getByTestId('import-summary')).toHaveTextContent('2 chapters · 3 scenes')
+  })
+
+  it('ticks scenes (Shift for a range) and merges them into one from the selection bar', async () => {
+    await open()
+    expect(screen.queryByTestId('import-selection')).not.toBeInTheDocument()
+    await userEvent.click(
+      within(row('p1c1s1')).getByRole('checkbox', { name: 'Select scene Scene 1' })
+    )
+    fireEvent.click(within(row('p1c2s1')).getByTestId('import-select'), { shiftKey: true })
+    const bar = screen.getByTestId('import-selection')
+    expect(bar).toHaveTextContent('3 selected')
+    await userEvent.click(within(bar).getByTestId('import-merge-selected'))
+    expect(screen.queryByTestId('import-selection')).not.toBeInTheDocument()
+    expect(screen.getByTestId('import-summary')).toHaveTextContent('2 chapters · 2 scenes')
+    const merged = useImportStore.getState().draft?.parts[0]?.chapters[0]?.scenes[0]
+    expect(merged?.paragraphs).toHaveLength(4)
+  })
+
+  it('deletes the ticked rows together, and cannot merge a mix of chapters and scenes', async () => {
+    await open()
+    await userEvent.click(within(row('p1c2')).getByTestId('import-select'))
+    await userEvent.click(within(row('p2c1s1')).getByTestId('import-select'))
+    expect(screen.getByTestId('import-merge-selected')).toBeDisabled()
+    await userEvent.click(screen.getByTestId('import-delete-selected'))
+    expect(screen.getByTestId('import-summary')).toHaveTextContent('1 chapter · 2 scenes')
+  })
+
+  it('moves a scene by drag and drop', async () => {
+    await open()
+    const dataTransfer = { setData: vi.fn(), effectAllowed: '', dropEffect: '' }
+    fireEvent.dragStart(row('p2c1s1'), { dataTransfer })
+    fireEvent.dragOver(row('p1c1s1'), { dataTransfer })
+    expect(row('p1c1s1')).toHaveAttribute('data-drop', 'before')
+    // A chapter takes a scene into it; a part does not.
+    fireEvent.dragOver(row('p1'), { dataTransfer })
+    expect(row('p1')).not.toHaveAttribute('data-drop')
+    fireEvent.dragOver(row('p1c1s1'), { dataTransfer })
+    fireEvent.drop(row('p1c1s1'), { dataTransfer })
+    expect(
+      useImportStore.getState().draft?.parts[0]?.chapters[0]?.scenes.map((sc) => sc.id)
+    ).toEqual(['p2c1s1', 'p1c1s1', 'p1c1s2'])
+  })
+
+  it('shows the project’s own rows with the imported ones marked New, and says what Import deletes', async () => {
+    install({ 'import:open': mixedDraftFixture() })
+    await open()
+    expect(within(row('e-s1')).queryByTestId('import-new-badge')).not.toBeInTheDocument()
+    expect(within(row('p1c1s1')).getByTestId('import-new-badge')).toHaveTextContent('New')
+    // An existing chapter keeps its place in the manuscript: no placement select.
+    expect(within(row('e-c1')).queryByTestId('import-placement')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('import-existing')).not.toBeInTheDocument()
+
+    await userEvent.click(
+      within(row('e-s1')).getByRole('button', { name: 'Merge Opening with the next scene' })
+    )
+    expect(screen.getByTestId('import-existing')).toHaveTextContent(
+      'In your project: 1 existing scene merged into another (the text is kept; their tags and notes are not).'
+    )
+    // Deleting the chapter takes the merged scene with it: both scenes are now deleted.
+    await userEvent.click(within(row('e-c1')).getByTestId('import-select'))
+    await userEvent.click(screen.getByTestId('import-delete-selected'))
+    expect(screen.getByTestId('import-existing')).toHaveTextContent(
+      'In your project: 2 existing scenes will be deleted · 1 existing chapter will be deleted.'
+    )
+  })
+
+  it('names the new project and picks its format when no project is open', async () => {
+    useProjectStore.setState({ current: null })
+    await open()
+    const name = screen.getByRole('textbox', { name: 'Project name' })
+    expect(name).toHaveValue('novel')
+    await userEvent.clear(name)
+    await userEvent.type(name, 'The Storm')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Format' }), 'epic')
+    expect(useImportStore.getState()).toMatchObject({
+      projectName: 'The Storm',
+      projectFormat: 'epic'
+    })
+    expect(screen.getByTestId('import-commit')).toHaveTextContent('Create project')
   })
 
   it('sends a chapter to the front matter through its placement select', async () => {
@@ -173,12 +284,13 @@ describe('ImportDialog (F-12.2)', () => {
     expect(screen.getByTestId('import-summary')).toHaveTextContent('3 chapters · 4 scenes')
   })
 
-  it('reorders, nests, and merges through the row buttons', async () => {
+  it('reorders, moves across containers, and merges through the row buttons', async () => {
     await open()
     await userEvent.click(within(row('p2')).getByRole('button', { name: 'Move Part Two up' }))
     expect(useImportStore.getState().draft?.parts.map((p) => p.id)).toEqual(['p2', 'p1'])
+    // The last chapter of a part moves down into the start of the next part.
     await userEvent.click(
-      within(row('p2c1')).getByRole('button', { name: 'Move Chapter Two to the next part' })
+      within(row('p2c1')).getByRole('button', { name: 'Move Chapter Two down' })
     )
     expect(useImportStore.getState().draft?.parts[1]?.chapters.map((c) => c.id)).toEqual([
       'p2c1',
@@ -186,7 +298,7 @@ describe('ImportDialog (F-12.2)', () => {
       'p1c2'
     ])
     await userEvent.click(
-      within(row('p1c1s2')).getByRole('button', { name: 'Merge Scene 2 with the scene before it' })
+      within(row('p1c1s1')).getByRole('button', { name: 'Merge Scene 1 with the next scene' })
     )
     const chapter = useImportStore.getState().draft?.parts[1]?.chapters.find((c) => c.id === 'p1c1')
     expect(chapter?.scenes).toHaveLength(1)
@@ -210,7 +322,7 @@ describe('ImportDialog (F-12.2)', () => {
   })
 
   it('imports the edited draft and closes; a draft with nothing left disables Import', async () => {
-    install({ 'import:commit': { nodes: [], words: 21 } })
+    install({ 'import:commit': { nodes: [], words: 21, tree: treeFixture, rewritten: [] } })
     await open()
     await userEvent.click(within(row('p2c1')).getByRole('button', { name: 'Chapter Two' }))
     await userEvent.keyboard('The Return{Enter}')
@@ -226,10 +338,10 @@ describe('ImportDialog (F-12.2)', () => {
     ])
   })
 
-  it('disables Import when every node is left out', async () => {
+  it('disables Import when every node is deleted', async () => {
     await open()
-    await userEvent.click(within(row('p1')).getByTestId('import-exclude'))
-    await userEvent.click(within(row('p2')).getByTestId('import-exclude'))
+    await userEvent.click(within(row('p1')).getByTestId('import-delete'))
+    await userEvent.click(within(row('p2')).getByTestId('import-delete'))
     expect(screen.getByTestId('import-summary')).toHaveTextContent('0 scenes')
     expect(screen.getByTestId('import-commit')).toBeDisabled()
   })
@@ -291,7 +403,8 @@ describe('ImportDialog, the AI structure pass (F-12.3)', () => {
     // Nothing may move under the indices the suggestions are about.
     expect(within(row('p2')).getByRole('button', { name: 'Move Part Two down' })).toBeDisabled()
     expect(within(row('p1c1s2')).getByRole('button', { name: 'Split Scene 2' })).toBeDisabled()
-    expect(within(row('p1c1')).getByTestId('import-exclude')).toBeDisabled()
+    expect(within(row('p1c1')).getByTestId('import-delete')).toBeDisabled()
+    expect(within(row('p1c1')).getByTestId('import-select')).toBeDisabled()
     expect(within(row('p1c2')).getByTestId('import-placement')).toBeDisabled()
     expect(screen.getByTestId('import-commit')).toBeDisabled()
 
