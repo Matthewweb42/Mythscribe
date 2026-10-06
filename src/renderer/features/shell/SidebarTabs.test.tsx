@@ -7,7 +7,7 @@ import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetLayoutStore, useLayoutStore } from './layoutStore'
 import { SidebarTabs } from './SidebarTabs'
-import type { SidebarTab } from './sidebarTabs'
+import type { SidebarTab } from './sidebarTabList'
 
 const tabs: readonly [SidebarTab, ...SidebarTab[]] = [
   { id: 'manuscript', label: 'Manuscript', icon: BookOpen, render: () => <p>tree here</p> },

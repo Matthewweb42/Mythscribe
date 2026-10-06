@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import type { SidebarTabId } from '@shared/sidebarTabs'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
-import { SIDEBAR_TABS, type SidebarTab } from '@renderer/features/shell/sidebarTabs'
+import { SIDEBAR_TABS, type SidebarTab } from '@renderer/features/shell/sidebarTabList'
 
 interface SidebarTabsProps {
   format: NovelFormat
