@@ -20,6 +20,7 @@ import { PROPOSAL_NOTE_MAX, normalizeProposalNote } from '@shared/proposal'
 import type { ProposedTag } from '@shared/proposedTags'
 import { resolveTagId } from '@shared/tagExchange'
 import { toTagName } from '@shared/tags'
+import { titleTagProposal } from '@shared/titleTags'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { describeRequest } from '@renderer/features/ai/usageFormat'
@@ -101,7 +102,9 @@ interface RegenerateOptions {
  * nothing about them is editable from the bar. Under those again, the proposed tags (F-4.12b):
  * the recurring capitalised names of the manuscript that no tag stands for, narrowed to the ones
  * this document carries, each with a Create tag button and a Dismiss button; nothing is created
- * until one is clicked.
+ * until one is clicked. Last, the bar's own node's title as a tag (F-2.8): a part, chapter, or
+ * scene the author named ("Fallen Creator") offers `#fallen-creator` "From the title" until the
+ * bank holds that name or the author dismisses it; Create makes it a custom tag linked here.
  * "Recommend" (F-4.7) asks main for bank tags that fit the live text once it has 50 characters
  * (a folder never does, so there it stays disabled) and shows them as chips the author accepts
  * one at a time, all at once, or dismisses; nothing is linked until accepted, and the note
@@ -144,6 +147,19 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   const proposed = useMemo(
     () => proposals.filter((proposal) => proposal.nodeIds.includes(id)),
     [proposals, id]
+  )
+  // F-2.8: the node's own title as a tag, unless it is a placeholder, a bank name, or dismissed.
+  const title = useTreeStore((s) => s.byId[id]?.title ?? '')
+  const level = useTreeStore((s) => s.byId[id]?.hierarchyLevel ?? null)
+  const dismissed = useProposedTagStore((s) => s.dismissed)
+  const titleTag = useMemo(
+    () =>
+      titleTagProposal(
+        { title, hierarchyLevel: level },
+        new Set(Object.values(bank).map((tag) => tag.name)),
+        dismissed
+      ),
+    [title, level, bank, dismissed]
   )
   const content = useDocumentStore((s) => s.docs[id]?.content ?? null)
   const flush = useDocumentStore((s) => s.flush)
@@ -622,6 +638,18 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
                 </ul>
               </>
             ) : null}
+            {titleTag ? (
+              <>
+                <p className="mt-2 mb-1 text-xs text-fg-subtle">From the title</p>
+                <ul
+                  role="list"
+                  aria-label="From the title"
+                  className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
+                >
+                  <TitleTagRow key={titleTag} nodeId={id} name={titleTag} onError={report} />
+                </ul>
+              </>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -808,6 +836,60 @@ function ProposedTagRow({
         title="Never propose this name again"
         disabled={busy}
         onClick={() => settle(dismiss(proposal.name))}
+        className="rounded-full p-0.5 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40"
+      >
+        <X size={12} aria-hidden="true" />
+      </button>
+    </li>
+  )
+}
+
+/**
+ * The tag a node's title offers (F-2.8): Create makes it a custom tag and links it to the node,
+ * Dismiss keeps the name quiet for the project (the F-4.12b dismissed names). The row leaves once
+ * the bank holds the name or the dismissal lands; while a click is in flight both are disabled.
+ */
+function TitleTagRow({
+  nodeId,
+  name,
+  onError
+}: {
+  nodeId: string
+  name: string
+  onError: (err: unknown) => void
+}): React.JSX.Element {
+  const acceptTitle = useProposedTagStore((s) => s.acceptTitle)
+  const dismiss = useProposedTagStore((s) => s.dismiss)
+  const [busy, setBusy] = useState(false)
+  const settle = (work: Promise<unknown>): void => {
+    setBusy(true)
+    work.catch(onError).finally(() => setBusy(false))
+  }
+  return (
+    <li
+      role="listitem"
+      data-testid="title-tag"
+      className="flex items-center gap-1.5 rounded-full border border-dashed border-line py-0.5 pr-1 pl-2 text-xs"
+    >
+      <span className="max-w-48 truncate">#{name}</span>
+      <button
+        type="button"
+        data-testid="title-tag-accept"
+        aria-label={`Create tag ${name}`}
+        title="Create a tag for this title and add it here"
+        disabled={busy}
+        onClick={() => settle(acceptTitle(nodeId, name))}
+        className="rounded-full p-0.5 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40"
+      >
+        <Plus size={12} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        data-testid="title-tag-dismiss"
+        aria-label={`Dismiss ${name}`}
+        title="Never offer this name again"
+        disabled={busy}
+        onClick={() => settle(dismiss(name))}
         className="rounded-full p-0.5 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40"
       >
         <X size={12} aria-hidden="true" />

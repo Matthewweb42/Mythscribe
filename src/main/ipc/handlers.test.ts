@@ -4307,6 +4307,7 @@ describe('proposed tags (F-4.12b)', () => {
     await expect(invoke('tag:dismissProposed', { name: 'tash' })).rejects.toThrowError(
       /^NO_PROJECT: /
     )
+    await expect(invoke('tag:dismissedNames', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
   })
 
   it('publishes the list once a scan has read the saved text', async () => {
@@ -4349,6 +4350,8 @@ describe('proposed tags (F-4.12b)', () => {
       await vi.advanceTimersByTimeAsync(SCAN)
       expect(await invoke('tag:dismissProposed', { name: 'Tash' })).toEqual([])
       expect(published().at(-1)).toEqual([])
+      // F-2.8: the stored names are readable, kebab-cased, for the title offer.
+      expect(await invoke('tag:dismissedNames', undefined)).toEqual(['tash'])
 
       // Another save rescans the document and still proposes nothing: the dismissal is stored.
       await save(scene, TASH, 'Tash rode on with Tash and Tash.')

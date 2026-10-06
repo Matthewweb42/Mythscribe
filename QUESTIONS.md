@@ -41,3 +41,9 @@ do. Review, then confirm, change, or delete the entry.
 - Chosen: a thin underline per tag in its colour under the text (stacked when tags overlap; hover names them) and a gutter bar beside each paragraph that holds a range; tag from the editor's right-click menu ("Tag selection…", "Clear tags in selection") or the shortcut in the menu. Tagging also links the tag to the document; clearing ranges keeps the link. Manuscript documents only; export and the compiled preview ignore ranges.
 - Alternatives: background tint instead of underlines; a toolbar button; clearing a range also unlinks the tag when no range or mention remains.
 - To change it: `TagRange.ts`, `DocumentEditor.tsx`, `src/renderer/styles/app.css`.
+
+## 2026-10-05 · F-2.8 · Which titles offer a tag, and what accepting does
+- Question: the spec names chapters, scenes, and characters; characters already get a tag on create (F-9.4). Which titles count, which category, and where the offer shows.
+- Chosen: parts, chapters, and scenes only (not generic documents or section roots); never for the app's own default names ("Untitled Chapter", "Scene 1", "Part III"), a name already in the bank, or one you dismissed. The offer is a "From the title" row in that node's tag bar (documents, cork board, stacked view); Create makes a Custom tag and links it to the node, Dismiss joins the same never-propose list as F-4.12b. A new read channel `tag:dismissedNames` lets the tag bar see that list.
+- Alternatives: a toast or dialog on create/rename (toasts have no buttons; dialogs interrupt); the Plot Threads category for chapter titles; no link on accept.
+- To change it: `src/shared/titleTags.ts`, `src/renderer/features/tags/proposedTagStore.ts`, `src/renderer/features/editor/TagBar.tsx`.

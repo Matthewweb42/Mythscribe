@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
 import type { ProposedTag } from '@shared/proposedTags'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetDocumentTagStore, useDocumentTagStore } from './documentTagStore'
 import { resetProposedTagStore, useProposedTagStore } from './proposedTagStore'
 import { resetTagStore, useTagStore } from './tagStore'
 
@@ -67,16 +68,22 @@ describe('proposedTagStore (F-4.12b)', () => {
   beforeEach(() => {
     resetProposedTagStore()
     resetTagStore()
+    resetDocumentTagStore()
   })
 
   it('loads the list main computed', async () => {
     const { client, calls } = fakeClient({
-      'tag:proposed': () => [proposal('tash', 3), proposal('bren', 3)]
+      'tag:proposed': () => [proposal('tash', 3), proposal('bren', 3)],
+      'tag:dismissedNames': () => ['kael']
     })
     setIpcClient(client)
     await state().load()
     expect(state().proposals.map((p) => p.name)).toEqual(['tash', 'bren'])
-    expect(calls).toEqual([['tag:proposed', undefined]])
+    expect(state().dismissed).toEqual(['kael'])
+    expect(calls).toEqual([
+      ['tag:proposed', undefined],
+      ['tag:dismissedNames', undefined]
+    ])
   })
 
   it('a failed load propagates and leaves the list untouched', async () => {
@@ -92,7 +99,10 @@ describe('proposedTagStore (F-4.12b)', () => {
   })
 
   it('subscribes once and takes every list main pushes', async () => {
-    const { client, listeners, emit } = fakeClient({ 'tag:proposed': () => [proposal('tash', 3)] })
+    const { client, listeners, emit } = fakeClient({
+      'tag:proposed': () => [proposal('tash', 3)],
+      'tag:dismissedNames': () => []
+    })
     setIpcClient(client)
     state().subscribe()
     state().subscribe()
@@ -107,13 +117,18 @@ describe('proposedTagStore (F-4.12b)', () => {
   it('dismiss sends the name and takes the list main answers with', async () => {
     const { client, calls } = fakeClient({
       'tag:proposed': () => [proposal('tash', 3), proposal('bren', 3)],
+      'tag:dismissedNames': () => ['kael'],
       'tag:dismissProposed': () => [proposal('tash', 3)]
     })
     setIpcClient(client)
     await state().load()
     await state().dismiss('bren')
-    expect(calls[1]).toEqual(['tag:dismissProposed', { name: 'bren' }])
+    expect(calls[2]).toEqual(['tag:dismissProposed', { name: 'bren' }])
     expect(state().proposals.map((p) => p.name)).toEqual(['tash'])
+    // F-2.8: the name joins the dismissed list in main's kebab-cased form, once.
+    await state().dismiss('Fallen Creator')
+    await state().dismiss('fallen-creator')
+    expect(state().dismissed).toEqual(['kael', 'bren', 'fallen-creator'])
   })
 
   it('accept creates a character tag and merges it into the bank', async () => {
@@ -141,6 +156,23 @@ describe('proposedTagStore (F-4.12b)', () => {
     expect(state().proposals.map((p) => p.name)).toEqual(['tash'])
   })
 
+  it('acceptTitle creates a custom tag and links it to the node (F-2.8)', async () => {
+    const created: Tag = { ...tag('fallen-creator'), category: 'custom' }
+    const { client, calls } = fakeClient({
+      'tag:create': () => created,
+      'documentTag:add': () => ({ ...created, usageCount: 1 })
+    })
+    setIpcClient(client)
+    const accepted = await state().acceptTitle('sc-1', 'fallen-creator')
+    expect(accepted.id).toBe('t-fallen-creator')
+    expect(calls).toEqual([
+      ['tag:create', { name: 'fallen-creator', category: 'custom' }],
+      ['documentTag:add', { nodeId: 'sc-1', tagId: 't-fallen-creator' }]
+    ])
+    expect(useTagStore.getState().byId['t-fallen-creator']?.category).toBe('custom')
+    expect(useDocumentTagStore.getState().tagIdsByNode['sc-1']).toContain('t-fallen-creator')
+  })
+
   it('clear empties the list and stops a pending load from applying', async () => {
     let release: (proposals: ProposedTag[]) => void = () => {}
     setIpcClient(
@@ -148,15 +180,18 @@ describe('proposedTagStore (F-4.12b)', () => {
         'tag:proposed': () =>
           new Promise<ProposedTag[]>((resolve) => {
             release = resolve
-          })
+          }),
+        'tag:dismissedNames': () => ['kael']
       }).client
     )
-    useProposedTagStore.setState({ proposals: [proposal('bren', 3)] })
+    useProposedTagStore.setState({ proposals: [proposal('bren', 3)], dismissed: ['bren'] })
     const loading = state().load()
     state().clear()
     expect(state().proposals).toEqual([])
+    expect(state().dismissed).toEqual([])
     release([proposal('tash', 3)])
     await loading
     expect(state().proposals).toEqual([])
+    expect(state().dismissed).toEqual([])
   })
 })

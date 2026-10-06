@@ -1067,6 +1067,11 @@ export const contract = {
     output: z.array(ProposedTag)
   },
   /**
+   * The names the author dismissed for the project (F-4.12b), kebab-cased, oldest first. The tag
+   * bar reads them so a title's tag offer (F-2.8) honours the same refusals; asking changes nothing.
+   */
+  'tag:dismissedNames': { input: z.undefined(), output: z.array(z.string()) },
+  /**
    * Global search (F-10.1): documents (title and text), notes, and entities (name, template
    * fields, page) holding the query, case-insensitively, filtered by type and tag; one result per
    * matching source with a highlighted snippet, at most `SEARCH_MAX_RESULTS` of them. A query

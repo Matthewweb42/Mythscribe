@@ -3523,6 +3523,29 @@ test('create, close, reopen a project on disk', async () => {
   const insertedChapter = arc1.getByRole('treeitem', { name: 'Untitled Chapter', exact: true })
   await expect(insertedChapter).toBeVisible()
   await page.keyboard.press('Escape')
+
+  // F-2.8: a scene the author names offers its title as a tag. The inserted scene keeps its
+  // placeholder title and offers nothing; renamed "Fallen Creator", its bar offers
+  // #fallen-creator "From the title", and Create makes the custom tag and links it here. The
+  // chip is removed again so later steps see the bar as before (the 0-use tag stays in the bank).
+  await insertedScene.getByText('Untitled Scene', { exact: true }).click()
+  await expect(page.getByTestId('selected-title')).toHaveText('Untitled Scene')
+  const titleTag = tagBar.getByTestId('title-tag')
+  await expect(titleTag).toHaveCount(0)
+  await insertedScene.click({ button: 'right' })
+  await menu.getByRole('menuitem', { name: 'Rename' }).click()
+  const renameInserted = page.getByRole('textbox', { name: 'Rename' })
+  await renameInserted.fill('Fallen Creator')
+  await renameInserted.press('Enter')
+  await expect(renameInserted).toBeHidden()
+  await expect(titleTag).toHaveText('#fallen-creator')
+  await tagBar.getByRole('button', { name: 'Create tag fallen-creator' }).click()
+  await expect(chipList.getByRole('listitem')).toHaveText(['fallen-creator'])
+  await expect(titleTag).toHaveCount(0)
+  await chipList.getByRole('button', { name: 'Remove fallen-creator' }).click()
+  await expect(chipList).toHaveCount(0)
+  await expect(titleTag).toHaveCount(0)
+
   await scene1.getByText('Scene 1', { exact: true }).click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
 

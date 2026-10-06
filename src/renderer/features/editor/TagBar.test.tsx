@@ -564,6 +564,96 @@ describe('TagBar (F-4.4)', () => {
     expect(within(bar()).queryByText('Proposed tags')).not.toBeInTheDocument()
   })
 
+  describe('the title as a tag (F-2.8)', () => {
+    /** The fixture tree with `sc-1` titled `title`. */
+    const titled = (title: string): void => {
+      act(() => {
+        useTreeStore.setState({
+          ...buildIndex(treeFixture.map((n) => (n.id === 'sc-1' ? { ...n, title } : n))),
+          loaded: true
+        })
+      })
+    }
+    const titleRow = (): HTMLElement | null => within(bar()).queryByTestId('title-tag')
+
+    it('offers a named scene’s title; Create makes it a custom tag linked to the scene', async () => {
+      const created: Tag = {
+        ...tagFixture[0]!,
+        id: 't-fallen',
+        name: 'fallen-creator',
+        category: 'custom',
+        usageCount: 0
+      }
+      const calls = install({ 'tag:create': () => created })
+      titled('Fallen Creator')
+      await mount()
+      expect(within(bar()).getByText('From the title')).toBeInTheDocument()
+      expect(titleRow()).toHaveTextContent('#fallen-creator')
+
+      await userEvent.click(
+        within(bar()).getByRole('button', { name: 'Create tag fallen-creator' })
+      )
+      expect(calls).toContainEqual(['tag:create', { name: 'fallen-creator', category: 'custom' }])
+      await waitFor(() =>
+        expect(calls).toContainEqual(['documentTag:add', { nodeId: 'sc-1', tagId: 't-fallen' }])
+      )
+      await waitFor(() => expect(chipNames()).toContain('Remove fallen-creator'))
+      expect(titleRow()).not.toBeInTheDocument()
+      expect(toasts()).toEqual([])
+    })
+
+    it('Dismiss stores the name and hides the offer; a refused one toasts and stays', async () => {
+      let refuse = true
+      const calls = install({
+        'tag:dismissProposed': () => {
+          if (refuse)
+            throw new IpcRequestError({ code: 'NO_PROJECT', message: 'No project is open' })
+          return []
+        }
+      })
+      titled('Fallen Creator')
+      await mount()
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Dismiss fallen-creator' }))
+      await waitFor(() => expect(toasts()).toEqual(['No project is open']))
+      expect(titleRow()).toBeInTheDocument()
+
+      refuse = false
+      await userEvent.click(within(bar()).getByRole('button', { name: 'Dismiss fallen-creator' }))
+      expect(calls).toContainEqual(['tag:dismissProposed', { name: 'fallen-creator' }])
+      await waitFor(() => expect(titleRow()).not.toBeInTheDocument())
+      expect(useProposedTagStore.getState().dismissed).toEqual(['fallen-creator'])
+    })
+
+    it('never offers a placeholder title, a bank name, a dismissed name, or a node without a level', async () => {
+      install()
+      titled('Scene 1')
+      const view = await mount()
+      expect(titleRow()).not.toBeInTheDocument()
+      expect(within(bar()).queryByText('From the title')).not.toBeInTheDocument()
+
+      titled('Untitled Scene')
+      expect(titleRow()).not.toBeInTheDocument()
+      titled('Dark Forest')
+      expect(titleRow()).not.toBeInTheDocument()
+      act(() => useProposedTagStore.setState({ dismissed: ['fallen-creator'] }))
+      titled('Fallen Creator')
+      expect(titleRow()).not.toBeInTheDocument()
+
+      view.unmount()
+      await mount('title-page')
+      expect(titleRow()).not.toBeInTheDocument()
+    })
+
+    it('follows a rename', async () => {
+      install()
+      titled('Fallen Creator')
+      await mount()
+      expect(titleRow()).toHaveTextContent('#fallen-creator')
+      titled('The Long Night')
+      expect(titleRow()).toHaveTextContent('#the-long-night')
+    })
+  })
+
   it('shows the metadata pane behind a persisted split only for a node with a hierarchy level (F-4.5)', async () => {
     install()
     await mount()

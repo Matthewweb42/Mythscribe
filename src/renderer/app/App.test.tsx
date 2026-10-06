@@ -187,6 +187,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'observedFact:listForEntity') return []
     if (channel === 'documentTag:list') return []
     if (channel === 'tag:proposed') return []
+    if (channel === 'tag:dismissedNames') return []
     if (channel === 'sceneMeta:get')
       return { id: (input as { id: string }).id, meta: { location: '', pov: '', timeline: '' } }
     if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }

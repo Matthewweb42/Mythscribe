@@ -177,6 +177,7 @@ import {
   getAiSettings,
   getAuthorRules,
   getConversations,
+  getDismissedNames,
   getEditorSettings,
   getFocusSettings,
   getProjectDictionary,
@@ -1057,6 +1058,9 @@ export function registerHandlers({
     }
     return proposals
   })
+
+  // F-2.8: the tag bar's title offer honours the same dismissals as the proposals.
+  register('tag:dismissedNames', () => getDismissedNames(manager.require().connection.orm).names)
 
   register('documentTag:list', ({ nodeId }) =>
     listDocumentTags(manager.require().connection.orm, nodeId)
