@@ -69,7 +69,11 @@ export interface FlatParagraph {
   words: number
 }
 
-/** The draft's paragraphs in reading order; excluded parts, chapters, and scenes are skipped, as are empty scenes. */
+/**
+ * The draft's paragraphs in reading order; excluded parts, chapters, and scenes are skipped, as
+ * are empty scenes and scenes already in the project (`existing`): the pass reads only what is
+ * being imported, never the author's existing manuscript.
+ */
 export function flattenDraft(draft: ImportDraft): FlatParagraph[] {
   const flat: FlatParagraph[] = []
   for (const part of draft.parts) {
@@ -79,6 +83,10 @@ export function flattenDraft(draft: ImportDraft): FlatParagraph[] {
       let chapterStart = true
       for (const scene of chapter.scenes) {
         if (scene.excluded) continue
+        if (scene.existing === true) {
+          if (scene.paragraphs.length > 0) chapterStart = false
+          continue
+        }
         scene.paragraphs.forEach((paragraph, local) => {
           const doc = { type: 'doc', content: [paragraph] }
           flat.push({

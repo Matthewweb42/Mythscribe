@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
+import { FileInput, FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
 import { AI_DATA_SHARING, type AiDial, type AiSource } from '@shared/aiSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, type HierarchyLevel } from '@shared/labels'
@@ -510,6 +510,7 @@ function WelcomeScreen(): React.JSX.Element {
   const setCreating = useWelcomeStore((s) => s.setCreating)
   // F-15.11: the wizard's Cloud option says who is signed in; the account is app-wide.
   const account = useAccountStore((s) => s.status)
+  const importing = useImportStore((s) => s.busy)
 
   useEffect(() => {
     loadRecents().catch((err: unknown) => toast.error(describeError(err)))
@@ -588,6 +589,15 @@ function WelcomeScreen(): React.JSX.Element {
             className="flex items-center justify-center gap-2 rounded-md border border-line bg-surface px-4 py-2.5 hover:bg-surface-raised disabled:opacity-60"
           >
             <FolderOpen size={16} /> Open project
+          </button>
+          {/* F-12.2: import to start — the review dialog names the project, Import creates it. */}
+          <button
+            type="button"
+            disabled={busy || importing}
+            onClick={() => void useImportStore.getState().open()}
+            className="flex items-center justify-center gap-2 rounded-md border border-line bg-surface px-4 py-2.5 hover:bg-surface-raised disabled:opacity-60"
+          >
+            <FileInput size={16} /> Import manuscript…
           </button>
           <RecentProjects
             recents={recents}

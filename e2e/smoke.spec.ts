@@ -4847,6 +4847,57 @@ test('create, close, reopen a project on disk', async () => {
   expect(fs.readFileSync(path.join(tmp, v0Backup ?? ''))).toEqual(v0Original)
   await closeProject()
 
+  // F-12.2, import to start: the welcome screen's Import manuscript… reads a plain-text file,
+  // the review names the new project after it, a title opening a scene became a chapter of that
+  // name, and Create project makes the project (no starter skeleton) and opens it.
+  const startPath = path.join(tmp, 'Harbor Lights.txt')
+  fs.writeFileSync(
+    startPath,
+    [
+      'The Harbor',
+      '',
+      'Mara watched the boats come in.',
+      '',
+      '',
+      'Nightfall',
+      '',
+      'The lights went out one by one.',
+      ''
+    ].join('\n')
+  )
+  await stubOpenDialog(startPath)
+  await stubSaveDialog(path.join(tmp, 'Harbor Lights.mythscribe'))
+  await page.getByRole('button', { name: 'Import manuscript…' }).click()
+  const startImport = page.getByTestId('import-dialog')
+  await expect(startImport).toBeVisible()
+  await expect(startImport.getByRole('textbox', { name: 'Project name' })).toHaveValue(
+    'Harbor Lights'
+  )
+  await expect(startImport.getByTestId('import-node')).toHaveText([
+    /Harbor Lights/,
+    /The Harbor/,
+    /Scene 1.*Mara watched the boats come in\./,
+    /Nightfall/,
+    /Scene 1.*The lights went out one by one\./
+  ])
+  await startImport.getByTestId('import-commit').click()
+  await expect(startImport).toHaveCount(0)
+  await expect(page.getByTestId('project-name')).toHaveText('Harbor Lights')
+  await expect(page.getByRole('treeitem', { name: 'Nightfall', exact: true })).toBeVisible()
+  const startTree = await listTree()
+  expect(
+    startTree.filter((n) => n.hierarchyLevel !== null).map((n) => [n.title, n.hierarchyLevel])
+  ).toEqual(
+    expect.arrayContaining([
+      ['Harbor Lights', 'part'],
+      ['The Harbor', 'chapter'],
+      ['Nightfall', 'chapter']
+    ])
+  )
+  // No starter skeleton: the two imported scenes are the only ones.
+  expect(startTree.filter((n) => n.hierarchyLevel === 'scene')).toHaveLength(2)
+  await closeProject()
+
   // F-15.8: diagnostics are app-wide, so the tab is there on the welcome screen, and they are off
   // on every install. The preview is the report verbatim, and the switch survives the dialog
   // closing because main stores it in app state. Nothing leaves the machine here: this build has
@@ -4924,7 +4975,13 @@ test('create, close, reopen a project on disk', async () => {
   await expect(importDialog).toBeVisible()
   await expect(importDialog.getByTestId('import-question')).toContainText('Does this look right?')
   await expect(importDialog.getByTestId('import-summary')).toContainText('3 scenes')
-  const importRows = importDialog.getByTestId('import-node')
+  // The combined outline: the project's own parts, chapters, and scenes come first, and the
+  // imported rows after them are marked New. Leaving the project's rows alone deletes nothing.
+  await expect(
+    importDialog.locator('[data-testid="import-node"][data-import-kind="part"]').first()
+  ).not.toHaveAttribute('data-import-new', 'true')
+  await expect(importDialog.getByTestId('import-existing')).toHaveCount(0)
+  const importRows = importDialog.locator('[data-testid="import-node"][data-import-new="true"]')
   await expect(importRows).toHaveText([
     /the-ridge/,
     /Chapter One/,
@@ -4971,6 +5028,19 @@ test('create, close, reopen a project on disk', async () => {
   )
   await expect(importRows.nth(3).getByTestId('import-reject')).toBeVisible()
   await expect(importRows.nth(2).getByTestId('import-reject')).toHaveCount(0)
+  // The rework's quick edits: tick two scenes and merge them into one, then Undo; Undo also
+  // brings back a scene deleted with its ×.
+  await importRows.nth(3).getByTestId('import-select').check()
+  await importRows.nth(4).getByTestId('import-select').check()
+  await expect(importDialog.getByTestId('import-selection')).toContainText('2 selected')
+  await importDialog.getByTestId('import-merge-selected').click()
+  await expect(importDialog.getByTestId('import-summary')).toContainText('3 scenes')
+  await importDialog.getByTestId('import-undo').click()
+  await expect(importDialog.getByTestId('import-summary')).toContainText('4 scenes')
+  await importRows.nth(6).getByTestId('import-delete').click()
+  await expect(importDialog.getByTestId('import-summary')).toContainText('3 scenes')
+  await importDialog.getByTestId('import-undo').click()
+  await expect(importDialog.getByTestId('import-summary')).toContainText('4 scenes')
   await importRows.nth(5).getByRole('button', { name: 'Chapter Two', exact: true }).click()
   const importRename = importDialog.getByTestId('import-rename')
   await importRename.fill('The Return')
@@ -5006,8 +5076,10 @@ test('create, close, reopen a project on disk', async () => {
   ])
   const manuscriptRoot = treeAfter.find((n) => n.sectionType === 'manuscript')
   expect(importedPart?.parentId).toBe(manuscriptRoot?.id)
+  // After the project's own parts: the outline lays the parts out in the reviewed order.
   expect(importedPart?.position).toBe(
-    treeBefore.filter((n) => n.parentId === manuscriptRoot?.id).length
+    treeBefore.filter((n) => n.parentId === manuscriptRoot?.id && n.hierarchyLevel === 'part')
+      .length
   )
   // The first imported scene is selected and open; its paragraphs carry the provenance attribute.
   const importedScene = imported[2]

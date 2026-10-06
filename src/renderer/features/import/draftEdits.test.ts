@@ -2,22 +2,29 @@ import { describe, expect, it } from 'vitest'
 import {
   IMPORT_TITLE_MAX,
   draftSummary,
+  existingChanges,
   type ImportAiMarks,
   type ImportDraft
 } from '@shared/import'
 import type { StructureSuggestions } from '@shared/importStructure'
-import { draftFixture, importedParagraph } from './draftFixture'
+import { draftFixture, importedParagraph, mixedDraftFixture } from './draftFixture'
 import {
   applyStructure,
   findNode,
+  idsOfKind,
   mergeChapter,
+  mergeChapters,
   mergeScene,
+  mergeScenes,
+  mergeWithNext,
+  moveTo,
+  removeNodes,
+  shiftNode,
   moveNode,
   moveScene,
   nestChapter,
   rejectSuggestion,
   renameNode,
-  setExcluded,
   setPlacement,
   splitScene,
   splitTitle
@@ -87,26 +94,26 @@ describe('renameNode', () => {
   })
 })
 
-describe('setExcluded', () => {
-  it('excludes a scene, a chapter, and a part, and the summary drops what they hold', () => {
+describe('removeNodes', () => {
+  it('removes a scene, a chapter, and a part, and the summary drops what they held', () => {
     const draft = draftFixture()
     expect(draftSummary(draft)).toMatchObject({ parts: 2, chapters: 2, scenes: 3, matter: 1 })
 
-    const noScene = setExcluded(draft, 'p1c1s2', true)
-    expect(draftSummary(noScene)).toMatchObject({ scenes: 2 })
-    const noChapter = setExcluded(draft, 'p2c1', true)
+    expect(draftSummary(removeNodes(draft, ['p1c1s2']))).toMatchObject({ scenes: 2 })
+    const noChapter = removeNodes(draft, ['p2c1'])
     expect(draftSummary(noChapter)).toMatchObject({ parts: 1, chapters: 1, scenes: 2 })
-    const noPart = setExcluded(draft, 'p1', true)
+    const noPart = removeNodes(draft, ['p1'])
     expect(draftSummary(noPart)).toMatchObject({ parts: 1, chapters: 1, scenes: 1, matter: 0 })
+    expect(shape(removeNodes(draft, ['p1c1s1', 'p1c2']))).toEqual({
+      'Part One': { 'Chapter One': ['Scene 2'] },
+      'Part Two': { 'Chapter Two': ['Scene 1'] }
+    })
   })
 
-  it('keeps the children’s own flags, so unexcluding a container restores them', () => {
-    const draft = setExcluded(draftFixture(), 'p1c1s2', true)
-    const hidden = setExcluded(draft, 'p1', true)
-    const back = setExcluded(hidden, 'p1', false)
-    expect(draftSummary(back)).toEqual(draftSummary(draft))
-    expect(setExcluded(draft, 'p1c1s2', true)).toBe(draft)
-    expect(setExcluded(draft, 'nope', true)).toBe(draft)
+  it('answers the same draft when nothing it names is there', () => {
+    const draft = draftFixture()
+    expect(removeNodes(draft, [])).toBe(draft)
+    expect(removeNodes(draft, ['nope'])).toBe(draft)
   })
 })
 
@@ -467,5 +474,179 @@ describe('rejectSuggestion (F-12.3)', () => {
     expect(rejectSuggestion(draft, 'nope')).toBe(draft)
     expect(rejectSuggestion(draft, 'p1c1s1')).toBe(draft)
     expect(rejectSuggestion(draft, 'p1c1')).toBe(draft)
+  })
+})
+
+/** Every paragraph's text in reading order: what no merge, move, or split may lose or reorder. */
+const text = (draft: ImportDraft): string[] =>
+  draft.parts.flatMap((part) =>
+    part.chapters.flatMap((chapter) =>
+      chapter.scenes.flatMap((sc) =>
+        sc.paragraphs.map((paragraph) => paragraph.content?.[0]?.text ?? '')
+      )
+    )
+  )
+
+describe('mergeScenes (F-12.2 rework)', () => {
+  it('merges ticked scenes in reading order into the first, wherever they sit', () => {
+    const draft = draftFixture()
+    // Ticked out of order and across parts: reading order decides.
+    const merged = mergeScenes(draft, ['p2c1s1', 'p1c1s1'])
+    expect(shape(merged)).toEqual({
+      'Part One': { 'Chapter One': ['Scene 1', 'Scene 2'], Acknowledgements: ['Scene 1'] },
+      'Part Two': { 'Chapter Two': [] }
+    })
+    expect(scene(merged, 'p1c1s1').paragraphs).toBe(5)
+    expect(draftSummary(merged).words).toBe(draftSummary(draft).words)
+  })
+
+  it('needs two scenes', () => {
+    const draft = draftFixture()
+    expect(mergeScenes(draft, ['p1c1s1'])).toBe(draft)
+    expect(mergeScenes(draft, ['p1c1s1', 'nope'])).toBe(draft)
+  })
+
+  it('records the existing scenes it swallows, so Import counts them merged, not deleted', () => {
+    const draft = mixedDraftFixture()
+    const merged = mergeScenes(draft, ['e-s1', 'e-s2'])
+    const found = findNode(merged, 'e-s1')
+    expect(found?.kind === 'scene' ? found.scene.absorbed : null).toEqual(['e-s2'])
+    expect(existingChanges(merged)).toEqual({
+      deletedScenes: [],
+      mergedScenes: ['e-s2'],
+      deletedChapters: [],
+      deletedParts: []
+    })
+    // A new scene that takes in an existing one carries what that one had absorbed too.
+    const ahead = moveTo(merged, 'p1c1s1', 'e-s1', 'before')
+    const chained = mergeScenes(ahead, ['e-s1', 'p1c1s1'])
+    const held = findNode(chained, 'p1c1s1')
+    expect(held?.kind === 'scene' ? held.scene.absorbed : null).toEqual(['e-s1', 'e-s2'])
+    expect(existingChanges(chained).mergedScenes).toEqual(['e-s1', 'e-s2'])
+    const swallowed = mergeScenes(draft, ['e-s2', 'p1c1s1'])
+    const first = findNode(swallowed, 'e-s2')
+    expect(first?.kind === 'scene' ? first.scene.existing : null).toBe(true)
+    expect(existingChanges(swallowed).mergedScenes).toEqual([])
+  })
+})
+
+describe('mergeChapters and mergeWithNext', () => {
+  it('appends the later chapters’ scenes to the first chapter', () => {
+    const draft = draftFixture()
+    const merged = mergeChapters(draft, ['p2c1', 'p1c1'])
+    expect(shape(merged)).toEqual({
+      'Part One': {
+        'Chapter One': ['Scene 1', 'Scene 2', 'Scene 1'],
+        Acknowledgements: ['Scene 1']
+      },
+      'Part Two': {}
+    })
+    expect(mergeChapters(draft, ['p1c1'])).toBe(draft)
+  })
+
+  it('merges a scene with the next one in reading order, across a chapter too', () => {
+    const draft = draftFixture()
+    const once = mergeWithNext(draft, 'p1c1s1')
+    expect(shape(once)['Part One']?.['Chapter One']).toEqual(['Scene 1'])
+    const across = mergeWithNext(draft, 'p1c1s2')
+    expect(shape(across)['Part One']).toEqual({
+      'Chapter One': ['Scene 1', 'Scene 2'],
+      Acknowledgements: []
+    })
+    expect(text(across)).toEqual(text(draft))
+    expect(mergeWithNext(draft, 'p2c1s1')).toBe(draft)
+  })
+
+  it('merges a chapter with the next chapter, and does nothing for a part', () => {
+    const draft = draftFixture()
+    expect(shape(mergeWithNext(draft, 'p1c1'))['Part One']).toEqual({
+      'Chapter One': ['Scene 1', 'Scene 2', 'Scene 1']
+    })
+    expect(mergeWithNext(draft, 'p2c1')).toBe(draft)
+    expect(mergeWithNext(draft, 'p1')).toBe(draft)
+  })
+})
+
+describe('shiftNode', () => {
+  it('moves among siblings first, then across into the neighbouring chapter or part', () => {
+    const draft = draftFixture()
+    expect(idsOfKind(shiftNode(draft, 'p1c1s2', -1), 'scene')).toEqual([
+      'p1c1s2',
+      'p1c1s1',
+      'p1c2s1',
+      'p2c1s1'
+    ])
+    // The first scene of Chapter Two goes up to the end of the chapter before it.
+    const up = shiftNode(draft, 'p2c1s1', -1)
+    expect(findNode(up, 'p2c1s1')).toMatchObject({ chapter: { id: 'p1c2' }, sceneIndex: 1 })
+    // The last chapter of Part One goes down to the start of Part Two.
+    const down = shiftNode(draft, 'p1c2', 1)
+    expect(findNode(down, 'p1c2')).toMatchObject({ part: { id: 'p2' }, chapterIndex: 0 })
+    expect(shiftNode(draft, 'p1', -1)).toBe(draft)
+    expect(shiftNode(draft, 'p1c1s1', -1)).toBe(draft)
+    expect(shiftNode(draft, 'p2c1s1', 1)).toBe(draft)
+  })
+})
+
+describe('moveTo (drag and drop)', () => {
+  it('drops a scene before or after another scene, or into a chapter at its end', () => {
+    const draft = draftFixture()
+    const before = moveTo(draft, 'p2c1s1', 'p1c1s1', 'before')
+    expect(idsOfKind(before, 'scene')).toEqual(['p2c1s1', 'p1c1s1', 'p1c1s2', 'p1c2s1'])
+    const after = moveTo(draft, 'p1c1s1', 'p1c1s2', 'after')
+    expect(idsOfKind(after, 'scene')).toEqual(['p1c1s2', 'p1c1s1', 'p1c2s1', 'p2c1s1'])
+    const into = moveTo(draft, 'p1c1s1', 'p2c1', 'into')
+    expect(findNode(into, 'p1c1s1')).toMatchObject({ chapter: { id: 'p2c1' }, sceneIndex: 1 })
+  })
+
+  it('drops a chapter among chapters or into a part, and a part among parts', () => {
+    const draft = draftFixture()
+    expect(idsOfKind(moveTo(draft, 'p2c1', 'p1c1', 'before'), 'chapter')).toEqual([
+      'p2c1',
+      'p1c1',
+      'p1c2'
+    ])
+    expect(findNode(moveTo(draft, 'p1c1', 'p2', 'into'), 'p1c1')).toMatchObject({
+      part: { id: 'p2' },
+      chapterIndex: 1
+    })
+    expect(idsOfKind(moveTo(draft, 'p2', 'p1', 'before'), 'part')).toEqual(['p2', 'p1'])
+  })
+
+  it('refuses a drop that does not fit the levels, or on itself', () => {
+    const draft = draftFixture()
+    expect(moveTo(draft, 'p1c1', 'p1c1s1', 'before')).toBe(draft)
+    expect(moveTo(draft, 'p1c1s1', 'p1', 'into')).toBe(draft)
+    expect(moveTo(draft, 'p1c1s1', 'p2c1s1', 'into')).toBe(draft)
+    expect(moveTo(draft, 'p1', 'p2', 'into')).toBe(draft)
+    expect(moveTo(draft, 'p1c1s1', 'p1c1s1', 'after')).toBe(draft)
+    expect(moveTo(draft, 'nope', 'p1c1s1', 'after')).toBe(draft)
+  })
+})
+
+describe('existing nodes in the combined outline', () => {
+  it('names what Import would delete when existing rows are removed', () => {
+    const draft = mixedDraftFixture()
+    expect(existingChanges(draft)).toEqual({
+      deletedScenes: [],
+      mergedScenes: [],
+      deletedChapters: [],
+      deletedParts: []
+    })
+    expect(existingChanges(removeNodes(draft, ['e-c1']))).toEqual({
+      deletedScenes: ['e-s1', 'e-s2'],
+      mergedScenes: [],
+      deletedChapters: ['e-c1'],
+      deletedParts: []
+    })
+  })
+
+  it('keeps an existing chapter in the manuscript and counts only new nodes in the summary', () => {
+    const draft = mixedDraftFixture()
+    expect(setPlacement(draft, 'e-c1', 'front')).toBe(draft)
+    expect(draftSummary(draft)).toMatchObject({ parts: 2, chapters: 2, scenes: 3 })
+    // An existing scene moved into a matter chapter is flattened into it: merged, not deleted.
+    const flattened = moveTo(draft, 'e-s1', 'p1c2', 'into')
+    expect(existingChanges(flattened).mergedScenes).toEqual(['e-s1'])
   })
 })

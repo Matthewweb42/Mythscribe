@@ -148,7 +148,8 @@ import {
   type EntityTagChange
 } from '../entity/entityStore'
 import { listFactsForEntity, setFactHidden } from '../entity/observedFactStore'
-import { importDraft } from '../import/commit'
+import { importDraft, type ImportResult } from '../import/commit'
+import { withExisting } from '../import/existing'
 import { readManuscript } from '../import/read'
 import { buildDraft } from '../import/structure'
 import { addBackground, listBackgrounds, removeBackground } from '../project/backgroundStore'
@@ -2474,17 +2475,20 @@ export function registerHandlers({
   })
 
   // F-12.2: reading a manuscript writes nothing. The draft goes to the renderer, the author
-  // corrects it there, and only `import:commit` touches the project.
+  // corrects it there, and only `import:commit` (or `import:createProject` from the welcome
+  // screen, where no project is open) writes it. With a project open, its existing outline
+  // joins the draft so the author sorts both in one tree.
   register('import:open', async ({ path: given }) => {
-    const session = manager.require()
+    const session = manager.current() === null ? null : manager.require()
     const chosen = given ?? (await dialogs.chooseManuscriptFile())
     if (chosen === null) return null
     const file = await readManuscript(chosen)
-    return buildDraft(file.blocks, {
+    const draft = buildDraft(file.blocks, {
       name: file.name,
       format: file.format,
-      novelFormat: session.info.format
+      novelFormat: session?.info.format ?? 'novel'
     })
+    return session === null ? draft : withExisting(session.connection.orm, draft)
   })
 
   // F-12.3: the AI pass over the draft. The parent `requestId` is registered here, not in the
@@ -2510,16 +2514,18 @@ export function registerHandlers({
     }
   })
 
-  register('import:commit', ({ draft }) => {
-    const session = manager.require()
-    const db = session.connection.orm
-    const result = importDraft(db, session.info.format, draft)
-    // F-12.3: the tag candidates the AI pass proposed for each scene become pending proposals
-    // on the created nodes, so the tag bar can offer them one by one (F-4.7) whenever the
-    // author opens the scene. They cost nothing: the pass itself was paid for by the chunk
-    // rows, and these only carry the names forward. The draft does not record which model
-    // answered, so the row names the current fast model (or `import` when there is none) and
-    // the catalogued prompt version of the pass that could have produced it.
+  /**
+   * What follows every import write, into the open project or a new one: the AI pass's tag
+   * candidates (F-12.3) become pending proposals on the created scenes, so the tag bar can offer
+   * them one by one (F-4.7) whenever the author opens the scene. They cost nothing: the pass
+   * itself was paid for by the chunk rows, and these only carry the names forward. The draft
+   * does not record which model answered, so the row names the current fast model (or `import`
+   * when there is none) and the catalogued prompt version of the pass that could have produced
+   * it. Then the imported scenes are tracked like typed ones (mentions scanned, summaries
+   * queued), existing scenes a merge or a split rewrote go through `documentsWritten` like a
+   * save, and deleted ones tell the continuity panel to drop their findings.
+   */
+  const afterImport = (db: TreeDb, result: ImportResult): void => {
     if (result.tagCandidates.length > 0) {
       const model = ai.get(sourceOf(db))?.resolveModel('fast') ?? 'import'
       for (const candidate of result.tagCandidates) {
@@ -2538,10 +2544,46 @@ export function registerHandlers({
         })
       }
     }
-    // The imported scenes are tracked like typed ones: mentions scanned, summaries queued.
+    documentsWritten(
+      db,
+      result.rewritten.map((each) => each.id)
+    )
+    if (result.deleted.length > 0)
+      emit(windows(), 'continuity:changed', { nodeIds: result.deleted })
     mentionQueue.indexAll('mentions', staleMentionNodeIds(db))
     backfillSummaries(false)
-    return { nodes: result.rows.map(toTreeNode), words: result.words }
+  }
+
+  register('import:commit', ({ draft }) => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const result = importDraft(db, session.info.format, draft)
+    afterImport(db, result)
+    return {
+      nodes: result.rows.map(toTreeNode),
+      words: result.words,
+      tree: listNodes(db).map(toTreeNode),
+      rewritten: result.rewritten.map((each) => each.id)
+    }
+  })
+
+  // F-12.2, import to start: the project is created without the starter skeleton and the draft
+  // is written into it before it opens; a draft that cannot be imported undoes the create.
+  register('import:createProject', async ({ draft, name, format, directory }) => {
+    const folder = directory
+      ? projectFolderFor(directory, name)
+      : await dialogs.chooseProjectSavePath(name)
+    if (!folder) return null
+    const written: { result: ImportResult | null } = { result: null }
+    const info = manager.create(folder, name, format, {
+      skeleton: false,
+      fill: (db) => {
+        written.result = importDraft(db, format, draft)
+      }
+    })
+    diagnostics.count('project.create')
+    if (written.result !== null) afterImport(manager.require().connection.orm, written.result)
+    return info
   })
 
   register('window:close', () => {

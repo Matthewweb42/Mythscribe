@@ -1,7 +1,13 @@
 import path from 'node:path'
 import type { NovelFormat, ProjectInfo } from '@shared/ipc/contract'
 import { AppError } from '../ipc/errors'
-import { DB_FILE, createProject, openProject, type ProjectSession } from './projectStore'
+import {
+  DB_FILE,
+  createProject,
+  openProject,
+  type CreateProjectOptions,
+  type ProjectSession
+} from './projectStore'
 
 type Listener = (info: ProjectInfo | null) => void
 type BeforeCloseListener = (session: ProjectSession) => void
@@ -22,8 +28,13 @@ export class ProjectManager {
     return this.session
   }
 
-  create(folder: string, name: string, format: NovelFormat): ProjectInfo {
-    const next = createProject(folder, name, format)
+  create(
+    folder: string,
+    name: string,
+    format: NovelFormat,
+    options: CreateProjectOptions = {}
+  ): ProjectInfo {
+    const next = createProject(folder, name, format, options)
     this.replace(next)
     return next.info
   }

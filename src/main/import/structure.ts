@@ -1,6 +1,7 @@
 import { docToText } from '@shared/docText'
 import {
   IMPORT_TITLE_MAX,
+  baseName,
   type ImportChapter,
   type ImportDraft,
   type ImportFormat,
@@ -79,7 +80,7 @@ export function buildDraft(blocks: readonly ImportBlock[], options: DraftOptions
   const resolved = blankRunsToBreaks(blocks).filter(
     (block): block is Exclude<ImportBlock, { type: 'blank' }> => block.type !== 'blank'
   )
-  const parts = assemble(classify(resolved))
+  const parts = assemble(promoteTitleLines(classify(resolved)))
   const hasTitledChapter = parts.some((part) =>
     part.chapters.some((chapter) => chapter.title !== null)
   )
@@ -149,6 +150,77 @@ function classify(blocks: readonly Exclude<ImportBlock, { type: 'blank' }>[]): M
         return { type: 'chapter', title: text }
     }
     return { type: 'paragraph', node: block.node }
+  })
+}
+
+/** A title is a line, not a sentence: this many words at most… */
+const TITLE_WORDS_MAX = 8
+/** …and this many characters. */
+const TITLE_CHARS_MAX = 60
+/** Words Title Case leaves lower-case ("The Fall of the House"). */
+const TITLE_SMALL_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'as',
+  'at',
+  'but',
+  'by',
+  'for',
+  'from',
+  'in',
+  'into',
+  'nor',
+  'of',
+  'on',
+  'or',
+  'over',
+  'the',
+  'to',
+  'under',
+  'with'
+])
+
+/**
+ * True for a short line that reads as a title rather than prose: no ending punctuation (a
+ * sentence, a line of dialogue, or a dash-cut fragment always has one), an upper-case letter or
+ * a digit first, at most `TITLE_WORDS_MAX` words, and either all capitals, Title Case, or three
+ * words or fewer ("The long night"). Pure, so the guess is testable line by line.
+ */
+export function isTitleLine(text: string): boolean {
+  const line = text.trim()
+  if (line.length === 0 || line.length > TITLE_CHARS_MAX || line.includes('\n')) return false
+  if (/[.,;:!?…"”'’)\]\-–—*]$/.test(line)) return false
+  if (!/^[\p{Lu}\p{N}]/u.test(line)) return false
+  const words = line.split(/\s+/)
+  if (words.length > TITLE_WORDS_MAX) return false
+  const letters = line.replace(/[^\p{L}]/gu, '')
+  if (letters.length > 0 && letters === letters.toUpperCase()) return true
+  if (words.length <= 3) return true
+  return words.every(
+    (word, index) =>
+      index === 0 || TITLE_SMALL_WORDS.has(word.toLowerCase()) || /^[\p{Lu}\p{N}]/u.test(word)
+  )
+}
+
+/**
+ * A title at the start of a scene starts a new chapter named after it (the author's rule,
+ * 2026-10-06): a title-like line (`isTitleLine`) right after a scene break or a part heading,
+ * with prose after it, becomes a chapter marker. The first line of the file counts too, but only
+ * when the file marks no chapters of its own — otherwise what precedes the first chapter is the
+ * front matter `label` guesses at (a book title, a dedication). A title with nothing after it
+ * (a closing "THE END") stays prose, so no text is dropped as an empty chapter.
+ */
+function promoteTitleLines(markers: readonly Marker[]): Marker[] {
+  const explicitChapters = markers.some((marker) => marker.type === 'chapter')
+  return markers.map((marker, index): Marker => {
+    if (marker.type !== 'paragraph') return marker
+    const previous = index === 0 ? null : (markers[index - 1] ?? null)
+    const startsScene =
+      previous === null ? !explicitChapters : previous.type === 'break' || previous.type === 'part'
+    if (!startsScene || markers[index + 1]?.type !== 'paragraph') return marker
+    const text = docToText({ type: 'doc', content: [marker.node] })
+    return isTitleLine(text) ? { type: 'chapter', title: text.trim() } : marker
   })
 }
 
@@ -315,11 +387,4 @@ function chapterWords(chapter: WorkChapter): number {
 function cap(title: string): string {
   const trimmed = title.trim()
   return trimmed.length > IMPORT_TITLE_MAX ? trimmed.slice(0, IMPORT_TITLE_MAX).trim() : trimmed
-}
-
-/** "Chapters of Ash.docx" → "Chapters of Ash". */
-export function baseName(fileName: string): string {
-  const dot = fileName.lastIndexOf('.')
-  const stem = dot > 0 ? fileName.slice(0, dot) : fileName
-  return stem.trim().length > 0 ? stem.trim() : fileName
 }

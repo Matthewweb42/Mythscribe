@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { draftSummary, type ImportDraft } from '@shared/import'
 import { paragraphNode, textRun, type ImportBlock } from './blocks'
-import { buildDraft, guessPlacements } from './structure'
+import { buildDraft, guessPlacements, isTitleLine } from './structure'
 
 const heading = (level: number, text: string): ImportBlock => ({ type: 'heading', level, text })
 const para = (text: string): ImportBlock => ({
@@ -267,5 +267,95 @@ describe('guessPlacements', () => {
     expect(
       guessPlacements(['Copyright', 'Chapter One', 'Glossary', 'Chapter Two', 'Appendix'])
     ).toEqual(['front', 'manuscript', 'manuscript', 'manuscript', 'end'])
+  })
+})
+
+describe('isTitleLine (the author’s rule, 2026-10-06)', () => {
+  it('takes a short line without ending punctuation in Title Case, all capitals, or of few words', () => {
+    for (const line of [
+      'The Long Night',
+      'THE LONG NIGHT OF THE SOUL',
+      'The Fall of the House of Usher',
+      'Homecoming',
+      'Ash and bone',
+      '1997'
+    ]) {
+      expect(isTitleLine(line), line).toBe(true)
+    }
+  })
+
+  it('refuses prose: ending punctuation, dialogue, a lower-case start, long or sentence-cased lines', () => {
+    for (const line of [
+      'She ran.',
+      'Who goes there?',
+      '“Run,” she said',
+      'and then it rained',
+      'It was the last time she would see the river at night',
+      'She walked down to the river at dusk',
+      'Wait—',
+      'x'.repeat(61),
+      ''
+    ]) {
+      expect(isTitleLine(line), line).toBe(false)
+    }
+  })
+})
+
+describe('buildDraft, a title at the start of a scene starts a chapter', () => {
+  it('names a new chapter after a title line that opens a scene', () => {
+    const built = draft([
+      para('The Ridge'),
+      para('Mara climbed.'),
+      brk,
+      para('She waited.'),
+      brk,
+      para('THE VILLAGE'),
+      para('Lanterns came on.'),
+      brk,
+      para('Nobody came.')
+    ])
+    expect(shape(built)).toEqual(['The Quiet House: The Ridge(2), THE VILLAGE(2)'])
+    expect(built.parts[0]?.chapters[1]?.scenes[0]?.paragraphs).toHaveLength(1)
+  })
+
+  it('works with blank-line breaks in plain text and after a part heading', () => {
+    const built = draft([
+      heading(1, 'Part One'),
+      para('Landfall'),
+      para('The ship came in.'),
+      blank,
+      blank,
+      para('Into the Hills'),
+      para('They walked.')
+    ])
+    expect(shape(built)).toEqual(['Part One: Landfall(1), Into the Hills(1)'])
+  })
+
+  it('keeps a title with nothing after it as prose, so no text is dropped', () => {
+    const built = draft([para('It ended.'), brk, para('THE END')])
+    expect(shape(built)).toEqual(['The Quiet House: Chapter 1(2)'])
+    expect(draftSummary(built).words).toBe(4)
+  })
+
+  it('leaves the opening line alone when the file marks its own chapters', () => {
+    const built = draft([
+      para('The Iron Crown'),
+      para('by Jane Doe'),
+      heading(1, 'Chapter 1'),
+      para('It began.')
+    ])
+    expect(shape(built)).toEqual(['The Quiet House: Front matter(1), Chapter 1(1)'])
+  })
+
+  it('does not promote a line inside a scene, or a sentence after a break', () => {
+    const built = draft([
+      para('The Ridge'),
+      para('Mara climbed.'),
+      para('Higher Still'),
+      para('The wind rose.'),
+      brk,
+      para('Below, the lanterns came on.')
+    ])
+    expect(shape(built)).toEqual(['The Quiet House: The Ridge(2)'])
   })
 })

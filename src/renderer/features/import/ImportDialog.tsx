@@ -1,5 +1,14 @@
-import { useEffect, useId, useMemo, useRef, type KeyboardEvent, type ReactNode } from 'react'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type ReactNode
+} from 'react'
+import { ChevronDown, ChevronUp, GripVertical, X } from 'lucide-react'
 import { docToText } from '@shared/docText'
 import {
   IMPORT_PLACEMENTS,
@@ -7,16 +16,22 @@ import {
   IMPORT_TITLE_MAX,
   ImportPlacement,
   draftSummary,
+  existingChanges,
   sceneFirstLine,
   sceneWords,
+  type ExistingChanges,
   type ImportAiMarks,
   type ImportChapter,
   type ImportDraft,
+  type ImportPart,
+  type ImportScene,
   type ImportSummary
 } from '@shared/import'
+import { NovelFormat, PROJECT_NAME_MAX } from '@shared/ipc/contract'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
-import { findNode } from './draftEdits'
+import { PROJECT_FORMATS } from '@renderer/features/project/formats'
+import { chapterIds, findNode, sceneIds, type DropZone } from './draftEdits'
 import { useImportStore, type DetectState } from './importStore'
 
 /** `N word` / `N words`, with the thousands separators the tree shows. */
@@ -35,6 +50,29 @@ function summaryLine(summary: ImportSummary): string {
   return parts.join(' · ')
 }
 
+/**
+ * What Import does to the project's own nodes beyond moving and renaming them, spelled out
+ * before anything is written (the author's rule: never silent). Empty when nothing goes.
+ */
+function existingLine(changes: ExistingChanges): string {
+  const lines: string[] = []
+  if (changes.deletedScenes.length > 0) {
+    lines.push(`${count(changes.deletedScenes.length, 'existing scene')} will be deleted`)
+  }
+  if (changes.mergedScenes.length > 0) {
+    lines.push(
+      `${count(changes.mergedScenes.length, 'existing scene')} merged into another (the text is kept; their tags and notes are not)`
+    )
+  }
+  if (changes.deletedChapters.length > 0) {
+    lines.push(`${count(changes.deletedChapters.length, 'existing chapter')} will be deleted`)
+  }
+  if (changes.deletedParts.length > 0) {
+    lines.push(`${count(changes.deletedParts.length, 'existing part')} will be deleted`)
+  }
+  return lines.join(' · ')
+}
+
 /** One paragraph of a scene as the review pane shows it; empty paragraphs read as a blank line. */
 const paragraphText = (node: TiptapNodeT): string => docToText({ type: 'doc', content: [node] })
 
@@ -43,17 +81,46 @@ const ACTION =
 const ICON_ACTION =
   'flex h-5 w-5 shrink-0 items-center justify-center rounded border border-line text-fg-muted hover:bg-surface hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent'
 const INDENT = ['pl-2', 'pl-6', 'pl-10'] as const
+const FIELD = 'rounded border border-line bg-bg px-2 py-1 text-sm text-fg'
 
 /** True while the AI pass runs: every edit in the tree is refused until it answers. */
 const useDetectRunning = (): boolean => useImportStore((s) => s.detect?.status === 'running')
 
+type RowKind = 'part' | 'chapter' | 'scene'
+
+/** The level a row of `kind` can be dropped into (`into`), if any. */
+const PARENT_KIND: Record<RowKind, RowKind | null> = {
+  part: null,
+  chapter: 'part',
+  scene: 'chapter'
+}
+
+/** The drag in progress: the row being dragged and, once a row would take it, where it lands. */
+interface DragState {
+  id: string
+  kind: RowKind
+  over: { id: string; zone: DropZone } | null
+}
+
+/** What every row needs to take part in a drag (F-12.2: reorder and move by drag and drop). */
+interface DragProps {
+  drag: DragState | null
+  onStart: (id: string, kind: RowKind, event: DragEvent<HTMLDivElement>) => void
+  onOver: (id: string, kind: RowKind, event: DragEvent<HTMLDivElement>) => void
+  onDrop: (event: DragEvent<HTMLDivElement>) => void
+  onEnd: () => void
+}
+
 /**
- * The import review dialog (F-12.2): main's structure draft, shown as the parts, chapters, and
- * scenes it would create, with everything the author needs to correct a heuristic before
- * anything is written — rename, exclude, reorder, nest, move a scene between chapters, merge,
- * split, and send a chapter to the front or back matter. Import writes the draft as it stands;
- * Cancel drops it. The dialog holds review edits that exist nowhere else, so a backdrop click
- * does *not* close it (Escape and Cancel do, deliberately).
+ * The import review dialog (F-12.2): main's structure draft as an outline of parts, chapters,
+ * and scenes — with, when the project already has a manuscript, the project's own nodes in the
+ * same outline so the author sorts both together (imported rows are marked New). Everything
+ * the author needs is on the row: click a title to rename it, drag a row (or Move up / Move
+ * down) to reorder it or move a scene into another chapter, Merge with next, Split…, × to
+ * delete; tick rows (Shift for a range) to merge them into one scene or delete them together.
+ * Undo steps back. Import writes the outline as it stands, after the line above the buttons has
+ * said what happens to existing nodes; Cancel drops it. The dialog holds review edits that
+ * exist nowhere else, so a backdrop click does *not* close it (Escape and Cancel do).
  */
 export function ImportDialog(): React.JSX.Element | null {
   const draft = useImportStore((s) => s.draft)
@@ -66,27 +133,76 @@ function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
   const busy = useImportStore((s) => s.busy)
   const running = useDetectRunning()
   const sceneId = useImportStore((s) => s.sceneId)
+  const target = useImportStore((s) => s.target)
+  const canUndo = useImportStore((s) => s.history.length > 0)
   const cancel = useImportStore((s) => s.cancel)
   const commit = useImportStore((s) => s.commit)
+  const undo = useImportStore((s) => s.undo)
+  const moveTo = useImportStore((s) => s.moveTo)
   const panel = useRef<HTMLDivElement>(null)
+  const [drag, setDrag] = useState<DragState | null>(null)
 
   useEffect(() => {
     panel.current?.focus()
   }, [])
 
-  // Both walk every paragraph, so they are computed once per draft rather than once per render.
+  // These walk every paragraph, so they are computed once per draft rather than once per render.
   const summary = useMemo(() => draftSummary(draft), [draft])
+  const changes = useMemo(() => existingLine(existingChanges(draft)), [draft])
   const words = useMemo(() => wordMap(draft), [draft])
-  const chapterAt = useMemo(() => chapterOrder(draft), [draft])
+  const order = useMemo(() => ({ scenes: sceneIds(draft), chapters: chapterIds(draft) }), [draft])
+  // Into a project with a manuscript the outline mixes both, so the imported rows say so.
+  const mixed = draft.existing !== undefined
 
   const selected = sceneId === null ? null : findNode(draft, sceneId)
   const scene = selected?.kind === 'scene' ? selected.scene : null
-  const nothingToImport = summary.scenes + summary.matter === 0
+  const nothingToImport = summary.scenes + summary.matter === 0 && changes.length === 0
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === 'Escape') {
       event.preventDefault()
       cancel()
+      return
+    }
+    // Undo in the outline; a text field keeps its own Ctrl+Z.
+    const typing =
+      (event.target instanceof HTMLInputElement && event.target.type !== 'checkbox') ||
+      event.target instanceof HTMLSelectElement
+    if (!typing && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+      event.preventDefault()
+      undo()
+    }
+  }
+
+  const dragProps: DragProps = {
+    drag,
+    onStart(id, kind, event) {
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('text/plain', id)
+      setDrag({ id, kind, over: null })
+    },
+    onOver(id, kind, event) {
+      if (drag === null || drag.id === id) return
+      let zone: DropZone | null = null
+      if (kind === drag.kind) {
+        const rect = event.currentTarget.getBoundingClientRect()
+        const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0
+        zone = ratio < 0.5 ? 'before' : 'after'
+      } else if (PARENT_KIND[drag.kind] === kind) {
+        zone = 'into'
+      }
+      if (zone === null) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'move'
+      if (drag.over?.id !== id || drag.over.zone !== zone) setDrag({ ...drag, over: { id, zone } })
+    },
+    onDrop(event) {
+      event.preventDefault()
+      if (drag?.over) moveTo(drag.id, drag.over.id, drag.over.zone)
+      setDrag(null)
+    },
+    onEnd() {
+      setDrag(null)
     }
   }
 
@@ -100,91 +216,70 @@ function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
         tabIndex={-1}
         data-testid="import-dialog"
         onKeyDown={onKeyDown}
-        className="flex h-[80vh] w-[1000px] max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none"
+        className="flex h-[85vh] w-[1100px] max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none"
       >
         <div className="shrink-0 border-b border-line px-5 pt-4 pb-3">
           <h2 id={titleId} className="m-0 text-base font-semibold">
             Import “{draft.source.name}”
           </h2>
+          {target === 'new' ? <NewProjectFields /> : null}
           <p className="mt-1 mb-0 text-sm text-fg-muted" data-testid="import-question">
-            Does this look right? Rename, reorder, or leave anything out before you import.
+            Does this look right? Click a title to rename it, drag rows to reorder them, tick rows
+            to merge or delete them.
           </p>
           <p className="mt-1 mb-0 text-xs text-fg-subtle" data-testid="import-summary">
             {summaryLine(summary)}
           </p>
         </div>
         <DetectPanel />
+        <SelectionBar />
         <div className="flex min-h-0 flex-1">
           <div className="min-h-0 flex-1 overflow-y-auto py-2">
             <ul className="m-0 flex list-none flex-col p-0">
               {draft.parts.map((part, partIndex) => (
                 <li key={part.id} className="m-0 list-none p-0">
-                  <Row
-                    id={part.id}
-                    title={part.title}
-                    depth={0}
-                    kindLabel="part"
-                    excluded={part.excluded}
-                    dimmed={part.excluded}
+                  <PartRow
+                    part={part}
                     words={words[part.id] ?? 0}
-                  >
-                    <MoveButtons
-                      id={part.id}
-                      title={part.title}
-                      canUp={partIndex > 0}
-                      canDown={partIndex < draft.parts.length - 1}
-                    />
-                  </Row>
+                    mixed={mixed}
+                    canUp={partIndex > 0}
+                    canDown={partIndex < draft.parts.length - 1}
+                    dragProps={dragProps}
+                  />
                   <ul className="m-0 flex list-none flex-col p-0">
-                    {part.chapters.map((chapter, chapterIndex) => (
-                      <li key={chapter.id} className="m-0 list-none p-0">
-                        <ChapterRow
-                          chapter={chapter}
-                          words={words[chapter.id] ?? 0}
-                          dimmed={part.excluded || chapter.excluded}
-                          canUp={chapterIndex > 0}
-                          canDown={chapterIndex < part.chapters.length - 1}
-                          canNestPrev={partIndex > 0}
-                          canNestNext={partIndex < draft.parts.length - 1}
-                        />
-                        <ul className="m-0 flex list-none flex-col p-0">
-                          {chapter.scenes.map((sc, sceneIndex) => {
-                            const flat = chapterAt[chapter.id] ?? 0
-                            return (
-                              <li key={sc.id} className="m-0 list-none p-0">
-                                <Row
-                                  id={sc.id}
-                                  title={sc.title}
-                                  depth={2}
-                                  kindLabel="scene"
-                                  excluded={sc.excluded}
-                                  dimmed={part.excluded || chapter.excluded || sc.excluded}
-                                  words={words[sc.id] ?? 0}
-                                  preview={sceneFirstLine(sc)}
-                                  active={sc.id === sceneId}
-                                  ai={sc.ai}
-                                >
-                                  <MoveButtons
-                                    id={sc.id}
-                                    title={sc.title}
-                                    canUp={sceneIndex > 0}
-                                    canDown={sceneIndex < chapter.scenes.length - 1}
+                    {part.chapters.map((chapter) => {
+                      const at = order.chapters.indexOf(chapter.id)
+                      return (
+                        <li key={chapter.id} className="m-0 list-none p-0">
+                          <ChapterRow
+                            chapter={chapter}
+                            words={words[chapter.id] ?? 0}
+                            mixed={mixed}
+                            canUp={at > 0}
+                            canDown={at < order.chapters.length - 1}
+                            dragProps={dragProps}
+                          />
+                          <ul className="m-0 flex list-none flex-col p-0">
+                            {chapter.scenes.map((sc) => {
+                              const index = order.scenes.indexOf(sc.id)
+                              return (
+                                <li key={sc.id} className="m-0 list-none p-0">
+                                  <SceneRow
+                                    scene={sc}
+                                    words={words[sc.id] ?? 0}
+                                    mixed={mixed}
+                                    active={sc.id === sceneId}
+                                    canUp={index > 0}
+                                    canDown={index < order.scenes.length - 1}
+                                    dragProps={dragProps}
                                   />
-                                  <SceneActions
-                                    id={sc.id}
-                                    title={sc.title}
-                                    canMerge={sceneIndex > 0}
-                                    canPrevChapter={flat > 0}
-                                    canNextChapter={flat < Object.keys(chapterAt).length - 1}
-                                    canSplit={sc.paragraphs.length > 1}
-                                  />
-                                </Row>
-                              </li>
-                            )
-                          })}
-                        </ul>
-                      </li>
-                    ))}
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        </li>
+                      )
+                    })}
                   </ul>
                 </li>
               ))}
@@ -224,7 +319,25 @@ function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
             )}
           </div>
         </div>
+        {changes.length > 0 ? (
+          <p
+            role="note"
+            data-testid="import-existing"
+            className="m-0 shrink-0 border-t border-line bg-surface px-5 py-2 text-xs text-warning"
+          >
+            {`In your project: ${changes}.`}
+          </p>
+        ) : null}
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-5 py-3">
+          <button
+            type="button"
+            data-testid="import-undo"
+            disabled={!canUndo || running}
+            onClick={undo}
+            className="mr-auto rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-40"
+          >
+            Undo
+          </button>
           <button
             type="button"
             data-testid="import-cancel"
@@ -240,7 +353,7 @@ function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
             onClick={() => void commit()}
             className="rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60"
           >
-            {busy ? 'Importing…' : 'Import'}
+            {busy ? 'Importing…' : target === 'new' ? 'Create project' : 'Import'}
           </button>
         </div>
       </div>
@@ -248,53 +361,186 @@ function ImportReview({ draft }: { draft: ImportDraft }): React.JSX.Element {
   )
 }
 
+/** Import to start (F-12.2): the new project's name and format, above the outline. */
+function NewProjectFields(): React.JSX.Element {
+  const nameId = useId()
+  const formatId = useId()
+  const name = useImportStore((s) => s.projectName)
+  const format = useImportStore((s) => s.projectFormat)
+  const setName = useImportStore((s) => s.setProjectName)
+  const setFormat = useImportStore((s) => s.setProjectFormat)
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+      <label htmlFor={nameId} className="text-fg-muted">
+        Project name
+      </label>
+      <input
+        id={nameId}
+        data-testid="import-project-name"
+        value={name}
+        maxLength={PROJECT_NAME_MAX}
+        onChange={(event) => setName(event.target.value)}
+        className={`${FIELD} min-w-48 flex-1`}
+      />
+      <label htmlFor={formatId} className="text-fg-muted">
+        Format
+      </label>
+      <select
+        id={formatId}
+        data-testid="import-project-format"
+        value={format}
+        onChange={(event) => {
+          const chosen = NovelFormat.safeParse(event.target.value)
+          if (chosen.success) setFormat(chosen.data)
+        }}
+        className={FIELD}
+      >
+        {PROJECT_FORMATS.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+/** The ticked rows and what can be done with them together; absent while nothing is ticked. */
+function SelectionBar(): React.JSX.Element | null {
+  const draft = useImportStore((s) => s.draft)
+  const selected = useImportStore((s) => s.selected)
+  const running = useDetectRunning()
+  const mergeSelected = useImportStore((s) => s.mergeSelected)
+  const removeSelected = useImportStore((s) => s.removeSelected)
+  const clearSelection = useImportStore((s) => s.clearSelection)
+  if (draft === null || selected.length === 0) return null
+  const kinds = new Set(selected.map((id) => findNode(draft, id)?.kind))
+  const only = kinds.size === 1 ? [...kinds][0] : undefined
+  const mergeLabel = only === 'chapter' ? 'Merge into one chapter' : 'Merge into one scene'
+  const canMerge = selected.length >= 2 && (only === 'scene' || only === 'chapter')
+  return (
+    <div
+      data-testid="import-selection"
+      className="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-5 py-2 text-xs"
+    >
+      <span className="text-fg-muted">{`${selected.length.toLocaleString()} selected`}</span>
+      <span className="flex-1" />
+      <button
+        type="button"
+        data-testid="import-merge-selected"
+        disabled={!canMerge || running}
+        title={canMerge ? undefined : 'Tick two or more scenes (or two or more chapters)'}
+        onClick={mergeSelected}
+        className={ACTION}
+      >
+        {mergeLabel}
+      </button>
+      <button
+        type="button"
+        data-testid="import-delete-selected"
+        disabled={running}
+        onClick={removeSelected}
+        className={ACTION}
+      >
+        Delete selected
+      </button>
+      <button type="button" onClick={clearSelection} className={ACTION}>
+        Clear selection
+      </button>
+    </div>
+  )
+}
+
 interface RowProps {
   id: string
+  kind: RowKind
   title: string
   depth: 0 | 1 | 2
-  /** Reads in the accessible names of the row's controls: "Exclude chapter Chapter One". */
-  kindLabel: string
-  excluded: boolean
-  /** True when this node or a container above it is left out; the row greys either way. */
-  dimmed: boolean
+  /** True for a node already in the project; false for imported text. */
+  existing: boolean
+  /** True when the outline mixes existing and imported rows, so the imported ones are badged. */
+  mixed: boolean
   words: number
   preview?: string
+  /** A count shown instead of a preview (a chapter's scenes). */
+  detail?: string
   /** The scene whose paragraphs the right pane shows. */
   active?: boolean
+  /** Chapters and scenes can be ticked for the selection bar; parts cannot. */
+  selectable: boolean
   /** What the AI pass (F-12.3) did to this node, if anything: the row badges it and offers Reject. */
   ai?: ImportAiMarks
+  dragProps: DragProps
+  canUp: boolean
+  canDown: boolean
+  /** Actions between the move buttons and the delete button. */
   children?: ReactNode
 }
 
-/** One line of the review tree: the title (click to rename), a preview, the words, the actions, Exclude. */
+/** One line of the outline: tick, grip, title (click to rename), badges, preview, words, actions, ×. */
 function Row({
   id,
+  kind,
   title,
   depth,
-  kindLabel,
-  excluded,
-  dimmed,
+  existing,
+  mixed,
   words,
   preview,
+  detail,
   active,
+  selectable,
   ai,
+  dragProps,
+  canUp,
+  canDown,
   children
 }: RowProps): React.JSX.Element {
   const renaming = useImportStore((s) => s.renamingId === id)
+  const ticked = useImportStore((s) => s.selected.includes(id))
   const running = useDetectRunning()
   const startRename = useImportStore((s) => s.startRename)
-  const setExcluded = useImportStore((s) => s.setExcluded)
+  const toggleSelect = useImportStore((s) => s.toggleSelect)
+  const remove = useImportStore((s) => s.remove)
+  const move = useImportStore((s) => s.move)
   const reject = useImportStore((s) => s.rejectSuggestion)
+  const { drag } = dragProps
+  const zone = drag?.over?.id === id ? drag.over.zone : null
 
   return (
     <div
       data-testid="import-node"
       data-import-id={id}
-      data-excluded={dimmed ? 'true' : undefined}
+      data-import-kind={kind}
+      data-import-new={existing ? undefined : 'true'}
+      data-drop={zone ?? undefined}
+      draggable={!renaming && !running}
+      onDragStart={(event) => dragProps.onStart(id, kind, event)}
+      onDragOver={(event) => dragProps.onOver(id, kind, event)}
+      onDrop={dragProps.onDrop}
+      onDragEnd={dragProps.onEnd}
       className={`flex items-center gap-2 py-0.5 pr-3 text-sm ${INDENT[depth]} ${
-        active ? 'bg-accent/10' : 'hover:bg-surface'
-      } ${dimmed ? 'text-fg-subtle line-through' : ''}`}
+        active || ticked ? 'bg-accent/10' : 'hover:bg-surface'
+      } ${drag?.id === id ? 'opacity-50' : ''} ${zone === 'into' ? 'ring-2 ring-accent ring-inset' : ''} ${
+        zone === 'before' ? 'border-t-2 border-accent' : ''
+      } ${zone === 'after' ? 'border-b-2 border-accent' : ''}`}
     >
+      {selectable ? (
+        <input
+          type="checkbox"
+          data-testid="import-select"
+          disabled={running}
+          aria-label={`Select ${kind} ${title}`}
+          checked={ticked}
+          onChange={(event) => {
+            const native = event.nativeEvent
+            toggleSelect(id, native instanceof MouseEvent && native.shiftKey)
+          }}
+        />
+      ) : (
+        <span aria-hidden="true" className="w-[13px] shrink-0" />
+      )}
+      <GripVertical size={12} aria-hidden="true" className="shrink-0 cursor-grab text-fg-subtle" />
       {renaming ? (
         <RenameInput id={id} title={title} />
       ) : (
@@ -303,16 +549,22 @@ function Row({
           title="Rename"
           disabled={running}
           onClick={() => startRename(id)}
-          // The title keeps at least 6rem (up to 12rem) and the preview gives way first: a badged
-          // row (F-12.3) carries an AI chip and a Reject button, which otherwise squeezed the
-          // title to one letter while the preview kept a few.
-          className={`min-w-24 max-w-48 shrink truncate rounded px-1 text-left hover:bg-surface-raised disabled:hover:bg-transparent ${
+          // The title keeps at least 6rem (up to 14rem) and the preview gives way first.
+          className={`min-w-24 max-w-56 shrink truncate rounded px-1 text-left hover:bg-surface-raised disabled:hover:bg-transparent ${
             depth === 2 ? '' : 'font-medium'
           }`}
         >
           {title}
         </button>
       )}
+      {mixed && !existing ? (
+        <span
+          data-testid="import-new-badge"
+          className="shrink-0 rounded border border-line px-1 text-[10px] font-medium text-fg-muted"
+        >
+          New
+        </span>
+      ) : null}
       {ai && (ai.break || ai.title) ? (
         <span
           data-testid="import-ai-badge"
@@ -324,123 +576,12 @@ function Row({
       ) : null}
       {preview ? (
         <span className="min-w-0 flex-1 truncate text-xs text-fg-subtle">{preview}</span>
+      ) : detail ? (
+        <span className="min-w-0 flex-1 truncate text-xs text-fg-subtle">{detail}</span>
       ) : (
         <span className="flex-1" />
       )}
       <span className="shrink-0 text-xs text-fg-subtle tabular-nums">{words.toLocaleString()}</span>
-      {children}
-      {ai?.break === true ? (
-        <button
-          type="button"
-          data-testid="import-reject"
-          disabled={running}
-          aria-label={`Reject the ${kindLabel} the AI added, ${title}`}
-          onClick={() => reject(id)}
-          className={ACTION}
-        >
-          Reject
-        </button>
-      ) : null}
-      <label className="flex shrink-0 items-center gap-1 text-xs text-fg-muted">
-        <input
-          type="checkbox"
-          data-testid="import-exclude"
-          disabled={running}
-          aria-label={`Exclude ${kindLabel} ${title}`}
-          checked={excluded}
-          onChange={(event) => setExcluded(id, event.target.checked)}
-        />
-        Exclude
-      </label>
-    </div>
-  )
-}
-
-/** The chapter's own row: placement, nesting, and the shared move buttons. */
-function ChapterRow({
-  chapter,
-  words,
-  dimmed,
-  canUp,
-  canDown,
-  canNestPrev,
-  canNestNext
-}: {
-  chapter: ImportChapter
-  words: number
-  dimmed: boolean
-  canUp: boolean
-  canDown: boolean
-  canNestPrev: boolean
-  canNestNext: boolean
-}): React.JSX.Element {
-  const setPlacement = useImportStore((s) => s.setPlacement)
-  const nest = useImportStore((s) => s.nest)
-  const running = useDetectRunning()
-  return (
-    <Row
-      id={chapter.id}
-      title={chapter.title}
-      depth={1}
-      kindLabel="chapter"
-      excluded={chapter.excluded}
-      dimmed={dimmed}
-      words={words}
-      ai={chapter.ai}
-    >
-      <select
-        data-testid="import-placement"
-        aria-label={`Placement for ${chapter.title}`}
-        value={chapter.placement}
-        disabled={running}
-        onChange={(event) => setPlacement(chapter.id, ImportPlacement.parse(event.target.value))}
-        className="shrink-0 rounded border border-line bg-bg px-1 py-0.5 text-xs text-fg disabled:opacity-40"
-      >
-        {IMPORT_PLACEMENTS.map((placement) => (
-          <option key={placement} value={placement}>
-            {IMPORT_PLACEMENT_LABEL[placement]}
-          </option>
-        ))}
-      </select>
-      <MoveButtons id={chapter.id} title={chapter.title} canUp={canUp} canDown={canDown} />
-      <button
-        type="button"
-        disabled={!canNestPrev || running}
-        aria-label={`Move ${chapter.title} to the previous part`}
-        onClick={() => nest(chapter.id, 'prev')}
-        className={ACTION}
-      >
-        ↰ part
-      </button>
-      <button
-        type="button"
-        disabled={!canNestNext || running}
-        aria-label={`Move ${chapter.title} to the next part`}
-        onClick={() => nest(chapter.id, 'next')}
-        className={ACTION}
-      >
-        ↳ part
-      </button>
-    </Row>
-  )
-}
-
-/** Move up / move down among the siblings; the same pair for a part, a chapter, and a scene. */
-function MoveButtons({
-  id,
-  title,
-  canUp,
-  canDown
-}: {
-  id: string
-  title: string
-  canUp: boolean
-  canDown: boolean
-}): React.JSX.Element {
-  const move = useImportStore((s) => s.move)
-  const running = useDetectRunning()
-  return (
-    <>
       <button
         type="button"
         disabled={!canUp || running}
@@ -459,69 +600,191 @@ function MoveButtons({
       >
         <ChevronDown size={12} aria-hidden="true" />
       </button>
-    </>
+      {children}
+      {ai?.break === true ? (
+        <button
+          type="button"
+          data-testid="import-reject"
+          disabled={running}
+          aria-label={`Reject the ${kind} the AI added, ${title}`}
+          onClick={() => reject(id)}
+          className={ACTION}
+        >
+          Reject
+        </button>
+      ) : null}
+      <button
+        type="button"
+        data-testid="import-delete"
+        disabled={running}
+        aria-label={`Delete ${kind} ${title}`}
+        title={existing ? 'Delete (removes it from your project at Import)' : 'Delete'}
+        onClick={() => remove(id)}
+        className={ICON_ACTION}
+      >
+        <X size={12} aria-hidden="true" />
+      </button>
+    </div>
   )
 }
 
-/** What a scene can do beyond moving among its siblings: change chapter, merge, split. */
-function SceneActions({
-  id,
-  title,
-  canMerge,
-  canPrevChapter,
-  canNextChapter,
-  canSplit
+function PartRow({
+  part,
+  words,
+  mixed,
+  canUp,
+  canDown,
+  dragProps
 }: {
-  id: string
-  title: string
-  canMerge: boolean
-  canPrevChapter: boolean
-  canNextChapter: boolean
-  canSplit: boolean
+  part: ImportPart
+  words: number
+  mixed: boolean
+  canUp: boolean
+  canDown: boolean
+  dragProps: DragProps
 }): React.JSX.Element {
-  const moveScene = useImportStore((s) => s.moveScene)
-  const mergeScene = useImportStore((s) => s.mergeScene)
+  return (
+    <Row
+      id={part.id}
+      kind="part"
+      title={part.title}
+      depth={0}
+      existing={part.existing === true}
+      mixed={mixed}
+      words={words}
+      detail={count(part.chapters.length, 'chapter')}
+      selectable={false}
+      dragProps={dragProps}
+      canUp={canUp}
+      canDown={canDown}
+    />
+  )
+}
+
+/** The chapter's own row: placement (imported chapters only) and Merge with next. */
+function ChapterRow({
+  chapter,
+  words,
+  mixed,
+  canUp,
+  canDown,
+  dragProps
+}: {
+  chapter: ImportChapter
+  words: number
+  mixed: boolean
+  canUp: boolean
+  canDown: boolean
+  dragProps: DragProps
+}): React.JSX.Element {
+  const setPlacement = useImportStore((s) => s.setPlacement)
+  const mergeWithNext = useImportStore((s) => s.mergeWithNext)
+  const running = useDetectRunning()
+  const existing = chapter.existing === true
+  return (
+    <Row
+      id={chapter.id}
+      kind="chapter"
+      title={chapter.title}
+      depth={1}
+      existing={existing}
+      mixed={mixed}
+      words={words}
+      detail={count(chapter.scenes.length, 'scene')}
+      selectable
+      ai={chapter.ai}
+      dragProps={dragProps}
+      canUp={canUp}
+      canDown={canDown}
+    >
+      {existing ? null : (
+        <select
+          data-testid="import-placement"
+          aria-label={`Placement for ${chapter.title}`}
+          value={chapter.placement}
+          disabled={running}
+          onChange={(event) => setPlacement(chapter.id, ImportPlacement.parse(event.target.value))}
+          className="shrink-0 rounded border border-line bg-bg px-1 py-0.5 text-xs text-fg disabled:opacity-40"
+        >
+          {IMPORT_PLACEMENTS.map((placement) => (
+            <option key={placement} value={placement}>
+              {IMPORT_PLACEMENT_LABEL[placement]}
+            </option>
+          ))}
+        </select>
+      )}
+      <button
+        type="button"
+        data-testid="import-merge-next"
+        disabled={!canDown || running}
+        aria-label={`Merge ${chapter.title} with the next chapter`}
+        onClick={() => mergeWithNext(chapter.id)}
+        className={ACTION}
+      >
+        Merge ↓
+      </button>
+    </Row>
+  )
+}
+
+/** A scene's row: its first line, Merge with next, and Split… (which opens the paragraph pane). */
+function SceneRow({
+  scene,
+  words,
+  mixed,
+  active,
+  canUp,
+  canDown,
+  dragProps
+}: {
+  scene: ImportScene
+  words: number
+  mixed: boolean
+  active: boolean
+  canUp: boolean
+  canDown: boolean
+  dragProps: DragProps
+}): React.JSX.Element {
+  const mergeWithNext = useImportStore((s) => s.mergeWithNext)
   const selectScene = useImportStore((s) => s.selectScene)
   const running = useDetectRunning()
   return (
-    <>
+    <Row
+      id={scene.id}
+      kind="scene"
+      title={scene.title}
+      depth={2}
+      existing={scene.existing === true}
+      mixed={mixed}
+      words={words}
+      preview={sceneFirstLine(scene)}
+      active={active}
+      selectable
+      ai={scene.ai}
+      dragProps={dragProps}
+      canUp={canUp}
+      canDown={canDown}
+    >
       <button
         type="button"
-        disabled={!canPrevChapter || running}
-        aria-label={`Move ${title} to the previous chapter`}
-        onClick={() => moveScene(id, 'prev')}
+        data-testid="import-merge-next"
+        disabled={!canDown || running}
+        aria-label={`Merge ${scene.title} with the next scene`}
+        onClick={() => mergeWithNext(scene.id)}
         className={ACTION}
       >
-        ↰ ch.
+        Merge ↓
       </button>
       <button
         type="button"
-        disabled={!canNextChapter || running}
-        aria-label={`Move ${title} to the next chapter`}
-        onClick={() => moveScene(id, 'next')}
-        className={ACTION}
-      >
-        ↳ ch.
-      </button>
-      <button
-        type="button"
-        disabled={!canMerge || running}
-        aria-label={`Merge ${title} with the scene before it`}
-        onClick={() => mergeScene(id)}
-        className={ACTION}
-      >
-        Merge
-      </button>
-      <button
-        type="button"
-        disabled={!canSplit || running}
-        aria-label={`Split ${title}`}
-        onClick={() => selectScene(id)}
+        disabled={scene.paragraphs.length < 2 || running}
+        aria-label={`Split ${scene.title}`}
+        onClick={() => selectScene(scene.id)}
         className={ACTION}
       >
         Split…
       </button>
-    </>
+    </Row>
   )
 }
 
@@ -685,14 +948,4 @@ function wordMap(draft: ImportDraft): Record<string, number> {
     words[part.id] = partWords
   }
   return words
-}
-
-/** Each chapter's place in reading order, so a scene knows whether it has a chapter either side. */
-function chapterOrder(draft: ImportDraft): Record<string, number> {
-  const order: Record<string, number> = {}
-  let index = 0
-  for (const part of draft.parts) {
-    for (const chapter of part.chapters) order[chapter.id] = index++
-  }
-  return order
 }

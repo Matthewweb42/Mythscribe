@@ -97,3 +97,57 @@ export function draftFixture(): ImportDraft {
     ]
   }
 }
+
+/** A paragraph as the author wrote it in the project: no imported origin. */
+export function ownParagraph(text: string): TiptapNodeT {
+  return { type: 'paragraph', content: [{ type: 'text', text }] }
+}
+
+/**
+ * The combined outline main builds when importing into a project with a manuscript: the
+ * project's own part (`e-p1` → `e-c1` → `e-s1`, `e-s2`, all `existing`) ahead of
+ * `draftFixture()`'s imported parts, with `existing` listing the ids Import may delete.
+ */
+export function mixedDraftFixture(): ImportDraft {
+  const imported = draftFixture()
+  return {
+    ...imported,
+    parts: [
+      {
+        id: 'e-p1',
+        title: 'Part 1',
+        excluded: false,
+        existing: true,
+        chapters: [
+          {
+            id: 'e-c1',
+            title: 'Chapter 1',
+            excluded: false,
+            existing: true,
+            placement: 'manuscript',
+            scenes: [
+              {
+                id: 'e-s1',
+                title: 'Opening',
+                excluded: false,
+                existing: true,
+                paragraphs: [ownParagraph('Mara climbed.')],
+                tags: []
+              },
+              {
+                id: 'e-s2',
+                title: 'Ridge',
+                excluded: false,
+                existing: true,
+                paragraphs: [ownParagraph('The wind rose.')],
+                tags: []
+              }
+            ]
+          }
+        ]
+      },
+      ...imported.parts
+    ],
+    existing: { parts: ['e-p1'], chapters: ['e-c1'], scenes: ['e-s1', 'e-s2'] }
+  }
+}

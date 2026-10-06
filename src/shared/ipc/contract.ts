@@ -1977,22 +1977,51 @@ export const contract = {
   /**
    * Manuscript import (F-12.2), step one: the author picks a DOCX, Markdown, or plain-text file
    * (`path` skips the dialog, as for `project:open`), main reads it and answers the structure
-   * draft; null when the dialog is cancelled. An unsupported extension, an unreadable file, or a
-   * file with no text is VALIDATION with the cause. Nothing is written.
+   * draft; null when the dialog is cancelled. With a project open whose manuscript has parts,
+   * the draft is the combined outline: the project's parts, chapters, and scenes first
+   * (`existing`, with their stored text), the imported ones after them. With no project open
+   * (the welcome screen's Import manuscript…) the draft is labelled for a novel and holds only
+   * the file. An unsupported extension, an unreadable file, or a file with no text is
+   * VALIDATION with the cause. Nothing is written.
    */
   'import:open': {
     input: z.object({ path: z.string().optional() }),
     output: ImportDraft.nullable()
   },
   /**
-   * Step two: writes the reviewed draft into the open project in one transaction (parts,
-   * chapters, scenes after the existing manuscript nodes; front/back-matter chapters as one
-   * generic document each under their section) and answers the created rows in creation order
-   * plus the words imported. A draft with nothing left to import is VALIDATION.
+   * Step two: writes the reviewed draft into the open project in one transaction (new parts,
+   * chapters, scenes created where the outline puts them; front/back-matter chapters as one
+   * generic document each under their section; existing nodes moved, renamed, rewritten by a
+   * merge or a split, and the ones `existingChanges` names deleted) and answers the created
+   * rows in creation order, the imported words, the whole tree afterwards (so the renderer
+   * rebuilds its index once instead of replaying the changes), and the existing documents whose
+   * text changed. A draft that changes nothing is VALIDATION; one that refers to a node no
+   * longer in the project is VALIDATION and writes nothing.
    */
   'import:commit': {
     input: z.object({ draft: ImportDraft }),
-    output: z.object({ nodes: z.array(TreeNode), words: z.number().int() })
+    output: z.object({
+      nodes: z.array(TreeNode),
+      words: z.number().int(),
+      tree: z.array(TreeNode),
+      rewritten: z.array(z.string())
+    })
+  },
+  /**
+   * Import to start (F-12.2, from the welcome screen): creates a project named `name` where
+   * the author picks (the same save dialog and default folder as `project:create`; `directory`
+   * skips it) without the starter skeleton, writes the reviewed draft into it in the same step,
+   * and opens it. Null when the save dialog is cancelled — nothing is written. A draft that
+   * cannot be imported leaves no project folder behind.
+   */
+  'import:createProject': {
+    input: z.object({
+      draft: ImportDraft,
+      name: z.string().trim().min(1).max(PROJECT_NAME_MAX),
+      format: NovelFormat,
+      directory: z.string().optional()
+    }),
+    output: ProjectInfo.nullable()
   },
   /**
    * The AI pass over a draft (F-12.3), asked for from the review dialog after the author saw the
