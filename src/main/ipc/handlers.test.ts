@@ -31,6 +31,7 @@ import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_BRIEF, EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { SUMMARY_BACKFILL_DELAY_MS } from '@shared/summary'
+import { writeV0Project } from '../project/legacyFixture'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
 import type { CheckoutResult, CloudSession, CreditsResult, LicenseResult } from '@shared/cloudApi'
@@ -98,6 +99,8 @@ let openPath: ReturnType<typeof vi.fn<(folder: string) => Promise<string>>>
 /** What the fake backup dialogs answer (F-8.4); null cancels. */
 let backupFile: string | null
 let restoreParent: string | null
+let convertLegacy: boolean
+let legacyAsked: { source: string; backup: string } | null
 let backupFolder: string | null
 /** Every list the handlers synced the spellchecker to (F-3.11), in order. */
 let spellSync: ReturnType<typeof vi.fn<(words: string[]) => Promise<void>>>
@@ -211,7 +214,11 @@ const dialogs: ProjectDialogs = {
   chooseTagBankFile: async () => tagBankPath,
   chooseBackupFolder: async () => backupFolder,
   chooseBackupFile: async () => backupFile,
-  chooseRestoreParent: async () => restoreParent
+  chooseRestoreParent: async () => restoreParent,
+  confirmLegacyConversion: async (source, backup) => {
+    legacyAsked = { source, backup }
+    return convertLegacy
+  }
 }
 
 beforeEach(() => {
@@ -252,6 +259,8 @@ beforeEach(() => {
   openPath = vi.fn<(folder: string) => Promise<string>>(() => Promise.resolve(''))
   backupFile = null
   restoreParent = null
+  convertLegacy = true
+  legacyAsked = null
   backupFolder = null
   spellSync = vi.fn<(words: string[]) => Promise<void>>(() => Promise.resolve())
   safe = fakeSafeStorage()
@@ -393,6 +402,31 @@ describe('window state handlers (F-7.9)', () => {
     })
     expect(stored().get().window.reopenLastProject).toBe(false)
     expect(await invoke('startup:get', undefined)).toEqual({ reopenLastProject: false })
+  })
+})
+
+describe('opening a v0 project (F-1.6)', () => {
+  it('asks first, converts on yes, and opens the converted project at the same path', async () => {
+    const file = path.join(tmp, 'Ferryman.mythscribe')
+    writeV0Project(file)
+    const original = fs.readFileSync(file)
+
+    convertLegacy = false
+    expect(await invoke('project:open', { path: file })).toBeNull()
+    expect(legacyAsked?.source).toBe(file)
+    expect(path.basename(legacyAsked?.backup ?? '')).toMatch(
+      /^Ferryman \(v0 backup \d{4}-\d{2}-\d{2}\)\.mythscribe$/
+    )
+    expect(fs.readFileSync(file)).toEqual(original)
+    expect(await invoke('project:current', undefined)).toBeNull()
+
+    convertLegacy = true
+    const info = await invoke('project:open', { path: file })
+    expect(info).toMatchObject({ name: 'Ferryman', format: 'epic', path: file })
+    expect(fs.readFileSync(legacyAsked?.backup ?? '')).toEqual(original)
+    const rows = await invoke('tree:list', undefined)
+    expect(rows.map((r) => r.title)).toContain('Landing')
+    expect((await invoke('recents:list', undefined))[0]?.path).toBe(file)
   })
 })
 

@@ -4782,6 +4782,27 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByRole('status')).toContainText('Not a MythScribe project')
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
 
+  // F-1.6: a v0 project (here a single-file one) is converted after the author agrees: the new
+  // project opens at the same path with v0's tree and text, and the original is kept beside it.
+  const v0File = path.join(tmp, 'Old Ferryman.mythscribe')
+  fs.copyFileSync(path.join(__dirname, 'fixtures', 'v0-project.mythscribe'), v0File)
+  const v0Original = fs.readFileSync(v0File)
+  await app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = () => Promise.resolve({ response: 0, checkboxChecked: false })
+  })
+  await stubOpenDialog(v0File)
+  await page.getByRole('button', { name: 'Open project' }).click()
+  const landing = page.getByRole('treeitem', { name: 'Landing', exact: true })
+  await expect(landing).toBeVisible()
+  await landing.click()
+  await expect(editor).toContainText('Mara waited at the ferry landing until the bell rang.')
+  await expect(editor.locator('blockquote')).toContainText('Cross by noon.')
+  expect(fs.statSync(v0File).isDirectory()).toBe(true)
+  const v0Backup = fs.readdirSync(tmp).find((name) => name.startsWith('Old Ferryman (v0 backup'))
+  expect(v0Backup).toBeDefined()
+  expect(fs.readFileSync(path.join(tmp, v0Backup ?? ''))).toEqual(v0Original)
+  await closeProject()
+
   // F-15.8: diagnostics are app-wide, so the tab is there on the welcome screen, and they are off
   // on every install. The preview is the report verbatim, and the switch survives the dialog
   // closing because main stores it in app state. Nothing leaves the machine here: this build has

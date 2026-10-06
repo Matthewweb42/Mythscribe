@@ -40,6 +40,11 @@ export interface ProjectDialogs {
   chooseBackupFile: (directory: string) => Promise<string | null>
   /** Returns the folder a restored backup is unpacked into (F-8.4), or null if cancelled. */
   chooseRestoreParent: () => Promise<string | null>
+  /**
+   * Asks before a v0 project is converted (F-1.6), naming where the original will be kept;
+   * true to convert.
+   */
+  confirmLegacyConversion: (source: string, backup: string) => Promise<boolean>
 }
 
 export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDialogs {
@@ -182,6 +187,25 @@ export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDia
       )
       if (result.canceled) return null
       return result.filePaths[0] ?? null
+    },
+    async confirmLegacyConversion(source, backup) {
+      const options: Electron.MessageBoxOptions = {
+        type: 'question',
+        title: 'Convert project',
+        message: `"${path.basename(source)}" was made with an earlier MythScribe.`,
+        detail:
+          'Convert it to open it here? Your documents, notes, scene details, tags, references, ' +
+          `and editor settings come across. The original is kept untouched as "${path.basename(backup)}" ` +
+          'beside it, with anything that does not come across (AI summaries, background images).',
+        buttons: ['Convert', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true
+      }
+      const result = await show((win) =>
+        win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)
+      )
+      return result.response === 0
     }
   }
 }
