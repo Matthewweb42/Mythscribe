@@ -22,9 +22,15 @@ app will then refuse it with "saved by a newer version of MythScribe" until you 
 ## One-time setup (Windows)
 
 1. Install [Git for Windows](https://git-scm.com/download/win) and
-   [Node.js 22 LTS](https://nodejs.org/) (the installer that matches your PC: **ARM64** on a
-   Windows on Arm machine). If `npm ci` later complains about building `better-sqlite3`, also
-   install the Visual Studio Build Tools with the "Desktop development with C++" workload.
+   [Node.js](https://nodejs.org/) 22.22.2+ or 24.15+ (the installer that matches your PC:
+   **ARM64** on a Windows on Arm machine; `winget upgrade OpenJS.NodeJS.LTS` updates it). Install
+   the Visual Studio 2022 Build Tools with the "Desktop development with C++" workload, and on
+   Windows on Arm also the **MSVC v143 ARM64/ARM64EC build tools** component; without it `npm ci`
+   fails building `better-sqlite3` with `MSB8020 ... v143 ... cannot be found`. From an
+   Administrator PowerShell:
+   ```
+   & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\setup.exe" modify --installPath "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools" --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended --passive
+   ```
 2. Clone into a normal Windows folder, separate from your WSL clone (building from
    `\\wsl.localhost\...` is slow and breaks native modules):
    ```
@@ -44,7 +50,9 @@ powershell -ExecutionPolicy Bypass -File scripts\install-personal.ps1
 
 The script pulls `main`, builds it (it stops if the typecheck fails), builds the installer in
 `dist\`, and runs it. Windows SmartScreen warns about an unknown publisher because the build is
-unsigned: choose **More info → Run anyway**. Reinstalling over the old version keeps your
+unsigned: choose **More info → Run anyway**. If the installer leaves out `MythScribe.exe` (seen
+once on Windows on Arm: the Start-menu shortcut then asks you to browse for the program), the
+script copies the unpacked build into `%LOCALAPPDATA%\Programs\MythScribe` itself. Reinstalling over the old version keeps your
 projects, settings, AI key, and backups; they are not in the install folder.
 
 Run the gates in WSL before pushing something you mean to write with: `npm run test` at least,

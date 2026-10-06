@@ -33,3 +33,19 @@ if ($LASTEXITCODE -ne 0) { throw 'electron-builder failed.' }
 $installer = Get-ChildItem dist -Filter '*-setup.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 Write-Host "Installing $($installer.Name) ($(git rev-parse --short HEAD))"
 Start-Process -FilePath $installer.FullName -Wait
+
+# On Windows on Arm the installer has been seen to finish without writing MythScribe.exe and its
+# DLLs (2026-10-06), leaving a Start-menu shortcut that asks you to browse for the program. The
+# unpacked build is the same app, so copy it over whatever the installer wrote.
+$unpacked = Join-Path 'dist' "win-$Arch-unpacked"
+if ($Arch -eq 'x64') { $unpacked = Join-Path 'dist' 'win-unpacked' }
+$installed = Join-Path $env:LOCALAPPDATA 'Programs\MythScribe'
+if ((Test-Path $installed) -and -not (Test-Path (Join-Path $installed 'MythScribe.exe'))) {
+  Write-Host "The installer left out MythScribe.exe; copying the build from $unpacked"
+  Copy-Item (Join-Path $unpacked '*') $installed -Recurse -Force
+}
+if (Test-Path (Join-Path $installed 'MythScribe.exe')) {
+  Write-Host 'MythScribe is installed. Start it from the Start menu.'
+} else {
+  Write-Host "MythScribe.exe is not in $installed. If you chose another folder, check it is there."
+}
