@@ -212,7 +212,8 @@ export const GHOST_AFTER_CHARS = 100
  * rows, so a member is never renamed. A feature's budget lines join `FEATURE_BUDGETS` and
  * `FEATURE_INPUT_BUDGETS` in the change that builds it (F-5.3 ghost text, F-4.7 tags, F-5.6
  * summaries, F-5.4 chat, F-5.5 Author mode, F-5.7 queries, F-14.8 critique, F-5.8 embeddings,
- * F-14.10 rewrite, F-14.3 brief, F-13.4 continuity, F-14.12 proofread).
+ * F-14.10 rewrite, F-14.3 brief, F-13.4 continuity, F-14.12 proofread, F-5.19 route, F-5.20
+ * synopsis and notes suggestions).
  */
 export const AI_FEATURE_IDS = [
   'ghostText',
@@ -236,7 +237,13 @@ export const AI_FEATURE_IDS = [
   // F-14.12: the proofreading pass over a scene or a selection.
   'proofread',
   // F-5.17: the "What should come next?" quick action, three short directions as JSON.
-  'whatNext'
+  'whatNext',
+  // F-5.19: the assistant router, which picks the feature that answers a chat message.
+  'route',
+  // F-5.20: a suggested synopsis for the side panel.
+  'synopsis',
+  // F-5.20: suggested key points for the scene's notes.
+  'notesSuggest'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -277,7 +284,13 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-14.12: up to 30 fixes as JSON, each a kind, a short quote, and its corrected form.
   proofread: 2_000,
   // F-5.17: three directions as JSON, each a short title and up to ~40 words.
-  whatNext: 300
+  whatNext: 300,
+  // F-5.19: one action id and a one-sentence instruction as JSON.
+  route: 120,
+  // F-5.20: one synopsis of up to 1,000 characters as JSON.
+  synopsis: 350,
+  // F-5.20: up to 8 key points as JSON, each up to 200 characters.
+  notesSuggest: 600
 }
 
 /**
@@ -318,7 +331,15 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   proofread: 8_000,
   // F-5.17: the last 6,000 characters of the scene (or up to the selection's end), the brief,
   // and the story bible at its 400-token budget.
-  whatNext: 4_000
+  whatNext: 4_000,
+  // F-5.19: the opening 1,000 characters of the message, two turns of 300 characters, the
+  // opening of the selection, and the open document's kind and title.
+  route: 1_200,
+  // F-5.20: one scene head-truncated to 12,000 characters and its stored summary.
+  synopsis: 4_000,
+  // F-5.20: the scene head-truncated to 12,000 characters, its summary, brief, current notes,
+  // the author's focus, and the story bible at its 400-token budget.
+  notesSuggest: 6_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

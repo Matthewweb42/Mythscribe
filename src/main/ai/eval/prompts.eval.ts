@@ -15,6 +15,8 @@ import { postProcessGhostText } from '../ghostText'
 import { buildOpenAiProvider } from '../providers/openai'
 import { PROMPT_CATALOGUE, PROMPT_VERSIONS } from '../prompts/catalogue'
 import { parseProofreadAnswer } from '../proofread'
+import { parseRouteAnswer } from '../route'
+import { parseNotesSuggestAnswer, parseSynopsisAnswer } from '../sceneSuggest'
 import { parseSummaryAnswer } from '../summarize'
 import { parseWhatNextAnswer } from '../whatNext'
 import { EVAL_CASES, FIXTURE_PROFILE, type EvalCase } from './fixtures'
@@ -302,6 +304,45 @@ function scoreWhatNext(answer: string): LiveResult['verdict'] {
   }
 }
 
+/**
+ * The assistant router (F-5.19) scores through the feature's own parser: the answer must be JSON
+ * naming a known action (anything else silently becomes `chat`, which is a miss unless `chat`
+ * was expected), and the action must be the one the case expects.
+ */
+function scoreRoute(expected: string, answer: string): LiveResult['verdict'] {
+  try {
+    JSON.parse(answer)
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not JSON' }
+  }
+  const { action } = parseRouteAnswer(answer)
+  return action === expected
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `routed to ${action}, expected ${expected}` }
+}
+
+/** A suggested synopsis (F-5.20) scores through the feature's own parser. */
+function scoreSynopsis(answer: string): LiveResult['verdict'] {
+  try {
+    parseSynopsisAnswer(answer)
+    return { kind: 'json', ok: true, problem: null }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not { synopsis } with text' }
+  }
+}
+
+/** Suggested notes (F-5.20) score through the feature's own parser; a dropped point is waste. */
+function scoreNotesSuggest(answer: string): LiveResult['verdict'] {
+  try {
+    const { points, dropped } = parseNotesSuggestAnswer(answer)
+    return dropped === 0 && points.length > 0
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: `${points.length} kept, ${dropped} dropped` }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not { points: [string] }' }
+  }
+}
+
 const BriefAnswer = z.object({
   goal: z.string(),
   conflict: z.string(),
@@ -470,6 +511,22 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
       }
       if (c.scoring.kind === 'whatNext') {
         results.push({ ...base, answer: reply.text, verdict: scoreWhatNext(reply.text) })
+        continue
+      }
+      if (c.scoring.kind === 'route') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreRoute(c.scoring.expected, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'synopsis') {
+        results.push({ ...base, answer: reply.text, verdict: scoreSynopsis(reply.text) })
+        continue
+      }
+      if (c.scoring.kind === 'notesSuggest') {
+        results.push({ ...base, answer: reply.text, verdict: scoreNotesSuggest(reply.text) })
         continue
       }
       if (c.scoring.kind === 'structure') {

@@ -23,6 +23,7 @@ import { checkChatFidelity, postProcessChatText, runChat, type ChatInput } from 
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import type { ChatTurn } from './prompts/chat.v1'
+import { SCENE_PANEL_HEADING } from './prompts/chat.v5'
 import {
   AiCancelledError,
   AiProviderError,
@@ -175,7 +176,7 @@ afterEach(() => {
 })
 
 describe('runChat, Plan mode (F-5.4)', () => {
-  it('streams the answer through onDelta, resolves the whole text, and logs one fast-tier chat.v4 row with no temperature', async () => {
+  it('streams the answer through onDelta, resolves the whole text, and logs one fast-tier chat.v5 row with no temperature', async () => {
     const seen: string[] = []
     const result = await ask({}, (delta) => void seen.push(delta))
     expect(seen).toEqual(['The storm, ', 'per the opening.'])
@@ -185,7 +186,7 @@ describe('runChat, Plan mode (F-5.4)', () => {
       costUsd: priceFor('gpt-5.4-mini', 90, 8).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'chat.v4',
+      promptVersion: 'chat.v5',
       flagged: false,
       violation: null
     })
@@ -199,7 +200,7 @@ describe('runChat, Plan mode (F-5.4)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'chat',
       tier: 'fast',
-      promptVersion: 'chat.v4',
+      promptVersion: 'chat.v5',
       cached: false
     })
     expect(ledger[0]!.contextHash).toMatch(/^[0-9a-f]{64}$/)
@@ -232,6 +233,22 @@ describe('runChat, Plan mode (F-5.4)', () => {
     await ask({ nodeId: null })
     expect(stream.mock.calls[0]![0].messages[0]?.content).toContain('No scene is open')
     expect(stream.mock.calls[0]![0].messages[0]?.content).not.toContain('Active scene')
+  })
+
+  it("carries the scene's side panel (synopsis and notes, F-5.20) before the scene and misses the cache when it changes", async () => {
+    await ask()
+    expect(stream.mock.calls[0]![0].messages[0]?.content).not.toContain(SCENE_PANEL_HEADING)
+    setSceneMeta(db, scene, { ...emptySceneMeta(), synopsis: 'Mara waits out the storm.' })
+    saveNotes(db, scene, doc('Tomas is already on the ridge.'))
+    await ask()
+    expect(stream).toHaveBeenCalledTimes(2)
+    const system = stream.mock.calls[1]![0].messages[0]?.content ?? ''
+    expect(system).toContain(
+      `${SCENE_PANEL_HEADING}\nSynopsis: Mara waits out the storm.\n` +
+        'Notes:\n"""\nTomas is already on the ridge.\n"""\n\nActive scene:'
+    )
+    await ask({ mode: 'agent' })
+    expect(complete.mock.calls[0]![0].messages[0]?.content).toContain(SCENE_PANEL_HEADING)
   })
 
   it('pulls the notes behind a #name that names a bank tag and ignores an unknown name', async () => {
@@ -373,11 +390,11 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'chat.v4',
+      promptVersion: 'chat.v5',
       flagged: false,
       violation: null
     })
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['chat.v4'])
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['chat.v5'])
   })
 
   it('Agent mode carries the scene brief (F-14.3) after the metadata line; Plan mode never does', async () => {
@@ -430,7 +447,7 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
     expect(postProcessChatText('  ')).toBe('')
   })
 
-  it('regenerates an off-voice draft once through chatRegen.v4 with the violation named, and shows the clean second draft with both calls summed', async () => {
+  it('regenerates an off-voice draft once through chatRegen.v5 with the violation named, and shows the clean second draft with both calls summed', async () => {
     strongProfile()
     answers(OFF_VOICE, CLEAN)
     const result = await ask(agent())
@@ -440,7 +457,7 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
       "Your last attempt switches to present tense. Write a different draft that keeps the manuscript's voice."
     )
     expect(second.messages.slice(1)).toEqual(complete.mock.calls[0]![0].messages.slice(1))
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['chat.v4', 'chatRegen.v4'])
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['chat.v5', 'chatRegen.v5'])
     expect(ledger[0]!.contextHash).not.toBe(ledger[1]!.contextHash)
     expect(result).toEqual({
       text: CLEAN,
@@ -448,7 +465,7 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 120, 12).costUsd * 2,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'chatRegen.v4',
+      promptVersion: 'chatRegen.v5',
       flagged: false,
       violation: null
     })
@@ -461,7 +478,7 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
       text: OFF_VOICE,
       flagged: true,
       violation: 'switches to present tense',
-      promptVersion: 'chatRegen.v4'
+      promptVersion: 'chatRegen.v5'
     })
     answers(OFF_VOICE)
     complete.mockRejectedValueOnce(new AiRateLimitError('Slow down.'))
@@ -469,14 +486,14 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
       text: OFF_VOICE,
       flagged: true,
       violation: 'switches to present tense',
-      promptVersion: 'chat.v4',
+      promptVersion: 'chat.v5',
       usage: { inputTokens: 120, outputTokens: 12 }
     })
     answers(OFF_VOICE, '""')
     expect(await ask(agent({ message: 'Once more.' }))).toMatchObject({
       text: OFF_VOICE,
       flagged: true,
-      promptVersion: 'chat.v4',
+      promptVersion: 'chat.v5',
       usage: { inputTokens: 240, outputTokens: 24 }
     })
   })

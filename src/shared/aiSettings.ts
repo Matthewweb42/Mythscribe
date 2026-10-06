@@ -170,8 +170,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   query: {
     label: 'Story Intelligence',
     sends:
-      'Your question, scene summaries, the full text of the top matching scenes, and the sheets ' +
-      'of the story-bible entries your question names with what the manuscript states about them.',
+      'Your question, scene summaries, the full text of the top matching scenes, the sheets ' +
+      'of the story-bible entries your question names with what the manuscript states about ' +
+      "them, and the open scene's synopsis and notes (the first 1,500 characters).",
     minDial: 1
   },
   critique: {
@@ -213,6 +214,30 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       `scene's goal, and ${STORY_BIBLE_SENDS}, only when you click What should come next?.`,
     minDial: 1
   },
+  route: {
+    label: 'Assistant routing',
+    sends:
+      'Your message (the first 1,000 characters), the last two turns of the conversation (300 ' +
+      'characters each), the first 200 characters of the passage you selected, and the open ' +
+      "document's kind and title, so the assistant can pick which feature answers you.",
+    minDial: 1
+  },
+  synopsis: {
+    label: 'Synopsis suggestions',
+    sends:
+      "The scene's text (the first 12,000 characters) and its stored summary and key points, " +
+      'only when you ask for a suggested synopsis.',
+    minDial: 1
+  },
+  notesSuggest: {
+    label: 'Notes suggestions',
+    sends:
+      "The scene's text (the first 12,000 characters), its stored summary and key points, its " +
+      "notes (the first 1,500 characters), its brief plus the previous scene's " +
+      "reader-knows-after line and the next scene's goal, " +
+      `${STORY_BIBLE_SENDS}, and what you asked to focus on, only when you ask for suggested notes.`,
+    minDial: 1
+  },
   betaReader: {
     label: 'Beta reader',
     sends:
@@ -232,7 +257,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   chat: {
     label: 'Assistant chat',
     sends:
-      "The active scene's text (head-truncated), the notes of documents tagged with any #name " +
+      "The active scene's text (head-truncated), its synopsis and notes (the first 1,500 " +
+      'characters), the notes of documents tagged with any #name ' +
       `you mention, ${STORY_BIBLE_SENDS}, the recent turns of the conversation, and your ` +
       'message. In Agent mode, which needs Suggest, the voice profile, your author rules and ' +
       "banned phrases, the scene metadata, and the scene brief (plus the previous scene's " +

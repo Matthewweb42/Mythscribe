@@ -43,6 +43,12 @@ import { TAGS_PROMPT_VERSION } from './tags.v1'
 import { TAGS_REGEN_PROMPT_VERSION } from './tagsRegen.v1'
 import { WHAT_NEXT_PROMPT_VERSION } from './whatNext.v1'
 import { WHAT_NEXT_PROMPT_V2_VERSION } from './whatNext.v2'
+import { CHAT_PROMPT_V5_VERSION } from './chat.v5'
+import { CHAT_REGEN_PROMPT_V5_VERSION } from './chatRegen.v5'
+import { QUERY_PROMPT_V4_VERSION } from './query.v4'
+import { ROUTE_PROMPT_VERSION } from './route.v1'
+import { SYNOPSIS_PROMPT_VERSION } from './synopsis.v1'
+import { NOTES_SUGGEST_PROMPT_VERSION } from './notesSuggest.v1'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -100,7 +106,13 @@ export const PROMPT_VERSIONS = [
   CONTINUITY_PROMPT_VERSION,
   PROOFREAD_PROMPT_VERSION,
   WHAT_NEXT_PROMPT_VERSION,
-  WHAT_NEXT_PROMPT_V2_VERSION
+  WHAT_NEXT_PROMPT_V2_VERSION,
+  CHAT_PROMPT_V5_VERSION,
+  CHAT_REGEN_PROMPT_V5_VERSION,
+  QUERY_PROMPT_V4_VERSION,
+  ROUTE_PROMPT_VERSION,
+  SYNOPSIS_PROMPT_VERSION,
+  NOTES_SUGGEST_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -316,6 +328,27 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-14.13'
+  },
+  [CHAT_PROMPT_V5_VERSION]: { feature: 'chat', tier: 'fast', output: 'text', since: 'F-5.20' },
+  [CHAT_REGEN_PROMPT_V5_VERSION]: {
+    feature: 'chat',
+    tier: 'fast',
+    output: 'text',
+    since: 'F-5.20'
+  },
+  [QUERY_PROMPT_V4_VERSION]: { feature: 'query', tier: 'strong', output: 'json', since: 'F-5.20' },
+  [ROUTE_PROMPT_VERSION]: { feature: 'route', tier: 'fast', output: 'json', since: 'F-5.19' },
+  [SYNOPSIS_PROMPT_VERSION]: {
+    feature: 'synopsis',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-5.20'
+  },
+  [NOTES_SUGGEST_PROMPT_VERSION]: {
+    feature: 'notesSuggest',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-5.20'
   }
 }
 

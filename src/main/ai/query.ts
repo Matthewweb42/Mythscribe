@@ -26,10 +26,11 @@ import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { headTruncate } from './context/chatContext'
+import { buildScenePanel } from './context/scenePanel'
 import { rankCandidates } from './context/queryContext'
 import { assertFeatureAllowed } from './dial'
 import type { ChatTurn } from './prompts/chat.v1'
-import { buildQueryPromptV3 } from './prompts/query.v3'
+import { buildQueryPromptV4 } from './prompts/query.v4'
 import { AiFallbackError, type AiMessage, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -108,6 +109,8 @@ const BAD_FORMAT = 'The model did not answer in the expected format.'
  * for the entities the question names — the author's sheets, then the observed facts with the
  * scene each was read from — and since query.v3 the sheets are a source the answer may rest on
  * (named in `sheets`, checked against the sheets sent), within `QUERY_V3_BIBLE_TOKEN_BUDGET`.
+ * Since query.v4 (F-5.20) the open scene's side panel (synopsis and notes, `buildScenePanel`)
+ * rides along to orient the answer, never as a source.
  *
  * `fitQueryPrompt` then counts before sending (token rule 8) and trims by priority rather than
  * failing: the full scenes shrink to their floor first, then the summaries go, then the
@@ -166,25 +169,29 @@ export async function runQuery(
   )
   const bible = bibleLines.length > 0 ? bibleLines.join('\n') : null
   const sheetsSent = sentSheets(candidates.bible, bibleLines)
+  // F-5.20: the open scene's side panel orients the answer; it is never a citation source.
+  const panel = buildScenePanel(db, input.nodeId)
 
   const fit = fitQueryPrompt(
     { full, summaries, history: input.history },
     inputBudget('query'),
     (scenes, summarised, history) =>
-      buildQueryPromptV3({
+      buildQueryPromptV4({
         full: scenes,
         summaries: summarised,
         history,
         question: input.message,
-        bible
+        bible,
+        panel
       }).messages
   )
-  const prompt = buildQueryPromptV3({
+  const prompt = buildQueryPromptV4({
     full: fit.full,
     summaries: fit.summaries,
     history: fit.history,
     question: input.message,
-    bible
+    bible,
+    panel
   })
 
   const result = await runAiRequest(deps, {
@@ -199,7 +206,8 @@ export async function runQuery(
         history: fit.history,
         full: fit.full.map((scene) => [scene.nodeId, scene.text]),
         summaries: fit.summaries.map((scene) => [scene.nodeId, scene.contentHash]),
-        bible
+        bible,
+        panel
       })
     ),
     promptVersion: prompt.version,

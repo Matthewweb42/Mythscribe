@@ -160,9 +160,19 @@ describe('AI_DATA_SHARING', () => {
         'states about them'
     )
     expect(AI_DATA_SHARING.query.sends).toBe(
-      'Your question, scene summaries, the full text of the top matching scenes, and the sheets ' +
-        'of the story-bible entries your question names with what the manuscript states about them.'
+      'Your question, scene summaries, the full text of the top matching scenes, the sheets ' +
+        'of the story-bible entries your question names with what the manuscript states about ' +
+        "them, and the open scene's synopsis and notes (the first 1,500 characters)."
     )
+  })
+
+  it('names what the router and the side-panel suggestions send (F-5.19, F-5.20) and gates them at Ask', () => {
+    expect(AI_DATA_SHARING.route.minDial).toBe(1)
+    expect(AI_DATA_SHARING.route.sends).toContain('the first 200 characters of the passage')
+    expect(AI_DATA_SHARING.synopsis.minDial).toBe(1)
+    expect(AI_DATA_SHARING.notesSuggest.minDial).toBe(1)
+    expect(AI_DATA_SHARING.notesSuggest.sends).toContain(STORY_BIBLE_SENDS)
+    expect(AI_DATA_SHARING.chat.sends).toContain('its synopsis and notes (the first 1,500')
   })
 
   it('names what a brief draft sends (F-14.3) and gates it at Ask', () => {

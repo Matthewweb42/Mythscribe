@@ -1574,7 +1574,7 @@ describe('ai:chat (F-5.4)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'chat',
       nodeId: scene,
-      promptVersion: 'chat.v4',
+      promptVersion: 'chat.v5',
       model: 'gpt-fake',
       promptTokens: 90,
       completionTokens: 8,
@@ -2179,6 +2179,238 @@ describe('ai:whatNext (F-5.17)', () => {
   })
 })
 
+describe('ai:route (F-5.19)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+
+  async function ready(dial: AiDial = 1): Promise<{ scene: string }> {
+    await invoke('project:create', { name: 'Route', format: 'novel', directory: tmp })
+    const scene = manuscriptDocuments(manager.require().connection.orm)[0]
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+    await invoke('ai:setKey', { key: KEY })
+    return { scene: scene.id }
+  }
+
+  function answersWith(answer: unknown): void {
+    complete.mockResolvedValue({
+      text: typeof answer === 'string' ? answer : JSON.stringify(answer),
+      model: 'gpt-fake',
+      usage: { inputTokens: 300, outputTokens: 12 }
+    })
+  }
+
+  const ask = (over: Partial<Input<'ai:route'>> = {}): Input<'ai:route'> => ({
+    nodeId: null,
+    message: 'Make this colder.',
+    history: [],
+    selection: null,
+    requestId: 'rt-1',
+    ...over
+  })
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('ai:route', ask())).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('asks the fast tier for JSON with the selection opening and the open scene, and answers the action and instruction', async () => {
+    const { scene } = await ready()
+    answersWith({ action: 'rewrite', instruction: 'Colder, fewer adjectives.' })
+    const result = await invoke(
+      'ai:route',
+      ask({ nodeId: scene, selection: { text: 'He looked at the lantern.' } })
+    )
+    expect(result).toEqual({
+      ok: true,
+      action: 'rewrite',
+      instruction: 'Colder, fewer adjectives.',
+      routedBy: 'model',
+      usage: { inputTokens: 300, outputTokens: 12 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      requestId: 'rt-1'
+    })
+    const request = complete.mock.calls.at(-1)?.[0]
+    expect(request?.tier).toBe('fast')
+    expect(request?.json).toBe(true)
+    const user = request?.messages[1]?.content ?? ''
+    expect(user).toContain('Open document: scene "Scene 1"')
+    expect(user).toContain('Selected passage (opening):\n"""\nHe looked at the lantern.\n"""')
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['route'])
+  })
+
+  it('falls back to chat for a rewrite with no selection and for an unreadable answer', async () => {
+    const { scene } = await ready()
+    answersWith({ action: 'rewrite', instruction: 'Colder.' })
+    const noSelection = await invoke('ai:route', ask({ nodeId: scene, requestId: 'rt-2' }))
+    expect(noSelection).toMatchObject({ ok: true, action: 'chat', instruction: null })
+    answersWith('not json at all')
+    const garbled = await invoke(
+      'ai:route',
+      ask({ nodeId: scene, message: 'Something else.', requestId: 'rt-3' })
+    )
+    expect(garbled).toMatchObject({ ok: true, action: 'chat', routedBy: 'model' })
+  })
+
+  it('decides an exact action id locally, without a request or a ledger row', async () => {
+    const { scene } = await ready()
+    const result = await invoke('ai:route', ask({ nodeId: scene, message: 'Proofread' }))
+    expect(result).toEqual({
+      ok: true,
+      action: 'proofread',
+      instruction: null,
+      routedBy: 'local',
+      usage: { inputTokens: 0, outputTokens: 0 },
+      costUsd: 0,
+      cached: false,
+      model: null,
+      requestId: 'rt-1'
+    })
+    expect(complete).not.toHaveBeenCalled()
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.total.requests).toBe(0)
+  })
+
+  it('answers DISABLED as data below Ask', async () => {
+    await ready(0)
+    expect(await invoke('ai:route', ask())).toMatchObject({
+      ok: false,
+      code: 'DISABLED',
+      requestId: 'rt-1'
+    })
+    expect(complete).not.toHaveBeenCalled()
+  })
+})
+
+describe('ai:suggestSynopsis and ai:suggestNotes (F-5.20)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const SCENE =
+    'The ferry landing was empty when Mara reached it. The rope hung slack in the water and ' +
+    'the bell had lost its clapper years ago. She set the lantern down and waited for Tomas.'
+
+  async function ready(dial: AiDial = 1): Promise<{ scene: string }> {
+    await invoke('project:create', { name: 'Suggest', format: 'novel', directory: tmp })
+    const scene = manuscriptDocuments(manager.require().connection.orm)[0]
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: SCENE }] }]
+      }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+    await invoke('ai:setKey', { key: KEY })
+    return { scene: scene.id }
+  }
+
+  function answersWith(answer: unknown): void {
+    complete.mockResolvedValue({
+      text: JSON.stringify(answer),
+      model: 'gpt-fake',
+      usage: { inputTokens: 500, outputTokens: 60 }
+    })
+  }
+
+  it('suggests a synopsis as one pending proposal and writes nothing into the side panel', async () => {
+    const { scene } = await ready()
+    answersWith({ synopsis: ' Mara waits for Tomas at the empty landing. ' })
+    const result = await invoke('ai:suggestSynopsis', { nodeId: scene, requestId: 'syn-1' })
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toEqual({
+      ok: true,
+      synopsis: 'Mara waits for Tomas at the empty landing.',
+      truncated: false,
+      usage: { inputTokens: 500, outputTokens: 60 },
+      costUsd: 0,
+      cached: false,
+      model: 'gpt-fake',
+      proposalId: result.proposalId,
+      requestId: 'syn-1'
+    })
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'synopsis',
+      nodeId: scene,
+      promptVersion: 'synopsis.v1',
+      content: 'Mara waits for Tomas at the empty landing.',
+      flagged: false,
+      status: 'pending'
+    })
+    const request = complete.mock.calls.at(-1)?.[0]
+    expect(request?.tier).toBe('fast')
+    expect(request?.messages[1]?.content).toContain(SCENE)
+    const { meta } = await invoke('sceneMeta:get', { id: scene })
+    expect(meta.synopsis).toBe('')
+  })
+
+  it('suggests notes with the focus and the current notes, as one pending proposal holding the points', async () => {
+    const { scene } = await ready()
+    await invoke('notes:save', {
+      id: scene,
+      notes: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Tomas is late.' }] }]
+      }
+    })
+    const points = ['The bell has no clapper.', 'Tomas owes the mill.']
+    answersWith({ points: [...points, ''] })
+    const result = await invoke('ai:suggestNotes', {
+      nodeId: scene,
+      requestId: 'notes-1',
+      instruction: 'the ledger'
+    })
+    if (!result.ok) throw new Error(result.message)
+    expect(result).toMatchObject({ ok: true, points, dropped: 1, requestId: 'notes-1' })
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'notesSuggest',
+      promptVersion: 'notesSuggest.v1',
+      content: JSON.stringify(points),
+      status: 'pending'
+    })
+    const user = complete.mock.calls.at(-1)?.[0].messages[1]?.content ?? ''
+    expect(user).toContain('Current notes:\n"""\nTomas is late.\n"""')
+    expect(user).toContain('List the key points, focusing on: the ledger')
+    const summary = await invoke('ai:usageSummary', undefined)
+    expect(summary.byFeature.map((f) => f.feature)).toEqual(['notesSuggest'])
+  })
+
+  it('answers DISABLED as data, a bad answer as PROVIDER, and refuses an unknown or too-short scene', async () => {
+    const { scene } = await ready(0)
+    expect(await invoke('ai:suggestSynopsis', { nodeId: scene, requestId: 's-0' })).toMatchObject(
+      { ok: false, code: 'DISABLED', requestId: 's-0' }
+    )
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    answersWith({ nothing: true })
+    expect(await invoke('ai:suggestNotes', { nodeId: scene, requestId: 'n-1' })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER',
+      requestId: 'n-1'
+    })
+    expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
+    const unknown = await handlerFor('ai:suggestSynopsis')(undefined, {
+      nodeId: 'nope',
+      requestId: 's-1'
+    })
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
+    await invoke('document:save', {
+      id: scene,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Too short.' }] }]
+      }
+    })
+    const short = await handlerFor('ai:suggestNotes')(undefined, {
+      nodeId: scene,
+      requestId: 'n-2'
+    })
+    expect(short.ok).toBe(false)
+    if (!short.ok) expect(short.error.code).toBe('VALIDATION')
+  })
+})
+
 describe('continuity (F-13.4)', () => {
   const KEY = 'sk-test-secret-1234abcd'
   const OPENING =
@@ -2712,7 +2944,7 @@ describe('ai:query (F-5.7)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'query',
       nodeId: null,
-      promptVersion: 'query.v3',
+      promptVersion: 'query.v4',
       content: JSON.stringify({
         answer: result.answer,
         citations: result.citations,

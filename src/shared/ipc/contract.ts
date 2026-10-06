@@ -98,6 +98,12 @@ import { CustomTagTemplate, CustomTagTemplateName, TagTemplateId } from '../tagT
 import { TiptapNode } from '../tiptap'
 import { UpdateChannel, UpdateState } from '../updates'
 import { WHAT_NEXT_CHAR_BUDGET, WhatNextDirections } from '../whatNext'
+import { ROUTE_SELECTION_PREVIEW_CHARS, RouteAction } from '../assistantRoute'
+import {
+  NOTES_SUGGEST_INSTRUCTION_MAX,
+  SuggestedNotePoints,
+  SuggestedSynopsis
+} from '../sceneSuggest'
 import { VOICE_EXEMPLAR_TEXT_MAX, VOICE_EXEMPLAR_TEXT_MIN, VoiceExemplarKind } from '../voice'
 import { StatsDashboard } from '../statsDashboard'
 import { WordCountReport } from '../wordCount'
@@ -476,6 +482,80 @@ export const AiWhatNextResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiWhatNextResult = z.infer<typeof AiWhatNextResult>
+
+/** The failure branch the F-5.19/F-5.20 results share: an expected AI failure as data. */
+const AiFailureWithRequest = z.object({
+  ok: z.literal(false),
+  code: AiErrorCode,
+  message: z.string(),
+  nextStep: z.string(),
+  requestId: z.string()
+})
+
+/**
+ * What `ai:route` answers (F-5.19): the action that answers the message, the instruction the
+ * router restated for it (null when there is none), whether the decision was `local` (no
+ * request; zero usage, null model) or the `model`'s, and what it cost; or an expected AI failure
+ * as data. No proposal: a routing decision is never shown as content.
+ */
+export const AiRouteResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    action: RouteAction,
+    instruction: z.string().nullable(),
+    routedBy: z.enum(['local', 'model']),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string().nullable(),
+    requestId: z.string()
+  }),
+  AiFailureWithRequest
+])
+export type AiRouteResult = z.infer<typeof AiRouteResult>
+
+/**
+ * What `ai:suggestSynopsis` answers (F-5.20): the suggested synopsis, whether the scene was cut
+ * before it was sent, what it cost, and the proposal it belongs to (F-14.5); or an expected AI
+ * failure as data.
+ */
+export const AiSuggestSynopsisResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    synopsis: SuggestedSynopsis,
+    truncated: z.boolean(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    proposalId: z.string(),
+    requestId: z.string()
+  }),
+  AiFailureWithRequest
+])
+export type AiSuggestSynopsisResult = z.infer<typeof AiSuggestSynopsisResult>
+
+/**
+ * What `ai:suggestNotes` answers (F-5.20): up to eight key points (`dropped` counts the blank,
+ * repeated, or surplus ones), whether the scene was cut, what it cost, and the proposal they
+ * belong to; or an expected AI failure as data.
+ */
+export const AiSuggestNotesResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    points: SuggestedNotePoints,
+    dropped: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    proposalId: z.string(),
+    requestId: z.string()
+  }),
+  AiFailureWithRequest
+])
+export type AiSuggestNotesResult = z.infer<typeof AiSuggestNotesResult>
 
 /**
  * What `ai:betaReader` answers (F-14.11): the reader's report, every item citing a passage main
@@ -1690,6 +1770,54 @@ export const contract = {
       before: z.string().max(WHAT_NEXT_CHAR_BUDGET).nullable().optional()
     }),
     output: AiWhatNextResult
+  },
+  /**
+   * The assistant router (F-5.19): which feature answers this chat message. The renderer sends
+   * the open document (null with none), the message, the recent turns (main reads the last two),
+   * and the selection as its first `ROUTE_SELECTION_PREVIEW_CHARS` characters (null with none).
+   * Main short-circuits a blank-ish message or an exact action / quick-action id without a
+   * request, otherwise asks the fast tier for JSON; an unreadable answer is `chat`, a `rewrite`
+   * without a selection or a scene action without an open document falls back to `chat`. The
+   * renderer then calls the chosen feature's own channel. AI failures come back as data with
+   * the echoed `requestId` (DISABLED when the router is off: fall back to `ai:chat`).
+   */
+  'ai:route': {
+    input: z.object({
+      nodeId: z.string().nullable(),
+      message: z.string().trim().min(1).max(CHAT_MESSAGE_MAX),
+      history: z
+        .array(z.object({ role: ChatRole, content: z.string().max(CHAT_MESSAGE_MAX) }))
+        .max(CHAT_HISTORY_TURNS),
+      selection: z.object({ text: z.string().max(ROUTE_SELECTION_PREVIEW_CHARS) }).nullable(),
+      requestId: z.string()
+    }),
+    output: AiRouteResult
+  },
+  /**
+   * A suggested synopsis for the side panel (F-5.20), from the saved scene (the renderer flushes
+   * the autosave first) and its stored summary, on the fast tier as JSON. Recorded as a pending
+   * proposal; the renderer writes it with `sceneMeta:set` and settles the proposal only when the
+   * author accepts. NOT_FOUND for an unknown id, VALIDATION for a node outside the manuscript or
+   * under `SCENE_SUGGEST_TEXT_MIN` characters; AI failures come back as data.
+   */
+  'ai:suggestSynopsis': {
+    input: z.object({ nodeId: z.string(), requestId: z.string() }),
+    output: AiSuggestSynopsisResult
+  },
+  /**
+   * Suggested key points for the scene's notes (F-5.20), from the saved scene, its summary,
+   * brief, current notes, and the story bible, optionally focused by `instruction` (the router's
+   * restated request). Recorded as a pending proposal; the renderer adds the points with
+   * `notes:save` and settles the proposal only when the author accepts. Same refusals as
+   * `ai:suggestSynopsis`.
+   */
+  'ai:suggestNotes': {
+    input: z.object({
+      nodeId: z.string(),
+      requestId: z.string(),
+      instruction: z.string().max(NOTES_SUGGEST_INSTRUCTION_MAX).nullable().optional()
+    }),
+    output: AiSuggestNotesResult
   },
   /** Every open finding of the project (F-13.4), in reading order of their scenes, oldest first within a scene. */
   'continuity:list': { input: z.undefined(), output: z.array(ContinuityFinding) },

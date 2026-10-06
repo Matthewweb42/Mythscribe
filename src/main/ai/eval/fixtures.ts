@@ -242,6 +242,47 @@ import {
   type SceneBrief
 } from '@shared/sceneMeta'
 import { renderSceneSteer, SCENE_STEER_CATEGORIES, SCENE_STEER_NAMES_MAX } from '@shared/sceneSteer'
+import {
+  ROUTE_MESSAGE_CHARS,
+  ROUTE_SELECTION_PREVIEW_CHARS,
+  ROUTE_TITLE_CHARS,
+  ROUTE_TURN_CHARS
+} from '@shared/assistantRoute'
+import {
+  NOTES_SUGGEST_CURRENT_CHARS,
+  NOTES_SUGGEST_INSTRUCTION_MAX,
+  PANEL_NOTES_CHARS,
+  PANEL_SYNOPSIS_CHARS,
+  SCENE_SUGGEST_CHAR_BUDGET,
+  SCENE_SUGGEST_TEXT_MIN
+} from '@shared/sceneSuggest'
+import {
+  buildChatPromptV5,
+  CHAT_PROMPT_V5_VERSION,
+  type BuildChatPromptV5Input,
+  type ScenePanel
+} from '../prompts/chat.v5'
+import { buildChatRegenPromptV5, CHAT_REGEN_PROMPT_V5_VERSION } from '../prompts/chatRegen.v5'
+import {
+  buildQueryPromptV4,
+  QUERY_PROMPT_V4_VERSION,
+  type BuildQueryPromptV4Input
+} from '../prompts/query.v4'
+import {
+  buildRoutePrompt,
+  ROUTE_PROMPT_VERSION,
+  type BuildRoutePromptInput
+} from '../prompts/route.v1'
+import {
+  buildSynopsisPrompt,
+  SYNOPSIS_PROMPT_VERSION,
+  type BuildSynopsisPromptInput
+} from '../prompts/synopsis.v1'
+import {
+  buildNotesSuggestPrompt,
+  NOTES_SUGGEST_PROMPT_VERSION,
+  type BuildNotesSuggestPromptInput
+} from '../prompts/notesSuggest.v1'
 
 /**
  * The eval harness's fixtures (F-5.12): one manuscript passage, the voice profile it yields,
@@ -524,6 +565,15 @@ export interface EvalCase {
      * the feature's own parser (shape, non-blank, within the caps), three of them.
      */
     | { kind: 'whatNext' }
+    /**
+     * The assistant router (F-5.19): the answer, read by the feature's own parser, must name
+     * `expected`, the action a well-behaved router picks for the case.
+     */
+    | { kind: 'route'; expected: string }
+    /** A suggested synopsis (F-5.20): the answer must survive the feature's own parser. */
+    | { kind: 'synopsis' }
+    /** Suggested notes (F-5.20): the answer must survive the feature's own parser, nothing dropped. */
+    | { kind: 'notesSuggest' }
 }
 
 const general = builtinParams('general')
@@ -1718,6 +1768,160 @@ function whatNextCaseV2(
   }
 }
 
+/** The side panel the author keeps for the fixture scene (F-5.20): a synopsis and the scene notes. */
+const FIXTURE_PANEL: ScenePanel = {
+  synopsis:
+    'Mara meets Tomas at the flooded ferry landing and, instead of bargaining over the ledger, ' +
+    'tells him she knows where her brother is buried.',
+  notes: NOTES
+}
+/** The panel at its caps: a synopsis at its full length and the notes cut at theirs. */
+const MAXED_PANEL: ScenePanel = {
+  synopsis: 's'.repeat(PANEL_SYNOPSIS_CHARS),
+  notes: `${FIXTURE_PASSAGE.repeat(2).slice(0, PANEL_NOTES_CHARS)}…`
+}
+
+/** The same four shapes under `chat.v5` (F-5.20): the side panel in both modes. */
+const planFreshV5: BuildChatPromptV5Input = { ...planFreshV4, panel: null }
+const planFullV5: BuildChatPromptV5Input = { ...planFullV4, panel: FIXTURE_PANEL }
+const agentFullV5: BuildChatPromptV5Input = { ...agentFullV4, panel: FIXTURE_PANEL }
+const agentMaxedV5: BuildChatPromptV5Input = { ...agentMaxedV4, panel: MAXED_PANEL }
+
+function chatCaseV5(
+  name: string,
+  note: string,
+  given: BuildChatPromptV5Input,
+  violation: string | null
+): EvalCase {
+  // The oldest history turns are dropped until the first prompt fits, as `runChat` drops them.
+  const fits = (candidate: BuildChatPromptV5Input): boolean =>
+    estimateTokens(
+      buildChatPromptV5(candidate)
+        .messages.map((m) => m.content)
+        .join('\n')
+    ) <= inputBudget('chat')
+  let input = given
+  while (input.history.length > 0 && !fits(input)) {
+    input = { ...input, history: input.history.slice(1) }
+  }
+  const built =
+    violation === null ? buildChatPromptV5(input) : buildChatRegenPromptV5({ ...input, violation })
+  return {
+    version: violation === null ? CHAT_PROMPT_V5_VERSION : CHAT_REGEN_PROMPT_V5_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
+/** The same three shapes under `query.v4` (F-5.20): no panel, the fixture panel, the panel at its caps. */
+const queryV4Fresh: BuildQueryPromptV4Input = { ...queryV3Fresh, panel: null }
+const queryV4Full: BuildQueryPromptV4Input = { ...queryV3Full, panel: FIXTURE_PANEL }
+const queryV4Maxed: BuildQueryPromptV4Input = {
+  ...fitQueryPrompt(
+    queryMaxedRaw,
+    inputBudget('query'),
+    (full, summaries, history) =>
+      buildQueryPromptV4({
+        full,
+        summaries,
+        history,
+        question: MAXED_QUESTION,
+        bible: MAXED_QUERY_BIBLE_V3,
+        panel: MAXED_PANEL
+      }).messages
+  ),
+  question: MAXED_QUESTION,
+  bible: MAXED_QUERY_BIBLE_V3,
+  panel: MAXED_PANEL
+}
+
+function queryV4Case(name: string, note: string, input: BuildQueryPromptV4Input): EvalCase {
+  const built = buildQueryPromptV4(input)
+  return {
+    version: QUERY_PROMPT_V4_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'query', texts: input.full.map((scene) => scene.text) }
+  }
+}
+
+function routeCase(
+  name: string,
+  note: string,
+  input: BuildRoutePromptInput,
+  expected: string
+): EvalCase {
+  const built = buildRoutePrompt(input)
+  return {
+    version: ROUTE_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'route', expected }
+  }
+}
+
+function synopsisCase(name: string, note: string, input: BuildSynopsisPromptInput): EvalCase {
+  // The scene is fitted to the input budget exactly as the feature fits it (token rule 8).
+  const { sceneText } = fitSceneToBudget(
+    input.sceneText,
+    inputBudget('synopsis'),
+    (cut) => buildSynopsisPrompt({ ...input, sceneText: cut }).messages,
+    { chars: SCENE_SUGGEST_CHAR_BUDGET, min: SCENE_SUGGEST_TEXT_MIN }
+  )
+  const built = buildSynopsisPrompt({ ...input, sceneText })
+  return {
+    version: SYNOPSIS_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'synopsis' }
+  }
+}
+
+function notesSuggestCase(
+  name: string,
+  note: string,
+  input: BuildNotesSuggestPromptInput
+): EvalCase {
+  // The scene is fitted to the input budget exactly as the feature fits it (token rule 8).
+  const { sceneText } = fitSceneToBudget(
+    input.sceneText,
+    inputBudget('notesSuggest'),
+    (cut) => buildNotesSuggestPrompt({ ...input, sceneText: cut }).messages,
+    { chars: SCENE_SUGGEST_CHAR_BUDGET, min: SCENE_SUGGEST_TEXT_MIN }
+  )
+  const built = buildNotesSuggestPrompt({ ...input, sceneText })
+  return {
+    version: NOTES_SUGGEST_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'notesSuggest' }
+  }
+}
+
+/** The stored summary of the fixture scene (F-5.6), and one at every cap. */
+const SUGGEST_SUMMARY = {
+  summary:
+    'Mara meets Tomas at the ferry landing. He wants the mill ledger back; she reveals her ' +
+    'brother only copied it, then tells Tomas she knows he buried her brother under the elm.',
+  keyPoints: ['The ledger is a copy.', 'Tomas killed her brother.']
+}
+const MAXED_SUGGEST_SUMMARY = {
+  summary: 's'.repeat(SUMMARY_MAX_CHARS),
+  keyPoints: Array.from({ length: SUMMARY_KEY_POINTS_MAX }, () => 'k'.repeat(SUMMARY_KEY_POINT_MAX))
+}
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -2401,6 +2605,124 @@ export const EVAL_CASES: EvalCase[] = [
       brief: MAXED_BRIEF_BLOCK,
       steer: MAXED_STEER,
       bible: MAXED_BIBLE
+    }
+  ),
+  chatCaseV5('plan fresh', 'the v4 plan fresh case with no side panel', planFreshV5, null),
+  chatCaseV5(
+    'plan full',
+    'the v4 plan full case plus the side panel (a synopsis and the scene notes)',
+    planFullV5,
+    null
+  ),
+  chatCaseV5('agent full', 'the v4 agent full case plus the side panel', agentFullV5, null),
+  chatCaseV5(
+    'agent maxed',
+    'every cap at its limit, the side panel at its caps too, the oldest history turns dropped to fit as the feature does',
+    agentMaxedV5,
+    null
+  ),
+  chatCaseV5(
+    'agent full',
+    'the agent full case with its side panel, regenerated after a tense violation',
+    agentFullV5,
+    VIOLATION
+  ),
+  chatCaseV5(
+    'agent maxed',
+    'the agent maxed case with its side panel and trimmed history, regenerated after a tense violation',
+    agentMaxedV5,
+    VIOLATION
+  ),
+  queryV4Case(
+    'fresh',
+    'one retrieved scene, no story bible, and no side panel: query.v3’s messages exactly',
+    queryV4Fresh
+  ),
+  queryV4Case('full', 'the v3 full case plus the open scene’s side panel', queryV4Full),
+  queryV4Case(
+    'maxed',
+    'the worst input as the fit leaves it, with the story bible at the v3 budget and the side panel at its caps',
+    queryV4Maxed
+  ),
+  routeCase(
+    'fresh',
+    'a short question with no document open, no selection, and no history',
+    { message: 'Who owes the mill money?', history: [], active: null, selection: null },
+    'query'
+  ),
+  routeCase(
+    'full',
+    'a rewrite request over a selection in the open scene, two turns of history',
+    {
+      message: 'Make this tighter and colder.',
+      history: CHAT_HISTORY,
+      active: 'scene "The ferry landing"',
+      selection: REWRITE_PASSAGE.slice(0, ROUTE_SELECTION_PREVIEW_CHARS)
+    },
+    'rewrite'
+  ),
+  routeCase(
+    'maxed',
+    'every cap at its limit: the message, two turns, the title, and the selection opening',
+    {
+      message: FIXTURE_PASSAGE.repeat(3).slice(0, ROUTE_MESSAGE_CHARS),
+      history: [
+        { role: 'user', content: FIXTURE_PASSAGE.slice(0, ROUTE_TURN_CHARS) },
+        { role: 'assistant', content: FIXTURE_PASSAGE.slice(0, ROUTE_TURN_CHARS) }
+      ],
+      active: `scene "${'T'.repeat(ROUTE_TITLE_CHARS)}"`,
+      selection: FIXTURE_PASSAGE.slice(0, ROUTE_SELECTION_PREVIEW_CHARS)
+    },
+    'chat'
+  ),
+  synopsisCase(
+    'fresh',
+    'the fixture scene with no stored summary yet: the shape a new project sends',
+    { sceneText: FIXTURE_PASSAGE, summary: null }
+  ),
+  synopsisCase('full', 'the fixture scene with its stored summary and key points', {
+    sceneText: FIXTURE_PASSAGE,
+    summary: SUGGEST_SUMMARY
+  }),
+  synopsisCase(
+    'maxed',
+    'the worst input as the fit leaves it: a scene at the character budget and a summary at every cap',
+    { sceneText: FIXTURE_PASSAGE.repeat(60), summary: MAXED_SUGGEST_SUMMARY }
+  ),
+  notesSuggestCase(
+    'fresh',
+    'the fixture scene with no summary, brief, notes, story bible, or focus: the shape a new project sends',
+    {
+      sceneText: FIXTURE_PASSAGE,
+      summary: null,
+      brief: null,
+      notes: null,
+      bible: null,
+      instruction: null
+    }
+  ),
+  notesSuggestCase(
+    'full',
+    'the fixture scene with its summary, brief, notes, the story bible, and a focus',
+    {
+      sceneText: FIXTURE_PASSAGE,
+      summary: SUGGEST_SUMMARY,
+      brief: BRIEF_BLOCK,
+      notes: NOTES,
+      bible: FIXTURE_BIBLE,
+      instruction: 'What Tomas knows about the ledger.'
+    }
+  ),
+  notesSuggestCase(
+    'maxed',
+    'the worst input as the fit leaves it: every block at its cap and a scene at the character budget',
+    {
+      sceneText: FIXTURE_PASSAGE.repeat(60),
+      summary: MAXED_SUGGEST_SUMMARY,
+      brief: MAXED_BRIEF_BLOCK,
+      notes: `${FIXTURE_PASSAGE.repeat(2).slice(0, NOTES_SUGGEST_CURRENT_CHARS)}…`,
+      bible: MAXED_BIBLE,
+      instruction: 'i'.repeat(NOTES_SUGGEST_INSTRUCTION_MAX)
     }
   )
 ]

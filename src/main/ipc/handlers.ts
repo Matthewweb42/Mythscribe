@@ -39,6 +39,9 @@ import type {
   AiRewriteResult,
   AiSummarizeResult,
   AiWhatNextResult,
+  AiRouteResult,
+  AiSuggestNotesResult,
+  AiSuggestSynopsisResult,
   Entity,
   JobsIndexAllResult
 } from '@shared/ipc/contract'
@@ -88,6 +91,8 @@ import { createProposal, listPendingProposals, settleProposal } from '../ai/prop
 import { AiCancelledError, AiProviderError, NoKeyError } from '../ai/providers/types'
 import { runQuery } from '../ai/query'
 import { runWhatNext } from '../ai/whatNext'
+import { runRoute } from '../ai/route'
+import { runSuggestNotes, runSuggestSynopsis } from '../ai/sceneSuggest'
 import { recommendTags } from '../ai/recommendTags'
 import { runRewrite } from '../ai/rewrite'
 import type { AiProviderRegistry } from '../ai/registry'
@@ -2020,6 +2025,130 @@ export function registerHandlers({
       throw err
     }
   })
+
+  // F-5.19: the assistant router, JSON from the fast tier (or no request at all for a local
+  // decision). No proposal: the decision is never shown as content, only acted on by the
+  // renderer, which then calls the chosen feature's own channel. The ledger row is the cost.
+  register(
+    'ai:route',
+    async ({ nodeId, message, history, selection, requestId }): Promise<AiRouteResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const result = await runRoute(db, requestDeps(db), {
+          nodeId,
+          message,
+          history,
+          selection,
+          requestId
+        })
+        const { action, instruction, routedBy, usage, costUsd, cached, model } = result
+        return {
+          ok: true,
+          action,
+          instruction,
+          routedBy,
+          usage,
+          costUsd,
+          cached,
+          model,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
+
+  // F-5.20: a suggested synopsis for the side panel, JSON from the fast tier. One proposal
+  // (F-14.5) holds it, pending and never flagged (a synopsis is a planning note, not prose);
+  // the renderer writes it into the panel only when the author accepts.
+  register(
+    'ai:suggestSynopsis',
+    async ({ nodeId, requestId }): Promise<AiSuggestSynopsisResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const result = await runSuggestSynopsis(db, requestDeps(db), { nodeId, requestId })
+        const { synopsis, truncated, usage, costUsd, cached, model } = result
+        const proposal = createProposal(db, {
+          feature: 'synopsis',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model,
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          costUsd,
+          cached,
+          content: synopsis,
+          flagged: false,
+          violation: null
+        })
+        return {
+          ok: true,
+          synopsis,
+          truncated,
+          usage,
+          costUsd,
+          cached,
+          model,
+          proposalId: proposal.id,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
+
+  // F-5.20: suggested key points for the scene's notes, JSON from the fast tier. One proposal
+  // holds the points as JSON, pending and never flagged; nothing enters the notes until the
+  // author accepts.
+  register(
+    'ai:suggestNotes',
+    async ({ nodeId, requestId, instruction }): Promise<AiSuggestNotesResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const result = await runSuggestNotes(db, requestDeps(db), {
+          nodeId,
+          requestId,
+          instruction
+        })
+        const { points, dropped, truncated, usage, costUsd, cached, model } = result
+        const proposal = createProposal(db, {
+          feature: 'notesSuggest',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model,
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          costUsd,
+          cached,
+          content: JSON.stringify(points),
+          flagged: false,
+          violation: null
+        })
+        return {
+          ok: true,
+          points,
+          dropped,
+          truncated,
+          usage,
+          costUsd,
+          cached,
+          model,
+          proposalId: proposal.id,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
 
   // F-13.4: Check consistency on one scene, JSON from the strong tier, not streamed. The run
   // replaces the scene's open findings (dismissed ones stay dismissed) and every window hears

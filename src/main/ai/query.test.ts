@@ -13,7 +13,10 @@ import {
 } from '@shared/query'
 import type { StoredSceneSummary } from '@shared/summary'
 import type { TiptapNodeT } from '@shared/tiptap'
+import { emptySceneMeta } from '@shared/sceneMeta'
 import { saveDocument } from '../document/documentStore'
+import { saveNotes } from '../document/notesStore'
+import { setSceneMeta } from '../document/sceneMetaStore'
 import { upsertSummary } from '../document/summaryStore'
 import { createEntity } from '../entity/entityStore'
 import { replaceSceneFacts } from '../entity/observedFactStore'
@@ -27,7 +30,9 @@ import { sceneTitles } from './context/queryContext'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import type { ChatTurn } from './prompts/chat.v1'
+import { SCENE_PANEL_HEADING } from './prompts/chat.v5'
 import { buildQueryPromptV3, QUERY_BIBLE_HEADING_V3 } from './prompts/query.v3'
+import { QUERY_PANEL_RULE } from './prompts/query.v4'
 import {
   fitQueryPrompt,
   QUERY_HISTORY_KEEP,
@@ -188,7 +193,7 @@ afterEach(() => {
 })
 
 describe('runQuery (F-5.7)', () => {
-  it('sends the ranked scenes as JSON to the strong tier under query.v3 and answers with citations', async () => {
+  it('sends the ranked scenes as JSON to the strong tier under query.v4 and answers with citations', async () => {
     answers({ citations: [{ scene: 1, quote: QUOTE }] })
     const result = await ask()
     expect(result).toEqual({
@@ -206,7 +211,7 @@ describe('runQuery (F-5.7)', () => {
       costUsd: priceFor('gpt-5.4', 900, 60).costUsd,
       cached: false,
       model: 'gpt-5.4',
-      promptVersion: 'query.v3'
+      promptVersion: 'query.v4'
     })
     const request = complete.mock.calls[0]![0]
     expect(request).toMatchObject({ tier: 'strong', json: true, maxTokens: 600 })
@@ -214,7 +219,7 @@ describe('runQuery (F-5.7)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'query',
       tier: 'strong',
-      promptVersion: 'query.v3',
+      promptVersion: 'query.v4',
       cached: false
     })
   })
@@ -566,6 +571,21 @@ describe('fitQueryPrompt (F-5.7, token rule 8)', () => {
   })
 })
 
+describe('runQuery with the side panel (F-5.20)', () => {
+  it("carries the open scene's synopsis and notes before the scenes, never with no scene open", async () => {
+    const open = scenes[0]!
+    setSceneMeta(db, open, { ...emptySceneMeta(), synopsis: 'Mara hides the ledger.' })
+    saveNotes(db, open, doc('The copy is under the elm.'))
+    await ask()
+    expect(system()).not.toContain(SCENE_PANEL_HEADING)
+    await ask({ nodeId: open })
+    expect(system(1)).toContain(
+      `${SCENE_PANEL_HEADING}\nSynopsis: Mara hides the ledger.\n` +
+        `Notes:\n"""\nThe copy is under the elm.\n"""\n${QUERY_PANEL_RULE}\n\nScenes (full text):`
+    )
+  })
+})
+
 describe('runQuery with the story bible (F-5.16)', () => {
   it('sends no story bible while no entity is named by the question or the scenes', async () => {
     createEntity(db, { kind: 'character', name: 'Ilse', fields: { age: '50' } })
@@ -600,7 +620,7 @@ describe('runQuery with the story bible (F-5.16)', () => {
       `${QUERY_BIBLE_HEADING_V3}\nMara (character): Age: 31. Seen in the manuscript: ` +
         `Goals / motivations: Keep a copy of the ledger (${sceneTitle(0)}).\n\nScenes (full text):`
     )
-    expect(ledger[0]).toMatchObject({ feature: 'query', promptVersion: 'query.v3' })
+    expect(ledger[0]).toMatchObject({ feature: 'query', promptVersion: 'query.v4' })
   })
 
   it('sends the sheet of an entity the top scenes name when the question names none (query.v3)', async () => {

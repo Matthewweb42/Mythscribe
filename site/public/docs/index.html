@@ -145,8 +145,8 @@
               <tr>
                 <th scope="row">Assistant chat</th>
                 <td>
-                  The active scene's text (head-truncated), the notes of documents tagged with any
-                  #name you mention, the story bible (your tag names by category, the scene's tags,
+                  The active scene's text (head-truncated), its synopsis and notes (the first 1,500
+                  characters), the notes of documents tagged with any #name you mention, the story bible (your tag names by category, the scene's tags,
                   the sheets of the story-bible entries linked to those tags with what the
                   manuscript states about them, and the titles, metadata, and summaries of the
                   scenes either side of it), the recent turns of the conversation, and your message.
@@ -160,9 +160,10 @@
               <tr>
                 <th scope="row">Story Intelligence</th>
                 <td>
-                  Your question, scene summaries, the full text of the top matching scenes, and the
+                  Your question, scene summaries, the full text of the top matching scenes, the
                   sheets of the story-bible entries your question names with what the manuscript
-                  states about them.
+                  states about them, and the open scene's synopsis and notes (the first 1,500
+                  characters).
                 </td>
                 <td>Ask</td>
               </tr>
@@ -236,6 +237,37 @@
                   scene's tags, the sheets of the story-bible entries linked to those tags with what
                   the manuscript states about them, and the titles, metadata, and summaries of the
                   scenes either side of it), only when you click What should come next?.
+                </td>
+                <td>Ask</td>
+              </tr>
+              <tr>
+                <th scope="row">Assistant routing</th>
+                <td>
+                  Your message (the first 1,000 characters), the last two turns of the conversation
+                  (300 characters each), the first 200 characters of the passage you selected, and
+                  the open document's kind and title, so the assistant can pick which feature
+                  answers you.
+                </td>
+                <td>Ask</td>
+              </tr>
+              <tr>
+                <th scope="row">Synopsis suggestions</th>
+                <td>
+                  The scene's text (the first 12,000 characters) and its stored summary and key
+                  points, only when you ask for a suggested synopsis.
+                </td>
+                <td>Ask</td>
+              </tr>
+              <tr>
+                <th scope="row">Notes suggestions</th>
+                <td>
+                  The scene's text (the first 12,000 characters), its stored summary and key points,
+                  its notes (the first 1,500 characters), its brief plus the previous scene's
+                  reader-knows-after line and the next scene's goal, the story bible (your tag names
+                  by category, the scene's tags, the sheets of the story-bible entries linked to
+                  those tags with what the manuscript states about them, and the titles, metadata,
+                  and summaries of the scenes either side of it), and what you asked to focus on,
+                  only when you ask for suggested notes.
                 </td>
                 <td>Ask</td>
               </tr>
