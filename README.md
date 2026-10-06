@@ -9,6 +9,7 @@ prototype lives at git tag `v0-legacy`.
 - What it does and will do: [`FEATURES.md`](FEATURES.md)
 - Why the AI and the business are shaped the way they are: [`PLAN.md`](PLAN.md)
 - How the project is built with Claude Code: [`CLAUDE.md`](CLAUDE.md)
+- Installing it on your own PC to write with while it is developed: [`docs/PERSONAL-USE.md`](docs/PERSONAL-USE.md)
 
 ## Develop
 
