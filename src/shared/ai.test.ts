@@ -76,7 +76,8 @@ describe('budgets', () => {
       importStructure: 400,
       continuity: 800,
       proofread: 2_000,
-      whatNext: 300
+      whatNext: 300,
+      voiceNotes: 400
     })
     expect(Object.keys(FEATURE_INPUT_BUDGETS).sort()).toEqual(Object.keys(FEATURE_BUDGETS).sort())
     for (const feature of AI_FEATURE_IDS) {

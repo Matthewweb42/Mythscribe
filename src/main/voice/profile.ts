@@ -5,7 +5,7 @@ import { computeStylometrics, renderVoiceRules } from '@shared/stylometry'
 import { TiptapNode, type TiptapNodeT } from '@shared/tiptap'
 import { voiceConfidence } from '@shared/voice'
 import type { NodeRow } from '../db/schema'
-import { getAuthorRules } from '../project/settingsStore'
+import { getAuthorRules, getVoiceNotes } from '../project/settingsStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { listExemplars } from './exemplarStore'
 import { currentVoiceVersion } from './versionCache'
@@ -22,7 +22,8 @@ export const voiceProfileVersion = currentVoiceVersion
 
 /**
  * The voice profile (F-14.1), built locally: the manuscript's stylometrics rendered as rules,
- * every exemplar, the author's rules (F-14.2), and the confidence. Cached per POV key until the
+ * every exemplar (hand-marked and, since F-14.14, automatic), the author's rules (F-14.2), the
+ * learned style notes (F-14.14, stored; this never calls the AI), and the confidence. Cached per POV key until the
  * version counter moves (an exemplar write, an author-rules write, a document save, or a
  * project change), so ghost text, which calls this on every request, pays for the walk once per
  * edit burst rather than once per keystroke.
@@ -65,7 +66,8 @@ function compute(db: TreeDb, pov: string): VoiceProfile {
     exemplars,
     authorRules: getAuthorRules(db),
     confidence: voiceConfidence(stats.wordCount, exemplars.length),
-    wordCount: stats.wordCount
+    wordCount: stats.wordCount,
+    notes: getVoiceNotes(db)?.notes ?? []
   }
 }
 

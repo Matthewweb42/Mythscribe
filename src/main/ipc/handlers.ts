@@ -26,6 +26,7 @@ import {
 import type { Background } from '@shared/focus'
 import type { ImportDetectResult, PendingTagProposal } from '@shared/importStructure'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
+import { VOICE_JOB_DEBOUNCE_MS } from '@shared/voice'
 import type {
   AiBetaReaderResult,
   AiChatResult,
@@ -88,6 +89,7 @@ import { createProposal, listPendingProposals, settleProposal } from '../ai/prop
 import { AiCancelledError, AiProviderError, NoKeyError } from '../ai/providers/types'
 import { runQuery } from '../ai/query'
 import { runWhatNext } from '../ai/whatNext'
+import { clearVoiceNotes } from '../ai/voiceNotes'
 import { recommendTags } from '../ai/recommendTags'
 import { runRewrite } from '../ai/rewrite'
 import type { AiProviderRegistry } from '../ai/registry'
@@ -192,6 +194,7 @@ import {
   getProjectTimeline,
   getReferencePins,
   getTagAliases,
+  getVoiceNotes,
   getWritingPresets,
   setAiSettings,
   setAuthorRules,
@@ -249,6 +252,12 @@ import { addExemplar, listExemplars, removeExemplar } from '../voice/exemplarSto
 import { buildConsistencyReport } from '../voice/consistency'
 import { buildVoiceProfile, manuscriptDocuments } from '../voice/profile'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
+import {
+  manuscriptRootId,
+  runVoiceJob,
+  type VoiceJobMemo,
+  type VoiceJobResult
+} from '../voice/voiceJob'
 import { AppError } from './errors'
 import {
   addCustomTemplate,
@@ -492,6 +501,40 @@ export function registerHandlers({
     minIntervalMs: 0
   })
 
+  /**
+   * F-14.14: automatic voice learning's own queue, one `voice` job per project keyed to the
+   * manuscript root. Silent like the mention queue (no indicator, no node status): the local
+   * step re-picks the automatic exemplars, and the AI step refreshes the learned style notes
+   * only when due, allowed, and a provider is set up; it swallows its failures (`runVoiceJob`),
+   * so nothing here ever pauses. The memo of the last notes failure belongs to the project.
+   */
+  const voiceMemo: VoiceJobMemo = { failedAtWords: null }
+  const voiceQueue = createIndexQueue<VoiceJobResult>({
+    kind: 'voice',
+    db: () => (manager.current() === null ? null : manager.require().connection.orm),
+    run: async (_job, requestId) => {
+      const db = manager.require().connection.orm
+      const value = await runVoiceJob(
+        db,
+        {
+          request: () => requestDeps(db),
+          providerReady: () => Boolean(ai.get(sourceOf(db))),
+          now: () => new Date()
+        },
+        { requestId, memo: voiceMemo }
+      )
+      return { requested: value.requested, value }
+    },
+    cancelRequest: (requestId) => void cancelInflight(requestId),
+    debounceMs: VOICE_JOB_DEBOUNCE_MS,
+    minIntervalMs: 0
+  })
+  /** F-14.14: queue the voice job now (open, an AI settings change); it decides itself whether anything is due. */
+  const queueVoice = (db: TreeDb): void => {
+    const root = manuscriptRootId(db)
+    if (root !== null) voiceQueue.indexAll('voice', [root])
+  }
+
   /** F-4.12: every manuscript document is rescanned when the tag bank itself changes. */
   const rescanManuscript = (db: TreeDb): void => {
     mentionQueue.indexAll(
@@ -633,6 +676,9 @@ export function registerHandlers({
       // F-4.12b: a scan that read the document again republishes the proposed tags itself.
       mentionQueue.touch('mentions', id)
     }
+    // F-14.14: one debounced voice job per burst of saves, whichever documents they were.
+    const root = manuscriptRootId(db)
+    if (root !== null) voiceQueue.touch('voice', root)
   }
 
   /**
@@ -656,6 +702,8 @@ export function registerHandlers({
       backfillResume = false
       if (manager.current() === null) return
       const db = manager.require().connection.orm
+      // F-14.14: the voice job rides the same triggers; it checks its own gate and thresholds.
+      queueVoice(db)
       if (!isFeatureAllowed(getAiSettings(db), 'summary') || !ai.get(sourceOf(db))) return
       if (lift && queue.status().paused !== null) queue.resume()
       queue.indexAll('summary', staleSummaryNodeIds(db))
@@ -2317,6 +2365,11 @@ export function registerHandlers({
     return null
   })
 
+  // F-14.14: the learned style notes (AI-made, refreshed by the voice job) and their Clear.
+  register('voice:notes', () => getVoiceNotes(manager.require().connection.orm))
+
+  register('voice:clearNotes', () => clearVoiceNotes(manager.require().connection.orm, new Date()))
+
   register('voice:profile', ({ pov }) =>
     buildVoiceProfile(manager.require().connection.orm, { pov })
   )
@@ -2599,6 +2652,9 @@ export function registerHandlers({
     // F-4.12: the same for the mention queue, and a project that was written before this feature
     // (or by an older build) is backfilled from its own rows, silently, as soon as it opens.
     mentionQueue.clear()
+    // F-14.14: the voice job and its failure memo belong to the project that left.
+    voiceQueue.clear()
+    voiceMemo.failedAtWords = null
     // F-4.12b: the memoised word counts and what was last published belong to the project that
     // left, so a project opened again publishes its proposals afresh rather than staying silent
     // because the list happens to read the same as the last one's.
@@ -2619,6 +2675,7 @@ export function registerHandlers({
       queue.load()
       mentionQueue.load()
       mentionQueue.indexAll('mentions', staleMentionNodeIds(manager.require().connection.orm))
+      voiceQueue.load()
       backfillSummaries(false)
       publishProposed()
       try {

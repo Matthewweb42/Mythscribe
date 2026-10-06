@@ -112,6 +112,8 @@ describe('the continuity feature registry lines (F-13.4)', () => {
     expect(sends).toContain("the previous scene's timeline and this scene's")
     expect(sends).toContain("the scene's brief")
     expect(sends).toContain('only the paragraphs that state something different')
-    expect(sends).toContain('the voice profile (stylometric rules and up to 3 exemplar passages)')
+    expect(sends).toContain(
+      'the voice profile (stylometric rules, learned style notes, and up to 3 exemplar passages)'
+    )
   })
 })

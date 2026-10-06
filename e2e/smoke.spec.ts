@@ -3259,8 +3259,13 @@ test('create, close, reopen a project on disk', async () => {
   // 1's POV and toasts the count; the section then lists it and reports the words the profile
   // was built from. The ghost-text request below carries the profile in its system turn.
   const voiceSection = settingsDialog.getByTestId('voice-section')
-  await expect(voiceSection.getByTestId('voice-words')).toContainText('0 of 12 exemplars')
-  await expect(voiceSection).toContainText('No exemplars marked yet.')
+  await expect(voiceSection.getByTestId('voice-words')).toContainText('0 of 12 marked exemplars')
+  // F-14.14: what was learned automatically has its own block; this short manuscript is under
+  // the 2,000 words the style notes wait for, so it says when they will come.
+  await expect(voiceSection.getByTestId('voice-notes')).toContainText(
+    'What MythScribe has learned about your style'
+  )
+  await expect(voiceSection.getByTestId('voice-notes')).toContainText('Nothing yet.')
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
   const markExemplar = page.getByRole('button', { name: 'Mark voice exemplar' })
@@ -3273,14 +3278,17 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('End')
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  // The voice job's automatic picks (F-14.14), if any, are listed too; the hand-marked one is
+  // the only row without "Picked automatically".
   const exemplarRows = voiceSection
     .getByRole('list', { name: 'Voice exemplars' })
     .getByRole('listitem')
+    .filter({ hasNotText: 'Picked automatically' })
   await expect(exemplarRows).toHaveCount(1)
   await expect(exemplarRows.first()).toContainText('Mixed · POV Mara')
   await expect(exemplarRows.first()).toContainText('The storm broke at dusk. Rain followed.')
   await expect(voiceSection.getByTestId('voice-words')).toContainText(
-    /Built from [1-9]\d* words of manuscript and 1 of 12 exemplars/
+    /Built from [1-9]\d* words of manuscript, 1 of 12 marked exemplars/
   )
 
   // F-5.3: VibeWrite. Suggest unlocks ghost text; the idle delay drops to 0.5 s in the AI tab

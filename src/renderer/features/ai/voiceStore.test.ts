@@ -18,7 +18,8 @@ const exemplar = (id: string, text = `Passage ${id}`): VoiceExemplar => ({
   text,
   pov: null,
   kind: 'mixed',
-  created: '2026-09-14T08:00:00.000Z'
+  created: '2026-09-14T08:00:00.000Z',
+  source: 'author'
 })
 
 const profileOf = (exemplars: VoiceExemplar[]): VoiceProfile => ({
@@ -27,7 +28,8 @@ const profileOf = (exemplars: VoiceExemplar[]): VoiceProfile => ({
   exemplars,
   confidence: 0.2,
   wordCount: 2_000,
-  authorRules: defaultAuthorRules()
+  authorRules: defaultAuthorRules(),
+  notes: []
 })
 
 const REPORT: VoiceConsistencyReport = {

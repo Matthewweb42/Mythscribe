@@ -40,6 +40,7 @@ import { SUMMARY_PROMPT_VERSION } from './summary.v1'
 import { SUMMARY_PROMPT_V2_VERSION } from './summary.v2'
 import { SUMMARY_PROMPT_V3_VERSION } from './summary.v3'
 import { TAGS_PROMPT_VERSION } from './tags.v1'
+import { VOICE_NOTES_PROMPT_VERSION } from './voiceNotes.v1'
 import { TAGS_REGEN_PROMPT_VERSION } from './tagsRegen.v1'
 import { WHAT_NEXT_PROMPT_VERSION } from './whatNext.v1'
 import { WHAT_NEXT_PROMPT_V2_VERSION } from './whatNext.v2'
@@ -100,7 +101,8 @@ export const PROMPT_VERSIONS = [
   CONTINUITY_PROMPT_VERSION,
   PROOFREAD_PROMPT_VERSION,
   WHAT_NEXT_PROMPT_VERSION,
-  WHAT_NEXT_PROMPT_V2_VERSION
+  WHAT_NEXT_PROMPT_V2_VERSION,
+  VOICE_NOTES_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -316,6 +318,12 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-14.13'
+  },
+  [VOICE_NOTES_PROMPT_VERSION]: {
+    feature: 'voiceNotes',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-14.14'
   }
 }
 

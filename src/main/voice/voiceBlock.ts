@@ -2,7 +2,7 @@ import { estimateTokens } from '@shared/ai'
 import { renderAuthorRulesBlock } from '@shared/authorRules'
 import type { VoiceProfile } from '@shared/ipc/contract'
 import { classifyKind } from '@shared/stylometry'
-import { VOICE_BLOCK_TOKEN_BUDGET } from '@shared/voice'
+import { VOICE_BLOCK_TOKEN_BUDGET, VOICE_NOTES_TOKEN_BUDGET } from '@shared/voice'
 import { normalizePov } from './profile'
 
 /** At most this many exemplars are folded into one prompt. */
@@ -17,10 +17,15 @@ export interface VoiceSituation {
   pov: string | null
 }
 
+/** The heading of the learned style notes inside the voice block (F-14.14). */
+export const VOICE_NOTES_HEADING = 'Style notes learned from the manuscript:'
+
 /**
  * The voice block a prompt carries (F-14.1), pure: the stylometric rules as a list, then the
- * author's rules (F-14.2) as their own paragraph, then up to three exemplars chosen for the
- * situation (same kind as the passage first, then same POV, then the profile's order), whole,
+ * learned style notes (F-14.14) as their own list, as many as fit `VOICE_NOTES_TOKEN_BUDGET`,
+ * then the author's rules (F-14.2) as their own paragraph, then up to three exemplars chosen
+ * for the situation (same kind as the passage first, then same POV, then hand-marked before
+ * automatic, then the profile's order), whole,
  * while the rules and exemplars stay under `VOICE_BLOCK_TOKEN_BUDGET` estimated tokens. The
  * author block is budgeted separately (`AUTHOR_RULES_TOKEN_BUDGET`): they are hard constraints,
  * so an exemplar never crowds them out and they never cost an exemplar its place. When even the
@@ -31,10 +36,12 @@ export interface VoiceSituation {
  */
 export function voiceBlock(profile: VoiceProfile, situation: VoiceSituation): string | null {
   const author = renderAuthorRulesBlock(profile.authorRules)
-  if (profile.rules.length === 0 && profile.exemplars.length === 0) return author
-  const rules = ["Match the author's voice:", ...profile.rules.map((rule) => `- ${rule}`)].join(
-    '\n'
-  )
+  if (profile.rules.length === 0 && profile.exemplars.length === 0 && profile.notes.length === 0) {
+    return author
+  }
+  let rules = ["Match the author's voice:", ...profile.rules.map((rule) => `- ${rule}`)].join('\n')
+  const notes = notesBlock(profile.notes)
+  if (notes !== null) rules += `\n\n${notes}`
   let block = rules
   const kind = classifyKind(situation.text)
   const pov = normalizePov(situation.pov)
@@ -46,7 +53,12 @@ export function voiceBlock(profile: VoiceProfile, situation: VoiceSituation): st
         (exemplar.kind === kind ? 2 : 0) +
         (pov.length > 0 && normalizePov(exemplar.pov) === pov ? 1 : 0)
     }))
-    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        sourceRank(a.exemplar.source) - sourceRank(b.exemplar.source) ||
+        a.index - b.index
+    )
 
   let appended = 0
   for (const { exemplar } of ranked) {
@@ -66,6 +78,24 @@ export function voiceBlock(profile: VoiceProfile, situation: VoiceSituation): st
   }
   const examples = block.slice(rules.length)
   return author === null ? block : `${rules}\n\n${author}${examples}`
+}
+
+/** Hand-marked exemplars (F-14.1) rank ahead of the voice job's picks (F-14.14) on a tie. */
+function sourceRank(source: 'author' | 'auto'): number {
+  return source === 'author' ? 0 : 1
+}
+
+/** The learned notes as a list, in order, while it stays within `VOICE_NOTES_TOKEN_BUDGET`; null for none. */
+function notesBlock(notes: readonly string[]): string | null {
+  let block = VOICE_NOTES_HEADING
+  let kept = 0
+  for (const note of notes) {
+    const next = `${block}\n- ${note}`
+    if (estimateTokens(next) > VOICE_NOTES_TOKEN_BUDGET) break
+    block = next
+    kept += 1
+  }
+  return kept === 0 ? null : block
 }
 
 function example(text: string): string {

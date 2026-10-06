@@ -113,8 +113,8 @@ describe('AI_DATA_SHARING', () => {
     expect(AI_DATA_SHARING.ghostText.sends).toBe(
       'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes, ' +
         "its metadata (location, POV, timeline), its brief plus the previous scene's " +
-        "reader-knows-after line and the next scene's goal, the voice profile (stylometric rules " +
-        'and up to 3 exemplar passages), your author rules and banned phrases, and the story ' +
+        "reader-knows-after line and the next scene's goal, the voice profile (stylometric rules, " +
+        'learned style notes, and up to 3 exemplar passages), your author rules and banned phrases, and the story ' +
         "bible (your tag names by category, the scene's tags, the sheets of the story-bible " +
         'entries linked to those tags with what the manuscript states about them, and the ' +
         'titles, metadata, and summaries of the scenes either side of it). An answer that ' +

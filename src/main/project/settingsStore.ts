@@ -38,6 +38,13 @@ import { REFERENCE_PINS_KEY, ReferencePins, defaultReferencePins } from '@shared
 import { STRUCTURE_KEY, ProjectStructure, defaultProjectStructure } from '@shared/structure'
 import { TAG_ALIASES_KEY, TagAliases } from '@shared/tagExchange'
 import { TIMELINE_KEY, ProjectTimeline, defaultProjectTimeline } from '@shared/timeline'
+import {
+  VOICE_AUTO_KEY,
+  VOICE_NOTES_KEY,
+  VoiceAutoState,
+  VoiceNotes,
+  defaultVoiceAutoState
+} from '@shared/voice'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
 
@@ -452,6 +459,63 @@ export function setGoals(db: TreeDb, value: Goals): Goals {
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: GOALS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the voice job's state (F-14.14) from the `settings` row under `VOICE_AUTO_KEY`. A
+ * missing row, unparsable JSON, or a value outside the schema all answer with "never picked,
+ * nothing removed": the next run then picks again, which is all an unreadable row can cost.
+ */
+export function getVoiceAutoState(db: TreeDb): VoiceAutoState {
+  const row = db.select().from(settings).where(eq(settings.key, VOICE_AUTO_KEY)).get()
+  if (!row) return defaultVoiceAutoState()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultVoiceAutoState()
+  }
+  const parsed = VoiceAutoState.safeParse(json)
+  return parsed.success ? parsed.data : defaultVoiceAutoState()
+}
+
+/** Replaces the voice job's state (F-14.14; upsert on the settings key) and returns what was stored. */
+export function setVoiceAutoState(db: TreeDb, value: VoiceAutoState): VoiceAutoState {
+  const stored = VoiceAutoState.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: VOICE_AUTO_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the learned style notes (F-14.14) from the `settings` row under `VOICE_NOTES_KEY`; null
+ * when there is no row or it cannot be read (the job then writes it afresh when due).
+ */
+export function getVoiceNotes(db: TreeDb): VoiceNotes | null {
+  const row = db.select().from(settings).where(eq(settings.key, VOICE_NOTES_KEY)).get()
+  if (!row) return null
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return null
+  }
+  const parsed = VoiceNotes.safeParse(json)
+  return parsed.success ? parsed.data : null
+}
+
+/** Replaces the learned style notes (F-14.14; upsert on the settings key) and returns what was stored. */
+export function setVoiceNotes(db: TreeDb, value: VoiceNotes): VoiceNotes {
+  const stored = VoiceNotes.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: VOICE_NOTES_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

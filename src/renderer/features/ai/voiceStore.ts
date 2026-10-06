@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { VoiceConsistencyReport, VoiceExemplar, VoiceProfile } from '@shared/ipc/contract'
+import type { VoiceNotes } from '@shared/voice'
 import { ipc } from '@renderer/lib/ipc'
 
 /**
@@ -9,7 +10,10 @@ import { ipc } from '@renderer/lib/ipc'
  * main caches it). `add` and `remove` merge main's answer into the list instead of re-listing,
  * then refresh the profile if one is held, since the exemplars are part of it. The consistency
  * report (F-14.7) is loaded on demand by the section's button and held until the next load or
- * the project closes. Per project: `clear` on close. The generation counter drops a response
+ * the project closes. The learned style notes (F-14.14) are loaded by the section on mount, and
+ * `clearNotes` takes main's answer and refreshes the profile, which carries them. The voice job
+ * picks automatic exemplars in the background, so the section re-lists the exemplars on mount
+ * too. Per project: `clear` on close. The generation counter drops a response
  * from a superseded request.
  */
 interface VoiceState {
@@ -19,9 +23,13 @@ interface VoiceState {
   profile: VoiceProfile | null
   /** null until the first `loadReport` resolves (F-14.7). */
   report: VoiceConsistencyReport | null
+  /** The learned style notes (F-14.14); null until loaded, and while none were ever learned. */
+  notes: VoiceNotes | null
   load: () => Promise<void>
   loadProfile: () => Promise<void>
   loadReport: () => Promise<void>
+  loadNotes: () => Promise<void>
+  clearNotes: () => Promise<void>
   /** Marks a passage; resolves to the new exemplar once the list holds it, so the caller can toast the count. */
   add: (nodeId: string, text: string) => Promise<VoiceExemplar>
   remove: (id: string) => Promise<void>
@@ -35,6 +43,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   exemplars: null,
   profile: null,
   report: null,
+  notes: null,
 
   async load() {
     const mine = generation
@@ -57,6 +66,21 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     set({ report })
   },
 
+  async loadNotes() {
+    const mine = generation
+    const notes = await ipc().invoke('voice:notes', undefined)
+    if (mine !== generation) return
+    set({ notes })
+  },
+
+  async clearNotes() {
+    const mine = generation
+    const notes = await ipc().invoke('voice:clearNotes', undefined)
+    if (mine !== generation) return
+    set({ notes })
+    if (get().profile !== null) void get().loadProfile()
+  },
+
   async add(nodeId, text) {
     const mine = generation
     const exemplar = await ipc().invoke('voice:addExemplar', { nodeId, text })
@@ -77,7 +101,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   clear() {
     generation++
-    set({ exemplars: null, profile: null, report: null })
+    set({ exemplars: null, profile: null, report: null, notes: null })
   }
 }))
 

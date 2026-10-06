@@ -236,7 +236,9 @@ export const AI_FEATURE_IDS = [
   // F-14.12: the proofreading pass over a scene or a selection.
   'proofread',
   // F-5.17: the "What should come next?" quick action, three short directions as JSON.
-  'whatNext'
+  'whatNext',
+  // F-14.14: the learned style notes, refreshed in the background from the author's own prose.
+  'voiceNotes'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -277,7 +279,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-14.12: up to 30 fixes as JSON, each a kind, a short quote, and its corrected form.
   proofread: 2_000,
   // F-5.17: three directions as JSON, each a short title and up to ~40 words.
-  whatNext: 300
+  whatNext: 300,
+  // F-14.14: up to 8 style notes of at most 160 characters each as JSON.
+  voiceNotes: 400
 }
 
 /**
@@ -318,7 +322,9 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   proofread: 8_000,
   // F-5.17: the last 6,000 characters of the scene (or up to the selection's end), the brief,
   // and the story bible at its 400-token budget.
-  whatNext: 4_000
+  whatNext: 4_000,
+  // F-14.14: up to 6,000 characters of the author's paragraphs, the previous notes, and the rules.
+  voiceNotes: 2_500
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

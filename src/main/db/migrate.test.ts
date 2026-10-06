@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(16)
+    expect(result.version).toBe(17)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -711,5 +711,49 @@ describe('snapshot and snapshot_text tables (0015_snapshots)', () => {
     db.prepare('DELETE FROM node WHERE id = ?').run('scene')
     expect(count('snapshot_text')).toEqual({ n: 0 })
     expect(db.prepare('SELECT id FROM snapshot').all()).toEqual([{ id: 's1' }])
+  })
+})
+
+describe('voice_exemplar.source (0016_voice_exemplar_source)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+  })
+  afterEach(() => db.close())
+
+  const insert = (id: string, source?: string): void => {
+    if (source === undefined) {
+      db.prepare(
+        `INSERT INTO voice_exemplar (id, node_id, text, pov, kind, created)
+         VALUES (?, NULL, 'text', NULL, 'mixed', '2026-01-01')`
+      ).run(id)
+      return
+    }
+    db.prepare(
+      `INSERT INTO voice_exemplar (id, node_id, text, pov, kind, created, source)
+       VALUES (?, NULL, 'text', NULL, 'mixed', '2026-01-01', ?)`
+    ).run(id, source)
+  }
+
+  it('defaults a row written without a source (every row marked before F-14.14) to the author’s', () => {
+    insert('e1')
+    insert('e2', 'auto')
+    expect(db.prepare('SELECT id, source FROM voice_exemplar ORDER BY id').all()).toEqual([
+      { id: 'e1', source: 'author' },
+      { id: 'e2', source: 'auto' }
+    ])
+  })
+
+  it('refuses a null source', () => {
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO voice_exemplar (id, node_id, text, pov, kind, created, source)
+           VALUES ('e3', NULL, 'text', NULL, 'mixed', '2026-01-01', NULL)`
+        )
+        .run()
+    ).toThrow(/NOT NULL/)
   })
 })

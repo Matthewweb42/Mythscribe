@@ -1,0 +1,1 @@
+ALTER TABLE `voice_exemplar` ADD `source` text DEFAULT 'author' NOT NULL;

@@ -21,7 +21,8 @@ const PROFILE: VoiceProfile = {
   exemplars: [],
   confidence: 0,
   wordCount: 0,
-  authorRules: defaultAuthorRules()
+  authorRules: defaultAuthorRules(),
+  notes: []
 }
 
 /** `authorRules:get` answers with `stored`; `authorRules:set` resolves only when the test says so. */

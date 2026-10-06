@@ -12,6 +12,7 @@ import type {
   VoiceProfile
 } from '@shared/ipc/contract'
 import { computeStylometrics } from '@shared/stylometry'
+import type { VoiceNotes } from '@shared/voice'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -28,7 +29,8 @@ const exemplars: VoiceExemplar[] = [
     text: LONG,
     pov: 'Mara',
     kind: 'interiority',
-    created: '2026-09-14T08:00:00.000Z'
+    created: '2026-09-14T08:00:00.000Z',
+    source: 'author'
   },
   {
     id: 'e2',
@@ -36,7 +38,8 @@ const exemplars: VoiceExemplar[] = [
     text: 'Short enough to show whole.',
     pov: null,
     kind: 'dialogue',
-    created: '2026-09-14T08:01:00.000Z'
+    created: '2026-09-14T08:01:00.000Z',
+    source: 'author'
   }
 ]
 
@@ -47,6 +50,7 @@ const profile = (over: Partial<VoiceProfile> = {}): VoiceProfile => ({
   confidence: 0.256,
   wordCount: 2_560,
   authorRules: defaultAuthorRules(),
+  notes: [],
   ...over
 })
 
@@ -90,6 +94,7 @@ interface Fake {
   profile: VoiceProfile
   report: () => VoiceConsistencyReport
   removeAnswer: () => null
+  notes: VoiceNotes | null
 }
 
 function fakeClient(initial: VoiceProfile): Fake {
@@ -99,12 +104,21 @@ function fakeClient(initial: VoiceProfile): Fake {
     profile: initial,
     report: () => REPORT,
     removeAnswer: () => null,
+    notes: null,
     client: {
       async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
         calls.push({ channel, input })
         switch (channel) {
           case 'voice:profile':
             return fake.profile as Output<C>
+          case 'voice:listExemplars':
+            return fake.profile.exemplars as Output<C>
+          case 'voice:notes':
+            return fake.notes as Output<C>
+          case 'voice:clearNotes':
+            fake.notes = fake.notes === null ? null : { ...fake.notes, notes: [], model: null }
+            fake.profile = { ...fake.profile, notes: [] }
+            return fake.notes as Output<C>
           case 'voice:consistencyReport':
             return fake.report() as Output<C>
           case 'voice:removeExemplar': {
@@ -130,8 +144,12 @@ let fake: Fake
 const section = (): HTMLElement => screen.getByTestId('voice-section')
 const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.message)
 
-async function open(initial: VoiceProfile = profile()): Promise<void> {
+async function open(
+  initial: VoiceProfile = profile(),
+  notes: VoiceNotes | null = null
+): Promise<void> {
   fake = fakeClient(initial)
+  fake.notes = notes
   setIpcClient(fake.client)
   useVoiceStore.setState({ exemplars: initial.exemplars })
   render(<VoiceSection />)
@@ -152,14 +170,19 @@ describe('VoiceSection (F-14.1)', () => {
     render(<VoiceSection />)
     expect(screen.queryByTestId('voice-section')).not.toBeInTheDocument()
     await waitFor(() => expect(screen.getByTestId('voice-section')).toBeInTheDocument())
-    expect(fake.calls).toEqual([{ channel: 'voice:profile', input: {} }])
+    await waitFor(() => expect(useVoiceStore.getState().exemplars).toHaveLength(2))
+    expect(fake.calls).toEqual([
+      { channel: 'voice:profile', input: {} },
+      { channel: 'voice:listExemplars', input: undefined },
+      { channel: 'voice:notes', input: undefined }
+    ])
     expect(screen.getByTestId('voice-confidence')).toHaveTextContent('26%')
     expect(screen.getByRole('progressbar', { name: 'Confidence' })).toHaveAttribute(
       'value',
       '0.256'
     )
     expect(screen.getByTestId('voice-words')).toHaveTextContent(
-      'Built from 2,560 words of manuscript and 2 of 12 exemplars.'
+      'Built from 2,560 words of manuscript, 2 of 12 marked exemplars, and 0 picked automatically.'
     )
     const rules = within(screen.getByRole('list', { name: 'Voice rules' })).getAllByRole('listitem')
     expect(rules.map((r) => r.textContent)).toEqual([
@@ -182,7 +205,11 @@ describe('VoiceSection (F-14.1)', () => {
     await open(profile({ rules: [], exemplars: [], confidence: 0, wordCount: 0 }))
     expect(screen.getByTestId('voice-confidence')).toHaveTextContent('0%')
     expect(section()).toHaveTextContent('No rules yet')
-    expect(section()).toHaveTextContent('No exemplars marked yet.')
+    expect(section()).toHaveTextContent('No exemplars yet.')
+    expect(screen.getByTestId('voice-notes')).toHaveTextContent(
+      'Nothing yet. With the AI dial at Ask or higher, MythScribe notes how you write once the manuscript holds 2,000 words.'
+    )
+    expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument()
     expect(screen.queryByRole('list', { name: 'Voice rules' })).not.toBeInTheDocument()
   })
 
@@ -196,10 +223,12 @@ describe('VoiceSection (F-14.1)', () => {
     )
     expect(fake.calls.map((c) => c.channel)).toEqual([
       'voice:profile',
+      'voice:listExemplars',
+      'voice:notes',
       'voice:removeExemplar',
       'voice:profile'
     ])
-    expect(fake.calls[1]?.input).toEqual({ id: 'e1' })
+    expect(fake.calls[3]?.input).toEqual({ id: 'e1' })
     expect(useVoiceStore.getState().exemplars?.map((e) => e.id)).toEqual(['e2'])
     await waitFor(() => expect(screen.getByTestId('voice-words')).toHaveTextContent('1 of 12'))
   })
@@ -278,5 +307,63 @@ describe('VoiceSection (F-14.1)', () => {
     expect(
       within(screen.getByRole('list', { name: 'Voice exemplars' })).getAllByRole('listitem')
     ).toHaveLength(2)
+  })
+
+  describe('automatic voice learning (F-14.14)', () => {
+    const NOTES: VoiceNotes = {
+      notes: ['Opens scenes on a concrete object.', 'Uses said and nothing else.'],
+      basedOnWords: 2_400,
+      model: 'gpt-5.4-mini',
+      updated: '2026-10-06T09:00:00.000Z'
+    }
+
+    it('lists the learned notes as AI-made with the model and date, and Clear empties them', async () => {
+      await open(profile({ notes: NOTES.notes }), NOTES)
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole('list', { name: 'What MythScribe has learned about your style' }))
+            .getAllByRole('listitem')
+            .map((li) => li.textContent)
+        ).toEqual(NOTES.notes)
+      )
+      expect(screen.getByTestId('voice-notes-updated')).toHaveTextContent(
+        `AI-made by gpt-5.4-mini, updated ${new Date(NOTES.updated).toLocaleDateString()}.`
+      )
+      await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
+      await waitFor(() =>
+        expect(screen.getByTestId('voice-notes')).toHaveTextContent(
+          'Cleared. MythScribe learns again after about 5,000 more words.'
+        )
+      )
+      expect(fake.calls.map((c) => c.channel)).toContain('voice:clearNotes')
+      // The profile carries the notes, so it is reloaded after a Clear.
+      expect(fake.calls.at(-1)?.channel).toBe('voice:profile')
+    })
+
+    it('marks the picked exemplars and counts them apart from the marked ones', async () => {
+      const auto: VoiceExemplar = {
+        id: 'a1',
+        nodeId: 'scene-1',
+        text: 'Picked from the scene by the voice job, long enough to count.',
+        pov: null,
+        kind: 'action',
+        created: '2026-10-06T08:00:00.000Z',
+        source: 'auto'
+      }
+      await open(profile({ exemplars: [...exemplars, auto] }))
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole('list', { name: 'Voice exemplars' })).getAllByRole('listitem')
+        ).toHaveLength(3)
+      )
+      const rows = within(screen.getByRole('list', { name: 'Voice exemplars' })).getAllByRole(
+        'listitem'
+      )
+      expect(rows[2]).toHaveTextContent('Action · POV — · Picked automatically')
+      expect(rows[0]).not.toHaveTextContent('Picked automatically')
+      expect(screen.getByTestId('voice-words')).toHaveTextContent(
+        '2 of 12 marked exemplars, and 1 picked automatically'
+      )
+    })
   })
 })

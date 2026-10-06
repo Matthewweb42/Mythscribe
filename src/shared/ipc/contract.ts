@@ -98,7 +98,13 @@ import { CustomTagTemplate, CustomTagTemplateName, TagTemplateId } from '../tagT
 import { TiptapNode } from '../tiptap'
 import { UpdateChannel, UpdateState } from '../updates'
 import { WHAT_NEXT_CHAR_BUDGET, WhatNextDirections } from '../whatNext'
-import { VOICE_EXEMPLAR_TEXT_MAX, VOICE_EXEMPLAR_TEXT_MIN, VoiceExemplarKind } from '../voice'
+import {
+  VOICE_EXEMPLAR_TEXT_MAX,
+  VOICE_EXEMPLAR_TEXT_MIN,
+  VoiceExemplarKind,
+  VoiceExemplarSource,
+  VoiceNotes
+} from '../voice'
 import { StatsDashboard } from '../statsDashboard'
 import { WordCountReport } from '../wordCount'
 import { StartupSettings } from '../windowState'
@@ -593,7 +599,9 @@ export const VoiceExemplar = z.object({
   text: z.string(),
   pov: z.string().nullable(),
   kind: VoiceExemplarKind,
-  created: z.string()
+  created: z.string(),
+  /** F-14.14: marked by the author, or picked automatically by the local voice job. */
+  source: VoiceExemplarSource
 })
 export type VoiceExemplar = z.infer<typeof VoiceExemplar>
 
@@ -610,7 +618,9 @@ export const VoiceProfile = z.object({
   confidence: z.number().min(0).max(1),
   wordCount: z.number().int().nonnegative(),
   /** The author's rules and banned phrases (F-14.2), the profile's third source. */
-  authorRules: AuthorRules
+  authorRules: AuthorRules,
+  /** F-14.14: the learned style notes (AI-made, derived), empty until the first refresh. */
+  notes: z.array(z.string())
 })
 export type VoiceProfile = z.infer<typeof VoiceProfile>
 
@@ -1817,8 +1827,22 @@ export const contract = {
     }),
     output: VoiceExemplar
   },
-  /** Removes an exemplar (F-14.1); NOT_FOUND for an unknown id. */
+  /**
+   * Removes an exemplar (F-14.1); NOT_FOUND for an unknown id. Removing an automatic one
+   * (F-14.14) also remembers the passage, so the voice job never picks it again.
+   */
   'voice:removeExemplar': { input: z.object({ id: z.string() }), output: z.null() },
+  /**
+   * The learned style notes (F-14.14): AI-made, refreshed in the background by the voice job;
+   * null before the first refresh.
+   */
+  'voice:notes': { input: z.undefined(), output: VoiceNotes.nullable() },
+  /**
+   * Clears the learned style notes (F-14.14): the list empties at once and the voice block stops
+   * carrying it; the job learns again after `VOICE_NOTES_REFRESH_WORDS` more words. Answers
+   * what is stored now.
+   */
+  'voice:clearNotes': { input: z.undefined(), output: VoiceNotes.nullable() },
   /**
    * The voice profile (F-14.1), built locally from the manuscript and the exemplars and cached
    * until something is saved. With `pov`, the stylometrics come from the documents whose scene

@@ -48,7 +48,13 @@ import {
 } from '@shared/stylometry'
 import { TAG_NAME_MAX, type TagCategory } from '@shared/tags'
 import { TAG_TEMPLATES, type TagTemplateTag } from '@shared/tagTemplates'
-import { voiceConfidence, VOICE_EXEMPLAR_TEXT_MAX } from '@shared/voice'
+import {
+  voiceConfidence,
+  VOICE_EXEMPLAR_TEXT_MAX,
+  VOICE_NOTE_MAX_CHARS,
+  VOICE_NOTES_MAX,
+  VOICE_NOTES_SAMPLE_CHARS
+} from '@shared/voice'
 import { voiceBlock } from '../../voice/voiceBlock'
 import type { AiMessage } from '../providers/types'
 import type { PromptVersion } from '../prompts/catalogue'
@@ -212,6 +218,8 @@ import { buildProofreadPrompt, PROOFREAD_PROMPT_VERSION } from '../prompts/proof
 import { buildWhatNextPrompt, WHAT_NEXT_PROMPT_VERSION } from '../prompts/whatNext.v1'
 import { buildWhatNextPromptV2, WHAT_NEXT_PROMPT_V2_VERSION } from '../prompts/whatNext.v2'
 import { fitTailToBudget } from '../whatNext'
+import { buildVoiceNotesPrompt, VOICE_NOTES_PROMPT_VERSION } from '../prompts/voiceNotes.v1'
+import { sampleVoicePassages } from '../voiceNotes'
 import { fitSceneToBudget } from '../critique'
 import { fitQueryPrompt } from '../query'
 import { buildTagsPrompt, TAGS_PROMPT_VERSION, TAGS_TEXT_CHAR_BUDGET } from '../prompts/tags.v1'
@@ -285,7 +293,8 @@ const exemplar = (id: string, text: string): VoiceProfile['exemplars'][number] =
   text,
   pov: 'Mara',
   kind: classifyKind(text),
-  created: '2026-09-15T00:00:00.000Z'
+  created: '2026-09-15T00:00:00.000Z',
+  source: 'author'
 })
 
 /** Two lines of style rules over the seeded banned phrases: what an author who edited the section has (F-14.2). */
@@ -301,7 +310,8 @@ export const FIXTURE_PROFILE: VoiceProfile = {
   exemplars: [exemplar('ex-1', FIXTURE_PASSAGE.split('\n\n').slice(0, 5).join('\n\n'))],
   authorRules: FIXTURE_AUTHOR_RULES,
   confidence: voiceConfidence(FIXTURE_STATS.wordCount, 1),
-  wordCount: FIXTURE_STATS.wordCount
+  wordCount: FIXTURE_STATS.wordCount,
+  notes: []
 }
 
 /**
@@ -524,6 +534,11 @@ export interface EvalCase {
      * the feature's own parser (shape, non-blank, within the caps), three of them.
      */
     | { kind: 'whatNext' }
+    /**
+     * Learned style notes (F-14.14): the answer must parse, and every note must survive the
+     * feature's own parser (a string, non-blank, within the cap), at least one of them.
+     */
+    | { kind: 'voiceNotes' }
 }
 
 const general = builtinParams('general')
@@ -1718,6 +1733,29 @@ function whatNextCaseV2(
   }
 }
 
+function voiceNotesCase(
+  name: string,
+  note: string,
+  input: { passages: string[]; previous: string[] }
+): EvalCase {
+  // Sampled within the character budget exactly as the feature samples.
+  const passages = sampleVoicePassages(input.passages, VOICE_NOTES_SAMPLE_CHARS)
+  const built = buildVoiceNotesPrompt({ passages, previous: input.previous })
+  return {
+    version: VOICE_NOTES_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'voiceNotes' }
+  }
+}
+
+/** Eight notes at the character cap: the most the previous notes can weigh. */
+const MAXED_VOICE_NOTES = Array.from({ length: VOICE_NOTES_MAX }, (_, i) =>
+  `${i + 1}. ${FIXTURE_PASSAGE.replace(/\s+/g, ' ')}`.slice(0, VOICE_NOTE_MAX_CHARS)
+)
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -2401,6 +2439,19 @@ export const EVAL_CASES: EvalCase[] = [
       brief: MAXED_BRIEF_BLOCK,
       steer: MAXED_STEER,
       bible: MAXED_BIBLE
+    }
+  ),
+  voiceNotesCase(
+    'fresh',
+    'the first run over the fixture scene: its paragraphs as passages, no earlier notes',
+    { passages: FIXTURE_PASSAGE.split('\n\n'), previous: [] }
+  ),
+  voiceNotesCase(
+    'maxed',
+    'the worst input: a long manuscript sampled to the character budget and eight earlier notes at their cap',
+    {
+      passages: Array.from({ length: 40 }, () => FIXTURE_PASSAGE.slice(0, 600)),
+      previous: MAXED_VOICE_NOTES
     }
   )
 ]
