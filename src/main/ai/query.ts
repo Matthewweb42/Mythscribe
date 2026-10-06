@@ -4,16 +4,24 @@ import { findQuote, normalizeForMatch } from '@shared/critique'
 import {
   QUERY_ALSO_MAX,
   QUERY_ANSWER_MAX,
-  QUERY_BIBLE_TOKEN_BUDGET,
+  QUERY_BIBLE_ENTITIES,
   QUERY_MAX_CITATIONS,
   QUERY_QUOTE_MAX,
   QUERY_SCENE_CHAR_FLOOR,
   QUERY_SHRINK_CHARS,
+  QUERY_V3_BIBLE_TOKEN_BUDGET,
+  QUERY_V3_BIBLE_VALUE_MAX,
   stripDanglingMarkers,
   type QueryCitation,
-  type QuerySceneRef
+  type QuerySceneRef,
+  type QuerySheetRef
 } from '@shared/query'
-import { renderStoryBibleEntities } from '@shared/storyBible'
+import { toEntityNameKey } from '@shared/entities'
+import {
+  STORY_BIBLE_OBSERVED_LABEL,
+  renderStoryBibleEntities,
+  type StoryBibleEntity
+} from '@shared/storyBible'
 import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
@@ -21,7 +29,7 @@ import { headTruncate } from './context/chatContext'
 import { rankCandidates } from './context/queryContext'
 import { assertFeatureAllowed } from './dial'
 import type { ChatTurn } from './prompts/chat.v1'
-import { buildQueryPromptV2 } from './prompts/query.v2'
+import { buildQueryPromptV3 } from './prompts/query.v3'
 import { AiFallbackError, type AiMessage, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -50,6 +58,8 @@ export interface QueryResult {
   uncited: boolean
   /** The citations main found in the text it sent, in the model's order. */
   citations: QueryCitation[]
+  /** The author's sheets the answer says it rests on, among the sheets that were sent (query.v3). */
+  sheets: QuerySheetRef[]
   /** The ranked candidates the answer did not cite, best match first. */
   also: QuerySceneRef[]
   /** How many citations were dropped: a bad shape, a scene out of range, or a quote not found. */
@@ -82,7 +92,8 @@ export interface QuerySummaryScene {
 const ModelAnswer = z.object({
   found: z.unknown(),
   answer: z.string(),
-  citations: z.array(z.unknown()).optional()
+  citations: z.array(z.unknown()).optional(),
+  sheets: z.array(z.unknown()).optional()
 })
 const ModelCitation = z.object({ scene: z.number(), quote: z.string() })
 
@@ -95,8 +106,8 @@ const BAD_FORMAT = 'The model did not answer in the expected format.'
  * back the top few in full, the next few as their stored summaries, and the whole ranked list.
  * Never the whole manuscript (CLAUDE.md, token rule 2). Since F-5.16 the story bible rides along
  * for the entities the question names — the author's sheets, then the observed facts with the
- * scene each was read from, within `QUERY_BIBLE_TOKEN_BUDGET` — to orient the answer; it is
- * never a citation source.
+ * scene each was read from — and since query.v3 the sheets are a source the answer may rest on
+ * (named in `sheets`, checked against the sheets sent), within `QUERY_V3_BIBLE_TOKEN_BUDGET`.
  *
  * `fitQueryPrompt` then counts before sending (token rule 8) and trims by priority rather than
  * failing: the full scenes shrink to their floor first, then the summaries go, then the
@@ -148,14 +159,19 @@ export async function runQuery(
         ]
   )
 
-  const bibleLines = renderStoryBibleEntities(candidates.bible, QUERY_BIBLE_TOKEN_BUDGET)
+  const bibleLines = renderStoryBibleEntities(
+    candidates.bible,
+    QUERY_V3_BIBLE_TOKEN_BUDGET,
+    QUERY_V3_BIBLE_VALUE_MAX
+  )
   const bible = bibleLines.length > 0 ? bibleLines.join('\n') : null
+  const sheetsSent = sentSheets(candidates.bible, bibleLines)
 
   const fit = fitQueryPrompt(
     { full, summaries, history: input.history },
     inputBudget('query'),
     (scenes, summarised, history) =>
-      buildQueryPromptV2({
+      buildQueryPromptV3({
         full: scenes,
         summaries: summarised,
         history,
@@ -163,7 +179,7 @@ export async function runQuery(
         bible
       }).messages
   )
-  const prompt = buildQueryPromptV2({
+  const prompt = buildQueryPromptV3({
     full: fit.full,
     summaries: fit.summaries,
     history: fit.history,
@@ -190,13 +206,14 @@ export async function runQuery(
     ...(input.requestId === undefined ? {} : { requestId: input.requestId })
   })
 
-  const parsed = parseQueryAnswer(result.text, fit.full)
+  const parsed = parseQueryAnswer(result.text, fit.full, sheetsSent)
   const cited = new Set(parsed.citations.map((citation) => citation.nodeId))
   return {
     answer: parsed.answer,
     found: parsed.found,
     uncited: parsed.uncited,
     citations: parsed.citations,
+    sheets: parsed.sheets,
     also: candidates.ranked
       .filter((candidate) => !cited.has(candidate.nodeId))
       .slice(0, QUERY_ALSO_MAX)
@@ -287,12 +304,14 @@ function promptTokens(messages: AiMessage[]): number {
  */
 export function parseQueryAnswer(
   text: string,
-  scenes: QueryFullScene[]
+  scenes: QueryFullScene[],
+  sheetsSent: readonly QuerySheetRef[] = []
 ): {
   answer: string
   found: boolean
   uncited: boolean
   citations: QueryCitation[]
+  sheets: QuerySheetRef[]
   dropped: number
 } {
   let json: unknown
@@ -312,6 +331,7 @@ export function parseQueryAnswer(
       found: false,
       uncited: false,
       citations: [],
+      sheets: [],
       dropped: 0
     }
   }
@@ -338,14 +358,50 @@ export function parseQueryAnswer(
     citations.push({ nodeId: scene.nodeId, title: scene.title, scene: number, quote })
     if (citations.length === QUERY_MAX_CITATIONS) break
   }
+  const sheets = matchSheets(parsed.data.sheets ?? [], sheetsSent)
   return {
     answer: stripDanglingMarkers(
       answer,
       citations.map((citation) => citation.scene)
     ),
     found: true,
-    uncited: citations.length === 0,
+    uncited: citations.length === 0 && sheets.length === 0,
     citations,
+    sheets,
     dropped
   }
+}
+
+/**
+ * query.v3: the sheets the model named, kept only when they are sheets main sent (matched by
+ * name, ignoring case and spacing), in the model's order, each once. A name that is not one of
+ * them is ignored rather than counted: it costs the author nothing to lose.
+ */
+function matchSheets(named: readonly unknown[], sent: readonly QuerySheetRef[]): QuerySheetRef[] {
+  const byKey = new Map(sent.map((sheet) => [toEntityNameKey(sheet.name), sheet]))
+  const kept: QuerySheetRef[] = []
+  for (const name of named) {
+    if (typeof name !== 'string') continue
+    const sheet = byKey.get(toEntityNameKey(name))
+    if (sheet !== undefined && !kept.includes(sheet)) kept.push(sheet)
+    if (kept.length === QUERY_BIBLE_ENTITIES) break
+  }
+  return kept
+}
+
+/**
+ * The entities whose own sheet went out in the bible block (query.v3): an entity line that
+ * carries only observed facts is no sheet, and one the budget left out was never seen.
+ */
+export function sentSheets(
+  entities: readonly StoryBibleEntity[],
+  lines: readonly string[]
+): QuerySheetRef[] {
+  return entities.flatMap((entity) => {
+    if (entity.entityId === undefined || entity.sheet.length === 0) return []
+    const head = `${entity.name} (${entity.kind}): `
+    const line = lines.find((candidate) => candidate.startsWith(head))
+    if (line === undefined || line.startsWith(`${head}${STORY_BIBLE_OBSERVED_LABEL}`)) return []
+    return [{ entityId: entity.entityId, name: entity.name, kind: entity.kind }]
+  })
 }

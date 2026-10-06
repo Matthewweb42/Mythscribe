@@ -26,8 +26,7 @@ import { sceneTitles } from './context/queryContext'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import type { ChatTurn } from './prompts/chat.v1'
-import { buildQueryPrompt } from './prompts/query.v1'
-import { QUERY_BIBLE_HEADING } from './prompts/query.v2'
+import { buildQueryPromptV3, QUERY_BIBLE_HEADING_V3 } from './prompts/query.v3'
 import {
   fitQueryPrompt,
   QUERY_HISTORY_KEEP,
@@ -94,7 +93,7 @@ interface ModelCitation {
 
 /** One answer, as the JSON the prompt asks for. */
 const reply = (
-  over: { found?: unknown; answer?: string; citations?: ModelCitation[] } = {}
+  over: { found?: unknown; answer?: string; citations?: ModelCitation[]; sheets?: unknown[] } = {}
 ): CompletionResult => ({
   text: JSON.stringify({ found: true, answer: 'Under the elm. [1]', ...over }),
   model: 'gpt-5.4',
@@ -103,7 +102,12 @@ const reply = (
 
 /** The next answers, ahead of the default one the fixture stands up. */
 function answers(
-  ...replies: { found?: unknown; answer?: string; citations?: ModelCitation[] }[]
+  ...replies: {
+    found?: unknown
+    answer?: string
+    citations?: ModelCitation[]
+    sheets?: unknown[]
+  }[]
 ): void {
   for (const over of replies) complete.mockResolvedValueOnce(reply(over))
 }
@@ -183,7 +187,7 @@ afterEach(() => {
 })
 
 describe('runQuery (F-5.7)', () => {
-  it('sends the ranked scenes as JSON to the strong tier under query.v2 and answers with citations', async () => {
+  it('sends the ranked scenes as JSON to the strong tier under query.v3 and answers with citations', async () => {
     answers({ citations: [{ scene: 1, quote: QUOTE }] })
     const result = await ask()
     expect(result).toEqual({
@@ -191,6 +195,7 @@ describe('runQuery (F-5.7)', () => {
       found: true,
       uncited: false,
       citations: [{ nodeId: scenes[0], title: 'Chapter 1 › Scene 1', scene: 1, quote: QUOTE }],
+      sheets: [],
       also: [
         { nodeId: scenes[1], title: 'Chapter 2 › Scene 1' },
         { nodeId: scenes[2], title: 'Chapter 3 › Scene 1' }
@@ -200,7 +205,7 @@ describe('runQuery (F-5.7)', () => {
       costUsd: priceFor('gpt-5.4', 900, 60).costUsd,
       cached: false,
       model: 'gpt-5.4',
-      promptVersion: 'query.v2'
+      promptVersion: 'query.v3'
     })
     const request = complete.mock.calls[0]![0]
     expect(request).toMatchObject({ tier: 'strong', json: true, maxTokens: 600 })
@@ -208,7 +213,7 @@ describe('runQuery (F-5.7)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'query',
       tier: 'strong',
-      promptVersion: 'query.v2',
+      promptVersion: 'query.v3',
       cached: false
     })
   })
@@ -561,12 +566,12 @@ describe('fitQueryPrompt (F-5.7, token rule 8)', () => {
 })
 
 describe('runQuery with the story bible (F-5.16)', () => {
-  it("sends query.v1's messages exactly while no entity is named", async () => {
-    createEntity(db, { kind: 'character', name: 'Tomas', fields: { age: '50' } })
+  it('sends no story bible while no entity is named by the question or the scenes', async () => {
+    createEntity(db, { kind: 'character', name: 'Ilse', fields: { age: '50' } })
     await ask()
-    expect(system()).not.toContain('Story bible')
+    expect(system()).not.toContain(QUERY_BIBLE_HEADING_V3)
     expect(complete.mock.calls[0]?.[0].messages).toEqual(
-      buildQueryPrompt({
+      buildQueryPromptV3({
         full: [
           { title: sceneTitle(0), text: LEDGER },
           { title: sceneTitle(1), text: QUIET },
@@ -574,7 +579,8 @@ describe('runQuery with the story bible (F-5.16)', () => {
         ],
         summaries: [],
         history: [],
-        question: QUESTION
+        question: QUESTION,
+        bible: null
       }).messages
     )
   })
@@ -590,10 +596,54 @@ describe('runQuery with the story bible (F-5.16)', () => {
     ])
     await ask()
     expect(system()).toContain(
-      `${QUERY_BIBLE_HEADING}\nMara (character): Age: 31. Seen in the manuscript: ` +
+      `${QUERY_BIBLE_HEADING_V3}\nMara (character): Age: 31. Seen in the manuscript: ` +
         `Goals / motivations: Keep a copy of the ledger (${sceneTitle(0)}).\n\nScenes (full text):`
     )
-    expect(ledger[0]).toMatchObject({ feature: 'query', promptVersion: 'query.v2' })
+    expect(ledger[0]).toMatchObject({ feature: 'query', promptVersion: 'query.v3' })
+  })
+
+  it('sends the sheet of an entity the top scenes name when the question names none (query.v3)', async () => {
+    createEntity(db, { kind: 'character', name: 'Tomas', fields: { age: '50' } })
+    await ask()
+    expect(system()).toContain(`${QUERY_BIBLE_HEADING_V3}\nTomas (character): Age: 50.`)
+  })
+
+  it('backs an answer with the sheets it names, among the sheets sent, and never flags it uncited', async () => {
+    const mara = createEntity(db, {
+      kind: 'character',
+      name: 'Mara',
+      fields: { appearance: 'Grey eyes, a burn scar on her left hand.' }
+    }).entity
+    answers({
+      answer: 'She has grey eyes and a burn scar on her left hand.',
+      citations: [],
+      sheets: ['mara', 'Mara', 'Ilse', 7]
+    })
+    const result = await ask({ message: 'What does Mara look like?' })
+    expect(system()).toContain('Appearance: Grey eyes, a burn scar on her left hand.')
+    expect(result).toMatchObject({
+      found: true,
+      uncited: false,
+      citations: [],
+      sheets: [{ entityId: mara.id, name: 'Mara', kind: 'character' }]
+    })
+  })
+
+  it('does not count an entity with only observed facts as a sheet', async () => {
+    const tomas = createEntity(db, { kind: 'character', name: 'Tomas' }).entity
+    replaceSceneFacts(db, scenes[0]!, [
+      { entityId: tomas.id, attribute: 'goals', value: 'Wants the ledger back', quote: QUOTE }
+    ])
+    answers({ answer: 'He wants the ledger back.', citations: [], sheets: ['Tomas'] })
+    const result = await ask({ message: 'What does Tomas want?' })
+    expect(result).toMatchObject({ uncited: true, sheets: [] })
+  })
+
+  it('sends a long sheet value whole up to the v3 cap rather than leaving the sheet out', async () => {
+    const long = `${'Weathered and tall. '.repeat(20)}`.trim()
+    createEntity(db, { kind: 'character', name: 'Mara', fields: { appearance: long } })
+    await ask({ message: 'What does Mara look like?' })
+    expect(system()).toContain(`Appearance: ${long}`)
   })
 
   it('keys the local cache on the bible: a changed sheet is a new request, an unchanged one is not', async () => {

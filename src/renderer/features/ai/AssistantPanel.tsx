@@ -22,6 +22,7 @@ import {
 } from '@shared/query'
 import type { WhatNextDirection } from '@shared/whatNext'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
+import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
@@ -447,8 +448,9 @@ function Directions({
 /**
  * A Query answer (F-5.7): the "not found" line or the uncited warning when either applies, the
  * answer with every live `[n]` marker as a button that opens that scene at the passage it
- * rests on, the Sources list of the citations main verified against the text it sent, and the
- * ranked scenes the answer did not cite. Nothing here enters the manuscript.
+ * rests on, the Sources list of the citations main verified against the text it sent, the
+ * author's sheets it rests on (query.v3; a click opens the entity's page), and the ranked
+ * scenes the answer did not cite. Nothing here enters the manuscript.
  */
 function QueryAnswer({ answer, query }: { answer: string; query: QueryTurn }): React.JSX.Element {
   const openScene = useAssistantStore((s) => s.openScene)
@@ -486,6 +488,26 @@ function QueryAnswer({ answer, query }: { answer: string; query: QueryTurn }): R
                 >
                   <span className="block font-medium text-fg">{citation.title}</span>
                   <span className="block text-fg-muted italic">“{citation.quote}”</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {query.sheets.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <p className="m-0 text-xs font-medium text-fg-muted">From your notes</p>
+          <ul className="m-0 flex list-none flex-wrap gap-1 p-0">
+            {query.sheets.map((sheet) => (
+              <li key={sheet.entityId}>
+                <button
+                  type="button"
+                  data-testid="query-sheet"
+                  title={`Open ${sheet.name}`}
+                  onClick={() => useEntityStore.getState().select(sheet.entityId)}
+                  className={CHIP_BUTTON}
+                >
+                  {sheet.name}
                 </button>
               </li>
             ))}

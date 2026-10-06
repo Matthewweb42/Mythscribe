@@ -12,6 +12,7 @@ import {
   useActiveEditorStore
 } from '@renderer/features/editor/activeEditorStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
+import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -479,6 +480,7 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     found: true,
     uncited: false,
     citations: [CITATION],
+    sheets: [],
     also: [{ nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' }],
     ...over
   })
@@ -508,6 +510,7 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     found: true,
     uncited: false,
     citations: [CITATION],
+    sheets: [],
     also: [{ nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' }],
     dropped: 2,
     usage: { inputTokens: 900, outputTokens: 60 },
@@ -629,6 +632,28 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     )
     expect(within(uncited).queryByTestId('query-citation')).not.toBeInTheDocument()
     expect(within(uncited).getByTestId('query-also')).toHaveTextContent('Chapter 2 › Scene 2')
+  })
+
+  it("lists the author's sheets an answer rests on, and a click opens the entity's page", async () => {
+    resetEntityStore()
+    await mountOpen(
+      answered(
+        'She has grey eyes.',
+        queryTurn({
+          citations: [],
+          also: [],
+          sheets: [{ entityId: 'e-mara', name: 'Mara', kind: 'character' }]
+        })
+      )
+    )
+    const turn = turns()[1]!
+    expect(within(turn).queryByTestId('query-uncited')).not.toBeInTheDocument()
+    expect(within(turn).getByText('From your notes')).toBeInTheDocument()
+    const sheet = within(turn).getByTestId('query-sheet')
+    expect(sheet).toHaveTextContent('Mara')
+    await userEvent.click(sheet)
+    expect(useEntityStore.getState().selectedId).toBe('e-mara')
+    resetEntityStore()
   })
 
   it('leaves a marker naming no surviving citation as plain text', async () => {

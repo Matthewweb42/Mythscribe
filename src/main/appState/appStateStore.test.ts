@@ -52,8 +52,15 @@ describe('AppStateStore', () => {
       supporter: defaultSupporterSettings(),
       view: defaultViewSettings(),
       backups: defaultBackupSettings(),
-      window: defaultWindowState()
+      window: defaultWindowState(),
+      tagTemplates: []
     })
+  })
+
+  it('parses a file written before F-4.11 (no tag templates) as having none', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().tagTemplates).toEqual([])
   })
 
   it('parses a file written before F-15.9 (no supporter) as unlicensed with the default accent', () => {

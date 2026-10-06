@@ -2,16 +2,14 @@ import { useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
+import { useCustomTemplateStore } from './customTemplateStore'
+import { tagsLabel } from './loadSummary'
+import { promptTemplateName } from './templateName'
 import { useTagStore } from './tagStore'
 
 const FIELD = 'min-w-0 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 const BUTTON =
   'shrink-0 rounded-md border border-line px-2 py-1 text-xs hover:bg-surface-raised disabled:opacity-50 disabled:hover:bg-transparent'
-
-/** "3 tags" / "1 tag". */
-function tagsLabel(count: number): string {
-  return count === 1 ? '1 tag' : `${count} tags`
-}
 
 interface TagBulkBarProps {
   /** The checked tags still visible, in list order; every action applies to exactly these. */
@@ -25,7 +23,7 @@ interface TagBulkBarProps {
 
 /**
  * The bulk bar of the Tags tab's select mode (F-4.9), in place of the create form: recolor,
- * merge, or delete the checked tags. The color applies on pick, coalesced like the detail view's
+ * merge, or delete the checked tags, or save them as a tag template (F-4.11). The color applies on pick, coalesced like the detail view's
  * (one write in flight plus the latest pick). Merge keeps the chosen tag and folds the others
  * into it; merge and delete ask first because neither can be undone. Rows wrap so the bar fits
  * the sidebar minimum.
@@ -49,6 +47,20 @@ export function TagBulkBar({
   const colorInflight = useRef(false)
   const colorQueued = useRef<{ ids: string[]; color: string } | null>(null)
   const count = tags.length
+
+  const saveAsTemplate = async (): Promise<void> => {
+    const name = await promptTemplateName()
+    if (name === null) return
+    setBusy(true)
+    try {
+      const template = await useCustomTemplateStore.getState().save(name.trim(), ids)
+      toast.success(`Saved "${template.name}" with ${tagsLabel(template.tags.length)}`)
+    } catch (err) {
+      toast.error(describeError(err))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const pushColor = async (targets: string[], color: string): Promise<void> => {
     if (colorInflight.current) {
@@ -140,6 +152,16 @@ export function TagBulkBar({
         </button>
         <button type="button" onClick={onDone} className={BUTTON}>
           Done
+        </button>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => void saveAsTemplate()}
+          disabled={count === 0 || busy}
+          className={BUTTON}
+        >
+          Save as template…
         </button>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">

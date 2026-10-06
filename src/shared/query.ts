@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { EntityKind } from './entities'
 
 /**
  * Story Intelligence query mode (F-5.7): the third assistant mode. The author asks a question
@@ -25,6 +26,17 @@ export const QUERY_SCENE_CHAR_FLOOR = 3_000
 export const QUERY_BIBLE_ENTITIES = 6
 /** The estimated-token budget of that block; observed facts are dropped before sheets. */
 export const QUERY_BIBLE_TOKEN_BUDGET = 400
+/**
+ * query.v3: the story-bible block's budget and the characters kept per sheet value, so a filled
+ * character sheet rides along whole instead of being cut to a line or left out.
+ */
+export const QUERY_V3_BIBLE_TOKEN_BUDGET = 1_500
+export const QUERY_V3_BIBLE_VALUE_MAX = 600
+/**
+ * query.v3: when the question names no entity, the entities tagged on the top full scenes ride
+ * along instead, at most this many, so "what does she look like?" still reaches the sheet.
+ */
+export const QUERY_SCENE_ENTITIES = 3
 /** Citations kept per answer, in the model's order. */
 export const QUERY_MAX_CITATIONS = 6
 /** A citation's quote is capped to this many characters. */
@@ -54,13 +66,19 @@ export const QueryCitation = QuerySceneRef.extend({
 })
 export type QueryCitation = z.infer<typeof QueryCitation>
 
+/** A story-bible sheet the answer rests on (query.v3): enough to open the entity's page. */
+export const QuerySheetRef = z.object({ entityId: z.string(), name: z.string(), kind: EntityKind })
+export type QuerySheetRef = z.infer<typeof QuerySheetRef>
+
 /** What a Query-mode assistant turn carries beside its answer text. */
 export const QueryTurn = z.object({
   /** False when the model reported that the scenes do not answer the question. */
   found: z.boolean(),
-  /** True when the model claimed an answer but no citation survived the quote check. */
+  /** True when the model claimed an answer but neither a citation nor a sheet backs it. */
   uncited: z.boolean(),
   citations: z.array(QueryCitation).max(QUERY_MAX_CITATIONS),
+  /** The author's sheets the answer says it used (query.v3); empty on older turns. */
+  sheets: z.array(QuerySheetRef).max(QUERY_BIBLE_ENTITIES).default([]),
   /** Ranked candidates the answer did not cite, best match first. */
   also: z.array(QuerySceneRef).max(QUERY_ALSO_MAX)
 })

@@ -38,6 +38,12 @@ describe('query model (F-5.7)', () => {
       citations: [{ nodeId: 'n1', title: 'Scene 1', scene: 1, quote: 'The rope hung slack.' }],
       also: [{ nodeId: 'n2', title: 'Scene 2' }]
     }
-    expect(QueryTurn.parse(turn)).toEqual(turn)
+    // A turn saved before query.v3 has no `sheets`; it reads as none.
+    expect(QueryTurn.parse(turn)).toEqual({ ...turn, sheets: [] })
+    const withSheet = {
+      ...turn,
+      sheets: [{ entityId: 'e1', name: 'Mara', kind: 'character' }]
+    }
+    expect(QueryTurn.parse(withSheet)).toEqual(withSheet)
   })
 })

@@ -55,6 +55,11 @@ export const AUTO_TAG_BANK_CATEGORIES = [
 ] as const satisfies readonly TagCategory[]
 /** Main waits this long after the last save of a scene before summarising it. */
 export const SUMMARY_DEBOUNCE_MS = 3_000
+/**
+ * How long after the AI becomes able to run (a project opened, the dial or a toggle changed, a
+ * key saved, an import) every scene without a current summary is queued: one pass for a burst.
+ */
+export const SUMMARY_BACKFILL_DELAY_MS = 5_000
 
 /** What the model answers and the pane shows: the summary, its key points, and the characters present. */
 export const SceneSummary = z.object({

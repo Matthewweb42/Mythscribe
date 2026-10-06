@@ -29,6 +29,7 @@ import { IMPORT_STRUCTURE_PROMPT_VERSION } from './importStructure.v1'
 import { PROOFREAD_PROMPT_VERSION } from './proofread.v1'
 import { QUERY_PROMPT_VERSION } from './query.v1'
 import { QUERY_PROMPT_V2_VERSION } from './query.v2'
+import { QUERY_PROMPT_V3_VERSION } from './query.v3'
 import { REWRITE_PROMPT_VERSION } from './rewrite.v1'
 import { REWRITE_PROMPT_V2_VERSION } from './rewrite.v2'
 import { REWRITE_PROMPT_V3_VERSION } from './rewrite.v3'
@@ -94,6 +95,7 @@ export const PROMPT_VERSIONS = [
   SUMMARY_PROMPT_V3_VERSION,
   QUERY_PROMPT_VERSION,
   QUERY_PROMPT_V2_VERSION,
+  QUERY_PROMPT_V3_VERSION,
   IMPORT_STRUCTURE_PROMPT_VERSION,
   CONTINUITY_PROMPT_VERSION,
   PROOFREAD_PROMPT_VERSION,
@@ -282,6 +284,7 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   },
   [QUERY_PROMPT_VERSION]: { feature: 'query', tier: 'strong', output: 'json', since: 'F-5.7' },
   [QUERY_PROMPT_V2_VERSION]: { feature: 'query', tier: 'strong', output: 'json', since: 'F-5.16' },
+  [QUERY_PROMPT_V3_VERSION]: { feature: 'query', tier: 'strong', output: 'json', since: 'F-5.7' },
   [IMPORT_STRUCTURE_PROMPT_VERSION]: {
     feature: 'importStructure',
     tier: 'fast',

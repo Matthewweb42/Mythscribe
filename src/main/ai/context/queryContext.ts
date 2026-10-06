@@ -5,6 +5,7 @@ import {
   QUERY_BIBLE_ENTITIES,
   QUERY_FULL_SCENES,
   QUERY_SCENE_CHAR_BUDGET,
+  QUERY_SCENE_ENTITIES,
   QUERY_SUMMARY_SCENES
 } from '@shared/query'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
@@ -229,7 +230,10 @@ export interface QueryCandidates {
   summaries: QueryCandidate[]
   /** Every candidate in rank order, for the "Also mentioned in" list. */
   ranked: QueryCandidate[]
-  /** The entities the question names, as their sheet and observed facts with scene titles (F-5.16). */
+  /**
+   * The entities the question names, as their sheet and observed facts with scene titles
+   * (F-5.16); when it names none, the entities the top full scenes name (query.v3).
+   */
   bible: StoryBibleEntity[]
 }
 
@@ -266,7 +270,8 @@ export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCan
   )
   const terms = queryTerms(input.question)
   const refs = parseTagRefs(input.question)
-  const named = namedEntities(listEntities(db), terms, refs)
+  const entities = listEntities(db)
+  const named = namedEntities(entities, terms, refs)
   const factScenes = new Set(
     factsForEntities(
       db,
@@ -316,11 +321,12 @@ export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCan
       ? byScore
       : [active, ...byScore.filter((candidate) => candidate.nodeId !== active.nodeId)]
 
+  const full = ranked.slice(0, QUERY_FULL_SCENES).map((candidate) => ({
+    ...candidate,
+    text: headTruncate(candidate.text, QUERY_SCENE_CHAR_BUDGET)
+  }))
   return {
-    full: ranked.slice(0, QUERY_FULL_SCENES).map((candidate) => ({
-      ...candidate,
-      text: headTruncate(candidate.text, QUERY_SCENE_CHAR_BUDGET)
-    })),
+    full,
     summaries: ranked
       .slice(QUERY_FULL_SCENES)
       .filter((candidate) => candidate.summary !== null)
@@ -328,11 +334,41 @@ export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCan
     ranked,
     bible: storyBibleEntities(
       db,
-      named,
+      named.length > 0
+        ? named
+        : sceneEntities(
+            entities,
+            full.map((candidate) => candidate.text)
+          ),
       documents.map((row) => row.id),
       title
     )
   }
+}
+
+/**
+ * query.v3: the entities the given scenes name, most-named first, at most
+ * `QUERY_SCENE_ENTITIES`, for a question that names none ("what does she look like?"). A name
+ * counts by the same word-prefix rule as the scoring, whole, or a character's first name alone
+ * (three letters or more), since prose calls Mara Venn "Mara".
+ */
+export function sceneEntities(entities: readonly Entity[], texts: readonly string[]): Entity[] {
+  const haystack = texts.join('\n').toLowerCase()
+  return entities
+    .map((entity) => {
+      const name = entity.name.toLowerCase()
+      const first = name.split(/\s+/u)[0] ?? ''
+      const count =
+        occurrences(haystack, name) ||
+        (entity.kind === 'character' && first.length >= 3 && first !== name
+          ? occurrences(haystack, first)
+          : 0)
+      return { entity, count }
+    })
+    .filter(({ count }) => count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, QUERY_SCENE_ENTITIES)
+    .map(({ entity }) => entity)
 }
 
 /**

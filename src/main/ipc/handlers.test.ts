@@ -30,6 +30,7 @@ import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_BRIEF, EMPTY_SCENE_META } from '@shared/sceneMeta'
+import { SUMMARY_BACKFILL_DELAY_MS } from '@shared/summary'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
 import type { CheckoutResult, CloudSession, CreditsResult, LicenseResult } from '@shared/cloudApi'
@@ -1233,9 +1234,7 @@ describe('timeline:get / timeline:set (F-11.2)', () => {
       meta: { ...meta, timeline: 'Spring: The siege begins', eventId: 'a' }
     })
     const renamed = { ...siege, label: 'The siege' }
-    expect((await invoke('timeline:set', { events: [renamed] })).changedNodeIds).toEqual([
-      scene.id
-    ])
+    expect((await invoke('timeline:set', { events: [renamed] })).changedNodeIds).toEqual([scene.id])
     expect((await invoke('sceneMeta:get', { id: scene.id })).meta.timeline).toBe(
       'Spring: The siege'
     )
@@ -2656,6 +2655,7 @@ describe('ai:query (F-5.7)', () => {
       found: true,
       uncited: false,
       citations: [{ nodeId: first, title: 'Chapter 1 \u203a Scene 1', scene: 1, quote: QUOTE }],
+      sheets: [],
       also: [{ nodeId: second, title: 'Chapter 2 \u203a Scene 1' }],
       dropped: 2,
       usage: { inputTokens: 900, outputTokens: 60 },
@@ -2668,8 +2668,12 @@ describe('ai:query (F-5.7)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'query',
       nodeId: null,
-      promptVersion: 'query.v2',
-      content: JSON.stringify({ answer: result.answer, citations: result.citations }),
+      promptVersion: 'query.v3',
+      content: JSON.stringify({
+        answer: result.answer,
+        citations: result.citations,
+        sheets: result.sheets
+      }),
       flagged: false,
       violation: null,
       regeneratedFrom: null,
@@ -3122,6 +3126,68 @@ describe('scene summaries (F-5.6)', () => {
       expect(state).toMatchObject({ status: 'idle', stale: false })
       expect(state.summary?.summary).toBe(ANSWER.summary)
       expect(statusesSent()).toContainEqual({ nodeId: scene, status: 'idle' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('indexes the text written before AI was on, a moment after the dial and the key, unasked', async () => {
+    vi.useFakeTimers()
+    try {
+      const { scene } = await ready()
+      expect(complete).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(SUMMARY_BACKFILL_DELAY_MS)
+      expect(complete).toHaveBeenCalledTimes(1)
+      const state = await invoke('summary:get', { id: scene })
+      expect(state).toMatchObject({ status: 'idle', stale: false })
+      // A settings change over an indexed book queues nothing and costs nothing.
+      await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+      await vi.advanceTimersByTimeAsync(SUMMARY_BACKFILL_DELAY_MS)
+      expect(complete).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('indexes nothing until a provider can answer, then picks the book up once the key is saved', async () => {
+    vi.useFakeTimers()
+    try {
+      await invoke('project:create', { name: 'Keyless', format: 'novel', directory: tmp })
+      const rows = await invoke('tree:list', undefined)
+      const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+      if (!scene) throw new Error('skeleton not seeded')
+      await write(scene.id, SCENE)
+      await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+      await vi.advanceTimersByTimeAsync(SUMMARY_BACKFILL_DELAY_MS)
+      expect(complete).not.toHaveBeenCalled()
+      expect((await invoke('jobs:status', undefined)).paused).toBeNull()
+      complete.mockResolvedValue({
+        text: JSON.stringify(ANSWER),
+        model: 'gpt-fake',
+        usage: { inputTokens: 400, outputTokens: 60 }
+      })
+      await invoke('ai:setKey', { key: KEY })
+      await vi.advanceTimersByTimeAsync(SUMMARY_BACKFILL_DELAY_MS)
+      expect(complete).toHaveBeenCalledTimes(1)
+      expect((await invoke('summary:get', { id: scene.id })).stale).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('leaves the book alone with the summaries toggle off', async () => {
+    vi.useFakeTimers()
+    try {
+      const { scene } = await ready()
+      const settings = defaultAiSettings()
+      await invoke('aiSettings:set', {
+        ...settings,
+        dial: 1,
+        features: { ...settings.features, summary: false }
+      })
+      await vi.advanceTimersByTimeAsync(SUMMARY_BACKFILL_DELAY_MS)
+      expect(complete).not.toHaveBeenCalled()
+      expect((await invoke('summary:get', { id: scene })).stale).toBe(true)
     } finally {
       vi.useRealTimers()
     }
@@ -4413,6 +4479,80 @@ describe('tag:loadTemplate (F-4.3)', () => {
     const result = await handlerFor('tag:loadTemplate')(undefined, { template: 'western' })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+  })
+})
+
+describe('custom tag templates (F-4.11)', () => {
+  it('saves a bank, or a selection, app-wide, and loads it into another project', async () => {
+    await expect(invoke('tagTemplate:save', { name: 'Saga' })).rejects.toThrowError(/^NO_PROJECT: /)
+    expect(await invoke('tagTemplate:list', undefined)).toEqual([])
+    await invoke('project:create', { name: 'Book one', format: 'novel', directory: tmp })
+    const mara = await invoke('tag:create', { name: 'Mara', category: 'character' })
+    const young = await invoke('tag:create', {
+      name: 'Mara young',
+      category: 'character',
+      parentId: mara.id
+    })
+    const mill = await invoke('tag:create', {
+      name: 'The mill',
+      category: 'setting',
+      color: '#123456'
+    })
+
+    const whole = await invoke('tagTemplate:save', { name: 'Saga' })
+    expect(whole.tags.map((t) => [t.name, t.parent, t.color])).toEqual([
+      ['mara', null, DEFAULT_CATEGORY_COLOR.character],
+      ['mara-young', 'mara', DEFAULT_CATEGORY_COLOR.character],
+      ['the-mill', null, '#123456']
+    ])
+    const part = await invoke('tagTemplate:save', { name: 'Places', tagIds: [mill.id, young.id] })
+    expect(part.tags.map((t) => [t.name, t.parent])).toEqual([
+      ['mara-young', null],
+      ['the-mill', null]
+    ])
+    await expect(invoke('tagTemplate:save', { name: 'saga' })).rejects.toThrowError(
+      /^ALREADY_EXISTS: /
+    )
+    await expect(
+      invoke('tagTemplate:save', { name: 'Ghost', tagIds: ['nope'] })
+    ).rejects.toThrowError(/^NOT_FOUND: /)
+    expect((await invoke('tagTemplate:list', undefined)).map((t) => t.name)).toEqual([
+      'Places',
+      'Saga'
+    ])
+
+    await invoke('project:close', undefined)
+    await invoke('project:create', { name: 'Book two', format: 'novel', directory: tmp })
+    await invoke('tag:create', { name: 'Mara', category: 'character' })
+    const loaded = await invoke('tag:loadCustomTemplate', { id: whole.id })
+    expect(loaded.skipped).toEqual(['mara'])
+    expect(loaded.created.map((t) => t.name)).toEqual(['mara-young', 'the-mill'])
+    const bank = await invoke('tag:list', undefined)
+    const parentOf = bank.find((t) => t.name === 'mara-young')?.parentId
+    expect(bank.find((t) => t.id === parentOf)?.name).toBe('mara')
+    expect(bank.find((t) => t.name === 'the-mill')?.color).toBe('#123456')
+  })
+
+  it('renames, trims, and deletes a template; a template needs a tag and an unknown id is NOT_FOUND', async () => {
+    await invoke('project:create', { name: 'Book', format: 'novel', directory: tmp })
+    await invoke('tag:create', { name: 'Mara', category: 'character' })
+    await invoke('tag:create', { name: 'Tomas', category: 'character' })
+    const saved = await invoke('tagTemplate:save', { name: 'Cast' })
+    const renamed = await invoke('tagTemplate:update', { id: saved.id, name: 'Main cast' })
+    expect(renamed.name).toBe('Main cast')
+    const trimmed = await invoke('tagTemplate:update', { id: saved.id, keep: ['tomas'] })
+    expect(trimmed.tags.map((t) => t.name)).toEqual(['tomas'])
+    await expect(invoke('tagTemplate:update', { id: saved.id, keep: [] })).rejects.toThrowError(
+      /^VALIDATION: /
+    )
+    await expect(invoke('tag:loadCustomTemplate', { id: 'nope' })).rejects.toThrowError(
+      /^NOT_FOUND: /
+    )
+    expect(await invoke('tagTemplate:delete', { id: saved.id })).toBeNull()
+    expect(await invoke('tagTemplate:list', undefined)).toEqual([])
+    await expect(invoke('tagTemplate:delete', { id: saved.id })).rejects.toThrowError(
+      /^NOT_FOUND: /
+    )
   })
 })
 

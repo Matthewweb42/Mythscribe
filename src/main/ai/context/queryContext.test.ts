@@ -24,6 +24,7 @@ import {
   namedEntities,
   queryTerms,
   rankCandidates,
+  sceneEntities,
   sceneTitles,
   scoreCandidate,
   QUERY_WEIGHTS,
@@ -288,6 +289,23 @@ describe('the story bible in the retrieval (F-5.16)', () => {
     ])
   })
 
+  it('picks the entities the scenes name, most-named first, a character by first name too (query.v3)', () => {
+    const mara = createEntity(db, { kind: 'character', name: 'Mara Vell' }).entity
+    const mill = createEntity(db, { kind: 'setting', name: 'The Old Mill' }).entity
+    const tomas = createEntity(db, { kind: 'character', name: 'Tomas' }).entity
+    const ed = createEntity(db, { kind: 'character', name: 'Ed Brand' }).entity
+    const old = createEntity(db, { kind: 'setting', name: 'Old Town' }).entity
+    const texts = ['Mara crossed to the old mill. Mara waited.', 'Tomas saw Mara go. Edwin left.']
+    expect(sceneEntities([mara, mill, tomas, ed, old], texts).map((e) => e.name)).toEqual([
+      'Mara Vell',
+      'The Old Mill',
+      'Tomas'
+    ])
+    // A two-letter first name is too common a word-prefix to count alone; a setting never counts
+    // by its first word.
+    expect(sceneEntities([ed, old], texts)).toEqual([])
+  })
+
   it('boosts the scene a fact about a named entity was read from, so it goes out in full', () => {
     // Four scenes name Mara equally; the fact was read from the last, which would otherwise
     // rank fourth and ride along as nothing at all (it has no summary).
@@ -302,10 +320,11 @@ describe('the story bible in the retrieval (F-5.16)', () => {
     const ranked = rankCandidates(db, { question: 'How old is Mara?', nodeId: null })
     expect(ranked.full[0]?.nodeId).toBe(scenes[3])
     expect(ranked.full[0]!.score - ranked.full[1]!.score).toBeCloseTo(QUERY_WEIGHTS.fact)
-    // A question that does not name her gets neither the boost nor the bible.
+    // A question that does not name her gets no boost; her sheet still rides along because the
+    // top scenes name her (query.v3).
     const other = rankCandidates(db, { question: 'Who waited?', nodeId: null })
     expect(other.full[0]?.nodeId).toBe(scenes[0])
-    expect(other.bible).toEqual([])
+    expect(other.bible.map((entity) => entity.name)).toEqual(['Mara'])
   })
 
   it('answers the named entities as sheet and observed facts, each fact with its scene title', () => {
@@ -323,6 +342,7 @@ describe('the story bible in the retrieval (F-5.16)', () => {
     const title = sceneTitles(db)(scenes[0]!)
     expect(rankCandidates(db, { question: 'How old is Mara?', nodeId: null }).bible).toEqual([
       {
+        entityId: mara.id,
         name: 'Mara',
         kind: 'character',
         sheet: [{ label: 'Appearance', value: 'Tall, with a scar.' }],

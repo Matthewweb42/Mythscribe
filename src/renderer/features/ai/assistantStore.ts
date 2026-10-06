@@ -470,6 +470,9 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     }
     let result: AiChatResult
     try {
+      // Main reads the saved scene: the words typed just before asking go first.
+      await useDocumentStore.getState().flush()
+      if (get().pending[id] !== requestId) return // stopped or closed while saving
       result = await useAiActivityStore.getState().track(
         'chat',
         requestId,
@@ -634,6 +637,9 @@ async function sendQuery(id: string, input: Input<'ai:query'>): Promise<void> {
   const { requestId } = input
   let result: AiQueryResult
   try {
+    // Main searches the saved manuscript: the words typed just before asking go first.
+    await useDocumentStore.getState().flush()
+    if (useAssistantStore.getState().pending[id] !== requestId) return // stopped while saving
     result = await useAiActivityStore
       .getState()
       .track('query', requestId, ipc().invoke('ai:query', input))
@@ -666,6 +672,7 @@ async function sendQuery(id: string, input: Input<'ai:query'>): Promise<void> {
         found: result.found,
         uncited: result.uncited,
         citations: result.citations,
+        sheets: result.sheets,
         also: result.also
       }
     },

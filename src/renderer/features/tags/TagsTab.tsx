@@ -139,7 +139,7 @@ export function TagsTab(): React.JSX.Element {
         ) : (
           <>
             {/* Select mode needs the height for its rows and bar, not the template row. */}
-            {selecting ? null : <TemplateLoader />}
+            {selecting ? null : <TemplateLoader bankEmpty={total === 0} />}
             <TagBankActions
               selecting={selecting}
               empty={total === 0}

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TagExchangeRecord } from './tagExchange'
 import type { TagCategory } from './tags'
 
 /**
@@ -97,4 +98,46 @@ export const TAG_TEMPLATES: readonly TagTemplate[] = [
 /** The template with the given id; the id is enum-validated, so a miss means catalogue drift. */
 export function tagTemplateById(id: TagTemplateId): TagTemplate | undefined {
   return TAG_TEMPLATES.find((template) => template.id === id)
+}
+
+/**
+ * Custom tag templates (F-4.11): a tag bank (or part of one) the author saved under a name, kept
+ * app-wide in app state so any project can load it. A template holds tag-bank records (F-4.9), so
+ * colors, the custom category, nesting by parent name, and the tracking switch travel with it,
+ * and loading one is an import: taken names are skipped, never overwritten.
+ */
+export const CUSTOM_TAG_TEMPLATES_MAX = 50
+export const CUSTOM_TAG_TEMPLATE_NAME_MAX = 80
+/** A template is a bank snapshot, so it is capped well above any real bank. */
+export const CUSTOM_TAG_TEMPLATE_TAGS_MAX = 2000
+
+export const CustomTagTemplateName = z.string().trim().min(1).max(CUSTOM_TAG_TEMPLATE_NAME_MAX)
+
+export const CustomTagTemplate = z.object({
+  id: z.string().min(1),
+  name: CustomTagTemplateName,
+  tags: z.array(TagExchangeRecord).min(1).max(CUSTOM_TAG_TEMPLATE_TAGS_MAX),
+  created: z.string(),
+  modified: z.string()
+})
+export type CustomTagTemplate = z.infer<typeof CustomTagTemplate>
+
+/** The uniqueness key of a template name: NFC, trimmed, whitespace collapsed, lower-cased. */
+export function customTemplateNameKey(name: string): string {
+  return name.normalize('NFC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase()
+}
+
+/**
+ * The records whose names are in `keep`, in their order. A parent outside the kept set is
+ * dropped, so a template never names a parent it does not carry.
+ */
+export function keepTemplateRecords(
+  records: readonly TagExchangeRecord[],
+  keep: ReadonlySet<string>
+): TagExchangeRecord[] {
+  return records
+    .filter((record) => keep.has(record.name))
+    .map((record) =>
+      record.parent !== null && !keep.has(record.parent) ? { ...record, parent: null } : record
+    )
 }

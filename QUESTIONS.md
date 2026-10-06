@@ -47,3 +47,22 @@ do. Review, then confirm, change, or delete the entry.
 - Chosen: parts, chapters, and scenes only (not generic documents or section roots); never for the app's own default names ("Untitled Chapter", "Scene 1", "Part III"), a name already in the bank, or one you dismissed. The offer is a "From the title" row in that node's tag bar (documents, cork board, stacked view); Create makes a Custom tag and links it to the node, Dismiss joins the same never-propose list as F-4.12b. A new read channel `tag:dismissedNames` lets the tag bar see that list.
 - Alternatives: a toast or dialog on create/rename (toasts have no buttons; dialogs interrupt); the Plot Threads category for chapter titles; no link on accept.
 - To change it: `src/shared/titleTags.ts`, `src/renderer/features/tags/proposedTagStore.ts`, `src/renderer/features/editor/TagBar.tsx`.
+
+## 2026-10-06 · F-5.13 · The book indexes itself once AI is allowed
+- Question: existing text (written before AI was on, or imported) was only indexed when you pressed "Summarize all scenes", so the chat answered without summaries or story-bible facts.
+- Chosen: 5 s after a project opens, the AI settings change, a key is saved, or an import commits, every scene without a current summary is queued, when the dial is at Ask or above, "Scene summaries, story bible, and tags" is on, and a key (or Cloud) is there. Scenes already current cost nothing. This spends tokens without a click (under a cent per scene on gpt-5.4-mini, once per scene until it changes); the daily cap still applies.
+- Alternatives: keep it manual; ask once per project ("Index the 84 scenes written so far?").
+- To change it: `backfillSummaries` in `src/main/ipc/handlers.ts`.
+
+## 2026-10-06 · F-5.7 · The chat may answer from your sheets (query.v3)
+- Question: the chat treated your character and world sheets as background only, so "What does Mara look like?" came back "not found" or "unverified" when the answer was only on her sheet; long sheet fields were cut to 120 characters, and a full sheet could be left out entirely.
+- Chosen: your sheets are a source. The answer names the sheets it used, main checks them against what was sent, and the panel lists them as "From your notes" (click opens the page). Sheet values go out up to 600 characters within a 1,500-token block; when a question names nobody, the sheets of up to 3 entities the best-matching scenes name ride along. Observed facts and summaries still only orient. Costs about 30–75 more input tokens per question when there is no bible.
+- Alternatives: keep sheets as orientation only; require a scene citation even when the sheet answers.
+- To change it: `src/main/ai/prompts/query.v3.ts`, `src/main/ai/query.ts`, `src/main/ai/context/queryContext.ts` (`sceneEntities`).
+
+## 2026-10-06 · F-4.11 · What a custom tag template keeps, and how it is edited
+- Question: the spec says save the bank (or a selection), edit, and delete; it does not say what a template carries or what "edit" means.
+- Chosen: a template is a tag-bank snapshot (F-4.9's file records): names, categories (Custom included), colors, nesting by parent name, and the mention-tracking switch. Edit is rename plus removing tags; to add tags, save a bank again. Names are unique ignoring case; up to 50 templates; they live app-wide (in app state), not in a project. Loading one skips names already in the bank, like the built-ins.
+- Alternatives: names and categories only, with default colors like the built-ins; an editor that adds tags by typing.
+- To change it: `src/shared/tagTemplates.ts`, `src/main/tag/customTemplates.ts`, `src/renderer/features/tags/TagTemplatesDialog.tsx`.
+

@@ -74,7 +74,7 @@ import { WritingPresets } from '../presets'
 import { PROOFREAD_CHAR_BUDGET, ProofreadFixes, ProofreadScope } from '../proofread'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
 import { ProposedTag } from '../proposedTags'
-import { QueryCitation, QuerySceneRef } from '../query'
+import { QueryCitation, QuerySceneRef, QuerySheetRef } from '../query'
 import { RecoveryItem, RecoveryKind, RecoveryRestored } from '../recovery'
 import {
   ReplaceCommitRequest,
@@ -93,7 +93,7 @@ import { ProjectTimeline } from '../timeline'
 import { SceneSummaryState, SummaryStatus } from '../summary'
 import { HEX_COLOR, TAG_NAME_MAX, TagCategory } from '../tags'
 import { TagAliases } from '../tagExchange'
-import { TagTemplateId } from '../tagTemplates'
+import { CustomTagTemplate, CustomTagTemplateName, TagTemplateId } from '../tagTemplates'
 import { TiptapNode } from '../tiptap'
 import { UpdateChannel, UpdateState } from '../updates'
 import { WHAT_NEXT_CHAR_BUDGET, WhatNextDirections } from '../whatNext'
@@ -327,6 +327,8 @@ export const AiQueryResult = z.discriminatedUnion('ok', [
     found: z.boolean(),
     uncited: z.boolean(),
     citations: z.array(QueryCitation),
+    /** The author's sheets the answer rests on (query.v3), checked against the sheets sent. */
+    sheets: z.array(QuerySheetRef),
     also: z.array(QuerySceneRef),
     dropped: z.number().int().nonnegative(),
     usage: AiUsage,
@@ -962,6 +964,39 @@ export const contract = {
     input: z.object({ template: TagTemplateId }),
     output: z.object({ created: z.array(Tag), skipped: z.array(z.string()) })
   },
+  /**
+   * Loads a custom tag template (F-4.11) the way `tag:import` reads a file: names not in the bank
+   * are created with their category, color, parent, and tracking switch; taken names are skipped.
+   */
+  'tag:loadCustomTemplate': {
+    input: z.object({ id: z.string() }),
+    output: z.object({ created: z.array(Tag), skipped: z.array(z.string()) })
+  },
+  /** The author's saved tag templates (F-4.11), app-wide, sorted by name. */
+  'tagTemplate:list': { input: z.undefined(), output: z.array(CustomTagTemplate) },
+  /**
+   * Saves the open project's tag bank as a new template (F-4.11): every tag, or only `tagIds`
+   * (a parent outside them is dropped). ALREADY_EXISTS when the name is taken, ignoring case;
+   * VALIDATION for an empty bank or at the template cap; NOT_FOUND for an unknown id.
+   */
+  'tagTemplate:save': {
+    input: z.object({ name: CustomTagTemplateName, tagIds: z.array(z.string()).min(1).optional() }),
+    output: CustomTagTemplate
+  },
+  /**
+   * Renames a template and/or keeps only the tags named in `keep` (F-4.11). Keeping none is
+   * VALIDATION (delete the template instead); a taken name is ALREADY_EXISTS.
+   */
+  'tagTemplate:update': {
+    input: z.object({
+      id: z.string(),
+      name: CustomTagTemplateName.optional(),
+      keep: z.array(z.string()).optional()
+    }),
+    output: CustomTagTemplate
+  },
+  /** Deletes a saved template (F-4.11); tags already loaded from it stay in their projects. */
+  'tagTemplate:delete': { input: z.object({ id: z.string() }), output: z.null() },
   /**
    * Recolors several tags at once (F-4.9) in one transaction; answers the updated rows in the
    * given order. NOT_FOUND (and nothing written) if any id is unknown.

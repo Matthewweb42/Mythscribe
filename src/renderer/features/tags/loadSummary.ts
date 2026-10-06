@@ -1,3 +1,8 @@
+/** "3 tags" / "1 tag". */
+export function tagsLabel(count: number): string {
+  return count === 1 ? '1 tag' : `${count} tags`
+}
+
 /**
  * "Added 27 tags" / "Added 24 tags, skipped 3 already in the bank" / "All 27 tags are already in
  * the bank"; the tag bank import (F-4.9) says "Imported".
