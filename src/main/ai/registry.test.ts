@@ -6,7 +6,7 @@ import { defaultAiModels, type AiModels, type Tier } from '@shared/ai'
 import { AiKeyStore } from './keyStore'
 import { fakeSafeStorage } from './keyStoreFixture'
 import type { Provider } from './providers/types'
-import { AiProviderRegistry, type BuildProvider } from './registry'
+import { AiProviderRegistry, buildLocalProvider, type BuildProvider } from './registry'
 
 /** A provider whose `testConnection` answers with what `resolveModel` says for the fast tier. */
 function fakeProvider(key: string, resolveModel: (tier: Tier) => string): Provider {
@@ -107,5 +107,39 @@ describe('AiProviderRegistry with a Cloud source (F-15.4)', () => {
 
   it('has no Cloud provider when none was wired in', () => {
     expect(registry.get('cloud')).toBeNull()
+  })
+})
+
+describe('the local provider (F-5.15)', () => {
+  it('is null without local wiring, builds for the address, and rebuilds only when it changes', () => {
+    expect(registry.get('local')).toBeNull()
+    let baseUrl = 'http://localhost:11434/v1'
+    const buildLocal = vi.fn((_url: string, resolveModel: (tier: Tier) => string) =>
+      fakeProvider('local', resolveModel)
+    )
+    const withLocal = new AiProviderRegistry(
+      keyStore,
+      () => models,
+      build,
+      null,
+      () => ({ baseUrl }),
+      buildLocal
+    )
+    const first = withLocal.get('local')
+    expect(withLocal.get('local')).toBe(first)
+    expect(buildLocal).toHaveBeenCalledWith('http://localhost:11434/v1', expect.any(Function))
+    // The local map, read live: no key is needed and none is read.
+    models = { ...models, local: { fast: 'qwen2.5', strong: 'llama3.1:70b' } }
+    expect(first?.resolveModel('strong')).toBe('llama3.1:70b')
+    baseUrl = 'http://localhost:1234/v1'
+    expect(withLocal.get('local')).not.toBe(first)
+    expect(buildLocal).toHaveBeenCalledTimes(2)
+    expect(build).not.toHaveBeenCalled()
+  })
+
+  it('prices every local request at zero, even for a model named like an OpenAI one', () => {
+    const provider = buildLocalProvider('http://localhost:11434/v1', () => 'gpt-5.4')
+    expect(provider.id).toBe('local')
+    expect(provider.price?.('gpt-5.4', 10_000, 2_000)).toEqual({ costUsd: 0, priced: true })
   })
 })

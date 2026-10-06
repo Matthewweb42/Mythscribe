@@ -14,7 +14,7 @@ import {
   type Tag
 } from '@shared/ipc/contract'
 import { z } from 'zod'
-import { AI_NEXT_STEP, DEFAULT_MODELS, USAGE_RECENT_LIMIT } from '@shared/ai'
+import { AI_NEXT_STEP, DEFAULT_MODELS, LOCAL_DEFAULT_MODELS, USAGE_RECENT_LIMIT } from '@shared/ai'
 import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
 import type { DiagnosticsBody } from '@shared/cloudApi'
 import { RENDERER_ERROR_MESSAGE_MAX } from '@shared/diagnostics'
@@ -319,7 +319,9 @@ beforeEach(() => {
       keyStore,
       () => appState.get().models,
       () => provider,
-      () => cloudProvider
+      () => cloudProvider,
+      () => appState.get().localAi,
+      () => provider
     ),
     account: new AccountService({
       client: cloudClient,
@@ -5820,7 +5822,8 @@ describe('ai handlers (F-5.1)', () => {
       hint: null,
       encryption: 'os',
       // F-15.4: both provider maps, since the AI tab edits the one the project's source names.
-      models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS }
+      models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS, local: LOCAL_DEFAULT_MODELS },
+      local: { baseUrl: 'http://localhost:11434/v1' }
     })
   })
 
@@ -5831,7 +5834,8 @@ describe('ai handlers (F-5.1)', () => {
       hasKey: true,
       hint: 'sk-…abcd',
       encryption: 'os',
-      models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS }
+      models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS, local: LOCAL_DEFAULT_MODELS },
+      local: { baseUrl: 'http://localhost:11434/v1' }
     })
     expect(JSON.stringify(status)).not.toContain(KEY)
     expect(await invoke('ai:getStatus', undefined)).toEqual(status)
@@ -6464,7 +6468,7 @@ describe('ai:setModels (F-5.11)', () => {
   it('writes the Cloud map on its own, leaving the key path alone (F-15.4)', async () => {
     const cloud = { fast: 'gpt-5.4-mini', strong: 'gpt-5.4-nano' }
     const status = await invoke('ai:setModels', { provider: 'cloud', models: cloud })
-    expect(status.models).toEqual({ openai: DEFAULT_MODELS, cloud })
+    expect(status.models).toEqual({ openai: DEFAULT_MODELS, cloud, local: LOCAL_DEFAULT_MODELS })
   })
 
   it('refuses an empty or over-long model id with VALIDATION and keeps the stored mapping', async () => {
@@ -6478,6 +6482,32 @@ describe('ai:setModels (F-5.11)', () => {
       if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     }
     expect(await invoke('ai:getStatus', undefined)).toMatchObject({ models: { openai: models } })
+  })
+})
+
+describe('ai:setLocalEndpoint (F-5.15)', () => {
+  it("answers Ollama's address by default, stores a new one without its trailing slash, and refuses a non-http one", async () => {
+    expect((await invoke('ai:getStatus', undefined)).local).toEqual({
+      baseUrl: 'http://localhost:11434/v1'
+    })
+    const status = await invoke('ai:setLocalEndpoint', { baseUrl: ' http://localhost:1234/v1/ ' })
+    expect(status.local).toEqual({ baseUrl: 'http://localhost:1234/v1' })
+    const file = path.join(tmp, 'userData', 'app-state.json')
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({
+      localAi: { baseUrl: 'http://localhost:1234/v1' }
+    })
+    for (const baseUrl of ['ftp://host/v1', 'localhost:11434', '']) {
+      const result = await handlerFor('ai:setLocalEndpoint')(undefined, { baseUrl })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    }
+  })
+
+  it('sends a project on the local source to the local provider and logs it as local', async () => {
+    await invoke('project:create', { name: 'Local', format: 'novel', directory: tmp })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2, source: 'local' })
+    // No key is saved: the local source needs none.
+    expect(await invoke('ai:testConnection', undefined)).toMatchObject({ ok: true })
   })
 })
 

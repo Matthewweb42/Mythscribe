@@ -37,9 +37,11 @@ const RECOMMENDED_DIAL: AiDial = AI_DATA_SHARING.summary.minDial
 const sourceHint = (source: AiSource, signedInEmail: string | null): string =>
   source === 'ownKey'
     ? 'Add or change your OpenAI key under Settings › AI once the project is open.'
-    : signedInEmail !== null
-      ? `Signed in as ${signedInEmail}. Buy credits under Settings › Account.`
-      : 'Sign in and buy credits under Settings › Account once the project is open.'
+    : source === 'local'
+      ? 'Start Ollama or LM Studio, then set its address and models under Settings › AI.'
+      : signedInEmail !== null
+        ? `Signed in as ${signedInEmail}. Buy credits under Settings › Account.`
+        : 'Sign in and buy credits under Settings › Account once the project is open.'
 
 /** What the previous step leads to: the dial step, or back to the source. */
 const PREVIOUS: Record<Exclude<Step, 'name'>, Step> = {
@@ -215,8 +217,8 @@ export function CreateProjectWizard({
                 ))}
               </fieldset>
               <p data-testid="wizard-source-hint" className="mt-3 mb-0 text-xs text-fg-muted">
-                {sourceHint(aiSource, signedInEmail)} You can switch the source any time in
-                Settings › AI.
+                {sourceHint(aiSource, signedInEmail)} You can switch the source any time in Settings
+                › AI.
               </p>
             </>
           ) : (

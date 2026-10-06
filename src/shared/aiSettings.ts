@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AI_FEATURE_IDS, AiFeatureId } from './ai'
+import { AI_FEATURE_IDS, AiFeatureId, type AiProviderId } from './ai'
 import { DEFAULT_HONESTY, Honesty } from './critique'
 
 /** Settings-table key under which the AI dial and toggles (F-14.4) are stored as JSON. */
@@ -51,18 +51,34 @@ export function defaultGhostTextSettings(): GhostTextSettings {
  * key, or through the MythScribe Cloud proxy against the account's credits. Per project, so one
  * manuscript can be on Cloud while another stays on a personal key.
  */
-export const AiSource = z.enum(['ownKey', 'cloud'])
+export const AiSource = z.enum(['ownKey', 'cloud', 'local'])
 export type AiSource = z.infer<typeof AiSource>
 
 export const AI_SOURCE_LABEL: Record<AiSource, string> = {
   ownKey: 'My own key',
-  cloud: 'MythScribe Cloud'
+  cloud: 'MythScribe Cloud',
+  local: 'Local model'
 }
+
+/** The provider whose models and ledger rows a source uses (F-15.4, F-5.15). */
+export function providerForSource(source: AiSource): AiProviderId {
+  return source === 'ownKey' ? 'openai' : source
+}
+
+/**
+ * F-5.15: what the AI tab says whenever the local source is chosen. Local models are smaller
+ * than the hosted ones, and the voice checks (F-14.7) reject more of what they write.
+ */
+export const LOCAL_QUALITY_WARNING =
+  'Local models are smaller than OpenAI\u2019s: expect weaker answers, more rejected suggestions, ' +
+  'and slower replies, depending on your computer. Every feature still works the same way.'
 
 /** One-line meaning per option; shown under each radio in the AI tab and in the new-project wizard (F-15.11). */
 export const AI_SOURCE_MEANING: Record<AiSource, string> = {
   ownKey: 'Calls go straight to OpenAI with your own API key; nothing is paid to MythScribe.',
-  cloud: 'Calls go through MythScribe Cloud and are charged to your credits at the published rate.'
+  cloud: 'Calls go through MythScribe Cloud and are charged to your credits at the published rate.',
+  local:
+    'Calls go to a model running on your computer (Ollama, LM Studio); nothing leaves the machine and nothing is charged.'
 }
 
 /** The editor's-notes settings (F-14.8), per project: how blunt the critique is. */
@@ -192,7 +208,7 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   whatNext: {
     label: 'What comes next',
     sends:
-      "The last 6,000 characters of the scene, or of the text up to the end of the passage you " +
+      'The last 6,000 characters of the scene, or of the text up to the end of the passage you ' +
       "selected, its brief plus the previous scene's reader-knows-after line and the next " +
       `scene's goal, and ${STORY_BIBLE_SENDS}, only when you click What should come next?.`,
     minDial: 1

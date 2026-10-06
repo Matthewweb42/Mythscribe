@@ -1621,7 +1621,8 @@ export function registerHandlers({
     hint: keyStore.getHint('openai'),
     encryption: keyStore.encryption(),
     // F-15.4: both maps, since the AI tab edits the one the project's source names.
-    models: appState.get().models
+    models: appState.get().models,
+    local: appState.get().localAi
   })
 
   register('ai:getStatus', aiStatus)
@@ -1634,6 +1635,13 @@ export function registerHandlers({
 
   register('ai:clearKey', () => {
     keyStore.clearKey('openai')
+    return aiStatus()
+  })
+
+  // F-5.15: the registry reads the address live and rebuilds the local client when it changes.
+  register('ai:setLocalEndpoint', ({ baseUrl }) => {
+    appState.update((s) => ({ ...s, localAi: { baseUrl: baseUrl.replace(/\/+$/, '') } }))
+    backfillSummaries(true)
     return aiStatus()
   })
 

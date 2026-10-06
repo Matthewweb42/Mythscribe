@@ -8,6 +8,7 @@ import {
   AI_FEATURES_BY_LEVEL,
   GHOST_IDLE_MS_MAX,
   GHOST_IDLE_MS_MIN,
+  providerForSource,
   type AiDial
 } from '@shared/aiSettings'
 import { useAiSettingsStore } from './aiSettingsStore'
@@ -32,7 +33,7 @@ export function AiDialSection(): React.JSX.Element | null {
   // F-15.4: the Provider column names where the text actually goes, which is the project's
   // AI source, not a fixed provider id.
   const source = useAiSettingsStore((s) => s.settings?.source ?? 'ownKey')
-  const provider = source === 'cloud' ? 'cloud' : 'openai'
+  const provider = providerForSource(source)
   const radios = useRef(new Map<AiDial, HTMLButtonElement>())
   const headingId = useId()
   const dialId = useId()

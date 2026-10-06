@@ -340,7 +340,13 @@ if (!primaryInstance) {
       manager,
       appState,
       keyStore,
-      ai: new AiProviderRegistry(keyStore, () => appState.get().models, undefined, cloud),
+      ai: new AiProviderRegistry(
+        keyStore,
+        () => appState.get().models,
+        undefined,
+        cloud,
+        () => appState.get().localAi
+      ),
       account,
       updates,
       diagnostics,

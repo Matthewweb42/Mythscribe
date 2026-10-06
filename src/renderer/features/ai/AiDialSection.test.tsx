@@ -15,7 +15,8 @@ const STATUS: AiStatus = {
   hasKey: false,
   hint: null,
   encryption: 'os',
-  models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS }
+  models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS, local: DEFAULT_MODELS },
+  local: { baseUrl: 'http://localhost:11434/v1' }
 }
 
 interface Fake {

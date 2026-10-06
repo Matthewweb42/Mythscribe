@@ -371,6 +371,8 @@ let exited = false
 /** The environment every launch gets, set once the fake servers are listening. */
 let launchEnv: Record<string, string>
 let fakeOpenAi: http.Server
+/** The fake provider's address; F-5.15 points the local source at it, as it would at Ollama. */
+let fakeOpenAiUrl = ''
 /** Every request the fake OpenAI server saw: the path and the Authorization header. */
 const openAiRequests: { url: string; auth: string | undefined }[] = []
 /** The parsed body of every chat request, so a step can assert on what a prompt carried. */
@@ -845,6 +847,7 @@ async function startFakeCloudApi(): Promise<string> {
 test.beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-e2e-'))
   const openAiBaseUrl = await startFakeOpenAi()
+  fakeOpenAiUrl = openAiBaseUrl
   const cloudApiUrl = await startFakeCloudApi()
   // Point app-level state (recents, the AI key, the Cloud session) at the temp dir so the
   // developer's real userData is untouched, the OpenAI SDK at the fake provider, and the account
@@ -1483,13 +1486,15 @@ test('create, close, reopen a project on disk', async () => {
   // F-15.4: one map per provider; a write to the key path leaves the Cloud one at its defaults.
   expect((await aiStatus()).models).toEqual({
     openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
-    cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' }
+    cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' },
+    local: { fast: 'llama3.1', strong: 'llama3.1' }
   })
   expect(
     (JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { models: AiStatus['models'] }).models
   ).toEqual({
     openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
-    cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' }
+    cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' },
+    local: { fast: 'llama3.1', strong: 'llama3.1' }
   })
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
@@ -4607,6 +4612,38 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('tab', { name: 'Account' }).click()
   await settingsDialog.getByRole('button', { name: 'Sign out' }).click()
   await expect(settingsDialog.getByLabel('Email')).toBeVisible()
+
+  // F-5.15: a local model. The source switches to Local model, the server address points at an
+  // OpenAI-compatible server (the fake provider stands in for Ollama), Test connection reaches
+  // it, and a Plan question streams back from it at no cost, logged under the local provider.
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await settingsDialog.getByTestId('ai-source-local').click()
+  await expect.poll(async () => (await aiSettings()).source).toBe('local')
+  await expect(settingsDialog.getByTestId('ai-local-warning')).toBeVisible()
+  const serverAddress = settingsDialog.getByLabel('Server address')
+  await serverAddress.fill(fakeOpenAiUrl)
+  await settingsDialog
+    .getByRole('form', { name: 'Local model server' })
+    .getByRole('button', { name: 'Save' })
+    .click()
+  await expect(settingsDialog.getByText(/Nothing leaves this computer/)).toContainText(
+    fakeOpenAiUrl
+  )
+  await settingsDialog.getByRole('button', { name: 'Test connection' }).click()
+  await expect(settingsDialog.getByTestId('ai-test-result')).toContainText('Connected.')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  const localBodiesBefore = openAiChatBodies.length
+  await messageBox.fill('What is the storm doing?')
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(10)
+  await expect(turns.nth(9)).toContainText(CHAT_ANSWER)
+  await expect(turns.nth(9).getByTestId('chat-turn-cost')).toContainText('$0.0000')
+  expect(openAiChatBodies).toHaveLength(localBodiesBefore + 1)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await settingsDialog.getByTestId('ai-source-ownKey').click()
+  await expect.poll(async () => (await aiSettings()).source).toBe('ownKey')
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
 

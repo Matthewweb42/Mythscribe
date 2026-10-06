@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { defaultAiModels } from '@shared/ai'
+import { defaultAiModels, defaultLocalAiSettings } from '@shared/ai'
 import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
 import type { ImportDetectProgress, ImportDetectResult } from '@shared/importStructure'
 import type {
@@ -105,7 +105,8 @@ function allowDetect(dial: AiDial = 2): void {
       hasKey: true,
       hint: 'sk-…1234',
       encryption: 'os',
-      models: defaultAiModels()
+      models: defaultAiModels(),
+      local: defaultLocalAiSettings()
     }
   })
 }

@@ -4,14 +4,25 @@ import {
   AI_MODEL_MAX,
   DAILY_CAP_MAX,
   DAILY_CAP_MIN,
-  DEFAULT_MODELS,
+  LOCAL_AI_BASE_URL_MAX,
+  LocalAiBaseUrl,
   TIER_USE,
+  defaultModelsFor,
+  isLoopbackUrl,
   type AiModelMap,
+  type AiProviderId,
   type AiStatus,
   type AiUsageSummary,
   type Tier
 } from '@shared/ai'
-import { AI_SOURCE_LABEL, AI_SOURCE_MEANING, AiSource, isFeatureAllowed } from '@shared/aiSettings'
+import {
+  AI_SOURCE_LABEL,
+  AI_SOURCE_MEANING,
+  AiSource,
+  LOCAL_QUALITY_WARNING,
+  isFeatureAllowed,
+  providerForSource
+} from '@shared/aiSettings'
 import { cloudRateFor } from '@shared/cloudRates'
 import { useAccountStore } from '@renderer/features/account/accountStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -48,11 +59,19 @@ const PLAIN_STORAGE_COPY =
  * The storage claim follows the real backend: no "encrypted" under the plain-text warning. On
  * MythScribe Cloud there is no key here at all, so the line names where the text goes instead.
  */
-const privacyCopy = (encryption: 'os' | 'plain' | 'none' | undefined, source: AiSource): string =>
-  source === 'cloud'
-    ? 'Your key stays out of it on MythScribe Cloud: the text listed in the table above goes ' +
-      'to MythScribe Cloud, which relays it to OpenAI and stores none of it.'
-    : `Your key is ${encryption === 'plain' ? 'stored only on this machine' : 'encrypted and stored only on this machine'}, and is sent only to OpenAI when you use an AI feature.`
+const privacyCopy = (
+  encryption: 'os' | 'plain' | 'none' | undefined,
+  source: AiSource,
+  localUrl: string
+): string =>
+  source === 'local'
+    ? isLoopbackUrl(localUrl)
+      ? `Nothing leaves this computer: the text listed in the table above goes only to the model server at ${localUrl}.`
+      : `The text listed in the table above goes to the model server at ${localUrl}, over your network.`
+    : source === 'cloud'
+      ? 'Your key stays out of it on MythScribe Cloud: the text listed in the table above goes ' +
+        'to MythScribe Cloud, which relays it to OpenAI and stores none of it.'
+      : `Your key is ${encryption === 'plain' ? 'stored only on this machine' : 'encrypted and stored only on this machine'}, and is sent only to OpenAI when you use an AI feature.`
 
 const RADIO =
   'flex min-w-0 flex-1 flex-col gap-0.5 rounded-md border border-line px-2 py-1.5 text-left hover:bg-surface focus-visible:outline-2 focus-visible:outline-accent aria-checked:border-accent aria-checked:bg-surface-raised'
@@ -63,15 +82,18 @@ const report = (err: unknown): void => {
 
 const TIER_LABEL: Record<Tier, string> = { fast: 'Fast tier', strong: 'Strong tier' }
 
-const atDefaults = (models: AiModelMap): boolean =>
-  models.fast === DEFAULT_MODELS.fast && models.strong === DEFAULT_MODELS.strong
+const atDefaults = (models: AiModelMap, provider: AiProviderId): boolean => {
+  const defaults = defaultModelsFor(provider)
+  return models.fast === defaults.fast && models.strong === defaults.strong
+}
 
 /**
  * The AI tab of the Settings dialog (F-5.1): the project's AI dial, toggles, and data-sharing
  * table first (F-14.4, loaded with the project by `App.tsx`), the writing presets (F-5.2,
  * loaded the same way), "Summarize all scenes" (F-5.13), the voice profile (F-14.1), the author rules (F-14.2), the provenance ledger (F-14.6), then the
  * provider, the key field with Save and Clear, the masked hint once a key is saved, the model
- * per tier with "Reset to defaults" (F-5.11) and, on MythScribe Cloud, its rate (F-15.11),
+ * per tier with "Reset to defaults" (F-5.11) and, on MythScribe Cloud, its rate (F-15.11), the
+ * local server's address and quality warning when the source is a local model (F-5.15),
  * "Test connection" with its result inline, the Usage block with the daily cap (F-5.14), the
  * privacy line, and a warning when the key can only be obfuscated (no keyring) or not stored
  * at all. The uncommitted key lives in local state and is dropped as soon as it is saved, so
@@ -102,7 +124,7 @@ export function AiSettingsTab(): React.JSX.Element {
   const updateSettings = useAiSettingsStore((s) => s.update)
   const account = useAccountStore((s) => s.status)
   const source: AiSource = settings?.source ?? 'ownKey'
-  const provider = source === 'cloud' ? 'cloud' : 'openai'
+  const provider = providerForSource(source)
   const signedIn = account?.state === 'signedIn'
 
   useEffect(() => {
@@ -137,7 +159,8 @@ export function AiSettingsTab(): React.JSX.Element {
     run(async () => {
       if (models) await setModels(provider, { ...models, [tier]: model })
     })
-  const canTest = source === 'cloud' ? signedIn : hasKey
+  const canTest = source === 'cloud' ? signedIn : source === 'local' ? status !== null : hasKey
+  const localUrl = status?.local.baseUrl ?? ''
 
   return (
     <div className="flex flex-col gap-4 text-sm">
@@ -190,6 +213,8 @@ export function AiSettingsTab(): React.JSX.Element {
 
       {source === 'cloud' ? (
         <CloudAccountLine signedIn={signedIn} email={signedIn ? account.email : null} />
+      ) : source === 'local' ? (
+        <LocalEndpointForm key={localUrl} current={localUrl} disabled={status === null || busy} />
       ) : status !== null && status.encryption === 'none' ? (
         <p role="alert" className="m-0 rounded-md border border-warning/40 px-3 py-2 text-warning">
           {NO_SAFE_STORAGE_COPY}
@@ -247,8 +272,8 @@ export function AiSettingsTab(): React.JSX.Element {
           <legend className="float-left p-0 font-medium">Models</legend>
           <button
             type="button"
-            disabled={models === null || atDefaults(models) || busy}
-            onClick={() => void run(() => setModels(provider, { ...DEFAULT_MODELS }))}
+            disabled={models === null || atDefaults(models, provider) || busy}
+            onClick={() => void run(() => setModels(provider, defaultModelsFor(provider)))}
             className={BUTTON}
           >
             Reset to defaults
@@ -294,8 +319,71 @@ export function AiSettingsTab(): React.JSX.Element {
         onCommitCap={(usd) => run(() => setDailyCap(usd))}
       />
 
-      <p className="m-0 text-xs text-fg-muted">{privacyCopy(status?.encryption, source)}</p>
+      <p className="m-0 text-xs text-fg-muted">
+        {privacyCopy(status?.encryption, source, localUrl)}
+      </p>
     </div>
+  )
+}
+
+/**
+ * The local model server (F-5.15): its address with Save, the quality warning, and a warning
+ * when the address is not on this computer. Keyed on the stored address, so a save resets the
+ * draft to what main kept (it drops a trailing slash).
+ */
+function LocalEndpointForm({
+  current,
+  disabled
+}: {
+  current: string
+  disabled: boolean
+}): React.JSX.Element {
+  const setLocalEndpoint = useAiStore((s) => s.setLocalEndpoint)
+  const [draft, setDraft] = useState(current)
+  const trimmed = draft.trim()
+  const valid = LocalAiBaseUrl.safeParse(trimmed).success
+  return (
+    <form
+      aria-label="Local model server"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (valid && trimmed !== current) setLocalEndpoint(trimmed).catch(report)
+      }}
+      className="flex flex-col gap-1.5"
+    >
+      <div className="flex items-center gap-2">
+        <input
+          type="url"
+          aria-label="Server address"
+          placeholder="http://localhost:11434/v1"
+          spellCheck={false}
+          maxLength={LOCAL_AI_BASE_URL_MAX}
+          value={draft}
+          disabled={disabled}
+          onChange={(event) => setDraft(event.target.value)}
+          className={FIELD}
+        />
+        <button
+          type="submit"
+          disabled={disabled || !valid || trimmed === current}
+          className={BUTTON}
+        >
+          Save
+        </button>
+      </div>
+      <p className="m-0 text-xs text-fg-muted">
+        Ollama answers at http://localhost:11434/v1 and LM Studio at http://localhost:1234/v1. Set
+        the model names below to models you have downloaded.
+      </p>
+      <p role="note" data-testid="ai-local-warning" className="m-0 text-xs text-warning">
+        {LOCAL_QUALITY_WARNING}
+      </p>
+      {current !== '' && !isLoopbackUrl(current) ? (
+        <p role="alert" className="m-0 text-xs text-warning">
+          This address is not on this computer, so your text leaves the machine.
+        </p>
+      ) : null}
+    </form>
   )
 }
 

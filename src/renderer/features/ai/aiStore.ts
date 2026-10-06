@@ -37,6 +37,8 @@ interface AiState {
    * source, F-15.4). The last test result named the old model, so it is dropped.
    */
   setModels: (provider: AiProviderId, models: AiModelMap) => Promise<void>
+  /** F-5.15: where the local model server answers. */
+  setLocalEndpoint: (baseUrl: string) => Promise<void>
   test: () => Promise<void>
 }
 
@@ -87,6 +89,13 @@ export const useAiStore = create<AiState>((set) => ({
   async setModels(provider, models) {
     const mine = generation
     const status = await ipc().invoke('ai:setModels', { provider, models })
+    if (mine !== generation) return
+    set({ status, testResult: null })
+  },
+
+  async setLocalEndpoint(baseUrl) {
+    const mine = generation
+    const status = await ipc().invoke('ai:setLocalEndpoint', { baseUrl })
     if (mine !== generation) return
     set({ status, testResult: null })
   },
