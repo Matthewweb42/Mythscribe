@@ -66,3 +66,9 @@ do. Review, then confirm, change, or delete the entry.
 - Alternatives: names and categories only, with default colors like the built-ins; an editor that adds tags by typing.
 - To change it: `src/shared/tagTemplates.ts`, `src/main/tag/customTemplates.ts`, `src/renderer/features/tags/TagTemplatesDialog.tsx`.
 
+## 2026-10-06 · F-1.6 · How a v0 project is converted, and what comes across
+- Question: the spec kept tags and references "in the backup for a later import"; it did not say where the converted project goes or whether to ask.
+- Chosen: opening a v0 project asks first (Convert / Cancel). The converted project takes the original path, so recents and habits keep working; the untouched original is renamed `<Name> (v0 backup <date>).mythscribe` beside it. Tags (with their scene links) and v0 references (as blank-page entities) come across now, since the background tracking and the chat use them. Scene summaries are left behind (the AI writes them again), as are background images, v0 tag templates, AI presets, and per-document formatting. Top-level v0 research notes land in a "Notes" folder in the end matter so they stay out of the manuscript and the AI's index. Inline v0 tag highlights become plain text; automatic mentions find the names again.
+- Alternatives: convert into a new folder next to the original; carry over only the documents, as the spec said; import background images too.
+- To change it: `src/main/project/legacyImport.ts`, `legacyTree.ts`, `legacySlate.ts`, `project:open` in `handlers.ts`.
+

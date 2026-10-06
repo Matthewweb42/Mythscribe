@@ -61,7 +61,16 @@ function toInfo(row: ProjectRow, folder: string, schemaVersion: number): Project
   }
 }
 
-export function createProject(folder: string, name: string, format: NovelFormat): ProjectSession {
+/**
+ * `skeleton: false` (F-1.6) seeds only the three sections, for a project whose tree comes from
+ * elsewhere (a converted v0 project).
+ */
+export function createProject(
+  folder: string,
+  name: string,
+  format: NovelFormat,
+  { skeleton = true }: { skeleton?: boolean } = {}
+): ProjectSession {
   if (fs.existsSync(folder)) {
     if (isProjectFolder(folder)) {
       throw new AppError('ALREADY_EXISTS', `A project already exists at ${folder}`, { folder })
@@ -87,7 +96,8 @@ export function createProject(folder: string, name: string, format: NovelFormat)
     }
     connection.orm.transaction((tx) => {
       tx.insert(projectTable).values(row).run()
-      insertNodes(tx, seedSkeleton(format, now))
+      const rows = seedSkeleton(format, now)
+      insertNodes(tx, skeleton ? rows : rows.filter((row) => row.sectionType != null))
       tx.insert(settings).values(seedSettings(format)).run()
     })
     return new ProjectSession(folder, connection, toInfo(row, folder, connection.schemaVersion))

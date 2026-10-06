@@ -161,7 +161,13 @@ import {
   removeReferenceImage
 } from '../project/referenceStore'
 import type { ProjectManager } from '../project/manager'
-import { isProjectFolder, projectFolderFor, sanitizeName } from '../project/projectStore'
+import {
+  isProjectFolder,
+  locateProject,
+  projectFolderFor,
+  sanitizeName
+} from '../project/projectStore'
+import { convertLegacyProject, legacyBackupPath } from '../project/legacyImport'
 import { writeTextAtomic } from '../fs'
 import { renderDisclosure } from '../provenance/disclosure'
 import {
@@ -544,8 +550,16 @@ export function registerHandlers({
   })
 
   register('project:open', async ({ path }) => {
-    const folder = path ?? (await dialogs.chooseProjectToOpen())
-    if (!folder) return null
+    const chosen = path ?? (await dialogs.chooseProjectToOpen())
+    if (!chosen) return null
+    let folder = chosen
+    // F-1.6: a v0 project is converted after the author agrees; the original is kept beside it.
+    const location = locateProject(chosen)
+    if (location.kind === 'legacy') {
+      const backup = legacyBackupPath(location.source, new Date())
+      if (!(await dialogs.confirmLegacyConversion(location.source, backup))) return null
+      folder = convertLegacyProject(location).folder
+    }
     const info = manager.open(folder)
     diagnostics.count('project.open')
     return info
