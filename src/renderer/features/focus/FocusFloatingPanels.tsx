@@ -1,15 +1,21 @@
 import { AssistantBody } from '@renderer/features/ai/AssistantPanel'
 import { NotesBody } from '@renderer/features/editor/NotesPanel'
+import {
+  AddReferenceImageButton,
+  ReferencesBody
+} from '@renderer/features/references/ReferencePanel'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { FloatingWindow } from './FloatingWindow'
 import { useFocusStore } from './focusStore'
 
 /**
- * The floating Notes and AI assistant windows of focus mode (F-6.6), mounted by `App` only
+ * The floating Notes, References, and AI assistant windows of focus mode (F-6.6; References
+ * since 2026-10-07: the pins and the open scene's story bible sheets), mounted by `App` only
  * there and shown on the focus store's session flags (the control bar's buttons toggle them,
  * F-6.5; each window's Close and Escape clear its flag). The notes window hosts `NotesBody`
  * for the selected node, the same editor and store as the docked panel; the assistant window
- * hosts `AssistantBody`, which carries its own New conversation button and Continuity link. Their geometry is the layout's
+ * hosts `AssistantBody`, which carries its own New conversation button and Continuity link; the
+ * references window hosts `ReferencesBody` with Add image in its title bar. Their geometry is the layout's
  * `floating` rects, persisted app-wide like the docked sizes.
  */
 export function FocusFloatingPanels(): React.JSX.Element {
@@ -27,6 +33,18 @@ export function FocusFloatingPanels(): React.JSX.Element {
           ) : (
             <NotesBody id={selectedId} />
           )}
+        </FloatingWindow>
+      ) : null}
+      {panels.references ? (
+        <FloatingWindow
+          name="references"
+          title="References"
+          actions={<AddReferenceImageButton />}
+          onClose={() => togglePanel('references')}
+        >
+          <div className="flex min-h-0 flex-1 flex-col pt-3">
+            <ReferencesBody />
+          </div>
         </FloatingWindow>
       ) : null}
       {panels.assistant ? (

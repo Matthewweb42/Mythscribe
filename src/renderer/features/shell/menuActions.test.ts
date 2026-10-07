@@ -330,7 +330,11 @@ describe('runMenuAction (F-7.1)', () => {
     await useFocusStore.getState().enter()
     await runMenuAction('toggleNotes')
     await runMenuAction('toggleAssistant')
-    expect(useFocusStore.getState().panels).toEqual({ notes: true, assistant: true })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: true,
+      assistant: true,
+      references: false
+    })
     expect(useLayoutStore.getState().layout).toEqual(defaultLayout())
   })
 

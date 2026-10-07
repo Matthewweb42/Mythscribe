@@ -252,7 +252,7 @@ export function moveFloatingBy(panel: FloatingPanel, dxPx: number, dyPx: number)
   state.setFloatingRect(panel, { ...rect, x: rect.x + dxPx, y: rect.y + dyPx })
 }
 
-/** Applies a drag on a floating window's grip or a Shift+arrow step (F-6.6): the px deltas grow it. */
+/** Applies a Shift+arrow step on a floating window's title bar (F-6.6): the px deltas grow it. */
 export function resizeFloatingBy(panel: FloatingPanel, dwPx: number, dhPx: number): void {
   const state = useLayoutStore.getState()
   const rect = state.layout.floating[panel]

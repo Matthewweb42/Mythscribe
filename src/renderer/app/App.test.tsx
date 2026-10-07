@@ -1071,7 +1071,9 @@ describe('App', () => {
       aiSwitch: 'off'
     })
     expect(screen.getByRole('status')).toBeEmptyDOMElement()
-    expect(screen.getByRole('dialog', { name: 'Have worldbuilding docs? Add them' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('dialog', { name: 'Have worldbuilding docs? Add them' })
+    ).toBeInTheDocument()
   })
 
   it('Cancel in the wizard returns to the welcome buttons', async () => {
@@ -1463,9 +1465,23 @@ describe('App', () => {
       expect(
         within(assistantWindow).getByRole('button', { name: 'New conversation' })
       ).toBeInTheDocument()
+      // 2026-10-07: the references float too, with Add image in the title bar.
+      const references = within(bar).getByRole('button', { name: 'References' })
+      await userEvent.click(references)
+      expect(references).toHaveAttribute('aria-pressed', 'true')
+      const referencesWindow = await screen.findByRole('dialog', { name: 'References' })
+      expect(referencesWindow).toHaveAttribute('data-testid', 'floating-references')
+      expect(
+        within(referencesWindow).getByRole('button', { name: 'Add image…' })
+      ).toBeInTheDocument()
+      await userEvent.click(
+        within(referencesWindow).getByRole('button', { name: 'Close References' })
+      )
+      expect(references).toHaveAttribute('aria-pressed', 'false')
       // Never the docked panels; the persisted open flags did not move.
       expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument()
       expect(screen.queryByTestId('assistant-panel')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('references-panel')).not.toBeInTheDocument()
       expect(asides()).toEqual([])
       expect(useLayoutStore.getState().layout.notes.open).toBe(false)
       expect(useLayoutStore.getState().layout.assistant.open).toBe(false)
@@ -1501,7 +1517,11 @@ describe('App', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(screen.queryByTestId('assistant-panel')).not.toBeInTheDocument()
       expect(screen.queryByTestId('notes-panel')).not.toBeInTheDocument()
-      expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
+      expect(useFocusStore.getState().panels).toEqual({
+        notes: false,
+        assistant: false,
+        references: false
+      })
     })
 
     it('a dragged floating window persists its geometry to the layout, and it is back on reopen (F-6.6)', async () => {

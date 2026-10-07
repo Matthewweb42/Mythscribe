@@ -1,6 +1,13 @@
 import { useEffect, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { X } from 'lucide-react'
-import { FLOATING_KEY_STEP_PX, type FloatingPanel, type Rect } from '@shared/layout'
+import {
+  FLOATING_KEY_STEP_PX,
+  RESIZE_EDGES,
+  resizeRect,
+  type FloatingPanel,
+  type Rect,
+  type ResizeEdge
+} from '@shared/layout'
 import {
   moveFloatingBy,
   resizeFloatingBy,
@@ -10,7 +17,7 @@ import {
 const TITLE_HINT = 'Drag to move. Arrow keys move, Shift+arrow keys resize.'
 
 /**
- * Where a title-bar or grip drag started: the pointer and the rect at pointer-down. Every
+ * Where a title-bar or edge drag started: the pointer and the rect at pointer-down. Every
  * move is computed from here, not from the previous move, so sub-pixel pointer steps (a
  * zoomed display, a synthetic drag in steps) never lose distance to the store's rounding.
  */
@@ -19,6 +26,33 @@ interface DragOrigin {
   y: number
   rect: Rect
 }
+
+/** A resize drag: its origin and the edge or corner being dragged. */
+interface ResizeOrigin extends DragOrigin {
+  edge: ResizeEdge
+}
+
+/**
+ * Where each resize handle sits and the cursor it shows. The edges are 6 px strips inside the
+ * window's border, the corners 12 px squares above them (later in document order), so a corner
+ * wins where they overlap. The bottom-right corner also draws the visible grip.
+ */
+const HANDLE: Record<ResizeEdge, string> = {
+  n: 'top-0 right-3 left-3 h-1.5 cursor-ns-resize',
+  s: 'right-3 bottom-0 left-3 h-1.5 cursor-ns-resize',
+  e: 'top-3 right-0 bottom-3 w-1.5 cursor-ew-resize',
+  w: 'top-3 bottom-3 left-0 w-1.5 cursor-ew-resize',
+  ne: 'top-0 right-0 h-3 w-3 cursor-nesw-resize',
+  sw: 'bottom-0 left-0 h-3 w-3 cursor-nesw-resize',
+  nw: 'top-0 left-0 h-3 w-3 cursor-nwse-resize',
+  se: 'right-0 bottom-0 h-4 w-4 cursor-nwse-resize'
+}
+
+/** Edges first, corners last, so a corner is on top where it overlaps an edge strip. */
+const HANDLE_ORDER: readonly ResizeEdge[] = [
+  ...RESIZE_EDGES.filter((edge) => edge.length === 1),
+  ...RESIZE_EDGES.filter((edge) => edge.length === 2)
+]
 
 /** The arrow keys as `[dx, dy]` unit steps. */
 const ARROWS: Record<string, [number, number]> = {
@@ -43,8 +77,9 @@ interface FloatingWindowProps {
 /**
  * A floating, non-modal window for focus mode (F-6.6): a `dialog` positioned in px from the
  * layout store's `floating[name]` rect, moved by dragging its title bar and sized by dragging
- * the grip in its bottom-right corner (both with pointer capture, so a fast pointer never
- * escapes, and measured from the drag's origin), or with the keyboard on the focused title
+ * any edge or corner like a desktop window (2026-10-07; `resizeRect` keeps the opposite edges
+ * put; the bottom-right corner keeps a visible grip), all with pointer capture, so a fast
+ * pointer never escapes, and measured from the drag's origin; or with the keyboard on the focused title
  * bar: the arrow keys move it by `FLOATING_KEY_STEP_PX`, Shift+arrows resize it. Every change
  * goes through the store, which clamps the rect into the viewport and persists it with the
  * layout's debounced write; the window re-clamps itself on mount and on every window resize,
@@ -62,7 +97,7 @@ export function FloatingWindow({
   const rect = useLayoutStore((s) => s.layout.floating[name])
   const setFloatingRect = useLayoutStore((s) => s.setFloatingRect)
   const [moving, setMoving] = useState<DragOrigin | null>(null)
-  const [sizing, setSizing] = useState<DragOrigin | null>(null)
+  const [sizing, setSizing] = useState<ResizeOrigin | null>(null)
 
   // Re-clamp on mount (a rect stored on a larger display) and when the window shrinks; the
   // store ignores a rect that already fits, so this writes only when something moved.
@@ -82,6 +117,9 @@ export function FloatingWindow({
       start({ x: event.clientX, y: event.clientY, rect })
     }
 
+  const startResize = (edge: ResizeEdge): ((event: PointerEvent<HTMLDivElement>) => void) =>
+    startDrag((origin) => setSizing({ ...origin, edge }))
+
   const onTitleMove = (event: PointerEvent<HTMLDivElement>): void => {
     if (moving === null) return
     const { rect: from } = moving
@@ -92,14 +130,15 @@ export function FloatingWindow({
     })
   }
 
-  const onGripMove = (event: PointerEvent<HTMLDivElement>): void => {
+  const onResizeMove = (event: PointerEvent<HTMLDivElement>): void => {
     if (sizing === null) return
-    const { rect: from } = sizing
-    setFloatingRect(name, {
-      ...from,
-      width: from.width + event.clientX - sizing.x,
-      height: from.height + event.clientY - sizing.y
-    })
+    setFloatingRect(
+      name,
+      resizeRect(sizing.rect, sizing.edge, event.clientX - sizing.x, event.clientY - sizing.y, {
+        width: window.innerWidth,
+        height: window.innerHeight
+      })
+    )
   }
 
   const onTitleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -155,15 +194,37 @@ export function FloatingWindow({
         </button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-      <div
-        aria-hidden="true"
-        data-testid={`floating-${name}-grip`}
-        onPointerDown={startDrag(setSizing)}
-        onPointerMove={onGripMove}
-        onPointerUp={() => setSizing(null)}
-        onPointerCancel={() => setSizing(null)}
-        className={`absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize touch-none ${sizing === null ? 'hover:bg-accent/40' : 'bg-accent/40'}`}
-      />
+      {HANDLE_ORDER.map((edge) => (
+        <div
+          key={edge}
+          aria-hidden="true"
+          data-testid={edge === 'se' ? `floating-${name}-grip` : `floating-${name}-resize-${edge}`}
+          data-edge={edge}
+          onPointerDown={startResize(edge)}
+          onPointerMove={onResizeMove}
+          onPointerUp={() => setSizing(null)}
+          onPointerCancel={() => setSizing(null)}
+          className={`absolute z-10 touch-none ${HANDLE[edge]} ${sizing?.edge === edge ? 'bg-accent/40' : 'hover:bg-accent/40'}`}
+        >
+          {edge === 'se' ? <GripMark /> : null}
+        </div>
+      ))}
     </section>
+  )
+}
+
+/** The visible bottom-right grip: three short diagonal strokes, as on a desktop window. */
+function GripMark(): React.JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      className="pointer-events-none h-full w-full text-fg-subtle"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+    >
+      <path d="M13 6 6 13M13 9.5 9.5 13M13 3 3 13" />
+    </svg>
   )
 }

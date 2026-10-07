@@ -340,7 +340,8 @@ describe('floating windows (F-6.6)', () => {
     expect(sets).toHaveLength(1)
     expect(sets[0]?.value.floating).toEqual({
       notes: { x: 700, y: 560, width: 300, height: 240 },
-      assistant: { x: 0, y: 0, width: 280, height: 200 }
+      assistant: { x: 0, y: 0, width: 280, height: 200 },
+      references: defaultFloating().references
     })
     expect(sets[0]?.value.sidebar).toEqual(stored.sidebar)
   })
