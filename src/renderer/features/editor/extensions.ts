@@ -18,6 +18,7 @@ import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
 import { NameCheck } from './nameCheck'
 import { RewriteTarget } from './rewriteTarget'
+import { SmartTypography } from './smartTypography'
 import { TagRange } from './TagRange'
 import { TrackedChanges } from './trackedChanges'
 import { Typewriter } from './typewriter'
@@ -289,7 +290,8 @@ export function buildExtensions({
     TextAlign.configure({ types: ['heading', 'paragraph'], alignments: [...ALIGNMENTS] }),
     SceneBreak.configure({ text: sceneBreak }),
     SaveShortcut.configure({ onSave }),
-    ClipboardParagraphs
+    ClipboardParagraphs,
+    SmartTypography
   ]
   if (inlineTagNodeId !== undefined) {
     extensions.push(
