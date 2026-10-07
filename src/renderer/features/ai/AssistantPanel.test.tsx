@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import { SUGGESTION_ROTATE_MS } from '@shared/assistantSuggestions'
 import type { Conversation, Conversations } from '@shared/chat'
-import type { AiChatResult, AiQueryResult, Channel, Input, Output } from '@shared/ipc/contract'
+import type { AgentChange } from '@shared/agent'
+import type { AiAgentResult, AiChatResult, Channel, Input, Output } from '@shared/ipc/contract'
 import { QUERY_NOT_FOUND, type QueryTurn } from '@shared/query'
 import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
 import {
@@ -41,8 +42,8 @@ interface PendingChat {
   resolve: (result: AiChatResult) => void
 }
 interface PendingQuery {
-  input: Input<'ai:query'>
-  resolve: (result: AiQueryResult) => void
+  input: Input<'ai:agent'>
+  resolve: (result: AiAgentResult) => void
 }
 
 let chats: PendingChat[]
@@ -51,7 +52,7 @@ let queries: PendingQuery[]
 let sets: Input<'conversations:set'>[]
 let cancels: string[]
 
-/** `conversations:get` answers with `stored`; writes record; `ai:chat`/`ai:query` resolve when the test says so. */
+/** `conversations:get` answers with `stored`; writes record; `ai:chat`/`ai:agent` resolve when the test says so. */
 function install(stored: Conversations): void {
   const client: IpcClient = {
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
@@ -68,10 +69,10 @@ function install(stored: Conversations): void {
           })
         })
       }
-      if (channel === 'ai:query') {
+      if (channel === 'ai:agent') {
         return new Promise<Output<C>>((resolve) => {
           queries.push({
-            input: input as Input<'ai:query'>,
+            input: input as Input<'ai:agent'>,
             resolve: (result) => resolve(result as Output<C>)
           })
         })
@@ -512,14 +513,18 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     ]
   })
 
-  const queryOk = (requestId: string): AiQueryResult => ({
+  const queryOk = (requestId: string): AiAgentResult => ({
     ok: true,
     answer: ANSWER,
-    found: true,
-    uncited: false,
-    citations: [CITATION],
-    sheets: [],
-    also: [{ nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' }],
+    query: {
+      found: true,
+      uncited: false,
+      citations: [CITATION],
+      sheets: [],
+      also: [{ nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' }]
+    },
+    steps: [{ tool: 'search', label: 'Searching “crossing”…' }],
+    changes: [],
     dropped: 2,
     usage: { inputTokens: 900, outputTokens: 60 },
     costUsd: 0.0009,
@@ -549,25 +554,28 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     expect(query).toBeDisabled()
     expect(query).toHaveAttribute(
       'title',
-      'Query needs the AI switch at Ask or Auto, with Story Intelligence on (Settings, AI tab)'
+      'Query needs the AI switch at Ask or Auto, with Assistant lookups and edits on (Settings, AI tab)'
     )
     expect(screen.queryByTestId('assistant-mode-off')).not.toBeInTheDocument()
     act(() =>
       useAiSettingsStore.setState({
-        settings: settings({ dial: 1, features: { ...defaultAiSettings().features, query: false } })
+        settings: settings({ dial: 1, features: { ...defaultAiSettings().features, agent: false } })
       })
     )
     expect(query).toBeDisabled()
     // A conversation already in Query mode (the F-5.8 default) says why Send is off.
     act(() => useAssistantStore.getState().setMode('query'))
     expect(screen.getByTestId('assistant-mode-off')).toHaveTextContent(
-      'Query needs the AI switch at Ask or Auto, with Story Intelligence on (Settings, AI tab). Pick another mode to keep going.'
+      'Query needs the AI switch at Ask or Auto, with Assistant lookups and edits on (Settings, AI tab). Pick another mode to keep going.'
     )
     expect(sendButton()).toBeDisabled()
     act(() => useAiSettingsStore.setState({ settings: settings({ dial: 1 }) }))
     expect(query).toBeEnabled()
     expect(screen.queryByTestId('assistant-mode-off')).not.toBeInTheDocument()
-    expect(query).toHaveAttribute('title', 'Ask about the whole manuscript; answers cite scenes')
+    expect(query).toHaveAttribute(
+      'title',
+      'Ask about the whole project; it looks things up and cites scenes'
+    )
     await userEvent.click(query)
     expect(query).toHaveAttribute('aria-checked', 'true')
     expect(useAssistantStore.getState().conversations?.items[0]?.mode).toBe('query')
@@ -575,14 +583,26 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     expect(screen.queryByRole('combobox', { name: 'Paragraphs' })).not.toBeInTheDocument()
   })
 
-  it('sends the question on ai:query and shows the answer with its markers, sources, and cost', async () => {
+  it('sends the question to the agent, shows its lookups live, then the answer with its markers, sources, and cost', async () => {
     await mountOpen({ active: 'c-1', items: [conversation({ mode: 'query', messages: [] })] })
     const openScene = spyOnOpenScene()
     await userEvent.type(box(), 'Where does she cross?{Enter}')
     expect(chats).toHaveLength(0)
     expect(queries).toHaveLength(1)
-    expect(queries[0]?.input).toMatchObject({ message: 'Where does she cross?', nodeId: null })
+    expect(queries[0]?.input).toMatchObject({
+      message: 'Where does she cross?',
+      nodeId: null,
+      access: 'read'
+    })
     expect(within(turns()[1]!).getByTestId('chat-pending')).toBeInTheDocument()
+    act(() =>
+      useAssistantStore.setState({
+        agentSteps: {
+          [queries[0]?.input.requestId ?? '']: [{ tool: 'search', label: 'Searching “crossing”…' }]
+        }
+      })
+    )
+    expect(within(turns()[1]!).getByTestId('agent-step')).toHaveTextContent('Searching “crossing”…')
 
     await act(async () => {
       queries[0]?.resolve(queryOk(queries[0].input.requestId))
@@ -669,6 +689,107 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     const turn = turns()[1]!
     expect(within(turn).getAllByTestId('query-cite')).toHaveLength(1)
     expect(turn).toHaveTextContent('She crosses [1] at dawn [4].')
+  })
+})
+
+describe('AssistantPanel agent edits (F-5.22)', () => {
+  const TEXT_EDIT = {
+    kind: 'text',
+    nodeId: 'sc-1',
+    title: 'Chapter 1 › Scene 1',
+    find: 'Mara climbed the ridge alone.',
+    replace: 'Mara went up the ridge alone.'
+  } as const
+  const DELETE = { kind: 'delete', target: 'node', id: 'sc-2', name: 'Scene 2' } as const
+
+  const withChanges = (changes: AgentChange[]): Conversations => ({
+    active: 'c-1',
+    items: [
+      conversation({
+        messages: [
+          message('m-1', 'user', 'Tighten the ridge line.'),
+          message('m-2', 'assistant', 'Here is a tighter line.', {
+            mode: 'plan',
+            model: 'gpt-fake',
+            costUsd: 0.002,
+            proposalId: 'p-2',
+            agent: {
+              access: 'write',
+              steps: [{ tool: 'read_scene', label: 'Reading Chapter 1 › Scene 1…' }],
+              changes
+            }
+          })
+        ]
+      })
+    ]
+  })
+
+  const change = (
+    id: string,
+    edit: AgentChange['edit'],
+    over: Partial<AgentChange> = {}
+  ): AgentChange => ({
+    id,
+    edit,
+    status: 'pending',
+    violation: null,
+    error: null,
+    ...over
+  })
+
+  it('shows a pending edit with the removed text struck and the added text marked, Apply and Skip, and a deletion that says so', async () => {
+    await mountOpen(withChanges([change('e-1', TEXT_EDIT), change('e-2', DELETE)]))
+    const turn = turns()[1]!
+    expect(within(turn).getByText('Looked up one thing')).toBeInTheDocument()
+    const cards = within(turn).getAllByTestId('agent-change')
+    expect(cards).toHaveLength(2)
+    expect(cards[0]).toHaveTextContent('Changed Chapter 1 › Scene 1')
+    const diff = within(cards[0]!).getByTestId('agent-change-diff')
+    expect(diff.querySelector('del')).toHaveTextContent('climbed')
+    expect(diff.querySelector('ins')).toHaveTextContent('went')
+    expect(within(cards[0]!).getByTestId('agent-change-apply')).toHaveTextContent('Apply')
+    expect(cards[1]).toHaveTextContent('Delete Scene 2')
+    expect(cards[1]).toHaveTextContent('This deletes; it always asks first, even at Auto.')
+    expect(within(cards[1]!).getByTestId('agent-change-apply')).toHaveTextContent('Delete')
+    // One waiting edit besides the deletion: no Apply all.
+    expect(within(turn).queryByTestId('agent-apply-all')).not.toBeInTheDocument()
+
+    await userEvent.click(within(cards[1]!).getByTestId('agent-change-skip'))
+    const skipped = within(turns()[1]!).getAllByTestId('agent-change')[1]!
+    expect(skipped).toHaveAttribute('data-status', 'skipped')
+    expect(skipped).toHaveTextContent('Skipped: Delete Scene 2')
+  })
+
+  it('logs applied and failed edits as lines, offers Apply all for two waiting, and flags an off-voice one', async () => {
+    await mountOpen(
+      withChanges([
+        change('e-1', TEXT_EDIT, { status: 'applied' }),
+        change(
+          'e-2',
+          { ...TEXT_EDIT, find: 'Nobody followed.' },
+          { status: 'failed', error: 'The passage is no longer in the scene' }
+        ),
+        change('e-3', { kind: 'rename', nodeId: 'sc-1', title: 'Scene 1', after: 'The ridge' }),
+        change(
+          'e-4',
+          { kind: 'synopsis', nodeId: 'sc-1', title: 'Scene 1', before: '', after: 'Mara climbs.' },
+          { violation: 'uses a banned phrase' }
+        )
+      ])
+    )
+    const cards = within(turns()[1]!).getAllByTestId('agent-change')
+    expect(cards[0]).toHaveTextContent(
+      'Changed Chapter 1 › Scene 1: “Mara went up the ridge alone.”'
+    )
+    // The undo lives in memory: a turn from another session offers none.
+    expect(within(cards[0]!).queryByTestId('agent-change-undo')).not.toBeInTheDocument()
+    expect(cards[1]).toHaveTextContent(
+      'Could not apply: Changed Chapter 1 › Scene 1 (The passage is no longer in the scene)'
+    )
+    expect(within(cards[3]!).getByTestId('agent-change-flag')).toHaveTextContent(
+      'uses a banned phrase'
+    )
+    expect(within(turns()[1]!).getByTestId('agent-apply-all')).toBeInTheDocument()
   })
 })
 

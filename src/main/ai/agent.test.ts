@@ -199,6 +199,22 @@ describe('runAgent (F-5.22)', () => {
     expect(result.query).toMatchObject({ found: true, uncited: true, citations: [] })
   })
 
+  it('keeps a cited sheet the project has, so an answer from the author’s notes is not uncited', async () => {
+    createEntity(db, { kind: 'character', name: 'Wren', fields: { appearance: 'Grey eyes.' } })
+    replies({
+      answer: 'Wren has grey eyes [1].',
+      found: true,
+      citations: [{ sheet: 'Wren' }, { sheet: 'Nobody' }]
+    })
+    const result = await run()
+    expect(result.query).toMatchObject({
+      uncited: false,
+      citations: [],
+      sheets: [{ name: 'Wren', kind: 'character' }]
+    })
+    expect(result.dropped).toBe(1)
+  })
+
   it('tells the model when a tool or an id names nothing, and keeps going', async () => {
     replies(
       { tool: 'teleport', args: {} },

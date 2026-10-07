@@ -75,3 +75,25 @@ export function locateText(
   if (!first || !last || first.pos < 0 || last.pos < 0) return null
   return { from: first.pos, to: last.pos + 1 }
 }
+
+/**
+ * Where `passage` sits when the document holds it exactly once (F-5.22: an edit the chat agent
+ * proposes names its passage by its text); `missing` or `ambiguous` otherwise. The same
+ * normalization as `locateText`.
+ */
+export function locateUniqueText(
+  doc: PmNode,
+  passage: string
+): TextRange | 'missing' | 'ambiguous' {
+  const needle = normalizeForMatch(passage)
+  if (needle === '') return 'missing'
+  const entries = scan(doc)
+  const haystack = entries.map((entry) => entry.char).join('')
+  const at = haystack.indexOf(needle)
+  if (at === -1) return 'missing'
+  if (haystack.includes(needle, at + 1)) return 'ambiguous'
+  const first = entries[at]
+  const last = entries[at + needle.length - 1]
+  if (!first || !last || first.pos < 0 || last.pos < 0) return 'missing'
+  return { from: first.pos, to: last.pos + 1 }
+}

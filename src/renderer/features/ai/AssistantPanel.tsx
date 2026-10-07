@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useEditorState } from '@tiptap/react'
 import { MessageSquare, Plus, Quote, Send, Square, X } from 'lucide-react'
 import { AI_FEATURE_IDS, type AiFeatureId } from '@shared/ai'
+import type { AgentStep } from '@shared/agent'
 import { ROUTE_ACTION_LABEL } from '@shared/assistantRoute'
 import { SUGGESTION_ROTATE_MS, assistantSuggestions } from '@shared/assistantSuggestions'
 import {
@@ -34,6 +35,7 @@ import { DockPanelControls } from '@renderer/features/shell/Dock'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { CONVERSATION_BUSY_MESSAGE, useOpenScene } from './aiActions'
+import { AgentChanges, AgentSteps } from './AgentTurn'
 import { AiResults } from './AiResults'
 import { AiSwitchControl } from './AiSwitchControl'
 import { useAiSettingsStore } from './aiSettingsStore'
@@ -316,15 +318,20 @@ function MessageLog(): React.JSX.Element {
     conversation ? s.pending[conversation.id] !== undefined : false
   )
   const cached = useAssistantStore((s) => s.cached)
+  const liveSteps = useAssistantStore((s) => {
+    const requestId = conversation ? s.pending[conversation.id] : undefined
+    return requestId === undefined ? undefined : s.agentSteps[requestId]
+  })
   const log = useRef<HTMLDivElement>(null)
   const messages = conversation?.messages ?? []
   const lastId = messages[messages.length - 1]?.id ?? null
   const lastLength = messages[messages.length - 1]?.content.length ?? 0
+  const stepCount = liveSteps?.length ?? 0
 
   useEffect(() => {
     const element = log.current
     if (element) element.scrollTop = element.scrollHeight
-  }, [lastId, lastLength])
+  }, [lastId, lastLength, stepCount])
 
   return (
     <div
@@ -336,9 +343,9 @@ function MessageLog(): React.JSX.Element {
     >
       {messages.length === 0 ? (
         <p className="m-auto max-w-64 text-center text-xs leading-relaxed text-fg-subtle">
-          Ask about your story. Auto picks what answers: a chat about the open scene, a cited
-          answer, editor&apos;s notes, a proofread, a rewrite of the selection, and more. Write
-          #name to pull in that tag&apos;s notes.
+          Ask about your story or ask for a change. Auto looks things up in your project, then
+          answers or edits; at Ask every change waits for your Apply. Editor&apos;s notes, a
+          proofread, or a rewrite of the selection work too.
         </p>
       ) : null}
       {messages.map((message, index) => (
@@ -348,6 +355,7 @@ function MessageLog(): React.JSX.Element {
           pending={pending && index === messages.length - 1}
           busy={pending}
           cached={cached[message.id] === true}
+          liveSteps={index === messages.length - 1 ? (liveSteps ?? []) : []}
         />
       ))}
     </div>
@@ -359,19 +367,22 @@ function MessageLog(): React.JSX.Element {
  * has one (`model · cost · cached`, F-4.7's note). An empty assistant turn with a request in
  * flight reads as thinking; an Author turn shows the notice, its text went to the editor; a
  * Query turn (F-5.7) shows its citations through `QueryAnswer`; a What should come next? turn
- * (F-5.17) shows its directions as cards through `Directions`. `busy` is whether the
- * conversation has a request in flight.
+ * (F-5.17) shows its directions as cards through `Directions`. An agent turn (F-5.22) shows
+ * its lookups live while it waits (`liveSteps`), then its answer, the lookups folded away, and
+ * its edits (`AgentChanges`). `busy` is whether the conversation has a request in flight.
  */
 function Turn({
   message,
   pending,
   busy,
-  cached
+  cached,
+  liveSteps
 }: {
   message: ChatMessage
   pending: boolean
   busy: boolean
   cached: boolean
+  liveSteps: readonly AgentStep[]
 }): React.JSX.Element {
   const mine = message.role === 'user'
   return (
@@ -387,9 +398,10 @@ function Turn({
         </p>
       ) : null}
       {!mine && message.content === '' && pending ? (
-        <p role="status" data-testid="chat-pending" className="m-0 text-xs text-fg-muted">
-          Thinking…
-        </p>
+        <div role="status" data-testid="chat-pending" className="flex flex-col gap-0.5">
+          <p className="m-0 text-xs text-fg-muted">Thinking…</p>
+          <AgentSteps steps={liveSteps} live />
+        </div>
       ) : !mine && message.directions !== null ? (
         <Directions directions={message.directions} busy={busy} />
       ) : !mine && message.mode === 'agent' ? (
@@ -399,6 +411,12 @@ function Turn({
       ) : (
         <p className="m-0 break-words whitespace-pre-wrap">{message.content}</p>
       )}
+      {!mine && message.agent !== null ? (
+        <>
+          <AgentSteps steps={message.agent.steps} live={false} />
+          <AgentChanges messageId={message.id} changes={message.agent.changes} />
+        </>
+      ) : null}
       {message.model !== null ? (
         <p data-testid="chat-turn-cost" className="m-0 text-[11px] text-fg-subtle">
           {describeRequest({
@@ -608,10 +626,10 @@ function modeTitle(id: ConversationMode, disabled: boolean): string {
     return 'Pick what answers each message: chat, a cited answer, editor’s notes, a rewrite, and more'
   }
   if (disabled) {
-    return `${needsSwitchText('Query')}, with ${AI_DATA_SHARING.query.label} on (Settings, AI tab)`
+    return `${needsSwitchText('Query')}, with ${AI_DATA_SHARING.agent.label} on (Settings, AI tab)`
   }
   if (id === 'agent') return 'Place the answer in the editor as ghost text'
-  if (id === 'query') return 'Ask about the whole manuscript; answers cite scenes'
+  if (id === 'query') return 'Ask about the whole project; it looks things up and cites scenes'
   return 'Talk through ideas and feedback about the open scene'
 }
 
@@ -646,7 +664,7 @@ function Composer(): React.JSX.Element {
   }, [attachment])
 
   const chatAllowed = settings !== null && isFeatureAllowed(settings, 'chat')
-  const queryAllowed = settings !== null && isFeatureAllowed(settings, 'query')
+  const queryAllowed = settings !== null && isFeatureAllowed(settings, 'agent')
   const modeOff = (id: ConversationMode): boolean => id === 'query' && !queryAllowed
   const mode = conversation?.mode ?? 'auto'
   const canSend =

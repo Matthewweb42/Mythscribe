@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import type { Editor } from '@tiptap/core'
 import {
+  AGENT_CARET_CHARS,
+  AGENT_SELECTION_CHARS,
+  isDeletion,
+  type AgentAccess,
+  type AgentChange,
+  type AgentFocus,
+  type AgentStep
+} from '@shared/agent'
+import {
   ROUTE_HISTORY_TURNS,
   ROUTE_SELECTION_PREVIEW_CHARS,
   type RouteAction
@@ -19,8 +28,8 @@ import {
   type ConversationMode
 } from '@shared/chat'
 import type {
+  AiAgentResult,
   AiChatResult,
-  AiQueryResult,
   AiRouteResult,
   AiWhatNextResult,
   Input
@@ -49,6 +58,7 @@ import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
+import { applyAgentEdit } from './agentApply'
 import {
   aiActionReason,
   openSceneNow,
@@ -89,11 +99,15 @@ export { OPEN_SCENE_TIMEOUT_MS, PASSAGE_GONE_MESSAGE }
  * the model, cost, and proposal id when the request resolves. An Author answer never enters the
  * chat: it goes to the active editor as ghost text (F-5.3), marked with its proposal on accept
  * (F-14.6) and settled through the ghost's own exit (F-14.5); the chat records a notice turn.
- * A Query answer (F-5.7) comes back whole, not streamed, and rides on its turn as `query`: the
- * citations main verified, the ranked scenes it did not cite, and the two flags the panel
- * shows; `openScene` opens a cited scene and selects the passage.
+ * A Query turn and an Auto turn the router sends to chat or query run the chat agent (F-5.22,
+ * `ai:agent`): main looks things up in the project (each lookup shows on the waiting turn from
+ * `ai:agentStep`), then the answer comes back whole and rides on its turn as `query` (the
+ * citations main verified and the two flags the panel shows) and `agent` (the lookups and the
+ * edits, each pending, applied, skipped, undone, or failed). At Ask each edit waits for Apply;
+ * at Auto every edit but a deletion or an off-voice one is applied at once, with its Undo held
+ * in memory for the session. `openScene` opens a cited scene and selects the passage.
  * The quick actions (F-5.17) write into the active conversation through the same turns:
- * `recap` is a Query turn with a fixed question that pins the open scene first, `whatNext`
+ * `recap` is a Query turn with a fixed question about the open scene, `whatNext`
  * asks `ai:whatNext` and records the directions on the assistant turn, and `writeDirection`
  * sends one of them as an Author turn, so it lands as ghost text. One busy rule covers them
  * all: nothing new starts while the active conversation has a request in flight.
@@ -116,6 +130,10 @@ interface AssistantState {
   pending: Record<string, string>
   /** Message ids answered from the local cache this session (the cost line says so; not persisted). */
   cached: Record<string, true>
+  /** The lookups of each agent turn still on its way, by request id (F-5.22; not persisted). */
+  agentSteps: Record<string, AgentStep[]>
+  /** The agent edits being applied or undone right now, by change id. */
+  changing: Record<string, true>
   load: () => Promise<void>
   /** The selected passage Ask AI attached to the composer (2026-10-06), or null. */
   attachment: string | null
@@ -134,8 +152,8 @@ interface AssistantState {
   /**
    * Sends one turn in the active conversation; ignored while one is in flight or for a blank
    * message. `override.mode` runs this turn in another mode than the conversation's (the
-   * conversation keeps its own); `override.pinActive` asks a Query turn to rank the open scene
-   * first (F-5.17).
+   * conversation keeps its own). A Query turn (F-5.22: the agent, read-only) always carries the
+   * open document, so the recap of F-5.17 needs nothing more to be about it.
    */
   send: (message: string, override?: SendOverride) => Promise<void>
   /**
@@ -155,15 +173,26 @@ interface AssistantState {
    * it. A quote the scene no longer holds toasts; a null quote just opens the scene.
    */
   openScene: (ref: QuerySceneRef, quote: string | null) => Promise<void>
+  /**
+   * Applies one pending edit of an agent turn (F-5.22): the Ask view's Apply, and what Auto does
+   * on its own for every edit that is neither a deletion nor off-voice. The turn records the
+   * outcome; a failure stays on the line with its reason.
+   */
+  applyChange: (messageId: string, changeId: string) => Promise<void>
+  /** Apply all remaining: the turn's pending edits but its deletions, one after the other. */
+  applyAll: (messageId: string) => Promise<void>
+  /** Skips a pending edit; nothing changes in the book. */
+  skipChange: (messageId: string, changeId: string) => void
+  /** Takes an applied edit back (this session only: the undo lives in memory). */
+  undoChange: (messageId: string, changeId: string) => Promise<void>
 }
 
 /**
- * A turn sent in another mode than its conversation's, or a Query turn pinned to the open scene.
- * A turn with an override never carries the composer's attachment.
+ * A turn sent in another mode than its conversation's. A turn with an override never carries
+ * the composer's attachment.
  */
 export interface SendOverride {
   mode?: ChatMode
-  pinActive?: boolean
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -173,7 +202,10 @@ let persisted: Conversations | null = null
 let generation = 0
 let unregister: (() => void) | null = null
 let unsubscribe: (() => void) | null = null
+let unsubscribeSteps: (() => void) | null = null
 let counter = 0
+/** Change id → how to take an applied agent edit back; gone with the session or the project. */
+const undoers = new Map<string, () => Promise<void>>()
 
 const nextId = (prefix: string): string => `${prefix}-${Date.now().toString(36)}-${++counter}`
 
@@ -267,6 +299,28 @@ const turn = (role: ChatMessage['role'], content: string, mode: ChatMode | null)
   action: null,
   agent: null
 })
+
+/** Records one lookup of an agent turn on its way, under the request it belongs to. */
+function onAgentStep({ requestId, step }: { requestId: string; step: AgentStep }): void {
+  if (conversationOfRequest(requestId) === null) return
+  useAssistantStore.setState((s) => ({
+    agentSteps: { ...s.agentSteps, [requestId]: [...(s.agentSteps[requestId] ?? []), step] }
+  }))
+}
+
+function dropSteps(requestId: string): void {
+  useAssistantStore.setState((s) => {
+    if (s.agentSteps[requestId] === undefined) return {}
+    const agentSteps = { ...s.agentSteps }
+    delete agentSteps[requestId]
+    return { agentSteps }
+  })
+}
+
+/** Whether `undoChange` can still take this change back (its undo lives in memory). */
+export function canUndoChange(changeId: string): boolean {
+  return undoers.has(changeId)
+}
 
 /** `value` with the active conversation replaced by `patch(conversation)`, its `modified` bumped. */
 function patchActive(
@@ -406,6 +460,8 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   conversations: null,
   pending: {},
   cached: {},
+  agentSteps: {},
+  changing: {},
   attachment: null,
 
   attach(text) {
@@ -427,6 +483,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   async load() {
     unregister ??= registerPendingSave(flush)
     unsubscribe ??= ipc().on('ai:chatDelta', onDelta)
+    unsubscribeSteps ??= ipc().on('ai:agentStep', onAgentStep)
     const mine = ++generation
     const value = await ipc().invoke('conversations:get', undefined)
     if (mine !== generation) return
@@ -442,7 +499,17 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     unregister = null
     unsubscribe?.()
     unsubscribe = null
-    set({ conversations: null, pending: {}, cached: {}, attachment: null })
+    unsubscribeSteps?.()
+    unsubscribeSteps = null
+    undoers.clear()
+    set({
+      conversations: null,
+      pending: {},
+      cached: {},
+      agentSteps: {},
+      changing: {},
+      attachment: null
+    })
   },
 
   newConversation() {
@@ -514,17 +581,12 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     )
     const nodeId = useActiveEditorStore.getState().active?.id ?? null
     if (mode === 'auto') {
-      await routeTurn(id, requestId, text, history, paragraphs)
+      await routeTurn(id, requestId, text, history)
       return
     }
     if (mode === 'query') {
-      await sendQuery(id, {
-        nodeId,
-        message: text,
-        history,
-        requestId,
-        ...(override?.pinActive === true ? { pinActive: true } : {})
-      })
+      // The open document always rides along with an agent turn, so a pinned recap needs no more.
+      await runAgentTurn(id, requestId, 'read', { nodeId, message: text, history })
       return
     }
     await runChat(id, requestId, { nodeId, mode, paragraphs, message: text, history, requestId })
@@ -560,7 +622,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   async recap() {
     const active = liveEditor()
     const selection = active === null ? null : selectedText(active.editor)
-    await get().send(recapQuestion(selection), { mode: 'query', pinActive: true })
+    await get().send(recapQuestion(selection), { mode: 'query' })
   },
 
   async writeDirection(direction) {
@@ -576,6 +638,55 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     // The turn leaves now, so the author can resend at once; the cancelled reply finds nothing pending.
     settleFailure(id, requestId, null)
     void useAiActivityStore.getState().cancel(requestId)
+  },
+
+  async applyChange(messageId, changeId) {
+    const found = findChange(messageId, changeId)
+    if (found?.change.status !== 'pending' || get().changing[changeId]) return
+    setChanging(changeId, true)
+    try {
+      const undo = await applyAgentEdit(found.change.edit, found.message.proposalId ?? '')
+      if (undo !== null) undoers.set(changeId, undo)
+      patchChange(messageId, changeId, { status: 'applied', error: null })
+    } catch (err) {
+      patchChange(messageId, changeId, { status: 'failed', error: describeError(err) })
+    } finally {
+      setChanging(changeId, false)
+    }
+    settleChanges(messageId)
+  },
+
+  async applyAll(messageId) {
+    const found = findMessage(messageId)
+    // Deletions are never part of it: each asks on its own (F-5.21).
+    const ids = (found?.agent?.changes ?? [])
+      .filter((change) => change.status === 'pending' && !isDeletion(change.edit))
+      .map((change) => change.id)
+    for (const changeId of ids) await get().applyChange(messageId, changeId)
+  },
+
+  skipChange(messageId, changeId) {
+    const found = findChange(messageId, changeId)
+    if (found?.change.status !== 'pending' || get().changing[changeId]) return
+    patchChange(messageId, changeId, { status: 'skipped' })
+    settleChanges(messageId)
+  },
+
+  async undoChange(messageId, changeId) {
+    const found = findChange(messageId, changeId)
+    const undo = undoers.get(changeId)
+    if (found?.change.status !== 'applied' || undo === undefined) return
+    if (get().changing[changeId]) return
+    setChanging(changeId, true)
+    try {
+      await undo()
+      undoers.delete(changeId)
+      patchChange(messageId, changeId, { status: 'undone', error: null })
+    } catch (err) {
+      toast.error(describeError(err))
+    } finally {
+      setChanging(changeId, false)
+    }
   },
 
   async openScene(ref, quote) {
@@ -742,8 +853,7 @@ async function routeTurn(
   id: string,
   requestId: string,
   text: string,
-  history: Input<'ai:chat'>['history'],
-  paragraphs: number
+  history: Input<'ai:chat'>['history']
 ): Promise<void> {
   const open = openSceneNow()
   const { editor } = open
@@ -786,7 +896,7 @@ async function routeTurn(
     )
     return
   }
-  await dispatchRoute(id, { action, instruction, cost, text, history, paragraphs, open })
+  await dispatchRoute(id, { action, instruction, cost, text, history, open })
 }
 
 /** What the router decided for one Auto turn, and what the turn carries into the feature. */
@@ -797,32 +907,23 @@ interface RoutedTurn {
   cost: Partial<ChatMessage>
   text: string
   history: Input<'ai:chat'>['history']
-  paragraphs: number
   open: OpenScene
 }
 
 /** Runs the feature the router picked on conversation `id`'s turn pair, labelled with the action. */
 async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
-  const { action, instruction, cost, text, history, paragraphs, open } = routed
+  const { action, instruction, cost, text, history, open } = routed
   const { editor, nodeId } = open
   switch (action) {
     case 'chat': {
+      // F-5.22: the chat is the agent, which may look things up and edit the book.
       patchLastTurn(id, { action, mode: 'plan' })
-      const requestId = nextRequest(id)
-      await runChat(id, requestId, {
-        nodeId,
-        mode: 'plan',
-        paragraphs,
-        message: text,
-        history,
-        requestId
-      })
+      await runAgentTurn(id, nextRequest(id), 'write', { nodeId, message: text, history })
       return
     }
     case 'query': {
       patchLastTurn(id, { action, mode: 'query' })
-      const requestId = nextRequest(id)
-      await sendQuery(id, { nodeId, message: text, history, requestId })
+      await runAgentTurn(id, nextRequest(id), 'read', { nodeId, message: text, history })
       return
     }
     case 'whatNext': {
@@ -859,25 +960,58 @@ async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
   }
 }
 
+/** The open document's caret window and selection, as an agent turn carries them (F-5.22). */
+function focusOf(): AgentFocus {
+  const active = liveEditor()
+  if (active === null) return { beforeCaret: '', selection: '' }
+  const { doc, selection } = active.editor.state
+  return {
+    beforeCaret: doc.textBetween(0, selection.from, '\n\n').slice(-AGENT_CARET_CHARS),
+    selection: selection.empty
+      ? ''
+      : doc.textBetween(selection.from, selection.to, '\n\n').slice(0, AGENT_SELECTION_CHARS)
+  }
+}
+
+/** What an agent turn asks about, beside its access. */
+interface AgentAsk {
+  nodeId: string | null
+  message: string
+  history: Input<'ai:agent'>['history']
+}
+
 /**
- * One Query turn (F-5.7): main ranks the manuscript's scenes, answers with the citations it
- * verified, and the answer lands whole in the chat (nothing streams, nothing enters the
- * manuscript). Failures settle exactly as a Plan turn's do.
+ * One chat agent turn (F-5.22) on the turn pair already in conversation `id`: main looks things
+ * up (each lookup shows on the pending turn as it starts), then answers; the answer lands whole
+ * with its verified citations (shown as a Query answer) and its edits, each pending. With the
+ * switch at Auto, every edit that is neither a deletion nor off-voice is then applied, one after
+ * the other, and logged on the turn with its Undo; the rest wait for Apply. Failures settle as a
+ * Plan turn's do.
  */
-async function sendQuery(id: string, input: Input<'ai:query'>): Promise<void> {
-  const { requestId } = input
-  let result: AiQueryResult
+async function runAgentTurn(
+  id: string,
+  requestId: string,
+  access: AgentAccess,
+  ask: AgentAsk
+): Promise<void> {
+  let result: AiAgentResult
   try {
-    // Main searches the saved manuscript: the words typed just before asking go first.
+    // Main reads the saved book: the words typed just before asking go first.
     await useDocumentStore.getState().flush()
     if (useAssistantStore.getState().pending[id] !== requestId) return // stopped while saving
     result = await useAiActivityStore
       .getState()
-      .track('query', requestId, ipc().invoke('ai:query', input))
+      .track(
+        'agent',
+        requestId,
+        ipc().invoke('ai:agent', { ...ask, access, focus: focusOf(), requestId })
+      )
   } catch (err) {
+    dropSteps(requestId)
     settleFailure(id, requestId, describeError(err))
     return
   }
+  dropSteps(requestId)
   if (useAssistantStore.getState().pending[id] !== requestId) {
     // The conversation was closed or the store cleared meanwhile: nothing shows the answer.
     if (result.ok) void proposalStore.settle(result.proposalId, 'rejected', null)
@@ -891,6 +1025,18 @@ async function sendQuery(id: string, input: Input<'ai:query'>): Promise<void> {
     )
     return
   }
+  const changes: AgentChange[] = result.changes.map((change) => ({
+    id: nextId('e'),
+    edit: change.edit,
+    status: 'pending',
+    violation: change.violation,
+    error: null
+  }))
+  const messageId =
+    useAssistantStore
+      .getState()
+      .conversations?.items.find((c) => c.id === id)
+      ?.messages.at(-1)?.id ?? null
   finishTurn(
     id,
     {
@@ -899,16 +1045,92 @@ async function sendQuery(id: string, input: Input<'ai:query'>): Promise<void> {
       costUsd: result.costUsd,
       usage: result.usage,
       proposalId: result.proposalId,
-      query: {
-        found: result.found,
-        uncited: result.uncited,
-        citations: result.citations,
-        sheets: result.sheets,
-        also: result.also
-      }
+      query: result.query,
+      agent: { access, steps: result.steps, changes }
     },
     result.cached
   )
+  if (messageId === null || useAiSettingsStore.getState().settings?.auto !== true) return
+  const store = useAssistantStore.getState()
+  for (const change of changes) {
+    if (isDeletion(change.edit) || change.violation !== null) continue
+    await store.applyChange(messageId, change.id)
+  }
+}
+
+/** The message `messageId` in whichever conversation holds it, or null. */
+function findMessage(messageId: string): ChatMessage | null {
+  for (const conversation of useAssistantStore.getState().conversations?.items ?? []) {
+    const message = conversation.messages.find((m) => m.id === messageId)
+    if (message) return message
+  }
+  return null
+}
+
+function findChange(
+  messageId: string,
+  changeId: string
+): { message: ChatMessage; change: AgentChange } | null {
+  const message = findMessage(messageId)
+  const change = message?.agent?.changes.find((c) => c.id === changeId)
+  return message && change ? { message, change } : null
+}
+
+/** Records where one edit of an agent turn stands. */
+function patchChange(
+  messageId: string,
+  changeId: string,
+  patch: Partial<Pick<AgentChange, 'status' | 'error'>>
+): void {
+  const value = useAssistantStore.getState().conversations
+  if (value === null) return
+  commit({
+    ...value,
+    items: value.items.map((conversation) =>
+      conversation.messages.some((m) => m.id === messageId)
+        ? {
+            ...conversation,
+            messages: conversation.messages.map((m) =>
+              m.id === messageId && m.agent
+                ? {
+                    ...m,
+                    agent: {
+                      ...m.agent,
+                      changes: m.agent.changes.map((c) =>
+                        c.id === changeId ? { ...c, ...patch } : c
+                      )
+                    }
+                  }
+                : m
+            )
+          }
+        : conversation
+    )
+  })
+}
+
+function setChanging(changeId: string, on: boolean): void {
+  useAssistantStore.setState((s) => {
+    const changing = { ...s.changing }
+    if (on) changing[changeId] = true
+    else delete changing[changeId]
+    return { changing }
+  })
+}
+
+/**
+ * Settles an agent turn's proposal (F-14.5) once none of its edits waits any longer: every edit
+ * applied is `accepted`, some `acceptedPart`, none `rejected`. A turn without edits stays
+ * pending, as an answer that changed nothing does.
+ */
+function settleChanges(messageId: string): void {
+  const message = findMessage(messageId)
+  const changes = message?.agent?.changes ?? []
+  if (message?.proposalId == null || changes.length === 0) return
+  if (changes.some((c) => c.status === 'pending')) return
+  const applied = changes.filter((c) => c.status === 'applied' || c.status === 'undone').length
+  const status = applied === changes.length ? 'accepted' : applied > 0 ? 'acceptedPart' : 'rejected'
+  void proposalStore.settle(message.proposalId, status, null)
 }
 
 /**

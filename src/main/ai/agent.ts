@@ -17,6 +17,7 @@ import {
   QUERY_QUOTE_MAX,
   stripDanglingMarkers,
   type QueryCitation,
+  type QuerySheetRef,
   type QueryTurn
 } from '@shared/query'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
@@ -30,6 +31,7 @@ import {
   nodeByRef,
   resolveAgentEdit,
   runAgentTool,
+  sheetByName,
   type AgentProject
 } from './agentTools'
 import { checkChatFidelity } from './chat'
@@ -143,7 +145,8 @@ export function parseAgentReply(text: string): AgentReply {
  * history. After `AGENT_MAX_STEPS` lookups, or once the run has spent `AGENT_COST_CAP_USD`, the
  * model is told to answer at once. A write run carries the voice block, and every edit's prose
  * is checked against the profile (F-14.7): an off-voice edit is offered flagged, never applied
- * on its own. Citations are kept only when the cited document holds the quote; edits only when
+ * on its own. Citations are kept only when the cited document holds the quote (a cited sheet
+ * only when the project has it; the chat lists it under "From your notes"); edits only when
  * `resolveAgentEdit` can place them. Nothing is written here.
  *
  * Cancel (F-5.10): the run registers `requestId` itself, and an abort of it stops the step in
@@ -299,8 +302,18 @@ function finishAnswer(
 ): Pick<AgentResult, 'answer' | 'query' | 'changes' | 'dropped'> {
   let dropped = 0
   const citations: QueryCitation[] = []
+  const sheets: QuerySheetRef[] = []
   reply.citations.slice(0, AGENT_MAX_CITATIONS).forEach((raw, index) => {
     const cite = asRecord(raw)
+    if (typeof cite.sheet === 'string') {
+      const entity = sheetByName(project, cite.sheet)
+      if (entity === undefined || sheets.some((sheet) => sheet.entityId === entity.id)) {
+        dropped++
+        return
+      }
+      sheets.push({ entityId: entity.id, name: entity.name, kind: entity.kind })
+      return
+    }
     const row = nodeByRef(project, cite.id)
     const quote = typeof cite.quote === 'string' ? cite.quote.trim() : ''
     if (row?.kind !== 'document' || quote === '' || !findQuote(documentText(row), quote)) {
@@ -320,12 +333,13 @@ function finishAnswer(
     citations.map((c) => c.scene)
   )
   const query: QueryTurn | null =
-    access === 'read' || citations.length > 0
+    access === 'read' || citations.length > 0 || sheets.length > 0
       ? {
           found: reply.found,
-          uncited: access === 'read' && reply.found && citations.length === 0,
+          uncited:
+            access === 'read' && reply.found && citations.length === 0 && sheets.length === 0,
           citations,
-          sheets: [],
+          sheets,
           also: []
         }
       : null

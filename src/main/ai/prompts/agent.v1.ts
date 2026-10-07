@@ -36,8 +36,9 @@ export const AGENT_RULES =
   '- list_sheets {"kind"}: sheet names; kind is character, setting, world, or "" for all.\n' +
   '- tags {}: the tag names by category.\n' +
   `At most ${AGENT_MAX_STEPS} tool calls, then reply. Ground what you say about the book in text ` +
-  'you read: cite a passage as {"id","quote"} with the quote copied exactly, and mark it in the ' +
-  'answer as [1], [2] in citation order. If the project does not answer the question, say so ' +
+  'you read: cite a passage as {"id","quote"} with the quote copied exactly, or a sheet you read ' +
+  'as {"sheet":"name"}, and mark each in the answer as [1], [2] in citation order. If the ' +
+  'project does not answer the question, say so ' +
   'and set "found" to false. The answer is plain prose for the author.'
 
 /** What a write run adds to the rules: the edits it may propose. */

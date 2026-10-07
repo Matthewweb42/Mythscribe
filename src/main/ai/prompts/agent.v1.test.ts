@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { estimateTokens, outputBudget } from '@shared/ai'
 import { AGENT_TOOLS } from '@shared/agent'
@@ -22,6 +24,13 @@ const FOCUS = renderAgentFocus({
 })
 
 describe('agent.v1 prompt (F-5.22)', () => {
+  it("pins the e2e fake server's CHAT_AGENT_SENTINEL to this version's opening (the e2e tsconfig cannot import from src/main)", () => {
+    const spec = readFileSync(join(__dirname, '../../../../e2e/smoke.spec.ts'), 'utf8')
+    const match = /const CHAT_AGENT_SENTINEL =\s*"([^"]+)"/.exec(spec)
+    if (!match) throw new Error('e2e/smoke.spec.ts no longer declares CHAT_AGENT_SENTINEL')
+    expect(AGENT_RULES.startsWith(match[1]!)).toBe(true)
+  })
+
   it('lists every tool in the stable rules and asks for one JSON object', () => {
     expect(AGENT_PROMPT_VERSION).toBe('agent.v1')
     for (const tool of AGENT_TOOLS) expect(AGENT_RULES).toContain(`- ${tool} {`)
@@ -91,4 +100,4 @@ describe('agent.v1 prompt (F-5.22)', () => {
 })
 
 /** The estimate of the full rules (read rules plus edit rules) when agent.v1 shipped. */
-const GOLDEN_RULES_TOKENS = 667
+const GOLDEN_RULES_TOKENS = 678
