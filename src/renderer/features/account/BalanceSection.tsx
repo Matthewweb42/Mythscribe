@@ -3,7 +3,12 @@ import type { CreditsResult, LedgerEntryType, PricingResult, UsageEntry } from '
 import { MICROS_PER_USD } from '@shared/cloudBilling'
 import { creditWarning, periodSpentMicros, projectedDaysLeft } from '@shared/cloudUsage'
 import { multiplierLabel, WORD_COST_ACTIONS, wordsCovered } from '@shared/hostedPricing'
-import { featureLabel, formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
+import {
+  featureLabel,
+  formatCount,
+  formatRequestCost,
+  formatUsd
+} from '@renderer/features/ai/usageFormat'
 import { useAccountStore } from './accountStore'
 import {
   creditWarningText,
@@ -36,9 +41,14 @@ const entryAction = (entry: UsageEntry): string =>
 const entryDate = (at: number): string =>
   new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
-/** A signed amount: "+$10.00" for money in, "−$0.01" for a charge. */
-const signedUsd = (micros: number): string =>
-  `${micros < 0 ? '−' : '+'}${formatUsd(Math.abs(micros) / MICROS_PER_USD)}`
+/**
+ * A signed amount: "+$10.00" for money in, "−$0.0021" for a charge (a single request is well under
+ * a cent, so it gets the four decimals the line under an answer uses).
+ */
+const signedUsd = (micros: number): string => {
+  const usd = Math.abs(micros) / MICROS_PER_USD
+  return `${micros < 0 ? '−' : '+'}${usd < 0.01 ? formatRequestCost(usd) : formatUsd(usd)}`
+}
 
 /**
  * The MythScribe Cloud balance of the signed-in account (F-15.3, AI-BILLING-SPEC E1–E7, C2–C4):
@@ -352,7 +362,7 @@ function UsageHistory(): React.JSX.Element {
               <th scope="col" className="text-right font-normal">
                 Tokens in / out
               </th>
-              <th scope="col" className="text-right font-normal">
+              <th scope="col" className="pl-3 text-right font-normal">
                 Amount
               </th>
             </tr>
@@ -368,7 +378,7 @@ function UsageHistory(): React.JSX.Element {
                     ? '—'
                     : `${formatCount(entry.tokensIn)} / ${formatCount(entry.tokensOut ?? 0)}`}
                 </td>
-                <td className="text-right tabular-nums">{signedUsd(entry.amountMicros)}</td>
+                <td className="pl-3 text-right tabular-nums">{signedUsd(entry.amountMicros)}</td>
               </tr>
             ))}
           </tbody>
