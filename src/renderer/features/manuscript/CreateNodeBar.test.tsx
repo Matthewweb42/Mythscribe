@@ -69,13 +69,21 @@ describe('CreateNodeBar', () => {
     expect(button('New part')).toBeDisabled()
   })
 
-  it('disables only the level that has no valid placement', () => {
+  it('enables New scene on an arc with no chapters (flexible nesting)', () => {
     const emptyArc = treeFixture.filter((n) => n.parentId !== 'arc-2' && n.parentId !== 'ch-4')
     useTreeStore.setState({ ...buildIndex(emptyArc), loaded: true, selectedId: 'arc-2' })
     render(<CreateNodeBar format="novel" />)
-    expect(button('New scene')).toBeDisabled()
+    expect(button('New scene')).toBeEnabled()
     expect(button('New chapter')).toBeEnabled()
     expect(button('New part')).toBeEnabled()
+  })
+
+  it('disables every level when the selection is outside the manuscript', () => {
+    useTreeStore.setState({ selectedId: 'title-page' })
+    render(<CreateNodeBar format="novel" />)
+    expect(button('New scene')).toBeDisabled()
+    expect(button('New chapter')).toBeDisabled()
+    expect(button('New part')).toBeDisabled()
   })
 
   it('disables the buttons while a request is in flight', () => {

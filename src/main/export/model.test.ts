@@ -129,26 +129,53 @@ describe('bodyBlocks (F-12.1)', () => {
   it('prints titles, breaks between scenes, and text, never scene headers', () => {
     const blocks = bodyBlocks([
       entry({ id: 'p', kind: 'folder', level: 'part', title: 'Part One' }),
-      entry({ id: 'c', kind: 'folder', level: 'chapter', title: 'Chapter One' }),
+      entry({ id: 'c', kind: 'folder', level: 'chapter', depth: 1, title: 'Chapter One' }),
       entry({
         id: 's1',
+        depth: 2,
         content: doc(para(text('First.'))),
         meta: { location: 'Harbor', pov: '', timeline: '' }
       }),
-      entry({ id: 's2', content: doc(para(text('Second.'))) })
+      entry({ id: 's2', depth: 2, content: doc(para(text('Second.'))) })
     ])
     expect(blocks).toEqual([
-      { kind: 'title', level: 'part', text: 'Part One' },
-      { kind: 'title', level: 'chapter', text: 'Chapter One' },
+      { kind: 'title', level: 'part', text: 'Part One', inPart: false },
+      { kind: 'title', level: 'chapter', text: 'Chapter One', inPart: true },
       { kind: 'paragraph', align: null, runs: [run('First.')] },
       { kind: 'sceneBreak' },
       { kind: 'paragraph', align: null, runs: [run('Second.')] }
     ])
   })
+
+  it('titles a scene at chapter level (a prologue) like a chapter; a part-less chapter is top-level', () => {
+    const blocks = bodyBlocks([
+      entry({ id: 'pro', title: 'Prologue', content: doc(para(text('Before.'))) }),
+      entry({ id: 'p', kind: 'folder', level: 'part', title: 'Part One' }),
+      entry({ id: 'c1', kind: 'folder', level: 'chapter', depth: 1, title: 'Chapter 1' }),
+      entry({ id: 's1', depth: 2, content: doc(para(text('One.'))) }),
+      entry({ id: 'i', depth: 1, title: 'Interlude', content: doc(para(text('Between.'))) }),
+      entry({ id: 'c2', kind: 'folder', level: 'chapter', title: 'Chapter 2' }),
+      entry({ id: 's2', depth: 1, content: doc(para(text('Two.'))) }),
+      entry({ id: 's3', depth: 1, content: doc(para(text('Three.'))) })
+    ])
+    expect(blocks).toEqual([
+      { kind: 'title', level: 'chapter', text: 'Prologue', inPart: false },
+      { kind: 'paragraph', align: null, runs: [run('Before.')] },
+      { kind: 'title', level: 'part', text: 'Part One', inPart: false },
+      { kind: 'title', level: 'chapter', text: 'Chapter 1', inPart: true },
+      { kind: 'paragraph', align: null, runs: [run('One.')] },
+      { kind: 'title', level: 'chapter', text: 'Interlude', inPart: true },
+      { kind: 'paragraph', align: null, runs: [run('Between.')] },
+      { kind: 'title', level: 'chapter', text: 'Chapter 2', inPart: false },
+      { kind: 'paragraph', align: null, runs: [run('Two.')] },
+      { kind: 'sceneBreak' },
+      { kind: 'paragraph', align: null, runs: [run('Three.')] }
+    ])
+  })
 })
 
 describe('startsPage (F-12.1)', () => {
-  const title = { kind: 'title', level: 'chapter', text: 'C' } as const
+  const title = { kind: 'title', level: 'chapter', text: 'C', inPart: true } as const
   const pBlock = { kind: 'sceneBreak' } as const
   it('breaks before every unit but the first and before later titles when asked', () => {
     expect(startsPage(0, 0, title, true)).toBe(false)

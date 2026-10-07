@@ -123,21 +123,59 @@ describe('compiledBlocks (F-3.12)', () => {
   it('prints nothing for a generic folder and no break before a scene folder’s first document', () => {
     const kinds = compiledBlocks(
       [
-        entry({ id: 'g', kind: 'folder', title: 'Loose' }),
-        entry({ id: 'a', level: 'scene', title: 'A', content: para('A.') }),
+        entry({ id: 'c', kind: 'folder', level: 'chapter', title: 'Chapter' }),
+        entry({ id: 'g', kind: 'folder', depth: 1, title: 'Loose' }),
+        entry({ id: 'a', level: 'scene', depth: 1, title: 'A', content: para('A.') }),
         entry({
           id: 'sf',
           kind: 'folder',
           level: 'scene',
+          depth: 1,
           title: 'Folder scene',
           meta: { location: 'Mill', pov: '', timeline: '' }
         }),
-        entry({ id: 'd1', title: 'Part a', content: para('One.') }),
-        entry({ id: 'd2', title: 'Part b', content: para('Two.') })
+        entry({ id: 'd1', depth: 2, title: 'Part a', content: para('One.') }),
+        entry({ id: 'd2', depth: 2, title: 'Part b', content: para('Two.') })
       ],
       true
     ).map((block) => block.kind)
-    expect(kinds).toEqual(['text', 'break', 'meta', 'text', 'break', 'text'])
+    expect(kinds).toEqual(['heading', 'text', 'break', 'meta', 'text', 'break', 'text'])
+  })
+
+  it('heads a scene at chapter level (root or part) with its title, like a chapter (flexible nesting)', () => {
+    const blocks = compiledBlocks(
+      [
+        entry({
+          id: 'pro',
+          level: 'scene',
+          title: 'Prologue',
+          meta: { location: 'Mill', pov: '', timeline: '' },
+          content: para('Before.')
+        }),
+        entry({ id: 'p', kind: 'folder', level: 'part', title: 'Part One' }),
+        entry({ id: 'c1', kind: 'folder', level: 'chapter', depth: 1, title: 'Chapter 1' }),
+        entry({ id: 's1', level: 'scene', depth: 2, title: 'S1', content: para('One.') }),
+        entry({ id: 'i', level: 'scene', depth: 1, title: 'Interlude', content: para('Mid.') }),
+        entry({ id: 'i2', level: 'scene', depth: 1, title: 'Interlude 2', content: para('Mid.') })
+      ],
+      true
+    )
+    expect(
+      blocks.map((block) =>
+        block.kind === 'heading' ? `${block.level}:${block.entry.title}` : block.kind
+      )
+    ).toEqual([
+      'chapter:Prologue',
+      'meta',
+      'text',
+      'part:Part One',
+      'chapter:Chapter 1',
+      'text',
+      'chapter:Interlude',
+      'text',
+      'chapter:Interlude 2',
+      'text'
+    ])
   })
 })
 

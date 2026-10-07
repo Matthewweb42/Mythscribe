@@ -26,7 +26,7 @@ const units: BookUnit[] = [
     kind: 'body',
     title: 'Book',
     blocks: [
-      { kind: 'title', level: 'chapter', text: 'Chapter One' },
+      { kind: 'title', level: 'chapter', text: 'Chapter One', inPart: true },
       p(run('First & <best>\u0001', { bold: true })),
       p(
         run('Next', { italic: true, underline: true, strike: true, code: true }),
@@ -36,7 +36,7 @@ const units: BookUnit[] = [
       { kind: 'sceneBreak' },
       { kind: 'paragraph', runs: [run('Centred')], align: 'center' },
       { kind: 'quote', blocks: [p(run('Quoted'))] },
-      { kind: 'title', level: 'chapter', text: 'Chapter Two' }
+      { kind: 'title', level: 'chapter', text: 'Chapter Two', inPart: true }
     ]
   }
 ]

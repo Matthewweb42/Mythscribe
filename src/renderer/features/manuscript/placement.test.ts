@@ -5,6 +5,7 @@ import {
   resolveCreateTarget,
   resolveDropTarget,
   resolveGenericTarget,
+  resolveMenuCreateTarget,
   type CreateTarget,
   type DropTarget,
   type DropZone
@@ -94,9 +95,9 @@ describe('resolveCreateTarget', () => {
     ])
     const noParts = buildIndex(sections())
 
-    it('returns null for a scene under a part with no chapters', () => {
-      expect(resolveCreateTarget(emptyPart, 'p-1', 'scene')).toBeNull()
-      expect(resolveCreateTarget(emptyPart, null, 'scene')).toBeNull()
+    it('puts a scene right inside a part with no chapters', () => {
+      expect(resolveCreateTarget(emptyPart, 'p-1', 'scene')).toEqual({ parentId: 'p-1' })
+      expect(resolveCreateTarget(emptyPart, null, 'scene')).toEqual({ parentId: 'p-2' })
     })
 
     it('still places chapters and parts when only chapters are missing', () => {
@@ -108,10 +109,61 @@ describe('resolveCreateTarget', () => {
       })
     })
 
-    it('returns null for chapters and scenes when the manuscript has no parts', () => {
+    it('puts chapters and scenes on the manuscript root when it has no parts', () => {
       expect(resolveCreateTarget(noParts, null, 'part')).toEqual({ parentId: 'manuscript' })
-      expect(resolveCreateTarget(noParts, null, 'chapter')).toBeNull()
-      expect(resolveCreateTarget(noParts, 'manuscript', 'scene')).toBeNull()
+      expect(resolveCreateTarget(noParts, null, 'chapter')).toEqual({ parentId: 'manuscript' })
+      expect(resolveCreateTarget(noParts, 'manuscript', 'scene')).toEqual({
+        parentId: 'manuscript'
+      })
+    })
+  })
+
+  describe('scenes and chapters at a higher level (flexible nesting)', () => {
+    const loose = buildIndex([
+      ...sections(),
+      node('prologue', 'manuscript', 0, 'document', 'scene'),
+      node('p-1', 'manuscript', 1, 'folder', 'part'),
+      node('c-1', 'p-1', 0, 'folder', 'chapter'),
+      node('s-1', 'c-1', 0, 'document', 'scene'),
+      node('interlude', 'p-1', 1, 'document', 'scene'),
+      node('epilogue', 'manuscript', 2, 'folder', 'chapter')
+    ])
+
+    it('adds a sibling right after a scene that sits at a higher level', () => {
+      expect(resolveCreateTarget(loose, 'prologue', 'scene')).toEqual({
+        parentId: 'manuscript',
+        afterId: 'prologue'
+      })
+      expect(resolveCreateTarget(loose, 'interlude', 'scene')).toEqual({
+        parentId: 'p-1',
+        afterId: 'interlude'
+      })
+    })
+
+    it('adds a higher level after the nearest node whose parent can hold it', () => {
+      expect(resolveCreateTarget(loose, 'prologue', 'chapter')).toEqual({
+        parentId: 'manuscript',
+        afterId: 'prologue'
+      })
+      expect(resolveCreateTarget(loose, 'interlude', 'chapter')).toEqual({
+        parentId: 'p-1',
+        afterId: 'interlude'
+      })
+      expect(resolveCreateTarget(loose, 's-1', 'chapter')).toEqual({
+        parentId: 'p-1',
+        afterId: 'c-1'
+      })
+      expect(resolveCreateTarget(loose, 'interlude', 'part')).toEqual({
+        parentId: 'manuscript',
+        afterId: 'p-1'
+      })
+    })
+
+    it('appends along the bottom of the outline, stopping at the last leveled child', () => {
+      expect(resolveCreateTarget(loose, null, 'scene')).toEqual({ parentId: 'epilogue' })
+      expect(resolveCreateTarget(loose, null, 'chapter')).toEqual({ parentId: 'manuscript' })
+      expect(resolveCreateTarget(loose, 'p-1', 'scene')).toEqual({ parentId: 'p-1' })
+      expect(resolveCreateTarget(loose, 'p-1', 'chapter')).toEqual({ parentId: 'p-1' })
     })
   })
 
@@ -152,6 +204,38 @@ describe('resolveCreateTarget', () => {
       })
       expect(resolveCreateTarget(withTrailingGeneric, null, 'scene')).toEqual({ parentId: 'ch-6' })
     })
+  })
+})
+
+describe('resolveMenuCreateTarget (right-click, flexible nesting)', () => {
+  it('creates right inside a clicked part or manuscript root that can hold the level', () => {
+    expect(resolveMenuCreateTarget(index, 'arc-1', 'scene')).toEqual({ parentId: 'arc-1' })
+    expect(resolveMenuCreateTarget(index, 'arc-1', 'chapter')).toEqual({ parentId: 'arc-1' })
+    expect(resolveMenuCreateTarget(index, 'manuscript', 'scene')).toEqual({
+      parentId: 'manuscript'
+    })
+    expect(resolveMenuCreateTarget(index, 'manuscript', 'chapter')).toEqual({
+      parentId: 'manuscript'
+    })
+    expect(resolveMenuCreateTarget(index, 'manuscript', 'part')).toEqual({ parentId: 'manuscript' })
+    expect(resolveMenuCreateTarget(index, 'ch-2', 'scene')).toEqual({ parentId: 'ch-2' })
+  })
+
+  it('falls back to the create bar rule where the clicked node cannot hold the level', () => {
+    expect(resolveMenuCreateTarget(index, 'arc-1', 'part')).toEqual({
+      parentId: 'manuscript',
+      afterId: 'arc-1'
+    })
+    expect(resolveMenuCreateTarget(index, 'ch-2', 'chapter')).toEqual({
+      parentId: 'arc-1',
+      afterId: 'ch-2'
+    })
+    expect(resolveMenuCreateTarget(index, 'sc-5', 'scene')).toEqual({
+      parentId: 'ch-5',
+      afterId: 'sc-5'
+    })
+    expect(resolveMenuCreateTarget(index, 'front', 'scene')).toBeNull()
+    expect(resolveMenuCreateTarget(index, 'title-page', 'chapter')).toBeNull()
   })
 })
 
@@ -280,19 +364,48 @@ describe('resolveDropTarget', () => {
       expected: null
     },
     { name: 'into a document', drag: 'sc-1', hover: 'sc-2', zone: 'into', expected: null },
-    { name: 'a scene into a part', drag: 'sc-1', hover: 'arc-2', zone: 'into', expected: null },
+    {
+      name: 'a scene into a part',
+      drag: 'sc-1',
+      hover: 'arc-2',
+      zone: 'into',
+      expected: { parentId: 'arc-2' }
+    },
     {
       name: 'a scene beside a chapter',
       drag: 'sc-1',
       hover: 'ch-4',
       zone: 'after',
-      expected: null
+      expected: { parentId: 'arc-2', afterId: 'ch-4' }
+    },
+    {
+      name: 'a scene into the manuscript root',
+      drag: 'sc-1',
+      hover: 'manuscript',
+      zone: 'into',
+      expected: { parentId: 'manuscript' }
+    },
+    {
+      name: 'a scene beside a part',
+      drag: 'sc-1',
+      hover: 'arc-1',
+      zone: 'before',
+      expected: { parentId: 'manuscript', afterId: null }
     },
     {
       name: 'a chapter into the manuscript root',
       drag: 'ch-1',
       hover: 'manuscript',
       zone: 'into',
+      expected: { parentId: 'manuscript' }
+    },
+    { name: 'a part into a part', drag: 'arc-1', hover: 'arc-2', zone: 'into', expected: null },
+    { name: 'a part into a chapter', drag: 'arc-1', hover: 'ch-4', zone: 'into', expected: null },
+    {
+      name: 'a chapter beside a scene (inside a chapter)',
+      drag: 'ch-1',
+      hover: 'sc-4',
+      zone: 'after',
       expected: null
     },
     { name: 'a chapter into a chapter', drag: 'ch-1', hover: 'ch-4', zone: 'into', expected: null },

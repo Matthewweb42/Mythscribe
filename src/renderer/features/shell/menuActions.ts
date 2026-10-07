@@ -262,7 +262,7 @@ export function openFindInDocument(replace: boolean): void {
  * Insert › Scene / Chapter / Part and the F-2.7 chords: creates the level relative to the
  * current selection through the create bar's placement rule (`createLevel` resolves against
  * `selectedId`), with inline rename. When the selection cannot take the level (front or end
- * matter, nothing selected in an empty manuscript) a toast says what to select.
+ * matter) a toast says what to select.
  */
 export function insertLevel(level: HierarchyLevel, format: NovelFormat): void {
   const tree = useTreeStore.getState()

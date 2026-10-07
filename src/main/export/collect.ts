@@ -81,7 +81,10 @@ export function collectBook(db: TreeDb, options: ExportOptions, projectName: str
         id: scope.id
       })
     }
-    body = [compiledEntry(row, 0, new Map())]
+    const alone = compiledEntry(row, 0, new Map())
+    // A scene printed alone is its text only: at depth 0 it would read as a scene placed at
+    // chapter level (a prologue), which prints its title as a heading.
+    body = [alone.level === 'scene' ? { ...alone, level: null } : alone]
     bodyTitle = row.title
   } else {
     body = compileSection(

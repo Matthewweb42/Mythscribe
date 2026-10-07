@@ -670,6 +670,31 @@ describe('tree:move', () => {
     ])
   })
 
+  it('creates a scene directly under an arc and moves another to the root, upward only (flexible nesting)', async () => {
+    await invoke('project:create', { name: 'Tree', format: 'webnovel', directory: tmp })
+    growLegacyStarter(manager.require(), 'webnovel')
+    const before = await invoke('tree:list', undefined)
+    const manuscript = before.find((r) => r.sectionType === 'manuscript')
+    const arc1 = before.find((r) => r.parentId === manuscript?.id && r.position === 0)
+    const arc2 = before.find((r) => r.parentId === manuscript?.id && r.position === 1)
+    const interlude = await invoke('tree:create', {
+      parentId: arc1?.id ?? '',
+      kind: 'document',
+      hierarchyLevel: 'scene'
+    })
+    expect(interlude).toMatchObject({ parentId: arc1?.id, hierarchyLevel: 'scene' })
+    const scene = before.find((r) => r.hierarchyLevel === 'scene')
+    const moved = await invoke('tree:move', {
+      id: scene?.id ?? '',
+      parentId: manuscript?.id ?? '',
+      afterId: null
+    })
+    expect(moved).toMatchObject({ parentId: manuscript?.id, position: 0 })
+    await expect(
+      invoke('tree:move', { id: arc2?.id ?? '', parentId: arc1?.id ?? '' })
+    ).rejects.toThrowError(/^VALIDATION: A part cannot be moved here/)
+  })
+
   it('rejects a cross-section move with VALIDATION', async () => {
     await invoke('project:create', { name: 'Tree', format: 'novel', directory: tmp })
     const before = await invoke('tree:list', undefined)

@@ -196,8 +196,7 @@ describe('createNode kind and level rules', () => {
     )
   })
 
-  it('rejects structural misplacement', () => {
-    const manuscript = root('manuscript')
+  it('rejects a level placed below where it belongs (upward only)', () => {
     const part = byLevel('part')
     const chapter = byLevel('chapter')
     expectCode(
@@ -206,17 +205,16 @@ describe('createNode kind and level rules', () => {
       'VALIDATION'
     )
     expectCode(
-      () =>
-        createNode(db, 'novel', {
-          parentId: manuscript.id,
-          kind: 'folder',
-          hierarchyLevel: 'chapter'
-        }),
+      () => createNode(db, 'novel', { parentId: part.id, kind: 'folder', hierarchyLevel: 'part' }),
       'VALIDATION'
     )
     expectCode(
       () =>
-        createNode(db, 'novel', { parentId: part.id, kind: 'document', hierarchyLevel: 'scene' }),
+        createNode(db, 'novel', {
+          parentId: chapter.id,
+          kind: 'folder',
+          hierarchyLevel: 'chapter'
+        }),
       'VALIDATION'
     )
     expectCode(
@@ -228,6 +226,38 @@ describe('createNode kind and level rules', () => {
         }),
       'VALIDATION'
     )
+    expectCode(
+      () =>
+        createNode(db, 'novel', {
+          parentId: root('end').id,
+          kind: 'document',
+          hierarchyLevel: 'scene'
+        }),
+      'VALIDATION'
+    )
+  })
+
+  it('places a scene or chapter at a higher level (flexible nesting)', () => {
+    const manuscript = root('manuscript')
+    const part = byLevel('part')
+    const prologue = createNode(db, 'novel', {
+      parentId: manuscript.id,
+      kind: 'document',
+      hierarchyLevel: 'scene'
+    })
+    const interlude = createNode(db, 'novel', {
+      parentId: part.id,
+      kind: 'document',
+      hierarchyLevel: 'scene'
+    })
+    const loose = createNode(db, 'novel', {
+      parentId: manuscript.id,
+      kind: 'folder',
+      hierarchyLevel: 'chapter'
+    })
+    expect(prologue).toMatchObject({ parentId: manuscript.id, hierarchyLevel: 'scene' })
+    expect(interlude).toMatchObject({ parentId: part.id, hierarchyLevel: 'scene' })
+    expect(loose).toMatchObject({ parentId: manuscript.id, hierarchyLevel: 'chapter' })
   })
 
   it('allows generic nodes under any folder', () => {
@@ -627,16 +657,32 @@ describe('moveNode', () => {
     expect(listNodes(db).find((r) => r.id === part.id)?.parentId).toBe(root('manuscript').id)
   })
 
-  it('rejects structural misplacement', () => {
+  it('rejects a level moved below where it belongs (upward only)', () => {
+    const manuscript = root('manuscript')
+    const [p1, p2] = children(manuscript.id)
+    if (!p1 || !p2) throw new Error('no parts')
+    const [a1] = children(p1.id)
+    const [b1] = children(p2.id)
+    if (!a1 || !b1) throw new Error('no chapters')
+    expectCode(() => moveNode(db, p2.id, p1.id, undefined), 'VALIDATION')
+    expectCode(() => moveNode(db, p2.id, a1.id, undefined), 'VALIDATION')
+    expectCode(() => moveNode(db, b1.id, a1.id, undefined), 'VALIDATION')
+    expect(listNodes(db).find((r) => r.id === p2.id)?.parentId).toBe(manuscript.id)
+    expect(listNodes(db).find((r) => r.id === b1.id)?.parentId).toBe(p2.id)
+  })
+
+  it('moves a scene or chapter up to a part or the manuscript root (flexible nesting)', () => {
     const manuscript = root('manuscript')
     const part = byLevel('part')
     const chapter = byLevel('chapter')
     const scene = byLevel('scene')
-    expectCode(() => moveNode(db, scene.id, part.id, undefined), 'VALIDATION')
-    expectCode(() => moveNode(db, scene.id, manuscript.id, undefined), 'VALIDATION')
-    expectCode(() => moveNode(db, chapter.id, manuscript.id, undefined), 'VALIDATION')
-    expect(listNodes(db).find((r) => r.id === scene.id)?.parentId).toBe(scene.parentId)
-    expect(listNodes(db).find((r) => r.id === chapter.id)?.parentId).toBe(chapter.parentId)
+    expect(moveNode(db, scene.id, manuscript.id, null)).toMatchObject({
+      parentId: manuscript.id,
+      position: 0
+    })
+    expect(moveNode(db, scene.id, part.id, undefined).parentId).toBe(part.id)
+    expect(moveNode(db, chapter.id, manuscript.id, undefined).parentId).toBe(manuscript.id)
+    expect(moveNode(db, scene.id, chapter.id, undefined).parentId).toBe(chapter.id)
   })
 
   it('rejects section roots as the moved node, documents as the parent, and unknown ids', () => {

@@ -1,7 +1,7 @@
 import type { NovelFormat } from '@shared/ipc/contract'
 import { HIERARCHY_LEVELS, levelLabel } from '@shared/labels'
 import { MatterTemplateId, matterTemplatesFor } from '@shared/matterTemplates'
-import { resolveCreateTarget, resolveGenericTarget } from './placement'
+import { resolveGenericTarget, resolveMenuCreateTarget } from './placement'
 import type { TreeIndex } from './treeStore'
 
 export interface MenuItem {
@@ -25,8 +25,9 @@ export function templateIdOf(itemId: string): MatterTemplateId | null {
 
 /**
  * The right-click menu for a tree row (F-2.2), section-aware: manuscript rows offer the levels
- * that can be placed relative to them plus a generic document and folder; front and end matter
- * rows offer the generic items followed by their section's templates as `New <Title>` (F-2.6).
+ * that can be placed relative to them (`resolveMenuCreateTarget`: right inside a clicked root,
+ * part, or chapter when it can hold the level) plus a generic document and folder; front and
+ * end matter rows offer the generic items followed by their section's templates as `New <Title>` (F-2.6).
  * Documents and folders (never sections) also offer Rename, Duplicate, and Delete (F-2.3), and
  * those in the manuscript `Set word target…`, plus `Clear word target` when `hasTarget` (F-10.3).
  */
@@ -39,7 +40,7 @@ export function treeContextMenuItems(
   const items: MenuItem[] = []
   if (index.sectionOf[nodeId] === 'manuscript') {
     for (const level of HIERARCHY_LEVELS) {
-      if (resolveCreateTarget(index, nodeId, level) !== null) {
+      if (resolveMenuCreateTarget(index, nodeId, level) !== null) {
         items.push({ id: `new-${level}`, label: `New ${levelLabel(format, level)}` })
       }
     }

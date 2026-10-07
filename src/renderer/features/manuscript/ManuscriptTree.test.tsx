@@ -522,6 +522,32 @@ describe('ManuscriptTree', () => {
     expect(row('Front Matter')).toHaveTextContent(`Front Matter${12 + words}`)
   })
 
+  it('right-click New Scene on an arc creates the scene right inside it (flexible nesting)', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    fireEvent.contextMenu(row('Arc 1'), { clientX: 40, clientY: 50 })
+    await userEvent.click(screen.getByRole('menuitem', { name: 'New Scene' }))
+    expect(invoke).toHaveBeenCalledWith('tree:create', {
+      parentId: 'arc-1',
+      afterId: undefined,
+      kind: 'document',
+      hierarchyLevel: 'scene'
+    })
+  })
+
+  it('right-click New Chapter on the manuscript root creates it on the root (flexible nesting)', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    fireEvent.contextMenu(row('Volume 1'), { clientX: 40, clientY: 50 })
+    await userEvent.click(screen.getByRole('menuitem', { name: 'New Chapter' }))
+    expect(invoke).toHaveBeenCalledWith('tree:create', {
+      parentId: 'manuscript',
+      afterId: undefined,
+      kind: 'folder',
+      hierarchyLevel: 'chapter'
+    })
+  })
+
   it('right-click on a section never offers Rename, Duplicate, or Delete', () => {
     render(<ManuscriptTree format="webnovel" />)
     fireEvent.contextMenu(row('Volume 1'), { clientX: 40, clientY: 50 })
@@ -954,11 +980,11 @@ describe('ManuscriptTree', () => {
       expect(invoke).not.toHaveBeenCalled()
     })
 
-    it('rejects a scene dropped into an arc (level rule) with dragover left unhandled', () => {
+    it('rejects an arc dropped into an arc (upward only) with dragover left unhandled', () => {
       const invoke = install()
       render(<ManuscriptTree format="webnovel" />)
       const dataTransfer = dragData()
-      dragEvent('dragStart', row('Scene 1'), dataTransfer)
+      dragEvent('dragStart', row('Arc 1'), dataTransfer)
       const target = row('Arc 2')
       vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(
         new DOMRect(0, rowTop, 200, rowHeight)
@@ -966,9 +992,28 @@ describe('ManuscriptTree', () => {
       expect(dragEvent('dragOver', target, dataTransfer, y.middle)).toBe(true)
       expect(dataTransfer.dropEffect).toBe('none')
       expect(indicator('Arc 2')).toBeNull()
-      expect(dragEvent('dragOver', row('Chapter 4'), dataTransfer, y.middle)).toBe(false)
-      expect(indicator('Chapter 4')).toBe('into')
       expect(invoke).not.toHaveBeenCalled()
+    })
+
+    it('drops a scene into an arc and onto the manuscript root (flexible nesting)', () => {
+      const invoke = install()
+      render(<ManuscriptTree format="webnovel" />)
+      const intoArc = dragOver('Scene 1', 'Arc 2', y.middle)
+      expect(indicator('Arc 2')).toBe('into')
+      dragEvent('drop', row('Arc 2'), intoArc, y.middle)
+      expect(invoke).toHaveBeenCalledWith('tree:move', {
+        id: 'sc-1',
+        parentId: 'arc-2',
+        afterId: undefined
+      })
+      const intoRoot = dragOver('Scene 2', 'Volume 1', y.middle)
+      expect(indicator('Volume 1')).toBe('into')
+      dragEvent('drop', row('Volume 1'), intoRoot, y.middle)
+      expect(invoke).toHaveBeenCalledWith('tree:move', {
+        id: 'sc-2',
+        parentId: 'manuscript',
+        afterId: undefined
+      })
     })
 
     it('a collapsed folder expands after a nest-drop so the moved row is visible', async () => {

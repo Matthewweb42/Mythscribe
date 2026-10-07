@@ -9,7 +9,7 @@ import type { NodeRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { saveDocument } from '../document/documentStore'
-import { createNode, getNode, listNodes, type TreeDb } from '../tree/treeStore'
+import { createNode, getNode, listNodes, moveNode, type TreeDb } from '../tree/treeStore'
 import { importDraft } from './commit'
 import { withExisting } from './existing'
 
@@ -429,6 +429,34 @@ describe('importDraft with the combined outline (F-12.2 rework)', () => {
       'p1',
       'Research'
     ])
+  })
+
+  it('keeps a prologue scene placed on the root in front of the outline (flexible nesting)', () => {
+    const manuscript = root('manuscript')
+    const prologue = createNode(db, 'novel', {
+      parentId: manuscript.id,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'Prologue'
+    })
+    moveNode(db, prologue.id, manuscript.id, null)
+    createNode(db, 'novel', {
+      parentId: manuscript.id,
+      kind: 'folder',
+      hierarchyLevel: 'chapter',
+      title: 'Epilogue'
+    })
+    const draft = combined([part('p1', [chapter('c1', [scene('s1', 'New.')])])])
+    expect(draft.parts.map((p) => p.title)).toEqual(['Part 1', 'p1'])
+    const before = getNode(db, prologue.id)
+    importDraft(db, 'novel', draft)
+    expect(children(manuscript.id).map((row) => [row.title, row.position])).toEqual([
+      ['Prologue', 0],
+      ['Part 1', 1],
+      ['p1', 2],
+      ['Epilogue', 3]
+    ])
+    expect(getNode(db, prologue.id)).toEqual(before)
   })
 
   it('refuses a draft whose existing nodes changed since it was opened, writing nothing', () => {

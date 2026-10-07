@@ -53,7 +53,7 @@ function assertKindMatchesLevel(kind: NodeKind, level: HierarchyLevel | null): v
   }
 }
 
-/** Where a level may live (`canPlaceLevel`): part under the manuscript root, chapter under a part, scene under a chapter. */
+/** Where a level may live (`canPlaceLevel`): at its own level or higher, never lower (a scene under the root, a part, or a chapter). */
 function assertPlacement(parent: NodeRow, level: HierarchyLevel | null): void {
   if (!canPlaceLevel(level, parent)) {
     throw new AppError('VALIDATION', `A ${level} cannot be created here`, {

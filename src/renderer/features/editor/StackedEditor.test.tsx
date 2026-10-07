@@ -445,12 +445,13 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     await waitFor(() => expect(regionNames()).toEqual(['Untitled']))
   })
 
-  it('shows text only for an empty part, which has no scene target', () => {
+  it('adds a scene right inside an empty part (flexible nesting)', async () => {
     loadTree(['ch-4', 'ch-5', 'ch-6', 'sc-4', 'sc-5', 'sc-6'])
     render(<StackedEditor folderId="arc-2" format="novel" />)
-    expect(
-      screen.getByText('Nothing here yet. Add a chapter first, then a scene.')
-    ).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Add a scene' })).not.toBeInTheDocument()
+    expect(screen.getByText('Nothing here yet. Add a scene to start writing.')).toBeInTheDocument()
+    await userEvent.click(button('Add a scene'))
+    expect(creates).toEqual([
+      { parentId: 'arc-2', afterId: undefined, kind: 'document', hierarchyLevel: 'scene' }
+    ])
   })
 })

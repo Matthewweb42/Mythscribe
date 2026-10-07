@@ -30,8 +30,12 @@ export const EXPORT_ALIGNMENTS = ['left', 'center', 'right', 'justify'] as const
 export type Align = (typeof EXPORT_ALIGNMENTS)[number]
 
 export type BookBlock =
-  /** A part (level `part`) or chapter title from the tree. */
-  | { kind: 'title'; level: 'part' | 'chapter'; text: string }
+  /**
+   * A part (level `part`) or chapter-level title from the tree: a chapter, or a scene placed at
+   * chapter level such as a prologue. `inPart`: the title sits inside a part (false for a part,
+   * and for a chapter-level node right under the manuscript root).
+   */
+  | { kind: 'title'; level: 'part' | 'chapter'; text: string; inPart: boolean }
   | { kind: 'paragraph'; runs: Inline[]; align: Align | null }
   /** A heading the author set inside a document, 1–3; renderers print it below chapter titles. */
   | { kind: 'heading'; level: 1 | 2 | 3; runs: Inline[]; align: Align | null }
@@ -143,7 +147,13 @@ export function bodyBlocks(entries: readonly CompiledEntry[]): BookBlock[] {
   const out: BookBlock[] = []
   for (const block of compiledBlocks(entries, false)) {
     if (block.kind === 'heading') {
-      out.push({ kind: 'title', level: block.level, text: block.entry.title })
+      // A part always sits on the root, so a chapter-level title below the root is in a part.
+      out.push({
+        kind: 'title',
+        level: block.level,
+        text: block.entry.title,
+        inPart: block.level === 'chapter' && block.entry.depth > 0
+      })
     } else if (block.kind === 'break') {
       out.push({ kind: 'sceneBreak' })
     } else if (block.kind === 'text') {

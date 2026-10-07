@@ -28,61 +28,56 @@ function nearestLeveled(index: TreeIndex, node: TreeNode): TreeNode | null {
   return null
 }
 
-/** The nearest ancestor of `node` (inclusive) at exactly `level`, or null if none. */
-function ancestorAtLevel(index: TreeIndex, node: TreeNode, level: HierarchyLevel): TreeNode | null {
+/**
+ * The nearest of `node` and its ancestors whose parent can hold `level` (`canPlaceLevel`), or
+ * null if none: a new chapter after a scene goes after that scene's chapter, or after the scene
+ * itself when it sits directly under a part or the manuscript root.
+ */
+function holderChild(index: TreeIndex, node: TreeNode, level: HierarchyLevel): TreeNode | null {
   let current: TreeNode | undefined = node
-  while (current) {
-    if (current.hierarchyLevel === level) return current
-    current = current.parentId === null ? undefined : index.byId[current.parentId]
+  while (current?.parentId != null) {
+    const parent: TreeNode | undefined = index.byId[current.parentId]
+    if (parent && canPlaceLevel(level, parent)) return current
+    current = parent
   }
   return null
 }
 
-/** Last child of `parentId` whose hierarchy level is `level`, skipping generic siblings. */
-function lastChildAtLevel(
-  index: TreeIndex,
-  parentId: string,
-  level: HierarchyLevel
-): TreeNode | null {
+/** Last child of `parentId` that has a hierarchy level, skipping generic siblings. */
+function lastLeveledChild(index: TreeIndex, parentId: string): TreeNode | null {
   const children = index.childrenOf[parentId] ?? []
   for (let i = children.length - 1; i >= 0; i--) {
     const child = index.byId[children[i] ?? '']
-    if (child?.hierarchyLevel === level) return child
+    if (child?.hierarchyLevel != null) return child
   }
   return null
 }
 
 /**
- * Descends the level chain from `parentId`, taking the last child at each level from `from` down
- * to (but not including) `level`, and returns the parent to append to. Null when a level in
- * between is missing (e.g. New Scene under a part that has no chapters).
+ * Descends from `parentId` along the bottom of the outline: while the last leveled child sits
+ * higher than `level` (so it can hold it), steps into it, then appends there. With flexible
+ * nesting every stop can hold the level, so a part with no chapters takes a new scene itself.
  */
-function appendTarget(
-  index: TreeIndex,
-  parentId: string,
-  from: number,
-  level: HierarchyLevel
-): CreateTarget | null {
+function appendTarget(index: TreeIndex, parentId: string, level: HierarchyLevel): CreateTarget {
   let current = parentId
-  for (let i = from; i < rank(level); i++) {
-    const step = HIERARCHY_LEVELS[i]
-    if (!step) return null
-    const last = lastChildAtLevel(index, current, step)
-    if (!last) return null
+  let last = lastLeveledChild(index, current)
+  while (last?.hierarchyLevel != null && rank(last.hierarchyLevel) < rank(level)) {
     current = last.id
+    last = lastLeveledChild(index, current)
   }
   return { parentId: current }
 }
 
 /**
- * Resolves where a new part/chapter/scene goes relative to the selected node (F-2.2).
+ * Resolves where a new part/chapter/scene goes relative to the selected node (F-2.2: the create
+ * bar, Insert, and the empty-folder invitation).
  *
  * - Same level as the target: sibling right after it.
- * - Higher level than the target: sibling after the enclosing ancestor at that level.
+ * - Higher level than the target: sibling after the nearest of the target and its ancestors
+ *   whose parent can hold the level (its chapter, or a scene that sits right under a part).
  * - Lower level than the target (or no target): appended at the bottom of the existing chain.
  *
- * Returns null when the target lives outside the manuscript section or when an intermediate
- * level is missing (a part with no chapters cannot receive a scene).
+ * Returns null when the target lives outside the manuscript section.
  */
 export function resolveCreateTarget(
   index: TreeIndex,
@@ -100,7 +95,7 @@ export function resolveCreateTarget(
   }
 
   if (target?.hierarchyLevel == null) {
-    return appendTarget(index, rootId, 0, level)
+    return appendTarget(index, rootId, level)
   }
 
   const targetRank = rank(target.hierarchyLevel)
@@ -111,12 +106,35 @@ export function resolveCreateTarget(
   }
 
   if (wanted < targetRank) {
-    const ancestor = ancestorAtLevel(index, target, level)
-    if (ancestor?.parentId == null) return null
-    return { parentId: ancestor.parentId, afterId: ancestor.id }
+    const sibling = holderChild(index, target, level)
+    if (sibling?.parentId == null) return null
+    return { parentId: sibling.parentId, afterId: sibling.id }
   }
 
-  return appendTarget(index, target.id, targetRank + 1, level)
+  return appendTarget(index, target.id, level)
+}
+
+/**
+ * Where the tree's right-click "New <level>" puts a node (F-2.2, flexible nesting decided by the
+ * author 2026-10-07): directly inside the clicked manuscript root, part, or chapter as its last
+ * child when that folder can hold the level (a scene right under a part, a chapter right under
+ * the root); otherwise the create bar's rule, so a new part from a part goes after it.
+ */
+export function resolveMenuCreateTarget(
+  index: TreeIndex,
+  nodeId: string,
+  level: HierarchyLevel
+): CreateTarget | null {
+  const node = index.byId[nodeId]
+  if (
+    node?.kind === 'folder' &&
+    index.sectionOf[nodeId] === 'manuscript' &&
+    (node.sectionType === 'manuscript' || node.hierarchyLevel !== null) &&
+    canPlaceLevel(level, node)
+  ) {
+    return { parentId: node.id }
+  }
+  return resolveCreateTarget(index, nodeId, level)
 }
 
 /**

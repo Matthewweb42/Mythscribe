@@ -12,14 +12,15 @@ import { escapeXml } from './xml'
  * at every part and chapter title (content before the first title gets a file of its own). The
  * split happens whether or not `chapterNewPage` is on: readers page by file, and a novel in one
  * file is slow to open. The contents (`nav.xhtml`) lists every file, chapters nested under the
- * part above them.
+ * part that holds them; a chapter or chapter-level scene right under the manuscript root is a
+ * top-level entry.
  */
 
 export interface EpubFile {
   /** `sNNN.xhtml` under `OEBPS/text/`. */
   name: string
   label: string
-  /** A part's file holds its chapters' entries in the contents. */
+  /** A part's file holds its chapters' entries in the contents; `other` entries are top-level. */
   role: 'part' | 'chapter' | 'other'
   blocks: BookBlock[]
 }
@@ -37,7 +38,12 @@ export function epubFiles(units: readonly BookUnit[]): EpubFile[] {
       if (block.kind === 'title' || current === null) {
         current =
           block.kind === 'title'
-            ? { label: block.text, role: block.level, blocks: [] }
+            ? {
+                label: block.text,
+                // A chapter-level title right under the root (no part) is a top-level entry.
+                role: block.level === 'chapter' && !block.inPart ? 'other' : block.level,
+                blocks: []
+              }
             : { label: unit.title, role: 'other', blocks: [] }
         files.push(current)
       }
