@@ -62,7 +62,7 @@ say(`
 Lemon Squeezy products → ${tomlPath}
 
 For each product, from the Lemon Squeezy dashboard:
-  • Buy link:   the product's Share button → checkout URL (https://<store>.lemonsqueezy.com/buy/…)
+  • Buy link:   the product's Share button → checkout URL (https://<store>.lemonsqueezy.com/checkout/buy/…)
   • Variant ID: open the product's variant; the number is in the page URL (…/variants/123456).
     Pasting that whole URL works too.
   • Price:      must match the price in Lemon Squeezy (it is what the balance grows by).

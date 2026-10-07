@@ -34,6 +34,10 @@ binding = "DB"
 describe('productsConfig (operator tooling)', () => {
   it('accepts a trimmed Lemon Squeezy buy link and refuses anything else', () => {
     expect(parseBuyLink(`  ${link('9f1c-22')}  `)).toEqual({ url: link('9f1c-22') })
+    // The share link Lemon Squeezy gives today (2026-10-07, from the author's dashboard).
+    const real =
+      'https://mythscribe.lemonsqueezy.com/checkout/buy/f74c3cc6-9fc7-42c6-a9cd-23ba102c1e1b'
+    expect(parseBuyLink(real)).toEqual({ url: real })
     expect(parseBuyLink('http://mythscribe.lemonsqueezy.com/buy/x')).toHaveProperty('error')
     expect(parseBuyLink('https://evil.example.com/buy/x')).toHaveProperty('error')
     expect(parseBuyLink('https://app.lemonsqueezy.com/products/12')).toHaveProperty('error')

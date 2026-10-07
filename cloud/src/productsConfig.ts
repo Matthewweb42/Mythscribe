@@ -31,7 +31,8 @@ export const MIN_PACK_CENTS = 1000
 
 /**
  * A pasted buy link, trimmed: an https URL on a `*.lemonsqueezy.com` host whose path is
- * `/buy/<id>` (the share link from the product page). Null with the reason otherwise.
+ * `/checkout/buy/<id>` (the share link from the product page; older links were `/buy/<id>`). Null with
+ * the reason otherwise.
  */
 export function parseBuyLink(input: string): { url: string } | { error: string } {
   const text = input.trim()
@@ -44,10 +45,10 @@ export function parseBuyLink(input: string): { url: string } | { error: string }
   if (parsed.protocol !== 'https:' || !parsed.hostname.endsWith('.lemonsqueezy.com')) {
     return { error: 'The link must start with https:// and be on a .lemonsqueezy.com address.' }
   }
-  if (!/^\/buy\/[A-Za-z0-9-]+\/?$/.test(parsed.pathname)) {
+  if (!/^\/(checkout\/)?buy\/[A-Za-z0-9-]+\/?$/.test(parsed.pathname)) {
     return {
       error:
-        'That is not a buy link. It should look like https://<store>.lemonsqueezy.com/buy/<id>.'
+        'That is not a buy link. It should look like https://<store>.lemonsqueezy.com/checkout/buy/<id>.'
     }
   }
   return { url: text }
