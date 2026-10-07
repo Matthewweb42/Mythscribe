@@ -280,14 +280,31 @@ function RegionEditor({
 
   // F-1.7: the caret as the session last saw it, and the focus for the document the project
   // reopened on; the scroll follows in `useScrollMemory`, after the focus, so it wins.
+  // `sessionLive` is a dependency so a session that arrives after the document still restores.
+  const sessionLive = useSessionStore((s) => s.live)
   useEffect(() => {
-    if (!ready || !toolbar) return
+    if (!ready || !toolbar || !sessionLive) return
     const session = useSessionStore.getState()
     const selection = session.positionOf(id)?.selection ?? null
-    if (selection !== null)
-      editor.commands.setTextSelection({ from: selection.anchor, to: selection.head })
-    if (session.takeCaretFocus(id)) editor.commands.focus(null, { scrollIntoView: false })
-  }, [editor, id, ready, toolbar])
+    const place = (): void => {
+      if (selection !== null)
+        editor.commands.setTextSelection({ from: selection.anchor, to: selection.head })
+    }
+    place()
+    if (!session.takeCaretFocus(id)) return
+    editor.commands.focus(null, { scrollIntoView: false })
+    if (selection === null) return
+    // Taking the focus can put the caret back at the start (ProseMirror reads the DOM selection
+    // shortly after focus), so the caret is placed again once that has settled, unless the
+    // author has already typed or moved it.
+    const doc = editor.state.doc
+    const settled = window.setTimeout(() => {
+      if (editor.isDestroyed || editor.state.doc !== doc) return
+      const { anchor, head } = editor.state.selection
+      if (anchor !== selection.anchor || head !== selection.head) place()
+    }, 50)
+    return () => window.clearTimeout(settled)
+  }, [editor, id, ready, toolbar, sessionLive])
 
   const scroller = useRef<HTMLDivElement>(null)
   useScrollMemory(scroller, id, ready && toolbar)
