@@ -5884,15 +5884,25 @@ test('create, close, reopen a project on disk', async () => {
   const resumeText = (await documentText(draftScene)) ?? ''
   expect(resumeText.length).toBeGreaterThan(3)
   await resumeEditor.click()
-  await page.keyboard.press('Control+Home')
-  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
-  // The caret after three characters is position 4 (the paragraph opens at 1).
-  await expect
-    .poll(async () => {
-      const session = await getSession()
-      return [session.selectedNodeId, session.positions[0]?.selection]
-    })
-    .toEqual([draftScene, { anchor: 4, head: 4 }])
+  // ProseMirror puts its own selection back 20 ms after the editor gains focus (see the
+  // typewriter step), so the keys wait that out, and the moves repeat until the session holds
+  // them: a move the focus timer undid lands the caret back at 1.
+  await expect(resumeEditor).toBeFocused()
+  await page.waitForTimeout(60)
+  await expect(async () => {
+    await page.keyboard.press('Control+Home')
+    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
+    // The caret after three characters is position 4 (the paragraph opens at 1).
+    await expect
+      .poll(
+        async () => {
+          const session = await getSession()
+          return [session.selectedNodeId, session.positions[0]?.selection]
+        },
+        { timeout: 2000 }
+      )
+      .toEqual([draftScene, { anchor: 4, head: 4 }])
+  }).toPass({ timeout: 10_000 })
   const foldButton = resumeTree.getByRole('button', { name: /^Collapse / }).last()
   const foldName = ((await foldButton.getAttribute('aria-label')) ?? '').replace(/^Collapse /, '')
   expect(foldName).not.toBe('')
