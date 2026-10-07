@@ -52,7 +52,7 @@ const summaryOf = (id: string, text: string): SceneSummaryState => ({
 
 /**
  * `sceneMeta:get` answers from `metas`, `summary:get` from `summaries`, `tree:move` with the row
- * at the gap-closed target position (like main), and the folder's tag bar gets empty lists.
+ * at the gap-closed target position (like main); the tag channels answer empty lists.
  */
 function install(): void {
   const invoke = vi.fn(async (channel: string, input: unknown) => {

@@ -1,20 +1,10 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import {
-  ChevronDown,
-  ChevronRight,
-  CornerDownRight,
-  Loader2,
-  Plus,
-  RefreshCw,
-  Sparkles,
-  X
-} from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { CornerDownRight, Loader2, Plus, RefreshCw, Sparkles, Tags, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { TAGS_MIN_CHARS, type AiUsage } from '@shared/ai'
 import { docToText } from '@shared/docText'
 import { countInlineTags } from '@shared/inlineTags'
 import type { Tag } from '@shared/ipc/contract'
-import { TAG_BAR_MAX_FRACTION, TAG_BAR_MIN_HEIGHT, TAG_BAR_SPLIT_LIMITS } from '@shared/layout'
 import type { MentionRange } from '@shared/mentions'
 import { PROPOSAL_NOTE_MAX, normalizeProposalNote } from '@shared/proposal'
 import type { ProposedTag } from '@shared/proposedTags'
@@ -26,12 +16,8 @@ import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { describeRequest } from '@renderer/features/ai/usageFormat'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
-import {
-  resizeTagBarBy,
-  resizeTagBarSplitBy,
-  useLayoutStore
-} from '@renderer/features/shell/layoutStore'
-import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
+import { DockPanelControls } from '@renderer/features/shell/Dock'
+import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
 import { useProposedTagStore } from '@renderer/features/tags/proposedTagStore'
@@ -39,7 +25,6 @@ import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useDocumentStore } from './documentStore'
-import { MetadataPane } from './MetadataPane'
 import { openMention } from './openPassage'
 import { TagPicker } from './TagPicker'
 
@@ -48,7 +33,7 @@ const BUTTON =
 const LINK_BUTTON = 'rounded px-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg'
 
 let requestCounter = 0
-/** A request id `ai:cancel` can find (F-5.10), unique across this renderer's tag bars. */
+/** A request id `ai:cancel` can find (F-5.10), unique across this renderer's tag panels. */
 const nextRequestId = (): string => `t-${Date.now().toString(36)}-${++requestCounter}`
 
 /**
@@ -60,7 +45,7 @@ const nextRequestId = (): string => `t-${Date.now().toString(36)}-${++requestCou
  * pending state carries the request id its Cancel button stops (F-5.10). A `done` result is
  * also how the tags the import pass proposed are offered (F-12.3): the same chips and the same
  * settlements, only the request was made during the import, so `fromImport` replaces the cost
- * line (this bar spent nothing; the pass's cost is on its own rows in the ledger).
+ * line (this panel spent nothing; the pass's cost is on its own rows in the ledger).
  */
 type RecommendState =
   | { nodeId: string; status: 'pending'; requestId: string }
@@ -86,45 +71,86 @@ interface RegenerateOptions {
   regeneratedFrom: string
 }
 
+/** The header toggle for the tags column; `aria-pressed` reflects whether it is open. */
+export function TagsToggleButton(): React.JSX.Element {
+  const open = useLayoutStore((s) => s.layout.tags.open)
+  const toggle = useLayoutStore((s) => s.toggle)
+  return (
+    <button
+      type="button"
+      aria-label="Tags"
+      title="Tags"
+      aria-pressed={open}
+      onClick={() => toggle('tags')}
+      className="rounded-md p-1.5 text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:bg-surface-raised aria-pressed:text-accent"
+    >
+      <Tags size={16} aria-hidden="true" />
+    </button>
+  )
+}
+
 /**
- * The tag bar (F-4.4) above the editor of a document and, in the stacked view, of the chapter or
- * part itself: the linked tags as colored chips with a remove button each, an "Add tag" picker
- * of the unassigned tags, a collapse toggle, and a draggable height (100 px to 60 % of the
- * window), both kept in the app-wide layout. For a node with a hierarchy level (scene, chapter,
- * part) the metadata pane (F-4.5) sits to the left of the tags, behind a draggable split of
- * 30–70 % of the bar's width, also in the layout. Takes only `id`: it loads the node's links
- * itself and reads the tag records from the bank by id, so a rename or recolor in the Tags tab
- * shows here at once. Below the chips, the inline tags used in the text (F-4.6) are listed with
- * their occurrence counts, taken from the document's live content, so they follow the typing
- * before any save; a folder is never loaded as a document, so its bar has no such list. Under
- * those, the automatic mentions (F-4.12) main recorded for the saved text: one row per tag whose
- * name occurs here, with its count and a jump to the first occurrence. They are not links, so
- * nothing about them is editable from the bar. Under those again, the proposed tags (F-4.12b):
- * the recurring capitalised names of the manuscript that no tag stands for, narrowed to the ones
- * this document carries, each with a Create tag button and a Dismiss button; nothing is created
- * until one is clicked. Last, the bar's own node's title as a tag (F-2.8): a part, chapter, or
- * scene the author named ("Fallen Creator") offers `#fallen-creator` "From the title" until the
- * bank holds that name or the author dismisses it; Create makes it a custom tag linked here.
- * "Recommend" (F-4.7) asks main for bank tags that fit the live text once it has 50 characters
- * (a folder never does, so there it stays disabled) and shows them as chips the author accepts
- * one at a time, all at once, or dismisses; nothing is linked until accepted, and the note
- * under the chips says which model answered and what it cost. Each answer is a proposal
- * (F-14.5): accepting every chip settles it accepted, Dismiss settles it accepted in part or
- * rejected (one click, no note), and "Regenerate…" asks what was off, settles it regenerated
- * with that note, and asks again with the note and the proposal id in the request. While a
- * request is pending, Cancel stops it (F-5.10): the reply comes back cancelled and the bar
- * returns to idle without a word. The same chips carry the tags an import's structure pass
- * proposed (F-12.3): opening an imported document asks main for its pending proposal once and
- * shows what is left of it, so the author accepts those one by one too.
+ * The tags panel (2026-10-06, replacing the F-4.4 tag bar above the editor): a dock panel (layout
+ * 3c; its column, width, and handle are the dock's), toggled from the header and View › Tags, for the selected node
+ * (`id`: a document, a stacked folder, a cork-board folder; null while an entity page or nothing
+ * taggable is selected) wherever the tag bar used to show. Its open state lives in the layout
+ * store (F-7.2). Renders nothing while closed; not mounted in focus mode.
  */
-export function TagBar({ id }: { id: string }): React.JSX.Element {
-  const tagBar = useLayoutStore((s) => s.layout.tagBar)
-  const toggleTagBar = useLayoutStore((s) => s.toggleTagBar)
-  const withMetadata = useTreeStore((s) => (s.byId[id]?.hierarchyLevel ?? null) !== null)
+export function TagsColumn({ id }: { id: string | null }): React.JSX.Element | null {
+  const tags = useLayoutStore((s) => s.layout.tags)
+  if (!tags.open) return null
+  return (
+    <aside
+      data-testid="tags-panel"
+      aria-label="Tags column"
+      className="flex min-h-0 flex-1 flex-col bg-surface"
+    >
+      {id === null ? (
+        <>
+          <div className="flex shrink-0 items-center gap-2 pt-3 pr-4 pb-2 pl-2">
+            <DockPanelControls id="tags" />
+            <h2 className="m-0 text-sm font-medium text-fg-muted">Tags</h2>
+          </div>
+          <p className="m-0 px-4 text-sm text-fg-muted">Select a document to see its tags.</p>
+        </>
+      ) : (
+        <TagsPanel id={id} />
+      )}
+    </aside>
+  )
+}
+
+/**
+ * The tags of one node, laid out for a narrow column (F-4.4, moved out of the bar above the
+ * editor on 2026-10-06): the heading with the link count, "Recommend" and "Add tag" under it,
+ * then the linked tags as colored chips with a remove button each. Takes only `id`: it loads the
+ * node's links itself and reads the tag records from the bank by id, so a rename or recolor in
+ * the Tags tab shows here at once. Below the chips, the inline tags used in the text (F-4.6) are
+ * listed with their occurrence counts, taken from the document's live content, so they follow
+ * the typing before any save; a folder is never loaded as a document, so it has no such list.
+ * Under those, the automatic mentions (F-4.12) main recorded for the saved text: one row per tag
+ * whose name occurs here, with its count and a jump to the first occurrence. They are not links,
+ * so nothing about them is editable here. Under those again, the proposed tags (F-4.12b): the
+ * recurring capitalised names of the manuscript that no tag stands for, narrowed to the ones this
+ * document carries, each with a Create tag button and a Dismiss button; nothing is created until
+ * one is clicked. Last, the node's own title as a tag (F-2.8): a part, chapter, or scene the
+ * author named ("Fallen Creator") offers `#fallen-creator` "From the title" until the bank holds
+ * that name or the author dismisses it; Create makes it a custom tag linked here. "Recommend"
+ * (F-4.7) asks main for bank tags that fit the live text once it has 50 characters (a folder
+ * never does, so there it stays disabled) and shows them as chips the author accepts one at a
+ * time, all at once, or dismisses; nothing is linked until accepted, and the note under the
+ * chips says which model answered and what it cost. Each answer is a proposal (F-14.5):
+ * accepting every chip settles it accepted, Dismiss settles it accepted in part or rejected (one
+ * click, no note), and "Regenerate…" asks what was off, settles it regenerated with that note,
+ * and asks again with the note and the proposal id in the request. While a request is pending,
+ * Cancel stops it (F-5.10): the reply comes back cancelled and the panel returns to idle without
+ * a word. The same chips carry the tags an import's structure pass proposed (F-12.3): opening an
+ * imported document asks main for its pending proposal once and shows what is left of it, so the
+ * author accepts those one by one too.
+ */
+export function TagsPanel({ id }: { id: string }): React.JSX.Element {
   /** Only a document can carry a pending tag proposal from an import (F-12.3). */
   const isDocument = useTreeStore((s) => s.byId[id]?.kind === 'document')
-  /** The row holding both panes; the split drag is measured against its width. */
-  const panes = useRef<HTMLDivElement>(null)
   const ids = useDocumentTagStore((s) => s.tagIdsByNode[id])
   /** F-4.13: the links the background job made, marked on their chips until the author takes them. */
   const aiIds = useDocumentTagStore((s) => s.aiTagIdsByNode[id])
@@ -142,7 +168,7 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
     [mentions, bank]
   )
   // F-4.12b: the app-wide proposals main pushed, narrowed to the names this document carries, so
-  // the bar proposes what the author is looking at rather than the whole manuscript's list.
+  // the panel proposes what the author is looking at rather than the whole manuscript's list.
   const proposals = useProposedTagStore((s) => s.proposals)
   const proposed = useMemo(
     () => proposals.filter((proposal) => proposal.nodeIds.includes(id)),
@@ -203,14 +229,13 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   const pending = mine?.status === 'pending'
   const cancel = useAiActivityStore((s) => s.cancel)
   const track = useAiActivityStore((s) => s.track)
-  const bodyId = useId()
 
   useEffect(() => {
     load(id).catch((err: unknown) => toast.error(describeError(err)))
   }, [id, load])
 
   // F-4.12: what main's scan recorded for this document; `mention:changed` refreshes it after
-  // every save, so the list follows the manuscript without this bar asking again.
+  // every save, so the list follows the manuscript without this panel asking again.
   useEffect(() => {
     loadMentions(id).catch((err: unknown) => toast.error(describeError(err)))
   }, [id, loadMentions])
@@ -220,12 +245,12 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
 
   /**
    * F-12.3: what the import's structure pass proposed for this scene waits as a pending proposal
-   * until the author opens it. The bar asks main once per document — after the bank and the
+   * until the author opens it. The panel asks main once per document — after the bank and the
    * links are in, since unknown names and names already on the document are dropped here — and
    * seeds the F-4.7 result with what is left, so those chips are accepted one at a time, all at
    * once, or dismissed, settling the proposal exactly as a Recommend answer does. Nothing is
    * linked by the import itself. A row with nothing left to offer is settled rejected and shown
-   * to no one. A Recommend result the author asked for owns the bar: the row then stays pending
+   * to no one. A Recommend result the author asked for owns the panel: the row then stays pending
    * and is offered again the next time the document is opened.
    */
   useEffect(() => {
@@ -278,11 +303,6 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   const report = (err: unknown): void => {
     toast.error(describeError(err))
   }
-  const maxHeight = Math.max(
-    TAG_BAR_MIN_HEIGHT,
-    Math.round(window.innerHeight * TAG_BAR_MAX_FRACTION)
-  )
-
   // Main reads the saved row, so unsaved typing is flushed first: the request carries what
   // the author sees, and the 50-character gate here and in main agree.
   const askForTags = (nodeId: string, regenerate?: RegenerateOptions): void => {
@@ -343,7 +363,7 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
         report(err)
       })
   }
-  /** Stops the pending request; the bar goes idle when its cancelled reply lands. */
+  /** Stops the pending request; the panel goes idle when its cancelled reply lands. */
   const cancelRecommend = (): void => {
     if (mine?.status !== 'pending') return
     void cancel(mine.requestId)
@@ -411,259 +431,207 @@ export function TagBar({ id }: { id: string }): React.JSX.Element {
   }
 
   return (
-    <div
-      role="region"
-      aria-label="Tags"
-      data-testid="tag-bar"
-      className={`relative flex shrink-0 flex-col border-b border-line bg-surface ${tagBar.open ? 'max-h-[60vh]' : ''}`}
-      style={tagBar.open ? { height: tagBar.height } : undefined}
-    >
-      <div className="flex shrink-0 items-center gap-2 px-4 py-1">
-        <button
-          type="button"
-          aria-expanded={tagBar.open}
-          aria-controls={tagBar.open ? bodyId : undefined}
-          onClick={toggleTagBar}
-          className={BUTTON}
-        >
-          {tagBar.open ? (
-            <ChevronDown size={14} aria-hidden="true" />
-          ) : (
-            <ChevronRight size={14} aria-hidden="true" />
-          )}
-          <span className="font-medium">Tags</span>
-          <span className="text-fg-subtle tabular-nums">{linked.length}</span>
-        </button>
-        {tagBar.open ? (
-          <div className="ml-auto flex items-center gap-1">
+    <div role="region" aria-label="Tags" className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 flex-col gap-1 pt-3 pr-4 pb-2 pl-2">
+        <div className="flex items-center gap-2">
+          <DockPanelControls id="tags" />
+          <h2 className="m-0 flex items-center gap-2 text-sm font-medium text-fg-muted">
+            Tags
+            <span className="text-xs font-normal text-fg-subtle tabular-nums">{linked.length}</span>
+          </h2>
+        </div>
+        {/* The labels never break inside a button, so a narrow column wraps the row instead. */}
+        <div className="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            onClick={() => askForTags(id)}
+            disabled={!canRecommend || pending}
+            title={
+              canRecommend
+                ? undefined
+                : `Add at least ${TAGS_MIN_CHARS} characters to get tag suggestions`
+            }
+            className={BUTTON}
+          >
+            {pending ? (
+              <Loader2 size={14} aria-hidden="true" className="animate-spin" />
+            ) : (
+              <Sparkles size={14} aria-hidden="true" />
+            )}
+            Recommend
+          </button>
+          <div className="relative">
             <button
               type="button"
-              onClick={() => askForTags(id)}
-              disabled={!canRecommend || pending}
-              title={
-                canRecommend
-                  ? undefined
-                  : `Add at least ${TAGS_MIN_CHARS} characters to get tag suggestions`
-              }
+              aria-expanded={picking}
+              onClick={() => setPickingFor(picking ? null : id)}
               className={BUTTON}
             >
-              {pending ? (
-                <Loader2 size={14} aria-hidden="true" className="animate-spin" />
-              ) : (
-                <Sparkles size={14} aria-hidden="true" />
-              )}
-              Recommend
+              <Plus size={14} aria-hidden="true" />
+              Add tag
             </button>
-            <div className="relative">
-              <button
-                type="button"
-                aria-expanded={picking}
-                onClick={() => setPickingFor(picking ? null : id)}
-                className={BUTTON}
-              >
-                <Plus size={14} aria-hidden="true" />
-                Add tag
-              </button>
-              {picking ? (
-                <TagPicker
-                  excludeIds={linked}
-                  onPick={(tagId) => {
-                    setPickingFor(null)
-                    add(id, tagId).catch(report)
-                  }}
-                  onClose={() => setPickingFor(null)}
-                />
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-      </div>
-      {tagBar.open ? (
-        <div id={bodyId} ref={panes} className="flex min-h-0 flex-1">
-          {withMetadata ? (
-            <div
-              className="relative shrink-0 pr-3 pl-4"
-              style={{ width: `${tagBar.split * 100}%` }}
-            >
-              <MetadataPane id={id} />
-              <ResizeHandle
-                side="right"
-                value={tagBar.split}
-                min={TAG_BAR_SPLIT_LIMITS[0]}
-                max={TAG_BAR_SPLIT_LIMITS[1]}
-                ariaLabel="Resize metadata pane"
-                onChange={(deltaPx) =>
-                  resizeTagBarSplitBy(deltaPx, panes.current?.clientWidth ?? 0)
-                }
+            {picking ? (
+              <TagPicker
+                excludeIds={linked}
+                onPick={(tagId) => {
+                  setPickingFor(null)
+                  add(id, tagId).catch(report)
+                }}
+                onClose={() => setPickingFor(null)}
               />
-            </div>
-          ) : null}
-          <div className="min-w-0 flex-1 overflow-y-auto px-4 pb-2">
-            {mine ? (
-              <div role="group" aria-label="Tag suggestions" className="mb-2">
-                {mine.status === 'pending' ? (
-                  <p role="status" className="m-0 flex items-center gap-2 text-xs text-fg-muted">
-                    <span>Asking for tag suggestions…</span>
-                    <button
-                      type="button"
-                      data-testid="tag-recommend-cancel"
-                      onClick={cancelRecommend}
-                      className={LINK_BUTTON}
-                    >
-                      Cancel
-                    </button>
-                  </p>
-                ) : null}
-                {mine.status === 'error' ? (
-                  <p
-                    role="status"
-                    data-testid="tag-recommend-result"
-                    className="m-0 text-xs text-danger"
-                  >
-                    {mine.message} {mine.nextStep}
-                  </p>
-                ) : null}
-                {mine.status === 'done' ? (
-                  <>
-                    {mine.suggestions.length === 0 ? (
-                      <p
-                        role="status"
-                        data-testid="tag-recommend-result"
-                        className="m-0 text-xs text-fg-muted"
-                      >
-                        No new tags fit.
-                      </p>
-                    ) : (
-                      <ul
-                        role="list"
-                        aria-label="Suggested tags"
-                        className="m-0 flex list-none flex-wrap gap-1.5 p-0"
-                      >
-                        {mine.suggestions.map((tag) => (
-                          <SuggestionChip
-                            key={tag.id}
-                            id={tag.id}
-                            onAccept={() => accept(tag.id)}
-                          />
-                        ))}
-                      </ul>
-                    )}
-                    <p className="mt-1 mb-0 flex items-center gap-2 text-xs text-fg-subtle">
-                      <span data-testid="tag-recommend-cost">
-                        {mine.fromImport ? `${mine.model} · from import` : describeRequest(mine)}
-                      </span>
-                      {mine.suggestions.length > 0 ? (
-                        <button type="button" onClick={acceptAll} className={LINK_BUTTON}>
-                          Accept all
-                        </button>
-                      ) : null}
-                      <button type="button" onClick={regenerate} className={LINK_BUTTON}>
-                        <RefreshCw size={11} aria-hidden="true" className="mr-1 inline" />
-                        Regenerate…
-                      </button>
-                      <button type="button" onClick={dismiss} className={LINK_BUTTON}>
-                        Dismiss
-                      </button>
-                    </p>
-                  </>
-                ) : null}
-              </div>
-            ) : null}
-            {linked.length === 0 ? (
-              <p className="m-0 text-xs text-fg-muted">No tags on this document.</p>
-            ) : (
-              <ul
-                role="list"
-                aria-label="Document tags"
-                className="m-0 flex list-none flex-wrap gap-1.5 p-0"
-              >
-                {linked.map((tagId) => (
-                  <TagChip
-                    key={tagId}
-                    id={tagId}
-                    ai={aiIds?.includes(tagId) ?? false}
-                    onRemove={() => {
-                      remove(id, tagId).catch(report)
-                    }}
-                  />
-                ))}
-              </ul>
-            )}
-            {inlineIds.length > 0 ? (
-              <>
-                <p className="mt-2 mb-1 text-xs text-fg-subtle">Inline tags</p>
-                <ul
-                  role="list"
-                  aria-label="Inline tags"
-                  className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
-                >
-                  {inlineIds.map((tagId) => (
-                    <InlineTagRow key={tagId} id={tagId} count={inlineCounts[tagId] ?? 0} />
-                  ))}
-                </ul>
-              </>
-            ) : null}
-            {mentioned.length > 0 ? (
-              <>
-                <p className="mt-2 mb-1 text-xs text-fg-subtle">Mentions</p>
-                <ul
-                  role="list"
-                  aria-label="Mentions"
-                  className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
-                >
-                  {mentioned.map((mention) => (
-                    <MentionRow
-                      key={mention.tagId}
-                      id={mention.tagId}
-                      nodeId={id}
-                      count={mention.count}
-                      // A row always carries at least one range; `[0, 0]` makes the jump search by name.
-                      range={mention.ranges[0] ?? [0, 0]}
-                    />
-                  ))}
-                </ul>
-              </>
-            ) : null}
-            {proposed.length > 0 ? (
-              <>
-                <p className="mt-2 mb-1 text-xs text-fg-subtle">Proposed tags</p>
-                <ul
-                  role="list"
-                  aria-label="Proposed tags"
-                  className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
-                >
-                  {proposed.map((proposal) => (
-                    <ProposedTagRow key={proposal.name} proposal={proposal} onError={report} />
-                  ))}
-                </ul>
-              </>
-            ) : null}
-            {titleTag ? (
-              <>
-                <p className="mt-2 mb-1 text-xs text-fg-subtle">From the title</p>
-                <ul
-                  role="list"
-                  aria-label="From the title"
-                  className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
-                >
-                  <TitleTagRow key={titleTag} nodeId={id} name={titleTag} onError={report} />
-                </ul>
-              </>
             ) : null}
           </div>
         </div>
-      ) : null}
-      {tagBar.open ? (
-        <ResizeHandle
-          side="bottom"
-          value={tagBar.height}
-          min={TAG_BAR_MIN_HEIGHT}
-          max={maxHeight}
-          ariaLabel="Resize tag bar"
-          ariaValue={Math.round}
-          onChange={resizeTagBarBy}
-        />
-      ) : null}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+        {mine ? (
+          <div role="group" aria-label="Tag suggestions" className="mb-2">
+            {mine.status === 'pending' ? (
+              <p role="status" className="m-0 flex items-center gap-2 text-xs text-fg-muted">
+                <span>Asking for tag suggestions…</span>
+                <button
+                  type="button"
+                  data-testid="tag-recommend-cancel"
+                  onClick={cancelRecommend}
+                  className={LINK_BUTTON}
+                >
+                  Cancel
+                </button>
+              </p>
+            ) : null}
+            {mine.status === 'error' ? (
+              <p
+                role="status"
+                data-testid="tag-recommend-result"
+                className="m-0 text-xs text-danger"
+              >
+                {mine.message} {mine.nextStep}
+              </p>
+            ) : null}
+            {mine.status === 'done' ? (
+              <>
+                {mine.suggestions.length === 0 ? (
+                  <p
+                    role="status"
+                    data-testid="tag-recommend-result"
+                    className="m-0 text-xs text-fg-muted"
+                  >
+                    No new tags fit.
+                  </p>
+                ) : (
+                  <ul
+                    role="list"
+                    aria-label="Suggested tags"
+                    className="m-0 flex list-none flex-wrap gap-1.5 p-0"
+                  >
+                    {mine.suggestions.map((tag) => (
+                      <SuggestionChip key={tag.id} id={tag.id} onAccept={() => accept(tag.id)} />
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-1 mb-0 flex items-center gap-2 text-xs text-fg-subtle">
+                  <span data-testid="tag-recommend-cost">
+                    {mine.fromImport ? `${mine.model} · from import` : describeRequest(mine)}
+                  </span>
+                  {mine.suggestions.length > 0 ? (
+                    <button type="button" onClick={acceptAll} className={LINK_BUTTON}>
+                      Accept all
+                    </button>
+                  ) : null}
+                  <button type="button" onClick={regenerate} className={LINK_BUTTON}>
+                    <RefreshCw size={11} aria-hidden="true" className="mr-1 inline" />
+                    Regenerate…
+                  </button>
+                  <button type="button" onClick={dismiss} className={LINK_BUTTON}>
+                    Dismiss
+                  </button>
+                </p>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+        {linked.length === 0 ? (
+          <p className="m-0 text-xs text-fg-muted">No tags on this document.</p>
+        ) : (
+          <ul
+            role="list"
+            aria-label="Document tags"
+            className="m-0 flex list-none flex-wrap gap-1.5 p-0"
+          >
+            {linked.map((tagId) => (
+              <TagChip
+                key={tagId}
+                id={tagId}
+                ai={aiIds?.includes(tagId) ?? false}
+                onRemove={() => {
+                  remove(id, tagId).catch(report)
+                }}
+              />
+            ))}
+          </ul>
+        )}
+        {inlineIds.length > 0 ? (
+          <>
+            <p className="mt-2 mb-1 text-xs text-fg-subtle">Inline tags</p>
+            <ul
+              role="list"
+              aria-label="Inline tags"
+              className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
+            >
+              {inlineIds.map((tagId) => (
+                <InlineTagRow key={tagId} id={tagId} count={inlineCounts[tagId] ?? 0} />
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {mentioned.length > 0 ? (
+          <>
+            <p className="mt-2 mb-1 text-xs text-fg-subtle">Mentions</p>
+            <ul
+              role="list"
+              aria-label="Mentions"
+              className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
+            >
+              {mentioned.map((mention) => (
+                <MentionRow
+                  key={mention.tagId}
+                  id={mention.tagId}
+                  nodeId={id}
+                  count={mention.count}
+                  // A row always carries at least one range; `[0, 0]` makes the jump search by name.
+                  range={mention.ranges[0] ?? [0, 0]}
+                />
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {proposed.length > 0 ? (
+          <>
+            <p className="mt-2 mb-1 text-xs text-fg-subtle">Proposed tags</p>
+            <ul
+              role="list"
+              aria-label="Proposed tags"
+              className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
+            >
+              {proposed.map((proposal) => (
+                <ProposedTagRow key={proposal.name} proposal={proposal} onError={report} />
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {titleTag ? (
+          <>
+            <p className="mt-2 mb-1 text-xs text-fg-subtle">From the title</p>
+            <ul
+              role="list"
+              aria-label="From the title"
+              className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0"
+            >
+              <TitleTagRow key={titleTag} nodeId={id} name={titleTag} onError={report} />
+            </ul>
+          </>
+        ) : null}
+      </div>
     </div>
   )
 }

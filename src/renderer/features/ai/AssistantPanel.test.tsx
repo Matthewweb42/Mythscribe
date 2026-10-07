@@ -17,6 +17,7 @@ import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { DockColumn } from '@renderer/features/shell/Dock'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAiActivityStore } from './aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
@@ -158,7 +159,7 @@ function Host(): React.JSX.Element {
       <AssistantToggleButton />
       <div className="flex">
         <div>editor</div>
-        <AssistantPanel />
+        <DockColumn column={['assistant']} side="left" render={() => <AssistantPanel />} />
       </div>
       <DialogHost />
     </div>
@@ -215,7 +216,9 @@ describe('AssistantPanel (F-5.4)', () => {
     await userEvent.click(button)
     expect(button).toHaveAttribute('aria-pressed', 'true')
     expect(panel()).toBeInTheDocument()
-    expect(panel().style.width).toBe(`${defaultLayout().assistant.size * 100}vw`)
+    expect(screen.getByTestId('dock-column').style.width).toBe(
+      `${defaultLayout().assistant.size * 100}vw`
+    )
     expect(screen.getByRole('heading', { name: 'Assistant' })).toBeInTheDocument()
 
     await userEvent.keyboard('{Control>}k{/Control}')
@@ -228,7 +231,7 @@ describe('AssistantPanel (F-5.4)', () => {
 
   it('resizes by its left-edge handle with the arrow keys, clamped to its limits', async () => {
     await mountOpen()
-    const handle = within(panel()).getByRole('separator', { name: 'Resize assistant' })
+    const handle = screen.getByRole('separator', { name: 'Resize assistant' })
     expect(handle).toHaveAttribute('aria-orientation', 'vertical')
     expect(handle).toHaveAttribute('aria-valuenow', '30')
     expect(handle).toHaveAttribute('aria-valuemin', '20')

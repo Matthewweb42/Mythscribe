@@ -1,7 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Loader2, Sparkles } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { TAG_BAR_BRIEF_HEIGHT } from '@shared/layout'
 import {
   EMPTY_SCENE_META,
   SCENE_BRIEF_FIELDS,
@@ -17,7 +16,6 @@ import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { StatusSelect } from '@renderer/features/outline/status'
 import { useStructureStore } from '@renderer/features/outline/structureStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
-import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { describeError } from '@renderer/lib/errors'
@@ -45,16 +43,16 @@ function useTagNames(category: TagCategory): string[] {
 }
 
 /**
- * The metadata pane of the tag bar (F-4.5) for a scene, chapter, or part: Location (autocomplete
- * from the setting tags), POV (from the character tags), the timeline position (autocomplete
- * from the project's timeline events, F-11.2: picking one links the node, free text unlinks), the outline's status and synopsis (F-11.1, the same record the index cards edit), and
- * the scene brief (F-14.3) behind a disclosure. Takes only `id`: it loads the
- * node's metadata through `useSceneMetaStore` on mount (and again when `id` changes) and unloads
- * on unmount; every change goes through the store's `edit`, so it debounces and flushes like
- * notes do (Ctrl+S, close, quit). The fields are disabled until the load resolves. The pane
- * scrolls inside its column (the suggestion lists are fixed-positioned, so the scroll box never
- * clips them), and opening the brief grows the tag bar to `TAG_BAR_BRIEF_HEIGHT` when it is
- * shorter, never shrinking a taller one. For a document, "Draft with AI" asks main for a brief
+ * The scene details (F-4.5) for a scene, chapter, or part, behind the "Scene details" disclosure
+ * of the notes column since 2026-10-06 (they were the left half of the tag bar): Location
+ * (autocomplete from the setting tags), POV (from the character tags), the timeline position
+ * (autocomplete from the project's timeline events, F-11.2: picking one links the node, free
+ * text unlinks), the outline's status (F-11.1), and the scene brief (F-14.3) behind a
+ * disclosure. The synopsis is not here: it is the box at the top of the notes column
+ * (`SynopsisBox`). Takes only `id`: it loads the node's metadata through `useSceneMetaStore` on
+ * mount (and again when `id` changes) and unloads on unmount; every change goes through the
+ * store's `edit`, so it debounces and flushes like notes do (Ctrl+S, close, quit). The fields
+ * are disabled until the load resolves. For a document, "Draft with AI" asks main for a brief
  * drafted from the scene (`useBriefDraft`); the author reviews the five lines and fills the
  * fields with one click. Under the brief, `SummaryBlock` shows the scene summary main keeps up
  * to date in the background (F-5.6) for a manuscript document. While the project has a
@@ -68,19 +66,9 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   const edit = useSceneMetaStore((s) => s.edit)
   const settings = useTagNames('setting')
   const characters = useTagNames('character')
-  const synopsisId = useId()
   const briefId = useId()
   const [briefOpen, setBriefOpen] = useState(false)
-  const tagBarHeight = useLayoutStore((s) => s.layout.tagBar.height)
-  const setTagBarHeight = useLayoutStore((s) => s.setTagBarHeight)
-  /** Opening a disclosure grows a short bar to fit it, and never shrinks a taller one. */
-  const growBar = (): void => {
-    if (tagBarHeight < TAG_BAR_BRIEF_HEIGHT) setTagBarHeight(TAG_BAR_BRIEF_HEIGHT)
-  }
-  const openBrief = (): void => {
-    setBriefOpen(true)
-    growBar()
-  }
+  const openBrief = (): void => setBriefOpen(true)
   const draft = useBriefDraft(id, openBrief)
   const template = useStructureStore((s) => s.template)
   const events = useTimelineStore((s) => s.events)
@@ -122,11 +110,7 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   }
 
   return (
-    <div
-      role="group"
-      aria-label="Scene metadata"
-      className="flex h-full min-w-0 flex-col gap-1 overflow-y-auto"
-    >
+    <div role="group" aria-label="Scene metadata" className="flex min-w-0 flex-col gap-1">
       <SuggestInput
         label="Location"
         value={value.location}
@@ -164,21 +148,6 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
           disabled={disabled}
         />
       ) : null}
-      <div className="flex items-start gap-2">
-        <label htmlFor={synopsisId} className="w-16 shrink-0 pt-px text-xs leading-5 text-fg-muted">
-          Synopsis
-        </label>
-        <textarea
-          id={synopsisId}
-          rows={2}
-          value={value.synopsis}
-          placeholder="The index card: what happens here"
-          maxLength={SCENE_SYNOPSIS_MAX}
-          disabled={disabled}
-          onChange={(event) => set({ synopsis: event.target.value })}
-          className={`${FIELD} resize-none`}
-        />
-      </div>
       {/* The labels never break inside a button, so a narrow pane wraps the row instead. */}
       <div className="flex flex-wrap items-center gap-1">
         <button
@@ -227,7 +196,47 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
           ))}
         </div>
       ) : null}
-      <SummaryBlock id={id} onOpen={growBar} />
+      <SummaryBlock id={id} />
+    </div>
+  )
+}
+
+/**
+ * The synopsis box at the top of the notes column (2026-10-06): the node's index-card synopsis
+ * (F-11.1, the same `sceneMeta.synopsis` the cork board's cards edit), a few lines tall, for a
+ * scene, chapter, or part. Loads and unloads the node's metadata like `MetadataPane` (the store
+ * counts holders, so both can show the same node), edits through the store's debounced `edit`,
+ * and is disabled until the load resolves.
+ */
+export function SynopsisBox({ id }: { id: string }): React.JSX.Element {
+  const meta = useSceneMetaStore((s) => s.docs[id]?.content ?? null)
+  const load = useSceneMetaStore((s) => s.load)
+  const unload = useSceneMetaStore((s) => s.unload)
+  const edit = useSceneMetaStore((s) => s.edit)
+  const synopsisId = useId()
+
+  useEffect(() => {
+    load(id).catch((err: unknown) => toast.error(describeError(err)))
+    return () => unload(id)
+  }, [id, load, unload])
+
+  return (
+    <div className="flex shrink-0 flex-col gap-1 px-4 pb-2">
+      <label htmlFor={synopsisId} className="text-xs font-medium text-fg-muted">
+        Synopsis
+      </label>
+      <textarea
+        id={synopsisId}
+        rows={4}
+        value={meta?.synopsis ?? ''}
+        placeholder="The index card: what happens here"
+        maxLength={SCENE_SYNOPSIS_MAX}
+        disabled={meta === null}
+        onChange={(event) => {
+          if (meta !== null) edit(id, { ...meta, synopsis: event.target.value })
+        }}
+        className="w-full resize-none rounded-md border border-line bg-bg px-2 py-1 text-sm leading-5 disabled:opacity-50"
+      />
     </div>
   )
 }

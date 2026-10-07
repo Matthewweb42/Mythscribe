@@ -15,7 +15,6 @@ import { FocusModeButton } from './FocusModeButton'
 import { NotesToggleButton } from './NotesPanel'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
-import { TagBar } from './TagBar'
 import { Toolbar } from './Toolbar'
 
 /** The region that last gained focus: the shared toolbar's target. */
@@ -35,10 +34,9 @@ const ADD_BUTTON =
  * format's scene-break text (F-3.6) inside the manuscript, a thin page-break line in front and
  * end matter. An empty folder invites the author to add the first document. The status bar
  * shows the folder's combined saved count (F-3.3), so it follows each region's autosave; no
- * session delta, because a folder's rollup also moves when scenes are moved or deleted. The tag
- * bar (F-4.4) mounts once at the top for the folder itself, so a chapter or part carries its
- * own tags and metadata (F-4.5); it is there for an empty folder too, since metadata can be set
- * before the first scene exists. Focus mode (F-6.1) drops the toolbar and the tag bar.
+ * session delta, because a folder's rollup also moves when scenes are moved or deleted. The
+ * folder's own tags and metadata live in the tags and notes columns. Focus mode (F-6.1) drops
+ * the toolbar.
  */
 export function StackedEditor({
   folderId,
@@ -49,11 +47,7 @@ export function StackedEditor({
 }): React.JSX.Element {
   const docIds = useTreeStore(useShallow((s) => descendantDocuments(s, folderId)))
   const section = useTreeStore((s) => s.sectionOf[folderId] ?? 'manuscript')
-  // Every non-root node carries tags; a section root never reaches here from the tree (not
-  // selectable), but the guard keeps a stray id from asking main for links it refuses.
-  const taggable = useTreeStore((s) => (s.byId[folderId]?.parentId ?? null) !== null)
   const focus = useFocusStore((s) => s.active)
-  const tagBar = taggable && !focus
   const [active, setActive] = useState<ActiveRegion | null>(null)
   const words = useTreeStore((s) => s.wordCountRollup[folderId] ?? 0)
   const settings = useEditorSettings(format)
@@ -72,7 +66,6 @@ export function StackedEditor({
   if (docIds.length === 0)
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {tagBar ? <TagBar id={folderId} /> : null}
         <EmptyFolder folderId={folderId} format={format} section={section} />
       </div>
     )
@@ -90,7 +83,6 @@ export function StackedEditor({
           }
         />
       )}
-      {tagBar ? <TagBar id={folderId} /> : null}
       <div className={`min-h-0 flex-1 overflow-y-auto pb-12 ${sheet ? 'bg-desk px-4' : ''}`}>
         {docIds.map((id, index) => (
           <Fragment key={id}>

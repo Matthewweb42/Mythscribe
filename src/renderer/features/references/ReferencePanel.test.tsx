@@ -21,6 +21,7 @@ import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layou
 import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { resetMentionStore, useMentionStore } from '@renderer/features/tags/mentionStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
+import { DockColumn } from '@renderer/features/shell/Dock'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { ReferencePanel, ReferencesToggleButton } from './ReferencePanel'
 import { resetReferenceStore, useReferenceStore } from './referenceStore'
@@ -94,7 +95,7 @@ async function openPanel(): Promise<void> {
   })
   render(
     <>
-      <ReferencePanel />
+      <DockColumn column={['references']} side="left" render={() => <ReferencePanel />} />
       <DialogHost />
     </>
   )
@@ -149,7 +150,7 @@ describe('ReferencesToggleButton and the panel shell (F-9.6)', () => {
     render(
       <>
         <ReferencesToggleButton />
-        <ReferencePanel />
+        <DockColumn column={['references']} side="left" render={() => <ReferencePanel />} />
       </>
     )
     const button = screen.getByRole('button', { name: 'References' })
@@ -171,7 +172,7 @@ describe('ReferencesToggleButton and the panel shell (F-9.6)', () => {
     await openPanel()
     const size = (): number => useLayoutStore.getState().layout.references.size
     expect(size()).toBe(defaultLayout().references.size)
-    expect(screen.getByTestId('references-panel').style.width).toBe('22vw')
+    expect(screen.getByTestId('dock-column').style.width).toBe('22vw')
     const handle = screen.getByRole('separator', { name: 'Resize references' })
     handle.focus()
     // The handle is on the panel's left edge: left grows it, right shrinks it, each to its limit.

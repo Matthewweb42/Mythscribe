@@ -3,7 +3,7 @@ import { FileInput, FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-r
 import { AI_DATA_SHARING, type AiDial, type AiSource } from '@shared/aiSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, type HierarchyLevel } from '@shared/labels'
-import { LAYOUT_LIMITS } from '@shared/layout'
+import type { DockPanelId } from '@shared/dock'
 import { DEFAULT_THEME, THEME_TOKENS, THEME_TOKEN_VARS, resolveTheme } from '@shared/themes'
 import { useAccountStore } from '@renderer/features/account/accountStore'
 import { useBackupStore } from '@renderer/features/backups/backupStore'
@@ -11,7 +11,8 @@ import { useDiagnosticsStore } from '@renderer/features/diagnostics/diagnosticsS
 import { AboutDialog } from '@renderer/features/shell/AboutDialog'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
-import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { DockColumn, DockPanelControls, DockSlot } from '@renderer/features/shell/Dock'
+import { isColumnShown, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { Logo } from '@renderer/features/shell/Logo'
 import { MenuBar } from '@renderer/features/shell/MenuBar'
 import {
@@ -20,7 +21,6 @@ import {
   openFindInDocument,
   runMenuAction
 } from '@renderer/features/shell/menuActions'
-import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { SettingsDialog } from '@renderer/features/shell/SettingsDialog'
 import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
 import { ShortcutsDialog } from '@renderer/features/shell/ShortcutsDialog'
@@ -41,6 +41,7 @@ import { EditorPane } from '@renderer/features/editor/EditorPane'
 import { FindBar } from '@renderer/features/editor/FindBar'
 import { resetFindStore } from '@renderer/features/editor/findStore'
 import { NotesPanel } from '@renderer/features/editor/NotesPanel'
+import { TagsColumn, TagsToggleButton } from '@renderer/features/editor/TagsPanel'
 import { StackedEditor } from '@renderer/features/editor/StackedEditor'
 import { CorkBoard } from '@renderer/features/outline/CorkBoard'
 import { SelectionCrumb } from '@renderer/features/shell/SelectionCrumb'
@@ -416,6 +417,7 @@ export function App(): React.JSX.Element {
                 <IndexingIndicator />
                 <SearchButton />
                 <ReferencesToggleButton />
+                <TagsToggleButton />
                 <AssistantToggleButton />
               </>
             ) : null}
@@ -829,46 +831,63 @@ function SettingsButton(): React.JSX.Element {
 }
 
 /**
- * F-7.3: the tabbed sidebar beside the main pane; its Manuscript tab holds the document tree
- * (F-2.1) with the create buttons (F-2.2) pinned under it. The editor (F-3.1) takes the main
- * pane for the selected document, or every document of the selected folder stacked (F-2.5,
- * F-3.8), with the notes panel (F-3.7) beside it when open. F-7.2: the sidebar's open state
- * and width come from the layout store; the width is a fraction of the window rendered in
- * `vw`, resized by the handle on its right edge. F-5.4: the assistant panel docks at the right
- * edge, full height, whatever is selected (Plan mode works without a scene). F-9.6: the
- * reference panel docks to its left, full height too, beside a document or an entity page. F-6.1: focus mode
- * hides the sidebar and both side panels without touching the layout store, so they come back
- * as they were on exit. F-6.5 / F-6.6: in focus mode the notes and the assistant follow the
- * focus store's own flags (the control bar toggles them; both close on exit) and float as
- * windows over the editor instead of docking.
+ * The project screen as dockable columns (layout 3c, author request 2026-10-06): the layout
+ * store's `dock` lists the columns left to right, each holding the sidebar (F-7.3: the tabbed
+ * sidebar whose Manuscript tab holds the document tree), the editor (the main pane: the selected
+ * document, a folder's stack or cork board, or an entity page), the notes (F-3.7), the tags, the
+ * references (F-9.6), or the assistant (F-5.4), or several side panels stacked. A column whose
+ * panels are all closed is not rendered; a side column is as wide as its first open panel and
+ * resizes from the edge facing the editor (`DockColumn`); the editor column takes the rest. Every
+ * panel's grip and menu move it (`DockPanelControls`). F-6.1: focus mode hides every column but
+ * the editor without touching the layout store, so they come back as they were on exit. F-6.5 /
+ * F-6.6: in focus mode the notes and the assistant follow the focus store's own flags (the
+ * control bar toggles them; both close on exit) and float as windows over the editor instead.
  */
 function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
-  const sidebar = useLayoutStore((s) => s.layout.sidebar)
+  const layout = useLayoutStore((s) => s.layout)
   const focus = useFocusStore((s) => s.active)
+  const nodeId = useMainNodeId()
+  // Every non-root node carries tags; a section root is never selectable, but the guard keeps a
+  // stray id from asking main for links it refuses.
+  const taggable = useTreeStore((s) =>
+    nodeId === null ? false : (s.byId[nodeId]?.parentId ?? null) !== null
+  )
+  const render = (id: DockPanelId): React.ReactNode => {
+    switch (id) {
+      case 'sidebar':
+        return <SidebarPanel format={format} />
+      case 'notes':
+        return <NotesPanel id={nodeId} />
+      case 'tags':
+        return <TagsColumn id={taggable ? nodeId : null} />
+      case 'references':
+        return <ReferencePanel />
+      case 'assistant':
+        return <AssistantPanel />
+      case 'editor':
+        return null
+    }
+  }
+  // One keyed list in and out of focus mode, so the editor column is never remounted by it.
+  const shown = focus
+    ? [['editor' as const]]
+    : layout.dock.columns.filter((column) => isColumnShown(layout, column))
+  const editorAt = shown.findIndex((column) => column.includes('editor'))
   return (
     <>
-      {sidebar.open && !focus ? (
-        <aside
-          className="relative flex shrink-0 flex-col border-r border-line bg-surface"
-          style={{ width: `${sidebar.size * 100}vw` }}
-        >
-          <SidebarTabs format={format} />
-          <ResizeHandle
-            side="right"
-            value={sidebar.size}
-            min={LAYOUT_LIMITS.sidebar[0]}
-            max={LAYOUT_LIMITS.sidebar[1]}
-            ariaLabel="Resize sidebar"
-            onChange={(deltaPx) => resizePanelBy('sidebar', deltaPx)}
+      {shown.map((column, index) =>
+        column.includes('editor') ? (
+          <EditorColumn key="editor" format={format} />
+        ) : (
+          <DockColumn
+            key={column.join(' ')}
+            column={column}
+            side={index < editorAt ? 'right' : 'left'}
+            render={render}
           />
-        </aside>
-      ) : null}
-      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <MainPane format={format} />
-      </section>
-      {/* F-9.6: the pins dock between the main pane and the assistant; not shown in focus mode. */}
-      {focus ? null : <ReferencePanel />}
-      {focus ? <FocusFloatingPanels /> : <AssistantPanel />}
+        )
+      )}
+      {focus ? <FocusFloatingPanels /> : null}
       {/* F-9.3: the entity creation dialog, open while a kind is being created. */}
       <EntityCreateDialog />
       {/* F-9.5: the entity import review, open only while a plan is under review. */}
@@ -880,6 +899,55 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       {/* F-10.3: the Goals dialog, open while the goals store says so. */}
       <GoalsDialog />
     </>
+  )
+}
+
+/**
+ * The sidebar as a dock panel (F-7.3): a slim row with its grip and menu above the tabs, so it
+ * moves like any panel without a title taking room from the tree.
+ */
+function SidebarPanel({ format }: { format: NovelFormat }): React.JSX.Element {
+  return (
+    <aside className="flex min-h-0 flex-1 flex-col bg-surface">
+      <div className="flex shrink-0 items-center justify-end px-1 pt-1">
+        <DockPanelControls id="sidebar" />
+      </div>
+      <SidebarTabs format={format} />
+    </aside>
+  )
+}
+
+/**
+ * The editor's column: the main pane with the dock grip and menu (layout 3c) floating in a 12 px
+ * strip over its top-left corner, inside the toolbar's own left padding, so the editor moves like
+ * the panels without giving up a pixel of width or a row above the text. Focus mode drops them.
+ */
+function EditorColumn({ format }: { format: NovelFormat }): React.JSX.Element {
+  const focus = useFocusStore((s) => s.active)
+  return (
+    <section className="flex min-w-0 flex-1 overflow-hidden">
+      <DockSlot id="editor" first>
+        {focus ? null : (
+          <div className="absolute top-1.5 left-0 z-20 flex w-3 flex-col items-center">
+            <DockPanelControls id="editor" vertical />
+          </div>
+        )}
+        <MainPane format={format} />
+      </DockSlot>
+    </section>
+  )
+}
+
+/**
+ * The node the manuscript shows in the main pane, which the notes and tags columns follow: the
+ * selected document or folder, or null while an entity page (F-9.3) or nothing is selected.
+ */
+function useMainNodeId(): string | null {
+  const entityId = useEntityStore((s) => s.selectedId)
+  return useTreeStore((s) =>
+    entityId === null && s.selectedId !== null && s.byId[s.selectedId] !== undefined
+      ? s.selectedId
+      : null
   )
 }
 
@@ -904,24 +972,19 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
   const folder = node.kind === 'folder'
   const cork = folder && folderView === 'cork' && !focus
   return (
-    <>
-      <div className="flex min-h-0 flex-1">
-        {/* F-3.10: the find bar docks above the editor's toolbar, so it hides no control and
-            never spans the notes beside it. */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <FindBar />
-          <div className="flex min-h-0 min-w-0 flex-1">
-            {!folder ? (
-              <EditorPane id={node.id} format={format} />
-            ) : cork ? (
-              <CorkBoard folderId={node.id} format={format} />
-            ) : (
-              <StackedEditor folderId={node.id} format={format} />
-            )}
-          </div>
-        </div>
-        {focus ? null : <NotesPanel id={node.id} />}
+    // F-3.10: the find bar docks above the editor's toolbar, so it hides no control and never
+    // spans the columns beside it.
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FindBar />
+      <div className="flex min-h-0 min-w-0 flex-1">
+        {!folder ? (
+          <EditorPane id={node.id} format={format} />
+        ) : cork ? (
+          <CorkBoard folderId={node.id} format={format} />
+        ) : (
+          <StackedEditor folderId={node.id} format={format} />
+        )}
       </div>
-    </>
+    </div>
   )
 }

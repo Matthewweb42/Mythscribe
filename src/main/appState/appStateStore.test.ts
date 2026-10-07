@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, defaultAiModels, defaultLocalAiSettings } from '@shared/ai'
 import { defaultBackupSettings } from '@shared/backups'
 import { defaultDiagnosticsSettings } from '@shared/diagnostics'
+import { defaultDock } from '@shared/dock'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultSupporterSettings } from '@shared/license'
 import { RELEASE_NOTES_MAX, defaultUpdateSettings } from '@shared/updates'
@@ -98,21 +99,22 @@ describe('AppStateStore', () => {
     expect(state.recents).toEqual([entry])
   })
 
-  it('parses a file written before F-7.3 (no sidebar tab) and F-4.4 (no tag bar) with their defaults', () => {
+  it('parses a file written before F-7.3 (no sidebar tab) and the tags column with their defaults', () => {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     const layout = { sidebar: { open: false, size: 0.3 }, notes: { open: true, size: 0.4 } }
     fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [], layout }), 'utf8')
     expect(new AppStateStore(file).get().layout).toEqual({
       ...layout,
       sidebar: { ...layout.sidebar, tab: 'manuscript' },
-      tagBar: { open: true, height: 180, split: 0.4 },
+      tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
-      floating: defaultFloating()
+      floating: defaultFloating(),
+      dock: { columns: defaultDock() }
     })
   })
 
-  it('parses a file written before F-4.5 (tag bar without a split) with the default split', () => {
+  it('parses a file written with the old tag bar (F-4.4, F-4.5) by dropping it', () => {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     const layout = {
       sidebar: { open: true, size: 0.25, tab: 'manuscript' },
@@ -120,12 +122,14 @@ describe('AppStateStore', () => {
       tagBar: { open: false, height: 240 }
     }
     fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [], layout }), 'utf8')
+    const { tagBar: _dropped, ...rest } = layout
     expect(new AppStateStore(file).get().layout).toEqual({
-      ...layout,
-      tagBar: { open: false, height: 240, split: 0.4 },
+      ...rest,
+      tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
-      floating: defaultFloating()
+      floating: defaultFloating(),
+      dock: { columns: defaultDock() }
     })
   })
 
@@ -142,10 +146,11 @@ describe('AppStateStore', () => {
     const layout = {
       sidebar: { open: false, size: 0.3, tab: 'manuscript' as const },
       notes: { open: true, size: 0.4 },
-      tagBar: { open: false, height: 240, split: 0.55 },
+      tags: { open: true, size: 0.25 },
       assistant: { open: true, size: 0.25 },
       references: { open: false, size: 0.22 },
-      floating: defaultFloating()
+      floating: defaultFloating(),
+      dock: { columns: defaultDock() }
     }
     expect(store.update((s) => ({ ...s, layout })).layout).toEqual(layout)
     expect(new AppStateStore(file).get().layout).toEqual(layout)

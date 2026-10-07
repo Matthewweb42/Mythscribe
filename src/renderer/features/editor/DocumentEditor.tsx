@@ -41,7 +41,6 @@ import { useRewriteStore } from './rewriteStore'
 import { FocusModeButton } from './FocusModeButton'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
-import { TagBar } from './TagBar'
 import { TagPicker } from './TagPicker'
 import { TAG_RANGE_SELECTOR } from './TagRange'
 import { Toolbar } from './Toolbar'
@@ -168,15 +167,15 @@ function pickerAtSelection(editor: Editor): RangePicker {
  * the toggle sits in the toolbar's right slot, so a stacked region never shows ghost text. The voice exemplar
  * button (F-14.1), the rewrite button (F-14.10), and the editor's-notes button (F-14.8) sit
  * beside it, for the same reason, and so does the beta-reader button (F-14.11) (Proofread,
- * F-14.12, is a quick action in the assistant, F-5.17); the rewrite panel shows between the tag bar and the text while
+ * F-14.12, is a quick action in the assistant, F-5.17); the rewrite panel shows between the toolbar and the text while
  * this document's rewrite runs, with the editor's-notes panel under it while its critique runs,
  * the proofread panel under that while its pass runs, and the beta-reader panel under that
  * while its read runs, and all four are dismissed when the instance goes (unmount, switch,
  * or rebuild).
  * Once ready, the instance registers as the active editor (F-5.4; again on focus, so the
  * last-focused region of a stack wins) and releases itself on unmount, which is how the
- * assistant panel reaches the caret. Focus mode (F-6.1) drops the toolbar and the tag bar;
- * the status bar stays.
+ * assistant panel reaches the caret. Focus mode (F-6.1) drops the toolbar; the status bar
+ * stays.
  */
 function RegionEditor({
   id,
@@ -451,7 +450,6 @@ function RegionEditor({
           }
         />
       )}
-      {focus ? null : <TagBar id={id} />}
       {focus ? null : <RewritePanel id={id} editor={ready ? editor : null} />}
       {focus ? null : <CritiquePanel id={id} editor={ready ? editor : null} />}
       {focus ? null : <ProofreadPanel id={id} editor={ready ? editor : null} />}

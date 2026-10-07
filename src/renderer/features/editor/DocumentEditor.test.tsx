@@ -22,6 +22,7 @@ import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetActiveEditorStore, useActiveEditorStore } from './activeEditorStore'
 import { DocumentEditor } from './DocumentEditor'
+import { TagsPanel } from './TagsPanel'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { resetBetaReaderStore, useBetaReaderStore } from './betaReaderStore'
 import { resetProofreadStore, useProofreadStore } from './proofreadStore'
@@ -90,7 +91,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
         const { nodeId } = input as Input<'documentTag:list'>
         return (links[nodeId] ?? []).map((id) => ({ ...tagOf(id), source: 'author' })) as Output<C>
       }
-      // F-4.12: the tag bar asks for the document's recorded mentions; none in these tests.
+      // F-4.12: the tags column asks for the document's recorded mentions; none in these tests.
       if (channel === 'mention:listForNode') return [] as Output<C>
 
       if (channel === 'documentTag:add') {
@@ -140,14 +141,18 @@ async function mountReady(overrides: Partial<Record<Channel, Handler>> = {}) {
     await useTagStore.getState().load()
   })
   let editor: Editor | null = null
+  // The tags column sits beside the editor in the app; the inline-tag tests read its lists.
   render(
-    <DocumentEditor
-      id="sc-1"
-      format="novel"
-      onFocus={(focused) => {
-        editor = focused
-      }}
-    />
+    <>
+      <DocumentEditor
+        id="sc-1"
+        format="novel"
+        onFocus={(focused) => {
+          editor = focused
+        }}
+      />
+      <TagsPanel id="sc-1" />
+    </>
   )
   await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
   await waitFor(() => expect(useDocumentTagStore.getState().tagIdsByNode['sc-1']).toBeDefined())
@@ -168,14 +173,18 @@ async function mountReadyWithEditor(
     await useTagStore.getState().load()
   })
   let editor: Editor | null = null
+  // The tags column sits beside the editor in the app; the inline-tag tests read its lists.
   render(
-    <DocumentEditor
-      id="sc-1"
-      format="novel"
-      onFocus={(focused) => {
-        editor = focused
-      }}
-    />
+    <>
+      <DocumentEditor
+        id="sc-1"
+        format="novel"
+        onFocus={(focused) => {
+          editor = focused
+        }}
+      />
+      <TagsPanel id="sc-1" />
+    </>
   )
   await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
   await waitFor(() => expect(useDocumentTagStore.getState().tagIdsByNode['sc-1']).toBeDefined())
@@ -328,7 +337,7 @@ describe('DocumentEditor beta reader (F-14.11)', () => {
     await userEvent.click(read)
     await waitFor(() => expect(sent).not.toBeNull())
     expect(sent).toMatchObject({ nodeId: 'sc-1' })
-    // It sits under the editor's-notes panel, between the tag bar and the text.
+    // It sits under the editor's-notes panel, between the toolbar and the text.
     expect(screen.getByTestId('beta-reader-pending')).toBeInTheDocument()
     const requestId = useBetaReaderStore.getState().session?.requestId ?? null
     cleanup()
@@ -338,18 +347,16 @@ describe('DocumentEditor beta reader (F-14.11)', () => {
 })
 
 describe('DocumentEditor focus mode (F-6.1)', () => {
-  it('carries the Focus mode button in the toolbar and drops the toolbar and tag bar while active', async () => {
+  it('carries the Focus mode button in the toolbar and drops the toolbar while active', async () => {
     await mountReady()
     const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
     expect(within(toolbar).getByRole('button', { name: 'Focus mode' })).toHaveAttribute(
       'aria-pressed',
       'false'
     )
-    expect(bar()).toBeInTheDocument()
 
     act(() => useFocusStore.setState({ active: true }))
     expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Tags' })).not.toBeInTheDocument()
     // The surface and the status bar stay, and the document is still the same instance.
     expect(box()).toHaveAttribute('contenteditable', 'true')
     expect(box()).toHaveTextContent('Into the')
@@ -357,7 +364,6 @@ describe('DocumentEditor focus mode (F-6.1)', () => {
 
     act(() => useFocusStore.setState({ active: false }))
     expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
-    expect(bar()).toBeInTheDocument()
   })
 })
 

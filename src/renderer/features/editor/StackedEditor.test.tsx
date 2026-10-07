@@ -117,7 +117,7 @@ async function release(id: string, content: TiptapNodeT | null): Promise<void> {
   })
 }
 
-/** The document regions (`<section>`); the folder's own tag bar (F-4.5) is a region too but not a document. */
+/** The document regions (`<section>`). */
 const regions = (): HTMLElement[] =>
   screen.getAllByRole('region').filter((r) => r.tagName === 'SECTION')
 const regionNames = (): string[] => regions().map((r) => r.getAttribute('aria-label') ?? '')
@@ -383,7 +383,7 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     expect(useDocumentStore.getState().docs['sc-3']).toBeUndefined()
   })
 
-  it('carries the Focus mode button in the shared toolbar and drops the toolbar and tag bar while active (F-6.1)', async () => {
+  it('carries the Focus mode button in the shared toolbar and drops the toolbar while active (F-6.1)', async () => {
     loadTree()
     render(<StackedEditor folderId="ch-1" format="novel" />)
     const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
@@ -391,20 +391,19 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
       'aria-pressed',
       'false'
     )
-    expect(screen.getByRole('region', { name: 'Tags' })).toBeInTheDocument()
+    // The folder's tags are in the tags column (2026-10-06), never inside the stack.
+    expect(screen.queryByRole('region', { name: 'Tags' })).not.toBeInTheDocument()
 
     act(() => useFocusStore.setState({ active: true }))
     expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Tags' })).not.toBeInTheDocument()
     expect(regionNames()).toEqual(['Scene 1'])
     expect(screen.getByTestId('status-words')).toBeInTheDocument()
 
     act(() => useFocusStore.setState({ active: false }))
     expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Tags' })).toBeInTheDocument()
   })
 
-  it('drops the tag bar of an empty folder while focus mode is active (F-6.1)', () => {
+  it('shows the invitation for an empty folder in focus mode, with no tags inside the stack (F-6.1)', () => {
     loadTree(['sc-1'])
     useFocusStore.setState({ active: true })
     render(<StackedEditor folderId="ch-1" format="novel" />)

@@ -40,6 +40,8 @@ export const MENU_ITEM_IDS = [
   'toggleNotes',
   'toggleAssistant',
   'toggleReferences',
+  'toggleTags',
+  'resetLayout',
   'openCompile',
   'toggleFocusMode',
   'togglePageEdges',
@@ -179,6 +181,10 @@ export const MENU: readonly MenuSection[] = [
       { id: 'toggleAssistant', label: 'AI assistant', shortcut: 'assistant', when: 'project' },
       // F-9.6: the quick reference panel.
       { id: 'toggleReferences', label: 'References', when: 'project' },
+      // The tags column, which replaced the tag bar above the editor (2026-10-06).
+      { id: 'toggleTags', label: 'Tags', when: 'project' },
+      // Layout 3c: the columns back to the default arrangement and widths.
+      { id: 'resetLayout', label: 'Reset layout', when: 'project' },
       // F-3.12: the read-only compiled preview of the manuscript.
       { id: 'openCompile', label: 'Compiled preview', when: 'project' },
       SEPARATOR,

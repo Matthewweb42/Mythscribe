@@ -12,7 +12,6 @@ import {
   type Conversation
 } from '@shared/chat'
 import { AI_DATA_SHARING, AI_DIAL_LABEL, isFeatureAllowed, type AiDial } from '@shared/aiSettings'
-import { LAYOUT_LIMITS } from '@shared/layout'
 import {
   CITATION_MARKER,
   QUERY_NOT_FOUND,
@@ -24,8 +23,8 @@ import type { WhatNextDirection } from '@shared/whatNext'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
-import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
-import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
+import { DockPanelControls } from '@renderer/features/shell/Dock'
+import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { useAiSettingsStore } from './aiSettingsStore'
 import {
@@ -98,12 +97,12 @@ export function AssistantToggleButton(): React.JSX.Element {
 }
 
 /**
- * The AI assistant panel (F-5.4): a docked column on the right, resizable by its left edge,
- * with one tab per conversation, the turns of the open one, and the composer. Query mode (the
+ * The AI assistant panel (F-5.4): a dock panel (layout 3c; by default the rightmost column,
+ * sized and resized by `DockColumn`), with one tab per conversation, the turns of the open one, and the composer. Query mode (the
  * default, F-5.8) answers about the manuscript with citations; Plan mode answers in the chat
  * (streamed); Author mode places the answer in the active editor as ghost text and the chat
  * shows a notice. Every assistant turn shows what it cost. The open state
- * and width live in the layout store (F-7.2); the conversations in `useAssistantStore`.
+ * lives in the layout store (F-7.2); the conversations in `useAssistantStore`.
  * Renders nothing while closed. Not mounted in focus mode, where `AssistantBody` floats
  * instead (F-6.6).
  */
@@ -114,17 +113,8 @@ export function AssistantPanel(): React.JSX.Element | null {
     <aside
       aria-label="Assistant"
       data-testid="assistant-panel"
-      className="relative flex shrink-0 flex-col border-l border-line bg-surface"
-      style={{ width: `${assistant.size * 100}vw` }}
+      className="flex min-h-0 flex-1 flex-col bg-surface"
     >
-      <ResizeHandle
-        side="left"
-        value={assistant.size}
-        min={LAYOUT_LIMITS.assistant[0]}
-        max={LAYOUT_LIMITS.assistant[1]}
-        ariaLabel="Resize assistant"
-        onChange={(deltaPx) => resizePanelBy('assistant', deltaPx)}
-      />
       <PanelHeader />
       <AssistantBody />
     </aside>
@@ -158,7 +148,8 @@ export function AssistantBody(): React.JSX.Element {
 
 function PanelHeader(): React.JSX.Element {
   return (
-    <div className="flex shrink-0 items-center gap-1 px-3 pt-3 pb-1">
+    <div className="flex shrink-0 items-center gap-1 pt-3 pr-3 pb-1 pl-2">
+      <DockPanelControls id="assistant" />
       <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Assistant</h2>
       <ContinuityButton />
       <NewConversationButton />

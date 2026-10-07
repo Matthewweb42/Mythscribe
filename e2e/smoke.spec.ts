@@ -2590,13 +2590,27 @@ test('create, close, reopen a project on disk', async () => {
   await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
   await expect(tree).toBeVisible()
 
-  // F-4.4: the tag bar above Scene 1's editor starts without chips; "Add tag" opens a picker of
+  // F-4.4: the tags column (it replaced the tag bar above the editor on 2026-10-06) opens from
+  // the header's Tags button and starts without chips for Scene 1; "Add tag" opens a picker of
   // the unassigned tags, searching "forest" narrows it to dark-forest (the template's plain
   // "dark" tone tag would also match "dark"), Enter links it as a chip, and the Tags tab shows
-  // the usage at once; removing the chip returns it to 0. Collapsing hides the chips, the
-  // picker, and the handle, and the state persists in the layout.
+  // the usage at once; removing the chip returns it to 0. Closing the column hides it and the
+  // state persists in the layout.
   await expect(scene1).toHaveAttribute('aria-selected', 'true')
+  const tagsToggle = page.getByRole('banner').getByRole('button', { name: 'Tags', exact: true })
   const tagBar = page.getByRole('region', { name: 'Tags', exact: true })
+  /**
+   * Opens the tags column unless it is open: another panel opening beside four open ones closes
+   * it first, so the editor keeps its 30 % (`normalizeLayout`).
+   */
+  const showTags = async (): Promise<void> => {
+    if ((await tagsToggle.getAttribute('aria-pressed')) !== 'true') await tagsToggle.click()
+    await expect(tagBar).toBeVisible()
+  }
+  await expect(tagsToggle).toHaveAttribute('aria-pressed', 'false')
+  await expect(tagBar).toHaveCount(0)
+  await tagsToggle.click()
+  await expect(tagsToggle).toHaveAttribute('aria-pressed', 'true')
   await expect(tagBar).toBeVisible()
   await expect(tagBar.getByRole('listitem')).toHaveCount(0)
   await tagBar.getByRole('button', { name: 'Add tag' }).click()
@@ -2643,28 +2657,29 @@ test('create, close, reopen a project on disk', async () => {
     'dark-forest 0 uses'
   )
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
-  const tagBarToggle = tagBar.getByRole('button', { name: /^Tags/ })
-  await expect(tagBarToggle).toHaveAttribute('aria-expanded', 'true')
-  await expect(tagBar.getByRole('separator', { name: 'Resize tag bar' })).toHaveAttribute(
-    'aria-valuenow',
-    '180'
-  )
-  await tagBarToggle.click()
-  await expect(tagBarToggle).toHaveAttribute('aria-expanded', 'false')
-  await expect(tagBar.getByRole('button', { name: 'Add tag' })).toHaveCount(0)
-  await expect(tagBar.getByRole('separator')).toHaveCount(0)
-  await expect
-    .poll(async () => (await getLayout()).tagBar, { timeout: 3000 })
-    .toEqual({ open: false, height: 180, split: 0.4 })
-  await tagBarToggle.click()
-  await expect(tagBarToggle).toHaveAttribute('aria-expanded', 'true')
+  await tagsToggle.click()
+  await expect(tagsToggle).toHaveAttribute('aria-pressed', 'false')
+  await expect(tagBar).toHaveCount(0)
+  await expect.poll(async () => (await getLayout()).tags.open, { timeout: 3000 }).toBe(false)
+  await tagsToggle.click()
   await expect(tagBar.getByRole('button', { name: 'Add tag' })).toBeVisible()
+  await expect.poll(async () => (await getLayout()).tags.open, { timeout: 3000 }).toBe(true)
 
-  // F-4.5: the metadata pane sits beside the chips for a scene. Location autocompletes from the
-  // setting tags (typing "dark" offers dark-forest, Enter fills it in), POV and the timeline
-  // position are free text. Showing another scene flushes the edits and coming back reloads
-  // them from disk. The split between the panes moves from its handle and persists.
-  const metadata = tagBar.getByRole('group', { name: 'Scene metadata' })
+  // F-4.5: the scene's details sit in the notes column, collapsed under the notes; the synopsis
+  // is the box at its top. Location autocompletes from the setting tags (typing "dark" offers
+  // dark-forest, Enter fills it in), POV and the timeline position are free text. Showing
+  // another scene flushes the edits and coming back reloads them from disk.
+  const notesColumn = page.getByTestId('notes-panel')
+  const detailsToggle = notesColumn.getByRole('button', { name: 'Scene details' })
+  /** Opens the Scene details disclosure unless it is open (closing the column or a relaunch resets it). */
+  const showSceneDetails = async (): Promise<void> => {
+    if ((await detailsToggle.getAttribute('aria-expanded')) !== 'true') await detailsToggle.click()
+    await expect(detailsToggle).toHaveAttribute('aria-expanded', 'true')
+  }
+  await expect(detailsToggle).toHaveAttribute('aria-expanded', 'false')
+  await showSceneDetails()
+  const metadata = notesColumn.getByRole('group', { name: 'Scene metadata' })
+  await expect(metadata.getByRole('textbox', { name: 'Synopsis' })).toHaveCount(0)
   const location = metadata.getByRole('combobox', { name: 'Location' })
   await expect(location).toBeEnabled()
   await location.fill('dark')
@@ -2685,20 +2700,24 @@ test('create, close, reopen a project on disk', async () => {
   await expect(metadata.getByRole('combobox', { name: 'Timeline' })).toHaveValue(
     'Day 3, after the storm'
   )
-  const splitHandle = tagBar.getByRole('separator', { name: 'Resize metadata pane' })
-  await expect(splitHandle).toHaveAttribute('aria-valuenow', '40')
-  await splitHandle.focus()
-  await page.keyboard.press('ArrowRight')
+  // The synopsis box at the top of the notes column saves to the scene's metadata.
+  const synopsisBox = notesColumn.getByRole('textbox', { name: 'Synopsis' })
+  await expect(synopsisBox).toBeEnabled()
+  await synopsisBox.fill('Mara reaches the forest.')
   await expect
-    .poll(async () => (await getLayout()).tagBar.split, { timeout: 3000 })
-    .toBeGreaterThan(0.4)
+    .poll(async () => (await sceneMetaOf(scene1Row.id)).synopsis, { timeout: 3000 })
+    .toBe('Mara reaches the forest.')
+  await synopsisBox.fill('')
+  await expect
+    .poll(async () => (await sceneMetaOf(scene1Row.id)).synopsis, { timeout: 3000 })
+    .toBe('')
 
   // F-2.5/F-3.8: selecting Chapter 1 stacks Opening and Scene 1 in tree order, each as its own
   // region with the web-novel scene break between them; typing into Opening leaves Scene 1
   // untouched and autosaves under Opening's own id.
   await chapter1.getByText('Chapter 1', { exact: true }).click()
   await expect(page.getByTestId('selected-title')).toHaveText('Chapter 1')
-  // The folder's own tag bar (F-4.5) is a region too; the document regions are the sections.
+  // The tags column is a region too; the document regions are the sections.
   const regions = page.locator('section[aria-label]')
   await expect(regions).toHaveCount(2)
   await expect(regions.nth(0)).toHaveAttribute('aria-label', 'Opening')
@@ -2785,6 +2804,7 @@ test('create, close, reopen a project on disk', async () => {
   )
   await outlinePanel.getByRole('button', { name: 'Opening', exact: true }).click()
   await expect(page.getByTestId('selected-title')).toHaveText('Opening')
+  await showSceneDetails()
   const beatSelect = metadata.getByRole('combobox', { name: 'Beat' })
   await expect(beatSelect).toBeEnabled()
   await beatSelect.selectOption({ label: 'Catalyst' })
@@ -2855,6 +2875,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(timelineEvents).toHaveCount(2)
   await expect(timelineEvents.nth(0)).toHaveAttribute('aria-label', 'The siege begins')
   await expect(timelineEvents.nth(1)).toHaveAttribute('aria-label', 'The fall')
+  await showSceneDetails()
   const timelineField = metadata.getByRole('combobox', { name: 'Timeline' })
   await expect(timelineField).toBeEnabled()
   await timelineField.fill('Spr')
@@ -2908,6 +2929,7 @@ test('create, close, reopen a project on disk', async () => {
   await entityEditor.getByRole('button', { name: 'Close Rowan' }).click()
   await expect(entityEditor).toHaveCount(0)
   await expect(page.getByTestId('selected-title')).toHaveText('Opening')
+  await showSceneDetails()
   const openingPov = metadata.getByRole('combobox', { name: 'POV' })
   await openingPov.fill('Rowan')
   await sidebarTabs.getByRole('tab', { name: 'Timeline' }).click()
@@ -3324,6 +3346,7 @@ test('create, close, reopen a project on disk', async () => {
   // Use draft fills the fields, which autosave like the rest of the metadata, so the
   // ghost-text request below carries the brief.
   const briefRequestsBefore = openAiRequests.length
+  await showSceneDetails()
   await metadata.getByRole('button', { name: 'Brief' }).click()
   await metadata.getByRole('button', { name: 'Draft with AI' }).click()
   const briefDraft = metadata.getByRole('group', { name: 'Brief draft' })
@@ -3899,7 +3922,7 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('Control+k')
   const assistant = page.getByTestId('assistant-panel')
   await expect(assistant).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Assistant' })).toHaveAttribute(
+  await expect(page.getByRole('button', { name: 'Assistant', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true'
   )
@@ -4210,6 +4233,7 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
   const summaryRequestsBefore = openAiRequests.length
+  await showSceneDetails()
   await metadata.getByRole('button', { name: 'Summary' }).click()
   await expect(metadata.getByTestId('summary-empty')).toBeVisible()
   await expect(metadata.getByTestId('summary-status')).toHaveText('Out of date')
@@ -4318,6 +4342,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(entityEditor).toHaveCount(0)
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
+  await showSceneDetails()
   await metadata.getByRole('button', { name: 'Summary' }).click()
   await expect(metadata.getByTestId('summary-text')).toHaveText(SUMMARY_TEXT)
 
@@ -5100,6 +5125,7 @@ test('create, close, reopen a project on disk', async () => {
   ).toHaveCount(1)
   // F-12.3: the tag candidate is a pending proposal on the created scene, offered in the tag
   // bar like an F-4.7 answer (no cost line: the chunk paid for it) and linked only on accept.
+  await showTags()
   const importedSuggested = tagBar.getByRole('list', { name: 'Suggested tags' })
   await expect(importedSuggested.getByRole('listitem')).toHaveText(['antagonist'])
   await expect(tagBar.getByTestId('tag-recommend-cost')).toHaveText('gpt-5.4-mini · from import')
@@ -5465,6 +5491,24 @@ test('create, close, reopen a project on disk', async () => {
   await snapshotsDialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(snapshotsDialog).toHaveCount(0)
 
+  // Layout 3c: the panel menu is the keyboard alternative to dragging a grip. Move right puts
+  // the sidebar's column right of the editor; the arrangement is written to app state and comes
+  // back after the relaunch below, where View › Reset layout puts it back.
+  const sidebarTabsList = page.getByRole('tablist', { name: 'Sidebar' })
+  const editorColumn = page.locator('main > section')
+  const leftOf = async (a: Locator, b: Locator): Promise<boolean> => {
+    const [boxA, boxB] = [await a.boundingBox(), await b.boundingBox()]
+    if (!boxA || !boxB) throw new Error('not laid out')
+    return boxA.x < boxB.x
+  }
+  expect(await leftOf(sidebarTabsList, editorColumn)).toBe(true)
+  await page.getByRole('button', { name: 'Sidebar panel options' }).click()
+  await page.getByRole('menuitem', { name: 'Move right' }).click()
+  await expect.poll(() => leftOf(editorColumn, sidebarTabsList)).toBe(true)
+  await expect
+    .poll(async () => (await getLayout()).dock.columns.slice(0, 2), { timeout: 3000 })
+    .toEqual([['editor'], ['sidebar']])
+
   // F-7.9: the window closes somewhere else at another size, with the project still open; the
   // next launch puts the window back there and opens the project again.
   const left = await app.evaluate(({ BrowserWindow }) => {
@@ -5498,6 +5542,29 @@ test('create, close, reopen a project on disk', async () => {
   expect(
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getNormalBounds())
   ).toEqual(left)
+  // Layout 3c: the sidebar came back right of the editor; View › Reset layout returns it.
+  const relaunchedTabs = page.getByRole('tablist', { name: 'Sidebar' })
+  const relaunchedEditor = page.locator('main > section')
+  const boxOf = async (locator: Locator): Promise<number> => {
+    const box = await locator.boundingBox()
+    if (!box) throw new Error('not laid out')
+    return box.x
+  }
+  expect(await boxOf(relaunchedEditor)).toBeLessThan(await boxOf(relaunchedTabs))
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'View' })
+    .click()
+  await page
+    .getByRole('menu', { name: 'View' })
+    .getByRole('menuitem', { name: 'Reset layout' })
+    .click()
+  await expect
+    .poll(async () => (await boxOf(relaunchedTabs)) < (await boxOf(relaunchedEditor)))
+    .toBe(true)
+  await expect
+    .poll(async () => (await getLayout()).dock.columns[0], { timeout: 3000 })
+    .toEqual(['sidebar'])
 })
 
 /** The single-document editor's text with the ghost-text widget (F-5.3) left out. */

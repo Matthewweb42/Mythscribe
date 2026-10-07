@@ -17,6 +17,7 @@ import type {
   RecentProject
 } from '@shared/ipc/contract'
 import { IDLE_INDEX_QUEUE } from '@shared/jobs'
+import { defaultDock } from '@shared/dock'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultViewSettings } from '@shared/zoom'
 import type { TiptapNodeT } from '@shared/tiptap'
@@ -169,7 +170,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** The stacked document regions (`<section>`), leaving out the folder's own tag bar region (F-4.5). */
+/** The stacked document regions (`<section>`). */
 const documentRegions = (): HTMLElement[] =>
   screen.getAllByRole('region').filter((r) => r.tagName === 'SECTION')
 
@@ -273,6 +274,15 @@ const createdScene = {
   created: 'c',
   modified: 'm'
 } as const
+
+/** The dock column holding the sidebar (layout 3c): it carries the width and the resize handle. */
+const sidebarColumn = (): HTMLElement => {
+  const column = screen
+    .getByRole('complementary')
+    .closest<HTMLElement>('[data-testid="dock-column"]')
+  if (!column) throw new Error('the sidebar is not in a dock column')
+  return column
+}
 
 describe('App', () => {
   it('shows the welcome screen, creates a project through the wizard, then closes it', async () => {
@@ -547,17 +557,19 @@ describe('App', () => {
       'layout:get': {
         sidebar: { open: true, size: 0.3, tab: 'manuscript' },
         notes: { open: false, size: 0.25 },
-        tagBar: { open: true, height: 180, split: 0.4 },
+        tags: { open: false, size: 0.2 },
         assistant: { open: false, size: 0.3 },
         references: { open: false, size: 0.22 },
-        floating: defaultFloating()
+        floating: defaultFloating(),
+        dock: { columns: defaultDock() }
       }
     })
     render(<App />)
     expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
     expect(invoke).toHaveBeenCalledWith('layout:get', undefined)
     await waitFor(() => expect(useLayoutStore.getState().layout.sidebar.size).toBe(0.3))
-    const aside = screen.getByRole('complementary')
+    // The width and the handle are the dock column's (layout 3c), around the sidebar.
+    const aside = sidebarColumn()
     expect(aside.style.width).toBe('30vw')
     const handle = within(aside).getByRole('separator', { name: 'Resize sidebar' })
     expect(handle).toHaveAttribute('aria-valuenow', '30')
@@ -574,7 +586,7 @@ describe('App', () => {
       })
       render(<App />)
       await screen.findByRole('treeitem', { name: 'Volume 1' })
-      const aside = screen.getByRole('complementary')
+      const aside = sidebarColumn()
       expect(aside.style.width).toBe('22vw')
       const handle = within(aside).getByRole('separator', { name: 'Resize sidebar' })
       handle.focus()
@@ -598,10 +610,11 @@ describe('App', () => {
           tab: 'manuscript'
         },
         notes: { open: false, size: 0.25 },
-        tagBar: { open: true, height: 180, split: 0.4 },
+        tags: { open: false, size: 0.2 },
         assistant: { open: false, size: 0.3 },
         references: { open: false, size: 0.22 },
-        floating: defaultFloating()
+        floating: defaultFloating(),
+        dock: { columns: defaultDock() }
       })
     } finally {
       vi.useRealTimers()
@@ -628,7 +641,7 @@ describe('App', () => {
     await userEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('tree')).toBeInTheDocument()
-    expect(screen.getByRole('complementary').style.width).toBe('22vw')
+    expect(sidebarColumn().style.width).toBe('22vw')
   })
 
   it('does not show the sidebar button on the welcome screen', async () => {
@@ -927,7 +940,7 @@ describe('App', () => {
     await userEvent.keyboard('{Control>}k{/Control}')
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
     const panel = screen.getByRole('complementary', { name: 'Assistant' })
-    expect(panel.style.width).toBe('30vw')
+    expect(panel.closest<HTMLElement>('[data-testid="dock-column"]')?.style.width).toBe('30vw')
     expect(within(panel).getByRole('tab', { name: 'Why the ridge?' })).toBeInTheDocument()
     // Docked at the right edge: after the main pane, full height.
     expect(
@@ -1125,7 +1138,7 @@ describe('App', () => {
 
   describe('focus mode (F-6.1)', () => {
     const asides = (): HTMLElement[] => screen.queryAllByRole('complementary')
-    /** What was asked of the window, in order (leaving fullscreen remounts the tag bar, whose own calls follow). */
+    /** What was asked of the window, in order (leaving fullscreen remounts the tags column, whose own calls follow). */
     const fullScreenCalls = (invoke: ReturnType<typeof vi.fn>): unknown[] =>
       invoke.mock.calls
         .filter(([c]) => c === 'window:setFullScreen')
@@ -1141,6 +1154,10 @@ describe('App', () => {
       await userEvent.click(within(scene).getByText('Scene 1'))
       const editor = await screen.findByRole('textbox', { name: 'Document' })
       await waitFor(() => expect(editor).toHaveAttribute('contenteditable', 'true'))
+      // The tags column starts closed; the header's Tags button opens it beside the editor.
+      await userEvent.click(
+        within(screen.getByRole('banner')).getByRole('button', { name: 'Tags' })
+      )
       expect(screen.getByRole('region', { name: 'Tags' })).toBeInTheDocument()
       editor.focus()
 
@@ -1169,7 +1186,8 @@ describe('App', () => {
       expect(fullScreenCalls(invoke)).toEqual([{ on: true }, { on: false }])
       await waitFor(() => expect(useFocusStore.getState().active).toBe(false))
       expect(screen.getByRole('banner')).toBeInTheDocument()
-      expect(screen.getByRole('complementary')).toBeInTheDocument()
+      // The sidebar and the tags column are back.
+      expect(asides()).toHaveLength(2)
       expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeInTheDocument()
       expect(screen.getByRole('region', { name: 'Tags' })).toBeInTheDocument()
       expect(screen.getByRole('treeitem', { name: 'Scene 1' })).toHaveAttribute(

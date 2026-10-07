@@ -98,6 +98,8 @@ describe('menu definition (F-7.1)', () => {
       'toggleNotes',
       'toggleAssistant',
       'toggleReferences',
+      'toggleTags',
+      'resetLayout',
       'openCompile',
       'separator',
       'toggleFocusMode',
@@ -129,6 +131,14 @@ describe('menu definition (F-7.1)', () => {
     expect(menuItemChord(byId.toggleReferences!)).toBeNull()
     expect(isMenuItemEnabled(byId.toggleReferences!, false)).toBe(false)
     expect(isMenuItemEnabled(byId.toggleReferences!, true)).toBe(true)
+  })
+
+  it('offers Tags in View after References, only with a project and without a shortcut', () => {
+    const byId = Object.fromEntries(menuItems().map((item) => [item.id, item]))
+    expect(byId.toggleTags?.label).toBe('Tags')
+    expect(menuItemChord(byId.toggleTags!)).toBeNull()
+    expect(isMenuItemEnabled(byId.toggleTags!, false)).toBe(false)
+    expect(isMenuItemEnabled(byId.toggleTags!, true)).toBe(true)
   })
 
   it('offers Compiled preview in View after References, only with a project and without a shortcut (F-3.12)', () => {
