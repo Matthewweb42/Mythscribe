@@ -9,6 +9,8 @@ export interface MenuItem {
   label: string
   /** Shown but not choosable (F-9.5: an export with nothing to export); absent means choosable. */
   disabled?: boolean
+  /** The item's tooltip: what it does, or why it is disabled; absent means none. */
+  title?: string
 }
 
 /** Prefix of the template items' ids (F-2.6): `template:<MatterTemplateId>`. */

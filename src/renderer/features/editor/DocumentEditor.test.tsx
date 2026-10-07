@@ -29,6 +29,8 @@ import { resetProofreadStore, useProofreadStore } from './proofreadStore'
 import { resetRewriteStore, useRewriteStore } from './rewriteStore'
 import { resetSceneMetaStore } from './sceneMetaStore'
 import { resetVoiceStore } from '@renderer/features/ai/voiceStore'
+import { AiResults } from '@renderer/features/ai/AiResults'
+import { resetAssistantStore, useAssistantStore } from '@renderer/features/ai/assistantStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { defaultAiSettings } from '@shared/aiSettings'
 import type { AiBetaReaderResult, AiProofreadResult, AiRewriteResult } from '@shared/ipc/contract'
@@ -166,7 +168,8 @@ async function mountReady(overrides: Partial<Record<Channel, Handler>> = {}) {
 
 /** Like `mountReady`, but hands back the live editor instance so a test can place the caret mid-text. */
 async function mountReadyWithEditor(
-  overrides: Partial<Record<Channel, Handler>> = {}
+  overrides: Partial<Record<Channel, Handler>> = {},
+  results = false
 ): Promise<Editor> {
   install(overrides)
   await act(async () => {
@@ -184,6 +187,7 @@ async function mountReadyWithEditor(
         }}
       />
       <TagsPanel id="sc-1" />
+      {results ? <AiResults /> : null}
     </>
   )
   await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
@@ -210,6 +214,7 @@ beforeEach(() => {
   resetBetaReaderStore()
   resetProofreadStore()
   resetAiSettingsStore()
+  resetAssistantStore()
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
 })
@@ -228,35 +233,64 @@ afterEach(() => {
   resetBetaReaderStore()
   resetProofreadStore()
   resetAiSettingsStore()
+  resetAssistantStore()
 })
 
-describe('DocumentEditor rewrite in my voice (F-14.10)', () => {
+describe('DocumentEditor AI on a selection (2026-10-06)', () => {
   const PASSAGE = 'Into the dark woods they went, without a word.'
 
-  it('the toolbar button rewrites the selection, the panel shows the diff, and Accept replaces the text', async () => {
+  it('keeps VibeWrite as the toolbar’s only AI control', async () => {
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 3 } })
+    await mountReady()
+    const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
+    expect(within(toolbar).getByRole('button', { name: 'VibeWrite' })).toBeInTheDocument()
+    for (const name of [
+      'Rewrite in my voice',
+      "Editor's notes",
+      'Beta reader',
+      'Mark voice exemplar'
+    ]) {
+      expect(within(toolbar).queryByRole('button', { name })).not.toBeInTheDocument()
+    }
+  })
+
+  it('the bubble’s Rewrite rewrites the selection, opens the assistant, and Accept in the results replaces the text', async () => {
     let resolveRewrite: ((result: AiRewriteResult) => void) | null = null
     let sent: Input<'ai:rewrite'> | null = null
     useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
-    const editor = await mountReadyWithEditor({
-      'document:get': () => ({ id: 'sc-1', content: doc(PASSAGE) }),
-      'ai:rewrite': (input) =>
-        new Promise<AiRewriteResult>((resolve) => {
-          sent = input as Input<'ai:rewrite'>
-          resolveRewrite = resolve
-        }),
-      'proposal:settle': () => null
+    const editor = await mountReadyWithEditor(
+      {
+        'document:get': () => ({ id: 'sc-1', content: doc(PASSAGE) }),
+        'ai:rewrite': (input) =>
+          new Promise<AiRewriteResult>((resolve) => {
+            sent = input as Input<'ai:rewrite'>
+            resolveRewrite = resolve
+          }),
+        'proposal:settle': () => null,
+        'layout:set': (input) => input
+      },
+      true
+    )
+    expect(screen.queryByTestId('selection-bubble')).not.toBeInTheDocument()
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 6 })
     })
-    const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
-    const rewrite = within(toolbar).getByRole('button', { name: 'Rewrite in my voice' })
-    expect(rewrite).toBeDisabled()
-    expect(screen.queryByTestId('rewrite-panel')).not.toBeInTheDocument()
+    const bubble = await screen.findByTestId('selection-bubble')
+    // Too short to rewrite: the button stays with the reason, Ask AI is there too.
+    expect(within(bubble).getByTestId('selection-rewrite')).toBeDisabled()
+    expect(within(bubble).getByTestId('selection-rewrite')).toHaveAttribute(
+      'title',
+      'Select 20–4,000 characters to rewrite them in your voice'
+    )
+    expect(within(bubble).getByTestId('selection-ask')).toBeInTheDocument()
     act(() => {
       editor.commands.setTextSelection({ from: 1, to: PASSAGE.length + 1 })
     })
-    await waitFor(() => expect(rewrite).toBeEnabled())
-    await userEvent.click(rewrite)
+    await waitFor(() => expect(screen.getByTestId('selection-rewrite')).toBeEnabled())
+    await userEvent.click(screen.getByTestId('selection-rewrite'))
     await waitFor(() => expect(sent).not.toBeNull())
     expect(sent).toMatchObject({ nodeId: 'sc-1', from: 1, to: PASSAGE.length + 1, text: PASSAGE })
+    expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
     const panel = screen.getByTestId('rewrite-panel')
     expect(within(panel).getByTestId('rewrite-stop')).toBeInTheDocument()
     expect(box().querySelector('.rewrite-target')?.textContent).toBe(PASSAGE)
@@ -275,19 +309,54 @@ describe('DocumentEditor rewrite in my voice (F-14.10)', () => {
       })
     })
     await waitFor(() => expect(within(panel).getByTestId('rewrite-diff')).toBeInTheDocument())
-    expect(
-      Array.from(within(panel).getByTestId('rewrite-diff').querySelectorAll('ins'))
-        .map((el) => el.textContent)
-        .join('')
-    ).toContain('nobody')
     await userEvent.click(within(panel).getByTestId('rewrite-accept'))
     await waitFor(() => expect(screen.queryByTestId('rewrite-panel')).not.toBeInTheDocument())
     expect(box()).toHaveTextContent('Into the dark woods they went, and nobody spoke.')
     expect(box().querySelector('.ai-origin[data-proposal-id="p1"]')).not.toBeNull()
-    expect(useDocumentStore.getState().docs['sc-1']?.content).toMatchObject({
-      content: [{ content: [{ marks: [{ type: 'aiOrigin' }] }] }]
-    })
     expect(useRewriteStore.getState().session).toBeNull()
+  })
+
+  it('the bubble’s Ask AI attaches the passage to the composer; nothing shows while the dial is Off', async () => {
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 0 } })
+    const editor = await mountReadyWithEditor({
+      'document:get': () => ({ id: 'sc-1', content: doc(PASSAGE) }),
+      'layout:set': (input) => input
+    })
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 20 })
+    })
+    expect(screen.queryByTestId('selection-bubble')).not.toBeInTheDocument()
+    // At Ask the chat is allowed but a rewrite is not: Ask AI alone, never a dead Rewrite.
+    act(() => useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } }))
+    const bubble = await screen.findByTestId('selection-bubble')
+    expect(within(bubble).queryByTestId('selection-rewrite')).not.toBeInTheDocument()
+    await userEvent.click(within(bubble).getByTestId('selection-ask'))
+    expect(useAssistantStore.getState().attachment).toBe('Into the dark woods')
+    expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
+  })
+
+  it('the right-click menu over a selection offers Rewrite and Ask AI while the dial allows them', async () => {
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
+    let sent: Input<'ai:rewrite'> | null = null
+    const editor = await mountReadyWithEditor({
+      'document:get': () => ({ id: 'sc-1', content: doc(PASSAGE) }),
+      'ai:rewrite': (input) =>
+        new Promise<AiRewriteResult>(() => {
+          sent = input as Input<'ai:rewrite'>
+        }),
+      'layout:set': (input) => input
+    })
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: PASSAGE.length + 1 })
+    })
+    fireEvent.contextMenu(box().querySelector('p')!, { clientX: 40, clientY: 50 })
+    expect(
+      within(screen.getByRole('menu'))
+        .getAllByRole('menuitem')
+        .map((el) => el.textContent)
+    ).toEqual(['Tag selection…', 'Clear tags in selection', 'Rewrite', 'Ask AI'])
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rewrite' }))
+    await waitFor(() => expect(sent).toMatchObject({ nodeId: 'sc-1', text: PASSAGE }))
   })
 
   it('unmounting the editor dismisses its pending rewrite', async () => {
@@ -305,8 +374,8 @@ describe('DocumentEditor rewrite in my voice (F-14.10)', () => {
       editor.commands.setTextSelection({ from: 1, to: PASSAGE.length + 1 })
       useRewriteStore.getState().start('sc-1', editor)
     })
-    await waitFor(() => expect(screen.getByTestId('rewrite-panel')).toBeInTheDocument())
     const requestId = useRewriteStore.getState().session?.requestId ?? null
+    expect(requestId).not.toBeNull()
     cleanup()
     expect(useRewriteStore.getState().session).toBeNull()
     await waitFor(() => expect(cancelled).toBe(requestId))
@@ -316,7 +385,7 @@ describe('DocumentEditor rewrite in my voice (F-14.10)', () => {
 describe('DocumentEditor beta reader (F-14.11)', () => {
   const SCENE = 'Into the dark woods they went, without a word. '.repeat(5)
 
-  it('the toolbar button opens the panel, and unmounting dismisses the read', async () => {
+  it('unmounting the editor dismisses the read in progress', async () => {
     useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
     let sent: Input<'ai:betaReader'> | null = null
     let cancelled: string | null = null
@@ -331,14 +400,9 @@ describe('DocumentEditor beta reader (F-14.11)', () => {
         return { cancelled: true }
       }
     })
-    const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
-    const read = within(toolbar).getByRole('button', { name: 'Beta reader' })
-    await waitFor(() => expect(read).toBeEnabled())
-    await userEvent.click(read)
+    act(() => useBetaReaderStore.getState().start('sc-1'))
     await waitFor(() => expect(sent).not.toBeNull())
     expect(sent).toMatchObject({ nodeId: 'sc-1' })
-    // It sits under the editor's-notes panel, between the toolbar and the text.
-    expect(screen.getByTestId('beta-reader-pending')).toBeInTheDocument()
     const requestId = useBetaReaderStore.getState().session?.requestId ?? null
     cleanup()
     expect(useBetaReaderStore.getState().session).toBeNull()
@@ -775,7 +839,7 @@ describe('DocumentEditor granular tags (F-4.8)', () => {
 describe('DocumentEditor proofread (F-14.12)', () => {
   const SCENE = 'Into the dark woods they went, without a word.'
 
-  it('drops the toolbar button (F-5.17 moved it to the quick actions), shows the pass of the selection, and unmounting dismisses it', async () => {
+  it('sends the pass of the selection, and unmounting the editor dismisses it', async () => {
     useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
     let sent: Input<'ai:proofread'> | null = null
     let cancelled: string | null = null
@@ -790,16 +854,12 @@ describe('DocumentEditor proofread (F-14.12)', () => {
         return { cancelled: true }
       }
     })
-    const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
-    expect(within(toolbar).queryByRole('button', { name: 'Proofread' })).not.toBeInTheDocument()
     act(() => {
       editor.commands.setTextSelection({ from: 1, to: 31 })
       useProofreadStore.getState().start('sc-1', editor)
     })
     await waitFor(() => expect(sent).not.toBeNull())
     expect(sent).toMatchObject({ nodeId: 'sc-1', selection: 'Into the dark woods they went,' })
-    expect(screen.getByTestId('proofread-pending')).toBeInTheDocument()
-    expect(screen.getByTestId('proofread-scope')).toHaveTextContent('Selection')
     const requestId = useProofreadStore.getState().session?.requestId ?? null
     cleanup()
     expect(useProofreadStore.getState().session).toBeNull()

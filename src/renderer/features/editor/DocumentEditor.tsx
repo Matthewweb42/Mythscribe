@@ -18,6 +18,9 @@ import { useEditorZoom, usePageEdges } from '@renderer/features/shell/viewStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
+import { rewriteReason } from '@renderer/features/ai/aiActions'
+import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import type { AiSettings } from '@shared/aiSettings'
 import { useActiveEditorStore } from './activeEditorStore'
 import { columnClass, deskClass, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
@@ -25,19 +28,14 @@ import { buildExtensions, EDITOR_CORE_OPTIONS } from './extensions'
 import { useGhostTextController } from './ghostTextController'
 import { INLINE_TAG_SELECTOR, resyncInlineTags, tokenTag } from './InlineTag'
 import { useLiveDocStats } from './liveDocStats'
-import { MarkVoiceExemplarButton } from './MarkVoiceExemplarButton'
-import { BetaReaderButton } from './BetaReaderButton'
-import { BetaReaderPanel } from './BetaReaderPanel'
 import { useBetaReaderStore } from './betaReaderStore'
-import { CritiqueButton } from './CritiqueButton'
-import { CritiquePanel } from './CritiquePanel'
-import { ProofreadPanel } from './ProofreadPanel'
 import { useProofreadStore } from './proofreadStore'
 import { useCritiqueStore } from './critiqueStore'
 import { NotesToggleButton } from './NotesPanel'
-import { RewriteButton } from './RewriteButton'
-import { RewritePanel } from './RewritePanel'
+import { captureRewriteText } from './rewriteTarget'
 import { useRewriteStore } from './rewriteStore'
+import { SelectionBubble } from './SelectionBubble'
+import { askAboutSelection, rewriteSelection, selectionOffer } from './selectionActions'
 import { FocusModeButton } from './FocusModeButton'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
@@ -132,15 +130,31 @@ interface RangePicker {
 const RANGE_PICKER_WIDTH = 272
 const NO_EXCLUSIONS: string[] = []
 
-/** The menu over a selection; Clear is shown but not choosable when no range lies in it. */
-function rangeMenuItems(editor: Editor, menu: RangeMenu): MenuItem[] {
+/**
+ * The menu over a selection; Clear is shown but not choosable when no range lies in it. Rewrite
+ * and Ask AI (2026-10-06, the selection bubble's two) follow while the dial allows them; Rewrite
+ * is disabled with the reason while the selection is out of its bounds or a rewrite runs.
+ */
+function rangeMenuItems(editor: Editor, menu: RangeMenu, settings: AiSettings | null): MenuItem[] {
   if (menu.at !== null) return [{ id: 'clear-tags-here', label: 'Clear tags here' }]
   const type = editor.schema.marks[TAG_RANGE_MARK]
   const tagged = type !== undefined && editor.state.doc.rangeHasMark(menu.from, menu.to, type)
-  return [
+  const items: MenuItem[] = [
     { id: 'tag-selection', label: 'Tag selection…' },
     { id: 'clear-tags', label: 'Clear tags in selection', disabled: !tagged }
   ]
+  const offer = selectionOffer(settings)
+  if (offer.rewrite) {
+    const reason = rewriteReason(settings, captureRewriteText(editor).text.length)
+    items.push({
+      id: 'rewrite',
+      label: 'Rewrite',
+      disabled: reason !== null,
+      title: reason ?? 'Rewrite the selection in your voice'
+    })
+  }
+  if (offer.ask) items.push({ id: 'ask-ai', label: 'Ask AI' })
+  return items
 }
 
 /** The picker for the editor's selection, opened under its end (Mod+Alt+T). */
@@ -164,14 +178,13 @@ function pickerAtSelection(editor: Editor): RangePicker {
  * Clear tags here); Tag selection… and Mod+Alt+T open the tag picker for the selected text, and
  * the picked tag is linked to the document as an inline tag's is. Clearing ranges leaves links.
  * VibeWrite (F-5.3) runs only in the single-document view: the controller arms itself there and
- * the toggle sits in the toolbar's right slot, so a stacked region never shows ghost text. The voice exemplar
- * button (F-14.1), the rewrite button (F-14.10), and the editor's-notes button (F-14.8) sit
- * beside it, for the same reason, and so does the beta-reader button (F-14.11) (Proofread,
- * F-14.12, is a quick action in the assistant, F-5.17); the rewrite panel shows between the toolbar and the text while
- * this document's rewrite runs, with the editor's-notes panel under it while its critique runs,
- * the proofread panel under that while its pass runs, and the beta-reader panel under that
- * while its read runs, and all four are dismissed when the instance goes (unmount, switch,
- * or rebuild).
+ * the toggle sits in the toolbar's right slot, so a stacked region never shows ghost text. It is
+ * the toolbar's only AI control since 2026-10-06: Editor's notes, Beta reader, Rewrite, and the
+ * voice exemplar button left it; their features start from the assistant panel (its actions menu
+ * and the chat), and a selection gets the bubble (`SelectionBubble`: Rewrite, Ask AI), which the
+ * right-click menu repeats. Their results show in the assistant panel (`AiResults`); a rewrite,
+ * critique, proofread, or beta read of this document is dismissed when the instance goes
+ * (unmount, switch, or rebuild).
  * Once ready, the instance registers as the active editor (F-5.4; again on focus, so the
  * last-focused region of a stack wins) and releases itself on unmount, which is how the
  * assistant panel reaches the caret. Focus mode (F-6.1) drops the toolbar; the status bar
@@ -222,6 +235,7 @@ function RegionEditor({
   const [menu, setMenu] = useState<TokenMenu | null>(null)
   const [rangeMenu, setRangeMenu] = useState<RangeMenu | null>(null)
   const closePicker = useCallback(() => setPicker(null), [])
+  const aiSettings = useAiSettingsStore((s) => s.settings)
 
   const editor = useEditor(
     {
@@ -356,6 +370,11 @@ function RegionEditor({
       editor.chain().focus().setTextSelection({ from, to }).clearTagRanges().run()
     } else if (itemId === 'clear-tags-here' && at !== null) {
       editor.chain().focus().clearTagRangesAt(at).run()
+    } else if (itemId === 'rewrite' || itemId === 'ask-ai') {
+      // The selection as it was when the menu opened (the click may have moved it).
+      editor.chain().focus().setTextSelection({ from, to }).run()
+      if (itemId === 'rewrite') rewriteSelection(id, editor)
+      else askAboutSelection(editor)
     }
   }
 
@@ -386,11 +405,12 @@ function RegionEditor({
   const popups = (
     <>
       {tokenMenu}
+      {ready ? <SelectionBubble editor={editor} nodeId={id} /> : null}
       {rangeMenu ? (
         <ContextMenu
           x={rangeMenu.x}
           y={rangeMenu.y}
-          items={rangeMenuItems(editor, rangeMenu)}
+          items={rangeMenuItems(editor, rangeMenu, aiSettings)}
           onSelect={onRangeMenuSelect}
           onClose={() => setRangeMenu(null)}
         />
@@ -439,10 +459,6 @@ function RegionEditor({
           editor={ready ? editor : null}
           right={
             <>
-              <CritiqueButton editor={ready ? editor : null} nodeId={id} />
-              <BetaReaderButton editor={ready ? editor : null} nodeId={id} />
-              <RewriteButton editor={ready ? editor : null} nodeId={id} />
-              <MarkVoiceExemplarButton editor={ready ? editor : null} nodeId={id} />
               <VibeWriteToggle error={ghostError} />
               <NotesToggleButton />
               <FocusModeButton />
@@ -450,10 +466,6 @@ function RegionEditor({
           }
         />
       )}
-      {focus ? null : <RewritePanel id={id} editor={ready ? editor : null} />}
-      {focus ? null : <CritiquePanel id={id} editor={ready ? editor : null} />}
-      {focus ? null : <ProofreadPanel id={id} editor={ready ? editor : null} />}
-      {focus ? null : <BetaReaderPanel id={id} editor={ready ? editor : null} />}
       <div className={`flex min-h-0 flex-1 flex-col overflow-y-auto ${deskClass(sheet)}`}>
         <EditorContent
           editor={editor}

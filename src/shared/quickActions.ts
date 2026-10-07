@@ -93,7 +93,14 @@ export interface QuickActionState {
  * buttons it replaced (F-13.4's Check this scene).
  */
 export function quickActionReason(id: QuickActionId, state: QuickActionState): string | null {
-  const { feature } = QUICK_ACTIONS[id]
+  return featureActionReason(QUICK_ACTIONS[id].feature, state)
+}
+
+/**
+ * The same rule for any one-click AI action on the open scene (the assistant's actions menu,
+ * 2026-10-06): why `feature` cannot run now, or null when it can.
+ */
+export function featureActionReason(feature: AiFeatureId, state: QuickActionState): string | null {
   const { minDial, label } = AI_DATA_SHARING[feature]
   const { settings } = state
   if (settings === null || settings.dial < minDial) {

@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { MessageSquare, Plus, Send, Square, X } from 'lucide-react'
+import { MessageSquare, Plus, Quote, Send, Square, X } from 'lucide-react'
+import { ROUTE_ACTION_LABEL } from '@shared/assistantRoute'
 import {
   CHAT_MAX_CONVERSATIONS,
   CHAT_MESSAGE_MAX,
-  CHAT_MODE_LABEL,
-  CHAT_MODES,
   CHAT_PARAGRAPHS_MAX,
   CHAT_PARAGRAPHS_MIN,
+  CONVERSATION_MODE_LABEL,
+  CONVERSATION_MODES,
   type ChatMessage,
-  type ChatMode,
-  type Conversation
+  type Conversation,
+  type ConversationMode
 } from '@shared/chat'
 import { AI_DATA_SHARING, AI_DIAL_LABEL, isFeatureAllowed, type AiDial } from '@shared/aiSettings'
 import {
@@ -26,6 +27,9 @@ import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { DockPanelControls } from '@renderer/features/shell/Dock'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
+import { CONVERSATION_BUSY_MESSAGE } from './aiActions'
+import { AiActionsMenu } from './AiActionsMenu'
+import { AiResults } from './AiResults'
 import { useAiSettingsStore } from './aiSettingsStore'
 import {
   AGENT_NOTICE,
@@ -35,7 +39,6 @@ import {
 } from './assistantStore'
 import { ContinuityButton, ContinuityView } from './ContinuityPanel'
 import { useContinuityStore } from './continuityStore'
-import { CONVERSATION_BUSY_MESSAGE, QuickActions } from './QuickActions'
 import { describeRequest } from './usageFormat'
 
 const ICON_BUTTON =
@@ -126,13 +129,13 @@ export function AssistantPanel(): React.JSX.Element | null {
  * the heading. The docked panel and the floating window in focus mode (F-6.6) share it, and
  * so the same store, so a conversation started in one continues in the other. While the
  * Continuity button is pressed (F-13.4) the findings view takes the place of the chat. The
- * quick actions (F-5.17) sit above both views.
+ * results of the scene features (`AiResults`, 2026-10-06) sit above both views.
  */
 export function AssistantBody(): React.JSX.Element {
   const continuity = useContinuityStore((s) => s.viewOpen)
   return (
     <>
-      <QuickActions />
+      <AiResults />
       {continuity ? (
         <ContinuityView />
       ) : (
@@ -151,6 +154,7 @@ function PanelHeader(): React.JSX.Element {
     <div className="flex shrink-0 items-center gap-1 pt-3 pr-3 pb-1 pl-2">
       <DockPanelControls id="assistant" />
       <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Assistant</h2>
+      <AiActionsMenu />
       <ContinuityButton />
       <NewConversationButton />
     </div>
@@ -307,9 +311,10 @@ function MessageLog(): React.JSX.Element {
     >
       {messages.length === 0 ? (
         <p className="m-0 text-xs text-fg-muted">
-          Query answers about the whole manuscript and cites the scenes it rests on. Author places
-          its answer in the editor as ghost text. Plan talks through ideas and feedback about the
-          open scene. Write #name to pull in that tag's notes.
+          Auto picks what answers you: a chat about the open scene, a cited answer about the whole
+          manuscript, editor&apos;s notes, a rewrite of the selection, a suggested synopsis or
+          notes, and more. Query, Author, and Plan pin one. Actions has the same features in one
+          click. Write #name to pull in that tag&apos;s notes.
         </p>
       ) : null}
       {messages.map((message, index) => (
@@ -352,6 +357,11 @@ function Turn({
       aria-label={mine ? 'You' : 'Assistant'}
       className={`flex max-w-[92%] flex-col gap-1 rounded-md px-2.5 py-1.5 text-sm ${mine ? 'self-end bg-surface-raised' : 'self-start border border-line'}`}
     >
+      {!mine && message.action !== null && message.action !== 'chat' ? (
+        <p data-testid="chat-turn-action" className="m-0 text-xs font-medium text-accent">
+          {ROUTE_ACTION_LABEL[message.action]}
+        </p>
+      ) : null}
       {!mine && message.content === '' && pending ? (
         <p role="status" data-testid="chat-pending" className="m-0 text-xs text-fg-muted">
           Thinking…
@@ -572,7 +582,10 @@ function answerParts(
 }
 
 /** What a mode radio's tooltip says: what it does, or what to change when the dial forbids it. */
-function modeTitle(id: ChatMode, disabled: boolean, agentDial: AiDial): string {
+function modeTitle(id: ConversationMode, disabled: boolean, agentDial: AiDial): string {
+  if (id === 'auto') {
+    return 'Pick what answers each message: chat, a cited answer, editor’s notes, a rewrite, and more'
+  }
   if (disabled) {
     return id === 'agent'
       ? `Author needs the AI dial at ${AI_DIAL_LABEL[agentDial]} or higher (Settings, AI tab)`
@@ -600,17 +613,25 @@ function Composer(): React.JSX.Element {
   const setMode = useAssistantStore((s) => s.setMode)
   const setParagraphs = useAssistantStore((s) => s.setParagraphs)
   const clearMessages = useAssistantStore((s) => s.clearMessages)
+  const attachment = useAssistantStore((s) => s.attachment)
+  const detach = useAssistantStore((s) => s.detach)
   const settings = useAiSettingsStore((s) => s.settings)
   const [draft, setDraft] = useState('')
-  const radios = useRef(new Map<ChatMode, HTMLButtonElement>())
+  const radios = useRef(new Map<ConversationMode, HTMLButtonElement>())
+  const messageBox = useRef<HTMLTextAreaElement>(null)
+
+  // Ask AI (the selection bubble) attaches a passage: the author writes the question next.
+  useEffect(() => {
+    if (attachment !== null) messageBox.current?.focus()
+  }, [attachment])
 
   const chatAllowed = settings !== null && isFeatureAllowed(settings, 'chat')
   const agentDial = AI_DATA_SHARING.ghostText.minDial
   const agentAllowed = settings !== null && settings.dial >= agentDial
   const queryAllowed = settings !== null && isFeatureAllowed(settings, 'query')
-  const modeOff = (id: ChatMode): boolean =>
+  const modeOff = (id: ConversationMode): boolean =>
     (id === 'agent' && !agentAllowed) || (id === 'query' && !queryAllowed)
-  const mode = conversation?.mode ?? 'query'
+  const mode = conversation?.mode ?? 'auto'
   const canSend =
     conversation !== null && chatAllowed && !pending && draft.trim() !== '' && !modeOff(mode)
 
@@ -620,29 +641,29 @@ function Composer(): React.JSX.Element {
     setDraft('')
   }
 
-  const selectMode = (next: ChatMode): void => {
+  const selectMode = (next: ConversationMode): void => {
     if (modeOff(next)) return
     setMode(next)
     radios.current.get(next)?.focus()
   }
 
   const onRadioKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
-    const index = CHAT_MODES.indexOf(mode)
+    const index = CONVERSATION_MODES.indexOf(mode)
     let next: number
     switch (event.key) {
       case 'ArrowRight':
       case 'ArrowDown':
-        next = (index + 1) % CHAT_MODES.length
+        next = (index + 1) % CONVERSATION_MODES.length
         break
       case 'ArrowLeft':
       case 'ArrowUp':
-        next = (index - 1 + CHAT_MODES.length) % CHAT_MODES.length
+        next = (index - 1 + CONVERSATION_MODES.length) % CONVERSATION_MODES.length
         break
       default:
         return
     }
     event.preventDefault()
-    const target = CHAT_MODES[next]
+    const target = CONVERSATION_MODES[next]
     if (target !== undefined) selectMode(target)
   }
 
@@ -670,7 +691,7 @@ function Composer(): React.JSX.Element {
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <div role="radiogroup" aria-label="Mode" className="flex gap-1">
-          {CHAT_MODES.map((id) => {
+          {CONVERSATION_MODES.map((id) => {
             const disabled = modeOff(id)
             return (
               <button
@@ -689,7 +710,7 @@ function Composer(): React.JSX.Element {
                 onKeyDown={onRadioKeyDown}
                 className={RADIO}
               >
-                {CHAT_MODE_LABEL[id]}
+                {CONVERSATION_MODE_LABEL[id]}
               </button>
             )
           })}
@@ -720,11 +741,34 @@ function Composer(): React.JSX.Element {
           Clear conversation
         </button>
       </div>
+      {attachment !== null ? (
+        <div
+          data-testid="assistant-attachment"
+          className="flex items-start gap-1.5 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-fg-muted"
+        >
+          <Quote size={12} aria-hidden="true" className="mt-0.5 shrink-0" />
+          <p className="m-0 line-clamp-3 min-w-0 flex-1 break-words italic">{attachment}</p>
+          <button
+            type="button"
+            aria-label="Remove passage"
+            title="Remove the passage from the message"
+            onClick={detach}
+            className="shrink-0 rounded-md p-0.5 text-fg-subtle hover:bg-surface hover:text-fg"
+          >
+            <X size={12} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
       <textarea
+        ref={messageBox}
         aria-label="Message"
         rows={3}
         maxLength={CHAT_MESSAGE_MAX}
-        placeholder="Ask about your story… Enter sends, Shift+Enter breaks the line"
+        placeholder={
+          attachment !== null
+            ? 'Ask about this passage… Enter sends'
+            : 'Ask about your story… Enter sends, Shift+Enter breaks the line'
+        }
         disabled={conversation === null}
         value={draft}
         onChange={(event) => setDraft(event.target.value)}

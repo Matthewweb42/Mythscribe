@@ -6,6 +6,7 @@ import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
 import { MetadataPane, SynopsisBox } from './MetadataPane'
 import { NotesEditor } from './NotesEditor'
+import { NotesSuggestion, SuggestButton } from './SceneSuggestions'
 
 const BUTTON =
   'rounded-md p-1.5 text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:bg-surface-raised aria-pressed:text-accent'
@@ -33,7 +34,8 @@ export function NotesToggleButton(): React.JSX.Element {
  * entity page or nothing is selected); its column, width, and resize handle are the dock's
  * (`DockColumn`). Since 2026-10-06 it is the node's whole side panel: for a scene, chapter, or
  * part a compact Synopsis box at the top (`SynopsisBox`), then the notes editor filling the rest
- * as a scratch pad, then a collapsed "Scene details" disclosure with the rest of the metadata
+ * as a scratch pad (with Suggest in the heading and the suggested key points over the notes,
+ * F-5.20, for a manuscript scene), then a collapsed "Scene details" disclosure with the rest of the metadata
  * (`MetadataPane`: location, POV, timeline, status, beat, brief, AI summary). Its open state
  * lives in the layout store (F-7.2), so it is back after a restart. Renders nothing while closed,
  * so the editor gets the whole pane and no notes are loaded. Not mounted in focus mode, where
@@ -53,12 +55,13 @@ export function NotesPanel({ id }: { id: string | null }): React.JSX.Element | n
   )
 }
 
-/** The panel's heading: the dock grip and menu, the title, and the pin button while a node is shown. */
+/** The panel's heading: the dock grip and menu, the title, and Suggest and the pin button while a node is shown. */
 function NotesHeading({ id }: { id: string | null }): React.JSX.Element {
   return (
     <div className="flex shrink-0 items-center gap-2 pt-3 pr-4 pb-2 pl-2">
       <DockPanelControls id="notes" />
       <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Notes</h2>
+      {id === null ? null : <SuggestButton id={id} kind="notes" />}
       {id === null ? null : <PinNotesButton id={id} />}
     </div>
   )
@@ -86,6 +89,7 @@ function NotesContent({
   return (
     <>
       {withMetadata ? <SynopsisBox id={id} /> : null}
+      <NotesSuggestion id={id} />
       <NotesBody id={id} />
       {withMetadata ? <SceneDetails id={id} open={detailsOpen} onOpen={onDetailsOpen} /> : null}
     </>

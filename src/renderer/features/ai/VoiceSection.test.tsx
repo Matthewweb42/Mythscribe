@@ -198,7 +198,7 @@ describe('VoiceSection (F-14.1)', () => {
     expect(rows[0]).not.toHaveTextContent('kept rising')
     expect(rows[1]).toHaveTextContent('Dialogue · POV —')
     expect(rows[1]).toHaveTextContent('Short enough to show whole.')
-    expect(section()).toHaveTextContent('Select 80–2,000 characters in the editor')
+    expect(section()).not.toHaveTextContent('Mark voice exemplar')
   })
 
   it('explains an empty profile', async () => {

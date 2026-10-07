@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Loader2, Sparkles } from 'lucide-react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   EMPTY_SCENE_META,
@@ -19,9 +19,8 @@ import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { describeError } from '@renderer/lib/errors'
-import { useBriefDraft } from './briefDraft'
-import { BriefDraftPanel } from './BriefDraftPanel'
 import { useSceneMetaStore } from './sceneMetaStore'
+import { SuggestButton, SynopsisSuggestion } from './SceneSuggestions'
 import { SuggestInput } from './SuggestInput'
 import { SummaryBlock } from './SummaryBlock'
 
@@ -52,9 +51,8 @@ function useTagNames(category: TagCategory): string[] {
  * (`SynopsisBox`). Takes only `id`: it loads the node's metadata through `useSceneMetaStore` on
  * mount (and again when `id` changes) and unloads on unmount; every change goes through the
  * store's `edit`, so it debounces and flushes like notes do (Ctrl+S, close, quit). The fields
- * are disabled until the load resolves. For a document, "Draft with AI" asks main for a brief
- * drafted from the scene (`useBriefDraft`); the author reviews the five lines and fills the
- * fields with one click. Under the brief, `SummaryBlock` shows the scene summary main keeps up
+ * are disabled until the load resolves. Drafting the brief with AI is the assistant's "Draft
+ * scene brief" action since 2026-10-06 (`briefDraftStore`). Under the brief, `SummaryBlock` shows the scene summary main keeps up
  * to date in the background (F-5.6) for a manuscript document. While the project has a
  * structure template (F-11.1b) and the node is in the manuscript, a Beat picker after Status
  * sets the beat the node sits on in that template (stored per template in `meta.beats`).
@@ -68,8 +66,6 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   const characters = useTagNames('character')
   const briefId = useId()
   const [briefOpen, setBriefOpen] = useState(false)
-  const openBrief = (): void => setBriefOpen(true)
-  const draft = useBriefDraft(id, openBrief)
   const template = useStructureStore((s) => s.template)
   const events = useTimelineStore((s) => s.events)
   const eventTexts = useMemo(() => events.map(eventText), [events])
@@ -148,40 +144,20 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
           disabled={disabled}
         />
       ) : null}
-      {/* The labels never break inside a button, so a narrow pane wraps the row instead. */}
-      <div className="flex flex-wrap items-center gap-1">
-        <button
-          type="button"
-          aria-expanded={briefOpen}
-          aria-controls={briefOpen ? briefId : undefined}
-          onClick={() => (briefOpen ? setBriefOpen(false) : openBrief())}
-          className={BUTTON}
-        >
-          {briefOpen ? (
-            <ChevronDown size={14} aria-hidden="true" />
-          ) : (
-            <ChevronRight size={14} aria-hidden="true" />
-          )}
-          <span className="font-medium">Brief</span>
-        </button>
-        {draft.available ? (
-          <button
-            type="button"
-            onClick={draft.start}
-            disabled={draft.blocked !== null}
-            title={draft.blocked ?? "Draft this scene's brief for you to correct"}
-            className={`ml-auto ${BUTTON}`}
-          >
-            {draft.pending ? (
-              <Loader2 size={14} aria-hidden="true" className="animate-spin" />
-            ) : (
-              <Sparkles size={14} aria-hidden="true" />
-            )}
-            Draft with AI
-          </button>
-        ) : null}
-      </div>
-      <BriefDraftPanel draft={draft} />
+      <button
+        type="button"
+        aria-expanded={briefOpen}
+        aria-controls={briefOpen ? briefId : undefined}
+        onClick={() => setBriefOpen(!briefOpen)}
+        className={`self-start ${BUTTON}`}
+      >
+        {briefOpen ? (
+          <ChevronDown size={14} aria-hidden="true" />
+        ) : (
+          <ChevronRight size={14} aria-hidden="true" />
+        )}
+        <span className="font-medium">Brief</span>
+      </button>
       {briefOpen ? (
         <div id={briefId} className="flex flex-col gap-1">
           {SCENE_BRIEF_FIELDS.map(({ key, label, hint }) => (
@@ -206,7 +182,8 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
  * (F-11.1, the same `sceneMeta.synopsis` the cork board's cards edit), a few lines tall, for a
  * scene, chapter, or part. Loads and unloads the node's metadata like `MetadataPane` (the store
  * counts holders, so both can show the same node), edits through the store's debounced `edit`,
- * and is disabled until the load resolves.
+ * and is disabled until the load resolves. For a manuscript scene, Suggest (F-5.20) asks the AI
+ * for a synopsis, shown under the box until the author accepts or dismisses it.
  */
 export function SynopsisBox({ id }: { id: string }): React.JSX.Element {
   const meta = useSceneMetaStore((s) => s.docs[id]?.content ?? null)
@@ -222,9 +199,12 @@ export function SynopsisBox({ id }: { id: string }): React.JSX.Element {
 
   return (
     <div className="flex shrink-0 flex-col gap-1 px-4 pb-2">
-      <label htmlFor={synopsisId} className="text-xs font-medium text-fg-muted">
-        Synopsis
-      </label>
+      <div className="flex items-center gap-1">
+        <label htmlFor={synopsisId} className="min-w-0 flex-1 text-xs font-medium text-fg-muted">
+          Synopsis
+        </label>
+        <SuggestButton id={id} kind="synopsis" />
+      </div>
       <textarea
         id={synopsisId}
         rows={4}
@@ -237,6 +217,7 @@ export function SynopsisBox({ id }: { id: string }): React.JSX.Element {
         }}
         className="w-full resize-none rounded-md border border-line bg-bg px-2 py-1 text-sm leading-5 disabled:opacity-50"
       />
+      <SynopsisSuggestion id={id} />
     </div>
   )
 }

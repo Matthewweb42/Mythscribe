@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { AiUsage } from './ai'
+import { RouteAction } from './assistantRoute'
 import { QueryTurn } from './query'
 import { toTagName } from './tags'
 import { WhatNextDirection } from './whatNext'
@@ -25,6 +26,20 @@ export const CHAT_MODE_LABEL: Record<ChatMode, string> = {
   query: 'Query',
   agent: 'Author',
   plan: 'Plan'
+}
+
+/**
+ * What a conversation answers in (2026-10-06, all AI in the assistant): `auto`, the default for
+ * a new conversation, asks the router (F-5.19) which feature answers each message; the three
+ * request modes above pin one. `auto` is never sent to main: a routed turn runs in the mode or
+ * feature the router picked. Decided by Claude, unconfirmed.
+ */
+export const CONVERSATION_MODES = ['auto', ...CHAT_MODES] as const
+export const ConversationMode = z.enum(CONVERSATION_MODES)
+export type ConversationMode = z.infer<typeof ConversationMode>
+export const CONVERSATION_MODE_LABEL: Record<ConversationMode, string> = {
+  auto: 'Auto',
+  ...CHAT_MODE_LABEL
 }
 
 export const CHAT_PARAGRAPHS_MIN = 1
@@ -68,14 +83,19 @@ export const ChatMessage = z.object({
   /** A Query turn's citations and flags (F-5.7); null for every other turn and for rows written before it. */
   query: QueryTurn.nullable().default(null),
   /** A What should come next? turn's directions (F-5.17); null for every other turn and for rows written before it. */
-  directions: z.array(WhatNextDirection).nullable().default(null)
+  directions: z.array(WhatNextDirection).nullable().default(null),
+  /**
+   * The feature the router (F-5.19) picked for this turn in an Auto conversation, shown as a
+   * label on the turn; null for a turn sent in a fixed mode and for rows written before it.
+   */
+  action: RouteAction.nullable().default(null)
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
 
 export const Conversation = z.object({
   id: z.string(),
   title: z.string().max(CHAT_TITLE_MAX),
-  mode: ChatMode,
+  mode: ConversationMode,
   paragraphs: z.number().int().min(CHAT_PARAGRAPHS_MIN).max(CHAT_PARAGRAPHS_MAX),
   messages: z.array(ChatMessage).max(CHAT_MAX_MESSAGES),
   created: z.string(),

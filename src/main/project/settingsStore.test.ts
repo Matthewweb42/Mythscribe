@@ -266,7 +266,8 @@ describe('getConversations / setConversations (F-5.4)', () => {
         usage: null,
         mode: null,
         query: null,
-        directions: null
+        directions: null,
+        action: null
       }
     ],
     created: '2026-09-15T10:00:00.000Z',

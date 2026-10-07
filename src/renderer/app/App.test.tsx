@@ -891,7 +891,7 @@ describe('App', () => {
     expect(useFindStore.getState()).toMatchObject({ open: false, query: '' })
   })
 
-  it('a project created with AI on opens in the assistant panel, Query mode, quick actions showing (F-5.18)', async () => {
+  it('a project created with AI on opens in the assistant panel, Auto mode, the actions menu showing (F-5.18, 2026-10-06)', async () => {
     const invoke = install({ 'project:create': info, 'tree:list': treeFixture })
     render(<App />)
     await fillWizard('Smoke', /^novel/i, undefined, /^ask/i)
@@ -904,8 +904,8 @@ describe('App', () => {
       aiDial: 1
     })
     const panel = await screen.findByRole('complementary', { name: 'Assistant' })
-    expect(within(panel).getByRole('radio', { name: /^query/i })).toBeChecked()
-    expect(within(panel).getByTestId('quick-action-whatNext')).toBeInTheDocument()
+    expect(within(panel).getByRole('radio', { name: /^auto/i })).toBeChecked()
+    expect(within(panel).getByRole('button', { name: 'AI actions' })).toBeInTheDocument()
     expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
   })
 

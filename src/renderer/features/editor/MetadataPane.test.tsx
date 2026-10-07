@@ -25,6 +25,8 @@ import {
 import { resetAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
+import { BriefDraftPanel } from './BriefDraftPanel'
+import { resetBriefDraftStore, useBriefDraftStore } from './briefDraftStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -180,7 +182,6 @@ const timeline = (): HTMLElement => screen.getByRole('combobox', { name: 'Timeli
 const briefToggle = (): HTMLElement => screen.getByRole('button', { name: 'Brief' })
 const summaryToggle = (): HTMLElement => screen.getByRole('button', { name: 'Summary' })
 const refreshButton = (): HTMLElement => screen.getByTestId('summary-refresh')
-const draftButton = (): HTMLElement => screen.getByRole('button', { name: 'Draft with AI' })
 const line = (name: string): HTMLInputElement => screen.getByRole('textbox', { name })
 const briefLines = (): string[] => [
   line('Goal').value,
@@ -210,7 +211,18 @@ function ready(id = 'sc-1', chars = BRIEF_TEXT_MIN): void {
   })
 }
 
+/** The metadata pane with the assistant's brief draft beside it, as the app shows them. */
+function WithDraft(): React.JSX.Element {
+  return (
+    <>
+      <MetadataPane id="sc-1" />
+      <BriefDraftPanel />
+    </>
+  )
+}
+
 beforeEach(() => {
+  resetBriefDraftStore()
   resetPendingSaves()
   resetTagStore()
   resetSceneMetaStore()
@@ -228,6 +240,7 @@ beforeEach(() => {
   useTagStore.setState({ byId, ids: orderedIds(byId), loaded: true })
 })
 afterEach(() => {
+  resetBriefDraftStore()
   resetSceneMetaStore()
   resetSummaryStore()
   resetDocumentStore()
@@ -518,9 +531,9 @@ describe('MetadataPane brief (F-14.3)', () => {
     const { calls, sets, release } = install({ 'ai:draftBrief': () => pending })
     release()
     ready()
-    render(<MetadataPane id="sc-1" />)
+    render(<WithDraft />)
     await waitFor(() => expect(field('Location')).toBeEnabled())
-    await userEvent.click(draftButton())
+    act(() => useBriefDraftStore.getState().start('sc-1'))
     expect(screen.getByRole('status')).toHaveTextContent('Drafting the brief…')
     expect(screen.getByTestId('brief-draft-cancel')).toBeInTheDocument()
     await act(async () => {
@@ -534,8 +547,7 @@ describe('MetadataPane brief (F-14.3)', () => {
     expect(screen.getByTestId('brief-draft-cost')).toHaveTextContent(
       'gpt-5.4-mini · $0.0012 · 400 in · 60 out'
     )
-    // The draft opens the disclosure, so the fields it would fill are in view.
-    expect(briefToggle()).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(briefToggle())
     expect(briefLines()).toEqual(['', '', '', '', ''])
     const request = calls.find(([channel]) => channel === 'ai:draftBrief')?.[1] as
       Input<'ai:draftBrief'> | undefined
@@ -570,9 +582,9 @@ describe('MetadataPane brief (F-14.3)', () => {
     const { release } = install({ 'ai:draftBrief': () => drafted({ truncated: true }) })
     release()
     ready()
-    render(<MetadataPane id="sc-1" />)
+    render(<WithDraft />)
     await waitFor(() => expect(field('Location')).toBeEnabled())
-    await userEvent.click(draftButton())
+    act(() => useBriefDraftStore.getState().start('sc-1'))
     const group = await screen.findByRole('group', { name: 'Brief draft' })
     expect(group).toHaveTextContent('Drafted from the first 20,000 characters.')
   })
@@ -581,12 +593,13 @@ describe('MetadataPane brief (F-14.3)', () => {
     const { calls, release } = install()
     release()
     ready()
-    render(<MetadataPane id="sc-1" />)
+    render(<WithDraft />)
     await waitFor(() => expect(field('Location')).toBeEnabled())
-    await userEvent.click(draftButton())
+    act(() => useBriefDraftStore.getState().start('sc-1'))
     await screen.findByRole('group', { name: 'Brief draft' })
     await userEvent.click(screen.getByRole('button', { name: 'Discard' }))
     expect(screen.queryByRole('group', { name: 'Brief draft' })).not.toBeInTheDocument()
+    await userEvent.click(briefToggle())
     expect(briefLines()).toEqual(['', '', '', '', ''])
     expect(useSceneMetaStore.getState().docs['sc-1']?.dirty).toBe(false)
     await waitFor(() =>
@@ -610,42 +623,46 @@ describe('MetadataPane brief (F-14.3)', () => {
     })
     release()
     ready()
-    render(<MetadataPane id="sc-1" />)
+    render(<WithDraft />)
     await waitFor(() => expect(field('Location')).toBeEnabled())
-    await userEvent.click(draftButton())
+    act(() => useBriefDraftStore.getState().start('sc-1'))
     const error = await screen.findByTestId('brief-draft-error')
     expect(error).toHaveTextContent(
       'OpenAI is rate limiting this key. Wait a minute and try again.'
     )
-    await userEvent.click(draftButton())
-    await waitFor(() => expect(screen.queryByTestId('brief-draft-error')).not.toBeInTheDocument())
+    // Close drops the error; the next draft's cancellation clears in silence.
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    act(() => useBriefDraftStore.getState().start('sc-1'))
+    await waitFor(() => expect(useBriefDraftStore.getState().draft).toBeNull())
+    expect(screen.queryByTestId('brief-draft-error')).not.toBeInTheDocument()
     expect(screen.queryByRole('group', { name: 'Brief draft' })).not.toBeInTheDocument()
     expect(toasts()).toEqual([])
   })
 
-  it('offers no Draft with AI for a folder and names what a short scene is missing', async () => {
+  it('has no Draft with AI button: drafting is an action of the assistant (2026-10-06)', async () => {
     const { release } = install()
     release()
-    ready('sc-1', BRIEF_TEXT_MIN - 1)
-    const view = render(<MetadataPane id="sc-1" />)
-    await waitFor(() => expect(field('Location')).toBeEnabled())
-    expect(draftButton()).toBeDisabled()
-    expect(draftButton()).toHaveAttribute('title', 'Write 200 characters before asking for a brief')
-    view.rerender(<MetadataPane id="ch-1" />)
+    ready()
+    render(<MetadataPane id="sc-1" />)
     await waitFor(() => expect(field('Location')).toBeEnabled())
     expect(screen.queryByRole('button', { name: 'Draft with AI' })).not.toBeInTheDocument()
     expect(briefToggle()).toBeInTheDocument()
   })
 
-  it('keeps Draft with AI disabled while the dial is Off', async () => {
-    const { release } = install()
+  it('fills the fields of a scene whose metadata no view holds, writing it at once', async () => {
+    const { calls, sets, release } = install()
     release()
     ready()
-    useAiSettingsStore.setState({ settings: defaultAiSettings() })
-    render(<MetadataPane id="sc-1" />)
-    await waitFor(() => expect(field('Location')).toBeEnabled())
-    expect(draftButton()).toBeDisabled()
-    expect(draftButton().getAttribute('title')).toContain('needs the AI dial at Ask or higher')
+    render(<BriefDraftPanel />)
+    act(() => useBriefDraftStore.getState().start('sc-1'))
+    await screen.findByRole('group', { name: 'Brief draft' })
+    await userEvent.click(screen.getByRole('button', { name: 'Use draft' }))
+    await waitFor(() => expect(sets).toHaveLength(1))
+    expect(sets[0]?.meta.brief).toEqual(DRAFTED)
+    expect(useSceneMetaStore.getState().docs['sc-1']).toBeUndefined()
+    await waitFor(() =>
+      expect(settlements(calls)).toEqual([{ id: 'prop-1', status: 'accepted', note: null }])
+    )
   })
 })
 

@@ -82,6 +82,7 @@ export function ContextMenu({
             role="menuitem"
             tabIndex={-1}
             disabled={item.disabled}
+            title={item.title}
             onClick={() => onSelect(item.id)}
             className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-surface focus:bg-surface focus:outline-none disabled:opacity-50 disabled:hover:bg-transparent"
           >

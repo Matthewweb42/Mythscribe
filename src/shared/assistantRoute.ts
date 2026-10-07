@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { AiFeatureId } from './ai'
 import { PROPOSAL_NOTE_MAX } from './proposal'
 import { QUICK_ACTION_IDS, type QuickActionId } from './quickActions'
 
@@ -31,6 +32,34 @@ export const ROUTE_ACTIONS = [
 ] as const
 export const RouteAction = z.enum(ROUTE_ACTIONS)
 export type RouteAction = z.infer<typeof RouteAction>
+
+/** The label a routed turn carries in the chat, naming what answered it. */
+export const ROUTE_ACTION_LABEL: Record<RouteAction, string> = {
+  chat: 'Chat',
+  query: 'Story question',
+  rewrite: 'Rewrite',
+  critique: "Editor's notes",
+  betaReader: 'Beta reader',
+  proofread: 'Proofread',
+  continuity: 'Check consistency',
+  whatNext: 'What should come next?',
+  synopsis: 'Suggested synopsis',
+  notes: 'Suggested notes'
+}
+
+/** The feature whose dial level and toggle gate each action (the router's own gate is `route`). */
+export const ROUTE_ACTION_FEATURE: Record<RouteAction, AiFeatureId> = {
+  chat: 'chat',
+  query: 'query',
+  rewrite: 'rewrite',
+  critique: 'critique',
+  betaReader: 'betaReader',
+  proofread: 'proofread',
+  continuity: 'continuity',
+  whatNext: 'whatNext',
+  synopsis: 'synopsis',
+  notes: 'notesSuggest'
+}
 
 /** The actions that act on the open document; without one they fall back to `chat`. */
 export const ROUTE_NODE_ACTIONS: readonly RouteAction[] = [

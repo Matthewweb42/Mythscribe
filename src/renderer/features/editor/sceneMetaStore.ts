@@ -21,5 +21,29 @@ const sceneMetaStore = createAutosaveStore({
 
 export const useSceneMetaStore = sceneMetaStore.useStore
 
+/**
+ * Applies `patch` to the metadata of `id` through the autosave store whether or not a view holds
+ * the record (2026-10-06: the AI panel and the notes column fill the brief and the synopsis from
+ * accepted proposals). A held record is edited in place and saves on the usual debounce; one
+ * nobody holds is loaded, edited, and released, which writes it at once.
+ */
+export async function patchSceneMeta(
+  id: string,
+  patch: (meta: SceneMeta) => SceneMeta
+): Promise<void> {
+  const held = useSceneMetaStore.getState().docs[id]?.content ?? null
+  if (held !== null) {
+    useSceneMetaStore.getState().edit(id, patch(held))
+    return
+  }
+  try {
+    await useSceneMetaStore.getState().load(id)
+    const loaded = useSceneMetaStore.getState().docs[id]?.content ?? null
+    if (loaded !== null) useSceneMetaStore.getState().edit(id, patch(loaded))
+  } finally {
+    useSceneMetaStore.getState().unload(id)
+  }
+}
+
 /** Drops the pending jobs, timers, in-flight write, load tokens, and registration, then empties the store. For tests only. */
 export const resetSceneMetaStore = sceneMetaStore.reset

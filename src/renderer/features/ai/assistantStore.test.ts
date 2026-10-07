@@ -162,7 +162,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       usage: null,
       mode: null,
       query: null,
-      directions: null
+      directions: null,
+      action: null
     },
     {
       id: 'm-2',
@@ -175,7 +176,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       usage: { inputTokens: 300, outputTokens: 20 },
       mode: 'plan',
       query: null,
-      directions: null
+      directions: null,
+      action: null
     }
   ],
   created: '2026-09-15T10:00:00.000Z',
@@ -263,7 +265,7 @@ describe('useAssistantStore load and persistence (F-5.4)', () => {
     expect(sets).toHaveLength(0)
   })
 
-  it('gives a fresh project one Query conversation (F-5.8) to write in without writing it', async () => {
+  it('gives a fresh project one Auto conversation (2026-10-06) to write in without writing it', async () => {
     setIpcClient(deferredClient({ active: null, items: [] }))
     await store().load()
     const value = store().conversations
@@ -271,7 +273,7 @@ describe('useAssistantStore load and persistence (F-5.4)', () => {
     expect(value?.active).toBe(value?.items[0]?.id)
     expect(value?.items[0]).toMatchObject({
       title: NEW_CONVERSATION_TITLE,
-      mode: 'query',
+      mode: 'auto',
       paragraphs: 1,
       messages: []
     })
@@ -341,14 +343,14 @@ describe('useAssistantStore load and persistence (F-5.4)', () => {
 })
 
 describe('useAssistantStore tabs (F-5.4)', () => {
-  it('newConversation opens a fresh Plan tab as the active one, up to the cap', async () => {
+  it('newConversation opens a fresh Auto tab as the active one, up to the cap', async () => {
     await store().load()
     store().newConversation()
     const value = store().conversations
     expect(value?.items).toHaveLength(2)
     expect(value?.active).toBe(value?.items[1]?.id)
     // F-5.8: a new conversation starts in Query mode.
-    expect(active()).toMatchObject({ title: NEW_CONVERSATION_TITLE, mode: 'query', messages: [] })
+    expect(active()).toMatchObject({ title: NEW_CONVERSATION_TITLE, mode: 'auto', messages: [] })
     for (let i = 0; i < CHAT_MAX_CONVERSATIONS + 2; i++) store().newConversation()
     expect(store().conversations?.items).toHaveLength(CHAT_MAX_CONVERSATIONS)
   })
@@ -446,7 +448,8 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
       usage: null,
       mode: null,
       query: null,
-      directions: null
+      directions: null,
+      action: null
     }))
     setIpcClient(
       deferredClient({

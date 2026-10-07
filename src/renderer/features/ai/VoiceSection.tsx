@@ -5,8 +5,6 @@ import {
   EXEMPLAR_KIND_LABEL,
   VOICE_AUTO_EXEMPLAR_MAX,
   VOICE_EXEMPLAR_MAX,
-  VOICE_EXEMPLAR_TEXT_MAX,
-  VOICE_EXEMPLAR_TEXT_MIN,
   VOICE_NOTES_MIN_WORDS,
   VOICE_NOTES_REFRESH_WORDS,
   type VoiceNotes
@@ -168,10 +166,6 @@ export function VoiceSection(): React.JSX.Element | null {
         <p className="m-0 text-xs text-fg-muted">
           MythScribe picks up to {VOICE_AUTO_EXEMPLAR_MAX} passages of your own prose (never text
           accepted from the AI) as you write; removing one keeps it from being picked again.
-        </p>
-        <p className="m-0 text-xs text-fg-muted">
-          Select {VOICE_EXEMPLAR_TEXT_MIN}–{VOICE_EXEMPLAR_TEXT_MAX.toLocaleString()} characters in
-          the editor and use Mark voice exemplar in the toolbar. Up to {VOICE_EXEMPLAR_MAX}.
         </p>
       </div>
 

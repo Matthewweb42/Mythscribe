@@ -28,7 +28,7 @@ import {
   resetAssistantStore,
   useAssistantStore
 } from './assistantStore'
-import { CONVERSATION_BUSY_MESSAGE } from './QuickActions'
+import { CONVERSATION_BUSY_MESSAGE } from './aiActions'
 import { resetContinuityStore, useContinuityStore } from './continuityStore'
 import { resetProposalStore } from './proposalStore'
 
@@ -102,6 +102,7 @@ const message = (
   mode: null,
   query: null,
   directions: null,
+  action: null,
   ...over
 })
 
@@ -267,12 +268,12 @@ describe('AssistantPanel (F-5.4)', () => {
       'aria-checked',
       'false'
     )
-    // F-5.8: the radios read Query, Author, Plan in that order.
+    // F-5.8: the radios read Query, Author, Plan in that order, after Auto (2026-10-06).
     expect(
       within(modes)
         .getAllByRole('radio')
         .map((radio) => radio.textContent)
-    ).toEqual(['Query', 'Author', 'Plan'])
+    ).toEqual(['Auto', 'Query', 'Author', 'Plan'])
     expect(screen.queryByRole('combobox', { name: 'Paragraphs' })).not.toBeInTheDocument()
     expect(box()).toBeEnabled()
     expect(sendButton()).toBeDisabled()
@@ -703,13 +704,30 @@ describe('AssistantPanel quick actions (F-5.17)', () => {
     editor.destroy()
   })
 
-  it('shows the row above the chat and above the Continuity view', async () => {
+  it('the actions menu sits in the header and lists every action, off with the reason while no scene is open', async () => {
     await mountOpen()
-    const group = (): HTMLElement => within(panel()).getByRole('group', { name: 'Quick actions' })
-    expect(group()).toBeInTheDocument()
-    act(() => useContinuityStore.getState().setViewOpen(true))
-    await screen.findByTestId('continuity-panel')
-    expect(group()).toBeInTheDocument()
+    await userEvent.click(within(panel()).getByRole('button', { name: 'AI actions' }))
+    const menu = screen.getByRole('menu')
+    const items = within(menu).getAllByRole('menuitem')
+    expect(items.map((item) => item.textContent)).toEqual([
+      'What should come next?',
+      'What happened here?',
+      "Editor's notes",
+      'Beta reader',
+      'Proofread',
+      'Check consistency',
+      'Suggest synopsis',
+      'Suggest notes',
+      'Draft scene brief',
+      'Summarize scene'
+    ])
+    for (const item of items) {
+      expect(item).toBeDisabled()
+      expect(item).toHaveAttribute('title', 'Open a manuscript scene first')
+    }
+    // The button closes it again rather than reopening it.
+    await userEvent.click(within(panel()).getByRole('button', { name: 'AI actions' }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
   it('renders a turn’s directions as cards, and Write this sends one as an Author turn', async () => {

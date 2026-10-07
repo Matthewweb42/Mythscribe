@@ -58,8 +58,12 @@ export interface RewriteSession {
  */
 interface RewriteState {
   session: RewriteSession | null
-  /** Rewrites the editor's selection for `nodeId`; ignored while a rewrite is in progress or when the selection is out of bounds. */
-  start: (nodeId: string, editor: Editor) => void
+  /**
+   * Rewrites the editor's selection for `nodeId`; ignored while a rewrite is in progress or when
+   * the selection is out of bounds. `note` is the author's instruction when the chat asked for
+   * the rewrite (F-5.19), sent as a regenerate's note is.
+   */
+  start: (nodeId: string, editor: Editor, note?: string | null) => void
   /** Cancels the streaming request and clears the panel; the target highlight goes with it. */
   stop: () => void
   /** Asks again with the author's note (F-14.5); the shown proposal settles `regenerated`. */
@@ -162,7 +166,7 @@ function send(input: Input<'ai:rewrite'>): void {
 export const useRewriteStore = create<RewriteState>((set, get) => ({
   session: null,
 
-  start(nodeId, editor) {
+  start(nodeId, editor, note = null) {
     if (get().session !== null || editor.isDestroyed) return
     const { from, to, text } = captureRewriteText(editor)
     if (text.length < REWRITE_TEXT_MIN || text.length > REWRITE_TEXT_MAX) return
@@ -185,7 +189,7 @@ export const useRewriteStore = create<RewriteState>((set, get) => ({
         to
       }
     })
-    send({ nodeId, from, to, text, before, after, requestId })
+    send({ nodeId, from, to, text, before, after, requestId, ...(note ? { note } : {}) })
   },
 
   stop() {

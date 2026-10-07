@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 import type { Editor } from '@tiptap/core'
 import {
+  ROUTE_HISTORY_TURNS,
+  ROUTE_SELECTION_PREVIEW_CHARS,
+  type RouteAction
+} from '@shared/assistantRoute'
+import {
   CHAT_HISTORY_TURNS,
   CHAT_MAX_CONVERSATIONS,
   CHAT_MAX_MESSAGES,
@@ -10,9 +15,16 @@ import {
   titleFor,
   type ChatMessage,
   type ChatMode,
-  type Conversation
+  type Conversation,
+  type ConversationMode
 } from '@shared/chat'
-import type { AiChatResult, AiQueryResult, AiWhatNextResult, Input } from '@shared/ipc/contract'
+import type {
+  AiChatResult,
+  AiQueryResult,
+  AiRouteResult,
+  AiWhatNextResult,
+  Input
+} from '@shared/ipc/contract'
 import type { QuerySceneRef } from '@shared/query'
 import { WHAT_NEXT_QUESTION, directionMessage, recapQuestion } from '@shared/quickActions'
 import { WHAT_NEXT_CHAR_BUDGET, directionsText, type WhatNextDirection } from '@shared/whatNext'
@@ -23,6 +35,9 @@ import {
 } from '@renderer/features/editor/activeEditorStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import type { GhostSettleHandler } from '@renderer/features/editor/ghostText'
+import { captureRewriteText } from '@renderer/features/editor/rewriteTarget'
+import { useRewriteStore } from '@renderer/features/editor/rewriteStore'
+import { selectedText as plainSelection } from '@renderer/features/editor/selectedText'
 import { locateText } from '@renderer/features/editor/locateText'
 import {
   OPEN_SCENE_TIMEOUT_MS,
@@ -34,7 +49,15 @@ import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
+import {
+  aiActionReason,
+  openSceneNow,
+  rewriteReason,
+  startSceneAction,
+  type OpenScene
+} from './aiActions'
 import { useAiActivityStore } from './aiActivityStore'
+import { useAiSettingsStore } from './aiSettingsStore'
 import { proposalStore } from './proposalStore'
 
 /** The title of a conversation nobody has written in yet. */
@@ -47,6 +70,10 @@ export const NO_EDITOR_MESSAGE = 'Open a scene to place text'
 export const NO_SCENE_MESSAGE = 'Open a scene first'
 /** The toast when Author mode came back with nothing to place. */
 export const EMPTY_ANSWER_MESSAGE = 'The assistant returned no text. Try again.'
+/** What a routed rewrite turn says once the rewrite started (F-5.19). */
+export const REWRITE_STARTED_MESSAGE = 'The rewrite is above the chat.'
+/** The selected passage Ask AI attaches to the composer is cut to this many characters. */
+export const ATTACHMENT_MAX = 1_000
 // The passage jump lives in the editor feature (F-4.12 reuses it for mentions); the two
 // constants are re-exported here because the Query panel and this store's tests read them.
 export { OPEN_SCENE_TIMEOUT_MS, PASSAGE_GONE_MESSAGE }
@@ -70,6 +97,13 @@ export { OPEN_SCENE_TIMEOUT_MS, PASSAGE_GONE_MESSAGE }
  * asks `ai:whatNext` and records the directions on the assistant turn, and `writeDirection`
  * sends one of them as an Author turn, so it lands as ghost text. One busy rule covers them
  * all: nothing new starts while the active conversation has a request in flight.
+ * An Auto conversation (2026-10-06, the default) asks the router (F-5.19, `ai:route`) which
+ * feature answers each message and runs it on the same turn pair: chat (Plan), a Story
+ * Intelligence question, What should come next?, a rewrite of the selection, or a scene action
+ * (`startSceneAction`), whose result shows in the panel or the notes column while the turn
+ * carries the action's label and a notice saying where. A router that is off falls back to chat.
+ * Ask AI on a selection attaches the passage to the composer (`attachment`); the next message
+ * sent from the composer carries it as a quote.
  * Every request is tracked in the activity store and can be stopped (F-5.10): `stop` drops the
  * unanswered turn (with whatever streamed into it) and keeps the author's turn to resend; the
  * `CANCELLED` reply is silent. Loaded with the tree on project open and cleared on close
@@ -83,6 +117,11 @@ interface AssistantState {
   /** Message ids answered from the local cache this session (the cost line says so; not persisted). */
   cached: Record<string, true>
   load: () => Promise<void>
+  /** The selected passage Ask AI attached to the composer (2026-10-06), or null. */
+  attachment: string | null
+  /** Attaches a passage to the next message (cut to `ATTACHMENT_MAX`); blank text detaches. */
+  attach: (text: string) => void
+  detach: () => void
   /** Cancels any pending write, drops the delta subscription, and empties the store. */
   clear: () => void
   /** Opens a fresh Plan conversation as the active tab; a no-op at the conversation cap. */
@@ -90,7 +129,7 @@ interface AssistantState {
   /** Drops a conversation (its request in flight is stopped); the last tab is replaced by a fresh one. */
   closeConversation: (id: string) => void
   select: (id: string) => void
-  setMode: (mode: ChatMode) => void
+  setMode: (mode: ConversationMode) => void
   setParagraphs: (paragraphs: number) => void
   /** Empties the active conversation's turns and resets its title. */
   clearMessages: () => void
@@ -120,7 +159,10 @@ interface AssistantState {
   openScene: (ref: QuerySceneRef, quote: string | null) => Promise<void>
 }
 
-/** A turn sent in another mode than its conversation's, or a Query turn pinned to the open scene. */
+/**
+ * A turn sent in another mode than its conversation's, or a Query turn pinned to the open scene.
+ * A turn with an override never carries the composer's attachment.
+ */
 export interface SendOverride {
   mode?: ChatMode
   pinActive?: boolean
@@ -192,7 +234,7 @@ function freshConversation(): Conversation {
   return {
     id: nextId('c'),
     title: NEW_CONVERSATION_TITLE,
-    mode: 'query',
+    mode: 'auto',
     paragraphs: CHAT_PARAGRAPHS_DEFAULT,
     messages: [],
     created: now,
@@ -223,7 +265,8 @@ const turn = (role: ChatMessage['role'], content: string, mode: ChatMode | null)
   usage: null,
   mode,
   query: null,
-  directions: null
+  directions: null,
+  action: null
 })
 
 /** `value` with the active conversation replaced by `patch(conversation)`, its `modified` bumped. */
@@ -364,6 +407,23 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   conversations: null,
   pending: {},
   cached: {},
+  attachment: null,
+
+  attach(text) {
+    const passage = text.trim()
+    set({
+      attachment:
+        passage === ''
+          ? null
+          : passage.length > ATTACHMENT_MAX
+            ? `${passage.slice(0, ATTACHMENT_MAX - 1).trimEnd()}…`
+            : passage
+    })
+  },
+
+  detach() {
+    set({ attachment: null })
+  },
 
   async load() {
     unregister ??= registerPendingSave(flush)
@@ -383,7 +443,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     unregister = null
     unsubscribe?.()
     unsubscribe = null
-    set({ conversations: null, pending: {}, cached: {} })
+    set({ conversations: null, pending: {}, cached: {}, attachment: null })
   },
 
   newConversation() {
@@ -431,33 +491,39 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
 
   async send(message, override) {
     const value = get().conversations
-    const text = message.trim().slice(0, CHAT_MESSAGE_MAX)
-    if (value?.active == null || !text) return
+    // The composer's attachment rides on a plain send only; an override (recap, Write this) is its own message.
+    const attachment = override === undefined ? get().attachment : null
+    const text = withAttachment(message.trim(), attachment)
+    if (value?.active == null || !message.trim()) return
     const id = value.active
     const conversation = value.items.find((c) => c.id === id)
     if (!conversation || get().pending[id] !== undefined) return
-    const mode = override?.mode ?? conversation.mode
+    const mode: ConversationMode = override?.mode ?? conversation.mode
     const { paragraphs } = conversation
     if (mode === 'agent' && useActiveEditorStore.getState().active === null) {
       toast.error(NO_EDITOR_MESSAGE)
       return
     }
-    const history = conversation.messages
-      .filter((m) => m.content !== '')
-      .slice(-CHAT_HISTORY_TURNS)
-      .map((m) => ({ role: m.role, content: m.content }))
+    if (attachment !== null) set({ attachment: null })
+    const history = historyOf(conversation)
     const requestId = nextId('r')
     setPending(id, requestId)
     commit(
       patchOne(value, id, (c) => ({
         ...c,
         title: c.messages.length === 0 ? titleFor(text) || NEW_CONVERSATION_TITLE : c.title,
-        messages: [...c.messages, turn('user', text, null), turn('assistant', '', mode)].slice(
-          -CHAT_MAX_MESSAGES
-        )
+        messages: [
+          ...c.messages,
+          turn('user', text, null),
+          turn('assistant', '', mode === 'auto' ? null : mode)
+        ].slice(-CHAT_MAX_MESSAGES)
       }))
     )
     const nodeId = useActiveEditorStore.getState().active?.id ?? null
+    if (mode === 'auto') {
+      await routeTurn(id, requestId, text, history, paragraphs)
+      return
+    }
     if (mode === 'query') {
       await sendQuery(id, {
         nodeId,
@@ -468,61 +534,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       })
       return
     }
-    let result: AiChatResult
-    try {
-      // Main reads the saved scene: the words typed just before asking go first.
-      await useDocumentStore.getState().flush()
-      if (get().pending[id] !== requestId) return // stopped or closed while saving
-      result = await useAiActivityStore.getState().track(
-        'chat',
-        requestId,
-        ipc().invoke('ai:chat', {
-          nodeId,
-          mode,
-          paragraphs,
-          message: text,
-          history,
-          requestId
-        })
-      )
-    } catch (err) {
-      settleFailure(id, requestId, describeError(err))
-      return
-    }
-    if (get().pending[id] !== requestId) {
-      // The conversation was closed or the store cleared meanwhile: nothing shows the answer.
-      if (result.ok) void proposalStore.settle(result.proposalId, 'rejected', null)
-      return
-    }
-    if (!result.ok) {
-      settleFailure(
-        id,
-        requestId,
-        result.code === 'CANCELLED' ? null : `${result.message} ${result.nextStep}`.trim()
-      )
-      return
-    }
-    if (mode === 'agent' && !result.text.trim()) {
-      void proposalStore.settle(result.proposalId, 'rejected', null)
-      settleFailure(id, requestId, EMPTY_ANSWER_MESSAGE)
-      return
-    }
-    if (mode === 'agent' && !placeInEditor(result)) {
-      void proposalStore.settle(result.proposalId, 'rejected', null)
-      settleFailure(id, requestId, NO_EDITOR_MESSAGE)
-      return
-    }
-    finishTurn(
-      id,
-      {
-        content: result.text,
-        model: result.model,
-        costUsd: result.costUsd,
-        usage: result.usage,
-        proposalId: result.proposalId
-      },
-      result.cached
-    )
+    await runChat(id, requestId, { nodeId, mode, paragraphs, message: text, history, requestId })
   },
 
   async whatNext() {
@@ -536,14 +548,6 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       toast.error(NO_SCENE_MESSAGE)
       return
     }
-    const { editor } = active
-    const nodeId = active.id
-    // With a selection the directions follow from the text up to its end; the contract caps it.
-    const before = editor.state.selection.empty
-      ? null
-      : editor.state.doc
-          .textBetween(0, editor.state.selection.to, '\n\n')
-          .slice(-WHAT_NEXT_CHAR_BUDGET)
     const requestId = nextId('r')
     setPending(id, requestId)
     commit(
@@ -557,43 +561,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
         ].slice(-CHAT_MAX_MESSAGES)
       }))
     )
-    let result: AiWhatNextResult
-    try {
-      // Main reads the saved scene when no selection rides along: the author's typing goes first.
-      await useDocumentStore.getState().flush()
-      if (get().pending[id] !== requestId) return // stopped or closed while saving
-      result = await useAiActivityStore
-        .getState()
-        .track('whatNext', requestId, ipc().invoke('ai:whatNext', { nodeId, requestId, before }))
-    } catch (err) {
-      settleFailure(id, requestId, describeError(err))
-      return
-    }
-    if (get().pending[id] !== requestId) {
-      // The conversation was closed or the store cleared meanwhile: nothing shows the answer.
-      if (result.ok) void proposalStore.settle(result.proposalId, 'rejected', null)
-      return
-    }
-    if (!result.ok) {
-      settleFailure(
-        id,
-        requestId,
-        result.code === 'CANCELLED' ? null : `${result.message} ${result.nextStep}`.trim()
-      )
-      return
-    }
-    finishTurn(
-      id,
-      {
-        content: directionsText(result.directions),
-        directions: result.directions,
-        model: result.model,
-        costUsd: result.costUsd,
-        usage: result.usage,
-        proposalId: result.proposalId
-      },
-      result.cached
-    )
+    await runWhatNext(id, requestId, active)
   },
 
   async recap() {
@@ -627,6 +595,276 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     await openPassage(ref.nodeId, (doc) => locateText(doc, quote))
   }
 }))
+
+/** The recent turns that ride along with a request as history. */
+function historyOf(conversation: Conversation): Input<'ai:chat'>['history'] {
+  return conversation.messages
+    .filter((m) => m.content !== '')
+    .slice(-CHAT_HISTORY_TURNS)
+    .map((m) => ({ role: m.role, content: m.content }))
+}
+
+/**
+ * The message as sent: the author's words, then the attached passage as a quote, within the
+ * message cap (the author's words are cut first; the quote is capped already).
+ */
+export function withAttachment(message: string, attachment: string | null): string {
+  if (attachment === null) return message.slice(0, CHAT_MESSAGE_MAX)
+  const quote = `\n\nPassage:\n"${attachment}"`
+  return `${message.slice(0, Math.max(0, CHAT_MESSAGE_MAX - quote.length))}${quote}`
+}
+
+/** Applies `patch` to the unanswered assistant turn at the end of conversation `id`. */
+function patchLastTurn(id: string, patch: Partial<ChatMessage>): void {
+  const value = useAssistantStore.getState().conversations
+  if (value === null) return
+  commit(
+    patchOne(value, id, (c) => {
+      const last = c.messages[c.messages.length - 1]
+      if (last?.role !== 'assistant') return c
+      return { ...c, messages: [...c.messages.slice(0, -1), { ...last, ...patch }] }
+    })
+  )
+}
+
+/** Hands conversation `id`'s turn to a new request (the router answered; the feature's request starts). */
+function nextRequest(id: string): string {
+  const requestId = nextId('r')
+  setPending(id, requestId)
+  return requestId
+}
+
+/**
+ * One Plan or Author turn (F-5.4) on the turn pair already in conversation `id`: Plan streams
+ * into the chat, Author places its answer in the editor as ghost text.
+ */
+async function runChat(id: string, requestId: string, input: Input<'ai:chat'>): Promise<void> {
+  const { mode } = input
+  let result: AiChatResult
+  try {
+    // Main reads the saved scene: the words typed just before asking go first.
+    await useDocumentStore.getState().flush()
+    if (useAssistantStore.getState().pending[id] !== requestId) return // stopped or closed while saving
+    result = await useAiActivityStore
+      .getState()
+      .track('chat', requestId, ipc().invoke('ai:chat', input))
+  } catch (err) {
+    settleFailure(id, requestId, describeError(err))
+    return
+  }
+  if (useAssistantStore.getState().pending[id] !== requestId) {
+    // The conversation was closed or the store cleared meanwhile: nothing shows the answer.
+    if (result.ok) void proposalStore.settle(result.proposalId, 'rejected', null)
+    return
+  }
+  if (!result.ok) {
+    settleFailure(
+      id,
+      requestId,
+      result.code === 'CANCELLED' ? null : `${result.message} ${result.nextStep}`.trim()
+    )
+    return
+  }
+  if (mode === 'agent' && !result.text.trim()) {
+    void proposalStore.settle(result.proposalId, 'rejected', null)
+    settleFailure(id, requestId, EMPTY_ANSWER_MESSAGE)
+    return
+  }
+  if (mode === 'agent' && !placeInEditor(result)) {
+    void proposalStore.settle(result.proposalId, 'rejected', null)
+    settleFailure(id, requestId, NO_EDITOR_MESSAGE)
+    return
+  }
+  finishTurn(
+    id,
+    {
+      content: result.text,
+      model: result.model,
+      costUsd: result.costUsd,
+      usage: result.usage,
+      proposalId: result.proposalId
+    },
+    result.cached
+  )
+}
+
+/**
+ * What should come next? (F-5.17) on the turn pair already in conversation `id`. With a
+ * selection the directions follow from the text up to its end; the contract caps it.
+ */
+async function runWhatNext(id: string, requestId: string, active: ActiveEditor): Promise<void> {
+  const { editor } = active
+  const nodeId = active.id
+  const before = editor.state.selection.empty
+    ? null
+    : editor.state.doc
+        .textBetween(0, editor.state.selection.to, '\n\n')
+        .slice(-WHAT_NEXT_CHAR_BUDGET)
+  let result: AiWhatNextResult
+  try {
+    // Main reads the saved scene when no selection rides along: the author's typing goes first.
+    await useDocumentStore.getState().flush()
+    if (useAssistantStore.getState().pending[id] !== requestId) return // stopped or closed while saving
+    result = await useAiActivityStore
+      .getState()
+      .track('whatNext', requestId, ipc().invoke('ai:whatNext', { nodeId, requestId, before }))
+  } catch (err) {
+    settleFailure(id, requestId, describeError(err))
+    return
+  }
+  if (useAssistantStore.getState().pending[id] !== requestId) {
+    // The conversation was closed or the store cleared meanwhile: nothing shows the answer.
+    if (result.ok) void proposalStore.settle(result.proposalId, 'rejected', null)
+    return
+  }
+  if (!result.ok) {
+    settleFailure(
+      id,
+      requestId,
+      result.code === 'CANCELLED' ? null : `${result.message} ${result.nextStep}`.trim()
+    )
+    return
+  }
+  finishTurn(
+    id,
+    {
+      content: directionsText(result.directions),
+      directions: result.directions,
+      model: result.model,
+      costUsd: result.costUsd,
+      usage: result.usage,
+      proposalId: result.proposalId
+    },
+    result.cached
+  )
+}
+
+/**
+ * One Auto turn (F-5.19): asks the router which feature answers `text`, with the open document,
+ * the opening of the selection, and the last turns, then runs that feature on the turn pair
+ * already in conversation `id`. The router being off (DISABLED) falls back to chat; any other
+ * failure settles the turn as a chat failure would.
+ */
+async function routeTurn(
+  id: string,
+  requestId: string,
+  text: string,
+  history: Input<'ai:chat'>['history'],
+  paragraphs: number
+): Promise<void> {
+  const open = openSceneNow()
+  const { editor } = open
+  const preview =
+    editor !== null && !editor.state.selection.empty
+      ? plainSelection(editor).slice(0, ROUTE_SELECTION_PREVIEW_CHARS)
+      : ''
+  let route: AiRouteResult
+  try {
+    route = await useAiActivityStore.getState().track(
+      'route',
+      requestId,
+      ipc().invoke('ai:route', {
+        nodeId: open.nodeId,
+        message: text,
+        history: history.slice(-ROUTE_HISTORY_TURNS),
+        selection: preview === '' ? null : { text: preview },
+        requestId
+      })
+    )
+  } catch (err) {
+    settleFailure(id, requestId, describeError(err))
+    return
+  }
+  if (useAssistantStore.getState().pending[id] !== requestId) return // stopped or closed meanwhile
+  let action: RouteAction = 'chat'
+  let instruction: string | null = null
+  let cost: Partial<ChatMessage> = {}
+  if (route.ok) {
+    action = route.action
+    instruction = route.instruction
+    if (route.model !== null) {
+      cost = { model: route.model, costUsd: route.costUsd, usage: route.usage }
+    }
+  } else if (route.code !== 'DISABLED') {
+    settleFailure(
+      id,
+      requestId,
+      route.code === 'CANCELLED' ? null : `${route.message} ${route.nextStep}`.trim()
+    )
+    return
+  }
+  await dispatchRoute(id, { action, instruction, cost, text, history, paragraphs, open })
+}
+
+/** What the router decided for one Auto turn, and what the turn carries into the feature. */
+interface RoutedTurn {
+  action: RouteAction
+  instruction: string | null
+  /** The router's own cost, shown on a turn whose feature answers outside the chat. */
+  cost: Partial<ChatMessage>
+  text: string
+  history: Input<'ai:chat'>['history']
+  paragraphs: number
+  open: OpenScene
+}
+
+/** Runs the feature the router picked on conversation `id`'s turn pair, labelled with the action. */
+async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
+  const { action, instruction, cost, text, history, paragraphs, open } = routed
+  const { editor, nodeId } = open
+  switch (action) {
+    case 'chat': {
+      patchLastTurn(id, { action, mode: 'plan' })
+      const requestId = nextRequest(id)
+      await runChat(id, requestId, {
+        nodeId,
+        mode: 'plan',
+        paragraphs,
+        message: text,
+        history,
+        requestId
+      })
+      return
+    }
+    case 'query': {
+      patchLastTurn(id, { action, mode: 'query' })
+      const requestId = nextRequest(id)
+      await sendQuery(id, { nodeId, message: text, history, requestId })
+      return
+    }
+    case 'whatNext': {
+      patchLastTurn(id, { action, mode: 'plan' })
+      const active = liveEditor()
+      if (active === null) {
+        finishTurn(id, { content: NO_SCENE_MESSAGE, ...cost }, false)
+        return
+      }
+      await runWhatNext(id, nextRequest(id), active)
+      return
+    }
+    case 'rewrite': {
+      patchLastTurn(id, { action })
+      const settings = useAiSettingsStore.getState().settings
+      const length = editor === null ? 0 : captureRewriteText(editor).text.length
+      const reason = editor === null ? NO_EDITOR_MESSAGE : rewriteReason(settings, length)
+      if (reason === null && editor !== null && nodeId !== null) {
+        useRewriteStore.getState().start(nodeId, editor, instruction)
+      }
+      finishTurn(id, { content: reason ?? REWRITE_STARTED_MESSAGE, ...cost }, false)
+      return
+    }
+    default: {
+      patchLastTurn(id, { action })
+      const settings = useAiSettingsStore.getState().settings
+      const reason = aiActionReason(action, settings, open, false)
+      let content = reason ?? NO_SCENE_MESSAGE
+      if (reason === null && editor !== null && nodeId !== null) {
+        content = startSceneAction(action, nodeId, editor, instruction)
+      }
+      finishTurn(id, { content, ...cost }, false)
+    }
+  }
+}
 
 /**
  * One Query turn (F-5.7): main ranks the manuscript's scenes, answers with the citations it
