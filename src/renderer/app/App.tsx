@@ -10,6 +10,9 @@ import { useAppAccessStore } from '@renderer/features/account/appAccessStore'
 import { TrialBanner } from '@renderer/features/account/TrialBanner'
 import { useBackupStore } from '@renderer/features/backups/backupStore'
 import { useDiagnosticsStore } from '@renderer/features/diagnostics/diagnosticsStore'
+import { DEVTOOLS_CHORD } from '@shared/devtools'
+import { DevToolsPanel } from '@renderer/features/devtools/DevToolsPanel'
+import { useDevToolsStore } from '@renderer/features/devtools/devToolsStore'
 import { AboutDialog } from '@renderer/features/shell/AboutDialog'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -173,6 +176,9 @@ export function App(): React.JSX.Element {
     // F-15.8: diagnostics are app-wide as well, and main pushes the state after a report is sent,
     // so the subscription is opened here once rather than by the Settings tab.
     const offDiagnostics = useDiagnosticsStore.getState().subscribe()
+    // Developer tools (2026-10-07): app-wide too; main pushes the switch, new log entries, and
+    // AI request rows, so the subscription is opened here once.
+    const offDevTools = useDevToolsStore.getState().subscribe()
     // F-8.4: backups are app-wide, and main pushes the state after a scheduled or on-close
     // backup (a failure is toasted once), so the subscription is opened here once as well.
     const offBackups = useBackupStore.getState().subscribe()
@@ -187,6 +193,7 @@ export function App(): React.JSX.Element {
       offAccess()
       offUpdates()
       offDiagnostics()
+      offDevTools()
       offBackups()
     }
   }, [])
@@ -465,6 +472,7 @@ export function App(): React.JSX.Element {
       {focus ? null : <TrialBanner />}
       {current ? <FocusShortcuts /> : null}
       <SettingsShortcut />
+      <DevToolsShortcut />
       <ZoomShortcuts />
       {current ? <InsertShortcuts format={current.format} /> : null}
       {current ? <SearchShortcut /> : null}
@@ -488,6 +496,8 @@ export function App(): React.JSX.Element {
       <DialogHost />
       {/* F-3.11: the spelling menu, after the dialogs so it opens above their text fields too. */}
       {current ? <SpellcheckMenu /> : null}
+      {/* Developer tools: a drawer over the bottom of the window, only while the switch is on. */}
+      <DevToolsPanel />
     </div>
   )
 }
@@ -809,6 +819,25 @@ function SettingsShortcut(): null {
         event.preventDefault()
         useShellDialogStore.getState().show('settings')
       }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
+  return null
+}
+
+/**
+ * Ctrl+Shift+D (Cmd+Shift+D on macOS) opens or closes the developer panel while developer tools
+ * are on (2026-10-07); while they are off the chord is left alone. Renders nothing.
+ */
+function DevToolsShortcut(): null {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!matchesShortcut(event, DEVTOOLS_CHORD)) return
+      const store = useDevToolsStore.getState()
+      if (!store.enabled) return
+      event.preventDefault()
+      store.togglePanel()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)

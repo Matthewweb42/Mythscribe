@@ -13,6 +13,7 @@ import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import {
   AiCancelledError,
   AiRateLimitError,
+  NoKeyError,
   type CompletionRequest,
   type CompletionResult,
   type Provider,
@@ -24,7 +25,9 @@ import {
   runAiRequest,
   runAiStream,
   type AiRequestDeps,
-  type AiRequestInput
+  type AiRequestInput,
+  type AiRequestObserver,
+  type AiRequestTrace
 } from './request'
 import { createSessionUsage, type SessionUsage } from './sessionUsage'
 import { listUsage, type UsageEntry } from './usageStore'
@@ -694,5 +697,71 @@ describe('model choice and cached input (AI-BILLING-SPEC M8, R4, A4, R6)', () =>
       project.close()
       fs.rmSync(tmp, { recursive: true, force: true })
     }
+  })
+})
+
+describe('the developer tools observer (2026-10-07)', () => {
+  /** A recording observer: every call in order, as `[step, detail]`. */
+  function recorder(): { observe: AiRequestObserver; calls: [string, unknown][] } {
+    const calls: [string, unknown][] = []
+    const trace: AiRequestTrace = {
+      prepared: (info) => void calls.push(['prepared', info]),
+      sent: () => void calls.push(['sent', null]),
+      firstToken: () => void calls.push(['firstToken', null]),
+      done: (info) => void calls.push(['done', info]),
+      failed: (err) => void calls.push(['failed', err instanceof Error ? err.message : err])
+    }
+    return {
+      calls,
+      observe: {
+        start: (info) => {
+          calls.push([
+            'start',
+            { feature: info.feature, streamed: info.streamed, requestId: info.requestId }
+          ])
+          return trace
+        }
+      }
+    }
+  }
+
+  it('traces a request from start to done, then a cache hit without a provider call', async () => {
+    const f = fakes()
+    f.complete.mockResolvedValueOnce({
+      text: '',
+      model: 'gpt-5.4-mini',
+      usage: { inputTokens: 40, outputTokens: 10, reasoningTokens: 10 },
+      finishReason: 'length'
+    })
+    const { observe, calls } = recorder()
+    await runAiRequest({ ...f.deps, observe }, { ...input, requestId: 'r-1' })
+    expect(calls.map(([step]) => step)).toEqual(['start', 'prepared', 'sent', 'done'])
+    expect(calls[0]![1]).toEqual({ feature: 'tags', streamed: false, requestId: 'r-1' })
+    expect(calls[1]![1]).toEqual({
+      provider: 'openai',
+      model: 'gpt-5.4-mini',
+      tier: 'fast',
+      maxTokens: 120
+    })
+    expect(calls[3]![1]).toMatchObject({ text: '', cached: false, finishReason: 'length' })
+
+    calls.length = 0
+    await runAiRequest({ ...f.deps, observe }, input)
+    expect(calls.map(([step]) => step)).toEqual(['start', 'prepared', 'done'])
+    expect(calls[2]![1]).toMatchObject({ cached: true, costUsd: 0 })
+  })
+
+  it('traces the first streamed piece and the finish reason, and a refusal as failed', async () => {
+    const f = fakes()
+    f.chunks = [{ delta: '{"tags":' }, { delta: '[]}', finishReason: 'stop' }]
+    const { observe, calls } = recorder()
+    await runAiStream({ ...f.deps, observe }, input, () => undefined)
+    expect(calls.map(([step]) => step)).toEqual(['start', 'prepared', 'sent', 'firstToken', 'done'])
+    expect(calls.at(-1)![1]).toMatchObject({ finishReason: 'stop', text: '{"tags":[]}' })
+
+    calls.length = 0
+    f.provider = null
+    await expect(runAiRequest({ ...f.deps, observe }, input)).rejects.toThrow(NoKeyError)
+    expect(calls.map(([step]) => step)).toEqual(['start', 'failed'])
   })
 })

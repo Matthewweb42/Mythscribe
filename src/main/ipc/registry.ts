@@ -5,13 +5,20 @@ import {
   type Channel,
   type EventName,
   type EventPayload,
+  type IpcError,
   type IpcResult,
   type ParsedInput,
   type Output
 } from '@shared/ipc/contract'
-import { toIpcError } from './errors'
+import { IPC_LOG_PREFIX, toIpcError } from './errors'
 
 export type Handler<C extends Channel> = (input: ParsedInput<C>) => Promise<Output<C>> | Output<C>
+
+/**
+ * Told about every error envelope a channel answers (developer tools' live log), with what was
+ * thrown when there was something; must not throw.
+ */
+export type FailureObserver = (channel: Channel, error: IpcError, cause?: unknown) => void
 
 /**
  * Wraps a handler with input validation and error envelope. Pure, so it is unit-testable
@@ -19,20 +26,20 @@ export type Handler<C extends Channel> = (input: ParsedInput<C>) => Promise<Outp
  */
 export function createHandler<C extends Channel>(
   channel: C,
-  fn: Handler<C>
+  fn: Handler<C>,
+  onFailure?: FailureObserver
 ): (raw: unknown) => Promise<IpcResult<Output<C>>> {
   const schema = contract[channel].input
   return async (raw) => {
     const parsed = schema.safeParse(raw)
     if (!parsed.success) {
-      return {
-        ok: false,
-        error: {
-          code: 'VALIDATION',
-          message: `Invalid input for ${channel}`,
-          details: parsed.error.issues
-        }
+      const error: IpcError = {
+        code: 'VALIDATION',
+        message: `Invalid input for ${channel}`,
+        details: parsed.error.issues
       }
+      onFailure?.(channel, error)
+      return { ok: false, error }
     }
     try {
       const data = await fn(parsed.data as ParsedInput<C>)
@@ -40,14 +47,19 @@ export function createHandler<C extends Channel>(
     } catch (err) {
       const error = toIpcError(err)
       // Expected AppErrors are the renderer's to show; anything else is a bug worth a stack trace.
-      if (error.code === 'INTERNAL') console.error(`[ipc] ${channel} failed`, err)
+      if (error.code === 'INTERNAL') console.error(`${IPC_LOG_PREFIX} ${channel} failed`, err)
+      onFailure?.(channel, error, err)
       return { ok: false, error }
     }
   }
 }
 
-export function register<C extends Channel>(channel: C, fn: Handler<C>): void {
-  const handler = createHandler(channel, fn)
+export function register<C extends Channel>(
+  channel: C,
+  fn: Handler<C>,
+  onFailure?: FailureObserver
+): void {
+  const handler = createHandler(channel, fn, onFailure)
   ipcMain.handle(channel, (_event, raw: unknown) => handler(raw))
 }
 

@@ -11,6 +11,7 @@ import {
   menuAccelerator,
   menuItemChord,
   menuItemLabel,
+  menuFor,
   menuItems,
   type MenuItem
 } from './menu'
@@ -22,9 +23,26 @@ describe('menu definition (F-7.1)', () => {
   })
 
   it('uses every item id exactly once, and every id is an item', () => {
-    const ids = menuItems().map((item) => item.id)
+    // The developer items join only while developer tools are on (2026-10-07).
+    const ids = menuItems(menuFor({ devTools: true })).map((item) => item.id)
     expect([...ids].sort()).toEqual([...MENU_ITEM_IDS].sort())
     expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('adds Help › Developer tools and Chromium DevTools only while developer tools are on', () => {
+    expect(menuFor({ devTools: false })).toBe(MENU)
+    const ids = (devTools: boolean): string[] =>
+      menuItems(menuFor({ devTools })).map((item) => item.id)
+    expect(ids(false)).not.toContain('openDeveloperTools')
+    const help = menuFor({ devTools: true }).find((s) => s.id === 'help')!
+    expect(help.entries.slice(-2).map((e) => (isSeparator(e) ? '-' : e.label))).toEqual([
+      'Developer tools',
+      'Chromium DevTools'
+    ])
+    expect(ids(true).filter((id) => !ids(false).includes(id))).toEqual([
+      'openDeveloperTools',
+      'openChromiumDevTools'
+    ])
   })
 
   it('never starts or ends a section with a separator, nor doubles one', () => {

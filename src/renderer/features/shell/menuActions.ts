@@ -10,6 +10,7 @@ import {
 } from '@shared/menu'
 import type { FloatingPanel } from '@shared/layout'
 import type { EntityKind } from '@shared/entities'
+import { useDevToolsStore } from '@renderer/features/devtools/devToolsStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
@@ -85,6 +86,13 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         return
       case 'openAbout':
         useShellDialogStore.getState().show('about')
+        return
+      // 2026-10-07: present in the menu only while developer tools are on (Settings › Advanced).
+      case 'openDeveloperTools':
+        useDevToolsStore.getState().togglePanel()
+        return
+      case 'openChromiumDevTools':
+        await useDevToolsStore.getState().openChromium()
         return
       case 'openSettings':
         // App-wide since F-15.2: without a project the dialog shows only the app-wide tabs.

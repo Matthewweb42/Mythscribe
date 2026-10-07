@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shouldTrigger, type ThrottleInput } from './aiThrottle'
+import { shouldTrigger, throttleReason, type ThrottleInput } from './aiThrottle'
 
 const ready: ThrottleInput = {
   idleMs: 1_000,
@@ -39,5 +39,16 @@ describe('shouldTrigger (F-5.14)', () => {
     expect(shouldTrigger({ ...ready, requestsToday: 199 })).toBe(true)
     expect(shouldTrigger({ ...ready, requestsToday: 200 })).toBe(false)
     expect(shouldTrigger({ ...ready, dailyRequestCap: 0 })).toBe(false)
+  })
+})
+
+describe('throttleReason (developer tools)', () => {
+  it('names the first gate that says no, in the order shouldTrigger asks', () => {
+    expect(throttleReason(ready)).toBeNull()
+    expect(throttleReason({ ...ready, pending: true, visible: true })).toBe('pending')
+    expect(throttleReason({ ...ready, visible: true, idleMs: 0 })).toBe('visible')
+    expect(throttleReason({ ...ready, idleMs: 999, newChars: 0 })).toBe('idle')
+    expect(throttleReason({ ...ready, newChars: 11 })).toBe('newChars')
+    expect(throttleReason({ ...ready, requestsToday: 200 })).toBe('dailyCap')
   })
 })

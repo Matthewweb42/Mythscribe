@@ -59,7 +59,9 @@ export const MENU_ITEM_IDS = [
   'openDocumentation',
   'openShortcuts',
   'checkForUpdates',
-  'openAbout'
+  'openAbout',
+  'openDeveloperTools',
+  'openChromiumDevTools'
 ] as const
 export const MenuItemId = z.enum(MENU_ITEM_IDS)
 export type MenuItemId = z.infer<typeof MenuItemId>
@@ -227,6 +229,27 @@ export const MENU: readonly MenuSection[] = [
     ]
   }
 ]
+
+/**
+ * Help › Developer (2026-10-07): present only while developer tools are on (Settings ›
+ * Advanced), absent otherwise like any item whose feature is not there. The menu model has no
+ * submenus, so they follow a separator at the end of Help.
+ */
+export const DEVELOPER_MENU_ENTRIES: readonly MenuEntry[] = [
+  SEPARATOR,
+  { id: 'openDeveloperTools', label: 'Developer tools', when: 'always' },
+  { id: 'openChromiumDevTools', label: 'Chromium DevTools', when: 'always' }
+]
+
+/** The menu as shown now: `MENU`, plus Help's developer items while developer tools are on. */
+export function menuFor(options: { devTools: boolean }): readonly MenuSection[] {
+  if (!options.devTools) return MENU
+  return MENU.map((section) =>
+    section.id === 'help'
+      ? { ...section, entries: [...section.entries, ...DEVELOPER_MENU_ENTRIES] }
+      : section
+  )
+}
 
 export function isSeparator(entry: MenuEntry): entry is MenuSeparator {
   return 'separator' in entry

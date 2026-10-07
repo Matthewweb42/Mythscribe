@@ -438,3 +438,21 @@ do. Review, then confirm, change, or delete the entry.
 - Chosen: left as it is in B3a (the intro is the hosted-AI copy slice B3b rewrites); the license section below it explains the trial and the purchase.
 - Alternatives: "The account holds your MythScribe license and connects MythScribe Cloud."
 - To change it: `INTRO` in `src/renderer/features/account/AccountSettingsTab.tsx` (and its unit test and the smoke test's check).
+
+## 2026-10-07 · Developer tools · The panel is a bottom drawer, not a dock panel or a window
+- Question: The plan left the form open ("a dock panel or a separate window, whichever is simpler and does not disturb the writing layout").
+- Chosen: a drawer fixed over the bottom 45 % of the window (`DevToolsPanel.tsx`), outside the dock, so no column moves and the editor above stays usable while it is open: you can type and watch VibeWrite's requests arrive. Help › Developer tools or Ctrl+Shift+D toggles it; the close button hides it. Help › Developer is two items at the end of Help (Developer tools, Chromium DevTools) because the menu model has no submenus; both are absent while the switch is off.
+- Alternatives: a dock panel (moves the layout); a separate BrowserWindow (more wiring: its own preload route and lifetime).
+- To change it: `src/renderer/features/devtools/DevToolsPanel.tsx`, `DEVELOPER_MENU_ENTRIES` in `src/shared/menu.ts`.
+
+## 2026-10-07 · Developer tools · What "waiting" measures, and how skips are counted
+- Question: The inspector's timing breakdown needs a definition of "queued/waiting", and ghost text can skip on every idle tick.
+- Chosen: `waiting` is from the moment the request path takes the request until the provider is called (the pre-checks and the cache lookup); the feature's own context building and a background job's time in the index queue are not in it. `first token` exists only for streamed requests (chat Plan mode, rewrite); ghost text is not streamed, so its total is its time to first word. A fidelity regenerate and each agent step are rows of their own under the caller's request id (`…:regen`). Ghost-text skips are reported once per change of reason (a run of identical "too few new characters" ticks is one row), and reset when a request leaves. A feature refused by Use AI or its toggle (DISABLED) never reaches the request path, so it is a log entry, not an inspector row.
+- Alternatives: include context-building time (needs a hook in every use case); one row per idle tick (floods the 200-row buffer).
+- To change it: `traced`/`AiRequestTrace` in `src/main/ai/request.ts`, `skip` in `src/renderer/features/editor/ghostTextController.ts`, `aiFailure` in `src/main/ipc/handlers.ts`.
+
+## 2026-10-07 · Developer tools · What the copied diagnostics report contains
+- Question: "Settings with keys and secrets removed" needed a concrete list.
+- Chosen: app version, OS and architecture, Electron/Node/Chromium versions; the project's AI source, the own-key provider, whether a key is saved and how it is stored (never the key or its hint), the tier models; app settings limited to models, routing, local server, daily cap and today's tally, view, update channel, backups, and the two switches; the open project's AI settings; the newest 50 log entries and 50 AI request summaries (no prompt or answer text). Every field named like a key, token, secret, password, hint, license, email, or session is dropped, and every string is scrubbed for `sk-…`, `Bearer …`, and JWT-shaped text. Recent project paths, the window state, and the diagnostics queue are left out.
+- Alternatives: the whole app-state.json minus secrets (includes project paths).
+- To change it: the `devtools:report` handler in `src/main/ipc/handlers.ts`, `formatDiagnosticsReport` in `src/shared/devtools.ts`.

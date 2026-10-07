@@ -10,6 +10,7 @@ import type { NovelFormat } from '@shared/ipc/contract'
 import {
   MENU,
   isMenuItemEnabled,
+  menuFor,
   isSeparator,
   menuItemChord,
   menuItemLabel,
@@ -17,6 +18,7 @@ import {
   type MenuSection,
   type MenuSectionId
 } from '@shared/menu'
+import { useDevToolsStore } from '@renderer/features/devtools/devToolsStore'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { runMenuAction } from '@renderer/features/shell/menuActions'
 import { formatShortcut } from '@renderer/features/shell/shortcuts'
@@ -35,6 +37,8 @@ import { formatShortcut } from '@renderer/features/shell/shortcuts'
  */
 export function MenuBar(): React.JSX.Element {
   const format = useProjectStore((s) => s.current?.format ?? null)
+  // 2026-10-07: Help › Developer items only while developer tools are on.
+  const devTools = useDevToolsStore((s) => s.enabled)
   const [openId, setOpenId] = useState<MenuSectionId | null>(null)
   const bar = useRef<HTMLDivElement>(null)
   /** Mirrors `openId` for the callbacks, so opening knows whether the bar was closed before. */
@@ -167,7 +171,7 @@ export function MenuBar(): React.JSX.Element {
       data-testid="menu-bar"
       className="flex items-center gap-0.5 text-sm"
     >
-      {MENU.map((section, index) => (
+      {menuFor({ devTools }).map((section, index) => (
         <MenuTrigger
           key={section.id}
           section={section}
