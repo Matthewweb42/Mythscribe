@@ -30,7 +30,7 @@
     "cloud:migrate": "wrangler d1 migrations apply mythscribe --remote --config cloud/wrangler.toml",
     "cloud:types": "wrangler types --config cloud/wrangler.toml cloud/worker-configuration.d.ts",
     "cloud:license-keygen": "node cloud/scripts/licenseKeygen.mjs",
-    "cloud:products": "node cloud/scripts/setProducts.mjs"
+    "cloud:products": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON cloud/scripts/setProducts.mjs"
   },
   "dependencies": {
     "@tiptap/core": "3.31.3",
