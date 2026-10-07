@@ -2,10 +2,13 @@ import { useMemo, useState } from 'react'
 import { Loader2, Sparkles } from 'lucide-react'
 import { isFeatureAllowed } from '@shared/aiSettings'
 import { docToText } from '@shared/docText'
+import { BRIEF_TEXT_MIN } from '@shared/sceneMeta'
 import { SCENE_SUGGEST_TEXT_MIN } from '@shared/sceneSuggest'
+import { openAssistant } from '@renderer/features/ai/aiActions'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { describeRequest } from '@renderer/features/ai/usageFormat'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { useBriefDraftStore } from './briefDraftStore'
 import { useDocumentStore } from './documentStore'
 import { useSceneSuggestStore, type SuggestionCost, type SuggestionKind } from './sceneSuggestStore'
 
@@ -71,6 +74,50 @@ export function SuggestButton({
         <Sparkles size={12} aria-hidden="true" />
       )}
       {compact ? null : 'Suggest'}
+    </button>
+  )
+}
+
+/**
+ * The small Draft button beside the Brief disclosure (F-14.3; since the 2026-10-06 panel polish
+ * removed the assistant's Actions menu, the one way to draft a brief): asks for a brief of node
+ * `id`, which shows in the assistant panel's results for the author to use or discard. Hidden
+ * like `SuggestButton` while the dial or the toggle forbids it or for anything but a manuscript
+ * document; disabled with the reason while the scene is too short or a draft is on its way.
+ */
+export function BriefDraftButton({ id }: { id: string }): React.JSX.Element | null {
+  const settings = useAiSettingsStore((s) => s.settings)
+  const scene = useTreeStore(
+    (s) => s.byId[id]?.kind === 'document' && s.sectionOf[id] === 'manuscript'
+  )
+  const content = useDocumentStore((s) => s.docs[id]?.content ?? null)
+  const length = useMemo(() => (content ? docToText(content).length : null), [content])
+  const pending = useBriefDraftStore((s) => s.draft?.status === 'pending')
+  if (!scene || settings === null || !isFeatureAllowed(settings, 'brief')) return null
+  let reason: string | null = null
+  if (pending) reason = 'A brief draft is already on the way'
+  else if (length !== null && length < BRIEF_TEXT_MIN) {
+    reason = `Write ${BRIEF_TEXT_MIN} characters first`
+  }
+  return (
+    <button
+      type="button"
+      data-testid="draft-brief"
+      aria-label="Draft scene brief"
+      disabled={reason !== null}
+      title={reason ?? 'Draft the brief from the scene, shown in the assistant to use or discard'}
+      onClick={() => {
+        useBriefDraftStore.getState().start(id)
+        openAssistant()
+      }}
+      className={SUGGEST_BUTTON}
+    >
+      {pending ? (
+        <Loader2 size={12} aria-hidden="true" className="animate-spin" />
+      ) : (
+        <Sparkles size={12} aria-hidden="true" />
+      )}
+      Draft
     </button>
   )
 }

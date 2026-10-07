@@ -320,6 +320,8 @@ const WHAT_NEXT_ANSWER = JSON.stringify({
  */
 const QUERY_SENTINEL = 'You are the Story Intelligence feature inside a novel-writing app.'
 const QUERY_QUESTION = 'Where does the storm reach the ridge?'
+/** A recap asked in Query mode; its words rank Scene 1 first, as the question above does. */
+const RECAP_QUESTION = 'What happened on the ridge in the storm?'
 const QUERY_ANSWER_TEXT = 'She waits out the storm on the ridge [1], then crosses at dawn [3].'
 /** What the answer reads once main drops the uncited scene and strips its marker. */
 const QUERY_ANSWER_KEPT = 'She waits out the storm on the ridge [1], then crosses at dawn.'
@@ -3379,19 +3381,16 @@ test('create, close, reopen a project on disk', async () => {
       timeout: 3000
     })
     .toBe(6)
-  // F-14.3: the scene brief. The metadata pane's Brief disclosure holds the five lines; since
-  // 2026-10-06 the assistant's Actions menu drafts them ("Draft scene brief"; the dial is at
+  // F-14.3: the scene brief. The metadata pane's Brief disclosure holds the five lines; Draft
+  // beside it drafts them (2026-10-06, after the assistant's Actions menu went; the dial is at
   // Suggest and the key is set by now, and Scene 1 is well past the 200-character floor). The
-  // draft is a proposal shown in the assistant: Use draft fills the fields, which autosave like
-  // the rest of the metadata, so the ghost-text request below carries the brief. The panel is
-  // closed again so the assistant step below opens it with Ctrl+K.
+  // draft is a proposal shown in the assistant, which Draft opens: Use draft fills the fields,
+  // which autosave like the rest of the metadata, so the ghost-text request below carries the
+  // brief. The panel is closed again so the assistant step below opens it with Ctrl+K.
   const briefRequestsBefore = openAiRequests.length
   await showSceneDetails()
-  await metadata.getByRole('button', { name: 'Brief' }).click()
-  await editor.click()
-  await page.keyboard.press('Control+k')
-  await page.getByTestId('ai-actions').click()
-  await page.getByRole('menuitem', { name: 'Draft scene brief' }).click()
+  await metadata.getByRole('button', { name: 'Brief', exact: true }).click()
+  await metadata.getByTestId('draft-brief').click()
   const briefDraft = page.getByTestId('assistant-panel').getByRole('group', { name: 'Brief draft' })
   await expect(briefDraft).toContainText(`Goal: ${BRIEF_GOAL}`)
   expect(openAiRequests).toHaveLength(briefRequestsBefore + 1)
@@ -4002,10 +4001,16 @@ test('create, close, reopen a project on disk', async () => {
   const modeRadios = assistant.getByRole('radiogroup', { name: 'Mode' }).getByRole('radio')
   await expect(modeRadios).toHaveText(['Auto', 'Query', 'Author', 'Plan'])
   await expect(modeRadios.nth(0)).toHaveAttribute('aria-checked', 'true')
-  /** Opens the assistant's Actions menu (2026-10-06) and picks `label`. */
-  const runAiAction = async (label: string): Promise<void> => {
-    await assistant.getByTestId('ai-actions').click()
-    await page.getByRole('menuitem', { name: label }).click()
+  // 2026-10-06 polish: the header holds no actions; a scene action is a chat turn in Auto. A
+  // message that is exactly an action's name ("Proofread", "Beta reader") is routed locally,
+  // with no router request, so the request counts below see only the feature's own request.
+  await expect(assistant.getByTestId('ai-actions')).toHaveCount(0)
+  await expect(assistant.getByRole('button', { name: 'Clear conversation' })).toHaveCount(0)
+  /** Sends `message` as an Auto turn in the active conversation. */
+  const sendAuto = async (message: string): Promise<void> => {
+    await assistant.getByRole('radio', { name: 'Auto' }).click()
+    await messageBox.fill(message)
+    await messageBox.press('Enter')
   }
   await assistant.getByRole('radio', { name: 'Plan' }).click()
   await messageBox.fill('Why is Mara on the ridge?')
@@ -4058,28 +4063,31 @@ test('create, close, reopen a project on disk', async () => {
   await expect(editor).toContainText(AGENT_SECOND)
   await expect(editor.locator('.ai-origin[data-proposal-id]')).toHaveCount(2)
   await expect(page.getByTestId('status-ai')).toHaveText(/^[1-9]\d*% AI$/)
-  // F-5.17: What should come next?. The quick action asks the fast tier once (the scene's tail,
-  // its brief, and the story bible) and lands three directions in the conversation as chat;
-  // Write this on the first sends it through Author mode, which places ghost text at the caret.
+  // F-5.17: What should come next?, asked in the chat. The rotating suggestion above the box
+  // (2026-10-06) fills the box on a click and sends nothing. "What next?" in Auto routes locally
+  // to the action, which asks the fast tier once (the scene's tail, its brief, and the story
+  // bible) and lands three directions in the conversation as chat; Write this on the first
+  // sends it through Author mode, which places ghost text at the caret.
   const whatNextBodies = (): { role: string; content: string }[][] =>
     openAiChatBodies
       .filter((body) => body.messages[0]?.content.startsWith(WHAT_NEXT_SENTINEL))
       .map((body) => body.messages)
   const whatNextBefore = whatNextBodies().length
-  await assistant.getByTestId('ai-actions').click()
-  const whatNextItem = page.getByRole('menuitem', { name: 'What should come next?' })
-  await expect(whatNextItem).toBeEnabled()
-  await expect(whatNextItem).toHaveAttribute('title', /Uses the fast tier/)
-  await expect(page.getByRole('menuitem', { name: 'Check consistency' })).toHaveAttribute(
-    'title',
-    /Uses the strong tier/
-  )
-  await whatNextItem.click()
+  await assistant.getByRole('radio', { name: 'Auto' }).click()
+  const suggestion = assistant.getByTestId('assistant-suggestion')
+  await suggestion.hover()
+  const suggested = (await suggestion.textContent()) ?? ''
+  expect(suggested.length).toBeGreaterThan(0)
+  await suggestion.click()
+  await expect(messageBox).toHaveValue(suggested)
+  await expect(turns).toHaveCount(5)
+  await sendAuto('What next?')
   const directions = assistant.getByTestId('what-next-direction')
   await expect(directions).toHaveCount(3)
   await expect(directions.first()).toContainText(WHAT_NEXT_TITLES[0] ?? '')
   await expect(turns).toHaveCount(7)
-  await expect(turns.nth(5)).toContainText('What should come next?')
+  await expect(turns.nth(5)).toContainText('What next?')
+  await expect(turns.nth(6).getByTestId('chat-turn-action')).toHaveText('What should come next?')
   expect(whatNextBodies()).toHaveLength(whatNextBefore + 1)
   expect(whatNextBodies().at(-1)?.[0]?.content).toContain(STORY_BIBLE_HEADING)
   await directions.first().getByTestId('what-next-write').click()
@@ -4106,13 +4114,19 @@ test('create, close, reopen a project on disk', async () => {
   await messageBox.fill('A second question.')
   await messageBox.press('Enter')
   await expect(turns).toHaveCount(2)
-  await assistant.getByRole('button', { name: 'Clear conversation' }).click()
-  await page
-    .getByRole('dialog', { name: 'Clear conversation' })
-    .getByRole('button', { name: 'Clear' })
-    .click()
+  // No clearing (2026-10-06): a fresh conversation is New conversation, and a conversation
+  // leaves only by its tab's close button (shown on hover), after confirming when it has turns.
+  await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
   await expect(turns).toHaveCount(0)
+  await expect(assistant.getByRole('tab')).toHaveCount(3)
+  await assistant.getByRole('tab', { name: 'A second question.' }).hover()
+  await assistant.getByRole('button', { name: 'Close A second question.' }).click()
+  await page
+    .getByRole('dialog', { name: 'Close conversation' })
+    .getByRole('button', { name: 'Close' })
+    .click()
   await expect(assistant.getByRole('tab')).toHaveCount(2)
+  await expect(turns).toHaveCount(0)
 
   // F-14.10: rewrite in my voice. With Scene 1's opening sentence selected (set on the DOM, as
   // the provenance step does, since the paragraph wraps), the selection bubble's Rewrite
@@ -4242,11 +4256,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(critiquePanel).toHaveCount(0)
   const afterRoute = await usageSummary()
   expect(afterRoute.byFeature.find((f) => f.feature === 'route')).toMatchObject({ requests: 1 })
-  await assistant.getByRole('button', { name: 'Clear conversation' }).click()
-  await page
-    .getByRole('dialog', { name: 'Clear conversation' })
-    .getByRole('button', { name: 'Clear' })
-    .click()
+  await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
   await expect(turns).toHaveCount(0)
 
   // F-5.20: suggestions in the notes column. Suggest beside Synopsis asks the fast tier for a
@@ -4273,7 +4283,7 @@ test('create, close, reopen a project on disk', async () => {
   for (const point of SUGGESTED_POINTS) await expect(notesBox).toContainText(`• ${point}`)
 
   // F-14.12: proofread. A sentence with a misspelling and a doubled word is typed at the end of
-  // Scene 1; with the caret collapsed Proofread in the assistant's Actions menu (2026-10-06)
+  // Scene 1; with the caret collapsed, "Proofread" sent in Auto (2026-10-06, routed locally)
   // proofreads the whole scene. The fake
   // server answers three fixes, one quoting a passage that was never written, and main drops it,
   // so two cards show. Accept takes the first, Accept all the other, each replacing exactly its
@@ -4293,7 +4303,7 @@ test('create, close, reopen a project on disk', async () => {
   const proofreadRequestsBefore = proofreadBodies()
   if (!(await assistant.isVisible())) await page.keyboard.press('Control+k')
   await expect(assistant).toBeVisible()
-  await runAiAction('Proofread')
+  await sendAuto('Proofread')
   const proofreadPanel = page.getByTestId('proofread-panel')
   await expect(proofreadPanel).toBeVisible()
   const proofreadFixes = proofreadPanel.getByTestId('proofread-fix')
@@ -4583,7 +4593,7 @@ test('create, close, reopen a project on disk', async () => {
   // block and no story bible go out: the reader knows only what is on the page.
   const betaReaderBodiesBefore = openAiChatBodies.length
   if (!(await assistant.isVisible())) await page.keyboard.press('Control+k')
-  await runAiAction('Beta reader')
+  await sendAuto('Beta reader')
   const betaReaderPanel = page.getByTestId('beta-reader-panel')
   await expect(betaReaderPanel).toBeVisible()
   await expect(betaReaderPanel.getByTestId('beta-reader-item')).toHaveCount(1)
@@ -4624,8 +4634,11 @@ test('create, close, reopen a project on disk', async () => {
   // the `[3]` marker they left behind is stripped. Clicking the surviving citation opens the
   // scene and selects the passage in the editor.
   await dismissToasts()
-  const queryBodiesBefore = openAiChatBodies.length
   await expect(assistant).toBeVisible()
+  // The proofread and beta-reader turns above are in the current conversation: start a fresh one.
+  await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
+  await expect(turns).toHaveCount(0)
+  const queryBodiesBefore = openAiChatBodies.length
   const queryRadio = assistant.getByRole('radio', { name: 'Query' })
   await expect(queryRadio).toBeEnabled()
   await queryRadio.click()
@@ -4658,19 +4671,17 @@ test('create, close, reopen a project on disk', async () => {
   await expect
     .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''), { timeout: 5_000 })
     .toBe(CRITIQUE_PRAISE_QUOTE)
-  // F-5.17: What happened here?. With the cited passage still selected, the quick action asks
-  // Query for a recap of that passage, with the open scene pinned first so it goes out as [1];
-  // the canned answer's citation of Scene 1 survives.
+  // A recap is a Query question in the chat (2026-10-06: the What happened here? action left with
+  // the Actions menu). The canned answer's citation of Scene 1 survives.
   const recapBodiesBefore = openAiChatBodies.length
-  await runAiAction('What happened here?')
+  await messageBox.fill(RECAP_QUESTION)
+  await messageBox.press('Enter')
   await expect(turns).toHaveCount(4)
-  await expect(turns.nth(2)).toContainText('What happens in this passage?')
+  await expect(turns.nth(2)).toContainText(RECAP_QUESTION)
   await expect(turns.nth(3)).toContainText(QUERY_ANSWER_KEPT)
   await expect(turns.nth(3).getByTestId('query-citation')).toContainText('Chapter 1 › Scene 1')
   expect(openAiChatBodies).toHaveLength(recapBodiesBefore + 1)
-  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe(
-    `What happens in this passage? Give a short recap, citing it: "${CRITIQUE_PRAISE_QUOTE}"`
-  )
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe(RECAP_QUESTION)
   expect(openAiChatBodies.at(-1)?.messages[0]?.content).toMatch(/\[1\] Chapter 1 › Scene 1/)
   // query.v3: a question the author's own sheet answers. Wren's appearance is only on her sheet;
   // the sheet goes out as a source, the answer names it, and the panel lists it under "From your
@@ -5297,9 +5308,9 @@ test('create, close, reopen a project on disk', async () => {
       .map((body) => body.messages.at(-1)?.content ?? '')
   // Counted by sentinel: the typing above also queues the scene's background summary.
   const continuityRequestsBefore = continuityBodies().length
-  // F-5.17: Check consistency (the Actions menu since 2026-10-06) runs the check and opens the
-  // findings view.
-  await runAiAction('Check consistency')
+  // F-5.17: Check consistency, asked in the chat (2026-10-06): "Continuity" in Auto runs the
+  // check and opens the findings view in place of the chat.
+  await sendAuto('Continuity')
   const continuityPanel = assistant.getByTestId('continuity-panel')
   await expect(continuityPanel).toBeVisible()
   const findingCards = continuityPanel.getByTestId('continuity-finding')
@@ -5308,7 +5319,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(continuityPanel.getByTestId('continuity-result')).toContainText(
     '2 contradictions found'
   )
-  await expect(assistant.getByTestId('continuity-count')).toHaveText('2')
+  await expect(assistant.getByTestId('continuity-button')).toHaveText('Back to the conversation')
   const ageFinding = findingCards.filter({ hasText: CONTINUITY_WHY })
   await expect(ageFinding).toHaveAttribute('data-ref-kind', 'sheet')
   await expect(ageFinding.getByTestId('continuity-quote')).toContainText(CONTINUITY_QUOTE)
@@ -5329,7 +5340,10 @@ test('create, close, reopen a project on disk', async () => {
   expect(continuityBodiesBefore.at(-1)).toContain('Age: 34')
   // Other references may remain (what other scenes state about Mara), so the second check may
   // still ask; what it never does is send the dismissed sheet line or raise the finding again.
-  await runAiAction('Check consistency')
+  // The link leads back to the chat, where the second check is asked.
+  await assistant.getByTestId('continuity-button').click()
+  await expect(continuityPanel).toHaveCount(0)
+  await sendAuto('Continuity')
   await expect(
     continuityPanel
       .getByTestId('continuity-result')

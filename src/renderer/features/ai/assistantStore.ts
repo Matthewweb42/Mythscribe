@@ -131,8 +131,6 @@ interface AssistantState {
   select: (id: string) => void
   setMode: (mode: ConversationMode) => void
   setParagraphs: (paragraphs: number) => void
-  /** Empties the active conversation's turns and resets its title. */
-  clearMessages: () => void
   /**
    * Sends one turn in the active conversation; ignored while one is in flight or for a blank
    * message. `override.mode` runs this turn in another mode than the conversation's (the
@@ -481,12 +479,6 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     const value = get().conversations
     if (value === null) return
     commit(patchActive(value, (c) => (c.paragraphs === paragraphs ? c : { ...c, paragraphs })))
-  },
-
-  clearMessages() {
-    const value = get().conversations
-    if (value === null) return
-    commit(patchActive(value, (c) => ({ ...c, title: NEW_CONVERSATION_TITLE, messages: [] })))
   },
 
   async send(message, override) {

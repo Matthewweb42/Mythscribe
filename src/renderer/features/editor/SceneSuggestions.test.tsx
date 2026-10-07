@@ -23,7 +23,7 @@ import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { SynopsisBox } from './MetadataPane'
 import { resetNotesStore, useNotesStore } from './notesStore'
 import { resetSceneMetaStore, useSceneMetaStore } from './sceneMetaStore'
-import { NotesSuggestion, SuggestButton } from './SceneSuggestions'
+import { BriefDraftButton, NotesSuggestion, SuggestButton } from './SceneSuggestions'
 import { appendNotePoints, resetSceneSuggestStore, useSceneSuggestStore } from './sceneSuggestStore'
 
 const SCENE = 'Mara climbed the ridge as the storm broke over the valley behind her. '.repeat(3)
@@ -292,6 +292,37 @@ describe('SuggestButton (F-5.20)', () => {
     expect(screen.getByRole('button', { name: 'Suggest synopsis' })).toHaveAttribute(
       'title',
       'Write 100 characters first'
+    )
+  })
+})
+
+describe('BriefDraftButton (F-14.3, 2026-10-06)', () => {
+  it('is not shown while the dial is Off or for a folder, and waits for enough text', () => {
+    useAiSettingsStore.setState({ settings: defaultAiSettings() })
+    const view = render(<BriefDraftButton id="sc-1" />)
+    expect(screen.queryByRole('button', { name: 'Draft scene brief' })).not.toBeInTheDocument()
+    act(() => useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } }))
+    expect(screen.getByRole('button', { name: 'Draft scene brief' })).toBeEnabled()
+    view.rerender(<BriefDraftButton id="ch-1" />)
+    expect(screen.queryByRole('button', { name: 'Draft scene brief' })).not.toBeInTheDocument()
+    act(() =>
+      useDocumentStore.setState({
+        docs: {
+          'sc-1': {
+            content: {
+              type: 'doc',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Short.' }] }]
+            },
+            dirty: false
+          }
+        }
+      })
+    )
+    view.rerender(<BriefDraftButton id="sc-1" />)
+    expect(screen.getByRole('button', { name: 'Draft scene brief' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Draft scene brief' })).toHaveAttribute(
+      'title',
+      'Write 200 characters first'
     )
   })
 })

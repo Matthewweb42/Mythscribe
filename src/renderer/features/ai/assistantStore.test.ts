@@ -313,11 +313,11 @@ describe('useAssistantStore load and persistence (F-5.4)', () => {
 
   it('writes a pending change when the pending saves are flushed (project close)', async () => {
     await store().load()
-    store().clearMessages()
+    store().setParagraphs(5)
     const flushing = flushPendingSaves()
     await settle()
     expect(sets).toHaveLength(1)
-    expect(sets[0]?.value.items[0]).toMatchObject({ title: NEW_CONVERSATION_TITLE, messages: [] })
+    expect(sets[0]?.value.items[0]).toMatchObject({ paragraphs: 5 })
     sets[0]?.resolve()
     await flushing
   })
@@ -382,12 +382,6 @@ describe('useAssistantStore tabs (F-5.4)', () => {
     expect(value?.items[0]?.id).not.toBe('c-1')
     expect(value?.active).toBe(value?.items[0]?.id)
     expect(active().messages).toEqual([])
-  })
-
-  it('clearMessages empties the active conversation and resets its title', async () => {
-    await store().load()
-    store().clearMessages()
-    expect(active()).toMatchObject({ title: NEW_CONVERSATION_TITLE, messages: [] })
   })
 })
 

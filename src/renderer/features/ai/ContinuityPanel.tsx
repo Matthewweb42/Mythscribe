@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/core'
+import { ArrowLeft } from 'lucide-react'
 import {
   CONTINUITY_SCENE_CHAR_BUDGET,
   type ContinuityFinding,
@@ -32,47 +33,51 @@ export const CONTINUITY_NO_PROPOSAL =
 /** The title of a scene that has left the tree. */
 const MISSING_SCENE = 'Deleted scene'
 
-const HEADER_BUTTON =
-  'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:bg-surface-raised aria-pressed:text-fg'
+const QUIET_LINK =
+  'flex items-center gap-1 rounded px-1 text-xs text-fg-muted underline-offset-2 hover:text-fg hover:underline'
 const LINK =
   'm-0 cursor-pointer border-0 bg-transparent p-0 text-left text-xs text-accent underline-offset-2 hover:underline'
 
 /**
- * The header button of the assistant panel (F-13.4): it switches the panel between the chat and
- * the findings view, and carries the count of open findings across the project as a plain
- * number. Nothing else announces a finding: no animation, no toast, no sound, and no number at
- * all while there are none.
+ * The way into the findings view (F-13.4; since the 2026-10-06 panel polish a quiet line under
+ * the results instead of a header button): "N continuity notes" while findings are open, and
+ * "Back to the conversation" while the view shows. Nothing at all while there are no findings
+ * and the chat shows: no animation, no toast, no sound.
  */
-export function ContinuityButton(): React.JSX.Element {
+export function ContinuityLink(): React.JSX.Element | null {
   const count = useContinuityStore((s) => s.ids.length)
   const open = useContinuityStore((s) => s.viewOpen)
   const setViewOpen = useContinuityStore((s) => s.setViewOpen)
+  if (!open && count === 0) return null
   return (
-    <button
-      type="button"
-      data-testid="continuity-button"
-      aria-pressed={open}
-      title={open ? 'Back to the conversation' : 'What the scenes state against the story bible'}
-      onClick={() => setViewOpen(!open)}
-      className={HEADER_BUTTON}
-    >
-      Continuity
-      {count > 0 ? (
-        <span
-          data-testid="continuity-count"
-          aria-label={`${count} open ${count === 1 ? 'finding' : 'findings'}`}
-          className="text-fg-subtle"
-        >
-          {count}
-        </span>
-      ) : null}
-    </button>
+    <div className="flex shrink-0 justify-end px-3 pt-1">
+      <button
+        type="button"
+        data-testid="continuity-button"
+        aria-pressed={open}
+        title={open ? 'Back to the conversation' : 'What the scenes state against the story bible'}
+        onClick={() => setViewOpen(!open)}
+        className={QUIET_LINK}
+      >
+        {open ? (
+          <>
+            <ArrowLeft size={12} aria-hidden="true" />
+            Back to the conversation
+          </>
+        ) : (
+          <>
+            <span data-testid="continuity-count">{count}</span>
+            {count === 1 ? 'continuity note' : 'continuity notes'}
+          </>
+        )}
+      </button>
+    </div>
   )
 }
 
 /**
  * The findings view of the assistant panel (F-13.4): what the last check said on top (the check
- * itself is the Check consistency quick action above the view, F-5.17), then every open finding grouped by scene in the order received. Each card
+ * itself is a chat turn the router sends to Check consistency), then every open finding grouped by scene in the order received. Each card
  * cites both sides: the scene's passage (a click opens the scene and selects it) and the
  * reference it contradicts (the sheet field with a link to the entity, or the other scene's
  * passage as a jump), with the reason, the word diff of the passage against the fix, Apply, and

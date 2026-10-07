@@ -39,7 +39,7 @@ import {
   CONTINUITY_GONE_MESSAGE,
   CONTINUITY_NO_PROPOSAL,
   CONTINUITY_NO_REFERENCES,
-  ContinuityButton,
+  ContinuityLink,
   ContinuityView
 } from './ContinuityPanel'
 import { resetContinuityStore, useContinuityStore } from './continuityStore'
@@ -165,26 +165,28 @@ afterEach(() => {
   setIpcClient(null)
 })
 
-describe('ContinuityButton (F-13.4)', () => {
-  it('shows no number while there are no findings, and a plain count once there are', () => {
-    render(<ContinuityButton />)
-    const button = screen.getByTestId('continuity-button')
-    expect(button).toHaveTextContent(/^Continuity$/)
-    expect(screen.queryByTestId('continuity-count')).not.toBeInTheDocument()
+describe('ContinuityLink (F-13.4)', () => {
+  it('shows nothing while there are no findings, and a plain count once there are', () => {
+    render(<ContinuityLink />)
+    expect(screen.queryByTestId('continuity-button')).not.toBeInTheDocument()
     hold([finding(), hairFinding(), finding({ id: 'f-3', nodeId: 'sc-2' })])
+    expect(screen.getByTestId('continuity-button')).toHaveTextContent(/^3continuity notes$/)
     expect(screen.getByTestId('continuity-count')).toHaveTextContent(/^3$/)
     // Quiet by construction: nothing toasts, nothing opens.
     expect(useDialogStore.getState().toasts).toEqual([])
     expect(useContinuityStore.getState().viewOpen).toBe(false)
   })
 
-  it('toggles the findings view', async () => {
-    render(<ContinuityButton />)
+  it('opens the findings view, then leads back to the conversation', async () => {
+    hold([finding()])
+    render(<ContinuityLink />)
     const button = screen.getByTestId('continuity-button')
     expect(button).toHaveAttribute('aria-pressed', 'false')
+    expect(button).toHaveTextContent(/^1continuity note$/)
     await userEvent.click(button)
     expect(useContinuityStore.getState().viewOpen).toBe(true)
     expect(button).toHaveAttribute('aria-pressed', 'true')
+    expect(button).toHaveTextContent('Back to the conversation')
     await userEvent.click(button)
     expect(useContinuityStore.getState().viewOpen).toBe(false)
   })

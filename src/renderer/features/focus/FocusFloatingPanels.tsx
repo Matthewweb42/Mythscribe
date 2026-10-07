@@ -1,5 +1,4 @@
-import { AssistantBody, NewConversationButton } from '@renderer/features/ai/AssistantPanel'
-import { ContinuityButton } from '@renderer/features/ai/ContinuityPanel'
+import { AssistantBody } from '@renderer/features/ai/AssistantPanel'
 import { NotesBody } from '@renderer/features/editor/NotesPanel'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { FloatingWindow } from './FloatingWindow'
@@ -10,7 +9,7 @@ import { useFocusStore } from './focusStore'
  * there and shown on the focus store's session flags (the control bar's buttons toggle them,
  * F-6.5; each window's Close and Escape clear its flag). The notes window hosts `NotesBody`
  * for the selected node, the same editor and store as the docked panel; the assistant window
- * hosts `AssistantBody` with Continuity (F-13.4) and New conversation in its title bar. Their geometry is the layout's
+ * hosts `AssistantBody`, which carries its own New conversation button and Continuity link. Their geometry is the layout's
  * `floating` rects, persisted app-wide like the docked sizes.
  */
 export function FocusFloatingPanels(): React.JSX.Element {
@@ -31,17 +30,7 @@ export function FocusFloatingPanels(): React.JSX.Element {
         </FloatingWindow>
       ) : null}
       {panels.assistant ? (
-        <FloatingWindow
-          name="assistant"
-          title="Assistant"
-          actions={
-            <>
-              <ContinuityButton />
-              <NewConversationButton />
-            </>
-          }
-          onClose={() => togglePanel('assistant')}
-        >
+        <FloatingWindow name="assistant" title="Assistant" onClose={() => togglePanel('assistant')}>
           <AssistantBody />
         </FloatingWindow>
       ) : null}

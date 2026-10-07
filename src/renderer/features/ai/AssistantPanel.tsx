@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEditorState } from '@tiptap/react'
 import { MessageSquare, Plus, Quote, Send, Square, X } from 'lucide-react'
+import { AI_FEATURE_IDS, type AiFeatureId } from '@shared/ai'
 import { ROUTE_ACTION_LABEL } from '@shared/assistantRoute'
+import { SUGGESTION_ROTATE_MS, assistantSuggestions } from '@shared/assistantSuggestions'
 import {
   CHAT_MAX_CONVERSATIONS,
   CHAT_MESSAGE_MAX,
@@ -20,15 +23,17 @@ import {
   type QuerySceneRef,
   type QueryTurn
 } from '@shared/query'
+import { docToText } from '@shared/docText'
 import type { WhatNextDirection } from '@shared/whatNext'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
+import { useNotesStore } from '@renderer/features/editor/notesStore'
+import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { DockPanelControls } from '@renderer/features/shell/Dock'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
-import { CONVERSATION_BUSY_MESSAGE } from './aiActions'
-import { AiActionsMenu } from './AiActionsMenu'
+import { CONVERSATION_BUSY_MESSAGE, useOpenScene } from './aiActions'
 import { AiResults } from './AiResults'
 import { useAiSettingsStore } from './aiSettingsStore'
 import {
@@ -37,14 +42,15 @@ import {
   useActiveConversation,
   useAssistantStore
 } from './assistantStore'
-import { ContinuityButton, ContinuityView } from './ContinuityPanel'
+import { ContinuityLink, ContinuityView } from './ContinuityPanel'
 import { useContinuityStore } from './continuityStore'
 import { describeRequest } from './usageFormat'
 
 const ICON_BUTTON =
   'rounded-md p-1 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
-const RADIO =
-  'rounded-md border border-line px-2 py-0.5 text-xs hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 disabled:hover:bg-transparent aria-checked:border-accent aria-checked:bg-surface-raised aria-checked:text-accent'
+/** One segment of the compact mode switch. */
+const MODE_RADIO =
+  'rounded px-2 py-px text-[11px] leading-4 text-fg-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 disabled:hover:text-fg-muted aria-checked:bg-bg aria-checked:text-fg aria-checked:shadow-sm'
 const LINK_BUTTON =
   'text-xs text-fg-muted underline-offset-2 hover:text-fg hover:underline disabled:opacity-40 disabled:hover:no-underline'
 /** A `[n]` marker inside an answer, and the chips under "Also mentioned in". */
@@ -128,14 +134,16 @@ export function AssistantPanel(): React.JSX.Element | null {
  * The conversation tabs, the open conversation's turns, and the composer: everything under
  * the heading. The docked panel and the floating window in focus mode (F-6.6) share it, and
  * so the same store, so a conversation started in one continues in the other. While the
- * Continuity button is pressed (F-13.4) the findings view takes the place of the chat. The
- * results of the scene features (`AiResults`, 2026-10-06) sit above both views.
+ * Continuity link is pressed (F-13.4) the findings view takes the place of the chat. The
+ * results of the scene features (`AiResults`, 2026-10-06) sit above both views, and the
+ * Continuity link under them while there are findings.
  */
 export function AssistantBody(): React.JSX.Element {
   const continuity = useContinuityStore((s) => s.viewOpen)
   return (
     <>
       <AiResults />
+      <ContinuityLink />
       {continuity ? (
         <ContinuityView />
       ) : (
@@ -149,19 +157,25 @@ export function AssistantBody(): React.JSX.Element {
   )
 }
 
+/**
+ * The dock's grip and panel menu and the title, nothing else (2026-10-06, the author's polish:
+ * no action buttons up here; the actions are chat turns Auto routes and the rotating suggestions
+ * above the message box).
+ */
 function PanelHeader(): React.JSX.Element {
   return (
     <div className="flex shrink-0 items-center gap-1 pt-3 pr-3 pb-1 pl-2">
       <DockPanelControls id="assistant" />
       <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Assistant</h2>
-      <AiActionsMenu />
-      <ContinuityButton />
-      <NewConversationButton />
     </div>
   )
 }
 
-/** Opens a fresh conversation; disabled until the conversations load and at the cap. The floating window (F-6.6) puts it in its title bar. */
+/**
+ * The small + at the end of the conversation tabs: opens a fresh conversation (there is no
+ * clearing one; a conversation leaves only by closing its tab). Disabled until the conversations
+ * load and at the cap.
+ */
 export function NewConversationButton(): React.JSX.Element {
   const loaded = useAssistantStore((s) => s.conversations !== null)
   const count = useAssistantStore((s) => s.conversations?.items.length ?? 0)
@@ -186,18 +200,25 @@ export function NewConversationButton(): React.JSX.Element {
 
 /**
  * One tab per conversation (an ARIA tablist with a roving tabindex like the sidebar's:
- * ArrowLeft/ArrowRight wrap, Home/End jump), each with a close button beside it. Tabs share
- * the strip's width and truncate their titles, so the panel at its floor shows no scrollbar
- * until many are open. Closing a conversation with messages confirms first; the last tab is
- * replaced by a fresh one.
+ * ArrowLeft/ArrowRight wrap, Home/End jump), then New conversation. Each tab's close button
+ * shows only while the tab is hovered or the button has keyboard focus, so it is not hit by
+ * accident. Tabs share the strip's width and truncate their titles, so the panel at its floor
+ * shows no scrollbar until many are open. Closing a conversation with messages confirms first;
+ * the last tab is replaced by a fresh one.
  */
-function ConversationTabs(): React.JSX.Element | null {
+function ConversationTabs(): React.JSX.Element {
   const items = useAssistantStore((s) => s.conversations?.items ?? null)
   const active = useAssistantStore((s) => s.conversations?.active ?? null)
   const select = useAssistantStore((s) => s.select)
   const closeConversation = useAssistantStore((s) => s.closeConversation)
   const tabs = useRef(new Map<string, HTMLButtonElement>())
-  if (items === null) return null
+  if (items === null) {
+    return (
+      <div className="flex shrink-0 justify-end border-b border-line px-1">
+        <NewConversationButton />
+      </div>
+    )
+  }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     const index = items.findIndex((c) => c.id === active)
@@ -239,47 +260,50 @@ function ConversationTabs(): React.JSX.Element | null {
   }
 
   return (
-    <div
-      role="tablist"
-      aria-label="Conversations"
-      onKeyDown={onKeyDown}
-      className="flex shrink-0 overflow-x-auto border-b border-line px-2"
-    >
-      {items.map((conversation) => {
-        const selected = conversation.id === active
-        return (
-          <div
-            key={conversation.id}
-            className={`flex min-w-14 max-w-40 flex-1 basis-0 items-center border-b-2 ${selected ? 'border-accent' : 'border-transparent'}`}
-          >
-            <button
-              ref={(element) => {
-                if (element) tabs.current.set(conversation.id, element)
-                else tabs.current.delete(conversation.id)
-              }}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              aria-controls="assistant-log"
-              tabIndex={selected ? 0 : -1}
-              title={conversation.title}
-              onClick={() => select(conversation.id)}
-              className={`min-w-0 flex-1 truncate py-1.5 pr-1 pl-2 text-xs font-medium select-none hover:text-fg focus-visible:outline-none ${selected ? 'text-fg' : 'text-fg-muted'}`}
+    <div className="flex shrink-0 items-center border-b border-line pr-1 pl-2">
+      <div
+        role="tablist"
+        aria-label="Conversations"
+        onKeyDown={onKeyDown}
+        className="flex min-w-0 flex-1 overflow-x-auto"
+      >
+        {items.map((conversation) => {
+          const selected = conversation.id === active
+          return (
+            <div
+              key={conversation.id}
+              className={`group flex min-w-14 max-w-40 flex-1 basis-0 items-center border-b-2 ${selected ? 'border-accent' : 'border-transparent'}`}
             >
-              {conversation.title}
-            </button>
-            <button
-              type="button"
-              aria-label={`Close ${conversation.title}`}
-              title="Close conversation"
-              onClick={() => void close(conversation)}
-              className="shrink-0 rounded-md p-0.5 text-fg-subtle hover:bg-surface-raised hover:text-fg"
-            >
-              <X size={12} aria-hidden="true" />
-            </button>
-          </div>
-        )
-      })}
+              <button
+                ref={(element) => {
+                  if (element) tabs.current.set(conversation.id, element)
+                  else tabs.current.delete(conversation.id)
+                }}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls="assistant-log"
+                tabIndex={selected ? 0 : -1}
+                title={conversation.title}
+                onClick={() => select(conversation.id)}
+                className={`min-w-0 flex-1 truncate py-1.5 pr-1 pl-2 text-xs font-medium select-none hover:text-fg focus-visible:outline-none ${selected ? 'text-fg' : 'text-fg-muted'}`}
+              >
+                {conversation.title}
+              </button>
+              <button
+                type="button"
+                aria-label={`Close ${conversation.title}`}
+                title="Close conversation"
+                onClick={() => void close(conversation)}
+                className="shrink-0 rounded-md p-0.5 text-fg-subtle opacity-0 group-hover:opacity-100 hover:bg-surface-raised hover:text-fg focus-visible:opacity-100"
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+      <NewConversationButton />
     </div>
   )
 }
@@ -307,14 +331,13 @@ function MessageLog(): React.JSX.Element {
       id="assistant-log"
       role="log"
       aria-label="Messages"
-      className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2"
+      className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3"
     >
       {messages.length === 0 ? (
-        <p className="m-0 text-xs text-fg-muted">
-          Auto picks what answers you: a chat about the open scene, a cited answer about the whole
-          manuscript, editor&apos;s notes, a rewrite of the selection, a suggested synopsis or
-          notes, and more. Query, Author, and Plan pin one. Actions has the same features in one
-          click. Write #name to pull in that tag&apos;s notes.
+        <p className="m-auto max-w-64 text-center text-xs leading-relaxed text-fg-subtle">
+          Ask about your story. Auto picks what answers: a chat about the open scene, a cited
+          answer, editor&apos;s notes, a proofread, a rewrite of the selection, and more. Write
+          #name to pull in that tag&apos;s notes.
         </p>
       ) : null}
       {messages.map((message, index) => (
@@ -355,10 +378,10 @@ function Turn({
       data-testid="chat-turn"
       data-role={message.role}
       aria-label={mine ? 'You' : 'Assistant'}
-      className={`flex max-w-[92%] flex-col gap-1 rounded-md px-2.5 py-1.5 text-sm ${mine ? 'self-end bg-surface-raised' : 'self-start border border-line'}`}
+      className={`flex flex-col gap-1 text-sm leading-relaxed ${mine ? 'max-w-[85%] self-end rounded-lg rounded-br-sm bg-surface-raised px-3 py-1.5' : 'max-w-full self-start px-0.5'}`}
     >
       {!mine && message.action !== null && message.action !== 'chat' ? (
-        <p data-testid="chat-turn-action" className="m-0 text-xs font-medium text-accent">
+        <p data-testid="chat-turn-action" className="m-0 text-[11px] font-medium text-accent">
           {ROUTE_ACTION_LABEL[message.action]}
         </p>
       ) : null}
@@ -376,7 +399,7 @@ function Turn({
         <p className="m-0 break-words whitespace-pre-wrap">{message.content}</p>
       )}
       {message.model !== null ? (
-        <p data-testid="chat-turn-cost" className="m-0 text-xs text-fg-subtle">
+        <p data-testid="chat-turn-cost" className="m-0 text-[11px] text-fg-subtle">
           {describeRequest({
             model: message.model,
             costUsd: message.costUsd ?? 0,
@@ -597,11 +620,12 @@ function modeTitle(id: ConversationMode, disabled: boolean, agentDial: AiDial): 
 }
 
 /**
- * The mode, the paragraph count (Author only), Clear conversation, and the message box. Enter
- * sends, Shift+Enter breaks the line; Send is disabled for a blank message and while the dial
- * does not allow the assistant (the note above says what to change). While a turn is in
- * flight, Stop takes Send's place (F-5.10): it drops the unanswered turn and keeps the
- * author's, so it can be sent again.
+ * The rotating suggestion line, the message box with Send (or Stop) inside it, and under it the
+ * mode switch and the paragraph count (Author only). Enter sends, Shift+Enter breaks the line;
+ * Send is disabled for a blank message and while the dial does not allow the assistant (the note
+ * above says what to change). While a turn is in flight, Stop takes Send's place (F-5.10): it
+ * drops the unanswered turn and keeps the author's, so it can be sent again. There is no
+ * clearing a conversation (2026-10-06): New conversation starts a fresh one.
  */
 function Composer(): React.JSX.Element {
   const conversation = useActiveConversation()
@@ -612,11 +636,11 @@ function Composer(): React.JSX.Element {
   const stop = useAssistantStore((s) => s.stop)
   const setMode = useAssistantStore((s) => s.setMode)
   const setParagraphs = useAssistantStore((s) => s.setParagraphs)
-  const clearMessages = useAssistantStore((s) => s.clearMessages)
   const attachment = useAssistantStore((s) => s.attachment)
   const detach = useAssistantStore((s) => s.detach)
   const settings = useAiSettingsStore((s) => s.settings)
   const [draft, setDraft] = useState('')
+  const [focusCount, setFocusCount] = useState(0)
   const radios = useRef(new Map<ConversationMode, HTMLButtonElement>())
   const messageBox = useRef<HTMLTextAreaElement>(null)
 
@@ -667,80 +691,32 @@ function Composer(): React.JSX.Element {
     if (target !== undefined) selectMode(target)
   }
 
-  const clear = async (): Promise<void> => {
-    const ok = await dialogs.confirm({
-      title: 'Clear conversation',
-      message: 'Remove every message in this conversation?',
-      confirmLabel: 'Clear',
-      danger: true
-    })
-    if (ok) clearMessages()
-  }
+  const warning =
+    settings !== null && !chatAllowed ? (
+      <p data-testid="assistant-disabled" className="m-0 text-xs text-warning">
+        The assistant needs the AI dial at {AI_DIAL_LABEL[AI_DATA_SHARING.chat.minDial]} or higher,
+        with Assistant chat on (Settings, AI tab).
+      </p>
+    ) : settings !== null && modeOff(mode) ? (
+      <p data-testid="assistant-mode-off" className="m-0 text-xs text-warning">
+        {modeTitle(mode, true, agentDial)}. Pick another mode to keep going.
+      </p>
+    ) : null
 
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-t border-line p-2">
-      {settings !== null && !chatAllowed ? (
-        <p data-testid="assistant-disabled" className="m-0 text-xs text-warning">
-          The assistant needs the AI dial at {AI_DIAL_LABEL[AI_DATA_SHARING.chat.minDial]} or
-          higher, with Assistant chat on (Settings, AI tab).
-        </p>
-      ) : settings !== null && modeOff(mode) ? (
-        <p data-testid="assistant-mode-off" className="m-0 text-xs text-warning">
-          {modeTitle(mode, true, agentDial)}. Pick another mode to keep going.
-        </p>
-      ) : null}
-      <div className="flex flex-wrap items-center gap-2">
-        <div role="radiogroup" aria-label="Mode" className="flex gap-1">
-          {CONVERSATION_MODES.map((id) => {
-            const disabled = modeOff(id)
-            return (
-              <button
-                key={id}
-                ref={(element) => {
-                  if (element) radios.current.set(id, element)
-                  else radios.current.delete(id)
-                }}
-                type="button"
-                role="radio"
-                aria-checked={id === mode}
-                tabIndex={id === mode ? 0 : -1}
-                disabled={disabled}
-                title={modeTitle(id, disabled, agentDial)}
-                onClick={() => selectMode(id)}
-                onKeyDown={onRadioKeyDown}
-                className={RADIO}
-              >
-                {CONVERSATION_MODE_LABEL[id]}
-              </button>
-            )
-          })}
-        </div>
-        {mode === 'agent' ? (
-          <label className="flex items-center gap-1 text-xs text-fg-muted">
-            <span>Paragraphs</span>
-            <select
-              aria-label="Paragraphs"
-              value={conversation?.paragraphs ?? CHAT_PARAGRAPHS_MIN}
-              onChange={(event) => setParagraphs(Number(event.target.value))}
-              className="rounded-md border border-line bg-bg px-1 py-0.5 text-xs text-fg"
-            >
-              {PARAGRAPH_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        <button
-          type="button"
-          disabled={!conversation || conversation.messages.length === 0 || pending}
-          onClick={() => void clear()}
-          className={`ml-auto ${LINK_BUTTON}`}
-        >
-          Clear conversation
-        </button>
-      </div>
+    <div className="flex shrink-0 flex-col gap-1.5 px-3 pt-1 pb-3">
+      {warning ?? (
+        <SuggestionLine
+          mode={mode}
+          conversationId={conversation?.id ?? null}
+          paused={draft !== ''}
+          focusCount={focusCount}
+          onPick={(text) => {
+            setDraft(text)
+            messageBox.current?.focus()
+          }}
+        />
+      )}
       {attachment !== null ? (
         <div
           data-testid="assistant-attachment"
@@ -759,55 +735,223 @@ function Composer(): React.JSX.Element {
           </button>
         </div>
       ) : null}
-      <textarea
-        ref={messageBox}
-        aria-label="Message"
-        rows={3}
-        maxLength={CHAT_MESSAGE_MAX}
-        placeholder={
-          attachment !== null
-            ? 'Ask about this passage… Enter sends'
-            : 'Ask about your story… Enter sends, Shift+Enter breaks the line'
-        }
-        disabled={conversation === null}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault()
-            submit()
-          }
-        }}
-        className="min-w-0 resize-none rounded-md border border-line bg-bg px-2 py-1.5 text-sm"
-      />
-      <div className="flex items-center justify-end">
-        {pending ? (
-          <button
-            type="button"
-            aria-label="Stop"
-            title="Stop this answer"
-            data-testid="assistant-stop"
-            onClick={stop}
-            className="flex items-center gap-1 rounded-md border border-line px-2.5 py-1 text-xs font-medium text-fg hover:bg-surface-raised"
-          >
-            <Square size={12} aria-hidden="true" />
-            Stop
-          </button>
-        ) : (
-          <button
-            type="button"
-            aria-label="Send"
-            title="Send (Enter)"
-            data-testid="assistant-send"
-            disabled={!canSend}
-            onClick={submit}
-            className="flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-50 disabled:hover:bg-accent"
-          >
-            <Send size={12} aria-hidden="true" />
-            Send
-          </button>
-        )}
+      <div className="relative">
+        <textarea
+          ref={messageBox}
+          aria-label="Message"
+          rows={2}
+          maxLength={CHAT_MESSAGE_MAX}
+          placeholder={attachment !== null ? 'Ask about this passage…' : 'Ask about your story…'}
+          disabled={conversation === null}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onFocus={() => setFocusCount((n) => n + 1)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              submit()
+            }
+          }}
+          className="block w-full min-w-0 resize-none rounded-lg border border-line bg-bg py-2 pr-10 pl-3 text-sm"
+        />
+        <div className="absolute right-1.5 bottom-1.5 flex">
+          {pending ? (
+            <button
+              type="button"
+              aria-label="Stop"
+              title="Stop this answer"
+              data-testid="assistant-stop"
+              onClick={stop}
+              className="rounded-md border border-line bg-bg p-1.5 text-fg hover:bg-surface-raised"
+            >
+              <Square size={12} aria-hidden="true" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label="Send"
+              title="Send (Enter; Shift+Enter breaks the line)"
+              data-testid="assistant-send"
+              disabled={!canSend}
+              onClick={submit}
+              className="rounded-md bg-accent p-1.5 text-accent-fg hover:bg-accent-hover disabled:bg-transparent disabled:text-fg-subtle"
+            >
+              <Send size={12} aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div
+          role="radiogroup"
+          aria-label="Mode"
+          className="inline-flex items-center rounded-md bg-surface-raised p-0.5"
+        >
+          {CONVERSATION_MODES.map((id) => {
+            const disabled = modeOff(id)
+            return (
+              <button
+                key={id}
+                ref={(element) => {
+                  if (element) radios.current.set(id, element)
+                  else radios.current.delete(id)
+                }}
+                type="button"
+                role="radio"
+                aria-checked={id === mode}
+                tabIndex={id === mode ? 0 : -1}
+                disabled={disabled}
+                title={modeTitle(id, disabled, agentDial)}
+                onClick={() => selectMode(id)}
+                onKeyDown={onRadioKeyDown}
+                className={MODE_RADIO}
+              >
+                {CONVERSATION_MODE_LABEL[id]}
+              </button>
+            )
+          })}
+        </div>
+        {mode === 'agent' ? (
+          <label className="flex items-center gap-1 text-[11px] text-fg-muted">
+            <span>Paragraphs</span>
+            <select
+              aria-label="Paragraphs"
+              value={conversation?.paragraphs ?? CHAT_PARAGRAPHS_MIN}
+              onChange={(event) => setParagraphs(Number(event.target.value))}
+              className="rounded border border-line bg-bg px-1 py-px text-[11px] text-fg"
+            >
+              {PARAGRAPH_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
     </div>
+  )
+}
+
+/** How long a suggestion takes to fade out before the next one fades in. */
+const SUGGESTION_FADE_MS = 300
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+}
+
+/**
+ * One suggestion above the message box (2026-10-06): small, muted, centred, picked locally by
+ * `assistantSuggestions` from what the dial, the open scene, its selection, its synopsis and
+ * notes, and the story bible's characters offer. It changes every `SUGGESTION_ROTATE_MS` with a
+ * fade, and holds still while the message box has text or the pointer or focus is on it. With
+ * reduced motion it never fades or runs on a timer: it changes each time the message box gains
+ * focus. It changes with the conversation too. A click fills the message box; nothing is sent.
+ */
+function SuggestionLine({
+  mode,
+  conversationId,
+  paused,
+  focusCount,
+  onPick
+}: {
+  mode: ConversationMode
+  conversationId: string | null
+  paused: boolean
+  /** How often the message box has gained focus. */
+  focusCount: number
+  onPick: (text: string) => void
+}): React.JSX.Element | null {
+  const settings = useAiSettingsStore((s) => s.settings)
+  const open = useOpenScene()
+  const { editor, nodeId } = open
+  const selection =
+    useEditorState({
+      editor,
+      selector: () => (editor ? !editor.state.selection.empty : false)
+    }) ?? false
+  const synopsis = useSceneMetaStore((s) =>
+    nodeId === null ? undefined : s.docs[nodeId]?.content?.synopsis
+  )
+  const notes = useNotesStore((s) => (nodeId === null ? undefined : s.docs[nodeId]?.content))
+  const notesEmpty = useMemo(() => notes != null && docToText(notes).trim() === '', [notes])
+  const entities = useEntityStore((s) => s.byId)
+  const characters = useMemo(
+    () =>
+      Object.values(entities)
+        .filter((entity) => entity.kind === 'character')
+        .map((entity) => entity.name),
+    [entities]
+  )
+  const allowed = useMemo(
+    () =>
+      new Set<AiFeatureId>(
+        settings === null ? [] : AI_FEATURE_IDS.filter((id) => isFeatureAllowed(settings, id))
+      ),
+    [settings]
+  )
+  const [tick, setTick] = useState(0)
+  const [shown, setShown] = useState(true)
+  const [held, setHeld] = useState(false)
+  const [reduced] = useState(prefersReducedMotion)
+
+  // A new conversation gets a new suggestion.
+  const [seenConversation, setSeenConversation] = useState(conversationId)
+  if (seenConversation !== conversationId) {
+    setSeenConversation(conversationId)
+    setTick((n) => n + 1)
+  }
+
+  const step = tick + (reduced ? focusCount : 0)
+  const list = assistantSuggestions(
+    {
+      mode,
+      allowed,
+      sceneLength: open.scene ? open.length : null,
+      selection,
+      synopsisEmpty: synopsis?.trim() === '',
+      notesEmpty,
+      characters
+    },
+    step
+  )
+  const rotates = list.length > 1 && !paused && !held && !reduced
+
+  useEffect(() => {
+    if (!rotates) return
+    let fade: ReturnType<typeof setTimeout> | undefined
+    const timer = setInterval(() => {
+      setShown(false)
+      fade = setTimeout(() => {
+        setTick((n) => n + 1)
+        setShown(true)
+      }, SUGGESTION_FADE_MS)
+    }, SUGGESTION_ROTATE_MS)
+    return () => {
+      clearInterval(timer)
+      if (fade !== undefined) clearTimeout(fade)
+      setShown(true)
+    }
+  }, [rotates])
+
+  const text = list.length === 0 ? null : (list[step % list.length] ?? null)
+  if (text === null) return null
+  return (
+    <button
+      type="button"
+      data-testid="assistant-suggestion"
+      title="Use this suggestion (fills the message box)"
+      onClick={() => onPick(text)}
+      onMouseEnter={() => setHeld(true)}
+      onMouseLeave={() => setHeld(false)}
+      onFocus={() => setHeld(true)}
+      onBlur={() => setHeld(false)}
+      className={`mx-auto max-w-full truncate rounded px-2 text-center text-xs text-fg-muted hover:text-fg motion-safe:transition-opacity motion-safe:duration-300 ${shown ? 'opacity-70 hover:opacity-100' : 'opacity-0'}`}
+    >
+      {text}
+    </button>
   )
 }

@@ -20,7 +20,7 @@ import { useTagStore } from '@renderer/features/tags/tagStore'
 import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { describeError } from '@renderer/lib/errors'
 import { useSceneMetaStore } from './sceneMetaStore'
-import { SuggestButton, SynopsisSuggestion } from './SceneSuggestions'
+import { BriefDraftButton, SuggestButton, SynopsisSuggestion } from './SceneSuggestions'
 import { SuggestInput } from './SuggestInput'
 import { SummaryBlock } from './SummaryBlock'
 
@@ -51,8 +51,8 @@ function useTagNames(category: TagCategory): string[] {
  * (`SynopsisBox`). Takes only `id`: it loads the node's metadata through `useSceneMetaStore` on
  * mount (and again when `id` changes) and unloads on unmount; every change goes through the
  * store's `edit`, so it debounces and flushes like notes do (Ctrl+S, close, quit). The fields
- * are disabled until the load resolves. Drafting the brief with AI is the assistant's "Draft
- * scene brief" action since 2026-10-06 (`briefDraftStore`). Under the brief, `SummaryBlock` shows the scene summary main keeps up
+ * are disabled until the load resolves. Draft beside the Brief disclosure drafts it with AI
+ * (`BriefDraftButton`, `briefDraftStore`; the draft shows in the assistant). Under the brief, `SummaryBlock` shows the scene summary main keeps up
  * to date in the background (F-5.6) for a manuscript document. While the project has a
  * structure template (F-11.1b) and the node is in the manuscript, a Beat picker after Status
  * sets the beat the node sits on in that template (stored per template in `meta.beats`).
@@ -144,20 +144,23 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
           disabled={disabled}
         />
       ) : null}
-      <button
-        type="button"
-        aria-expanded={briefOpen}
-        aria-controls={briefOpen ? briefId : undefined}
-        onClick={() => setBriefOpen(!briefOpen)}
-        className={`self-start ${BUTTON}`}
-      >
-        {briefOpen ? (
-          <ChevronDown size={14} aria-hidden="true" />
-        ) : (
-          <ChevronRight size={14} aria-hidden="true" />
-        )}
-        <span className="font-medium">Brief</span>
-      </button>
+      <div className="flex items-center justify-between gap-1">
+        <button
+          type="button"
+          aria-expanded={briefOpen}
+          aria-controls={briefOpen ? briefId : undefined}
+          onClick={() => setBriefOpen(!briefOpen)}
+          className={BUTTON}
+        >
+          {briefOpen ? (
+            <ChevronDown size={14} aria-hidden="true" />
+          ) : (
+            <ChevronRight size={14} aria-hidden="true" />
+          )}
+          <span className="font-medium">Brief</span>
+        </button>
+        <BriefDraftButton id={id} />
+      </div>
       {briefOpen ? (
         <div id={briefId} className="flex flex-col gap-1">
           {SCENE_BRIEF_FIELDS.map(({ key, label, hint }) => (

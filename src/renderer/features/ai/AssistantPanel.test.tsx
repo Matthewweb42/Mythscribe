@@ -1,8 +1,9 @@
 import { Editor } from '@tiptap/core'
-import { act, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
+import { SUGGESTION_ROTATE_MS } from '@shared/assistantSuggestions'
 import type { Conversation, Conversations } from '@shared/chat'
 import type { AiChatResult, AiQueryResult, Channel, Input, Output } from '@shared/ipc/contract'
 import { QUERY_NOT_FOUND, type QueryTurn } from '@shared/query'
@@ -12,7 +13,9 @@ import {
   useActiveEditorStore
 } from '@renderer/features/editor/activeEditorStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
+import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
+import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -29,6 +32,7 @@ import {
   useAssistantStore
 } from './assistantStore'
 import { CONVERSATION_BUSY_MESSAGE } from './aiActions'
+import { continuityTree } from './continuityFixture'
 import { resetContinuityStore, useContinuityStore } from './continuityStore'
 import { resetProposalStore } from './proposalStore'
 
@@ -297,7 +301,6 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(within(turns()[3]!).getByTestId('chat-pending')).toHaveTextContent('Thinking…')
     expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument()
     expect(stopButton()).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Clear conversation' })).toBeDisabled()
 
     await act(async () => {
       chats[0]?.resolve(ok(chats[0].input.requestId, 'She climbs.'))
@@ -405,14 +408,15 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(chats).toHaveLength(0)
   })
 
-  it('New conversation closes the Continuity view, so the new tab is what shows (F-13.4)', async () => {
+  it('the Continuity view leads back to the conversation (F-13.4)', async () => {
     await mountOpen()
-    useContinuityStore.getState().setViewOpen(true)
+    act(() => useContinuityStore.getState().setViewOpen(true))
     await screen.findByTestId('continuity-panel')
-    await userEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Back to the conversation' }))
     expect(screen.queryByTestId('continuity-panel')).toBeNull()
     expect(useContinuityStore.getState().viewOpen).toBe(false)
-    expect(tabs().map((t) => t.textContent)).toEqual(['Why the ridge?', 'New conversation'])
+    expect(tabs().map((t) => t.textContent)).toEqual(['Why the ridge?'])
   })
 
   it('New conversation adds a tab; closing one with messages confirms; the tablist has a roving tabindex', async () => {
@@ -445,17 +449,13 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(turns()).toHaveLength(0)
   })
 
-  it('Clear conversation confirms, then empties the log', async () => {
+  it('has no actions in its header and no way to clear a conversation (2026-10-06)', async () => {
     await mountOpen()
-    await userEvent.click(screen.getByRole('button', { name: 'Clear conversation' }))
-    expect(modals()).toEqual(['Clear conversation'])
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(turns()).toHaveLength(2)
-    await userEvent.click(screen.getByRole('button', { name: 'Clear conversation' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
-    expect(within(log()).queryAllByTestId('chat-turn')).toHaveLength(0)
-    expect(tabs().map((t) => t.textContent)).toEqual(['New conversation'])
-    expect(screen.getByRole('button', { name: 'Clear conversation' })).toBeDisabled()
+    const header = screen.getByRole('heading', { name: 'Assistant' }).parentElement!
+    expect(within(header).queryByRole('button', { name: 'New conversation' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'AI actions' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('continuity-button')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear conversation' })).not.toBeInTheDocument()
   })
 
   it('renders its chrome disabled before the conversations load', () => {
@@ -704,32 +704,6 @@ describe('AssistantPanel quick actions (F-5.17)', () => {
     editor.destroy()
   })
 
-  it('the actions menu sits in the header and lists every action, off with the reason while no scene is open', async () => {
-    await mountOpen()
-    await userEvent.click(within(panel()).getByRole('button', { name: 'AI actions' }))
-    const menu = screen.getByRole('menu')
-    const items = within(menu).getAllByRole('menuitem')
-    expect(items.map((item) => item.textContent)).toEqual([
-      'What should come next?',
-      'What happened here?',
-      "Editor's notes",
-      'Beta reader',
-      'Proofread',
-      'Check consistency',
-      'Suggest synopsis',
-      'Suggest notes',
-      'Draft scene brief',
-      'Summarize scene'
-    ])
-    for (const item of items) {
-      expect(item).toBeDisabled()
-      expect(item).toHaveAttribute('title', 'Open a manuscript scene first')
-    }
-    // The button closes it again rather than reopening it.
-    await userEvent.click(within(panel()).getByRole('button', { name: 'AI actions' }))
-    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
-  })
-
   it('renders a turn’s directions as cards, and Write this sends one as an Author turn', async () => {
     act(() => useActiveEditorStore.getState().set('sc-1', editor))
     await mountOpen(withDirections())
@@ -776,5 +750,90 @@ describe('AssistantPanel quick actions (F-5.17)', () => {
     await mountOpen(withDirections([]))
     expect(within(log()).getByText(NO_DIRECTIONS_MESSAGE)).toBeInTheDocument()
     expect(screen.queryByTestId('what-next-direction')).not.toBeInTheDocument()
+  })
+})
+
+describe('AssistantPanel suggestions (2026-10-06)', () => {
+  const suggestion = (): HTMLElement => screen.getByTestId('assistant-suggestion')
+  const auto = (): Conversations => ({
+    active: 'c-1',
+    items: [conversation({ mode: 'auto', messages: [] })]
+  })
+  const rotate = (): void => {
+    act(() => {
+      vi.advanceTimersByTime(SUGGESTION_ROTATE_MS)
+    })
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+  }
+
+  let editor: Editor
+  beforeEach(() => {
+    resetEntityStore()
+    useTreeStore.getState().clear()
+    editor = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' })
+    })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    resetActiveEditorStore()
+    resetEntityStore()
+    useTreeStore.getState().clear()
+    editor.destroy()
+  })
+
+  it('shows one suggestion above the box; a click fills the box and sends nothing', async () => {
+    await mountOpen(auto())
+    const text = suggestion().textContent ?? ''
+    expect([
+      'Who are the main characters so far?',
+      'What is still unresolved in the story?',
+      'Talk me through where the story goes'
+    ]).toContain(text)
+    await userEvent.click(suggestion())
+    expect(box()).toHaveValue(text)
+    expect(box()).toHaveFocus()
+    expect(chats).toHaveLength(0)
+    expect(queries).toHaveLength(0)
+  })
+
+  it('fits the mode, and shows none while the dial keeps the assistant off', async () => {
+    await mountOpen({ active: 'c-1', items: [conversation({ mode: 'plan', messages: [] })] })
+    expect(suggestion()).toHaveTextContent('Talk me through where the story goes')
+    act(() => useAiSettingsStore.setState({ settings: settings({ dial: 0 }) }))
+    expect(screen.queryByTestId('assistant-suggestion')).not.toBeInTheDocument()
+  })
+
+  it('rotates on a timer, and holds still while the box has text', async () => {
+    vi.useFakeTimers()
+    await mountOpen(auto())
+    const first = suggestion().textContent
+    rotate()
+    const second = suggestion().textContent
+    expect(second).not.toBe(first)
+    fireEvent.change(box(), { target: { value: 'Where' } })
+    rotate()
+    rotate()
+    expect(suggestion().textContent).toBe(second)
+  })
+
+  it("names the story bible's characters and offers the scene actions for an open scene", async () => {
+    const mara = entityFixture.find((e) => e.kind === 'character')!
+    useEntityStore.setState({ byId: { [mara.id]: mara }, ids: [mara.id] })
+    useTreeStore.setState({ ...buildIndex(continuityTree), loaded: true })
+    editor.commands.setContent(`<p>${'Mara climbed the ridge in the rain. '.repeat(10)}</p>`)
+    act(() => useActiveEditorStore.getState().set('sc-1', editor))
+    vi.useFakeTimers()
+    await mountOpen(auto())
+    const seen = new Set<string>()
+    for (let i = 0; i < 30; i++) {
+      seen.add(suggestion().textContent ?? '')
+      rotate()
+    }
+    expect(seen).toContain('Proofread this scene')
+    expect(seen).toContain('What happens next here?')
+    expect([...seen].some((text) => text.includes(mara.name))).toBe(true)
   })
 })

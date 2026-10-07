@@ -29,15 +29,14 @@ import { useSummaryStore } from '@renderer/features/editor/summaryStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
-import { useAiSettingsStore } from './aiSettingsStore'
 import { useContinuityStore } from './continuityStore'
 
 /**
- * The assistant's one-click AI actions (2026-10-06, "all AI in the AI panel"): the table behind
- * the panel's actions menu, the rule for when each is off, and how each starts. The toolbar
- * buttons (Editor's notes, Beta reader, Rewrite, Voice exemplar) and the quick-action row
- * (F-5.17) are gone; their features start here, from the selection bubble, or from a chat turn
- * the router (F-5.19) sent to them. Results show in the assistant panel (`AiResults`), the
+ * The assistant's AI actions (2026-10-06, "all AI in the AI panel"): the table of the scene
+ * features, the rule for when each is off, and how each starts. The toolbar buttons, the
+ * quick-action row (F-5.17), and the panel's Actions menu are gone (the last in the 2026-10-06
+ * polish); these features start from a chat turn the router (F-5.19) sent to them, the
+ * selection bubble, or their own buttons in the notes column (summary, brief draft). Results show in the assistant panel (`AiResults`), the
  * Continuity view, or the notes column (synopsis, notes, summary).
  */
 
@@ -250,29 +249,6 @@ export function aiActionReason(
     minLength,
     busy
   })
-}
-
-/**
- * Every action's reason, kept current: subscribes to whatever the reasons read, so the menu
- * re-renders when a run starts or ends.
- */
-export function useAiActionReasons(
-  open: OpenScene,
-  conversationBusy: boolean
-): Record<AiActionId, string | null> {
-  const settings = useAiSettingsStore((s) => s.settings)
-  // Subscriptions only: the reasons read the same values through `getState`.
-  useCritiqueStore((s) => s.session !== null)
-  useBetaReaderStore((s) => s.session !== null)
-  useProofreadStore((s) => s.session !== null)
-  useContinuityStore((s) => s.running !== null)
-  useSceneSuggestStore((s) => s.synopsis)
-  useSceneSuggestStore((s) => s.notes)
-  useBriefDraftStore((s) => s.draft?.status === 'pending')
-  useSummaryStore((s) => s.byNode)
-  const reasons = {} as Record<AiActionId, string | null>
-  for (const id of AI_ACTION_IDS) reasons[id] = aiActionReason(id, settings, open, conversationBusy)
-  return reasons
 }
 
 /** Opens the assistant: the docked panel, or the floating one in focus mode (F-6.6). */
