@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { DEFAULT_MODELS } from '@shared/ai'
-import { isFeatureAllowed, providerForSource } from '@shared/aiSettings'
+import { isFeatureAllowed } from '@shared/aiSettings'
 import { baseName, type ImportDraft, type ImportPlacement } from '@shared/import'
 import {
   estimateStructureCost,
@@ -11,7 +11,7 @@ import {
 import type { NovelFormat } from '@shared/ipc/contract'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
-import { useAiStore } from '@renderer/features/ai/aiStore'
+import { providerOf, routedTier, useAiStore } from '@renderer/features/ai/aiStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { refreshRewrittenDocuments } from '@renderer/features/editor/rewrittenDocuments'
 import { buildIndex, expandAncestors, useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -84,11 +84,15 @@ let counter = 0
 /** A request id `ai:cancel` can find (F-5.10), unique across this renderer's passes. */
 const nextRequestId = (): string => `imp-${Date.now().toString(36)}-${++counter}`
 
-/** The model the pass would run on: the fast tier of the provider this project's source sends through (F-15.4). */
+/**
+ * The model the pass would run on: the tier the import routes to (fast unless the author
+ * overrode it) of the provider this project's source sends through (F-15.4, 2026-10-07).
+ */
 function fastModel(): string {
   const source = useAiSettingsStore.getState().settings?.source ?? 'ownKey'
-  const provider = providerForSource(source)
-  return useAiStore.getState().status?.models[provider].fast ?? DEFAULT_MODELS.fast
+  const { status, choice } = useAiStore.getState()
+  const tier = routedTier(choice, source, 'importStructure', 'fast')
+  return status?.models[providerOf(status, source)][tier] ?? DEFAULT_MODELS[tier]
 }
 
 /** What the pass over the draft as it stands would cost, from the words that would really be sent. */

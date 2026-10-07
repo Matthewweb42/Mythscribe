@@ -2,11 +2,10 @@ import { z } from 'zod'
 import { priceFor, type Tier } from './ai'
 
 /**
- * Edit passes (F-14.15): the professional edits an author would pay an editor for, run over the
+ * Edit passes (F-14.15): developmental, line, copy, proofread, continuity, and custom passes, run over the
  * scenes the author picks, as one background job per pass. Every change comes back as a tracked
  * change the author accepts or rejects (AI rule 1); a developmental pass only writes notes. This
- * module is the one owner of the vocabulary, the caps, the estimate, the professional-rate table,
- * and the shapes the contract, main, and the workspace share.
+ * module is the one owner of the vocabulary, the caps, the estimate, and the shapes the contract, main, and the workspace share.
  */
 
 export const EDIT_PASS_TYPES = [
@@ -171,25 +170,6 @@ export const EditPassPresets = z.array(EditPassPreset).max(EDIT_PASS_PRESETS_MAX
 export type EditPassPresets = z.infer<typeof EditPassPresets>
 export const EDIT_PASS_PRESETS_KEY = 'editPassPresets'
 
-/**
- * Typical professional rates in USD per word (low, high), per pass type. Approximate ranges in
- * line with the Editorial Freelancers Association's published rate chart and Reedsy's published
- * marketplace pricing for fiction, compiled 2026-10-06 (decided by Claude, unconfirmed: the
- * figures were not fetched live). The workspace shows them as "typical rates", a range.
- */
-export const PRO_RATES_SOURCE =
-  'Typical rates: approximate per-word ranges in line with the Editorial Freelancers Association rate chart and Reedsy’s published pricing (compiled 2026-10-06; rates vary by editor and genre).'
-export const PRO_RATES_PER_WORD: Record<EditPassType, { low: number; high: number }> = {
-  developmental: { low: 0.03, high: 0.08 },
-  line: { low: 0.025, high: 0.06 },
-  copy: { low: 0.015, high: 0.04 },
-  proofread: { low: 0.01, high: 0.025 },
-  // Usually part of a copy edit; priced as its lower half.
-  continuity: { low: 0.01, high: 0.03 },
-  // Compared with a line edit, the nearest professional service.
-  custom: { low: 0.02, high: 0.06 }
-}
-
 /** Tokens per word of English prose (as the import estimate counts them). */
 export const EDIT_PASS_TOKENS_PER_WORD = 1.35
 /** Characters per word, to count the chunks a scene of N words splits into. */
@@ -214,9 +194,6 @@ export interface EditPassEstimate {
   tokensOut: number
   costUsd: number
   priced: boolean
-  /** What an editor typically charges for the same words. */
-  proLowUsd: number
-  proHighUsd: number
 }
 
 /** The chunks a scene of `words` words is sent in (0 for an empty scene). */
@@ -226,9 +203,9 @@ export function chunksForWords(words: number): number {
 }
 
 /**
- * What a pass over scenes of `sceneWords` words would cost on `model`, against what an editor
- * typically charges for the same words. Each chunk's output is capped at `outputCap`, as the
- * request path caps it.
+ * What a pass over scenes of `sceneWords` words would cost on `model`: the sum of its chunk
+ * estimates (AI-BILLING-SPEC R3). Each chunk's output is capped at `outputCap`, as the request
+ * path caps it. No comparison with an editor's fee is made (AI-BILLING-SPEC C1).
  */
 export function estimateEditPass(
   type: EditPassType,
@@ -252,7 +229,6 @@ export function estimateEditPass(
   const tokensIn =
     Math.ceil(words * EDIT_PASS_TOKENS_PER_WORD) + chunks * EDIT_PASS_CHUNK_OVERHEAD_TOKENS
   const price = priceFor(model, tokensIn, tokensOut)
-  const rate = PRO_RATES_PER_WORD[type]
   return {
     scenes,
     words,
@@ -260,9 +236,7 @@ export function estimateEditPass(
     tokensIn,
     tokensOut,
     costUsd: price.costUsd,
-    priced: price.priced,
-    proLowUsd: words * rate.low,
-    proHighUsd: words * rate.high
+    priced: price.priced
   }
 }
 

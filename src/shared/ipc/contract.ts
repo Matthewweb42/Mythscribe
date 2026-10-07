@@ -9,12 +9,16 @@ import {
   AiStatus,
   AiTestConnectionResult,
   AiUsage,
+  AiUsageHistory,
   AiUsageSummary,
   DailyCapUsd,
+  OwnKeyProvider,
+  USAGE_HISTORY_PAGE,
   GHOST_AFTER_CHARS,
   GHOST_BEFORE_CHARS
 } from '../ai'
 import { AgentAccess, AgentEdit, AgentFocus, AgentStep } from '../agent'
+import { AiModelChoice, AiRouting } from '../aiRouting'
 import { AiSettings, AiSource, AiSwitch } from '../aiSettings'
 import { ExportOptions, ExportProgress, ExportResult } from '../bookExport'
 import {
@@ -1717,6 +1721,29 @@ export const contract = {
   },
   /** Forgets the stored key (F-5.1); a no-op when none is saved. */
   'ai:clearKey': { input: z.undefined(), output: AiStatus },
+  /**
+   * Picks which provider an own key is for (2026-10-07: OpenRouter or OpenAI), app-wide; the
+   * key field, the models, and the next request follow it. Each provider keeps its own key.
+   */
+  'ai:setOwnKeyProvider': { input: z.object({ provider: OwnKeyProvider }), output: AiStatus },
+  /**
+   * Model choice (AI-BILLING-SPEC M8, R4): the author's overrides (one tier for every task, or
+   * per task; none is Auto) and the MythScribe Cloud table last fetched. App-wide.
+   */
+  'ai:getModelChoice': { input: z.undefined(), output: AiModelChoice },
+  /** Replaces the overrides; the next request routes by them. */
+  'ai:setRouting': { input: AiRouting, output: AiModelChoice },
+  /**
+   * The usage history (AI-BILLING-SPEC E7): the open project's ledger rows, newest first, one
+   * page at a time, with the row count. NO_PROJECT without one.
+   */
+  'ai:usageHistory': {
+    input: z.object({
+      offset: z.number().int().nonnegative(),
+      limit: z.number().int().min(1).max(USAGE_HISTORY_PAGE)
+    }),
+    output: AiUsageHistory
+  },
   /**
    * Asks the provider a token-free question with the saved key (F-5.1). Expected failures (no
    * key, invalid key, rate limit, quota, network, provider) come back as data with a next step,

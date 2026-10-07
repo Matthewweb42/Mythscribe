@@ -8,6 +8,7 @@ import {
   type CloudErrorCode,
   type CreditsResult
 } from '@shared/cloudApi'
+import { hostedPriceFor, type CloudPricing } from '@shared/aiRouting'
 import { cloudPriceFor } from '@shared/cloudRates'
 import { AccountError } from '../../account/cloudAuthClient'
 import type { FetchLike } from './openai'
@@ -61,6 +62,12 @@ export interface CloudProviderOptions {
    * with `AiCloudUnavailableError` before anything is sent.
    */
   available?: boolean
+  /**
+   * The server's price table (`GET /pricing`, AI-BILLING-SPEC P5), read live; a model in it is
+   * priced at the server's rate and markup. Absent or null, or a model it does not list, falls
+   * back to the bundled rate (`cloudPriceFor`) until the Worker serves the table.
+   */
+  pricing?: () => CloudPricing | null
 }
 
 const SIGNED_OUT = 'Sign in to MythScribe Cloud to use it for this project.'
@@ -179,7 +186,12 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
   return {
     id: 'cloud',
     resolveModel: options.resolveModel,
-    price: cloudPriceFor,
+    price: (model, inTok, outTok, cachedTok) => {
+      const table = options.pricing?.() ?? null
+      return table?.models.some((entry) => entry.model === model)
+        ? hostedPriceFor(table, model, inTok, outTok, cachedTok)
+        : cloudPriceFor(model, inTok, outTok)
+    },
 
     async complete(request): Promise<CompletionResult> {
       const response = await send(request, false)

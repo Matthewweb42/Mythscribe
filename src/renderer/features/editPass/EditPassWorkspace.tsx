@@ -1,7 +1,8 @@
 import { useId, useMemo, useState } from 'react'
 import { Loader2, Check, X } from 'lucide-react'
 import { DEFAULT_MODELS, outputBudget, type Tier } from '@shared/ai'
-import { isFeatureAllowed, providerForSource } from '@shared/aiSettings'
+import { type AiSource } from '@shared/aiSettings'
+import { isFeatureAllowed } from '@shared/aiSettings'
 import {
   BUILTIN_PRESET_IDS,
   BUILTIN_PRESETS,
@@ -14,13 +15,12 @@ import {
   EDIT_PASS_TYPES,
   estimateEditPass,
   presetInstruction,
-  PRO_RATES_SOURCE,
   type BuiltinPresetId,
   type EditPassSummary,
   type EditPassType
 } from '@shared/editPass'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
-import { useAiStore } from '@renderer/features/ai/aiStore'
+import { providerOf, routedTier, useAiStore } from '@renderer/features/ai/aiStore'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { descendantDocuments, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { listOutline } from '@renderer/features/outline/outlineRows'
@@ -35,11 +35,17 @@ const SMALL_BUTTON =
   'rounded-md border border-line px-2 py-0.5 text-xs hover:bg-surface-raised disabled:opacity-40 disabled:hover:bg-transparent'
 const INDENT = ['pl-0', 'pl-4', 'pl-8', 'pl-12', 'pl-16'] as const
 
-/** The model a tier resolves to for this project's source (F-5.11, F-15.4), as the estimate prices it. */
-function useModelFor(tier: Tier): string {
+/**
+ * The tier and model a pass of this kind goes out on for this project's source (F-5.11, F-15.4),
+ * after the author's model choice (AI-BILLING-SPEC M8, R4), as the estimate prices it.
+ */
+function usePassModel(type: EditPassType): { tier: Tier; model: string; source: AiSource } {
   const source = useAiSettingsStore((s) => s.settings?.source ?? 'ownKey')
-  const models = useAiStore((s) => s.status?.models ?? null)
-  return models?.[providerForSource(source)][tier] ?? DEFAULT_MODELS[tier]
+  const status = useAiStore((s) => s.status)
+  const choice = useAiStore((s) => s.choice)
+  const tier = routedTier(choice, source, 'editPass', EDIT_PASS_TIER[type])
+  const model = status?.models[providerOf(status, source)][tier] ?? DEFAULT_MODELS[tier]
+  return { tier, model, source }
 }
 
 /**
@@ -130,7 +136,9 @@ function PassSetup(): React.JSX.Element {
   const settings = useAiSettingsStore((s) => s.settings)
   const allowed = settings !== null && isFeatureAllowed(settings, 'editPass')
   const wordCounts = useTreeStore((s) => s.wordCountRollup)
-  const model = useModelFor(EDIT_PASS_TIER[type])
+  const { model, source } = usePassModel(type)
+  // AI-BILLING-SPEC C4: hosted users see dollars and words, not tokens.
+  const hosted = source === 'cloud'
   const ordered = scope.ordered
   const estimate = useMemo(
     () =>
@@ -175,13 +183,13 @@ function PassSetup(): React.JSX.Element {
         </p>
         <p className="m-0 text-sm" data-testid="edit-pass-estimate-ai">
           {estimate.priced
-            ? `With MythScribe: about ${formatUsd(estimate.costUsd)} on ${model} (about ${formatCount(estimate.tokensIn)} tokens in, ${formatCount(estimate.tokensOut)} out at most).`
-            : `With MythScribe: ${model} has no published price here, so the cost is not estimated (about ${formatCount(estimate.tokensIn)} tokens in).`}
+            ? hosted
+              ? `With MythScribe: about ${formatUsd(estimate.costUsd)} on ${model}.`
+              : `With MythScribe: about ${formatUsd(estimate.costUsd)} on ${model} (about ${formatCount(estimate.tokensIn)} tokens in, ${formatCount(estimate.tokensOut)} out at most).`
+            : hosted
+              ? `With MythScribe: ${model} has no published price here, so the cost is not estimated.`
+              : `With MythScribe: ${model} has no published price here, so the cost is not estimated (about ${formatCount(estimate.tokensIn)} tokens in).`}
         </p>
-        <p className="m-0 text-sm" data-testid="edit-pass-estimate-pro">
-          {`A professional ${EDIT_PASS_LABEL[type].toLowerCase()}: typically ${formatUsd(estimate.proLowUsd)} to ${formatUsd(estimate.proHighUsd)} for these words.`}
-        </p>
-        <p className="m-0 text-xs text-fg-muted">{PRO_RATES_SOURCE}</p>
       </section>
       <div className="flex items-center gap-3 px-6 py-4">
         <button
@@ -209,6 +217,8 @@ function TypePicker({
   onChange: (type: EditPassType) => void
 }): React.JSX.Element {
   const name = useId()
+  const source = useAiSettingsStore((s) => s.settings?.source ?? 'ownKey')
+  const choice = useAiStore((s) => s.choice)
   return (
     <fieldset className={`${SECTION} m-0 border-x-0 border-t-0`}>
       <legend className="sr-only">Kind of edit</legend>
@@ -234,7 +244,9 @@ function TypePicker({
             </span>
             <span className="text-xs text-fg-muted">{EDIT_PASS_DESCRIPTION[value]}</span>
             <span className="text-xs text-fg-subtle">
-              {EDIT_PASS_TIER[value] === 'strong' ? 'Strong model' : 'Fast model'}
+              {routedTier(choice, source, 'editPass', EDIT_PASS_TIER[value]) === 'strong'
+                ? 'Strong model'
+                : 'Fast model'}
             </span>
           </label>
         ))}

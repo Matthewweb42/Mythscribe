@@ -1042,6 +1042,8 @@ test.beforeAll(async () => {
     NODE_ENV: 'test',
     MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData'),
     OPENAI_BASE_URL: openAiBaseUrl,
+    // AI-BILLING-SPEC S2 refuses a provider key without a keyring; xvfb has none.
+    MYTHSCRIBE_E2E_PLAINTEXT_KEYS: '1',
     MYTHSCRIBE_CLOUD_API_URL: cloudApiUrl,
     // F-15.9: verify licenses against the fixture keypair, not the key the release ships with.
     MYTHSCRIBE_LICENSE_PUBLIC_KEY: JSON.stringify(LICENSE_FIXTURE.publicKey)
@@ -1599,11 +1601,12 @@ test('create, close, reopen a project on disk', async () => {
   await expect(useAi).toBeChecked()
   await expect(ghostTextToggle).toBeEnabled()
   await expect.poll(async () => (await aiSettings()).dial).toBe(1)
+  // A fresh install's own key is for OpenRouter (2026-10-07); the table names it.
   await expect(
     settingsDialog.getByRole('table', { name: 'What each AI feature sends' }).getByRole('row', {
       name: /^Ghost text /
     })
-  ).toContainText('OpenAI')
+  ).toContainText('OpenRouter')
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
   await page.getByRole('button', { name: 'Settings' }).click()
@@ -1657,7 +1660,17 @@ test('create, close, reopen a project on disk', async () => {
     })
   await presets.getByRole('radio', { name: 'General' }).click()
   await expect.poll(async () => (await writingPresets()).active).toBe('general')
-  await expect(settingsDialog.getByText('OpenAI', { exact: true }).first()).toBeVisible()
+  // 2026-10-07: a fresh install's own key is for OpenRouter; the fake provider speaks OpenAI's
+  // API at OPENAI_BASE_URL, so the steps below pick OpenAI, and the choice persists.
+  const keyProviders = settingsDialog.getByRole('radiogroup', { name: 'Key provider' })
+  await expect(keyProviders.getByTestId('own-key-provider-openrouter')).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  await expect(settingsDialog.getByRole('form', { name: 'OpenRouter API key' })).toBeVisible()
+  await keyProviders.getByTestId('own-key-provider-openai').click()
+  await expect(settingsDialog.getByRole('form', { name: 'OpenAI API key' })).toBeVisible()
+  expect(await aiStatus()).toMatchObject({ provider: 'openai', hasKey: false })
   const keyHint = settingsDialog.getByTestId('ai-key-hint')
   const keyField = settingsDialog.getByLabel('API key', { exact: true })
   const testResult = settingsDialog.getByTestId('ai-test-result')
@@ -1706,14 +1719,16 @@ test('create, close, reopen a project on disk', async () => {
   expect((await aiStatus()).models).toEqual({
     openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
     cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' },
-    local: { fast: 'llama3.1', strong: 'llama3.1' }
+    local: { fast: 'llama3.1', strong: 'llama3.1' },
+    openrouter: { fast: 'openai/gpt-5.4-mini', strong: 'openai/gpt-5.4' }
   })
   expect(
     (JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { models: AiStatus['models'] }).models
   ).toEqual({
     openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
     cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' },
-    local: { fast: 'llama3.1', strong: 'llama3.1' }
+    local: { fast: 'llama3.1', strong: 'llama3.1' },
+    openrouter: { fast: 'openai/gpt-5.4-mini', strong: 'openai/gpt-5.4' }
   })
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
@@ -4542,9 +4557,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(workspace).toBeVisible()
   await workspace.getByRole('radio', { name: 'Proofread' }).check()
   await expect(workspace.getByTestId('edit-pass-estimate')).toContainText('1 scene')
-  await expect(workspace.getByTestId('edit-pass-estimate-pro')).toContainText(
-    'A professional proofread: typically'
-  )
+  await expect(workspace.getByTestId('edit-pass-estimate-ai')).toContainText('With MythScribe')
   await workspace.getByTestId('edit-pass-start').click()
   const report = page.getByTestId('edit-report')
   await expect(report).toBeVisible()

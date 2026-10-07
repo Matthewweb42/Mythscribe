@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AI_FEATURE_IDS, AiFeatureId, type AiProviderId } from './ai'
+import { AI_FEATURE_IDS, AiFeatureId, type AiProviderId, type OwnKeyProvider } from './ai'
 import { DEFAULT_HONESTY, Honesty } from './critique'
 
 /** Settings-table key under which the AI dial and toggles (F-14.4) are stored as JSON. */
@@ -128,9 +128,12 @@ export const AI_SOURCE_LABEL: Record<AiSource, string> = {
   local: 'Local model'
 }
 
-/** The provider whose models and ledger rows a source uses (F-15.4, F-5.15). */
-export function providerForSource(source: AiSource): AiProviderId {
-  return source === 'ownKey' ? 'openai' : source
+/**
+ * The provider whose models and ledger rows a source uses (F-15.4, F-5.15): on My own key, the
+ * provider the key is for (OpenRouter or OpenAI, `AiStatus.provider`).
+ */
+export function providerForSource(source: AiSource, ownKey: OwnKeyProvider): AiProviderId {
+  return source === 'ownKey' ? ownKey : source
 }
 
 /**
@@ -138,12 +141,13 @@ export function providerForSource(source: AiSource): AiProviderId {
  * than the hosted ones, and the voice checks (F-14.7) reject more of what they write.
  */
 export const LOCAL_QUALITY_WARNING =
-  'Local models are smaller than OpenAI\u2019s: expect weaker answers, more rejected suggestions, ' +
+  'Local models are smaller than hosted ones: expect weaker answers, more rejected suggestions, ' +
   'and slower replies, depending on your computer. Every feature still works the same way.'
 
 /** One-line meaning per option; shown under each radio in the AI tab and in the new-project wizard (F-15.11). */
 export const AI_SOURCE_MEANING: Record<AiSource, string> = {
-  ownKey: 'Calls go straight to OpenAI with your own API key; nothing is paid to MythScribe.',
+  ownKey:
+    'Calls go straight to OpenRouter (or OpenAI) with your own API key; nothing is paid to MythScribe.',
   cloud: 'Calls go through MythScribe Cloud and are charged to your credits at the published rate.',
   local:
     'Calls go to a model running on your computer (Ollama, LM Studio); nothing leaves the machine and nothing is charged.'

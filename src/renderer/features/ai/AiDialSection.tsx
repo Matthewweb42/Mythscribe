@@ -6,10 +6,10 @@ import {
   GHOST_IDLE_MS_MAX,
   GHOST_IDLE_MS_MIN,
   USE_AI_LABEL,
-  USE_AI_MEANING,
-  providerForSource
+  USE_AI_MEANING
 } from '@shared/aiSettings'
 import { useAiSettingsStore } from './aiSettingsStore'
+import { providerOf, useAiStore } from './aiStore'
 
 const FIELD = 'w-24 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 
@@ -29,7 +29,8 @@ export function AiDialSection(): React.JSX.Element | null {
   // F-15.4: the Provider column names where the text actually goes, which is the project's
   // AI source, not a fixed provider id.
   const source = useAiSettingsStore((s) => s.settings?.source ?? 'ownKey')
-  const provider = providerForSource(source)
+  const status = useAiStore((s) => s.status)
+  const provider = providerOf(status, source)
   const headingId = useId()
   const useAiHintId = useId()
 

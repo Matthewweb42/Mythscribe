@@ -9,8 +9,10 @@ import {
   type AiStatus,
   type AiTestConnectionResult,
   USAGE_RECENT_LIMIT,
-  type AiUsageSummary
+  type AiUsageSummary,
+  type OwnKeyProvider
 } from '@shared/ai'
+import type { AiModelChoice } from '@shared/aiRouting'
 import { type AiSource, aiSwitchPatch, isFeatureAllowed } from '@shared/aiSettings'
 import { EXPORT_EXTENSIONS, EXPORT_FORMAT_LABELS } from '@shared/bookExport'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl } from '@shared/cloudApi'
@@ -120,7 +122,7 @@ import type { AiProviderRegistry } from '../ai/registry'
 import { buildAiRequestDeps, type AiRequestDeps } from '../ai/request'
 import { createSessionUsage } from '../ai/sessionUsage'
 import { staleSummaryNodeIds, summarizeScene, summarySource } from '../ai/summarize'
-import { ledgerSummary, recentUsage, type AiDb } from '../ai/usageStore'
+import { ledgerSummary, recentUsage, usageHistory, type AiDb } from '../ai/usageStore'
 import { createIndexQueue } from '../jobs/indexQueue'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
@@ -1795,11 +1797,14 @@ export function registerHandlers({
   })
 
   // F-5.1: the key is accepted by `ai:setKey` once and never returned; status carries a mask.
+  // 2026-10-07: the key is for the own-key provider in effect (OpenRouter or OpenAI).
+  const ownKey = (): OwnKeyProvider => ai.ownKeyProvider()
   const aiStatus = (): AiStatus => ({
-    provider: 'openai',
-    hasKey: keyStore.hasKey('openai'),
-    hint: keyStore.getHint('openai'),
+    provider: ownKey(),
+    hasKey: keyStore.hasKey(ownKey()),
+    hint: keyStore.getHint(ownKey()),
     encryption: keyStore.encryption(),
+    canStoreKey: keyStore.canStoreProviderKey(),
     // F-15.4: both maps, since the AI tab edits the one the project's source names.
     models: appState.get().models,
     local: appState.get().localAi
@@ -1808,14 +1813,33 @@ export function registerHandlers({
   register('ai:getStatus', aiStatus)
 
   register('ai:setKey', ({ key }) => {
-    keyStore.setKey('openai', key)
+    keyStore.setKey(ownKey(), key)
     backfillSummaries(true)
     return aiStatus()
   })
 
   register('ai:clearKey', () => {
-    keyStore.clearKey('openai')
+    keyStore.clearKey(ownKey())
     return aiStatus()
+  })
+
+  register('ai:setOwnKeyProvider', ({ provider }) => {
+    appState.update((s) => ({ ...s, ownKeyProvider: provider }))
+    if (keyStore.hasKey(provider)) backfillSummaries(true)
+    return aiStatus()
+  })
+
+  // AI-BILLING-SPEC M8, R4: the request path reads the overrides live (`buildAiRequestDeps`).
+  const modelChoice = (): AiModelChoice => ({
+    routing: appState.get().routing,
+    cloudPricing: appState.get().cloudPricing?.pricing ?? null
+  })
+
+  register('ai:getModelChoice', modelChoice)
+
+  register('ai:setRouting', (routing) => {
+    appState.update((s) => ({ ...s, routing }))
+    return modelChoice()
   })
 
   // F-5.15: the registry reads the address live and rebuilds the local client when it changes.
@@ -1866,6 +1890,10 @@ export function registerHandlers({
   }
 
   register('ai:usageSummary', usageSummary)
+
+  register('ai:usageHistory', ({ offset, limit }) =>
+    usageHistory(manager.require().connection.orm, offset, limit)
+  )
 
   register('ai:setDailyCap', ({ dailyCapUsd }) => {
     appState.update((s) => ({ ...s, aiUsage: { ...s.aiUsage, dailyCapUsd } }))

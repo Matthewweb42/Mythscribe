@@ -2,7 +2,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_MODELS, defaultAiModels, defaultLocalAiSettings } from '@shared/ai'
+import {
+  DEFAULT_MODELS,
+  OPENROUTER_DEFAULT_MODELS,
+  defaultAiModels,
+  defaultLocalAiSettings
+} from '@shared/ai'
 import { defaultBackupSettings } from '@shared/backups'
 import { defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { defaultDock } from '@shared/dock'
@@ -12,6 +17,7 @@ import { RELEASE_NOTES_MAX, defaultUpdateSettings } from '@shared/updates'
 import { defaultWindowState } from '@shared/windowState'
 import { defaultViewSettings } from '@shared/zoom'
 import { defaultAiUsageState } from '../ai/dailyCap'
+import { defaultAiRouting } from '@shared/aiRouting'
 import { AppStateStore, EMPTY_APP_STATE } from './appStateStore'
 
 let tmp: string
@@ -55,7 +61,9 @@ describe('AppStateStore', () => {
       backups: defaultBackupSettings(),
       window: defaultWindowState(),
       tagTemplates: [],
-      localAi: defaultLocalAiSettings()
+      localAi: defaultLocalAiSettings(),
+      routing: defaultAiRouting(),
+      cloudPricing: null
     })
   })
 
@@ -175,7 +183,8 @@ describe('AppStateStore', () => {
     const models = {
       openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
       cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' },
-      local: { fast: 'llama3.2', strong: 'qwen2.5:14b' }
+      local: { fast: 'llama3.2', strong: 'qwen2.5:14b' },
+      openrouter: { fast: 'deepseek/deepseek-chat', strong: 'openai/gpt-5.4' }
     }
     expect(
       store.update((s) => ({
@@ -197,6 +206,47 @@ describe('AppStateStore', () => {
       }))
     ).toThrow()
     expect(new AppStateStore(file).get().models).toEqual(models)
+  })
+
+  it('reads the 2026-10-07 billing fields leniently: absent, Auto, and no cached table by default', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    const old = new AppStateStore(file).get()
+    expect(old.ownKeyProvider).toBeUndefined()
+    expect(old.routing).toEqual(defaultAiRouting())
+    expect(old.cloudPricing).toBeNull()
+    expect(old.models.openrouter).toEqual(OPENROUTER_DEFAULT_MODELS)
+    // A bad value resets only its own field; the recents survive.
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        recents: [entry],
+        ownKeyProvider: 'anthropic',
+        routing: { all: 'medium' },
+        cloudPricing: { fetchedAt: 'x' }
+      }),
+      'utf8'
+    )
+    const bad = new AppStateStore(file).get()
+    expect(bad.recents).toEqual([entry])
+    expect(bad.ownKeyProvider).toBeUndefined()
+    expect(bad.routing).toEqual(defaultAiRouting())
+    expect(bad.cloudPricing).toBeNull()
+    // An unknown feature id in the per-task overrides is dropped, the rest kept.
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        recents: [entry],
+        ownKeyProvider: 'openai',
+        routing: { all: null, features: { summary: 'strong', someFutureFeature: 'fast' } }
+      }),
+      'utf8'
+    )
+    const kept = new AppStateStore(file).get()
+    expect(kept.ownKeyProvider).toBe('openai')
+    expect(kept.routing).toEqual({ all: null, features: { summary: 'strong' } })
   })
 
   it('parses a file written before F-5.14 (no aiUsage) to the default cap with no tally', () => {
@@ -234,7 +284,8 @@ describe('AppStateStore', () => {
     expect(state.models).toEqual({
       ...models,
       cloud: DEFAULT_MODELS,
-      local: defaultAiModels().local
+      local: defaultAiModels().local,
+      openrouter: OPENROUTER_DEFAULT_MODELS
     })
     expect(state.recents).toEqual([entry])
   })

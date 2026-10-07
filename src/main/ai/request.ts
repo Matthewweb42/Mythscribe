@@ -5,8 +5,10 @@ import {
   outputBudget,
   priceFor,
   type AiFeatureId,
+  type AiProviderId,
   type Tier
 } from '@shared/ai'
+import { autoTable, resolveTier, type AiRouting } from '@shared/aiRouting'
 import type { AppStateStore } from '../appState/appStateStore'
 import { getCached, putCached, type CacheEntry, type CachedResponse } from './cacheStore'
 import { dayOf, rollIfNewDay, spend, wouldExceed, type AiUsageState } from './dailyCap'
@@ -88,6 +90,14 @@ export interface AiRequestDeps {
   session: { spend(amount: { costUsd: number; tokens: number }): void }
   now: () => Date
   price: typeof priceFor
+  /**
+   * Model choice (AI-BILLING-SPEC M8, R4): the author's overrides and the Auto table for the
+   * provider that answers. Absent, the request goes out on the tier the feature asked for.
+   */
+  routing?: (provider: AiProviderId) => {
+    routing: AiRouting
+    table: Partial<Record<AiFeatureId, Tier>>
+  }
 }
 
 /** What the shared pre-checks settle before either path calls the provider. */
@@ -99,6 +109,8 @@ interface PreparedRequest {
    * the same function, so a proposal's cost line is always what the request actually cost.
    */
   price: typeof priceFor
+  /** The tier the request goes out on once routing has spoken (`resolveTier`). */
+  tier: Tier
   model: string
   maxTokens: number
   /** The local estimate of the prompt, what the input budget was checked against. */
@@ -119,11 +131,14 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
   const provider = deps.providers.get()
   if (!provider) throw new NoKeyError('No API key is saved.')
   const maxTokens = Math.min(input.maxTokens, outputBudget(input.feature))
-  const model = provider.resolveModel(input.tier)
+  const tier = deps.routing
+    ? resolveTier({ feature: input.feature, requested: input.tier, ...deps.routing(provider.id) })
+    : input.tier
+  const model = provider.resolveModel(tier)
   // Called through a closure rather than passed as a method reference: the provider owns it.
   const providerPrice = provider.price
   const price: typeof priceFor = providerPrice
-    ? (model, inTok, outTok) => providerPrice(model, inTok, outTok)
+    ? (model, inTok, outTok, cachedTok) => providerPrice(model, inTok, outTok, cachedTok)
     : deps.price
 
   const estimatedIn = estimateTokens(input.messages.map((m) => m.content).join('\n'))
@@ -145,13 +160,14 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
   return {
     provider,
     price,
+    tier,
     model,
     maxTokens,
     estimatedIn,
     key: cacheKey(input, model),
     base: {
       feature: input.feature,
-      tier: input.tier,
+      tier,
       model,
       provider: provider.id,
       promptVersion: input.promptVersion,
@@ -195,10 +211,12 @@ function record(
   answer: { text: string; usage: CompletionUsage }
 ): AiRequestResult {
   const { model, key } = prepared
+  const cachedTokens = answer.usage.cachedInputTokens ?? null
   const { costUsd, priced } = prepared.price(
     model,
     answer.usage.inputTokens,
-    answer.usage.outputTokens
+    answer.usage.outputTokens,
+    cachedTokens ?? 0
   )
   const at = deps.now().toISOString()
   const tokens = answer.usage.inputTokens + answer.usage.outputTokens
@@ -207,7 +225,7 @@ function record(
     at,
     promptTokens: answer.usage.inputTokens,
     completionTokens: answer.usage.outputTokens,
-    cachedTokens: null,
+    cachedTokens,
     costUsd,
     cached: false
   })
@@ -250,7 +268,7 @@ function completionRequest(
   signal: AbortSignal | undefined
 ): CompletionRequest {
   return {
-    tier: input.tier,
+    tier: prepared.tier,
     feature: input.feature,
     messages: input.messages,
     maxTokens: prepared.maxTokens,
@@ -356,6 +374,11 @@ export function buildAiRequestDeps(bind: {
     },
     session: bind.session,
     now,
-    price: priceFor
+    price: priceFor,
+    routing: (provider) => {
+      const state = bind.appState.get()
+      const cloudTable = provider === 'cloud' ? (state.cloudPricing?.pricing.routing ?? null) : null
+      return { routing: state.routing, table: autoTable(cloudTable) }
+    }
   }
 }

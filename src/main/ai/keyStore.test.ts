@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { maskKey } from '@shared/ai'
 import { AppError } from '../ipc/errors'
-import { AiKeyStore } from './keyStore'
+import { AiKeyStore, NO_KEYCHAIN_MESSAGE } from './keyStore'
 import { fakeSafeStorage } from './keyStoreFixture'
 
 const KEY = 'sk-test-secret-1234abcd'
@@ -84,10 +84,25 @@ describe('AiKeyStore (F-5.1)', () => {
     expect(new AiKeyStore(file, basic, 'linux').encryption()).toBe('plain')
     expect(new AiKeyStore(file, basic, 'win32').encryption()).toBe('os')
     expect(new AiKeyStore(file, fakeSafeStorage(), 'linux').encryption()).toBe('os')
-    // Plain storage still stores.
+  })
+
+  it('refuses a provider key without the OS keychain (S2) but keeps the Cloud session', () => {
+    const basic = fakeSafeStorage({ getSelectedStorageBackend: () => 'basic_text' })
     const store = new AiKeyStore(file, basic, 'linux')
-    store.setKey('openai', KEY)
-    expect(store.getKey('openai')).toBe(KEY)
+    for (const id of ['openai', 'openrouter'] as const) {
+      expect(() => store.setKey(id, KEY)).toThrow(NO_KEYCHAIN_MESSAGE)
+      expect(store.hasKey(id)).toBe(false)
+    }
+    expect(fs.existsSync(file)).toBe(false)
+    store.setKey('cloudSession', KEY)
+    expect(store.getKey('cloudSession')).toBe(KEY)
+    expect(store.canStoreProviderKey()).toBe(false)
+    expect(new AiKeyStore(file, fakeSafeStorage(), 'linux').canStoreProviderKey()).toBe(true)
+    // The e2e's escape hatch (xvfb has no keyring): the fallback is allowed only when asked.
+    const e2e = new AiKeyStore(file, basic, 'linux', true)
+    expect(e2e.canStoreProviderKey()).toBe(true)
+    e2e.setKey('openrouter', KEY)
+    expect(e2e.getKey('openrouter')).toBe(KEY)
   })
 
   it('treats ciphertext that no longer decrypts as no key, naming only the provider', () => {
