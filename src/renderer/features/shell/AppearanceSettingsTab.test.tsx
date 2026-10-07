@@ -1,4 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { resetSessionStore } from '@renderer/features/project/sessionStore'
+import { resetBackgroundStore } from '@renderer/features/focus/backgroundStore'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
@@ -83,6 +85,9 @@ const sizes = (): HTMLElement[] =>
 beforeEach(() => {
   resetViewStore()
   resetAccountStore()
+  // F-1.7: the app below starts a session load; none may finish inside another test file.
+  resetSessionStore()
+  resetBackgroundStore()
   calls = []
   startupCalls = []
   reopenLastProject = true
@@ -93,6 +98,8 @@ beforeEach(() => {
 afterEach(() => {
   resetViewStore()
   resetAccountStore()
+  resetSessionStore()
+  resetBackgroundStore()
 })
 
 describe('AppearanceSettingsTab (F-7.10)', () => {
