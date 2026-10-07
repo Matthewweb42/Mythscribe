@@ -355,7 +355,10 @@ async function main() {
     ...process.env,
     NODE_ENV: 'test',
     MYTHSCRIBE_USER_DATA: path.join(tmp, 'user'),
-    OPENAI_BASE_URL: url
+    OPENAI_BASE_URL: url,
+    // The fake key goes to a plain file under the throwaway profile: there is no OS keychain
+    // under xvfb, and keys are keychain-only otherwise (honoured by unpackaged builds only).
+    MYTHSCRIBE_E2E_PLAINTEXT_KEYS: '1'
   }
   delete env.WAYLAND_DISPLAY
   const app = await electron.launch({

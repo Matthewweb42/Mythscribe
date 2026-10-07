@@ -201,11 +201,15 @@ export function SynopsisBox({ id }: { id: string }): React.JSX.Element {
   }, [id, load, unload])
 
   return (
-    // The top section of the notes, flush with the column (2026-10-06, the author's call): no box,
-    // a rule under it, the text where the notes' text sits.
-    <div className="flex shrink-0 flex-col border-b border-line">
+    // The top section of the notes, flush with the column (2026-10-06), on its own tinted band in
+    // italic with a strong rule under it, so it never reads as part of the notes (2026-10-07, the
+    // author's call).
+    <div className="flex shrink-0 flex-col border-b-2 border-line-strong bg-surface-raised">
       <div className="flex items-center gap-1 px-4 pt-2">
-        <label htmlFor={synopsisId} className="min-w-0 flex-1 text-xs font-medium text-fg-muted">
+        <label
+          htmlFor={synopsisId}
+          className="min-w-0 flex-1 text-xs font-semibold tracking-wide text-fg-muted uppercase"
+        >
           Synopsis
         </label>
         <SuggestButton id={id} kind="synopsis" />
@@ -220,7 +224,7 @@ export function SynopsisBox({ id }: { id: string }): React.JSX.Element {
         onChange={(event) => {
           if (meta !== null) edit(id, { ...meta, synopsis: event.target.value })
         }}
-        className="field-sizing-content max-h-48 min-h-16 w-full resize-none border-0 bg-transparent px-4 py-1.5 text-sm leading-5 placeholder:text-fg-muted focus:outline-none disabled:opacity-50"
+        className="field-sizing-content max-h-48 min-h-16 w-full resize-none border-0 bg-transparent px-4 py-1.5 text-sm leading-5 italic placeholder:text-fg-muted focus:outline-none disabled:opacity-50"
       />
       <SynopsisSuggestion id={id} />
     </div>

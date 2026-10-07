@@ -63,7 +63,6 @@ function NotesHeading({ id }: { id: string | null }): React.JSX.Element {
     <div className="flex shrink-0 items-center gap-2 pt-3 pr-4 pb-2 pl-2">
       <DockPanelControls id="notes" />
       <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Notes</h2>
-      {id === null ? null : <SuggestButton id={id} kind="notes" compact />}
       {id === null ? null : <PinNotesButton id={id} />}
     </div>
   )
@@ -91,6 +90,13 @@ function NotesContent({
   return (
     <>
       {withMetadata ? <SynopsisBox id={id} /> : null}
+      {/* The notes' own label, mirroring the synopsis band's, so the two read as two sections. */}
+      <div className="flex shrink-0 items-center gap-1 px-4 pt-3 pb-1">
+        <span className="min-w-0 flex-1 text-xs font-semibold tracking-wide text-fg-muted uppercase">
+          Notes
+        </span>
+        <SuggestButton id={id} kind="notes" compact />
+      </div>
       <NotesSuggestion id={id} />
       <NotesBody id={id} />
       {withMetadata ? <SceneDetails id={id} open={detailsOpen} onOpen={onDetailsOpen} /> : null}
