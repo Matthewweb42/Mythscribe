@@ -55,7 +55,7 @@ export interface GhostTextResult {
 }
 
 /**
- * The ghost-text use case (F-5.3): checks the AI switch first (nothing is read or sent at
+ * The ghost-text use case (F-5.3): checks Use AI first (nothing is read or sent at
  * Off or with the feature toggled off), gathers the scene's notes, metadata, and brief
  * (F-14.3: its own five lines, the previous scene's reader-knows-after line, and the next
  * scene's goal) as the context the data-sharing panel lists, builds the voice block (F-14.1: the locally computed

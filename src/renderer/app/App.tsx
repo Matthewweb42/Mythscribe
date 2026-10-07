@@ -544,7 +544,7 @@ function WelcomeScreen(): React.JSX.Element {
     if (!info) return
     toast.success(`Created "${info.name}"`)
     // F-5.18: a project created with AI on arrives in the assisted workflow, the assistant panel
-    // open (a new conversation starts in Query mode, the quick actions above it). Only a new
+    // open (the chat in the project's mode, Ask for a new project). Only a new
     // project does this; opening an existing one leaves the layout as the author left it.
     const layout = useLayoutStore.getState()
     if (aiSwitch !== 'off' && !layout.layout.assistant.open) {

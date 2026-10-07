@@ -10,11 +10,11 @@ import {
   GHOST_IDLE_MS_MAX,
   GHOST_IDLE_MS_MIN,
   AI_FEATURES_BY_LEVEL,
-  AI_SWITCH_LABEL,
-  AI_SWITCH_MEANING,
-  AI_SWITCH_POSITIONS,
+  ASSISTANT_MODES,
+  ASSISTANT_MODE_LABEL,
+  ASSISTANT_MODE_MEANING,
   AiSettings,
-  aiSwitchOf,
+  USE_AI_MEANING,
   aiSwitchPatch,
   defaultAiSettings,
   isFeatureAllowed,
@@ -26,7 +26,7 @@ describe('defaultAiSettings (F-14.4)', () => {
   it('installs at Off with every feature toggle on', () => {
     const defaults = defaultAiSettings()
     expect(defaults.dial).toBe(0)
-    expect(defaults.auto).toBe(false)
+    expect(defaults.chatMode).toBe('ask')
     for (const id of AI_FEATURE_IDS) expect(defaults.features[id]).toBe(true)
     expect(Object.keys(defaults.features).sort()).toEqual([...AI_FEATURE_IDS].sort())
   })
@@ -208,31 +208,46 @@ describe('AI_DATA_SHARING', () => {
   })
 })
 
-describe('the one AI switch (F-5.21)', () => {
-  it('has three positions with labels and meanings', () => {
-    expect(AI_SWITCH_POSITIONS.map((p) => AI_SWITCH_LABEL[p])).toEqual(['Off', 'Ask', 'Auto'])
-    for (const p of AI_SWITCH_POSITIONS) expect(AI_SWITCH_MEANING[p].length).toBeGreaterThan(0)
-    expect(AI_DIAL_LABEL).toEqual({ 0: 'Off', 1: 'Ask' })
+describe('Use AI and the chat modes (decided by the author 2026-10-07)', () => {
+  it('has Use AI on and off and the three chat modes, each with its meaning', () => {
+    expect(USE_AI_MEANING.off).toBe('No AI at all. Nothing leaves this machine.')
+    expect(USE_AI_MEANING.on.length).toBeGreaterThan(0)
+    expect(ASSISTANT_MODES.map((m) => ASSISTANT_MODE_LABEL[m])).toEqual(['Auto', 'Ask', 'Plan'])
+    for (const m of ASSISTANT_MODES) expect(ASSISTANT_MODE_MEANING[m].length).toBeGreaterThan(0)
+    expect(AI_DIAL_LABEL).toEqual({ 0: 'Off', 1: 'On' })
   })
 
-  it('round-trips every position through the stored fields', () => {
-    for (const p of AI_SWITCH_POSITIONS) {
-      expect(aiSwitchOf({ ...defaultAiSettings(), ...aiSwitchPatch(p) })).toBe(p)
-    }
-    expect(aiSwitchOf({ dial: 0, auto: true })).toBe('off')
+  it('writes the wizard positions: off is AI off, ask and auto are AI on in that mode', () => {
+    expect(aiSwitchPatch('off')).toEqual({ dial: 0, chatMode: 'ask' })
+    expect(aiSwitchPatch('ask')).toEqual({ dial: 1, chatMode: 'ask' })
+    expect(aiSwitchPatch('auto')).toEqual({ dial: 1, chatMode: 'auto' })
   })
 
-  it('reads a stored Suggest or Draft level as Ask, never Auto, and Off as Off', () => {
-    for (const [dial, expected] of [
-      [0, 'off'],
-      [1, 'ask'],
-      [2, 'ask'],
-      [3, 'ask']
+  it('migrates a stored F-5.21 switch without raising autonomy: Off stays off, Auto is Auto, anything else Ask', () => {
+    const { chatMode: _drop, ...base } = defaultAiSettings()
+    for (const [dial, auto, expectedDial, expected] of [
+      [0, undefined, 0, 'ask'],
+      [0, false, 0, 'ask'],
+      [0, true, 0, 'ask'],
+      [1, undefined, 1, 'ask'],
+      [1, false, 1, 'ask'],
+      [1, true, 1, 'auto'],
+      [2, undefined, 1, 'ask'],
+      [3, undefined, 1, 'ask']
     ] as const) {
-      const parsed = AiSettings.parse({ ...defaultAiSettings(), auto: undefined, dial })
-      expect(parsed.auto).toBe(false)
-      expect(aiSwitchOf(parsed)).toBe(expected)
+      const parsed = AiSettings.parse({ ...base, dial, auto })
+      expect(parsed.dial).toBe(expectedDial)
+      expect(parsed.chatMode).toBe(expected)
+      expect('auto' in parsed).toBe(false)
     }
+  })
+
+  it('keeps a stored chat mode and never writes the old Auto bit', () => {
+    for (const chatMode of ASSISTANT_MODES) {
+      const parsed = AiSettings.parse({ ...defaultAiSettings(), dial: 1, auto: false, chatMode })
+      expect(parsed.chatMode).toBe(chatMode)
+    }
+    expect(AiSettings.safeParse({ ...defaultAiSettings(), chatMode: 'query' }).success).toBe(false)
   })
 })
 

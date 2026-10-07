@@ -1178,7 +1178,7 @@ describe('aiSettings:get / aiSettings:set (F-14.4)', () => {
     expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
   })
 
-  it("stores the wizard's AI switch with the new project; omitted keeps Off (F-5.18, F-5.21)", async () => {
+  it("stores the wizard's Use AI choice with the new project; omitted keeps Off (F-5.18, 2026-10-07)", async () => {
     await invoke('project:create', {
       name: 'Assisted',
       format: 'novel',
@@ -1197,7 +1197,7 @@ describe('aiSettings:get / aiSettings:set (F-14.4)', () => {
       directory: tmp,
       aiSwitch: 'auto'
     })
-    expect(await invoke('aiSettings:get', undefined)).toMatchObject({ dial: 1, auto: true })
+    expect(await invoke('aiSettings:get', undefined)).toMatchObject({ dial: 1, chatMode: 'auto' })
     await invoke('project:create', { name: 'Plain', format: 'novel', directory: tmp })
     expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
   })
@@ -1683,9 +1683,9 @@ describe('ai:chat (F-5.4)', () => {
     expect(await invoke('ai:chat', plan(scene, 'req-9'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Assistant chat needs the AI switch at Ask or Auto (it is at Off).',
+      message: 'Assistant chat needs Use AI turned on (it is off).',
       nextStep:
-        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
+        'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'req-9'
     })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
@@ -1846,9 +1846,9 @@ describe('ai:rewrite (F-14.10)', () => {
     expect(await invoke('ai:rewrite', ask(scene, 'rw-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Rewrite in my voice needs the AI switch at Ask or Auto (it is at Off).',
+      message: 'Rewrite in my voice needs Use AI turned on (it is off).',
       nextStep:
-        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
+        'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'rw-3'
     })
     expect(deltasSent()).toEqual([])
@@ -1972,9 +1972,9 @@ describe('ai:critique (F-14.8)', () => {
     expect(await invoke('ai:critique', ask(scene, 'cq-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: "Editor's notes needs the AI switch at Ask or Auto (it is at Off).",
+      message: "Editor's notes needs Use AI turned on (it is off).",
       nextStep:
-        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
+        'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'cq-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -2093,9 +2093,9 @@ describe('ai:proofread (F-14.12)', () => {
     expect(await invoke('ai:proofread', ask(scene, 'pr-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Proofread needs the AI switch at Ask or Auto (it is at Off).',
+      message: 'Proofread needs Use AI turned on (it is off).',
       nextStep:
-        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
+        'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'pr-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -2202,9 +2202,9 @@ describe('ai:whatNext (F-5.17)', () => {
     expect(await invoke('ai:whatNext', ask(scene, 'wn-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'What comes next needs the AI switch at Ask or Auto (it is at Off).',
+      message: 'What comes next needs Use AI turned on (it is off).',
       nextStep:
-        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
+        'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'wn-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -2880,9 +2880,9 @@ describe('ai:betaReader (F-14.11)', () => {
     expect(await invoke('ai:betaReader', ask(scene, 'br-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Beta reader needs the AI switch at Ask or Auto (it is at Off).',
+      message: 'Beta reader needs Use AI turned on (it is off).',
       nextStep:
-        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
+        'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'br-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -3009,9 +3009,9 @@ describe('ai:query (F-5.7)', () => {
     expect(await invoke('ai:query', ask('q-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Story Intelligence needs the AI switch at Ask or Auto (it is at Off).',
+      message: 'Story Intelligence needs Use AI turned on (it is off).',
       nextStep:
-        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
+        'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'q-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -3078,7 +3078,7 @@ describe('ai:agent (F-5.22)', () => {
     const scene = manuscriptDocuments(manager.require().connection.orm)[0]
     if (!scene) throw new Error('skeleton not seeded')
     await invoke('document:save', { id: scene.id, content: body(LEDGER) })
-    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1, auto: true })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1, chatMode: 'auto' })
     await invoke('ai:setKey', { key: KEY })
     const said = (value: unknown): CompletionResult => ({
       text: JSON.stringify(value),
@@ -3231,9 +3231,9 @@ describe('ai:draftBrief (F-14.3)', () => {
     expect(await invoke('ai:draftBrief', ask(scene, 'br-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Scene brief drafts needs the AI switch at Ask or Auto (it is at Off).',
+      message: 'Scene brief drafts needs Use AI turned on (it is off).',
       nextStep:
-        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
+        'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'br-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -3511,9 +3511,9 @@ describe('scene summaries (F-5.6)', () => {
       ok: false,
       code: 'DISABLED',
       message:
-        'Scene summaries, story bible, and tags needs the AI switch at Ask or Auto (it is at Off).',
+        'Scene summaries, story bible, and tags needs Use AI turned on (it is off).',
       nextStep:
-        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
+        'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 's-3'
     })
     expect(complete).not.toHaveBeenCalled()
@@ -6373,9 +6373,9 @@ describe('ai:recommendTags (F-4.7)', () => {
     expect(await invoke('ai:recommendTags', { nodeId: scene })).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Tag suggestions needs the AI switch at Ask or Auto (it is at Off).',
+      message: 'Tag suggestions needs Use AI turned on (it is off).',
       nextStep:
-        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
+        'Turn on Use AI in Settings › AI, or enable the feature there.'
     })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     complete.mockRejectedValueOnce(new InvalidKeyError('OpenAI rejected the API key.'))
@@ -6604,9 +6604,9 @@ describe('ai:ghostText (F-5.3)', () => {
     expect(await invoke('ai:ghostText', input)).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Ghost text needs the AI switch at Ask or Auto (it is at Off).',
+      message: 'Ghost text needs Use AI turned on (it is off).',
       nextStep:
-        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
+        'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'req-8'
     })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
@@ -7412,7 +7412,7 @@ describe('manuscript import', () => {
       expect(await invoke('import:detectStructure', { draft, requestId: 'd-1' })).toEqual({
         ok: false,
         code: 'DISABLED',
-        message: 'Import structure detection needs the AI switch at Ask or Auto (it is at Off).',
+        message: 'Import structure detection needs Use AI turned on (it is off).',
         nextStep: AI_NEXT_STEP.DISABLED
       })
       expect(complete).not.toHaveBeenCalled()

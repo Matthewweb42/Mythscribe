@@ -156,9 +156,9 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
     }
     expect(setAiSettings(db, next)).toEqual(next)
     expect(getAiSettings(db)).toEqual(next)
-    setAiSettings(db, { ...next, auto: true })
+    setAiSettings(db, { ...next, chatMode: 'plan' })
     expect(rows(AI_SETTINGS_KEY)).toHaveLength(1)
-    expect(getAiSettings(db).auto).toBe(true)
+    expect(getAiSettings(db).chatMode).toBe('plan')
   })
 
   it('falls back when the stored value is not JSON', () => {

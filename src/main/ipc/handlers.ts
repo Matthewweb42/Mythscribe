@@ -615,7 +615,7 @@ export function registerHandlers({
       if (
         next.source !== settings.source ||
         next.dial !== settings.dial ||
-        next.auto !== settings.auto
+        next.chatMode !== settings.chatMode
       ) {
         setAiSettings(orm, next)
       }

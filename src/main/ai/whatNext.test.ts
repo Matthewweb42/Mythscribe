@@ -177,7 +177,7 @@ describe('runWhatNext (F-5.17)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure({ nodeId: 'nope' })).toEqual({
       code: 'DISABLED',
-      message: 'What comes next needs the AI switch at Ask or Auto (it is at Off).'
+      message: 'What comes next needs Use AI turned on (it is off).'
     })
     const on = defaultAiSettings()
     setAiSettings(db, { ...on, dial: 1, features: { ...on.features, whatNext: false } })

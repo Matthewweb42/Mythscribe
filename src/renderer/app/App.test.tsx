@@ -252,7 +252,7 @@ function fire<E extends EventName>(event: E, payload: EventPayload<E>): void {
   act(() => listener(payload as never))
 }
 
-/** Off unless `dial` says otherwise, so a test that is not about F-5.18 keeps the panel closed. */
+/** Use AI off unless `dial` says otherwise, so a test that is not about F-5.18 keeps the panel closed. */
 async function fillWizard(
   name: string,
   format: RegExp,
@@ -910,10 +910,14 @@ describe('App', () => {
     expect(useFindStore.getState()).toMatchObject({ open: false, query: '' })
   })
 
-  it('a project created with AI on opens in the assistant panel, Auto mode, no actions menu (F-5.18, 2026-10-06)', async () => {
-    const invoke = install({ 'project:create': info, 'tree:list': treeFixture })
+  it('a project created with AI on opens in the assistant panel, chat in Ask, no actions menu (F-5.18, 2026-10-07)', async () => {
+    const invoke = install({
+      'project:create': info,
+      'tree:list': treeFixture,
+      'aiSettings:get': { ...defaultAiSettings(), dial: 1 }
+    })
     render(<App />)
-    await fillWizard('Smoke', /^novel/i, undefined, /^ask/i)
+    await fillWizard('Smoke', /^novel/i, undefined, /^on/i)
     expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
     expect(invoke).toHaveBeenCalledWith('project:create', {
       name: 'Smoke',
@@ -923,7 +927,13 @@ describe('App', () => {
       aiSwitch: 'ask'
     })
     const panel = await screen.findByRole('complementary', { name: 'Assistant' })
-    expect(within(panel).getByRole('radio', { name: /^auto/i })).toBeChecked()
+    const modes = await within(panel).findByRole('radiogroup', { name: 'Mode' })
+    expect(
+      within(modes)
+        .getAllByRole('radio')
+        .map((r) => r.textContent)
+    ).toEqual(['Auto', 'Ask', 'Plan'])
+    expect(within(modes).getByRole('radio', { name: 'Ask' })).toBeChecked()
     expect(within(panel).queryByRole('button', { name: 'AI actions' })).not.toBeInTheDocument()
     expect(within(panel).getByRole('textbox', { name: 'Message' })).toBeInTheDocument()
     expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
@@ -1037,7 +1047,7 @@ describe('App', () => {
     install({ 'project:create': new Error('Folder is not empty: /x') })
     render(<App />)
     await fillWizard('Smoke', /^novel/i)
-    const wizard = screen.getByRole('dialog', { name: 'Choose how much AI helps' })
+    const wizard = screen.getByRole('dialog', { name: 'Choose whether AI helps' })
     expect(await within(wizard).findByRole('alert')).toHaveTextContent('Folder is not empty: /x')
     expect(screen.getByRole('status')).toBeEmptyDOMElement()
   })
@@ -1054,7 +1064,7 @@ describe('App', () => {
       aiSwitch: 'off'
     })
     expect(screen.getByRole('status')).toBeEmptyDOMElement()
-    expect(screen.getByRole('dialog', { name: 'Choose how much AI helps' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Choose whether AI helps' })).toBeInTheDocument()
   })
 
   it('Cancel in the wizard returns to the welcome buttons', async () => {

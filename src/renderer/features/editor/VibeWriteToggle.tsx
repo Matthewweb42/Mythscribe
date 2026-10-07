@@ -7,7 +7,7 @@ const BUTTON =
 
 /**
  * The VibeWrite toggle in the single-document toolbar (F-5.3): `aria-pressed` is the mode's
- * effective state (on, and allowed by the AI switch). At Off, or with the feature toggled
+ * effective state (on, and allowed by Use AI). With AI off, or with the feature toggled
  * off in Settings, it is disabled and its title says what to change; while on, the title
  * carries the last subtle failure (rate limit, network, ...) so a silent pause has a reason.
  * Mouse-down is swallowed so the editor keeps its caret and the author can keep typing.

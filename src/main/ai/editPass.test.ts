@@ -290,7 +290,7 @@ describe('the edit pass runner (F-14.15)', () => {
   it('refuses to start below Ask, and while another pass runs', async () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(() => runner.start({ type: 'line', instruction: null, nodeIds: [one] })).toThrow(
-      /Edit passes needs the AI switch at Ask or Auto/
+      /Edit passes needs Use AI turned on/
     )
     setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
     complete.mockImplementation(() => new Promise(() => undefined))

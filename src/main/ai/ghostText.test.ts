@@ -332,7 +332,7 @@ describe('generateGhostText (F-5.3)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Ghost text needs the AI switch at Ask or Auto (it is at Off).'
+      message: 'Ghost text needs Use AI turned on (it is off).'
     })
     const on = defaultAiSettings()
     setAiSettings(db, { ...on, dial: 1, features: { ...on.features, ghostText: false } })

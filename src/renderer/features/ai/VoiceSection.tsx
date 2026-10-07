@@ -230,7 +230,7 @@ function LearnedNotes({
       ) : (
         <p className="m-0 text-xs text-fg-muted">
           {notes === null
-            ? `Nothing yet. With the AI switch at Ask or Auto, MythScribe notes how you write once the manuscript holds ${VOICE_NOTES_MIN_WORDS.toLocaleString()} words.`
+            ? `Nothing yet. With Use AI on, MythScribe notes how you write once the manuscript holds ${VOICE_NOTES_MIN_WORDS.toLocaleString()} words.`
             : `Cleared. MythScribe learns again after about ${VOICE_NOTES_REFRESH_WORDS.toLocaleString()} more words.`}
         </p>
       )}

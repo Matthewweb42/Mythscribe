@@ -56,10 +56,7 @@ describe('VibeWriteToggle (F-5.3)', () => {
     const { rerender } = render(<VibeWriteToggle error={null} />)
     expect(button()).toBeDisabled()
     expect(button()).toHaveAttribute('aria-pressed', 'false')
-    expect(button()).toHaveAttribute(
-      'title',
-      'VibeWrite needs the AI switch at Ask or Auto (Settings, AI tab)'
-    )
+    expect(button()).toHaveAttribute('title', 'VibeWrite needs Use AI turned on (Settings, AI tab)')
     useAiSettingsStore.setState({
       settings: settings({ features: { ...defaultAiSettings().features, ghostText: false } })
     })

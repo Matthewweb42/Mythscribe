@@ -815,8 +815,7 @@ describe('TagsPanel (F-4.4, the tags column)', () => {
           ok: false,
           code: 'DISABLED',
           message: 'Tag suggestions is turned off for this project.',
-          nextStep:
-            'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
+          nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.'
         },
         {
           ok: true,
@@ -841,7 +840,7 @@ describe('TagsPanel (F-4.4, the tags column)', () => {
       await userEvent.click(recommendButton())
       await waitFor(() =>
         expect(screen.getByTestId('tag-recommend-result')).toHaveTextContent(
-          'Tag suggestions is turned off for this project. Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
+          'Tag suggestions is turned off for this project. Turn on Use AI in Settings › AI, or enable the feature there.'
         )
       )
       expect(screen.getByTestId('tag-recommend-result')).toHaveClass('text-danger')

@@ -144,7 +144,7 @@ function PassSetup(): React.JSX.Element {
   )
   const needsInstruction = type === 'custom' && instruction.trim() === ''
   const reason = !allowed
-    ? 'Edit passes need AI at Ask or higher for this project (Settings, AI).'
+    ? 'Edit passes need Use AI on for this project (Settings, AI).'
     : ordered.length === 0
       ? 'Tick at least one scene.'
       : needsInstruction

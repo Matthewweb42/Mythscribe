@@ -8,15 +8,16 @@ import { SUGGESTION_ROTATE_MS, assistantSuggestions } from '@shared/assistantSug
 import {
   CHAT_MAX_CONVERSATIONS,
   CHAT_MESSAGE_MAX,
-  CHAT_PARAGRAPHS_MAX,
-  CHAT_PARAGRAPHS_MIN,
-  CONVERSATION_MODE_LABEL,
-  CONVERSATION_MODES,
   type ChatMessage,
-  type Conversation,
-  type ConversationMode
+  type Conversation
 } from '@shared/chat'
-import { AI_DATA_SHARING, isFeatureAllowed, needsSwitchText } from '@shared/aiSettings'
+import {
+  AI_DATA_SHARING,
+  DEFAULT_ASSISTANT_MODE,
+  isFeatureAllowed,
+  needsSwitchText,
+  type AssistantMode
+} from '@shared/aiSettings'
 import {
   CITATION_MARKER,
   QUERY_NOT_FOUND,
@@ -37,11 +38,12 @@ import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcu
 import { CONVERSATION_BUSY_MESSAGE, useOpenScene } from './aiActions'
 import { AgentChanges, AgentSteps } from './AgentTurn'
 import { AiResults } from './AiResults'
-import { AiSwitchControl } from './AiSwitchControl'
+import { AssistantModeControl } from './AssistantModeControl'
 import { useAiSettingsStore } from './aiSettingsStore'
 import {
   AGENT_NOTICE,
-  NO_EDITOR_MESSAGE,
+  NO_SCENE_MESSAGE,
+  PLAN_NO_EDITS_MESSAGE,
   useActiveConversation,
   useAssistantStore
 } from './assistantStore'
@@ -51,9 +53,9 @@ import { describeRequest } from './usageFormat'
 
 const ICON_BUTTON =
   'rounded-md p-1 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
-/** One segment of the compact mode switch. */
-const MODE_RADIO =
-  'rounded px-2 py-px text-[11px] leading-4 text-fg-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 disabled:hover:text-fg-muted aria-checked:bg-bg aria-checked:text-fg aria-checked:shadow-sm'
+/** What the panel says while Use AI is off; the chat no longer carries an Off position (2026-10-07). */
+export const AI_OFF_MESSAGE =
+  'AI is off for this project. Turn on Use AI in Settings › AI to use the assistant.'
 const LINK_BUTTON =
   'text-xs text-fg-muted underline-offset-2 hover:text-fg hover:underline disabled:opacity-40 disabled:hover:no-underline'
 /** A `[n]` marker inside an answer, and the chips under "Also mentioned in". */
@@ -67,12 +69,6 @@ export const QUERY_UNCITED_WARNING =
 
 /** What a What should come next? turn says when no direction survived (F-5.17). */
 export const NO_DIRECTIONS_MESSAGE = 'No directions came back. Try again.'
-
-/** The paragraph counts Author mode offers, 1–10. */
-const PARAGRAPH_OPTIONS = Array.from(
-  { length: CHAT_PARAGRAPHS_MAX - CHAT_PARAGRAPHS_MIN + 1 },
-  (_, i) => CHAT_PARAGRAPHS_MIN + i
-)
 
 /**
  * The header toggle for the assistant panel (F-5.4); `aria-pressed` reflects whether it is
@@ -110,10 +106,9 @@ export function AssistantToggleButton(): React.JSX.Element {
 
 /**
  * The AI assistant panel (F-5.4): a dock panel (layout 3c; by default the rightmost column,
- * sized and resized by `DockColumn`), with one tab per conversation, the turns of the open one, and the composer. Query mode (the
- * default, F-5.8) answers about the manuscript with citations; Plan mode answers in the chat
- * (streamed); Author mode places the answer in the active editor as ghost text and the chat
- * shows a notice. Every assistant turn shows what it cost. The open state
+ * sized and resized by `DockColumn`), with one tab per conversation, the turns of the open one,
+ * and the composer with the chat mode switch (Auto · Ask · Plan, one setting per project since
+ * 2026-10-07). Every assistant turn shows what it cost. The open state
  * lives in the layout store (F-7.2); the conversations in `useAssistantStore`.
  * Renders nothing while closed. Not mounted in focus mode, where `AssistantBody` floats
  * instead (F-6.6).
@@ -343,9 +338,10 @@ function MessageLog(): React.JSX.Element {
     >
       {messages.length === 0 ? (
         <p className="m-auto max-w-64 text-center text-xs leading-relaxed text-fg-subtle">
-          Ask about your story or ask for a change. Auto looks things up in your project, then
-          answers or edits; at Ask every change waits for your Apply. Editor&apos;s notes, a
-          proofread, or a rewrite of the selection work too.
+          Ask about your story or ask for a change. The assistant looks things up in your project,
+          then answers or edits: in Auto it makes its edits itself, in Ask every change waits for
+          your Apply, and in Plan it only talks. Editor&apos;s notes, a proofread, or a rewrite of
+          the selection work too.
         </p>
       ) : null}
       {messages.map((message, index) => (
@@ -433,9 +429,10 @@ function Turn({
 
 /**
  * The directions of a What should come next? turn (F-5.17), one card each with `Write this`,
- * which sends the direction as an Author turn so the text lands in the editor as ghost text
- * (with the voice profile and the fidelity check that path carries). Disabled with the reason
- * while Author mode is not allowed, without an open editor, or while the conversation waits.
+ * which sends the direction to the chat agent with its edit tools, so the text comes back as an
+ * insert edit (with the voice profile and the fidelity check that path carries): waiting for
+ * Apply in Ask, applied in Auto. Disabled with the reason while the agent is not allowed, in
+ * Plan (which never edits), without an open editor, or while the conversation waits.
  */
 function Directions({
   directions,
@@ -448,10 +445,12 @@ function Directions({
   const hasEditor = useActiveEditorStore((s) => s.active !== null && !s.active.editor.isDestroyed)
   const writeDirection = useAssistantStore((s) => s.writeDirection)
   let reason: string | null = null
-  if (settings === null || !isFeatureAllowed(settings, 'chat')) {
-    reason = `${needsSwitchText('Author')}, with ${AI_DATA_SHARING.chat.label} on (Settings, AI tab)`
+  if (settings === null || !isFeatureAllowed(settings, 'agent')) {
+    reason = `${needsSwitchText('Write this')}, with ${AI_DATA_SHARING.agent.label} on (Settings, AI tab)`
+  } else if (settings.chatMode === 'plan') {
+    reason = PLAN_NO_EDITS_MESSAGE
   } else if (!hasEditor) {
-    reason = NO_EDITOR_MESSAGE
+    reason = NO_SCENE_MESSAGE
   } else if (busy) {
     reason = CONVERSATION_BUSY_MESSAGE
   }
@@ -472,7 +471,9 @@ function Directions({
             type="button"
             data-testid="what-next-write"
             disabled={reason !== null}
-            title={reason ?? 'Continue the scene this way, as ghost text in the editor'}
+            title={
+              reason ?? 'Continue the scene this way: the assistant proposes the text as an edit'
+            }
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => void writeDirection(direction)}
             className={`self-start ${LINK_BUTTON}`}
@@ -620,23 +621,10 @@ function answerParts(
   return parts
 }
 
-/** What a mode radio's tooltip says: what it does, or what to change when the settings forbid it. */
-function modeTitle(id: ConversationMode, disabled: boolean): string {
-  if (id === 'auto') {
-    return 'Pick what answers each message: chat, a cited answer, editor’s notes, a rewrite, and more'
-  }
-  if (disabled) {
-    return `${needsSwitchText('Query')}, with ${AI_DATA_SHARING.agent.label} on (Settings, AI tab)`
-  }
-  if (id === 'agent') return 'Place the answer in the editor as ghost text'
-  if (id === 'query') return 'Ask about the whole project; it looks things up and cites scenes'
-  return 'Talk through ideas and feedback about the open scene'
-}
-
 /**
  * The rotating suggestion line, the message box with Send (or Stop) inside it, and under it the
- * mode switch, the paragraph count (Author only), and the one AI switch (F-5.21) at the end of
- * the row. Enter sends, Shift+Enter breaks the line; Send is disabled for a blank message and
+ * chat mode switch (Auto · Ask · Plan, 2026-10-07). Use AI lives in Settings › AI only; while it
+ * is off the note above the box says so. Enter sends, Shift+Enter breaks the line; Send is disabled for a blank message and
  * while the settings do not allow the assistant (the note above says what to change). While a turn is in flight, Stop takes Send's place (F-5.10): it
  * drops the unanswered turn and keeps the author's, so it can be sent again. There is no
  * clearing a conversation (2026-10-06): New conversation starts a fresh one.
@@ -648,14 +636,11 @@ function Composer(): React.JSX.Element {
   )
   const send = useAssistantStore((s) => s.send)
   const stop = useAssistantStore((s) => s.stop)
-  const setMode = useAssistantStore((s) => s.setMode)
-  const setParagraphs = useAssistantStore((s) => s.setParagraphs)
   const attachment = useAssistantStore((s) => s.attachment)
   const detach = useAssistantStore((s) => s.detach)
   const settings = useAiSettingsStore((s) => s.settings)
   const [draft, setDraft] = useState('')
   const [focusCount, setFocusCount] = useState(0)
-  const radios = useRef(new Map<ConversationMode, HTMLButtonElement>())
   const messageBox = useRef<HTMLTextAreaElement>(null)
 
   // Ask AI (the selection bubble) attaches a passage: the author writes the question next.
@@ -663,12 +648,11 @@ function Composer(): React.JSX.Element {
     if (attachment !== null) messageBox.current?.focus()
   }, [attachment])
 
-  const chatAllowed = settings !== null && isFeatureAllowed(settings, 'chat')
-  const queryAllowed = settings !== null && isFeatureAllowed(settings, 'agent')
-  const modeOff = (id: ConversationMode): boolean => id === 'query' && !queryAllowed
-  const mode = conversation?.mode ?? 'auto'
-  const canSend =
-    conversation !== null && chatAllowed && !pending && draft.trim() !== '' && !modeOff(mode)
+  // Every message is answered by the chat agent unless the router picks another feature.
+  const chatAllowed =
+    settings !== null && isFeatureAllowed(settings, 'chat') && isFeatureAllowed(settings, 'agent')
+  const mode = settings?.chatMode ?? DEFAULT_ASSISTANT_MODE
+  const canSend = conversation !== null && chatAllowed && !pending && draft.trim() !== ''
 
   const submit = (): void => {
     if (!canSend) return
@@ -676,42 +660,12 @@ function Composer(): React.JSX.Element {
     setDraft('')
   }
 
-  const selectMode = (next: ConversationMode): void => {
-    if (modeOff(next)) return
-    setMode(next)
-    radios.current.get(next)?.focus()
-  }
-
-  const onRadioKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
-    const index = CONVERSATION_MODES.indexOf(mode)
-    let next: number
-    switch (event.key) {
-      case 'ArrowRight':
-      case 'ArrowDown':
-        next = (index + 1) % CONVERSATION_MODES.length
-        break
-      case 'ArrowLeft':
-      case 'ArrowUp':
-        next = (index - 1 + CONVERSATION_MODES.length) % CONVERSATION_MODES.length
-        break
-      default:
-        return
-    }
-    event.preventDefault()
-    const target = CONVERSATION_MODES[next]
-    if (target !== undefined) selectMode(target)
-  }
-
   const warning =
     settings !== null && !chatAllowed ? (
       <p data-testid="assistant-disabled" className="m-0 text-xs text-warning">
         {settings.dial === 0
-          ? 'The AI is Off. Set the AI switch below to Ask or Auto to use the assistant.'
-          : 'Assistant chat is turned off for this project (Settings, AI tab).'}
-      </p>
-    ) : settings !== null && modeOff(mode) ? (
-      <p data-testid="assistant-mode-off" className="m-0 text-xs text-warning">
-        {modeTitle(mode, true)}. Pick another mode to keep going.
+          ? AI_OFF_MESSAGE
+          : `${isFeatureAllowed(settings, 'chat') ? AI_DATA_SHARING.agent.label : AI_DATA_SHARING.chat.label} is turned off for this project (Settings, AI tab).`}
       </p>
     ) : null
 
@@ -794,55 +748,7 @@ function Composer(): React.JSX.Element {
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <div
-          role="radiogroup"
-          aria-label="Mode"
-          className="inline-flex items-center rounded-md bg-surface-raised p-0.5"
-        >
-          {CONVERSATION_MODES.map((id) => {
-            const disabled = modeOff(id)
-            return (
-              <button
-                key={id}
-                ref={(element) => {
-                  if (element) radios.current.set(id, element)
-                  else radios.current.delete(id)
-                }}
-                type="button"
-                role="radio"
-                aria-checked={id === mode}
-                tabIndex={id === mode ? 0 : -1}
-                disabled={disabled}
-                title={modeTitle(id, disabled)}
-                onClick={() => selectMode(id)}
-                onKeyDown={onRadioKeyDown}
-                className={MODE_RADIO}
-              >
-                {CONVERSATION_MODE_LABEL[id]}
-              </button>
-            )
-          })}
-        </div>
-        {mode === 'agent' ? (
-          <label className="flex items-center gap-1 text-[11px] text-fg-muted">
-            <span>Paragraphs</span>
-            <select
-              aria-label="Paragraphs"
-              value={conversation?.paragraphs ?? CHAT_PARAGRAPHS_MIN}
-              onChange={(event) => setParagraphs(Number(event.target.value))}
-              className="rounded border border-line bg-bg px-1 py-px text-[11px] text-fg"
-            >
-              {PARAGRAPH_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        <div className="ml-auto">
-          <AiSwitchControl variant="compact" />
-        </div>
+        <AssistantModeControl />
       </div>
     </div>
   )
@@ -873,7 +779,7 @@ function SuggestionLine({
   focusCount,
   onPick
 }: {
-  mode: ConversationMode
+  mode: AssistantMode
   conversationId: string | null
   paused: boolean
   /** How often the message box has gained focus. */

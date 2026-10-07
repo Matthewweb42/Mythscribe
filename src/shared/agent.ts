@@ -152,7 +152,7 @@ export const AgentChange = z.object({
   id: z.string(),
   edit: AgentEdit,
   status: AgentChangeStatus,
-  /** The voice check's complaint about the edit's prose (F-14.7); such an edit asks even at Auto. */
+  /** The voice check's complaint about the edit's prose (F-14.7); such an edit asks even in Auto. */
   violation: z.string().nullable(),
   /** Why applying or undoing it failed, shown on the line. */
   error: z.string().nullable()
@@ -167,7 +167,7 @@ export const AgentTurn = z.object({
 })
 export type AgentTurn = z.infer<typeof AgentTurn>
 
-/** Deleting or merging away scenes, chapters, sheets, or tags: these ask even at Auto. */
+/** Deleting or merging away scenes, chapters, sheets, or tags: these ask even in Auto. */
 export function isDeletion(edit: AgentEdit): boolean {
   return edit.kind === 'delete' || edit.kind === 'merge'
 }

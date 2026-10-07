@@ -85,17 +85,24 @@ describe('assistantSuggestions', () => {
     expect(list).toContain('What happened in this scene?')
   })
 
-  it('fits each mode: Query asks, Plan talks, Author writes', () => {
-    const query = assistantSuggestions(context({ mode: 'query' }), 0)
-    expect(query).toContain('What happened in this scene?')
-    expect(query).not.toContain('Proofread this scene')
-    const plan = assistantSuggestions(context({ mode: 'plan' }), 0)
+  it('fits each mode: Plan offers only what changes nothing; Ask and Auto may write (2026-10-07)', () => {
+    const writing = new Set<AiFeatureId>([...EVERYTHING, 'agent'])
+    const plan = assistantSuggestions(context({ mode: 'plan', allowed: writing }), 0)
     expect(plan).toEqual([
+      'What happens next here?',
+      'Who are the main characters so far?',
+      'How would a beta reader react?',
+      'What happened in this scene?',
       'What could raise the stakes here?',
+      'What is still unresolved in the story?',
       'Talk me through where the story goes'
     ])
-    const author = assistantSuggestions(context({ mode: 'agent' }), 0)
-    expect(author).toEqual(['Continue the scene', 'Write the next beat'])
+    for (const mode of ['ask', 'auto'] as const) {
+      const list = assistantSuggestions(context({ mode, allowed: writing }), 0)
+      expect(list).toContain('Proofread this scene')
+      expect(list).toContain('Continue the scene')
+      expect(list).toContain('Write the next beat')
+    }
   })
 
   it('names a character picked by the seed, and skips a name too long to fit', () => {

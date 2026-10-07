@@ -14,6 +14,7 @@ import {
   ROUTE_SELECTION_PREVIEW_CHARS,
   type RouteAction
 } from '@shared/assistantRoute'
+import { DEFAULT_ASSISTANT_MODE, type AssistantMode } from '@shared/aiSettings'
 import {
   CHAT_HISTORY_TURNS,
   CHAT_MAX_CONVERSATIONS,
@@ -21,19 +22,15 @@ import {
   CHAT_MESSAGE_MAX,
   CHAT_PARAGRAPHS_DEFAULT,
   Conversations,
+  agentAccessFor,
+  appliesEditsItself,
+  routeActionFor,
   titleFor,
   type ChatMessage,
   type ChatMode,
-  type Conversation,
-  type ConversationMode
+  type Conversation
 } from '@shared/chat'
-import type {
-  AiAgentResult,
-  AiChatResult,
-  AiRouteResult,
-  AiWhatNextResult,
-  Input
-} from '@shared/ipc/contract'
+import type { AiAgentResult, AiRouteResult, AiWhatNextResult, Input } from '@shared/ipc/contract'
 import type { QuerySceneRef } from '@shared/query'
 import { WHAT_NEXT_QUESTION, directionMessage, recapQuestion } from '@shared/quickActions'
 import { WHAT_NEXT_CHAR_BUDGET, directionsText, type WhatNextDirection } from '@shared/whatNext'
@@ -43,7 +40,6 @@ import {
   type ActiveEditor
 } from '@renderer/features/editor/activeEditorStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
-import type { GhostSettleHandler } from '@renderer/features/editor/ghostText'
 import { captureRewriteText } from '@renderer/features/editor/rewriteTarget'
 import { useRewriteStore } from '@renderer/features/editor/rewriteStore'
 import { selectedText as plainSelection } from '@renderer/features/editor/selectedText'
@@ -72,14 +68,17 @@ import { proposalStore } from './proposalStore'
 
 /** The title of a conversation nobody has written in yet. */
 export const NEW_CONVERSATION_TITLE = 'New conversation'
-/** The turn the chat shows for an Author-mode answer, whose text went to the editor instead. */
+/**
+ * What a stored Author-mode turn shows (its text went to the editor as ghost text); Author mode
+ * is gone since 2026-10-07, but conversations written in it still load.
+ */
 export const AGENT_NOTICE = 'Placed in the editor. Tab accepts, Escape dismisses.'
-/** The toast when Author mode has no document editor to place its answer in. */
+/** Why a rewrite has nothing to work on: no document editor is open. */
 export const NO_EDITOR_MESSAGE = 'Open a scene to place text'
 /** The toast when What should come next? has no open scene to read (F-5.17). */
 export const NO_SCENE_MESSAGE = 'Open a scene first'
-/** The toast when Author mode came back with nothing to place. */
-export const EMPTY_ANSWER_MESSAGE = 'The assistant returned no text. Try again.'
+/** Why Write this does nothing in Plan, which never edits (2026-10-07). */
+export const PLAN_NO_EDITS_MESSAGE = 'Plan never changes the book. Switch to Ask or Auto to write.'
 /** What a routed rewrite turn says once the rewrite started (F-5.19). */
 export const REWRITE_STARTED_MESSAGE = 'The rewrite is above the chat.'
 /** The selected passage Ask AI attaches to the composer is cut to this many characters. */
@@ -94,34 +93,34 @@ export { OPEN_SCENE_TIMEOUT_MS, PASSAGE_GONE_MESSAGE }
  * `presetsStore` pattern: every change applies at once and is written after the shared
  * debounce through `conversations:set`; a failed write reverts to the last persisted value and
  * toasts; the pending-save registry flushes it before the project closes. Main is stateless
- * about conversations: `send` carries the recent turns as `history`, appends the streamed
- * `ai:chatDelta` pieces of a Plan answer to the turn they belong to, and fills the turn with
- * the model, cost, and proposal id when the request resolves. An Author answer never enters the
- * chat: it goes to the active editor as ghost text (F-5.3), marked with its proposal on accept
- * (F-14.6) and settled through the ghost's own exit (F-14.5); the chat records a notice turn.
- * A Query turn and an Auto turn the router sends to chat or query run the chat agent (F-5.22,
- * `ai:agent`): main looks things up in the project (each lookup shows on the waiting turn from
+ * about conversations: `send` carries the recent turns as `history` and fills the turn with the
+ * model, cost, and proposal id when the request resolves.
+ * Every message runs in the project's chat mode (`AiSettings.chatMode`, read when it is sent;
+ * decided by the author 2026-10-07, replacing the per-conversation Auto/Query/Author/Plan
+ * modes): the router (F-5.19, `ai:route`) picks which feature answers it, and the turn runs that
+ * feature on the same turn pair: the chat agent (F-5.22, `ai:agent`) for chat, a read-only
+ * agent turn for a Story Intelligence question, What should come next?, a rewrite of the
+ * selection, or a scene action (`startSceneAction`), whose result shows in the panel or the
+ * notes column while the turn carries the action's label and a notice saying where. A router
+ * that is off falls back to chat. In Plan the agent gets only its read tools and a pick that
+ * would propose an edit runs as chat instead (`routeActionFor`).
+ * An agent turn looks things up in the project (each lookup shows on the waiting turn from
  * `ai:agentStep`), then the answer comes back whole and rides on its turn as `query` (the
  * citations main verified and the two flags the panel shows) and `agent` (the lookups and the
- * edits, each pending, applied, skipped, undone, or failed). At Ask each edit waits for Apply;
- * at Auto every edit but a deletion or an off-voice one is applied at once, with its Undo held
+ * edits, each pending, applied, skipped, undone, or failed). In Ask each edit waits for Apply;
+ * in Auto every edit but a deletion or an off-voice one is applied at once, with its Undo held
  * in memory for the session. `openScene` opens a cited scene and selects the passage.
  * The quick actions (F-5.17) write into the active conversation through the same turns:
- * `recap` is a Query turn with a fixed question about the open scene, `whatNext`
+ * `recap` is a read-only agent turn with a fixed question about the open scene, `whatNext`
  * asks `ai:whatNext` and records the directions on the assistant turn, and `writeDirection`
- * sends one of them as an Author turn, so it lands as ghost text. One busy rule covers them
- * all: nothing new starts while the active conversation has a request in flight.
- * An Auto conversation (2026-10-06, the default) asks the router (F-5.19, `ai:route`) which
- * feature answers each message and runs it on the same turn pair: chat (Plan), a Story
- * Intelligence question, What should come next?, a rewrite of the selection, or a scene action
- * (`startSceneAction`), whose result shows in the panel or the notes column while the turn
- * carries the action's label and a notice saying where. A router that is off falls back to chat.
+ * sends one of them to the agent with its edit tools, so the text comes back as an insert edit
+ * (not in Plan). One busy rule covers them all: nothing new starts while the active
+ * conversation has a request in flight.
  * Ask AI on a selection attaches the passage to the composer (`attachment`); the next message
  * sent from the composer carries it as a quote.
  * Every request is tracked in the activity store and can be stopped (F-5.10): `stop` drops the
- * unanswered turn (with whatever streamed into it) and keeps the author's turn to resend; the
- * `CANCELLED` reply is silent. Loaded with the tree on project open and cleared on close
- * (`App.tsx`).
+ * unanswered turn and keeps the author's turn to resend; the `CANCELLED` reply is silent.
+ * Loaded with the tree on project open and cleared on close (`App.tsx`).
  */
 interface AssistantState {
   /** The loaded conversations; null until `load` resolves (the panel renders its chrome disabled until then). */
@@ -140,20 +139,18 @@ interface AssistantState {
   /** Attaches a passage to the next message (cut to `ATTACHMENT_MAX`); blank text detaches. */
   attach: (text: string) => void
   detach: () => void
-  /** Cancels any pending write, drops the delta subscription, and empties the store. */
+  /** Cancels any pending write, drops the step subscription, and empties the store. */
   clear: () => void
-  /** Opens a fresh Plan conversation as the active tab; a no-op at the conversation cap. */
+  /** Opens a fresh conversation as the active tab; a no-op at the conversation cap. */
   newConversation: () => void
   /** Drops a conversation (its request in flight is stopped); the last tab is replaced by a fresh one. */
   closeConversation: (id: string) => void
   select: (id: string) => void
-  setMode: (mode: ConversationMode) => void
-  setParagraphs: (paragraphs: number) => void
   /**
-   * Sends one turn in the active conversation; ignored while one is in flight or for a blank
-   * message. `override.mode` runs this turn in another mode than the conversation's (the
-   * conversation keeps its own). A Query turn (F-5.22: the agent, read-only) always carries the
-   * open document, so the recap of F-5.17 needs nothing more to be about it.
+   * Sends one turn in the active conversation in the project's chat mode; ignored while one is
+   * in flight or for a blank message. `override.agent` skips the router and runs the agent with
+   * that access (the recap reads; Write this writes). An agent turn always carries the open
+   * document, so the recap of F-5.17 needs nothing more to be about it.
    */
   send: (message: string, override?: SendOverride) => Promise<void>
   /**
@@ -162,9 +159,12 @@ interface AssistantState {
    * autosave is flushed and main reads the saved scene.
    */
   whatNext: () => Promise<void>
-  /** What happened here? (F-5.17): a cited recap of the open scene, or of the selection, as a Query turn. */
+  /** What happened here? (F-5.17): a cited recap of the open scene, or of the selection, as a read-only agent turn. */
   recap: () => Promise<void>
-  /** Write this (F-5.17): sends a direction as an Author turn, so the text lands as ghost text. */
+  /**
+   * Write this (F-5.17): sends a direction to the agent with its edit tools, so the text comes
+   * back as an insert edit, waiting for Apply in Ask and applied in Auto. Not in Plan.
+   */
   writeDirection: (direction: WhatNextDirection) => Promise<void>
   /** Stops the active conversation's request in flight: the unanswered turn goes, the author's turn stays. */
   stop: () => void
@@ -188,11 +188,16 @@ interface AssistantState {
 }
 
 /**
- * A turn sent in another mode than its conversation's. A turn with an override never carries
- * the composer's attachment.
+ * A turn that skips the router and runs the agent with `agent` access. A turn with an override
+ * never carries the composer's attachment.
  */
 export interface SendOverride {
-  mode?: ChatMode
+  agent: AgentAccess
+}
+
+/** The project's chat mode now; Ask until the AI settings load. */
+function chatModeNow(): AssistantMode {
+  return useAiSettingsStore.getState().settings?.chatMode ?? DEFAULT_ASSISTANT_MODE
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -201,7 +206,6 @@ let persisted: Conversations | null = null
 /** Bumped by every load() and clear() so a response from a superseded request is dropped. */
 let generation = 0
 let unregister: (() => void) | null = null
-let unsubscribe: (() => void) | null = null
 let unsubscribeSteps: (() => void) | null = null
 let counter = 0
 /** Change id → how to take an applied agent edit back; gone with the session or the project. */
@@ -264,7 +268,6 @@ function freshConversation(): Conversation {
   return {
     id: nextId('c'),
     title: NEW_CONVERSATION_TITLE,
-    mode: 'auto',
     paragraphs: CHAT_PARAGRAPHS_DEFAULT,
     messages: [],
     created: now,
@@ -322,14 +325,7 @@ export function canUndoChange(changeId: string): boolean {
   return undoers.has(changeId)
 }
 
-/** `value` with the active conversation replaced by `patch(conversation)`, its `modified` bumped. */
-function patchActive(
-  value: Conversations,
-  patch: (conversation: Conversation) => Conversation
-): Conversations {
-  return patchOne(value, value.active, patch)
-}
-
+/** `value` with conversation `id` replaced by `patch(conversation)`, its `modified` bumped. */
 function patchOne(
   value: Conversations,
   id: string | null,
@@ -350,23 +346,6 @@ function conversationOfRequest(requestId: string): string | null {
   return Object.keys(pending).find((id) => pending[id] === requestId) ?? null
 }
 
-/** Appends a streamed piece to the assistant turn at the end of the conversation the request belongs to. */
-function onDelta({ requestId, delta }: { requestId: string; delta: string }): void {
-  const id = conversationOfRequest(requestId)
-  const value = useAssistantStore.getState().conversations
-  if (id === null || value === null) return
-  commit(
-    patchOne(value, id, (c) => {
-      const last = c.messages[c.messages.length - 1]
-      if (last?.role !== 'assistant') return c
-      return {
-        ...c,
-        messages: [...c.messages.slice(0, -1), { ...last, content: last.content + delta }]
-      }
-    })
-  )
-}
-
 function setPending(id: string, requestId: string | null): void {
   useAssistantStore.setState((s) => {
     const pending = { ...s.pending }
@@ -378,7 +357,7 @@ function setPending(id: string, requestId: string | null): void {
 
 /**
  * Removes the unanswered assistant turn a failed, stopped, or abandoned request left at the end
- * of the conversation, streamed pieces included: only a resolved request fills in the model.
+ * of the conversation: only a resolved request fills in the model.
  */
 function dropUnanswered(value: Conversations, id: string): Conversations {
   return patchOne(value, id, (c) => {
@@ -427,35 +406,6 @@ function cancelRequest(id: string): void {
   if (requestId !== undefined) void useAiActivityStore.getState().cancel(requestId)
 }
 
-/**
- * Places an Agent answer in the active editor as ghost text carrying its proposal, and settles
- * that proposal once through the ghost's exit: the hook slot belongs to the ghost-text
- * controller (F-5.3) while its session runs, so this wraps whatever is there for exactly one
- * settlement and restores it. Installed after `setGhost` ran, so a suggestion this one replaced
- * settled under its own listener first. False when no editor can take the text.
- */
-function placeInEditor(result: Extract<AiChatResult, { ok: true }>): boolean {
-  const active = useActiveEditorStore.getState().active
-  if (active === null || active.editor.isDestroyed) return false
-  const { editor } = active
-  const shown = editor
-    .chain()
-    .focus()
-    .setGhost(result.text, result.flagged, result.violation, result.proposalId)
-    .run()
-  if (!shown) return false
-  const storage = editor.storage.ghostText
-  if (!storage) return true
-  const previous = storage.onSettle
-  const settleOnce: GhostSettleHandler = (status, consumed) => {
-    if (storage.onSettle === settleOnce) storage.onSettle = previous
-    void proposalStore.settle(result.proposalId, status, null)
-    previous?.(status, consumed)
-  }
-  storage.onSettle = settleOnce
-  return true
-}
-
 export const useAssistantStore = create<AssistantState>((set, get) => ({
   conversations: null,
   pending: {},
@@ -482,7 +432,6 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
 
   async load() {
     unregister ??= registerPendingSave(flush)
-    unsubscribe ??= ipc().on('ai:chatDelta', onDelta)
     unsubscribeSteps ??= ipc().on('ai:agentStep', onAgentStep)
     const mine = ++generation
     const value = await ipc().invoke('conversations:get', undefined)
@@ -497,8 +446,6 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     persisted = null
     unregister?.()
     unregister = null
-    unsubscribe?.()
-    unsubscribe = null
     unsubscribeSteps?.()
     unsubscribeSteps = null
     undoers.clear()
@@ -537,18 +484,6 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     commit({ ...value, active: id })
   },
 
-  setMode(mode) {
-    const value = get().conversations
-    if (value === null) return
-    commit(patchActive(value, (c) => (c.mode === mode ? c : { ...c, mode })))
-  },
-
-  setParagraphs(paragraphs) {
-    const value = get().conversations
-    if (value === null) return
-    commit(patchActive(value, (c) => (c.paragraphs === paragraphs ? c : { ...c, paragraphs })))
-  },
-
   async send(message, override) {
     const value = get().conversations
     // The composer's attachment rides on a plain send only; an override (recap, Write this) is its own message.
@@ -558,38 +493,34 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     const id = value.active
     const conversation = value.items.find((c) => c.id === id)
     if (!conversation || get().pending[id] !== undefined) return
-    const mode: ConversationMode = override?.mode ?? conversation.mode
-    const { paragraphs } = conversation
-    if (mode === 'agent' && useActiveEditorStore.getState().active === null) {
-      toast.error(NO_EDITOR_MESSAGE)
-      return
-    }
+    const mode = chatModeNow()
     if (attachment !== null) set({ attachment: null })
     const history = historyOf(conversation)
     const requestId = nextId('r')
     setPending(id, requestId)
+    // A direct agent turn is labelled now (a cited lookup reads as Query, an edit turn as chat);
+    // a routed one once the router has picked.
+    const turnMode: ChatMode | null =
+      override === undefined ? null : override.agent === 'read' ? 'query' : 'plan'
     commit(
       patchOne(value, id, (c) => ({
         ...c,
         title: c.messages.length === 0 ? titleFor(text) || NEW_CONVERSATION_TITLE : c.title,
-        messages: [
-          ...c.messages,
-          turn('user', text, null),
-          turn('assistant', '', mode === 'auto' ? null : mode)
-        ].slice(-CHAT_MAX_MESSAGES)
+        messages: [...c.messages, turn('user', text, null), turn('assistant', '', turnMode)].slice(
+          -CHAT_MAX_MESSAGES
+        )
       }))
     )
-    const nodeId = useActiveEditorStore.getState().active?.id ?? null
-    if (mode === 'auto') {
-      await routeTurn(id, requestId, text, history)
+    if (override !== undefined) {
+      const nodeId = useActiveEditorStore.getState().active?.id ?? null
+      await runAgentTurn(id, requestId, override.agent, appliesEditsItself(mode), {
+        nodeId,
+        message: text,
+        history
+      })
       return
     }
-    if (mode === 'query') {
-      // The open document always rides along with an agent turn, so a pinned recap needs no more.
-      await runAgentTurn(id, requestId, 'read', { nodeId, message: text, history })
-      return
-    }
-    await runChat(id, requestId, { nodeId, mode, paragraphs, message: text, history, requestId })
+    await routeTurn(id, requestId, text, history, mode)
   },
 
   async whatNext() {
@@ -622,11 +553,15 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   async recap() {
     const active = liveEditor()
     const selection = active === null ? null : selectedText(active.editor)
-    await get().send(recapQuestion(selection), { mode: 'query' })
+    await get().send(recapQuestion(selection), { agent: 'read' })
   },
 
   async writeDirection(direction) {
-    await get().send(directionMessage(direction), { mode: 'agent' })
+    if (agentAccessFor(chatModeNow()) === 'read') {
+      toast.error(PLAN_NO_EDITS_MESSAGE)
+      return
+    }
+    await get().send(directionMessage(direction), { agent: 'write' })
   },
 
   stop() {
@@ -739,60 +674,6 @@ function nextRequest(id: string): string {
 }
 
 /**
- * One Plan or Author turn (F-5.4) on the turn pair already in conversation `id`: Plan streams
- * into the chat, Author places its answer in the editor as ghost text.
- */
-async function runChat(id: string, requestId: string, input: Input<'ai:chat'>): Promise<void> {
-  const { mode } = input
-  let result: AiChatResult
-  try {
-    // Main reads the saved scene: the words typed just before asking go first.
-    await useDocumentStore.getState().flush()
-    if (useAssistantStore.getState().pending[id] !== requestId) return // stopped or closed while saving
-    result = await useAiActivityStore
-      .getState()
-      .track('chat', requestId, ipc().invoke('ai:chat', input))
-  } catch (err) {
-    settleFailure(id, requestId, describeError(err))
-    return
-  }
-  if (useAssistantStore.getState().pending[id] !== requestId) {
-    // The conversation was closed or the store cleared meanwhile: nothing shows the answer.
-    if (result.ok) void proposalStore.settle(result.proposalId, 'rejected', null)
-    return
-  }
-  if (!result.ok) {
-    settleFailure(
-      id,
-      requestId,
-      result.code === 'CANCELLED' ? null : `${result.message} ${result.nextStep}`.trim()
-    )
-    return
-  }
-  if (mode === 'agent' && !result.text.trim()) {
-    void proposalStore.settle(result.proposalId, 'rejected', null)
-    settleFailure(id, requestId, EMPTY_ANSWER_MESSAGE)
-    return
-  }
-  if (mode === 'agent' && !placeInEditor(result)) {
-    void proposalStore.settle(result.proposalId, 'rejected', null)
-    settleFailure(id, requestId, NO_EDITOR_MESSAGE)
-    return
-  }
-  finishTurn(
-    id,
-    {
-      content: result.text,
-      model: result.model,
-      costUsd: result.costUsd,
-      usage: result.usage,
-      proposalId: result.proposalId
-    },
-    result.cached
-  )
-}
-
-/**
  * What should come next? (F-5.17) on the turn pair already in conversation `id`. With a
  * selection the directions follow from the text up to its end; the contract caps it.
  */
@@ -844,16 +725,18 @@ async function runWhatNext(id: string, requestId: string, active: ActiveEditor):
 }
 
 /**
- * One Auto turn (F-5.19): asks the router which feature answers `text`, with the open document,
- * the opening of the selection, and the last turns, then runs that feature on the turn pair
- * already in conversation `id`. The router being off (DISABLED) falls back to chat; any other
- * failure settles the turn as a chat failure would.
+ * One routed turn (F-5.19) in chat mode `mode`: asks the router which feature answers `text`,
+ * with the open document, the opening of the selection, and the last turns, then runs that
+ * feature on the turn pair already in conversation `id` (in Plan, only a pick that edits
+ * nothing; any other becomes chat). The router being off (DISABLED) falls back to chat; any
+ * other failure settles the turn as a chat failure would.
  */
 async function routeTurn(
   id: string,
   requestId: string,
   text: string,
-  history: Input<'ai:chat'>['history']
+  history: Input<'ai:chat'>['history'],
+  mode: AssistantMode
 ): Promise<void> {
   const open = openSceneNow()
   const { editor } = open
@@ -896,7 +779,15 @@ async function routeTurn(
     )
     return
   }
-  await dispatchRoute(id, { action, instruction, cost, text, history, open })
+  await dispatchRoute(id, {
+    action: routeActionFor(mode, action),
+    instruction,
+    cost,
+    text,
+    history,
+    open,
+    mode
+  })
 }
 
 /** What the router decided for one Auto turn, and what the turn carries into the feature. */
@@ -908,22 +799,33 @@ interface RoutedTurn {
   text: string
   history: Input<'ai:chat'>['history']
   open: OpenScene
+  /** The chat mode the turn was sent in. */
+  mode: AssistantMode
 }
 
 /** Runs the feature the router picked on conversation `id`'s turn pair, labelled with the action. */
 async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
-  const { action, instruction, cost, text, history, open } = routed
+  const { action, instruction, cost, text, history, open, mode } = routed
   const { editor, nodeId } = open
+  const autoApply = appliesEditsItself(mode)
   switch (action) {
     case 'chat': {
-      // F-5.22: the chat is the agent, which may look things up and edit the book.
+      // F-5.22: the chat is the agent, which may look things up and, in Ask and Auto, edit the book.
       patchLastTurn(id, { action, mode: 'plan' })
-      await runAgentTurn(id, nextRequest(id), 'write', { nodeId, message: text, history })
+      await runAgentTurn(id, nextRequest(id), agentAccessFor(mode), autoApply, {
+        nodeId,
+        message: text,
+        history
+      })
       return
     }
     case 'query': {
       patchLastTurn(id, { action, mode: 'query' })
-      await runAgentTurn(id, nextRequest(id), 'read', { nodeId, message: text, history })
+      await runAgentTurn(id, nextRequest(id), 'read', autoApply, {
+        nodeId,
+        message: text,
+        history
+      })
       return
     }
     case 'whatNext': {
@@ -983,15 +885,16 @@ interface AgentAsk {
 /**
  * One chat agent turn (F-5.22) on the turn pair already in conversation `id`: main looks things
  * up (each lookup shows on the pending turn as it starts), then answers; the answer lands whole
- * with its verified citations (shown as a Query answer) and its edits, each pending. With the
- * switch at Auto, every edit that is neither a deletion nor off-voice is then applied, one after
- * the other, and logged on the turn with its Undo; the rest wait for Apply. Failures settle as a
- * Plan turn's do.
+ * with its verified citations (shown as a Query answer) and its edits, each pending. With
+ * `autoApply` (the turn was sent in Auto), every edit that is neither a deletion nor off-voice
+ * is then applied, one after the other, and logged on the turn with its Undo; the rest wait for
+ * Apply. A read-only turn (Plan, a lookup) never has edits.
  */
 async function runAgentTurn(
   id: string,
   requestId: string,
   access: AgentAccess,
+  autoApply: boolean,
   ask: AgentAsk
 ): Promise<void> {
   let result: AiAgentResult
@@ -1050,7 +953,7 @@ async function runAgentTurn(
     },
     result.cached
   )
-  if (messageId === null || useAiSettingsStore.getState().settings?.auto !== true) return
+  if (messageId === null || !autoApply) return
   const store = useAssistantStore.getState()
   for (const change of changes) {
     if (isDeletion(change.edit) || change.violation !== null) continue

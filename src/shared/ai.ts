@@ -142,8 +142,7 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
   NETWORK: 'Check your internet connection and retry.',
   PROVIDER: 'Try again in a moment.',
   BUDGET: 'Raise the daily cap in Settings or wait until tomorrow.',
-  DISABLED:
-    'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
+  DISABLED: 'Turn on Use AI in Settings › AI, or enable the feature there.',
   CANCELLED: 'Send it again whenever you like.',
   SIGNED_OUT: 'Sign in on the Account tab in Settings.',
   NO_CREDIT: 'Buy credits on the Account tab in Settings.',

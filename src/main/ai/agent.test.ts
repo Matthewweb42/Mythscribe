@@ -247,7 +247,7 @@ describe('runAgent (F-5.22)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     await expect(run()).rejects.toMatchObject({
       code: 'DISABLED',
-      message: 'Assistant lookups and edits needs the AI switch at Ask or Auto (it is at Off).'
+      message: 'Assistant lookups and edits needs Use AI turned on (it is off).'
     })
     const on = defaultAiSettings()
     setAiSettings(db, { ...on, dial: 1, features: { ...on.features, agent: false } })

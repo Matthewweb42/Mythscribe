@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>How MythScribe's AI switch works – MythScribe</title>
+    <title>How MythScribe's AI settings work – MythScribe</title>
     <meta
       name="description"
-      content="The three positions of MythScribe's AI switch, what each AI feature sends, and the rules that keep the author in control."
+      content="MythScribe's Use AI setting and the assistant's Auto, Ask, and Plan modes, what each AI feature sends, and the rules that keep the author in control."
     />
     <meta name="theme-color" content="#1b1b1f" />
     <link rel="icon" href="../img/favicon.png" type="image/png" />
@@ -22,7 +22,7 @@
         <nav class="site-nav" aria-label="Site">
           <ul>
             <li><a href="../#download">Download</a></li>
-            <li><a href="./" aria-current="page">AI switch</a></li>
+            <li><a href="./" aria-current="page">AI settings</a></li>
             <li><a href="../privacy">Privacy</a></li>
             <li><a href="../terms">Terms</a></li>
             <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
@@ -33,24 +33,26 @@
 
     <main class="wrap">
       <article class="prose">
-        <h1>How MythScribe's AI switch works</h1>
-        <p class="meta">Matches the app’s Settings as of 6 October 2026</p>
+        <h1>How MythScribe's AI settings work</h1>
+        <p class="meta">Matches the app’s Settings as of 7 October 2026</p>
 
         <p>
-          MythScribe installs with AI off. One control, the AI switch, decides how much the app is
-          allowed to do; it sits in the assistant panel and in Settings. A toggle per feature lets
-          you turn off anything you do not want even when the switch is on. This page reproduces
-          the switch's three positions and the data-sharing table from the app, word for word. The text is copied from the app's source,
+          MythScribe installs with AI off. One control in Settings, Use AI, decides whether the app
+          may use AI at all. The assistant's mode (Auto, Ask, or Plan, picked under its message
+          box) decides what the chat may do with your book. A toggle per feature lets you turn off
+          anything you do not want even when AI is on. This page reproduces those settings and the
+          data-sharing table from the app, word for word. The text is copied from the app's source,
           and a test in the repository fails if the two drift apart.
         </p>
 
         <h2 id="principles">The rules the AI features follow</h2>
         <ol>
           <li>
-            <strong>You decide what changes.</strong> At Ask, ghost text, suggested tags,
-            rewrites, and every edit the assistant wants to make are shown to you and go nowhere
-            until you accept them. At Auto, the assistant makes its edits itself and lists each one
-            with an Undo button; anything that deletes still asks first.
+            <strong>You decide what changes.</strong> Ghost text, rewrites, and edit passes are
+            shown to you and go nowhere until you accept them. In Ask, every edit the assistant
+            wants to make waits for you too. In Auto, the assistant makes its edits itself and lists
+            each one with an Undo button; anything that deletes still asks first. In Plan, it only
+            reads and talks.
           </li>
           <li>
             <strong>Your voice, not the model's.</strong> Anything that generates prose is given a
@@ -58,7 +60,7 @@
             against that profile before it is shown to you.
           </li>
           <li>
-            <strong>The switch and the toggles are the law.</strong> Nothing runs at Off, and a
+            <strong>Use AI and the toggles are the law.</strong> Nothing runs with AI off, and a
             feature runs only with its own toggle on. A feature may not send any text
             that the table below does not list.
           </li>
@@ -69,33 +71,49 @@
           </li>
         </ol>
 
-        <h2 id="dial">The three positions</h2>
+        <h2 id="dial">Use AI and the assistant's modes</h2>
         <p>
-          The switch is set per project, so a project you are experimenting with can sit at Auto
-          while your novel stays at Off.
+          Both are set per project, so a project you are experimenting with can run the assistant
+          in Auto while your novel keeps AI off. The modes govern only the assistant's chat:
+          background indexing (summaries, story bible, tags) runs whenever AI is on, and edit
+          passes always come back as tracked changes.
         </p>
         <div class="table-wrap">
           <table id="dial-levels">
             <thead>
               <tr>
-                <th scope="col">Position</th>
+                <th scope="col">Setting</th>
                 <th scope="col">What it means</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <th scope="row">Off</th>
+                <th scope="row">Use AI off</th>
                 <td>No AI at all. Nothing leaves this machine.</td>
               </tr>
               <tr>
-                <th scope="row">Ask</th>
-                <td>AI features on. Every change the AI wants to make asks you first.</td>
+                <th scope="row">Use AI on</th>
+                <td>AI features on. The assistant works in the mode picked under the chat box.</td>
               </tr>
               <tr>
                 <th scope="row">Auto</th>
                 <td>
-                  AI features on. The chat makes its changes itself, each with Undo; deletions still
-                  ask.
+                  The assistant looks things up, answers with sources, and makes its edits itself,
+                  each with Undo; deletions still ask.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Ask</th>
+                <td>
+                  The assistant looks things up and answers with sources; every edit it wants to
+                  make waits for your Apply.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Plan</th>
+                <td>
+                  The assistant reads the whole project to discuss and brainstorm with you; it never
+                  proposes or makes edits.
                 </td>
               </tr>
             </tbody>
@@ -344,15 +362,15 @@
         <h2 id="where">Where to find it</h2>
         <p>
           Open Settings (<kbd>Ctrl</kbd>+<kbd>,</kbd>, or <kbd>Cmd</kbd>+<kbd>,</kbd> on macOS),
-          choose the AI tab, and the switch is at the top under &ldquo;This project&rdquo;; the
-          same switch sits under the assistant panel's message box. Your API
+          choose the AI tab, and Use AI is at the top under &ldquo;This project&rdquo;; the
+          assistant's mode sits under its message box. Your API
           key, the model tiers, and the usage figures are on the same tab.
         </p>
 
         <p>
-          In short: at Ask nothing enters the manuscript without your explicit accept, at Auto
-          every change can be undone and deletions still ask, and AI is off until you turn the
-          switch on.
+          In short: in Ask nothing enters the manuscript without your explicit accept, in Auto
+          every change can be undone and deletions still ask, in Plan nothing changes, and AI is
+          off until you turn Use AI on.
         </p>
       </article>
     </main>
@@ -364,7 +382,7 @@
           <ul>
             <li><a href="../privacy">Privacy</a></li>
             <li><a href="../terms">Terms</a></li>
-            <li><a href="./" aria-current="page">AI switch</a></li>
+            <li><a href="./" aria-current="page">AI settings</a></li>
             <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
             <li><a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a></li>
           </ul>

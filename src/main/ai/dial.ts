@@ -18,7 +18,7 @@ export function assertFeatureAllowed(settings: AiSettings, feature: AiFeatureId)
   const { label, minDial } = AI_DATA_SHARING[feature]
   const message =
     settings.dial < minDial
-      ? `${needsSwitchText(label)} (it is at Off).`
+      ? `${needsSwitchText(label)} (it is off).`
       : `${label} is turned off for this project.`
   throw new AiDisabledError(message)
 }

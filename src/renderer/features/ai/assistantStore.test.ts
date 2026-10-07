@@ -8,9 +8,9 @@ import {
   type Conversations
 } from '@shared/chat'
 import { defaultAiSettings } from '@shared/aiSettings'
+import type { RouteAction } from '@shared/assistantRoute'
 import type {
   AiAgentResult,
-  AiChatResult,
   AiWhatNextResult,
   Channel,
   EventName,
@@ -28,7 +28,6 @@ import {
 import { resetDocumentStore } from '@renderer/features/editor/documentStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
 import { locateText } from '@renderer/features/editor/locateText'
-import { ghostOf, type GhostSettleHandler } from '@renderer/features/editor/ghostText'
 import { SETTINGS_SAVE_DELAY_MS } from '@renderer/features/editor/settingsStore'
 import { flushPendingSaves, resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -37,11 +36,9 @@ import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import {
-  AGENT_NOTICE,
-  EMPTY_ANSWER_MESSAGE,
   NEW_CONVERSATION_TITLE,
-  NO_EDITOR_MESSAGE,
   NO_SCENE_MESSAGE,
+  PLAN_NO_EDITS_MESSAGE,
   OPEN_SCENE_TIMEOUT_MS,
   PASSAGE_GONE_MESSAGE,
   resetAssistantStore,
@@ -57,11 +54,6 @@ interface PendingSet {
   resolve: () => void
   reject: (err: Error) => void
 }
-interface PendingChat {
-  input: Input<'ai:chat'>
-  resolve: (result: AiChatResult) => void
-  reject: (err: Error) => void
-}
 interface PendingQuery {
   input: Input<'ai:agent'>
   resolve: (result: AiAgentResult) => void
@@ -75,13 +67,12 @@ interface PendingWhatNext {
 
 let sets: PendingSet[]
 let whatNexts: PendingWhatNext[]
-let chats: PendingChat[]
 let queries: PendingQuery[]
 let settles: Input<'proposal:settle'>[]
 /** The request ids `ai:cancel` was asked to stop. */
 let cancels: string[]
-/** The `ai:chatDelta` listener the store registered, if any. */
-let deltaListener: ((payload: EventPayload<'ai:chatDelta'>) => void) | null
+/** What the fake router picks for every message (F-5.19); chat unless a test says otherwise. */
+let routeAction: RouteAction
 /** The `ai:agentStep` listener the store registered, if any (F-5.22). */
 let stepListener: ((payload: EventPayload<'ai:agentStep'>) => void) | null
 let unsubscribed: number
@@ -89,8 +80,9 @@ let unsubscribed: number
 let renames: Input<'tree:rename'>[]
 
 /**
- * `conversations:get` answers with `stored`; `conversations:set`, `ai:chat`, and `ai:query`
- * resolve only when the test says so; `proposal:settle` records; the delta listener is captured.
+ * `conversations:get` answers with `stored`; `ai:route` picks `routeAction` locally at once;
+ * `conversations:set`, `ai:agent`, and `ai:whatNext` resolve only when the test says so;
+ * `proposal:settle` records; the step listener is captured.
  */
 function deferredClient(stored: Conversations): IpcClient {
   return {
@@ -100,15 +92,6 @@ function deferredClient(stored: Conversations): IpcClient {
         const value = input as Input<'conversations:set'>
         return new Promise<Output<C>>((resolve, reject) => {
           sets.push({ value, resolve: () => resolve(value as Output<C>), reject })
-        })
-      }
-      if (channel === 'ai:chat') {
-        return new Promise<Output<C>>((resolve, reject) => {
-          chats.push({
-            input: input as Input<'ai:chat'>,
-            resolve: (result) => resolve(result as Output<C>),
-            reject
-          })
         })
       }
       if (channel === 'ai:agent') {
@@ -137,7 +120,7 @@ function deferredClient(stored: Conversations): IpcClient {
         const { requestId } = input as Input<'ai:route'>
         return {
           ok: true,
-          action: 'chat',
+          action: routeAction,
           instruction: null,
           routedBy: 'local',
           usage: { inputTokens: 0, outputTokens: 0 },
@@ -161,15 +144,11 @@ function deferredClient(stored: Conversations): IpcClient {
       throw new Error(`unexpected ${channel}`)
     },
     on<E extends EventName>(event: E, listener: (payload: EventPayload<E>) => void) {
-      if (event === 'ai:chatDelta') {
-        deltaListener = listener as (payload: EventPayload<'ai:chatDelta'>) => void
-      }
       if (event === 'ai:agentStep') {
         stepListener = listener as (payload: EventPayload<'ai:agentStep'>) => void
       }
       return () => {
         unsubscribed++
-        if (event === 'ai:chatDelta') deltaListener = null
         if (event === 'ai:agentStep') stepListener = null
       }
     }
@@ -220,21 +199,29 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
 
 const STORED: Conversations = { active: 'c-1', items: [conversation()] }
 
-type ChatOk = Extract<AiChatResult, { ok: true }>
+type AgentOk = Extract<AiAgentResult, { ok: true }>
 
-const ok = (requestId: string, text: string, over: Partial<ChatOk> = {}): AiChatResult => ({
+/** A chat agent answer (F-5.22) with no lookups, citations, or edits. */
+const ok = (requestId: string, answer: string, over: Partial<AgentOk> = {}): AiAgentResult => ({
   ok: true,
-  text,
+  answer,
+  query: null,
+  steps: [],
+  changes: [],
+  dropped: 0,
   usage: { inputTokens: 200, outputTokens: 40 },
   costUsd: 0.0003,
   cached: false,
   model: 'gpt-fake',
-  flagged: false,
-  violation: null,
   proposalId: `prop-${requestId}`,
   requestId,
   ...over
 })
+
+/** Puts the project's AI on, in chat mode `chatMode` (2026-10-07). */
+const inMode = (chatMode: 'auto' | 'ask' | 'plan'): void => {
+  useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1, chatMode } })
+}
 
 const store = (): ReturnType<typeof useAssistantStore.getState> => useAssistantStore.getState()
 const active = (): Conversation => {
@@ -249,11 +236,11 @@ async function settle(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0)
 }
 
-/** Sends `text` in the loaded state and hands back the request main received. */
-async function sendAndCapture(text: string): Promise<PendingChat> {
+/** Sends `text` in the loaded state and hands back the agent request main received. */
+async function sendAndCapture(text: string): Promise<PendingQuery> {
   const sending = store().send(text)
   await settle()
-  const request = chats[chats.length - 1]
+  const request = queries[queries.length - 1]
   if (!request) throw new Error('nothing was sent')
   return Object.assign(request, { done: sending })
 }
@@ -261,12 +248,11 @@ async function sendAndCapture(text: string): Promise<PendingChat> {
 beforeEach(() => {
   vi.useFakeTimers()
   sets = []
-  chats = []
   queries = []
   whatNexts = []
   settles = []
   cancels = []
-  deltaListener = null
+  routeAction = 'chat'
   stepListener = null
   unsubscribed = 0
   renames = []
@@ -293,16 +279,16 @@ afterEach(() => {
 })
 
 describe('useAssistantStore load and persistence (F-5.4)', () => {
-  it('starts empty, loads the stored conversations, and subscribes to the deltas', async () => {
+  it('starts empty, loads the stored conversations, and subscribes to the agent steps', async () => {
     expect(store().conversations).toBeNull()
-    expect(deltaListener).toBeNull()
+    expect(stepListener).toBeNull()
     await store().load()
     expect(store().conversations).toEqual(STORED)
-    expect(deltaListener).not.toBeNull()
+    expect(stepListener).not.toBeNull()
     expect(sets).toHaveLength(0)
   })
 
-  it('gives a fresh project one Auto conversation (2026-10-06) to write in without writing it', async () => {
+  it('gives a fresh project one conversation to write in without writing it, and no per-conversation mode (2026-10-07)', async () => {
     setIpcClient(deferredClient({ active: null, items: [] }))
     await store().load()
     const value = store().conversations
@@ -310,10 +296,10 @@ describe('useAssistantStore load and persistence (F-5.4)', () => {
     expect(value?.active).toBe(value?.items[0]?.id)
     expect(value?.items[0]).toMatchObject({
       title: NEW_CONVERSATION_TITLE,
-      mode: 'auto',
       paragraphs: 1,
       messages: []
     })
+    expect(value?.items[0]?.mode).toBeUndefined()
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(0)
   })
@@ -324,71 +310,69 @@ describe('useAssistantStore load and persistence (F-5.4)', () => {
     expect(store().conversations?.active).toBe('c-1')
   })
 
-  it('applies a mode change at once and writes it once after the debounce', async () => {
+  it('applies a change at once and writes it once after the debounce', async () => {
     await store().load()
-    store().setMode('agent')
-    store().setParagraphs(3)
-    expect(active()).toMatchObject({ mode: 'agent', paragraphs: 3 })
+    store().newConversation()
+    store().select('c-1')
+    expect(store().conversations?.items).toHaveLength(2)
     expect(sets).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(1)
-    expect(sets[0]?.value.items[0]).toMatchObject({ mode: 'agent', paragraphs: 3 })
+    expect(sets[0]?.value.items).toHaveLength(2)
+    expect(sets[0]?.value.active).toBe('c-1')
     sets[0]?.resolve()
     await settle()
-    expect(active().mode).toBe('agent')
+    expect(store().conversations?.items).toHaveLength(2)
   })
 
   it('reverts to the value before a failed write and toasts', async () => {
     await store().load()
-    store().setMode('agent')
+    store().newConversation()
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     sets[0]?.reject(new Error('disk full'))
     await settle()
-    expect(active().mode).toBe('plan')
+    expect(store().conversations).toEqual(STORED)
     expect(toasts()).toEqual(['disk full'])
   })
 
   it('writes a pending change when the pending saves are flushed (project close)', async () => {
     await store().load()
-    store().setParagraphs(5)
+    store().newConversation()
     const flushing = flushPendingSaves()
     await settle()
     expect(sets).toHaveLength(1)
-    expect(sets[0]?.value.items[0]).toMatchObject({ paragraphs: 5 })
+    expect(sets[0]?.value.items).toHaveLength(2)
     sets[0]?.resolve()
     await flushing
   })
 
-  it('clear empties the store, cancels the pending write, and drops the delta subscription', async () => {
+  it('clear empties the store, cancels the pending write, and drops the step subscription', async () => {
     await store().load()
-    store().setMode('agent')
+    store().newConversation()
     store().clear()
     expect(store().conversations).toBeNull()
-    expect(unsubscribed).toBe(2)
-    expect(deltaListener).toBeNull()
+    expect(unsubscribed).toBe(1)
     expect(stepListener).toBeNull()
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(0)
   })
 
   it('ignores changes before anything is loaded', async () => {
-    store().setMode('agent')
     store().newConversation()
     await store().send('hello')
     expect(store().conversations).toBeNull()
-    expect(chats).toHaveLength(0)
+    expect(queries).toHaveLength(0)
   })
 })
 
 describe('useAssistantStore tabs (F-5.4)', () => {
-  it('newConversation opens a fresh Auto tab as the active one, up to the cap', async () => {
+  it('newConversation opens a fresh tab as the active one, up to the cap', async () => {
     await store().load()
     store().newConversation()
     const value = store().conversations
     expect(value?.items).toHaveLength(2)
     expect(value?.active).toBe(value?.items[1]?.id)
-    // F-5.8: a new conversation starts in Query mode.
-    expect(active()).toMatchObject({ title: NEW_CONVERSATION_TITLE, mode: 'auto', messages: [] })
+    expect(active()).toMatchObject({ title: NEW_CONVERSATION_TITLE, messages: [] })
     for (let i = 0; i < CHAT_MAX_CONVERSATIONS + 2; i++) store().newConversation()
     expect(store().conversations?.items).toHaveLength(CHAT_MAX_CONVERSATIONS)
   })
@@ -423,30 +407,30 @@ describe('useAssistantStore tabs (F-5.4)', () => {
   })
 })
 
-describe('useAssistantStore send, Plan mode (F-5.4)', () => {
-  it('appends the turn and an empty answer, sends the recent history, streams the deltas, then fills the answer with its cost', async () => {
+describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 2026-10-07)', () => {
+  it('appends the turn and an empty answer, asks the agent in Ask with its edit tools and the recent history, then fills the answer with its cost', async () => {
     await store().load()
     const request = await sendAndCapture('  What does Mara want?  ')
     expect(request.input).toEqual({
       nodeId: null,
-      mode: 'plan',
-      paragraphs: 1,
       message: 'What does Mara want?',
       history: [
         { role: 'user', content: 'Why the ridge?' },
         { role: 'assistant', content: 'Because Mara wants the view.' }
       ],
+      access: 'write',
+      focus: { beforeCaret: '', selection: '' },
       requestId: expect.any(String) as string
     })
     expect(active().messages).toHaveLength(4)
     expect(active().messages[2]).toMatchObject({ role: 'user', content: 'What does Mara want?' })
-    expect(active().messages[3]).toMatchObject({ role: 'assistant', content: '', mode: 'plan' })
+    expect(active().messages[3]).toMatchObject({
+      role: 'assistant',
+      content: '',
+      mode: 'plan',
+      action: 'chat'
+    })
     expect(store().pending['c-1']).toBe(request.input.requestId)
-
-    deltaListener?.({ requestId: request.input.requestId, delta: 'The ' })
-    deltaListener?.({ requestId: request.input.requestId, delta: 'view.' })
-    deltaListener?.({ requestId: 'someone-else', delta: 'noise' })
-    expect(active().messages[3]?.content).toBe('The view.')
 
     request.resolve(ok(request.input.requestId, 'The view.', { cached: true }))
     await settle()
@@ -459,7 +443,8 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
       costUsd: 0.0003,
       usage: { inputTokens: 200, outputTokens: 40 },
       proposalId: `prop-${request.input.requestId}`,
-      mode: 'plan'
+      mode: 'plan',
+      agent: { access: 'write', steps: [], changes: [] }
     })
     expect(store().cached[answer?.id ?? '']).toBe(true)
     expect(settles).toEqual([])
@@ -498,7 +483,7 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
 
     setIpcClient(deferredClient({ active: 'c-1', items: [conversation({ messages: [] })] }))
     resetAssistantStore()
-    chats = []
+    queries = []
     await store().load()
     const long = 'A question that runs well past the forty-character title cap'
     const first = await sendAndCapture(long)
@@ -510,13 +495,13 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
   it('ignores a blank message and a second send while one is in flight', async () => {
     await store().load()
     await store().send('   ')
-    expect(chats).toHaveLength(0)
+    expect(queries).toHaveLength(0)
     const sending = store().send('one')
     await settle()
     await store().send('two')
-    expect(chats).toHaveLength(1)
+    expect(queries).toHaveLength(1)
     expect(active().messages).toHaveLength(4)
-    chats[0]?.resolve(ok(chats[0].input.requestId, 'answer'))
+    queries[0]?.resolve(ok(queries[0].input.requestId, 'answer'))
     await sending
   })
 
@@ -550,12 +535,11 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
   it('drops the answer of a conversation closed meanwhile and rejects its proposal', async () => {
     await store().load()
     store().newConversation()
-    store().setMode('plan')
     const second = store().conversations?.active ?? ''
     const sending = store().send('hello')
     await settle()
     store().closeConversation(second)
-    const request = chats[0]
+    const request = queries[0]
     request?.resolve(ok(request.input.requestId, 'late'))
     await sending
     expect(store().conversations?.items.map((c) => c.id)).toEqual(['c-1'])
@@ -567,7 +551,7 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
 })
 
 describe('useAssistantStore stop (F-5.10)', () => {
-  const cancelled = (requestId: string): AiChatResult => ({
+  const cancelled = (requestId: string): AiAgentResult => ({
     ok: false,
     code: 'CANCELLED',
     message: 'The request was stopped.',
@@ -579,17 +563,16 @@ describe('useAssistantStore stop (F-5.10)', () => {
     await store().load()
     const request = await sendAndCapture('hello')
     expect(useAiActivityStore.getState().inflight).toEqual({
-      [request.input.requestId]: { feature: 'chat', startedAt: expect.any(Number) as number }
+      [request.input.requestId]: { feature: 'agent', startedAt: expect.any(Number) as number }
     })
     request.resolve(ok(request.input.requestId, 'answer'))
     await settle()
     expect(useAiActivityStore.getState().inflight).toEqual({})
   })
 
-  it('stop drops the unanswered turn with what streamed into it, keeps the author’s turn, asks main to stop, and the reply is silent', async () => {
+  it('stop drops the unanswered turn, keeps the author’s turn, asks main to stop, and the reply is silent', async () => {
     await store().load()
     const request = await sendAndCapture('What next?')
-    deltaListener?.({ requestId: request.input.requestId, delta: 'The ' })
     expect(active().messages).toHaveLength(4)
     store().stop()
     expect(active().messages).toHaveLength(3)
@@ -639,138 +622,68 @@ describe('useAssistantStore stop (F-5.10)', () => {
   it('closing a conversation stops its request in flight', async () => {
     await store().load()
     store().newConversation()
-    store().setMode('plan')
     const second = store().conversations?.active ?? ''
     const sending = store().send('hello')
     await settle()
     store().closeConversation(second)
-    expect(cancels).toEqual([chats[0]?.input.requestId])
-    chats[0]?.resolve(cancelled(chats[0].input.requestId))
+    expect(cancels).toEqual([queries[0]?.input.requestId])
+    queries[0]?.resolve(cancelled(queries[0].input.requestId))
     await sending
     expect(toasts()).toEqual([])
   })
 })
 
-describe('useAssistantStore send, Author mode (F-5.4; Agent until F-5.8)', () => {
-  const CONTENT = 'The storm broke at dusk.'
-  let editor: Editor
-
-  beforeEach(() => {
-    editor = new Editor({
-      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' }),
-      content: {
-        type: 'doc',
-        content: [{ type: 'paragraph', content: [{ type: 'text', text: CONTENT }] }]
-      }
-    })
-    editor.commands.focus('end')
-  })
-  afterEach(() => {
-    editor.destroy()
-  })
-
-  const press = (key: string): void => {
-    editor.view.dom.dispatchEvent(
-      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
-    )
-  }
-
-  it('refuses to send without an active editor', async () => {
+describe('useAssistantStore chat modes (decided by the author 2026-10-07)', () => {
+  it('Ask and Auto give the agent its edit tools; Plan gives it the read-only tools', async () => {
     await store().load()
-    store().setMode('agent')
-    await store().send('continue')
-    expect(chats).toHaveLength(0)
-    expect(toasts()).toEqual([NO_EDITOR_MESSAGE])
-    expect(active().messages).toHaveLength(2)
+    for (const [mode, access] of [
+      ['ask', 'write'],
+      ['auto', 'write'],
+      ['plan', 'read']
+    ] as const) {
+      inMode(mode)
+      const request = await sendAndCapture(`In ${mode}?`)
+      expect(request.input.access).toBe(access)
+      expect(active().messages.at(-1)).toMatchObject({ mode: 'plan', action: 'chat' })
+      request.resolve(ok(request.input.requestId, 'Yes.'))
+      await settle()
+    }
   })
 
-  it('sends the active editor as the scene, places the answer as ghost text with its proposal, and records the notice turn', async () => {
-    useActiveEditorStore.getState().set('sc-1', editor)
+  it('in Plan a router pick that would edit runs as the read-only chat instead', async () => {
+    inMode('plan')
     await store().load()
-    store().setMode('agent')
-    store().setParagraphs(2)
-    const request = await sendAndCapture('continue')
-    expect(request.input).toMatchObject({ nodeId: 'sc-1', mode: 'agent', paragraphs: 2 })
-    request.resolve(
-      ok(request.input.requestId, ' Rain followed.\n\nThen silence.', {
-        flagged: true,
-        violation: 'switches to present tense'
-      })
-    )
-    await settle()
-    expect(ghostOf(editor.state)).toMatchObject({
-      text: ' Rain followed.\n\nThen silence.',
-      flagged: true,
-      violation: 'switches to present tense',
-      proposalId: `prop-${request.input.requestId}`
-    })
-    const answer = active().messages[3]
-    expect(answer).toMatchObject({
-      role: 'assistant',
-      mode: 'agent',
-      content: ' Rain followed.\n\nThen silence.',
-      model: 'gpt-fake',
-      proposalId: `prop-${request.input.requestId}`
-    })
-    expect(AGENT_NOTICE).toContain('Tab')
+    for (const pick of ['rewrite', 'proofread', 'critique', 'continuity', 'synopsis'] as const) {
+      routeAction = pick
+      const request = await sendAndCapture(`Do ${pick}`)
+      expect(request.input.access).toBe('read')
+      expect(active().messages.at(-1)).toMatchObject({ action: 'chat', mode: 'plan' })
+      request.resolve(ok(request.input.requestId, 'Here is what I think.'))
+      await settle()
+    }
+    expect(queries).toHaveLength(5)
     expect(toasts()).toEqual([])
-
-    // Tab accepts: the proposal settles once through the ghost's exit, the text lands marked.
-    press('Tab')
-    expect(settles).toEqual([
-      { id: `prop-${request.input.requestId}`, status: 'accepted', note: null }
-    ])
-    expect(editor.getText()).toBe(`${CONTENT} Rain followed.\n\nThen silence.`)
-    expect(editor.getJSON().content).toHaveLength(2)
-    // The hook slot is back to what it was (nobody was listening), so the next ghost settles nothing here.
-    expect(editor.storage.ghostText?.onSettle).toBeNull()
   })
 
-  it('hands the settlement on to the ghost-text controller listener that was there and restores it', async () => {
-    const previous = vi.fn<GhostSettleHandler>()
-    if (editor.storage.ghostText) editor.storage.ghostText.onSettle = previous
-    useActiveEditorStore.getState().set('sc-1', editor)
+  it('reads the mode when a message is sent, for every conversation tab alike', async () => {
+    inMode('plan')
     await store().load()
-    store().setMode('agent')
-    const request = await sendAndCapture('continue')
-    request.resolve(ok(request.input.requestId, ' Rain followed.'))
+    store().newConversation()
+    const first = await sendAndCapture('One')
+    expect(first.input.access).toBe('read')
+    first.resolve(ok(first.input.requestId, 'A.'))
     await settle()
-    press('Escape')
-    expect(settles).toEqual([
-      { id: `prop-${request.input.requestId}`, status: 'rejected', note: null }
-    ])
-    expect(previous).toHaveBeenCalledExactlyOnceWith('rejected', '')
-    expect(editor.storage.ghostText?.onSettle).toBe(previous)
-  })
-
-  it('rejects the proposal and toasts when the editor went away before the answer, or the answer is empty', async () => {
-    useActiveEditorStore.getState().set('sc-1', editor)
-    await store().load()
-    store().setMode('agent')
-    const request = await sendAndCapture('continue')
-    resetActiveEditorStore()
-    request.resolve(ok(request.input.requestId, ' Rain followed.'))
-    await settle()
-    expect(ghostOf(editor.state)).toBeNull()
-    expect(active().messages).toHaveLength(3)
-    expect(toasts()).toEqual([NO_EDITOR_MESSAGE])
-    expect(settles).toEqual([
-      { id: `prop-${request.input.requestId}`, status: 'rejected', note: null }
-    ])
-
-    useActiveEditorStore.getState().set('sc-1', editor)
-    chats = []
-    const again = await sendAndCapture('continue')
-    again.resolve(ok(again.input.requestId, '   '))
-    await settle()
-    expect(ghostOf(editor.state)).toBeNull()
-    expect(toasts()).toEqual([NO_EDITOR_MESSAGE, EMPTY_ANSWER_MESSAGE])
-    expect(settles).toHaveLength(2)
+    store().select('c-1')
+    inMode('ask')
+    const second = await sendAndCapture('Two')
+    expect(second.input.access).toBe('write')
   })
 })
 
-describe('useAssistantStore send, Query mode (F-5.7, on the chat agent since F-5.22)', () => {
-  type AgentOk = Extract<AiAgentResult, { ok: true }>
+describe("useAssistantStore send, a cited lookup (F-5.7; the router's query pick, on the read-only agent)", () => {
+  beforeEach(() => {
+    routeAction = 'query'
+  })
 
   const CITATION = {
     nodeId: 'sc-1',
@@ -796,7 +709,7 @@ describe('useAssistantStore send, Query mode (F-5.7, on the chat agent since F-5
     ...over
   })
 
-  /** Sends `text` in Query mode and hands back the request main received. */
+  /** Sends `text`, which the router answers with a lookup, and hands back the agent request. */
   async function askAndCapture(text: string): Promise<PendingQuery> {
     const asking = store().send(text)
     await settle()
@@ -807,9 +720,7 @@ describe('useAssistantStore send, Query mode (F-5.7, on the chat agent since F-5
 
   it('asks ai:agent read-only with the open scene and the recent history, shows its lookups live, and fills the turn with the answer, its cost, and its citations', async () => {
     await store().load()
-    store().setMode('query')
     const request = await askAndCapture('  Where does the storm break?  ')
-    expect(chats).toHaveLength(0)
     expect(request.input).toEqual({
       nodeId: null,
       message: 'Where does the storm break?',
@@ -859,7 +770,6 @@ describe('useAssistantStore send, Query mode (F-5.7, on the chat agent since F-5
     })
     useActiveEditorStore.getState().set('sc-1', editor)
     await store().load()
-    store().setMode('query')
     const request = await askAndCapture('Who owns the boat?')
     expect(request.input.nodeId).toBe('sc-1')
     request.resolve(
@@ -878,7 +788,6 @@ describe('useAssistantStore send, Query mode (F-5.7, on the chat agent since F-5
 
   it('an expected failure drops the unanswered turn and toasts, and a stop is silent', async () => {
     await store().load()
-    store().setMode('query')
     const request = await askAndCapture('Where is Mara?')
     request.resolve({
       ok: false,
@@ -913,7 +822,6 @@ describe('useAssistantStore send, Query mode (F-5.7, on the chat agent since F-5
     await store().load()
     store().newConversation()
     const second = store().conversations?.active ?? ''
-    store().setMode('query')
     const asking = store().send('Where is Mara?')
     await settle()
     store().closeConversation(second)
@@ -954,12 +862,11 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
     requestId
   })
 
-  /** An Auto turn the router sends to chat, so the agent runs with write access and answers with edits. */
+  /** A turn the router sends to chat, so the agent runs with write access and answers with edits. */
   async function answerWithEdits(auto: boolean): Promise<string> {
     useTreeStore.setState(buildIndex(treeFixture))
-    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1, auto } })
+    inMode(auto ? 'auto' : 'ask')
     await store().load()
-    store().setMode('auto')
     const asking = store().send('Rename the first scene.')
     await settle()
     const request = queries[0]
@@ -974,7 +881,7 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
   const changes = (): { status: string; error: string | null }[] =>
     (active().messages.at(-1)?.agent?.changes ?? []).map(({ status, error }) => ({ status, error }))
 
-  it('at Ask every edit waits; Apply runs it through the tree store, Skip leaves the book alone, and the proposal settles once none waits', async () => {
+  it('in Ask every edit waits; Apply runs it through the tree store, Skip leaves the book alone, and the proposal settles once none waits', async () => {
     const messageId = await answerWithEdits(false)
     expect(changes()).toEqual([
       { status: 'pending', error: null },
@@ -996,7 +903,7 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
     expect(changes().map((c) => c.status)).toEqual(['undone', 'skipped'])
   })
 
-  it('at Auto applies every edit but a deletion at once, and the deletion still asks', async () => {
+  it('in Auto applies every edit but a deletion at once, and the deletion still asks', async () => {
     await answerWithEdits(true)
     expect(renames).toEqual([{ id: 'sc-1', title: 'The ridge' }])
     expect(changes().map((c) => c.status)).toEqual(['applied', 'pending'])
@@ -1221,20 +1128,18 @@ describe('useAssistantStore quick actions (F-5.17)', () => {
     expect(toasts()).toHaveLength(2)
   })
 
-  it('recap asks a Query turn about the scene, or the selection, whatever the conversation mode', async () => {
+  it('recap asks a read-only agent turn about the scene, or the selection, whatever the chat mode', async () => {
     useActiveEditorStore.getState().set('sc-1', editor)
+    inMode('auto')
     await store().load()
-    expect(active().mode).toBe('plan')
     const asking = store().recap()
     await settle()
-    expect(chats).toHaveLength(0)
     expect(queries[0]?.input).toMatchObject({
       nodeId: 'sc-1',
       message: RECAP_SCENE_QUESTION,
       access: 'read'
     })
     expect(active().messages.at(-1)).toMatchObject({ role: 'assistant', mode: 'query' })
-    expect(active().mode).toBe('plan')
     queries[0]?.reject(new Error('offline'))
     await asking
 
@@ -1248,24 +1153,29 @@ describe('useAssistantStore quick actions (F-5.17)', () => {
     await again
   })
 
-  it('writeDirection sends the direction as an Author turn and places the answer as ghost text', async () => {
+  it('writeDirection sends the direction to the agent with its edit tools, and not in Plan (2026-10-07)', async () => {
     useActiveEditorStore.getState().set('sc-1', editor)
     await store().load()
     const writing = store().writeDirection(DIRECTIONS[0]!)
     await settle()
-    expect(chats[0]?.input).toMatchObject({
+    expect(queries[0]?.input).toMatchObject({
       nodeId: 'sc-1',
-      mode: 'agent',
-      paragraphs: 1,
+      access: 'write',
       message:
         'Continue the scene in this direction: The storm breaks. Rain drives them into the shepherd hut.'
     })
-    const request = chats[0]!
-    request.resolve(ok(request.input.requestId, ' Rain came hard.'))
+    const request = queries[0]!
+    request.resolve(ok(request.input.requestId, 'Here is the next beat.'))
     await writing
-    expect(ghostOf(editor.state)).toMatchObject({ text: ' Rain came hard.' })
-    expect(active().messages.at(-1)).toMatchObject({ role: 'assistant', mode: 'agent' })
-    // The conversation keeps its own mode.
-    expect(active().mode).toBe('plan')
+    expect(active().messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      mode: 'plan',
+      content: 'Here is the next beat.'
+    })
+
+    inMode('plan')
+    await store().writeDirection(DIRECTIONS[0]!)
+    expect(queries).toHaveLength(1)
+    expect(toasts()).toEqual([PLAN_NO_EDITS_MESSAGE])
   })
 })

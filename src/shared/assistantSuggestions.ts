@@ -1,6 +1,6 @@
 import type { AiFeatureId } from './ai'
 import { BETA_READER_TEXT_MIN } from './betaReader'
-import type { ConversationMode } from './chat'
+import type { AssistantMode } from './aiSettings'
 import { CONTINUITY_TEXT_MIN } from './continuity'
 import { CRITIQUE_TEXT_MIN } from './critique'
 import { PROOFREAD_TEXT_MIN } from './proofread'
@@ -11,7 +11,8 @@ import { WHAT_NEXT_TEXT_MIN } from './whatNext'
  * The rotating suggestions above the assistant's message box (2026-10-06, the author's AI panel
  * polish; they replace the panel's Actions menu): short prompts the author can click to fill the
  * box. Local and free: picked from this list by what the project and the open scene offer, never
- * by an AI call. In Auto mode the router sends a filled prompt to its feature like any message.
+ * by an AI call. The router sends a filled prompt to its feature like any message; in Plan
+ * (2026-10-07) only prompts that change nothing are offered.
  */
 
 /** The longest suggestion shown; one with a long character name in it is skipped instead. */
@@ -21,8 +22,8 @@ export const SUGGESTION_ROTATE_MS = 6_000
 
 /** What the picker knows about the panel and the open scene. */
 export interface SuggestionContext {
-  /** The active conversation's mode. */
-  mode: ConversationMode
+  /** The chat mode (`AiSettings.chatMode`). */
+  mode: AssistantMode
   /** The AI features the dial and the project's toggles allow. */
   allowed: ReadonlySet<AiFeatureId>
   /** The open manuscript scene's text length, or null without one. */
@@ -44,18 +45,18 @@ interface Entry {
   text: string
   /** The feature that answers it, whose dial level and toggle gate it. */
   feature: AiFeatureId
-  modes: readonly ConversationMode[]
+  modes: readonly AssistantMode[]
   /** The scene text it needs, in characters; null when it needs no open scene. */
   minLength: number | null
   need?: Need
 }
 
-const AUTO: readonly ConversationMode[] = ['auto']
-const ASK: readonly ConversationMode[] = ['auto', 'query']
-const TALK: readonly ConversationMode[] = ['auto', 'plan']
-const AUTHOR: readonly ConversationMode[] = ['agent']
+/** Every mode: a prompt that changes nothing in the book. */
+const ANY: readonly AssistantMode[] = ['auto', 'ask', 'plan']
+/** Auto and Ask: a prompt whose answer proposes or makes an edit, which Plan never does. */
+const EDITS: readonly AssistantMode[] = ['auto', 'ask']
 
-/** Features only Auto reaches, through the router (`route`). */
+/** Features reached through the router (`route`). */
 const ROUTED: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
   'whatNext',
   'proofread',
@@ -71,85 +72,85 @@ const ENTRIES: readonly Entry[] = [
   {
     text: 'What happens next here?',
     feature: 'whatNext',
-    modes: AUTO,
+    modes: ANY,
     minLength: WHAT_NEXT_TEXT_MIN
   },
   {
     text: 'Rewrite the selection tighter',
     feature: 'rewrite',
-    modes: AUTO,
+    modes: EDITS,
     minLength: 0,
     need: 'selection'
   },
   {
     text: 'What does {name} look like?',
     feature: 'query',
-    modes: ASK,
+    modes: ANY,
     minLength: null,
     need: 'character'
   },
   {
     text: 'Proofread this scene',
     feature: 'proofread',
-    modes: AUTO,
+    modes: EDITS,
     minLength: PROOFREAD_TEXT_MIN
   },
   {
     text: 'Who are the main characters so far?',
     feature: 'query',
-    modes: ASK,
+    modes: ANY,
     minLength: null,
     need: 'noCharacter'
   },
   {
     text: "Give me editor's notes on this scene",
     feature: 'critique',
-    modes: AUTO,
+    modes: EDITS,
     minLength: CRITIQUE_TEXT_MIN
   },
   {
     text: 'Suggest a synopsis for this scene',
     feature: 'synopsis',
-    modes: AUTO,
+    modes: EDITS,
     minLength: SCENE_SUGGEST_TEXT_MIN,
     need: 'synopsisEmpty'
   },
   {
     text: 'Where did {name} last appear?',
     feature: 'query',
-    modes: ASK,
+    modes: ANY,
     minLength: null,
     need: 'character'
   },
   {
     text: 'How would a beta reader react?',
     feature: 'betaReader',
-    modes: AUTO,
+    modes: ANY,
     minLength: BETA_READER_TEXT_MIN
   },
-  { text: 'What happened in this scene?', feature: 'query', modes: ASK, minLength: 1 },
+  { text: 'What happened in this scene?', feature: 'query', modes: ANY, minLength: 1 },
   {
     text: 'Check this scene for continuity slips',
     feature: 'continuity',
-    modes: AUTO,
+    modes: EDITS,
     minLength: CONTINUITY_TEXT_MIN
   },
   {
     text: 'Suggest notes for this scene',
     feature: 'notesSuggest',
-    modes: AUTO,
+    modes: EDITS,
     minLength: SCENE_SUGGEST_TEXT_MIN,
     need: 'notesEmpty'
   },
-  { text: 'What could raise the stakes here?', feature: 'chat', modes: TALK, minLength: 1 },
-  { text: 'What is still unresolved in the story?', feature: 'query', modes: ASK, minLength: null },
-  { text: 'Talk me through where the story goes', feature: 'chat', modes: TALK, minLength: null },
-  { text: 'Continue the scene', feature: 'chat', modes: AUTHOR, minLength: 1 },
-  { text: 'Write the next beat', feature: 'chat', modes: AUTHOR, minLength: 1 },
+  { text: 'What could raise the stakes here?', feature: 'chat', modes: ANY, minLength: 1 },
+  { text: 'What is still unresolved in the story?', feature: 'query', modes: ANY, minLength: null },
+  { text: 'Talk me through where the story goes', feature: 'chat', modes: ANY, minLength: null },
+  { text: 'Continue the scene', feature: 'agent', modes: EDITS, minLength: 1 },
+  { text: 'Write the next beat', feature: 'agent', modes: EDITS, minLength: 1 },
   {
     text: 'Write a line of dialogue for {name}',
-    feature: 'chat',
-    modes: AUTHOR,
+    feature: 'agent',
+    modes: EDITS,
     minLength: 1,
     need: 'character'
   }
@@ -176,7 +177,7 @@ function needMet(need: Need | undefined, context: SuggestionContext): boolean {
  * The suggestions that fit `context`, in display order. `seed` picks the character a `{name}`
  * suggestion names (the panel passes its rotation count, so the name changes as it rotates); a
  * suggestion the name pushes past `SUGGESTION_MAX_CHARS` is left out. Nothing without the
- * assistant chat allowed; an Auto suggestion answered by another feature also needs the router.
+ * assistant chat allowed; a suggestion answered by another feature also needs the router.
  */
 export function assistantSuggestions(context: SuggestionContext, seed: number): string[] {
   const { allowed, mode, sceneLength, characters } = context

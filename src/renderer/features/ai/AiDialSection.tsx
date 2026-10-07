@@ -5,17 +5,19 @@ import {
   AI_FEATURES_BY_LEVEL,
   GHOST_IDLE_MS_MAX,
   GHOST_IDLE_MS_MIN,
+  USE_AI_LABEL,
+  USE_AI_MEANING,
   providerForSource
 } from '@shared/aiSettings'
-import { AiSwitchControl } from './AiSwitchControl'
 import { useAiSettingsStore } from './aiSettingsStore'
 
 const FIELD = 'w-24 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 
 /**
- * The "This project" section at the top of the AI tab (F-14.4, F-5.21): the one AI switch
- * (Off / Ask / Auto, the same control the assistant panel carries), the per-feature toggles
- * beneath it (disabled and greyed while the switch is Off, since nothing runs then), the
+ * The "This project" section at the top of the AI tab (F-14.4, F-5.21): Use AI, the one on/off
+ * control (decided by the author 2026-10-07; the chat's Auto/Ask/Plan sits under the chat box),
+ * the per-feature toggles beneath it (disabled and greyed while AI is off, since nothing runs
+ * then), the
  * data-sharing table, and the note that nothing is sent until a row is allowed and used. Every
  * row reads `AI_DATA_SHARING`, the same registry `isFeatureAllowed` reads, so the panel cannot
  * disagree with the gate. The ghost-text idle delay (F-5.3) sits under the toggles. Nothing
@@ -29,6 +31,7 @@ export function AiDialSection(): React.JSX.Element | null {
   const source = useAiSettingsStore((s) => s.settings?.source ?? 'ownKey')
   const provider = providerForSource(source)
   const headingId = useId()
+  const useAiHintId = useId()
 
   if (settings === null) return null
   const { dial, features, ghostText } = settings
@@ -47,7 +50,21 @@ export function AiDialSection(): React.JSX.Element | null {
         This project
       </h3>
 
-      <AiSwitchControl variant="full" />
+      <div className="flex flex-col gap-0.5">
+        <label className="flex items-center gap-2 font-medium">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-describedby={useAiHintId}
+            checked={dial !== 0}
+            onChange={(event) => update({ dial: event.target.checked ? 1 : 0 })}
+          />
+          <span>{USE_AI_LABEL}</span>
+        </label>
+        <p id={useAiHintId} className="m-0 text-xs text-fg-muted">
+          {dial === 0 ? USE_AI_MEANING.off : USE_AI_MEANING.on}
+        </p>
+      </div>
 
       <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
         <legend className="float-left p-0 text-xs text-fg-muted">Features</legend>
@@ -107,8 +124,8 @@ export function AiDialSection(): React.JSX.Element | null {
       </table>
 
       <p className="m-0 text-xs text-fg-muted">
-        Nothing is sent while the switch is Off, or until a feature's row above is allowed and you
-        use it.
+        Nothing is sent while {USE_AI_LABEL} is off, or until a feature's row above is allowed and
+        you use it.
       </p>
     </section>
   )

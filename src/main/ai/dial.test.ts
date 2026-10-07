@@ -4,7 +4,11 @@ import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import { assertFeatureAllowed } from './dial'
 import { AiDisabledError, AiProviderError } from './providers/types'
 
-const at = (dial: 0 | 1, auto = false): AiSettings => ({ ...defaultAiSettings(), dial, auto })
+const at = (dial: 0 | 1, auto = false): AiSettings => ({
+  ...defaultAiSettings(),
+  dial,
+  chatMode: auto ? 'auto' : 'ask'
+})
 
 describe('assertFeatureAllowed (F-14.4, F-5.21)', () => {
   it('returns for every feature at Ask and at Auto when its toggle is on', () => {
@@ -26,9 +30,9 @@ describe('assertFeatureAllowed (F-14.4, F-5.21)', () => {
     expect(caught).toBeInstanceOf(AiProviderError)
     if (!(caught instanceof AiDisabledError)) throw new Error('unreachable')
     expect(caught.code).toBe('DISABLED')
-    expect(caught.message).toBe('Ghost text needs the AI switch at Ask or Auto (it is at Off).')
+    expect(caught.message).toBe('Ghost text needs Use AI turned on (it is off).')
     expect(AI_NEXT_STEP[caught.code]).toBe(
-      'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
+      'Turn on Use AI in Settings › AI, or enable the feature there.'
     )
   })
 

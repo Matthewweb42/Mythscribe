@@ -181,7 +181,7 @@ export function AgentChanges({
             <p className="m-0 text-xs font-medium">{describeEdit(change.edit)}</p>
             {deletion ? (
               <p className="m-0 text-xs text-warning">
-                This deletes; it always asks first, even at Auto.
+                This deletes; it always asks first, even in Auto.
               </p>
             ) : null}
             {change.violation !== null ? (

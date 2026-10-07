@@ -823,7 +823,7 @@ export const contract = {
       directory: z.string().optional(),
       /** Where the new project's AI requests go (F-15.11, the wizard's third step); omitted keeps the `ownKey` default. */
       aiSource: AiSource.optional(),
-      /** The wizard's AI switch position (F-5.18 and F-5.21, its fourth step); omitted keeps the Off default. */
+      /** The wizard's AI step (F-5.18; Use AI since 2026-10-07: `ask` is on, `off` off); omitted keeps the Off default. */
       aiSwitch: AiSwitch.optional()
     }),
     output: ProjectInfo.nullable()
