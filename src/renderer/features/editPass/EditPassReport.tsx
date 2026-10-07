@@ -75,7 +75,7 @@ function ReportBody({ detail }: { detail: EditPassDetail }): React.JSX.Element {
       .filter((id) => pass.doneNodeIds.includes(id))
       .map((id) => ({ id, changes: byNode.get(id) ?? [] }))
   }, [changes, pass.nodeIds, pass.doneNodeIds])
-  const pro = estimateEditPass(
+  const done = estimateEditPass(
     pass.type,
     pass.doneNodeIds.map((id) => words[id] ?? 0),
     pass.model,
@@ -110,7 +110,7 @@ function ReportBody({ detail }: { detail: EditPassDetail }): React.JSX.Element {
           </button>
         </div>
         <p className="m-0 text-sm text-fg-muted">
-          {`${PASS_STATUS_LABEL[pass.status]} · ${passDate(pass.createdAt)} · ${pass.doneNodeIds.length} of ${pass.nodeIds.length} scenes · ${formatCount(pro.words, 'word')}`}
+          {`${PASS_STATUS_LABEL[pass.status]} · ${passDate(pass.createdAt)} · ${pass.doneNodeIds.length} of ${pass.nodeIds.length} scenes · ${formatCount(done.words, 'word')}`}
         </p>
         {pass.instruction ? (
           <p className="m-0 text-sm">
@@ -119,7 +119,7 @@ function ReportBody({ detail }: { detail: EditPassDetail }): React.JSX.Element {
           </p>
         ) : null}
         <p className="m-0 text-sm" data-testid="edit-report-cost">
-          {`Cost: ${formatUsd(pass.costUsd)}${pass.model ? ` on ${pass.model}` : ''} · ${formatCount(pass.tokensIn)} tokens in · ${formatCount(pass.tokensOut)} out. A professional ${EDIT_PASS_LABEL[pass.type].toLowerCase()} of these words typically costs ${formatUsd(pro.proLowUsd)} to ${formatUsd(pro.proHighUsd)}.`}
+          {`Cost: ${formatUsd(pass.costUsd)}${pass.model ? ` on ${pass.model}` : ''} · ${formatCount(pass.tokensIn)} tokens in · ${formatCount(pass.tokensOut)} out.`}
         </p>
         <p className="m-0 text-sm" data-testid="edit-report-counts">
           {`${passCounts(pass)}${pass.dropped > 0 ? ` · ${pass.dropped} discarded (not found once in the scene)` : ''}`}

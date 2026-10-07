@@ -8,8 +8,7 @@ import {
   EDIT_PASS_TYPES,
   estimateEditPass,
   passChangesText,
-  presetInstruction,
-  PRO_RATES_PER_WORD
+  presetInstruction
 } from './editPass'
 
 describe('chunkText (F-14.15)', () => {
@@ -33,7 +32,7 @@ describe('chunkText (F-14.15)', () => {
 })
 
 describe('estimateEditPass (F-14.15)', () => {
-  it('counts chunks per scene, prices the tokens, and quotes the typical professional range', () => {
+  it('counts chunks per scene, and prices the tokens with no editor-fee comparison', () => {
     const estimate = estimateEditPass('line', [1_000, 0, 5_000], 'gpt-5.4', 4_000)
     const chunks = chunksForWords(1_000) + chunksForWords(5_000)
     expect(estimate).toMatchObject({ scenes: 2, words: 6_000, chunks })
@@ -44,8 +43,7 @@ describe('estimateEditPass (F-14.15)', () => {
       priceFor('gpt-5.4', estimate.tokensIn, estimate.tokensOut).costUsd
     )
     expect(estimate.priced).toBe(true)
-    expect(estimate.proLowUsd).toBeCloseTo(6_000 * PRO_RATES_PER_WORD.line.low)
-    expect(estimate.proHighUsd).toBeCloseTo(6_000 * PRO_RATES_PER_WORD.line.high)
+    expect(Object.keys(estimate).some((key) => key.startsWith('pro'))).toBe(false)
   })
 
   it('caps each chunk’s output at the feature budget and marks an unknown model unpriced', () => {
@@ -62,9 +60,8 @@ describe('estimateEditPass (F-14.15)', () => {
 })
 
 describe('pass types and presets (F-14.15)', () => {
-  it('has a professional range for every type, low under high, and only developmental writes no text', () => {
+  it('only developmental writes no text', () => {
     for (const type of EDIT_PASS_TYPES) {
-      expect(PRO_RATES_PER_WORD[type].low).toBeLessThan(PRO_RATES_PER_WORD[type].high)
       expect(passChangesText(type)).toBe(type !== 'developmental')
     }
   })

@@ -14,7 +14,6 @@ import {
   EDIT_PASS_TYPES,
   estimateEditPass,
   presetInstruction,
-  PRO_RATES_SOURCE,
   type BuiltinPresetId,
   type EditPassSummary,
   type EditPassType
@@ -178,10 +177,6 @@ function PassSetup(): React.JSX.Element {
             ? `With MythScribe: about ${formatUsd(estimate.costUsd)} on ${model} (about ${formatCount(estimate.tokensIn)} tokens in, ${formatCount(estimate.tokensOut)} out at most).`
             : `With MythScribe: ${model} has no published price here, so the cost is not estimated (about ${formatCount(estimate.tokensIn)} tokens in).`}
         </p>
-        <p className="m-0 text-sm" data-testid="edit-pass-estimate-pro">
-          {`A professional ${EDIT_PASS_LABEL[type].toLowerCase()}: typically ${formatUsd(estimate.proLowUsd)} to ${formatUsd(estimate.proHighUsd)} for these words.`}
-        </p>
-        <p className="m-0 text-xs text-fg-muted">{PRO_RATES_SOURCE}</p>
       </section>
       <div className="flex items-center gap-3 px-6 py-4">
         <button

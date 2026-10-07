@@ -4493,9 +4493,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(workspace).toBeVisible()
   await workspace.getByRole('radio', { name: 'Proofread' }).check()
   await expect(workspace.getByTestId('edit-pass-estimate')).toContainText('1 scene')
-  await expect(workspace.getByTestId('edit-pass-estimate-pro')).toContainText(
-    'A professional proofread: typically'
-  )
+  await expect(workspace.getByTestId('edit-pass-estimate-ai')).toContainText('With MythScribe')
   await workspace.getByTestId('edit-pass-start').click()
   const report = page.getByTestId('edit-report')
   await expect(report).toBeVisible()
