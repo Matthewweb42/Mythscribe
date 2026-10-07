@@ -6,6 +6,7 @@ import type {
   EntityImportPlan
 } from '@shared/entityExchange'
 import type { Entity, EntityCreateInput, EntityUpdateInput } from '@shared/ipc/contract'
+import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { ipc } from '@renderer/lib/ipc'
 import type { EntityView } from './entityView'
@@ -238,6 +239,8 @@ export const useEntityStore = create<EntityState>((set, get) => ({
   },
 
   select(id) {
+    // F-14.15: an entity page takes the main pane back from the Edits workspace or a report.
+    if (id !== null) useEditPassViewStore.getState().close()
     if (get().selectedId !== id) set({ selectedId: id })
   },
 

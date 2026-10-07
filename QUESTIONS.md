@@ -112,3 +112,24 @@ do. Review, then confirm, change, or delete the entry.
 - Chosen: a fixed list of short prompts (≤ 50 characters) picked locally by the mode, the dial and toggles, the open scene's length, a selection, an empty synopsis or notes, and the story bible's character names ("What happens next here?", "Proofread this scene", "Give me editor's notes on this scene", "How would a beta reader react?", "Check this scene for continuity slips", "Rewrite the selection tighter", "Suggest a synopsis for this scene", "What does Mara look like?", "Where did Mara last appear?", …; Author mode gets "Continue the scene" / "Write the next beat"). A click fills the box; it never sends. Draft scene brief is a small Draft button beside the Brief disclosure in Scene details; Summarize scene is the Scene details' existing button; the recap is any Query question (the pinned-scene recap left with the menu).
 - Alternatives: add `brief` and `recap` as router actions (a prompt change, `route.v2`, with an eval run); keep a single ⋯ menu in the composer for them.
 - To change it: `src/shared/assistantSuggestions.ts`, `src/renderer/features/ai/AssistantPanel.tsx` (`SuggestionLine`), `src/renderer/features/editor/SceneSuggestions.tsx` (`BriefDraftButton`).
+
+## 2026-10-06 · F-14.15 · Edit passes: where they live and what they cost
+- Question: The pass types, the workspace, the report, and the tracked changes were confirmed; how
+  are the details built?
+- Chosen: an **Edits** sidebar tab (New edit pass opens the workspace in the main pane; the tab
+  lists the Edit reports). Reports live in the project database (`edit_pass`, `edit_change`), not
+  as documents in a new tree folder, so they can never be compiled or exported as the book; a
+  report shows in the main pane like an entity page. One prompt version for every pass type.
+  Developmental, line, and custom passes use the strong tier; copy edit, proofread, and
+  continuity the fast one. The professional rates are approximate per-word ranges compiled from
+  memory of the EFA chart and Reedsy's pricing (developmental $0.03–0.08, line $0.025–0.06, copy
+  $0.015–0.04, proofread $0.01–0.025, continuity $0.01–0.03, custom compared with a line edit),
+  not fetched live. The lock is the editor's read-only state (main does not refuse saves; a
+  change whose passage moved is marked out of date anyway). Custom presets are saved per
+  project. Developmental notes are settled with Mark done or Dismiss. No entry from the AI
+  assistant panel yet (another change was editing that panel).
+- Alternatives: a fourth tree section "Edit reports" holding real documents (touches every place
+  that walks the sections: compile, export, word counts); a header button instead of a tab; one
+  prompt file per pass type; all passes on one tier; app-wide presets.
+- To change it: `src/shared/editPass.ts` (`EDIT_PASS_TIER`, `PRO_RATES_PER_WORD`),
+  `src/renderer/features/editPass/`, `src/main/ai/editPass.ts`, `src/main/ai/prompts/editPass.v1.ts`.

@@ -33,6 +33,7 @@ import type {
   AiContinuityResult,
   AiCritiqueResult,
   AiProofreadResult,
+  EditPassStartResult,
   AiDraftBriefResult,
   AiGhostTextResult,
   AiQueryResult,
@@ -78,6 +79,20 @@ import {
 import { listOpenFindings } from '../ai/continuityFindingStore'
 import { runCritique } from '../ai/critique'
 import { runProofread } from '../ai/proofread'
+import { createEditPassRunner } from '../ai/editPass'
+import {
+  deletePass,
+  getPresets,
+  interruptRunningPasses,
+  listPassRows,
+  passDetail,
+  pendingChangesFor,
+  proposalChangeCounts,
+  requirePass,
+  setPresets,
+  settleChanges,
+  toSummary
+} from '../editPass/editPassStore'
 import { dayOf, rollIfNewDay } from '../ai/dailyCap'
 import { assertFeatureAllowed } from '../ai/dial'
 import { draftBrief } from '../ai/draftBrief'
@@ -2041,6 +2056,103 @@ export function registerHandlers({
     }
   })
 
+  /**
+   * F-14.15: the edit passes. One runner for the session; it reads the open project through the
+   * manager at every scene, and `manager.onChange` clears it, so a pass never writes into another
+   * project. Every move of a pass reaches every window as `editPass:changed`.
+   */
+  const editPasses = createEditPassRunner({
+    db: () => (manager.current() === null ? null : manager.require().connection.orm),
+    requestDeps: (db) => requestDeps(db),
+    onChange: (summary) => emit(windows(), 'editPass:changed', summary)
+  })
+  const passSummary = (db: AiDb, id: string): ReturnType<typeof toSummary> => {
+    const running = editPasses.running()
+    return toSummary(db, requirePass(db, id), running?.passId === id ? running.nodeId : null)
+  }
+  const startResult = (start: () => ReturnType<typeof toSummary>): EditPassStartResult => {
+    try {
+      return { ok: true, pass: start() }
+    } catch (err) {
+      if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
+      throw err
+    }
+  }
+
+  register('editPass:start', ({ type, instruction, nodeIds }) => {
+    const db = manager.require().connection.orm
+    const text = instruction?.trim() ? instruction.trim() : null
+    if (type === 'custom' && text === null) {
+      throw new AppError('VALIDATION', 'Write an instruction for the custom pass')
+    }
+    const documents = new Set(
+      listNodes(db)
+        .filter((row) => row.kind === 'document')
+        .map((row) => row.id)
+    )
+    const ids = [...new Set(nodeIds)].filter((id) => documents.has(id))
+    if (ids.length === 0) throw new AppError('VALIDATION', 'Pick at least one scene for the pass')
+    return startResult(() =>
+      editPasses.start({ type, instruction: type === 'custom' ? text : null, nodeIds: ids })
+    )
+  })
+
+  register('editPass:resume', ({ id }) => startResult(() => editPasses.resume(id)))
+
+  register('editPass:cancel', ({ id }) => {
+    editPasses.cancel(id)
+    return null
+  })
+
+  register('editPass:list', () => {
+    const db = manager.require().connection.orm
+    return listPassRows(db).map((row) => passSummary(db, row.id))
+  })
+
+  register('editPass:get', ({ id }) => {
+    const db = manager.require().connection.orm
+    const running = editPasses.running()
+    return passDetail(db, id, running?.passId === id ? running.nodeId : null)
+  })
+
+  register('editPass:delete', ({ id }) => {
+    deletePass(manager.require().connection.orm, id)
+    return null
+  })
+
+  register('editPass:changes', ({ nodeId }) =>
+    pendingChangesFor(manager.require().connection.orm, nodeId)
+  )
+
+  // A scene's proposal (F-14.5) settles once none of its changes is pending: accepted when every
+  // one was, rejected when none was, acceptedPart otherwise (a stale change counts as not taken).
+  register('editPass:settle', ({ ids, status }) => {
+    const db = manager.require().connection.orm
+    const moved = settleChanges(db, ids, status)
+    const proposals = new Set(moved.flatMap((change) => change.proposalId ?? []))
+    for (const proposalId of proposals) {
+      const counts = proposalChangeCounts(db, proposalId)
+      if (counts.pending > 0) continue
+      const taken = counts.accepted
+      const total = taken + counts.rejected + counts.stale
+      settleProposal(
+        db,
+        proposalId,
+        taken === 0 ? 'rejected' : taken === total ? 'accepted' : 'acceptedPart'
+      )
+    }
+    for (const passId of new Set(moved.map((change) => change.passId))) {
+      emit(windows(), 'editPass:changed', passSummary(db, passId))
+    }
+    return moved
+  })
+
+  register('editPass:presets', () => getPresets(manager.require().connection.orm))
+
+  register('editPass:setPresets', (presets) =>
+    setPresets(manager.require().connection.orm, presets)
+  )
+
   // F-5.17: What should come next? on a scene, JSON from the fast tier, not streamed. The reply
   // carries up to three directions (`dropped` counts the rest) and one proposal (F-14.5) holds
   // them as JSON, pending and never flagged: directions are advice in the chat, and one becomes
@@ -2832,6 +2944,10 @@ export function registerHandlers({
     // F-14.14: the voice job and its failure memo belong to the project that left.
     voiceQueue.clear()
     voiceMemo.failedAtWords = null
+    // F-14.15: a pass running in the project that left stops without writing; one left running
+    // by a crash or a quit reads as stopped in the project that opened, ready to resume.
+    editPasses.clear()
+    if (info) interruptRunningPasses(manager.require().connection.orm)
     // F-4.12b: the memoised word counts and what was last published belong to the project that
     // left, so a project opened again publishes its proposals afresh rather than staying silent
     // because the list happens to read the same as the last one's.

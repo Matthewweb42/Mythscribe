@@ -22,6 +22,9 @@ import { describeError } from '@renderer/lib/errors'
 import { rewriteReason } from '@renderer/features/ai/aiActions'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import type { AiSettings } from '@shared/aiSettings'
+import { useSceneLocked } from '@renderer/features/editPass/editPassStore'
+import { TrackedChangesBar } from '@renderer/features/editPass/TrackedChangesBar'
+import { useTrackedChanges } from '@renderer/features/editPass/useTrackedChanges'
 import { useActiveEditorStore } from './activeEditorStore'
 import { columnClass, deskClass, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
@@ -271,6 +274,16 @@ function RegionEditor({
     [extensions]
   )
 
+  // F-14.15: a scene in a running edit pass is read-only until the pass ends; its tracked
+  // changes show (and accept inline) once it is free.
+  const locked = useSceneLocked(id) !== null
+  useTrackedChanges(editor, id, ready, locked)
+  useEffect(() => {
+    // No update event: a lock is not an edit, so it must not mark the document dirty.
+    const editable = ready && !locked
+    if (!editor.isDestroyed && editor.isEditable !== editable) editor.setEditable(editable, false)
+  }, [editor, ready, locked])
+
   useEffect(() => {
     if (!ready) return
     const store = useActiveEditorStore.getState()
@@ -475,6 +488,7 @@ function RegionEditor({
   if (!toolbar)
     return (
       <>
+        <TrackedChangesBar nodeId={id} />
         <EditorContent editor={editor} className="py-6" />
         {popups}
       </>
@@ -507,6 +521,7 @@ function RegionEditor({
           }
         />
       )}
+      <TrackedChangesBar nodeId={id} />
       <div
         ref={scroller}
         className={`flex min-h-0 flex-1 flex-col overflow-y-auto ${deskClass(sheet)}`}

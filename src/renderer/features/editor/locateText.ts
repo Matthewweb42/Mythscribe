@@ -75,3 +75,23 @@ export function locateText(
   if (!first || !last || first.pos < 0 || last.pos < 0) return null
   return { from: first.pos, to: last.pos + 1 }
 }
+
+/**
+ * `locateText` for many quotes over one scan of the document (F-14.15: every tracked change of a
+ * scene is found again whenever the changes are set): one range per quote, null where it is not
+ * found, with the same normalization and the same first-match rule.
+ */
+export function locateAll(doc: PmNode, quotes: readonly string[]): (TextRange | null)[] {
+  const entries = scan(doc)
+  const haystack = entries.map((entry) => entry.char).join('')
+  return quotes.map((quote) => {
+    const needle = normalizeForMatch(quote)
+    if (needle === '') return null
+    const at = haystack.indexOf(needle)
+    if (at === -1) return null
+    const first = entries[at]
+    const last = entries[at + needle.length - 1]
+    if (!first || !last || first.pos < 0 || last.pos < 0) return null
+    return { from: first.pos, to: last.pos + 1 }
+  })
+}

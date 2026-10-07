@@ -105,6 +105,8 @@ function install(): void {
         return { restored, skipped } as Output<C>
       }
       if (channel === 'documentTag:list') return [] as Output<C>
+      // F-14.15: every scene editor asks for its tracked changes; none in these tests.
+      if (channel === 'editPass:changes') return [] as Output<C>
       if (channel === 'sceneMeta:get') {
         const { id } = input as Input<'sceneMeta:get'>
         return { id, meta: { location: '', pov: '', timeline: '' } } as Output<C>

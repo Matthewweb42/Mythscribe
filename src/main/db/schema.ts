@@ -17,6 +17,13 @@ import {
   CONTINUITY_REF_KINDS,
   CONTINUITY_STATUSES
 } from '../../shared/continuity'
+import {
+  DEVELOPMENTAL_CATEGORIES,
+  EDIT_CHANGE_KINDS,
+  EDIT_CHANGE_STATUSES,
+  EDIT_PASS_STATUSES,
+  EDIT_PASS_TYPES
+} from '../../shared/editPass'
 import { ENTITY_KINDS, ENTITY_ORIGINS, ENTITY_TEMPLATES } from '../../shared/entities'
 import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
@@ -591,3 +598,66 @@ export const snapshotText = sqliteTable(
   (t) => [primaryKey({ columns: [t.snapshotId, t.nodeId] })]
 )
 export type SnapshotTextRow = typeof snapshotText.$inferSelect
+
+/**
+ * One edit pass (F-14.15): its type, the custom instruction, the scenes it covers in reading
+ * order (`node_ids`, JSON) and the ones it has finished (`done_node_ids`, JSON, so a pass stopped
+ * by a crash or a cancel can resume where it was), what it cost, and how it ended. Derived data:
+ * nothing here is the author's text until a change is accepted in the editor.
+ */
+export const editPass = sqliteTable(
+  'edit_pass',
+  {
+    id: text('id').primaryKey(),
+    type: text('type', { enum: EDIT_PASS_TYPES }).notNull(),
+    instruction: text('instruction'),
+    status: text('status', { enum: EDIT_PASS_STATUSES }).notNull(),
+    nodeIds: text('node_ids').notNull(),
+    doneNodeIds: text('done_node_ids').notNull().default('[]'),
+    model: text('model').notNull().default(''),
+    tokensIn: integer('tokens_in').notNull().default(0),
+    tokensOut: integer('tokens_out').notNull().default(0),
+    costUsd: real('cost_usd').notNull().default(0),
+    dropped: integer('dropped').notNull().default(0),
+    error: text('error'),
+    createdAt: text('created_at').notNull(),
+    finishedAt: text('finished_at')
+  },
+  (t) => [index('edit_pass_created_idx').on(t.createdAt)]
+)
+export type EditPassRow = typeof editPass.$inferSelect
+
+/**
+ * One tracked change or developmental note of a pass (F-14.15). `original` is the passage as it
+ * read when the pass ran (it occurred exactly once in the scene), `replacement` what the editor
+ * proposes ('' cuts it; null for a note). The renderer finds `original` again before it shows or
+ * applies anything, so a change the author's later edits orphaned is marked `stale`, never
+ * misapplied. Cascaded from the pass and from the scene; the proposal is set null when evicted.
+ */
+export const editChange = sqliteTable(
+  'edit_change',
+  {
+    id: text('id').primaryKey(),
+    passId: text('pass_id')
+      .notNull()
+      .references(() => editPass.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: EDIT_CHANGE_KINDS }).notNull(),
+    position: integer('position').notNull(),
+    original: text('original').notNull(),
+    replacement: text('replacement'),
+    rationale: text('rationale').notNull(),
+    category: text('category', { enum: DEVELOPMENTAL_CATEGORIES }),
+    flagged: integer('flagged', { mode: 'boolean' }).notNull().default(false),
+    violation: text('violation'),
+    status: text('status', { enum: EDIT_CHANGE_STATUSES }).notNull().default('pending'),
+    proposalId: text('proposal_id').references(() => aiProposal.id, { onDelete: 'set null' })
+  },
+  (t) => [
+    index('edit_change_pass_idx').on(t.passId),
+    index('edit_change_node_idx').on(t.nodeId)
+  ]
+)
+export type EditChangeRow = typeof editChange.$inferSelect

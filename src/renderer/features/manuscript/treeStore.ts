@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { TreeNode } from '@shared/ipc/contract'
 import type { HierarchyLevel, NodeKind, SectionType } from '@shared/labels'
 import type { MatterTemplateId } from '@shared/matterTemplates'
+import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { ipc } from '@renderer/lib/ipc'
 import { resolveCreateTarget, resolveGenericTarget, type CreateTarget } from './placement'
@@ -347,6 +348,8 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       // tree, a passage link, the tag detail, the assistant, an import), so the main pane always
       // shows what was just selected — a click on the already-selected node included.
       useEntityStore.getState().select(null)
+      // F-14.15: and the Edits workspace or a report, the same way.
+      useEditPassViewStore.getState().close()
     }
     set({ selectedId: id })
   },

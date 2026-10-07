@@ -281,6 +281,60 @@ select {
   background: color-mix(in srgb, var(--ms-success) 14%, transparent);
 }
 
+/*
+ * F-14.15: tracked changes of an edit pass. The passage a change replaces is struck through in
+ * the danger colour, its replacement follows in the success colour (the rewrite diff's pair), and
+ * two small buttons accept or reject it. A change the author jumped to is outlined.
+ */
+.ms-editor .tracked-del {
+  text-decoration: line-through;
+  color: var(--ms-danger);
+  background: color-mix(in srgb, var(--ms-danger) 12%, transparent);
+}
+
+.ms-editor .tracked-del.tracked-focus {
+  outline: 2px solid var(--ms-accent);
+  outline-offset: 1px;
+}
+
+.ms-editor .tracked-change {
+  white-space: normal;
+}
+
+.ms-editor .tracked-ins {
+  color: var(--ms-success);
+  background: color-mix(in srgb, var(--ms-success) 14%, transparent);
+}
+
+.ms-editor .tracked-change.tracked-flagged .tracked-ins {
+  text-decoration: underline wavy var(--ms-warning);
+}
+
+.ms-editor .tracked-accept,
+.ms-editor .tracked-reject {
+  margin-left: 0.2em;
+  padding: 0 0.3em;
+  border: 1px solid var(--ms-line);
+  border-radius: 4px;
+  background: var(--ms-surface-raised);
+  color: var(--ms-fg-muted);
+  font-family: var(--ms-font-ui, inherit);
+  font-size: 0.7em;
+  line-height: 1.4;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.ms-editor .tracked-accept:hover {
+  color: var(--ms-success);
+  border-color: var(--ms-success);
+}
+
+.ms-editor .tracked-reject:hover {
+  color: var(--ms-danger);
+  border-color: var(--ms-danger);
+}
+
 /* F-14.7: a suggestion that failed the voice fidelity check. */
 .ms-editor .ghost-text[data-flagged='true'] {
   text-decoration: underline wavy var(--ms-warning);

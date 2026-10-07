@@ -96,6 +96,8 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       }
       // F-4.12: the tags column asks for the document's recorded mentions; none in these tests.
       if (channel === 'mention:listForNode') return [] as Output<C>
+      // F-14.15: the editor asks for the scene's tracked changes; none in these tests.
+      if (channel === 'editPass:changes') return [] as Output<C>
 
       if (channel === 'documentTag:add') {
         const { nodeId, tagId } = input as Input<'documentTag:add'>

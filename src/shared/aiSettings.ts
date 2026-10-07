@@ -246,6 +246,18 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'a few notes on how you write that the voice profile carries.',
     minDial: 1
   },
+  editPass: {
+    label: 'Edit passes',
+    sends:
+      'Only when you start a pass, the text of each scene you picked, in pieces of up to ' +
+      '12,000 characters, with its title and your instruction for a custom pass; for line, ' +
+      'copy, proofread, and custom passes the voice profile (stylometric rules, learned style ' +
+      'notes, and up to 3 exemplar passages) with your author rules and banned phrases; for ' +
+      'copy edits and proofreads up to 200 words to leave alone (the names of your story-bible ' +
+      'entries and tags and the project dictionary); for a continuity pass the sheets of the ' +
+      'story-bible entries the scene names and what other scenes state about them.',
+    minDial: 1
+  },
   betaReader: {
     label: 'Beta reader',
     sends:

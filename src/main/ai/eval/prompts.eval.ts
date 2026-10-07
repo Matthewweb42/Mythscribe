@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { inputBudget, outputBudget, priceFor } from '@shared/ai'
 import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
-import { findQuote } from '@shared/critique'
+import { findQuote, normalizeForMatch } from '@shared/critique'
+import type { EditPassType } from '@shared/editPass'
 import { SCENE_BRIEF_FIELD_MAX } from '@shared/sceneMeta'
 import { SceneSummary } from '@shared/summary'
 import { toTagName } from '@shared/tags'
@@ -14,6 +15,7 @@ import { checkChatFidelity, postProcessChatText } from '../chat'
 import { postProcessGhostText } from '../ghostText'
 import { buildOpenAiProvider } from '../providers/openai'
 import { PROMPT_CATALOGUE, PROMPT_VERSIONS } from '../prompts/catalogue'
+import { parseEditChanges, parseEditNotes } from '../editPass'
 import { parseProofreadAnswer } from '../proofread'
 import { parseRouteAnswer } from '../route'
 import { parseNotesSuggestAnswer, parseSynopsisAnswer } from '../sceneSuggest'
@@ -286,6 +288,34 @@ function scoreProofread(text: string, keepWords: string[], answer: string): Live
 }
 
 /**
+ * An edit pass (F-14.15) scores through the feature's own parsers, so the verdict is what the
+ * author would see: the answer must parse, and every change (quote in the piece and once in the
+ * scene, within one paragraph, no overlap, a proofread only a correction) or note (cited) must
+ * survive; a dropped item is tokens the model wasted.
+ */
+function scoreEditPass(type: EditPassType, text: string, answer: string): LiveResult['verdict'] {
+  try {
+    const scene = normalizeForMatch(text)
+    let kept: number
+    let dropped: number
+    if (type === 'developmental') {
+      const parsed = parseEditNotes(answer, text, scene)
+      kept = parsed.notes.length
+      dropped = parsed.dropped
+    } else {
+      const parsed = parseEditChanges(answer, text, scene, { type, keep: new Set(), taken: [] })
+      kept = parsed.changes.length
+      dropped = parsed.dropped
+    }
+    return dropped === 0
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: `${dropped} of ${kept + dropped} dropped` }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not the changes or notes JSON asked for' }
+  }
+}
+
+/**
  * What should come next? (F-5.17) scores through the feature's own parser: the answer must
  * parse to `{ directions: [...] }`, and all three directions asked for must survive it (shape,
  * non-blank, within the caps); a dropped or missing one is tokens the model wasted.
@@ -519,6 +549,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreProofread(c.scoring.text, c.scoring.keepWords, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'editPass') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreEditPass(c.scoring.type, c.scoring.text, reply.text)
         })
         continue
       }
