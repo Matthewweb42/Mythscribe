@@ -3,200 +3,594 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MythScribe – local-first novel writing with AI that keeps your voice</title>
+    <title>MythScribe – the novel-writing app that remembers your book</title>
     <meta
       name="description"
-      content="MythScribe is a free desktop app for fiction writers: a Scrivener-style organizer, a distraction-free editor, story tags, and AI that reads your manuscript and keeps your voice. Your book stays on your machine."
+      content="MythScribe is a desktop app for novelists: a binder and a distraction-free editor, a story bible that keeps itself up to date, consistency checks, a chat that answers from your own manuscript, and line edits you accept or reject. Your manuscript stays on your computer."
     />
-    <meta name="theme-color" content="#1b1b1f" />
+    <meta name="theme-color" content="#08161e" />
     <meta property="og:title" content="MythScribe" />
     <meta
       property="og:description"
-      content="Local-first novel writing with AI that keeps your voice. Free desktop app; bring your own key."
+      content="The novel-writing app that remembers your book. Your manuscript stays on your computer."
     />
-    <meta property="og:image" content="https://mythscribe.app/img/screenshot-manuscript.png" />
+    <meta property="og:image" content="https://mythscribe.app/img/shot-assistant.png" />
     <meta property="og:url" content="https://mythscribe.app/" />
     <link rel="icon" href="img/favicon.png" type="image/png" />
+    <link rel="preload" href="fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="site-header">
       <div class="wrap">
         <a class="brand" href="./" aria-current="page">
-          <img src="img/favicon.png" alt="" width="32" height="32" />
-          MythScribe
+          <img src="img/favicon.png" alt="" width="34" height="34" />
+          <span class="wordmark">Myth<span>Scribe</span></span>
         </a>
         <nav class="site-nav" aria-label="Site">
           <ul>
-            <li><a href="#download">Download</a></li>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#control">Your control</a></li>
+            <li><a href="#pricing">Pricing</a></li>
+            <li><a href="#faq">FAQ</a></li>
             <li><a href="docs/">AI settings</a></li>
-            <li><a href="privacy">Privacy</a></li>
-            <li><a href="terms">Terms</a></li>
-            <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
+            <li class="nav-extra">
+              <a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a>
+            </li>
           </ul>
         </nav>
       </div>
     </header>
 
-    <main class="wrap">
-      <section class="hero" aria-labelledby="pitch">
-        <h1 id="pitch">Write your novel on your own machine.</h1>
+    <main>
+      <section class="hero wrap" aria-labelledby="pitch">
+        <p class="eyebrow">A desktop app for novelists</p>
+        <h1 id="pitch">Write the book. <em>It remembers the rest.</em></h1>
         <p class="lede">
-          MythScribe is a desktop app for fiction writers: a Scrivener-style organizer, a
-          distraction-free editor, story tags, and AI that reads your manuscript and keeps your
-          voice. It is free, it works offline, and nothing leaves your computer unless you turn the
-          AI on yourself.
+          MythScribe keeps your story bible up to date while you write, flags the places where your
+          book contradicts itself, and answers questions about your manuscript with the passage that
+          proves it. Your manuscript stays on your computer.
         </p>
         <div class="actions">
-          <a class="button" href="#download">Download</a>
-          <a class="button button-secondary" href="docs/">How the AI settings work</a>
+          <button class="button" type="button" disabled>
+            Download <span class="soon">Coming soon</span>
+          </button>
+          <a class="button button-ghost" href="#features">See how it works</a>
         </div>
-        <ul class="cards">
+        <p class="fine">
+          For Windows, macOS, and Linux. The editor, notes, and story bible work fully with AI
+          switched off.
+        </p>
+        <figure class="hero-shot frame">
+          <picture>
+            <source
+              type="image/webp"
+              srcset="img/shot-assistant.webp 1600w, img/shot-assistant-800.webp 800w"
+              sizes="(min-width: 68rem) 64rem, 100vw"
+            />
+            <img
+              src="img/shot-assistant.png"
+              width="1600"
+              height="1000"
+              fetchpriority="high"
+              alt="The MythScribe window with a scene from a fantasy novel open in the editor. On the right, the assistant has answered the question “Does Tomas’s warning on the ferry sound like him?” It cites a line from the scene and the character sheet for Tomas Reed, lists the three things it looked up, and shows a proposed edit with Apply and Skip buttons."
+            />
+          </picture>
+          <figcaption>
+            The assistant in Ask mode: it looked up three things, cited its sources, and is waiting
+            for you to apply the change.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section id="features" class="section wrap" aria-labelledby="features-heading">
+        <div class="section-head">
+          <p class="eyebrow">Feature tour</p>
+          <h2 id="features-heading">A writing room with a very good memory.</h2>
+          <p>
+            Everything a long book needs in one place: the manuscript, the people and places in it,
+            and help that reads what you wrote before it says a word.
+          </p>
+        </div>
+
+        <div class="tour">
+          <article class="feature">
+            <div class="feature-text">
+              <p class="feature-kicker">Write</p>
+              <h3>A quiet page and a binder that bends to your book.</h3>
+              <p>
+                Parts, chapters, and scenes in a binder you can nest however your story is built,
+                with word counts at every level. The page is a book-width column with your choice of
+                type, a focus mode that hides everything else, and autosave on every pause.
+              </p>
+              <ul class="ticks">
+                <li>Synopsis, notes, POV, location, and timeline beside every scene</li>
+                <li>Outline, timeline, goals, and writing statistics</li>
+                <li>Automatic backups, drafts, and snapshots you can compare</li>
+              </ul>
+            </div>
+            <figure class="frame">
+              <picture>
+                <source
+                  type="image/webp"
+                  srcset="img/shot-writing.webp 1600w, img/shot-writing-800.webp 800w"
+                  sizes="(min-width: 60rem) 40rem, 100vw"
+                />
+                <img
+                  src="img/shot-writing.png"
+                  width="1600"
+                  height="1000"
+                  loading="lazy"
+                  decoding="async"
+                  alt="The writing view. The binder on the left shows Part One: Low Water with the chapters The Harbour and The Warden and their scenes, each with a word count. The open scene, The Last Ferry, is set in a serif book column."
+                />
+              </picture>
+            </figure>
+          </article>
+
+          <article class="feature flip">
+            <div class="feature-text">
+              <p class="feature-kicker">Ask your book</p>
+              <h3>A chat that researches before it answers.</h3>
+              <p>
+                Ask where a character was last seen, what the reader knows by chapter ten, or
+                whether a line sounds like the person saying it. The assistant searches your scenes,
+                reads your character sheets, and answers with the passages it used. If it cannot
+                find something, it says so.
+              </p>
+              <ul class="ticks">
+                <li>Every answer cites a passage or one of your own sheets</li>
+                <li>You can watch each lookup as it happens</li>
+                <li>In Ask, a change it suggests waits for your Apply</li>
+              </ul>
+            </div>
+            <figure class="frame">
+              <picture>
+                <source
+                  type="image/webp"
+                  srcset="img/shot-assistant.webp 1600w, img/shot-assistant-800.webp 800w"
+                  sizes="(min-width: 60rem) 40rem, 100vw"
+                />
+                <img
+                  src="img/shot-assistant.png"
+                  width="1600"
+                  height="1000"
+                  loading="lazy"
+                  decoding="async"
+                  alt="The assistant panel beside the scene. Under the answer: a cited line from the scene, the Tomas Reed sheet under From your notes, the lookups Searching, Reading Tomas Reed’s sheet, and Reading The Last Ferry, and a proposed edit with the old words struck through and the new ones marked."
+                />
+              </picture>
+            </figure>
+          </article>
+
+          <article class="feature">
+            <div class="feature-text">
+              <p class="feature-kicker">Story bible</p>
+              <h3>Worldbuilding that keeps itself.</h3>
+              <p>
+                Characters, places, and the rules of your world each get a sheet. As you write,
+                MythScribe notes what each scene says about them (an age, a scar, who was where) and
+                keeps it beside your own notes, marked as found in the manuscript. When a new scene
+                disagrees with an earlier one, it tells you where.
+              </p>
+              <ul class="ticks">
+                <li>Scene summaries and facts gathered in the background</li>
+                <li>Consistency checks that quote the passage in question</li>
+                <li>Import your existing sheets from JSON or a spreadsheet</li>
+              </ul>
+            </div>
+            <figure class="frame">
+              <picture>
+                <source
+                  type="image/webp"
+                  srcset="img/shot-story-bible.webp 1600w, img/shot-story-bible-800.webp 800w"
+                  sizes="(min-width: 60rem) 40rem, 100vw"
+                />
+                <img
+                  src="img/shot-story-bible.png"
+                  width="1600"
+                  height="1000"
+                  loading="lazy"
+                  decoding="async"
+                  alt="The Characters tab with Ilse Varrow, Tomas Reed, and Warden Cassel. Tomas Reed’s sheet is open: age 64, his appearance, his personality (speaks in five words where others use twenty), and his background."
+                />
+              </picture>
+            </figure>
+          </article>
+
+          <article class="feature flip">
+            <div class="feature-text">
+              <p class="feature-kicker">Revise</p>
+              <h3>Edit passes that come back as tracked changes.</h3>
+              <p>
+                Pick a kind of pass (developmental notes, a line edit, a copy edit, a proofread, a
+                continuity pass, or your own instruction), pick the scenes, and see the cost in
+                dollars before you start. Every change lands in your text as a tracked change with a
+                reason, for you to accept or reject one by one.
+              </p>
+              <ul class="ticks">
+                <li>Line and copy edits keep to your voice and your banned phrases</li>
+                <li>Names from your story bible are left alone</li>
+                <li>Every pass is saved as a report you can come back to</li>
+              </ul>
+            </div>
+            <div class="shot-pair">
+              <figure class="frame">
+                <picture>
+                  <source
+                    type="image/webp"
+                    srcset="img/shot-edit-setup.webp 1600w, img/shot-edit-setup-800.webp 800w"
+                    sizes="(min-width: 60rem) 40rem, 100vw"
+                  />
+                  <img
+                    src="img/shot-edit-setup.png"
+                    width="1600"
+                    height="721"
+                    loading="lazy"
+                    decoding="async"
+                    alt="The Edit pass workspace: six kinds of edit (Developmental edit, Line edit, Copy edit, Proofread, Continuity pass, Custom pass) with Line edit selected, and the scenes in the pass with The Last Ferry ticked."
+                  />
+                </picture>
+              </figure>
+              <figure class="frame">
+                <picture>
+                  <source
+                    type="image/webp"
+                    srcset="img/shot-edit-review.webp 1600w, img/shot-edit-review-800.webp 800w"
+                    sizes="(min-width: 60rem) 40rem, 100vw"
+                  />
+                  <img
+                    src="img/shot-edit-review.png"
+                    width="1600"
+                    height="1000"
+                    loading="lazy"
+                    decoding="async"
+                    alt="The scene after a line edit: two tracked changes in the text, the old words struck through in red and the new ones in green, each with accept and reject buttons, and a bar reading 2 tracked changes from edit passes with Accept all and Reject all."
+                  />
+                </picture>
+              </figure>
+            </div>
+          </article>
+        </div>
+
+        <ul class="cards section-cards">
           <li class="card">
-            <h3>Local-first</h3>
+            <div class="card-icon" aria-hidden="true">V</div>
+            <h3>VibeWrite</h3>
             <p>
-              A project is a folder on your disk: one database file plus your assets. No account, no
-              sign-in, no sync you did not ask for. Copy the folder and you have a backup.
+              Stuck mid-sentence? Pause, and a few words in your style appear in grey after the
+              cursor. Tab takes them, Shift+Tab takes one word, typing anything else makes them go
+              away.
             </p>
           </li>
           <li class="card">
-            <h3>Never lose words</h3>
+            <div class="card-icon" aria-hidden="true">&#8470;</div>
+            <h3>It learns how you write</h3>
             <p>
-              Every pause in typing saves your work, and the app flushes pending saves before it
-              lets a window close or the app quit. Word counts, tags, and notes live in the same
-              file as the text.
+              A voice profile built from your own paragraphs (sentence length, tense, point of view,
+              how much is dialogue, your punctuation habits) plus your rules and banned phrases.
+              Anything that touches your prose is checked against it first.
             </p>
           </li>
           <li class="card">
-            <h3>AI assists, you decide</h3>
+            <div class="card-icon" aria-hidden="true">#</div>
+            <h3>Tags and mentions</h3>
             <p>
-              Every AI output is a proposal you accept, edit, or dismiss. Nothing is written into
-              your manuscript silently, and AI is off when you install. Each feature tells you
-              exactly what it sends before you turn it on.
+              Tag scenes by character, place, thread, or tone, or type <code>#</code> in the text.
+              Filter the binder by tag and see every scene a character appears in.
+            </p>
+          </li>
+          <li class="card">
+            <div class="card-icon" aria-hidden="true">&#8595;</div>
+            <h3>Bring your manuscript</h3>
+            <p>
+              Import a Word or Markdown file and review the chapters and scenes it finds before
+              anything is created. Export to Word, PDF, EPUB, or Markdown.
             </p>
           </li>
         </ul>
       </section>
 
-      <section aria-labelledby="screens">
-        <h2 id="screens">What it looks like</h2>
-        <p class="note">
-          Screenshots from the current development build with a sample project. The interface is
-          dark by default; themes come later.
-        </p>
-        <div class="shots">
-          <figure>
-            <a href="img/screenshot-manuscript.png">
-              <img
-                src="img/screenshot-manuscript.png"
-                width="1400"
-                height="900"
-                loading="lazy"
-                alt="The MythScribe window. On the left, a manuscript tree with Front Matter, Manuscript, and End Matter, expanded to Part One: Tides, chapter The Harbour, and the selected scene Low Water. On the right, the scene's tags (ilse, prophecy, the-ferryman, the-harbour), its location, point of view, and timeline fields, and the scene text in a serif book column."
-              />
-            </a>
-            <figcaption>
-              Parts, chapters, and scenes on the left; the scene's tags, location, point of view,
-              and timeline above the text; the editor in a book-width column.
-            </figcaption>
-          </figure>
-          <figure>
-            <a href="img/screenshot-tags.png">
-              <img
-                src="img/screenshot-tags.png"
-                width="1400"
-                height="900"
-                loading="lazy"
-                alt="The Tags tab in the sidebar: category filters (Characters, Settings, World Building, Tone, Content, Plot Threads, Custom), a Standard Fiction template ready to load, a search box, and a colour-coded list of tags such as ally, battle, coming-of-age, and dark-fantasy with their use counts."
-              />
-            </a>
-            <figcaption>
-              A tag bank per project, filtered by category, with templates for standard fiction,
-              mystery, fantasy, and sci-fi to start from. Type <code>#</code> in the editor to tag
-              inline.
-            </figcaption>
-          </figure>
-          <figure>
-            <a href="img/screenshot-ai-dial.png">
-              <img
-                src="img/screenshot-ai-dial.png"
-                width="1400"
-                height="900"
-                loading="lazy"
-                alt="The Settings dialog on the AI tab. The AI dial shows four levels: Off, Ask, Suggest (selected), and Draft. Below it, a checkbox per feature, the ghost text idle delay, and a table listing each feature, what it sends, the provider, and the level it needs."
-              />
-            </a>
-            <figcaption>
-              The AI dial in Settings: four levels, a toggle per feature, and a table of exactly
-              what each feature sends and the level it needs.
-            </figcaption>
-          </figure>
+      <figure class="pull wrap">
+        <blockquote>
+          <p>
+            Nothing goes into your book until you say so, and nothing leaves your computer that you
+            have not been told about.
+          </p>
+        </blockquote>
+        <figcaption>The rule every AI feature in MythScribe is built to</figcaption>
+      </figure>
+
+      <section id="control" class="section wrap" aria-labelledby="control-heading">
+        <div class="control">
+          <div class="section-head">
+            <p class="eyebrow">Your voice, your control</p>
+            <h2 id="control-heading">You decide how much help you get.</h2>
+            <p>
+              AI is off when you install. Turn on Use AI for a project and pick how the assistant
+              may act, right under its message box. Change it whenever you like.
+            </p>
+          </div>
+          <ul class="modes">
+            <li class="mode">
+              <h3>Auto</h3>
+              <p>
+                Looks things up, answers with sources, and makes its edits itself, each with Undo.
+                Anything that deletes still asks first.
+              </p>
+            </li>
+            <li class="mode featured">
+              <h3>Ask <span class="badge badge-emerald">Recommended</span></h3>
+              <p>
+                Looks things up and answers with sources. Every edit it wants to make waits for your
+                Apply; nothing changes without you.
+              </p>
+            </li>
+            <li class="mode">
+              <h3>Plan</h3>
+              <p>
+                Reads the whole project to discuss and brainstorm with you. It never proposes or
+                makes an edit.
+              </p>
+            </li>
+          </ul>
+          <ul class="cards">
+            <li class="card">
+              <h3>Local-first</h3>
+              <p>
+                A project is a folder on your disk. No account, no sync you did not ask for, and it
+                works offline. Copy the folder and you have a backup.
+              </p>
+            </li>
+            <li class="card">
+              <h3>Bring your own key</h3>
+              <p>
+                Use your own OpenAI key, kept in your system’s secure storage, or a model running on
+                your own machine. Requests go straight to the provider, never through us.
+              </p>
+            </li>
+            <li class="card">
+              <h3>Nothing hidden</h3>
+              <p>
+                Each feature lists exactly what it sends, and the
+                <a href="docs/">AI settings page</a> reproduces that list word for word. Every
+                request shows its cost, and a daily cap stops spending at a number you choose.
+              </p>
+            </li>
+          </ul>
         </div>
       </section>
 
-      <section aria-labelledby="ai">
-        <h2 id="ai">AI on your terms</h2>
-        <p class="note">
-          AI features are optional and off when you install. The dial in Settings runs from Off,
-          where nothing leaves your machine, to Draft. Every feature lists what it sends, and every
-          result is a proposal you have to accept. The
-          <a href="docs/">AI dial page</a> has the full table.
-        </p>
-        <div class="plans">
-          <div class="card">
-            <h3>Bring your own key <span class="badge">Free</span></h3>
+      <!--
+        PRICING BLOCK (provisional, 2026-10-07). The business model is being revised; swap the
+        contents of this section as one block once it is confirmed. See QUESTIONS.md.
+      -->
+      <section id="pricing" class="section wrap" aria-labelledby="pricing-heading">
+        <div class="section-head">
+          <p class="eyebrow">Pricing</p>
+          <h2 id="pricing-heading">Simple, and you only pay for AI you use.</h2>
+        </div>
+        <div class="provisional" role="note">
+          <span class="badge">Provisional</span>
+          <p>
+            Pricing is being finalised before launch. The prices below are placeholders and may
+            change.
+          </p>
+        </div>
+        <div class="pricing">
+          <article class="price-card featured">
+            <h3>MythScribe</h3>
+            <p class="price">To be announced <small>(placeholder)</small></p>
             <p>
-              Enter your OpenAI API key in Settings. The key is stored in your operating system's
-              secure storage, and requests go straight from the app to OpenAI: nothing passes
-              through us, and we never see your key or your text. You pay OpenAI for what you use;
-              the app shows the cost of every request and a running total, and you can set a daily
-              cap.
+              The whole writing app: binder, editor, notes, story bible, tags, outline, timeline,
+              goals, import, export, and backups. Works with AI switched off.
             </p>
-          </div>
-          <div class="card">
-            <h3>MythScribe Cloud <span class="badge">Not yet available</span></h3>
+            <ul class="ticks">
+              <li>Windows, macOS, and Linux</li>
+              <li>Your files stay on your computer</li>
+            </ul>
+          </article>
+          <article class="price-card">
+            <h3>Your own key or a local model</h3>
+            <p class="price">$0 <small>to us</small></p>
             <p>
-              A subscription for writers who would rather not manage an API key: sign in, and the
-              app sends AI requests through a small proxy that meters usage and hands them to the
-              provider. The proxy will not store or log manuscript text, and billing will go through
-              Lemon Squeezy. It is not built yet; the app you can download today is
-              bring-your-own-key only.
+              Add your OpenAI key and pay OpenAI directly for what you use, or point MythScribe at a
+              model on your own computer (Ollama, LM Studio) and pay nothing.
             </p>
+            <ul class="ticks">
+              <li>Never routed through our servers</li>
+              <li>Cost shown on every request</li>
+              <li>A daily spending cap</li>
+            </ul>
+          </article>
+          <article class="price-card">
+            <h3>Hosted AI <span class="badge">Coming soon</span></h3>
+            <p class="price">Coming soon</p>
+            <p>
+              For writers who would rather not manage a key: sign in and use AI through MythScribe.
+              Details will be announced before it opens.
+            </p>
+          </article>
+        </div>
+
+        <div class="estimate">
+          <h3>What does your own key cost?</h3>
+          <p class="note">
+            A rough estimate, not a quote: about <strong>$6 a month</strong> for a writer who adds
+            1,000 words a day, keeps background indexing on, takes about 20 VibeWrite suggestions a
+            day, and asks the assistant 3 questions a day, on the app’s default OpenAI models
+            (GPT-5.4 mini for background work and suggestions, GPT-5.4 for the assistant) at
+            OpenAI’s prices of 5 October 2026.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">
+                Rough monthly cost with your own OpenAI key
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">What</th>
+                  <th scope="col">Assumption</th>
+                  <th scope="col">Rough cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Background indexing</th>
+                  <td>Summaries, story bible, and tags for about 30,000 new words</td>
+                  <td>about $0.60 a month</td>
+                </tr>
+                <tr>
+                  <th scope="row">VibeWrite</th>
+                  <td>About 20 suggestions a day</td>
+                  <td>about $0.80 a month</td>
+                </tr>
+                <tr>
+                  <th scope="row">Assistant</th>
+                  <td>About 3 questions a day, each with a few lookups</td>
+                  <td>about $4.60 a month</td>
+                </tr>
+                <tr>
+                  <th scope="row">A line edit</th>
+                  <td>One pass over a 90,000-word novel, when you run it</td>
+                  <td>up to about $2.50 each time</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
+          <p class="fine">
+            Your own numbers depend on how you write and what you ask. The app shows the cost of
+            every request and a running total, the edit-pass screen shows an estimate before you
+            start, and the daily cap (set to $2 when you install) stops requests once it is reached.
+            A local model costs nothing.
+          </p>
+        </div>
+      </section>
+      <!-- END PRICING BLOCK -->
+
+      <section id="faq" class="section wrap" aria-labelledby="faq-heading">
+        <div class="section-head">
+          <p class="eyebrow">FAQ</p>
+          <h2 id="faq-heading">Questions writers ask</h2>
+        </div>
+        <div class="faq">
+          <details>
+            <summary>Where is my writing stored, and who can see it?</summary>
+            <div>
+              <p>
+                On your computer. A project is a folder holding one database file and your images;
+                nothing is uploaded and there is no account. With AI off, nothing leaves your
+                machine. With AI on, a feature sends only the text it needs, straight to the
+                provider you chose, and the <a href="docs/">AI settings page</a> lists exactly what
+                each one sends. The <a href="privacy">privacy policy</a> has the details.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>Do I have to use AI?</summary>
+            <div>
+              <p>
+                No. MythScribe installs with AI off, and the binder, editor, notes, story bible,
+                tags, outline, timeline, and backups all work without it. You can switch AI on for
+                one project and leave it off for another.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>How much does the AI cost?</summary>
+            <div>
+              <p>
+                With your own OpenAI key you pay OpenAI directly; for a writer working every day
+                that is roughly a few dollars a month (see the <a href="#pricing">estimate</a>). The
+                app shows the cost of every request and a running total, and stops at a daily cap
+                you set. A model running on your own computer costs nothing.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>What do Auto, Ask, and Plan mean?</summary>
+            <div>
+              <p>
+                They are the assistant’s modes, picked under its message box. In
+                <strong>Auto</strong> it makes its edits itself, each with Undo, and still asks
+                before deleting anything. In <strong>Ask</strong> every edit waits for your Apply.
+                In <strong>Plan</strong> it only reads and talks; it never edits. Edit passes always
+                come back as tracked changes, whatever the mode.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>Can I bring in a manuscript and my worldbuilding notes?</summary>
+            <div>
+              <p>
+                Yes. Import a Word (.docx) or Markdown file and MythScribe finds the chapters and
+                scenes; you review and adjust them before anything is created. Character, place, and
+                world sheets import from a JSON file or a spreadsheet (CSV), and export the same
+                way, so you can reuse them across books.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>Does it work offline?</summary>
+            <div>
+              <p>
+                Yes. Writing, organising, search, and backups need no connection. AI features need
+                to reach your provider, unless you run a local model on your own computer.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>Which platforms does it run on?</summary>
+            <div>
+              <p>
+                Windows, macOS, and Linux. MythScribe is in development and there are no public
+                downloads yet; the buttons on this page will work once the first signed builds are
+                out.
+              </p>
+            </div>
+          </details>
         </div>
       </section>
 
-      <section id="download" aria-labelledby="download-heading">
-        <h2 id="download-heading">Download</h2>
-        <p class="note">
-          MythScribe is still in development and there are no public builds yet. The buttons below
-          go to the GitHub releases page, which is where the first Windows build will appear,
-          followed by macOS and Linux. Installers will be signed before the first public release.
-        </p>
-        <div class="downloads">
-          <a class="button" href="https://github.com/Matthewweb42/Mythscribe/releases">Windows</a>
-          <a class="button" href="https://github.com/Matthewweb42/Mythscribe/releases">macOS</a>
-          <a class="button" href="https://github.com/Matthewweb42/Mythscribe/releases">Linux</a>
-          <a class="button button-secondary" href="https://github.com/Matthewweb42/Mythscribe"
-            >Source on GitHub</a
-          >
+      <section id="download" class="section wrap" aria-labelledby="download-heading">
+        <div class="download">
+          <h2 id="download-heading">Your next book deserves a good memory.</h2>
+          <p class="note">
+            MythScribe is in development. Signed installers for each platform will appear here when
+            the first release is ready.
+          </p>
+          <div class="actions">
+            <button class="button" type="button" disabled>
+              Windows <span class="soon">Coming soon</span>
+            </button>
+            <button class="button" type="button" disabled>
+              macOS <span class="soon">Coming soon</span>
+            </button>
+            <button class="button" type="button" disabled>
+              Linux <span class="soon">Coming soon</span>
+            </button>
+          </div>
+          <p class="fine">
+            Questions? Email <a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a>.
+          </p>
         </div>
-        <p class="note">
-          Want to know when the first build is out? Email
-          <a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a> and I will reply when it
-          ships. No mailing list, no tracking.
-        </p>
       </section>
     </main>
 
     <footer class="site-footer">
       <div class="wrap">
-        <p>MythScribe is made by Matthew Webecke.</p>
+        <div>
+          <a class="brand" href="./">
+            <img src="img/favicon.png" alt="" width="34" height="34" />
+            <span class="wordmark">Myth<span>Scribe</span></span>
+          </a>
+          <p>Made for novelists by Matthew Webecke.</p>
+        </div>
         <nav aria-label="Footer">
           <ul>
+            <li><a href="docs/">AI settings</a></li>
             <li><a href="privacy">Privacy</a></li>
             <li><a href="terms">Terms</a></li>
-            <li><a href="docs/">AI settings</a></li>
             <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
             <li><a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a></li>
           </ul>

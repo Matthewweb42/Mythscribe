@@ -90,5 +90,12 @@ export default tseslint.config(
     files: ['**/*.mjs'],
     ...tseslint.configs.disableTypeChecked
   },
+  {
+    // Plain-JS tooling scripts run by hand (scripts/site-screenshots.mjs, F-15.10): no types to
+    // annotate a return with, and their `page.evaluate` callbacks run in the browser.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: { window: 'readonly', document: 'readonly', Image: 'readonly' } },
+    rules: { '@typescript-eslint/explicit-function-return-type': 'off' }
+  },
   prettier
 )

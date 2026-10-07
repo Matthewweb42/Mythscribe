@@ -12,6 +12,24 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-07 · F-15.10 · Website revamp: provisional pricing block
+- Question: The business model is being revised (likely a one-time app price around $30, hosted AI as a prepaid dollar balance). What should the pricing section say until it is confirmed?
+- Chosen: one clearly marked block in `site/public/index.html` (`PRICING BLOCK` comments) with a visible "Provisional" note: the app's price as "To be announced (placeholder)", own key or local model "$0 to us", hosted AI "Coming soon" with no price. The Supporter license ($39) is not on the page. Below it, a rough own-key estimate of about $6 a month (1,000 words a day, background indexing on, 20 VibeWrite suggestions and 3 assistant questions a day; GPT-5.4 mini and GPT-5.4 at the `MODEL_PRICING` rates of 2026-10-05), and "up to about $2.50" for a line edit of a 90,000-word novel (the app's own edit-pass estimate per word, scaled).
+- Alternatives: show the old Free + $39 Supporter; show the likely $30 price marked as a placeholder; drop the estimate.
+- To change it: the block between `PRICING BLOCK` and `END PRICING BLOCK` in `site/public/index.html`.
+
+## 2026-10-07 · F-15.10 · Website revamp: the app still compares with a human editor and says "tokens"
+- Question: Your new copy rule says never compare cost with hiring a human editor and never show "tokens" in marketing copy. The app's own Edit pass screen still shows "A professional line edit … typically costs $X to $Y", the Editorial Freelancers Association note, and token counts in the estimate and report.
+- Chosen: the website does not show those parts: the edit-pass setup screenshot is cropped above the estimate, the report is not captured, and the copy never mentions editors' rates or tokens. The app is unchanged (out of scope for a website change). The docs page's cost paragraph now says "how much text went in and came out"; the privacy policy's "token counts" (legal precision) is unchanged.
+- Alternatives: remove the comparison and the token counts from the app (`EditPassWorkspace.tsx`, `EditPassReport.tsx`, the rates in `src/shared/editPass.ts`) in a separate change.
+- To change it: say so and it becomes its own app change.
+
+## 2026-10-07 · F-15.10 · Website revamp: fonts, screenshots, legal pages
+- Question: Several details the plan left open.
+- Chosen: Fraunces (display serif) and Inter (text), self-hosted as woff2 under `site/public/fonts/` with their OFL licences, so the CSP stays `'self'` and nothing loads from Google. The brand is the app icon plus a text wordmark ("Myth" light, "Scribe" emerald gradient), because `art/Full-Logo.png` is drawn for a white background. Screenshots come from `scripts/site-screenshots.mjs` (kept, so they can be recaptured when the UI changes); the demo novel is "The Lantern Ferry". The story-bible shot has no portrait (there is no art for the demo characters). The context library does not exist yet, so it has no shot. Privacy and terms keep their legal text; only the terms' "AI dial" sentence now names Use AI and Auto/Ask/Plan. Terms §4 still calls every AI output "a proposal for you to accept", which Auto mode's applied-with-Undo edits stretch; not changed (legal wording is yours). Both legal pages still describe the Cloud subscription and the Supporter license, which the business revision may change. The old screenshots (`screenshot-*.png`, showing the four-level dial) were deleted.
+- Alternatives: Google Fonts from their CDN (needs CSP changes and a third-party request); a different serif closer to the wordmark (e.g. Libre Caslon).
+- To change it: `site/public/styles.css` (`@font-face`, tokens), `scripts/site-screenshots.mjs`, `site/public/terms.html` §4.
+
 ## 2026-10-07 · F-2.2 · Flexible nesting: where the bottom buttons and Insert put a new scene
 - Question: With scenes allowed directly under a part or the manuscript, where do the bottom Scene/Chapter/Part buttons, Insert, and the empty-folder "Add a scene" put a new node? (Your decision covered right-click and drag only.)
 - Chosen: unchanged where the old rule had an answer (Scene with a part selected still goes into its last chapter; with nothing selected, into the last chapter of the last part). Where it used to refuse, it now places directly: a part with no chapters takes the scene itself, a manuscript with no parts takes the chapter or scene on the root, and the empty-part invitation reads "Add a scene" instead of "Add a chapter first". With nothing selected, a new node is appended after the last leveled node at the bottom of the outline, so after an Epilogue scene on the root a new scene goes on the root too. A new chapter from a loose scene goes right after it.
