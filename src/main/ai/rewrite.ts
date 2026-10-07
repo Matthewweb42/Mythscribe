@@ -51,7 +51,7 @@ export type RewriteResult = ChatResult
 
 /**
  * The rewrite-in-my-voice use case (F-14.10). The gate first (`rewrite` must be allowed:
- * nothing is read or sent below Suggest or with the feature toggled off), then the node must
+ * nothing is read or sent at Off or with the feature toggled off), then the node must
  * be a document (NOT_FOUND / VALIDATION as everywhere else), then the context the
  * data-sharing panel lists: the scene's metadata and, through the scene's POV, the voice
  * profile block (F-14.1) with the exemplars closest to the passage. No preset: a rewrite is

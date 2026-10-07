@@ -9,7 +9,7 @@ import { VibeWriteToggle } from './VibeWriteToggle'
 
 const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   ...defaultAiSettings(),
-  dial: 2,
+  dial: 1,
   ghostText: { enabled: false, idleMs: 1500 },
   ...over
 })
@@ -49,16 +49,16 @@ describe('VibeWriteToggle (F-5.3)', () => {
     expect(useAiSettingsStore.getState().settings?.ghostText.enabled).toBe(false)
   })
 
-  it('is disabled below Suggest with the level in its title, and when the feature is off for the project', () => {
+  it('is disabled at Off with the switch in its title, and when the feature is off for the project', () => {
     useAiSettingsStore.setState({
-      settings: settings({ dial: 1, ghostText: { enabled: true, idleMs: 1500 } })
+      settings: settings({ dial: 0, ghostText: { enabled: true, idleMs: 1500 } })
     })
     const { rerender } = render(<VibeWriteToggle error={null} />)
     expect(button()).toBeDisabled()
     expect(button()).toHaveAttribute('aria-pressed', 'false')
     expect(button()).toHaveAttribute(
       'title',
-      'VibeWrite needs the AI dial at Suggest or higher (Settings, AI tab)'
+      'VibeWrite needs the AI switch at Ask or Auto (Settings, AI tab)'
     )
     useAiSettingsStore.setState({
       settings: settings({ features: { ...defaultAiSettings().features, ghostText: false } })

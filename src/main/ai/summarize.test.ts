@@ -226,10 +226,10 @@ describe('summarizeScene (F-5.6)', () => {
     expect(await failure()).toEqual({
       code: 'DISABLED',
       message:
-        'Scene summaries, story bible, and tags needs the AI dial at Ask or higher (it is at Off).'
+        'Scene summaries, story bible, and tags needs the AI switch at Ask or Auto (it is at Off).'
     })
     const on = defaultAiSettings()
-    setAiSettings(db, { ...on, dial: 3, features: { ...on.features, summary: false } })
+    setAiSettings(db, { ...on, dial: 1, features: { ...on.features, summary: false } })
     expect(await failure()).toEqual({
       code: 'DISABLED',
       message: 'Scene summaries, story bible, and tags is turned off for this project.'

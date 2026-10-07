@@ -4,7 +4,7 @@ import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import type { Conversations } from '@shared/chat'
 import type {
   AiChatResult,
-  AiQueryResult,
+  AiAgentResult,
   AiRouteResult,
   Channel,
   Input,
@@ -105,22 +105,24 @@ function client(): IpcClient {
           }
           return result as Output<C>
         }
-        case 'ai:query': {
-          const result: AiQueryResult = {
+        case 'ai:agent': {
+          const { access, requestId } = input as Input<'ai:agent'>
+          const result: AiAgentResult = {
             ok: true,
-            answer: 'She climbs the ridge [1].',
-            found: true,
-            uncited: false,
-            citations: [],
-            sheets: [],
-            also: [],
+            answer: access === 'read' ? 'She climbs the ridge.' : 'Because she wants the view.',
+            query:
+              access === 'read'
+                ? { found: true, uncited: true, citations: [], sheets: [], also: [] }
+                : null,
+            steps: [],
+            changes: [],
             dropped: 0,
             usage,
             costUsd: 0.001,
             cached: false,
             model: 'gpt-strong',
-            proposalId: 'p-query',
-            requestId: (input as Input<'ai:query'>).requestId
+            proposalId: access === 'read' ? 'p-query' : 'p-agent',
+            requestId
           }
           return result as Output<C>
         }
@@ -147,7 +149,7 @@ const turns = () =>
   useAssistantStore.getState().conversations?.items.find((c) => c.id === 'c-1')?.messages ?? []
 const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   ...defaultAiSettings(),
-  dial: 2,
+  dial: 1,
   ...over
 })
 
@@ -227,11 +229,12 @@ describe('Auto conversations (F-5.19 router, 2026-10-06)', () => {
     expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
   })
 
-  it('chat runs as a Plan turn on the same turn pair', async () => {
+  it('chat runs the agent with write access on the same turn pair (F-5.22)', async () => {
     await useAssistantStore.getState().send('Why is Mara on the ridge?')
-    expect(sent('ai:chat')).toEqual([
+    expect(sent('ai:chat')).toHaveLength(0)
+    expect(sent('ai:agent')).toEqual([
       expect.objectContaining({
-        mode: 'plan',
+        access: 'write',
         nodeId: 'sc-1',
         message: 'Why is Mara on the ridge?'
       })
@@ -241,7 +244,8 @@ describe('Auto conversations (F-5.19 router, 2026-10-06)', () => {
       action: 'chat',
       mode: 'plan',
       content: 'Because she wants the view.',
-      proposalId: 'p-chat'
+      proposalId: 'p-agent',
+      agent: { access: 'write', steps: [], changes: [] }
     })
   })
 
@@ -254,7 +258,7 @@ describe('Auto conversations (F-5.19 router, 2026-10-06)', () => {
       requestId: 'r'
     }
     await useAssistantStore.getState().send('Hello')
-    expect(sent('ai:chat')).toHaveLength(1)
+    expect(sent('ai:agent')).toHaveLength(1)
     expect(turns()[1]).toMatchObject({ action: 'chat', content: 'Because she wants the view.' })
     expect(useDialogStore.getState().toasts).toEqual([])
   })
@@ -268,18 +272,18 @@ describe('Auto conversations (F-5.19 router, 2026-10-06)', () => {
       requestId: 'r'
     }
     await useAssistantStore.getState().send('Hello')
-    expect(sent('ai:chat')).toHaveLength(0)
+    expect(sent('ai:agent')).toHaveLength(0)
     expect(turns()).toHaveLength(1)
     expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual([
       'OpenAI is rate limiting this key. Wait a minute.'
     ])
   })
 
-  it('a question about the book goes to Story Intelligence', async () => {
+  it('a question about the book goes to the agent, read-only', async () => {
     route = routed('query')
     await useAssistantStore.getState().send('Where does Mara sleep?')
-    expect(sent('ai:query')).toEqual([
-      expect.objectContaining({ nodeId: 'sc-1', message: 'Where does Mara sleep?' })
+    expect(sent('ai:agent')).toEqual([
+      expect.objectContaining({ access: 'read', nodeId: 'sc-1', message: 'Where does Mara sleep?' })
     ])
     expect(turns()[1]).toMatchObject({ action: 'query', mode: 'query', proposalId: 'p-query' })
   })

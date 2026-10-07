@@ -125,7 +125,7 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-structure-'))
   session = createProject(projectFolderFor(tmp, 'Imp'), 'Imp', 'novel')
   db = session.connection.orm
-  setAiSettings(db, { ...defaultAiSettings(), dial: 2 })
+  setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
   complete = vi.fn<Complete>()
   answer('{"breaks":[],"scenes":[]}')
   ledger = []
@@ -407,15 +407,15 @@ describe('detectImportStructure (F-12.3)', () => {
   })
 
   it('refuses with DISABLED below the dial or with the toggle off, before touching the provider', async () => {
-    setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
+    setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Import structure detection needs the AI dial at Suggest or higher (it is at Ask).'
+      message: 'Import structure detection needs the AI switch at Ask or Auto (it is at Off).'
     })
     const on = defaultAiSettings()
     setAiSettings(db, {
       ...on,
-      dial: 2,
+      dial: 1,
       features: { ...on.features, importStructure: false }
     })
     expect(await failure()).toEqual({

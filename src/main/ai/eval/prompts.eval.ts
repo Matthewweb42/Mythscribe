@@ -11,6 +11,7 @@ import { SceneSummary } from '@shared/summary'
 import { toTagName } from '@shared/tags'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { WHAT_NEXT_DIRECTIONS } from '@shared/whatNext'
+import { parseAgentReply } from '../agent'
 import { checkChatFidelity, postProcessChatText } from '../chat'
 import { postProcessGhostText } from '../ghostText'
 import { buildOpenAiProvider } from '../providers/openai'
@@ -352,6 +353,19 @@ function scoreRoute(expected: string, answer: string): LiveResult['verdict'] {
     : { kind: 'json', ok: false, problem: `routed to ${action}, expected ${expected}` }
 }
 
+/** One chat agent step (F-5.22): JSON that the feature's parser reads as the expected kind. */
+function scoreAgent(expected: 'tool' | 'answer', answer: string): LiveResult['verdict'] {
+  try {
+    JSON.parse(answer.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not JSON' }
+  }
+  const { kind } = parseAgentReply(answer)
+  return kind === expected
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `a ${kind}, expected a ${expected}` }
+}
+
 /** A suggested synopsis (F-5.20) scores through the feature's own parser. */
 function scoreSynopsis(answer: string): LiveResult['verdict'] {
   try {
@@ -569,6 +583,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreRoute(c.scoring.expected, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'agent') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreAgent(c.scoring.expected, reply.text)
         })
         continue
       }

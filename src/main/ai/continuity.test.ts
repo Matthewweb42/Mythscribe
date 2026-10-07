@@ -636,10 +636,10 @@ describe('runContinuity, on demand (F-13.4)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Consistency check needs the AI dial at Ask or higher (it is at Off).'
+      message: 'Consistency check needs the AI switch at Ask or Auto (it is at Off).'
     })
     const on = defaultAiSettings()
-    setAiSettings(db, { ...on, dial: 3, features: { ...on.features, continuity: false } })
+    setAiSettings(db, { ...on, dial: 1, features: { ...on.features, continuity: false } })
     expect(await failure()).toEqual({
       code: 'DISABLED',
       message: 'Consistency check is turned off for this project.'
@@ -833,7 +833,7 @@ describe('runBackgroundContinuity (F-13.4)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await background()).toBeNull()
     const on = defaultAiSettings()
-    setAiSettings(db, { ...on, dial: 3, features: { ...on.features, continuity: false } })
+    setAiSettings(db, { ...on, dial: 1, features: { ...on.features, continuity: false } })
     expect(await background()).toBeNull()
     setAiSettings(db, { ...on, dial: 1 })
     expect(await runBackgroundContinuity(db, deps, { nodeId: folder, memo })).toBeNull()

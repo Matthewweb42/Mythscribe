@@ -19,7 +19,7 @@ import {
 
 const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   ...defaultAiSettings(),
-  dial: 2,
+  dial: 1,
   ...over
 })
 
@@ -56,7 +56,7 @@ afterEach(() => {
 describe('aiActionReason (2026-10-06)', () => {
   it('names the dial first, then the toggle, the scene, and the length', () => {
     expect(aiActionReason('critique', settings({ dial: 0 }), scene(500), false)).toBe(
-      "Editor's notes needs the AI dial at Ask or higher (Settings, AI tab)"
+      "Editor's notes needs the AI switch at Ask or Auto (Settings, AI tab)"
     )
     expect(
       aiActionReason(
@@ -98,7 +98,7 @@ describe('aiActionReason (2026-10-06)', () => {
 
 describe('rewriteReason (F-14.10)', () => {
   it('follows the dial, the toggle, a rewrite in progress, and the selection bounds', () => {
-    expect(rewriteReason(settings({ dial: 1 }), 50)).toContain('needs the AI dial at Suggest')
+    expect(rewriteReason(settings({ dial: 0 }), 50)).toContain('needs the AI switch at Ask or Auto')
     expect(rewriteReason(settings(), 10)).toBe(
       'Select 20–4,000 characters to rewrite them in your voice'
     )

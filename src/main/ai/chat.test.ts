@@ -127,7 +127,7 @@ beforeEach(() => {
   scene = listNodes(db).find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')?.id ?? ''
   if (!scene) throw new Error('skeleton not seeded')
   saveDocument(db, scene, doc(SCENE))
-  setAiSettings(db, { ...defaultAiSettings(), dial: 2 })
+  setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
   complete = vi.fn<Complete>()
   complete.mockResolvedValue({
     text: 'Somewhere ahead the river was rising.',
@@ -297,10 +297,10 @@ describe('runChat, Plan mode (F-5.4)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Assistant chat needs the AI dial at Ask or higher (it is at Off).'
+      message: 'Assistant chat needs the AI switch at Ask or Auto (it is at Off).'
     })
     const on = defaultAiSettings()
-    setAiSettings(db, { ...on, dial: 2, features: { ...on.features, chat: false } })
+    setAiSettings(db, { ...on, dial: 1, features: { ...on.features, chat: false } })
     expect(await failure()).toEqual({
       code: 'DISABLED',
       message: 'Assistant chat is turned off for this project.'
@@ -542,16 +542,16 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
     expect(inflightCount()).toBe(0)
   })
 
-  it('refuses with DISABLED below Suggest even though chat itself is allowed at Ask', async () => {
-    setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
+  it('refuses with DISABLED at Off; the ghost-text toggle does not gate Author mode', async () => {
+    setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure(agent())).toEqual({
       code: 'DISABLED',
-      message: 'Author mode needs the AI dial at Suggest or higher (it is at Ask).'
+      message: 'Assistant chat needs the AI switch at Ask or Auto (it is at Off).'
     })
     expect(complete).not.toHaveBeenCalled()
-    // The ghost-text toggle does not gate Agent mode: only the level does.
+    // The ghost-text toggle does not gate Agent mode: only the switch does.
     const on = defaultAiSettings()
-    setAiSettings(db, { ...on, dial: 2, features: { ...on.features, ghostText: false } })
+    setAiSettings(db, { ...on, dial: 1, features: { ...on.features, ghostText: false } })
     answers(CLEAN)
     expect((await ask(agent())).text).toBe(CLEAN)
   })

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AiDial, AiSource } from '@shared/aiSettings'
+import type { AiSwitch, AiSource } from '@shared/aiSettings'
 import type { ImportDraft } from '@shared/import'
 import type { NovelFormat, ProjectInfo, RecentProject } from '@shared/ipc/contract'
 import { ipc } from '@renderer/lib/ipc'
@@ -13,7 +13,7 @@ interface ProjectState {
   recents: RecentProject[]
   init: () => Promise<void>
   /**
-   * `aiSource` and `aiDial` are the wizard's AI source (F-15.11) and AI level (F-5.18) choices;
+   * `aiSource` and `aiSwitch` are the wizard's AI source (F-15.11) and AI level (F-5.18) choices;
    * omitted keeps the project default.
    */
   create: (
@@ -21,7 +21,7 @@ interface ProjectState {
     format: NovelFormat,
     directory?: string,
     aiSource?: AiSource,
-    aiDial?: AiDial
+    aiSwitch?: AiSwitch
   ) => Promise<ProjectInfo | null>
   open: (path?: string) => Promise<ProjectInfo | null>
   /**
@@ -77,7 +77,7 @@ export const useProjectStore = create<ProjectState>((set) => {
       if (current) void offerRecovery()
     },
 
-    create(name, format, directory, aiSource, aiDial) {
+    create(name, format, directory, aiSource, aiSwitch) {
       return run(async () => {
         await flushPendingSaves()
         const info = await ipc().invoke('project:create', {
@@ -85,7 +85,7 @@ export const useProjectStore = create<ProjectState>((set) => {
           format,
           directory,
           aiSource,
-          aiDial
+          aiSwitch
         })
         if (info) set({ current: info })
         return info

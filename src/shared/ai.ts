@@ -139,7 +139,8 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
   NETWORK: 'Check your internet connection and retry.',
   PROVIDER: 'Try again in a moment.',
   BUDGET: 'Raise the daily cap in Settings or wait until tomorrow.',
-  DISABLED: 'Turn the AI dial up in Settings, or enable the feature there.',
+  DISABLED:
+    'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
   CANCELLED: 'Send it again whenever you like.',
   SIGNED_OUT: 'Sign in on the Account tab in Settings.',
   NO_CREDIT: 'Buy credits on the Account tab in Settings.'
@@ -213,7 +214,7 @@ export const GHOST_AFTER_CHARS = 100
  * `FEATURE_INPUT_BUDGETS` in the change that builds it (F-5.3 ghost text, F-4.7 tags, F-5.6
  * summaries, F-5.4 chat, F-5.5 Author mode, F-5.7 queries, F-14.8 critique, F-5.8 embeddings,
  * F-14.10 rewrite, F-14.3 brief, F-13.4 continuity, F-14.12 proofread, F-5.19 route, F-5.20
- * synopsis and notes suggestions).
+ * synopsis and notes suggestions, F-5.22 the chat agent).
  */
 export const AI_FEATURE_IDS = [
   'ghostText',
@@ -247,7 +248,9 @@ export const AI_FEATURE_IDS = [
   // F-14.14: the learned style notes, refreshed in the background from the author's own prose.
   'voiceNotes',
   // F-14.15: the edit passes (developmental, line, copy, proofread, continuity, custom).
-  'editPass'
+  'editPass',
+  // F-5.22: the chat agent, which looks things up in the project before it answers or edits.
+  'agent'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -298,7 +301,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-14.14: up to 8 style notes of at most 160 characters each as JSON.
   voiceNotes: 400,
   // F-14.15: up to 40 changes or notes for one chunk as JSON, each a quote, a replacement, and a reason.
-  editPass: 4_000
+  editPass: 4_000,
+  // F-5.22: one step as JSON: a tool call, or the answer with citations and up to 8 edits.
+  agent: 1_500
 }
 
 /**
@@ -352,7 +357,11 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   voiceNotes: 2_500,
   // F-14.15: one chunk of up to 12,000 characters (~3,000 tokens), the rules, the instruction,
   // the voice block, and the keep list or the story bible.
-  editPass: 7_000
+  editPass: 7_000,
+  // F-5.22: per step: the rules, the voice block, the open document (synopsis, notes head,
+  // summary, caret window, selection), recent turns, and the tool results so far (each capped at
+  // 6,000 characters; the oldest are dropped first when the step would go over).
+  agent: 12_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

@@ -330,26 +330,83 @@ const WHAT_NEXT_ANSWER = JSON.stringify({
 })
 /**
  * F-5.7: the opening of the Story Intelligence prompt's system turn (`QUERY_RULES` in
- * `src/main/ai/prompts/query.v1.ts`, repeated here for the same reason). A JSON request
- * carrying it gets the canned answer below: one citation quoting a passage of the scene that
- * ranks first, one quoting a passage that is nowhere in it, and one naming a scene that was
- * never sent, so both drop rules show and the dangling `[3]` marker is stripped.
+ * `src/main/ai/prompts/query.v1.ts`, repeated here for the same reason). The panel asks the chat
+ * agent since F-5.22, but `ai:query` still answers; a JSON request carrying it gets the canned
+ * answer below: one citation quoting a passage of the scene that ranks first, one quoting a
+ * passage that is nowhere in it, and one naming a scene that was never sent.
  */
 const QUERY_SENTINEL = 'You are the Story Intelligence feature inside a novel-writing app.'
+/**
+ * F-5.22: the opening of the chat agent's rules (`AGENT_RULES` in
+ * `src/main/ai/prompts/agent.v1.ts`, repeated here for the same reason). Query questions and
+ * Auto chat turns run on the agent; the fake answers its protocol through `chatAgentReply`.
+ */
+const CHAT_AGENT_SENTINEL =
+  "You are the assistant inside a novel-writing app, working for the book's author."
+/** An Auto message the router sends to chat; the agent answers it with one edit to Scene 1. */
+const AGENT_EDIT_MESSAGE = 'Make the opening line plainer.'
+const AGENT_EDIT_ANSWER = 'Here is a plainer line.'
+/** What the edit puts in place of a sentence Scene 1 holds once. */
+const AGENT_EDIT_REPLACEMENT = 'The storm came in at dusk.'
 const QUERY_QUESTION = 'Where does the storm reach the ridge?'
 /** A recap asked in Query mode; its words rank Scene 1 first, as the question above does. */
 const RECAP_QUESTION = 'What happened on the ridge in the storm?'
 const QUERY_ANSWER_TEXT = 'She waits out the storm on the ridge [1], then crosses at dawn [3].'
 /** What the answer reads once main drops the uncited scene and strips its marker. */
 const QUERY_ANSWER_KEPT = 'She waits out the storm on the ridge [1], then crosses at dawn.'
+/**
+ * F-5.22: one step of the chat agent. Without a lookup made yet it searches (or reads Wren's
+ * sheet for the sheet question); with one made it answers: the sheet question from the sheet,
+ * the edit message (after reading Scene 1) with one text edit replacing the first sentence of
+ * at least 15 characters the scene holds exactly once, anything else with the Query answer's three
+ * citations (one real, one fabricated, one naming no document) so both drop rules show.
+ */
+function chatAgentReply(messages: { role: string; content: string }[]): string {
+  const looked = messages.filter((m) => m.role === 'user' && m.content.startsWith('Result of '))
+  const asked =
+    [...messages].reverse().find((m) => m.role === 'user' && !m.content.startsWith('Result of '))
+      ?.content ?? ''
+  if (looked.length === 0) {
+    return asked === SHEET_QUESTION
+      ? JSON.stringify({ tool: 'read_sheet', args: { name: 'Wren' } })
+      : JSON.stringify({ tool: 'search', args: { query: 'storm ridge window' } })
+  }
+  if (asked === SHEET_QUESTION) return SHEET_ANSWER
+  const seen = [...messages.map((m) => m.content)].join('\n')
+  const ref = /(n\d+) Chapter 1 › Scene 1\b/.exec(seen)?.[1] ?? 'n1'
+  if (asked === AGENT_EDIT_MESSAGE) {
+    if (looked.length === 1) return JSON.stringify({ tool: 'read_scene', args: { id: ref } })
+    const text = (looked.at(-1)?.content ?? '').split('\n').slice(2).join('\n')
+    const find =
+      text
+        .split(/(?<=[.!?])\s+/)
+        .map((sentence) => sentence.trim())
+        .find((sentence) => sentence.length >= 15 && text.split(sentence).length === 2) ?? ''
+    return JSON.stringify({
+      answer: AGENT_EDIT_ANSWER,
+      found: true,
+      citations: [],
+      edits: [{ edit: 'text', id: ref, find, replace: AGENT_EDIT_REPLACEMENT }]
+    })
+  }
+  return JSON.stringify({
+    found: true,
+    answer: QUERY_ANSWER_TEXT,
+    citations: [
+      { id: ref, quote: CRITIQUE_PRAISE_QUOTE },
+      { id: ref, quote: CRITIQUE_FABRICATED_QUOTE },
+      { id: 'n9999', quote: CRITIQUE_PRAISE_QUOTE }
+    ]
+  })
+}
+
 /** query.v3: a question about a character answered from the author's sheet alone. */
 const SHEET_QUESTION = 'What does Wren look like?'
 const SHEET_APPEARANCE = 'Grey eyes, a burn scar across the left hand.'
 const SHEET_ANSWER = JSON.stringify({
   found: true,
   answer: 'Wren has grey eyes and a burn scar across the left hand.',
-  citations: [],
-  sheets: ['Wren', 'Nobody']
+  citations: [{ sheet: 'Wren' }, { sheet: 'Nobody' }]
 })
 const QUERY_ANSWER = JSON.stringify({
   found: true,
@@ -481,6 +538,10 @@ function startFakeOpenAi(): Promise<string> {
           const query = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(QUERY_SENTINEL)
           )
+          // F-5.22: the chat agent's protocol: a lookup first, then the answer.
+          const chatAgent = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(CHAT_AGENT_SENTINEL)
+          )
           // F-5.17: What should come next? comes back as three JSON directions.
           const whatNext = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(WHAT_NEXT_SENTINEL)
@@ -561,46 +622,44 @@ function startFakeOpenAi(): Promise<string> {
                   message: {
                     role: 'assistant',
                     content: json
-                      ? route
-                        ? JSON.stringify({
-                            action: (request.messages.at(-1)?.content ?? '').includes(
-                              ROUTE_CRITIQUE_MESSAGE
-                            )
-                              ? 'critique'
-                              : 'chat',
-                            instruction: null
-                          })
-                        : synopsis
-                          ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
-                          : notesSuggest
-                            ? JSON.stringify({ points: SUGGESTED_POINTS })
-                            : whatNext
-                              ? WHAT_NEXT_ANSWER
-                              : editPass
-                                ? EDIT_PASS_ANSWER
-                                : proofread
-                                  ? PROOFREAD_ANSWER
-                                  : continuity
-                                    ? continuityAnswer(request.messages)
-                                    : importStructure
-                                      ? IMPORT_STRUCTURE_ANSWER
-                                      : critique
-                                        ? CRITIQUE_ANSWER
-                                        : betaReader
-                                          ? BETA_READER_ANSWER
-                                          : query
-                                            ? request.messages.some((m) =>
-                                                m.content.includes('Wren (character):')
-                                              )
-                                              ? SHEET_ANSWER
-                                              : QUERY_ANSWER
-                                            : brief
-                                              ? BRIEF_ANSWER
-                                              : summary
-                                                ? SUMMARY_ANSWER
-                                                : regen
-                                                  ? '{"tags":["antagonist","protagonist"]}'
-                                                  : '{"tags":["dark-forest","protagonist"]}'
+                      ? chatAgent
+                        ? chatAgentReply(request.messages)
+                        : route
+                          ? JSON.stringify({
+                              action: (request.messages.at(-1)?.content ?? '').includes(
+                                ROUTE_CRITIQUE_MESSAGE
+                              )
+                                ? 'critique'
+                                : 'chat',
+                              instruction: null
+                            })
+                          : synopsis
+                            ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
+                            : notesSuggest
+                              ? JSON.stringify({ points: SUGGESTED_POINTS })
+                              : whatNext
+                                ? WHAT_NEXT_ANSWER
+                                : editPass
+                                  ? EDIT_PASS_ANSWER
+                                  : proofread
+                                    ? PROOFREAD_ANSWER
+                                    : continuity
+                                      ? continuityAnswer(request.messages)
+                                      : importStructure
+                                        ? IMPORT_STRUCTURE_ANSWER
+                                        : critique
+                                          ? CRITIQUE_ANSWER
+                                          : betaReader
+                                            ? BETA_READER_ANSWER
+                                            : query
+                                              ? QUERY_ANSWER
+                                              : brief
+                                                ? BRIEF_ANSWER
+                                                : summary
+                                                  ? SUMMARY_ANSWER
+                                                  : regen
+                                                    ? '{"tags":["antagonist","protagonist"]}'
+                                                    : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -1435,20 +1494,19 @@ test('create, close, reopen a project on disk', async () => {
     'aria-selected',
     'true'
   )
-  // F-14.4: the project's AI dial installs at Off, so every feature toggle is locked; Suggest
-  // unlocks ghost text, the level lands in the project's settings table, and it survives
+  // F-14.4, F-5.21: the project's AI switch installs at Off, so every feature toggle is locked;
+  // Ask unlocks them all, the position lands in the project's settings table, and it survives
   // closing the dialog. Back to Off before the key steps so nothing below depends on it.
-  const dial = settingsDialog.getByRole('radiogroup', { name: 'AI dial' })
+  const dial = settingsDialog.getByRole('radiogroup', { name: 'AI switch' })
   const ghostTextToggle = settingsDialog.getByRole('checkbox', { name: /^Ghost text/ })
   await expect(dial.getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true')
   await expect(ghostTextToggle).toBeDisabled()
-  await expect(ghostTextToggle).toHaveAccessibleName('Ghost text (needs Suggest)')
-  expect((await aiSettings()).dial).toBe(0)
-  await dial.getByRole('radio', { name: 'Suggest' }).click()
-  await expect(dial.getByRole('radio', { name: 'Suggest' })).toHaveAttribute('aria-checked', 'true')
-  await expect(ghostTextToggle).toBeEnabled()
   await expect(ghostTextToggle).toHaveAccessibleName('Ghost text')
-  await expect.poll(async () => (await aiSettings()).dial).toBe(2)
+  expect((await aiSettings()).dial).toBe(0)
+  await dial.getByRole('radio', { name: 'Ask' }).click()
+  await expect(dial.getByRole('radio', { name: 'Ask' })).toHaveAttribute('aria-checked', 'true')
+  await expect(ghostTextToggle).toBeEnabled()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(1)
   await expect(
     settingsDialog.getByRole('table', { name: 'What each AI feature sends' }).getByRole('row', {
       name: /^Ghost text /
@@ -1458,7 +1516,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(settingsDialog).toHaveCount(0)
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await expect(dial.getByRole('radio', { name: 'Suggest' })).toHaveAttribute('aria-checked', 'true')
+  await expect(dial.getByRole('radio', { name: 'Ask' })).toHaveAttribute('aria-checked', 'true')
   await expect(ghostTextToggle).toBeEnabled()
   await dial.getByRole('radio', { name: 'Off' }).click()
   await expect(ghostTextToggle).toBeDisabled()
@@ -3263,7 +3321,7 @@ test('create, close, reopen a project on disk', async () => {
   await recommend.click()
   const recommendResult = tagBar.getByTestId('tag-recommend-result')
   await expect(recommendResult).toHaveText(
-    'Tag suggestions needs the AI dial at Ask or higher (it is at Off). Turn the AI dial up in Settings, or enable the feature there.'
+    'Tag suggestions needs the AI switch at Ask or Auto (it is at Off). Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
   )
   expect(openAiRequests).toHaveLength(requestsBefore)
   await page.getByRole('button', { name: 'Settings' }).click()
@@ -3378,14 +3436,14 @@ test('create, close, reopen a project on disk', async () => {
     /Built from [1-9]\d* words of manuscript, 1 of 12 marked exemplars/
   )
 
-  // F-5.3: VibeWrite. Suggest unlocks ghost text; the idle delay drops to 0.5 s in the AI tab
+  // F-5.3: VibeWrite. Ask allows ghost text; the idle delay drops to 0.5 s in the AI tab
   // and lands in the settings table. The toolbar toggle arms the mode (persisted per project).
   // Typing into Scene 1 and pausing brings the fake server's continuation as ghost text at the
   // caret (a widget, not document text); Tab accepts it into the document and the ledger gains
   // a ghostText request. A second suggestion is dismissed with Escape and inserts nothing.
   // The mode is turned off again before the dial and the key are restored below.
-  await dial.getByRole('radio', { name: 'Suggest' }).click()
-  await expect.poll(async () => (await aiSettings()).dial).toBe(2)
+  await dial.getByRole('radio', { name: 'Ask' }).click()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(1)
   const idleDelay = settingsDialog.getByLabel('Ghost text idle delay (s)', { exact: true })
   await expect(idleDelay).toHaveValue('1.5')
   await idleDelay.fill('0.5')
@@ -4003,7 +4061,7 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
 
-  // F-5.4: the assistant panel. Ctrl+K opens it (the dial is still at Suggest with the key
+  // F-5.4: the assistant panel. Ctrl+K opens it (the switch is still at Ask with the key
   // saved). A Plan question streams its answer into the chat with the cost line, and the
   // request carries the scene's text; the tab takes the question as its title. Author mode
   // places a two-paragraph answer in the editor as ghost text with a notice in the chat; Tab
@@ -4032,7 +4090,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(assistant.getByRole('button', { name: 'Clear conversation' })).toHaveCount(0)
   /** Sends `message` as an Auto turn in the active conversation. */
   const sendAuto = async (message: string): Promise<void> => {
-    await assistant.getByRole('radio', { name: 'Auto' }).click()
+    await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
     await messageBox.fill(message)
     await messageBox.press('Enter')
   }
@@ -4097,7 +4155,7 @@ test('create, close, reopen a project on disk', async () => {
       .filter((body) => body.messages[0]?.content.startsWith(WHAT_NEXT_SENTINEL))
       .map((body) => body.messages)
   const whatNextBefore = whatNextBodies().length
-  await assistant.getByRole('radio', { name: 'Auto' }).click()
+  await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
   const suggestion = assistant.getByTestId('assistant-suggestion')
   await suggestion.hover()
   const suggested = (await suggestion.textContent()) ?? ''
@@ -4130,7 +4188,7 @@ test('create, close, reopen a project on disk', async () => {
   })
   await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
   await expect(turns).toHaveCount(0)
-  await expect(assistant.getByRole('radio', { name: 'Auto' })).toHaveAttribute(
+  await expect(assistant.getByRole('radio', { name: 'Auto', exact: true })).toHaveAttribute(
     'aria-checked',
     'true'
   )
@@ -4234,7 +4292,7 @@ test('create, close, reopen a project on disk', async () => {
   // gains a critique request. Close settles the proposal.
   await expect(page.getByRole('button', { name: "Editor's notes" })).toHaveCount(0)
   const critiqueBodiesBefore = openAiChatBodies.length
-  await assistant.getByRole('radio', { name: 'Auto' }).click()
+  await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
   await messageBox.fill(ROUTE_CRITIQUE_MESSAGE)
   await messageBox.press('Enter')
   const critiquePanel = page.getByTestId('critique-panel')
@@ -4735,12 +4793,11 @@ test('create, close, reopen a project on disk', async () => {
   await betaReaderPanel.getByTestId('beta-reader-close').click()
   await expect(betaReaderPanel).toHaveCount(0)
 
-  // F-5.7: Story Intelligence. The assistant's third mode asks about the whole manuscript: main
-  // ranks the scenes on the question's words (Scene 1 carries both "storm" and "ridge", so it
-  // goes out in full as [1]), and the answer's citations are checked against the text that was
-  // sent. The fabricated quote and the one naming a scene that was never sent are dropped, and
-  // the `[3]` marker they left behind is stripped. Clicking the surviving citation opens the
-  // scene and selects the passage in the editor.
+  // F-5.7, F-5.22: Story Intelligence on the chat agent. Query mode asks about the whole
+  // project: the agent looks first (a search, shown live as a step on the waiting turn), then
+  // answers, and its citations are checked against the documents. The fabricated quote and the
+  // one naming no document are dropped, and the `[3]` marker they left behind is stripped.
+  // Clicking the surviving citation opens the scene and selects the passage in the editor.
   await dismissToasts()
   await expect(assistant).toBeVisible()
   // The proofread and beta-reader turns above are in the current conversation: start a fresh one.
@@ -4765,14 +4822,18 @@ test('create, close, reopen a project on disk', async () => {
   await expect(citation).toContainText('Chapter 1 › Scene 1')
   await expect(queryTurn).not.toContainText(CRITIQUE_FABRICATED_QUOTE)
   await expect(queryTurn.getByTestId('chat-turn-cost')).toContainText('gpt-5.4 ·')
-  expect(openAiChatBodies).toHaveLength(queryBodiesBefore + 1)
-  const querySystem = openAiChatBodies.at(-1)?.messages[0]
+  // The lookup it made folds away under the answer.
+  await expect(queryTurn.getByText('Looked up one thing')).toBeVisible()
+  expect(openAiChatBodies).toHaveLength(queryBodiesBefore + 2)
+  const querySystem = openAiChatBodies.at(-2)?.messages[0]
   expect(querySystem?.role).toBe('system')
-  expect(querySystem?.content.startsWith(QUERY_SENTINEL)).toBe(true)
-  expect(querySystem?.content).toContain(CRITIQUE_PRAISE_QUOTE)
-  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe(QUERY_QUESTION)
+  expect(querySystem?.content.startsWith(CHAT_AGENT_SENTINEL)).toBe(true)
+  expect(openAiChatBodies.at(-2)?.messages.at(-1)?.content).toBe(QUERY_QUESTION)
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toMatch(
+    /^Result of search:\nScenes:\nn\d+ Chapter 1 › Scene 1: /
+  )
   const afterQuery = await usageSummary()
-  expect(afterQuery.byFeature.find((f) => f.feature === 'query')).toMatchObject({ requests: 1 })
+  expect(afterQuery.byFeature.find((f) => f.feature === 'agent')).toMatchObject({ requests: 2 })
   // The citation opens its scene and selects the cited passage there.
   await citation.click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
@@ -4780,7 +4841,7 @@ test('create, close, reopen a project on disk', async () => {
     .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''), { timeout: 5_000 })
     .toBe(CRITIQUE_PRAISE_QUOTE)
   // A recap is a Query question in the chat (2026-10-06: the What happened here? action left with
-  // the Actions menu). The canned answer's citation of Scene 1 survives.
+  // the Actions menu). The open scene rides along; the canned answer's citation survives.
   const recapBodiesBefore = openAiChatBodies.length
   await messageBox.fill(RECAP_QUESTION)
   await messageBox.press('Enter')
@@ -4788,12 +4849,14 @@ test('create, close, reopen a project on disk', async () => {
   await expect(turns.nth(2)).toContainText(RECAP_QUESTION)
   await expect(turns.nth(3)).toContainText(QUERY_ANSWER_KEPT)
   await expect(turns.nth(3).getByTestId('query-citation')).toContainText('Chapter 1 › Scene 1')
-  expect(openAiChatBodies).toHaveLength(recapBodiesBefore + 1)
-  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe(RECAP_QUESTION)
-  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toMatch(/\[1\] Chapter 1 › Scene 1/)
-  // query.v3: a question the author's own sheet answers. Wren's appearance is only on her sheet;
-  // the sheet goes out as a source, the answer names it, and the panel lists it under "From your
-  // notes" instead of flagging the answer as uncited. A name the model invents is ignored.
+  expect(openAiChatBodies).toHaveLength(recapBodiesBefore + 2)
+  expect(openAiChatBodies.at(-2)?.messages.at(-1)?.content).toBe(RECAP_QUESTION)
+  expect(openAiChatBodies.at(-2)?.messages[0]?.content).toMatch(
+    /Open document n\d+: Chapter 1 › Scene 1 \(scene\)/
+  )
+  // A question the author's own sheet answers. Wren's appearance is only on her sheet; the agent
+  // reads it, cites it, and the panel lists it under "From your notes" instead of flagging the
+  // answer as uncited. A sheet the model invents is ignored.
   const wren = await page.evaluate(
     (appearance) =>
       window.mythscribe.invoke('entity:create', {
@@ -4812,13 +4875,69 @@ test('create, close, reopen a project on disk', async () => {
   await expect(sheetTurn.getByTestId('query-uncited')).toHaveCount(0)
   await expect(sheetTurn.getByText('From your notes')).toBeVisible()
   await expect(sheetTurn.getByTestId('query-sheet')).toHaveText(['Wren'])
-  const sheetSystem = openAiChatBodies.at(-1)?.messages[0]?.content ?? ''
-  expect(sheetSystem).toContain(`Wren (character): Appearance: ${SHEET_APPEARANCE}`)
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toContain(
+    `appearance (Appearance): ${SHEET_APPEARANCE}`
+  )
   const removed = await page.evaluate(
     (id) => window.mythscribe.invoke('entity:delete', { id }) as Promise<IpcResult<null>>,
     wren.data.id
   )
   if (!removed.ok) throw new Error(`entity:delete failed: ${removed.error.message}`)
+
+  // F-5.21, F-5.22: the one AI switch sits under the message box, and the chat edits the book.
+  // At Ask an Auto message the router sends to chat comes back with its edit waiting: the
+  // current text struck through, the new text marked, Apply and Skip. Apply changes Scene 1 in
+  // the editor (AI-origin marked) and leaves a log line with Undo, which puts it back. At Auto the
+  // same message applies its edit at once. Back to Ask, the text restored, for the steps below.
+  await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
+  await expect(turns).toHaveCount(0)
+  const aiSwitch = assistant.getByRole('radiogroup', { name: 'AI switch' })
+  await expect(aiSwitch.getByRole('radio', { name: 'AI Ask' })).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
+  await messageBox.fill(AGENT_EDIT_MESSAGE)
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(2)
+  const editTurn = turns.nth(1)
+  await expect(editTurn).toContainText(AGENT_EDIT_ANSWER)
+  const editCard = editTurn.getByTestId('agent-change')
+  await expect(editCard).toHaveAttribute('data-status', 'pending')
+  await expect(editCard.locator('del').first()).toBeVisible()
+  await expect(editCard.locator('ins').first()).toBeVisible()
+  const sceneBefore = await documentTextWithoutGhost()
+  expect(sceneBefore).not.toContain(AGENT_EDIT_REPLACEMENT)
+  // The lookups it made fold away under the answer and open on a click.
+  await editTurn.getByText('Looked up 2 things').click()
+  await expect(editTurn.getByTestId('agent-step')).toHaveText([
+    'Searching “storm ridge window”…',
+    'Reading Chapter 1 › Scene 1…'
+  ])
+  await editCard.getByTestId('agent-change-apply').click()
+  await expect(editCard).toHaveAttribute('data-status', 'applied')
+  await expect(editCard).toContainText(`Changed Chapter 1 › Scene 1: “${AGENT_EDIT_REPLACEMENT}”`)
+  await expect(editor).toContainText(AGENT_EDIT_REPLACEMENT)
+  await expect(editor.locator('.ai-origin', { hasText: AGENT_EDIT_REPLACEMENT })).toHaveCount(1)
+  await editCard.getByTestId('agent-change-undo').click()
+  await expect(editCard).toHaveAttribute('data-status', 'undone')
+  await expect.poll(() => documentTextWithoutGhost()).toBe(sceneBefore)
+  await aiSwitch.getByRole('radio', { name: 'AI Auto' }).click()
+  await expect.poll(async () => (await aiSettings()).auto).toBe(true)
+  await messageBox.fill(AGENT_EDIT_MESSAGE)
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(4)
+  const autoCard = turns.nth(3).getByTestId('agent-change')
+  await expect(autoCard).toHaveAttribute('data-status', 'applied')
+  await expect(editor).toContainText(AGENT_EDIT_REPLACEMENT)
+  await autoCard.getByTestId('agent-change-undo').click()
+  await expect(autoCard).toHaveAttribute('data-status', 'undone')
+  await expect.poll(() => documentTextWithoutGhost()).toBe(sceneBefore)
+  await aiSwitch.getByRole('radio', { name: 'AI Ask' }).click()
+  await expect.poll(async () => (await aiSettings()).auto).toBe(false)
+  // Back to the Query conversation the steps below continue.
+  await assistant.getByRole('tab', { name: QUERY_QUESTION }).click()
+  await expect(turns).toHaveCount(6)
 
   // F-15.4: MythScribe Cloud. Signing in again (the account step signed out), the AI tab's
   // source picker points this project at the proxy; the next assistant question streams through
@@ -5224,11 +5343,11 @@ test('create, close, reopen a project on disk', async () => {
       ''
     ].join('\n')
   )
-  // F-12.3 needs the dial at Suggest and a key, which the steps above turned off.
+  // F-12.3 needs the switch at Ask and a key, which the steps above turned off.
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await dial.getByRole('radio', { name: 'Suggest' }).click()
-  await expect.poll(async () => (await aiSettings()).dial).toBe(2)
+  await dial.getByRole('radio', { name: 'Ask' }).click()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(1)
   await keyField.fill(ACCEPTED_KEY)
   await settingsDialog.getByRole('button', { name: 'Save' }).click()
   await expect(keyHint).toHaveText('Key saved: sk-…wxyz')

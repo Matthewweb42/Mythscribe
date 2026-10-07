@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { FileInput, FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
-import { AI_DATA_SHARING, type AiDial, type AiSource } from '@shared/aiSettings'
+import type { AiSource, AiSwitch } from '@shared/aiSettings'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { formatLabel, type HierarchyLevel } from '@shared/labels'
 import type { DockPanelId } from '@shared/dock'
@@ -538,16 +538,16 @@ function WelcomeScreen(): React.JSX.Element {
     name: string,
     format: NovelFormat,
     aiSource: AiSource,
-    aiDial: AiDial
+    aiSwitch: AiSwitch
   ): Promise<void> => {
-    const info = await create(name, format, undefined, aiSource, aiDial)
+    const info = await create(name, format, undefined, aiSource, aiSwitch)
     if (!info) return
     toast.success(`Created "${info.name}"`)
     // F-5.18: a project created with AI on arrives in the assisted workflow, the assistant panel
     // open (a new conversation starts in Query mode, the quick actions above it). Only a new
     // project does this; opening an existing one leaves the layout as the author left it.
     const layout = useLayoutStore.getState()
-    if (aiDial >= AI_DATA_SHARING.query.minDial && !layout.layout.assistant.open) {
+    if (aiSwitch !== 'off' && !layout.layout.assistant.open) {
       layout.toggle('assistant')
     }
   }

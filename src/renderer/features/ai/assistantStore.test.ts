@@ -7,9 +7,10 @@ import {
   type Conversation,
   type Conversations
 } from '@shared/chat'
+import { defaultAiSettings } from '@shared/aiSettings'
 import type {
+  AiAgentResult,
   AiChatResult,
-  AiQueryResult,
   AiWhatNextResult,
   Channel,
   EventName,
@@ -47,6 +48,7 @@ import {
   useAssistantStore
 } from './assistantStore'
 import { resetAiActivityStore, useAiActivityStore } from './aiActivityStore'
+import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
 import { resetProposalStore } from './proposalStore'
 
 interface PendingSet {
@@ -61,8 +63,8 @@ interface PendingChat {
   reject: (err: Error) => void
 }
 interface PendingQuery {
-  input: Input<'ai:query'>
-  resolve: (result: AiQueryResult) => void
+  input: Input<'ai:agent'>
+  resolve: (result: AiAgentResult) => void
   reject: (err: Error) => void
 }
 interface PendingWhatNext {
@@ -80,7 +82,11 @@ let settles: Input<'proposal:settle'>[]
 let cancels: string[]
 /** The `ai:chatDelta` listener the store registered, if any. */
 let deltaListener: ((payload: EventPayload<'ai:chatDelta'>) => void) | null
+/** The `ai:agentStep` listener the store registered, if any (F-5.22). */
+let stepListener: ((payload: EventPayload<'ai:agentStep'>) => void) | null
 let unsubscribed: number
+/** The tree renames the agent's edits asked for (F-5.22). */
+let renames: Input<'tree:rename'>[]
 
 /**
  * `conversations:get` answers with `stored`; `conversations:set`, `ai:chat`, and `ai:query`
@@ -105,10 +111,10 @@ function deferredClient(stored: Conversations): IpcClient {
           })
         })
       }
-      if (channel === 'ai:query') {
+      if (channel === 'ai:agent') {
         return new Promise<Output<C>>((resolve, reject) => {
           queries.push({
-            input: input as Input<'ai:query'>,
+            input: input as Input<'ai:agent'>,
             resolve: (result) => resolve(result as Output<C>),
             reject
           })
@@ -127,6 +133,27 @@ function deferredClient(stored: Conversations): IpcClient {
         settles.push(input as Input<'proposal:settle'>)
         return null as Output<C>
       }
+      if (channel === 'ai:route') {
+        const { requestId } = input as Input<'ai:route'>
+        return {
+          ok: true,
+          action: 'chat',
+          instruction: null,
+          routedBy: 'local',
+          usage: { inputTokens: 0, outputTokens: 0 },
+          costUsd: 0,
+          cached: false,
+          model: null,
+          requestId
+        } as Output<C>
+      }
+      if (channel === 'tree:rename') {
+        const rename = input as Input<'tree:rename'>
+        renames.push(rename)
+        const node = treeFixture.find((n) => n.id === rename.id)
+        if (!node) throw new Error('unknown node')
+        return { ...node, title: rename.title } as Output<C>
+      }
       if (channel === 'ai:cancel') {
         cancels.push((input as Input<'ai:cancel'>).requestId)
         return { cancelled: true } as Output<C>
@@ -137,9 +164,13 @@ function deferredClient(stored: Conversations): IpcClient {
       if (event === 'ai:chatDelta') {
         deltaListener = listener as (payload: EventPayload<'ai:chatDelta'>) => void
       }
+      if (event === 'ai:agentStep') {
+        stepListener = listener as (payload: EventPayload<'ai:agentStep'>) => void
+      }
       return () => {
         unsubscribed++
-        deltaListener = null
+        if (event === 'ai:chatDelta') deltaListener = null
+        if (event === 'ai:agentStep') stepListener = null
       }
     }
   }
@@ -163,7 +194,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       mode: null,
       query: null,
       directions: null,
-      action: null
+      action: null,
+      agent: null
     },
     {
       id: 'm-2',
@@ -177,7 +209,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       mode: 'plan',
       query: null,
       directions: null,
-      action: null
+      action: null,
+      agent: null
     }
   ],
   created: '2026-09-15T10:00:00.000Z',
@@ -234,8 +267,11 @@ beforeEach(() => {
   settles = []
   cancels = []
   deltaListener = null
+  stepListener = null
   unsubscribed = 0
+  renames = []
   resetAssistantStore()
+  resetAiSettingsStore()
   resetDocumentStore()
   resetActiveEditorStore()
   resetAiActivityStore()
@@ -248,6 +284,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   resetAssistantStore()
+  resetAiSettingsStore()
   resetDocumentStore()
   resetActiveEditorStore()
   resetAiActivityStore()
@@ -327,8 +364,9 @@ describe('useAssistantStore load and persistence (F-5.4)', () => {
     store().setMode('agent')
     store().clear()
     expect(store().conversations).toBeNull()
-    expect(unsubscribed).toBe(1)
+    expect(unsubscribed).toBe(2)
     expect(deltaListener).toBeNull()
+    expect(stepListener).toBeNull()
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(0)
   })
@@ -443,7 +481,8 @@ describe('useAssistantStore send, Plan mode (F-5.4)', () => {
       mode: null,
       query: null,
       directions: null,
-      action: null
+      action: null,
+      agent: null
     }))
     setIpcClient(
       deferredClient({
@@ -730,8 +769,8 @@ describe('useAssistantStore send, Author mode (F-5.4; Agent until F-5.8)', () =>
   })
 })
 
-describe('useAssistantStore send, Query mode (F-5.7)', () => {
-  type QueryOk = Extract<AiQueryResult, { ok: true }>
+describe('useAssistantStore send, Query mode (F-5.7, on the chat agent since F-5.22)', () => {
+  type AgentOk = Extract<AiAgentResult, { ok: true }>
 
   const CITATION = {
     nodeId: 'sc-1',
@@ -740,14 +779,13 @@ describe('useAssistantStore send, Query mode (F-5.7)', () => {
     quote: 'Rain followed.'
   }
 
-  const queryOk = (requestId: string, over: Partial<QueryOk> = {}): AiQueryResult => ({
+  const QUERY = { found: true, uncited: false, citations: [CITATION], sheets: [], also: [] }
+  const queryOk = (requestId: string, over: Partial<AgentOk> = {}): AiAgentResult => ({
     ok: true,
     answer: 'She waits for the storm [1].',
-    found: true,
-    uncited: false,
-    sheets: [],
-    citations: [CITATION],
-    also: [{ nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' }],
+    query: QUERY,
+    steps: [{ tool: 'search', label: 'Searching “storm”…' }],
+    changes: [],
     dropped: 1,
     usage: { inputTokens: 900, outputTokens: 60 },
     costUsd: 0.0009,
@@ -767,7 +805,7 @@ describe('useAssistantStore send, Query mode (F-5.7)', () => {
     return Object.assign(request, { done: asking })
   }
 
-  it('asks ai:query with the open scene and the recent history, and fills the turn with the answer, its cost, and its citations', async () => {
+  it('asks ai:agent read-only with the open scene and the recent history, shows its lookups live, and fills the turn with the answer, its cost, and its citations', async () => {
     await store().load()
     store().setMode('query')
     const request = await askAndCapture('  Where does the storm break?  ')
@@ -779,12 +817,18 @@ describe('useAssistantStore send, Query mode (F-5.7)', () => {
         { role: 'user', content: 'Why the ridge?' },
         { role: 'assistant', content: 'Because Mara wants the view.' }
       ],
+      access: 'read',
+      focus: { beforeCaret: '', selection: '' },
       requestId: expect.any(String) as string
     })
     expect(useAiActivityStore.getState().inflight).toEqual({
-      [request.input.requestId]: { feature: 'query', startedAt: expect.any(Number) as number }
+      [request.input.requestId]: { feature: 'agent', startedAt: expect.any(Number) as number }
     })
     expect(active().messages[3]).toMatchObject({ role: 'assistant', content: '', mode: 'query' })
+    const step = { tool: 'search', label: 'Searching “storm”…' } as const
+    stepListener?.({ requestId: request.input.requestId, step })
+    stepListener?.({ requestId: 'someone-else', step })
+    expect(store().agentSteps).toEqual({ [request.input.requestId]: [step] })
 
     request.resolve(queryOk(request.input.requestId, { cached: true }))
     await settle()
@@ -799,13 +843,10 @@ describe('useAssistantStore send, Query mode (F-5.7)', () => {
       costUsd: 0.0009,
       usage: { inputTokens: 900, outputTokens: 60 },
       proposalId: `prop-${request.input.requestId}`,
-      query: {
-        found: true,
-        uncited: false,
-        citations: [CITATION],
-        also: [{ nodeId: 'sc-2', title: 'Chapter 2 › Scene 2' }]
-      }
+      query: QUERY,
+      agent: { access: 'read', steps: [step], changes: [] }
     })
+    expect(store().agentSteps).toEqual({})
     expect(store().cached[answer?.id ?? '']).toBe(true)
     expect(settles).toEqual([])
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
@@ -824,9 +865,7 @@ describe('useAssistantStore send, Query mode (F-5.7)', () => {
     request.resolve(
       queryOk(request.input.requestId, {
         answer: `${QUERY_NOT_FOUND} The scenes never name an owner.`,
-        found: false,
-        citations: [],
-        also: []
+        query: { ...QUERY, found: false, citations: [] }
       })
     )
     await settle()
@@ -885,6 +924,83 @@ describe('useAssistantStore send, Query mode (F-5.7)', () => {
       { id: `prop-${request?.input.requestId}`, status: 'rejected', note: null }
     ])
     expect(toasts()).toEqual([])
+  })
+})
+
+describe('useAssistantStore agent edits (F-5.22)', () => {
+  const RENAME = {
+    kind: 'rename',
+    nodeId: 'sc-1',
+    title: 'Scene 1',
+    after: 'The ridge'
+  } as const
+  const DELETE = { kind: 'delete', target: 'node', id: 'sc-2', name: 'Scene 2' } as const
+
+  const agentOk = (requestId: string): AiAgentResult => ({
+    ok: true,
+    answer: 'Renamed it.',
+    query: null,
+    steps: [],
+    changes: [
+      { edit: RENAME, violation: null },
+      { edit: DELETE, violation: null }
+    ],
+    dropped: 0,
+    usage: { inputTokens: 900, outputTokens: 60 },
+    costUsd: 0.0009,
+    cached: false,
+    model: 'gpt-fake',
+    proposalId: `prop-${requestId}`,
+    requestId
+  })
+
+  /** An Auto turn the router sends to chat, so the agent runs with write access and answers with edits. */
+  async function answerWithEdits(auto: boolean): Promise<string> {
+    useTreeStore.setState(buildIndex(treeFixture))
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1, auto } })
+    await store().load()
+    store().setMode('auto')
+    const asking = store().send('Rename the first scene.')
+    await settle()
+    const request = queries[0]
+    if (!request) throw new Error('nothing was asked')
+    expect(request.input.access).toBe('write')
+    request.resolve(agentOk(request.input.requestId))
+    await asking
+    await settle()
+    return active().messages.at(-1)?.id ?? ''
+  }
+
+  const changes = (): { status: string; error: string | null }[] =>
+    (active().messages.at(-1)?.agent?.changes ?? []).map(({ status, error }) => ({ status, error }))
+
+  it('at Ask every edit waits; Apply runs it through the tree store, Skip leaves the book alone, and the proposal settles once none waits', async () => {
+    const messageId = await answerWithEdits(false)
+    expect(changes()).toEqual([
+      { status: 'pending', error: null },
+      { status: 'pending', error: null }
+    ])
+    expect(renames).toEqual([])
+    const [rename, remove] = active().messages.at(-1)?.agent?.changes ?? []
+    await store().applyChange(messageId, rename?.id ?? '')
+    expect(renames).toEqual([{ id: 'sc-1', title: 'The ridge' }])
+    expect(useTreeStore.getState().byId['sc-1']?.title).toBe('The ridge')
+    expect(settles).toEqual([])
+    store().skipChange(messageId, remove?.id ?? '')
+    expect(changes().map((c) => c.status)).toEqual(['applied', 'skipped'])
+    const proposalId = active().messages.at(-1)?.proposalId
+    expect(settles).toEqual([{ id: proposalId, status: 'acceptedPart', note: null }])
+
+    await store().undoChange(messageId, rename?.id ?? '')
+    expect(renames.at(-1)).toEqual({ id: 'sc-1', title: 'Scene 1' })
+    expect(changes().map((c) => c.status)).toEqual(['undone', 'skipped'])
+  })
+
+  it('at Auto applies every edit but a deletion at once, and the deletion still asks', async () => {
+    await answerWithEdits(true)
+    expect(renames).toEqual([{ id: 'sc-1', title: 'The ridge' }])
+    expect(changes().map((c) => c.status)).toEqual(['applied', 'pending'])
+    expect(settles).toEqual([])
   })
 })
 
@@ -1105,7 +1221,7 @@ describe('useAssistantStore quick actions (F-5.17)', () => {
     expect(toasts()).toHaveLength(2)
   })
 
-  it('recap asks a pinned Query turn about the scene, or the selection, whatever the conversation mode', async () => {
+  it('recap asks a Query turn about the scene, or the selection, whatever the conversation mode', async () => {
     useActiveEditorStore.getState().set('sc-1', editor)
     await store().load()
     expect(active().mode).toBe('plan')
@@ -1115,7 +1231,7 @@ describe('useAssistantStore quick actions (F-5.17)', () => {
     expect(queries[0]?.input).toMatchObject({
       nodeId: 'sc-1',
       message: RECAP_SCENE_QUESTION,
-      pinActive: true
+      access: 'read'
     })
     expect(active().messages.at(-1)).toMatchObject({ role: 'assistant', mode: 'query' })
     expect(active().mode).toBe('plan')
@@ -1130,16 +1246,6 @@ describe('useAssistantStore quick actions (F-5.17)', () => {
     )
     queries[1]?.reject(new Error('offline'))
     await again
-  })
-
-  it('a plain Query send carries no pin', async () => {
-    await store().load()
-    store().setMode('query')
-    const asking = store().send('Where is Mara?')
-    await settle()
-    expect(queries[0]?.input).not.toHaveProperty('pinActive')
-    queries[0]?.reject(new Error('offline'))
-    await asking
   })
 
   it('writeDirection sends the direction as an Author turn and places the answer as ghost text', async () => {

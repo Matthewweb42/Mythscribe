@@ -1,6 +1,5 @@
 import { estimateTokens, inputBudget } from '@shared/ai'
 import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
-import { AI_DATA_SHARING, AI_DIAL_LABEL } from '@shared/aiSettings'
 import type { ChatMode } from '@shared/chat'
 import { resolvePreset } from '@shared/presets'
 import { computeStylometrics, type Stylometrics } from '@shared/stylometry'
@@ -24,7 +23,7 @@ import { regenRequestId } from './inflight'
 import type { ChatTurn } from './prompts/chat.v1'
 import { buildChatPromptV5, type BuildChatPromptV5Input } from './prompts/chat.v5'
 import { buildChatRegenPromptV5 } from './prompts/chatRegen.v5'
-import { AiCancelledError, AiDisabledError, type CompletionUsage } from './providers/types'
+import { AiCancelledError, type CompletionUsage } from './providers/types'
 import {
   runAiRequest,
   runAiStream,
@@ -71,10 +70,10 @@ export interface ChatResult {
 export const CHAT_FRAGMENT_MAX_WORDS = 200
 
 /**
- * The assistant use case (F-5.4). The gate first: `chat` must be allowed (Ask), and Agent mode
- * additionally needs the dial at the ghost-text level (Suggest), since its draft renders
- * through ghost text; the toggle for ghost text itself does not apply, so the level is checked
- * directly. Then the context (`buildChatContext`: the scene's text, metadata, and brief
+ * The assistant use case (F-5.4). The gate first: `chat` must be allowed (Ask or Auto; since
+ * the one switch, F-5.21, Author mode needs nothing more, since its draft is a ghost-text
+ * proposal the author accepts or not; the toggle for ghost text itself does not apply).
+ * Then the context (`buildChatContext`: the scene's text, metadata, and brief
  * (F-14.3, Agent mode only), the notes behind the message's `#name` references), and, in Agent mode, the voice block (F-14.1) and
  * the active preset (F-5.2) and the scene steer (F-14.13), and in both modes the side panel's synopsis and notes
  * (F-5.20, `buildScenePanel`). The prompt is `chat.v5`; when its estimate is over the chat
@@ -104,14 +103,6 @@ export async function runChat(
   const settings = getAiSettings(db)
   assertFeatureAllowed(settings, 'chat')
   const agent = input.mode === 'agent'
-  if (agent) {
-    const { minDial } = AI_DATA_SHARING.ghostText
-    if (settings.dial < minDial) {
-      throw new AiDisabledError(
-        `Author mode needs the AI dial at ${AI_DIAL_LABEL[minDial]} or higher (it is at ${AI_DIAL_LABEL[settings.dial]}).`
-      )
-    }
-  }
 
   const context = buildChatContext(db, { nodeId: input.nodeId, message: input.message })
   const preset = agent ? resolvePreset(getWritingPresets(db)) : null

@@ -61,6 +61,17 @@ interface TreeState extends TreeIndex {
    * real title. No-op when there is no valid placement. Errors propagate.
    */
   createFromTemplate: (templateId: MatterTemplateId, targetId: string) => Promise<void>
+  /**
+   * Creates a titled chapter or scene under `parentId`, right after `afterId` (null: last), and
+   * answers it, leaving the selection and inline rename alone (F-5.22, the chat agent's edits).
+   * Errors propagate.
+   */
+  createIn: (
+    level: 'chapter' | 'scene',
+    parentId: string,
+    afterId: string | null,
+    title: string
+  ) => Promise<TreeNode | null>
   /** Renames a node and ends its inline rename. Errors propagate. */
   rename: (id: string, title: string) => Promise<void>
   /**
@@ -99,6 +110,8 @@ interface CreateAtOptions extends CreateOptions {
   template?: MatterTemplateId
   /** Open inline rename on the new node; default true. Off for templates, whose title is meaningful. */
   rename?: boolean
+  /** The new node's title; omitted lets main name it "Untitled …". */
+  title?: string
 }
 
 const byPosition = (a: TreeNode, b: TreeNode): number => a.position - b.position
@@ -406,6 +419,15 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     await createAt(target, 'document', null, { template: templateId, rename: false })
   },
 
+  createIn(level, parentId, afterId, title) {
+    return createAt(
+      afterId === null ? { parentId } : { parentId, afterId },
+      level === 'scene' ? 'document' : 'folder',
+      level,
+      { keepSelection: true, rename: false, title }
+    )
+  },
+
   async rename(id, title) {
     const mine = generation
     set({ busy: true })
@@ -546,7 +568,7 @@ async function createAt(
   kind: NodeKind,
   hierarchyLevel: HierarchyLevel | null,
   options?: CreateAtOptions
-): Promise<void> {
+): Promise<TreeNode | null> {
   const mine = generation
   useTreeStore.setState({ busy: true })
   try {
@@ -555,9 +577,10 @@ async function createAt(
       afterId: target.afterId,
       kind,
       hierarchyLevel,
-      ...(options?.template === undefined ? {} : { template: options.template })
+      ...(options?.template === undefined ? {} : { template: options.template }),
+      ...(options?.title === undefined ? {} : { title: options.title })
     })
-    if (mine !== generation) return // the project was closed while the request was in flight
+    if (mine !== generation) return null // the project was closed while the request was in flight
     useTreeStore.setState((s) => {
       const merged = insertIntoIndex(s, node)
       return {
@@ -568,6 +591,7 @@ async function createAt(
         renamingId: options?.rename === false ? s.renamingId : node.id
       }
     })
+    return node
   } finally {
     if (mine === generation) useTreeStore.setState({ busy: false })
   }

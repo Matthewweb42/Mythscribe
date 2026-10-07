@@ -64,24 +64,24 @@ describe('useAiSettingsStore (F-14.4)', () => {
     expect(store().settings).toEqual(STORED)
   })
 
-  it('applies a dial change at once and writes it after the debounce', async () => {
+  it('applies a switch change at once and writes it after the debounce', async () => {
     await store().load()
-    store().update({ dial: 2 })
-    expect(store().settings?.dial).toBe(2)
+    store().update({ dial: 0 })
+    expect(store().settings?.dial).toBe(0)
     expect(sets).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS - 1)
     expect(sets).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(1)
     expect(sets).toHaveLength(1)
-    expect(sets[0]?.value).toEqual({ ...STORED, dial: 2 })
+    expect(sets[0]?.value).toEqual({ ...STORED, dial: 0 })
     sets[0]?.resolve()
     await settle()
-    expect(store().settings?.dial).toBe(2)
+    expect(store().settings?.dial).toBe(0)
   })
 
   it('replaces the toggles wholesale and coalesces rapid updates into one write', async () => {
     await store().load()
-    store().update({ dial: 3 })
+    store().update({ auto: true })
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS - 50)
     store().update({ features: { ...defaults.features, ghostText: false } })
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS - 50)
@@ -91,34 +91,35 @@ describe('useAiSettingsStore (F-14.4)', () => {
     expect(sets).toHaveLength(1)
     expect(sets[0]?.value).toEqual({
       ...defaults,
-      dial: 3,
+      dial: 1,
+      auto: true,
       features: { ...defaults.features, ghostText: false, chat: false }
     })
   })
 
   it('reverts to the value before the failed write and toasts', async () => {
     await store().load()
-    store().update({ dial: 2 })
+    store().update({ dial: 0 })
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
-    store().update({ dial: 3 })
+    store().update({ auto: true })
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(2)
     sets[0]?.resolve()
     sets[1]?.reject(new Error('disk full'))
     await settle()
-    expect(store().settings?.dial).toBe(2)
+    expect(store().settings?.dial).toBe(0)
     expect(toasts()).toEqual(['disk full'])
   })
 
   it('keeps the revert baseline when a newer change is pending while a write fails', async () => {
     await store().load()
-    store().update({ dial: 2 })
+    store().update({ dial: 0 })
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(1)
-    store().update({ dial: 3 }) // pending while the first write is on the wire
+    store().update({ auto: true }) // pending while the first write is on the wire
     sets[0]?.reject(new Error('locked'))
     await settle()
-    expect(store().settings?.dial).toBe(3)
+    expect(store().settings?.auto).toBe(true)
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(2)
     sets[1]?.reject(new Error('locked again'))
@@ -128,7 +129,7 @@ describe('useAiSettingsStore (F-14.4)', () => {
   })
 
   it('ignores an update before anything is loaded', async () => {
-    store().update({ dial: 2 })
+    store().update({ dial: 0 })
     expect(store().settings).toBeNull()
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(0)
@@ -151,7 +152,7 @@ describe('useAiSettingsStore (F-14.4)', () => {
 
   it('surfaces a failed flush to the caller', async () => {
     await store().load()
-    store().update({ dial: 2 })
+    store().update({ dial: 0 })
     const flushing = flushPendingSaves()
     await settle()
     sets[0]?.reject(new Error('read-only'))
@@ -161,7 +162,7 @@ describe('useAiSettingsStore (F-14.4)', () => {
 
   it('clear empties the store and cancels the pending write', async () => {
     await store().load()
-    store().update({ dial: 2 })
+    store().update({ dial: 0 })
     store().clear()
     expect(store().settings).toBeNull()
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)

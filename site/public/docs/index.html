@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>How MythScribe's AI dial works – MythScribe</title>
+    <title>How MythScribe's AI switch works – MythScribe</title>
     <meta
       name="description"
-      content="The four levels of MythScribe's AI dial, what each AI feature sends and the level it needs, and the rules that keep the author in control."
+      content="The three positions of MythScribe's AI switch, what each AI feature sends, and the rules that keep the author in control."
     />
     <meta name="theme-color" content="#1b1b1f" />
     <link rel="icon" href="../img/favicon.png" type="image/png" />
@@ -22,7 +22,7 @@
         <nav class="site-nav" aria-label="Site">
           <ul>
             <li><a href="../#download">Download</a></li>
-            <li><a href="./" aria-current="page">AI dial</a></li>
+            <li><a href="./" aria-current="page">AI switch</a></li>
             <li><a href="../privacy">Privacy</a></li>
             <li><a href="../terms">Terms</a></li>
             <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
@@ -33,23 +33,24 @@
 
     <main class="wrap">
       <article class="prose">
-        <h1>How MythScribe's AI dial works</h1>
-        <p class="meta">Matches the app’s Settings as of 15 September 2026</p>
+        <h1>How MythScribe's AI switch works</h1>
+        <p class="meta">Matches the app’s Settings as of 6 October 2026</p>
 
         <p>
-          MythScribe installs with AI off. One control in Settings, the AI dial, decides how much
-          the app is allowed to do, and a switch per feature lets you turn off anything you do not
-          want even at a level that allows it. This page reproduces the dial's four levels and the
-          data-sharing table from the app, word for word. The text is copied from the app's source,
+          MythScribe installs with AI off. One control, the AI switch, decides how much the app is
+          allowed to do; it sits in the assistant panel and in Settings. A toggle per feature lets
+          you turn off anything you do not want even when the switch is on. This page reproduces
+          the switch's three positions and the data-sharing table from the app, word for word. The text is copied from the app's source,
           and a test in the repository fails if the two drift apart.
         </p>
 
         <h2 id="principles">The rules the AI features follow</h2>
         <ol>
           <li>
-            <strong>Everything is a proposal.</strong> Ghost text, suggested tags, rewrites, and
-            drafts are shown to you and go nowhere until you accept them. Nothing enters your
-            manuscript without an explicit accept.
+            <strong>You decide what changes.</strong> At Ask, ghost text, suggested tags,
+            rewrites, and every edit the assistant wants to make are shown to you and go nowhere
+            until you accept them. At Auto, the assistant makes its edits itself and lists each one
+            with an Undo button; anything that deletes still asks first.
           </li>
           <li>
             <strong>Your voice, not the model's.</strong> Anything that generates prose is given a
@@ -57,8 +58,8 @@
             against that profile before it is shown to you.
           </li>
           <li>
-            <strong>The dial and the toggles are the law.</strong> A feature runs only at or above
-            the level it needs, and only with its own switch on. A feature may not send any text
+            <strong>The switch and the toggles are the law.</strong> Nothing runs at Off, and a
+            feature runs only with its own toggle on. A feature may not send any text
             that the table below does not list.
           </li>
           <li>
@@ -68,42 +69,34 @@
           </li>
         </ol>
 
-        <h2 id="dial">The four levels</h2>
+        <h2 id="dial">The three positions</h2>
         <p>
-          The dial is monotonic: each level includes everything below it. It is set per project, so
-          a project you are experimenting with can sit at Draft while your novel stays at Off.
+          The switch is set per project, so a project you are experimenting with can sit at Auto
+          while your novel stays at Off.
         </p>
         <div class="table-wrap">
           <table id="dial-levels">
             <thead>
               <tr>
-                <th scope="col">Level</th>
-                <th scope="col">Name</th>
+                <th scope="col">Position</th>
                 <th scope="col">What it means</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td>0</td>
                 <th scope="row">Off</th>
-                <td>Nothing leaves this machine.</td>
+                <td>No AI at all. Nothing leaves this machine.</td>
               </tr>
               <tr>
-                <td>1</td>
                 <th scope="row">Ask</th>
+                <td>AI features on. Every change the AI wants to make asks you first.</td>
+              </tr>
+              <tr>
+                <th scope="row">Auto</th>
                 <td>
-                  Queries, summaries, tag suggestions, critique, and proofreading, on request.
+                  AI features on. The chat makes its changes itself, each with Undo; deletions still
+                  ask.
                 </td>
-              </tr>
-              <tr>
-                <td>2</td>
-                <th scope="row">Suggest</th>
-                <td>Adds ghost text and rewrite-in-my-voice.</td>
-              </tr>
-              <tr>
-                <td>3</td>
-                <th scope="row">Draft</th>
-                <td>Adds multi-paragraph drafting proposals.</td>
               </tr>
             </tbody>
           </table>
@@ -122,179 +115,9 @@
               <tr>
                 <th scope="col">Feature</th>
                 <th scope="col">What it sends</th>
-                <th scope="col">Level needed</th>
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <th scope="row">Tag suggestions</th>
-                <td>The current document's text and the existing tag names.</td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Scene summaries, story bible, and tags</th>
-                <td>
-                  A scene's text (the first 20,000 characters), its metadata, the names of the
-                  story-bible entries and tags that occur in the scene, and the names of your tone,
-                  content, plot-thread, and custom tags, to keep its summary, key points, characters
-                  present, the facts it states about your characters, places, and world, and its
-                  tags up to date after you pause typing.
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Assistant chat</th>
-                <td>
-                  The active scene's text (head-truncated), its synopsis and notes (the first 1,500
-                  characters), the notes of documents tagged with any #name you mention, the story bible (your tag names by category, the scene's tags,
-                  the sheets of the story-bible entries linked to those tags with what the
-                  manuscript states about them, and the titles, metadata, and summaries of the
-                  scenes either side of it), the recent turns of the conversation, and your message.
-                  In Agent mode, which needs Suggest, the voice profile, your author rules and
-                  banned phrases, the scene metadata, and the scene brief (plus the previous scene's
-                  reader-knows-after line and the next scene's goal) go too, and an off-voice answer
-                  is sent back once with the rule it broke.
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Story Intelligence</th>
-                <td>
-                  Your question, scene summaries, the full text of the top matching scenes, the
-                  sheets of the story-bible entries your question names with what the manuscript
-                  states about them, and the open scene's synopsis and notes (the first 1,500
-                  characters).
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Editor's notes</th>
-                <td>
-                  The scene's text (the first 20,000 characters), its metadata, its brief plus the
-                  previous scene's reader-knows-after line and the next scene's goal, the voice
-                  profile (stylometric rules, learned style notes, and up to 3 exemplar passages),
-                  your author rules and banned phrases, and the story bible (your tag names by
-                  category, the scene's tags, the sheets of the story-bible entries linked to those
-                  tags with what the manuscript states about them, and the titles, metadata, and
-                  summaries of the scenes either side of it).
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Search indexing</th>
-                <td>Chunks of scene text, to compute embeddings for search.</td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Scene brief drafts</th>
-                <td>
-                  The scene's text (the first 20,000 characters) and its metadata (location, POV,
-                  timeline), to draft the five brief lines for you to correct.
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Beta reader</th>
-                <td>
-                  The scene's text (the first 20,000 characters) and the stored summaries and key
-                  points of every manuscript scene before it, in reading order, so a first-time
-                  reader can report what they know, believe, and expect. No voice profile, no story
-                  bible: the reader knows only what is on the page.
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Consistency check</th>
-                <td>
-                  The sheets of the story-bible entries named in a scene, what the manuscript states
-                  about them in other scenes with the passages, the previous scene's timeline and
-                  this scene's, the scene's brief plus the previous scene's reader-knows-after line
-                  and the next scene's goal, and the voice profile (stylometric rules, learned style
-                  notes, and up to 3 exemplar passages) with your author rules and banned phrases;
-                  with them, the scene's text (the first 20,000 characters) when you ask for a
-                  check, or only the paragraphs that state something different when it runs after
-                  you pause typing.
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Proofread</th>
-                <td>
-                  The scene's text (the first 20,000 characters), or only the passage you selected,
-                  its brief plus the previous scene's reader-knows-after line and the next scene's
-                  goal, the voice profile (stylometric rules, learned style notes, and up to 3
-                  exemplar passages) with your author rules and banned phrases, and up to 200 words
-                  to leave alone: the names of your story-bible entries and tags and the words in
-                  the project dictionary.
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">What comes next</th>
-                <td>
-                  The last 6,000 characters of the scene, or of the text up to the end of the
-                  passage you selected, its brief plus the previous scene's reader-knows-after line
-                  and the next scene's goal, and the story bible (your tag names by category, the
-                  scene's tags, the sheets of the story-bible entries linked to those tags with what
-                  the manuscript states about them, and the titles, metadata, and summaries of the
-                  scenes either side of it), only when you click What should come next?.
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Assistant routing</th>
-                <td>
-                  Your message (the first 1,000 characters), the last two turns of the conversation
-                  (300 characters each), the first 200 characters of the passage you selected, and
-                  the open document's kind and title, so the assistant can pick which feature
-                  answers you.
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Synopsis suggestions</th>
-                <td>
-                  The scene's text (the first 12,000 characters) and its stored summary and key
-                  points, only when you ask for a suggested synopsis.
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Notes suggestions</th>
-                <td>
-                  The scene's text (the first 12,000 characters), its stored summary and key points,
-                  its notes (the first 1,500 characters), its brief plus the previous scene's
-                  reader-knows-after line and the next scene's goal, the story bible (your tag names
-                  by category, the scene's tags, the sheets of the story-bible entries linked to
-                  those tags with what the manuscript states about them, and the titles, metadata,
-                  and summaries of the scenes either side of it), and what you asked to focus on,
-                  only when you ask for suggested notes.
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Learned style notes</th>
-                <td>
-                  Up to 6,000 characters of your own paragraphs from across the manuscript (never
-                  text accepted from the AI) and the previous notes, about once per 5,000 new words,
-                  to keep a few notes on how you write that the voice profile carries.
-                </td>
-                <td>Ask</td>
-              </tr>
-              <tr>
-                <th scope="row">Edit passes</th>
-                <td>
-                  Only when you start a pass, the text of each scene you picked, in pieces of up to
-                  12,000 characters, with its title and your instruction for a custom pass; for
-                  line, copy, proofread, and custom passes the voice profile (stylometric rules,
-                  learned style notes, and up to 3 exemplar passages) with your author rules and
-                  banned phrases; for copy edits and proofreads up to 200 words to leave alone (the
-                  names of your story-bible entries and tags and the project dictionary); for a
-                  continuity pass the sheets of the story-bible entries the scene names and what
-                  other scenes state about them.
-                </td>
-                <td>Ask</td>
-              </tr>
               <tr>
                 <th scope="row">Ghost text</th>
                 <td>
@@ -309,7 +132,65 @@
                   banned phrase is sent back once, with the same context plus the rule it broke, for
                   a second try.
                 </td>
-                <td>Suggest</td>
+              </tr>
+              <tr>
+                <th scope="row">Tag suggestions</th>
+                <td>The current document's text and the existing tag names.</td>
+              </tr>
+              <tr>
+                <th scope="row">Scene summaries, story bible, and tags</th>
+                <td>
+                  A scene's text (the first 20,000 characters), its metadata, the names of the
+                  story-bible entries and tags that occur in the scene, and the names of your tone,
+                  content, plot-thread, and custom tags, to keep its summary, key points, characters
+                  present, the facts it states about your characters, places, and world, and its
+                  tags up to date after you pause typing.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Assistant chat</th>
+                <td>
+                  The active scene's text (head-truncated), its synopsis and notes (the first 1,500
+                  characters), the notes of documents tagged with any #name you mention, the story
+                  bible (your tag names by category, the scene's tags, the sheets of the story-bible
+                  entries linked to those tags with what the manuscript states about them, and the
+                  titles, metadata, and summaries of the scenes either side of it), the recent turns
+                  of the conversation, and your message. In Author mode, the voice profile, your
+                  author rules and banned phrases, the scene metadata, and the scene brief (plus the
+                  previous scene's reader-knows-after line and the next scene's goal) go too, and an
+                  off-voice answer is sent back once with the rule it broke.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Author mode</th>
+                <td>
+                  The active scene's text, referenced notes, the scene brief, and your instruction.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Story Intelligence</th>
+                <td>
+                  Your question, scene summaries, the full text of the top matching scenes, the
+                  sheets of the story-bible entries your question names with what the manuscript
+                  states about them, and the open scene's synopsis and notes (the first 1,500
+                  characters).
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Editor's notes</th>
+                <td>
+                  The scene's text (the first 20,000 characters), its metadata, its brief plus the
+                  previous scene's reader-knows-after line and the next scene's goal, the voice
+                  profile (stylometric rules, learned style notes, and up to 3 exemplar passages),
+                  your author rules and banned phrases, and the story bible (your tag names by
+                  category, the scene's tags, the sheets of the story-bible entries linked to those
+                  tags with what the manuscript states about them, and the titles, metadata, and
+                  summaries of the scenes either side of it).
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Search indexing</th>
+                <td>Chunks of scene text, to compute embeddings for search.</td>
               </tr>
               <tr>
                 <th scope="row">Rewrite in my voice</th>
@@ -323,7 +204,22 @@
                   summaries of the scenes either side of it). An off-voice rewrite is sent back once
                   with the rule it broke; a regenerate carries your note.
                 </td>
-                <td>Suggest</td>
+              </tr>
+              <tr>
+                <th scope="row">Scene brief drafts</th>
+                <td>
+                  The scene's text (the first 20,000 characters) and its metadata (location, POV,
+                  timeline), to draft the five brief lines for you to correct.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Beta reader</th>
+                <td>
+                  The scene's text (the first 20,000 characters) and the stored summaries and key
+                  points of every manuscript scene before it, in reading order, so a first-time
+                  reader can report what they know, believe, and expect. No voice profile, no story
+                  bible: the reader knows only what is on the page.
+                </td>
               </tr>
               <tr>
                 <th scope="row">Import structure detection</th>
@@ -332,14 +228,104 @@
                   shortened), and your tag names, only when you ask for the check in the import
                   dialog.
                 </td>
-                <td>Suggest</td>
               </tr>
               <tr>
-                <th scope="row">Author mode</th>
+                <th scope="row">Consistency check</th>
                 <td>
-                  The active scene's text, referenced notes, the scene brief, and your instruction.
+                  The sheets of the story-bible entries named in a scene, what the manuscript states
+                  about them in other scenes with the passages, the previous scene's timeline and
+                  this scene's, the scene's brief plus the previous scene's reader-knows-after line
+                  and the next scene's goal, and the voice profile (stylometric rules, learned style
+                  notes, and up to 3 exemplar passages) with your author rules and banned phrases;
+                  with them, the scene's text (the first 20,000 characters) when you ask for a
+                  check, or only the paragraphs that state something different when it runs after
+                  you pause typing.
                 </td>
-                <td>Draft</td>
+              </tr>
+              <tr>
+                <th scope="row">Proofread</th>
+                <td>
+                  The scene's text (the first 20,000 characters), or only the passage you selected,
+                  its brief plus the previous scene's reader-knows-after line and the next scene's
+                  goal, the voice profile (stylometric rules, learned style notes, and up to 3
+                  exemplar passages) with your author rules and banned phrases, and up to 200 words
+                  to leave alone: the names of your story-bible entries and tags and the words in
+                  the project dictionary.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">What comes next</th>
+                <td>
+                  The last 6,000 characters of the scene, or of the text up to the end of the
+                  passage you selected, its brief plus the previous scene's reader-knows-after line
+                  and the next scene's goal, and the story bible (your tag names by category, the
+                  scene's tags, the sheets of the story-bible entries linked to those tags with what
+                  the manuscript states about them, and the titles, metadata, and summaries of the
+                  scenes either side of it), only when you click What should come next?.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Assistant routing</th>
+                <td>
+                  Your message (the first 1,000 characters), the last two turns of the conversation
+                  (300 characters each), the first 200 characters of the passage you selected, and
+                  the open document's kind and title, so the assistant can pick which feature
+                  answers you.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Synopsis suggestions</th>
+                <td>
+                  The scene's text (the first 12,000 characters) and its stored summary and key
+                  points, only when you ask for a suggested synopsis.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Notes suggestions</th>
+                <td>
+                  The scene's text (the first 12,000 characters), its stored summary and key points,
+                  its notes (the first 1,500 characters), its brief plus the previous scene's
+                  reader-knows-after line and the next scene's goal, the story bible (your tag names
+                  by category, the scene's tags, the sheets of the story-bible entries linked to
+                  those tags with what the manuscript states about them, and the titles, metadata,
+                  and summaries of the scenes either side of it), and what you asked to focus on,
+                  only when you ask for suggested notes.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Learned style notes</th>
+                <td>
+                  Up to 6,000 characters of your own paragraphs from across the manuscript (never
+                  text accepted from the AI) and the previous notes, about once per 5,000 new words,
+                  to keep a few notes on how you write that the voice profile carries.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Edit passes</th>
+                <td>
+                  Only when you start a pass, the text of each scene you picked, in pieces of up to
+                  12,000 characters, with its title and your instruction for a custom pass; for
+                  line, copy, proofread, and custom passes the voice profile (stylometric rules,
+                  learned style notes, and up to 3 exemplar passages) with your author rules and
+                  banned phrases; for copy edits and proofreads up to 200 words to leave alone (the
+                  names of your story-bible entries and tags and the project dictionary); for a
+                  continuity pass the sheets of the story-bible entries the scene names and what
+                  other scenes state about them.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Assistant lookups and edits</th>
+                <td>
+                  Your message, the recent turns of the conversation, the open document's title,
+                  synopsis, notes (the first 1,500 characters), and stored summary, up to 1,500
+                  characters before the caret and 2,000 of the selected passage, and then, one
+                  lookup at a time (at most 6 per message), what the assistant asks to read: search
+                  results with scene summaries, the outline of titles and word counts, up to 6,000
+                  characters of a document per read, notes, summaries, story-bible sheets, and tag
+                  names. When it may edit, the voice profile (stylometric rules, learned style
+                  notes, and up to 3 exemplar passages) and your author rules and banned phrases go
+                  too.
+                </td>
               </tr>
             </tbody>
           </table>
@@ -358,13 +344,15 @@
         <h2 id="where">Where to find it</h2>
         <p>
           Open Settings (<kbd>Ctrl</kbd>+<kbd>,</kbd>, or <kbd>Cmd</kbd>+<kbd>,</kbd> on macOS),
-          choose the AI tab, and the dial is at the top under &ldquo;This project&rdquo;. Your API
+          choose the AI tab, and the switch is at the top under &ldquo;This project&rdquo;; the
+          same switch sits under the assistant panel's message box. Your API
           key, the model tiers, and the usage figures are on the same tab.
         </p>
 
         <p>
-          In short: every AI output is a proposal, nothing enters the manuscript without your
-          explicit accept, and AI is off until you turn the dial.
+          In short: at Ask nothing enters the manuscript without your explicit accept, at Auto
+          every change can be undone and deletions still ask, and AI is off until you turn the
+          switch on.
         </p>
       </article>
     </main>
@@ -376,7 +364,7 @@
           <ul>
             <li><a href="../privacy">Privacy</a></li>
             <li><a href="../terms">Terms</a></li>
-            <li><a href="./" aria-current="page">AI dial</a></li>
+            <li><a href="./" aria-current="page">AI switch</a></li>
             <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
             <li><a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a></li>
           </ul>

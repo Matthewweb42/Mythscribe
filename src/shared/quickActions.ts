@@ -1,5 +1,5 @@
 import type { AiFeatureId, Tier } from './ai'
-import { AI_DATA_SHARING, AI_DIAL_LABEL, isFeatureAllowed, type AiSettings } from './aiSettings'
+import { AI_DATA_SHARING, needsSwitchText, isFeatureAllowed, type AiSettings } from './aiSettings'
 import type { WhatNextDirection } from './whatNext'
 
 /**
@@ -104,7 +104,7 @@ export function featureActionReason(feature: AiFeatureId, state: QuickActionStat
   const { minDial, label } = AI_DATA_SHARING[feature]
   const { settings } = state
   if (settings === null || settings.dial < minDial) {
-    return `${label} needs the AI dial at ${AI_DIAL_LABEL[minDial]} or higher (Settings, AI tab)`
+    return `${needsSwitchText(label)} (Settings, AI tab)`
   }
   if (!isFeatureAllowed(settings, feature)) {
     return `${label} is turned off for this project (Settings, AI tab)`

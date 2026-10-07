@@ -14,7 +14,8 @@ import {
   GHOST_AFTER_CHARS,
   GHOST_BEFORE_CHARS
 } from '../ai'
-import { AiDial, AiSettings, AiSource } from '../aiSettings'
+import { AgentAccess, AgentEdit, AgentFocus, AgentStep } from '../agent'
+import { AiSettings, AiSource, AiSwitch } from '../aiSettings'
 import { ExportOptions, ExportProgress, ExportResult } from '../bookExport'
 import {
   CHAT_HISTORY_TURNS,
@@ -84,7 +85,7 @@ import { WritingPresets } from '../presets'
 import { PROOFREAD_CHAR_BUDGET, ProofreadFixes, ProofreadScope } from '../proofread'
 import { PROPOSAL_NOTE_MAX, SettledStatus } from '../proposal'
 import { ProposedTag } from '../proposedTags'
-import { QueryCitation, QuerySceneRef, QuerySheetRef } from '../query'
+import { QueryCitation, QuerySceneRef, QuerySheetRef, QueryTurn } from '../query'
 import { RecoveryItem, RecoveryKind, RecoveryRestored } from '../recovery'
 import {
   ReplaceCommitRequest,
@@ -370,6 +371,38 @@ export const AiQueryResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiQueryResult = z.infer<typeof AiQueryResult>
+
+/**
+ * What `ai:agent` answers (F-5.22): the answer, the verified citations and flags (`query`, for a
+ * read run always and for a write run that cited), the lookups it made, the edits it proposes
+ * (each with the voice check's complaint, if any; nothing is applied), what the citations and
+ * edits that could not be kept number, what every step cost together, and the proposal (F-14.5)
+ * holding the answer and the edits; or an expected AI failure as data.
+ */
+export const AiAgentResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    answer: z.string(),
+    query: QueryTurn.nullable(),
+    steps: z.array(AgentStep),
+    changes: z.array(z.object({ edit: AgentEdit, violation: z.string().nullable() })),
+    dropped: z.number().int().nonnegative(),
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    proposalId: z.string(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiAgentResult = z.infer<typeof AiAgentResult>
 
 /**
  * What `ai:rewrite` answers (F-14.10): the rewritten passage (streamed first through
@@ -790,8 +823,8 @@ export const contract = {
       directory: z.string().optional(),
       /** Where the new project's AI requests go (F-15.11, the wizard's third step); omitted keeps the `ownKey` default. */
       aiSource: AiSource.optional(),
-      /** The wizard's AI level (F-5.18, its fourth step); omitted keeps the Off default. */
-      aiDial: AiDial.optional()
+      /** The wizard's AI switch position (F-5.18 and F-5.21, its fourth step); omitted keeps the Off default. */
+      aiSwitch: AiSwitch.optional()
     }),
     output: ProjectInfo.nullable()
   },
@@ -1696,6 +1729,26 @@ export const contract = {
     output: AiChatResult
   },
   /**
+   * One chat agent turn (F-5.22): the assistant looks things up in the project (each lookup
+   * arrives first as an `ai:agentStep` event for `requestId`), then answers. `nodeId` is the open
+   * document and `focus` its caret window and selection; `access: 'read'` answers only (Query),
+   * `'write'` may propose edits (Auto), which come back unapplied. Expected AI failures come
+   * back as data.
+   */
+  'ai:agent': {
+    input: z.object({
+      nodeId: z.string().nullable(),
+      message: z.string().trim().min(1).max(CHAT_MESSAGE_MAX),
+      history: z
+        .array(z.object({ role: ChatRole, content: z.string().max(CHAT_MESSAGE_MAX) }))
+        .max(CHAT_HISTORY_TURNS),
+      access: AgentAccess,
+      focus: AgentFocus,
+      requestId: z.string()
+    }),
+    output: AiAgentResult
+  },
+  /**
    * One Story Intelligence turn (F-5.7). `nodeId` is the active document (null with none open;
    * it breaks ranking ties and is the fallback candidate); `history` is the recent turns of the
    * conversation; the answer is JSON on the strong tier and is not streamed. `pinActive`
@@ -2261,6 +2314,8 @@ export const events = {
   'window:close-requested': z.null(),
   /** A streamed piece of a Plan-mode answer (F-5.4); the renderer appends it to the turn with this `requestId`. */
   'ai:chatDelta': z.object({ requestId: z.string(), delta: z.string() }),
+  /** One lookup of a chat agent turn (F-5.22), sent as it starts; the chat shows it on the turn with this `requestId`. */
+  'ai:agentStep': z.object({ requestId: z.string(), step: AgentStep }),
   /** A streamed piece of a rewrite's first draft (F-14.10); the panel appends it to the draft with this `requestId`. */
   'ai:rewriteDelta': z.object({ requestId: z.string(), delta: z.string() }),
   /** A node's background summary run changed status (F-5.6): pending → idle or failed; the pane refetches `summary:get`. */

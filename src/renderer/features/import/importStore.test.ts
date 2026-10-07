@@ -109,8 +109,8 @@ function install(overrides: Partial<Record<string, unknown>> = {}): void {
   setIpcClient(client)
 }
 
-/** Turns the AI pass on: the dial at Suggest (its `minDial`) with the fast model the tab shows. */
-function allowDetect(dial: AiDial = 2): void {
+/** Turns the AI pass on: the switch at Ask (its `minDial`) with the fast model the tab shows. */
+function allowDetect(dial: AiDial = 1): void {
   useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial } })
   useAiStore.setState({
     status: {
@@ -405,7 +405,7 @@ describe('useImportStore, the AI structure pass (F-12.3)', () => {
     expect(detect()).toBeNull()
 
     resetImportStore()
-    allowDetect(1) // Ask: below the feature's minimum.
+    allowDetect(0) // Off: nothing runs.
     await useImportStore.getState().open()
     expect(detect()).toBeNull()
 

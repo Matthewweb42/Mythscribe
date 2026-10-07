@@ -4,7 +4,7 @@ import { useEditorState } from '@tiptap/react'
 import type { AiFeatureId, Tier } from '@shared/ai'
 import {
   AI_DATA_SHARING,
-  AI_DIAL_LABEL,
+  needsSwitchText,
   isFeatureAllowed,
   type AiSettings
 } from '@shared/aiSettings'
@@ -349,7 +349,7 @@ const REWRITE_MAX_LABEL = REWRITE_TEXT_MAX.toLocaleString()
 export function rewriteReason(settings: AiSettings | null, length: number): string | null {
   const { minDial } = AI_DATA_SHARING.rewrite
   if (settings === null || settings.dial < minDial) {
-    return `Rewrite in my voice needs the AI dial at ${AI_DIAL_LABEL[minDial]} or higher (Settings, AI tab)`
+    return `${needsSwitchText('Rewrite in my voice')} (Settings, AI tab)`
   }
   if (!isFeatureAllowed(settings, 'rewrite')) {
     return 'Rewrite in my voice is turned off for this project (Settings, AI tab)'

@@ -92,7 +92,7 @@ function install(): void {
 
 const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   ...defaultAiSettings(),
-  dial: 2,
+  dial: 1,
   ...over
 })
 

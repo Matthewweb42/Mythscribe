@@ -79,7 +79,7 @@ beforeEach(() => {
   reset()
   useFocusStore.setState({ active: true })
   useBackgroundStore.setState({ backgrounds: [], settings: defaultFocusSettings() })
-  useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
+  useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
   vi.stubGlobal('innerHeight', 800)
 })
 afterEach(() => {

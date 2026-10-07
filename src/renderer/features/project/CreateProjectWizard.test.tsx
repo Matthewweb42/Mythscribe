@@ -82,7 +82,7 @@ describe('CreateProjectWizard', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Next' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Create' }))
-    expect(onCreate).toHaveBeenCalledWith('My Book', 'webnovel', 'ownKey', 1)
+    expect(onCreate).toHaveBeenCalledWith('My Book', 'webnovel', 'ownKey', 'ask')
   })
 
   it('offers the three AI sources on step 3, own key first, and creates with the chosen one (F-15.11, F-5.15)', async () => {
@@ -100,14 +100,14 @@ describe('CreateProjectWizard', () => {
     )
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Create' }))
-    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'cloud', 1)
+    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'cloud', 'ask')
   })
 
   it('explains the background work and recommends Ask on step 4, with Off one click away (F-5.18)', async () => {
     const { onCreate } = setup()
     await goToDialStep('My Book')
     expect(screen.getByRole('dialog')).toHaveTextContent('Step 4 of 4')
-    expect(screen.getAllByRole('radio')).toHaveLength(4)
+    expect(screen.getAllByRole('radio')).toHaveLength(3)
     expect(screen.getByTestId('wizard-dial-explainer')).toHaveTextContent('summarizes the scene')
     expect(screen.getByTestId('wizard-dial-explainer')).toHaveTextContent('flags contradictions')
     const ask = screen.getByRole('radio', { name: /^ask/i })
@@ -118,7 +118,7 @@ describe('CreateProjectWizard', () => {
     )
     await userEvent.click(screen.getByRole('radio', { name: /^off/i }))
     await userEvent.click(screen.getByRole('button', { name: 'Create' }))
-    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'ownKey', 0)
+    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'ownKey', 'off')
   })
 
   it('names the signed-in account under the Cloud option', async () => {
@@ -139,7 +139,7 @@ describe('CreateProjectWizard', () => {
     await screen.findByRole('dialog', { name: 'Choose how much AI helps' })
     expect(onCreate).not.toHaveBeenCalled()
     await userEvent.keyboard('{Enter}')
-    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'ownKey', 1)
+    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'ownKey', 'ask')
   })
 
   it('Back returns a step at a time with the choices and the name preserved', async () => {

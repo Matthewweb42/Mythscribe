@@ -266,10 +266,10 @@ describe('runBetaReader (F-14.11)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Beta reader needs the AI dial at Ask or higher (it is at Off).'
+      message: 'Beta reader needs the AI switch at Ask or Auto (it is at Off).'
     })
     const on = defaultAiSettings()
-    setAiSettings(db, { ...on, dial: 3, features: { ...on.features, betaReader: false } })
+    setAiSettings(db, { ...on, dial: 1, features: { ...on.features, betaReader: false } })
     expect(await failure()).toEqual({
       code: 'DISABLED',
       message: 'Beta reader is turned off for this project.'

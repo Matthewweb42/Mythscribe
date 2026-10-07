@@ -141,7 +141,7 @@ beforeEach(() => {
   folder = rows.find((r) => r.kind === 'folder' && r.sectionType === null)?.id ?? ''
   if (!scene || !folder) throw new Error('skeleton not seeded')
   saveDocument(db, scene, doc(PASSAGE))
-  setAiSettings(db, { ...defaultAiSettings(), dial: 2 })
+  setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
   complete = vi.fn<Complete>()
   streams(CLEAN)
   stream = vi.fn<Stream>(async function* () {
@@ -220,7 +220,12 @@ describe('runRewrite (F-14.10)', () => {
 
   it('sends the voice block and the scene line system-side and the context each side of the passage in the user turn', async () => {
     strongProfile()
-    setSceneMeta(db, scene, { location: 'Ferry landing', pov: 'Mara', timeline: '', brief: EMPTY_SCENE_BRIEF })
+    setSceneMeta(db, scene, {
+      location: 'Ferry landing',
+      pov: 'Mara',
+      timeline: '',
+      brief: EMPTY_SCENE_BRIEF
+    })
     await rewrite({ before: BEFORE, after: AFTER })
     const messages = stream.mock.calls[0]![0].messages
     expect(messages).toHaveLength(2)
@@ -271,14 +276,14 @@ describe('runRewrite (F-14.10)', () => {
     expect(stream).toHaveBeenCalledTimes(5)
   })
 
-  it('refuses with DISABLED when the dial is below Suggest or the feature is off, before reading anything', async () => {
-    setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
+  it('refuses with DISABLED when the switch is Off or the feature is off, before reading anything', async () => {
+    setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Rewrite in my voice needs the AI dial at Suggest or higher (it is at Ask).'
+      message: 'Rewrite in my voice needs the AI switch at Ask or Auto (it is at Off).'
     })
     const on = defaultAiSettings()
-    setAiSettings(db, { ...on, dial: 2, features: { ...on.features, rewrite: false } })
+    setAiSettings(db, { ...on, dial: 1, features: { ...on.features, rewrite: false } })
     expect(await failure()).toEqual({
       code: 'DISABLED',
       message: 'Rewrite in my voice is turned off for this project.'

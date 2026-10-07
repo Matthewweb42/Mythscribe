@@ -81,7 +81,8 @@ describe('budgets', () => {
       synopsis: 350,
       notesSuggest: 600,
       voiceNotes: 400,
-      editPass: 4_000
+      editPass: 4_000,
+      agent: 1_500
     })
     expect(Object.keys(FEATURE_INPUT_BUDGETS).sort()).toEqual(Object.keys(FEATURE_BUDGETS).sort())
     for (const feature of AI_FEATURE_IDS) {
@@ -131,7 +132,8 @@ describe('aiFailure', () => {
       ok: false,
       code: 'DISABLED',
       message: 'Tag suggestions is turned off for this project.',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.'
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
     })
     expect(testConnectionFailure('NO_KEY', 'No API key is saved.')).toEqual(
       aiFailure('NO_KEY', 'No API key is saved.')
