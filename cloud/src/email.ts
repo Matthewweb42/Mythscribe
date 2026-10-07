@@ -1,7 +1,7 @@
 /**
  * Sending the sign-in email (F-15.2). Resend over plain HTTPS in production (no SDK); the `log`
- * transport prints the link for local runs. The mailer never sees anything but an address and a
- * one-time link.
+ * transport prints the link for local runs. The mailer never sees anything but an address, a
+ * one-time link, and a one-time code.
  */
 
 export interface MailMessage {
@@ -20,20 +20,26 @@ export const MAIL_FROM = 'MythScribe <sign-in@mythscribe.app>'
 
 const SUBJECT = 'Your MythScribe sign-in link'
 
-/** The one sign-in email: the link, how long it lasts, and what to do if it was not requested. */
-export function signInEmail(to: string, link: string): MailMessage {
+/**
+ * The one sign-in email: the link, the code for an app on another device (AI-BILLING-SPEC A5),
+ * how long both last, and what to do if it was not requested.
+ */
+export function signInEmail(to: string, link: string, code: string): MailMessage {
   const text = [
     'Open this link to sign in to MythScribe:',
     '',
     link,
     '',
-    'The link works for 15 minutes and can be used once.',
+    `Or enter this code in MythScribe: ${code}`,
+    '',
+    'The link and the code work for 15 minutes and can be used once.',
     'If you did not ask to sign in, ignore this email; nothing happens.'
   ].join('\n')
   const html = [
     '<p>Open this link to sign in to MythScribe:</p>',
     `<p><a href="${link}">Sign in to MythScribe</a></p>`,
-    '<p>The link works for 15 minutes and can be used once.</p>',
+    `<p>Or enter this code in MythScribe: <strong>${code}</strong></p>`,
+    '<p>The link and the code work for 15 minutes and can be used once.</p>',
     '<p>If you did not ask to sign in, ignore this email; nothing happens.</p>'
   ].join('\n')
   return { to, subject: SUBJECT, text, html }

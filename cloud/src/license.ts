@@ -48,6 +48,11 @@ export type LicenseSigner = () => Promise<CryptoKey>
 export interface LicenseDeps extends AuthDeps {
   /** F-15.9: the Supporter product on sale; null until the operator configures it. */
   supporter: ConfiguredPack | null
+  /**
+   * M1 (2026-10-07): the $30 app license, which supersedes the Supporter product. It grants the
+   * same license row and token; offered instead of the Supporter product once configured.
+   */
+  appLicense: ConfiguredPack | null
   /** Built from `LICENSE_SIGNING_KEY`; absent → a licensed account gets 503 NOT_CONFIGURED. */
   signingKey: LicenseSigner | null
 }
@@ -66,8 +71,9 @@ export async function handleLicense(request: Request, deps: LicenseDeps): Promis
   if (!caller) return jsonError('UNAUTHORIZED', UNAUTHORIZED_MESSAGE)
 
   // The checkout URL stays on the Worker, as in `GET /credits`: the app only names a variant.
-  const product: CreditPack | null = deps.supporter
-    ? { variantId: deps.supporter.variantId, priceCents: deps.supporter.priceCents }
+  const onSale = deps.appLicense ?? deps.supporter
+  const product: CreditPack | null = onSale
+    ? { variantId: onSale.variantId, priceCents: onSale.priceCents }
     : null
 
   // No license, or one a refund revoked: the app hears the same thing and clears its cache.

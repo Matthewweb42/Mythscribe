@@ -1,8 +1,10 @@
 /**
- * The upstream seam of the AI proxy (F-15.4): what the Worker sends to OpenAI on the operator's
- * key, over plain `fetch` and Chat Completions. No SDK: the Worker bundle has no dependencies
- * and this is a POST plus an SSE reader. `ai.ts` talks to the `Upstream` interface only, so its
- * tests never touch the network and a second provider is another implementation of it.
+ * The upstream seam of the AI proxy (F-15.4): what the Worker sends to the model gateway on the
+ * operator's key, over plain `fetch` and Chat Completions. OpenRouter is the gateway
+ * (AI-BILLING-SPEC A9, author decision 2026-10-07): it speaks the same Chat Completions API, so
+ * one implementation serves it and OpenAI direct (kept for a Worker that only has
+ * `OPENAI_API_KEY`). No SDK: the Worker bundle has no dependencies and this is a POST plus an SSE
+ * reader. `ai.ts` talks to the `Upstream` interface only, so its tests never touch the network.
  *
  * Nothing from a request or an answer is ever put in an error message or a log line: the
  * messages are the author's manuscript.
@@ -16,6 +18,8 @@ export interface UpstreamMessage {
 export interface UpstreamUsage {
   inputTokens: number
   outputTokens: number
+  /** Input tokens served from the provider's prompt cache (part of `inputTokens`); 0 if none. */
+  cachedInputTokens: number
 }
 
 export interface UpstreamParams {
@@ -41,8 +45,8 @@ export interface Upstream {
   stream(params: UpstreamParams, signal?: AbortSignal): AsyncIterable<UpstreamChunk>
 }
 
-/** Why the upstream call failed, in the terms the proxy answers with (429 vs 502). */
-export type UpstreamErrorKind = 'rate_limit' | 'auth' | 'network' | 'other'
+/** Why the upstream call failed, in the terms the proxy answers with (429, 422, or 502). */
+export type UpstreamErrorKind = 'rate_limit' | 'auth' | 'model_unavailable' | 'network' | 'other'
 
 export class UpstreamError extends Error {
   constructor(
@@ -61,36 +65,61 @@ export class UpstreamError extends Error {
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
+export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 
 function kindFor(status: number): UpstreamErrorKind {
   if (status === 429) return 'rate_limit'
   if (status === 401 || status === 403) return 'auth'
+  // OpenRouter answers 404 when no provider serves the model any more.
+  if (status === 404) return 'model_unavailable'
   return 'other'
 }
 
-function body(params: UpstreamParams, stream: boolean): string {
+/** How one gateway differs from another on the same Chat Completions API. */
+export interface UpstreamOptions {
+  baseUrl?: string
+  /** OpenAI's current name for the output cap, or the `max_tokens` OpenRouter documents. */
+  maxTokensField?: 'max_completion_tokens' | 'max_tokens'
+  /** Extra request headers (OpenRouter's app attribution). Never a secret beyond the key. */
+  headers?: Record<string, string>
+  /** Maps the price table's id to the gateway's (OpenAI direct drops the `openai/` prefix). */
+  modelId?: (model: string) => string
+}
+
+function body(
+  params: UpstreamParams,
+  stream: boolean,
+  options: Required<Pick<UpstreamOptions, 'maxTokensField' | 'modelId'>>
+): string {
   return JSON.stringify({
-    model: params.model,
+    model: options.modelId(params.model),
     messages: params.messages,
-    max_completion_tokens: params.maxTokens,
+    [options.maxTokensField]: params.maxTokens,
     ...(params.json ? { response_format: { type: 'json_object' } } : {}),
     ...(params.temperature === undefined ? {} : { temperature: params.temperature }),
     ...(stream ? { stream: true, stream_options: { include_usage: true } } : {})
   })
 }
 
+/** The usage block of an answer: OpenAI's and OpenRouter's share these fields. */
+interface ChatUsage {
+  prompt_tokens?: number
+  completion_tokens?: number
+  prompt_tokens_details?: { cached_tokens?: number | null } | null
+}
+
 /** The shape of a Chat Completions answer this module reads; everything else is ignored. */
 interface ChatCompletion {
   model?: string
   choices?: { message?: { content?: string | null } }[]
-  usage?: { prompt_tokens?: number; completion_tokens?: number }
+  usage?: ChatUsage
 }
 
 /** One SSE chunk of a streamed Chat Completions answer. */
 interface ChatCompletionChunk {
   model?: string
   choices?: { delta?: { content?: string | null } }[]
-  usage?: { prompt_tokens?: number; completion_tokens?: number } | null
+  usage?: ChatUsage | null
 }
 
 function parseJson(text: string): unknown {
@@ -101,20 +130,32 @@ function parseJson(text: string): unknown {
   }
 }
 
-function usageOf(usage: { prompt_tokens?: number; completion_tokens?: number }): UpstreamUsage {
+function usageOf(usage: ChatUsage): UpstreamUsage {
+  const inputTokens = usage.prompt_tokens ?? 0
   return {
-    inputTokens: usage.prompt_tokens ?? 0,
-    outputTokens: usage.completion_tokens ?? 0
+    inputTokens,
+    outputTokens: usage.completion_tokens ?? 0,
+    cachedInputTokens: Math.min(usage.prompt_tokens_details?.cached_tokens ?? 0, inputTokens)
   }
 }
 
-/** The OpenAI implementation of `Upstream`; the key is used here and nowhere else. */
+/**
+ * The Chat Completions implementation of `Upstream` (OpenAI by default); the key is used here and
+ * nowhere else. `baseUrl` may be passed alone, as before the options existed.
+ */
 export function openAiUpstream(
   key: string,
   fetchImpl: FetchLike = (input, init) => fetch(input, init),
-  baseUrl: string = DEFAULT_BASE_URL
+  baseUrlOrOptions: string | UpstreamOptions = DEFAULT_BASE_URL
 ): Upstream {
+  const options: UpstreamOptions =
+    typeof baseUrlOrOptions === 'string' ? { baseUrl: baseUrlOrOptions } : baseUrlOrOptions
+  const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL
   const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`
+  const shape = {
+    maxTokensField: options.maxTokensField ?? 'max_completion_tokens',
+    modelId: options.modelId ?? ((model: string) => model)
+  }
 
   const send = async (
     params: UpstreamParams,
@@ -126,10 +167,11 @@ export function openAiUpstream(
       response = await fetchImpl(url, {
         method: 'POST',
         headers: {
+          ...options.headers,
           authorization: `Bearer ${key}`,
           'content-type': 'application/json'
         },
-        body: body(params, stream),
+        body: body(params, stream, shape),
         ...(signal === undefined ? {} : { signal })
       })
     } catch (err) {
@@ -172,6 +214,27 @@ export function openAiUpstream(
       }
     }
   }
+}
+
+/**
+ * OpenRouter (A9): the hosted gateway, on the operator's `OPENROUTER_API_KEY`. The price table's
+ * ids are OpenRouter's, so they pass through unchanged; usage (with cached tokens) arrives on the
+ * answer and on the last streamed chunk.
+ */
+export function openRouterUpstream(
+  key: string,
+  fetchImpl: FetchLike = (input, init) => fetch(input, init)
+): Upstream {
+  return openAiUpstream(key, fetchImpl, {
+    baseUrl: OPENROUTER_BASE_URL,
+    maxTokensField: 'max_tokens',
+    headers: { 'HTTP-Referer': 'https://mythscribe.app', 'X-Title': 'MythScribe' }
+  })
+}
+
+/** OpenAI's own id for a price-table id: `openai/gpt-5.4` → `gpt-5.4`. */
+export function openAiModelId(model: string): string {
+  return model.startsWith('openai/') ? model.slice('openai/'.length) : model
 }
 
 /**

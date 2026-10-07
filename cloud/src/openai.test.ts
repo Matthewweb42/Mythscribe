@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   type FetchLike,
+  openAiModelId,
   openAiUpstream,
+  openRouterUpstream,
   type UpstreamChunk,
   UpstreamError,
   type UpstreamParams
@@ -87,7 +89,7 @@ describe('openAiUpstream.complete', () => {
     expect(answer).toEqual({
       text: 'Because the pass is watched.',
       model: 'gpt-5.4-mini-2026-09-01',
-      usage: { inputTokens: 100, outputTokens: 20 }
+      usage: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 0 }
     })
     expect(sent).toHaveLength(1)
     expect(sent[0]?.url).toBe(`${BASE}/chat/completions`)
@@ -108,7 +110,7 @@ describe('openAiUpstream.complete', () => {
     expect(answer).toEqual({
       text: '',
       model: 'gpt-5.4-mini',
-      usage: { inputTokens: 0, outputTokens: 0 }
+      usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }
     })
     expect(bodyOf(sent[0])).toEqual({
       model: 'gpt-5.4-mini',
@@ -121,6 +123,7 @@ describe('openAiUpstream.complete', () => {
     const cases: [number, string][] = [
       [429, 'rate_limit'],
       [401, 'auth'],
+      [404, 'model_unavailable'],
       [500, 'other']
     ]
     for (const [status, kind] of cases) {
@@ -165,7 +168,7 @@ describe('openAiUpstream.stream', () => {
     expect(chunks).toEqual([
       { delta: 'The storm ' },
       { delta: 'broke at dusk.' },
-      { usage: { inputTokens: 100, outputTokens: 20 }, model: 'gpt-5.4-mini' }
+      { usage: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 0 }, model: 'gpt-5.4-mini' }
     ])
     expect(bodyOf(sent[0])).toMatchObject({
       stream: true,
@@ -207,5 +210,67 @@ describe('openAiUpstream.stream', () => {
     )
     expect(failure).toBeInstanceOf(UpstreamError)
     expect((failure as UpstreamError).kind).toBe('rate_limit')
+  })
+})
+
+describe('openRouterUpstream (A9) and cached tokens (A4, R6)', () => {
+  it('posts to OpenRouter with max_tokens, the app attribution, and the id unchanged', async () => {
+    const { fetch, sent } = fakeFetch(() =>
+      jsonResponse({
+        model: 'openai/gpt-5.4-mini',
+        choices: [{ message: { content: 'Because of the storm.' } }],
+        usage: {
+          prompt_tokens: 1000,
+          completion_tokens: 20,
+          prompt_tokens_details: { cached_tokens: 800 }
+        }
+      })
+    )
+    const answer = await openRouterUpstream('sk-or-key', fetch).complete({
+      ...PARAMS,
+      model: 'openai/gpt-5.4-mini'
+    })
+
+    expect(answer.usage).toEqual({ inputTokens: 1000, outputTokens: 20, cachedInputTokens: 800 })
+    expect(sent[0]?.url).toBe('https://openrouter.ai/api/v1/chat/completions')
+    const headers = new Headers(sent[0]?.init?.headers)
+    expect(headers.get('authorization')).toBe('Bearer sk-or-key')
+    expect(headers.get('x-title')).toBe('MythScribe')
+    const body = bodyOf(sent[0])
+    expect(body.model).toBe('openai/gpt-5.4-mini')
+    expect(body.max_tokens).toBe(60)
+    expect(body.max_completion_tokens).toBeUndefined()
+  })
+
+  it('reads the cached tokens from the last streamed chunk', async () => {
+    const { fetch } = fakeFetch(() =>
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n',
+        'data: {"model":"openai/gpt-5.4","choices":[],"usage":{"prompt_tokens":50,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":40}}}\n\n',
+        'data: [DONE]\n\n'
+      ])
+    )
+    const chunks = await collect(openRouterUpstream('k', fetch).stream(PARAMS))
+    expect(chunks).toEqual([
+      { delta: 'Hi' },
+      {
+        usage: { inputTokens: 50, outputTokens: 2, cachedInputTokens: 40 },
+        model: 'openai/gpt-5.4'
+      }
+    ])
+  })
+
+  it('maps a price table id to OpenAI direct by dropping the gateway prefix', async () => {
+    expect(openAiModelId('openai/gpt-5.4')).toBe('gpt-5.4')
+    expect(openAiModelId('gpt-5.4')).toBe('gpt-5.4')
+
+    const { fetch, sent } = fakeFetch(() => jsonResponse({ choices: [] }))
+    await openAiUpstream(KEY, fetch, { baseUrl: BASE, modelId: openAiModelId }).complete({
+      ...PARAMS,
+      model: 'openai/gpt-5.4'
+    })
+    const body = bodyOf(sent[0])
+    expect(body.model).toBe('gpt-5.4')
+    expect(body.max_completion_tokens).toBe(60)
   })
 })

@@ -4,14 +4,18 @@
  * here is meant to be called from a web page; only `/auth/verify` is opened in a browser, and it
  * answers HTML. F-15.4 adds the AI proxy route (`POST /ai/complete`) to the same router, F-15.8 the
  * one unauthenticated route, `POST /diagnostics`, and F-15.9 the Supporter license, `GET /license`.
+ * AI-BILLING-SPEC (2026-10-07) adds `GET /pricing`, `GET /usage`, `POST /auth/refresh`, the code
+ * exchange `POST /auth/verify`, and the scheduled sweep that releases expired holds.
  */
 import { type AiDeps, handleAiComplete } from './ai'
 import {
   handleMe,
   handlePoll,
+  handleRefresh,
   handleSignOut,
   handleStart,
   handleVerify,
+  handleVerifyCode,
   jsonError,
   jsonResponse
 } from './auth'
@@ -20,14 +24,16 @@ import {
   ConfiguredPacks,
   handleCheckout,
   handleCredits,
-  handleLemonSqueezyWebhook
+  handleLemonSqueezyWebhook,
+  handlePricing,
+  handleUsage
 } from './credits'
 import { importSigningKey, randomToken } from './crypto'
 import { handleDiagnostics } from './diagnostics'
 import { logMailer, resendMailer, type Mailer } from './email'
 import { handleLicense, type LicenseDeps, LicenseSigningJwk, type LicenseSigner } from './license'
-import { openAiUpstream } from './openai'
-import { d1Store } from './store'
+import { openAiModelId, openAiUpstream, openRouterUpstream, type Upstream } from './openai'
+import { d1Store, type Store } from './store'
 
 /**
  * The bindings this Worker needs. Hand-written rather than the generated `Env`: secrets are not
@@ -44,8 +50,12 @@ export interface WorkerEnv {
   LEMONSQUEEZY_PACKS?: string
   /** F-15.9: the Supporter product, as one JSON `{ variantId, url, priceCents }` object. */
   LEMONSQUEEZY_SUPPORTER?: string
+  /** M1: the $30 app license, the same shape; supersedes the Supporter product. */
+  LEMONSQUEEZY_APP_LICENSE?: string
   LEMONSQUEEZY_WEBHOOK_SECRET?: string
-  /** F-15.4: the operator's provider key, the only place it exists; absent → the proxy is a 503. */
+  /** A9: the operator's OpenRouter key, the gateway the proxy forwards to. Preferred when set. */
+  OPENROUTER_API_KEY?: string
+  /** F-15.4: the operator's OpenAI key, used only while `OPENROUTER_API_KEY` is unset. */
   OPENAI_API_KEY?: string
   /** F-15.9: the private Ed25519 JWK license tokens are signed with; absent → no token is issued. */
   LICENSE_SIGNING_KEY?: string
@@ -83,19 +93,30 @@ function packsFor(env: WorkerEnv): ConfiguredPack[] {
 }
 
 /**
- * The Supporter product (F-15.9), configured exactly like one pack. Unset or malformed is treated
- * the same way as a malformed pack list: nothing is on sale and the Account tab says so.
+ * One license product (the Supporter product of F-15.9, or the $30 app license), configured
+ * exactly like one pack. Unset or malformed is treated the same way as a malformed pack list:
+ * nothing is on sale and the Account tab says so.
  */
-function supporterFor(env: WorkerEnv): ConfiguredPack | null {
-  if (!env.LEMONSQUEEZY_SUPPORTER) return null
-  const parsed = ConfiguredPack.safeParse(parseJson(env.LEMONSQUEEZY_SUPPORTER))
+function productFor(name: string, value: string | undefined): ConfiguredPack | null {
+  if (!value) return null
+  const parsed = ConfiguredPack.safeParse(parseJson(value))
   if (!parsed.success) {
-    console.error(
-      'LEMONSQUEEZY_SUPPORTER is not a valid product; the Supporter license is off sale'
-    )
+    console.error(`${name} is not a valid product; it is off sale`)
     return null
   }
   return parsed.data
+}
+
+/**
+ * The gateway (A9): OpenRouter when its key is set; else OpenAI direct (the F-15.4 setup), which
+ * knows the price table's `openai/…` models by their bare names; else none (503).
+ */
+function upstreamFor(env: WorkerEnv): Upstream | null {
+  if (env.OPENROUTER_API_KEY) return openRouterUpstream(env.OPENROUTER_API_KEY)
+  if (env.OPENAI_API_KEY) {
+    return openAiUpstream(env.OPENAI_API_KEY, undefined, { modelId: openAiModelId })
+  }
+  return null
 }
 
 /**
@@ -122,9 +143,10 @@ function depsFor(env: WorkerEnv): WorkerDeps {
     random: randomToken,
     revealLink: env.EMAIL_TRANSPORT === 'log',
     packs: packsFor(env),
-    supporter: supporterFor(env),
+    supporter: productFor('LEMONSQUEEZY_SUPPORTER', env.LEMONSQUEEZY_SUPPORTER),
+    appLicense: productFor('LEMONSQUEEZY_APP_LICENSE', env.LEMONSQUEEZY_APP_LICENSE),
     webhookSecret: env.LEMONSQUEEZY_WEBHOOK_SECRET ?? null,
-    upstream: env.OPENAI_API_KEY ? openAiUpstream(env.OPENAI_API_KEY) : null,
+    upstream: upstreamFor(env),
     signingKey: signingKeyFor(env),
     ...(env.PUBLIC_ORIGIN ? { publicOrigin: env.PUBLIC_ORIGIN } : {})
   }
@@ -138,11 +160,15 @@ function route(request: Request, deps: WorkerDeps): Promise<Response> | Response
 
   if (pathname === '/auth/start' && method === 'POST') return handleStart(request, deps)
   if (pathname === '/auth/verify' && method === 'GET') return handleVerify(request, deps)
+  if (pathname === '/auth/verify' && method === 'POST') return handleVerifyCode(request, deps)
   if (pathname === '/auth/poll' && method === 'POST') return handlePoll(request, deps)
+  if (pathname === '/auth/refresh' && method === 'POST') return handleRefresh(request, deps)
   if (pathname === '/auth/me' && method === 'GET') return handleMe(request, deps)
   if (pathname === '/auth/signout' && method === 'POST') return handleSignOut(request, deps)
 
   if (pathname === '/credits' && method === 'GET') return handleCredits(request, deps)
+  if (pathname === '/pricing' && method === 'GET') return handlePricing(deps)
+  if (pathname === '/usage' && method === 'GET') return handleUsage(request, deps)
   if (pathname === '/billing/checkout' && method === 'POST') return handleCheckout(request, deps)
   if (pathname === '/billing/lemonsqueezy' && method === 'POST') {
     return handleLemonSqueezyWebhook(request, deps)
@@ -177,8 +203,27 @@ export async function handleRequest(request: Request, deps: WorkerDeps): Promise
   }
 }
 
+/** How long a rate window or an expired access token is kept before the sweep drops it. */
+const PRUNE_AFTER_MS = 60 * 60_000
+
+/**
+ * The scheduled sweep (L5), run by the Cron Trigger in `wrangler.toml`: release every active hold
+ * past its expiry (the request never settled — the Worker was evicted, or the store failed), and
+ * drop rate-limit windows and access tokens that ended over an hour ago. Answers how many holds
+ * it released; the count goes to the log, nothing else does.
+ */
+export async function runScheduledSweep(store: Store, now: number): Promise<number> {
+  const released = await store.releaseExpiredHolds(now)
+  await store.pruneExpired(now - PRUNE_AFTER_MS)
+  if (released > 0) console.log(`sweep released=${released}`)
+  return released
+}
+
 export default {
   fetch(request: Request, env: WorkerEnv): Promise<Response> {
     return handleRequest(request, depsFor(env))
+  },
+  async scheduled(controller: ScheduledController, env: WorkerEnv): Promise<void> {
+    await runScheduledSweep(d1Store(env.DB), controller.scheduledTime)
   }
 }
