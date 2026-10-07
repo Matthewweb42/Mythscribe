@@ -62,7 +62,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): void {
 
 /** Turns the AI pass on (F-12.3): the dial at Suggest, with a priced fast model for the estimate. */
 function allowDetect(): void {
-  useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
+  useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
   useAiStore.setState({
     status: {
       provider: 'openai',

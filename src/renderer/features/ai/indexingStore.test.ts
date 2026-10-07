@@ -160,12 +160,13 @@ describe('indexingStore (F-5.13)', () => {
         ok: false,
         code: 'DISABLED',
         message: 'Scene summaries is turned off for this project.',
-        nextStep: 'Turn the AI dial up in Settings, or enable the feature there.'
+        nextStep:
+          'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
       }
     ]
     await store().indexAll()
     expect(toasts()).toEqual([
-      'Scene summaries is turned off for this project. Turn the AI dial up in Settings, or enable the feature there.'
+      'Scene summaries is turned off for this project. Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
     ])
     expect(store().status).toEqual(IDLE_INDEX_QUEUE)
   })

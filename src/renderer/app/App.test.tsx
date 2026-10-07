@@ -303,7 +303,7 @@ describe('App', () => {
       format: 'epic',
       directory: undefined,
       aiSource: 'cloud',
-      aiDial: 0
+      aiSwitch: 'off'
     })
     // At Off the assistant panel stays as it was.
     expect(useLayoutStore.getState().layout.assistant.open).toBe(false)
@@ -682,11 +682,11 @@ describe('App', () => {
     install({
       'project:current': { ...info, name: 'Serial', format: 'webnovel' },
       'tree:list': treeFixture,
-      'aiSettings:get': { ...defaultAiSettings(), dial: 2 }
+      'aiSettings:get': { ...defaultAiSettings(), dial: 1 }
     })
     render(<App />)
     await screen.findByRole('treeitem', { name: 'Scene 1' })
-    await waitFor(() => expect(useAiSettingsStore.getState().settings?.dial).toBe(2))
+    await waitFor(() => expect(useAiSettingsStore.getState().settings?.dial).toBe(1))
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
@@ -908,7 +908,7 @@ describe('App', () => {
       format: 'novel',
       directory: undefined,
       aiSource: 'ownKey',
-      aiDial: 1
+      aiSwitch: 'ask'
     })
     const panel = await screen.findByRole('complementary', { name: 'Assistant' })
     expect(within(panel).getByRole('radio', { name: /^auto/i })).toBeChecked()
@@ -1039,7 +1039,7 @@ describe('App', () => {
       format: 'novel',
       directory: undefined,
       aiSource: 'ownKey',
-      aiDial: 0
+      aiSwitch: 'off'
     })
     expect(screen.getByRole('status')).toBeEmptyDOMElement()
     expect(screen.getByRole('dialog', { name: 'Choose how much AI helps' })).toBeInTheDocument()

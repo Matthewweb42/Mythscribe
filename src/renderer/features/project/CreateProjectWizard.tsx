@@ -1,13 +1,12 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import {
-  AI_DATA_SHARING,
-  AI_DIAL_LABEL,
-  AI_DIAL_LEVELS,
-  AI_DIAL_MEANING,
   AI_SOURCE_LABEL,
   AI_SOURCE_MEANING,
-  type AiDial,
-  AiSource
+  AI_SWITCH_LABEL,
+  AI_SWITCH_MEANING,
+  AI_SWITCH_POSITIONS,
+  AiSource,
+  type AiSwitch
 } from '@shared/aiSettings'
 import { PROJECT_NAME_MAX, type NovelFormat } from '@shared/ipc/contract'
 import { PROJECT_FORMATS } from './formats'
@@ -24,11 +23,11 @@ const STEP_TITLE: Record<Step, string> = {
 }
 
 /**
- * The level the wizard recommends and preselects (F-5.18): the lowest one at which the
- * background work runs (summaries with the story bible and tags, PLAN.md §2.6). The author
- * still chooses; Off is one click away.
+ * The switch position the wizard recommends and preselects (F-5.18, F-5.21): Ask, at which the
+ * background work runs (summaries with the story bible and tags, PLAN.md §2.6) and every AI edit
+ * asks first. The author still chooses; Off is one click away.
  */
-const RECOMMENDED_DIAL: AiDial = AI_DATA_SHARING.summary.minDial
+const RECOMMENDED_SWITCH: AiSwitch = 'ask'
 
 /**
  * What the choice asks of the author next (F-15.11). Neither option is a dead end: the key and
@@ -78,14 +77,19 @@ export function CreateProjectWizard({
   /** The MythScribe account this machine is signed in to, or null; only the Cloud hint reads it. */
   signedInEmail: string | null
   onCancel: () => void
-  onCreate: (name: string, format: NovelFormat, aiSource: AiSource, aiDial: AiDial) => Promise<void>
+  onCreate: (
+    name: string,
+    format: NovelFormat,
+    aiSource: AiSource,
+    aiSwitch: AiSwitch
+  ) => Promise<void>
 }): React.JSX.Element {
   const titleId = useId()
   const [step, setStep] = useState<Step>('name')
   const [name, setName] = useState('')
   const [format, setFormat] = useState<NovelFormat>('novel')
   const [aiSource, setAiSource] = useState<AiSource>('ownKey')
-  const [aiDial, setAiDial] = useState<AiDial>(RECOMMENDED_DIAL)
+  const [aiSwitch, setAiSwitch] = useState<AiSwitch>(RECOMMENDED_SWITCH)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fieldsetRef = useRef<HTMLFieldSetElement>(null)
@@ -124,7 +128,7 @@ export function CreateProjectWizard({
     }
     setError(null)
     try {
-      await onCreate(trimmed, format, aiSource, aiDial)
+      await onCreate(trimmed, format, aiSource, aiSwitch)
     } catch (err) {
       // The author is looking at this form, so the failure belongs here, not in a toast.
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -224,33 +228,36 @@ export function CreateProjectWizard({
           ) : (
             <>
               <p data-testid="wizard-dial-explainer" className="mt-4 mb-0 text-sm text-fg-muted">
-                You write; at {AI_DIAL_LABEL[RECOMMENDED_DIAL]} the AI works behind you. When you
-                pause typing it summarizes the scene, notes what it states about your characters,
-                places, and world in the story bible, tags it, and flags contradictions. The
-                assistant panel opens beside the editor for questions and one-click actions. Every
-                change to your prose stays a proposal you accept or reject.
+                You write; at {AI_SWITCH_LABEL[RECOMMENDED_SWITCH]} the AI works behind you. When
+                you pause typing it summarizes the scene, notes what it states about your
+                characters, places, and world in the story bible, tags it, and flags contradictions.
+                The assistant panel opens beside the editor for questions and one-click actions.
+                Every change to your prose asks you first; at Auto the assistant makes its edits
+                itself, each with Undo.
               </p>
               <fieldset ref={fieldsetRef} className="mt-3 m-0 flex flex-col gap-2 border-0 p-0">
                 <legend className="mb-2 p-0 text-sm font-medium">AI level</legend>
-                {AI_DIAL_LEVELS.map((level) => (
-                  <label key={level} className={OPTION}>
+                {AI_SWITCH_POSITIONS.map((position) => (
+                  <label key={position} className={OPTION}>
                     <input
                       type="radio"
-                      name="aiDial"
-                      value={level}
+                      name="aiSwitch"
+                      value={position}
                       className="sr-only"
-                      checked={aiDial === level}
-                      onChange={() => setAiDial(level)}
+                      checked={aiSwitch === position}
+                      onChange={() => setAiSwitch(position)}
                     />
                     <span className="block text-sm font-medium">
-                      {AI_DIAL_LABEL[level]}
-                      {level === RECOMMENDED_DIAL ? (
+                      {AI_SWITCH_LABEL[position]}
+                      {position === RECOMMENDED_SWITCH ? (
                         <span className="ml-2 rounded-sm bg-accent px-1.5 py-0.5 text-xs font-medium text-accent-fg">
                           Recommended
                         </span>
                       ) : null}
                     </span>
-                    <span className="block text-sm text-fg-muted">{AI_DIAL_MEANING[level]}</span>
+                    <span className="block text-sm text-fg-muted">
+                      {AI_SWITCH_MEANING[position]}
+                    </span>
                   </label>
                 ))}
               </fieldset>

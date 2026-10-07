@@ -14,7 +14,7 @@ import {
   GHOST_AFTER_CHARS,
   GHOST_BEFORE_CHARS
 } from '../ai'
-import { AiDial, AiSettings, AiSource } from '../aiSettings'
+import { AiSettings, AiSource, AiSwitch } from '../aiSettings'
 import { ExportOptions, ExportProgress, ExportResult } from '../bookExport'
 import {
   CHAT_HISTORY_TURNS,
@@ -766,8 +766,8 @@ export const contract = {
       directory: z.string().optional(),
       /** Where the new project's AI requests go (F-15.11, the wizard's third step); omitted keeps the `ownKey` default. */
       aiSource: AiSource.optional(),
-      /** The wizard's AI level (F-5.18, its fourth step); omitted keeps the Off default. */
-      aiDial: AiDial.optional()
+      /** The wizard's AI switch position (F-5.18 and F-5.21, its fourth step); omitted keeps the Off default. */
+      aiSwitch: AiSwitch.optional()
     }),
     output: ProjectInfo.nullable()
   },

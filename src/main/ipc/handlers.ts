@@ -11,7 +11,7 @@ import {
   USAGE_RECENT_LIMIT,
   type AiUsageSummary
 } from '@shared/ai'
-import { type AiSource, isFeatureAllowed } from '@shared/aiSettings'
+import { type AiSource, aiSwitchPatch, isFeatureAllowed } from '@shared/aiSettings'
 import { EXPORT_EXTENSIONS, EXPORT_FORMAT_LABELS } from '@shared/bookExport'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl } from '@shared/cloudApi'
 import { aiRequestCounter } from '@shared/diagnostics'
@@ -578,7 +578,7 @@ export function registerHandlers({
 
   register('app:info', () => ({ version: app.getVersion(), platform: process.platform }))
 
-  register('project:create', async ({ name, format, directory, aiSource, aiDial }) => {
+  register('project:create', async ({ name, format, directory, aiSource, aiSwitch }) => {
     const folder = directory
       ? projectFolderFor(directory, name)
       : await dialogs.chooseProjectSavePath(name)
@@ -587,15 +587,21 @@ export function registerHandlers({
     diagnostics.count('project.create')
     // F-15.11, F-5.18: the wizard's choices are written before this answers, so the renderer's
     // first `aiSettings:get` already reads them.
-    if (aiSource !== undefined || aiDial !== undefined) {
+    if (aiSource !== undefined || aiSwitch !== undefined) {
       const orm = manager.require().connection.orm
       const settings = getAiSettings(orm)
       const next = {
         ...settings,
-        source: aiSource ?? settings.source,
-        dial: aiDial ?? settings.dial
+        ...(aiSwitch === undefined ? {} : aiSwitchPatch(aiSwitch)),
+        source: aiSource ?? settings.source
       }
-      if (next.source !== settings.source || next.dial !== settings.dial) setAiSettings(orm, next)
+      if (
+        next.source !== settings.source ||
+        next.dial !== settings.dial ||
+        next.auto !== settings.auto
+      ) {
+        setAiSettings(orm, next)
+      }
     }
     return info
   })

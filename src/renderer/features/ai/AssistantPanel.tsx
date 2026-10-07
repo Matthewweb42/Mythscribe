@@ -15,7 +15,7 @@ import {
   type Conversation,
   type ConversationMode
 } from '@shared/chat'
-import { AI_DATA_SHARING, AI_DIAL_LABEL, isFeatureAllowed, type AiDial } from '@shared/aiSettings'
+import { AI_DATA_SHARING, isFeatureAllowed, needsSwitchText } from '@shared/aiSettings'
 import {
   CITATION_MARKER,
   QUERY_NOT_FOUND,
@@ -35,6 +35,7 @@ import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { CONVERSATION_BUSY_MESSAGE, useOpenScene } from './aiActions'
 import { AiResults } from './AiResults'
+import { AiSwitchControl } from './AiSwitchControl'
 import { useAiSettingsStore } from './aiSettingsStore'
 import {
   AGENT_NOTICE,
@@ -428,12 +429,9 @@ function Directions({
   const settings = useAiSettingsStore((s) => s.settings)
   const hasEditor = useActiveEditorStore((s) => s.active !== null && !s.active.editor.isDestroyed)
   const writeDirection = useAssistantStore((s) => s.writeDirection)
-  const agentDial = AI_DATA_SHARING.ghostText.minDial
   let reason: string | null = null
   if (settings === null || !isFeatureAllowed(settings, 'chat')) {
-    reason = `Author needs the AI dial at ${AI_DIAL_LABEL[AI_DATA_SHARING.chat.minDial]} or higher, with ${AI_DATA_SHARING.chat.label} on (Settings, AI tab)`
-  } else if (settings.dial < agentDial) {
-    reason = modeTitle('agent', true, agentDial)
+    reason = `${needsSwitchText('Author')}, with ${AI_DATA_SHARING.chat.label} on (Settings, AI tab)`
   } else if (!hasEditor) {
     reason = NO_EDITOR_MESSAGE
   } else if (busy) {
@@ -604,15 +602,13 @@ function answerParts(
   return parts
 }
 
-/** What a mode radio's tooltip says: what it does, or what to change when the dial forbids it. */
-function modeTitle(id: ConversationMode, disabled: boolean, agentDial: AiDial): string {
+/** What a mode radio's tooltip says: what it does, or what to change when the settings forbid it. */
+function modeTitle(id: ConversationMode, disabled: boolean): string {
   if (id === 'auto') {
     return 'Pick what answers each message: chat, a cited answer, editor’s notes, a rewrite, and more'
   }
   if (disabled) {
-    return id === 'agent'
-      ? `Author needs the AI dial at ${AI_DIAL_LABEL[agentDial]} or higher (Settings, AI tab)`
-      : `Query needs the AI dial at ${AI_DIAL_LABEL[AI_DATA_SHARING.query.minDial]} or higher, with ${AI_DATA_SHARING.query.label} on (Settings, AI tab)`
+    return `${needsSwitchText('Query')}, with ${AI_DATA_SHARING.query.label} on (Settings, AI tab)`
   }
   if (id === 'agent') return 'Place the answer in the editor as ghost text'
   if (id === 'query') return 'Ask about the whole manuscript; answers cite scenes'
@@ -621,9 +617,9 @@ function modeTitle(id: ConversationMode, disabled: boolean, agentDial: AiDial): 
 
 /**
  * The rotating suggestion line, the message box with Send (or Stop) inside it, and under it the
- * mode switch and the paragraph count (Author only). Enter sends, Shift+Enter breaks the line;
- * Send is disabled for a blank message and while the dial does not allow the assistant (the note
- * above says what to change). While a turn is in flight, Stop takes Send's place (F-5.10): it
+ * mode switch, the paragraph count (Author only), and the one AI switch (F-5.21) at the end of
+ * the row. Enter sends, Shift+Enter breaks the line; Send is disabled for a blank message and
+ * while the settings do not allow the assistant (the note above says what to change). While a turn is in flight, Stop takes Send's place (F-5.10): it
  * drops the unanswered turn and keeps the author's, so it can be sent again. There is no
  * clearing a conversation (2026-10-06): New conversation starts a fresh one.
  */
@@ -650,11 +646,8 @@ function Composer(): React.JSX.Element {
   }, [attachment])
 
   const chatAllowed = settings !== null && isFeatureAllowed(settings, 'chat')
-  const agentDial = AI_DATA_SHARING.ghostText.minDial
-  const agentAllowed = settings !== null && settings.dial >= agentDial
   const queryAllowed = settings !== null && isFeatureAllowed(settings, 'query')
-  const modeOff = (id: ConversationMode): boolean =>
-    (id === 'agent' && !agentAllowed) || (id === 'query' && !queryAllowed)
+  const modeOff = (id: ConversationMode): boolean => id === 'query' && !queryAllowed
   const mode = conversation?.mode ?? 'auto'
   const canSend =
     conversation !== null && chatAllowed && !pending && draft.trim() !== '' && !modeOff(mode)
@@ -694,12 +687,13 @@ function Composer(): React.JSX.Element {
   const warning =
     settings !== null && !chatAllowed ? (
       <p data-testid="assistant-disabled" className="m-0 text-xs text-warning">
-        The assistant needs the AI dial at {AI_DIAL_LABEL[AI_DATA_SHARING.chat.minDial]} or higher,
-        with Assistant chat on (Settings, AI tab).
+        {settings.dial === 0
+          ? 'The AI is Off. Set the AI switch below to Ask or Auto to use the assistant.'
+          : 'Assistant chat is turned off for this project (Settings, AI tab).'}
       </p>
     ) : settings !== null && modeOff(mode) ? (
       <p data-testid="assistant-mode-off" className="m-0 text-xs text-warning">
-        {modeTitle(mode, true, agentDial)}. Pick another mode to keep going.
+        {modeTitle(mode, true)}. Pick another mode to keep going.
       </p>
     ) : null
 
@@ -801,7 +795,7 @@ function Composer(): React.JSX.Element {
                 aria-checked={id === mode}
                 tabIndex={id === mode ? 0 : -1}
                 disabled={disabled}
-                title={modeTitle(id, disabled, agentDial)}
+                title={modeTitle(id, disabled)}
                 onClick={() => selectMode(id)}
                 onKeyDown={onRadioKeyDown}
                 className={MODE_RADIO}
@@ -828,6 +822,9 @@ function Composer(): React.JSX.Element {
             </select>
           </label>
         ) : null}
+        <div className="ml-auto">
+          <AiSwitchControl variant="compact" />
+        </div>
       </div>
     </div>
   )

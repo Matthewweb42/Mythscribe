@@ -109,7 +109,7 @@ beforeEach(() => {
   db = session.connection.orm
   scene = listNodes(db).find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')?.id ?? ''
   if (!scene) throw new Error('skeleton not seeded')
-  setAiSettings(db, { ...defaultAiSettings(), dial: 2 })
+  setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
   complete = vi.fn<Complete>()
   answer('Somewhere ahead the river was rising.')
   ledger = []
@@ -328,14 +328,14 @@ describe('generateGhostText (F-5.3)', () => {
     expect(complete.mock.calls[0]![0].maxTokens).toBeLessThanOrEqual(60)
   })
 
-  it('refuses with DISABLED below Suggest or with the feature toggled off, before reading anything', async () => {
-    setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
+  it('refuses with DISABLED at Off or with the feature toggled off, before reading anything', async () => {
+    setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Ghost text needs the AI dial at Suggest or higher (it is at Ask).'
+      message: 'Ghost text needs the AI switch at Ask or Auto (it is at Off).'
     })
     const on = defaultAiSettings()
-    setAiSettings(db, { ...on, dial: 2, features: { ...on.features, ghostText: false } })
+    setAiSettings(db, { ...on, dial: 1, features: { ...on.features, ghostText: false } })
     expect(await failure()).toEqual({
       code: 'DISABLED',
       message: 'Ghost text is turned off for this project.'

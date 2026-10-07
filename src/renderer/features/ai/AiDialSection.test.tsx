@@ -68,7 +68,7 @@ async function open(initial: AiSettings = defaultAiSettings()): Promise<void> {
   render(<AiDialSection />)
   await useAiStore.getState().load()
   await useAiSettingsStore.getState().load()
-  await screen.findByRole('radiogroup', { name: 'AI dial' })
+  await screen.findByRole('radiogroup', { name: 'AI switch' })
 }
 
 beforeEach(() => {
@@ -80,38 +80,34 @@ afterEach(() => {
   resetAiSettingsStore()
 })
 
-describe('AiDialSection (F-14.4)', () => {
-  it('renders nothing until the settings load, then the dial at Off with its meanings', async () => {
+describe('AiDialSection (F-14.4, F-5.21)', () => {
+  it('renders nothing until the settings load, then the switch at Off with its meanings', async () => {
     fake = fakeClient(defaultAiSettings())
     setIpcClient(fake.client)
     render(<AiDialSection />)
     expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument()
     await useAiSettingsStore.getState().load()
-    const group = await screen.findByRole('radiogroup', { name: 'AI dial' })
+    const group = await screen.findByRole('radiogroup', { name: 'AI switch' })
     expect(
       within(group)
         .getAllByRole('radio')
         .map((r) => r.getAttribute('aria-checked'))
-    ).toEqual(['true', 'false', 'false', 'false'])
-    expect(radio('Off')).toHaveAccessibleDescription('Nothing leaves this machine.')
-    expect(radio('Ask')).toHaveAccessibleDescription(/Queries, summaries, tag suggestions/)
-    expect(radio('Suggest')).toHaveAccessibleDescription(/Adds ghost text/)
-    expect(radio('Draft')).toHaveAccessibleDescription(/multi-paragraph/)
+    ).toEqual(['true', 'false', 'false'])
+    expect(radio('Off')).toHaveAccessibleDescription('No AI at all. Nothing leaves this machine.')
+    expect(radio('Ask')).toHaveAccessibleDescription(/asks you first/)
+    expect(radio('Auto')).toHaveAccessibleDescription(/deletions still ask/)
     expect(radio('Off')).toHaveAttribute('tabindex', '0')
     expect(radio('Ask')).toHaveAttribute('tabindex', '-1')
     expect(screen.getByText('This project')).toBeInTheDocument()
-    expect(
-      screen.getByText("Nothing is sent until a feature's row above is allowed and you use it.")
-    ).toBeInTheDocument()
   })
 
-  it('selects a level on click and writes it once after the debounce', async () => {
+  it('selects a position on click and writes it once after the debounce', async () => {
     await open()
-    await userEvent.click(radio('Suggest'))
-    expect(radio('Suggest')).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(radio('Auto'))
+    expect(radio('Auto')).toHaveAttribute('aria-checked', 'true')
     expect(radio('Off')).toHaveAttribute('aria-checked', 'false')
     await waitFor(() => expect(sets()).toHaveLength(1))
-    expect(sets()[0]).toEqual({ ...defaultAiSettings(), dial: 2 })
+    expect(sets()[0]).toEqual({ ...defaultAiSettings(), dial: 1, auto: true })
   })
 
   it('moves and selects with the arrow keys, Home, and End', async () => {
@@ -120,47 +116,41 @@ describe('AiDialSection (F-14.4)', () => {
     await userEvent.keyboard('{ArrowRight}')
     expect(radio('Ask')).toHaveAttribute('aria-checked', 'true')
     expect(radio('Ask')).toHaveFocus()
-    await userEvent.keyboard('{ArrowRight}{ArrowRight}')
-    expect(radio('Draft')).toHaveAttribute('aria-checked', 'true')
+    await userEvent.keyboard('{ArrowRight}')
+    expect(radio('Auto')).toHaveAttribute('aria-checked', 'true')
     await userEvent.keyboard('{ArrowRight}')
     expect(radio('Off')).toHaveAttribute('aria-checked', 'true') // wraps
     await userEvent.keyboard('{ArrowLeft}')
-    expect(radio('Draft')).toHaveAttribute('aria-checked', 'true')
+    expect(radio('Auto')).toHaveAttribute('aria-checked', 'true')
     await userEvent.keyboard('{Home}')
     expect(radio('Off')).toHaveAttribute('aria-checked', 'true')
     await userEvent.keyboard('{End}')
-    expect(radio('Draft')).toHaveAttribute('aria-checked', 'true')
-    expect(radio('Draft')).toHaveFocus()
+    expect(radio('Auto')).toHaveAttribute('aria-checked', 'true')
+    expect(radio('Auto')).toHaveFocus()
     await waitFor(() => expect(sets()).toHaveLength(1))
-    expect(sets()[0]?.dial).toBe(3)
+    expect(sets()[0]).toMatchObject({ dial: 1, auto: true })
   })
 
-  it('disables a toggle below its level, says the level needed, and enables it once the dial is raised', async () => {
+  it('disables every toggle at Off and enables them all at Ask', async () => {
     await open()
     for (const id of AI_FEATURE_IDS) {
-      expect(checkbox(new RegExp(`^${AI_DATA_SHARING[id].label}`))).toBeDisabled()
+      expect(checkbox(AI_DATA_SHARING[id].label)).toBeDisabled()
     }
-    expect(checkbox('Ghost text (needs Suggest)')).toBeChecked()
-    expect(checkbox('Author mode (needs Draft)')).toBeDisabled()
-    expect(checkbox('Tag suggestions (needs Ask)')).toBeDisabled()
+    expect(checkbox('Ghost text')).toBeChecked()
     await userEvent.click(radio('Ask'))
-    expect(checkbox('Tag suggestions')).toBeEnabled()
-    expect(checkbox('Ghost text (needs Suggest)')).toBeDisabled()
-    await userEvent.click(radio('Suggest'))
-    expect(checkbox('Ghost text')).toBeEnabled()
-    expect(checkbox('Author mode (needs Draft)')).toBeDisabled()
-    await userEvent.click(radio('Draft'))
-    expect(checkbox('Author mode')).toBeEnabled()
+    for (const id of AI_FEATURE_IDS) {
+      expect(checkbox(AI_DATA_SHARING[id].label)).toBeEnabled()
+    }
   })
 
   it('unchecks and rechecks a toggle through the store, replacing the toggles wholesale', async () => {
-    await open({ ...defaultAiSettings(), dial: 2 })
+    await open({ ...defaultAiSettings(), dial: 1 })
     await userEvent.click(checkbox('Ghost text'))
     expect(checkbox('Ghost text')).not.toBeChecked()
     await waitFor(() => expect(sets()).toHaveLength(1))
     expect(sets()[0]).toEqual({
       ...defaultAiSettings(),
-      dial: 2,
+      dial: 1,
       features: { ...defaultAiSettings().features, ghostText: false }
     })
     await userEvent.click(checkbox('Ghost text'))
@@ -174,8 +164,8 @@ describe('AiDialSection (F-14.4)', () => {
     fake.setAnswer = () => {
       throw new IpcRequestError({ code: 'IO', message: 'Disk is read-only' })
     }
-    await userEvent.click(radio('Draft'))
-    expect(radio('Draft')).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(radio('Auto'))
+    expect(radio('Auto')).toHaveAttribute('aria-checked', 'true')
     await waitFor(() => expect(toasts()).toEqual(['Disk is read-only']))
     expect(radio('Off')).toHaveAttribute('aria-checked', 'true')
   })
@@ -211,7 +201,7 @@ describe('AiDialSection (F-14.4)', () => {
     expect(sets()).toHaveLength(3)
   })
 
-  it('lists every feature in the data-sharing table with what it sends, the provider, and the level', async () => {
+  it('lists every feature in the data-sharing table with what it sends and the provider', async () => {
     await open()
     const table = screen.getByRole('table', { name: 'What each AI feature sends' })
     const rows = within(table).getAllByRole('row').slice(1)
@@ -222,11 +212,6 @@ describe('AiDialSection (F-14.4)', () => {
       expect(row).toHaveTextContent(sends)
       expect(row).toHaveTextContent('OpenAI')
     }
-    const rowFor = (label: string): HTMLElement =>
-      within(table).getByRole('row', { name: new RegExp(`^${label} `) })
-    expect(rowFor('Ghost text')).toHaveTextContent(/Suggest$/)
-    expect(rowFor('Author mode')).toHaveTextContent(/Draft$/)
-    expect(rowFor('Tag suggestions')).toHaveTextContent(/Ask$/)
   })
 })
 

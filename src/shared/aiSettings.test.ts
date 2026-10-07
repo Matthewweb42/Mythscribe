@@ -9,10 +9,13 @@ import {
   DEFAULT_GHOST_IDLE_MS,
   GHOST_IDLE_MS_MAX,
   GHOST_IDLE_MS_MIN,
-  AI_DIAL_LEVELS,
-  AI_DIAL_MEANING,
   AI_FEATURES_BY_LEVEL,
+  AI_SWITCH_LABEL,
+  AI_SWITCH_MEANING,
+  AI_SWITCH_POSITIONS,
   AiSettings,
+  aiSwitchOf,
+  aiSwitchPatch,
   defaultAiSettings,
   isFeatureAllowed,
   STORY_BIBLE_SENDS
@@ -23,6 +26,7 @@ describe('defaultAiSettings (F-14.4)', () => {
   it('installs at Off with every feature toggle on', () => {
     const defaults = defaultAiSettings()
     expect(defaults.dial).toBe(0)
+    expect(defaults.auto).toBe(false)
     for (const id of AI_FEATURE_IDS) expect(defaults.features[id]).toBe(true)
     expect(Object.keys(defaults.features).sort()).toEqual([...AI_FEATURE_IDS].sort())
   })
@@ -43,10 +47,10 @@ describe('defaultAiSettings (F-14.4)', () => {
 
   it('fills a toggle missing from a stored row (a feature added later, F-14.10) with on, keeping the rest', () => {
     const { ghostText: _ghostText, rewrite: _rewrite, ...older } = defaultAiSettings().features
-    const parsed = AiSettings.safeParse({ dial: 2, features: { ...older, chat: false } })
+    const parsed = AiSettings.safeParse({ dial: 1, features: { ...older, chat: false } })
     expect(parsed.success).toBe(true)
     if (parsed.success) {
-      expect(parsed.data.dial).toBe(2)
+      expect(parsed.data.dial).toBe(1)
       expect(parsed.data.features.chat).toBe(false)
       expect(parsed.data.features.ghostText).toBe(true)
       expect(parsed.data.features.rewrite).toBe(true)
@@ -60,11 +64,11 @@ describe('defaultAiSettings (F-14.4)', () => {
 
   it('fills the ghost-text defaults into a row stored before F-5.3 and bounds the idle delay', () => {
     const { ghostText: _ghostText, ...old } = defaultAiSettings()
-    const parsed = AiSettings.safeParse({ ...old, dial: 2 })
+    const parsed = AiSettings.safeParse({ ...old, dial: 1 })
     expect(parsed.success).toBe(true)
     if (parsed.success) {
       expect(parsed.data.ghostText).toEqual({ enabled: false, idleMs: DEFAULT_GHOST_IDLE_MS })
-      expect(parsed.data.dial).toBe(2)
+      expect(parsed.data.dial).toBe(1)
     }
     const withIdle = (idleMs: number): boolean =>
       AiSettings.safeParse({ ...defaultAiSettings(), ghostText: { enabled: true, idleMs } }).success
@@ -103,7 +107,6 @@ describe('AI_DATA_SHARING', () => {
       expect(entry).toBeDefined()
       expect(entry.label.length).toBeGreaterThan(0)
       expect(entry.sends.length).toBeGreaterThan(0)
-      expect(AI_DIAL_LEVELS).toContain(entry.minDial)
       expect(entry.minDial).toBeGreaterThan(0) // nothing runs at Off
     }
     expect(Object.keys(AI_DATA_SHARING).sort()).toEqual([...AI_FEATURE_IDS].sort())
@@ -194,20 +197,8 @@ describe('AI_DATA_SHARING', () => {
     expect(AI_DATA_SHARING.rewrite.sends).toMatch(/author rules|banned phrase/)
   })
 
-  it("places ghost text at Suggest and Author mode at Draft, per PLAN.md §2.3's table", () => {
-    expect(AI_DATA_SHARING.ghostText.minDial).toBe(2)
-    expect(AI_DATA_SHARING.authorMode.minDial).toBe(3)
-    for (const id of [
-      'query',
-      'summary',
-      'tags',
-      'critique',
-      'betaReader',
-      'chat',
-      'embeddings'
-    ] as const) {
-      expect(AI_DATA_SHARING[id].minDial).toBe(1)
-    }
+  it('lets every feature run at Ask and Auto, nothing at Off (F-5.21)', () => {
+    for (const id of AI_FEATURE_IDS) expect(AI_DATA_SHARING[id].minDial).toBe(1)
   })
 
   it('lists the features by level for display, covering every id once', () => {
@@ -217,22 +208,37 @@ describe('AI_DATA_SHARING', () => {
   })
 })
 
-describe('the dial labels and meanings', () => {
-  it('cover all four levels', () => {
-    expect(AI_DIAL_LEVELS).toEqual([0, 1, 2, 3])
-    expect(AI_DIAL_LEVELS.map((level) => AI_DIAL_LABEL[level])).toEqual([
-      'Off',
-      'Ask',
-      'Suggest',
-      'Draft'
-    ])
-    for (const level of AI_DIAL_LEVELS) expect(AI_DIAL_MEANING[level].length).toBeGreaterThan(0)
+describe('the one AI switch (F-5.21)', () => {
+  it('has three positions with labels and meanings', () => {
+    expect(AI_SWITCH_POSITIONS.map((p) => AI_SWITCH_LABEL[p])).toEqual(['Off', 'Ask', 'Auto'])
+    for (const p of AI_SWITCH_POSITIONS) expect(AI_SWITCH_MEANING[p].length).toBeGreaterThan(0)
+    expect(AI_DIAL_LABEL).toEqual({ 0: 'Off', 1: 'Ask' })
+  })
+
+  it('round-trips every position through the stored fields', () => {
+    for (const p of AI_SWITCH_POSITIONS) {
+      expect(aiSwitchOf({ ...defaultAiSettings(), ...aiSwitchPatch(p) })).toBe(p)
+    }
+    expect(aiSwitchOf({ dial: 0, auto: true })).toBe('off')
+  })
+
+  it('reads a stored Suggest or Draft level as Ask, never Auto, and Off as Off', () => {
+    for (const [dial, expected] of [
+      [0, 'off'],
+      [1, 'ask'],
+      [2, 'ask'],
+      [3, 'ask']
+    ] as const) {
+      const parsed = AiSettings.parse({ ...defaultAiSettings(), auto: undefined, dial })
+      expect(parsed.auto).toBe(false)
+      expect(aiSwitchOf(parsed)).toBe(expected)
+    }
   })
 })
 
 describe('isFeatureAllowed', () => {
   const cases = AI_FEATURE_IDS.flatMap((feature) =>
-    AI_DIAL_LEVELS.flatMap((dial) =>
+    ([0, 1] as const).flatMap((dial) =>
       [true, false].map((on) => ({
         feature,
         dial,
@@ -242,7 +248,7 @@ describe('isFeatureAllowed', () => {
     )
   )
   it('covers every feature, level, and toggle state', () => {
-    expect(cases).toHaveLength(AI_FEATURE_IDS.length * 4 * 2)
+    expect(cases).toHaveLength(AI_FEATURE_IDS.length * 2 * 2)
   })
 
   it.each(cases)('$feature at dial $dial with the toggle $on → $expected', (c) => {
@@ -257,7 +263,7 @@ describe('isFeatureAllowed', () => {
   it('is monotone in the dial: raising it never disables a feature', () => {
     for (const feature of AI_FEATURE_IDS) {
       let previous = false
-      for (const dial of AI_DIAL_LEVELS) {
+      for (const dial of [0, 1] as const) {
         const now = isFeatureAllowed({ ...defaultAiSettings(), dial }, feature)
         if (previous) expect(now).toBe(true)
         previous = now

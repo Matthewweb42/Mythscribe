@@ -66,16 +66,19 @@ the book.
 
 ### 2.3 Control (F-14.4, F-14.5, F-14.6, F-14.10)
 
-**The AI dial** (F-14.4), per project, monotonic (a lower level disables everything above it):
+**The AI switch** (F-5.21, the author's decision of 2026-10-06; it replaced the four-level dial of
+F-14.4), per project, in the assistant panel and in Settings › AI:
 
-| Level | What the AI may do | What leaves the machine |
+| Position | What the AI may do | What leaves the machine |
 |---|---|---|
-| 0 Off | Nothing | Nothing |
-| 1 Ask | Story Intelligence queries, summaries, tag suggestions, critique | Scene text and story bible |
-| 2 Suggest | Level 1 + VibeWrite ghost text, rewrite-in-my-voice on selection | Same, plus the last ~500 characters at the caret |
-| 3 Draft | Level 2 + Author mode (multi-paragraph proposals) | Same |
+| Off | Nothing | Nothing |
+| Ask | Every AI feature; every change the AI wants to make to the book asks first | What each feature's data-sharing row lists |
+| Auto | Every AI feature; the chat applies its own edits, each listed with Undo; deletions still ask | Same |
 
-Plus per-feature toggles under the dial and a **data-sharing panel** listing exactly which
+VibeWrite (ghost text) stays its own toolbar toggle, available at Ask and Auto. A project stored
+at the old Ask, Suggest, or Draft level opens at Ask, never Auto.
+
+Plus per-feature toggles under the switch and a **data-sharing panel** listing exactly which
 features send which text to which provider.
 
 **Proposal review** (F-14.5): every AI output is a `Proposal` object (source feature, prompt
@@ -316,7 +319,7 @@ Deliberately small; a solo side business cannot run a big service:
 | **Voice drift over a long draft** | Every accepted AI sentence nudges the exemplars; models regress to their mean | Fidelity check on every proposal; exemplars are author-marked, not auto-updated from AI spans; voice-consistency report over the book |
 | **Sycophantic critique** | Models praise by default; useless to a writer | Critique prompts forbid uncited praise; honesty setting; structured output (issue, passage, why, suggestion) |
 | **Hallucinated story facts** | Long-context summarization invents connections | Retrieval with citations; "not found" as a first-class answer; entity sheets are the ground truth, summaries are derived and re-generated on edit |
-| **Ghost-text cost** | A 2-second idle trigger can fire hundreds of times an hour | Minimum typed characters + interval + local cache + fast tier + daily cap; off by default at dial ≤1 |
+| **Ghost-text cost** | A 2-second idle trigger can fire hundreds of times an hour | Minimum typed characters + interval + local cache + fast tier + daily cap; off until the author turns VibeWrite on |
 | **Cold start** | No manuscript, no voice | Author rules and pasted exemplars; confidence indicator; features degrade to "generic but constrained" rather than refusing |
 | **Content policy refusals** | Fiction has dark scenes | Test early; provider/model choice per plan; clear error message that names the policy; BYOK users can choose permissive providers |
 | **Key and data safety** | Desktop apps leak secrets; proxies tempt logging | `safeStorage`; keys never in project files; proxy stores nothing; content-scrubbed error tracking; privacy page that is actually true |

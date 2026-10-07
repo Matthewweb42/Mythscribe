@@ -243,7 +243,7 @@ describe('DocumentEditor AI on a selection (2026-10-06)', () => {
   const PASSAGE = 'Into the dark woods they went, without a word.'
 
   it('keeps VibeWrite as the toolbar’s only AI control', async () => {
-    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 3 } })
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
     await mountReady()
     const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
     expect(within(toolbar).getByRole('button', { name: 'VibeWrite' })).toBeInTheDocument()
@@ -260,7 +260,7 @@ describe('DocumentEditor AI on a selection (2026-10-06)', () => {
   it('the bubble’s Rewrite rewrites the selection, opens the assistant, and Accept in the results replaces the text', async () => {
     let resolveRewrite: ((result: AiRewriteResult) => void) | null = null
     let sent: Input<'ai:rewrite'> | null = null
-    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
     const editor = await mountReadyWithEditor(
       {
         'document:get': () => ({ id: 'sc-1', content: doc(PASSAGE) }),
@@ -329,8 +329,13 @@ describe('DocumentEditor AI on a selection (2026-10-06)', () => {
       editor.commands.setTextSelection({ from: 1, to: 20 })
     })
     expect(screen.queryByTestId('selection-bubble')).not.toBeInTheDocument()
-    // At Ask the chat is allowed but a rewrite is not: Ask AI alone, never a dead Rewrite.
-    act(() => useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } }))
+    // With the chat allowed but rewrite turned off: Ask AI alone, never a dead Rewrite.
+    const on = defaultAiSettings()
+    act(() =>
+      useAiSettingsStore.setState({
+        settings: { ...on, dial: 1, features: { ...on.features, rewrite: false } }
+      })
+    )
     const bubble = await screen.findByTestId('selection-bubble')
     expect(within(bubble).queryByTestId('selection-rewrite')).not.toBeInTheDocument()
     await userEvent.click(within(bubble).getByTestId('selection-ask'))
@@ -339,7 +344,7 @@ describe('DocumentEditor AI on a selection (2026-10-06)', () => {
   })
 
   it('the right-click menu over a selection offers Rewrite and Ask AI while the dial allows them', async () => {
-    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
     let sent: Input<'ai:rewrite'> | null = null
     const editor = await mountReadyWithEditor({
       'document:get': () => ({ id: 'sc-1', content: doc(PASSAGE) }),
@@ -363,7 +368,7 @@ describe('DocumentEditor AI on a selection (2026-10-06)', () => {
   })
 
   it('unmounting the editor dismisses its pending rewrite', async () => {
-    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
     let cancelled: string | null = null
     const editor = await mountReadyWithEditor({
       'document:get': () => ({ id: 'sc-1', content: doc(PASSAGE) }),
@@ -389,7 +394,7 @@ describe('DocumentEditor beta reader (F-14.11)', () => {
   const SCENE = 'Into the dark woods they went, without a word. '.repeat(5)
 
   it('unmounting the editor dismisses the read in progress', async () => {
-    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 2 } })
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
     let sent: Input<'ai:betaReader'> | null = null
     let cancelled: string | null = null
     await mountReady({

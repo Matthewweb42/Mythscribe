@@ -1,5 +1,5 @@
 import { Sparkles } from 'lucide-react'
-import { AI_DATA_SHARING, AI_DIAL_LABEL, isFeatureAllowed } from '@shared/aiSettings'
+import { AI_DATA_SHARING, needsSwitchText, isFeatureAllowed } from '@shared/aiSettings'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 
 const BUTTON =
@@ -7,7 +7,7 @@ const BUTTON =
 
 /**
  * The VibeWrite toggle in the single-document toolbar (F-5.3): `aria-pressed` is the mode's
- * effective state (on, and allowed by the dial). Below Suggest, or with the feature toggled
+ * effective state (on, and allowed by the AI switch). At Off, or with the feature toggled
  * off in Settings, it is disabled and its title says what to change; while on, the title
  * carries the last subtle failure (rate limit, network, ...) so a silent pause has a reason.
  * Mouse-down is swallowed so the editor keeps its caret and the author can keep typing.
@@ -21,7 +21,7 @@ export function VibeWriteToggle({ error }: { error: string | null }): React.JSX.
   const on = settings.ghostText.enabled && allowed
   let title = 'VibeWrite: ghost-text continuations while you write'
   if (settings.dial < minDial) {
-    title = `VibeWrite needs the AI dial at ${AI_DIAL_LABEL[minDial]} or higher (Settings, AI tab)`
+    title = `${needsSwitchText('VibeWrite')} (Settings, AI tab)`
   } else if (!allowed) {
     title = 'Ghost text is turned off for this project (Settings, AI tab)'
   } else if (on && error) {

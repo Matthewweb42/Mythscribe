@@ -1177,19 +1177,26 @@ describe('aiSettings:get / aiSettings:set (F-14.4)', () => {
     expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
   })
 
-  it("stores the wizard's AI level with the new project; omitted keeps Off (F-5.18)", async () => {
+  it("stores the wizard's AI switch with the new project; omitted keeps Off (F-5.18, F-5.21)", async () => {
     await invoke('project:create', {
       name: 'Assisted',
       format: 'novel',
       directory: tmp,
       aiSource: 'cloud',
-      aiDial: 1
+      aiSwitch: 'ask'
     })
     expect(await invoke('aiSettings:get', undefined)).toEqual({
       ...defaultAiSettings(),
       source: 'cloud',
       dial: 1
     })
+    await invoke('project:create', {
+      name: 'Hands off',
+      format: 'novel',
+      directory: tmp,
+      aiSwitch: 'auto'
+    })
+    expect(await invoke('aiSettings:get', undefined)).toMatchObject({ dial: 1, auto: true })
     await invoke('project:create', { name: 'Plain', format: 'novel', directory: tmp })
     expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
   })
@@ -1203,7 +1210,7 @@ describe('aiSettings:get / aiSettings:set (F-14.4)', () => {
     expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
     const next = {
       ...defaultAiSettings(),
-      dial: 2 as const,
+      dial: 1 as const,
       features: { ...defaultAiSettings().features, ghostText: false }
     }
     expect(await invoke('aiSettings:set', next)).toEqual(next)
@@ -1541,8 +1548,8 @@ describe('ai:chat (F-5.4)', () => {
   const KEY = 'sk-test-secret-1234abcd'
   const SCENE = 'The storm broke at dusk over the dark forest. Mara counted the lightning gaps.'
 
-  /** A project with the dial at Suggest, a key, and a scene with text. */
-  async function ready(dial: AiDial = 2): Promise<{ scene: string }> {
+  /** A project with the switch at Ask, a key, and a scene with text. */
+  async function ready(dial: AiDial = 1): Promise<{ scene: string }> {
     await invoke('project:create', { name: 'Chat', format: 'novel', directory: tmp })
     const rows = await invoke('tree:list', undefined)
     const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
@@ -1671,19 +1678,13 @@ describe('ai:chat (F-5.4)', () => {
       requestId: 'req-9'
     })
     await invoke('ai:setKey', { key: KEY })
-    expect(await invoke('ai:chat', { ...plan(scene, 'req-9'), mode: 'agent' })).toEqual({
-      ok: false,
-      code: 'DISABLED',
-      message: 'Author mode needs the AI dial at Suggest or higher (it is at Ask).',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
-      requestId: 'req-9'
-    })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 0 })
     expect(await invoke('ai:chat', plan(scene, 'req-9'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Assistant chat needs the AI dial at Ask or higher (it is at Off).',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      message: 'Assistant chat needs the AI switch at Ask or Auto (it is at Off).',
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
       requestId: 'req-9'
     })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
@@ -1742,8 +1743,8 @@ describe('ai:rewrite (F-14.10)', () => {
   const KEY = 'sk-test-secret-1234abcd'
   const PASSAGE = 'The storm broke at dusk over the dark forest. Mara counted the lightning gaps.'
 
-  /** A project with the dial at Suggest, a key, and a scene holding the passage. */
-  async function ready(dial: AiDial = 2): Promise<{ scene: string }> {
+  /** A project with the switch at Ask, a key, and a scene holding the passage. */
+  async function ready(dial: AiDial = 1): Promise<{ scene: string }> {
     await invoke('project:create', { name: 'Rewrite', format: 'novel', directory: tmp })
     const rows = await invoke('tree:list', undefined)
     const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
@@ -1840,17 +1841,18 @@ describe('ai:rewrite (F-14.10)', () => {
   })
 
   it('answers an expected AI failure as data with the requestId, and an unknown node or a passage outside the limits through the error envelope', async () => {
-    const { scene } = await ready(1)
+    const { scene } = await ready(0)
     expect(await invoke('ai:rewrite', ask(scene, 'rw-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Rewrite in my voice needs the AI dial at Suggest or higher (it is at Ask).',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      message: 'Rewrite in my voice needs the AI switch at Ask or Auto (it is at Off).',
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
       requestId: 'rw-3'
     })
     expect(deltasSent()).toEqual([])
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
-    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     const unknown = await handlerFor('ai:rewrite')(undefined, ask('nope'))
     expect(unknown.ok).toBe(false)
     if (!unknown.ok) expect(unknown.error.code).toBe('NOT_FOUND')
@@ -1969,8 +1971,9 @@ describe('ai:critique (F-14.8)', () => {
     expect(await invoke('ai:critique', ask(scene, 'cq-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: "Editor's notes needs the AI dial at Ask or higher (it is at Off).",
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      message: "Editor's notes needs the AI switch at Ask or Auto (it is at Off).",
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
       requestId: 'cq-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -2089,8 +2092,9 @@ describe('ai:proofread (F-14.12)', () => {
     expect(await invoke('ai:proofread', ask(scene, 'pr-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Proofread needs the AI dial at Ask or higher (it is at Off).',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      message: 'Proofread needs the AI switch at Ask or Auto (it is at Off).',
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
       requestId: 'pr-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -2197,8 +2201,9 @@ describe('ai:whatNext (F-5.17)', () => {
     expect(await invoke('ai:whatNext', ask(scene, 'wn-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'What comes next needs the AI dial at Ask or higher (it is at Off).',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      message: 'What comes next needs the AI switch at Ask or Auto (it is at Off).',
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
       requestId: 'wn-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -2874,8 +2879,9 @@ describe('ai:betaReader (F-14.11)', () => {
     expect(await invoke('ai:betaReader', ask(scene, 'br-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Beta reader needs the AI dial at Ask or higher (it is at Off).',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      message: 'Beta reader needs the AI switch at Ask or Auto (it is at Off).',
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
       requestId: 'br-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -3002,8 +3008,9 @@ describe('ai:query (F-5.7)', () => {
     expect(await invoke('ai:query', ask('q-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Story Intelligence needs the AI dial at Ask or higher (it is at Off).',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      message: 'Story Intelligence needs the AI switch at Ask or Auto (it is at Off).',
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
       requestId: 'q-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -3128,8 +3135,9 @@ describe('ai:draftBrief (F-14.3)', () => {
     expect(await invoke('ai:draftBrief', ask(scene, 'br-3'))).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Scene brief drafts needs the AI dial at Ask or higher (it is at Off).',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      message: 'Scene brief drafts needs the AI switch at Ask or Auto (it is at Off).',
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
       requestId: 'br-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -3407,8 +3415,9 @@ describe('scene summaries (F-5.6)', () => {
       ok: false,
       code: 'DISABLED',
       message:
-        'Scene summaries, story bible, and tags needs the AI dial at Ask or higher (it is at Off).',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+        'Scene summaries, story bible, and tags needs the AI switch at Ask or Auto (it is at Off).',
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
       requestId: 's-3'
     })
     expect(complete).not.toHaveBeenCalled()
@@ -3455,7 +3464,7 @@ describe('scene summaries (F-5.6)', () => {
       const state = await invoke('summary:get', { id: scene })
       expect(state).toMatchObject({ status: 'idle', stale: false })
       // A settings change over an indexed book queues nothing and costs nothing.
-      await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+      await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
       await vi.advanceTimersByTimeAsync(SUMMARY_BACKFILL_DELAY_MS)
       expect(complete).toHaveBeenCalledTimes(1)
     } finally {
@@ -6058,7 +6067,7 @@ describe('diagnostics handlers (F-15.8)', () => {
     const rows = await invoke('tree:list', undefined)
     const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
     if (!scene) throw new Error('skeleton not seeded')
-    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     await invoke('ai:setKey', { key: KEY })
     const ghost = await invoke('ai:ghostText', {
       nodeId: scene.id,
@@ -6268,8 +6277,9 @@ describe('ai:recommendTags (F-4.7)', () => {
     expect(await invoke('ai:recommendTags', { nodeId: scene })).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Tag suggestions needs the AI dial at Ask or higher (it is at Off).',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.'
+      message: 'Tag suggestions needs the AI switch at Ask or Auto (it is at Off).',
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
     })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     complete.mockRejectedValueOnce(new InvalidKeyError('OpenAI rejected the API key.'))
@@ -6391,13 +6401,13 @@ describe('ai:ghostText (F-5.3)', () => {
   const KEY = 'sk-test-secret-1234abcd'
   const BEFORE = 'The storm broke at dusk over the dark forest. Mara counted the lightning gaps.'
 
-  /** A project with the dial at Suggest and a scene to continue. */
+  /** A project with the switch at Ask and a scene to continue. */
   async function ready(): Promise<{ scene: string }> {
     await invoke('project:create', { name: 'Ghost', format: 'novel', directory: tmp })
     const rows = await invoke('tree:list', undefined)
     const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
     if (!scene) throw new Error('skeleton not seeded')
-    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     complete.mockResolvedValue({
       text: 'Somewhere ahead the river was rising.',
       model: 'gpt-fake',
@@ -6494,15 +6504,16 @@ describe('ai:ghostText (F-5.3)', () => {
       requestId: 'req-8'
     })
     await invoke('ai:setKey', { key: KEY })
-    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 0 })
     expect(await invoke('ai:ghostText', input)).toEqual({
       ok: false,
       code: 'DISABLED',
-      message: 'Ghost text needs the AI dial at Suggest or higher (it is at Ask).',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.',
+      message: 'Ghost text needs the AI switch at Ask or Auto (it is at Off).',
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
       requestId: 'req-8'
     })
-    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     complete.mockRejectedValueOnce(new InvalidKeyError('OpenAI rejected the API key.'))
     expect(await invoke('ai:ghostText', input)).toEqual({
       ok: false,
@@ -6539,13 +6550,13 @@ describe('ai:ghostText (F-5.3)', () => {
 describe('proposal:settle (F-14.5)', () => {
   const KEY = 'sk-test-secret-1234abcd'
 
-  /** A project with the dial at Suggest, a key, and one pending ghost-text proposal. */
+  /** A project with the switch at Ask, a key, and one pending ghost-text proposal. */
   async function ready(): Promise<string> {
     await invoke('project:create', { name: 'Settle', format: 'novel', directory: tmp })
     const rows = await invoke('tree:list', undefined)
     const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
     if (!scene) throw new Error('skeleton not seeded')
-    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     await invoke('ai:setKey', { key: KEY })
     complete.mockResolvedValue({
       text: 'Somewhere ahead the river was rising.',
@@ -6619,7 +6630,7 @@ describe('ai:cancel (F-5.10)', () => {
     const rows = await invoke('tree:list', undefined)
     const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
     if (!scene) throw new Error('skeleton not seeded')
-    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
     complete.mockImplementationOnce(untilCancelled)
     const pending = invoke('ai:ghostText', {
@@ -6788,7 +6799,7 @@ describe('ai:setLocalEndpoint (F-5.15)', () => {
 
   it('sends a project on the local source to the local provider and logs it as local', async () => {
     await invoke('project:create', { name: 'Local', format: 'novel', directory: tmp })
-    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2, source: 'local' })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1, source: 'local' })
     // No key is saved: the local source needs none.
     expect(await invoke('ai:testConnection', undefined)).toMatchObject({ ok: true })
   })
@@ -7249,7 +7260,7 @@ describe('manuscript import', () => {
     async function readyForDetect(): Promise<ImportedDraft> {
       await ready()
       await invoke('ai:setKey', { key: KEY })
-      await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 2 })
+      await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
       await invoke('tag:create', { name: 'Protagonist', category: 'character' })
       return draftFrom(write('Book.md', MARKDOWN))
     }
@@ -7305,8 +7316,7 @@ describe('manuscript import', () => {
       expect(await invoke('import:detectStructure', { draft, requestId: 'd-1' })).toEqual({
         ok: false,
         code: 'DISABLED',
-        message:
-          'Import structure detection needs the AI dial at Suggest or higher (it is at Off).',
+        message: 'Import structure detection needs the AI switch at Ask or Auto (it is at Off).',
         nextStep: AI_NEXT_STEP.DISABLED
       })
       expect(complete).not.toHaveBeenCalled()

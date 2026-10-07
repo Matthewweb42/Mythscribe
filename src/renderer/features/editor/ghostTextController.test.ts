@@ -69,7 +69,7 @@ function fakeClient(): IpcClient {
 
 const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   ...defaultAiSettings(),
-  dial: 2,
+  dial: 1,
   ghostText: { enabled: true, idleMs: IDLE_MS },
   ...over
 })
@@ -266,7 +266,7 @@ describe('useGhostTextController (F-5.3)', () => {
     expect(requests).toHaveLength(3) // visible: no request
   })
 
-  it('never asks while VibeWrite is off, the dial is below Suggest, or outside the single-document view', async () => {
+  it('never asks while VibeWrite is off, the AI switch is Off, or outside the single-document view', async () => {
     useAiSettingsStore.setState({
       settings: settings({ ghostText: { enabled: false, idleMs: IDLE_MS } })
     })
@@ -275,7 +275,7 @@ describe('useGhostTextController (F-5.3)', () => {
     await idle()
     expect(requests).toHaveLength(0)
     act(() => {
-      useAiSettingsStore.setState({ settings: settings({ dial: 1 }) })
+      useAiSettingsStore.setState({ settings: settings({ dial: 0 }) })
     })
     type(ENOUGH)
     await idle()

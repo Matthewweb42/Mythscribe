@@ -225,7 +225,7 @@ describe('recommendTags (F-4.7)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Tag suggestions needs the AI dial at Ask or higher (it is at Off).'
+      message: 'Tag suggestions needs the AI switch at Ask or Auto (it is at Off).'
     })
     const on = defaultAiSettings()
     setAiSettings(db, { ...on, dial: 1, features: { ...on.features, tags: false } })

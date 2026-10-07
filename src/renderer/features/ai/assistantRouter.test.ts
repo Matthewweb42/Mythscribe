@@ -147,7 +147,7 @@ const turns = () =>
   useAssistantStore.getState().conversations?.items.find((c) => c.id === 'c-1')?.messages ?? []
 const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   ...defaultAiSettings(),
-  dial: 2,
+  dial: 1,
   ...over
 })
 

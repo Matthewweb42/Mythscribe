@@ -151,14 +151,14 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
     open('epic')
     const next = {
       ...defaultAiSettings(),
-      dial: 2 as const,
+      dial: 1 as const,
       features: { ...defaultAiSettings().features, ghostText: false }
     }
     expect(setAiSettings(db, next)).toEqual(next)
     expect(getAiSettings(db)).toEqual(next)
-    setAiSettings(db, { ...next, dial: 3 })
+    setAiSettings(db, { ...next, auto: true })
     expect(rows(AI_SETTINGS_KEY)).toHaveLength(1)
-    expect(getAiSettings(db).dial).toBe(3)
+    expect(getAiSettings(db).auto).toBe(true)
   })
 
   it('falls back when the stored value is not JSON', () => {
@@ -178,9 +178,10 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
   it('fills toggles missing from an older row with on instead of resetting the dial (F-14.10)', () => {
     open('novel')
     setRaw(JSON.stringify({ dial: 3, features: { ghostText: false } }), AI_SETTINGS_KEY)
+    // F-5.21: a Draft level from the four-level dial reads as Ask, never Auto.
     expect(getAiSettings(db)).toEqual({
       ...defaultAiSettings(),
-      dial: 3,
+      dial: 1,
       features: { ...defaultAiSettings().features, ghostText: false }
     })
   })
@@ -189,11 +190,11 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
     open('novel')
     const { ghostText: _ghostText, ...old } = defaultAiSettings()
     setRaw(JSON.stringify({ ...old, dial: 2 }), AI_SETTINGS_KEY)
-    expect(getAiSettings(db)).toEqual({ ...old, dial: 2, ghostText: defaultGhostTextSettings() })
+    expect(getAiSettings(db)).toEqual({ ...old, dial: 1, ghostText: defaultGhostTextSettings() })
     // The write path takes the same shape and stores the filled-in block.
     expect(setAiSettings(db, { ...old, dial: 1 }).ghostText).toEqual(defaultGhostTextSettings())
     expect(getAiSettings(db).ghostText).toEqual(defaultGhostTextSettings())
-    setAiSettings(db, { ...old, dial: 2, ghostText: { enabled: true, idleMs: 700 } })
+    setAiSettings(db, { ...old, dial: 1, ghostText: { enabled: true, idleMs: 700 } })
     expect(getAiSettings(db).ghostText).toEqual({ enabled: true, idleMs: 700 })
   })
 })

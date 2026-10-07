@@ -130,7 +130,8 @@ describe('aiFailure', () => {
       ok: false,
       code: 'DISABLED',
       message: 'Tag suggestions is turned off for this project.',
-      nextStep: 'Turn the AI dial up in Settings, or enable the feature there.'
+      nextStep:
+        'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
     })
     expect(testConnectionFailure('NO_KEY', 'No API key is saved.')).toEqual(
       aiFailure('NO_KEY', 'No API key is saved.')

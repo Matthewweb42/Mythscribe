@@ -4,15 +4,15 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import {
   AI_DATA_SHARING,
-  AI_DIAL_LABEL,
-  AI_DIAL_LEVELS,
-  AI_DIAL_MEANING,
-  AI_FEATURES_BY_LEVEL
+  AI_FEATURES_BY_LEVEL,
+  AI_SWITCH_LABEL,
+  AI_SWITCH_MEANING,
+  AI_SWITCH_POSITIONS
 } from './aiSettings'
 
 /**
  * The website (F-15.10) is static HTML under `site/public/`, deployed as-is. These tests keep it
- * honest without a build step: the docs page must quote the app's dial and data-sharing copy
+ * honest without a build step: the docs page must quote the app's AI switch and data-sharing copy
  * verbatim (author-control rule 3: a feature must not send text the panel does not list, so the
  * public page and the panel have to say the same thing), every relative link and asset must
  * resolve, and every page must carry the basics a browser and a screen reader need.
@@ -43,17 +43,20 @@ function cells(doc: Document, tableId: string): string[][] {
 describe('docs page mirrors the AI settings copy (F-15.10)', () => {
   const doc = load(join(SITE_ROOT, 'docs/index.html'))
 
-  it('lists the four dial levels with their labels and meanings verbatim', () => {
+  it('lists the three switch positions with their labels and meanings verbatim (F-5.21)', () => {
     expect(cells(doc, 'dial-levels')).toEqual(
-      AI_DIAL_LEVELS.map((level) => [String(level), AI_DIAL_LABEL[level], AI_DIAL_MEANING[level]])
+      AI_SWITCH_POSITIONS.map((position) => [
+        AI_SWITCH_LABEL[position],
+        AI_SWITCH_MEANING[position]
+      ])
     )
   })
 
-  it('lists every feature, what it sends, and the level it needs, in the app’s order', () => {
+  it('lists every feature and what it sends, in the app’s order', () => {
     expect(cells(doc, 'feature-sharing')).toEqual(
       AI_FEATURES_BY_LEVEL.map((feature) => {
         const entry = AI_DATA_SHARING[feature]
-        return [entry.label, entry.sends, AI_DIAL_LABEL[entry.minDial]]
+        return [entry.label, entry.sends]
       })
     )
   })

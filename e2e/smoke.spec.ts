@@ -1411,20 +1411,19 @@ test('create, close, reopen a project on disk', async () => {
     'aria-selected',
     'true'
   )
-  // F-14.4: the project's AI dial installs at Off, so every feature toggle is locked; Suggest
-  // unlocks ghost text, the level lands in the project's settings table, and it survives
+  // F-14.4, F-5.21: the project's AI switch installs at Off, so every feature toggle is locked;
+  // Ask unlocks them all, the position lands in the project's settings table, and it survives
   // closing the dialog. Back to Off before the key steps so nothing below depends on it.
-  const dial = settingsDialog.getByRole('radiogroup', { name: 'AI dial' })
+  const dial = settingsDialog.getByRole('radiogroup', { name: 'AI switch' })
   const ghostTextToggle = settingsDialog.getByRole('checkbox', { name: /^Ghost text/ })
   await expect(dial.getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true')
   await expect(ghostTextToggle).toBeDisabled()
-  await expect(ghostTextToggle).toHaveAccessibleName('Ghost text (needs Suggest)')
-  expect((await aiSettings()).dial).toBe(0)
-  await dial.getByRole('radio', { name: 'Suggest' }).click()
-  await expect(dial.getByRole('radio', { name: 'Suggest' })).toHaveAttribute('aria-checked', 'true')
-  await expect(ghostTextToggle).toBeEnabled()
   await expect(ghostTextToggle).toHaveAccessibleName('Ghost text')
-  await expect.poll(async () => (await aiSettings()).dial).toBe(2)
+  expect((await aiSettings()).dial).toBe(0)
+  await dial.getByRole('radio', { name: 'Ask' }).click()
+  await expect(dial.getByRole('radio', { name: 'Ask' })).toHaveAttribute('aria-checked', 'true')
+  await expect(ghostTextToggle).toBeEnabled()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(1)
   await expect(
     settingsDialog.getByRole('table', { name: 'What each AI feature sends' }).getByRole('row', {
       name: /^Ghost text /
@@ -1434,7 +1433,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(settingsDialog).toHaveCount(0)
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await expect(dial.getByRole('radio', { name: 'Suggest' })).toHaveAttribute('aria-checked', 'true')
+  await expect(dial.getByRole('radio', { name: 'Ask' })).toHaveAttribute('aria-checked', 'true')
   await expect(ghostTextToggle).toBeEnabled()
   await dial.getByRole('radio', { name: 'Off' }).click()
   await expect(ghostTextToggle).toBeDisabled()
@@ -3239,7 +3238,7 @@ test('create, close, reopen a project on disk', async () => {
   await recommend.click()
   const recommendResult = tagBar.getByTestId('tag-recommend-result')
   await expect(recommendResult).toHaveText(
-    'Tag suggestions needs the AI dial at Ask or higher (it is at Off). Turn the AI dial up in Settings, or enable the feature there.'
+    'Tag suggestions needs the AI switch at Ask or Auto (it is at Off). Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
   )
   expect(openAiRequests).toHaveLength(requestsBefore)
   await page.getByRole('button', { name: 'Settings' }).click()
@@ -3354,14 +3353,14 @@ test('create, close, reopen a project on disk', async () => {
     /Built from [1-9]\d* words of manuscript, 1 of 12 marked exemplars/
   )
 
-  // F-5.3: VibeWrite. Suggest unlocks ghost text; the idle delay drops to 0.5 s in the AI tab
+  // F-5.3: VibeWrite. Ask allows ghost text; the idle delay drops to 0.5 s in the AI tab
   // and lands in the settings table. The toolbar toggle arms the mode (persisted per project).
   // Typing into Scene 1 and pausing brings the fake server's continuation as ghost text at the
   // caret (a widget, not document text); Tab accepts it into the document and the ledger gains
   // a ghostText request. A second suggestion is dismissed with Escape and inserts nothing.
   // The mode is turned off again before the dial and the key are restored below.
-  await dial.getByRole('radio', { name: 'Suggest' }).click()
-  await expect.poll(async () => (await aiSettings()).dial).toBe(2)
+  await dial.getByRole('radio', { name: 'Ask' }).click()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(1)
   const idleDelay = settingsDialog.getByLabel('Ghost text idle delay (s)', { exact: true })
   await expect(idleDelay).toHaveValue('1.5')
   await idleDelay.fill('0.5')
@@ -3979,7 +3978,7 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
 
-  // F-5.4: the assistant panel. Ctrl+K opens it (the dial is still at Suggest with the key
+  // F-5.4: the assistant panel. Ctrl+K opens it (the switch is still at Ask with the key
   // saved). A Plan question streams its answer into the chat with the cost line, and the
   // request carries the scene's text; the tab takes the question as its title. Author mode
   // places a two-paragraph answer in the editor as ghost text with a notice in the chat; Tab
@@ -5116,11 +5115,11 @@ test('create, close, reopen a project on disk', async () => {
       ''
     ].join('\n')
   )
-  // F-12.3 needs the dial at Suggest and a key, which the steps above turned off.
+  // F-12.3 needs the switch at Ask and a key, which the steps above turned off.
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await dial.getByRole('radio', { name: 'Suggest' }).click()
-  await expect.poll(async () => (await aiSettings()).dial).toBe(2)
+  await dial.getByRole('radio', { name: 'Ask' }).click()
+  await expect.poll(async () => (await aiSettings()).dial).toBe(1)
   await keyField.fill(ACCEPTED_KEY)
   await settingsDialog.getByRole('button', { name: 'Save' }).click()
   await expect(keyHint).toHaveText('Key saved: sk-…wxyz')

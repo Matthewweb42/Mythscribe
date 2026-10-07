@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Loader2, Sparkles } from 'lucide-react'
-import { AI_DATA_SHARING, AI_DIAL_LABEL, isFeatureAllowed } from '@shared/aiSettings'
+import { AI_DATA_SHARING, needsSwitchText, isFeatureAllowed } from '@shared/aiSettings'
 import { docToText } from '@shared/docText'
 import { SUMMARY_TEXT_MIN, type StoredSceneSummary } from '@shared/summary'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
@@ -39,7 +39,7 @@ export function SummaryBlock({ id }: { id: string }): React.JSX.Element | null {
   const { minDial } = AI_DATA_SHARING.summary
   let blocked: string | null = null
   if (settings === null || settings.dial < minDial) {
-    blocked = `Summarising a scene needs the AI dial at ${AI_DIAL_LABEL[minDial]} or higher (Settings, AI tab)`
+    blocked = `${needsSwitchText('Summarising a scene')} (Settings, AI tab)`
   } else if (!isFeatureAllowed(settings, 'summary')) {
     blocked = 'Scene summaries are turned off for this project (Settings, AI tab)'
   } else if (pending) {

@@ -5,25 +5,53 @@ import { DEFAULT_HONESTY, Honesty } from './critique'
 /** Settings-table key under which the AI dial and toggles (F-14.4) are stored as JSON. */
 export const AI_SETTINGS_KEY = 'ai'
 
-/** The AI dial (PLAN.md §2.3), monotonic: each level includes everything below it. */
-export const AiDial = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
-export type AiDial = z.infer<typeof AiDial>
-export const AI_DIAL_LEVELS: readonly AiDial[] = [0, 1, 2, 3]
+/**
+ * The stored AI level (F-14.4, narrowed by F-5.21): 0 Off, 1 on. A row stored while the dial had
+ * four levels may carry 2 (Suggest) or 3 (Draft); both read as 1, which is Ask, never Auto
+ * (the author decided 2026-10-06 that nothing moves to Auto silently). Whether an "on" project
+ * applies the chat's edits itself is `AiSettings.auto`; `aiSwitchOf` reads the two as the one
+ * switch the author sees.
+ */
+export const AiDial = z
+  .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
+  .transform((level): 0 | 1 => (level === 0 ? 0 : 1))
+export type AiDial = z.output<typeof AiDial>
 
-export const AI_DIAL_LABEL: Record<AiDial, string> = {
-  0: 'Off',
-  1: 'Ask',
-  2: 'Suggest',
-  3: 'Draft'
+/**
+ * The one AI switch (F-5.21, decided by the author 2026-10-06): Off (no AI at all, nothing
+ * leaves the machine), Ask (every AI feature on; every AI edit asks first), Auto (every AI
+ * feature on; the chat applies its edits itself, each with Undo, and deletions still ask).
+ */
+export const AI_SWITCH_POSITIONS = ['off', 'ask', 'auto'] as const
+export const AiSwitch = z.enum(AI_SWITCH_POSITIONS)
+export type AiSwitch = z.infer<typeof AiSwitch>
+
+export const AI_SWITCH_LABEL: Record<AiSwitch, string> = {
+  off: 'Off',
+  ask: 'Ask',
+  auto: 'Auto'
 }
 
-/** One-line meaning per level (PLAN.md §2.3's table); shown under each radio. */
-export const AI_DIAL_MEANING: Record<AiDial, string> = {
-  0: 'Nothing leaves this machine.',
-  1: 'Queries, summaries, tag suggestions, critique, and proofreading, on request.',
-  2: 'Adds ghost text and rewrite-in-my-voice.',
-  3: 'Adds multi-paragraph drafting proposals.'
+/** One-line meaning per position; shown under each radio in Settings and in the new-project wizard. */
+export const AI_SWITCH_MEANING: Record<AiSwitch, string> = {
+  off: 'No AI at all. Nothing leaves this machine.',
+  ask: 'AI features on. Every change the AI wants to make asks you first.',
+  auto: 'AI features on. The chat makes its changes itself, each with Undo; deletions still ask.'
 }
+
+/** The switch position a project's settings stand at. */
+export function aiSwitchOf(settings: Pick<AiSettings, 'dial' | 'auto'>): AiSwitch {
+  if (settings.dial === 0) return 'off'
+  return settings.auto ? 'auto' : 'ask'
+}
+
+/** The settings fields one switch position writes. */
+export function aiSwitchPatch(position: AiSwitch): Pick<AiSettings, 'dial' | 'auto'> {
+  return { dial: position === 'off' ? 0 : 1, auto: position === 'auto' }
+}
+
+/** The label for a stored level, as gate messages name it. */
+export const AI_DIAL_LABEL: Record<AiDial, string> = { 0: 'Off', 1: 'Ask' }
 
 /** Bounds for the ghost-text idle delay (F-5.3): the spec's 0.5–5 s, stored in milliseconds. */
 export const GHOST_IDLE_MS_MIN = 500
@@ -34,7 +62,7 @@ export const DEFAULT_GHOST_IDLE_MS = 1_500
  * The VibeWrite mode (F-5.3), per project. `enabled` is the toolbar toggle's state, the
  * author's moment-to-moment "write with me" switch; it is independent of `features.ghostText`,
  * the dial's per-feature gate (F-14.4), which decides whether ghost text may ever run. Both
- * must be on (and the dial at Suggest) before a request leaves.
+ * must be on (and the switch at Ask or Auto) before a request leaves.
  */
 export const GhostTextSettings = z.object({
   enabled: z.boolean(),
@@ -97,6 +125,11 @@ export function defaultFeatureToggles(): Record<AiFeatureId, boolean> {
 export const AiSettings = z.object({
   dial: AiDial,
   /**
+   * F-5.21: at Auto the chat applies its non-deletion edits itself. Defaulted, so every row
+   * stored before the switch reads as Ask (or Off), never Auto.
+   */
+  auto: z.boolean().default(false),
+  /**
    * One toggle per feature. A stored row from before a feature existed lacks its key, so the
    * missing toggles are filled from the defaults (on) instead of the whole row falling back
    * and resetting the dial (F-14.10 added `rewrite` after projects had settings rows).
@@ -119,6 +152,7 @@ export type AiSettingsInput = z.input<typeof AiSettings>
 export function defaultAiSettings(): AiSettings {
   return {
     dial: 0,
+    auto: false,
     features: defaultFeatureToggles(),
     ghostText: defaultGhostTextSettings(),
     critique: defaultCritiqueSettings(),
@@ -131,7 +165,10 @@ export interface AiDataSharing {
   label: string
   /** Exactly what leaves the machine when the feature runs; the rule "no text the panel does not list" refers to this. */
   sends: string
-  /** The lowest dial level at which the feature may run. */
+  /**
+   * The lowest stored level at which the feature may run: 1 (Ask, which Auto includes) for every
+   * feature since the one switch (F-5.21); Off runs nothing.
+   */
   minDial: AiDial
 }
 
@@ -268,7 +305,7 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "The active scene's text (head-truncated), its synopsis and notes (the first 1,500 " +
       'characters), the notes of documents tagged with any #name ' +
       `you mention, ${STORY_BIBLE_SENDS}, the recent turns of the conversation, and your ` +
-      'message. In Agent mode, which needs Suggest, the voice profile, your author rules and ' +
+      'message. In Author mode, the voice profile, your author rules and ' +
       "banned phrases, the scene metadata, and the scene brief (plus the previous scene's " +
       "reader-knows-after line and the next scene's goal) go too, and an off-voice answer is " +
       'sent back once with the rule it broke.',
@@ -288,14 +325,14 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'learned style notes, and up to 3 exemplar passages), your author rules and banned phrases, and ' +
       `${STORY_BIBLE_SENDS}. An answer that breaks the voice profile or uses a banned phrase is ` +
       'sent back once, with the same context plus the rule it broke, for a second try.',
-    minDial: 2
+    minDial: 1
   },
   importStructure: {
     label: 'Import structure detection',
     sends:
       'The manuscript you are importing, in chunks of about 2,500 words (long paragraphs ' +
       'shortened), and your tag names, only when you ask for the check in the import dialog.',
-    minDial: 2
+    minDial: 1
   },
   rewrite: {
     label: 'Rewrite in my voice',
@@ -305,12 +342,12 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       '(stylometric rules, learned style notes, and up to 3 exemplar passages), your author rules and banned ' +
       `phrases, and ${STORY_BIBLE_SENDS}. An off-voice rewrite is sent back once with the rule ` +
       'it broke; a regenerate carries your note.',
-    minDial: 2
+    minDial: 1
   },
   authorMode: {
     label: 'Author mode',
     sends: "The active scene's text, referenced notes, the scene brief, and your instruction.",
-    minDial: 3
+    minDial: 1
   }
 }
 
@@ -322,4 +359,13 @@ export const AI_FEATURES_BY_LEVEL: readonly AiFeatureId[] = [...AI_FEATURE_IDS].
 /** True only when the dial is high enough for `feature` and its own toggle is on. */
 export function isFeatureAllowed(settings: AiSettings, feature: AiFeatureId): boolean {
   return settings.dial >= AI_DATA_SHARING[feature].minDial && settings.features[feature]
+}
+
+/**
+ * How a gate says a feature cannot run at Off (F-5.21): every feature runs at Ask and Auto, so
+ * the one level to name is the switch's. Main appends the current position; the renderer
+ * appends where the switch lives.
+ */
+export function needsSwitchText(label: string): string {
+  return `${label} needs the AI switch at Ask or Auto`
 }

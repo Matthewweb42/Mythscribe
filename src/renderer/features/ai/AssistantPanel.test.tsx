@@ -131,7 +131,7 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
 
 const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   ...defaultAiSettings(),
-  dial: 2,
+  dial: 1,
   ...over
 })
 
@@ -345,15 +345,9 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(sendButton()).toBeEnabled()
   })
 
-  it('Author is disabled below Suggest with the reason; at Suggest it shows the paragraph selector and the notice turn', async () => {
+  it('Author is on at Ask (F-5.21) and shows the paragraph selector and the notice turn', async () => {
     await mountOpen({ active: 'c-1', items: [conversation()] }, settings({ dial: 1 }))
     const agent = screen.getByRole('radio', { name: 'Author' })
-    expect(agent).toBeDisabled()
-    expect(agent).toHaveAttribute(
-      'title',
-      'Author needs the AI dial at Suggest or higher (Settings, AI tab)'
-    )
-    act(() => useAiSettingsStore.setState({ settings: settings({ dial: 2 }) }))
     expect(agent).toBeEnabled()
     await userEvent.click(agent)
     expect(agent).toHaveAttribute('aria-checked', 'true')
@@ -397,15 +391,24 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(turns()[1]).not.toHaveTextContent('Rain followed.')
   })
 
-  it('says what to change and disables Send while the dial does not allow the assistant', async () => {
+  it('says what to change and disables Send while the switch is Off, and the switch beside the modes turns it on (F-5.21)', async () => {
     await mountOpen({ active: 'c-1', items: [conversation()] }, settings({ dial: 0 }))
     expect(screen.getByTestId('assistant-disabled')).toHaveTextContent(
-      'The assistant needs the AI dial at Ask or higher'
+      'The AI is Off. Set the AI switch below to Ask or Auto to use the assistant.'
+    )
+    const aiSwitch = screen.getByRole('radiogroup', { name: 'AI switch' })
+    expect(within(aiSwitch).getByRole('radio', { name: 'AI Off' })).toHaveAttribute(
+      'aria-checked',
+      'true'
     )
     await userEvent.type(box(), 'hello')
     expect(sendButton()).toBeDisabled()
     await userEvent.keyboard('{Enter}')
     expect(chats).toHaveLength(0)
+    await userEvent.click(within(aiSwitch).getByRole('radio', { name: 'AI Ask' }))
+    expect(useAiSettingsStore.getState().settings).toMatchObject({ dial: 1, auto: false })
+    expect(screen.queryByTestId('assistant-disabled')).toBeNull()
+    expect(sendButton()).toBeEnabled()
   })
 
   it('the Continuity view leads back to the conversation (F-13.4)', async () => {
@@ -545,19 +548,19 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     expect(query).toBeDisabled()
     expect(query).toHaveAttribute(
       'title',
-      'Query needs the AI dial at Ask or higher, with Story Intelligence on (Settings, AI tab)'
+      'Query needs the AI switch at Ask or Auto, with Story Intelligence on (Settings, AI tab)'
     )
     expect(screen.queryByTestId('assistant-mode-off')).not.toBeInTheDocument()
     act(() =>
       useAiSettingsStore.setState({
-        settings: settings({ dial: 2, features: { ...defaultAiSettings().features, query: false } })
+        settings: settings({ dial: 1, features: { ...defaultAiSettings().features, query: false } })
       })
     )
     expect(query).toBeDisabled()
     // A conversation already in Query mode (the F-5.8 default) says why Send is off.
     act(() => useAssistantStore.getState().setMode('query'))
     expect(screen.getByTestId('assistant-mode-off')).toHaveTextContent(
-      'Query needs the AI dial at Ask or higher, with Story Intelligence on (Settings, AI tab). Pick another mode to keep going.'
+      'Query needs the AI switch at Ask or Auto, with Story Intelligence on (Settings, AI tab). Pick another mode to keep going.'
     )
     expect(sendButton()).toBeDisabled()
     act(() => useAiSettingsStore.setState({ settings: settings({ dial: 1 }) }))
@@ -726,12 +729,12 @@ describe('AssistantPanel quick actions (F-5.17)', () => {
     expect(writes()[0]).toHaveAttribute('title', CONVERSATION_BUSY_MESSAGE)
   })
 
-  it('Write this is off with the reason below Suggest, with the chat off, or without an editor', async () => {
-    await mountOpen(withDirections(), settings({ dial: 1 }))
+  it('Write this is off with the reason while the switch is Off, with the chat off, or without an editor', async () => {
+    await mountOpen(withDirections(), settings({ dial: 0 }))
     expect(writes()[0]).toBeDisabled()
     expect(writes()[0]).toHaveAttribute(
       'title',
-      'Author needs the AI dial at Suggest or higher (Settings, AI tab)'
+      'Author needs the AI switch at Ask or Auto, with Assistant chat on (Settings, AI tab)'
     )
     const on = settings()
     act(() =>
