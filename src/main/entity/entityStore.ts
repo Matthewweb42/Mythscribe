@@ -236,11 +236,15 @@ function mirrorRename(db: EntityDb, before: EntityRow, after: EntityRow): Entity
  * F-5.16: `origin` is `ai` only when the story-bible job creates the entity for a name it met;
  * that caller checks the dismissed names first. An entity the author creates takes its name off
  * that list, so the job may log facts about it again.
+ *
+ * F-9.8: `tag: false` leaves the new entity untagged — the context library's Project notes page,
+ * and a sheet whose tag the author unticked in the review.
  */
 export function createEntity(
   db: EntityDb,
   input: EntityCreateInput,
-  origin: EntityOrigin = 'author'
+  origin: EntityOrigin = 'author',
+  options: { tag?: boolean } = {}
 ): EntityWrite {
   return db.transaction((tx) => {
     const name = normalizeName(input.name)
@@ -267,7 +271,7 @@ export function createEntity(
       const kept = withoutObservedDismissed(dismissed, input.kind, name)
       if (kept !== dismissed) setObservedDismissed(tx, kept)
     }
-    const tagChange = linkTag(tx, inserted)
+    const tagChange = options.tag === false ? null : linkTag(tx, inserted)
     return {
       entity: rowToEntity(tagChange === null ? inserted : { ...inserted, tagId: tagChange.tag.id }),
       tagChange

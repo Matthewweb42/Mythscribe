@@ -1,6 +1,7 @@
 import { app, dialog, type BrowserWindow } from 'electron'
 import path from 'node:path'
 import { IMAGE_EXTENSIONS } from '@shared/assets'
+import { CONTEXT_EXTENSIONS } from '@shared/contextLibrary'
 import { ENTITY_EXCHANGE_EXTENSIONS } from '@shared/entityExchange'
 import { BACKGROUND_EXTENSIONS } from '@shared/focus'
 import { IMPORT_EXTENSIONS } from '@shared/import'
@@ -40,6 +41,8 @@ export interface ProjectDialogs {
   chooseBackupFile: (directory: string) => Promise<string | null>
   /** Returns the folder a restored backup is unpacked into (F-8.4), or null if cancelled. */
   chooseRestoreParent: () => Promise<string | null>
+  /** Returns the files the author chose for the context library (F-9.8), or null if cancelled. */
+  chooseContextFiles: () => Promise<string[] | null>
   /**
    * Asks before a v0 project is converted (F-1.6), naming where the original will be kept;
    * true to convert.
@@ -187,6 +190,23 @@ export function createDialogs(getWindow: () => BrowserWindow | null): ProjectDia
       )
       if (result.canceled) return null
       return result.filePaths[0] ?? null
+    },
+    async chooseContextFiles() {
+      const options: Electron.OpenDialogOptions = {
+        title: 'Add worldbuilding documents and images',
+        buttonLabel: 'Add',
+        defaultPath: app.getPath('documents'),
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          { name: 'Documents and images', extensions: [...CONTEXT_EXTENSIONS] },
+          { name: 'All files', extensions: ['*'] }
+        ]
+      }
+      const result = await show((win) =>
+        win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
+      )
+      if (result.canceled || result.filePaths.length === 0) return null
+      return result.filePaths
     },
     async confirmLegacyConversion(source, backup) {
       const options: Electron.MessageBoxOptions = {

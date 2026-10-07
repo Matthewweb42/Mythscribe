@@ -106,6 +106,7 @@ let openPath: ReturnType<typeof vi.fn<(folder: string) => Promise<string>>>
 /** What the fake backup dialogs answer (F-8.4); null cancels. */
 let backupFile: string | null
 let restoreParent: string | null
+let contextFiles: string[] | null
 let convertLegacy: boolean
 let legacyAsked: { source: string; backup: string } | null
 let backupFolder: string | null
@@ -222,6 +223,7 @@ const dialogs: ProjectDialogs = {
   chooseBackupFolder: async () => backupFolder,
   chooseBackupFile: async () => backupFile,
   chooseRestoreParent: async () => restoreParent,
+  chooseContextFiles: async () => contextFiles,
   confirmLegacyConversion: async (source, backup) => {
     legacyAsked = { source, backup }
     return convertLegacy
@@ -266,6 +268,7 @@ beforeEach(() => {
   openPath = vi.fn<(folder: string) => Promise<string>>(() => Promise.resolve(''))
   backupFile = null
   restoreParent = null
+  contextFiles = null
   convertLegacy = true
   legacyAsked = null
   backupFolder = null
@@ -7490,5 +7493,103 @@ describe('manuscript import', () => {
       await invoke('proposal:settle', { id: pending?.proposalId ?? '', status: 'accepted' })
       expect(await invoke('proposal:pendingTags', { nodeId: first })).toBeNull()
     })
+  })
+})
+
+// F-9.8: the context library's wiring. The store, the AI pass, and Apply have their own tests;
+// these cover the dialog, the bytes a drop carries, opening an original, the estimate, the
+// progress event, the failures as data, and Apply's announcements.
+describe('context library', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+
+  async function ready(dial: AiDial = 1): Promise<void> {
+    await invoke('project:create', { name: 'Library', format: 'novel', directory: tmp })
+    await invoke('ai:setKey', { key: KEY })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial })
+  }
+
+  function write(name: string, text: string): string {
+    const file = path.join(tmp, name)
+    fs.writeFileSync(file, text)
+    return file
+  }
+
+  it('adds chosen and dropped files, cancels to null, and opens an original', async () => {
+    await ready()
+    expect(await invoke('library:choose', undefined)).toEqual([])
+    expect(await invoke('library:add', {})).toBeNull()
+    contextFiles = [write('people.md', 'Mara is 35.'), write('notes.epub', 'x')]
+    expect(await invoke('library:choose', undefined)).toEqual(contextFiles)
+    const added = await invoke('library:add', {})
+    expect(added?.files.map((file) => [file.name, file.state])).toEqual([['people.md', 'new']])
+    expect(added?.skipped.map((file) => file.name)).toEqual(['notes.epub'])
+
+    const dropped = await invoke('library:addData', {
+      files: [{ name: 'places.txt', data: new TextEncoder().encode('The Landing.') }]
+    })
+    expect(dropped.files).toHaveLength(2)
+    expect((await invoke('library:list', undefined)).map((file) => file.name).sort()).toEqual([
+      'people.md',
+      'places.txt'
+    ])
+
+    const id = added?.changed[0] ?? ''
+    expect(await invoke('library:open', { id })).toBeNull()
+    expect(openPath).toHaveBeenLastCalledWith(
+      expect.stringMatching(/assets[\\/]library[\\/]people\.[0-9a-f]{8}\.md$/)
+    )
+    await expect(invoke('library:open', { id: 'nope' })).rejects.toThrowError(/^NOT_FOUND/)
+  })
+
+  it('estimates, sorts with progress, and applies the review with its tags announced', async () => {
+    await ready()
+    const added = await invoke('library:add', { paths: [write('people.md', 'Tomas is 29.')] })
+    const fileIds = added?.changed ?? []
+    const estimate = await invoke('library:estimate', { fileIds })
+    expect(estimate).toMatchObject({ files: 1, chunks: 1, model: 'gpt-fake' })
+
+    complete.mockResolvedValue({
+      text: '{"entities":[{"kind":"character","name":"Tomas","fields":{"age":"29"}}],"notes":["Theme: debts."]}',
+      model: 'gpt-fake',
+      usage: { inputTokens: 40, outputTokens: 10 }
+    })
+    const result = await invoke('library:process', { fileIds, requestId: 'c-1' })
+    if (!result.ok) throw new Error(result.message)
+    expect(fakeWin.webContents.send).toHaveBeenCalledWith('library:progress', {
+      done: 1,
+      total: 1,
+      costUsd: 0
+    })
+    expect(result.review.entities.map((entity) => entity.name)).toEqual(['Tomas'])
+    expect(
+      getProposal(manager.require().connection.orm, result.review.proposalIds[0] ?? '')
+    ).toMatchObject({ feature: 'contextImport', status: 'pending' })
+    expect(await invoke('entity:list', undefined)).toEqual([])
+
+    const applied = await invoke('library:apply', { review: result.review })
+    expect(applied).toMatchObject({ created: 1, updated: 0, notes: true })
+    expect(applied.entities.map((entity) => entity.name).sort()).toEqual([
+      'Project notes',
+      'Tomas'
+    ])
+    expect(applied.files[0]?.state).toBe('processed')
+    expect(fakeWin.webContents.send).toHaveBeenCalledWith(
+      'tag:changed',
+      expect.objectContaining({ name: 'tomas' })
+    )
+  })
+
+  it('answers Use AI off as data and sends nothing', async () => {
+    await ready(0)
+    const added = await invoke('library:add', { paths: [write('people.md', 'Tomas is 29.')] })
+    expect(
+      await invoke('library:process', { fileIds: added?.changed ?? [], requestId: 'c-1' })
+    ).toEqual({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Context library sorting needs Use AI turned on (it is off).',
+      nextStep: AI_NEXT_STEP.DISABLED
+    })
+    expect(complete).not.toHaveBeenCalled()
   })
 })

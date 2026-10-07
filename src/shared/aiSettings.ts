@@ -422,6 +422,15 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'your author rules and banned phrases go too.',
     minDial: 1
   },
+  contextImport: {
+    label: 'Context library sorting',
+    sends:
+      'The documents you upload to the Library (Word, Markdown, text, PDF text), in chunks of ' +
+      'about 16,000 characters (only the new or changed passages of an updated file), the names ' +
+      'of your existing story-bible sheets, and the file names of uploaded images (never the ' +
+      'images themselves), only after you confirm the estimate.',
+    minDial: 1
+  },
   authorMode: {
     label: 'Author mode',
     sends: "The active scene's text, referenced notes, the scene brief, and your instruction.",

@@ -207,6 +207,17 @@ import {
   type StructurePromptParagraph
 } from '../prompts/importStructure.v1'
 import {
+  buildContextImportPrompt,
+  CONTEXT_IMPORT_PROMPT_VERSION,
+  type BuildContextImportPromptInput
+} from '../prompts/contextImport.v1'
+import {
+  CONTEXT_CHUNK_CHARS,
+  CONTEXT_IMAGE_NAMES_MAX,
+  chunkParagraphs,
+  splitParagraphs
+} from '@shared/contextLibrary'
+import {
   buildQueryPrompt,
   QUERY_PROMPT_VERSION,
   type BuildQueryPromptInput
@@ -620,6 +631,11 @@ export interface EvalCase {
      * feature's own parser against the piece as sent (here the whole scene), nothing dropped.
      */
     | { kind: 'editPass'; type: EditPassType; text: string }
+    /**
+     * A context-library chunk (F-9.8): the answer must parse to the shape the prompt asks for,
+     * every entity must be of a known kind with a name, and every name in `expected` must be found.
+     */
+    | { kind: 'contextImport'; expected: string[] }
 }
 
 const general = builtinParams('general')
@@ -1608,6 +1624,44 @@ function structureCase(
     scoring: { kind: 'structure', bank, indices: paragraphs.map((p) => p.index) }
   }
 }
+
+/** A worldbuilding document as an author might upload it: two characters, a place, a theme. */
+const CONTEXT_DOCUMENT = [
+  '# People',
+  'Mara Vell, called Mara by everyone at the landing, is thirty-four. She runs the ferry her ' +
+    'father built and keeps the mill ledger hidden under the bench. Grey eyes, a burn scar on ' +
+    'the left wrist.',
+  'Tomas is her younger brother. He owes the mill money and wants to sell the ferry.',
+  '# Places',
+  'The Ferry Landing: a jetty of black planks on the north bank, fog most mornings, a bell on ' +
+    'a post that rings when someone wants to cross.',
+  '# Themes',
+  'The book is about debts that outlive the people who made them.'
+].join('\n\n')
+
+function contextImportCase(
+  name: string,
+  note: string,
+  input: BuildContextImportPromptInput,
+  expected: string[]
+): EvalCase {
+  const built = buildContextImportPrompt(input)
+  return {
+    version: CONTEXT_IMPORT_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'contextImport', expected }
+  }
+}
+
+/** A chunk at the character cap, cut at paragraph breaks as the runner cuts a long document. */
+const CONTEXT_MAXED_CHUNK =
+  chunkParagraphs(
+    splitParagraphs(Array.from({ length: 40 }, () => CONTEXT_DOCUMENT).join('\n\n')),
+    CONTEXT_CHUNK_CHARS
+  )[0] ?? ''
 
 function queryCase(name: string, note: string, input: BuildQueryPromptInput): EvalCase {
   const built = buildQueryPrompt(input)
@@ -2993,5 +3047,37 @@ export const EVAL_CASES: EvalCase[] = [
       final: true
     },
     'answer'
+  ),
+  contextImportCase(
+    'fixture',
+    'a short worldbuilding document against a story bible that already has Mara, with one portrait uploaded beside it',
+    {
+      sheets: { character: ['Mara Vell'], setting: [], world: [] },
+      images: ['mara-portrait.png'],
+      fileName: 'worldbuilding.md',
+      part: 1,
+      parts: 1,
+      changedOnly: false,
+      text: CONTEXT_DOCUMENT
+    },
+    ['Mara Vell', 'Tomas', 'The Ferry Landing']
+  ),
+  contextImportCase(
+    'maxed',
+    'a full chunk of a long document, a story bible of 200 sheets, and the image list at its cap',
+    {
+      sheets: {
+        character: Array.from({ length: 120 }, (_, i) => `Character ${i}`),
+        setting: Array.from({ length: 50 }, (_, i) => `Setting ${i}`),
+        world: Array.from({ length: 30 }, (_, i) => `World item ${i}`)
+      },
+      images: Array.from({ length: CONTEXT_IMAGE_NAMES_MAX }, (_, i) => `image-${i}.png`),
+      fileName: 'worldbuilding.docx',
+      part: 1,
+      parts: 3,
+      changedOnly: false,
+      text: CONTEXT_MAXED_CHUNK
+    },
+    ['Mara Vell']
   )
 ]
