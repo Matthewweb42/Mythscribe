@@ -245,7 +245,9 @@ export const AI_FEATURE_IDS = [
   // F-5.20: suggested key points for the scene's notes.
   'notesSuggest',
   // F-14.14: the learned style notes, refreshed in the background from the author's own prose.
-  'voiceNotes'
+  'voiceNotes',
+  // F-14.15: the edit passes (developmental, line, copy, proofread, continuity, custom).
+  'editPass'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -294,7 +296,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-5.20: up to 8 key points as JSON, each up to 200 characters.
   notesSuggest: 600,
   // F-14.14: up to 8 style notes of at most 160 characters each as JSON.
-  voiceNotes: 400
+  voiceNotes: 400,
+  // F-14.15: up to 40 changes or notes for one chunk as JSON, each a quote, a replacement, and a reason.
+  editPass: 4_000
 }
 
 /**
@@ -345,7 +349,10 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // the author's focus, and the story bible at its 400-token budget.
   notesSuggest: 6_000,
   // F-14.14: up to 6,000 characters of the author's paragraphs, the previous notes, and the rules.
-  voiceNotes: 2_500
+  voiceNotes: 2_500,
+  // F-14.15: one chunk of up to 12,000 characters (~3,000 tokens), the rules, the instruction,
+  // the voice block, and the keep list or the story bible.
+  editPass: 7_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

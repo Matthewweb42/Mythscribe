@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(17)
+    expect(result.version).toBe(18)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -755,5 +755,88 @@ describe('voice_exemplar.source (0016_voice_exemplar_source)', () => {
         )
         .run()
     ).toThrow(/NOT NULL/)
+  })
+})
+
+describe('edit_pass and edit_change tables (0017_edit_passes)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO ai_proposal (id, created_at, feature, node_id, prompt_version, model,
+         prompt_tokens, completion_tokens, cost_usd, cached, content)
+       VALUES ('p1', '2026-01-01', 'editPass', 'scene', 'editPass.v1', 'gpt', 1, 1, 0, 0, '[]')`
+    ).run()
+  })
+  afterEach(() => db.close())
+
+  const insertPass = (id: string): void => {
+    db.prepare(
+      `INSERT INTO edit_pass (id, type, status, node_ids, created_at)
+       VALUES (?, 'line', 'running', '["scene"]', '2026-01-01')`
+    ).run(id)
+  }
+  const insertChange = (id: string, passId = 'e1', nodeId = 'scene'): void => {
+    db.prepare(
+      `INSERT INTO edit_change (id, pass_id, node_id, kind, position, original, replacement,
+         rationale, proposal_id)
+       VALUES (?, ?, ?, 'change', 0, 'He walked slowly.', 'He trudged.', 'Stronger verb.', 'p1')`
+    ).run(id, passId, nodeId)
+  }
+  const count = (table: string): unknown => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()
+
+  it('defaults a pass to no progress and no cost, and a change to pending and unflagged', () => {
+    insertPass('e1')
+    expect(
+      db
+        .prepare(
+          'SELECT done_node_ids, model, tokens_in, tokens_out, cost_usd, dropped, error, finished_at FROM edit_pass'
+        )
+        .get()
+    ).toEqual({
+      done_node_ids: '[]',
+      model: '',
+      tokens_in: 0,
+      tokens_out: 0,
+      cost_usd: 0,
+      dropped: 0,
+      error: null,
+      finished_at: null
+    })
+    insertChange('c1')
+    expect(db.prepare('SELECT status, flagged, category FROM edit_change').get()).toEqual({
+      status: 'pending',
+      flagged: 0,
+      category: null
+    })
+    expect(() => insertChange('c2', 'ghost')).toThrow(/FOREIGN KEY/)
+    expect(() => insertChange('c3', 'e1', 'ghost')).toThrow(/FOREIGN KEY/)
+  })
+
+  it('drops changes with their pass and with their scene, and keeps them when the proposal goes', () => {
+    insertPass('e1')
+    insertChange('c1')
+    db.prepare('DELETE FROM ai_proposal WHERE id = ?').run('p1')
+    expect(db.prepare('SELECT proposal_id FROM edit_change').get()).toEqual({ proposal_id: null })
+    db.prepare('DELETE FROM edit_pass WHERE id = ?').run('e1')
+    expect(count('edit_change')).toEqual({ n: 0 })
+
+    insertPass('e2')
+    db.prepare(
+      `INSERT INTO ai_proposal (id, created_at, feature, node_id, prompt_version, model,
+         prompt_tokens, completion_tokens, cost_usd, cached, content)
+       VALUES ('p1', '2026-01-01', 'editPass', 'scene', 'editPass.v1', 'gpt', 1, 1, 0, 0, '[]')`
+    ).run()
+    insertChange('c2', 'e2')
+    db.prepare('DELETE FROM node WHERE id = ?').run('scene')
+    expect(count('edit_change')).toEqual({ n: 0 })
+    expect(count('edit_pass')).toEqual({ n: 1 })
   })
 })

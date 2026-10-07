@@ -58,6 +58,15 @@ import {
   EntityOrigin,
   EntityTemplate
 } from '../entities'
+import {
+  EDIT_PASS_INSTRUCTION_MAX,
+  EDIT_PASS_SCENES_MAX,
+  EditChange,
+  EditPassDetail,
+  EditPassPresets,
+  EditPassSummary,
+  EditPassType
+} from '../editPass'
 import { EntityExchangeFormat, EntityImportItem, EntityImportPlan } from '../entityExchange'
 import { Background, FocusSettings } from '../focus'
 import { GoalsPatch, GoalsStatus } from '../goals'
@@ -462,6 +471,21 @@ export const AiProofreadResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiProofreadResult = z.infer<typeof AiProofreadResult>
+
+/**
+ * What `editPass:start` and `editPass:resume` answer (F-14.15): the pass as it starts running,
+ * or an expected AI failure as data (the switch, the toggle) like every `ai:*` channel.
+ */
+export const EditPassStartResult = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), pass: EditPassSummary }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string()
+  })
+])
+export type EditPassStartResult = z.infer<typeof EditPassStartResult>
 
 /**
  * What `ai:whatNext` answers (F-5.17): up to three directions (`dropped` counts the ones that
@@ -1781,6 +1805,49 @@ export const contract = {
    * `WHAT_NEXT_TEXT_MIN` characters; the AI failures come back as data with the echoed
    * `requestId`.
    */
+  /**
+   * Edit passes (F-14.15). The renderer flushes pending saves first (main reads saved rows) and
+   * sends the pass type, the custom instruction (required for a custom pass), and the scenes in
+   * reading order; main keeps the ids that are documents (VALIDATION when none is) and starts
+   * the one background run of the session (VALIDATION while another runs). The answer comes
+   * back at once; `editPass:changed` follows every scene. Expected AI failures are data.
+   */
+  'editPass:start': {
+    input: z.object({
+      type: EditPassType,
+      instruction: z.string().trim().max(EDIT_PASS_INSTRUCTION_MAX).nullable(),
+      nodeIds: z.array(z.string()).min(1).max(EDIT_PASS_SCENES_MAX)
+    }),
+    output: EditPassStartResult
+  },
+  /** Runs the scenes a stopped, failed, or interrupted pass has not finished. NOT_FOUND for an unknown id. */
+  'editPass:resume': { input: z.object({ id: z.string() }), output: EditPassStartResult },
+  /** Stops the running pass after the request in flight; its finished scenes keep their changes. */
+  'editPass:cancel': { input: z.object({ id: z.string() }), output: z.null() },
+  /** Every pass of the project, newest first: the Edit reports list. */
+  'editPass:list': { input: z.undefined(), output: z.array(EditPassSummary) },
+  /** One pass with its changes or notes and its scenes' titles: the report. NOT_FOUND for an unknown id. */
+  'editPass:get': { input: z.object({ id: z.string() }), output: EditPassDetail },
+  /** Deletes a finished or stopped pass and its changes (VALIDATION while it runs). */
+  'editPass:delete': { input: z.object({ id: z.string() }), output: z.null() },
+  /** The pending tracked changes of one scene, across every pass: what the editor shows inline. */
+  'editPass:changes': { input: z.object({ nodeId: z.string() }), output: z.array(EditChange) },
+  /**
+   * Settles changes the renderer accepted (applied to the document), rejected, or found stale
+   * (their passage is gone). Only pending rows move; the answer is the rows that moved. A
+   * scene's proposal settles once none of its changes is pending.
+   */
+  'editPass:settle': {
+    input: z.object({
+      ids: z.array(z.string()).min(1).max(5_000),
+      status: z.enum(['accepted', 'rejected', 'stale'])
+    }),
+    output: z.array(EditChange)
+  },
+  /** The author's saved custom-pass presets. */
+  'editPass:presets': { input: z.undefined(), output: EditPassPresets },
+  /** Replaces the saved presets; answers what was stored. */
+  'editPass:setPresets': { input: EditPassPresets, output: EditPassPresets },
   'ai:whatNext': {
     input: z.object({
       nodeId: z.string(),
@@ -2225,6 +2292,8 @@ export const events = {
   'observedFact:changed': z.object({ entityIds: z.array(z.string()) }),
   /** The findings of these scenes changed (F-13.4): a check ran in the background or on demand, or one was settled; the store refetches `continuity:list`. */
   'continuity:changed': z.object({ nodeIds: z.array(z.string()) }),
+  /** An edit pass moved (F-14.15): started, finished a scene, stopped, failed, finished, or had changes settled. */
+  'editPass:changed': EditPassSummary,
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /**

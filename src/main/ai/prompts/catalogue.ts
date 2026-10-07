@@ -50,6 +50,7 @@ import { QUERY_PROMPT_V4_VERSION } from './query.v4'
 import { ROUTE_PROMPT_VERSION } from './route.v1'
 import { SYNOPSIS_PROMPT_VERSION } from './synopsis.v1'
 import { NOTES_SUGGEST_PROMPT_VERSION } from './notesSuggest.v1'
+import { EDIT_PASS_PROMPT_VERSION } from './editPass.v1'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -114,7 +115,8 @@ export const PROMPT_VERSIONS = [
   ROUTE_PROMPT_VERSION,
   SYNOPSIS_PROMPT_VERSION,
   NOTES_SUGGEST_PROMPT_VERSION,
-  VOICE_NOTES_PROMPT_VERSION
+  VOICE_NOTES_PROMPT_VERSION,
+  EDIT_PASS_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -357,6 +359,14 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-5.20'
+  },
+  // One version for every pass type; developmental, line, and custom passes ask the strong tier,
+  // copy, proofread, and continuity the fast one (`EDIT_PASS_TIER`). The catalogue names strong.
+  [EDIT_PASS_PROMPT_VERSION]: {
+    feature: 'editPass',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-14.15'
   }
 }
 

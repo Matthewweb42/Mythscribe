@@ -239,7 +239,7 @@ export function parseProofreadAnswer(
  * entity's "Mara" costs tokens and says nothing), the author's capitals preferred, in first-seen
  * order, capped at `PROOFREAD_KEEP_WORDS_MAX`.
  */
-function keepList(words: readonly string[]): string[] {
+export function keepList(words: readonly string[]): string[] {
   const byKey = new Map<string, string>()
   for (const word of words) {
     const key = word.toLocaleLowerCase()
@@ -250,7 +250,7 @@ function keepList(words: readonly string[]): string[] {
 }
 
 /** Whether `fix` is a small edit of `quote` that leaves the keep words alone (see `parseProofreadAnswer`). */
-function isCorrection(quote: string, fix: string, keep: ReadonlySet<string>): boolean {
+export function isCorrection(quote: string, fix: string, keep: ReadonlySet<string>): boolean {
   const segments = diffWords(quote, fix)
   const deleted = segments.filter((s) => s.kind === 'del').flatMap((s) => wordsOf(s.text))
   const inserted = segments.filter((s) => s.kind === 'ins').flatMap((s) => wordsOf(s.text))

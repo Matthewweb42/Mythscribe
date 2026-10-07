@@ -118,6 +118,23 @@ const CRITIQUE_ANSWER = JSON.stringify({
  * main must drop.
  */
 const PROOFREAD_SENTINEL = 'You are the proofreading feature inside a novel-writing app.'
+/**
+ * F-14.15: the opening of the edit-pass prompt's system turn (`EDIT_PASS_SENTINEL` in
+ * `src/main/ai/prompts/editPass.v1.ts`; its golden test pins the two together). A JSON request
+ * carrying it gets one change to the sentence the edit-pass step types, and one quoting a
+ * passage that is nowhere in the scene, which main must drop.
+ */
+const EDIT_PASS_SENTINEL = 'You are the edit-pass feature inside a novel-writing app.'
+/** What the edit-pass step types at the end of Scene 1. */
+const EDIT_PASS_TYPED = ' The harbour bell rang very very slowly over the water.'
+const EDIT_PASS_QUOTE = 'rang very very slowly'
+const EDIT_PASS_REPLACEMENT = 'rang slowly'
+const EDIT_PASS_ANSWER = JSON.stringify({
+  changes: [
+    { quote: EDIT_PASS_QUOTE, replacement: EDIT_PASS_REPLACEMENT, why: 'Cut the doubled word.' },
+    { quote: 'a passage nowhere in the scene', replacement: 'x', why: 'Dropped by main.' }
+  ]
+})
 /** What the proofread step types at the end of Scene 1: one misspelling and one doubled word. */
 const PROOFREAD_TYPED = ' The ferryman was laet that night, and and the river rose under the dock.'
 const PROOFREAD_TYPO_QUOTE = 'was laet that'
@@ -445,6 +462,10 @@ function startFakeOpenAi(): Promise<string> {
           const proofread = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(PROOFREAD_SENTINEL)
           )
+          // F-14.15: an edit pass comes back as two JSON changes, one of them uncitable.
+          const editPass = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(EDIT_PASS_SENTINEL)
+          )
           // F-13.4: a consistency check comes back as findings built from the request itself.
           const continuity = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(CONTINUITY_SENTINEL)
@@ -553,29 +574,31 @@ function startFakeOpenAi(): Promise<string> {
                             ? JSON.stringify({ points: SUGGESTED_POINTS })
                             : whatNext
                               ? WHAT_NEXT_ANSWER
-                              : proofread
-                                ? PROOFREAD_ANSWER
-                                : continuity
-                                  ? continuityAnswer(request.messages)
-                                  : importStructure
-                                    ? IMPORT_STRUCTURE_ANSWER
-                                    : critique
-                                      ? CRITIQUE_ANSWER
-                                      : betaReader
-                                        ? BETA_READER_ANSWER
-                                        : query
-                                          ? request.messages.some((m) =>
-                                              m.content.includes('Wren (character):')
-                                            )
-                                            ? SHEET_ANSWER
-                                            : QUERY_ANSWER
-                                          : brief
-                                            ? BRIEF_ANSWER
-                                            : summary
-                                              ? SUMMARY_ANSWER
-                                              : regen
-                                                ? '{"tags":["antagonist","protagonist"]}'
-                                                : '{"tags":["dark-forest","protagonist"]}'
+                              : editPass
+                                ? EDIT_PASS_ANSWER
+                                : proofread
+                                  ? PROOFREAD_ANSWER
+                                  : continuity
+                                    ? continuityAnswer(request.messages)
+                                    : importStructure
+                                      ? IMPORT_STRUCTURE_ANSWER
+                                      : critique
+                                        ? CRITIQUE_ANSWER
+                                        : betaReader
+                                          ? BETA_READER_ANSWER
+                                          : query
+                                            ? request.messages.some((m) =>
+                                                m.content.includes('Wren (character):')
+                                              )
+                                              ? SHEET_ANSWER
+                                              : QUERY_ANSWER
+                                            : brief
+                                              ? BRIEF_ANSWER
+                                              : summary
+                                                ? SUMMARY_ANSWER
+                                                : regen
+                                                  ? '{"tags":["antagonist","protagonist"]}'
+                                                  : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent

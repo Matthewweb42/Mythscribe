@@ -215,6 +215,17 @@ import {
   type BuildQueryPromptV3Input
 } from '../prompts/query.v3'
 import { buildProofreadPrompt, PROOFREAD_PROMPT_VERSION } from '../prompts/proofread.v1'
+import {
+  buildEditPassPrompt,
+  EDIT_PASS_PROMPT_VERSION,
+  type BuildEditPassPromptInput
+} from '../prompts/editPass.v1'
+import {
+  chunkText,
+  EDIT_PASS_INSTRUCTION_MAX,
+  EDIT_PASS_TYPES,
+  type EditPassType
+} from '@shared/editPass'
 import { buildWhatNextPrompt, WHAT_NEXT_PROMPT_VERSION } from '../prompts/whatNext.v1'
 import { buildWhatNextPromptV2, WHAT_NEXT_PROMPT_V2_VERSION } from '../prompts/whatNext.v2'
 import { fitTailToBudget } from '../whatNext'
@@ -589,6 +600,11 @@ export interface EvalCase {
     | { kind: 'synopsis' }
     /** Suggested notes (F-5.20): the answer must survive the feature's own parser, nothing dropped. */
     | { kind: 'notesSuggest' }
+    /**
+     * An edit pass (F-14.15): the answer must parse, and every change or note must survive the
+     * feature's own parser against the piece as sent (here the whole scene), nothing dropped.
+     */
+    | { kind: 'editPass'; type: EditPassType; text: string }
 }
 
 const general = builtinParams('general')
@@ -1739,6 +1755,32 @@ function proofreadCase(
   }
 }
 
+/** The fixture passage with a few slack phrases, a doubled word, and a typo for every pass to find. */
+const EDIT_PASS_PASSAGE = PROOFREAD_PASSAGE
+/** A piece at the chunk cap, cut at paragraph breaks as the runner cuts a long scene. */
+const EDIT_PASS_MAXED_PIECE =
+  chunkText(Array.from({ length: 30 }, () => EDIT_PASS_PASSAGE).join('\n\n'))[0] ?? ''
+
+function editPassCase(
+  name: string,
+  note: string,
+  input: Omit<BuildEditPassPromptInput, 'title' | 'part'>
+): EvalCase {
+  const built = buildEditPassPrompt({
+    ...input,
+    title: 'The Crossing',
+    part: { index: 0, count: 1 }
+  })
+  return {
+    version: EDIT_PASS_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'editPass', type: input.type, text: input.text }
+  }
+}
+
 function whatNextCase(
   name: string,
   note: string,
@@ -2774,6 +2816,71 @@ export const EVAL_CASES: EvalCase[] = [
     {
       passages: Array.from({ length: 40 }, () => FIXTURE_PASSAGE.slice(0, 600)),
       previous: MAXED_VOICE_NOTES
+    }
+  ),
+  ...EDIT_PASS_TYPES.map((type) =>
+    editPassCase(
+      `${type} fresh`,
+      `a ${type} pass over the fixture scene with no voice block, no keep list, and no references`,
+      {
+        type,
+        text: EDIT_PASS_PASSAGE,
+        voice: null,
+        keepWords: [],
+        references:
+          type === 'continuity'
+            ? CONTINUITY_FULL_REFS.map((ref, at) => continuityRefLine(ref, at + 1))
+            : [],
+        instruction: type === 'custom' ? 'Tighten: cut filler words and stacked modifiers.' : null
+      }
+    )
+  ),
+  editPassCase(
+    'line full',
+    'a line edit with the voice block for the scene’s POV: what a project with a voice profile sends',
+    {
+      type: 'line',
+      text: EDIT_PASS_PASSAGE,
+      voice: voiceBlock(FIXTURE_PROFILE, { text: EDIT_PASS_PASSAGE, pov: 'Mara' }),
+      keepWords: [],
+      references: [],
+      instruction: null
+    }
+  ),
+  editPassCase(
+    'copy maxed',
+    `the worst copy edit: a piece at the chunk cap, the voice block at its cap, and ${PROOFREAD_KEEP_WORDS_MAX} keep words`,
+    {
+      type: 'copy',
+      text: EDIT_PASS_MAXED_PIECE,
+      voice: voiceBlock(MAXED_PROFILE, { text: EDIT_PASS_PASSAGE, pov: 'Mara' }),
+      keepWords: PROOFREAD_MAXED_KEEP_WORDS,
+      references: [],
+      instruction: null
+    }
+  ),
+  editPassCase(
+    'continuity maxed',
+    'the worst continuity pass: a piece at the chunk cap against references at their token budget',
+    {
+      type: 'continuity',
+      text: EDIT_PASS_MAXED_PIECE,
+      voice: null,
+      keepWords: [],
+      references: CONTINUITY_MAXED_REFS.map((ref, at) => continuityRefLine(ref, at + 1)),
+      instruction: null
+    }
+  ),
+  editPassCase(
+    'custom maxed',
+    'the worst custom pass: a piece at the chunk cap, the voice block at its cap, and an instruction at its cap',
+    {
+      type: 'custom',
+      text: EDIT_PASS_MAXED_PIECE,
+      voice: voiceBlock(MAXED_PROFILE, { text: EDIT_PASS_PASSAGE, pov: 'Mara' }),
+      keepWords: [],
+      references: [],
+      instruction: 'i'.repeat(EDIT_PASS_INSTRUCTION_MAX)
     }
   )
 ]
