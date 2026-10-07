@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { AiFeatureId, ModelName } from './ai'
+import { HostedModelId, HostedRouting, WordCostConstants } from './cloudBilling'
 import { USAGE_PERIOD_DAYS } from './cloudUsage'
 import {
   CrashReport,
@@ -40,6 +41,16 @@ export const POLL_INTERVAL_MS = 3000
 export const START_RATE_LIMIT = 3
 /** Bytes of randomness in every token (attempt id, poll secret, link token, session token). */
 export const TOKEN_BYTES = 32
+/**
+ * Short-lived access tokens (AI-BILLING-SPEC A5, S6): what `POST /auth/refresh` and a completed
+ * sign-in mint for the bearer header. The session token is the revocable refresh token; revoking
+ * it ends every access token minted from it at once.
+ */
+export const ACCESS_TOKEN_TTL_MS = 15 * 60_000
+/** The sign-in email carries a code beside the link, for `POST /auth/verify` (A5). */
+export const LOGIN_CODE_DIGITS = 6
+/** Wrong codes allowed per sign-in attempt; the next one expires the attempt. */
+export const LOGIN_CODE_MAX_FAILURES = 5
 
 const trimmedEmail = z
   .string()
@@ -77,13 +88,41 @@ export const AuthPollBody = z.object({
 })
 export type AuthPollBody = z.infer<typeof AuthPollBody>
 
+/** A short-lived access token and when it stops working (ISO timestamp). */
+export const AccessToken = z.object({ token: z.string().min(1), expiresAt: z.string().min(1) })
+export type AccessToken = z.infer<typeof AccessToken>
+
 export const AuthPollResult = z.discriminatedUnion('status', [
   z.object({ status: z.literal('pending') }),
-  /** Handed over exactly once; the Worker wipes the session from the attempt afterwards. */
-  z.object({ status: z.literal('ready'), session: CloudSession }),
+  /**
+   * Handed over exactly once; the Worker wipes the session from the attempt afterwards.
+   * `session.token` is the refresh token; `access` the first short-lived access token (optional
+   * so an app reading a Worker deployed before it still parses the answer).
+   */
+  z.object({ status: z.literal('ready'), session: CloudSession, access: AccessToken.optional() }),
   z.object({ status: z.literal('expired') })
 ])
 export type AuthPollResult = z.infer<typeof AuthPollResult>
+
+/**
+ * `POST /auth/verify`: the code from the sign-in email, for an author who reads mail on another
+ * device. Bound to the attempt and its poll secret, so only the app that started the sign-in can
+ * spend the code; answers like `/auth/poll` (`ready`, or `expired` after too many wrong codes).
+ */
+export const AuthCodeBody = AuthPollBody.extend({
+  code: z
+    .string()
+    .trim()
+    .regex(new RegExp(`^\\d{${LOGIN_CODE_DIGITS}}$`), 'Enter the code from the email')
+})
+export type AuthCodeBody = z.infer<typeof AuthCodeBody>
+
+/** `POST /auth/refresh`: a fresh access token for a live session (the refresh token). */
+export const AuthRefreshBody = z.object({ refreshToken: z.string().min(1) })
+export type AuthRefreshBody = z.infer<typeof AuthRefreshBody>
+
+export const AuthRefreshResult = z.object({ access: AccessToken })
+export type AuthRefreshResult = z.infer<typeof AuthRefreshResult>
 
 /** `GET /auth/me` with `Authorization: Bearer <token>` */
 export const AuthMeResult = z.object({
@@ -122,8 +161,16 @@ export type CreditSpendRow = z.infer<typeof CreditSpendRow>
  * meter (F-15.5); they default so the app still reads a Worker deployed before them.
  */
 export const CreditsResult = z.object({
-  /** May be slightly negative: the last request is charged after it was answered. */
+  /**
+   * What can be spent now: the sum of the account's ledger minus its active holds (L6). Negative
+   * only after a refund of spent money; a request is never answered past it.
+   */
   balanceMicros: z.number().int(),
+  /**
+   * Reserved by requests in flight (L5); `balanceMicros + heldMicros` is the ledger's sum.
+   * Optional so a Worker deployed before holds still parses (none held then).
+   */
+  heldMicros: z.number().int().nonnegative().optional(),
   /** Spend per feature since the account was created. */
   spend: z.array(CreditSpendRow),
   /** How many days back `periodSpend` reaches (`USAGE_PERIOD_DAYS`, a rolling window). */
@@ -175,7 +222,16 @@ export const CloudErrorCode = z.enum([
   'INVALID_EMAIL',
   /** The proxy could not read the body, or it asks for a model or a size the proxy refuses (F-15.4). */
   'BAD_REQUEST',
+  /** Too many requests: sign-in emails per address, proxy requests per minute, or a busy provider. */
   'RATE_LIMITED',
+  /** The messages are longer than the configured input cap (AI-BILLING-SPEC S4). */
+  'REQUEST_TOO_LARGE',
+  /** The model is not on the hosted price table, or the gateway no longer serves it. */
+  'MODEL_UNAVAILABLE',
+  /** This `Idempotency-Key` already ran (charged once) or is still running (L8). */
+  'DUPLICATE_REQUEST',
+  /** A signed webhook older than the configured window (S5); a replay, never applied. */
+  'STALE_WEBHOOK',
   /** No mail transport is configured on the Worker (the Resend secret is missing). */
   'NOT_CONFIGURED',
   'UNAUTHORIZED',
@@ -199,6 +255,10 @@ export const CLOUD_ERROR_STATUS: Record<CloudErrorCode, number> = {
   INVALID_EMAIL: 400,
   BAD_REQUEST: 400,
   RATE_LIMITED: 429,
+  REQUEST_TOO_LARGE: 413,
+  MODEL_UNAVAILABLE: 422,
+  DUPLICATE_REQUEST: 409,
+  STALE_WEBHOOK: 400,
   NOT_CONFIGURED: 503,
   UNAUTHORIZED: 401,
   NOT_FOUND: 404,
@@ -227,37 +287,49 @@ export const AiCompleteMessage = z.object({
 })
 export type AiCompleteMessage = z.infer<typeof AiCompleteMessage>
 
-export const AiCompleteBody = z
-  .object({
-    /** The `AiFeatureId` that is spending, so the ledger and the Account tab break spend down by feature. */
-    feature: AiFeatureId,
-    /** Resolved by the app (F-5.11); the Worker refuses a model outside the published rate table. */
-    model: ModelName,
-    messages: z.array(AiCompleteMessage).min(1).max(AI_COMPLETE_MAX_MESSAGES),
-    maxTokens: z.number().int().min(1).max(AI_COMPLETE_MAX_TOKENS),
-    json: z.boolean().optional(),
-    temperature: z.number().min(0).max(2).optional(),
-    stream: z.boolean()
-  })
-  .refine(
-    (body) => body.messages.reduce((sum, m) => sum + m.content.length, 0) <= AI_COMPLETE_MAX_CHARS,
-    `The messages are longer than ${AI_COMPLETE_MAX_CHARS} characters`
-  )
+/**
+ * `Idempotency-Key` on `POST /ai/complete` (L8): a retry with the same key is charged at most once.
+ * Optional until the app sends it; the Worker makes one up for a request without it.
+ */
+export const IDEMPOTENCY_KEY_HEADER = 'Idempotency-Key'
+export const IdempotencyKey = z.string().regex(/^[A-Za-z0-9._:-]{8,128}$/)
+
+/** The body's fields without the size cap, so the Worker can answer an oversize body by name. */
+export const AiCompleteFields = z.object({
+  /** The `AiFeatureId` that is spending, so the ledger and the Account tab break spend down by feature. */
+  feature: AiFeatureId,
+  /** Resolved by the app (F-5.11); the Worker refuses a model outside the published rate table. */
+  model: ModelName,
+  messages: z.array(AiCompleteMessage).min(1).max(AI_COMPLETE_MAX_MESSAGES),
+  maxTokens: z.number().int().min(1).max(AI_COMPLETE_MAX_TOKENS),
+  json: z.boolean().optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  stream: z.boolean()
+})
+
+export const AiCompleteBody = AiCompleteFields.refine(
+  (body) => body.messages.reduce((sum, m) => sum + m.content.length, 0) <= AI_COMPLETE_MAX_CHARS,
+  `The messages are longer than ${AI_COMPLETE_MAX_CHARS} characters`
+)
 export type AiCompleteBody = z.infer<typeof AiCompleteBody>
 
 /** What the provider answered plus the meter's receipt: what it cost and what is left. */
 export const AiCompleteResult = z.object({
   text: z.string(),
-  /** The model that actually answered; the charge is at its published rate. */
+  /** The model the request was billed as (the price table's id); the charge is at its price. */
   model: ModelName,
   usage: z.object({
     inputTokens: z.number().int().nonnegative(),
-    outputTokens: z.number().int().nonnegative()
+    outputTokens: z.number().int().nonnegative(),
+    /** Input tokens the provider served from its prompt cache, billed at the cached price (R6). */
+    cachedInputTokens: z.number().int().nonnegative().optional()
   }),
-  /** Micro-USD taken off the balance for this request; at least 1 (`cloudChargeMicros`). */
+  /** Micro-USD taken off the balance for this request; at least 1, never more than its hold. */
   chargeMicros: z.number().int().min(1),
-  /** The balance after the charge; may be slightly negative, since the charge lands afterwards. */
-  balanceMicros: z.number().int()
+  /** What can be spent after the charge (the ledger minus any other active holds). */
+  balanceMicros: z.number().int(),
+  /** The proxy's id for the request, on its ledger row and its log line. */
+  requestId: z.string().optional()
 })
 export type AiCompleteResult = z.infer<typeof AiCompleteResult>
 
@@ -269,7 +341,8 @@ export const AiStreamEvent = z.discriminatedUnion('type', [
     model: ModelName,
     usage: AiCompleteResult.shape.usage,
     chargeMicros: AiCompleteResult.shape.chargeMicros,
-    balanceMicros: z.number().int()
+    balanceMicros: z.number().int(),
+    requestId: z.string().optional()
   }),
   /** The upstream failed after the headers were sent, so the status is already 200. */
   z.object({ type: z.literal('error'), code: CloudErrorCode, message: z.string() })
@@ -294,3 +367,83 @@ export const DiagnosticsBody = DiagnosticsEnvironment.extend({
   crashes: z.array(CrashReport).max(DIAGNOSTIC_QUEUE_MAX)
 })
 export type DiagnosticsBody = z.infer<typeof DiagnosticsBody>
+
+/**
+ * `GET /pricing` (AI-BILLING-SPEC P1, P5, config defaults), no bearer: everything the app needs
+ * to quote, label, and route hosted requests, read from the Worker's config so a price, the
+ * markup, a pack, or the routing table changes without an app release. Money is micro-USD;
+ * model prices stay USD per million tokens, as the providers publish them.
+ */
+export const PricingModel = z.object({
+  id: HostedModelId,
+  label: z.string().min(1),
+  inputUsdPerM: z.number().positive(),
+  outputUsdPerM: z.number().positive(),
+  cachedInputUsdPerM: z.number().nonnegative().nullable(),
+  displayMultiplier: z.number().positive()
+})
+export type PricingModel = z.infer<typeof PricingModel>
+
+export const PricingResult = z.object({
+  currency: z.literal('USD'),
+  /** Over the provider cost: 0.2 is cost + 20 %. */
+  markup: z.number().nonnegative(),
+  /** The one-time app license (M1). */
+  appPriceMicros: z.number().int().nonnegative(),
+  /** The smallest pack sold (M4); smaller configured packs are not offered. */
+  minPackMicros: z.number().int().nonnegative(),
+  packs: z.array(CreditPack),
+  /** Once per verified email (M7). */
+  trialGrantMicros: z.number().int().nonnegative(),
+  /** Jobs estimated above this are quoted and confirmed first (hosted request flow 2). */
+  quoteThresholdMicros: z.number().int().nonnegative(),
+  /** Every displayed estimate is multiplied by this (E4). */
+  estimateSafetyFactor: z.number().min(1),
+  /** Warn below this balance (E6). */
+  lowBalanceWarningMicros: z.number().int().nonnegative(),
+  /** A hold is released this long after it was placed if the request never settled (L5). */
+  holdExpiryMinutes: z.number().int().positive(),
+  /** Unused balance is refundable this long after the pack was bought. */
+  refundWindowDays: z.number().int().nonnegative(),
+  /** Per-user limits on the proxy (S4). */
+  limits: z.object({
+    requestsPerMinute: z.number().int().positive(),
+    maxInputChars: z.number().int().positive(),
+    maxOutputTokens: z.number().int().positive()
+  }),
+  models: z.array(PricingModel),
+  routing: HostedRouting,
+  /** Null constants hide the estimate lines that need them (E2, E3). */
+  wordCosts: WordCostConstants
+})
+export type PricingResult = z.infer<typeof PricingResult>
+
+/** `GET /usage?limit=&cursor=` with the bearer (E7): the account's ledger, newest first. */
+export const USAGE_PAGE_DEFAULT = 50
+export const USAGE_PAGE_MAX = 200
+
+export const LedgerEntryType = z.enum(['topup', 'trial_grant', 'charge', 'refund', 'adjustment'])
+export type LedgerEntryType = z.infer<typeof LedgerEntryType>
+
+export const UsageEntry = z.object({
+  id: z.string().min(1),
+  type: LedgerEntryType,
+  /** Signed micro-USD: a top-up adds, a charge subtracts. */
+  amountMicros: z.number().int(),
+  /** Epoch ms. */
+  at: z.number().int(),
+  feature: z.string().nullable(),
+  model: z.string().nullable(),
+  tokensIn: z.number().int().nullable(),
+  tokensOut: z.number().int().nullable(),
+  tokensCached: z.number().int().nullable(),
+  requestId: z.string().nullable()
+})
+export type UsageEntry = z.infer<typeof UsageEntry>
+
+export const UsageResult = z.object({
+  entries: z.array(UsageEntry),
+  /** Pass back as `cursor` for the next (older) page; null on the last page. */
+  nextCursor: z.string().nullable()
+})
+export type UsageResult = z.infer<typeof UsageResult>

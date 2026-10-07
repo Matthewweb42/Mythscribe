@@ -17,12 +17,18 @@ database_name = "mythscribe"
 database_id = "47d97a47-28be-4557-9247-6ca9fb8e2bcd"
 migrations_dir = "migrations"
 
+# AI-BILLING-SPEC L5: every 5 minutes, release the holds of requests that never settled (and drop
+# old rate-limit windows and access tokens). See `runScheduledSweep` in src/index.ts.
+[triggers]
+crons = ["*/5 * * * *"]
+
 [vars]
 # `resend` sends the sign-in email over HTTPS; `log` (via .dev.vars) prints the link instead and
 # returns it as `devLink` from /auth/start so local runs can be driven end to end.
 EMAIL_TRANSPORT = "resend"
 
-# The credit packs on sale (F-15.3), as a JSON array of { variantId, url, priceCents }. Unset
+# The balance packs on sale (F-15.3; $10 / $25 / $50 since 2026-10-07 — a pack below `min_pack_usd`
+# in the billing_config table is not sold), as a JSON array of { variantId, url, priceCents }. Unset
 # until the Lemon Squeezy products exist: the Account tab then says no packs are on sale.
 # `priceCents` is the truth for the amount credited, so currency and tax never reach the balance.
 # LEMONSQUEEZY_PACKS = '[{"variantId":"123456","url":"https://mythscribe.lemonsqueezy.com/buy/00000000-0000-0000-0000-000000000000","priceCents":500}]'
@@ -32,9 +38,17 @@ EMAIL_TRANSPORT = "resend"
 # grants a license row, never credit.
 # LEMONSQUEEZY_SUPPORTER = '{"variantId":"123457","url":"https://mythscribe.lemonsqueezy.com/buy/00000000-0000-0000-0000-000000000000","priceCents":3900}'
 
+# The $30 one-time app license (M1, 2026-10-07), the same shape. It grants the same license row and
+# token as the Supporter product, which it supersedes; `GET /license` offers it once set.
+# LEMONSQUEEZY_APP_LICENSE = '{"variantId":"123458","url":"https://mythscribe.lemonsqueezy.com/buy/00000000-0000-0000-0000-000000000000","priceCents":3000}'
+
+# Prices, the markup, the trial grant, the limits, and the routing table are not here: they are
+# rows of the `billing_config` D1 table (migration 0005), changed without a deploy. See README.md.
+
 # Secrets (never in this file, never in the repo):
 #   RESEND_API_KEY                the Resend key for sign-in@mythscribe.app  -> `npx wrangler secret put RESEND_API_KEY`
-#   OPENAI_API_KEY                the operator's OpenAI key (F-15.4)         -> `npx wrangler secret put OPENAI_API_KEY`
+#   OPENROUTER_API_KEY            the operator's OpenRouter key (A9, preferred) -> `npx wrangler secret put OPENROUTER_API_KEY`
+#   OPENAI_API_KEY                the operator's OpenAI key (F-15.4; used only without OPENROUTER_API_KEY)
 #   LEMONSQUEEZY_WEBHOOK_SECRET   signs the billing webhook (F-15.3)         -> `npx wrangler secret put LEMONSQUEEZY_WEBHOOK_SECRET`
 #   LICENSE_SIGNING_KEY           signs Supporter tokens (F-15.9)            -> `npm run cloud:license-keygen`, then `npx wrangler secret put LICENSE_SIGNING_KEY`
 # Without RESEND_API_KEY the Worker answers 503 NOT_CONFIGURED to /auth/start, and without

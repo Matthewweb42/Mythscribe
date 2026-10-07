@@ -1,15 +1,20 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  ACCESS_TOKEN_TTL_MS,
   AuthMeResult,
   AuthPollResult,
+  AuthRefreshResult,
   AuthStartResult,
   CloudApiError,
+  CreditsResult,
   LOGIN_ATTEMPT_TTL_MS,
+  LOGIN_CODE_MAX_FAILURES,
+  SESSION_TTL_MS,
   START_RATE_LIMIT
 } from '../../src/shared/cloudApi'
 import type { MailMessage, Mailer } from './email'
 import { handleRequest, type WorkerDeps } from './index'
-import { memoryStore } from './store'
+import { testStore, type TestStore } from './testing/sqliteD1'
 
 const ORIGIN = 'https://api.mythscribe.app'
 const EMAIL = 'author@example.com'
@@ -29,7 +34,7 @@ const capturingMailer: Mailer = {
 
 function makeDeps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
   return {
-    store: memoryStore(),
+    store: testStore(),
     mailer: capturingMailer,
     now: () => new Date(clock),
     random: () => `tok-${(counter += 1)}`,
@@ -39,6 +44,7 @@ function makeDeps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
     webhookSecret: null,
     // F-15.9: the Supporter license has its own tests in `license.test.ts`.
     supporter: null,
+    appLicense: null,
     signingKey: null,
     // F-15.4: the AI proxy is off for the account and credit routes' tests.
     upstream: null,
@@ -89,6 +95,26 @@ async function poll(attempt: AuthStartResult, secret = attempt.pollSecret): Prom
 
 async function errorOf(response: Response): Promise<CloudApiError> {
   return CloudApiError.parse(await response.json())
+}
+
+/** The code in the last sign-in email (AI-BILLING-SPEC A5). */
+function lastCode(): string {
+  const match = /enter this code in MythScribe: (\d{6})/.exec(mails[mails.length - 1]!.text)
+  if (!match?.[1]) throw new Error('no code in the email')
+  return match[1]
+}
+
+function verifyCode(attempt: AuthStartResult, code: string): Promise<Response> {
+  return handleRequest(
+    post('/auth/verify', { attemptId: attempt.attemptId, pollSecret: attempt.pollSecret, code }),
+    deps
+  )
+}
+
+async function ready(response: Response): Promise<Extract<AuthPollResult, { status: 'ready' }>> {
+  const result = AuthPollResult.parse(await response.json())
+  if (result.status !== 'ready') throw new Error(`expected ready, got ${result.status}`)
+  return result
 }
 
 describe('POST /auth/start', () => {
@@ -311,7 +337,7 @@ describe('the router', () => {
   it('turns a thrown error into a generic 500', async () => {
     deps = makeDeps({
       store: {
-        ...memoryStore(),
+        ...testStore(),
         countAttemptsSince: () => Promise.reject(new Error('D1 is down: secret-detail'))
       }
     })
@@ -322,5 +348,144 @@ describe('the router', () => {
     const error = await errorOf(response)
     expect(error.code).toBe('INTERNAL')
     expect(error.message).not.toContain('secret-detail')
+  })
+})
+
+describe('POST /auth/verify (the emailed code)', () => {
+  it('mails a six-digit code beside the link and signs in with it at once', async () => {
+    const { body: attempt } = await start()
+    expect(mails[0]!.html).toContain(lastCode())
+
+    const result = await ready(await verifyCode(attempt, lastCode()))
+
+    expect(result.session.email).toBe(EMAIL)
+    expect(result.access?.expiresAt).toBe(
+      new Date(START.getTime() + ACCESS_TOKEN_TTL_MS).toISOString()
+    )
+    // Spent: neither the code nor a poll hands the session over again.
+    expect(AuthPollResult.parse(await (await verifyCode(attempt, lastCode())).json())).toEqual({
+      status: 'expired'
+    })
+    expect(AuthPollResult.parse(await (await poll(attempt)).json())).toEqual({ status: 'expired' })
+  })
+
+  it('refuses a wrong code and spends the attempt after too many', async () => {
+    const { body: attempt } = await start()
+    const right = lastCode()
+    const wrong = right === '000000' ? '111111' : '000000'
+
+    for (let i = 1; i < LOGIN_CODE_MAX_FAILURES; i += 1) {
+      const response = await verifyCode(attempt, wrong)
+      expect(response.status).toBe(400)
+      expect((await errorOf(response)).code).toBe('BAD_REQUEST')
+    }
+    expect(AuthPollResult.parse(await (await verifyCode(attempt, wrong)).json())).toEqual({
+      status: 'expired'
+    })
+    expect(AuthPollResult.parse(await (await verifyCode(attempt, right)).json())).toEqual({
+      status: 'expired'
+    })
+  })
+
+  it('needs the poll secret of the app that started the sign-in', async () => {
+    const { body: attempt } = await start()
+    const response = await handleRequest(
+      post('/auth/verify', { attemptId: attempt.attemptId, pollSecret: 'tok-x', code: lastCode() }),
+      deps
+    )
+    expect(response.status).toBe(404)
+  })
+
+  it('refuses a code once the attempt window has passed', async () => {
+    const { body: attempt } = await start()
+    clock += LOGIN_ATTEMPT_TTL_MS + 1
+    expect(AuthPollResult.parse(await (await verifyCode(attempt, lastCode())).json())).toEqual({
+      status: 'expired'
+    })
+  })
+})
+
+describe('access and refresh tokens (A5, S6)', () => {
+  async function signIn(): Promise<Extract<AuthPollResult, { status: 'ready' }>> {
+    const { body: attempt } = await start()
+    return ready(await verifyCode(attempt, lastCode()))
+  }
+
+  it('hands an access token over with the session after the link too', async () => {
+    const { body: attempt } = await start()
+    const link = lastLink()
+    await handleRequest(get(new URL(link).pathname + new URL(link).search), deps)
+    const result = await ready(await poll(attempt))
+    expect(result.access?.token).toBeTruthy()
+    expect((await handleRequest(get('/auth/me', result.access?.token), deps)).status).toBe(200)
+  })
+
+  it('accepts a short-lived access token until it expires, then refreshes it', async () => {
+    const { session, access } = await signIn()
+    expect((await handleRequest(get('/auth/me', access?.token), deps)).status).toBe(200)
+
+    clock += ACCESS_TOKEN_TTL_MS
+    expect((await handleRequest(get('/auth/me', access?.token), deps)).status).toBe(401)
+
+    const refreshed = await handleRequest(
+      post('/auth/refresh', { refreshToken: session.token }),
+      deps
+    )
+    expect(refreshed.status).toBe(200)
+    const { access: fresh } = AuthRefreshResult.parse(await refreshed.json())
+    expect(fresh.token).not.toBe(access?.token)
+    expect((await handleRequest(get('/auth/me', fresh.token), deps)).status).toBe(200)
+  })
+
+  it('ends every access token when the session is revoked, and refuses to refresh it', async () => {
+    const { session, access } = await signIn()
+
+    // Signing out with an access token revokes the session it was minted from.
+    expect((await handleRequest(post('/auth/signout', {}, access?.token), deps)).status).toBe(204)
+
+    expect((await handleRequest(get('/auth/me', access?.token), deps)).status).toBe(401)
+    expect((await handleRequest(get('/auth/me', session.token), deps)).status).toBe(401)
+    const refresh = await handleRequest(
+      post('/auth/refresh', { refreshToken: session.token }),
+      deps
+    )
+    expect(refresh.status).toBe(401)
+    expect((await errorOf(refresh)).code).toBe('UNAUTHORIZED')
+  })
+
+  it('refuses to refresh an unknown or expired session', async () => {
+    const { session } = await signIn()
+    expect(
+      (await handleRequest(post('/auth/refresh', { refreshToken: 'tok-made-up' }), deps)).status
+    ).toBe(401)
+    clock += SESSION_TTL_MS
+    expect(
+      (await handleRequest(post('/auth/refresh', { refreshToken: session.token }), deps)).status
+    ).toBe(401)
+  })
+})
+
+describe('the trial grant (M7)', () => {
+  async function balanceOf(token: string | undefined): Promise<number> {
+    const response = await handleRequest(get('/credits', token), deps)
+    return CreditsResult.parse(await response.json()).balanceMicros
+  }
+
+  it('grants $2.00 on the first verified sign-in and never again for the same email', async () => {
+    const first = await ready(await verifyCode((await start()).body, lastCode()))
+    expect(await balanceOf(first.access?.token)).toBe(2_000_000)
+
+    const second = await ready(await verifyCode((await start()).body, lastCode()))
+    expect(await balanceOf(second.access?.token)).toBe(2_000_000)
+    const ledger = await (deps.store as TestStore).ledger()
+    expect(ledger.filter((row) => row.type === 'trial_grant')).toHaveLength(1)
+  })
+
+  it('grants what the config says, and nothing at zero', async () => {
+    const store = deps.store as TestStore
+    store.setConfig('trial_grant_usd', 0)
+    const result = await ready(await verifyCode((await start()).body, lastCode()))
+    expect(await balanceOf(result.access?.token)).toBe(0)
+    expect(await store.ledger()).toEqual([])
   })
 })

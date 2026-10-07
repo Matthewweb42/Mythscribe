@@ -217,3 +217,75 @@ do. Review, then confirm, change, or delete the entry.
 - Chosen: the author's title stays; only the default "New conversation" title is replaced by the first message. Renamed titles are trimmed and cut to 40 characters (the stored cap).
 - Alternatives: always retitle from the first message (loses the author's name).
 - To change it: `titledBy` in `src/renderer/features/ai/assistantStore.ts`.
+
+## 2026-10-07 · AI billing B2 · Hold size and charge cap
+- Question: The spec's hold uses "input_tokens", which the server cannot count exactly before forwarding. How big is the hold?
+- Chosen: a guaranteed upper bound — the messages' UTF-8 bytes plus 16 tokens per message and 16 per request (no tokenizer emits less than a byte per token), at the full input price, plus `maxTokens` at the output price, times the markup. A charge is additionally clamped to its hold (logged). For English prose the hold is about 4x the real input cost; it lasts only until the answer settles.
+- Alternatives: characters / 4 times the safety factor (smaller holds, but the operator absorbs any undercount); a tokenizer in the Worker (a new dependency).
+- To change it: `inputTokenUpperBound` in `src/shared/cloudBilling.ts`.
+
+## 2026-10-07 · AI billing B2 · Idempotency-Key semantics
+- Question: What does a retry with the same key get, given the proxy may not store the answer (S3)?
+- Chosen: the header is optional until the app sends it (the Worker makes one up). Same key already charged → 409 `DUPLICATE_REQUEST` ("already answered and charged"; the answer is not replayed). Still running → 409 ("still running"). Released (upstream failed, nothing charged) → the retry runs and takes over the hold. A charge row is keyed `charge:<request id>`, so settling twice charges once.
+- Alternatives: re-answer a charged key for free (abusable); store answers briefly (breaks S3).
+- To change it: `PLACE_HOLD` / `TAKE_OVER_HOLD` in `cloud/src/store.ts`, `handleAiComplete` in `cloud/src/ai.ts`.
+
+## 2026-10-07 · AI billing B2 · An answer with no usage reported
+- Question: A gateway that streams an answer but reports no usage: charge what?
+- Chosen: an estimate from the text (characters / 4 for input and output, output capped at `maxTokens`), at least 1 micro-USD per answered request, never above the hold. A failed or cancelled request is never charged (its hold is released).
+- Alternatives: charge the whole hold; charge nothing (the operator pays).
+- To change it: `settle` in `cloud/src/ai.ts`.
+
+## 2026-10-07 · AI billing B2 · Access and refresh tokens
+- Question: How short-lived, how stored, and what about the app that still sends the session token?
+- Chosen: access tokens last 15 minutes and are stored hashed in D1 (`access_tokens`), so revoking the session (the refresh token, 90 days, unchanged) ends them at once. No refresh-token rotation. Until slice B3 switches the app, the session token is still accepted as the bearer on every route; S6 is fully in force only once a later change stops accepting it.
+- Alternatives: stateless signed access tokens (a new secret; revocation waits for expiry); rotate the refresh token on every refresh.
+- To change it: `ACCESS_TOKEN_TTL_MS` in `src/shared/cloudApi.ts`; `sessionHashFor` in `cloud/src/auth.ts`.
+
+## 2026-10-07 · AI billing B2 · Sign-in code
+- Question: The spec allows "magic link or code". What kind of code?
+- Chosen: the same email carries a 6-digit code beside the link. `POST /auth/verify` takes it with the attempt id and poll secret (so only the app that started the sign-in can use it); 5 wrong codes spend the attempt; it expires with the link (15 minutes).
+- Alternatives: a code usable from any device by email address alone (needs stricter rate limiting).
+- To change it: `handleVerifyCode` in `cloud/src/auth.ts`, `LOGIN_CODE_*` in `src/shared/cloudApi.ts`.
+
+## 2026-10-07 · AI billing B2 · Trial grant for existing accounts
+- Question: Accounts created before the grant existed: do they get it?
+- Chosen: yes. The grant is asked for on every verified sign-in (link or code) and keyed by the SHA-256 of the email, so every address gets it exactly once, including existing accounts on their next sign-in.
+- Alternatives: only accounts created after the deploy.
+- To change it: `grantTrial` in `cloud/src/auth.ts`.
+
+## 2026-10-07 · AI billing B2 · Refunds of unused balance
+- Question: How does the ledger follow a refund, and is the 30-day window enforced?
+- Chosen: the operator refunds (part of) an order in Lemon Squeezy; the `order_refunded` webhook writes a `refund` row of the order's cumulative `refunded_amount` (the whole pack if absent), capped at the pack, minus what was already refunded on that order. The window (`refund_window_days`, 30, unconfirmed) is published in `GET /pricing` but not enforced by the Worker, because refunds are issued by the operator. A refund of spent money can take the balance below zero; requests are then refused.
+- Alternatives: an in-app "refund my balance" request route; enforce the window on the webhook (it would then ignore a refund Lemon Squeezy already paid out).
+- To change it: `handleLemonSqueezyWebhook` in `cloud/src/credits.ts`.
+
+## 2026-10-07 · AI billing B2 · Webhook staleness
+- Question: What is "stale"?
+- Chosen: older than `webhook_max_age_hours` (72) by the order's `created_at` (`refunded_at` for a refund), or no timestamp at all: 400 `STALE_WEBHOOK`, nothing applied. Lemon Squeezy's own retries arrive well inside 72 hours; replays inside the window are caught by the ledger's unique keys.
+- Alternatives: a shorter window (a long outage would then lose orders); 200 "ignored" instead of a 400.
+- To change it: the `webhook_max_age_hours` config row, or `eventTime` in `cloud/src/credits.ts`.
+
+## 2026-10-07 · AI billing B2 · The $30 app license on the Worker
+- Question: How is the app license sold and issued?
+- Chosen: one more Lemon Squeezy variant, `LEMONSQUEEZY_APP_LICENSE` (same shape as the Supporter product). Buying it writes the same `supporter_licenses` row, so `GET /license` signs the same token (F-15.9) and the app's license check is unchanged; `GET /license` offers the app license instead of the Supporter product once it is configured. The trial clock stays in the app (slice B3).
+- Alternatives: a separate table and a token claim naming the product.
+- To change it: `findVariant` in `cloud/src/credits.ts`, `handleLicense` in `cloud/src/license.ts`.
+
+## 2026-10-07 · AI billing B2 · Where the config lives
+- Question: "Changeable without an app release" — D1 or Worker vars?
+- Chosen: a `billing_config` D1 table (one JSON value per spec key) over built-in defaults, so the operator changes the markup, prices, limits, routing, or estimate constants with one `wrangler d1 execute` and no deploy; a malformed row is logged and ignored. The packs stay in `LEMONSQUEEZY_PACKS` (they carry Lemon Squeezy URLs), filtered by `min_pack_usd`. Defaults: 60 requests per minute per account, 200,000 characters per request, 10-minute holds swept every 5 minutes.
+- Alternatives: everything in Worker vars (needs a deploy per change).
+- To change it: `cloud/src/config.ts`; the table is in `cloud/README.md`.
+
+## 2026-10-07 · AI billing B2 · Error codes on the wire
+- Question: The spec names `insufficient_balance`, `rate_limited`, `request_too_large`, `model_unavailable`, `upstream_error`.
+- Chosen: the existing codes keep their names so the shipped app still understands them (`INSUFFICIENT_CREDITS` 402, `RATE_LIMITED` 429 for both the per-account limit and a busy gateway, `UPSTREAM` 502); added `REQUEST_TOO_LARGE` 413, `MODEL_UNAVAILABLE` 422 (unknown model, or the gateway's 404), `DUPLICATE_REQUEST` 409, `STALE_WEBHOOK` 400. An unknown model was 400 `BAD_REQUEST` before; it is now 422 `MODEL_UNAVAILABLE`.
+- Alternatives: rename `INSUFFICIENT_CREDITS` to `INSUFFICIENT_BALANCE` in slice B3 together with the app.
+- To change it: `CloudErrorCode` in `src/shared/cloudApi.ts`.
+
+## 2026-10-07 · AI billing B2 · Proposed price table details (needs approval with the model proposal)
+- Question: The default hosted price table beyond what the plan fixed.
+- Chosen: OpenRouter ids `openai/gpt-5.4-mini` (fast, multiplier 1), `openai/gpt-5.4` (strong, about 3.3x), `openai/gpt-5.4-nano` (about 0.3x) at OpenAI's 2026-10-05 prices, cached input at a tenth of the input price; the bare names the app sends today are accepted as aliases. Multipliers are by output price relative to the fast model.
+- Alternatives: whatever the author approves for the default models and routing table.
+- To change it: a `models` / `routing` row in `billing_config` (no deploy), or `DEFAULT_HOSTED_MODELS` in `src/shared/cloudBilling.ts`.

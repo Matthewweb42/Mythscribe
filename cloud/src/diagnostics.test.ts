@@ -8,7 +8,7 @@ import { type CrashReport, DIAGNOSTIC_COUNT_MAX } from '../../src/shared/diagnos
 import { crashFingerprint } from './diagnostics'
 import type { Mailer } from './email'
 import { handleRequest, type WorkerDeps } from './index'
-import { type MemoryStore, memoryStore } from './store'
+import { testStore, type TestStore } from './testing/sqliteD1'
 
 const ORIGIN = 'https://api.mythscribe.app'
 const START = new Date('2026-09-21T10:00:00.000Z')
@@ -16,13 +16,13 @@ const MINUTE_MS = 60_000
 
 const silentMailer: Mailer = { send: () => Promise.resolve() }
 
-let store: MemoryStore
+let store: TestStore
 let deps: WorkerDeps
 let clock: number
 
 beforeEach(() => {
   clock = START.getTime()
-  store = memoryStore()
+  store = testStore()
   deps = {
     store,
     mailer: silentMailer,
@@ -31,6 +31,7 @@ beforeEach(() => {
     revealLink: false,
     packs: [],
     supporter: null,
+    appLicense: null,
     webhookSecret: null,
     upstream: null,
     signingKey: null

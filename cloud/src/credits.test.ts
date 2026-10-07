@@ -4,13 +4,18 @@ import {
   CloudApiError,
   CreditsResult,
   isCheckoutUrl,
-  SESSION_TTL_MS
+  LicenseResult,
+  PricingResult,
+  SESSION_TTL_MS,
+  UsageResult
 } from '../../src/shared/cloudApi'
-import { type ConfiguredPack, hasCredit, meterRequest } from './credits'
+import { DEFAULT_HOSTED_MODELS } from '../../src/shared/cloudBilling'
+import { type ConfiguredPack } from './credits'
 import { hmacSha256Hex, sha256Hex } from './crypto'
 import type { Mailer } from './email'
 import { handleRequest, type WorkerDeps } from './index'
-import { memoryStore } from './store'
+import { plainEntry } from './store'
+import { testStore, type TestStore } from './testing/sqliteD1'
 
 const ORIGIN = 'https://api.mythscribe.app'
 const EMAIL = 'author@example.com'
@@ -21,9 +26,16 @@ const START = new Date('2026-09-19T12:00:00.000Z')
 const DAY_MS = 24 * 60 * 60_000
 
 const PACKS: ConfiguredPack[] = [
-  { variantId: '111', priceCents: 500, url: 'https://mythscribe.lemonsqueezy.com/buy/five' },
-  { variantId: '222', priceCents: 2000, url: 'https://mythscribe.lemonsqueezy.com/buy/twenty' }
+  { variantId: '111', priceCents: 1000, url: 'https://mythscribe.lemonsqueezy.com/buy/ten' },
+  { variantId: '222', priceCents: 2500, url: 'https://mythscribe.lemonsqueezy.com/buy/twenty' }
 ]
+
+/** M1: the $30 app license, sold through the same checkout and webhook as the Supporter product. */
+const APP_LICENSE: ConfiguredPack = {
+  variantId: '444',
+  priceCents: 3000,
+  url: 'https://mythscribe.lemonsqueezy.com/buy/app'
+}
 
 /** F-15.9: the Supporter product goes through the same checkout and webhook as a pack. */
 const SUPPORTER: ConfiguredPack = {
@@ -41,13 +53,14 @@ let warnings: string[]
 
 function makeDeps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
   return {
-    store: memoryStore(),
+    store: testStore(),
     mailer: silentMailer,
     now: () => new Date(clock),
     random: () => `evt-${(counter += 1)}`,
     revealLink: false,
     packs: PACKS,
     supporter: SUPPORTER,
+    appLicense: APP_LICENSE,
     webhookSecret: SECRET,
     // F-15.4: the AI proxy has its own tests in `ai.test.ts`.
     upstream: null,
@@ -119,6 +132,10 @@ interface OrderEventOptions {
   userId?: string | null
   /** `null` leaves `first_order_item` off the payload. */
   variantId?: string | number | null
+  /** When the event happened; the clock by default. `null` leaves the timestamps off. */
+  at?: number | null
+  /** Cents refunded so far on the order; absent means the whole order. */
+  refundedAmount?: number
 }
 
 /** A Lemon Squeezy `order_created` body, trimmed to the fields the Worker reads. */
@@ -127,8 +144,11 @@ function orderEvent({
   id = 'order-1',
   status = 'paid',
   userId = USER_ID,
-  variantId = '111'
+  variantId = '111',
+  at = clock,
+  refundedAmount
 }: OrderEventOptions = {}): unknown {
+  const stamp = at === null ? undefined : new Date(at).toISOString()
   return {
     meta: {
       event_name: event,
@@ -140,7 +160,11 @@ function orderEvent({
       attributes: {
         store_id: 1,
         status,
-        total: 500,
+        total: 1000,
+        created_at: event === 'order_refunded' ? undefined : stamp,
+        updated_at: stamp,
+        refunded_at: event === 'order_refunded' ? stamp : null,
+        ...(refundedAmount === undefined ? {} : { refunded_amount: refundedAmount }),
         currency: 'USD',
         first_order_item:
           variantId === null
@@ -174,6 +198,34 @@ async function webhook(payload: unknown, options: WebhookOptions = {}): Promise<
   )
 }
 
+/** A charge row as the proxy writes it (its own tests are in `ai.test.ts`). */
+async function seedCharge(
+  feature: string,
+  micros: number,
+  tokensIn: number,
+  tokensOut: number,
+  requestId: string
+): Promise<void> {
+  await deps.store.appendLedgerEntry({
+    ...plainEntry({
+      id: requestId,
+      userId: USER_ID,
+      type: 'charge',
+      amountMicros: -micros,
+      idempotencyKey: `charge:${requestId}`,
+      createdAt: clock
+    }),
+    requestId,
+    feature,
+    model: 'openai/gpt-5.4-mini',
+    tokensIn,
+    tokensOut,
+    tokensCached: 0,
+    providerCostMicros: micros,
+    markupBps: 2000
+  })
+}
+
 async function webhookStatus(response: Response): Promise<string> {
   expect(response.status).toBe(200)
   const body = await response.json<{ status: string }>()
@@ -186,13 +238,14 @@ describe('GET /credits', () => {
 
     expect(body).toEqual({
       balanceMicros: 0,
+      heldMicros: 0,
       spend: [],
       periodDays: 30,
       periodSpend: [],
       periodFirstChargeAt: null,
       packs: [
-        { variantId: '111', priceCents: 500 },
-        { variantId: '222', priceCents: 2000 }
+        { variantId: '111', priceCents: 1000 },
+        { variantId: '222', priceCents: 2500 }
       ]
     })
   })
@@ -220,33 +273,12 @@ describe('GET /credits', () => {
   it('reports the balance and what each feature spent', async () => {
     expect(await webhookStatus(await webhook(orderEvent()))).toBe('applied')
 
-    // gpt-5.4-mini at the Cloud rate: (1000 * 1.5 + 100 * 9) / 1e6 USD = 2400 micros.
-    await meterRequest(deps, USER_ID, {
-      feature: 'ghostText',
-      model: 'gpt-5.4-mini',
-      tokensIn: 1000,
-      tokensOut: 100,
-      requestId: 'req-1'
-    })
-    await meterRequest(deps, USER_ID, {
-      feature: 'ghostText',
-      model: 'gpt-5.4-mini',
-      tokensIn: 1000,
-      tokensOut: 100,
-      requestId: 'req-2'
-    })
-    // gpt-5.4: (2000 * 5 + 500 * 30) / 1e6 USD = 25000 micros.
-    const chat = await meterRequest(deps, USER_ID, {
-      feature: 'chat',
-      model: 'gpt-5.4',
-      tokensIn: 2000,
-      tokensOut: 500,
-      requestId: 'req-3'
-    })
+    await seedCharge('ghostText', 2400, 1000, 100, 'req-1')
+    await seedCharge('ghostText', 2400, 1000, 100, 'req-2')
+    await seedCharge('chat', 25_000, 2000, 500, 'req-3')
 
-    expect(chat.micros).toBe(25_000)
     const body = await credits()
-    expect(body.balanceMicros).toBe(5_000_000 - 2400 - 2400 - 25_000)
+    expect(body.balanceMicros).toBe(10_000_000 - 2400 - 2400 - 25_000)
     expect(body.spend).toEqual([
       { feature: 'chat', micros: 25_000, requests: 1, tokens: 2500 },
       { feature: 'ghostText', micros: 4800, requests: 2, tokens: 2200 }
@@ -258,29 +290,11 @@ describe('GET /credits', () => {
   it('reports the last 30 days separately from all time', async () => {
     // Older than the period: lifetime spend counts it, the meter does not.
     clock = START.getTime() - 40 * DAY_MS
-    await meterRequest(deps, USER_ID, {
-      feature: 'ghostText',
-      model: 'gpt-5.4-mini',
-      tokensIn: 1000,
-      tokensOut: 100,
-      requestId: 'req-old'
-    })
+    await seedCharge('ghostText', 2400, 1000, 100, 'req-old')
     clock = START.getTime() - 20 * DAY_MS
-    await meterRequest(deps, USER_ID, {
-      feature: 'ghostText',
-      model: 'gpt-5.4-mini',
-      tokensIn: 1000,
-      tokensOut: 100,
-      requestId: 'req-in-window'
-    })
+    await seedCharge('ghostText', 2400, 1000, 100, 'req-in-window')
     clock = START.getTime() - 5 * DAY_MS
-    await meterRequest(deps, USER_ID, {
-      feature: 'chat',
-      model: 'gpt-5.4',
-      tokensIn: 2000,
-      tokensOut: 500,
-      requestId: 'req-recent'
-    })
+    await seedCharge('chat', 25_000, 2000, 500, 'req-recent')
     clock = START.getTime()
 
     const body = await credits()
@@ -300,13 +314,7 @@ describe('GET /credits', () => {
 
   it('has no period spend or first charge when nothing was spent in the last 30 days', async () => {
     clock = START.getTime() - 40 * DAY_MS
-    await meterRequest(deps, USER_ID, {
-      feature: 'chat',
-      model: 'gpt-5.4',
-      tokensIn: 2000,
-      tokensOut: 500,
-      requestId: 'req-old'
-    })
+    await seedCharge('chat', 25_000, 2000, 500, 'req-old')
     clock = START.getTime()
 
     const body = await credits()
@@ -385,20 +393,20 @@ describe('POST /billing/lemonsqueezy', () => {
     const response = await webhook(orderEvent())
 
     expect(await webhookStatus(response)).toBe('applied')
-    expect((await credits()).balanceMicros).toBe(5_000_000)
+    expect((await credits()).balanceMicros).toBe(10_000_000)
   })
 
   it('accepts the variant id as the number Lemon Squeezy sends', async () => {
     expect(await webhookStatus(await webhook(orderEvent({ variantId: 111 })))).toBe('applied')
 
-    expect((await credits()).balanceMicros).toBe(5_000_000)
+    expect((await credits()).balanceMicros).toBe(10_000_000)
   })
 
   it('applies a replayed delivery exactly once', async () => {
     await webhook(orderEvent())
 
     expect(await webhookStatus(await webhook(orderEvent()))).toBe('duplicate')
-    expect((await credits()).balanceMicros).toBe(5_000_000)
+    expect((await credits()).balanceMicros).toBe(10_000_000)
   })
 
   it('debits a refund of the same order', async () => {
@@ -437,7 +445,7 @@ describe('POST /billing/lemonsqueezy', () => {
     expect(response.status).toBe(503)
     expect(await errorOf(response)).toEqual({
       code: 'NOT_CONFIGURED',
-      message: 'Credit purchases are not configured on the server yet.'
+      message: 'Purchases are not configured on the server yet.'
     })
   })
 
@@ -541,58 +549,204 @@ describe('POST /billing/lemonsqueezy for the Supporter license (F-15.9)', () => 
   })
 })
 
-describe('meterRequest and hasCredit', () => {
-  it('charges the answered request and returns the new balance', async () => {
-    await webhook(orderEvent())
+describe('POST /billing/lemonsqueezy: replays, staleness, refunds (S5, L8)', () => {
+  it('adds the balance once when a webhook is delivered twice (acceptance check)', async () => {
+    expect(await webhookStatus(await webhook(orderEvent()))).toBe('applied')
+    expect(await webhookStatus(await webhook(orderEvent()))).toBe('duplicate')
 
-    const charge = await meterRequest(deps, USER_ID, {
-      feature: 'critique',
-      model: 'gpt-5.4',
-      tokensIn: 4000,
-      tokensOut: 800,
-      requestId: 'req-9'
-    })
-
-    // (4000 * 5 + 800 * 30) / 1e6 USD = 44000 micros.
-    expect(charge).toEqual({ micros: 44_000, balanceMicros: 5_000_000 - 44_000 })
+    expect((await credits()).balanceMicros).toBe(10_000_000)
+    const ledger = await (deps.store as TestStore).ledger()
+    expect(ledger.map((row) => [row.type, row.amountMicros, row.orderId])).toEqual([
+      ['topup', 10_000_000, 'order-1']
+    ])
   })
 
-  it('charges even when it overdraws, so the next request is refused', async () => {
-    expect(await hasCredit(deps.store, USER_ID)).toBe(false)
+  it('refuses a signed event older than the window, or with no timestamp', async () => {
+    const stale = await webhook(orderEvent({ at: START.getTime() - 73 * 60 * 60_000 }))
+    expect(stale.status).toBe(400)
+    expect((await errorOf(stale)).code).toBe('STALE_WEBHOOK')
 
-    await meterRequest(deps, USER_ID, {
-      feature: 'chat',
-      model: 'gpt-5.4',
+    const undated = await webhook(orderEvent({ at: null }))
+    expect((await errorOf(undated)).code).toBe('STALE_WEBHOOK')
+
+    expect(await webhookStatus(await webhook(orderEvent({ at: START.getTime() - 60_000 })))).toBe(
+      'applied'
+    )
+    expect((await credits()).balanceMicros).toBe(10_000_000)
+  })
+
+  it('takes the window from the config', async () => {
+    ;(deps.store as TestStore).setConfig('webhook_max_age_hours', 1)
+    const response = await webhook(orderEvent({ at: START.getTime() - 2 * 60 * 60_000 }))
+    expect((await errorOf(response)).code).toBe('STALE_WEBHOOK')
+  })
+
+  it('refunds what is left of a pack, then only the difference of a later refund', async () => {
+    await webhook(orderEvent({ variantId: '222' }))
+    await seedCharge('chat', 500_000, 1000, 100, 'req-spent')
+
+    // $15 of the $25 pack refunded: the unused part, as the operator refunds it.
+    const refund = (cents: number): Promise<Response> =>
+      webhook(orderEvent({ event: 'order_refunded', variantId: '222', refundedAmount: cents }))
+    expect(await webhookStatus(await refund(1500))).toBe('applied')
+    expect((await credits()).balanceMicros).toBe(25_000_000 - 500_000 - 15_000_000)
+
+    // The same delivery again changes nothing; a later, larger refund adds only the difference.
+    expect(await webhookStatus(await refund(1500))).toBe('duplicate')
+    expect(await webhookStatus(await refund(2000))).toBe('applied')
+    expect((await credits()).balanceMicros).toBe(25_000_000 - 500_000 - 20_000_000)
+  })
+
+  it('never refunds more than the pack', async () => {
+    await webhook(orderEvent())
+    await webhook(orderEvent({ event: 'order_refunded', refundedAmount: 99_999 }))
+    expect((await credits()).balanceMicros).toBe(0)
+  })
+})
+
+describe('the $30 app license (M1)', () => {
+  it('is what GET /license offers, and the webhook grants the license, not balance', async () => {
+    const offered = LicenseResult.parse(
+      await (await handleRequest(get('/license', TOKEN), deps)).json()
+    )
+    expect(offered.product).toEqual({ variantId: '444', priceCents: 3000 })
+
+    const checkout = await handleRequest(
+      post('/billing/checkout', { variantId: '444' }, TOKEN),
+      deps
+    )
+    expect(new URL(CheckoutResult.parse(await checkout.json()).url).pathname).toBe('/buy/app')
+
+    expect(
+      await webhookStatus(await webhook(orderEvent({ id: 'order-a1', variantId: '444' })))
+    ).toBe('applied')
+    expect(await deps.store.findSupporter(USER_ID)).toEqual({
+      grantedAt: START.getTime(),
+      revokedAt: null
+    })
+    expect((await credits()).balanceMicros).toBe(0)
+  })
+})
+
+describe('GET /pricing (P1, P5)', () => {
+  async function pricing(): Promise<PricingResult> {
+    const response = await handleRequest(get('/pricing'), deps)
+    expect(response.status).toBe(200)
+    return PricingResult.parse(await response.json())
+  }
+
+  it('serves the defaults without a session', async () => {
+    const body = await pricing()
+
+    expect(body).toMatchObject({
+      currency: 'USD',
+      markup: 0.2,
+      appPriceMicros: 30_000_000,
+      minPackMicros: 10_000_000,
+      packs: [
+        { variantId: '111', priceCents: 1000 },
+        { variantId: '222', priceCents: 2500 }
+      ],
+      trialGrantMicros: 2_000_000,
+      quoteThresholdMicros: 250_000,
+      estimateSafetyFactor: 1.2,
+      lowBalanceWarningMicros: 2_000_000,
+      holdExpiryMinutes: 10,
+      refundWindowDays: 30,
+      limits: { requestsPerMinute: 60, maxInputChars: 200_000, maxOutputTokens: 4000 },
+      routing: { tiers: { fast: 'openai/gpt-5.4-mini', strong: 'openai/gpt-5.4' }, features: {} },
+      wordCosts: { lineEdit: null, consistencyCheck: null }
+    })
+    expect(body.models.map((model) => model.id)).toEqual(DEFAULT_HOSTED_MODELS.map((m) => m.id))
+    // The checkout URLs and the aliases stay on the Worker.
+    expect(JSON.stringify(body)).not.toContain('/buy/')
+    expect(JSON.stringify(body)).not.toContain('aliases')
+  })
+
+  it('answers a config change on the next call, with no release', async () => {
+    const store = deps.store as TestStore
+    store.setConfig('markup', 0.25)
+    store.setConfig('word_costs', { lineEdit: 0.00002, consistencyCheck: null })
+    store.setConfig('routing', {
+      tiers: { fast: 'openai/gpt-5.4-nano', strong: 'openai/gpt-5.4' },
+      features: { tags: 'fast' }
+    })
+
+    const body = await pricing()
+    expect(body.markup).toBe(0.25)
+    expect(body.wordCosts.lineEdit).toBe(0.00002)
+    expect(body.routing.tiers.fast).toBe('openai/gpt-5.4-nano')
+    expect(body.routing.features).toEqual({ tags: 'fast' })
+  })
+
+  it('keeps the default for a malformed row, and routing that names an unpriced model', async () => {
+    const store = deps.store as TestStore
+    store.setConfig('markup', '"twenty percent"')
+    store.setConfig('routing', { tiers: { fast: 'made/up', strong: 'openai/gpt-5.4' } })
+    store.setConfig('no_such_key', 1)
+
+    const body = await pricing()
+    expect(body.markup).toBe(0.2)
+    expect(body.routing.tiers.fast).toBe('openai/gpt-5.4-mini')
+    expect(warnings).toHaveLength(3)
+  })
+
+  it('does not sell a configured pack below the minimum pack (M4)', async () => {
+    deps = makeDeps({
+      packs: [
+        { variantId: '100', priceCents: 500, url: 'https://mythscribe.lemonsqueezy.com/buy/five' },
+        ...PACKS
+      ]
+    })
+    await signIn()
+
+    expect((await pricing()).packs.map((pack) => pack.variantId)).toEqual(['111', '222'])
+    expect((await credits()).packs.map((pack) => pack.variantId)).toEqual(['111', '222'])
+    const checkout = await handleRequest(
+      post('/billing/checkout', { variantId: '100' }, TOKEN),
+      deps
+    )
+    expect(checkout.status).toBe(404)
+  })
+})
+
+describe('GET /usage (E7)', () => {
+  function usage(query = ''): Promise<Response> {
+    return handleRequest(get(`/usage${query}`, TOKEN), deps)
+  }
+
+  it('pages the ledger newest first, with every entry type and the charge details', async () => {
+    await webhook(orderEvent())
+    clock += 1
+    await seedCharge('chat', 25_000, 2000, 500, 'req-a')
+    clock += 1
+    await seedCharge('ghostText', 2400, 1000, 100, 'req-b')
+
+    const first = UsageResult.parse(await (await usage('?limit=2')).json())
+    expect(first.entries.map((entry) => [entry.type, entry.amountMicros, entry.feature])).toEqual([
+      ['charge', -2400, 'ghostText'],
+      ['charge', -25_000, 'chat']
+    ])
+    expect(first.entries[0]).toMatchObject({
+      model: 'openai/gpt-5.4-mini',
       tokensIn: 1000,
       tokensOut: 100,
-      requestId: 'req-over'
+      tokensCached: 0,
+      requestId: 'req-b',
+      at: START.getTime() + 2
     })
+    expect(first.nextCursor).not.toBeNull()
 
-    expect(await deps.store.getBalance(USER_ID)).toBe(-8000)
-    expect(await hasCredit(deps.store, USER_ID)).toBe(false)
+    const cursor = encodeURIComponent(first.nextCursor ?? '')
+    const second = UsageResult.parse(await (await usage(`?limit=2&cursor=${cursor}`)).json())
+    expect(second.entries.map((entry) => entry.type)).toEqual(['topup'])
+    expect(second.nextCursor).toBeNull()
   })
 
-  it('reports credit only while the balance is above zero', async () => {
-    await webhook(orderEvent())
-
-    expect(await hasCredit(deps.store, USER_ID)).toBe(true)
-
-    await webhook(orderEvent({ event: 'order_refunded' }))
-
-    expect(await hasCredit(deps.store, USER_ID)).toBe(false)
-  })
-
-  it('refuses to charge a model with no published rate', async () => {
-    await expect(
-      meterRequest(deps, USER_ID, {
-        feature: 'chat',
-        model: 'gpt-made-up',
-        tokensIn: 10,
-        tokensOut: 10,
-        requestId: 'req-unpriced'
-      })
-    ).rejects.toThrow('No MythScribe Cloud rate for model "gpt-made-up"')
-
-    expect(await deps.store.getBalance(USER_ID)).toBe(0)
+  it('refuses a malformed cursor and a caller with no session', async () => {
+    const bad = await usage('?cursor=nonsense')
+    expect(bad.status).toBe(400)
+    expect((await errorOf(bad)).code).toBe('BAD_REQUEST')
+    expect((await handleRequest(get('/usage'), deps)).status).toBe(401)
   })
 })

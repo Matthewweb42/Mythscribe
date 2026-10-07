@@ -5,7 +5,7 @@ import type { ConfiguredPack } from './credits'
 import { importSigningKey, sha256Hex } from './crypto'
 import type { Mailer } from './email'
 import { handleRequest, type WorkerDeps } from './index'
-import { memoryStore } from './store'
+import { testStore } from './testing/sqliteD1'
 
 const ORIGIN = 'https://api.mythscribe.app'
 const EMAIL = 'author@example.com'
@@ -43,13 +43,14 @@ let clock: number
 
 function makeDeps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
   return {
-    store: memoryStore(),
+    store: testStore(),
     mailer: silentMailer,
     now: () => new Date(clock),
     random: () => 'random',
     revealLink: false,
     packs: [],
     supporter: SUPPORTER,
+    appLicense: null,
     webhookSecret: null,
     upstream: null,
     signingKey: () => importSigningKey(PRIVATE_JWK),
