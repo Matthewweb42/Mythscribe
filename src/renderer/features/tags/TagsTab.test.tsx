@@ -287,6 +287,33 @@ describe('TagsTab (F-4.2)', () => {
     expect(rowNames()).toEqual(['dark-forest', 'moody', 'zed-alpha'])
   })
 
+  it('double-click on a row opens the detail with the name selected; the second click acts nowhere else (2026-10-07)', async () => {
+    const user = userEvent.setup()
+    const calls = await renderLoaded()
+    await user.click(row('mara'))
+    expect(screen.getByRole('textbox', { name: 'Tag name' })).not.toHaveFocus()
+    // The first click swapped the list for the detail, so the rest of the double-click lands on it.
+    const back = screen.getByRole('button', { name: 'Back' })
+    fireEvent.mouseDown(back, { detail: 2 })
+    fireEvent.click(back, { detail: 2 })
+    fireEvent.doubleClick(back, { detail: 2 })
+    const name = screen.getByRole('textbox', { name: 'Tag name' })
+    expect(name).toHaveFocus()
+    expect(name).toHaveValue('mara')
+    await user.keyboard('Zed Alpha{Enter}')
+    expect(calls.at(-1)).toEqual(['tag:update', { id: 't-mara', name: 'Zed Alpha' }])
+    expect(screen.getByRole('textbox', { name: 'Tag name' })).toHaveValue('zed-alpha')
+  })
+
+  it('F2 on a row opens the detail with the name field focused', async () => {
+    const user = userEvent.setup()
+    await renderLoaded()
+    row('moody').focus()
+    await user.keyboard('{F2}')
+    expect(screen.getByRole('textbox', { name: 'Tag name' })).toHaveFocus()
+    expect(screen.getByRole('textbox', { name: 'Tag name' })).toHaveValue('moody')
+  })
+
   it('blur commits a rename; Escape restores the name; an unchanged or empty name is a no-op', async () => {
     const user = userEvent.setup()
     const calls = await renderLoaded()

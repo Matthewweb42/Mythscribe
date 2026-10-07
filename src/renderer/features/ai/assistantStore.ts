@@ -21,6 +21,7 @@ import {
   CHAT_MAX_MESSAGES,
   CHAT_MESSAGE_MAX,
   CHAT_PARAGRAPHS_DEFAULT,
+  CHAT_TITLE_MAX,
   Conversations,
   agentAccessFor,
   appliesEditsItself,
@@ -146,6 +147,8 @@ interface AssistantState {
   /** Drops a conversation (its request in flight is stopped); the last tab is replaced by a fresh one. */
   closeConversation: (id: string) => void
   select: (id: string) => void
+  /** Renames a conversation's tab (double-click or F2, 2026-10-07); blank is ignored, long is cut. */
+  renameConversation: (id: string, title: string) => void
   /**
    * Sends one turn in the active conversation in the project's chat mode; ignored while one is
    * in flight or for a blank message. `override.agent` skips the router and runs the agent with
@@ -325,6 +328,17 @@ export function canUndoChange(changeId: string): boolean {
   return undoers.has(changeId)
 }
 
+/**
+ * A conversation's title once `firstMessage` is written in it: the message, while the tab still
+ * has the fresh title and no turns; a title the author gave it stays.
+ */
+function titledBy(conversation: Conversation, firstMessage: string): string {
+  if (conversation.messages.length > 0 || conversation.title !== NEW_CONVERSATION_TITLE) {
+    return conversation.title
+  }
+  return titleFor(firstMessage) || NEW_CONVERSATION_TITLE
+}
+
 /** `value` with conversation `id` replaced by `patch(conversation)`, its `modified` bumped. */
 function patchOne(
   value: Conversations,
@@ -484,6 +498,15 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     commit({ ...value, active: id })
   },
 
+  renameConversation(id, title) {
+    const value = get().conversations
+    const next = title.trim().slice(0, CHAT_TITLE_MAX).trimEnd()
+    if (value === null || next.length === 0) return
+    const conversation = value.items.find((c) => c.id === id)
+    if (!conversation || conversation.title === next) return
+    commit(patchOne(value, id, (c) => ({ ...c, title: next })))
+  },
+
   async send(message, override) {
     const value = get().conversations
     // The composer's attachment rides on a plain send only; an override (recap, Write this) is its own message.
@@ -505,7 +528,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     commit(
       patchOne(value, id, (c) => ({
         ...c,
-        title: c.messages.length === 0 ? titleFor(text) || NEW_CONVERSATION_TITLE : c.title,
+        title: titledBy(c, text),
         messages: [...c.messages, turn('user', text, null), turn('assistant', '', turnMode)].slice(
           -CHAT_MAX_MESSAGES
         )
@@ -539,7 +562,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     commit(
       patchOne(value, id, (c) => ({
         ...c,
-        title: c.messages.length === 0 ? titleFor(WHAT_NEXT_QUESTION) : c.title,
+        title: titledBy(c, WHAT_NEXT_QUESTION),
         messages: [
           ...c.messages,
           turn('user', WHAT_NEXT_QUESTION, null),

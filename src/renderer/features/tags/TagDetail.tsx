@@ -36,6 +36,8 @@ interface TagDetailProps {
   onBack: () => void
   /** Called after a confirmed delete succeeded; the parent closes the view. */
   onDeleted: () => void
+  /** Bumped to focus and select the name field (a double-click or F2 on the tag's row, 2026-10-07). */
+  focusName?: number
 }
 
 /**
@@ -49,7 +51,12 @@ interface TagDetailProps {
  * the first occurrence; "Track mentions" turns the scan off for this tag, which drops its
  * recorded rows in main and hides the section.
  */
-export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX.Element {
+export function TagDetail({
+  tag,
+  onBack,
+  onDeleted,
+  focusName = 0
+}: TagDetailProps): React.JSX.Element {
   const update = useTagStore((s) => s.update)
   const remove = useTagStore((s) => s.remove)
   const byId = useTreeStore((s) => s.byId)
@@ -64,6 +71,13 @@ export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX
   const colorInflight = useRef(false)
   const colorQueued = useRef<string | null>(null)
   const renameInflight = useRef(false)
+  const nameField = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (focusName === 0) return
+    nameField.current?.focus()
+    nameField.current?.select()
+  }, [focusName])
 
   const report = (err: unknown): void => {
     toast.error(describeError(err))
@@ -182,6 +196,7 @@ export function TagDetail({ tag, onBack, onDeleted }: TagDetailProps): React.JSX
         <span className="text-xs text-fg-muted">Name</span>
         <input
           key={tag.name}
+          ref={nameField}
           aria-label="Tag name"
           defaultValue={tag.name}
           maxLength={TAG_NAME_MAX}

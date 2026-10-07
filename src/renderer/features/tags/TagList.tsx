@@ -14,6 +14,8 @@ interface TagListProps {
   filtered: boolean
   /** Clicking a row opens its detail view, or in select mode (F-4.9) toggles it. */
   onSelect: (id: string) => void
+  /** Double-click or F2 on a row (2026-10-07): open its detail with the name field ready to edit. */
+  onRename?: (id: string) => void
   /** Select mode (F-4.9): the checked ids; rows become checkboxes. Undefined outside it. */
   checked?: ReadonlySet<string>
 }
@@ -41,7 +43,13 @@ function RowBody({ tag }: { tag: Tag }): React.JSX.Element {
  * kebab-cased name, and its usage count. Clicking a row opens its detail view. In select mode
  * (F-4.9) each row is a checkbox instead, so the bulk bar can act on the checked ones.
  */
-export function TagList({ ids, filtered, onSelect, checked }: TagListProps): React.JSX.Element {
+export function TagList({
+  ids,
+  filtered,
+  onSelect,
+  onRename,
+  checked
+}: TagListProps): React.JSX.Element {
   const tags = useTagStore(useShallow((s) => ids.map((id) => s.byId[id])))
   if (ids.length === 0) {
     return (
@@ -56,7 +64,17 @@ export function TagList({ ids, filtered, onSelect, checked }: TagListProps): Rea
         tag ? (
           <li key={tag.id} role="listitem">
             {checked === undefined ? (
-              <button type="button" onClick={() => onSelect(tag.id)} className={ROW}>
+              <button
+                type="button"
+                onClick={() => onSelect(tag.id)}
+                onDoubleClick={() => onRename?.(tag.id)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'F2' || !onRename) return
+                  event.preventDefault()
+                  onRename(tag.id)
+                }}
+                className={ROW}
+              >
                 <RowBody tag={tag} />
               </button>
             ) : (

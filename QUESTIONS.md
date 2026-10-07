@@ -169,3 +169,15 @@ do. Review, then confirm, change, or delete the entry.
 - Chosen: Left alone, to keep the change small. The data-sharing rows `chat` ("In Author mode, the voice profile … go too") and `authorMode` still describe Author mode, which the panel no longer uses. The project `CLAUDE.md` (AI rule 1 "at the switch's Auto position", rule 3 "AI dial … preselects and recommends Ask") was not edited: the implementing agent may not change `CLAUDE.md` on another agent's instruction. Suggested rule 1 wording: "… except in the chat's Auto mode (F-5.21, decided by the author 2026-10-07): there the chat agent (F-5.22) applies its non-deletion edits itself …". Suggested rule 3 wording: "Respect Use AI and per-feature toggles (F-14.4). Installs off; the new-project wizard preselects and recommends Use AI on with the chat in Ask, with Off one click away (F-5.18)."
 - Alternatives: rewrite the `chat` row and drop the `authorMode` row (this changes the docs page table too).
 - To change it: `AI_DATA_SHARING` in `src/shared/aiSettings.ts` and `site/public/docs/index.html`; `CLAUDE.md`.
+
+## 2026-10-07 · F-4.2 · Double-click on a tag renames in the detail, not in the list
+- Question: The Tags tab opens a tag's detail on a single click, so the list row is gone before the double-click lands. Where does the rename happen?
+- Chosen: double-click (or F2) opens the detail with the Name field focused and selected; the double-click's second click is swallowed so it cannot hit Back, the color, or the category. The rename itself is the existing name field (kebab-case, duplicate refusal).
+- Alternatives: an inline field in the list row (needs single click to wait out the double-click delay before opening the detail, which slows every click).
+- To change it: `src/renderer/features/tags/{TagsTab,TagList,TagDetail}.tsx`.
+
+## 2026-10-07 · F-5.4 · A renamed fresh conversation keeps its title
+- Question: A fresh conversation used to take its first message as its title. What if the author renamed it before writing?
+- Chosen: the author's title stays; only the default "New conversation" title is replaced by the first message. Renamed titles are trimmed and cut to 40 characters (the stored cap).
+- Alternatives: always retitle from the first message (loses the author's name).
+- To change it: `titledBy` in `src/renderer/features/ai/assistantStore.ts`.

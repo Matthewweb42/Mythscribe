@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   CHAT_HISTORY_TURNS,
   CHAT_MAX_CONVERSATIONS,
+  CHAT_TITLE_MAX,
   titleFor,
   type Conversation,
   type Conversations
@@ -391,6 +392,22 @@ describe('useAssistantStore tabs (F-5.4)', () => {
     expect(store().conversations?.active).toBe(second)
   })
 
+  it('renameConversation retitles a tab (trimmed, cut to the cap) and writes it; blank, unchanged, or unknown is a no-op', async () => {
+    await store().load()
+    store().renameConversation('c-1', '   ')
+    store().renameConversation('c-1', 'Why the ridge?')
+    store().renameConversation('nope', 'Other')
+    await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(0)
+    store().renameConversation('c-1', `  ${'x'.repeat(CHAT_TITLE_MAX + 5)}  `)
+    expect(active().title).toBe('x'.repeat(CHAT_TITLE_MAX))
+    store().renameConversation('c-1', ' Ridge research ')
+    expect(active().title).toBe('Ridge research')
+    await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(1)
+    expect(sets[0]?.value.items[0]?.title).toBe('Ridge research')
+  })
+
   it('closeConversation drops a tab, moves the selection to a neighbour, and replaces the last tab with a fresh one', async () => {
     await store().load()
     store().newConversation()
@@ -481,7 +498,12 @@ describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 
     expect(request.input.history[0]?.content).toBe('turn 4')
     expect(active().title).toBe(NEW_CONVERSATION_TITLE)
 
-    setIpcClient(deferredClient({ active: 'c-1', items: [conversation({ messages: [] })] }))
+    setIpcClient(
+      deferredClient({
+        active: 'c-1',
+        items: [conversation({ title: NEW_CONVERSATION_TITLE, messages: [] })]
+      })
+    )
     resetAssistantStore()
     queries = []
     await store().load()
@@ -490,6 +512,19 @@ describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 
     expect(first.input.history).toEqual([])
     expect(active().title).toBe(titleFor(long))
     expect(active().title.endsWith('…')).toBe(true)
+  })
+
+  it('keeps a title the author gave a fresh conversation when its first message is sent (2026-10-07)', async () => {
+    setIpcClient(
+      deferredClient({
+        active: 'c-1',
+        items: [conversation({ title: NEW_CONVERSATION_TITLE, messages: [] })]
+      })
+    )
+    await store().load()
+    store().renameConversation('c-1', 'Ridge research')
+    await sendAndCapture('Why the ridge?')
+    expect(active().title).toBe('Ridge research')
   })
 
   it('ignores a blank message and a second send while one is in flight', async () => {

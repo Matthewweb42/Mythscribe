@@ -1,9 +1,17 @@
+import { useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { ENTITY_KIND_LABEL, ENTITY_KIND_NOUN, type EntityKind } from '@shared/entities'
+import {
+  ENTITY_KIND_LABEL,
+  ENTITY_KIND_NOUN,
+  ENTITY_NAME_MAX,
+  type EntityKind
+} from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { describeError } from '@renderer/lib/errors'
+import { useEntityDraftStore } from './entityDraftStore'
 import { useEntityStore } from './entityStore'
 import { excerptOf, type EntityView } from './entityView'
 
@@ -21,12 +29,25 @@ interface EntityListProps {
  * excerpt and, for world items, the category chip (cards). Clicking a row selects it (the
  * selection is store state F-9.3 opens in the editor); the trailing button deletes it after a
  * confirmation. The list is the one place both views are drawn, so they never drift apart.
+ * Double-click or F2 renames a row inline (2026-10-07); the open page's name goes through its
+ * draft, so the page never writes the old name back.
  */
 export function EntityList({ kind, ids, filtered, view }: EntityListProps): React.JSX.Element {
   const entities = useEntityStore(useShallow((s) => ids.map((id) => s.byId[id])))
   const selectedId = useEntityStore((s) => s.selectedId)
   const select = useEntityStore((s) => s.select)
   const remove = useEntityStore((s) => s.remove)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+
+  const rename = async (id: string, name: string): Promise<void> => {
+    const drafts = useEntityDraftStore.getState()
+    if (drafts.draft?.id === id) {
+      drafts.edit({ name })
+      await drafts.flush()
+      return
+    }
+    await useEntityStore.getState().update(id, { name })
+  }
 
   const onDelete = async (entity: Entity): Promise<void> => {
     const ok = await dialogs.confirm({
@@ -63,12 +84,34 @@ export function EntityList({ kind, ids, filtered, view }: EntityListProps): Reac
         const excerpt = view === 'cards' ? excerptOf(entity) : ''
         const category = view === 'cards' && kind === 'world' ? entity.fields.category : undefined
         const selected = entity.id === selectedId
+        if (entity.id === renamingId) {
+          return (
+            <li key={entity.id} role="listitem" className="flex py-1 pr-1 pl-2">
+              <InlineRenameInput
+                value={entity.name}
+                maxLength={ENTITY_NAME_MAX}
+                onCommit={(next) => rename(entity.id, next)}
+                onDone={() => setRenamingId(null)}
+              />
+            </li>
+          )
+        }
         return (
           <li key={entity.id} role="listitem" className="group relative">
             <button
               type="button"
               aria-current={selected ? 'true' : undefined}
-              onClick={() => select(selected ? null : entity.id)}
+              onClick={(event) => {
+                // The second click of a double-click must not close the page the first opened.
+                if (event.detail > 1) return
+                select(selected ? null : entity.id)
+              }}
+              onDoubleClick={() => setRenamingId(entity.id)}
+              onKeyDown={(event) => {
+                if (event.key !== 'F2') return
+                event.preventDefault()
+                setRenamingId(entity.id)
+              }}
               className={`flex w-full min-w-0 flex-col rounded-md py-1 pr-8 pl-2 text-left text-sm hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none aria-[current]:bg-surface-raised ${view === 'cards' ? 'border border-line' : ''}`}
             >
               <span className={`min-w-0 truncate ${view === 'cards' ? 'font-medium' : ''}`}>

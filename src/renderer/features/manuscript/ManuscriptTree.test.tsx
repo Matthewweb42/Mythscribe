@@ -548,6 +548,40 @@ describe('ManuscriptTree', () => {
     expect(item('Opening')).toBeInTheDocument()
   })
 
+  it('double-click on a chapter renames it inline and keeps it open (2026-10-07)', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    await userEvent.dblClick(row('Chapter 1'))
+    const input = within(item('Chapter 1')).getByRole('textbox', { name: 'Rename' })
+    expect(input).toHaveFocus()
+    expect(input).toHaveValue('Chapter 1')
+    expect(item('Chapter 1')).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.keyboard('The Storm{Enter}')
+    expect(invoke).toHaveBeenCalledWith('tree:rename', { id: 'ch-1', title: 'The Storm' })
+    expect(item('The Storm')).toBeInTheDocument()
+  })
+
+  it('double-click on a section or a chevron never renames; Escape cancels a rename', async () => {
+    const invoke = install()
+    render(<ManuscriptTree format="webnovel" />)
+    await userEvent.dblClick(row('Volume 1'))
+    await userEvent.dblClick(screen.getByRole('button', { name: 'Collapse Arc 1' }))
+    expect(screen.queryByRole('textbox', { name: 'Rename' })).not.toBeInTheDocument()
+    await userEvent.dblClick(row('Scene 1'))
+    await userEvent.keyboard('Nope{Escape}')
+    expect(screen.queryByRole('textbox', { name: 'Rename' })).not.toBeInTheDocument()
+    expect(item('Scene 1')).toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('tree:rename', expect.anything())
+  })
+
+  it('F2 renames the focused row', async () => {
+    install()
+    render(<ManuscriptTree format="webnovel" />)
+    item('Scene 1').focus()
+    await userEvent.keyboard('{F2}')
+    expect(within(item('Scene 1')).getByRole('textbox', { name: 'Rename' })).toHaveFocus()
+  })
+
   it('Duplicate from the menu adds "<title> (Copy)" right after the row and selects it (F-2.3)', async () => {
     const invoke = install()
     useTreeStore.setState({ selectedId: 'sc-2' })

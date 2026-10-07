@@ -1399,6 +1399,24 @@ test('create, close, reopen a project on disk', async () => {
   await expect(untitled2).toBeVisible()
   await expect(chapter2.getByRole('treeitem')).toHaveText([/^Scene 1/, /^Untitled Scene/])
 
+  // 2026-10-07: double-clicking a chapter's row renames it inline (it stays expanded); a second
+  // double-click puts the name back for the steps below.
+  await chapter2.locator(':scope > div').dblclick()
+  const chapterRename = page.getByRole('textbox', { name: 'Rename' })
+  await expect(chapterRename).toBeFocused()
+  await expect(chapterRename).toHaveValue('Chapter 2')
+  await chapterRename.fill('The Storm')
+  await chapterRename.press('Enter')
+  const storm = arc1.getByRole('treeitem', { name: 'The Storm', exact: true })
+  await expect(storm).toBeVisible()
+  await expect(storm).toHaveAttribute('aria-expanded', 'true')
+  await expect(arc1.getByRole('treeitem', { name: 'Chapter 2', exact: true })).toHaveCount(0)
+  await storm.locator(':scope > div').dblclick()
+  await expect(chapterRename).toBeFocused()
+  await chapterRename.fill('Chapter 2')
+  await chapterRename.press('Enter')
+  await expect(chapter2).toBeVisible()
+
   // F-2.3: Rename from the right-click menu opens the inline editor prefilled with the title;
   // Escape keeps it.
   const opening = chapter1.getByRole('treeitem', { name: 'Opening', exact: true })
