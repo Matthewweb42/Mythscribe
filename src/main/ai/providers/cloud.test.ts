@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DEFAULT_MODELS, type Tier } from '@shared/ai'
+import { AI_NEXT_STEP, DEFAULT_MODELS, type Tier } from '@shared/ai'
 import {
   AI_STREAM_CONTENT_TYPE,
+  CLOUD_AI_AVAILABLE,
   type AiStreamEvent,
   type CloudErrorCode,
   type CreditsResult
@@ -13,6 +14,7 @@ import { buildCloudProvider, type CloudProviderOptions } from './cloud'
 import type { FetchLike } from './openai'
 import {
   AiCancelledError,
+  AiCloudUnavailableError,
   AiFallbackError,
   AiNetworkError,
   AiNoCreditError,
@@ -107,6 +109,8 @@ function build(
     onSessionEnded: () => undefined,
     resolveModel: (tier: Tier) => DEFAULT_MODELS[tier],
     credits: () => Promise.resolve(credits(2_500_000)),
+    // The wire behavior is tested as it will run once Cloud serves AI; the gate has its own tests.
+    available: true,
     ...overrides
   })
 }
@@ -354,6 +358,51 @@ describe('buildCloudProvider.stream', () => {
   it('reads a proxy failure before the first byte like a completion', async () => {
     const { fetch } = answering(() => failure(402, 'INSUFFICIENT_CREDITS'))
     await expect(collect(build({ fetch }).stream(REQUEST))).rejects.toBeInstanceOf(AiNoCreditError)
+  })
+})
+
+describe('buildCloudProvider while Cloud does not serve AI (CLOUD_AI_AVAILABLE)', () => {
+  it('defaults to the shared flag, which is off until Cloud launches', async () => {
+    expect(CLOUD_AI_AVAILABLE).toBe(false)
+    const { fetch, calls } = answering(() => answer())
+    const provider = buildCloudProvider({
+      baseUrl: BASE,
+      fetch,
+      token: () => TOKEN,
+      onSessionEnded: () => undefined,
+      resolveModel: (tier: Tier) => DEFAULT_MODELS[tier],
+      credits: () => Promise.resolve(credits(2_500_000))
+    })
+    await expect(provider.complete(REQUEST)).rejects.toBeInstanceOf(AiCloudUnavailableError)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('refuses every call before sending anything, with the way out as the next step', async () => {
+    const { fetch, calls } = answering(() => answer())
+    const creditsCall = vi.fn(() => Promise.resolve(credits(2_500_000)))
+    const provider = build({ fetch, available: false, credits: creditsCall })
+    const failed = await provider.complete(REQUEST).catch((err: unknown) => err)
+    expect(failed).toBeInstanceOf(AiCloudUnavailableError)
+    expect((failed as AiCloudUnavailableError).message).toBe(
+      'MythScribe Cloud isn\u2019t available yet.'
+    )
+    expect(AI_NEXT_STEP[(failed as AiCloudUnavailableError).code]).toBe(
+      'Switch to My own key or Local model in Settings › AI.'
+    )
+    await expect(collect(provider.stream(REQUEST))).rejects.toBeInstanceOf(AiCloudUnavailableError)
+    await expect(provider.testConnection()).rejects.toBeInstanceOf(AiCloudUnavailableError)
+    expect(calls).toHaveLength(0)
+    expect(creditsCall).not.toHaveBeenCalled()
+  })
+
+  it('reads a NOT_FOUND from /ai/complete as Cloud not serving AI yet, not as a raw code', async () => {
+    const { fetch } = answering(() => failure(404, 'NOT_FOUND'))
+    const failed = await build({ fetch })
+      .complete(REQUEST)
+      .catch((err: unknown) => err)
+    expect(failed).toBeInstanceOf(AiCloudUnavailableError)
+    expect((failed as Error).message).toBe('MythScribe Cloud isn\u2019t reachable for AI yet.')
+    expect((failed as Error).message).not.toContain('NOT_FOUND')
   })
 })
 

@@ -133,7 +133,9 @@ const HARD_CODES: ReadonlySet<AiErrorCode> = new Set<AiErrorCode>([
   'DISABLED',
   // F-15.4: neither a signed-out account nor an empty balance improves by retrying.
   'SIGNED_OUT',
-  'NO_CREDIT'
+  'NO_CREDIT',
+  // Cloud does not serve AI yet; only a change of source in Settings fixes it.
+  'CLOUD_UNAVAILABLE'
 ])
 
 type Outcome = 'quiet' | 'cancelled' | 'transient' | 'hard'

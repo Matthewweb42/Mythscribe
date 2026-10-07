@@ -19,6 +19,15 @@ import {
 /** Where the app sends Cloud requests; `MYTHSCRIBE_CLOUD_API_URL` overrides it for dev and e2e. */
 export const CLOUD_API_URL = 'https://api.mythscribe.app'
 
+/**
+ * Whether MythScribe Cloud can serve AI requests (`/ai/complete`) yet. While false (decided by
+ * the author 2026-10-07: own key until Cloud launches), the new-project wizard and Settings › AI
+ * show the Cloud source disabled with "Coming soon", a project still stored on Cloud is told to
+ * choose another source, and the Cloud adapter refuses before sending anything. Flip it to true
+ * once the Worker with `/ai/complete` is deployed and the Lemon Squeezy store and packs exist.
+ */
+export const CLOUD_AI_AVAILABLE = false
+
 /** RFC 5321 mailbox length; the Worker lower-cases and trims before storing. */
 export const EMAIL_MAX = 254
 /** A sign-in link is usable for this long after the email is sent. */

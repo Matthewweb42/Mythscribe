@@ -27,7 +27,9 @@ const TURN_OFF_CODES: ReadonlySet<AiErrorCode> = new Set([
   'INVALID_KEY',
   // F-15.4: neither a signed-out Cloud account nor an empty balance is fixed by typing on.
   'SIGNED_OUT',
-  'NO_CREDIT'
+  'NO_CREDIT',
+  // Cloud does not serve AI yet; only a change of source in Settings fixes it.
+  'CLOUD_UNAVAILABLE'
 ])
 
 /** Session state shared by every editor instance: the soft per-day count, the back-off, the one-time toast. */

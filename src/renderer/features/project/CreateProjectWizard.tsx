@@ -6,8 +6,10 @@ import {
   AI_SWITCH_MEANING,
   AI_SWITCH_POSITIONS,
   AiSource,
+  CLOUD_COMING_SOON,
   type AiSwitch
 } from '@shared/aiSettings'
+import { CLOUD_AI_AVAILABLE } from '@shared/cloudApi'
 import { PROJECT_NAME_MAX, type NovelFormat } from '@shared/ipc/contract'
 import { PROJECT_FORMATS } from './formats'
 
@@ -60,18 +62,20 @@ const SECONDARY_BUTTON =
 const PRIMARY_BUTTON =
   'rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60'
 const OPTION =
-  'block cursor-pointer rounded-md border border-line bg-surface px-3 py-2 hover:bg-bg has-checked:border-accent has-focus-visible:outline-2 has-focus-visible:outline-accent'
+  'block cursor-pointer rounded-md border border-line bg-surface px-3 py-2 hover:bg-bg has-checked:border-accent has-focus-visible:outline-2 has-focus-visible:outline-accent has-disabled:cursor-not-allowed has-disabled:opacity-60 has-disabled:hover:bg-surface'
 
 /**
  * Four-step create-project form: name, then format (F-1.2), then where AI requests go
  * (F-15.11), then how much AI helps (F-5.18); both AI choices are switchable later in the AI
- * tab. The caller owns the save location.
+ * tab. The caller owns the save location. Own key is preselected; while Cloud does not serve AI
+ * yet (decided by the author 2026-10-07) its option is shown disabled with "Coming soon".
  */
 export function CreateProjectWizard({
   busy,
   signedInEmail,
   onCancel,
-  onCreate
+  onCreate,
+  cloudAvailable = CLOUD_AI_AVAILABLE
 }: {
   busy: boolean
   /** The MythScribe account this machine is signed in to, or null; only the Cloud hint reads it. */
@@ -83,6 +87,8 @@ export function CreateProjectWizard({
     aiSource: AiSource,
     aiSwitch: AiSwitch
   ) => Promise<void>
+  /** Whether the Cloud source can be chosen; the shared flag unless a test says otherwise. */
+  cloudAvailable?: boolean
 }): React.JSX.Element {
   const titleId = useId()
   const [step, setStep] = useState<Step>('name')
@@ -205,20 +211,36 @@ export function CreateProjectWizard({
             <>
               <fieldset ref={fieldsetRef} className="mt-4 m-0 flex flex-col gap-2 border-0 p-0">
                 <legend className="mb-2 p-0 text-sm font-medium">AI source</legend>
-                {AiSource.options.map((option) => (
-                  <label key={option} className={OPTION}>
-                    <input
-                      type="radio"
-                      name="aiSource"
-                      value={option}
-                      className="sr-only"
-                      checked={aiSource === option}
-                      onChange={() => setAiSource(option)}
-                    />
-                    <span className="block text-sm font-medium">{AI_SOURCE_LABEL[option]}</span>
-                    <span className="block text-sm text-fg-muted">{AI_SOURCE_MEANING[option]}</span>
-                  </label>
-                ))}
+                {AiSource.options.map((option) => {
+                  const comingSoon = option === 'cloud' && !cloudAvailable
+                  return (
+                    <label key={option} className={OPTION}>
+                      <input
+                        type="radio"
+                        name="aiSource"
+                        value={option}
+                        className="sr-only"
+                        disabled={comingSoon}
+                        checked={aiSource === option}
+                        onChange={() => setAiSource(option)}
+                      />
+                      <span className="block text-sm font-medium">
+                        {AI_SOURCE_LABEL[option]}
+                        {comingSoon ? (
+                          <span
+                            data-testid="wizard-cloud-coming-soon"
+                            className="ml-2 rounded-sm border border-line px-1.5 py-0.5 text-xs font-medium text-fg-muted"
+                          >
+                            {CLOUD_COMING_SOON}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="block text-sm text-fg-muted">
+                        {AI_SOURCE_MEANING[option]}
+                      </span>
+                    </label>
+                  )
+                })}
               </fieldset>
               <p data-testid="wizard-source-hint" className="mt-3 mb-0 text-xs text-fg-muted">
                 {sourceHint(aiSource, signedInEmail)} You can switch the source any time in Settings

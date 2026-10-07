@@ -298,14 +298,14 @@ describe('App', () => {
   it('shows the welcome screen, creates a project through the wizard, then closes it', async () => {
     const invoke = install({ 'project:create': { ...info, format: 'epic' } })
     render(<App />)
-    await fillWizard('Smoke', /^epic/i, /^mythscribe cloud/i)
+    await fillWizard('Smoke', /^epic/i, /^local model/i)
     expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
     // F-15.11, F-5.18: the wizard's AI steps travel with the create, so main stores them with the project.
     expect(invoke).toHaveBeenCalledWith('project:create', {
       name: 'Smoke',
       format: 'epic',
       directory: undefined,
-      aiSource: 'cloud',
+      aiSource: 'local',
       aiSwitch: 'off'
     })
     // At Off the assistant panel stays as it was.

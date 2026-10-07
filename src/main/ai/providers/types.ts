@@ -136,3 +136,10 @@ export class AiSignedOutError extends AiProviderError {
 export class AiNoCreditError extends AiProviderError {
   readonly code = 'NO_CREDIT' as const
 }
+/**
+ * MythScribe Cloud does not serve AI yet: the app's `CLOUD_AI_AVAILABLE` is false, or the Worker
+ * has no `/ai/complete` (NOT_FOUND). Nothing was charged; the next step names the other sources.
+ */
+export class AiCloudUnavailableError extends AiProviderError {
+  readonly code = 'CLOUD_UNAVAILABLE' as const
+}

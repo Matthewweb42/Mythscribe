@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { CLOUD_AI_AVAILABLE } from '@shared/cloudApi'
 import { creditWarning, periodSpentMicros, projectedDaysLeft } from '@shared/cloudUsage'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
@@ -15,8 +16,15 @@ import { creditWarningText } from './creditMeter'
  *
  * The balance it reads is live: main pushes `account:balanceChanged` with every answered Cloud
  * request, so the line appears as soon as a charge crosses the line, with no Settings visit.
+ * While Cloud does not serve AI yet (`CLOUD_AI_AVAILABLE`) there is nothing to spend, so it
+ * renders nothing; Settings › AI tells a project still stored on Cloud to choose another source.
  */
-export function CreditNotice(): React.JSX.Element | null {
+export function CreditNotice({
+  cloudAvailable = CLOUD_AI_AVAILABLE
+}: {
+  /** Whether Cloud serves AI; the shared flag unless a test says otherwise. */
+  cloudAvailable?: boolean
+} = {}): React.JSX.Element | null {
   const source = useAiSettingsStore((s) => s.settings?.source ?? null)
   const status = useAccountStore((s) => s.status)
   const credits = useAccountStore((s) => s.credits)
@@ -26,7 +34,7 @@ export function CreditNotice(): React.JSX.Element | null {
   const loadCredits = useAccountStore((s) => s.loadCredits)
   const show = useShellDialogStore((s) => s.show)
 
-  const onCloud = source === 'cloud' && status?.state === 'signedIn'
+  const onCloud = cloudAvailable && source === 'cloud' && status?.state === 'signedIn'
   // Ask once, so the warning exists before the first Cloud request of the session rather than
   // only after it. A failure leaves `creditsError` set, which stops this from retrying in a loop.
   const needsCredits = onCloud && credits === null && !creditsBusy && creditsError === null

@@ -10,11 +10,11 @@ import {
   type Locator,
   type Page
 } from '@playwright/test'
-import { priceFor, type AiStatus, type AiUsageSummary } from '../src/shared/ai'
+import type { AiStatus, AiUsageSummary } from '../src/shared/ai'
 import type { AiSettings } from '../src/shared/aiSettings'
 import type { AuthorRules } from '../src/shared/authorRules'
 import { LOGIN_ATTEMPT_TTL_MS } from '../src/shared/cloudApi'
-import { cloudChargeMicros, cloudPriceFor, MICROS_PER_USD } from '../src/shared/cloudRates'
+import { cloudChargeMicros, MICROS_PER_USD } from '../src/shared/cloudRates'
 import { USAGE_PERIOD_DAYS } from '../src/shared/cloudUsage'
 import type { FocusSettings } from '../src/shared/focus'
 import { localDay } from '../src/shared/goals'
@@ -758,11 +758,11 @@ async function signLicenseToken(): Promise<string> {
 /**
  * F-15.4: what the fake Cloud Worker answers `POST /ai/complete` with, and what it saw. The
  * token counts are large enough that the Cloud rate (2x the provider's) shows in the cost line
- * as a different number from the OpenAI one.
+ * as a different number from the OpenAI one. While `CLOUD_AI_AVAILABLE` is false nothing calls
+ * it (the test asserts `cloudAiRequests` stays empty); the steps that drove it return when it flips.
  */
 const CLOUD_AI_USAGE = { inputTokens: 10_000, outputTokens: 2_000 }
 const CLOUD_AI_ANSWER = 'MythScribe Cloud answered this one.'
-const CLOUD_QUESTION = 'Does MythScribe Cloud answer this?'
 const CLOUD_AI_DELTAS = ['MythScribe Cloud ', 'answered this one.']
 const cloudAiRequests: {
   feature: string
@@ -1033,14 +1033,19 @@ test('create, close, reopen a project on disk', async () => {
   await expect(wizard.getByRole('textbox', { name: 'Project name' })).toHaveValue('Smoke Novel')
   await wizard.getByRole('button', { name: 'Next' }).click()
   await wizard.getByRole('button', { name: 'Next' }).click()
-  // F-15.11: own key is the default; the Cloud card says what it needs (nobody is signed in yet).
+  // F-15.11: own key is the default. Until Cloud serves AI (`CLOUD_AI_AVAILABLE`, decided by the
+  // author 2026-10-07) its card is shown disabled with "Coming soon", and clicking it changes
+  // nothing; a local model can still be picked, and the test goes back to the own key.
   await expect(wizard).toContainText('Step 3 of 4')
   await expect(wizard.getByRole('radio', { name: /^my own key/i })).toBeChecked()
-  await wizard.getByText('MythScribe Cloud', { exact: true }).click()
-  await expect(wizard.getByRole('radio', { name: /^mythscribe cloud/i })).toBeChecked()
-  await expect(wizard.getByTestId('wizard-source-hint')).toContainText(
-    'Sign in and buy credits under Settings › Account'
-  )
+  await expect(wizard.getByRole('radio', { name: /^mythscribe cloud/i })).toBeDisabled()
+  await expect(wizard.getByTestId('wizard-cloud-coming-soon')).toHaveText('Coming soon')
+  await wizard.getByTestId('wizard-cloud-coming-soon').click({ force: true })
+  await expect(wizard.getByRole('radio', { name: /^my own key/i })).toBeChecked()
+  await wizard.getByText('Local model', { exact: true }).click()
+  await expect(wizard.getByTestId('wizard-source-hint')).toContainText('Start Ollama or LM Studio')
+  await wizard.getByText('My own key', { exact: true }).click()
+  await expect(wizard.getByRole('radio', { name: /^my own key/i })).toBeChecked()
   // F-5.18: the level step explains the background work and recommends Ask; Off is one click.
   // The rest of this test raises the dial itself, so it starts at Off.
   await wizard.getByRole('button', { name: 'Next' }).click()
@@ -1052,25 +1057,21 @@ test('create, close, reopen a project on disk', async () => {
   await wizard.getByRole('button', { name: 'Create' }).click()
 
   await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
-  // F-15.11: the choice was stored with the project, the AI tab opens on it with the Cloud rate
-  // beside each model (2x the provider price), and it switches back: the rest of this test runs
-  // on the author's own key.
-  expect((await aiSettings()).source).toBe('cloud')
+  // F-15.11: the choice was stored with the project and the AI tab opens on it; the Cloud option
+  // is disabled with "Coming soon", so no Cloud rate shows beside the models.
+  expect((await aiSettings()).source).toBe('ownKey')
   expect((await aiSettings()).dial).toBe(0)
   await expect(page.getByRole('complementary', { name: 'Assistant' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Settings' }).click()
   const firstSettings = page.getByRole('dialog', { name: 'Settings' })
   await firstSettings.getByRole('tab', { name: 'AI' }).click()
-  await expect(firstSettings.getByTestId('ai-source-cloud')).toHaveAttribute('aria-checked', 'true')
-  await expect(firstSettings.getByTestId('ai-model-rate-fast')).toHaveText(
-    'MythScribe Cloud rate: $1.50 input, $9.00 output per 1M tokens.'
+  await expect(firstSettings.getByTestId('ai-source-ownKey')).toHaveAttribute(
+    'aria-checked',
+    'true'
   )
-  await expect(firstSettings.getByTestId('ai-model-rate-strong')).toHaveText(
-    'MythScribe Cloud rate: $5.00 input, $30.00 output per 1M tokens.'
-  )
-  await firstSettings.getByTestId('ai-source-ownKey').click()
+  await expect(firstSettings.getByTestId('ai-source-cloud')).toBeDisabled()
+  await expect(firstSettings.getByTestId('ai-source-cloud-coming-soon')).toHaveText('Coming soon')
   await expect(firstSettings.getByTestId('ai-model-rate-fast')).toHaveCount(0)
-  await expect.poll(async () => (await aiSettings()).source).toBe('ownKey')
   await firstSettings.getByRole('button', { name: 'Close settings' }).click()
   await expect(firstSettings).toHaveCount(0)
   // F-1.5: the shell header and window title carry the project name and format.
@@ -1710,21 +1711,15 @@ test('create, close, reopen a project on disk', async () => {
   await expect(settingsDialog.getByTestId('account-run-out')).toContainText('left at this pace')
   await expect(settingsDialog.getByTestId('account-credit-warning')).toHaveCount(0)
   await expect(page.getByTestId('credit-notice')).toHaveCount(0)
-  // F-15.4: the AI tab's source picker. With the account signed in, MythScribe Cloud names it
-  // and Test connection reaches the fake Worker's `/credits` (no key is saved at this point).
-  // The project goes back to the author's own key before anything else runs.
+  // F-15.4: the AI tab's source picker. Signed in or not, MythScribe Cloud stays disabled with
+  // "Coming soon" until Cloud serves AI (`CLOUD_AI_AVAILABLE`); the account itself still works.
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await settingsDialog.getByTestId('ai-source-cloud').click()
-  await expect(settingsDialog.getByTestId('ai-cloud-account')).toHaveText(
-    'Signed in as author@example.com. Manage credits on the Account tab.'
+  await expect(settingsDialog.getByTestId('ai-source-cloud')).toBeDisabled()
+  await expect(settingsDialog.getByTestId('ai-source-cloud-coming-soon')).toHaveText('Coming soon')
+  await expect(settingsDialog.getByTestId('ai-source-ownKey')).toHaveAttribute(
+    'aria-checked',
+    'true'
   )
-  const openAiBeforeCloudTest = openAiRequests.length
-  await settingsDialog.getByRole('button', { name: 'Test connection' }).click()
-  await expect(testResult).toHaveText('Connected. gpt-5.4-mini answered.')
-  // It asked MythScribe Cloud, not OpenAI: the fake provider saw nothing.
-  expect(openAiRequests).toHaveLength(openAiBeforeCloudTest)
-  await settingsDialog.getByTestId('ai-source-ownKey').click()
-  await expect.poll(async () => (await aiSettings()).source).toBe('ownKey')
   await settingsDialog.getByRole('tab', { name: 'Account' }).click()
   // F-15.9: the Supporter license. The fake Worker signs a token for this account, main verifies
   // it against the fixture public key and caches it, and the background refresh that follows the
@@ -1796,15 +1791,6 @@ test('create, close, reopen a project on disk', async () => {
   await expect(settingsDialog.getByTestId(`appearance-theme-${midnightId}`)).toBeDisabled()
   await settingsDialog.getByTestId('appearance-theme-dark').click()
   await expect.poll(() => storedTheme().theme, { timeout: 3000 }).toBe('dark')
-  // Signed out, Cloud says so and Test connection has nothing to test with.
-  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await settingsDialog.getByTestId('ai-source-cloud').click()
-  await expect(settingsDialog.getByTestId('ai-cloud-account')).toHaveText(
-    'Not signed in. Sign in on the Account tab to use MythScribe Cloud.'
-  )
-  await expect(settingsDialog.getByRole('button', { name: 'Test connection' })).toBeDisabled()
-  await settingsDialog.getByTestId('ai-source-ownKey').click()
-  await expect.poll(async () => (await aiSettings()).source).toBe('ownKey')
   expect(cloudAiRequests).toEqual([])
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
@@ -4939,77 +4925,14 @@ test('create, close, reopen a project on disk', async () => {
   await assistant.getByRole('tab', { name: QUERY_QUESTION }).click()
   await expect(turns).toHaveCount(6)
 
-  // F-15.4: MythScribe Cloud. Signing in again (the account step signed out), the AI tab's
-  // source picker points this project at the proxy; the next assistant question streams through
-  // the fake Cloud Worker instead of the fake OpenAI, carrying the session bearer and the
-  // feature it is charged to, and its cost line shows the Cloud rate — twice the provider's.
-  // The project goes back to the author's own key, signed out, for the steps below.
+  // F-15.4: MythScribe Cloud does not serve AI yet (`CLOUD_AI_AVAILABLE`, decided by the author
+  // 2026-10-07), so no request goes through the fake Worker; the adapter's refusal, the NOT_FOUND
+  // message, and the notice for a project still stored on Cloud are unit-tested
+  // (`cloud.test.ts`, `AiSettingsTab.test.tsx`). The next question is a Plan one.
   await dismissToasts()
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await settingsDialog.getByRole('tab', { name: 'Account' }).click()
-  await settingsDialog.getByLabel('Email').fill('author@example.com')
-  await settingsDialog.getByRole('button', { name: 'Send sign-in link' }).click()
-  approveSignIn()
-  await expect(settingsDialog.getByTestId('account-signed-in')).toHaveText(
-    'Signed in as author@example.com',
-    { timeout: 15_000 }
-  )
-  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await settingsDialog.getByTestId('ai-source-cloud').click()
-  await expect.poll(async () => (await aiSettings()).source).toBe('cloud')
-  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
-  await expect(settingsDialog).toHaveCount(0)
-  const cloudBodiesBefore = openAiChatBodies.length
   await assistant.getByRole('radio', { name: 'Plan' }).click()
-  await messageBox.fill(CLOUD_QUESTION)
-  await messageBox.press('Enter')
-  await expect(turns).toHaveCount(8)
-  await expect(turns.nth(7)).toContainText(CLOUD_AI_ANSWER)
-  const cloudCost = cloudPriceFor(
-    'gpt-5.4-mini',
-    CLOUD_AI_USAGE.inputTokens,
-    CLOUD_AI_USAGE.outputTokens
-  )
-  const ownKeyCost = priceFor(
-    'gpt-5.4-mini',
-    CLOUD_AI_USAGE.inputTokens,
-    CLOUD_AI_USAGE.outputTokens
-  )
-  expect(cloudCost.costUsd).toBeCloseTo(ownKeyCost.costUsd * 2, 8)
-  await expect(turns.nth(7).getByTestId('chat-turn-cost')).toHaveText(
-    `gpt-5.4-mini · $${cloudCost.costUsd.toFixed(4)} · 10,000 in · 2,000 out`
-  )
-  expect(openAiChatBodies).toHaveLength(cloudBodiesBefore)
-  expect(cloudAiRequests.filter((request) => request.feature === 'chat')).toEqual([
-    { feature: 'chat', model: 'gpt-5.4-mini', stream: true, auth: `Bearer ${CLOUD_SESSION_TOKEN}` }
-  ])
-  // F-15.5: the balance in the stream's `done` reached the renderer by itself — no Settings
-  // visit, no Refresh — and the charge took it under $1.00, so the status bar offers the way to
-  // the Account tab, where the meter shows the same figure.
-  const creditNotice = page.getByTestId('credit-notice')
-  await expect(creditNotice).toHaveText(`Cloud credits low: ${balanceText(cloudBalanceMicros)}`)
-  await creditNotice.click()
+  await page.getByRole('button', { name: 'Settings' }).click()
   await expect(settingsDialog).toBeVisible()
-  await expect(settingsDialog.getByRole('tab', { name: 'Account' })).toHaveAttribute(
-    'aria-selected',
-    'true'
-  )
-  await expect(settingsDialog.getByTestId('account-credit-balance')).toHaveText(
-    balanceText(cloudBalanceMicros)
-  )
-  await expect(settingsDialog.getByTestId('account-period-spent')).toHaveText(
-    balanceText(CLOUD_PERIOD_SPEND.micros)
-  )
-  await expect(settingsDialog.getByTestId('account-run-out')).toContainText('left at this pace')
-  await expect(settingsDialog.getByTestId('account-credit-warning')).toHaveText(
-    `Cloud credits low: ${balanceText(cloudBalanceMicros)}`
-  )
-  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await settingsDialog.getByTestId('ai-source-ownKey').click()
-  await expect.poll(async () => (await aiSettings()).source).toBe('ownKey')
-  await settingsDialog.getByRole('tab', { name: 'Account' }).click()
-  await settingsDialog.getByRole('button', { name: 'Sign out' }).click()
-  await expect(settingsDialog.getByLabel('Email')).toBeVisible()
 
   // F-5.15: a local model. The source switches to Local model, the server address points at an
   // OpenAI-compatible server (the fake provider stands in for Ollama), Test connection reaches
@@ -5034,9 +4957,9 @@ test('create, close, reopen a project on disk', async () => {
   const localBodiesBefore = openAiChatBodies.length
   await messageBox.fill('What is the storm doing?')
   await messageBox.press('Enter')
-  await expect(turns).toHaveCount(10)
-  await expect(turns.nth(9)).toContainText(CHAT_ANSWER)
-  await expect(turns.nth(9).getByTestId('chat-turn-cost')).toContainText('$0.0000')
+  await expect(turns).toHaveCount(8)
+  await expect(turns.nth(7)).toContainText(CHAT_ANSWER)
+  await expect(turns.nth(7).getByTestId('chat-turn-cost')).toContainText('$0.0000')
   expect(openAiChatBodies).toHaveLength(localBodiesBefore + 1)
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()

@@ -80,30 +80,30 @@ const sitting = (source: AiSource, status: AccountStatus | null, credits?: Credi
 describe('CreditNotice (F-15.5)', () => {
   it('renders nothing for a project on the author’s own key', () => {
     sitting('ownKey', SIGNED_IN, { ...CREDITS, balanceMicros: 0 })
-    render(<CreditNotice />)
+    render(<CreditNotice cloudAvailable />)
     expect(screen.queryByTestId('credit-notice')).not.toBeInTheDocument()
     expect(calls).toEqual([])
   })
 
   it('renders nothing while the balance is comfortable', () => {
     sitting('cloud', SIGNED_IN, CREDITS)
-    render(<CreditNotice />)
+    render(<CreditNotice cloudAvailable />)
     expect(screen.queryByTestId('credit-notice')).not.toBeInTheDocument()
   })
 
   it('asks for the credits once, so the warning is there before the first request', async () => {
     sitting('cloud', SIGNED_IN)
-    const { rerender } = render(<CreditNotice />)
+    const { rerender } = render(<CreditNotice cloudAvailable />)
     await waitFor(() => {
       expect(calls).toEqual([{ channel: 'account:getCredits', input: undefined }])
     })
-    rerender(<CreditNotice />)
+    rerender(<CreditNotice cloudAvailable />)
     expect(calls).toHaveLength(1)
   })
 
   it('asks for nothing while signed out', () => {
     sitting('cloud', { state: 'signedOut' })
-    render(<CreditNotice />)
+    render(<CreditNotice cloudAvailable />)
     expect(calls).toEqual([])
     expect(screen.queryByTestId('credit-notice')).not.toBeInTheDocument()
   })
@@ -111,17 +111,17 @@ describe('CreditNotice (F-15.5)', () => {
   it('does not ask again after a failure', async () => {
     fail = new IpcRequestError({ code: 'IO', message: 'Could not reach MythScribe Cloud.' })
     sitting('cloud', SIGNED_IN)
-    const { rerender } = render(<CreditNotice />)
+    const { rerender } = render(<CreditNotice cloudAvailable />)
     await waitFor(() => {
       expect(useAccountStore.getState().creditsError).toBe('Could not reach MythScribe Cloud.')
     })
-    rerender(<CreditNotice />)
+    rerender(<CreditNotice cloudAvailable />)
     expect(calls).toHaveLength(1)
   })
 
   it('warns about a low balance and opens Settings on the Account tab', async () => {
     sitting('cloud', SIGNED_IN, { ...CREDITS, balanceMicros: 420_000 })
-    render(<CreditNotice />)
+    render(<CreditNotice cloudAvailable />)
     const notice = screen.getByTestId('credit-notice')
     expect(notice).toHaveTextContent('Cloud credits low: $0.42')
     await userEvent.click(notice)
@@ -131,7 +131,7 @@ describe('CreditNotice (F-15.5)', () => {
 
   it('says when the balance is used up, and when it is days from it', () => {
     sitting('cloud', SIGNED_IN, { ...CREDITS, balanceMicros: 0 })
-    const { unmount } = render(<CreditNotice />)
+    const { unmount } = render(<CreditNotice cloudAvailable />)
     expect(screen.getByTestId('credit-notice')).toHaveTextContent('Cloud credits used up')
     unmount()
 
@@ -141,13 +141,22 @@ describe('CreditNotice (F-15.5)', () => {
       balanceMicros: 5_000_000,
       periodSpend: [{ feature: 'ghostText', micros: 5_000_000, requests: 9, tokens: 900 }]
     })
+    render(<CreditNotice cloudAvailable />)
+    expect(screen.getByTestId('credit-notice')).toHaveTextContent(
+      'Cloud credits: about 2 days left'
+    )
+  })
+
+  it('renders and asks for nothing while Cloud does not serve AI yet', () => {
+    sitting('cloud', SIGNED_IN, { ...CREDITS, balanceMicros: 0 })
     render(<CreditNotice />)
-    expect(screen.getByTestId('credit-notice')).toHaveTextContent('Cloud credits: about 2 days left')
+    expect(screen.queryByTestId('credit-notice')).not.toBeInTheDocument()
+    expect(calls).toEqual([])
   })
 
   it('follows a balance the store took from a charge', async () => {
     sitting('cloud', SIGNED_IN, CREDITS)
-    render(<CreditNotice />)
+    render(<CreditNotice cloudAvailable />)
     expect(screen.queryByTestId('credit-notice')).not.toBeInTheDocument()
     useAccountStore.setState({
       credits: { ...CREDITS, balanceMicros: 900_000 },

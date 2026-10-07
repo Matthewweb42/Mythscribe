@@ -109,6 +109,16 @@ export const AI_SOURCE_MEANING: Record<AiSource, string> = {
     'Calls go to a model running on your computer (Ollama, LM Studio); nothing leaves the machine and nothing is charged.'
 }
 
+/**
+ * The note on the Cloud option in the wizard and in Settings › AI while Cloud does not serve AI
+ * yet (`CLOUD_AI_AVAILABLE` in `cloudApi.ts`; decided by the author 2026-10-07).
+ */
+export const CLOUD_COMING_SOON = 'Coming soon'
+
+/** What Settings › AI says when a project is still stored on Cloud while Cloud does not serve AI. */
+export const CLOUD_UNAVAILABLE_NOTICE =
+  'MythScribe Cloud isn\u2019t available yet \u2014 choose My own key or Local model.'
+
 /** The editor's-notes settings (F-14.8), per project: how blunt the critique is. */
 export const CritiqueSettings = z.object({ honesty: Honesty })
 export type CritiqueSettings = z.infer<typeof CritiqueSettings>

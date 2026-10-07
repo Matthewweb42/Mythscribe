@@ -3,7 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { CreateProjectWizard } from './CreateProjectWizard'
 
-function setup(signedInEmail: string | null = null): {
+function setup(
+  signedInEmail: string | null = null,
+  cloudAvailable: boolean | undefined = undefined
+): {
   onCancel: ReturnType<typeof vi.fn>
   onCreate: ReturnType<typeof vi.fn>
 } {
@@ -15,6 +18,7 @@ function setup(signedInEmail: string | null = null): {
       signedInEmail={signedInEmail}
       onCancel={onCancel}
       onCreate={onCreate}
+      {...(cloudAvailable === undefined ? {} : { cloudAvailable })}
     />
   )
   return { onCancel, onCreate }
@@ -85,8 +89,24 @@ describe('CreateProjectWizard', () => {
     expect(onCreate).toHaveBeenCalledWith('My Book', 'webnovel', 'ownKey', 'ask')
   })
 
+  it('preselects own key and shows Cloud disabled as "Coming soon" while Cloud does not serve AI', async () => {
+    const { onCreate } = setup('ada@example.com')
+    await goToSourceStep('My Book')
+    expect(screen.getAllByRole('radio')).toHaveLength(3)
+    expect(screen.getByRole('radio', { name: /^my own key/i })).toBeChecked()
+    const cloud = screen.getByRole('radio', { name: /^mythscribe cloud/i })
+    expect(cloud).toBeDisabled()
+    expect(screen.getByTestId('wizard-cloud-coming-soon')).toHaveTextContent('Coming soon')
+    await userEvent.click(screen.getByText('MythScribe Cloud', { exact: true }))
+    expect(cloud).not.toBeChecked()
+    expect(screen.getByRole('radio', { name: /^local model/i })).toBeEnabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Create' }))
+    expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'ownKey', 'ask')
+  })
+
   it('offers the three AI sources on step 3, own key first, and creates with the chosen one (F-15.11, F-5.15)', async () => {
-    const { onCreate } = setup()
+    const { onCreate } = setup(null, true)
     await goToSourceStep('My Book')
     expect(screen.getByRole('dialog')).toHaveTextContent('Step 3 of 4')
     expect(screen.getAllByRole('radio')).toHaveLength(3)
@@ -100,6 +120,7 @@ describe('CreateProjectWizard', () => {
     )
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Create' }))
+    expect(screen.queryByTestId('wizard-cloud-coming-soon')).not.toBeInTheDocument()
     expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'cloud', 'ask')
   })
 
@@ -122,7 +143,7 @@ describe('CreateProjectWizard', () => {
   })
 
   it('names the signed-in account under the Cloud option', async () => {
-    setup('ada@example.com')
+    setup('ada@example.com', true)
     await goToSourceStep('My Book')
     await userEvent.click(screen.getByRole('radio', { name: /^mythscribe cloud/i }))
     expect(screen.getByTestId('wizard-source-hint')).toHaveTextContent(
@@ -143,7 +164,7 @@ describe('CreateProjectWizard', () => {
   })
 
   it('Back returns a step at a time with the choices and the name preserved', async () => {
-    setup()
+    setup(null, true)
     await goToFormatStep('My Book')
     await userEvent.click(screen.getByRole('radio', { name: /^epic/i }))
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))

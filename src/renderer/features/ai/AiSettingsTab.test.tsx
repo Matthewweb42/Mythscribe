@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
@@ -187,12 +187,16 @@ const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.mes
 
 const capField = (): HTMLElement => screen.getByLabelText('Daily cap (USD)', { selector: 'input' })
 
-async function open(initial: AiStatus = NO_KEY, usage: AiUsageSummary = NO_USAGE): Promise<void> {
+async function open(
+  initial: AiStatus = NO_KEY,
+  usage: AiUsageSummary = NO_USAGE,
+  props: { cloudAvailable?: boolean } = {}
+): Promise<void> {
   fake = fakeClient(initial, usage)
   setIpcClient(fake.client)
   // App.tsx loads the project's AI settings with the tree; the tab only reads them.
   await useAiSettingsStore.getState().load()
-  render(<AiSettingsTab />)
+  render(<AiSettingsTab {...props} />)
   await waitFor(() => expect(useAiStore.getState().status).not.toBeNull())
   await waitFor(() => expect(useAiStore.getState().usage).not.toBeNull())
   await waitFor(() => expect(useProvenanceStore.getState().report).not.toBeNull())
@@ -584,8 +588,39 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
     expect(await screen.findByText(/your text leaves the machine/)).toBeInTheDocument()
   })
 
-  it('writes the source, hides the key form, and names the signed-in account', async () => {
+  it('shows Cloud disabled as "Coming soon" while Cloud does not serve AI yet', async () => {
     await open(WITH_KEY)
+    signIn()
+    expect(sourceRadio('cloud')).toBeDisabled()
+    expect(screen.getByTestId('ai-source-cloud-coming-soon')).toHaveTextContent('Coming soon')
+    await userEvent.click(sourceRadio('cloud'))
+    expect(sets()).toEqual([])
+    expect(sourceRadio('ownKey')).toHaveAttribute('aria-checked', 'true')
+    expect(sourceRadio('local')).toBeEnabled()
+    expect(screen.queryByTestId('ai-cloud-unavailable')).not.toBeInTheDocument()
+  })
+
+  it('tells a project still stored on Cloud to choose another source, without rewriting it', async () => {
+    await open(WITH_KEY)
+    signIn()
+    const stored = useAiSettingsStore.getState().settings
+    if (stored === null) throw new Error('settings not loaded')
+    act(() => useAiSettingsStore.setState({ settings: { ...stored, source: 'cloud' } }))
+    expect(await screen.findByTestId('ai-cloud-unavailable')).toHaveTextContent(
+      'MythScribe Cloud isn\u2019t available yet \u2014 choose My own key or Local model.'
+    )
+    expect(sourceRadio('cloud')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByTestId('ai-cloud-account')).not.toBeInTheDocument()
+    expect(button('Test connection')).toBeDisabled()
+    expect(sets()).toEqual([])
+    await userEvent.click(sourceRadio('ownKey'))
+    await waitFor(() => expect(sets()).toHaveLength(1))
+    expect(sets()[0]).toMatchObject({ source: 'ownKey' })
+    expect(screen.queryByTestId('ai-cloud-unavailable')).not.toBeInTheDocument()
+  })
+
+  it('writes the source, hides the key form, and names the signed-in account', async () => {
+    await open(WITH_KEY, NO_USAGE, { cloudAvailable: true })
     signIn()
     await userEvent.click(sourceRadio('cloud'))
     expect(sourceRadio('cloud')).toHaveAttribute('aria-checked', 'true')
@@ -601,7 +636,7 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
   })
 
   it('enables Test connection by the source: a key, or a signed-in account', async () => {
-    await open(WITH_KEY)
+    await open(WITH_KEY, NO_USAGE, { cloudAvailable: true })
     expect(button('Test connection')).toBeEnabled()
     await userEvent.click(sourceRadio('cloud'))
     expect(screen.getByTestId('ai-cloud-account')).toHaveTextContent(
@@ -616,14 +651,18 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
   })
 
   it('shows the Cloud rate beside each model only while Cloud is the source (F-15.11)', async () => {
-    await open({
-      ...NO_KEY,
-      models: {
-        openai: DEFAULT_MODELS,
-        cloud: { fast: 'gpt-5.4-mini', strong: 'my-finetune' },
-        local: LOCAL_DEFAULT_MODELS
-      }
-    })
+    await open(
+      {
+        ...NO_KEY,
+        models: {
+          openai: DEFAULT_MODELS,
+          cloud: { fast: 'gpt-5.4-mini', strong: 'my-finetune' },
+          local: LOCAL_DEFAULT_MODELS
+        }
+      },
+      NO_USAGE,
+      { cloudAvailable: true }
+    )
     expect(screen.queryByTestId('ai-model-rate-fast')).not.toBeInTheDocument()
     await userEvent.click(sourceRadio('cloud'))
     // 0.75 and 4.50 per 1M at the provider, doubled by CLOUD_RATE_MULTIPLIER.
@@ -639,14 +678,18 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
   })
 
   it('edits the Cloud map, leaving the key map alone', async () => {
-    await open({
-      ...NO_KEY,
-      models: {
-        openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
-        cloud: DEFAULT_MODELS,
-        local: LOCAL_DEFAULT_MODELS
-      }
-    })
+    await open(
+      {
+        ...NO_KEY,
+        models: {
+          openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
+          cloud: DEFAULT_MODELS,
+          local: LOCAL_DEFAULT_MODELS
+        }
+      },
+      NO_USAGE,
+      { cloudAvailable: true }
+    )
     expect(modelField('Fast tier')).toHaveValue('gpt-5.4-nano')
     await userEvent.click(sourceRadio('cloud'))
     await waitFor(() => expect(modelField('Fast tier')).toHaveValue(DEFAULT_MODELS.fast))

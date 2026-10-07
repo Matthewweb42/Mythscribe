@@ -126,7 +126,10 @@ export const AiErrorCode = z.enum([
   // F-15.4: the project sends its requests through MythScribe Cloud but no account is signed in.
   'SIGNED_OUT',
   // F-15.4: the Cloud proxy refused the request because the account's credits are used up.
-  'NO_CREDIT'
+  'NO_CREDIT',
+  // The project's source is MythScribe Cloud, which does not serve AI yet (`CLOUD_AI_AVAILABLE`),
+  // or the Worker answered `/ai/complete` with NOT_FOUND.
+  'CLOUD_UNAVAILABLE'
 ])
 export type AiErrorCode = z.infer<typeof AiErrorCode>
 
@@ -143,7 +146,8 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
     'Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.',
   CANCELLED: 'Send it again whenever you like.',
   SIGNED_OUT: 'Sign in on the Account tab in Settings.',
-  NO_CREDIT: 'Buy credits on the Account tab in Settings.'
+  NO_CREDIT: 'Buy credits on the Account tab in Settings.',
+  CLOUD_UNAVAILABLE: 'Switch to My own key or Local model in Settings › AI.'
 }
 
 /**

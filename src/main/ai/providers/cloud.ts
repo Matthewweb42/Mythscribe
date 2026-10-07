@@ -3,6 +3,7 @@ import {
   type AiCompleteBody,
   AiCompleteResult,
   AiStreamEvent,
+  CLOUD_AI_AVAILABLE,
   CloudApiError,
   type CloudErrorCode,
   type CreditsResult
@@ -12,6 +13,7 @@ import { AccountError } from '../../account/cloudAuthClient'
 import type { FetchLike } from './openai'
 import {
   AiCancelledError,
+  AiCloudUnavailableError,
   AiFallbackError,
   AiNetworkError,
   AiNoCreditError,
@@ -54,6 +56,11 @@ export interface CloudProviderOptions {
   onBalance?: (balanceMicros: number) => void
   /** The non-streamed call's overall timeout; a stream is bounded by its signal alone. */
   timeoutMs?: number
+  /**
+   * Whether Cloud serves AI yet; defaults to `CLOUD_AI_AVAILABLE`. While false every call fails
+   * with `AiCloudUnavailableError` before anything is sent.
+   */
+  available?: boolean
 }
 
 const SIGNED_OUT = 'Sign in to MythScribe Cloud to use it for this project.'
@@ -65,6 +72,8 @@ const TIMED_OUT = 'MythScribe Cloud did not answer in time.'
 const UNREADABLE = 'MythScribe Cloud sent an answer MythScribe could not read.'
 const CANCELLED = 'The request was stopped.'
 const NO_FEATURE = 'MythScribe Cloud needs to know which feature is asking.'
+const NOT_AVAILABLE = 'MythScribe Cloud isn\u2019t available yet.'
+const NOT_REACHABLE = 'MythScribe Cloud isn\u2019t reachable for AI yet.'
 
 /** The default overall timeout for a non-streamed proxy call; the same 15 s the account calls use. */
 export const CLOUD_COMPLETE_TIMEOUT_MS = 15_000
@@ -107,6 +116,7 @@ function parseJson(text: string): unknown {
 export function buildCloudProvider(options: CloudProviderOptions): Provider {
   const root = options.baseUrl.replace(/\/+$/, '')
   const timeoutMs = options.timeoutMs ?? CLOUD_COMPLETE_TIMEOUT_MS
+  const available = options.available ?? CLOUD_AI_AVAILABLE
 
   /** The one mapping from a Cloud error code to the app's taxonomy. */
   const failureOf = (code: CloudErrorCode): AiProviderError => {
@@ -116,6 +126,8 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
     }
     if (code === 'INSUFFICIENT_CREDITS') return new AiNoCreditError(NO_CREDIT)
     if (code === 'RATE_LIMITED') return new AiRateLimitError(BUSY)
+    // A Worker deployed without `/ai/complete` (or without its secrets) answers NOT_FOUND.
+    if (code === 'NOT_FOUND') return new AiCloudUnavailableError(NOT_REACHABLE)
     return new AiFallbackError(`MythScribe Cloud reported a problem (${code}).`)
   }
 
@@ -141,6 +153,7 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
 
   /** Sends one `/ai/complete` request; every expected failure leaves as an `AiProviderError`. */
   const send = async (request: CompletionRequest, stream: boolean): Promise<Response> => {
+    if (!available) throw new AiCloudUnavailableError(NOT_AVAILABLE)
     const token = options.token()
     if (token === null) throw new AiSignedOutError(SIGNED_OUT)
     const body = bodyFor(request, stream)
@@ -201,6 +214,7 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
     },
 
     async testConnection(): Promise<{ model: string }> {
+      if (!available) throw new AiCloudUnavailableError(NOT_AVAILABLE)
       const token = options.token()
       if (token === null) throw new AiSignedOutError(SIGNED_OUT)
       let credits: CreditsResult

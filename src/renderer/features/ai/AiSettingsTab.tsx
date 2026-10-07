@@ -19,10 +19,13 @@ import {
   AI_SOURCE_LABEL,
   AI_SOURCE_MEANING,
   AiSource,
+  CLOUD_COMING_SOON,
+  CLOUD_UNAVAILABLE_NOTICE,
   LOCAL_QUALITY_WARNING,
   isFeatureAllowed,
   providerForSource
 } from '@shared/aiSettings'
+import { CLOUD_AI_AVAILABLE } from '@shared/cloudApi'
 import { cloudRateFor } from '@shared/cloudRates'
 import { useAccountStore } from '@renderer/features/account/accountStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -74,7 +77,7 @@ const privacyCopy = (
       : `Your key is ${encryption === 'plain' ? 'stored only on this machine' : 'encrypted and stored only on this machine'}, and is sent only to OpenAI when you use an AI feature.`
 
 const RADIO =
-  'flex min-w-0 flex-1 flex-col gap-0.5 rounded-md border border-line px-2 py-1.5 text-left hover:bg-surface focus-visible:outline-2 focus-visible:outline-accent aria-checked:border-accent aria-checked:bg-surface-raised'
+  'flex min-w-0 flex-1 flex-col gap-0.5 rounded-md border border-line px-2 py-1.5 text-left hover:bg-surface focus-visible:outline-2 focus-visible:outline-accent aria-checked:border-accent aria-checked:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent'
 
 const report = (err: unknown): void => {
   toast.error(describeError(err))
@@ -96,10 +99,18 @@ const atDefaults = (models: AiModelMap, provider: AiProviderId): boolean => {
  * local server's address and quality warning when the source is a local model (F-5.15),
  * "Test connection" with its result inline, the Usage block with the daily cap (F-5.14), the
  * privacy line, and a warning when the key can only be obfuscated (no keyring) or not stored
- * at all. The uncommitted key lives in local state and is dropped as soon as it is saved, so
+ * at all. While Cloud does not serve AI yet (`CLOUD_AI_AVAILABLE`, decided by the author
+ * 2026-10-07) its source option is disabled with "Coming soon", and a project still stored on
+ * Cloud gets a notice to choose another source; the stored source is never rewritten here.
+ * The uncommitted key lives in local state and is dropped as soon as it is saved, so
  * it is never shown again; the store holds only what main answers (a mask, never the key).
  */
-export function AiSettingsTab(): React.JSX.Element {
+export function AiSettingsTab({
+  cloudAvailable = CLOUD_AI_AVAILABLE
+}: {
+  /** Whether the Cloud source can be chosen; the shared flag unless a test says otherwise. */
+  cloudAvailable?: boolean
+} = {}): React.JSX.Element {
   const status = useAiStore((s) => s.status)
   const testResult = useAiStore((s) => s.testResult)
   const testing = useAiStore((s) => s.testing)
@@ -159,7 +170,8 @@ export function AiSettingsTab(): React.JSX.Element {
     run(async () => {
       if (models) await setModels(provider, { ...models, [tier]: model })
     })
-  const canTest = source === 'cloud' ? signedIn : source === 'local' ? status !== null : hasKey
+  const canTest =
+    source === 'cloud' ? cloudAvailable && signedIn : source === 'local' ? status !== null : hasKey
   const localUrl = status?.local.baseUrl ?? ''
 
   return (
@@ -193,25 +205,46 @@ export function AiSettingsTab(): React.JSX.Element {
       <div className="flex flex-col gap-1.5">
         <span className="text-xs text-fg-muted">AI source</span>
         <div role="radiogroup" aria-label="AI source" className="flex gap-2">
-          {AiSource.options.map((option) => (
-            <button
-              key={option}
-              type="button"
-              role="radio"
-              data-testid={`ai-source-${option}`}
-              aria-checked={option === source}
-              disabled={settings === null || busy}
-              onClick={() => updateSettings({ source: option })}
-              className={RADIO}
-            >
-              <span className="text-sm font-medium">{AI_SOURCE_LABEL[option]}</span>
-              <span className="text-xs text-fg-muted">{AI_SOURCE_MEANING[option]}</span>
-            </button>
-          ))}
+          {AiSource.options.map((option) => {
+            const comingSoon = option === 'cloud' && !cloudAvailable
+            return (
+              <button
+                key={option}
+                type="button"
+                role="radio"
+                data-testid={`ai-source-${option}`}
+                aria-checked={option === source}
+                disabled={settings === null || busy || comingSoon}
+                onClick={() => updateSettings({ source: option })}
+                className={RADIO}
+              >
+                <span className="text-sm font-medium">
+                  {AI_SOURCE_LABEL[option]}
+                  {comingSoon ? (
+                    <span
+                      data-testid="ai-source-cloud-coming-soon"
+                      className="ml-1.5 text-xs font-normal text-fg-muted"
+                    >
+                      {CLOUD_COMING_SOON}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-xs text-fg-muted">{AI_SOURCE_MEANING[option]}</span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
-      {source === 'cloud' ? (
+      {source === 'cloud' && !cloudAvailable ? (
+        <p
+          role="alert"
+          data-testid="ai-cloud-unavailable"
+          className="m-0 rounded-md border border-warning/40 px-3 py-2 text-warning"
+        >
+          {CLOUD_UNAVAILABLE_NOTICE}
+        </p>
+      ) : source === 'cloud' ? (
         <CloudAccountLine signedIn={signedIn} email={signedIn ? account.email : null} />
       ) : source === 'local' ? (
         <LocalEndpointForm key={localUrl} current={localUrl} disabled={status === null || busy} />
