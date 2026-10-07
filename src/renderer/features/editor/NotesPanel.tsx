@@ -169,7 +169,7 @@ function PinNotesButton({ id }: { id: string }): React.JSX.Element {
  */
 export function NotesBody({ id }: { id: string }): React.JSX.Element {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4">
       <NotesEditor id={id} />
     </div>
   )

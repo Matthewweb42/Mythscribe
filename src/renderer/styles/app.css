@@ -89,12 +89,23 @@ select {
 
 /*
  * Notes (F-3.7) are working text, not manuscript: a fixed, smaller size, no first-line indent,
- * and no minimum height, ignoring the formatting variables on purpose.
+ * ignoring the formatting variables on purpose. The editor fills the rest of the column, so a
+ * click anywhere below the synopsis lands in the notes (2026-10-07, the author's request).
  */
 .ms-editor.ms-notes {
-  min-height: 0;
+  flex: 1;
+  min-height: 8rem;
   font-size: 0.9rem;
   line-height: 1.5;
+}
+
+/* Empty notes show what the area is for (Tiptap's Placeholder marks the empty first paragraph). */
+.ms-editor.ms-notes p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--color-fg-muted);
+  pointer-events: none;
 }
 
 .ms-editor.ms-notes p {

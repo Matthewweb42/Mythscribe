@@ -8,7 +8,7 @@ import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore } from '@renderer/features/shell/layoutStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetDocumentStore } from './documentStore'
-import { NotesEditor } from './NotesEditor'
+import { NOTES_PLACEHOLDER, NotesEditor } from './NotesEditor'
 import { AUTOSAVE_DELAY_MS, resetNotesStore, useNotesStore } from './notesStore'
 
 const doc = (text: string): TiptapNodeT => ({
@@ -94,6 +94,8 @@ describe('NotesEditor (F-3.7)', () => {
     await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
     expect(box().querySelectorAll('p')).toHaveLength(1)
     expect(box()).toHaveTextContent('')
+    // Empty notes say what the area is for, so it is visible under the synopsis.
+    expect(box().querySelector('p')).toHaveAttribute('data-placeholder', NOTES_PLACEHOLDER)
   })
 
   it('autosaves typed notes after the debounce, and Ctrl+S saves at once', async () => {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
+import { Placeholder } from '@tiptap/extensions'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -8,6 +9,9 @@ import { useNotesStore } from './notesStore'
 
 /** Notes are not a manuscript, so the scene-break text is fixed rather than following the format. */
 const NOTES_SCENE_BREAK = '* * *'
+
+/** What empty notes say, so the free-write area under the synopsis is visible. */
+export const NOTES_PLACEHOLDER = 'Write notes…'
 
 /**
  * The notes of one document or folder (F-3.7): loads them through `useNotesStore` on mount (and
@@ -50,10 +54,13 @@ function NotesInstance({
   const edit = useNotesStore((s) => s.edit)
   const extensions = useMemo(
     () =>
-      buildExtensions({
-        sceneBreak: NOTES_SCENE_BREAK,
-        onSave: () => void useNotesStore.getState().saveNow()
-      }),
+      [
+        ...buildExtensions({
+          sceneBreak: NOTES_SCENE_BREAK,
+          onSave: () => void useNotesStore.getState().saveNow()
+        }),
+        Placeholder.configure({ placeholder: NOTES_PLACEHOLDER })
+      ],
     []
   )
   const ready = content !== null
@@ -77,5 +84,5 @@ function NotesInstance({
     [extensions]
   )
 
-  return <EditorContent editor={editor} />
+  return <EditorContent editor={editor} className="flex min-h-0 flex-1 flex-col" />
 }

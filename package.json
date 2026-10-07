@@ -34,6 +34,7 @@
   "dependencies": {
     "@tiptap/core": "3.31.3",
     "@tiptap/extension-text-align": "3.31.3",
+    "@tiptap/extensions": "3.31.3",
     "@tiptap/react": "3.31.3",
     "@tiptap/starter-kit": "3.31.3",
     "@tiptap/suggestion": "3.31.3",
