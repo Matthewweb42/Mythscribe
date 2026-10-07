@@ -7,6 +7,7 @@ import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { EntityTab } from './EntityTab'
 import { entityFixture } from './entityFixture'
+import { resetEntityDraftStore, useEntityDraftStore } from './entityDraftStore'
 import { resetEntityStore, useEntityStore } from './entityStore'
 
 type Handler = (input: unknown) => unknown
@@ -77,9 +78,13 @@ async function renderLoaded(
 describe('EntityTab (F-9.2)', () => {
   beforeEach(() => {
     resetEntityStore()
+    resetEntityDraftStore()
     useDialogStore.setState({ modals: [], toasts: [] })
   })
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    resetEntityDraftStore()
+  })
 
   it('lists only the entities of its kind, in list order, as cards with an excerpt', async () => {
     await renderLoaded('character')
@@ -162,6 +167,53 @@ describe('EntityTab (F-9.2)', () => {
     expect(row('Mara')).toHaveAttribute('aria-current', 'true')
     await user.click(row('Mara'))
     expect(useEntityStore.getState().selectedId).toBeNull()
+  })
+
+  it('double-click renames a row inline and leaves it selected (2026-10-07)', async () => {
+    const user = userEvent.setup()
+    const renamed = (input: unknown): Entity => ({
+      ...entityFixture[1]!,
+      name: (input as { name: string }).name
+    })
+    const calls = await renderLoaded('character', { 'entity:update': renamed })
+    await user.dblClick(row('Mara'))
+    expect(useEntityStore.getState().selectedId).toBe('e-mara')
+    const input = screen.getByRole('textbox', { name: 'Rename' })
+    expect(input).toHaveFocus()
+    expect(input).toHaveValue('Mara')
+    await user.keyboard('Zara{Enter}')
+    expect(calls).toContainEqual(['entity:update', { id: 'e-mara', name: 'Zara' }])
+    expect(rowNames('Characters')).toEqual(['Aldous', 'Zara'])
+  })
+
+  it('renaming the open entity goes through its page draft, so the page shows the new name', async () => {
+    const user = userEvent.setup()
+    const renamed = (input: unknown): Entity => ({
+      ...entityFixture[1]!,
+      name: (input as { name?: string }).name ?? 'Mara'
+    })
+    const calls = await renderLoaded('character', { 'entity:update': renamed })
+    useEntityDraftStore.getState().open(entityFixture[1]!)
+    row('Mara').focus()
+    await user.keyboard('{F2}')
+    await user.keyboard('{Control>}a{/Control}Zara{Enter}')
+    expect(calls).toContainEqual(['entity:update', { id: 'e-mara', name: 'Zara' }])
+    expect(useEntityDraftStore.getState().draft?.name).toBe('Zara')
+  })
+
+  it('a refused rename toasts the cause; Escape cancels without a write', async () => {
+    const user = userEvent.setup()
+    const calls = await renderLoaded('character', {
+      'entity:update': failing('An entity named "Aldous" already exists.', 'ALREADY_EXISTS')
+    })
+    await user.dblClick(row('Mara'))
+    await user.keyboard('Aldous{Enter}')
+    expect(toasts()).toEqual(['An entity named "Aldous" already exists.'])
+    expect(rowNames('Characters')).toEqual(['Aldous', 'Mara'])
+    await user.dblClick(row('Mara'))
+    await user.keyboard('Other{Escape}')
+    expect(screen.queryByRole('textbox', { name: 'Rename' })).not.toBeInTheDocument()
+    expect(calls.filter(([channel]) => channel === 'entity:update')).toHaveLength(1)
   })
 
   it('quick-add creates a structured entity of the kind, selects it, and clears the field', async () => {

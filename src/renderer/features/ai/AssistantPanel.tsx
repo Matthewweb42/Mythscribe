@@ -8,6 +8,7 @@ import { SUGGESTION_ROTATE_MS, assistantSuggestions } from '@shared/assistantSug
 import {
   CHAT_MAX_CONVERSATIONS,
   CHAT_MESSAGE_MAX,
+  CHAT_TITLE_MAX,
   type ChatMessage,
   type Conversation
 } from '@shared/chat'
@@ -33,6 +34,7 @@ import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { DockPanelControls } from '@renderer/features/shell/Dock'
+import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { CONVERSATION_BUSY_MESSAGE, useOpenScene } from './aiActions'
@@ -202,14 +204,24 @@ export function NewConversationButton(): React.JSX.Element {
  * shows only while the tab is hovered or the button has keyboard focus, so it is not hit by
  * accident. Tabs share the strip's width and truncate their titles, so the panel at its floor
  * shows no scrollbar until many are open. Closing a conversation with messages confirms first;
- * the last tab is replaced by a fresh one.
+ * the last tab is replaced by a fresh one. Double-click or F2 renames a tab inline (2026-10-07).
  */
 function ConversationTabs(): React.JSX.Element {
   const items = useAssistantStore((s) => s.conversations?.items ?? null)
   const active = useAssistantStore((s) => s.conversations?.active ?? null)
   const select = useAssistantStore((s) => s.select)
   const closeConversation = useAssistantStore((s) => s.closeConversation)
+  const renameConversation = useAssistantStore((s) => s.renameConversation)
   const tabs = useRef(new Map<string, HTMLButtonElement>())
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const tablist = useRef<HTMLDivElement>(null)
+  /** The tab to focus once its rename field is gone (Enter or Escape; a blur leaves focus where it went). */
+  const refocus = useRef<string | null>(null)
+  useEffect(() => {
+    if (renamingId !== null || refocus.current === null) return
+    tabs.current.get(refocus.current)?.focus()
+    refocus.current = null
+  }, [renamingId])
   if (items === null) {
     return (
       <div className="flex shrink-0 justify-end border-b border-line px-1">
@@ -219,9 +231,14 @@ function ConversationTabs(): React.JSX.Element {
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.target instanceof HTMLInputElement) return // the rename field handles its own keys
     const index = items.findIndex((c) => c.id === active)
     let next: number
     switch (event.key) {
+      case 'F2':
+        event.preventDefault()
+        setRenamingId(active)
+        return
       case 'ArrowRight':
         next = (index + 1) % items.length
         break
@@ -260,6 +277,7 @@ function ConversationTabs(): React.JSX.Element {
   return (
     <div className="flex shrink-0 items-center border-b border-line pr-1 pl-2">
       <div
+        ref={tablist}
         role="tablist"
         aria-label="Conversations"
         onKeyDown={onKeyDown}
@@ -272,22 +290,39 @@ function ConversationTabs(): React.JSX.Element {
               key={conversation.id}
               className={`group flex min-w-14 max-w-40 flex-1 basis-0 items-center border-b-2 ${selected ? 'border-accent' : 'border-transparent'}`}
             >
-              <button
-                ref={(element) => {
-                  if (element) tabs.current.set(conversation.id, element)
-                  else tabs.current.delete(conversation.id)
-                }}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                aria-controls="assistant-log"
-                tabIndex={selected ? 0 : -1}
-                title={conversation.title}
-                onClick={() => select(conversation.id)}
-                className={`min-w-0 flex-1 truncate py-1.5 pr-1 pl-2 text-xs font-medium select-none hover:text-fg focus-visible:outline-none ${selected ? 'text-fg' : 'text-fg-muted'}`}
-              >
-                {conversation.title}
-              </button>
+              {renamingId === conversation.id ? (
+                <InlineRenameInput
+                  value={conversation.title}
+                  label="Rename conversation"
+                  maxLength={CHAT_TITLE_MAX}
+                  onCommit={(next) => renameConversation(conversation.id, next)}
+                  onDone={() => {
+                    if (tablist.current?.contains(document.activeElement)) {
+                      refocus.current = conversation.id
+                    }
+                    setRenamingId(null)
+                  }}
+                  className="mx-1 my-1 min-w-0 flex-1 rounded border border-accent bg-bg px-1 text-xs text-fg outline-none"
+                />
+              ) : (
+                <button
+                  ref={(element) => {
+                    if (element) tabs.current.set(conversation.id, element)
+                    else tabs.current.delete(conversation.id)
+                  }}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-controls="assistant-log"
+                  tabIndex={selected ? 0 : -1}
+                  title={conversation.title}
+                  onClick={() => select(conversation.id)}
+                  onDoubleClick={() => setRenamingId(conversation.id)}
+                  className={`min-w-0 flex-1 truncate py-1.5 pr-1 pl-2 text-xs font-medium select-none hover:text-fg focus-visible:outline-none ${selected ? 'text-fg' : 'text-fg-muted'}`}
+                >
+                  {conversation.title}
+                </button>
+              )}
               <button
                 type="button"
                 aria-label={`Close ${conversation.title}`}

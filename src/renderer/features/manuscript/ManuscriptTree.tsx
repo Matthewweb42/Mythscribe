@@ -9,6 +9,7 @@ import { useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
+import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { describeError } from '@renderer/lib/errors'
 import { ContextMenu } from './ContextMenu'
 import { LevelIcon } from './LevelIcon'
@@ -55,57 +56,12 @@ function listVisibleRows(
   return rows
 }
 
-/** Inline title editor (F-2.2): Enter or blur commits, Escape cancels, empty or unchanged is a no-op. */
+/** Inline title editor (F-2.2): the shared rename field, committed through `tree:rename`. */
 function RenameInput({ id, title }: { id: string; title: string }): React.JSX.Element {
   const rename = useTreeStore((s) => s.rename)
   const endRename = useTreeStore((s) => s.endRename)
-  // Enter and Escape both unmount the input, which can fire one last blur; skip it.
-  const settled = useRef(false)
-
-  const commit = async (value: string): Promise<void> => {
-    if (settled.current) return
-    settled.current = true
-    const next = value.trim()
-    if (next.length === 0 || next === title) {
-      endRename()
-      return
-    }
-    try {
-      await rename(id, next)
-    } catch (err) {
-      toast.error(describeError(err))
-    } finally {
-      endRename()
-    }
-  }
-
-  const cancel = (): void => {
-    if (settled.current) return
-    settled.current = true
-    endRename()
-  }
-
   return (
-    <input
-      aria-label="Rename"
-      defaultValue={title}
-      autoFocus
-      onFocus={(event) => event.currentTarget.select()}
-      onClick={(event) => event.stopPropagation()}
-      onBlur={(event) => void commit(event.currentTarget.value)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault()
-          event.stopPropagation()
-          void commit(event.currentTarget.value)
-        } else if (event.key === 'Escape') {
-          event.preventDefault()
-          event.stopPropagation()
-          cancel()
-        }
-      }}
-      className="min-w-0 flex-1 rounded border border-accent bg-bg px-1 text-sm text-fg outline-none"
-    />
+    <InlineRenameInput value={title} onCommit={(next) => rename(id, next)} onDone={endRename} />
   )
 }
 
@@ -182,6 +138,7 @@ function TreeItem({
   const busy = useTreeStore((s) => s.busy)
   const select = useTreeStore((s) => s.select)
   const toggle = useTreeStore((s) => s.toggle)
+  const startRename = useTreeStore((s) => s.startRename)
   // F-10.3: a word target, on manuscript rows only (main prunes the rest on its next read).
   const target = useGoalsStore((s) =>
     section === 'manuscript' ? s.status?.goals.nodeTargets[id] : undefined
@@ -196,7 +153,9 @@ function TreeItem({
   const isMatter = node.kind === 'document' && section !== 'manuscript'
   const zone = over?.id === id ? over.zone : null
   const matched = filter?.matches.has(id) === true
-  const visibleChildIds = filter ? childIds?.filter((childId) => filter.visible.has(childId)) : childIds
+  const visibleChildIds = filter
+    ? childIds?.filter((childId) => filter.visible.has(childId))
+    : childIds
 
   return (
     <li
@@ -216,6 +175,10 @@ function TreeItem({
           if (!isSection) select(id)
           // A filtered tree is fully expanded, so a section click would only write dead state.
           else if (filter === null) toggle(id)
+        }}
+        onDoubleClick={() => {
+          // 2026-10-07: a double-click renames any row but a section root; the chevron keeps toggling.
+          if (!isSection) startRename(id)
         }}
         onContextMenu={(event) => {
           event.preventDefault()
@@ -251,6 +214,7 @@ function TreeItem({
               event.stopPropagation()
               toggle(id)
             }}
+            onDoubleClick={(event) => event.stopPropagation()}
             className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-fg-subtle hover:text-fg"
           >
             {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -583,6 +547,9 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
       case ' ':
         if (node.sectionType === null) select(id)
         else if (filter === null) toggle(id)
+        break
+      case 'F2':
+        if (node.sectionType === null) useTreeStore.getState().startRename(id)
         break
       default:
         return

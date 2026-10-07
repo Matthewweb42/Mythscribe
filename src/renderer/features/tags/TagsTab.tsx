@@ -9,6 +9,9 @@ import { TagList } from './TagList'
 import { TemplateLoader } from './TemplateLoader'
 import { useTagStore } from './tagStore'
 
+/** How soon after a row opened the detail a double-click on it still renames that tag. */
+const ROW_DOUBLE_CLICK_MS = 600
+
 const filterElementId = (filter: CategoryFilter): string => `tag-category-${filter}`
 
 /**
@@ -21,16 +24,24 @@ const filterElementId = (filter: CategoryFilter): string => `tag-category-${filt
  * not replay it. Select mode (F-4.9) turns the rows into checkboxes and the create form into the
  * bulk bar; the checked set is pruned to the visible rows at render, so a bulk action never
  * touches a tag the category or the search hides.
+ * Double-click or F2 on a row renames (2026-10-07): the detail opens with its name field focused
+ * and selected, so the tag naming rules stay on the one rename path. The row's first click has
+ * already swapped the list for the detail, so the double-click lands there; a double-click within
+ * moments of a row opening the detail counts as the row's, and its second click does nothing else.
  */
 export function TagsTab(): React.JSX.Element {
   const [filter, setFilter] = useState<CategoryFilter>('all')
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [focusName, setFocusName] = useState(0)
+  /** When a row click last opened the detail (ms), for a double-click whose second click lands on it. */
+  const openedByRowAt = useRef<number | null>(null)
   const pending = useTagStore((s) => s.pendingSelection)
   const [seenToken, setSeenToken] = useState(0)
   if (pending !== null && pending.token !== seenToken) {
     setSeenToken(pending.token)
     setSelectedId(pending.id)
+    setFocusName(0)
     setFilter('all')
   }
   useEffect(() => {
@@ -63,6 +74,37 @@ export function TagsTab(): React.JSX.Element {
   const endSelecting = (): void => {
     setSelecting(false)
     setCheckedIds([])
+  }
+
+  const openFromRow = (id: string): void => {
+    openedByRowAt.current = performance.now()
+    setFocusName(0)
+    setSelectedId(id)
+  }
+
+  const renameFromRow = (id: string): void => {
+    openedByRowAt.current = null
+    setSelectedId(id)
+    setFocusName((n) => n + 1)
+  }
+
+  const justOpenedByRow = (): boolean => {
+    const at = openedByRowAt.current
+    return at !== null && performance.now() - at < ROW_DOUBLE_CLICK_MS
+  }
+
+  // The second click of a row's double-click lands on whatever of the detail is under the
+  // pointer (Back, the color, the category); it must not act there.
+  const swallowSecondClick = (event: React.MouseEvent<HTMLDivElement>): void => {
+    if (event.detail < 2 || !justOpenedByRow()) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  const onPanelDoubleClick = (): void => {
+    const rename = justOpenedByRow()
+    openedByRowAt.current = null
+    if (rename) setFocusName((n) => n + 1)
   }
 
   const pick = (next: CategoryFilter): void => {
@@ -128,11 +170,15 @@ export function TagsTab(): React.JSX.Element {
         role="tabpanel"
         id="tag-category-panel"
         aria-labelledby={filterElementId(filter)}
+        onMouseDownCapture={selected ? swallowSecondClick : undefined}
+        onClickCapture={selected ? swallowSecondClick : undefined}
+        onDoubleClick={selected ? onPanelDoubleClick : undefined}
         className="flex min-h-0 flex-1 flex-col"
       >
         {selected ? (
           <TagDetail
             tag={selected}
+            focusName={focusName}
             onBack={() => setSelectedId(null)}
             onDeleted={() => setSelectedId(null)}
           />
@@ -159,7 +205,8 @@ export function TagsTab(): React.JSX.Element {
               <TagList
                 ids={visibleIds}
                 filtered={total > 0}
-                onSelect={selecting ? toggleChecked : setSelectedId}
+                onSelect={selecting ? toggleChecked : openFromRow}
+                onRename={selecting ? undefined : renameFromRow}
                 checked={selecting ? pickedSet : undefined}
               />
             </div>

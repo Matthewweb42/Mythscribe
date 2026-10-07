@@ -479,6 +479,22 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(turns()).toHaveLength(0)
   })
 
+  it('double-click or F2 renames a conversation tab inline; Escape cancels (2026-10-07)', async () => {
+    await mountOpen()
+    await userEvent.dblClick(tabs()[0]!)
+    const input = screen.getByRole('textbox', { name: 'Rename conversation' })
+    expect(input).toHaveFocus()
+    expect(input).toHaveValue('Why the ridge?')
+    await userEvent.keyboard('Ridge research{Enter}')
+    expect(tabs().map((t) => t.textContent)).toEqual(['Ridge research'])
+    expect(useAssistantStore.getState().conversations?.items[0]?.title).toBe('Ridge research')
+    expect(tabs()[0]).toHaveFocus()
+    await userEvent.keyboard('{F2}')
+    await userEvent.keyboard('Nope{Escape}')
+    expect(screen.queryByRole('textbox', { name: 'Rename conversation' })).not.toBeInTheDocument()
+    expect(tabs().map((t) => t.textContent)).toEqual(['Ridge research'])
+  })
+
   it('has no actions in its header and no way to clear a conversation (2026-10-06)', async () => {
     await mountOpen()
     const header = screen.getByRole('heading', { name: 'Assistant' }).parentElement!
