@@ -72,7 +72,8 @@ describe('SidebarTabs (F-7.3)', () => {
       'World',
       'Outline',
       'Timeline',
-      'Tags'
+      'Tags',
+      'Edits'
     ])
     expect(panel()).toHaveAccessibleName('Manuscript')
   })

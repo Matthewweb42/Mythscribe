@@ -1280,7 +1280,8 @@ test('create, close, reopen a project on disk', async () => {
     'World',
     'Outline',
     'Timeline',
-    'Tags'
+    'Tags',
+    'Edits'
   ])
   const manuscriptTab = sidebarTabs.getByRole('tab', { name: 'Manuscript' })
   await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
@@ -4364,6 +4365,90 @@ test('create, close, reopen a project on disk', async () => {
   })
   await proofreadPanel.getByTestId('proofread-close').click()
   await expect(proofreadPanel).toHaveCount(0)
+
+  // F-14.15: edit passes. A sentence with a doubled word is typed at the end of Scene 1. The
+  // Edits tab's New edit pass opens the workspace with the open scene ticked; a Proofread pass
+  // sends it once (the fake server answers two changes, one quoting a passage that is not in the
+  // scene, which main drops) and its report opens in the main pane. Back in the scene the kept
+  // change is a tracked change: the passage struck through, the replacement after it. A Custom
+  // pass with its own instruction sends the instruction; Accept in its report applies the change
+  // with the scene closed, as AI-origin text; the proofread change, whose passage is gone, no
+  // longer shows. Both reports are listed under Edit reports.
+  await dismissToasts()
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(EDIT_PASS_TYPED)
+  await expect
+    .poll(async () => ((await documentText(scene1Row.id)) ?? '').includes(EDIT_PASS_TYPED.trim()), {
+      timeout: 3000
+    })
+    .toBe(true)
+  const editPassBodies = (): (typeof openAiChatBodies)[number][] =>
+    openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(EDIT_PASS_SENTINEL))
+  const editPassRequestsBefore = editPassBodies().length
+  const editsTab = sidebarTabs.getByRole('tab', { name: 'Edits' })
+  await editsTab.click()
+  await page.getByTestId('edit-pass-new').click()
+  const workspace = page.getByTestId('edit-pass-workspace')
+  await expect(workspace).toBeVisible()
+  await workspace.getByRole('radio', { name: 'Proofread' }).check()
+  await expect(workspace.getByTestId('edit-pass-estimate')).toContainText('1 scene')
+  await expect(workspace.getByTestId('edit-pass-estimate-pro')).toContainText(
+    'A professional proofread: typically'
+  )
+  await workspace.getByTestId('edit-pass-start').click()
+  const report = page.getByTestId('edit-report')
+  await expect(report).toBeVisible()
+  await expect(report.getByTestId('edit-report-title')).toHaveText('Proofread')
+  expect(editPassBodies().length).toBe(editPassRequestsBefore + 1)
+  expect(editPassBodies().at(-1)?.messages[1]?.content).toContain(EDIT_PASS_TYPED.trim())
+  await expect(report.getByTestId('edit-report-counts')).toContainText('1 to review')
+  await expect(report.getByTestId('edit-report-counts')).toContainText('1 discarded')
+  await expect(report.getByTestId('edit-report-diff')).toHaveCount(1)
+  await expect(report.getByTestId('edit-report-cost')).toContainText('gpt-5.4-mini')
+
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await scene1.click()
+  await expect(report).toHaveCount(0)
+  await expect(editor.locator('.tracked-del')).toHaveText(EDIT_PASS_QUOTE)
+  await expect(editor.locator('.tracked-ins')).toHaveText(EDIT_PASS_REPLACEMENT)
+  await expect(page.getByTestId('tracked-changes-count')).toHaveText(
+    '1 tracked change from an edit pass'
+  )
+
+  await editsTab.click()
+  await page.getByTestId('edit-pass-new').click()
+  await workspace.getByRole('radio', { name: 'Custom pass' }).check()
+  await workspace.getByTestId('edit-pass-instruction').fill('Cut every doubled word.')
+  await workspace.getByTestId('edit-pass-start').click()
+  await expect(report.getByTestId('edit-report-title')).toHaveText(
+    'Custom pass: Cut every doubled word.'
+  )
+  expect(editPassBodies().length).toBe(editPassRequestsBefore + 2)
+  expect(editPassBodies().at(-1)?.messages[1]?.content).toContain('Cut every doubled word.')
+  await report.getByTestId('edit-report-accept').click()
+  await expect(report.getByTestId('edit-report-change')).toHaveAttribute('data-status', 'accepted')
+  await expect
+    .poll(
+      async () =>
+        ((await documentText(scene1Row.id)) ?? '').includes(
+          EDIT_PASS_TYPED.trim().replace(EDIT_PASS_QUOTE, EDIT_PASS_REPLACEMENT)
+        ),
+      { timeout: 3000 }
+    )
+    .toBe(true)
+  await expect(page.getByTestId('edit-report-row')).toHaveCount(2)
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await scene1.click()
+  await expect(editor.locator('.ai-origin').filter({ hasText: EDIT_PASS_REPLACEMENT })).toHaveCount(
+    1
+  )
+  await expect(editor.locator('.tracked-del')).toHaveCount(0)
+  await expect(page.getByTestId('tracked-changes-bar')).toHaveCount(0)
+  const afterEditPasses = await usageSummary()
+  expect(afterEditPasses.byFeature.find((f) => f.feature === 'editPass')).toMatchObject({
+    requests: 2
+  })
 
   // F-5.6: scene summaries. With the toggle back on, the metadata pane's Summary disclosure
   // shows Scene 1 has none yet (out of date: the text is long past the floor). Summarize now

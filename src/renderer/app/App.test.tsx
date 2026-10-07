@@ -215,6 +215,9 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'goals:get') return goalsStatusFixture()
     if (channel === 'jobs:status') return IDLE_INDEX_QUEUE
     if (channel === 'continuity:list') return []
+    if (channel === 'editPass:list') return []
+    if (channel === 'editPass:presets') return []
+    if (channel === 'editPass:changes') return []
     if (channel === 'view:get') return defaultViewSettings()
     if (channel === 'startup:get') return { reopenLastProject: true }
     if (channel === 'recovery:list') return []
@@ -350,7 +353,16 @@ describe('App', () => {
       within(aside)
         .getAllByRole('tab')
         .map((t) => t.textContent)
-    ).toEqual(['Manuscript', 'Characters', 'Settings', 'World', 'Outline', 'Timeline', 'Tags'])
+    ).toEqual([
+      'Manuscript',
+      'Characters',
+      'Settings',
+      'World',
+      'Outline',
+      'Timeline',
+      'Tags',
+      'Edits'
+    ])
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))

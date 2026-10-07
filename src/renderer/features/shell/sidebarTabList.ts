@@ -2,6 +2,7 @@ import { createElement, type ReactNode } from 'react'
 import {
   BookOpen,
   CalendarRange,
+  FilePenLine,
   Globe,
   ListTree,
   MapPin,
@@ -11,6 +12,7 @@ import {
 } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import type { SidebarTabId } from '@shared/sidebarTabs'
+import { EditPassTab } from '@renderer/features/editPass/EditPassTab'
 import { EntityTab } from '@renderer/features/entities/EntityTab'
 import { ManuscriptTab } from '@renderer/features/manuscript/ManuscriptTab'
 import { OutlineTab } from '@renderer/features/outline/OutlineTab'
@@ -74,5 +76,11 @@ export const SIDEBAR_TABS: readonly [SidebarTab, ...SidebarTab[]] = [
     label: 'Tags',
     icon: Tag,
     render: () => createElement(TagsTab)
+  },
+  {
+    id: 'edits',
+    label: 'Edits',
+    icon: FilePenLine,
+    render: () => createElement(EditPassTab)
   }
 ]

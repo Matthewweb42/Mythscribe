@@ -12,7 +12,9 @@ export const SIDEBAR_TAB_IDS = [
   'world',
   'outline',
   'timeline',
-  'tags'
+  'tags',
+  // F-14.15: the edit passes and their reports.
+  'edits'
 ] as const
 
 export const SidebarTabId = z.enum(SIDEBAR_TAB_IDS)

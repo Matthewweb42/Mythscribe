@@ -19,6 +19,7 @@ import { InlineTag } from './InlineTag'
 import { NameCheck } from './nameCheck'
 import { RewriteTarget } from './rewriteTarget'
 import { TagRange } from './TagRange'
+import { TrackedChanges } from './trackedChanges'
 import { Typewriter } from './typewriter'
 
 export interface EditorSchemaOptions {
@@ -208,7 +209,8 @@ export const OriginParagraph = Paragraph.extend({
  * document, the inline tag token with its `#` suggestion (F-4.6), the AI-origin mark (F-14.6,
  * wherever ghost text can insert), the ghost-text decoration (F-5.3, always in the schema
  * so toggling VibeWrite never rebuilds the editor), the rewrite target (F-14.10), find and
- * replace in document (F-3.10), the tag range mark (F-4.8), and the
+ * replace in document (F-3.10), the tag range mark (F-4.8), the tracked changes of an edit pass
+ * (F-14.15), and the
  * Escape hand-off (F-6.1) when the caller wants one. Lists, links, code blocks, horizontal rules, and the trailing node are off
  * so the document model stays what the compile views (F-3.12) and the AI post-processors
  * expect.
@@ -298,7 +300,8 @@ export function buildExtensions({
       Typewriter,
       NameCheck,
       FindReplace,
-      TagRange.configure({ onTagSelection: onTagSelection ?? null })
+      TagRange.configure({ onTagSelection: onTagSelection ?? null }),
+      TrackedChanges
     )
   }
   if (onEscape) extensions.push(EscapeShortcut.configure({ onEscape }))

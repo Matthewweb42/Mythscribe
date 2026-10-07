@@ -78,6 +78,10 @@ import { useImportStore } from '@renderer/features/import/importStore'
 import { EntityCreateDialog } from '@renderer/features/entities/EntityCreateDialog'
 import { EntityImportDialog } from '@renderer/features/entities/EntityImportDialog'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
+import { EditPassReport } from '@renderer/features/editPass/EditPassReport'
+import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
+import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
+import { EditPassWorkspace } from '@renderer/features/editPass/EditPassWorkspace'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useObservedFactStore } from '@renderer/features/entities/observedFactStore'
 import {
@@ -249,6 +253,8 @@ export function App(): React.JSX.Element {
       useProvenanceStore.getState().clear()
       useAssistantStore.getState().clear()
       useContinuityStore.getState().clear()
+      // F-14.15: the edit passes, their reports, and the workspace belong to the project that closed.
+      useEditPassStore.getState().clear()
       // F-7.1: a shell dialog left open over the closing project must not reappear over the next one.
       useShellDialogStore.getState().close()
       // F-12.2: a draft under review belongs to the project it would be written into.
@@ -340,6 +346,11 @@ export function App(): React.JSX.Element {
     // F-13.4: the open continuity findings, for the quiet count on the assistant panel; main
     // says when a background or on-demand check changed them.
     useContinuityStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    // F-14.15: the edit passes (the Edit reports list) and main's pass events.
+    useEditPassStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
@@ -947,8 +958,13 @@ function EditorColumn({ format }: { format: NovelFormat }): React.JSX.Element {
  */
 function useMainNodeId(): string | null {
   const entityId = useEntityStore((s) => s.selectedId)
+  // F-14.15: the Edits workspace or a report takes the pane like an entity page does.
+  const editView = useEditPassViewStore((s) => s.view)
   return useTreeStore((s) =>
-    entityId === null && s.selectedId !== null && s.byId[s.selectedId] !== undefined
+    entityId === null &&
+    editView === null &&
+    s.selectedId !== null &&
+    s.byId[s.selectedId] !== undefined
       ? s.selectedId
       : null
   )
@@ -961,6 +977,11 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
   const entityId = useEntityStore((s) => s.selectedId)
   const node = useTreeStore((s) => (s.selectedId === null ? undefined : s.byId[s.selectedId]))
   const folderView = useOutlineViewStore((s) => s.folderView)
+  // F-14.15: the Edits workspace or a pass's report; picking a document or an entity closes it.
+  const editView = useEditPassViewStore((s) => s.view)
+  if (editView?.kind === 'workspace') return <EditPassWorkspace />
+  if (editView?.kind === 'report')
+    return <EditPassReport key={editView.passId} passId={editView.passId} />
   if (entityId !== null) return <EntityEditor key={entityId} id={entityId} />
   if (!node) {
     // F-3.5: the empty state, centered in the pane.
