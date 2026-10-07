@@ -112,7 +112,10 @@ describe('contextWork (F-9.8)', () => {
   it('sends only the paragraphs an updated file did not have when it was last sorted', async () => {
     const id = await add('notes.md', 'Mara is 34.\n\nTomas is her brother.')
     markContextFileProcessed(db, id, 'Mara is 34.\n\nTomas is her brother.', NOW.toISOString())
-    expect((await contextWork(db, session.folder, [id])).chunks).toEqual([])
+    // Sorted as it stands: a reprocess reads it whole again.
+    expect((await contextWork(db, session.folder, [id])).chunks.map((c) => c.changedOnly)).toEqual([
+      false
+    ])
     await add('notes.md', 'Mara is 34.\n\nTomas is her brother.\n\nIlse keeps the bell.')
     const work = await contextWork(db, session.folder, [id])
     expect(work.chunks).toEqual([

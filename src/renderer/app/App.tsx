@@ -77,6 +77,9 @@ import { ImportDialog } from '@renderer/features/import/ImportDialog'
 import { useImportStore } from '@renderer/features/import/importStore'
 import { EntityCreateDialog } from '@renderer/features/entities/EntityCreateDialog'
 import { EntityImportDialog } from '@renderer/features/entities/EntityImportDialog'
+import { ContextUploadDialog } from '@renderer/features/library/ContextUploadDialog'
+import { DropOverlay } from '@renderer/features/library/DropOverlay'
+import { useLibraryStore } from '@renderer/features/library/libraryStore'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { EditPassReport } from '@renderer/features/editPass/EditPassReport'
 import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
@@ -261,6 +264,8 @@ export function App(): React.JSX.Element {
       useImportStore.getState().cancel()
       useTagStore.getState().clear()
       useEntityStore.getState().clear()
+      // F-9.8: the Library and any upload under review belong to the project that closed.
+      useLibraryStore.getState().clear()
       useObservedFactStore.getState().clear()
       useReferenceStore.getState().clear()
       // F-10.3: the goals, and the dialog if it was open.
@@ -305,6 +310,11 @@ export function App(): React.JSX.Element {
       .catch((err: unknown) => toast.error(describeError(err)))
     const treeLoaded = tree.load()
     treeLoaded.catch((err: unknown) => toast.error(describeError(err)))
+    // F-9.8: the Library tab's files.
+    useLibraryStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
     useEditorSettingsStore
       .getState()
       .load()
@@ -538,11 +548,20 @@ function WelcomeScreen(): React.JSX.Element {
     name: string,
     format: NovelFormat,
     aiSource: AiSource,
-    aiSwitch: AiSwitch
+    aiSwitch: AiSwitch,
+    contextPaths: string[]
   ): Promise<void> => {
     const info = await create(name, format, undefined, aiSource, aiSwitch)
     if (!info) return
     toast.success(`Created "${info.name}"`)
+    // F-9.8: the wizard's worldbuilding files go into the new project's Library, and from there
+    // to the estimate and the review, as if they had been added from the Library tab.
+    if (contextPaths.length > 0) {
+      useLibraryStore
+        .getState()
+        .add(contextPaths)
+        .catch((err: unknown) => toast.error(describeError(err)))
+    }
     // F-5.18: a project created with AI on arrives in the assisted workflow, the assistant panel
     // open (the chat in the project's mode, Ask for a new project). Only a new
     // project does this; opening an existing one leaves the layout as the author left it.
@@ -906,6 +925,10 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <EntityCreateDialog />
       {/* F-9.5: the entity import review, open only while a plan is under review. */}
       <EntityImportDialog />
+      {/* F-9.8: the context library's estimate, progress, and review, open while it sorts. */}
+      <ContextUploadDialog />
+      {/* F-9.8: files dropped anywhere on the window go to the Library. */}
+      <DropOverlay />
       {/* F-10.1: the project search, open while the search store says so. */}
       <SearchDialog />
       {/* F-10.2: find and replace across documents, open while the replace store says so. */}

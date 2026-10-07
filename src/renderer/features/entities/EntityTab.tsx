@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { LayoutGrid, List, MoreHorizontal } from 'lucide-react'
+import { LayoutGrid, List, MoreHorizontal, Upload } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { ENTITY_KIND_LABEL, ENTITY_KIND_NOUN, type EntityKind } from '@shared/entities'
 import { ENTITY_EXCHANGE_LABEL, type EntityExchangeFormat } from '@shared/entityExchange'
+import { useLibraryStore } from '@renderer/features/library/libraryStore'
 import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
 import type { MenuItem } from '@renderer/features/manuscript/contextMenuItems'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -133,6 +134,21 @@ export function EntityTab({ kind }: { kind: EntityKind }): React.JSX.Element {
           className="flex size-7 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-raised hover:text-fg"
         >
           <MoreHorizontal size={14} aria-hidden="true" />
+        </button>
+        {/* F-9.8: the author's own worldbuilding files, sorted into the story bible after a review. */}
+        <button
+          type="button"
+          data-testid="upload-context"
+          title="Add worldbuilding documents, character notes, maps, or art to the Library and sort them into the story bible"
+          onClick={() => {
+            useLibraryStore
+              .getState()
+              .add()
+              .catch((err: unknown) => toast.error(describeError(err)))
+          }}
+          className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-line px-2 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg"
+        >
+          <Upload size={12} aria-hidden="true" /> Upload context…
         </button>
         {categories.length > 0 ? (
           <select

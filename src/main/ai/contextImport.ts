@@ -74,7 +74,10 @@ export async function contextWork(
     }
     const text = await readContextText(folder, row)
     if (text === null) continue
-    const changedOnly = row.processedText !== null && row.processedHash !== null
+    // An updated file sends only what changed; a file sorted as it stands is read whole again
+    // (the author asked to reprocess it; the review still leaves out what the sheets hold).
+    const changedOnly =
+      row.processedText !== null && row.processedHash !== null && row.processedHash !== row.textHash
     const paragraphs = changedOnly
       ? changedParagraphs(splitParagraphs(text), splitParagraphs(row.processedText ?? ''))
       : splitParagraphs(text)

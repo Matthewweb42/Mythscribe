@@ -14,7 +14,9 @@ export const SIDEBAR_TAB_IDS = [
   'timeline',
   'tags',
   // F-14.15: the edit passes and their reports.
-  'edits'
+  'edits',
+  // F-9.8: the context library, the author's uploaded worldbuilding files.
+  'library'
 ] as const
 
 export const SidebarTabId = z.enum(SIDEBAR_TAB_IDS)
