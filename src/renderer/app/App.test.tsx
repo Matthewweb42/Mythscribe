@@ -1,4 +1,5 @@
 import { defaultFocusSettings } from '@shared/focus'
+import { defaultProjectSession } from '@shared/session'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -42,6 +43,7 @@ import { goalsStatusFixture } from '@renderer/features/goals/goalsFixture'
 import { resetGoalsStore } from '@renderer/features/goals/goalsStore'
 import { dialogs, useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { resetSessionStore } from '@renderer/features/project/sessionStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetReplaceStore, useReplaceStore } from '@renderer/features/search/replaceStore'
@@ -112,6 +114,7 @@ beforeEach(() => {
   useDocumentStore.getState().clear()
   useNotesStore.getState().clear()
   resetLayoutStore()
+  resetSessionStore()
   resetEditorSettingsStore()
   resetAiSettingsStore()
   resetAuthorRulesStore()
@@ -147,6 +150,8 @@ beforeEach(() => {
   vi.stubGlobal('innerWidth', 1000)
 })
 afterEach(() => {
+  // F-1.7: the session's write is debounced; leaving it pending leaks into the next file.
+  resetSessionStore()
   resetDraftStore()
   resetSnapshotStore()
   resetEntityDraftStore()
@@ -199,6 +204,8 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'authorRules:get') return defaultAuthorRules()
     if (channel === 'layout:get') return defaultLayout()
     if (channel === 'layout:set') return input
+    if (channel === 'session:get') return defaultProjectSession()
+    if (channel === 'session:set') return input
     if (channel === 'window:setFullScreen') return input // the fake window does what it is asked
     if (channel === 'conversations:get') return { active: null, items: [] }
     if (channel === 'focusSettings:get') return { ...defaultFocusSettings(), backgroundId: null }

@@ -12,6 +12,12 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-06 · F-1.7 · Where the session is kept and what it restores
+- Question: Where is "where I left off" stored, and how much of it comes back?
+- Chosen: in the project's database (settings key `session`), so it travels with the project folder (Google Drive) to any machine. Restored on open: the selected document, folder, or entity page; the sidebar tab (the project's, falling back to the app-wide one for a project with no session); folded folders; the Manuscript tag filter; stacked or cork-board folder view; Scene details open or shut; focus mode (a project closed fullscreen reopens fullscreen); caret and scroll for the 200 most recently visited documents, plus each stacked folder's scroll. The restored document takes the keyboard focus at its caret. The assistant's open conversation and mode were already per project.
+- Alternatives: keep it in app-state.json per machine (does not follow the folder); leave focus mode out (it used to always start windowed); keep the folder view app-wide as before.
+- To change it: `src/shared/session.ts`, `src/renderer/features/project/sessionStore.ts`, `src/renderer/features/editor/{DocumentEditor.tsx,scrollMemory.ts}`.
+
 ## 2026-10-06 · F-5.19 · Chat router instead of native tool calling
 - Question: How should the chat "act by itself" (rewrite, proofread, synopsis, …) when the provider layer and the Cloud Worker do not support tool calling?
 - Chosen: a router: one cheap `fast` JSON call (`route.v1`, feature `route`, its own toggle and ledger line) picks the action, then the existing feature runs unchanged. An exact action name or a message without letters skips the call; anything unreadable falls back to plain chat.

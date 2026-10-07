@@ -1,6 +1,7 @@
-import { useId, useState } from 'react'
+import { useId } from 'react'
 import { ChevronDown, ChevronRight, Pin, StickyNote } from 'lucide-react'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { useSessionStore } from '@renderer/features/project/sessionStore'
 import { DockPanelControls } from '@renderer/features/shell/Dock'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
@@ -43,9 +44,10 @@ export function NotesToggleButton(): React.JSX.Element {
  */
 export function NotesPanel({ id }: { id: string | null }): React.JSX.Element | null {
   const notes = useLayoutStore((s) => s.layout.notes)
-  // Held here, not in the disclosure, so it stays open across an entity page or a front-matter
-  // document in between; it resets when the column closes.
-  const [detailsOpen, setDetailsOpen] = useState(false)
+  // Held in the project's session (F-1.7), not in the disclosure, so it stays open across an
+  // entity page or a front-matter document in between and comes back with the project.
+  const detailsOpen = useSessionStore((s) => s.sceneDetailsOpen)
+  const setDetailsOpen = useSessionStore((s) => s.setSceneDetailsOpen)
   if (!notes.open) return null
   return (
     <div data-testid="notes-panel" className="flex min-h-0 flex-1 flex-col bg-surface">

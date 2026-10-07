@@ -13,7 +13,8 @@ export type WindowBounds = z.infer<typeof WindowBounds>
  * Window state (F-7.9), kept under one key in app-state.json and written only by main: where the
  * window was and whether it was maximized when it last closed, the project that was open, and
  * whether that project opens again on launch. Fullscreen is focus mode (F-6.1) and is never
- * restored; the bounds are the normal ones underneath it.
+ * restored here (the project's session, F-1.7, re-enters it); the bounds are the normal ones
+ * underneath it.
  */
 export const WindowState = z.object({
   bounds: WindowBounds.nullable().default(null),

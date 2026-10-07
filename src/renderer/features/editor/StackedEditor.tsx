@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Editor } from '@tiptap/core'
 import type { NovelFormat } from '@shared/ipc/contract'
@@ -11,8 +11,10 @@ import { useEditorZoom, usePageEdges } from '@renderer/features/shell/viewStore'
 import { describeError } from '@renderer/lib/errors'
 import { COLUMN, columnClass, editorStyle } from './column'
 import { DocumentEditor } from './DocumentEditor'
+import { useDocumentStore } from './documentStore'
 import { FocusModeButton } from './FocusModeButton'
 import { NotesToggleButton } from './NotesPanel'
+import { useScrollMemory } from './scrollMemory'
 import { useEditorSettings } from './settingsStore'
 import { StatusBar } from './StatusBar'
 import { Toolbar } from './Toolbar'
@@ -36,7 +38,8 @@ const ADD_BUTTON =
  * shows the folder's combined saved count (F-3.3), so it follows each region's autosave; no
  * session delta, because a folder's rollup also moves when scenes are moved or deleted. The
  * folder's own tags and metadata live in the tags and notes columns. Focus mode (F-6.1) drops
- * the toolbar.
+ * the toolbar. F-1.7: the stack's scroll is kept in the session under the folder's id and put
+ * back once every region has its text.
  */
 export function StackedEditor({
   folderId,
@@ -55,6 +58,9 @@ export function StackedEditor({
   const zoom = useEditorZoom()
   // F-7.11: each region is a sheet on the desk; focus mode keeps the plain stack (F-6.4).
   const sheet = usePageEdges() && !focus
+  const scroller = useRef<HTMLDivElement>(null)
+  const loaded = useDocumentStore((s) => docIds.every((d) => (s.docs[d]?.content ?? null) !== null))
+  useScrollMemory(scroller, folderId, loaded && docIds.length > 0)
   // A region that leaves the stack (deleted, moved out) takes its editor with it; the toolbar
   // must not keep pointing at it. Membership is decided here, at render, because Tiptap destroys
   // an unmounted editor on a timer, so `isDestroyed` alone would lag behind.
@@ -83,7 +89,10 @@ export function StackedEditor({
           }
         />
       )}
-      <div className={`min-h-0 flex-1 overflow-y-auto pb-12 ${sheet ? 'bg-desk px-4' : ''}`}>
+      <div
+        ref={scroller}
+        className={`min-h-0 flex-1 overflow-y-auto pb-12 ${sheet ? 'bg-desk px-4' : ''}`}
+      >
         {docIds.map((id, index) => (
           <Fragment key={id}>
             {index > 0 ? (

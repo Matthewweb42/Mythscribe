@@ -18,6 +18,7 @@ import type { NovelFormat } from '@shared/ipc/contract'
 import { OBSERVED_DISMISSED_KEY, defaultObservedDismissed } from '@shared/observedFacts'
 import { WRITING_PRESETS_KEY, builtinParams, defaultWritingPresets } from '@shared/presets'
 import { REFERENCE_PINS_KEY, REFERENCE_PINS_MAX, defaultReferencePins } from '@shared/references'
+import { SESSION_KEY, defaultProjectSession } from '@shared/session'
 import { STRUCTURE_KEY, defaultProjectStructure } from '@shared/structure'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
@@ -30,6 +31,7 @@ import {
   getFocusSettings,
   getObservedDismissed,
   getProjectDictionary,
+  getProjectSession,
   getProjectStructure,
   getReferencePins,
   getWritingPresets,
@@ -40,6 +42,7 @@ import {
   setFocusSettings,
   setObservedDismissed,
   setProjectDictionary,
+  setProjectSession,
   setProjectStructure,
   setReferencePins,
   setWritingPresets
@@ -306,6 +309,39 @@ describe('getConversations / setConversations (F-5.4)', () => {
     expect(getConversations(db)).toEqual(defaultConversations())
     setRaw(JSON.stringify({ active: 'c1', items: [{ id: 'c1' }] }), CONVERSATIONS_KEY)
     expect(getConversations(db)).toEqual(defaultConversations())
+  })
+})
+
+describe('getProjectSession / setProjectSession (F-1.7)', () => {
+  it('answers the defaults for a new project, which seeds no row', () => {
+    open('novel')
+    expect(rows(SESSION_KEY)).toHaveLength(0)
+    expect(getProjectSession(db)).toEqual(defaultProjectSession())
+  })
+
+  it('round-trips a value and overwrites the single row', () => {
+    open('novel')
+    const value = {
+      ...defaultProjectSession(),
+      selectedNodeId: 'n1',
+      sidebarTab: 'tags' as const,
+      collapsed: ['f1'],
+      positions: [{ id: 'n1', scrollTop: 120, selection: { anchor: 4, head: 9 } }]
+    }
+    expect(setProjectSession(db, value)).toEqual(value)
+    expect(getProjectSession(db)).toEqual(value)
+    setProjectSession(db, { selectedNodeId: null })
+    expect(rows(SESSION_KEY)).toHaveLength(1)
+    expect(getProjectSession(db)).toEqual(defaultProjectSession())
+  })
+
+  it('falls back when the stored value is not JSON or no longer fits the schema', () => {
+    open('novel')
+    setRaw('{not json', SESSION_KEY)
+    expect(getProjectSession(db)).toEqual(defaultProjectSession())
+    setRaw(JSON.stringify({ sidebarTab: 'gone' }), SESSION_KEY)
+    expect(getProjectSession(db)).toEqual(defaultProjectSession())
+    expect(() => setProjectSession(db, { collapsed: 'f1' as unknown as string[] })).toThrow()
   })
 })
 

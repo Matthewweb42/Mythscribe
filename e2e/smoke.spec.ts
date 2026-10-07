@@ -26,6 +26,7 @@ import { PRESETS, type WritingPresets } from '../src/shared/presets'
 import type { ReferencePin, ReferencePins } from '../src/shared/references'
 import { matterTemplate } from '../src/shared/matterTemplates'
 import type { SceneMeta } from '../src/shared/sceneMeta'
+import type { ProjectSession } from '../src/shared/session'
 import { STORY_BIBLE_HEADING } from '../src/shared/storyBible'
 import type { TiptapNodeT } from '../src/shared/tiptap'
 import { countWords } from '../src/shared/wordCount'
@@ -2706,7 +2707,7 @@ test('create, close, reopen a project on disk', async () => {
   // another scene flushes the edits and coming back reloads them from disk.
   const notesColumn = page.getByTestId('notes-panel')
   const detailsToggle = notesColumn.getByRole('button', { name: 'Scene details' })
-  /** Opens the Scene details disclosure unless it is open (closing the column or a relaunch resets it). */
+  /** Opens the Scene details disclosure unless it is open (since F-1.7 the project remembers it). */
   const showSceneDetails = async (): Promise<void> => {
     if ((await detailsToggle.getAttribute('aria-expanded')) !== 'true') await detailsToggle.click()
     await expect(detailsToggle).toHaveAttribute('aria-expanded', 'true')
@@ -5629,6 +5630,39 @@ test('create, close, reopen a project on disk', async () => {
     .poll(async () => (await getLayout()).dock.columns.slice(0, 2), { timeout: 3000 })
     .toEqual([['editor'], ['sidebar']])
 
+  // F-1.7: where the author was comes back with the project. Scene 1 (split) is open; the caret
+  // goes after its first three characters and the session saves it after its debounce. Then,
+  // as the last moves before the window closes (so the flush on close writes them), the last
+  // expandable folder folds shut and the sidebar moves to the Outline tab. After the relaunch
+  // below the same scene is open with the caret there (a typed letter lands at that spot), the
+  // folder is still folded, and the Outline tab is showing.
+  const resumeEditor = page.getByRole('textbox', { name: 'Document' })
+  const resumeTabs = page.getByRole('tablist', { name: 'Sidebar' })
+  const resumeTree = page.getByRole('tree', { name: 'Document tree' })
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1 (split)')
+  const resumeText = (await documentText(draftScene)) ?? ''
+  expect(resumeText.length).toBeGreaterThan(3)
+  await resumeEditor.click()
+  await page.keyboard.press('Control+Home')
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
+  // The caret after three characters is position 4 (the paragraph opens at 1).
+  await expect
+    .poll(async () => {
+      const session = await getSession()
+      return [session.selectedNodeId, session.positions[0]?.selection]
+    })
+    .toEqual([draftScene, { anchor: 4, head: 4 }])
+  const foldButton = resumeTree.getByRole('button', { name: /^Collapse / }).last()
+  const foldName = ((await foldButton.getAttribute('aria-label')) ?? '').replace(/^Collapse /, '')
+  expect(foldName).not.toBe('')
+  await foldButton.click()
+  await expect(resumeTree.getByRole('button', { name: `Expand ${foldName}` })).toBeVisible()
+  await resumeTabs.getByRole('tab', { name: 'Outline' }).click()
+  await expect(resumeTabs.getByRole('tab', { name: 'Outline' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+
   // F-7.9: the window closes somewhere else at another size, with the project still open; the
   // next launch puts the window back there and opens the project again.
   const left = await app.evaluate(({ BrowserWindow }) => {
@@ -5650,8 +5684,28 @@ test('create, close, reopen a project on disk', async () => {
   expect(exited).toBe(true)
 
   await launch()
-  await expect(page.getByRole('tabpanel', { name: 'Manuscript' }).getByRole('tree')).toBeVisible()
+  await expect(page.getByTestId('project-name')).toBeVisible()
   await expect(page.getByRole('button', { name: 'New project' })).toHaveCount(0)
+  // F-1.7: the same scene, focused at the same caret; the Outline tab; the folder still folded.
+  // (The relaunch made a new page, so the locators are taken again.)
+  const resumedEditor = page.getByRole('textbox', { name: 'Document' })
+  const resumedTabs = page.getByRole('tablist', { name: 'Sidebar' })
+  await expect(page.getByTestId('selected-title')).toHaveText('Scene 1 (split)')
+  await expect(resumedEditor).toBeFocused()
+  await page.keyboard.type('Z')
+  await expect
+    .poll(() => documentText(draftScene))
+    .toBe(`${resumeText.slice(0, 3)}Z${resumeText.slice(3)}`)
+  await page.keyboard.press('Backspace')
+  await expect.poll(() => documentText(draftScene)).toBe(resumeText)
+  await expect(resumedTabs.getByRole('tab', { name: 'Outline' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  await resumedTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  const resumedTree = page.getByRole('tabpanel', { name: 'Manuscript' }).getByRole('tree')
+  await expect(resumedTree).toBeVisible()
+  await expect(resumedTree.getByRole('button', { name: `Expand ${foldName}` })).toBeVisible()
   const relaunched = await page.evaluate(
     () =>
       window.mythscribe.invoke('project:current', undefined) as Promise<
@@ -5905,6 +5959,15 @@ async function usageSummary(): Promise<AiUsageSummary> {
       window.mythscribe.invoke('ai:usageSummary', undefined) as Promise<IpcResult<AiUsageSummary>>
   )
   if (!result.ok) throw new Error(`ai:usageSummary failed: ${result.error.message}`)
+  return result.data
+}
+
+/** The open project's stored session (F-1.7). */
+async function getSession(): Promise<ProjectSession> {
+  const result = await page.evaluate<IpcResult<ProjectSession>>(
+    () => window.mythscribe.invoke('session:get', undefined) as Promise<IpcResult<ProjectSession>>
+  )
+  if (!result.ok) throw new Error(`session:get failed: ${result.error.message}`)
   return result.data
 }
 

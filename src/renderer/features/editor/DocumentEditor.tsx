@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/core'
 import type { CSSProperties } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
@@ -12,6 +12,7 @@ import { useBackgroundStore, useCurrentBackground } from '@renderer/features/foc
 import { OVERLAY_WIDTH } from '@shared/focus'
 import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { useSessionStore } from '@renderer/features/project/sessionStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useEditorZoom, usePageEdges } from '@renderer/features/shell/viewStore'
@@ -34,6 +35,7 @@ import { useCritiqueStore } from './critiqueStore'
 import { NotesToggleButton } from './NotesPanel'
 import { captureRewriteText } from './rewriteTarget'
 import { useRewriteStore } from './rewriteStore'
+import { useScrollMemory } from './scrollMemory'
 import { SelectionBubble } from './SelectionBubble'
 import { askAboutSelection, rewriteSelection, selectionOffer } from './selectionActions'
 import { FocusModeButton } from './FocusModeButton'
@@ -188,7 +190,9 @@ function pickerAtSelection(editor: Editor): RangePicker {
  * Once ready, the instance registers as the active editor (F-5.4; again on focus, so the
  * last-focused region of a stack wins) and releases itself on unmount, which is how the
  * assistant panel reaches the caret. Focus mode (F-6.1) drops the toolbar; the status bar
- * stays.
+ * stays. F-1.7: the single-document view records its caret and scroll in the session and puts
+ * both back when the document opens again (and takes the focus for the document restored with
+ * the project), so the author is where they left it.
  */
 function RegionEditor({
   id,
@@ -252,6 +256,12 @@ function RegionEditor({
         }
       },
       onUpdate: ({ editor }) => edit(id, editor.getJSON()),
+      // F-1.7: where the caret is, for the session; a stacked region has no caret of its own.
+      onSelectionUpdate: ({ editor }) => {
+        if (!toolbar || !ready) return
+        const { anchor, head } = editor.state.selection
+        useSessionStore.getState().recordSelection(id, { anchor, head })
+      },
       // `useEditor` reads the latest `onFocus` on every call, so a changed callback is honoured.
       onFocus: ({ editor }) => {
         useActiveEditorStore.getState().set(id, editor)
@@ -267,6 +277,20 @@ function RegionEditor({
     store.set(id, editor)
     return () => store.release(editor)
   }, [editor, id, ready])
+
+  // F-1.7: the caret as the session last saw it, and the focus for the document the project
+  // reopened on; the scroll follows in `useScrollMemory`, after the focus, so it wins.
+  useEffect(() => {
+    if (!ready || !toolbar) return
+    const session = useSessionStore.getState()
+    const selection = session.positionOf(id)?.selection ?? null
+    if (selection !== null)
+      editor.commands.setTextSelection({ from: selection.anchor, to: selection.head })
+    if (session.takeCaretFocus(id)) editor.commands.focus(null, { scrollIntoView: false })
+  }, [editor, id, ready, toolbar])
+
+  const scroller = useRef<HTMLDivElement>(null)
+  useScrollMemory(scroller, id, ready && toolbar)
 
   useEffect(() => {
     resyncInlineTags(editor.view.dom, tagsById, tagAliases)
@@ -466,7 +490,10 @@ function RegionEditor({
           }
         />
       )}
-      <div className={`flex min-h-0 flex-1 flex-col overflow-y-auto ${deskClass(sheet)}`}>
+      <div
+        ref={scroller}
+        className={`flex min-h-0 flex-1 flex-col overflow-y-auto ${deskClass(sheet)}`}
+      >
         <EditorContent
           editor={editor}
           className={`${columnClass(sheet)} flex flex-1 flex-col py-6 ${typewriter ? 'pb-[50vh]' : ''} ${surface ? 'focus-surface' : ''}`}

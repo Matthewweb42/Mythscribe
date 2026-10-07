@@ -9,6 +9,7 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { resetSessionStore } from '@renderer/features/project/sessionStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { DockColumn } from '@renderer/features/shell/Dock'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -95,6 +96,7 @@ function Host({ id }: { id: string | null }): React.JSX.Element {
 beforeEach(() => {
   vi.stubGlobal('innerWidth', WINDOW_WIDTH)
   resetLayoutStore()
+  resetSessionStore()
   resetReferenceStore()
   resetNotesStore()
   resetSceneMetaStore()

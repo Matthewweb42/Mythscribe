@@ -196,6 +196,7 @@ import {
   getEditorSettings,
   getFocusSettings,
   getProjectDictionary,
+  getProjectSession,
   getProjectStructure,
   getProjectTimeline,
   getReferencePins,
@@ -208,6 +209,7 @@ import {
   setEditorSettings,
   setFocusSettings,
   setProjectDictionary,
+  setProjectSession,
   setProjectStructure,
   setReferencePins,
   setWritingPresets
@@ -849,6 +851,10 @@ export function registerHandlers({
   register('focusSettings:set', (value) =>
     setFocusSettings(manager.require().connection.orm, value)
   )
+
+  register('session:get', () => getProjectSession(manager.require().connection.orm))
+
+  register('session:set', (value) => setProjectSession(manager.require().connection.orm, value))
 
   // F-14.2: the author's rules are part of the voice profile, so a write invalidates its cache.
   register('authorRules:get', () => getAuthorRules(manager.require().connection.orm))

@@ -9,6 +9,7 @@ import { countWords } from '@shared/wordCount'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { resetSessionStore, useSessionStore } from '@renderer/features/project/sessionStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { resetViewStore, useViewStore } from '@renderer/features/shell/viewStore'
@@ -215,6 +216,7 @@ beforeEach(() => {
   resetProofreadStore()
   resetAiSettingsStore()
   resetAssistantStore()
+  resetSessionStore()
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
 })
@@ -234,6 +236,7 @@ afterEach(() => {
   resetProofreadStore()
   resetAiSettingsStore()
   resetAssistantStore()
+  resetSessionStore()
 })
 
 describe('DocumentEditor AI on a selection (2026-10-06)', () => {
@@ -491,6 +494,57 @@ describe('DocumentEditor typewriter (F-3.9, F-6.7)', () => {
     )
     expect(editor.storage.typewriter?.enabled).toBe(true)
     expect(screen.getByRole('textbox', { name: 'Document' })).toBe(box())
+  })
+})
+
+describe('DocumentEditor resume where you left off (F-1.7)', () => {
+  it('puts the caret back where the session saw it and takes the focus for the restored document', async () => {
+    install({ 'document:get': () => ({ id: 'sc-1', content: doc('Hello there, world') }) })
+    useSessionStore.setState({
+      live: true,
+      positions: [{ id: 'sc-1', scrollTop: 0, selection: { anchor: 7, head: 12 } }],
+      caretFocusId: 'sc-1'
+    })
+    render(<DocumentEditor id="sc-1" format="novel" />)
+    await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
+    const editor = useActiveEditorStore.getState().active?.editor
+    expect(editor?.state.selection.anchor).toBe(7)
+    expect(editor?.state.selection.head).toBe(12)
+    await waitFor(() => expect(box()).toHaveFocus())
+    expect(useSessionStore.getState().caretFocusId).toBeNull()
+  })
+
+  it('records caret moves for the session, but not for a stacked region', async () => {
+    install({
+      'document:get': (input) => ({
+        id: (input as { id: string }).id,
+        content: doc('Some words here')
+      })
+    })
+    useSessionStore.setState({ live: true })
+    render(
+      <>
+        <DocumentEditor id="sc-1" format="novel" />
+        <DocumentEditor id="sc-2" format="novel" toolbar={false} />
+      </>
+    )
+    const boxes = (): HTMLElement[] => screen.getAllByRole('textbox', { name: 'Document' })
+    await waitFor(() =>
+      expect(boxes().every((b) => b.getAttribute('contenteditable') === 'true')).toBe(true)
+    )
+    const editorOf = (index: number): Editor => {
+      const el = boxes()[index]
+      const found = el && (el as HTMLElement & { editor?: Editor }).editor
+      if (!found) throw new Error('no editor')
+      return found
+    }
+    act(() => {
+      editorOf(0).commands.setTextSelection(5)
+      editorOf(1).commands.setTextSelection(3)
+    })
+    expect(useSessionStore.getState().positions).toEqual([
+      { id: 'sc-1', scrollTop: 0, selection: { anchor: 5, head: 5 } }
+    ])
   })
 })
 

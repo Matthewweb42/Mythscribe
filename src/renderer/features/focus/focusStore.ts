@@ -17,7 +17,8 @@ const closedPanels = (): FocusPanels => ({ notes: false, assistant: false })
  * fullscreen state, never a wish: `enter`, `exit`, and `toggle` ask main and take the state it
  * answers, and `subscribe` mirrors `window:fullScreenChanged` for the cases nobody asked the
  * app for (the window manager or the OS leaving fullscreen on its own). A refused call toasts
- * and leaves `active` as it was. Not persisted: a reopened app starts windowed. F-6.5: the
+ * and leaves `active` as it was. The project's session (F-1.7) remembers it, so a project closed
+ * in focus mode reopens in it. F-6.5: the
  * notes and assistant panels have their own flags here for focus mode, so the persisted
  * layout (which governs the normal screen) is never touched; leaving focus mode closes both,
  * so every entry starts with the editor alone.

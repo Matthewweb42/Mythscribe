@@ -85,6 +85,7 @@ import {
   ReplaceUndoResult
 } from '../replace'
 import { SearchRequest, SearchResponse } from '../search'
+import { ProjectSession } from '../session'
 import { ReferencePins } from '../references'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../rewrite'
 import { SceneBrief, SceneMeta } from '../sceneMeta'
@@ -927,6 +928,13 @@ export const contract = {
   'focusSettings:get': { input: z.undefined(), output: FocusSettings },
   /** Replaces the project's focus-mode settings (F-6.2); a value outside the schema is refused with VALIDATION. */
   'focusSettings:set': { input: FocusSettings, output: FocusSettings },
+  /**
+   * Where the author was in the project (F-1.7): the selection, folded folders, sidebar tab, and
+   * caret and scroll per document. A missing or unreadable row answers with the defaults.
+   */
+  'session:get': { input: z.undefined(), output: ProjectSession },
+  /** Replaces the project's session (F-1.7); a value outside the schema is refused with VALIDATION. */
+  'session:set': { input: ProjectSession, output: ProjectSession },
   /** The author's rules and banned phrases (F-14.2); a missing or unreadable row answers with the defaults (no rules, the seeded phrases). */
   'authorRules:get': { input: z.undefined(), output: AuthorRules },
   /** Replaces the author's rules (F-14.2); phrases are normalised and deduplicated, a value outside the schema is refused with VALIDATION. */

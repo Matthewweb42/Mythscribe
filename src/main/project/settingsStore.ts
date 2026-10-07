@@ -35,6 +35,12 @@ import {
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
 import { DISMISSED_NAMES_KEY, DismissedNames, defaultDismissedNames } from '@shared/proposedTags'
 import { REFERENCE_PINS_KEY, ReferencePins, defaultReferencePins } from '@shared/references'
+import {
+  SESSION_KEY,
+  ProjectSession,
+  parseStoredSession,
+  type ProjectSessionInput
+} from '@shared/session'
 import { STRUCTURE_KEY, ProjectStructure, defaultProjectStructure } from '@shared/structure'
 import { TAG_ALIASES_KEY, TagAliases } from '@shared/tagExchange'
 import { TIMELINE_KEY, ProjectTimeline, defaultProjectTimeline } from '@shared/timeline'
@@ -248,6 +254,36 @@ export function setFocusSettings(db: TreeDb, value: FocusSettingsInput): FocusSe
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: FOCUS_SETTINGS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the project's session (F-1.7) from the `settings` row under `SESSION_KEY`. A missing
+ * row or unparsable JSON answers with the defaults (nothing selected, nothing restored); a row
+ * that no longer fits the schema is read leniently by `parseStoredSession`. Nothing is seeded:
+ * a new project starts with no session.
+ */
+export function getProjectSession(db: TreeDb): ProjectSession {
+  const row = db.select().from(settings).where(eq(settings.key, SESSION_KEY)).get()
+  let json: unknown = null
+  if (row) {
+    try {
+      json = JSON.parse(row.value)
+    } catch {
+      json = null
+    }
+  }
+  return parseStoredSession(json)
+}
+
+/** Replaces the project's session (upsert on the settings key) and returns what was stored. */
+export function setProjectSession(db: TreeDb, value: ProjectSessionInput): ProjectSession {
+  const stored = ProjectSession.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: SESSION_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

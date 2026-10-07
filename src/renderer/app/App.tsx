@@ -102,6 +102,7 @@ import { CreateProjectWizard } from '@renderer/features/project/CreateProjectWiz
 import { RecentProjects } from '@renderer/features/project/RecentProjects'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { installSaveOnBlur } from '@renderer/features/project/saveOnBlur'
+import { useSessionStore } from '@renderer/features/project/sessionStore'
 import { useWelcomeStore } from '@renderer/features/project/welcomeStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -222,9 +223,12 @@ export function App(): React.JSX.Element {
   // assistant conversations. F-5.13: and the background index queue's status, which the header
   // indicator shows. F-6.1: a project closed in focus mode leaves it, so the welcome
   // screen is windowed. F-6.2: and the focus-mode backgrounds. F-9.6: and the reference pins.
+  // F-1.7: the session restores once the tree, the story bible, and the tag bank are in; on
+  // close it stops recording first, so leaving focus mode and emptying the tree are not moves.
   useEffect(() => {
     const tree = useTreeStore.getState()
     if (projectId === null) {
+      useSessionStore.getState().clear()
       const focus = useFocusStore.getState()
       if (focus.active) void focus.exit()
       tree.clear()
@@ -293,7 +297,8 @@ export function App(): React.JSX.Element {
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
-    tree.load().catch((err: unknown) => toast.error(describeError(err)))
+    const treeLoaded = tree.load()
+    treeLoaded.catch((err: unknown) => toast.error(describeError(err)))
     useEditorSettingsStore
       .getState()
       .load()
@@ -338,15 +343,13 @@ export function App(): React.JSX.Element {
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
-    useTagStore
-      .getState()
-      .load()
-      .catch((err: unknown) => toast.error(describeError(err)))
-    // F-9.2: the story bible loads beside the tag bank; the entity tabs read it, nothing waits on it.
-    useEntityStore
-      .getState()
-      .load()
-      .catch((err: unknown) => toast.error(describeError(err)))
+    const tagsLoaded = useTagStore.getState().load()
+    tagsLoaded.catch((err: unknown) => toast.error(describeError(err)))
+    // F-9.2: the story bible loads beside the tag bank; the entity tabs read it, and the session
+    // (F-1.7) checks a restored entity page against it.
+    const entitiesLoaded = useEntityStore.getState().load()
+    entitiesLoaded.catch((err: unknown) => toast.error(describeError(err)))
+    void useSessionStore.getState().load(Promise.all([treeLoaded, tagsLoaded, entitiesLoaded]))
     // F-9.6: the pins of the quick reference panel; the cards read the stores above.
     useReferenceStore
       .getState()

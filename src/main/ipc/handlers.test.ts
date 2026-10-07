@@ -1,4 +1,5 @@
 import { defaultFocusSettings } from '@shared/focus'
+import { defaultProjectSession } from '@shared/session'
 import { growLegacyStarter } from '../project/testProject'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -1340,6 +1341,37 @@ describe('presets:get / presets:set (F-5.2)', () => {
   })
 })
 
+describe('session (F-1.7)', () => {
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('session:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('session:set', defaultProjectSession())).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+  })
+
+  it('answers the defaults for a new project, then what was set, also after a reopen', async () => {
+    const created = await invoke('project:create', {
+      name: 'Resume',
+      format: 'novel',
+      directory: tmp
+    })
+    expect(await invoke('session:get', undefined)).toEqual(defaultProjectSession())
+    const value = { ...defaultProjectSession(), selectedNodeId: 'n1', focus: true }
+    expect(await invoke('session:set', value)).toEqual(value)
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    expect(await invoke('session:get', undefined)).toEqual(value)
+  })
+
+  it('refuses a value outside the schema with VALIDATION', async () => {
+    await invoke('project:create', { name: 'Resume', format: 'novel', directory: tmp })
+    const result = await handlerFor('session:set')(undefined, { sidebarTab: 'nowhere' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION')
+    expect(await invoke('session:get', undefined)).toEqual(defaultProjectSession())
+  })
+})
+
 describe('focusSettings and backgrounds (F-6.2)', () => {
   const PNG = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMwTpsJAAICATNWh+JUAAAAAElFTkSuQmCC',
@@ -2382,9 +2414,11 @@ describe('ai:suggestSynopsis and ai:suggestNotes (F-5.20)', () => {
 
   it('answers DISABLED as data, a bad answer as PROVIDER, and refuses an unknown or too-short scene', async () => {
     const { scene } = await ready(0)
-    expect(await invoke('ai:suggestSynopsis', { nodeId: scene, requestId: 's-0' })).toMatchObject(
-      { ok: false, code: 'DISABLED', requestId: 's-0' }
-    )
+    expect(await invoke('ai:suggestSynopsis', { nodeId: scene, requestId: 's-0' })).toMatchObject({
+      ok: false,
+      code: 'DISABLED',
+      requestId: 's-0'
+    })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     answersWith({ nothing: true })
     expect(await invoke('ai:suggestNotes', { nodeId: scene, requestId: 'n-1' })).toMatchObject({
