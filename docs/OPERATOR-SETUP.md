@@ -140,6 +140,11 @@ For each of the four products:
 Each product has one variant; its ID is what the webhook matches on.
 
 ### 2.3 Tell the Worker about the products
+**The easy way:** run `npm run cloud:products`. It asks for each product's buy link, variant ID and price, checks them as you
+go, writes the two lines below into `cloud/wrangler.toml`, and asks before deploying. For the variant ID, you can paste the whole
+variant page URL; it pulls out the number. Re-run it any time; pressing Enter keeps what's already there.
+
+**By hand,** if you prefer:
 Edit `cloud/wrangler.toml`, section `[vars]`. Uncomment the example lines and fill in your values. These aren't secret:
 variant IDs and buy links are public.
 ```toml
