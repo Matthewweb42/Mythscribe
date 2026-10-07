@@ -51,7 +51,7 @@ import {
 } from './assistantStore'
 import { ContinuityLink, ContinuityView } from './ContinuityPanel'
 import { useContinuityStore } from './continuityStore'
-import { describeRequest } from './usageFormat'
+import { RequestCost } from './RequestCost'
 
 const ICON_BUTTON =
   'rounded-md p-1 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
@@ -450,12 +450,14 @@ function Turn({
       ) : null}
       {message.model !== null ? (
         <p data-testid="chat-turn-cost" className="m-0 text-[11px] text-fg-subtle">
-          {describeRequest({
-            model: message.model,
-            costUsd: message.costUsd ?? 0,
-            usage: message.usage,
-            cached
-          })}
+          <RequestCost
+            request={{
+              model: message.model,
+              costUsd: message.costUsd ?? 0,
+              usage: message.usage,
+              cached
+            }}
+          />
         </p>
       ) : null}
     </article>

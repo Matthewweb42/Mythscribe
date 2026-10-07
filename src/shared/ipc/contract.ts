@@ -33,7 +33,7 @@ import {
 import { AccountStatus } from '../account'
 import { AuthorRules } from '../authorRules'
 import { BackupSettingsPatch, BackupState } from '../backups'
-import { CheckoutBody, CreditsResult, EMAIL_MAX } from '../cloudApi'
+import { CheckoutBody, CreditsResult, EMAIL_MAX, PricingResult, UsageResult } from '../cloudApi'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { CompiledManuscript } from '../compile'
 import {
@@ -1542,6 +1542,21 @@ export const contract = {
    * VALIDATION; signed out or unreachable is IO.
    */
   'account:buyCredits': { input: CheckoutBody, output: z.null() },
+  /**
+   * One page of the signed-in account's MythScribe Cloud ledger, newest first (AI-BILLING-SPEC
+   * E7, `GET /usage`): top-ups, charges with their model and tokens, refunds. `cursor` is the
+   * previous page's `nextCursor`, null for the first page. IO when signed out or unreachable.
+   */
+  'account:getUsage': {
+    input: z.object({ cursor: z.string().min(1).max(200).nullable() }),
+    output: UsageResult
+  },
+  /**
+   * The hosted price table, packs, and limits (AI-BILLING-SPEC P5, `GET /pricing`), fetched again
+   * when the cached copy is an hour old; null before the Worker has ever answered (the renderer
+   * then uses the bundled defaults). Never fails: an unreachable Worker answers the cache.
+   */
+  'account:getPricing': { input: z.undefined(), output: PricingResult.nullable() },
   /**
    * The Supporter license (F-15.9) from the local cache: licensed or not, when the Worker last
    * confirmed it, how long the cached token is trusted without the network, the product on sale,

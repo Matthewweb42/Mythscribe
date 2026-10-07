@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_MODELS } from '@shared/ai'
-import { isFeatureAllowed } from '@shared/aiSettings'
+import { isFeatureAllowed, type AiSource } from '@shared/aiSettings'
+import { hostedModelFor, hostedQuote } from '@shared/hostedPricing'
 import { baseName, type ImportDraft, type ImportPlacement } from '@shared/import'
 import {
   estimateStructureCost,
@@ -9,6 +10,7 @@ import {
   type StructureEstimate
 } from '@shared/importStructure'
 import type { NovelFormat } from '@shared/ipc/contract'
+import { hostedPricingNow } from '@renderer/features/account/hostedPricing'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { providerOf, routedTier, useAiStore } from '@renderer/features/ai/aiStore'
@@ -86,19 +88,29 @@ const nextRequestId = (): string => `imp-${Date.now().toString(36)}-${++counter}
 
 /**
  * The model the pass would run on: the tier the import routes to (fast unless the author
- * overrode it) of the provider this project's source sends through (F-15.4, 2026-10-07).
+ * overrode it) of the provider this project's source sends through (F-15.4, 2026-10-07). On
+ * MythScribe Cloud a tier left at its default follows the server's routing table, as main does.
  */
-function fastModel(): string {
-  const source = useAiSettingsStore.getState().settings?.source ?? 'ownKey'
+function fastModel(source: AiSource): string {
   const { status, choice } = useAiStore.getState()
   const tier = routedTier(choice, source, 'importStructure', 'fast')
-  return status?.models[providerOf(status, source)][tier] ?? DEFAULT_MODELS[tier]
+  const chosen = status?.models[providerOf(status, source)][tier] ?? DEFAULT_MODELS[tier]
+  return source === 'cloud' ? hostedModelFor(tier, chosen, hostedPricingNow()) : chosen
 }
 
-/** What the pass over the draft as it stands would cost, from the words that would really be sent. */
+/**
+ * What the pass over the draft as it stands would cost, from the words that would really be
+ * sent. On MythScribe Cloud it is the hosted quote (AI-BILLING-SPEC flow 2, R3, E4): the sum of
+ * the chunks at the server's price, padded by the safety factor; the offer is the confirm.
+ */
 function estimateFor(draft: ImportDraft): { words: number; estimate: StructureEstimate } {
   const words = flattenDraft(draft).reduce((total, paragraph) => total + paragraph.words, 0)
-  return { words, estimate: estimateStructureCost(words, fastModel()) }
+  const source = useAiSettingsStore.getState().settings?.source ?? 'ownKey'
+  const model = fastModel(source)
+  const estimate = estimateStructureCost(words, model)
+  if (source !== 'cloud') return { words, estimate }
+  const quote = hostedQuote(hostedPricingNow(), model, estimate.tokensIn, estimate.tokensOut)
+  return { words, estimate: { ...estimate, costUsd: quote.costUsd, priced: quote.priced } }
 }
 
 /** The offer for a fresh draft, or null when the feature is not allowed or there is nothing to send. */

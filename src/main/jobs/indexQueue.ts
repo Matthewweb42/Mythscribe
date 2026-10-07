@@ -135,7 +135,9 @@ const HARD_CODES: ReadonlySet<AiErrorCode> = new Set<AiErrorCode>([
   'SIGNED_OUT',
   'NO_CREDIT',
   // Cloud does not serve AI yet; only a change of source in Settings fixes it.
-  'CLOUD_UNAVAILABLE'
+  'CLOUD_UNAVAILABLE',
+  // The hosted model is not on sale; only another model in Settings fixes it.
+  'MODEL_UNAVAILABLE'
 ])
 
 type Outcome = 'quiet' | 'cancelled' | 'transient' | 'hard'

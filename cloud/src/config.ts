@@ -8,6 +8,7 @@
 import { z } from 'zod'
 import { AI_COMPLETE_MAX_CHARS } from '../../src/shared/cloudApi'
 import {
+  DEFAULT_BILLING_TERMS,
   DEFAULT_HOSTED_MODELS,
   DEFAULT_HOSTED_ROUTING,
   DEFAULT_WORD_COSTS,
@@ -51,17 +52,8 @@ export const BillingConfig = z.object({
 export type BillingConfig = z.infer<typeof BillingConfig>
 
 export const DEFAULT_BILLING_CONFIG: BillingConfig = {
-  appPriceUsd: 30,
-  minPackUsd: 10,
-  markup: 0.2,
-  trialGrantUsd: 2,
-  quoteThresholdUsd: 0.25,
-  estimateSafetyFactor: 1.2,
-  lowBalanceWarningUsd: 2,
-  holdExpiryMinutes: 10,
-  requestsPerMinute: 60,
+  ...DEFAULT_BILLING_TERMS,
   maxInputChars: AI_COMPLETE_MAX_CHARS,
-  refundWindowDays: 30,
   webhookMaxAgeHours: 72,
   models: [...DEFAULT_HOSTED_MODELS],
   routing: DEFAULT_HOSTED_ROUTING,

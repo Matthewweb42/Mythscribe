@@ -1,3 +1,5 @@
+import { DEFAULT_BILLING_TERMS, usdToMicros } from './cloudBilling'
+
 /**
  * The MythScribe Cloud usage meter (F-15.5): the period the meter covers, the run-out projection,
  * and when the app warns. Pure, and imported by both the app and the Worker so "this period"
@@ -13,8 +15,11 @@ const DAY_MS = 24 * 60 * 60_000
 /** The meter, the per-feature breakdown, and the projection all cover this many days. */
 export const USAGE_PERIOD_DAYS = 30
 export const USAGE_PERIOD_MS = USAGE_PERIOD_DAYS * DAY_MS
-/** Below this balance (1.00 USD) the app warns, whatever the pace. */
-export const LOW_BALANCE_MICROS = 1_000_000
+/**
+ * Below this balance the app warns, whatever the pace (E6): the Worker's configured line
+ * (`lowBalanceWarningMicros` in `GET /pricing`) once known, this default ($2.00) until then.
+ */
+export const LOW_BALANCE_MICROS = usdToMicros(DEFAULT_BILLING_TERMS.lowBalanceWarningUsd)
 /** The app warns when the balance lasts this many days or fewer at the period's pace. */
 export const RUN_OUT_WARNING_DAYS = 3
 
@@ -51,9 +56,11 @@ export type CreditWarning = 'empty' | 'low' | 'runOut'
 export function creditWarning(input: {
   balanceMicros: number
   daysLeft: number | null
+  /** The configured warning line; `LOW_BALANCE_MICROS` when not given. */
+  lowMicros?: number
 }): CreditWarning | null {
   if (input.balanceMicros <= 0) return 'empty'
-  if (input.balanceMicros < LOW_BALANCE_MICROS) return 'low'
+  if (input.balanceMicros < (input.lowMicros ?? LOW_BALANCE_MICROS)) return 'low'
   if (input.daysLeft !== null && input.daysLeft <= RUN_OUT_WARNING_DAYS) return 'runOut'
   return null
 }

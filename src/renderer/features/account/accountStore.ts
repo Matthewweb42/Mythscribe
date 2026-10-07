@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { AccountStatus } from '@shared/account'
-import type { CreditsResult } from '@shared/cloudApi'
+import type { CreditsResult, PricingResult, UsageEntry } from '@shared/cloudApi'
 import type { AccentId, SupporterStatus } from '@shared/license'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -45,6 +45,20 @@ interface AccountState {
   supporterBusy: boolean
   /** The message from the last failed supporter call; separate from `error` and `creditsError`. */
   supporterError: string | null
+  /**
+   * The hosted price table, packs, and limits main last answered (AI-BILLING-SPEC P5); null
+   * until asked or before the Worker ever answered. Read through `useHostedPricing`, which falls
+   * back to the bundled defaults.
+   */
+  pricing: PricingResult | null
+  /**
+   * The usage history pages loaded so far (E7), newest first; null until the first page. The
+   * cursor is the next (older) page's, null on the last page.
+   */
+  usage: UsageEntry[] | null
+  usageCursor: string | null
+  usageBusy: boolean
+  usageError: string | null
   load: () => Promise<void>
   /** Asks main to email a sign-in link and start polling; the pending status comes back. */
   requestLink: (email: string) => Promise<void>
@@ -65,13 +79,35 @@ interface AccountState {
   buySupporter: () => Promise<void>
   /** Picks the accent colour (F-15.9); main refuses anything but `default` without a license. */
   setAccent: (accent: AccentId) => Promise<void>
+  /** Asks main for the hosted price table (refetched there once an hour old); never fails. */
+  loadPricing: () => Promise<void>
+  /** Loads the first page of the usage history, or with `more` the next (older) page. */
+  loadUsage: (more?: boolean) => Promise<void>
   /**
    * Listens for what main pushes: a status change (a link opened, an attempt expired), the
    * balance a Cloud request was charged against (F-15.5), and the Supporter license after a
-   * background refresh or a sign-out (F-15.9). Returns the one unsubscribe for all three.
+   * background refresh or a sign-out (F-15.9). It also refreshes the balance and the price table
+   * when the window regains focus while signed in (AI-BILLING-SPEC flow 4: the author comes back
+   * from a checkout in the browser). Returns the one unsubscribe for all of them.
    */
   subscribe: () => () => void
 }
+
+/** A focus refresh is skipped this soon after the last one, so alt-tabbing never floods the Worker. */
+export const FOCUS_REFRESH_MIN_MS = 10_000
+let lastFocusRefresh = 0
+/** Removes the window focus listener of the live subscription; null when none is attached. */
+let detachFocus: (() => void) | null = null
+
+/** What belongs to a signed-in account and goes when it does: the balance and its history. */
+const SIGNED_OUT_ACCOUNT_DATA = {
+  credits: null,
+  creditsAt: null,
+  creditsError: null,
+  usage: null,
+  usageCursor: null,
+  usageError: null
+} as const
 
 /** Bumped by every reset so a response from a superseded request is dropped. */
 let generation = 0
@@ -87,11 +123,7 @@ export const useAccountStore = create<AccountState>((set, get) => {
       // signed in (sign out, a revoked session on refresh) leaves none to show.
       // The Supporter license (F-15.9) is deliberately not cleared here: the cached token is
       // local, and main pushes `account:supporterChanged` when signing out drops it.
-      set(
-        status.state === 'signedIn'
-          ? { status }
-          : { status, credits: null, creditsAt: null, creditsError: null }
-      )
+      set(status.state === 'signedIn' ? { status } : { status, ...SIGNED_OUT_ACCOUNT_DATA })
     } catch (err: unknown) {
       if (mine !== generation) return
       set({ error: describeError(err) })
@@ -150,6 +182,11 @@ export const useAccountStore = create<AccountState>((set, get) => {
     supporter: null,
     supporterBusy: false,
     supporterError: null,
+    pricing: null,
+    usage: null,
+    usageCursor: null,
+    usageBusy: false,
+    usageError: null,
 
     load: () => run(() => ipc().invoke('account:getStatus', undefined)),
 
@@ -173,6 +210,38 @@ export const useAccountStore = create<AccountState>((set, get) => {
 
     setAccent: (accent) => runSupporter(() => ipc().invoke('account:setAccent', { accent })),
 
+    loadPricing: async () => {
+      const mine = generation
+      try {
+        const pricing = await ipc().invoke('account:getPricing', undefined)
+        if (mine !== generation || pricing === null) return
+        set({ pricing })
+      } catch (err: unknown) {
+        // Pricing is never worth an error: the bundled defaults stand in.
+        console.warn('Could not read the MythScribe Cloud price table', err)
+      }
+    },
+
+    loadUsage: async (more = false) => {
+      const mine = generation
+      const cursor = more ? get().usageCursor : null
+      if (more && cursor === null) return
+      set({ usageBusy: true, usageError: null })
+      try {
+        const page = await ipc().invoke('account:getUsage', { cursor })
+        if (mine !== generation) return
+        set({
+          usage: more ? [...(get().usage ?? []), ...page.entries] : page.entries,
+          usageCursor: page.nextCursor
+        })
+      } catch (err: unknown) {
+        if (mine !== generation) return
+        set({ usageError: describeError(err) })
+      } finally {
+        if (mine === generation) set({ usageBusy: false })
+      }
+    },
+
     subscribe: () => {
       const offStatus = ipc().on('account:changed', (status) => {
         // The state moved on under the author (the link was opened, or the attempt expired), so
@@ -180,7 +249,7 @@ export const useAccountStore = create<AccountState>((set, get) => {
         set(
           status.state === 'signedIn'
             ? { status, error: null }
-            : { status, error: null, credits: null, creditsAt: null, creditsError: null }
+            : { status, error: null, ...SIGNED_OUT_ACCOUNT_DATA }
         )
       })
       // F-15.5: a Cloud request was answered and charged; the balance it left behind is the one
@@ -201,10 +270,28 @@ export const useAccountStore = create<AccountState>((set, get) => {
       const offSupporter = ipc().on('account:supporterChanged', (supporter) => {
         set({ supporter, supporterError: null })
       })
+      // Flow 4: the author paid in the browser and came back. The balance and the table are
+      // asked again; nothing is asked while signed out, and never twice within a few seconds.
+      const onFocus = (): void => {
+        const now = Date.now()
+        if (get().status?.state !== 'signedIn' || now - lastFocusRefresh < FOCUS_REFRESH_MIN_MS) {
+          return
+        }
+        lastFocusRefresh = now
+        if (!get().creditsBusy) void get().loadCredits()
+        void get().loadPricing()
+      }
+      // One focus listener at a time: a second subscribe replaces the first, so none can leak.
+      detachFocus?.()
+      window.addEventListener('focus', onFocus)
+      const detach = (): void => window.removeEventListener('focus', onFocus)
+      detachFocus = detach
       return () => {
         offStatus()
         offBalance()
         offSupporter()
+        detach()
+        if (detachFocus === detach) detachFocus = null
       }
     }
   }
@@ -213,6 +300,9 @@ export const useAccountStore = create<AccountState>((set, get) => {
 /** Empties the store and invalidates in-flight requests. For tests only. */
 export function resetAccountStore(): void {
   generation++
+  lastFocusRefresh = 0
+  detachFocus?.()
+  detachFocus = null
   useAccountStore.setState({
     status: null,
     busy: false,
@@ -223,6 +313,11 @@ export function resetAccountStore(): void {
     creditsError: null,
     supporter: null,
     supporterBusy: false,
-    supporterError: null
+    supporterError: null,
+    pricing: null,
+    usage: null,
+    usageCursor: null,
+    usageBusy: false,
+    usageError: null
   })
 }

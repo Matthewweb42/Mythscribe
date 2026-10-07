@@ -35,7 +35,7 @@
     <main class="page wrap">
       <article class="prose">
         <h1>Privacy policy</h1>
-        <p class="meta">Last updated 21 September 2026</p>
+        <p class="meta">Last updated 7 October 2026</p>
 
         <p>
           MythScribe is built to need as little of your data as possible. The short version: the
@@ -90,18 +90,19 @@
 
         <h2 id="byok">Using your own API key</h2>
         <p>
-          If you enter an API key for an AI provider (OpenAI is the default), the app stores it with
-          your operating system's secure storage: the Windows Data Protection API, the macOS
-          Keychain, or the Linux secret service where one is available. On a Linux machine without a
-          keyring, the key is stored obfuscated rather than encrypted, and the app tells you so in
-          Settings.
+          If you enter an API key for an AI provider (OpenRouter is the default; OpenAI also works,
+          and a local model on your own computer needs no key at all), the app stores it only in
+          your operating system's keychain: the Windows Data Protection API, the macOS Keychain, or
+          the Linux secret service. On a Linux machine without a keyring, the app refuses to save
+          the key and tells you how to set one up, rather than store it in plain text.
         </p>
         <p>
           When an AI feature runs, the app sends the request straight from your computer to the
           provider. We are not in that path: we never receive your key, your text, or the provider's
           answer. What the provider does with the request is governed by its own terms and privacy
-          policy; for OpenAI, that is the API data-usage policy at
-          <a href="https://openai.com/policies/">openai.com/policies</a>. You pay the provider
+          policy (for OpenRouter, <a href="https://openrouter.ai/privacy">openrouter.ai/privacy</a>
+          and the policies of the model hosts it routes to; for OpenAI, the API data-usage policy
+          at <a href="https://openai.com/policies/">openai.com/policies</a>). You pay the provider
           directly for what you use. The app records each request's model, token counts, and cost in
           your project so you can see your spend; those records stay on your machine.
         </p>
@@ -112,39 +113,47 @@
           never asks you to sign in, and nothing in it — writing, your projects, your own API key —
           needs an account. If you do sign in, you give us your email address, and we store that
           address and a sign-in session (a random token and its expiry, held as a hash) on our
-          servers at Cloudflare. The sign-in emails themselves are sent through
+          servers at Cloudflare. On your computer, the session is kept only in your operating
+          system's keychain, and the app trades it for short-lived access tokens (15 minutes, held
+          in memory) for each call. The sign-in emails themselves are sent through
           <a href="https://resend.com/legal/privacy-policy">Resend</a>, a sub-processor; they carry
           the sign-in link and nothing else. Signing out revokes the session, and you can ask us to
           delete the account and its address at any time. No manuscript text is involved at any
           point.
         </p>
         <p>
-          Cloud AI itself — the subscription service for writers who do not want to manage an API
-          key — does not exist yet. When it launches, this policy will be updated first, and it will
-          work like this:
+          Cloud AI itself — a prepaid balance in US dollars for writers who do not want to manage
+          an API key — does not exist yet. When it launches, this policy will be updated first, and
+          it will work like this:
         </p>
         <ul>
           <li>
-            Your account gains a subscription state and a usage ledger (which feature ran, when, and
-            how many tokens it used), beside the email address it already holds.
+            Your account gains a balance ledger beside the email address it already holds: each
+            top-up, refund, and AI request, and for a request only the feature, the model, the
+            token counts, the cost, the status, and when it ran.
           </li>
           <li>
-            AI requests go from the app through our proxy to the provider. The proxy checks your
-            session and credits, meters the request, and passes it on.
-            <strong>Manuscript content is not stored or logged by the proxy.</strong>
+            AI requests go from the app through our proxy to the model gateway. The proxy checks
+            your session and balance, reserves the request's maximum cost, passes it on, and
+            charges what it actually cost.
+            <strong
+              >Your manuscript, your notes, your questions, and the answers are never stored or
+              logged by the proxy.</strong
+            >
           </li>
           <li>
             Sub-processors will be Cloudflare (hosting), Resend (sign-in email), Lemon Squeezy
-            (billing), and the AI provider (OpenAI at launch). Your writing is not used to train
-            models by us; the provider's API terms govern its own handling.
+            (billing), and OpenRouter (the model gateway) with the model host it routes to. Your
+            writing is not used to train models by us; the gateway's and the host's API terms
+            govern their own handling.
           </li>
           <li>You will be able to export or delete your account data by emailing us.</li>
         </ul>
 
         <h2 id="payments">Payments</h2>
         <p>
-          Paid products (the Cloud subscription and a one-time Supporter license, neither available
-          yet) will be sold through Lemon Squeezy as merchant of record. Lemon Squeezy collects your
+          Paid products (MythScribe Cloud balance packs and a one-time Supporter license, neither
+          available yet) will be sold through Lemon Squeezy as merchant of record. Lemon Squeezy collects your
           payment details, issues invoices, and handles sales tax; we never see your card number.
           Their handling of your data is described in their privacy policy. Refunds follow the
           <a href="terms">terms of service</a> and Lemon Squeezy's refund process.

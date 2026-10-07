@@ -3,7 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { estimateTokens, FEATURE_BUDGETS, inputBudget, priceFor } from '@shared/ai'
-import { CloudPricing, autoTable, defaultAiRouting } from '@shared/aiRouting'
+import { autoTable, defaultAiRouting } from '@shared/aiRouting'
+import { bundledPricing } from '@shared/hostedPricing'
 import { AppStateStore } from '../appState/appStateStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { getCached, type CacheEntry, type CachedResponse } from './cacheStore'
@@ -668,7 +669,10 @@ describe('model choice and cached input (AI-BILLING-SPEC M8, R4, A4, R6)', () =>
       routing: { all: null, features: { chat: 'strong' } },
       cloudPricing: {
         fetchedAt: NOW.toISOString(),
-        pricing: CloudPricing.parse({ markup: 0.2, models: [], routing: { tags: 'strong' } })
+        pricing: {
+          ...bundledPricing(),
+          routing: { ...bundledPricing().routing, features: { tags: 'strong' } }
+        }
       }
     }))
     const f = fakes()

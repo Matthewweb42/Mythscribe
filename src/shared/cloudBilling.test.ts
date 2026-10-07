@@ -13,7 +13,8 @@ import {
   providerCostMicros
 } from './cloudBilling'
 
-const MINI = DEFAULT_HOSTED_MODELS[0]!
+// The arithmetic below is worked on GPT-5.4 mini, still on sale beside the approved defaults.
+const MINI = findHostedModel(DEFAULT_HOSTED_MODELS, 'openai/gpt-5.4-mini')!
 const PRICES = lockPrices(MINI, 0.2)
 
 describe('the pricing math (P2-P4)', () => {

@@ -7,7 +7,7 @@ import {
   type BetaReaderItem
 } from '@shared/betaReader'
 import { normalizeProposalNote, PROPOSAL_NOTE_MAX } from '@shared/proposal'
-import { describeRequest } from '@renderer/features/ai/usageFormat'
+import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { useBetaReaderStore, type BetaReaderSession } from './betaReaderStore'
 import { HonestySelect } from './HonestySelect'
@@ -184,7 +184,7 @@ function Body({
           Close
         </button>
         <span data-testid="beta-reader-cost" className="text-xs text-fg-subtle">
-          {describeRequest(result)}
+          <RequestCost request={result} />
         </span>
         {result.dropped > 0 ? (
           <span data-testid="beta-reader-dropped" className="text-xs text-fg-subtle">

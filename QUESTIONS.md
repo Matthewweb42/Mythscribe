@@ -242,6 +242,46 @@ do. Review, then confirm, change, or delete the entry.
 - Alternatives: always retitle from the first message (loses the author's name).
 - To change it: `titledBy` in `src/renderer/features/ai/assistantStore.ts`.
 
+## 2026-10-07 · AI billing B3b · One pricing shape
+- Question: B1 defined `CloudPricing` for `GET /pricing`; B2 serves `PricingResult`. Which one?
+- Chosen: the Worker's `PricingResult` (micro-USD amounts, models by gateway id with `displayMultiplier`, routing `{ tiers, features }`, `wordCosts`) is the one shape; `CloudPricing` is removed and the app reads `PricingResult` everywhere. An app cache in the old shape is dropped on read and fetched again.
+- Alternatives: change the Worker to B1's shape (it is not deployed either, but its tests and config already use its own).
+- To change it: `PricingResult` in `src/shared/cloudApi.ts`; app helpers in `src/shared/hostedPricing.ts`.
+
+## 2026-10-07 · AI billing B3b · Display multipliers for the approved defaults
+- Question: DeepSeek V4 Pro is dearer per input token but cheaper per output token than V4 Flash, so "about Nx the default" needs a rule.
+- Chosen: compare on a blend of ten input tokens per output token (the shape of most of the app's requests): V4 Pro about 1.6x, GPT-5.4 nano 2.1x, GPT-5.4 mini 7.6x, GPT-5.4 25x. The OpenAI models stay on the hosted table as choices and for the bare ids older apps send.
+- Alternatives: by output price (V4 Pro would read "about 0.3x"); by input price (7x); drop the OpenAI models from the hosted table.
+- To change it: a `models` row in `billing_config` (no deploy), or `DEFAULT_HOSTED_MODELS` in `src/shared/cloudBilling.ts`.
+
+## 2026-10-07 · AI billing B3b · Which hosted model a tier asks for
+- Question: The Cloud model map is stored per install (default gpt-5.4-mini / gpt-5.4 until today). How does the server's routing table win without overriding a model the author chose?
+- Chosen: a tier still at a default (today's DeepSeek one or the pre-2026-10-07 OpenAI one) is sent as the server's `routing.tiers` model; anything else the author typed is sent as typed. A stored OpenRouter own-key map is not migrated: an install that saved B1's `openai/gpt-5.4-*` keeps them until Reset to defaults.
+- Alternatives: migrate stored maps to the new defaults; always send the stored map (the server table would never apply).
+- To change it: `hostedModelFor` in `src/shared/hostedPricing.ts`.
+
+## 2026-10-07 · AI billing B3b · What gets a quote and a confirm
+- Question: "Any job estimated above $0.25" — which jobs?
+- Chosen: the multi-request jobs that already have an estimate: edit passes (Start becomes "Confirm and start" with the quote when the hosted quote passes the threshold), the import structure pass and context-library sorting (their offer screens already wait for a click; they now show the hosted quote). Single requests are never quoted: one request on the default models costs about a cent; background indexing is never quoted either (it is derived data the author switched on).
+- Alternatives: quote every request in main before sending (needs a new renderer round trip on every AI call); quote background indexing per book.
+- To change it: `hostedQuote` in `src/shared/hostedPricing.ts`; `PassSetup` in `EditPassWorkspace.tsx`.
+
+## 2026-10-07 · AI billing B3b · Session token still accepted by the Worker (S6)
+- Question: The app now sends short-lived access tokens; should the Worker stop accepting the 90-day session token as a bearer?
+- Chosen: not changed in this slice (it is the Worker, and the live Worker is older still). The app falls back to the session token only when `/auth/refresh` answers NOT_FOUND (a Worker without the route). Once the new Worker is deployed and installs have updated, a small Worker change (`sessionHashFor` in `cloud/src/auth.ts`) makes S6 fully true.
+- Alternatives: stop accepting it now (an app from before this change would be signed out of the new Worker).
+
+## 2026-10-07 · AI billing B3b · Sign-in needs the OS keychain too
+- Question: The session (refresh token) must be keychain-only. What about Linux without a keyring, and a session stored before?
+- Chosen: a new sign-in is refused before the email is sent, with how to install GNOME Keyring or KWallet; a session already stored under the plain-text fallback is still read (nothing signs anyone out). The e2e escape hatch `MYTHSCRIBE_E2E_PLAINTEXT_KEYS=1` is now honoured only in an unpackaged build, so no installed copy can be switched to plain text.
+- Alternatives: also drop a stored plain-text session at launch.
+- To change it: `AiKeyStore.setKey` in `src/main/ai/keyStore.ts`, `AccountService.requestLink`.
+
+## 2026-10-07 · AI billing B3b · Copy on the purchase screen and the legal pages
+- Question: Exact wording of the privacy statement (C3), the terms line, and the legal pages.
+- Chosen: Account tab: "Your writing stays private. MythScribe Cloud passes each request to the AI model and back and never stores or logs your manuscript, your notes, your questions, or the answers. It keeps only your email address, your balance, and for each request the model, its size, its cost, and when it ran." and "Your balance never expires. Payment is handled by Lemon Squeezy. Unused balance can be refunded within 30 days of buying it." (the window comes from the server config; 30 days is unconfirmed, see B2). terms.html §5 and privacy.html now describe the dollar balance, cost + 20 %, refunds of unused balance within 30 days, OpenRouter as gateway and default own-key provider, and keychain-only keys; the Supporter sections were left for slice B3a. The site's own-key estimate still uses the OpenAI models (now headed "What does your own OpenAI key cost?"); no DeepSeek estimate was made up.
+- Alternatives: your wording.
+
 ## 2026-10-07 · AI billing B2 · Hold size and charge cap
 - Question: The spec's hold uses "input_tokens", which the server cannot count exactly before forwarding. How big is the hold?
 - Chosen: a guaranteed upper bound — the messages' UTF-8 bytes plus 16 tokens per message and 16 per request (no tokenizer emits less than a byte per token), at the full input price, plus `maxTokens` at the output price, times the markup. A charge is additionally clamped to its hold (logged). For English prose the hold is about 4x the real input cost; it lasts only until the answer settles.

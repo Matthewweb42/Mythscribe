@@ -695,7 +695,7 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
     expect(sets()[0]).toMatchObject({ source: 'cloud' })
     expect(screen.queryByLabelText('API key', { selector: 'input' })).not.toBeInTheDocument()
     expect(screen.getByTestId('ai-cloud-account')).toHaveTextContent(
-      'Signed in as author@example.com. Manage credits on the Account tab.'
+      'Signed in as author@example.com. Manage your balance on the Account tab.'
     )
     expect(screen.getByText(/relays it to the model and stores none of it/)).toBeInTheDocument()
     // The data-sharing table says where the text goes now.
@@ -740,7 +740,7 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
     expect(screen.getByTestId('ai-model-rate-fast')).not.toHaveTextContent(/token/i)
     // A model outside the rate table cannot be billed, so the proxy refuses it; the line says so.
     expect(screen.getByTestId('ai-model-rate-strong')).toHaveTextContent(
-      'MythScribe Cloud has no rate for this model'
+      'MythScribe Cloud does not offer this model'
     )
     await userEvent.click(sourceRadio('ownKey'))
     await waitFor(() => expect(screen.queryByTestId('ai-model-rate-fast')).not.toBeInTheDocument())

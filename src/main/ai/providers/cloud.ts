@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { Tier } from '@shared/ai'
 import {
   type AiCompleteBody,
@@ -6,21 +7,24 @@ import {
   CLOUD_AI_AVAILABLE,
   CloudApiError,
   type CloudErrorCode,
-  type CreditsResult
+  type CreditsResult,
+  IDEMPOTENCY_KEY_HEADER,
+  type PricingResult
 } from '@shared/cloudApi'
-import { hostedPriceFor, type CloudPricing } from '@shared/aiRouting'
-import { cloudPriceFor } from '@shared/cloudRates'
+import { bundledPricing, hostedPriceFor } from '@shared/hostedPricing'
 import { AccountError } from '../../account/cloudAuthClient'
 import type { FetchLike } from './openai'
 import {
   AiCancelledError,
   AiCloudUnavailableError,
   AiFallbackError,
+  AiModelUnavailableError,
   AiNetworkError,
   AiNoCreditError,
   AiProviderError,
   AiRateLimitError,
   AiSignedOutError,
+  AiTooLargeError,
   type CompletionRequest,
   type CompletionResult,
   type Provider,
@@ -29,13 +33,16 @@ import {
 
 /**
  * The MythScribe Cloud adapter (F-15.4): the same `Provider` interface, pointed at our Worker
- * instead of at OpenAI. It sends the session bearer and the resolved model to `POST /ai/complete`
+ * instead of at OpenAI. It sends an access token and the resolved model to `POST /ai/complete`
  * and reads back either one JSON answer or the NDJSON stream; the proxy charges the account's
- * credits, so `price` reports the Cloud rate and the cost line under every proposal is what the
- * author actually paid.
+ * balance, so `price` reports the server's price (cost + markup) and the cost line under every
+ * proposal is what the author actually paid.
  *
- * The session token never leaves main: it is read live through `token()` on every request, and a
- * 401 tells `AccountService` to forget the session (`onSessionEnded`) exactly as `refresh()` does.
+ * The session token never leaves main: it is read live through `token()` on every request and
+ * traded for a short-lived access token (`bearer`, AI-BILLING-SPEC A5/S6) that is the one sent. A
+ * 401 mints a fresh access token and tries once more; a session the Worker refuses outright tells
+ * `AccountService` to forget it (`onSessionEnded`) exactly as `refresh()` does. Every request
+ * carries an `Idempotency-Key` (L8), the same on that one retry, so it is charged at most once.
  */
 
 export interface CloudProviderOptions {
@@ -44,6 +51,15 @@ export interface CloudProviderOptions {
   fetch: FetchLike
   /** The current session token, or null when signed out; read on every request, never cached. */
   token: () => string | null
+  /**
+   * The bearer for the session token: a short-lived access token (`CloudAccessTokens.bearer`).
+   * Throws the refresh's `AccountError`. Absent (tests, older wiring), the session token is sent.
+   */
+  bearer?: (sessionToken: string) => Promise<string>
+  /** Forgets the cached access token after the proxy refused it, so the retry mints a new one. */
+  invalidateBearer?: () => void
+  /** A fresh `Idempotency-Key` per request; `randomUUID` unless a test pins it. */
+  idempotencyKey?: () => string
   /** Called when the proxy refuses the session, so the account forgets it and the tab updates. */
   onSessionEnded: () => void
   /** The tier → model mapping (F-5.11), asked on every request like the OpenAI adapter's. */
@@ -63,17 +79,22 @@ export interface CloudProviderOptions {
    */
   available?: boolean
   /**
-   * The server's price table (`GET /pricing`, AI-BILLING-SPEC P5), read live; a model in it is
-   * priced at the server's rate and markup. Absent or null, or a model it does not list, falls
-   * back to the bundled rate (`cloudPriceFor`) until the Worker serves the table.
+   * The server's price table (`GET /pricing`, AI-BILLING-SPEC P5), read live: every answer is
+   * priced at its rate and markup with the Worker's own integer math. Absent or null (never
+   * fetched yet), the Worker's defaults stand in (`bundledPricing`); the app keeps no rate of its
+   * own.
    */
-  pricing?: () => CloudPricing | null
+  pricing?: () => PricingResult | null
 }
 
 const SIGNED_OUT = 'Sign in to MythScribe Cloud to use it for this project.'
 const SESSION_ENDED = 'Your MythScribe Cloud session has ended.'
-const NO_CREDIT = 'Your MythScribe Cloud balance is used up.'
-const BUSY = 'MythScribe Cloud is busy right now.'
+const NO_CREDIT = 'Your MythScribe Cloud balance is too low for this request.'
+const BUSY = 'MythScribe Cloud is busy, or this account sent too many requests in the last minute.'
+const TOO_LARGE = 'This request is longer than MythScribe Cloud accepts.'
+const MODEL_UNAVAILABLE = 'MythScribe Cloud does not offer the model this request asked for.'
+const UPSTREAM = 'The AI model behind MythScribe Cloud did not answer. Nothing was charged.'
+const DUPLICATE = 'MythScribe Cloud is still working on this request.'
 const UNREACHABLE = 'Could not reach MythScribe Cloud.'
 const TIMED_OUT = 'MythScribe Cloud did not answer in time.'
 const UNREADABLE = 'MythScribe Cloud sent an answer MythScribe could not read.'
@@ -133,6 +154,10 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
     }
     if (code === 'INSUFFICIENT_CREDITS') return new AiNoCreditError(NO_CREDIT)
     if (code === 'RATE_LIMITED') return new AiRateLimitError(BUSY)
+    if (code === 'REQUEST_TOO_LARGE') return new AiTooLargeError(TOO_LARGE)
+    if (code === 'MODEL_UNAVAILABLE') return new AiModelUnavailableError(MODEL_UNAVAILABLE)
+    if (code === 'UPSTREAM') return new AiFallbackError(UPSTREAM)
+    if (code === 'DUPLICATE_REQUEST') return new AiFallbackError(DUPLICATE)
     // A Worker deployed without `/ai/complete` (or without its secrets) answers NOT_FOUND.
     if (code === 'NOT_FOUND') return new AiCloudUnavailableError(NOT_REACHABLE)
     return new AiFallbackError(`MythScribe Cloud reported a problem (${code}).`)
@@ -158,18 +183,32 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
     }
   }
 
-  /** Sends one `/ai/complete` request; every expected failure leaves as an `AiProviderError`. */
-  const send = async (request: CompletionRequest, stream: boolean): Promise<Response> => {
-    if (!available) throw new AiCloudUnavailableError(NOT_AVAILABLE)
-    const token = options.token()
-    if (token === null) throw new AiSignedOutError(SIGNED_OUT)
-    const body = bodyFor(request, stream)
-    const bounds = deadline(request.signal, timeoutMs)
-    let response: Response
+  /** The access token for the session; a refresh failure leaves in the provider taxonomy. */
+  const bearerFor = async (sessionToken: string): Promise<string> => {
+    if (options.bearer === undefined) return sessionToken
     try {
-      response = await options.fetch(`${root}/ai/complete`, {
+      return await options.bearer(sessionToken)
+    } catch (err) {
+      throw accountFailure(err, failureOf)
+    }
+  }
+
+  /** One POST of the body with this bearer and idempotency key. */
+  const post = async (
+    request: CompletionRequest,
+    body: AiCompleteBody,
+    bearer: string,
+    key: string
+  ): Promise<Response> => {
+    const bounds = deadline(request.signal, timeoutMs)
+    try {
+      return await options.fetch(`${root}/ai/complete`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${bearer}`,
+          [IDEMPOTENCY_KEY_HEADER]: key
+        },
         body: JSON.stringify(body),
         signal: bounds.signal
       })
@@ -179,6 +218,26 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
     } finally {
       bounds.release()
     }
+  }
+
+  /**
+   * Sends one `/ai/complete` request; every expected failure leaves as an `AiProviderError`. An
+   * access token the proxy refuses (expired between the check and the call) is replaced once,
+   * with the same idempotency key, so the retry can never be charged twice.
+   */
+  const send = async (request: CompletionRequest, stream: boolean): Promise<Response> => {
+    if (!available) throw new AiCloudUnavailableError(NOT_AVAILABLE)
+    const token = options.token()
+    if (token === null) throw new AiSignedOutError(SIGNED_OUT)
+    const body = bodyFor(request, stream)
+    const key = (options.idempotencyKey ?? randomUUID)()
+    const bearer = await bearerFor(token)
+    let response = await post(request, body, bearer, key)
+    if (response.status === 401 && bearer !== token) {
+      await response.text().catch(() => '')
+      options.invalidateBearer?.()
+      response = await post(request, body, await bearerFor(token), key)
+    }
     if (!response.ok) throw failureBody(await response.text().catch(() => ''))
     return response
   }
@@ -186,12 +245,8 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
   return {
     id: 'cloud',
     resolveModel: options.resolveModel,
-    price: (model, inTok, outTok, cachedTok) => {
-      const table = options.pricing?.() ?? null
-      return table?.models.some((entry) => entry.model === model)
-        ? hostedPriceFor(table, model, inTok, outTok, cachedTok)
-        : cloudPriceFor(model, inTok, outTok)
-    },
+    price: (model, inTok, outTok, cachedTok) =>
+      hostedPriceFor(options.pricing?.() ?? bundledPricing(), model, inTok, outTok, cachedTok),
 
     async complete(request): Promise<CompletionResult> {
       const response = await send(request, false)

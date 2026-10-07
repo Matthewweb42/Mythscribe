@@ -8,7 +8,8 @@ import {
   type ContextReviewField
 } from '@shared/contextLibrary'
 import { ENTITY_FIELDS, ENTITY_KIND_NOUN, entityTagName } from '@shared/entities'
-import { describeRequest, formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
+import { RequestCost } from '@renderer/features/ai/RequestCost'
+import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useLibraryStore, type LibraryFlow } from './libraryStore'
 
@@ -225,12 +226,14 @@ function Review({ review, busy }: { review: ContextReview; busy: boolean }): Rea
           className="flex-1 text-xs text-fg-subtle tabular-nums"
           data-testid="library-review-cost"
         >
-          {describeRequest({
-            model: review.model,
-            costUsd: review.costUsd,
-            usage: review.usage,
-            cached: false
-          })}
+          <RequestCost
+            request={{
+              model: review.model,
+              costUsd: review.costUsd,
+              usage: review.usage,
+              cached: false
+            }}
+          />
         </span>
         <button
           type="button"

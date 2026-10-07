@@ -1,4 +1,4 @@
-import { CreditNotice } from '@renderer/features/account/CreditNotice'
+import { BalanceNotice } from '@renderer/features/account/BalanceNotice'
 import { DraftStatus } from '@renderer/features/drafts/DraftStatus'
 import { GoalsStrip } from '@renderer/features/goals/GoalsStrip'
 import { formatDelta, formatWords } from './wordFormat'
@@ -12,8 +12,8 @@ import { formatDelta, formatWords } from './wordFormat'
  * characters accepted from the AI (F-14.6), shown only while it is above zero. Three pieces read
  * a store of their own: `DraftStatus` (F-8.5, the active draft's name once there are two or
  * more; a click opens the Drafts dialog), `GoalsStrip` (F-10.3, today's words against the targets; a click opens
- * the Goals dialog) and `CreditNotice` (F-15.5), pushed to the far end, which renders nothing
- * unless this project spends Cloud credits and they are running out.
+ * the Goals dialog) and `BalanceNotice` (F-15.5, AI-BILLING-SPEC E1), pushed to the far end: the
+ * MythScribe Cloud balance whenever this project spends it, nothing otherwise.
  */
 export function StatusBar({
   words,
@@ -43,7 +43,7 @@ export function StatusBar({
       ) : null}
       <DraftStatus />
       <GoalsStrip />
-      <CreditNotice />
+      <BalanceNotice />
     </footer>
   )
 }

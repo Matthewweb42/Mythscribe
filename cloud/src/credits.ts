@@ -26,8 +26,7 @@ import {
   USAGE_PAGE_MAX,
   type UsageResult
 } from '../../src/shared/cloudApi'
-import { usdToMicros } from '../../src/shared/cloudBilling'
-import { MICROS_PER_USD } from '../../src/shared/cloudRates'
+import { MICROS_PER_USD, usdToMicros } from '../../src/shared/cloudBilling'
 import { USAGE_PERIOD_DAYS, USAGE_PERIOD_MS } from '../../src/shared/cloudUsage'
 import {
   type AuthDeps,

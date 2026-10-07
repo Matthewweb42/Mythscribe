@@ -1,5 +1,5 @@
 import { BRIEF_SCENE_CHAR_BUDGET, SCENE_BRIEF_FIELDS } from '@shared/sceneMeta'
-import { describeRequest } from '@renderer/features/ai/usageFormat'
+import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useBriefDraftStore } from './briefDraftStore'
 
@@ -72,7 +72,9 @@ export function BriefDraftPanel(): React.JSX.Element | null {
         </p>
       ) : null}
       <p className="mt-1 mb-0 flex flex-wrap items-center gap-2 text-xs text-fg-subtle">
-        <span data-testid="brief-draft-cost">{describeRequest(state)}</span>
+        <span data-testid="brief-draft-cost">
+          <RequestCost request={state} />
+        </span>
         <button type="button" onClick={() => void accept()} className={LINK_BUTTON}>
           Use draft
         </button>

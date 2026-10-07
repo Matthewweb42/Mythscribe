@@ -3,6 +3,8 @@ import {
   AuthMeResult,
   AuthPollBody,
   AuthPollResult,
+  AuthRefreshBody,
+  AuthRefreshResult,
   AuthStartBody,
   AuthStartResult,
   CheckoutBody,
@@ -10,6 +12,7 @@ import {
   CloudApiError,
   CreditsResult,
   LicenseResult,
+  UsageResult,
   type CloudErrorCode
 } from '@shared/cloudApi'
 // The `fetch` shape is already defined once for the provider adapter; a type-only import, so
@@ -17,11 +20,12 @@ import {
 import type { FetchLike } from '../ai/providers/openai'
 
 /**
- * The typed client for the MythScribe Cloud routes the app calls: the four auth routes (F-15.2)
- * and the two credit routes (F-15.3). It owns the wire: every
- * 2xx body is parsed with the shared zod schemas, every other answer is parsed as `CloudApiError`,
- * and both failure paths leave as an `AccountError` carrying author-facing copy. It knows nothing
- * about state: `AccountService` owns the session and the poll timer.
+ * The typed client for the MythScribe Cloud routes the app calls: the auth routes (F-15.2, with
+ * `/auth/refresh` since AI-BILLING-SPEC A5), the credit routes (F-15.3), and `/usage` (E7). It
+ * owns the wire: every 2xx body is parsed with the shared zod schemas, every other answer is
+ * parsed as `CloudApiError`, and both failure paths leave as an `AccountError` carrying
+ * author-facing copy. It knows nothing about state: `AccountService` owns the session and the
+ * poll timer, and `withAccessTokens` (`accessTokens.ts`) swaps the bearer for an access token.
  */
 
 /** Everything that can go wrong for the author, whether the Worker said so or the network did. */
@@ -59,7 +63,7 @@ const NEXT_STEPS: Record<AccountErrorCode, string> = {
   UNAUTHORIZED: 'Sign in again.',
   NOT_FOUND: 'Ask for a new sign-in link.',
   BAD_SIGNATURE: 'Try again; if it keeps happening, update MythScribe.',
-  INSUFFICIENT_CREDITS: 'Buy more credits in Settings › Account.',
+  INSUFFICIENT_CREDITS: 'Add to your balance in Settings › Account.',
   UPSTREAM: 'Try again in a moment.',
   INTERNAL: 'Try again in a moment.',
   NETWORK: 'Check your connection and try again.',
@@ -78,7 +82,7 @@ const TIMEOUT_MESSAGE = 'MythScribe Cloud did not answer in time.'
  * `NOT_FOUND` from `/billing/checkout` is about the pack, not a sign-in attempt (F-15.3), so the
  * shared copy for the code would misname it; the checkout call re-throws with these instead.
  */
-const UNKNOWN_PACK_MESSAGE = 'That credit pack is no longer on sale.'
+const UNKNOWN_PACK_MESSAGE = 'That pack is no longer on sale.'
 const UNKNOWN_PACK_NEXT_STEP = 'Refresh the packs and pick another.'
 
 /** An expected failure of a Cloud call. `nextStep` is shown after `message`, never instead of it. */
@@ -103,6 +107,11 @@ export interface CloudAuthClient {
   start(email: string): Promise<AuthStartResult>
   /** Asks whether the attempt was approved yet; `ready` hands the session over exactly once. */
   poll(body: AuthPollBody): Promise<AuthPollResult>
+  /**
+   * A fresh short-lived access token for the session (AI-BILLING-SPEC A5, S6); `refreshToken` is
+   * the session token. UNAUTHORIZED means the session was revoked or expired.
+   */
+  refresh(refreshToken: string): Promise<AuthRefreshResult>
   /** Who this session belongs to; UNAUTHORIZED means it was revoked or expired. */
   me(token: string): Promise<AuthMeResult>
   /** Revokes the session server-side; answers 204 with no body. */
@@ -116,6 +125,8 @@ export interface CloudAuthClient {
    * none, plus the product on sale. The signature is checked by `licenseVerifier.ts`, not here.
    */
   license(token: string): Promise<LicenseResult>
+  /** One page of the account's ledger, newest first (AI-BILLING-SPEC E7, `GET /usage`). */
+  usage(token: string, cursor: string | null): Promise<UsageResult>
 }
 
 /** No Cloud call may hang: the author is waiting on the Account tab for every one of them. */
@@ -181,6 +192,12 @@ export function createCloudAuthClient({
     async poll(body) {
       return parseBody(AuthPollResult, await postJson('/auth/poll', AuthPollBody.parse(body)))
     },
+    async refresh(refreshToken) {
+      return parseBody(
+        AuthRefreshResult,
+        await postJson('/auth/refresh', AuthRefreshBody.parse({ refreshToken }))
+      )
+    },
     async me(token) {
       return parseBody(
         AuthMeResult,
@@ -218,6 +235,13 @@ export function createCloudAuthClient({
       return parseBody(
         LicenseResult,
         await send('/license', { method: 'GET', headers: bearer(token) })
+      )
+    },
+    async usage(token, cursor) {
+      const query = cursor === null ? '' : `?cursor=${encodeURIComponent(cursor)}`
+      return parseBody(
+        UsageResult,
+        await send(`/usage${query}`, { method: 'GET', headers: bearer(token) })
       )
     }
   }

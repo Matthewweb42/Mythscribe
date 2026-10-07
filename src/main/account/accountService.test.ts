@@ -12,7 +12,8 @@ import type {
   CheckoutResult,
   CloudSession,
   CreditsResult,
-  LicenseResult
+  LicenseResult,
+  UsageResult
 } from '@shared/cloudApi'
 import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import {
@@ -41,6 +42,24 @@ const START: AuthStartResult = {
 }
 const START_MS = Date.parse(START.expiresAt)
 const ME: AuthMeResult = { email: EMAIL, userId: 'u1', since: '2026-09-01T00:00:00.000Z' }
+const USAGE: UsageResult = {
+  entries: [
+    {
+      id: 'e1',
+      type: 'charge',
+      amountMicros: -130,
+      at: 1_700_000_000_000,
+      feature: 'chat',
+      model: 'deepseek/deepseek-v4-flash',
+      tokensIn: 100,
+      tokensOut: 20,
+      tokensCached: 0,
+      requestId: 'r1'
+    }
+  ],
+  nextCursor: null
+}
+
 const CREDITS: CreditsResult = {
   balanceMicros: 2_500_000,
   spend: [{ feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }],
@@ -91,6 +110,7 @@ let signOut: Mock<(token: string) => Promise<void>>
 let credits: Mock<(token: string) => Promise<CreditsResult>>
 let checkout: Mock<(token: string, variantId: string) => Promise<CheckoutResult>>
 let license: Mock<(token: string) => Promise<LicenseResult>>
+let usage: Mock<(token: string, cursor: string | null) => Promise<UsageResult>>
 
 const schedule: Schedule = (run, ms) => {
   const timer = { run, ms, cancelled: false }
@@ -124,7 +144,17 @@ const signedInStore = (): AiKeyStore => {
 }
 
 const build = (keyStore: AiKeyStore = store()): AccountService => {
-  const client: CloudAuthClient = { start, poll, me, signOut, credits, checkout, license }
+  const client: CloudAuthClient = {
+    start,
+    poll,
+    refresh: () => Promise.reject(new Error('the service never refreshes; withAccessTokens does')),
+    me,
+    signOut,
+    credits,
+    checkout,
+    license,
+    usage
+  }
   return new AccountService({
     client,
     keyStore,
@@ -167,6 +197,7 @@ beforeEach(() => {
   // F-15.9: no license unless a test says so, so the background refresh a signed-in service runs
   // on construction is harmless and changes nothing.
   license = vi.fn(() => Promise.resolve({ token: null, product: null }))
+  usage = vi.fn(() => Promise.resolve(USAGE))
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
@@ -289,6 +320,20 @@ describe('AccountService (F-15.2)', () => {
     )
     const service = build()
     expect((await caught(service.requestLink('nope'))).code).toBe('VALIDATION')
+    service.dispose()
+  })
+
+  it('refuses to sign in without the OS keychain: the refresh token is keychain-only', async () => {
+    const keyStore = new AiKeyStore(
+      keyFile,
+      fakeSafeStorage({ getSelectedStorageBackend: () => 'basic_text' }),
+      'linux'
+    )
+    const service = build(keyStore)
+    const err = await caught(service.requestLink(EMAIL))
+    expect(err.code).toBe('IO')
+    expect(err.message).toContain('keyring')
+    expect(start).not.toHaveBeenCalled()
     service.dispose()
   })
 
@@ -427,16 +472,31 @@ describe('AccountService (F-15.2)', () => {
     second.dispose()
   })
 
-  it('refuses to ask for credits or a checkout while signed out', async () => {
+  it('refuses to ask for the balance, a checkout, or the usage while signed out', async () => {
     const service = build()
     expect((await caught(service.credits())).message).toBe(
-      'Sign in to see your MythScribe Cloud credits.'
+      'Sign in to see your MythScribe Cloud balance.'
     )
     expect((await caught(service.checkoutUrl('pack-5'))).message).toBe(
-      'Sign in to buy MythScribe Cloud credits.'
+      'Sign in to add to your MythScribe Cloud balance.'
+    )
+    expect((await caught(service.usage(null))).message).toBe(
+      'Sign in to see your MythScribe Cloud usage.'
     )
     expect(credits).not.toHaveBeenCalled()
     expect(checkout).not.toHaveBeenCalled()
+    expect(usage).not.toHaveBeenCalled()
+    service.dispose()
+  })
+
+  it('answers a usage page with the stored session (E7)', async () => {
+    const service = build(signedInStore())
+    expect(await service.usage(null)).toEqual(USAGE)
+    expect(await service.usage('cursor-1')).toEqual(USAGE)
+    expect(usage.mock.calls).toEqual([
+      [SESSION.token, null],
+      [SESSION.token, 'cursor-1']
+    ])
     service.dispose()
   })
 

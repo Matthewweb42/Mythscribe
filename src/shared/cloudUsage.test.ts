@@ -83,6 +83,14 @@ describe('creditWarning', () => {
     ).toBe('runOut')
   })
 
+  it('warns below the configured line when one is given (E6)', () => {
+    expect(creditWarning({ balanceMicros: 2_500_000, daysLeft: null })).toBeNull()
+    expect(creditWarning({ balanceMicros: 2_500_000, daysLeft: null, lowMicros: 3_000_000 })).toBe(
+      'low'
+    )
+    expect(LOW_BALANCE_MICROS).toBe(2_000_000)
+  })
+
   it('is null while the balance is comfortable', () => {
     expect(
       creditWarning({ balanceMicros: LOW_BALANCE_MICROS, daysLeft: RUN_OUT_WARNING_DAYS + 1 })

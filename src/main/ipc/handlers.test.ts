@@ -19,6 +19,7 @@ import { z } from 'zod'
 import {
   AI_NEXT_STEP,
   DEFAULT_MODELS,
+  HOSTED_DEFAULT_MODELS,
   LOCAL_DEFAULT_MODELS,
   OPENROUTER_DEFAULT_MODELS,
   USAGE_RECENT_LIMIT,
@@ -324,11 +325,13 @@ beforeEach(() => {
   const cloudClient: CloudAuthClient = {
     start: () => Promise.reject(new Error('no cloud in these tests')),
     poll: () => Promise.reject(new Error('no cloud in these tests')),
+    refresh: () => Promise.reject(new Error('no cloud in these tests')),
     me: () => Promise.reject(new Error('no cloud in these tests')),
     signOut: () => Promise.resolve(),
     credits: () => Promise.reject(new Error('no cloud in these tests')),
     checkout: () => Promise.reject(new Error('no cloud in these tests')),
-    license: () => Promise.reject(new Error('no cloud in these tests'))
+    license: () => Promise.reject(new Error('no cloud in these tests')),
+    usage: () => Promise.reject(new Error('no cloud in these tests'))
   }
   registerHandlers({
     manager,
@@ -5833,11 +5836,17 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
     const cloudClient: CloudAuthClient = {
       start: () => Promise.reject(new Error('no cloud in these tests')),
       poll: () => Promise.reject(new Error('no cloud in these tests')),
+      refresh: () => Promise.reject(new Error('no cloud in these tests')),
       me: () => Promise.reject(new Error('no cloud in these tests')),
       signOut: () => Promise.resolve(),
       credits,
       checkout,
-      license
+      license,
+      usage: (_token, cursor) =>
+        Promise.resolve({
+          entries: [],
+          nextCursor: cursor === null ? 'page-2' : null
+        })
     }
     const appState = new AppStateStore(path.join(tmp, 'userData', 'app-state-credits.json'))
     const account = new AccountService({
@@ -5911,6 +5920,19 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
     credits.mockResolvedValueOnce(body)
     expect(await creditsInvoke('account:getCredits', undefined)).toEqual(body)
     expect(credits).toHaveBeenCalledWith(SESSION.token)
+  })
+
+  it('answers usage pages and the cached price table (E7, P5)', async () => {
+    expect(await creditsInvoke('account:getUsage', { cursor: null })).toEqual({
+      entries: [],
+      nextCursor: 'page-2'
+    })
+    expect(await creditsInvoke('account:getUsage', { cursor: 'page-2' })).toEqual({
+      entries: [],
+      nextCursor: null
+    })
+    // No pricing service wired here and nothing cached: null, and the renderer uses the defaults.
+    expect(await creditsInvoke('account:getPricing', undefined)).toBeNull()
   })
 
   it('opens the checkout URL the Worker built for a known pack', async () => {
@@ -6249,7 +6271,7 @@ describe('ai handlers (F-5.1)', () => {
       // F-15.4: both provider maps, since the AI tab edits the one the project's source names.
       models: {
         openai: DEFAULT_MODELS,
-        cloud: DEFAULT_MODELS,
+        cloud: HOSTED_DEFAULT_MODELS,
         local: LOCAL_DEFAULT_MODELS,
         openrouter: OPENROUTER_DEFAULT_MODELS
       },
@@ -6267,7 +6289,7 @@ describe('ai handlers (F-5.1)', () => {
       canStoreKey: true,
       models: {
         openai: DEFAULT_MODELS,
-        cloud: DEFAULT_MODELS,
+        cloud: HOSTED_DEFAULT_MODELS,
         local: LOCAL_DEFAULT_MODELS,
         openrouter: OPENROUTER_DEFAULT_MODELS
       },
@@ -6932,7 +6954,7 @@ describe('ai:setModels (F-5.11)', () => {
     })
     expect(status.models.openai).toEqual(models)
     // F-15.4: the other provider's map is untouched by a write to this one.
-    expect(status.models.cloud).toEqual(DEFAULT_MODELS)
+    expect(status.models.cloud).toEqual(HOSTED_DEFAULT_MODELS)
     expect(await invoke('ai:getStatus', undefined)).toMatchObject({ models: { openai: models } })
     const file = path.join(tmp, 'userData', 'app-state.json')
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({ models: { openai: models } })
@@ -7628,10 +7650,7 @@ describe('context library', () => {
 
     const applied = await invoke('library:apply', { review: result.review })
     expect(applied).toMatchObject({ created: 1, updated: 0, notes: true })
-    expect(applied.entities.map((entity) => entity.name).sort()).toEqual([
-      'Project notes',
-      'Tomas'
-    ])
+    expect(applied.entities.map((entity) => entity.name).sort()).toEqual(['Project notes', 'Tomas'])
     expect(applied.files[0]?.state).toBe('processed')
     expect(fakeWin.webContents.send).toHaveBeenCalledWith(
       'tag:changed',

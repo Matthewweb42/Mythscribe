@@ -6,7 +6,8 @@ import {
   type CreditsResult,
   type LicenseResult,
   LOGIN_ATTEMPT_TTL_MS,
-  POLL_INTERVAL_MS
+  POLL_INTERVAL_MS,
+  type UsageResult
 } from '@shared/cloudApi'
 import {
   LICENSE_REFRESH_INTERVAL_MS,
@@ -42,7 +43,7 @@ import { verifyLicenseToken } from './licenseVerifier'
 const SECRET_ID = 'cloudSession'
 
 export const NO_SAFE_STORAGE_SESSION_MESSAGE =
-  'This system has no safe storage available, so a MythScribe account sign-in cannot be stored ' +
+  'This system has no keychain available, so a MythScribe account sign-in cannot be stored ' +
   'securely. On Linux, install and unlock a keyring (GNOME Keyring or KWallet), then try again.'
 
 export const SIGN_IN_FOR_LICENSE_MESSAGE = 'Sign in to check your MythScribe Supporter license.'
@@ -147,11 +148,12 @@ export class AccountService {
 
   /**
    * Asks the Worker to email a sign-in link and starts polling for its approval. A machine that
-   * cannot protect the session is refused before the address leaves the app: signing in only to
-   * lose the session on quit would be worse than not signing in.
+   * cannot keep the session in the OS keychain (AI-BILLING-SPEC S2, A5: the refresh token is
+   * keychain-only) is refused before the address leaves the app: signing in only to lose the
+   * session on quit would be worse than not signing in.
    */
   async requestLink(email: string): Promise<AccountStatus> {
-    if (this.keyStore.encryption() === 'none') {
+    if (!this.keyStore.canStoreProviderKey()) {
       throw new AppError('IO', NO_SAFE_STORAGE_SESSION_MESSAGE)
     }
     this.stopPolling()
@@ -229,9 +231,22 @@ export class AccountService {
    * on sale. Signed out is a failure the author can act on, not an empty balance.
    */
   async credits(): Promise<CreditsResult> {
-    const current = this.requireSignedIn('Sign in to see your MythScribe Cloud credits.')
+    const current = this.requireSignedIn('Sign in to see your MythScribe Cloud balance.')
     try {
       return await this.client.credits(current.session.token)
+    } catch (err) {
+      throw this.callFailed(err, current)
+    }
+  }
+
+  /**
+   * One page of the account's MythScribe Cloud ledger, newest first (AI-BILLING-SPEC E7):
+   * top-ups, the trial grant, charges with their model and tokens, refunds.
+   */
+  async usage(cursor: string | null): Promise<UsageResult> {
+    const current = this.requireSignedIn('Sign in to see your MythScribe Cloud usage.')
+    try {
+      return await this.client.usage(current.session.token, cursor)
     } catch (err) {
       throw this.callFailed(err, current)
     }
@@ -242,7 +257,7 @@ export class AccountService {
    * account and the pack); this only carries it back to the handler, which opens it.
    */
   async checkoutUrl(variantId: string): Promise<string> {
-    const current = this.requireSignedIn('Sign in to buy MythScribe Cloud credits.')
+    const current = this.requireSignedIn('Sign in to add to your MythScribe Cloud balance.')
     try {
       const { url } = await this.client.checkout(current.session.token, variantId)
       return url

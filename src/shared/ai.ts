@@ -62,14 +62,24 @@ export const TIER_USE: Record<Tier, string> = {
 export const DEFAULT_MODELS: Record<Tier, string> = { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' }
 
 /**
- * The same two models through OpenRouter, by its `vendor/model` ids. Kept equal to
- * `DEFAULT_MODELS` until the author approves the proposed OpenRouter defaults (QUESTIONS.md,
- * 2026-10-07); changing them is this one line.
+ * The own-key OpenRouter defaults, by OpenRouter's `vendor/model` ids: DeepSeek V4 Flash (fast)
+ * and V4 Pro (strong), approved by the author on 2026-10-07 as cheap and permissive enough for
+ * dark and romance fiction. MythScribe Cloud defaults to the same two (`HOSTED_DEFAULT_MODELS`).
  */
 export const OPENROUTER_DEFAULT_MODELS: Record<Tier, string> = {
-  fast: 'openai/gpt-5.4-mini',
-  strong: 'openai/gpt-5.4'
+  fast: 'deepseek/deepseek-v4-flash',
+  strong: 'deepseek/deepseek-v4-pro'
 }
+
+/**
+ * MythScribe Cloud's default tier models (approved 2026-10-07). The Worker's routing table names
+ * the same two (`DEFAULT_HOSTED_ROUTING`) and serves its own in `GET /pricing`, which wins for a
+ * tier the author left at a default (`hostedModelFor`).
+ */
+export const HOSTED_DEFAULT_MODELS: Record<Tier, string> = { ...OPENROUTER_DEFAULT_MODELS }
+
+/** The Cloud defaults before 2026-10-07; a stored map still holding them was never chosen. */
+export const LEGACY_HOSTED_DEFAULT_MODELS: Record<Tier, string> = { ...DEFAULT_MODELS }
 
 /**
  * F-5.15: what a local server is asked for until the author names their own models. Ollama's
@@ -81,6 +91,7 @@ export const LOCAL_DEFAULT_MODELS: Record<Tier, string> = { fast: 'llama3.1', st
 export function defaultModelsFor(provider: AiProviderId): Record<Tier, string> {
   if (provider === 'local') return { ...LOCAL_DEFAULT_MODELS }
   if (provider === 'openrouter') return { ...OPENROUTER_DEFAULT_MODELS }
+  if (provider === 'cloud') return { ...HOSTED_DEFAULT_MODELS }
   return { ...DEFAULT_MODELS }
 }
 
@@ -126,8 +137,11 @@ export type AiModelMap = z.infer<typeof AiModelMap>
  */
 export const AiModels = z.object({
   openai: AiModelMap,
-  /** F-15.4: the models the MythScribe Cloud proxy is asked for; same defaults as the key path. */
-  cloud: AiModelMap.default(() => ({ ...DEFAULT_MODELS })),
+  /**
+   * F-15.4: the models the MythScribe Cloud proxy is asked for. A tier left at a default (this
+   * one or the pre-2026-10-07 one) follows the server's routing table (`hostedModelFor`).
+   */
+  cloud: AiModelMap.default(() => ({ ...HOSTED_DEFAULT_MODELS })),
   /** F-5.15: the models a local OpenAI-compatible server is asked for. */
   local: AiModelMap.default(() => ({ ...LOCAL_DEFAULT_MODELS })),
   /** 2026-10-07: the models an OpenRouter key asks for, by OpenRouter's ids. */
@@ -138,7 +152,7 @@ export type AiModels = z.infer<typeof AiModels>
 export function defaultAiModels(): AiModels {
   return {
     openai: { ...DEFAULT_MODELS },
-    cloud: { ...DEFAULT_MODELS },
+    cloud: { ...HOSTED_DEFAULT_MODELS },
     local: { ...LOCAL_DEFAULT_MODELS },
     openrouter: { ...OPENROUTER_DEFAULT_MODELS }
   }
@@ -166,11 +180,15 @@ export const AiErrorCode = z.enum([
   'CANCELLED',
   // F-15.4: the project sends its requests through MythScribe Cloud but no account is signed in.
   'SIGNED_OUT',
-  // F-15.4: the Cloud proxy refused the request because the account's credits are used up.
+  // F-15.4: the Cloud proxy refused the request because the account's balance is used up.
   'NO_CREDIT',
   // The project's source is MythScribe Cloud, which does not serve AI yet (`CLOUD_AI_AVAILABLE`),
   // or the Worker answered `/ai/complete` with NOT_FOUND.
-  'CLOUD_UNAVAILABLE'
+  'CLOUD_UNAVAILABLE',
+  // AI-BILLING-SPEC S4: the Cloud proxy refused a request longer than its configured input cap.
+  'TOO_LARGE',
+  // The Cloud proxy does not sell the requested model (not on its price table, or gone upstream).
+  'MODEL_UNAVAILABLE'
 ])
 export type AiErrorCode = z.infer<typeof AiErrorCode>
 
@@ -186,8 +204,10 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
   DISABLED: 'Turn on Use AI in Settings › AI, or enable the feature there.',
   CANCELLED: 'Send it again whenever you like.',
   SIGNED_OUT: 'Sign in on the Account tab in Settings.',
-  NO_CREDIT: 'Buy credits on the Account tab in Settings.',
-  CLOUD_UNAVAILABLE: 'Switch to My own key or Local model in Settings › AI.'
+  NO_CREDIT: 'Add to your balance on the Account tab in Settings.',
+  CLOUD_UNAVAILABLE: 'Switch to My own key or Local model in Settings › AI.',
+  TOO_LARGE: 'Select less text, or ask about a shorter passage, and try again.',
+  MODEL_UNAVAILABLE: 'Pick another model in Settings › AI, or reset the models to their defaults.'
 }
 
 /**
@@ -451,8 +471,8 @@ export interface ModelPrice {
  * against developers.openai.com/api/docs/pricing on 2026-10-05 (`gpt-5.4` at the under-272K
  * context rate). Cached input is a tenth of the input rate (AI-BILLING-SPEC R6); a model with no
  * cached price bills cached tokens at the full input rate, over-counted, never under-counted.
- * This is the own-key estimate only: hosted prices come from the server (`CloudPricing`); the
- * bundled Cloud rates (`cloudRates.ts`) still read this table until the Worker serves one.
+ * This is the own-key estimate only: hosted prices come from the server (`GET /pricing`, cached
+ * by `CloudPricingService`), with `bundledPricing` (`hostedPricing.ts`) until it has answered.
  */
 const GPT_5_4: ModelPrice = { inUsdPerM: 2.5, outUsdPerM: 15, cachedInUsdPerM: 0.25, priced: true }
 const GPT_5_4_MINI: ModelPrice = {
@@ -474,11 +494,23 @@ export const MODEL_PRICING: Record<string, ModelPrice> = {
 }
 
 /**
- * The same models by their OpenRouter ids (2026-10-07). OpenRouter passes the provider's price
- * through, so they carry the same rates. Kept apart from `MODEL_PRICING` so the Cloud rate table
- * does not list each model twice.
+ * The models by their OpenRouter ids (2026-10-07). OpenRouter passes the provider's price
+ * through, so the OpenAI ones carry the same rates; the DeepSeek defaults are OpenRouter's live
+ * prices of 2026-10-07 (re-check whenever a default changes).
  */
 export const OPENROUTER_PRICING: Record<string, ModelPrice> = {
+  'deepseek/deepseek-v4-flash': {
+    inUsdPerM: 0.03,
+    outUsdPerM: 1.28,
+    cachedInUsdPerM: 0.03,
+    priced: true
+  },
+  'deepseek/deepseek-v4-pro': {
+    inUsdPerM: 0.21,
+    outUsdPerM: 0.42,
+    cachedInUsdPerM: 0.017,
+    priced: true
+  },
   'openai/gpt-5.4': GPT_5_4,
   'openai/gpt-5.4-mini': GPT_5_4_MINI,
   'openai/gpt-5.4-nano': GPT_5_4_NANO

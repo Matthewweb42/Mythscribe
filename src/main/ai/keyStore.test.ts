@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { maskKey } from '@shared/ai'
 import { AppError } from '../ipc/errors'
-import { AiKeyStore, NO_KEYCHAIN_MESSAGE } from './keyStore'
+import { AiKeyStore, NO_KEYCHAIN_MESSAGE, NO_KEYCHAIN_SESSION_MESSAGE } from './keyStore'
 import { fakeSafeStorage } from './keyStoreFixture'
 
 const KEY = 'sk-test-secret-1234abcd'
@@ -94,8 +94,9 @@ describe('AiKeyStore (F-5.1)', () => {
       expect(store.hasKey(id)).toBe(false)
     }
     expect(fs.existsSync(file)).toBe(false)
-    store.setKey('cloudSession', KEY)
-    expect(store.getKey('cloudSession')).toBe(KEY)
+    // Slice B3b: the account's refresh token is held to the same rule (S2, A5).
+    expect(() => store.setKey('cloudSession', KEY)).toThrow(NO_KEYCHAIN_SESSION_MESSAGE)
+    expect(store.hasKey('cloudSession')).toBe(false)
     expect(store.canStoreProviderKey()).toBe(false)
     expect(new AiKeyStore(file, fakeSafeStorage(), 'linux').canStoreProviderKey()).toBe(true)
     // The e2e's escape hatch (xvfb has no keyring): the fallback is allowed only when asked.

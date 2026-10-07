@@ -149,3 +149,11 @@ export class AiNoCreditError extends AiProviderError {
 export class AiCloudUnavailableError extends AiProviderError {
   readonly code = 'CLOUD_UNAVAILABLE' as const
 }
+/** The Cloud proxy refused a request over its configured input cap (AI-BILLING-SPEC S4). */
+export class AiTooLargeError extends AiProviderError {
+  readonly code = 'TOO_LARGE' as const
+}
+/** The Cloud proxy does not sell the model the request asked for (not on its price table). */
+export class AiModelUnavailableError extends AiProviderError {
+  readonly code = 'MODEL_UNAVAILABLE' as const
+}

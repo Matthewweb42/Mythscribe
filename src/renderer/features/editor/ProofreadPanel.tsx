@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import { PROOFREAD_CHAR_BUDGET, PROOFREAD_KIND_LABEL, type ProofreadFix } from '@shared/proofread'
-import { describeRequest } from '@renderer/features/ai/usageFormat'
+import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { REWRITE_BUSY_MESSAGE } from './applyFix'
 import { FIX_BUTTON, FIX_PRIMARY_BUTTON, FIX_QUOTE_BUTTON, FixDiff, OffVoiceFlag } from './FixDiff'
 import { useProofreadStore, type ProofreadFixState, type ProofreadSession } from './proofreadStore'
@@ -146,7 +146,7 @@ function Body({
           Close
         </button>
         <span data-testid="proofread-cost" className="text-xs text-fg-subtle">
-          {describeRequest(result)}
+          <RequestCost request={result} />
         </span>
       </div>
     </>

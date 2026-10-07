@@ -25,9 +25,8 @@ import {
   ROUTABLE_FEATURES,
   ROUTE_CHOICE_LABEL,
   autoTable,
-  multiplierLabel,
-  type AiModelChoice,
-  type CloudPricing
+  hostedAutoTable,
+  type AiModelChoice
 } from '@shared/aiRouting'
 import {
   AI_SOURCE_LABEL,
@@ -38,8 +37,8 @@ import {
   LOCAL_QUALITY_WARNING,
   isFeatureAllowed
 } from '@shared/aiSettings'
-import { CLOUD_AI_AVAILABLE } from '@shared/cloudApi'
-import { cloudRateFor } from '@shared/cloudRates'
+import { CLOUD_AI_AVAILABLE, type PricingResult } from '@shared/cloudApi'
+import { bundledPricing, hostedModel, hostedModelFor, multiplierLabel } from '@shared/hostedPricing'
 import { useAccountStore } from '@renderer/features/account/accountStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -468,7 +467,7 @@ function CloudAccountLine({
   return (
     <p role="status" data-testid="ai-cloud-account" className="m-0 text-xs text-fg-muted">
       {signedIn && email !== null
-        ? `Signed in as ${email}. Manage credits on the Account tab.`
+        ? `Signed in as ${email}. Manage your balance on the Account tab.`
         : 'Not signed in. Sign in on the Account tab to use MythScribe Cloud.'}
     </p>
   )
@@ -693,7 +692,7 @@ function ModelField({
   disabled: boolean
   showCloudRate: boolean
   /** The server's table (`GET /pricing`), or null until one was fetched. */
-  pricing: CloudPricing | null
+  pricing: PricingResult | null
   onCommit: (model: string) => Promise<void>
 }): React.JSX.Element {
   const hintId = useId()
@@ -748,7 +747,7 @@ function ModelField({
 /**
  * What one tier's saved model costs on MythScribe Cloud, without tokens (AI-BILLING-SPEC C4,
  * E5): a model the server marks with a multiplier says "about 2x the default"; the server's
- * table wins over the bundled one (`cloudRates.ts`), which stands in until it is fetched.
+ * table (`GET /pricing`) wins, and its bundled defaults (`bundledPricing`) stand in until then.
  */
 function CloudRateLine({
   tier,
@@ -757,11 +756,13 @@ function CloudRateLine({
 }: {
   tier: Tier
   model: string
-  pricing: CloudPricing | null
+  pricing: PricingResult | null
 }): React.JSX.Element {
-  const listed = pricing?.models.some((entry) => entry.model === model) ?? false
-  const priced = listed || cloudRateFor(model).priced
-  const multiplier = multiplierLabel(pricing, model)
+  const table = pricing ?? bundledPricing()
+  // A tier left at a default goes out as the server's routing model, so that is the one priced.
+  const sent = hostedModelFor(tier, model, table)
+  const priced = hostedModel(table, sent) !== undefined
+  const multiplier = multiplierLabel(table, sent)
   return priced ? (
     <p data-testid={`ai-model-rate-${tier}`} className="m-0 pl-27 text-xs text-fg-muted">
       {multiplier === null
@@ -774,8 +775,8 @@ function CloudRateLine({
       data-testid={`ai-model-rate-${tier}`}
       className="m-0 pl-27 text-xs text-warning"
     >
-      MythScribe Cloud has no rate for this model and will not answer with it. Pick one from the
-      rates table on the Account tab.
+      MythScribe Cloud does not offer this model and will not answer with it. Pick one from the
+      models on the Account tab.
     </p>
   )
 }
@@ -860,7 +861,7 @@ function ModelChoiceSection({
   const hintId = useId()
   if (choice === null) return null
   const { routing } = choice
-  const table = autoTable(source === 'cloud' ? (choice.cloudPricing?.routing ?? null) : null)
+  const table = autoTable(source === 'cloud' ? hostedAutoTable(choice.cloudPricing) : null)
   const named = (tier: Tier): string =>
     models === null ? ROUTE_CHOICE_LABEL[tier] : `${ROUTE_CHOICE_LABEL[tier]} (${models[tier]})`
   const save = (next: typeof routing): void => {

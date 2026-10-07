@@ -2,24 +2,30 @@ import { describe, expect, it } from 'vitest'
 import { AI_FEATURE_IDS } from './ai'
 import {
   AiRouting,
-  CloudPricing,
   DEFAULT_ROUTING_TABLE,
   ROUTABLE_FEATURES,
   autoTable,
   defaultAiRouting,
-  hostedPriceFor,
-  multiplierLabel,
+  hostedAutoTable,
   resolveTier
 } from './aiRouting'
+import { bundledPricing } from './hostedPricing'
 
-const PRICING = CloudPricing.parse({
-  markup: 0.2,
-  models: [
-    { model: 'cheap/fast', inUsdPerM: 1, outUsdPerM: 2, cachedInUsdPerM: 0.1, multiplier: 1 },
-    { model: 'big/strong', inUsdPerM: 3, outUsdPerM: 15, multiplier: 2.4 }
-  ],
-  routing: { summary: 'strong', someFutureFeature: 'fast', chat: 'medium' }
-})
+/** The Worker's pricing shape, then one whose routing table names a feature this build lacks. */
+const PRICING = {
+  ...bundledPricing(),
+  routing: {
+    tiers: { fast: 'cheap/fast', strong: 'big/strong' },
+    features: { summary: 'strong' as const }
+  }
+}
+const PRICING_WITH_UNKNOWN = {
+  ...PRICING,
+  routing: {
+    ...PRICING.routing,
+    features: { ...PRICING.routing.features, someFutureFeature: 'fast' as const }
+  }
+}
 
 describe('model routing (AI-BILLING-SPEC M8, R4)', () => {
   it('Auto keeps the tier every feature asked for before routing existed', () => {
@@ -47,8 +53,9 @@ describe('model routing (AI-BILLING-SPEC M8, R4)', () => {
   })
 
   it('merges the Cloud table over the bundled one, dropping what this build does not know', () => {
-    expect(PRICING.routing).toEqual({ summary: 'strong' })
-    const table = autoTable(PRICING.routing)
+    expect(hostedAutoTable(PRICING_WITH_UNKNOWN)).toEqual({ summary: 'strong' })
+    expect(hostedAutoTable(null)).toBeNull()
+    const table = autoTable(hostedAutoTable(PRICING))
     expect(table.summary).toBe('strong')
     expect(table.tags).toBe('fast')
   })
@@ -62,35 +69,5 @@ describe('model routing (AI-BILLING-SPEC M8, R4)', () => {
     expect(ROUTABLE_FEATURES).toEqual(
       AI_FEATURE_IDS.filter((id) => id !== 'authorMode' && id !== 'embeddings')
     )
-  })
-})
-
-describe('hosted pricing (AI-BILLING-SPEC P1–P3, R6, E5)', () => {
-  it('fills the spec defaults for a table that omits them', () => {
-    expect(PRICING).toMatchObject({
-      packsUsd: [10, 25, 50],
-      trialGrantUsd: 2,
-      quoteThresholdUsd: 0.25,
-      estimateSafetyFactor: 1.2,
-      lowBalanceWarningUsd: 2,
-      perWordUsd: {},
-      defaults: null
-    })
-  })
-
-  it('charges provider cost plus the markup, cached input at its own rate, rounded up', () => {
-    // 1M in (250k cached), 100k out on cheap/fast: (750k × 1 + 250k × 0.1 + 100k × 2) / 1M = 0.975.
-    const { costUsd, priced } = hostedPriceFor(PRICING, 'cheap/fast', 1_000_000, 100_000, 250_000)
-    expect(priced).toBe(true)
-    expect(costUsd).toBeCloseTo(0.975 * 1.2, 6)
-    // Never free, never fractional micro-dollars.
-    expect(hostedPriceFor(PRICING, 'cheap/fast', 1, 0).costUsd).toBe(0.000002)
-    expect(hostedPriceFor(PRICING, 'unknown/model', 10, 10)).toEqual({ costUsd: 0, priced: false })
-  })
-
-  it('labels a model by its multiplier, and the default one not at all', () => {
-    expect(multiplierLabel(PRICING, 'big/strong')).toBe('about 2.4x')
-    expect(multiplierLabel(PRICING, 'cheap/fast')).toBeNull()
-    expect(multiplierLabel(null, 'big/strong')).toBeNull()
   })
 })

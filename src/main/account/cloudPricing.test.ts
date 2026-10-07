@@ -2,14 +2,15 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { bundledPricing } from '@shared/hostedPricing'
 import { AppStateStore } from '../appState/appStateStore'
 import type { FetchLike } from '../ai/providers/openai'
 import { CLOUD_PRICING_MAX_AGE_MS, CloudPricingService } from './cloudPricing'
 
+/** What the Worker's `GET /pricing` answers (`PricingResult`), plus a field from a newer Worker. */
 const TABLE = {
-  markup: 0.2,
-  models: [{ model: 'openai/gpt-5.4-mini', inUsdPerM: 0.75, outUsdPerM: 4.5 }],
-  routing: { summary: 'fast' },
+  ...bundledPricing(),
+  routing: { ...bundledPricing().routing, features: { summary: 'fast' } },
   aFieldFromANewerWorker: true
 }
 
@@ -43,7 +44,8 @@ describe('CloudPricingService (AI-BILLING-SPEC P5)', () => {
     expect(pricing.current()).toBeNull()
     const table = await pricing.refresh()
     expect(fetch).toHaveBeenCalledWith('https://api.example.test/pricing', expect.anything())
-    expect(table).toMatchObject({ markup: 0.2, routing: { summary: 'fast' } })
+    expect(table).toMatchObject({ markup: 0.2, routing: { features: { summary: 'fast' } } })
+    expect(table).not.toHaveProperty('aFieldFromANewerWorker')
     expect(pricing.current()).toEqual(table)
     expect(new AppStateStore(path.join(tmp, 'app-state.json')).get().cloudPricing).toEqual({
       fetchedAt: new Date(now).toISOString(),

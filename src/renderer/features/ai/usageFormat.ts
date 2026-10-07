@@ -36,16 +36,20 @@ export const describeTotals = (t: UsageTotals, showTokens = true): string =>
  * The line under every AI answer (F-5.9, CLAUDE.md rule 10): the model, what the request cost,
  * its tokens in and out, and whether it came from the local cache. `usage` is null only for a
  * chat turn stored before F-5.9, whose tokens were never kept; then the token part is left out
- * rather than shown as zero.
+ * rather than shown as zero. `showTokens` is false for MythScribe Cloud (AI-BILLING-SPEC C4:
+ * hosted users see dollars; tokens stay in the usage history); `RequestCost` decides it.
  */
-export const describeRequest = (request: {
-  model: string
-  costUsd: number
-  usage: AiUsage | null
-  cached: boolean
-}): string => {
+export const describeRequest = (
+  request: {
+    model: string
+    costUsd: number
+    usage: AiUsage | null
+    cached: boolean
+  },
+  showTokens = true
+): string => {
   const tokens =
-    request.usage === null
+    request.usage === null || !showTokens
       ? ''
       : ` · ${formatCount(request.usage.inputTokens)} in · ${formatCount(request.usage.outputTokens)} out`
   return `${request.model} · ${formatRequestCost(request.costUsd)}${tokens}${request.cached ? ' · cached' : ''}`

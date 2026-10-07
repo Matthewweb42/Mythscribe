@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  DEFAULT_MODELS,
+  HOSTED_DEFAULT_MODELS,
   OPENROUTER_DEFAULT_MODELS,
   defaultAiModels,
   defaultLocalAiSettings
@@ -283,7 +283,7 @@ describe('AppStateStore', () => {
     const state = new AppStateStore(file).get()
     expect(state.models).toEqual({
       ...models,
-      cloud: DEFAULT_MODELS,
+      cloud: HOSTED_DEFAULT_MODELS,
       local: defaultAiModels().local,
       openrouter: OPENROUTER_DEFAULT_MODELS
     })

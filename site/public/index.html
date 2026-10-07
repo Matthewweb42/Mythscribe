@@ -345,8 +345,8 @@
             <li class="card">
               <h3>Bring your own key</h3>
               <p>
-                Use your own OpenAI key, kept in your system’s secure storage, or a model running on
-                your own machine. Requests go straight to the provider, never through us.
+                Use your own OpenRouter or OpenAI key, kept in your system’s keychain, or a model
+                running on your own machine. Requests go straight to the provider, never through us.
               </p>
             </li>
             <li class="card">
@@ -389,8 +389,9 @@
             <h3>Your own key or a local model</h3>
             <p class="price">$0 <small>to us</small></p>
             <p>
-              Add your OpenAI key and pay OpenAI directly for what you use, or point MythScribe at a
-              model on your own computer (Ollama, LM Studio) and pay nothing.
+              Add an OpenRouter key (the default: one key for many models) or an OpenAI key and pay
+              the provider directly for what you use, or point MythScribe at a model on your own
+              computer (Ollama, LM Studio) and pay nothing.
             </p>
             <ul class="ticks">
               <li>Never routed through our servers</li>
@@ -415,13 +416,14 @@
         </div>
 
         <div class="estimate">
-          <h3>What does your own key cost?</h3>
+          <h3>What does your own OpenAI key cost?</h3>
           <p class="note">
             A rough estimate, not a quote: about <strong>$6 a month</strong> for a writer who adds
             1,000 words a day, keeps background indexing on, takes about 20 VibeWrite suggestions a
-            day, and asks the assistant 3 questions a day, on the app’s default OpenAI models
-            (GPT-5.4 mini for background work and suggestions, GPT-5.4 for the assistant) at
-            OpenAI’s prices of 5 October 2026.
+            day, and asks the assistant 3 questions a day, with an OpenAI key on the app’s OpenAI
+            models (GPT-5.4 mini for background work and suggestions, GPT-5.4 for the assistant) at
+            OpenAI’s prices of 5 October 2026. The OpenRouter defaults (DeepSeek V4 Flash and Pro)
+            are priced lower per token.
           </p>
           <div class="table-wrap">
             <table>
@@ -501,8 +503,8 @@
             <summary>How much does the AI cost?</summary>
             <div>
               <p>
-                With your own OpenAI key you pay OpenAI directly; for a writer working every day
-                that is roughly a few dollars a month (see the <a href="#pricing">estimate</a>). The
+                With your own OpenRouter or OpenAI key you pay the provider directly; for a writer
+                working every day that is roughly a few dollars a month (see the <a href="#pricing">estimate</a>). The
                 app shows the cost of every request and a running total, and stops at a daily cap
                 you set. A model running on your own computer costs nothing.
               </p>

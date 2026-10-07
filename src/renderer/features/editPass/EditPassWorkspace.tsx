@@ -19,6 +19,8 @@ import {
   type EditPassSummary,
   type EditPassType
 } from '@shared/editPass'
+import { hostedModelFor, hostedQuote } from '@shared/hostedPricing'
+import { useHostedPricing } from '@renderer/features/account/hostedPricing'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { providerOf, routedTier, useAiStore } from '@renderer/features/ai/aiStore'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
@@ -37,22 +39,25 @@ const INDENT = ['pl-0', 'pl-4', 'pl-8', 'pl-12', 'pl-16'] as const
 
 /**
  * The tier and model a pass of this kind goes out on for this project's source (F-5.11, F-15.4),
- * after the author's model choice (AI-BILLING-SPEC M8, R4), as the estimate prices it.
+ * after the author's model choice (AI-BILLING-SPEC M8, R4), as the estimate prices it. On
+ * MythScribe Cloud a tier left at its default follows the server's routing table, as main does.
  */
 function usePassModel(type: EditPassType): { tier: Tier; model: string; source: AiSource } {
   const source = useAiSettingsStore((s) => s.settings?.source ?? 'ownKey')
   const status = useAiStore((s) => s.status)
   const choice = useAiStore((s) => s.choice)
+  const pricing = useHostedPricing()
   const tier = routedTier(choice, source, 'editPass', EDIT_PASS_TIER[type])
-  const model = status?.models[providerOf(status, source)][tier] ?? DEFAULT_MODELS[tier]
+  const chosen = status?.models[providerOf(status, source)][tier] ?? DEFAULT_MODELS[tier]
+  const model = source === 'cloud' ? hostedModelFor(tier, chosen, pricing) : chosen
   return { tier, model, source }
 }
 
 /**
  * The Edits workspace (F-14.15), the main pane's own screen for a pass: choose the kind of edit
  * (or write a custom instruction, from a built-in or saved preset), tick the scenes it covers
- * (quick picks for this scene, this chapter, the whole manuscript), compare what it would cost
- * with what an editor typically charges for the same words, and start it. While a pass runs the
+ * (quick picks for this scene, this chapter, the whole manuscript), see what it would cost, and
+ * start it (on MythScribe Cloud, a pass quoted above the configured threshold asks once more). While a pass runs the
  * workspace shows its progress scene by scene with Stop; the scenes in it are read-only in the
  * editor until it ends, and the report opens when it finishes.
  */
@@ -139,6 +144,8 @@ function PassSetup(): React.JSX.Element {
   const { model, source } = usePassModel(type)
   // AI-BILLING-SPEC C4: hosted users see dollars and words, not tokens.
   const hosted = source === 'cloud'
+  const pricing = useHostedPricing()
+  const [confirming, setConfirming] = useState(false)
   const ordered = scope.ordered
   const estimate = useMemo(
     () =>
@@ -150,6 +157,15 @@ function PassSetup(): React.JSX.Element {
       ),
     [type, ordered, wordCounts, model]
   )
+  // Hosted flow 2, R3, E4: a pass is quoted at the server's price for the sum of its chunks,
+  // padded by the safety factor; above the threshold Start asks for a confirm first.
+  const quote = hosted ? hostedQuote(pricing, model, estimate.tokensIn, estimate.tokensOut) : null
+  const quoteKey = `${type}|${ordered.join(',')}|${model}|${quote?.costUsd ?? ''}`
+  const [quotedFor, setQuotedFor] = useState(quoteKey)
+  if (quotedFor !== quoteKey) {
+    setQuotedFor(quoteKey)
+    setConfirming(false)
+  }
   const needsInstruction = type === 'custom' && instruction.trim() === ''
   const reason = !allowed
     ? 'Edit passes need Use AI on for this project (Settings, AI).'
@@ -160,6 +176,11 @@ function PassSetup(): React.JSX.Element {
         : null
 
   const start = async (): Promise<void> => {
+    if (quote?.needsConfirm === true && !confirming) {
+      setConfirming(true)
+      return
+    }
+    setConfirming(false)
     setStarting(true)
     await useEditPassStore.getState().start({
       type,
@@ -182,12 +203,12 @@ function PassSetup(): React.JSX.Element {
           {`${formatCount(estimate.scenes, 'scene')} · ${formatCount(estimate.words, 'word')} · ${formatCount(estimate.chunks, 'request')}`}
         </p>
         <p className="m-0 text-sm" data-testid="edit-pass-estimate-ai">
-          {estimate.priced
-            ? hosted
-              ? `With MythScribe: about ${formatUsd(estimate.costUsd)} on ${model}.`
-              : `With MythScribe: about ${formatUsd(estimate.costUsd)} on ${model} (about ${formatCount(estimate.tokensIn)} tokens in, ${formatCount(estimate.tokensOut)} out at most).`
-            : hosted
-              ? `With MythScribe: ${model} has no published price here, so the cost is not estimated.`
+          {quote !== null
+            ? quote.priced
+              ? `With MythScribe: up to about ${formatUsd(quote.costUsd)} from your MythScribe Cloud balance on ${model}.`
+              : `With MythScribe: MythScribe Cloud does not offer ${model}, so the pass cannot run on it.`
+            : estimate.priced
+              ? `With MythScribe: about ${formatUsd(estimate.costUsd)} on ${model} (about ${formatCount(estimate.tokensIn)} tokens in, ${formatCount(estimate.tokensOut)} out at most).`
               : `With MythScribe: ${model} has no published price here, so the cost is not estimated (about ${formatCount(estimate.tokensIn)} tokens in).`}
         </p>
       </section>
@@ -199,11 +220,27 @@ function PassSetup(): React.JSX.Element {
           onClick={() => void start()}
           className="rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-50 disabled:hover:bg-accent"
         >
-          Start the pass
+          {confirming ? 'Confirm and start' : 'Start the pass'}
         </button>
-        <span className="text-xs text-fg-muted">
-          {reason ?? 'Every change comes back as a tracked change you accept or reject.'}
-        </span>
+        {confirming && quote !== null ? (
+          <>
+            <span role="status" data-testid="edit-pass-quote" className="text-xs text-fg">
+              {`This pass takes up to about ${formatUsd(quote.costUsd)} from your MythScribe Cloud balance. You pay only for what it uses.`}
+            </span>
+            <button
+              type="button"
+              data-testid="edit-pass-quote-cancel"
+              onClick={() => setConfirming(false)}
+              className={SMALL_BUTTON}
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <span className="text-xs text-fg-muted">
+            {reason ?? 'Every change comes back as a tracked change you accept or reject.'}
+          </span>
+        )}
       </div>
     </>
   )

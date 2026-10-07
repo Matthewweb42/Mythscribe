@@ -8,7 +8,7 @@ import {
   type AiProviderId,
   type Tier
 } from '@shared/ai'
-import { autoTable, resolveTier, type AiRouting } from '@shared/aiRouting'
+import { autoTable, hostedAutoTable, resolveTier, type AiRouting } from '@shared/aiRouting'
 import type { AppStateStore } from '../appState/appStateStore'
 import { getCached, putCached, type CacheEntry, type CachedResponse } from './cacheStore'
 import { dayOf, rollIfNewDay, spend, wouldExceed, type AiUsageState } from './dailyCap'
@@ -377,7 +377,8 @@ export function buildAiRequestDeps(bind: {
     price: priceFor,
     routing: (provider) => {
       const state = bind.appState.get()
-      const cloudTable = provider === 'cloud' ? (state.cloudPricing?.pricing.routing ?? null) : null
+      const cloudTable =
+        provider === 'cloud' ? hostedAutoTable(state.cloudPricing?.pricing ?? null) : null
       return { routing: state.routing, table: autoTable(cloudTable) }
     }
   }

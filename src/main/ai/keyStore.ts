@@ -39,6 +39,12 @@ export const NO_KEYCHAIN_MESSAGE =
   'gnome-keyring), sign out and back in, then save the key again. Until then, use MythScribe ' +
   'Cloud or a local model.'
 
+/** The same rule for the MythScribe account's sign-in (its refresh token; AI-BILLING-SPEC A5). */
+export const NO_KEYCHAIN_SESSION_MESSAGE =
+  'MythScribe keeps your account sign-in only in your system keychain, and none is running. ' +
+  'On Linux, install and unlock GNOME Keyring or KWallet (for example: sudo apt install ' +
+  'gnome-keyring), sign out of the desktop and back in, then sign in again.'
+
 /**
  * The one owner of provider keys (F-5.1) and the Cloud session (F-15.2): `<userData>/ai-keys.json`, separate from
  * `app-state.json` so the layout file never carries even ciphertext. Read lazily and written
@@ -66,7 +72,10 @@ export class AiKeyStore {
     return 'os'
   }
 
-  /** Whether a provider key may be saved: only in the OS keychain (S2), or the e2e's fallback. */
+  /**
+   * Whether a provider key or the Cloud session may be saved: only in the OS keychain (S2), or
+   * the e2e's fallback.
+   */
   canStoreProviderKey(): boolean {
     const encryption = this.encryption()
     return encryption === 'os' || (encryption === 'plain' && this.allowPlainText)
@@ -96,13 +105,17 @@ export class AiKeyStore {
 
   /**
    * Encrypts and stores the key; throws `AppError('IO')` before touching the file when it cannot
-   * be protected. A provider key also needs the OS keychain (S2): the plain-text fallback is
-   * refused. The Cloud session keeps the fallback until the session rework (billing slice B3).
+   * be protected. A provider key and the Cloud session (the refresh token, AI-BILLING-SPEC S2 and
+   * A5; slice B3b) both need the OS keychain: the plain-text fallback is refused. The account
+   * checks first (`AccountService.requestLink`), so a sign-in is refused before the email goes.
    */
   setKey(id: SecretId, key: string): void {
     if (this.encryption() === 'none') throw new AppError('IO', NO_SAFE_STORAGE_MESSAGE)
-    if (id !== 'cloudSession' && !this.canStoreProviderKey()) {
-      throw new AppError('IO', NO_KEYCHAIN_MESSAGE)
+    if (!this.canStoreProviderKey()) {
+      throw new AppError(
+        'IO',
+        id === 'cloudSession' ? NO_KEYCHAIN_SESSION_MESSAGE : NO_KEYCHAIN_MESSAGE
+      )
     }
     const cipher = this.safeStorage.encryptString(key).toString('base64')
     const current = this.read()

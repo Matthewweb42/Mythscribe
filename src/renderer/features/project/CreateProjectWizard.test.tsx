@@ -146,7 +146,7 @@ describe('CreateProjectWizard', () => {
     expect(screen.getByTestId('wizard-source-hint')).toHaveTextContent('Start Ollama or LM Studio')
     await userEvent.click(screen.getByRole('radio', { name: /^mythscribe cloud/i }))
     expect(screen.getByTestId('wizard-source-hint')).toHaveTextContent(
-      'Sign in and buy credits under Settings › Account'
+      'Sign in and add to your balance under Settings › Account'
     )
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
     await nextThenCreate()

@@ -49,8 +49,8 @@ const sourceHint = (source: AiSource, signedInEmail: string | null): string =>
     : source === 'local'
       ? 'Start Ollama or LM Studio, then set its address and models under Settings › AI.'
       : signedInEmail !== null
-        ? `Signed in as ${signedInEmail}. Buy credits under Settings › Account.`
-        : 'Sign in and buy credits under Settings › Account once the project is open.'
+        ? `Signed in as ${signedInEmail}. Add to your balance under Settings › Account.`
+        : 'Sign in and add to your balance under Settings › Account once the project is open.'
 
 /** What the previous step leads to: the dial step, or back to the source. */
 const PREVIOUS: Record<Exclude<Step, 'name'>, Step> = {

@@ -654,7 +654,11 @@ describe('GET /pricing (P1, P5)', () => {
       holdExpiryMinutes: 10,
       refundWindowDays: 30,
       limits: { requestsPerMinute: 60, maxInputChars: 200_000, maxOutputTokens: 4000 },
-      routing: { tiers: { fast: 'openai/gpt-5.4-mini', strong: 'openai/gpt-5.4' }, features: {} },
+      // The defaults the author approved on 2026-10-07.
+      routing: {
+        tiers: { fast: 'deepseek/deepseek-v4-flash', strong: 'deepseek/deepseek-v4-pro' },
+        features: {}
+      },
       wordCosts: { lineEdit: null, consistencyCheck: null }
     })
     expect(body.models.map((model) => model.id)).toEqual(DEFAULT_HOSTED_MODELS.map((m) => m.id))
@@ -687,7 +691,7 @@ describe('GET /pricing (P1, P5)', () => {
 
     const body = await pricing()
     expect(body.markup).toBe(0.2)
-    expect(body.routing.tiers.fast).toBe('openai/gpt-5.4-mini')
+    expect(body.routing.tiers.fast).toBe('deepseek/deepseek-v4-flash')
     expect(warnings).toHaveLength(3)
   })
 

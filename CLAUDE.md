@@ -19,8 +19,8 @@ The original prototype was deleted on purpose (git tag `v0-legacy`). Do not resu
 
 ## Decisions made (do not re-open)
 
-- **Business:** free desktop app; BYOK AI; paid MythScribe Cloud (subscription + credit packs); one-time Supporter license. Billing via **Lemon Squeezy** (merchant of record).
-- **AI provider:** **OpenAI-first** for both the default BYOK setup and Cloud, chosen for price. The provider interface stays generic; an Anthropic adapter is optional later. Local models (F-5.15) were built 2026-10-06 at the author's request (any OpenAI-compatible server, e.g. Ollama).
+- **Business (2026-10-07, `docs/research/AI-BILLING-SPEC.md`):** the app is a **$30 one-time purchase** with a 30-day free trial (no subscription; the $39 Supporter license is superseded). Own key and local models are free, with no markup, and never touch our servers. Hosted AI (MythScribe Cloud) is paid from a prepaid **dollar balance** ("Balance", never "credits"): packs $10/$25/$50, provider cost + 20 %, never expires, unused balance refundable (window 30 days, unconfirmed). Billing via **Lemon Squeezy** (merchant of record).
+- **AI provider:** **OpenRouter** for both the default own-key provider and the hosted gateway (OpenAI kept as an own-key option). Defaults approved 2026-10-07: DeepSeek V4 Flash (fast) and V4 Pro (strong). The provider interface stays generic. Local models (F-5.15) were built 2026-10-06 at the author's request (any OpenAI-compatible server, e.g. Ollama).
 - **Name:** MythScribe. **Goal: launch as soon as possible.** Scope is cut toward the launch line in `FEATURES.md` §6, not expanded.
 - **Stack:** approved 2026-09-10 and scaffolded (see Stack below). M0 is built.
 

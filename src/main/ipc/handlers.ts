@@ -15,7 +15,8 @@ import {
 import type { AiModelChoice } from '@shared/aiRouting'
 import { type AiSource, aiSwitchPatch, isFeatureAllowed } from '@shared/aiSettings'
 import { EXPORT_EXTENSIONS, EXPORT_FORMAT_LABELS } from '@shared/bookExport'
-import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl } from '@shared/cloudApi'
+import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl, type PricingResult } from '@shared/cloudApi'
+import { bundledPricing, hostedQuote } from '@shared/hostedPricing'
 import { aiRequestCounter } from '@shared/diagnostics'
 import { ENTITY_IMAGES_DIR, ENTITY_KIND_LABEL } from '@shared/entities'
 import {
@@ -350,6 +351,11 @@ export interface HandlerDeps {
    * the project's open and close.
    */
   backups: BackupService
+  /**
+   * AI-BILLING-SPEC P5: the hosted price table (`GET /pricing`), cached in app state and fetched
+   * again once it is an hour old. Absent in a build with no Cloud wiring: the cache alone answers.
+   */
+  cloudPricing?: { refresh(): Promise<PricingResult | null> }
   dialogs: ProjectDialogs
   windows: () => ClosableWindow[]
   /** The window with keyboard focus, for the edit commands (F-7.1); null when none has it. */
@@ -379,6 +385,7 @@ export function registerHandlers({
   updates,
   diagnostics,
   backups,
+  cloudPricing,
   dialogs,
   windows,
   focusedWindow,
@@ -1608,8 +1615,15 @@ export function registerHandlers({
   register('library:estimate', async ({ fileIds }) => {
     const session = manager.require()
     const db = session.connection.orm
-    const model = ai.get(sourceOf(db))?.resolveModel('strong') ?? ''
-    return estimateContextImport(db, session.folder, fileIds, model)
+    const source = sourceOf(db)
+    const model = ai.get(source)?.resolveModel('strong') ?? ''
+    const estimate = await estimateContextImport(db, session.folder, fileIds, model)
+    if (source !== 'cloud') return estimate
+    // AI-BILLING-SPEC flow 2, R3, E4: on Cloud the confirm shows the hosted quote (the chunks'
+    // sum at the server's price, padded by the safety factor), not the provider's own price.
+    const pricing = appState.get().cloudPricing?.pricing ?? bundledPricing()
+    const quote = hostedQuote(pricing, model, estimate.tokensIn, estimate.tokensOut)
+    return { ...estimate, costUsd: quote.costUsd, priced: quote.priced }
   })
 
   // Like `import:detectStructure` (F-12.3): the parent `requestId` is registered here so
@@ -1685,6 +1699,16 @@ export function registerHandlers({
 
   // F-15.3: the Cloud credit balance, what each feature has spent, and the packs on sale.
   register('account:getCredits', () => account.credits())
+
+  // AI-BILLING-SPEC E7: one page of the account's ledger, newest first.
+  register('account:getUsage', ({ cursor }) => account.usage(cursor))
+
+  // AI-BILLING-SPEC P5: the hosted price table, refreshed when stale; null before any answer.
+  register('account:getPricing', async () =>
+    cloudPricing === undefined
+      ? (appState.get().cloudPricing?.pricing ?? null)
+      : cloudPricing.refresh()
+  )
 
   // The Worker builds the checkout URL (it knows the account and the pack) and this opens it;
   // the app never builds one, and it opens nothing that is not a Lemon Squeezy checkout, so a

@@ -7,6 +7,7 @@ import {
   AiUsageSummary,
   DEFAULT_INPUT_BUDGET,
   DEFAULT_MODELS,
+  HOSTED_DEFAULT_MODELS,
   DEFAULT_OUTPUT_BUDGET,
   DailyCapUsd,
   FEATURE_BUDGETS,
@@ -40,12 +41,20 @@ describe('cached input and OpenRouter (AI-BILLING-SPEC A4, R6, A2)', () => {
     )
   })
 
-  it('prices the OpenRouter ids of the default models like the models themselves', () => {
+  it('prices the approved OpenRouter defaults and the OpenAI models by their OpenRouter ids', () => {
+    // Approved by the author 2026-10-07: DeepSeek V4 Flash and Pro, at that day's live prices.
+    expect(OPENROUTER_DEFAULT_MODELS).toEqual({
+      fast: 'deepseek/deepseek-v4-flash',
+      strong: 'deepseek/deepseek-v4-pro'
+    })
     for (const tier of ['fast', 'strong'] as const) {
-      expect(priceFor(OPENROUTER_DEFAULT_MODELS[tier], 1_000, 1_000)).toEqual(
+      expect(priceFor(OPENROUTER_DEFAULT_MODELS[tier], 1_000, 1_000).priced).toBe(true)
+      expect(priceFor(`openai/${DEFAULT_MODELS[tier]}`, 1_000, 1_000)).toEqual(
         priceFor(DEFAULT_MODELS[tier], 1_000, 1_000)
       )
     }
+    // 1M in, 1M out on V4 Flash: $0.03 + $1.28.
+    expect(priceFor('deepseek/deepseek-v4-flash', 1_000_000, 1_000_000).costUsd).toBeCloseTo(1.31)
     expect(defaultModelsFor('openrouter')).toEqual(OPENROUTER_DEFAULT_MODELS)
   })
 
@@ -176,7 +185,7 @@ describe('AiModels (F-15.4)', () => {
     const stored = { openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' } }
     const parsed = AiModels.parse(stored)
     expect(parsed.openai).toEqual(stored.openai)
-    expect(parsed.cloud).toEqual(DEFAULT_MODELS)
+    expect(parsed.cloud).toEqual(HOSTED_DEFAULT_MODELS)
   })
 
   it('keeps a stored cloud map and parses its own defaults', () => {
@@ -194,10 +203,10 @@ describe('AiModels (F-15.4)', () => {
     expect(AiModels.parse(defaultAiModels())).toEqual(defaultAiModels())
   })
 
-  it('defaults the OpenAI and Cloud maps to the default models, and the local map to its own', () => {
+  it('defaults each map to its own provider defaults', () => {
     expect(defaultAiModels()).toEqual({
       openai: DEFAULT_MODELS,
-      cloud: DEFAULT_MODELS,
+      cloud: HOSTED_DEFAULT_MODELS,
       local: LOCAL_DEFAULT_MODELS,
       openrouter: OPENROUTER_DEFAULT_MODELS
     })
@@ -209,7 +218,13 @@ describe('AiErrorCode (F-15.4)', () => {
     expect(AiErrorCode.parse('SIGNED_OUT')).toBe('SIGNED_OUT')
     expect(AiErrorCode.parse('NO_CREDIT')).toBe('NO_CREDIT')
     expect(AI_NEXT_STEP.SIGNED_OUT).toBe('Sign in on the Account tab in Settings.')
-    expect(AI_NEXT_STEP.NO_CREDIT).toBe('Buy credits on the Account tab in Settings.')
+    expect(AI_NEXT_STEP.NO_CREDIT).toBe('Add to your balance on the Account tab in Settings.')
+  })
+
+  it('names the proxy refusals the author can act on (AI-BILLING-SPEC error codes)', () => {
+    expect(AiErrorCode.parse('TOO_LARGE')).toBe('TOO_LARGE')
+    expect(AiErrorCode.parse('MODEL_UNAVAILABLE')).toBe('MODEL_UNAVAILABLE')
+    expect(AI_NEXT_STEP.MODEL_UNAVAILABLE).toContain('Settings › AI')
   })
 })
 
@@ -234,7 +249,8 @@ describe('local model settings (F-5.15)', () => {
 
   it('resets each provider to its own defaults', () => {
     expect(defaultModelsFor('local')).toEqual(LOCAL_DEFAULT_MODELS)
-    expect(defaultModelsFor('cloud')).toEqual(DEFAULT_MODELS)
+    expect(defaultModelsFor('cloud')).toEqual(HOSTED_DEFAULT_MODELS)
+    expect(defaultModelsFor('openai')).toEqual(DEFAULT_MODELS)
     expect(defaultLocalAiSettings()).toEqual({ baseUrl: LOCAL_AI_DEFAULT_BASE_URL })
   })
 })

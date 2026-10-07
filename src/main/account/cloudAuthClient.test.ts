@@ -169,7 +169,7 @@ describe('createCloudAuthClient (F-15.2)', () => {
     answers = [errorBody('INSUFFICIENT_CREDITS', 'no credit')]
     const spent = await caught(client().credits('tok-1'))
     expect(spent.message).toBe('Your MythScribe Cloud balance is used up.')
-    expect(spent.nextStep).toBe('Buy more credits in Settings › Account.')
+    expect(spent.nextStep).toBe('Add to your balance in Settings › Account.')
 
     answers = [errorBody('BAD_SIGNATURE', 'nope')]
     const signature = await caught(client().credits('tok-1'))
@@ -232,7 +232,7 @@ describe('createCloudAuthClient credits (F-15.3)', () => {
     answers = [errorBody('NOT_FOUND', 'unknown variant')]
     const err = await caught(client().checkout('tok-1', 'gone'))
     expect(err.code).toBe('NOT_FOUND')
-    expect(err.message).toBe('That credit pack is no longer on sale.')
+    expect(err.message).toBe('That pack is no longer on sale.')
     expect(err.nextStep).toBe('Refresh the packs and pick another.')
   })
 
@@ -282,5 +282,48 @@ describe('createCloudAuthClient license (F-15.9)', () => {
     expect((await caught(client().license('tok-1'))).code).toBe('UNAUTHORIZED')
     answers = [json(200, { token: 7, product: null })]
     expect((await caught(client().license('tok-1'))).code).toBe('PROTOCOL')
+  })
+})
+
+describe('createCloudAuthClient access tokens and usage (AI-BILLING-SPEC A5, E7)', () => {
+  it('trades the session token for an access token, with no bearer', async () => {
+    const access = { token: 'acc-1', expiresAt: '2026-10-07T12:15:00.000Z' }
+    answers = [json(200, { access })]
+    expect(await client().refresh('tok-1')).toEqual({ access })
+    expect(calls[0]?.url).toBe(`${BASE}/auth/refresh`)
+    expect(calls[0]?.init?.method).toBe('POST')
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBeNull()
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ refreshToken: 'tok-1' }))
+  })
+
+  it('reports a revoked session on refresh as UNAUTHORIZED', async () => {
+    answers = [errorBody('UNAUTHORIZED', 'gone')]
+    expect((await caught(client().refresh('tok-1'))).code).toBe('UNAUTHORIZED')
+  })
+
+  it('reads a usage page, passing the cursor along', async () => {
+    const page = {
+      entries: [
+        {
+          id: 'e1',
+          type: 'topup',
+          amountMicros: 10_000_000,
+          at: 1_700_000_000_000,
+          feature: null,
+          model: null,
+          tokensIn: null,
+          tokensOut: null,
+          tokensCached: null,
+          requestId: null
+        }
+      ],
+      nextCursor: '1700000000000.e1'
+    }
+    answers = [json(200, page), json(200, { entries: [], nextCursor: null })]
+    expect(await client().usage('acc-1', null)).toEqual(page)
+    expect(calls[0]?.url).toBe(`${BASE}/usage`)
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer acc-1')
+    await client().usage('acc-1', '1700000000000.e1')
+    expect(calls[1]?.url).toBe(`${BASE}/usage?cursor=1700000000000.e1`)
   })
 })

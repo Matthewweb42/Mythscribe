@@ -3,8 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings, type AiSource } from '@shared/aiSettings'
 import type { AccountStatus } from '@shared/account'
-import type { CreditsResult } from '@shared/cloudApi'
+import type { CreditsResult, PricingResult } from '@shared/cloudApi'
 import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
+import { bundledPricing } from '@shared/hostedPricing'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import {
@@ -12,12 +13,13 @@ import {
   useShellDialogStore
 } from '@renderer/features/shell/shellDialogStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
-import { CreditNotice } from './CreditNotice'
+import { BalanceNotice } from './BalanceNotice'
 import { resetAccountStore, useAccountStore } from './accountStore'
 
 /**
- * The status-bar warning of the usage meter (F-15.5): who sees it, what it says, and that it
- * opens Settings on the Account tab. The numbers themselves are `@shared/cloudUsage`'s tests.
+ * The balance in the status bar (F-15.5; AI-BILLING-SPEC E1, E2, E6): who sees it, what it says,
+ * when it turns into a warning, and that it opens Settings on the Account tab. The numbers
+ * themselves are `@shared/cloudUsage`'s and `@shared/hostedPricing`'s tests.
  */
 
 const DAY_MS = 24 * 60 * 60_000
@@ -28,7 +30,7 @@ const SIGNED_IN: AccountStatus = {
   since: null
 }
 
-/** $2.50 left after $0.50 spent over two days: ten days at this pace, so no warning. */
+/** $2.50 left after $0.50 spent over two days: ten days at this pace, above the $2.00 line. */
 const CREDITS: CreditsResult = {
   balanceMicros: 2_500_000,
   spend: [{ feature: 'ghostText', micros: 500_000, requests: 3, tokens: 900 }],
@@ -40,10 +42,12 @@ const CREDITS: CreditsResult = {
 
 let calls: { channel: Channel; input: unknown }[]
 let fail: Error | null
+let pricing: PricingResult | null
 
 const client: IpcClient = {
   async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
     calls.push({ channel, input })
+    if (channel === 'account:getPricing') return pricing as Output<C>
     if (fail) throw fail
     if (channel === 'account:getCredits') return CREDITS as Output<C>
     throw new Error(`unexpected ${channel}`)
@@ -59,6 +63,7 @@ beforeEach(() => {
   resetShellDialogStore()
   calls = []
   fail = null
+  pricing = null
   setIpcClient(client)
 })
 afterEach(() => {
@@ -77,62 +82,90 @@ const sitting = (source: AiSource, status: AccountStatus | null, credits?: Credi
   })
 }
 
-describe('CreditNotice (F-15.5)', () => {
+const creditCalls = (): unknown[] => calls.filter((call) => call.channel === 'account:getCredits')
+
+describe('BalanceNotice (F-15.5, AI-BILLING-SPEC E1)', () => {
   it('renders nothing for a project on the author’s own key', () => {
     sitting('ownKey', SIGNED_IN, { ...CREDITS, balanceMicros: 0 })
-    render(<CreditNotice cloudAvailable />)
-    expect(screen.queryByTestId('credit-notice')).not.toBeInTheDocument()
+    render(<BalanceNotice cloudAvailable />)
+    expect(screen.queryByTestId('balance-notice')).not.toBeInTheDocument()
     expect(calls).toEqual([])
   })
 
-  it('renders nothing while the balance is comfortable', () => {
+  it('always shows the balance in dollars on Cloud, quietly while it is comfortable', () => {
     sitting('cloud', SIGNED_IN, CREDITS)
-    render(<CreditNotice cloudAvailable />)
-    expect(screen.queryByTestId('credit-notice')).not.toBeInTheDocument()
+    render(<BalanceNotice cloudAvailable />)
+    const notice = screen.getByTestId('balance-notice')
+    expect(notice).toHaveTextContent('Balance $2.50')
+    expect(notice).not.toHaveAttribute('data-warning')
+    expect(notice.textContent).not.toMatch(/credit|token/i)
   })
 
-  it('asks for the credits once, so the warning is there before the first request', async () => {
+  it('asks for the balance once, so it is there before the first request', async () => {
     sitting('cloud', SIGNED_IN)
-    const { rerender } = render(<CreditNotice cloudAvailable />)
+    const { rerender } = render(<BalanceNotice cloudAvailable />)
     await waitFor(() => {
-      expect(calls).toEqual([{ channel: 'account:getCredits', input: undefined }])
+      expect(creditCalls()).toEqual([{ channel: 'account:getCredits', input: undefined }])
     })
-    rerender(<CreditNotice cloudAvailable />)
-    expect(calls).toHaveLength(1)
+    rerender(<BalanceNotice cloudAvailable />)
+    expect(creditCalls()).toHaveLength(1)
   })
 
   it('asks for nothing while signed out', () => {
     sitting('cloud', { state: 'signedOut' })
-    render(<CreditNotice cloudAvailable />)
+    render(<BalanceNotice cloudAvailable />)
     expect(calls).toEqual([])
-    expect(screen.queryByTestId('credit-notice')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('balance-notice')).not.toBeInTheDocument()
   })
 
   it('does not ask again after a failure', async () => {
     fail = new IpcRequestError({ code: 'IO', message: 'Could not reach MythScribe Cloud.' })
     sitting('cloud', SIGNED_IN)
-    const { rerender } = render(<CreditNotice cloudAvailable />)
+    const { rerender } = render(<BalanceNotice cloudAvailable />)
     await waitFor(() => {
       expect(useAccountStore.getState().creditsError).toBe('Could not reach MythScribe Cloud.')
     })
-    rerender(<CreditNotice cloudAvailable />)
-    expect(calls).toHaveLength(1)
+    rerender(<BalanceNotice cloudAvailable />)
+    expect(creditCalls()).toHaveLength(1)
   })
 
-  it('warns about a low balance and opens Settings on the Account tab', async () => {
-    sitting('cloud', SIGNED_IN, { ...CREDITS, balanceMicros: 420_000 })
-    render(<CreditNotice cloudAvailable />)
-    const notice = screen.getByTestId('credit-notice')
-    expect(notice).toHaveTextContent('Cloud credits low: $0.42')
+  it('warns below the $2.00 default line and opens Settings on the Account tab', async () => {
+    sitting('cloud', SIGNED_IN, { ...CREDITS, balanceMicros: 1_420_000 })
+    render(<BalanceNotice cloudAvailable />)
+    const notice = screen.getByTestId('balance-notice')
+    expect(notice).toHaveTextContent('MythScribe Cloud balance low: $1.42')
+    expect(notice).toHaveAttribute('data-warning', 'low')
     await userEvent.click(notice)
     expect(useShellDialogStore.getState().open).toBe('settings')
     expect(useShellDialogStore.getState().settingsTab).toBe('account')
   })
 
+  it('warns at the line the server configured (E6)', async () => {
+    pricing = { ...bundledPricing(), lowBalanceWarningMicros: 3_000_000 }
+    sitting('cloud', SIGNED_IN, CREDITS)
+    render(<BalanceNotice cloudAvailable />)
+    expect(await screen.findByText('MythScribe Cloud balance low: $2.50')).toBeInTheDocument()
+  })
+
+  it('shows the words of line editing left once measured (E2)', async () => {
+    pricing = { ...bundledPricing(), wordCosts: { lineEdit: 0.00005, consistencyCheck: null } }
+    sitting('cloud', SIGNED_IN, CREDITS)
+    render(<BalanceNotice cloudAvailable />)
+    // $2.50 / ($0.00005 × 1.2) = 41,666 words → 41,000.
+    await waitFor(() => {
+      expect(screen.getByTestId('balance-notice')).toHaveAttribute(
+        'title',
+        'About 41,000 words of line editing left'
+      )
+    })
+  })
+
   it('says when the balance is used up, and when it is days from it', () => {
     sitting('cloud', SIGNED_IN, { ...CREDITS, balanceMicros: 0 })
-    const { unmount } = render(<CreditNotice cloudAvailable />)
-    expect(screen.getByTestId('credit-notice')).toHaveTextContent('Cloud credits used up')
+    const { unmount } = render(<BalanceNotice cloudAvailable />)
+    expect(screen.getByTestId('balance-notice')).toHaveTextContent(
+      'MythScribe Cloud balance used up'
+    )
     unmount()
 
     // $2.50 a day against $5.00 left: two days, inside the three-day warning.
@@ -141,27 +174,27 @@ describe('CreditNotice (F-15.5)', () => {
       balanceMicros: 5_000_000,
       periodSpend: [{ feature: 'ghostText', micros: 5_000_000, requests: 9, tokens: 900 }]
     })
-    render(<CreditNotice cloudAvailable />)
-    expect(screen.getByTestId('credit-notice')).toHaveTextContent(
-      'Cloud credits: about 2 days left'
+    render(<BalanceNotice cloudAvailable />)
+    expect(screen.getByTestId('balance-notice')).toHaveTextContent(
+      'MythScribe Cloud balance: about 2 days left'
     )
   })
 
   it('renders and asks for nothing while Cloud does not serve AI yet', () => {
     sitting('cloud', SIGNED_IN, { ...CREDITS, balanceMicros: 0 })
-    render(<CreditNotice />)
-    expect(screen.queryByTestId('credit-notice')).not.toBeInTheDocument()
+    render(<BalanceNotice />)
+    expect(screen.queryByTestId('balance-notice')).not.toBeInTheDocument()
     expect(calls).toEqual([])
   })
 
   it('follows a balance the store took from a charge', async () => {
     sitting('cloud', SIGNED_IN, CREDITS)
-    render(<CreditNotice cloudAvailable />)
-    expect(screen.queryByTestId('credit-notice')).not.toBeInTheDocument()
+    render(<BalanceNotice cloudAvailable />)
+    expect(screen.getByTestId('balance-notice')).toHaveTextContent('Balance $2.50')
     useAccountStore.setState({
       credits: { ...CREDITS, balanceMicros: 900_000 },
       creditsAt: Date.now()
     })
-    expect(await screen.findByTestId('credit-notice')).toHaveTextContent('Cloud credits low: $0.90')
+    expect(await screen.findByText('MythScribe Cloud balance low: $0.90')).toBeInTheDocument()
   })
 })

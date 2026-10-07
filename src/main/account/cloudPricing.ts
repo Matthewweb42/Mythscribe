@@ -1,4 +1,4 @@
-import { CloudPricing } from '@shared/aiRouting'
+import { PricingResult } from '@shared/cloudApi'
 import type { AppStateStore } from '../appState/appStateStore'
 import type { FetchLike } from '../ai/providers/openai'
 
@@ -24,7 +24,7 @@ export interface CloudPricingServiceOptions {
 }
 
 export class CloudPricingService {
-  private inflight: Promise<CloudPricing | null> | null = null
+  private inflight: Promise<PricingResult | null> | null = null
   private readonly root: string
   private readonly now: () => number
   private readonly timeoutMs: number
@@ -36,7 +36,7 @@ export class CloudPricingService {
   }
 
   /** The cached table, or null before the first successful fetch. */
-  current(): CloudPricing | null {
+  current(): PricingResult | null {
     return this.options.appState.get().cloudPricing?.pricing ?? null
   }
 
@@ -44,7 +44,7 @@ export class CloudPricingService {
    * Fetches the table when the cache is older than `CLOUD_PRICING_MAX_AGE_MS` (or `force`), and
    * answers what is cached afterwards. Concurrent calls share one request.
    */
-  refresh(force = false): Promise<CloudPricing | null> {
+  refresh(force = false): Promise<PricingResult | null> {
     const cached = this.options.appState.get().cloudPricing
     const age = cached === null ? Infinity : this.now() - Date.parse(cached.fetchedAt)
     if (!force && age < CLOUD_PRICING_MAX_AGE_MS) return Promise.resolve(cached?.pricing ?? null)
@@ -54,7 +54,7 @@ export class CloudPricingService {
     return this.inflight
   }
 
-  private async fetchOnce(): Promise<CloudPricing | null> {
+  private async fetchOnce(): Promise<PricingResult | null> {
     const pricing = await this.download()
     if (pricing === null) return this.current()
     const fetchedAt = new Date(this.now()).toISOString()
@@ -62,7 +62,7 @@ export class CloudPricingService {
     return pricing
   }
 
-  private async download(): Promise<CloudPricing | null> {
+  private async download(): Promise<PricingResult | null> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.timeoutMs)
     if (typeof timer === 'object' && typeof timer.unref === 'function') timer.unref()
@@ -72,7 +72,7 @@ export class CloudPricingService {
         signal: controller.signal
       })
       if (!response.ok) return null
-      const parsed = CloudPricing.safeParse(JSON.parse(await response.text()))
+      const parsed = PricingResult.safeParse(JSON.parse(await response.text()))
       if (!parsed.success) {
         console.warn('MythScribe Cloud sent a price table this version cannot read')
         return null

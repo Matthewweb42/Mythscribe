@@ -14,7 +14,8 @@ import type { AiStatus, AiUsageSummary } from '../src/shared/ai'
 import type { AiSettings } from '../src/shared/aiSettings'
 import type { AuthorRules } from '../src/shared/authorRules'
 import { LOGIN_ATTEMPT_TTL_MS } from '../src/shared/cloudApi'
-import { cloudChargeMicros, MICROS_PER_USD } from '../src/shared/cloudRates'
+import { MICROS_PER_USD } from '../src/shared/cloudBilling'
+import { bundledPricing, hostedPriceFor } from '../src/shared/hostedPricing'
 import { USAGE_PERIOD_DAYS } from '../src/shared/cloudUsage'
 import type { FocusSettings } from '../src/shared/focus'
 import { localDay } from '../src/shared/goals'
@@ -768,18 +769,25 @@ let cloudApproved = false
 let cloudSessionTaken = false
 let cloudSessionRevoked = false
 const CLOUD_SESSION_TOKEN = 'e2e-session-token'
+/**
+ * AI-BILLING-SPEC A5, S6: the short-lived access token `/auth/refresh` mints from the session
+ * (the refresh token). Every bearer the fake sees is recorded, so the test can check that the
+ * app sends the access token and never the session token once the Worker can mint one.
+ */
+const CLOUD_ACCESS_TOKEN = 'e2e-access-token'
+const cloudBearers: string[] = []
 const CLOUD_USER_ID = 'e2e-user-1'
 const CLOUD_SINCE = '2026-09-19T12:00:00.000Z'
 /**
- * F-15.3: a little over $1.00 of credit, one pack on sale, and one feature that has spent
+ * F-15.3: a little over $2.00 of balance, one pack on sale, and one feature that has spent
  * something. F-15.5: the period rows the meter shows, and a balance close enough to the
- * low-credit line ($1.00) that one charged Cloud request takes it under, so the status-bar
- * notice is driven for real. The fake keeps the balance: `/ai/complete` charges it and
- * `/credits` answers it, so what the app shows after a charge is what the Worker said.
+ * low-balance line ($2.00, AI-BILLING-SPEC E6) that one charged Cloud request takes it under.
+ * The fake keeps the balance: `/ai/complete` charges it and `/credits` answers it, so what the
+ * app shows after a charge is what the Worker said.
  */
-const CLOUD_BALANCE_MICROS = 1_003_000
+const CLOUD_BALANCE_MICROS = 2_003_000
 let cloudBalanceMicros = CLOUD_BALANCE_MICROS
-const CLOUD_PACK = { variantId: 'pack-5', priceCents: 500 }
+const CLOUD_PACK = { variantId: 'pack-10', priceCents: 1000 }
 const CLOUD_SPEND = { feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }
 /** The rolling period's own breakdown: $0.20 spent, the oldest of it three days ago. */
 const CLOUD_PERIOD_SPEND = { feature: 'chat', micros: 200_000, requests: 2, tokens: 5_000 }
@@ -844,7 +852,8 @@ function approveSignIn(): void {
  * main at this server, which speaks the four auth routes of `src/shared/cloudApi.ts`: it records
  * the address a link was asked for, answers polls pending until `approveSignIn()`, then hands
  * over one session, and authorises `/auth/me` and `/auth/signout` with that session's token
- * alone. It also answers the two credit routes (F-15.3) behind the same bearer, and `/license`
+ * or the access token `/auth/refresh` mints from it (AI-BILLING-SPEC A5). It also answers the
+ * two credit routes (F-15.3), `/pricing` and `/usage` (B3b) behind the same bearer, and `/license`
  * (F-15.9) with a token it signs itself. No mail is sent, no link is ever pasted back into the
  * app, and no checkout is ever opened (the test does not click Buy, which would hand a URL to the
  * real browser).
@@ -862,8 +871,11 @@ async function startFakeCloudApi(): Promise<string> {
     res.setHeader('content-type', 'application/json')
     res.end(JSON.stringify(body))
   }
-  const authorized = (req: http.IncomingMessage): boolean =>
-    !cloudSessionRevoked && req.headers.authorization === `Bearer ${CLOUD_SESSION_TOKEN}`
+  const authorized = (req: http.IncomingMessage): boolean => {
+    const bearer = (req.headers.authorization ?? '').replace(/^Bearer /, '')
+    cloudBearers.push(bearer)
+    return !cloudSessionRevoked && (bearer === CLOUD_SESSION_TOKEN || bearer === CLOUD_ACCESS_TOKEN)
+  }
 
   fakeCloudApi = http.createServer((req, res) => {
     const url = (req.url ?? '').split('?')[0]
@@ -905,6 +917,59 @@ async function startFakeCloudApi(): Promise<string> {
           email: cloudSignInEmails[cloudSignInEmails.length - 1] ?? '',
           userId: CLOUD_USER_ID
         }
+      })
+      return
+    }
+    if (req.method === 'POST' && url === '/auth/refresh') {
+      let body = ''
+      req.setEncoding('utf8')
+      req.on('data', (chunk: string) => {
+        body += chunk
+      })
+      req.on('end', () => {
+        const { refreshToken } = JSON.parse(body) as { refreshToken: string }
+        if (cloudSessionRevoked || refreshToken !== CLOUD_SESSION_TOKEN) {
+          json(res, 401, { code: 'UNAUTHORIZED', message: 'Sign in again.' })
+          return
+        }
+        json(res, 200, {
+          access: {
+            token: CLOUD_ACCESS_TOKEN,
+            expiresAt: new Date(Date.now() + 15 * 60_000).toISOString()
+          }
+        })
+      })
+      return
+    }
+    // AI-BILLING-SPEC P5: the price table, no bearer; the Worker's own defaults.
+    if (req.method === 'GET' && url === '/pricing') {
+      req.resume()
+      json(res, 200, { ...bundledPricing(), packs: [CLOUD_PACK] })
+      return
+    }
+    // E7: one page of the ledger.
+    if (req.method === 'GET' && url === '/usage') {
+      req.resume()
+      if (!authorized(req)) {
+        json(res, 401, { code: 'UNAUTHORIZED', message: 'Sign in again.' })
+        return
+      }
+      json(res, 200, {
+        entries: [
+          {
+            id: 'e2e-topup',
+            type: 'topup',
+            amountMicros: 10_000_000,
+            at: Date.now() - 60_000,
+            feature: null,
+            model: null,
+            tokensIn: null,
+            tokensOut: null,
+            tokensCached: null,
+            requestId: null
+          }
+        ],
+        nextCursor: null
       })
       return
     }
@@ -976,10 +1041,13 @@ async function startFakeCloudApi(): Promise<string> {
           stream: request.stream,
           auth: req.headers.authorization
         })
-        const chargeMicros = cloudChargeMicros(
-          request.model,
-          CLOUD_AI_USAGE.inputTokens,
-          CLOUD_AI_USAGE.outputTokens
+        const chargeMicros = Math.round(
+          hostedPriceFor(
+            bundledPricing(),
+            request.model,
+            CLOUD_AI_USAGE.inputTokens,
+            CLOUD_AI_USAGE.outputTokens
+          ).costUsd * MICROS_PER_USD
         )
         // The Worker charges after it has answered (F-15.3), so every later `/credits` and the
         // balance in this answer agree, and the app's meter follows without asking again.
@@ -1718,17 +1786,17 @@ test('create, close, reopen a project on disk', async () => {
   // F-15.4: one map per provider; a write to the key path leaves the Cloud one at its defaults.
   expect((await aiStatus()).models).toEqual({
     openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
-    cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' },
+    cloud: { fast: 'deepseek/deepseek-v4-flash', strong: 'deepseek/deepseek-v4-pro' },
     local: { fast: 'llama3.1', strong: 'llama3.1' },
-    openrouter: { fast: 'openai/gpt-5.4-mini', strong: 'openai/gpt-5.4' }
+    openrouter: { fast: 'deepseek/deepseek-v4-flash', strong: 'deepseek/deepseek-v4-pro' }
   })
   expect(
     (JSON.parse(fs.readFileSync(appStateFile, 'utf8')) as { models: AiStatus['models'] }).models
   ).toEqual({
     openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
-    cloud: { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' },
+    cloud: { fast: 'deepseek/deepseek-v4-flash', strong: 'deepseek/deepseek-v4-pro' },
     local: { fast: 'llama3.1', strong: 'llama3.1' },
-    openrouter: { fast: 'openai/gpt-5.4-mini', strong: 'openai/gpt-5.4' }
+    openrouter: { fast: 'deepseek/deepseek-v4-flash', strong: 'deepseek/deepseek-v4-pro' }
   })
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
@@ -1804,19 +1872,30 @@ test('create, close, reopen a project on disk', async () => {
     'Signed in as author@example.com',
     { timeout: 15_000 }
   )
-  // F-15.3: the credits section loads with the signed-in state. Buy is only checked for being
+  // F-15.3: the balance section loads with the signed-in state. Add is only checked for being
   // there; clicking it would hand a Lemon Squeezy URL to the machine's real browser.
-  await expect(settingsDialog.getByTestId('account-credit-balance')).toHaveText(
+  await expect(settingsDialog.getByTestId('account-balance')).toHaveText(
     balanceText(cloudBalanceMicros)
   )
-  await expect(settingsDialog.getByRole('button', { name: 'Buy $5' })).toBeVisible()
+  await expect(settingsDialog.getByRole('button', { name: 'Add $10.00' })).toBeVisible()
+  // AI-BILLING-SPEC A5, S6: the balance was asked for with a short-lived access token, never the
+  // session (refresh) token. C3: the privacy rule beside the packs. E7: the usage history.
+  expect(cloudBearers).toContain(CLOUD_ACCESS_TOKEN)
+  expect(cloudBearers).not.toContain(CLOUD_SESSION_TOKEN)
+  await expect(settingsDialog.getByTestId('account-privacy')).toContainText(
+    'never stores or logs your manuscript'
+  )
+  await settingsDialog.getByText('Usage history').click()
+  await expect(
+    settingsDialog.getByRole('table', { name: 'Usage history' }).getByText('Added to balance')
+  ).toBeVisible()
   // F-15.5: the meter over the rolling period, and no warning while the balance is above $1.00.
   await expect(settingsDialog.getByTestId('account-period-spent')).toHaveText(
     balanceText(CLOUD_PERIOD_SPEND.micros)
   )
   await expect(settingsDialog.getByTestId('account-run-out')).toContainText('left at this pace')
-  await expect(settingsDialog.getByTestId('account-credit-warning')).toHaveCount(0)
-  await expect(page.getByTestId('credit-notice')).toHaveCount(0)
+  await expect(settingsDialog.getByTestId('account-balance-warning')).toHaveCount(0)
+  await expect(page.getByTestId('balance-notice')).toHaveCount(0)
   // F-15.4: the AI tab's source picker. Signed in or not, MythScribe Cloud stays disabled with
   // "Coming soon" until Cloud serves AI (`CLOUD_AI_AVAILABLE`); the account itself still works.
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()

@@ -5,10 +5,10 @@ import {
   CLOUD_AI_AVAILABLE,
   type AiStreamEvent,
   type CloudErrorCode,
-  type CreditsResult
+  type CreditsResult,
+  IDEMPOTENCY_KEY_HEADER
 } from '@shared/cloudApi'
-import { CloudPricing, hostedPriceFor } from '@shared/aiRouting'
-import { cloudPriceFor } from '@shared/cloudRates'
+import { bundledPricing, hostedPriceFor } from '@shared/hostedPricing'
 import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import { AccountError } from '../../account/cloudAuthClient'
 import { buildCloudProvider, type CloudProviderOptions } from './cloud'
@@ -17,10 +17,12 @@ import {
   AiCancelledError,
   AiCloudUnavailableError,
   AiFallbackError,
+  AiModelUnavailableError,
   AiNetworkError,
   AiNoCreditError,
   AiRateLimitError,
   AiSignedOutError,
+  AiTooLargeError,
   type CompletionRequest,
   type StreamChunk
 } from './types'
@@ -155,6 +157,70 @@ describe('buildCloudProvider.complete', () => {
     })
   })
 
+  it('sends a fresh Idempotency-Key with every request (L8)', async () => {
+    const { fetch, calls } = answering(() => answer())
+    const keys = ['key-00000001', 'key-00000002']
+    const provider = build({ fetch, idempotencyKey: () => keys.shift() ?? 'spare-key' })
+    await provider.complete(REQUEST)
+    await provider.complete(REQUEST)
+    expect(
+      calls.map((call) => new Headers(call.init?.headers).get(IDEMPOTENCY_KEY_HEADER))
+    ).toEqual(['key-00000001', 'key-00000002'])
+    // Unpinned, it is a random UUID the Worker accepts.
+    const { fetch: plain, calls: plainCalls } = answering(() => answer())
+    await build({ fetch: plain }).complete(REQUEST)
+    expect(new Headers(plainCalls[0]?.init?.headers).get(IDEMPOTENCY_KEY_HEADER)).toMatch(
+      /^[A-Za-z0-9._:-]{8,128}$/
+    )
+  })
+
+  it('sends an access token, not the session token (A5, S6)', async () => {
+    const { fetch, calls } = answering(() => answer())
+    const bearer = vi.fn(() => Promise.resolve('access-1'))
+    await build({ fetch, bearer }).complete(REQUEST)
+    expect(bearer).toHaveBeenCalledWith(TOKEN)
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer access-1')
+  })
+
+  it('replaces a refused access token once, with the same Idempotency-Key', async () => {
+    const onSessionEnded = vi.fn()
+    const invalidateBearer = vi.fn()
+    const tokens = ['access-stale', 'access-fresh']
+    const { fetch, calls } = answering((call) =>
+      new Headers(call.init?.headers).get('authorization') === 'Bearer access-stale'
+        ? failure(401, 'UNAUTHORIZED')
+        : answer()
+    )
+    const result = await build({
+      fetch,
+      onSessionEnded,
+      invalidateBearer,
+      bearer: () => Promise.resolve(tokens.shift() ?? 'access-spare'),
+      idempotencyKey: () => 'retry-key-1'
+    }).complete(REQUEST)
+    expect(result.text).toBe('Because the pass is watched.')
+    expect(calls).toHaveLength(2)
+    expect(invalidateBearer).toHaveBeenCalledOnce()
+    expect(onSessionEnded).not.toHaveBeenCalled()
+    const keys = calls.map((call) => new Headers(call.init?.headers).get(IDEMPOTENCY_KEY_HEADER))
+    expect(keys).toEqual(['retry-key-1', 'retry-key-1'])
+  })
+
+  it('ends the session when the refresh token itself is refused', async () => {
+    const onSessionEnded = vi.fn()
+    const { fetch, calls } = answering(() => answer())
+    const failed = await build({
+      fetch,
+      onSessionEnded,
+      bearer: () => Promise.reject(new AccountError('UNAUTHORIZED', 'gone', 'Sign in again.'))
+    })
+      .complete(REQUEST)
+      .catch((err: unknown) => err)
+    expect(failed).toBeInstanceOf(AiSignedOutError)
+    expect(onSessionEnded).toHaveBeenCalledOnce()
+    expect(calls).toHaveLength(0)
+  })
+
   it('refuses to send anything while signed out', async () => {
     const { fetch, calls } = answering(() => answer())
     await expect(build({ fetch, token: () => null }).complete(REQUEST)).rejects.toBeInstanceOf(
@@ -177,6 +243,9 @@ describe('buildCloudProvider.complete', () => {
     const cases: [CloudErrorCode, number, unknown][] = [
       ['INSUFFICIENT_CREDITS', 402, AiNoCreditError],
       ['RATE_LIMITED', 429, AiRateLimitError],
+      ['REQUEST_TOO_LARGE', 413, AiTooLargeError],
+      ['MODEL_UNAVAILABLE', 422, AiModelUnavailableError],
+      ['DUPLICATE_REQUEST', 409, AiFallbackError],
       ['UPSTREAM', 502, AiFallbackError],
       ['NOT_CONFIGURED', 503, AiFallbackError],
       ['BAD_REQUEST', 400, AiFallbackError]
@@ -436,23 +505,35 @@ describe('buildCloudProvider.testConnection and price', () => {
     await expect(offline.testConnection()).rejects.toBeInstanceOf(AiNetworkError)
   })
 
-  it('prices at the Cloud rate, not the provider rate', () => {
+  it('prices at the Worker defaults until the server table is known (P5)', () => {
     const provider = build()
-    expect(provider.price?.('gpt-5.4-mini', 100, 20)).toEqual(
-      cloudPriceFor('gpt-5.4-mini', 100, 20)
+    const bundled = bundledPricing()
+    const id = bundled.routing.tiers.fast
+    expect(provider.price?.(id, 1_000, 100, 500)).toEqual(
+      hostedPriceFor(bundled, id, 1_000, 100, 500)
     )
+    expect(provider.price?.(id, 1_000, 100)?.priced).toBe(true)
     expect(provider.id).toBe('cloud')
   })
 
-  it('prices at the server table when it lists the model (P5), else at the bundled rate', () => {
-    const table = CloudPricing.parse({
-      markup: 0.2,
-      models: [{ model: 'gpt-5.4-mini', inUsdPerM: 1, outUsdPerM: 2, cachedInUsdPerM: 0.1 }]
-    })
+  it('prices at the server table once fetched, and an unlisted model as unpriced', () => {
+    const table = {
+      ...bundledPricing(),
+      models: [
+        {
+          id: 'cheap/fast',
+          label: 'Cheap',
+          inputUsdPerM: 1,
+          outputUsdPerM: 2,
+          cachedInputUsdPerM: 0.1,
+          displayMultiplier: 1
+        }
+      ]
+    }
     const provider = build({ pricing: () => table })
-    expect(provider.price?.('gpt-5.4-mini', 1_000, 100, 500)).toEqual(
-      hostedPriceFor(table, 'gpt-5.4-mini', 1_000, 100, 500)
+    expect(provider.price?.('cheap/fast', 1_000, 100, 500)).toEqual(
+      hostedPriceFor(table, 'cheap/fast', 1_000, 100, 500)
     )
-    expect(provider.price?.('gpt-5.4', 100, 20)).toEqual(cloudPriceFor('gpt-5.4', 100, 20))
+    expect(provider.price?.('gpt-5.4', 100, 20)).toEqual({ costUsd: 0, priced: false })
   })
 })

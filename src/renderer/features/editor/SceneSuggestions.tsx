@@ -6,7 +6,7 @@ import { BRIEF_TEXT_MIN } from '@shared/sceneMeta'
 import { SCENE_SUGGEST_TEXT_MIN } from '@shared/sceneSuggest'
 import { openAssistant } from '@renderer/features/ai/aiActions'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
-import { describeRequest } from '@renderer/features/ai/usageFormat'
+import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useBriefDraftStore } from './briefDraftStore'
 import { useDocumentStore } from './documentStore'
@@ -163,7 +163,7 @@ function Waiting({
 function CostLine({ cost }: { cost: SuggestionCost }): React.JSX.Element {
   return (
     <span data-testid="suggest-cost" className="text-xs text-fg-subtle">
-      {describeRequest(cost)}
+      <RequestCost request={cost} />
       {cost.truncated ? ' · from the opening of the scene' : ''}
     </span>
   )

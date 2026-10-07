@@ -20,7 +20,7 @@ import { useRewriteStore } from '@renderer/features/editor/rewriteStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useContinuityFindings, useContinuityStore } from './continuityStore'
-import { describeRequest } from './usageFormat'
+import { RequestCost } from './RequestCost'
 
 /** What a card says once its quote is no longer in the scene. */
 export const CONTINUITY_GONE_MESSAGE = 'That passage has changed; check the scene again'
@@ -158,7 +158,9 @@ function CheckScene(): React.JSX.Element {
               : `${outcome.found} ${outcome.found === 1 ? 'contradiction' : 'contradictions'} found in ${outcomeTitle ?? MISSING_SCENE}.`}
           </p>
           <p className="m-0 flex flex-wrap gap-2 text-xs text-fg-subtle">
-            <span data-testid="continuity-cost">{describeRequest(outcome)}</span>
+            <span data-testid="continuity-cost">
+              <RequestCost request={outcome} />
+            </span>
             {outcome.dropped > 0 ? (
               <span data-testid="continuity-dropped">
                 {`${outcome.dropped} uncited or dismissed ${outcome.dropped === 1 ? 'finding' : 'findings'} dropped`}

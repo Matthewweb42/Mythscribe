@@ -1,23 +1,30 @@
 import { describe, expect, it } from 'vitest'
-import { creditWarningText, runOutText } from './creditMeter'
+import { creditWarningText, runOutText, wordsLeftText } from './creditMeter'
 
 describe('creditWarningText (F-15.5)', () => {
   it('says what is wrong, and names the balance only when it is the reason', () => {
     expect(creditWarningText('empty', { balanceMicros: -40, daysLeft: 0 })).toBe(
-      'Cloud credits used up'
+      'MythScribe Cloud balance used up'
     )
     expect(creditWarningText('low', { balanceMicros: 420_000, daysLeft: 9 })).toBe(
-      'Cloud credits low: $0.42'
+      'MythScribe Cloud balance low: $0.42'
     )
     expect(creditWarningText('runOut', { balanceMicros: 5_000_000, daysLeft: 2 })).toBe(
-      'Cloud credits: about 2 days left'
+      'MythScribe Cloud balance: about 2 days left'
     )
   })
 
   it('keeps the day singular', () => {
     expect(creditWarningText('runOut', { balanceMicros: 5_000_000, daysLeft: 1 })).toBe(
-      'Cloud credits: about 1 day left'
+      'MythScribe Cloud balance: about 1 day left'
     )
+  })
+})
+
+describe('wordsLeftText (AI-BILLING-SPEC E2)', () => {
+  it('names the words, or hides the line while the constant is unmeasured', () => {
+    expect(wordsLeftText(140_000, 'line editing')).toBe('About 140,000 words of line editing left')
+    expect(wordsLeftText(null, 'line editing')).toBeNull()
   })
 })
 

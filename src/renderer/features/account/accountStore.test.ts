@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AccountStatus } from '@shared/account'
-import type { CreditsResult } from '@shared/cloudApi'
+import type { CreditsResult, PricingResult, UsageEntry, UsageResult } from '@shared/cloudApi'
+import { bundledPricing } from '@shared/hostedPricing'
 import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import type { SupporterStatus } from '@shared/license'
@@ -29,6 +30,22 @@ const CREDITS: CreditsResult = {
   periodFirstChargeAt: 1_758_000_000_000,
   packs: [{ variantId: 'pack-5', priceCents: 500 }]
 }
+
+const PRICING: PricingResult = { ...bundledPricing(), lowBalanceWarningMicros: 3_000_000 }
+const ENTRY: UsageEntry = {
+  id: 'e1',
+  type: 'charge',
+  amountMicros: -130,
+  at: 1_758_000_000_000,
+  feature: 'chat',
+  model: 'deepseek/deepseek-v4-flash',
+  tokensIn: 100,
+  tokensOut: 20,
+  tokensCached: 0,
+  requestId: 'r1'
+}
+const USAGE_FIRST: UsageResult = { entries: [ENTRY], nextCursor: 'page-2' }
+const USAGE_LAST: UsageResult = { entries: [{ ...ENTRY, id: 'e0' }], nextCursor: null }
 
 /** F-15.9: no license yet, with the product on sale. */
 const SUPPORTER_NONE: SupporterStatus = {
@@ -92,6 +109,12 @@ function fakeClient(): Fake {
             return CREDITS as Output<C>
           case 'account:buyCredits':
             return null as Output<C>
+          case 'account:getPricing':
+            return PRICING as Output<C>
+          case 'account:getUsage': {
+            const { cursor } = input as Input<'account:getUsage'>
+            return (cursor === null ? USAGE_FIRST : USAGE_LAST) as Output<C>
+          }
           case 'account:getSupporter':
             return SUPPORTER_NONE as Output<C>
           case 'account:refreshSupporter':
@@ -310,6 +333,61 @@ describe('accountStore (F-15.2)', () => {
     await pending
     expect(store().status).toBeNull()
     expect(store().busy).toBe(false)
+  })
+})
+
+describe('accountStore hosted pricing and usage (AI-BILLING-SPEC P5, E7, flow 4)', () => {
+  it('keeps the price table main answers, and nothing on a failure', async () => {
+    await store().loadPricing()
+    expect(store().pricing).toEqual(PRICING)
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fake.fail = new Error('offline')
+    await store().loadPricing()
+    expect(store().pricing).toEqual(PRICING)
+    vi.restoreAllMocks()
+  })
+
+  it('loads the usage history and pages back until the last page', async () => {
+    await store().loadUsage()
+    expect(store().usage).toEqual([ENTRY])
+    expect(store().usageCursor).toBe('page-2')
+    await store().loadUsage(true)
+    expect(store().usage?.map((entry) => entry.id)).toEqual(['e1', 'e0'])
+    expect(store().usageCursor).toBeNull()
+    const before = fake.calls.length
+    await store().loadUsage(true)
+    expect(fake.calls).toHaveLength(before)
+  })
+
+  it('drops the balance and its history with the account on sign out', async () => {
+    useAccountStore.setState({ status: SIGNED_IN, credits: CREDITS, creditsAt: 1 })
+    await store().loadUsage()
+    await store().signOut()
+    expect(store().credits).toBeNull()
+    expect(store().usage).toBeNull()
+    expect(store().usageCursor).toBeNull()
+  })
+
+  it('asks for the balance and the table again when the window regains focus', async () => {
+    const off = store().subscribe()
+    window.dispatchEvent(new Event('focus'))
+    expect(fake.calls).toEqual([])
+
+    useAccountStore.setState({ status: SIGNED_IN })
+    window.dispatchEvent(new Event('focus'))
+    await vi.waitFor(() => expect(store().credits).toEqual(CREDITS))
+    expect(fake.calls.map((call) => call.channel)).toEqual([
+      'account:getCredits',
+      'account:getPricing'
+    ])
+    // Alt-tabbing straight back does not ask again.
+    window.dispatchEvent(new Event('focus'))
+    expect(fake.calls).toHaveLength(2)
+    off()
+    resetAccountStore()
+    useAccountStore.setState({ status: SIGNED_IN })
+    window.dispatchEvent(new Event('focus'))
+    expect(fake.calls).toHaveLength(2)
   })
 })
 

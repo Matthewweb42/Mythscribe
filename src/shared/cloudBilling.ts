@@ -1,6 +1,8 @@
 import { z } from 'zod'
-import { AI_MODEL_MAX, Tier } from './ai'
-import { MICROS_PER_USD } from './cloudRates'
+import { AI_MODEL_MAX, HOSTED_DEFAULT_MODELS, Tier } from './ai'
+
+/** Micro-USD (1e-6 USD) is the unit of every balance and charge (L2); a $10 pack is 10_000_000. */
+export const MICROS_PER_USD = 1_000_000
 
 /**
  * Hosted AI billing (AI-BILLING-SPEC P1–P6, L2): the server-held price table, the routing table,
@@ -57,19 +59,39 @@ export type WordCostConstants = z.infer<typeof WordCostConstants>
 
 /**
  * The defaults the Worker serves until the operator overrides a key in `billing_config`
- * (author decisions 2026-10-07: cost + 20 %, a $2.00 trial grant, $10 minimum pack). The model
- * prices are OpenAI's published rates for the models the app already uses (2026-10-05), reached
- * through OpenRouter, which passes provider prices through unchanged; cached input is a tenth of
- * input. The default models and the routing table are a proposal awaiting the author's approval.
+ * (author decisions 2026-10-07: cost + 20 %, a $2.00 trial grant, $10 minimum pack). The default
+ * models were approved by the author on 2026-10-07: DeepSeek V4 Flash (fast) and V4 Pro (strong)
+ * through OpenRouter, at OpenRouter's live prices that day. The OpenAI models stay on sale as
+ * choices (and for the bare ids older apps send). `displayMultiplier` compares a model with the
+ * default (fast) model on a blend of ten input tokens per output token, the shape of most of the
+ * app's requests (decided by Claude, unconfirmed: QUESTIONS.md 2026-10-07).
  */
 export const DEFAULT_HOSTED_MODELS: readonly HostedModelPrice[] = [
+  {
+    id: HOSTED_DEFAULT_MODELS.fast,
+    label: 'DeepSeek V4 Flash',
+    inputUsdPerM: 0.03,
+    outputUsdPerM: 1.28,
+    cachedInputUsdPerM: 0.03,
+    displayMultiplier: 1,
+    aliases: []
+  },
+  {
+    id: HOSTED_DEFAULT_MODELS.strong,
+    label: 'DeepSeek V4 Pro',
+    inputUsdPerM: 0.21,
+    outputUsdPerM: 0.42,
+    cachedInputUsdPerM: 0.017,
+    displayMultiplier: 1.6,
+    aliases: []
+  },
   {
     id: 'openai/gpt-5.4-mini',
     label: 'GPT-5.4 mini',
     inputUsdPerM: 0.75,
     outputUsdPerM: 4.5,
     cachedInputUsdPerM: 0.075,
-    displayMultiplier: 1,
+    displayMultiplier: 7.6,
     aliases: ['gpt-5.4-mini']
   },
   {
@@ -78,7 +100,7 @@ export const DEFAULT_HOSTED_MODELS: readonly HostedModelPrice[] = [
     inputUsdPerM: 2.5,
     outputUsdPerM: 15,
     cachedInputUsdPerM: 0.25,
-    displayMultiplier: 3.3,
+    displayMultiplier: 25,
     aliases: ['gpt-5.4']
   },
   {
@@ -87,15 +109,33 @@ export const DEFAULT_HOSTED_MODELS: readonly HostedModelPrice[] = [
     inputUsdPerM: 0.2,
     outputUsdPerM: 1.25,
     cachedInputUsdPerM: 0.02,
-    displayMultiplier: 0.3,
+    displayMultiplier: 2.1,
     aliases: ['gpt-5.4-nano']
   }
 ]
 
 export const DEFAULT_HOSTED_ROUTING: HostedRouting = {
-  tiers: { fast: 'openai/gpt-5.4-mini', strong: 'openai/gpt-5.4' },
+  tiers: { ...HOSTED_DEFAULT_MODELS },
   features: {}
 }
+
+/**
+ * The money terms the Worker serves by default (AI-BILLING-SPEC "Config defaults", author
+ * decisions 2026-10-07), in one place: the Worker's `DEFAULT_BILLING_CONFIG` spreads them, and the
+ * app's bundled pricing (`bundledPricing`, used until `GET /pricing` has answered) reads them.
+ */
+export const DEFAULT_BILLING_TERMS = {
+  appPriceUsd: 30,
+  minPackUsd: 10,
+  markup: 0.2,
+  trialGrantUsd: 2,
+  quoteThresholdUsd: 0.25,
+  estimateSafetyFactor: 1.2,
+  lowBalanceWarningUsd: 2,
+  holdExpiryMinutes: 10,
+  refundWindowDays: 30,
+  requestsPerMinute: 60
+} as const
 
 export const DEFAULT_WORD_COSTS: WordCostConstants = { lineEdit: null, consistencyCheck: null }
 
@@ -128,7 +168,10 @@ export function markupToBps(markup: number): number {
   return Math.round(markup * 10_000)
 }
 
-export function lockPrices(price: HostedModelPrice, markup: number): LockedPrices {
+export function lockPrices(
+  price: Pick<HostedModelPrice, 'inputUsdPerM' | 'outputUsdPerM' | 'cachedInputUsdPerM'>,
+  markup: number
+): LockedPrices {
   return {
     inputMicrosPerM: microsPerM(price.inputUsdPerM),
     outputMicrosPerM: microsPerM(price.outputUsdPerM),

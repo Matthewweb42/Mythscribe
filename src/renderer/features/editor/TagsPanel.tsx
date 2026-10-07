@@ -13,7 +13,7 @@ import { toTagName } from '@shared/tags'
 import { titleTagProposal } from '@shared/titleTags'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
-import { describeRequest } from '@renderer/features/ai/usageFormat'
+import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { DockPanelControls } from '@renderer/features/shell/Dock'
@@ -531,7 +531,11 @@ export function TagsPanel({ id }: { id: string }): React.JSX.Element {
                 )}
                 <p className="mt-1 mb-0 flex items-center gap-2 text-xs text-fg-subtle">
                   <span data-testid="tag-recommend-cost">
-                    {mine.fromImport ? `${mine.model} · from import` : describeRequest(mine)}
+                    {mine.fromImport ? (
+                      `${mine.model} · from import`
+                    ) : (
+                      <RequestCost request={mine} />
+                    )}
                   </span>
                   {mine.suggestions.length > 0 ? (
                     <button type="button" onClick={acceptAll} className={LINK_BUTTON}>

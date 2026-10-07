@@ -15,12 +15,14 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { cloudApiUrl } from '@shared/account'
 import { effectiveOwnKeyProvider } from '@shared/ai'
+import { hostedModelFor } from '@shared/hostedPricing'
 import { ASSET_SCHEME } from '@shared/focus'
 import { licensePublicKey } from '@shared/license'
 import { projectToReopen, restorableBounds } from '@shared/windowState'
 import { UI_SCALE_FACTORS } from '@shared/zoom'
 import { themeBackground } from '@shared/themes'
 import { AccountService } from './account/accountService'
+import { CloudAccessTokens, withAccessTokens } from './account/accessTokens'
 import { createCloudAuthClient } from './account/cloudAuthClient'
 import { CloudPricingService } from './account/cloudPricing'
 import { AiKeyStore } from './ai/keyStore'
@@ -262,20 +264,28 @@ if (!primaryInstance) {
       return net.fetch(pathToFileURL(file).toString())
     })
     const appState = new AppStateStore(join(app.getPath('userData'), 'app-state.json'))
-    // AI-BILLING-SPEC S2: provider keys only in the OS keychain; the e2e has none under xvfb.
+    // AI-BILLING-SPEC S2: provider keys and the account sign-in only in the OS keychain; the e2e
+    // has none under xvfb. The escape hatch is honoured only in an unpackaged build (the e2e runs
+    // `out/` with Electron directly), so no installed copy can be talked into plain text.
     const keyStore = new AiKeyStore(
       join(app.getPath('userData'), 'ai-keys.json'),
       safeStorage,
       process.platform,
-      process.env.MYTHSCRIBE_E2E_PLAINTEXT_KEYS === '1'
+      !app.isPackaged && process.env.MYTHSCRIBE_E2E_PLAINTEXT_KEYS === '1'
     )
     // F-15.2: the account is constructed here, not in the handlers, because it pushes
     // `account:changed` by itself when a sign-in link is opened or its attempt expires.
     const cloudBaseUrl = cloudApiUrl(process.env)
-    const cloudClient = createCloudAuthClient({
+    const rawCloudClient = createCloudAuthClient({
       baseUrl: cloudBaseUrl,
       fetch: (input, init) => globalThis.fetch(input, init)
     })
+    // AI-BILLING-SPEC A5, S6: every bearer call sends a short-lived access token minted from the
+    // session (the keychain-held refresh token); the access token lives in memory only.
+    const accessTokens = new CloudAccessTokens({
+      refresh: (refreshToken) => rawCloudClient.refresh(refreshToken)
+    })
+    const cloudClient = withAccessTokens(rawCloudClient, accessTokens)
     const cloudPricing = new CloudPricingService({
       baseUrl: cloudBaseUrl,
       fetch: (input, init) => globalThis.fetch(input, init),
@@ -307,8 +317,12 @@ if (!primaryInstance) {
         baseUrl: cloudBaseUrl,
         fetch: (input, init) => globalThis.fetch(input, init),
         token: () => signedInAccount.sessionToken(),
+        bearer: (sessionToken) => accessTokens.bearer(sessionToken),
+        invalidateBearer: () => accessTokens.invalidate(),
         onSessionEnded: () => signedInAccount.sessionEnded(),
-        resolveModel: (tier) => appState.get().models.cloud[tier],
+        // A tier left at a default follows the server's routing table (P5, R4).
+        resolveModel: (tier) =>
+          hostedModelFor(tier, appState.get().models.cloud[tier], cloudPricing.current()),
         credits: (token) => cloudClient.credits(token),
         pricing: () => cloudPricing.current(),
         // F-15.5: every answered request carries the balance it left behind, so the usage meter
@@ -376,6 +390,7 @@ if (!primaryInstance) {
       updates,
       diagnostics,
       backups,
+      cloudPricing,
       dialogs: createDialogs(
         () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
       ),

@@ -12,7 +12,13 @@ import {
   type AiUsageSummary,
   type Tier
 } from '@shared/ai'
-import { autoTable, resolveTier, type AiModelChoice, type AiRouting } from '@shared/aiRouting'
+import {
+  autoTable,
+  hostedAutoTable,
+  resolveTier,
+  type AiModelChoice,
+  type AiRouting
+} from '@shared/aiRouting'
 import { providerForSource, type AiSource } from '@shared/aiSettings'
 import { ipc } from '@renderer/lib/ipc'
 import { flushAiSettings } from './aiSettingsStore'
@@ -206,6 +212,6 @@ export function routedTier(
   requested: Tier
 ): Tier {
   if (choice === null) return requested
-  const cloudTable = source === 'cloud' ? (choice.cloudPricing?.routing ?? null) : null
+  const cloudTable = source === 'cloud' ? hostedAutoTable(choice.cloudPricing) : null
   return resolveTier({ feature, requested, routing: choice.routing, table: autoTable(cloudTable) })
 }

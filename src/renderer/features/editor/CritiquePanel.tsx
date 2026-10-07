@@ -5,7 +5,7 @@ import {
   type CritiqueNote
 } from '@shared/critique'
 import { normalizeProposalNote, PROPOSAL_NOTE_MAX } from '@shared/proposal'
-import { describeRequest } from '@renderer/features/ai/usageFormat'
+import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { REWRITE_BUSY_MESSAGE } from './applyFix'
 import { useCritiqueStore, type CritiqueSession } from './critiqueStore'
@@ -148,7 +148,7 @@ function Body({
           Close
         </button>
         <span data-testid="critique-cost" className="text-xs text-fg-subtle">
-          {describeRequest(result)}
+          <RequestCost request={result} />
         </span>
         {result.dropped > 0 ? (
           <span data-testid="critique-dropped" className="text-xs text-fg-subtle">
