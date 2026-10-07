@@ -124,8 +124,8 @@ not on the price table falls back to the default routing.
 | `max_input_chars` | `200000` |
 | `refund_window_days` | `30` |
 | `webhook_max_age_hours` | `72` |
-| `models` | GPT-5.4 mini / 5.4 / 5.4 nano via OpenRouter (`openai/…`), with cached-input prices and display multipliers |
-| `routing` | `{"tiers":{"fast":"openai/gpt-5.4-mini","strong":"openai/gpt-5.4"},"features":{}}` |
+| `models` | DeepSeek V4 Flash / V4 Pro via OpenRouter (`deepseek/…`, approved 2026-10-07), with cached-input prices and display multipliers (`HOSTED_DEFAULT_MODELS`, `src/shared/ai.ts`) |
+| `routing` | `{"tiers":{"fast":"deepseek/deepseek-v4-flash","strong":"deepseek/deepseek-v4-pro"},"features":{}}` |
 | `word_costs` | `{"lineEdit":null,"consistencyCheck":null}` (null hides the estimate line) |
 
 ```bash
@@ -286,6 +286,10 @@ that; `{"status":"ignored"}` with a line in the `wrangler dev` log means the use
 variant did not match the configuration.
 
 ## Setting up the Supporter license (operator, once)
+
+> Superseded 2026-10-07: the $30 app license (`LEMONSQUEEZY_APP_LICENSE`) replaces the $39 Supporter product and uses
+> the same key pair and license rows. Steps 1–3 and 5–6 below still apply; for step 4 create the $30 product instead.
+> The full operator walkthrough is `docs/OPERATOR-SETUP.md`.
 
 The key pair does not exist until this is run: until then the app ships a placeholder public key and
 the Worker answers 503 `NOT_CONFIGURED` to a licensed account. Order matters — the app's public key
