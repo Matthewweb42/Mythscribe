@@ -153,7 +153,8 @@ export interface ChapterGroup {
 
 /**
  * The manuscript's chapters in reading order, grouped under their parts, for the "Selected
- * chapters" checklist. Chapters outside any part form a group of their own in place.
+ * chapters" checklist. Chapters outside any part form a group of their own in place; a scene
+ * placed at chapter level (right under the root or a part) is listed like a chapter.
  */
 export function chapterGroups(
   index: Pick<TreeIndex, 'byId' | 'childrenOf' | 'rootIds'>
@@ -165,7 +166,12 @@ export function chapterGroups(
     for (const id of index.childrenOf[parentId] ?? []) {
       const node = index.byId[id]
       if (!node) continue
-      if (node.hierarchyLevel === 'chapter') {
+      // A scene placed at chapter level (a prologue right under the root or a part) is listed
+      // like a chapter: it prints with its own heading.
+      if (
+        node.hierarchyLevel === 'chapter' ||
+        (node.hierarchyLevel === 'scene' && (parentId === root || part?.id === parentId))
+      ) {
         const last = groups.at(-1)
         const chapter = { id, title: node.title }
         // `undefined` (no group yet) never equals a part id or null.

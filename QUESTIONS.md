@@ -12,6 +12,24 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-07 · F-2.2 · Flexible nesting: where the bottom buttons and Insert put a new scene
+- Question: With scenes allowed directly under a part or the manuscript, where do the bottom Scene/Chapter/Part buttons, Insert, and the empty-folder "Add a scene" put a new node? (Your decision covered right-click and drag only.)
+- Chosen: unchanged where the old rule had an answer (Scene with a part selected still goes into its last chapter; with nothing selected, into the last chapter of the last part). Where it used to refuse, it now places directly: a part with no chapters takes the scene itself, a manuscript with no parts takes the chapter or scene on the root, and the empty-part invitation reads "Add a scene" instead of "Add a chapter first". With nothing selected, a new node is appended after the last leveled node at the bottom of the outline, so after an Epilogue scene on the root a new scene goes on the root too. A new chapter from a loose scene goes right after it.
+- Alternatives: make the bottom buttons behave like right-click (Scene on a part always goes directly into the part); keep refusing in an empty part.
+- To change it: `resolveCreateTarget` in `src/renderer/features/manuscript/placement.ts`.
+
+## 2026-10-07 · F-12.1 · Flexible nesting: export details
+- Question: How do selected-chapter export, single-document export, and the EPUB contents treat a scene at chapter level and a part-less chapter?
+- Chosen: "Selected chapters" lists a chapter-level scene (a prologue) as its own item; a scene exported alone ("Current document") prints its text with no heading, as before; in EPUB's contents a chapter (or chapter-level scene) right under the manuscript is a top-level entry, not nested under the part before it. There was no chapter numbering anywhere (headings are node titles), so nothing needed renumbering.
+- Alternatives: leave loose scenes out of the checklist; print the prologue's heading even when exported alone.
+- To change it: `chapterGroups` in `src/renderer/features/export/exportStore.ts`, `collectBook` in `src/main/export/collect.ts`, `epubFiles` in `src/main/export/epub.ts`.
+
+## 2026-10-07 · F-12.2 · Flexible nesting: importing into a project with a prologue
+- Question: The import review's combined outline only knows part → chapter → scene. What happens to a scene or chapter placed at a higher level when the author imports into the project?
+- Chosen: it is not shown in the outline (like a generic document) and keeps its place: anything that sat before its container's first outline child stays in front (the prologue stays first), anything after follows the outline, as generic nodes already did. This also keeps a generic document at the top of the manuscript in front, where it used to move after the parts.
+- Alternatives: show loose scenes and chapters in the combined outline (a larger change to the draft model and the review dialog).
+- To change it: `importDraft` in `src/main/import/commit.ts`, `withExisting` in `src/main/import/existing.ts`.
+
 ## 2026-10-06 · F-1.7 · Where the session is kept and what it restores
 - Question: Where is "where I left off" stored, and how much of it comes back?
 - Chosen: in the project's database (settings key `session`), so it travels with the project folder (Google Drive) to any machine. Restored on open: the selected document, folder, or entity page; the sidebar tab (the project's, falling back to the app-wide one for a project with no session); folded folders; the Manuscript tag filter; stacked or cork-board folder view; Scene details open or shut; focus mode (a project closed fullscreen reopens fullscreen); caret and scroll for the 200 most recently visited documents, plus each stacked folder's scroll. The restored document takes the keyboard focus at its caret. The assistant's open conversation and mode were already per project.

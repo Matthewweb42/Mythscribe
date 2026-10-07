@@ -27,8 +27,8 @@ describe('renderMarkdown (F-12.1)', () => {
       [
         { kind: 'matter', title: 'Dedication', blocks: [p(run('For M.'))] },
         ...body(
-          { kind: 'title', level: 'part', text: 'Part One' },
-          { kind: 'title', level: 'chapter', text: 'Chapter One' },
+          { kind: 'title', level: 'part', text: 'Part One', inPart: false },
+          { kind: 'title', level: 'chapter', text: 'Chapter One', inPart: true },
           { kind: 'heading', level: 1, runs: [run('Morning')], align: 'center' },
           p(run('First.')),
           { kind: 'sceneBreak' },

@@ -49,13 +49,14 @@ describe('treeContextMenuItems', () => {
     ])
   })
 
-  it('omits a level that cannot be placed under the row', () => {
+  it('offers New scene on an arc with no chapters: it goes right inside (flexible nesting)', () => {
     const emptyArc = buildIndex(
       treeFixture.filter((node) => node.parentId !== 'arc-2' && node.parentId !== 'ch-4')
     )
     expect(treeContextMenuItems(emptyArc, 'arc-2', 'novel').map((item) => item.id)).toEqual([
       'new-part',
       'new-chapter',
+      'new-scene',
       'new-generic-document',
       'new-generic-folder',
       'rename',

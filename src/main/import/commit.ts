@@ -258,13 +258,22 @@ export function importDraft(db: TreeDb, format: NovelFormat, draft: ImportDraft)
 
     // What the outline does not show (a generic document or folder inside a part or chapter, or
     // at the top of the manuscript) follows its container's outline children; inside a container
-    // that is deleted it moves to the end of the manuscript rather than going with it.
+    // that is deleted it moves to the end of the manuscript rather than going with it. What sat
+    // before every outline child of its container stays in front (a prologue scene or chapter
+    // placed right under the root or a part, flexible nesting 2026-10-07; the outline only shows
+    // part → chapter → scene).
     if (reorganize) {
       const outline = new Set(levelOf.keys())
       const containers = [manuscript.id, ...[...levelOf.keys()].filter((id) => !deleting.has(id))]
+      const leadingOf = new Map<string, NodeRow[]>()
       for (const containerId of containers) {
-        for (const row of all) {
-          if (row.parentId !== containerId || outline.has(row.id)) continue
+        // `listNodes` answers by parent then position, so a filter keeps the order.
+        const held = all.filter((row) => row.parentId === containerId)
+        const first = held.findIndex((row) => outline.has(row.id))
+        const leading = first === -1 ? [] : held.slice(0, first)
+        if (leading.length > 0) leadingOf.set(containerId, leading)
+        for (const row of held.slice(leading.length)) {
+          if (outline.has(row.id)) continue
           updates.set(row.id, {
             parentId: containerId,
             position: positionIn(containerId),
@@ -279,6 +288,15 @@ export function importDraft(db: TreeDb, format: NovelFormat, draft: ImportDraft)
           position: positionIn(manuscript.id),
           title: row.title
         })
+      }
+      for (const [containerId, leading] of leadingOf) {
+        const shift = leading.length
+        for (const placed of updates.values())
+          if (placed.parentId === containerId) placed.position += shift
+        for (const row of rows) if (row.parentId === containerId) row.position += shift
+        leading.forEach((row, position) =>
+          updates.set(row.id, { parentId: containerId, position, title: row.title })
+        )
       }
     }
 

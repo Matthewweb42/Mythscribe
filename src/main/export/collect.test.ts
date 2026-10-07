@@ -8,7 +8,7 @@ import type { NodeRow } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { createSeededProject } from '../project/testProject'
-import { createNode, listNodes, type TreeDb } from '../tree/treeStore'
+import { createNode, listNodes, moveNode, type TreeDb } from '../tree/treeStore'
 import { collectBook } from './collect'
 import type { BookBlock } from './model'
 
@@ -135,6 +135,50 @@ describe('collectBook (F-12.1)', () => {
       'Only this.'
     ])
     expect(book.words).toBe(2)
+  })
+
+  it('heads a prologue scene on the root like a chapter and keeps a part-less chapter (flexible nesting)', () => {
+    const manuscript = section('manuscript')
+    const [first] = chapters()
+    if (!first) throw new Error('seed changed')
+    const prologue = createNode(db, 'novel', {
+      parentId: manuscript.id,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'Prologue'
+    })
+    moveNode(db, prologue.id, manuscript.id, null)
+    saveDocument(db, prologue.id, para('Before it all.'))
+    saveDocument(db, sceneOf(first).id, para('Then this.'))
+    const loose = createNode(db, 'novel', {
+      parentId: manuscript.id,
+      kind: 'folder',
+      hierarchyLevel: 'chapter',
+      title: 'Last Chapter'
+    })
+    const end = createNode(db, 'novel', {
+      parentId: loose.id,
+      kind: 'document',
+      hierarchyLevel: 'scene'
+    })
+    saveDocument(db, end.id, para('The end.'))
+    const blocks = collectBook(db, options({ includeFront: false, includeEnd: false }), 'Export')
+      .units[0]?.blocks
+    expect(texts(blocks ?? []).slice(0, 5)).toEqual([
+      'chapter:Prologue',
+      'Before it all.',
+      'part:Part 1',
+      'chapter:Chapter 1',
+      'Then this.'
+    ])
+    expect(texts(blocks ?? []).slice(-2)).toEqual(['chapter:Last Chapter', 'The end.'])
+    expect(blocks?.find((b) => b.kind === 'title' && b.text === 'Last Chapter')).toMatchObject({
+      inPart: false
+    })
+
+    // Printed alone, the prologue is its text only, like any scene.
+    const alone = collectBook(db, options({ scope: { kind: 'document', id: prologue.id } }), 'X')
+    expect(texts(alone.units[0]?.blocks ?? [])).toEqual(['Before it all.'])
   })
 
   it('prints one document alone, from any section, without matter', () => {

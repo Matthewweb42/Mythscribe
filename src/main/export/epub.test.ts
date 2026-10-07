@@ -26,12 +26,12 @@ const units: BookUnit[] = [
     title: 'Book',
     blocks: [
       p('Prologue text'),
-      { kind: 'title', level: 'part', text: 'Part One' },
-      { kind: 'title', level: 'chapter', text: 'Chapter One' },
+      { kind: 'title', level: 'part', text: 'Part One', inPart: false },
+      { kind: 'title', level: 'chapter', text: 'Chapter One', inPart: true },
       p('First'),
-      { kind: 'title', level: 'chapter', text: 'Chapter Two' },
+      { kind: 'title', level: 'chapter', text: 'Chapter Two', inPart: true },
       { kind: 'sceneBreak' },
-      { kind: 'title', level: 'part', text: 'Part Two' }
+      { kind: 'title', level: 'part', text: 'Part Two', inPart: false }
     ]
   },
   { kind: 'matter', title: 'Afterword', blocks: [p('Thanks & more')] }
@@ -47,6 +47,27 @@ describe('epubFiles (F-12.1)', () => {
       ['s005.xhtml', 'Chapter Two', 'chapter', 2],
       ['s006.xhtml', 'Part Two', 'part', 1],
       ['s007.xhtml', 'Afterword', 'other', 1]
+    ])
+  })
+
+  it('keeps a chapter-level title right under the root out of the part above it (flexible nesting)', () => {
+    const files = epubFiles([
+      {
+        kind: 'body',
+        title: 'Book',
+        blocks: [
+          { kind: 'title', level: 'part', text: 'Part One', inPart: false },
+          { kind: 'title', level: 'chapter', text: 'Chapter 1', inPart: true },
+          p('One'),
+          { kind: 'title', level: 'chapter', text: 'Epilogue', inPart: false },
+          p('After')
+        ]
+      }
+    ])
+    expect(files.map((f) => [f.label, f.role])).toEqual([
+      ['Part One', 'part'],
+      ['Chapter 1', 'chapter'],
+      ['Epilogue', 'other']
     ])
   })
 })

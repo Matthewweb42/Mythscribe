@@ -67,24 +67,21 @@ export function levelLabel(format: NovelFormat, level: HierarchyLevel): string {
 }
 
 /**
- * Where a hierarchy level may live (F-2.2 create, F-2.4 move): a part under the manuscript root,
- * a chapter under a part, a scene under a chapter. Generic nodes (no level) may live in any folder.
- * One owner for the structural rule; main validates with it and the renderer gates drops with it.
+ * Where a hierarchy level may live (F-2.2 create, F-2.4 move): at its own level or any higher
+ * one, never lower (flexible nesting, decided by the author 2026-10-07). A part sits under the
+ * manuscript root; a chapter under the root or a part; a scene under the root, a part, or a
+ * chapter. A part never goes inside a part or a chapter, a chapter never inside a chapter.
+ * Generic nodes (no level) may live in any folder. One owner for the structural rule; main
+ * validates with it and the renderer gates drops and the create menus with it.
  */
 export function canPlaceLevel(
   level: HierarchyLevel | null,
   parent: { sectionType: SectionType | null; hierarchyLevel: HierarchyLevel | null }
 ): boolean {
-  switch (level) {
-    case null:
-      return true
-    case 'part':
-      return parent.sectionType === 'manuscript'
-    case 'chapter':
-      return parent.hierarchyLevel === 'part'
-    case 'scene':
-      return parent.hierarchyLevel === 'chapter'
-  }
+  if (level === null) return true
+  if (parent.sectionType === 'manuscript') return true
+  if (parent.sectionType !== null || parent.hierarchyLevel === null) return false
+  return HIERARCHY_LEVELS.indexOf(parent.hierarchyLevel) < HIERARCHY_LEVELS.indexOf(level)
 }
 
 /** Title given to a newly created node (F-2.2): "Untitled Arc", "Untitled Chapter", "Untitled document". */

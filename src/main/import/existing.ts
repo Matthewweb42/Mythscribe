@@ -16,7 +16,8 @@ import { listNodes, type TreeDb } from '../tree/treeStore'
  * scenes first and the imported ones after them, so the author can sort both together. This
  * puts the existing outline into the draft main built from the file. Only the outline levels
  * travel (a part under the manuscript root, a chapter under a part, a scene under a chapter);
- * a generic document or folder in the manuscript is not shown and stays where it is. Existing
+ * a generic document or folder in the manuscript is not shown and stays where it is, and so is a
+ * scene or chapter placed at a higher level (a prologue on the root; flexible nesting). Existing
  * scenes carry their stored content as `paragraphs`, so a merge or a split in the dialog works
  * on real text, and an untouched scene compares equal at commit and is not rewritten.
  */

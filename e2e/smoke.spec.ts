@@ -5913,6 +5913,56 @@ test('create, close, reopen a project on disk', async () => {
   await expect
     .poll(async () => (await getLayout()).dock.columns[0], { timeout: 3000 })
     .toEqual(['sidebar'])
+
+  // Flexible nesting (the author, 2026-10-07): right-click Arc 1 → New Scene creates the scene
+  // right under the arc (Interlude); a second one (Prologue) dragged onto Arc 1's top edge lands
+  // on the manuscript root, first. The compiled preview heads both like chapters.
+  const nestRows = await listTree()
+  const nestRoot = nestRows.find((n) => n.sectionType === 'manuscript')
+  const nestArc1 = nestRows.find((n) => n.parentId === nestRoot?.id && n.position === 0)
+  if (!nestRoot || nestArc1?.hierarchyLevel !== 'part') throw new Error('Arc 1 not found')
+  const rowOf = (id: string): Locator => resumedTree.locator(`[data-node-id="${id}"] > div`).first()
+  const nestMenu = page.getByRole('menu')
+  const newSceneInArc1 = async (title: string): Promise<string> => {
+    await rowOf(nestArc1.id).click({ button: 'right' })
+    await nestMenu.getByRole('menuitem', { name: 'New Scene' }).click()
+    await expect(nestMenu).toBeHidden()
+    await expect(page.getByRole('textbox', { name: 'Rename' })).toBeFocused()
+    await page.keyboard.type(title)
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('textbox', { name: 'Rename' })).toBeHidden()
+    const made = (await listTree()).find((n) => n.title === title)
+    if (!made) throw new Error(`${title} was not created`)
+    expect(made).toMatchObject({ parentId: nestArc1.id, hierarchyLevel: 'scene' })
+    return made.id
+  }
+  const interludeId = await newSceneInArc1('Interlude')
+  const prologueId = await newSceneInArc1('Prologue')
+  await rowOf(prologueId).dragTo(rowOf(nestArc1.id), { targetPosition: { x: 60, y: 4 } })
+  await expect
+    .poll(async () => {
+      const node = (await listTree()).find((n) => n.id === prologueId)
+      return [node?.parentId, node?.position]
+    })
+    .toEqual([nestRoot.id, 0])
+  expect((await listTree()).find((n) => n.id === interludeId)?.parentId).toBe(nestArc1.id)
+  await expect(page.locator('[data-drop]')).toHaveCount(0)
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'View' })
+    .click()
+  await page
+    .getByRole('menu', { name: 'View' })
+    .getByRole('menuitem', { name: 'Compiled preview' })
+    .click()
+  const nestCompiled = page.getByRole('dialog', { name: 'Compiled preview' })
+  const nestHeadings = nestCompiled
+    .getByTestId('compile-preview')
+    .locator('[data-testid="compile-heading"][data-level="chapter"]')
+  await expect(nestHeadings.first()).toHaveText('Prologue')
+  await expect(nestHeadings.filter({ hasText: 'Interlude' })).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(nestCompiled).toHaveCount(0)
 })
 
 /** The single-document editor's text with the ghost-text widget (F-5.3) left out. */

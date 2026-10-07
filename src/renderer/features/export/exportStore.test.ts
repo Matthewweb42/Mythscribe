@@ -98,6 +98,21 @@ describe('chapterGroups (F-12.1)', () => {
     })
   })
 
+  it('lists a scene at chapter level (root or part) like a chapter, not one inside a chapter', () => {
+    const scene = treeFixture.find((n) => n.id === 'sc-1')!
+    const extra: TreeNode[] = [
+      { ...scene, id: 'prologue', parentId: 'manuscript', position: -1, title: 'Prologue' },
+      { ...scene, id: 'interlude', parentId: 'arc-1', position: 5, title: 'Interlude' }
+    ]
+    const groups = chapterGroups(buildIndex([...treeFixture, ...extra]))
+    expect(groups[0]).toEqual({
+      partId: null,
+      partTitle: null,
+      chapters: [{ id: 'prologue', title: 'Prologue' }]
+    })
+    expect(groups[1]?.chapters.map((c) => c.id)).toEqual(['ch-1', 'ch-2', 'ch-3', 'interlude'])
+  })
+
   it('answers no groups without a manuscript section', () => {
     expect(chapterGroups({ byId: {}, childrenOf: {}, rootIds: [] })).toEqual([])
   })

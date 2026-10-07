@@ -4,7 +4,6 @@ import type { Editor } from '@tiptap/core'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { levelLabel, type SectionType } from '@shared/labels'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
-import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { descendantDocuments, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useEditorZoom, usePageEdges } from '@renderer/features/shell/viewStore'
@@ -161,8 +160,8 @@ function RegionSeparator({
 
 /**
  * The invitation for a folder with no documents. In the manuscript the button adds a scene where
- * `resolveCreateTarget` puts it; an empty part has no scene target (a chapter must come first),
- * so it gets the text only. Front and end matter get a generic document. The cork board (F-11.1)
+ * `resolveCreateTarget` puts it (an empty part or the root takes the scene itself, flexible
+ * nesting, so every manuscript folder has a scene target). Front and end matter get a generic document. The cork board (F-11.1)
  * shows the same invitation for a folder with no children.
  */
 export function EmptyFolder({
@@ -177,7 +176,6 @@ export function EmptyFolder({
   const busy = useTreeStore((s) => s.busy)
   const createLevel = useTreeStore((s) => s.createLevel)
   const createGeneric = useTreeStore((s) => s.createGeneric)
-  const canAddScene = useTreeStore((s) => resolveCreateTarget(s, folderId, 'scene') !== null)
   const manuscript = section === 'manuscript'
   const scene = levelLabel(format, 'scene').toLowerCase()
 
@@ -192,19 +190,15 @@ export function EmptyFolder({
   }
 
   const message = manuscript
-    ? canAddScene
-      ? `Nothing here yet. Add a ${scene} to start writing.`
-      : `Nothing here yet. Add a ${levelLabel(format, 'chapter').toLowerCase()} first, then a ${scene}.`
+    ? `Nothing here yet. Add a ${scene} to start writing.`
     : 'Nothing here yet. Add a document to start writing.'
 
   return (
     <div className={`${COLUMN} flex flex-col items-start gap-3 py-6`}>
       <p className="m-0 text-sm text-fg-muted">{message}</p>
-      {manuscript && !canAddScene ? null : (
-        <button type="button" disabled={busy} onClick={() => void onAdd()} className={ADD_BUTTON}>
-          {manuscript ? `Add a ${scene}` : 'Add a document'}
-        </button>
-      )}
+      <button type="button" disabled={busy} onClick={() => void onAdd()} className={ADD_BUTTON}>
+        {manuscript ? `Add a ${scene}` : 'Add a document'}
+      </button>
     </div>
   )
 }

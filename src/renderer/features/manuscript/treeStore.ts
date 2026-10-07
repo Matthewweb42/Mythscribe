@@ -5,7 +5,12 @@ import type { MatterTemplateId } from '@shared/matterTemplates'
 import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { ipc } from '@renderer/lib/ipc'
-import { resolveCreateTarget, resolveGenericTarget, type CreateTarget } from './placement'
+import {
+  resolveCreateTarget,
+  resolveGenericTarget,
+  resolveMenuCreateTarget,
+  type CreateTarget
+} from './placement'
 
 /** Derived, normalized view of the document tree (F-2.1). Rebuilt in full by `load`. */
 export interface TreeIndex {
@@ -48,10 +53,15 @@ interface TreeState extends TreeIndex {
   endRename: () => void
   /**
    * Creates a part/chapter/scene relative to `targetId` (default: the selection) per
-   * `resolveCreateTarget`, then selects the new node and opens inline rename. No-op when there is
-   * no valid placement. Errors propagate so the caller can show them.
+   * `resolveCreateTarget` (with `direct`, per `resolveMenuCreateTarget`), then selects the new
+   * node and opens inline rename. No-op when there is no valid placement. Errors propagate so
+   * the caller can show them.
    */
-  createLevel: (level: HierarchyLevel, targetId?: string, options?: CreateOptions) => Promise<void>
+  createLevel: (
+    level: HierarchyLevel,
+    targetId?: string,
+    options?: LevelCreateOptions
+  ) => Promise<void>
   /** Creates a generic document or folder relative to `targetId` per `resolveGenericTarget`. */
   createGeneric: (kind: NodeKind, targetId: string, options?: CreateOptions) => Promise<void>
   /**
@@ -102,6 +112,11 @@ interface TreeState extends TreeIndex {
 /** `keepSelection`: leave the current selection alone (the stacked view adds a region in place, F-3.8). */
 export interface CreateOptions {
   keepSelection?: boolean
+}
+
+/** `direct`: the tree's right-click menu, which creates right inside a clicked root, part, or chapter. */
+export interface LevelCreateOptions extends CreateOptions {
+  direct?: boolean
 }
 
 /** What `createAt` adds on top of the public options. */
@@ -402,7 +417,11 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 
   async createLevel(level, targetId, options) {
     const state = get()
-    const target = resolveCreateTarget(state, targetId ?? state.selectedId, level)
+    const from = targetId ?? state.selectedId
+    const target =
+      options?.direct === true && from !== null
+        ? resolveMenuCreateTarget(state, from, level)
+        : resolveCreateTarget(state, from, level)
     if (!target) return
     await createAt(target, level === 'scene' ? 'document' : 'folder', level, options)
   },

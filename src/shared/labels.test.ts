@@ -91,22 +91,31 @@ describe('canPlaceLevel', () => {
   const part = parent(null, 'part')
   const chapter = parent(null, 'chapter')
   const generic = parent(null, null)
+  const end = parent('end', null)
 
+  // Every (level, parent) pair: upward only (flexible nesting, 2026-10-07).
   it.each([
     ['part', manuscript, true],
     ['part', front, false],
+    ['part', end, false],
     ['part', part, false],
+    ['part', chapter, false],
     ['part', generic, false],
+    ['chapter', manuscript, true],
     ['chapter', part, true],
-    ['chapter', manuscript, false],
+    ['chapter', front, false],
+    ['chapter', end, false],
     ['chapter', chapter, false],
     ['chapter', generic, false],
+    ['scene', manuscript, true],
+    ['scene', part, true],
     ['scene', chapter, true],
-    ['scene', part, false],
-    ['scene', manuscript, false],
+    ['scene', front, false],
+    ['scene', end, false],
     ['scene', generic, false],
     [null, manuscript, true],
     [null, front, true],
+    [null, end, true],
     [null, part, true],
     [null, chapter, true],
     [null, generic, true]

@@ -414,7 +414,7 @@ async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
   const template = templateIdOf(itemId)
   if (template) return createFromTemplate(template, nodeId)
   const level = HierarchyLevel.safeParse(itemId.replace(/^new-/, ''))
-  if (level.success) return createLevel(level.data, nodeId)
+  if (level.success) return createLevel(level.data, nodeId, { direct: true })
 }
 
 /**

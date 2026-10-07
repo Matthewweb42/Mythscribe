@@ -25,8 +25,8 @@ const units: BookUnit[] = [
     kind: 'body',
     title: 'Book',
     blocks: [
-      { kind: 'title', level: 'part', text: 'Part "One"' },
-      { kind: 'title', level: 'chapter', text: 'Chapter One' },
+      { kind: 'title', level: 'part', text: 'Part "One"', inPart: false },
+      { kind: 'title', level: 'chapter', text: 'Chapter One', inPart: true },
       { kind: 'heading', level: 2, runs: [run('Dawn')], align: 'right' },
       p(
         run('Bold', { bold: true }),
@@ -35,7 +35,7 @@ const units: BookUnit[] = [
       ),
       { kind: 'sceneBreak' },
       { kind: 'quote', blocks: [p(run('Quoted'))] },
-      { kind: 'title', level: 'chapter', text: 'Chapter Two' }
+      { kind: 'title', level: 'chapter', text: 'Chapter Two', inPart: true }
     ]
   }
 ]
