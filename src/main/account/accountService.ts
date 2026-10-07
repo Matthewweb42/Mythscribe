@@ -46,12 +46,13 @@ export const NO_SAFE_STORAGE_SESSION_MESSAGE =
   'This system has no keychain available, so a MythScribe account sign-in cannot be stored ' +
   'securely. On Linux, install and unlock a keyring (GNOME Keyring or KWallet), then try again.'
 
-export const SIGN_IN_FOR_LICENSE_MESSAGE = 'Sign in to check your MythScribe Supporter license.'
-export const SIGN_IN_TO_BUY_LICENSE_MESSAGE = 'Sign in to buy the MythScribe Supporter license.'
+// AI-BILLING-SPEC M1: the app license supersedes the Supporter license; same token, new name.
+export const SIGN_IN_FOR_LICENSE_MESSAGE = 'Sign in to check your MythScribe license.'
+export const SIGN_IN_TO_BUY_LICENSE_MESSAGE = 'Sign in to buy MythScribe.'
 export const LICENSE_NOT_ON_SALE_MESSAGE =
-  'The Supporter license is not on sale yet. Try again later.'
+  'The MythScribe license is not on sale yet. Try again later.'
 export const ACCENT_NEEDS_LICENSE_MESSAGE =
-  'The accent colours come with the Supporter license. Become a Supporter to use them.'
+  'The accent colours come with the MythScribe license. Buy MythScribe on the Account tab to use them.'
 
 export interface AccountServiceOptions {
   client: CloudAuthClient

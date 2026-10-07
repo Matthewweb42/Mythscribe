@@ -188,7 +188,9 @@ export const AiErrorCode = z.enum([
   // AI-BILLING-SPEC S4: the Cloud proxy refused a request longer than its configured input cap.
   'TOO_LARGE',
   // The Cloud proxy does not sell the requested model (not on its price table, or gone upstream).
-  'MODEL_UNAVAILABLE'
+  'MODEL_UNAVAILABLE',
+  // AI-BILLING-SPEC M1: the 30-day trial has ended without the app license; the app is read-only.
+  'TRIAL_ENDED'
 ])
 export type AiErrorCode = z.infer<typeof AiErrorCode>
 
@@ -207,7 +209,8 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
   NO_CREDIT: 'Add to your balance on the Account tab in Settings.',
   CLOUD_UNAVAILABLE: 'Switch to My own key or Local model in Settings › AI.',
   TOO_LARGE: 'Select less text, or ask about a shorter passage, and try again.',
-  MODEL_UNAVAILABLE: 'Pick another model in Settings › AI, or reset the models to their defaults.'
+  MODEL_UNAVAILABLE: 'Pick another model in Settings › AI, or reset the models to their defaults.',
+  TRIAL_ENDED: 'Buy MythScribe on the Account tab in Settings.'
 }
 
 /**

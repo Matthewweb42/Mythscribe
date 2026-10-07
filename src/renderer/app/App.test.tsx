@@ -24,6 +24,7 @@ import { defaultViewSettings } from '@shared/zoom'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAccountStore, useAccountStore } from '@renderer/features/account/accountStore'
+import { resetAppAccessStore } from '@renderer/features/account/appAccessStore'
 import { resetBackupStore } from '@renderer/features/backups/backupStore'
 import { draftFixture } from '@renderer/features/import/draftFixture'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
@@ -131,6 +132,7 @@ beforeEach(() => {
   resetIndexingStore()
   resetContinuityStore()
   resetAccountStore()
+  resetAppAccessStore()
   resetBackupStore()
   resetViewStore()
   resetStructureStore()
@@ -172,6 +174,7 @@ afterEach(() => {
   resetViewStore()
   resetStructureStore()
   resetTimelineStore()
+  resetAppAccessStore()
   vi.unstubAllGlobals()
 })
 
@@ -1566,6 +1569,17 @@ describe('App', () => {
       // Cancel returns to the buttons, and the flag does not leak into the next welcome screen.
       await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
       expect(screen.getByRole('button', { name: /new project/i })).toBeInTheDocument()
+    })
+
+    it('shows the read-only banner after the trial and follows main when a license lands (M1)', async () => {
+      const ends = new Date(2026, 10, 6).toISOString()
+      install({ 'app:getAccess': { state: 'expired', trialEndsAt: ends, daysLeft: 0 } })
+      render(<App />)
+      expect(await screen.findByTestId('read-only-banner')).toHaveTextContent(
+        'Your 30-day trial has ended.'
+      )
+      fire('app:accessChanged', { state: 'licensed', trialEndsAt: ends, daysLeft: 0 })
+      expect(screen.queryByTestId('read-only-banner')).not.toBeInTheDocument()
     })
 
     it('a native menu action arrives as an event and runs: Help › Keyboard shortcuts lists the chords, About shows the version', async () => {

@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { Placeholder } from '@tiptap/extensions'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
+import { useCanWrite } from '@renderer/features/account/appAccessStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { buildExtensions, EDITOR_CORE_OPTIONS } from './extensions'
@@ -83,6 +84,12 @@ function NotesInstance({
     },
     [extensions]
   )
+  // AI-BILLING-SPEC M1: read-only after the trial without the license, like the manuscript.
+  const writable = useCanWrite()
+  useEffect(() => {
+    const editable = ready && writable
+    if (!editor.isDestroyed && editor.isEditable !== editable) editor.setEditable(editable, false)
+  }, [editor, ready, writable])
 
   return <EditorContent editor={editor} className="flex min-h-0 flex-1 flex-col" />
 }

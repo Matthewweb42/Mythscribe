@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import type { TiptapNodeT } from '@shared/tiptap'
+import { resetAppAccessStore, useAppAccessStore } from '@renderer/features/account/appAccessStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -58,6 +59,7 @@ const text = (saved: Input<'notes:save'> | undefined): string =>
   JSON.stringify(saved?.notes ?? null)
 
 beforeEach(() => {
+  resetAppAccessStore()
   resetNotesStore()
   resetDocumentStore()
   resetLayoutStore()
@@ -69,6 +71,7 @@ beforeEach(() => {
   setIpcClient(deferred.client)
 })
 afterEach(() => {
+  resetAppAccessStore()
   resetNotesStore()
   resetDocumentStore()
   resetLayoutStore()
@@ -86,6 +89,16 @@ describe('NotesEditor (F-3.7)', () => {
     expect(box()).toHaveTextContent('Ends on the cliff')
     expect(box()).toHaveClass('ms-editor', 'ms-notes')
     expect(useNotesStore.getState().docs['sc-1']?.dirty).toBe(false)
+  })
+
+  it('stays read-only after the trial without the license (AI-BILLING-SPEC M1)', async () => {
+    useAppAccessStore.setState({ access: { state: 'expired', trialEndsAt: new Date(0).toISOString(), daysLeft: 0 } })
+    render(<NotesEditor id="sc-1" />)
+    await release(0, doc('Ends on the cliff'))
+    await waitFor(() => expect(box()).toHaveTextContent('Ends on the cliff'))
+    expect(box()).toHaveAttribute('contenteditable', 'false')
+    act(() => useAppAccessStore.setState({ access: { state: 'licensed', trialEndsAt: new Date(0).toISOString(), daysLeft: 0 } }))
+    await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
   })
 
   it('loads never-written notes as an empty, editable paragraph', async () => {

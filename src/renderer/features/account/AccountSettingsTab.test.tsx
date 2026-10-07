@@ -11,6 +11,7 @@ import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { AccountSettingsTab } from './AccountSettingsTab'
 import { resetAccountStore, useAccountStore } from './accountStore'
+import { resetAppAccessStore, useAppAccessStore } from './appAccessStore'
 
 const SIGNED_OUT: AccountStatus = { state: 'signedOut' }
 const PENDING: AccountStatus = {
@@ -101,7 +102,7 @@ const UNLICENSED: SupporterStatus = {
   since: null,
   validUntil: null,
   offline: false,
-  product: { variantId: 'supporter-39', priceCents: 3900 },
+  product: { variantId: 'app-license-30', priceCents: 3000 },
   accent: 'default'
 }
 const LICENSED: SupporterStatus = {
@@ -191,6 +192,7 @@ const writeText = vi.fn(async () => {})
 
 beforeEach(() => {
   resetAccountStore()
+  resetAppAccessStore()
   fake = fakeClient()
   setIpcClient(fake.client)
   useDialogStore.setState({ modals: [], toasts: [] })
@@ -199,6 +201,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   resetAccountStore()
+  resetAppAccessStore()
 })
 
 /** The tab reads the store App loaded; the tests put the status there directly. */
@@ -545,7 +548,7 @@ describe('AccountSettingsTab balance (F-15.3, AI-BILLING-SPEC E1-E7, C2-C4)', ()
  * the store the way it arrives; the section itself never asks on mount, which is why the signed-out
  * cases make no calls at all.
  */
-describe('AccountSettingsTab supporter (F-15.9)', () => {
+describe('AccountSettingsTab license (F-15.9, AI-BILLING-SPEC M1)', () => {
   const showSupporter = (supporter: SupporterStatus, status: AccountStatus = SIGNED_OUT): void => {
     useAccountStore.setState({ status, supporter, credits: CREDITS, creditsAt: Date.now() })
   }
@@ -553,12 +556,12 @@ describe('AccountSettingsTab supporter (F-15.9)', () => {
   it('badges a license with the day it was last confirmed', () => {
     showSupporter(LICENSED, SIGNED_IN)
     render(<AccountSettingsTab />)
-    const section = screen.getByRole('region', { name: 'Supporter' })
+    const section = screen.getByRole('region', { name: 'MythScribe license' })
     expect(within(section).getByTestId('account-supporter-badge')).toHaveTextContent(
-      `Supporter since ${new Date(LICENSED.since ?? '').toLocaleDateString(undefined, { dateStyle: 'medium' })}`
+      `Licensed since ${new Date(LICENSED.since ?? '').toLocaleDateString(undefined, { dateStyle: 'medium' })}`
     )
     expect(screen.queryByTestId('account-supporter-buy')).not.toBeInTheDocument()
-    expect(within(section).queryByText(/Extras stay on until/)).not.toBeInTheDocument()
+    expect(within(section).queryByText(/stays active until/)).not.toBeInTheDocument()
     // The extras moved to the Appearance tab with the themes (F-7.8).
     expect(screen.queryByTestId('account-accent-sky')).not.toBeInTheDocument()
   })
@@ -568,7 +571,7 @@ describe('AccountSettingsTab supporter (F-15.9)', () => {
     render(<AccountSettingsTab />)
     expect(
       screen.getByText(
-        `Extras stay on until ${new Date(LICENSED.validUntil ?? '').toLocaleDateString(undefined, { dateStyle: 'medium' })} while MythScribe Cloud cannot be reached.`
+        `Your license stays active until ${new Date(LICENSED.validUntil ?? '').toLocaleDateString(undefined, { dateStyle: 'medium' })} while MythScribe Cloud cannot be reached.`
       )
     ).toBeInTheDocument()
   })
@@ -578,11 +581,11 @@ describe('AccountSettingsTab supporter (F-15.9)', () => {
     render(<AccountSettingsTab />)
     expect(
       screen.getByText(
-        'A one-time purchase that supports the project and unlocks the accent colours, the Sepia theme, and custom themes (Settings › Appearance). Nothing else changes: every writing and AI feature works without it.'
+        'MythScribe is a one-time purchase with a 30-day free trial. After the trial, projects open read-only until you buy it; export and backup always work. The license also includes the accent colours, the Sepia theme, and custom themes (Settings › Appearance).'
       )
     ).toBeInTheDocument()
     const buy = screen.getByTestId('account-supporter-buy')
-    expect(buy).toHaveTextContent('Become a Supporter — $39.00')
+    expect(buy).toHaveTextContent('Buy MythScribe — $30.00')
     expect(buy).toBeEnabled()
     await userEvent.click(buy)
     await waitFor(() => {
@@ -594,7 +597,7 @@ describe('AccountSettingsTab supporter (F-15.9)', () => {
   it('says so when the license is not on sale yet', () => {
     showSupporter({ ...UNLICENSED, product: null }, SIGNED_IN)
     render(<AccountSettingsTab />)
-    expect(screen.getByText('The Supporter license is not on sale yet.')).toBeInTheDocument()
+    expect(screen.getByText('The MythScribe license is not on sale yet.')).toBeInTheDocument()
     expect(screen.queryByTestId('account-supporter-buy')).not.toBeInTheDocument()
   })
 
@@ -635,7 +638,7 @@ describe('AccountSettingsTab supporter (F-15.9)', () => {
       message: 'Could not reach MythScribe Cloud. Check your connection and try again.'
     })
     await userEvent.click(screen.getByRole('button', { name: 'Refresh license' }))
-    const section = screen.getByRole('region', { name: 'Supporter' })
+    const section = screen.getByRole('region', { name: 'MythScribe license' })
     expect(await within(section).findByRole('alert')).toHaveTextContent(
       'Could not reach MythScribe Cloud. Check your connection and try again.'
     )
@@ -643,10 +646,38 @@ describe('AccountSettingsTab supporter (F-15.9)', () => {
     expect(useDialogStore.getState().toasts).toHaveLength(0)
   })
 
+  it('says where the trial stands, and what read-only means once it has ended', () => {
+    const endsAt = new Date(2026, 10, 6).toISOString()
+    useAppAccessStore.setState({ access: { state: 'trial', trialEndsAt: endsAt, daysLeft: 12 } })
+    showSupporter(UNLICENSED, SIGNED_IN)
+    const { unmount } = render(<AccountSettingsTab />)
+    expect(screen.getByTestId('account-trial-status')).toHaveTextContent(
+      `12 days left in your trial (it ends ${new Date(endsAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}).`
+    )
+    expect(
+      screen.getByText('After paying in the browser, press Refresh to activate the license here.')
+    ).toBeInTheDocument()
+    unmount()
+    useAppAccessStore.setState({ access: { state: 'expired', trialEndsAt: endsAt, daysLeft: 0 } })
+    render(<AccountSettingsTab />)
+    expect(screen.getByTestId('account-trial-status')).toHaveTextContent(
+      'Your trial has ended. Projects open read-only; export and backup still work.'
+    )
+  })
+
+  it('says nothing about the trial to a licensed account', () => {
+    useAppAccessStore.setState({
+      access: { state: 'licensed', trialEndsAt: new Date().toISOString(), daysLeft: 0 }
+    })
+    showSupporter(LICENSED, SIGNED_IN)
+    render(<AccountSettingsTab />)
+    expect(screen.queryByTestId('account-trial-status')).not.toBeInTheDocument()
+  })
+
   it('shows the section before anything is loaded', () => {
     show(SIGNED_OUT)
     render(<AccountSettingsTab />)
-    expect(screen.getByRole('region', { name: 'Supporter' })).toBeInTheDocument()
-    expect(screen.getByText('The Supporter license is not on sale yet.')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'MythScribe license' })).toBeInTheDocument()
+    expect(screen.getByText('The MythScribe license is not on sale yet.')).toBeInTheDocument()
   })
 })

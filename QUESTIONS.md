@@ -383,3 +383,44 @@ do. Review, then confirm, change, or delete the entry.
 - Alternatives: per-task model ids (needs a list per source); a model picker in the chat and edit-pass screens.
 - To change it: `src/shared/aiRouting.ts`, `ModelChoiceSection` in `AiSettingsTab.tsx`.
 
+
+## 2026-10-07 · F-15.13 (billing B3a) · Your installed build will turn read-only 30 days after you update (operator step)
+- Question: No build can verify a license yet: `LICENSE_PUBLIC_KEY_JWK` in `src/shared/license.ts` is still the placeholder, and the $30 product is not on sale. The trial starts on the first launch of this version, so in 30 days every install (yours included) opens projects read-only.
+- Chosen: nothing bypasses the trial (you asked for no assumptions, and a hidden switch would be a user-settable bypass). Export and backup keep working.
+- To do before then: `npm run cloud:license-keygen`, `wrangler secret put LICENSE_SIGNING_KEY`, paste the public JWK into `src/shared/license.ts`, create the $30 product and `LEMONSQUEEZY_APP_LICENSE`, deploy; then buy (or grant yourself) the license. Alternatives: a developer exemption (say how you want it gated), or a longer trial for existing installs.
+
+## 2026-10-07 · F-15.13 (billing B3a) · What "read-only" refuses
+- Question: Which actions stop after the trial?
+- Chosen: main refuses every channel that changes what you wrote (scenes, notes, the tree, sheets, tags, drafts, snapshots, imports, find-and-replace, accepting AI proposals, the project dictionary, discarding crash recovery) and every AI request. Always allowed: opening, reading, search, export, compile, backups and restore, the account and the purchase, app settings, and the project's view preferences (layout, session, focus, editor and AI settings, goals, backgrounds, reference pins, chat history). The scene and notes editors stop being editable; other fields (sheets, scene details, renaming in the tree) still accept typing, and their save fails with the trial message.
+- Alternatives: also lock every other field in the UI (many components); block view preferences too.
+- To change it: `CHANNEL_ACCESS` in `src/main/ipc/channelAccess.ts`.
+
+## 2026-10-07 · F-15.13 (billing B3a) · The trial banner
+- Question: When does the trial show itself?
+- Chosen: one line under the header, only in the trial's last 7 days ("5 days left in your trial." + Buy MythScribe), and always after it ends ("Your 30-day trial has ended. Projects open read-only; export and backup still work." + Buy MythScribe). Buy opens Settings › Account. The Account tab always shows the days left. The trial is 30 calendar days and ends at local midnight.
+- Alternatives: show the countdown for the whole trial; a dismissable notice; no countdown.
+- To change it: `TRIAL_BANNER_DAYS` in `src/renderer/features/account/TrialBanner.tsx`.
+
+## 2026-10-07 · F-15.13 (billing B3a) · Themes and accents during the trial
+- Question: The Supporter extras "become part of the paid app". Do trial users get them?
+- Chosen: no change to the gate: Sepia, custom themes, and accent colours unlock with the license (now called the MythScribe license), not during the trial.
+- Alternatives: unlock them during the trial too (the gate would follow `AppAccess` instead of the license); make them free for everyone.
+- To change it: `themeNeedsLicense` callers (`handlers.ts`, `ThemePicker.tsx`, `viewStore.ts`, `App.tsx`) and `AccountService.setAccent`.
+
+## 2026-10-07 · F-15.13 (billing B3a) · A paid license offline for more than 14 days
+- Question: The F-15.9 token expires 14 days after the last refresh that reached the Worker (it was built for cosmetics). It now also keeps projects writable.
+- Chosen: unchanged: a licensed install that cannot reach MythScribe Cloud for more than 14 days turns read-only until it reconnects (Refresh on the Account tab). Export and backup still work.
+- Alternatives: a longer grace (e.g. 90 days) for the app license; trust an expired but genuine token for writing and use expiry only for refunds.
+- To change it: `LICENSE_GRACE_DAYS` in `src/shared/license.ts` (also the Worker's), or `verifyLicenseToken` in `src/main/account/licenseVerifier.ts`.
+
+## 2026-10-07 · F-15.13 (billing B3a) · How the trial clock is kept, and how a license is activated
+- Question: How tamper-resistant is the trial, and how does the app learn about a purchase?
+- Chosen: the clock is plain JSON in `app-state.json` (start and last-seen time); turning the system clock back does not give days back, but deleting the file starts a new trial ("enough for honest users"). The license is the account's F-15.9 token: buy while signed in, then press Refresh on the Account tab (it also refreshes on launch and daily); there is no license key to paste.
+- Alternatives: keep a second copy of the clock in the OS keychain; a pasteable license key for people without an account; refresh the license when the window regains focus after checkout.
+- To change it: `src/shared/appAccess.ts`, `src/main/account/appAccess.ts`.
+
+## 2026-10-07 · F-15.13 (billing B3a) · Account tab intro now overstates "no account needed"
+- Question: The Account tab still opens with "Optional. You never need an account to write." After the trial, writing needs the license, which belongs to an account.
+- Chosen: left as it is in B3a (the intro is the hosted-AI copy slice B3b rewrites); the license section below it explains the trial and the purchase.
+- Alternatives: "The account holds your MythScribe license and connects MythScribe Cloud."
+- To change it: `INTRO` in `src/renderer/features/account/AccountSettingsTab.tsx` (and its unit test and the smoke test's check).

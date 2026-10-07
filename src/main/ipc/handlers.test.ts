@@ -57,6 +57,8 @@ import {
 import type { ViewSettings } from '@shared/zoom'
 import { builtInTheme, CUSTOM_THEMES_MAX } from '@shared/themes'
 import { AccountService } from '../account/accountService'
+import { AppAccessService } from '../account/appAccess'
+import { TRIAL_ENDED_MESSAGE } from '@shared/appAccess'
 import type { CloudAuthClient } from '../account/cloudAuthClient'
 import { registerInflight, resetInflight } from '../ai/inflight'
 import { AiKeyStore } from '../ai/keyStore'
@@ -136,6 +138,9 @@ let complete: ReturnType<typeof vi.fn<(request: CompletionRequest) => Promise<Co
  * Tests set it per case.
  */
 let streamChunks: (StreamChunk | Error | ((request: CompletionRequest) => Promise<StreamChunk>))[]
+/** M1: the trial gate the handlers ask; a test ends the trial by moving `accessNow` past it. */
+let access: AppAccessService
+let accessNow: number
 
 /** Settles like the adapter once its `signal` aborts: rejects with CANCELLED (F-5.10). */
 const untilCancelled = (request: CompletionRequest): Promise<never> =>
@@ -333,6 +338,16 @@ beforeEach(() => {
     license: () => Promise.reject(new Error('no cloud in these tests')),
     usage: () => Promise.reject(new Error('no cloud in these tests'))
   }
+  accessNow = Date.now()
+  access = new AppAccessService({
+    // Its own file: the service reads its store at once, and several tests hand-write
+    // app-state.json after this setup and expect the handlers' store to read it lazily.
+    appState: new AppStateStore(path.join(tmp, 'userData', 'access-state.json')),
+    licensed: () => false,
+    onChange: () => {},
+    now: () => accessNow,
+    schedule: () => () => {}
+  })
   registerHandlers({
     manager,
     appState,
@@ -355,6 +370,7 @@ beforeEach(() => {
       onChange: () => {},
       onSupporterChange: () => {}
     }),
+    access,
     // F-15.7: a service with no updater, which is what a development build has; the service
     // itself is tested in `updates/updateService.test.ts`.
     updates: unsupportedUpdates(appState),
@@ -404,6 +420,58 @@ function manuscriptReadingOrder(rows: TreeNode[]): string[] {
       .flatMap((r) => (r.kind === 'document' ? [r.id] : walk(r.id)))
   return root ? walk(root.id) : []
 }
+
+describe('read-only after the trial (AI-BILLING-SPEC M1)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const endTrial = (): void => {
+    accessNow += 31 * 24 * 60 * 60_000
+    access.refresh()
+  }
+
+  it('answers the trial, then refuses writes and AI while reads still work', async () => {
+    expect((await invoke('app:getAccess', undefined)).state).toBe('trial')
+    await invoke('project:create', { name: 'Ro', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    const doc = {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Kept. '.repeat(20) }] }]
+    }
+    await invoke('document:save', { id: scene.id, content: doc })
+    await invoke('ai:setKey', { key: KEY })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+
+    endTrial()
+    expect(await invoke('app:getAccess', undefined)).toMatchObject({
+      state: 'expired',
+      daysLeft: 0
+    })
+    await expect(invoke('document:save', { id: scene.id, content: doc })).rejects.toThrow(
+      `VALIDATION: ${TRIAL_ENDED_MESSAGE}`
+    )
+    await expect(
+      invoke('tree:create', {
+        parentId: scene.parentId ?? '',
+        kind: 'document',
+        hierarchyLevel: 'scene',
+        title: 'New'
+      })
+    ).rejects.toThrow(/^VALIDATION: Your 30-day trial has ended/)
+    // Reading, searching, and preferences still answer.
+    expect((await invoke('document:get', { id: scene.id })).content).toEqual(doc)
+    expect((await invoke('tree:list', undefined)).length).toBe(rows.length)
+    await invoke('session:set', defaultProjectSession())
+    // AI is refused as data, before anything is sent.
+    expect(await invoke('ai:recommendTags', { nodeId: scene.id })).toEqual({
+      ok: false,
+      code: 'TRIAL_ENDED',
+      message: TRIAL_ENDED_MESSAGE,
+      nextStep: 'Buy MythScribe on the Account tab in Settings.'
+    })
+    expect(complete).not.toHaveBeenCalled()
+  })
+})
 
 describe('window state handlers (F-7.9)', () => {
   const stored = (): AppStateStore =>
@@ -5874,6 +5942,7 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
         () => neverProvider
       ),
       account,
+      access,
       updates: unsupportedUpdates(appState),
       diagnostics: localDiagnostics(appState),
       backups: localBackups(appState),

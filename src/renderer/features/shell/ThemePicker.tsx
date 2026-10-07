@@ -19,7 +19,7 @@ const CARD =
   'flex w-32 flex-col gap-1 rounded-md border border-line p-1.5 text-left hover:bg-surface focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent aria-checked:border-accent aria-checked:bg-surface-raised'
 
 /** Said on every locked card, so the reason is where the pointer already is. */
-const LOCKED = 'Supporter license needed'
+const LOCKED = 'MythScribe license needed'
 
 const THEME_NOTE =
   'Colours the whole window, the page included. Also under View › Switch theme, which steps ' +

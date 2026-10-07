@@ -6,6 +6,7 @@ import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
 import { TAG_RANGE_MARK } from '@shared/tagRanges'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
+import { useCanWrite } from '@renderer/features/account/appAccessStore'
 import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
 import type { MenuItem } from '@renderer/features/manuscript/contextMenuItems'
 import { useBackgroundStore, useCurrentBackground } from '@renderer/features/focus/backgroundStore'
@@ -278,11 +279,13 @@ function RegionEditor({
   // changes show (and accept inline) once it is free.
   const locked = useSceneLocked(id) !== null
   useTrackedChanges(editor, id, ready, locked)
+  // AI-BILLING-SPEC M1: after the trial without the license the whole project is read-only.
+  const writable = useCanWrite()
   useEffect(() => {
     // No update event: a lock is not an edit, so it must not mark the document dirty.
-    const editable = ready && !locked
+    const editable = ready && !locked && writable
     if (!editor.isDestroyed && editor.isEditable !== editable) editor.setEditable(editable, false)
-  }, [editor, ready, locked])
+  }, [editor, ready, locked, writable])
 
   useEffect(() => {
     if (!ready) return

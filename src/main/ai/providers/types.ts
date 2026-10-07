@@ -157,3 +157,10 @@ export class AiTooLargeError extends AiProviderError {
 export class AiModelUnavailableError extends AiProviderError {
   readonly code = 'MODEL_UNAVAILABLE' as const
 }
+/**
+ * The 30-day trial has ended without the app license (AI-BILLING-SPEC M1): the app is read-only
+ * and no AI request goes out. Nothing was sent; the next step is the purchase.
+ */
+export class AiTrialEndedError extends AiProviderError {
+  readonly code = 'TRIAL_ENDED' as const
+}

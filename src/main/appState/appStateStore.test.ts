@@ -63,8 +63,26 @@ describe('AppStateStore', () => {
       tagTemplates: [],
       localAi: defaultLocalAiSettings(),
       routing: defaultAiRouting(),
-      cloudPricing: null
+      cloudPricing: null,
+      trial: null
     })
+  })
+
+  it('reads the M1 trial clock leniently: none in older files, and a bad value starts afresh', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().trial).toBeNull()
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ version: 1, recents: [entry], trial: { startedAt: 'yesterday' } }),
+      'utf8'
+    )
+    const bad = new AppStateStore(file).get()
+    expect(bad.trial).toBeNull()
+    expect(bad.recents).toEqual([entry])
+    const store = new AppStateStore(file)
+    store.update((s) => ({ ...s, trial: { startedAt: 5, lastSeenAt: 9 } }))
+    expect(new AppStateStore(file).get().trial).toEqual({ startedAt: 5, lastSeenAt: 9 })
   })
 
   it("parses a file written before F-5.15 with Ollama's address and the local default models", () => {

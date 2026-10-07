@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { trialDaysText } from '@shared/appAccess'
 import { EMAIL_MAX } from '@shared/cloudApi'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { formatUsd } from '@renderer/features/ai/usageFormat'
 import { describeError } from '@renderer/lib/errors'
 import { useAccountStore } from './accountStore'
 import { BalanceSection } from './BalanceSection'
+import { useAppAccessStore } from './appAccessStore'
 
 const FIELD = 'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 const BUTTON =
@@ -20,11 +22,14 @@ const clockTime = (iso: string): string =>
 const day = (iso: string): string =>
   new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
-/** What the Supporter license (F-15.9) is, in one sentence, with no feature held hostage. */
-const SUPPORTER_INTRO =
-  'A one-time purchase that supports the project and unlocks the accent colours, the Sepia ' +
-  'theme, and custom themes (Settings › Appearance). Nothing else changes: every writing and AI ' +
-  'feature works without it.'
+/**
+ * What the MythScribe license is (AI-BILLING-SPEC M1, superseding the F-15.9 Supporter copy): the
+ * one-time purchase, the trial, what happens after it, and the extras it includes.
+ */
+const LICENSE_INTRO =
+  'MythScribe is a one-time purchase with a 30-day free trial. After the trial, projects open ' +
+  'read-only until you buy it; export and backup always work. The license also includes the ' +
+  'accent colours, the Sepia theme, and custom themes (Settings › Appearance).'
 
 /**
  * The Account tab of the Settings dialog (F-15.2). Three states, one at a time, from the store
@@ -102,8 +107,8 @@ export function AccountSettingsTab(): React.JSX.Element {
         </div>
       )}
 
-      {/* F-15.9: the license is cached locally, so it shows signed in or out; buying needs the account. */}
-      {status === null ? null : <SupporterSection signedIn={status.state === 'signedIn'} />}
+      {/* M1: the license is cached locally, so it shows signed in or out; buying needs the account. */}
+      {status === null ? null : <LicenseSection signedIn={status.state === 'signedIn'} />}
 
       {error === null ? null : (
         <p role="alert" className="m-0 text-xs text-danger">
@@ -115,27 +120,30 @@ export function AccountSettingsTab(): React.JSX.Element {
 }
 
 /**
- * The Supporter license (F-15.9): a one-time purchase, bought through the same Lemon Squeezy
- * checkout as the credit packs and granted to the account. Licensed shows the badge and, while
- * the Worker cannot be reached, how long the extras stay on from the cached token; unlicensed
- * explains what the purchase is and offers it. The extras themselves (the accent and the
- * themes) are on the Appearance tab since F-7.8, shown locked there without the license. App
- * loads the status at start (the cache is local and works signed out), so this section never
- * asks on mount; Refresh needs the account.
+ * The MythScribe license (AI-BILLING-SPEC M1; the F-15.9 Supporter license it supersedes): a
+ * one-time purchase, bought through the same Lemon Squeezy checkout as the packs and granted to
+ * the account. Licensed shows the badge and, while the Worker cannot be reached, how long the
+ * cached token stays good; unlicensed says where the trial stands, what the purchase is, and
+ * offers it. App loads the license and the trial at start (both are local), so this section never
+ * asks on mount; Refresh needs the account, and is how a purchase made in the browser lands.
  */
-function SupporterSection({ signedIn }: { signedIn: boolean }): React.JSX.Element {
+function LicenseSection({ signedIn }: { signedIn: boolean }): React.JSX.Element {
   const supporter = useAccountStore((s) => s.supporter)
   const busy = useAccountStore((s) => s.supporterBusy)
   const error = useAccountStore((s) => s.supporterError)
   const refreshSupporter = useAccountStore((s) => s.refreshSupporter)
   const buySupporter = useAccountStore((s) => s.buySupporter)
+  const access = useAppAccessStore((s) => s.access)
   const licensed = supporter?.licensed === true
   const product = supporter?.product ?? null
 
   return (
-    <section aria-label="Supporter" className="flex flex-col gap-2 border-t border-line pt-3">
+    <section
+      aria-label="MythScribe license"
+      className="flex flex-col gap-2 border-t border-line pt-3"
+    >
       <div className="flex items-center justify-between gap-3">
-        <h3 className="m-0 text-sm font-medium">Supporter</h3>
+        <h3 className="m-0 text-sm font-medium">MythScribe license</h3>
         <button
           type="button"
           // Its own name, so it is not the credits Refresh with a different job behind it.
@@ -156,19 +164,29 @@ function SupporterSection({ signedIn }: { signedIn: boolean }): React.JSX.Elemen
             className="self-start rounded-md border border-accent px-2 py-0.5 text-xs text-accent"
           >
             {/* `since` is the token's `iat`; a verified license always carries one. */}
-            {supporter.since === null ? 'Supporter' : `Supporter since ${day(supporter.since)}`}
+            {supporter.since === null ? 'Licensed' : `Licensed since ${day(supporter.since)}`}
           </span>
           {supporter.offline && supporter.validUntil !== null ? (
             <p className="m-0 text-xs text-fg-muted">
-              {`Extras stay on until ${day(supporter.validUntil)} while MythScribe Cloud cannot be reached.`}
+              {`Your license stays active until ${day(supporter.validUntil)} while MythScribe Cloud cannot be reached.`}
             </p>
           ) : null}
         </>
       ) : (
         <>
-          <p className="m-0 text-fg-muted">{SUPPORTER_INTRO}</p>
+          {access === null || access.state === 'licensed' ? null : (
+            <p
+              data-testid="account-trial-status"
+              className={`m-0 ${access.state === 'expired' ? 'text-warning' : ''}`}
+            >
+              {access.state === 'expired'
+                ? 'Your trial has ended. Projects open read-only; export and backup still work.'
+                : `${trialDaysText(access.daysLeft)} (it ends ${day(access.trialEndsAt)}).`}
+            </p>
+          )}
+          <p className="m-0 text-fg-muted">{LICENSE_INTRO}</p>
           {product === null ? (
-            <p className="m-0 text-xs text-fg-muted">The Supporter license is not on sale yet.</p>
+            <p className="m-0 text-xs text-fg-muted">The MythScribe license is not on sale yet.</p>
           ) : (
             <button
               type="button"
@@ -177,10 +195,14 @@ function SupporterSection({ signedIn }: { signedIn: boolean }): React.JSX.Elemen
               onClick={() => void buySupporter()}
               className={BUTTON}
             >
-              {`Become a Supporter — ${formatUsd(product.priceCents / 100)}`}
+              {`Buy MythScribe — ${formatUsd(product.priceCents / 100)}`}
             </button>
           )}
-          {signedIn ? null : (
+          {signedIn ? (
+            <p className="m-0 text-xs text-fg-muted">
+              After paying in the browser, press Refresh to activate the license here.
+            </p>
+          ) : (
             <p className="m-0 text-xs text-fg-muted">
               Sign in to buy it: the license belongs to your account, so it follows you to the next
               machine.

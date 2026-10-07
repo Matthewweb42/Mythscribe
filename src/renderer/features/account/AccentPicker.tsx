@@ -5,7 +5,7 @@ const SWATCH =
   'size-6 rounded-full border border-line-strong hover:border-fg aria-pressed:border-fg aria-pressed:ring-2 aria-pressed:ring-accent disabled:cursor-not-allowed disabled:opacity-40'
 
 /** Said once, on every locked swatch, so the reason is where the pointer already is. */
-const LOCKED = 'Supporter license needed'
+const LOCKED = 'MythScribe license needed'
 
 /**
  * The accent colour (F-15.9): the one cosmetic extra the Supporter license unlocks. Six swatches

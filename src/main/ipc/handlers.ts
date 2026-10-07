@@ -13,6 +13,7 @@ import {
   type OwnKeyProvider
 } from '@shared/ai'
 import type { AiModelChoice } from '@shared/aiRouting'
+import { TRIAL_ENDED_MESSAGE } from '@shared/appAccess'
 import { type AiSource, aiSwitchPatch, isFeatureAllowed } from '@shared/aiSettings'
 import { EXPORT_EXTENSIONS, EXPORT_FORMAT_LABELS } from '@shared/bookExport'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl, type PricingResult } from '@shared/cloudApi'
@@ -49,6 +50,7 @@ import type {
   AiRouteResult,
   AiSuggestNotesResult,
   AiSuggestSynopsisResult,
+  Channel,
   Entity,
   JobsIndexAllResult
 } from '@shared/ipc/contract'
@@ -70,6 +72,7 @@ import {
 } from '@shared/themes'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import type { AccountService } from '../account/accountService'
+import type { AppAccessService } from '../account/appAccess'
 import type { BackupService } from '../backups/backupService'
 import type { DiagnosticsService } from '../diagnostics/diagnosticsService'
 import type { UpdateService } from '../updates/updateService'
@@ -111,7 +114,12 @@ import type { ObservedFactsChange } from '../ai/observedFacts'
 import { IMPORT_STRUCTURE_PROMPT_VERSION } from '../ai/prompts/importStructure.v1'
 import { createProposal, listPendingProposals, settleProposal } from '../ai/proposalStore'
 import { clearVoiceNotes } from '../ai/voiceNotes'
-import { AiCancelledError, AiProviderError, NoKeyError } from '../ai/providers/types'
+import {
+  AiCancelledError,
+  AiProviderError,
+  AiTrialEndedError,
+  NoKeyError
+} from '../ai/providers/types'
 import { runQuery } from '../ai/query'
 import { runAgent } from '../ai/agent'
 import { runWhatNext } from '../ai/whatNext'
@@ -301,7 +309,8 @@ import {
   removeCustomTemplate,
   updateCustomTemplate
 } from '../tag/customTemplates'
-import { emit, register, type EmitTarget } from './registry'
+import { isWriteChannel } from './channelAccess'
+import { emit, register as registerChannel, type EmitTarget, type Handler } from './registry'
 
 /** The parts of a BrowserWindow the handlers need; structural so tests can pass a fake. */
 export interface ClosableWindow extends EmitTarget {
@@ -333,6 +342,11 @@ export interface HandlerDeps {
    * only ask it questions.
    */
   account: AccountService
+  /**
+   * AI-BILLING-SPEC M1: the trial and the license. Every `write` channel (`channelAccess.ts`)
+   * and every AI request asks it first; after the trial without the license both are refused.
+   */
+  access: AppAccessService
   /**
    * F-15.7: the update state. Like the account it owns its own timer and pushes
    * `updates:changed` through the `onChange` it was built with in `index.ts`; these handlers
@@ -382,6 +396,7 @@ export function registerHandlers({
   keyStore,
   ai,
   account,
+  access,
   updates,
   diagnostics,
   backups,
@@ -395,6 +410,20 @@ export function registerHandlers({
   onCloseCancelled
 }: HandlerDeps): void {
   /**
+   * AI-BILLING-SPEC M1: every channel is registered through the read-only gate. A `write` channel
+   * is refused after the trial without the license; reading, export, and backup never are.
+   */
+  const register = <C extends Channel>(channel: C, fn: Handler<C>): void => {
+    if (!isWriteChannel(channel)) {
+      registerChannel(channel, fn)
+      return
+    }
+    registerChannel(channel, (input) => {
+      access.assertWritable()
+      return fn(input)
+    })
+  }
+  /**
    * F-5.9: one session tally for this run of the app, shared by every request these handlers
    * make, so "this session, all projects" counts each one exactly once.
    */
@@ -405,10 +434,15 @@ export function registerHandlers({
    * the next one without rebuilding anything.
    */
   const sourceOf = (db: AiDb): AiSource => getAiSettings(db).source
+  /** The provider a project's requests go to, refused outright once the app is read-only. */
+  const providerFor = (db: AiDb): ReturnType<AiProviderRegistry['get']> => {
+    if (!access.writable()) throw new AiTrialEndedError(TRIAL_ENDED_MESSAGE)
+    return ai.get(sourceOf(db))
+  }
   const requestDeps = (db: AiDb): AiRequestDeps => {
     const deps = buildAiRequestDeps({
       db,
-      providers: { get: () => ai.get(sourceOf(db)) },
+      providers: { get: () => providerFor(db) },
       appState,
       session: sessionUsage
     })
@@ -561,7 +595,7 @@ export function registerHandlers({
         db,
         {
           request: () => requestDeps(db),
-          providerReady: () => Boolean(ai.get(sourceOf(db))),
+          providerReady: () => access.writable() && Boolean(ai.get(sourceOf(db))),
           now: () => new Date()
         },
         { requestId, memo: voiceMemo }
@@ -612,6 +646,9 @@ export function registerHandlers({
   }
 
   register('app:info', () => ({ version: app.getVersion(), platform: process.platform }))
+
+  // AI-BILLING-SPEC M1: the trial or the license; a change arrives as `app:accessChanged`.
+  register('app:getAccess', () => access.status())
 
   register('project:create', async ({ name, format, directory, aiSource, aiSwitch }) => {
     const folder = directory
@@ -753,6 +790,7 @@ export function registerHandlers({
       const db = manager.require().connection.orm
       // F-14.14: the voice job rides the same triggers; it checks its own gate and thresholds.
       queueVoice(db)
+      if (!access.writable()) return
       if (!isFeatureAllowed(getAiSettings(db), 'summary') || !ai.get(sourceOf(db))) return
       if (lift && queue.status().paused !== null) queue.resume()
       queue.indexAll('summary', staleSummaryNodeIds(db))
@@ -1727,7 +1765,12 @@ export function registerHandlers({
   // arrives as `account:supporterChanged`. The token itself never crosses IPC.
   register('account:getSupporter', () => account.supporter())
 
-  register('account:refreshSupporter', () => account.refreshLicense())
+  register('account:refreshSupporter', async () => {
+    const status = await account.refreshLicense()
+    // M1: a license just bought (or refunded) ends or starts the read-only state at once.
+    access.refresh()
+    return status
+  })
 
   // The same gate as `account:buyCredits`: the Worker builds the checkout and this opens it, and
   // nothing but a Lemon Squeezy checkout is ever handed to the browser.
