@@ -1,4 +1,5 @@
 import { compiledSceneMeta, type CompiledEntry, type CompiledManuscript } from '@shared/compile'
+import type { CompileNode, CompileSource } from '@shared/compileModel'
 import type { SectionType } from '@shared/labels'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import type { NodeRow } from '../db/schema'
@@ -23,27 +24,11 @@ export function compiledEntry(row: NodeRow, depth: number, tagsByNode: TagsByNod
   }
 }
 
-export interface CompileSectionOptions {
-  /**
-   * Keeps only these nodes, their descendants, and their ancestors (F-12.1 selected chapters:
-   * a chosen chapter keeps the part that holds it as a heading, and every scene below it).
-   */
-  only?: ReadonlySet<string>
-}
-
-/**
- * One section's descendants in reading order (F-3.12, F-12.1): one read of the tree (unless the
- * caller passes the rows it already has) and one of the tag links, then a preorder walk of the
- * section root's descendants in position order, so the entries read the way the book does (a
- * part, its chapters, their scenes). Content that does not parse is null rather than a throw,
- * like every other whole-manuscript read.
- */
-export function compileSection(
-  db: TreeDb,
+/** The node rows of one section in reading order, each with its depth below the section root. */
+function walkSection(
   section: SectionType,
-  options: CompileSectionOptions = {},
-  rows: readonly NodeRow[] = listNodes(db)
-): CompiledEntry[] {
+  rows: readonly NodeRow[]
+): { row: NodeRow; depth: number }[] {
   const root = rows.find((row) => row.parentId === null && row.sectionType === section)
   if (!root) return []
   // `listNodes` orders by parent, position, id, so each child list is already in reading order.
@@ -54,32 +39,49 @@ export function compileSection(
     if (siblings === undefined) children.set(row.parentId, [row])
     else siblings.push(row)
   }
-  const { only } = options
-  // The ancestors of every kept node, so the walk can tell a holder of a chosen node from a
-  // node with nothing chosen below it.
-  const holders = new Set<string>()
-  if (only !== undefined) {
-    const parentOf = new Map(rows.map((row) => [row.id, row.parentId]))
-    for (const id of only) {
-      let parent = parentOf.get(id) ?? null
-      while (parent !== null && !holders.has(parent)) {
-        holders.add(parent)
-        parent = parentOf.get(parent) ?? null
-      }
-    }
-  }
-  const tagsByNode = listAllLinkedTags(db)
-  const entries: CompiledEntry[] = []
-  const walk = (parentId: string, depth: number, inside: boolean): void => {
+  const out: { row: NodeRow; depth: number }[] = []
+  const walk = (parentId: string, depth: number): void => {
     for (const row of children.get(parentId) ?? []) {
-      const kept = only === undefined || inside || only.has(row.id)
-      if (!kept && !holders.has(row.id)) continue
-      entries.push(compiledEntry(row, depth, tagsByNode))
-      walk(row.id, depth + 1, kept)
+      out.push({ row, depth })
+      walk(row.id, depth + 1)
     }
   }
-  walk(root.id, 0, false)
-  return entries
+  walk(root.id, 0)
+  return out
+}
+
+/**
+ * One section's descendants in reading order (F-3.12, F-12.1): one read of the tree (unless the
+ * caller passes the rows it already has) and one of the tag links, then a preorder walk of the
+ * section root's descendants in position order, so the entries read the way the book does (a
+ * part, its chapters, their scenes). Content that does not parse is null rather than a throw,
+ * like every other whole-manuscript read. Choosing chapters and leaving documents out is the
+ * compile model's (`selectEntries` in `@shared/compileModel`).
+ */
+export function compileSection(
+  db: TreeDb,
+  section: SectionType,
+  rows: readonly NodeRow[] = listNodes(db)
+): CompiledEntry[] {
+  const tagsByNode = listAllLinkedTags(db)
+  return walkSection(section, rows).map(({ row, depth }) => compiledEntry(row, depth, tagsByNode))
+}
+
+/**
+ * The compile model's source (Compile v2): the front matter, manuscript, and end matter in
+ * reading order, each node with its synopsis and notes. One read of the tree and of the tag
+ * links; unreadable content or notes read as null, an unreadable synopsis as ''.
+ */
+export function compileSource(db: TreeDb): CompileSource {
+  const rows = listNodes(db)
+  const tagsByNode = listAllLinkedTags(db)
+  const nodes = (section: SectionType): CompileNode[] =>
+    walkSection(section, rows).map(({ row, depth }) => ({
+      ...compiledEntry(row, depth, tagsByNode),
+      synopsis: parseStoredSceneMeta(row.sceneMeta).synopsis,
+      notes: documentJson({ content: row.notes })
+    }))
+  return { front: nodes('front'), manuscript: nodes('manuscript'), end: nodes('end') }
 }
 
 /**

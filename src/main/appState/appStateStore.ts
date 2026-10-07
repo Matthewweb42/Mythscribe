@@ -11,6 +11,7 @@ import {
 import { AiRouting, CloudPricingCache, defaultAiRouting } from '@shared/aiRouting'
 import { AppTrial } from '@shared/appAccess'
 import { BackupSettings, defaultBackupSettings } from '@shared/backups'
+import { CompileFormatLibrary } from '@shared/compileFormat'
 import { RecentProjectEntry } from '@shared/ipc/contract'
 import { DiagnosticsSettings, defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { StoredLayout, defaultLayout } from '@shared/layout'
@@ -85,7 +86,12 @@ export const AppState = z.object({
    * has it (older files included). Read leniently: an unreadable value starts a fresh clock
    * rather than failing the whole file.
    */
-  trial: AppTrial.nullable().catch(null)
+  trial: AppTrial.nullable().catch(null),
+  /**
+   * Compile v2: the author's own compile formats ("My formats"), shared by every project; none in
+   * older files. Read leniently: a format that no longer parses is dropped, never the file.
+   */
+  compileFormats: CompileFormatLibrary
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -105,7 +111,8 @@ export const EMPTY_APP_STATE: AppState = {
   localAi: defaultLocalAiSettings(),
   routing: defaultAiRouting(),
   cloudPricing: null,
-  trial: null
+  trial: null,
+  compileFormats: []
 }
 
 export class AppStateStore {

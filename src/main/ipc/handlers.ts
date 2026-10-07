@@ -16,6 +16,8 @@ import type { AiModelChoice } from '@shared/aiRouting'
 import { TRIAL_ENDED_MESSAGE } from '@shared/appAccess'
 import { type AiSource, aiSwitchPatch, isFeatureAllowed } from '@shared/aiSettings'
 import { EXPORT_EXTENSIONS, EXPORT_FORMAT_LABELS } from '@shared/bookExport'
+import { BOOK_COVER_DIR } from '@shared/bookDetails'
+import { sortFormats } from '@shared/compileFormat'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl, type PricingResult } from '@shared/cloudApi'
 import { bundledPricing, hostedQuote } from '@shared/hostedPricing'
 import { aiRequestCounter } from '@shared/diagnostics'
@@ -136,7 +138,8 @@ import { createIndexQueue } from '../jobs/indexQueue'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
-import { compileManuscript } from '../document/compileStore'
+import { compileManuscript, compileSource } from '../document/compileStore'
+import { createFormat, deleteFormat, saveFormat } from '../export/formatLibrary'
 import { renderPdf } from '../export/pdf'
 import { exportBook } from '../export/run'
 import {
@@ -240,8 +243,12 @@ import {
   getTagAliases,
   getVoiceNotes,
   getWritingPresets,
+  getBookDetails,
+  getCompileState,
   setAiSettings,
   setAuthorRules,
+  setBookDetails,
+  setCompileState,
   setConversations,
   setEditorSettings,
   setFocusSettings,
@@ -1055,6 +1062,63 @@ export function registerHandlers({
     })
     diagnostics.count('export.run')
     return result
+  })
+
+  // Compile v2 (CV1): the model's source, the project's compile state and Book details, and the
+  // app-wide format library. The model itself is pure (`@shared/compileModel`).
+  register('compile:source', () => compileSource(manager.require().connection.orm))
+
+  register('compileState:get', () => getCompileState(manager.require().connection.orm))
+
+  register('compileState:set', (value) => setCompileState(manager.require().connection.orm, value))
+
+  register('bookDetails:get', () => getBookDetails(manager.require().connection.orm))
+
+  register('bookDetails:set', (value) => {
+    const db = manager.require().connection.orm
+    // The cover changes only through its own channels, which own the file.
+    return setBookDetails(db, { ...value, cover: getBookDetails(db).cover })
+  })
+
+  register('bookDetails:setCover', async () => {
+    const session = manager.require()
+    const source = await dialogs.chooseEntityImage()
+    if (source === null) return null
+    const db = session.connection.orm
+    const previous = getBookDetails(db)
+    const fileName = addImageAsset(session.folder, BOOK_COVER_DIR, source, 'cover')
+    const updated = setBookDetails(db, { ...previous, cover: fileName })
+    if (previous.cover !== null) removeImageAsset(session.folder, BOOK_COVER_DIR, previous.cover)
+    return updated
+  })
+
+  register('bookDetails:removeCover', () => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const previous = getBookDetails(db)
+    const updated = setBookDetails(db, { ...previous, cover: null })
+    if (previous.cover !== null) removeImageAsset(session.folder, BOOK_COVER_DIR, previous.cover)
+    return updated
+  })
+
+  register('compileFormat:list', () => sortFormats(appState.get().compileFormats))
+
+  register('compileFormat:create', ({ fromId, name }) => {
+    const next = createFormat(appState.get().compileFormats, fromId, name)
+    appState.update((s) => ({ ...s, compileFormats: next.library }))
+    return next.format
+  })
+
+  register('compileFormat:save', (value) => {
+    const next = saveFormat(appState.get().compileFormats, value)
+    appState.update((s) => ({ ...s, compileFormats: next.library }))
+    return next.format
+  })
+
+  register('compileFormat:delete', ({ id }) => {
+    const library = deleteFormat(appState.get().compileFormats, id)
+    appState.update((s) => ({ ...s, compileFormats: library }))
+    return null
   })
 
   register('goals:set', (patch) => {

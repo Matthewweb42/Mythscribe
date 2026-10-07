@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { CompiledEntry } from '@shared/compile'
+import { defaultExportFormatting, type ExportOptions } from '@shared/bookExport'
+import { defaultBookDetails } from '@shared/bookDetails'
+import { compileBook, type CompileNode } from '@shared/compileModel'
 import type { TiptapNodeT } from '@shared/tiptap'
-import { bodyBlocks, docBlocks, startsPage, type Run } from './model'
+import { legacyCompileFormat, legacyUnits, startsPage, type Run } from './model'
 
 const text = (value: string, marks: string[] = []): TiptapNodeT => ({
   type: 'text',
@@ -21,7 +23,7 @@ const run = (value: string, marks: Partial<Run> = {}): Run => ({
   ...marks
 })
 
-const entry = (over: Partial<CompiledEntry>): CompiledEntry => ({
+const node = (over: Partial<CompileNode>): CompileNode => ({
   id: 'x',
   kind: 'document',
   level: 'scene',
@@ -30,135 +32,84 @@ const entry = (over: Partial<CompiledEntry>): CompiledEntry => ({
   meta: null,
   tags: [],
   content: null,
+  synopsis: '',
+  notes: null,
   ...over
 })
 
-describe('docBlocks (F-12.1)', () => {
-  it('reads paragraphs with marks, ignoring the AI-origin mark and paragraph origin', () => {
-    const blocks = docBlocks(
-      doc({
-        type: 'paragraph',
-        attrs: { textAlign: 'center', origin: 'import' },
-        content: [
-          text('Plain '),
-          text('bold', ['bold', 'aiOrigin']),
-          text(' and '),
-          text('all', ['italic', 'underline', 'strike', 'code', 'mystery'])
-        ]
-      })
-    )
-    expect(blocks).toEqual([
-      {
-        kind: 'paragraph',
-        align: 'center',
-        runs: [
-          run('Plain '),
-          run('bold', { bold: true }),
-          run(' and '),
-          run('all', { italic: true, underline: true, strike: true, code: true })
-        ]
-      }
-    ])
-  })
-
-  it('never prints a tag range (F-4.8): the tagged text reads as the text around it', () => {
-    const blocks = docBlocks(
-      doc(
-        para(
-          text('Mara '),
-          { type: 'text', text: 'waited', marks: [{ type: 'tagRange', attrs: { tagId: 't-1' } }] },
-          {
-            type: 'text',
-            text: ' long',
-            marks: [{ type: 'italic' }, { type: 'tagRange', attrs: { tagId: 't-2' } }]
-          }
-        )
-      )
-    )
-    expect(blocks).toEqual([
-      {
-        kind: 'paragraph',
-        align: null,
-        runs: [run('Mara '), run('waited'), run(' long', { italic: true })]
-      }
-    ])
-  })
-
-  it('prints inline tags as their name, keeps hard breaks, and drops empty paragraphs', () => {
-    const blocks = docBlocks(
-      doc(
-        para(),
-        para(
-          text('Met '),
-          { type: 'inlineTag', attrs: { name: 'mara' } },
-          { type: 'hardBreak' },
-          text('again')
-        )
-      )
-    )
-    expect(blocks).toEqual([
-      {
-        kind: 'paragraph',
-        align: null,
-        runs: [run('Met '), run('mara'), { kind: 'hardBreak' }, run('again')]
-      }
-    ])
-  })
-
-  it('reads headings, quotes, scene breaks, and the content of unknown nodes', () => {
-    const blocks = docBlocks(
-      doc(
-        { type: 'heading', attrs: { level: 3, textAlign: 'bogus' }, content: [text('Late')] },
-        { type: 'heading', attrs: { level: 9 }, content: [text('Odd')] },
-        { type: 'blockquote', content: [para(text('Quoted'))] },
-        { type: 'sceneBreak' },
-        { type: 'mysteryBlock', content: [para(text('Inside'))] }
-      )
-    )
-    expect(blocks).toEqual([
-      { kind: 'heading', level: 3, align: null, runs: [run('Late')] },
-      { kind: 'heading', level: 1, align: null, runs: [run('Odd')] },
-      { kind: 'quote', blocks: [{ kind: 'paragraph', align: null, runs: [run('Quoted')] }] },
-      { kind: 'sceneBreak' },
-      { kind: 'paragraph', align: null, runs: [run('Inside')] }
-    ])
-  })
+const options = (over: Partial<ExportOptions> = {}): ExportOptions => ({
+  format: 'md',
+  scope: { kind: 'manuscript' },
+  includeFront: true,
+  includeEnd: true,
+  formatting: defaultExportFormatting('* * *'),
+  ...over
 })
 
-describe('bodyBlocks (F-12.1)', () => {
-  it('prints titles, breaks between scenes, and text, never scene headers', () => {
-    const blocks = bodyBlocks([
-      entry({ id: 'p', kind: 'folder', level: 'part', title: 'Part One' }),
-      entry({ id: 'c', kind: 'folder', level: 'chapter', depth: 1, title: 'Chapter One' }),
-      entry({
+function units(
+  manuscript: CompileNode[],
+  front: CompileNode[] = [],
+  end: CompileNode[] = [],
+  opts: ExportOptions = options()
+): ReturnType<typeof legacyUnits> {
+  const book = compileBook({
+    source: { front, manuscript, end },
+    format: legacyCompileFormat(opts),
+    output: opts.format,
+    details: defaultBookDetails(),
+    projectName: 'Book',
+    scope: opts.scope,
+    excluded: []
+  })
+  return legacyUnits(book, 'Book')
+}
+
+describe('legacyUnits over the compile model (F-12.1 on Compile v2)', () => {
+  it('prints titles, breaks between scenes, and text, never scene headers or marks beyond five', () => {
+    const result = units([
+      node({ id: 'p', kind: 'folder', level: 'part', title: 'Part One' }),
+      node({ id: 'c', kind: 'folder', level: 'chapter', depth: 1, title: 'Chapter One' }),
+      node({
         id: 's1',
         depth: 2,
-        content: doc(para(text('First.'))),
+        content: doc(
+          para(text('First '), text('bold', ['bold', 'aiOrigin']), text('.', ['tagRange']))
+        ),
         meta: { location: 'Harbor', pov: '', timeline: '' }
       }),
-      entry({ id: 's2', depth: 2, content: doc(para(text('Second.'))) })
+      node({ id: 's2', depth: 2, content: doc(para(text('Second.'))) })
     ])
-    expect(blocks).toEqual([
-      { kind: 'title', level: 'part', text: 'Part One', inPart: false },
-      { kind: 'title', level: 'chapter', text: 'Chapter One', inPart: true },
-      { kind: 'paragraph', align: null, runs: [run('First.')] },
-      { kind: 'sceneBreak' },
-      { kind: 'paragraph', align: null, runs: [run('Second.')] }
+    expect(result).toEqual([
+      {
+        kind: 'body',
+        title: 'Book',
+        blocks: [
+          { kind: 'title', level: 'part', text: 'Part One', inPart: false },
+          { kind: 'title', level: 'chapter', text: 'Chapter One', inPart: true },
+          {
+            kind: 'paragraph',
+            align: null,
+            runs: [run('First '), run('bold', { bold: true }), run('.')]
+          },
+          { kind: 'sceneBreak' },
+          { kind: 'paragraph', align: null, runs: [run('Second.')] }
+        ]
+      }
     ])
   })
 
   it('titles a scene at chapter level (a prologue) like a chapter; a part-less chapter is top-level', () => {
-    const blocks = bodyBlocks([
-      entry({ id: 'pro', title: 'Prologue', content: doc(para(text('Before.'))) }),
-      entry({ id: 'p', kind: 'folder', level: 'part', title: 'Part One' }),
-      entry({ id: 'c1', kind: 'folder', level: 'chapter', depth: 1, title: 'Chapter 1' }),
-      entry({ id: 's1', depth: 2, content: doc(para(text('One.'))) }),
-      entry({ id: 'i', depth: 1, title: 'Interlude', content: doc(para(text('Between.'))) }),
-      entry({ id: 'c2', kind: 'folder', level: 'chapter', title: 'Chapter 2' }),
-      entry({ id: 's2', depth: 1, content: doc(para(text('Two.'))) }),
-      entry({ id: 's3', depth: 1, content: doc(para(text('Three.'))) })
+    const [body] = units([
+      node({ id: 'pro', title: 'Prologue', content: doc(para(text('Before.'))) }),
+      node({ id: 'p', kind: 'folder', level: 'part', title: 'Part One' }),
+      node({ id: 'c1', kind: 'folder', level: 'chapter', depth: 1, title: 'Chapter 1' }),
+      node({ id: 's1', depth: 2, content: doc(para(text('One.'))) }),
+      node({ id: 'i', depth: 1, title: 'Interlude', content: doc(para(text('Between.'))) }),
+      node({ id: 'c2', kind: 'folder', level: 'chapter', title: 'Chapter 2' }),
+      node({ id: 's2', depth: 1, content: doc(para(text('Two.'))) }),
+      node({ id: 's3', depth: 1, content: doc(para(text('Three.'))) })
     ])
-    expect(blocks).toEqual([
+    expect(body?.blocks).toEqual([
       { kind: 'title', level: 'chapter', text: 'Prologue', inPart: false },
       { kind: 'paragraph', align: null, runs: [run('Before.')] },
       { kind: 'title', level: 'part', text: 'Part One', inPart: false },
@@ -171,6 +122,47 @@ describe('bodyBlocks (F-12.1)', () => {
       { kind: 'sceneBreak' },
       { kind: 'paragraph', align: null, runs: [run('Three.')] }
     ])
+  })
+
+  it('maps quotes, headings, and in-document breaks; matter units wrap the body', () => {
+    const result = units(
+      [
+        node({
+          id: 's',
+          content: doc(
+            { type: 'heading', attrs: { level: 2 }, content: [text('Late')] },
+            { type: 'blockquote', content: [para(text('Quoted'))] },
+            { type: 'sceneBreak' },
+            para(text('After'))
+          )
+        })
+      ],
+      [node({ id: 'f', level: null, title: 'Dedication', content: doc(para(text('For M.'))) })],
+      [node({ id: 'e', level: null, title: 'Afterword', content: doc(para(text('Thanks.'))) })],
+      options()
+    )
+    expect(result.map((u) => [u.kind, u.title])).toEqual([
+      ['matter', 'Dedication'],
+      ['body', 'Book'],
+      ['matter', 'Afterword']
+    ])
+    // An untitled chapter-level scene prints no title at all.
+    expect(result[1]?.blocks).toEqual([
+      { kind: 'heading', level: 2, align: null, runs: [run('Late')] },
+      { kind: 'quote', blocks: [{ kind: 'paragraph', align: null, runs: [run('Quoted')] }] },
+      { kind: 'sceneBreak' },
+      { kind: 'paragraph', align: null, runs: [run('After')] }
+    ])
+  })
+
+  it('leaves the body out when it prints no word, and matter out when not asked', () => {
+    const result = units(
+      [node({ id: 'c', kind: 'folder', level: 'chapter', title: 'Chapter 1' })],
+      [node({ id: 'f', level: null, title: 'Dedication', content: doc(para(text('For M.'))) })],
+      [],
+      options({ includeFront: false })
+    )
+    expect(result).toEqual([])
   })
 })
 

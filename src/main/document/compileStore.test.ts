@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { selectEntries } from '@shared/compileModel'
 import { emptySceneMeta } from '@shared/sceneMeta'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { node, type NodeRow } from '../db/schema'
@@ -11,8 +12,9 @@ import { createSeededProject } from '../project/testProject'
 import { addDocumentTag } from '../tag/documentTagStore'
 import { createTag } from '../tag/tagStore'
 import { createNode, deleteNode, listNodes, type TreeDb } from '../tree/treeStore'
-import { compileManuscript, compileSection } from './compileStore'
+import { compileManuscript, compileSection, compileSource } from './compileStore'
 import { saveDocument } from './documentStore'
+import { saveNotes } from './notesStore'
 import { setSceneMeta } from './sceneMetaStore'
 
 let tmp: string
@@ -134,14 +136,18 @@ describe('compileManuscript (F-3.12)', () => {
   })
 })
 
-describe('compileSection (F-12.1)', () => {
+describe('compileSection (F-12.1) with the compile model selection', () => {
   it('keeps a chosen chapter with the part above it and the scenes below it', () => {
     const [part2] = byTitle('Part 2', 'part')
     const chapter = listNodes(db).find(
       (r) => r.parentId === part2?.id && r.hierarchyLevel === 'chapter' && r.title === 'Chapter 2'
     )
     if (!part2 || !chapter) throw new Error('seed changed')
-    const entries = compileSection(db, 'manuscript', { only: new Set([chapter.id]) })
+    const entries = selectEntries(
+      compileSection(db, 'manuscript'),
+      new Set(),
+      new Set([chapter.id])
+    )
     expect(entries.map((e) => [e.depth, e.level, e.title])).toEqual([
       [0, 'part', 'Part 2'],
       [1, 'chapter', 'Chapter 2'],
@@ -158,11 +164,15 @@ describe('compileSection (F-12.1)', () => {
     const first = rows.find((r) => r.parentId === part1?.id && r.title === 'Chapter 1')
     const last = rows.find((r) => r.parentId === part2?.id && r.title === 'Chapter 3')
     if (!first || !last) throw new Error('seed changed')
-    const titles = compileSection(db, 'manuscript', { only: new Set([last.id, first.id]) }).map(
-      (e) => e.title
-    )
+    const titles = selectEntries(
+      compileSection(db, 'manuscript'),
+      new Set(),
+      new Set([last.id, first.id])
+    ).map((e) => e.title)
     expect(titles).toEqual(['Part 1', 'Chapter 1', 'Scene 1', 'Part 2', 'Chapter 3', 'Scene 1'])
-    expect(compileSection(db, 'manuscript', { only: new Set(['missing']) })).toEqual([])
+    expect(
+      selectEntries(compileSection(db, 'manuscript'), new Set(), new Set(['missing']))
+    ).toEqual([])
   })
 
   it('walks front matter the same way', () => {
@@ -177,5 +187,45 @@ describe('compileSection (F-12.1)', () => {
     expect(entries.map((e) => [e.depth, e.title, e.content])).toEqual([
       [0, 'Dedication', para('For M.')]
     ])
+  })
+})
+
+describe('compileSource (Compile v2)', () => {
+  it('walks all three sections with synopsis and notes, unreadable notes as null', () => {
+    const [part1] = byTitle('Part 1', 'part')
+    const chapter = listNodes(db).find(
+      (r) => r.parentId === part1?.id && r.hierarchyLevel === 'chapter' && r.title === 'Chapter 1'
+    )
+    const scene = listNodes(db).find(
+      (r) => r.parentId === chapter?.id && r.hierarchyLevel === 'scene'
+    )
+    if (!chapter || !scene) throw new Error('seed changed')
+    saveDocument(db, scene.id, para('Text.'))
+    setSceneMeta(db, scene.id, { ...emptySceneMeta(), synopsis: 'Mara arrives.' })
+    saveNotes(db, scene.id, para('Check the tide tables.'))
+    db.update(node).set({ notes: '{broken' }).where(eq(node.id, chapter.id)).run()
+    const afterword = createNode(db, 'novel', {
+      parentId: section('end').id,
+      kind: 'document',
+      hierarchyLevel: null,
+      title: 'Afterword'
+    })
+
+    const source = compileSource(db)
+    expect(source.front).toEqual([])
+    expect(source.end.map((n) => [n.id, n.depth, n.synopsis, n.notes])).toEqual([
+      [afterword.id, 0, '', null]
+    ])
+    expect(source.manuscript.find((n) => n.id === scene.id)).toMatchObject({
+      synopsis: 'Mara arrives.',
+      notes: para('Check the tide tables.'),
+      content: para('Text.'),
+      depth: 2
+    })
+    expect(source.manuscript.find((n) => n.id === chapter.id)?.notes).toBeNull()
+    // The manuscript part is the preview's walk.
+    expect(source.manuscript.map((n) => n.id)).toEqual(
+      compileManuscript(db).entries.map((e) => e.id)
+    )
   })
 })

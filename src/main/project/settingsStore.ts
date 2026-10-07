@@ -11,6 +11,17 @@ import {
   defaultAuthorRules,
   type AuthorRulesInput
 } from '@shared/authorRules'
+import {
+  BOOK_DETAILS_KEY,
+  BookDetails,
+  parseBookDetails,
+  type BookDetailsInput
+} from '@shared/bookDetails'
+import {
+  COMPILE_STATE_KEY,
+  CompileProjectState,
+  defaultCompileProjectState
+} from '@shared/compileFormat'
 import { CONVERSATIONS_KEY, Conversations, parseStoredConversations } from '@shared/chat'
 import { DICTIONARY_KEY, ProjectDictionary, defaultProjectDictionary } from '@shared/dictionary'
 import {
@@ -552,6 +563,67 @@ export function setVoiceNotes(db: TreeDb, value: VoiceNotes): VoiceNotes {
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: VOICE_NOTES_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the project's Book details (Compile v2) from the `settings` row under `BOOK_DETAILS_KEY`.
+ * A missing row, unparsable JSON, or a value outside the schema all answer with the defaults
+ * (every field empty, language `en`): the book then compiles under the project's name.
+ */
+export function getBookDetails(db: TreeDb): BookDetails {
+  const row = db.select().from(settings).where(eq(settings.key, BOOK_DETAILS_KEY)).get()
+  if (!row) return parseBookDetails(undefined)
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return parseBookDetails(undefined)
+  }
+  return parseBookDetails(json)
+}
+
+/**
+ * Replaces the project's Book details (upsert on the settings key) and returns what was stored.
+ * Takes the pre-parse shape, so a caller that omits a field stores its default.
+ */
+export function setBookDetails(db: TreeDb, value: BookDetailsInput): BookDetails {
+  const stored = BookDetails.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: BOOK_DETAILS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the project's compile state (Compile v2: last format and output, the quick pick, the
+ * "Include in compile" exclusions) from the `settings` row under `COMPILE_STATE_KEY`. A missing
+ * row, unparsable JSON, or a value outside the schema all answer with the defaults (Standard
+ * Manuscript, whole manuscript, everything included).
+ */
+export function getCompileState(db: TreeDb): CompileProjectState {
+  const row = db.select().from(settings).where(eq(settings.key, COMPILE_STATE_KEY)).get()
+  if (!row) return defaultCompileProjectState()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultCompileProjectState()
+  }
+  const parsed = CompileProjectState.safeParse(json)
+  return parsed.success ? parsed.data : defaultCompileProjectState()
+}
+
+/** Replaces the project's compile state (upsert on the settings key) and returns what was stored. */
+export function setCompileState(db: TreeDb, value: CompileProjectState): CompileProjectState {
+  const stored = CompileProjectState.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: COMPILE_STATE_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored
