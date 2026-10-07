@@ -3,11 +3,11 @@ import { X } from 'lucide-react'
 import { outputBudget } from '@shared/ai'
 import {
   DEVELOPMENTAL_CATEGORY_LABEL,
-  EDIT_PASS_LABEL,
   estimateEditPass,
   type EditChange,
   type EditPassDetail
 } from '@shared/editPass'
+import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import {
   FIX_BUTTON,
@@ -64,6 +64,8 @@ function ReportBody({ detail }: { detail: EditPassDetail }): React.JSX.Element {
   const { pass, changes, titles } = detail
   const busy = useEditPassStore((s) => s.busy)
   const words = useTreeStore((s) => s.wordCountRollup)
+  // AI-BILLING-SPEC C4: hosted users see dollars and words, not tokens.
+  const hosted = useAiSettingsStore((s) => s.settings?.source === 'cloud')
   const notes = pass.type === 'developmental'
   const pending = changes.filter((change) => change.status === 'pending')
   const groups = useMemo(() => {
@@ -119,7 +121,7 @@ function ReportBody({ detail }: { detail: EditPassDetail }): React.JSX.Element {
           </p>
         ) : null}
         <p className="m-0 text-sm" data-testid="edit-report-cost">
-          {`Cost: ${formatUsd(pass.costUsd)}${pass.model ? ` on ${pass.model}` : ''} · ${formatCount(pass.tokensIn)} tokens in · ${formatCount(pass.tokensOut)} out.`}
+          {`Cost: ${formatUsd(pass.costUsd)}${pass.model ? ` on ${pass.model}` : ''}${hosted ? '.' : ` · ${formatCount(pass.tokensIn)} tokens in · ${formatCount(pass.tokensOut)} out.`}`}
         </p>
         <p className="m-0 text-sm" data-testid="edit-report-counts">
           {`${passCounts(pass)}${pass.dropped > 0 ? ` · ${pass.dropped} discarded (not found once in the scene)` : ''}`}

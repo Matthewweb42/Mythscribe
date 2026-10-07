@@ -8,6 +8,7 @@ import {
   ledgerSummary,
   listUsage,
   recentUsage,
+  usageHistory,
   type AiDb,
   type UsageEntry
 } from './usageStore'
@@ -108,9 +109,28 @@ describe('usageStore (F-5.14)', () => {
         model: 'gpt-5.4-mini',
         promptTokens: 100,
         completionTokens: 20,
+        cachedTokens: null,
         costUsd: 0.001,
         cached: false
       }
     ])
+  })
+
+  it('pages the whole history newest first with the row count and the cache hits (E7)', () => {
+    expect(usageHistory(db, 0, 50)).toEqual({ rows: [], total: 0 })
+    for (let i = 0; i < 5; i++) {
+      insertUsage(
+        db,
+        entry({ at: `2026-10-07T10:0${i}:00.000Z`, cachedTokens: i === 4 ? 64 : null })
+      )
+    }
+    const first = usageHistory(db, 0, 2)
+    expect(first.total).toBe(5)
+    expect(first.rows.map((r) => r.at)).toEqual([
+      '2026-10-07T10:04:00.000Z',
+      '2026-10-07T10:03:00.000Z'
+    ])
+    expect(first.rows[0]?.cachedTokens).toBe(64)
+    expect(usageHistory(db, 4, 2).rows.map((r) => r.at)).toEqual(['2026-10-07T10:00:00.000Z'])
   })
 })

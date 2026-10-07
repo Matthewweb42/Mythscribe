@@ -12,6 +12,8 @@ import {
   FEATURE_BUDGETS,
   FEATURE_INPUT_BUDGETS,
   MODEL_PRICING,
+  OPENROUTER_DEFAULT_MODELS,
+  effectiveOwnKeyProvider,
   TAGS_MIN_CHARS,
   aiFailure,
   defaultAiModels,
@@ -27,6 +29,33 @@ import {
   defaultModelsFor,
   isLoopbackUrl
 } from './ai'
+
+describe('cached input and OpenRouter (AI-BILLING-SPEC A4, R6, A2)', () => {
+  it('prices cached prompt tokens at the cached rate, never above the input count', () => {
+    // 1M in of which 400k cached, 100k out on gpt-5.4: 600k × 2.5 + 400k × 0.25 + 100k × 15.
+    expect(priceFor('gpt-5.4', 1_000_000, 100_000, 400_000).costUsd).toBeCloseTo(1.5 + 0.1 + 1.5)
+    expect(priceFor('gpt-5.4', 1_000, 0, 5_000).costUsd).toBeCloseTo(1_000 * 0.25e-6)
+    expect(priceFor('gpt-5.4', 1_000, 0).costUsd).toBeCloseTo(
+      priceFor('gpt-5.4', 1_000, 0, 0).costUsd
+    )
+  })
+
+  it('prices the OpenRouter ids of the default models like the models themselves', () => {
+    for (const tier of ['fast', 'strong'] as const) {
+      expect(priceFor(OPENROUTER_DEFAULT_MODELS[tier], 1_000, 1_000)).toEqual(
+        priceFor(DEFAULT_MODELS[tier], 1_000, 1_000)
+      )
+    }
+    expect(defaultModelsFor('openrouter')).toEqual(OPENROUTER_DEFAULT_MODELS)
+  })
+
+  it('keeps an install with an OpenAI key on OpenAI until the author picks, else OpenRouter', () => {
+    expect(effectiveOwnKeyProvider(undefined, false)).toBe('openrouter')
+    expect(effectiveOwnKeyProvider(undefined, true)).toBe('openai')
+    expect(effectiveOwnKeyProvider('openrouter', true)).toBe('openrouter')
+    expect(effectiveOwnKeyProvider('openai', false)).toBe('openai')
+  })
+})
 
 describe('priceFor (F-5.14)', () => {
   it('prices a known model per million tokens in and out', () => {
@@ -154,8 +183,13 @@ describe('AiModels (F-15.4)', () => {
       openai: { ...DEFAULT_MODELS },
       cloud: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-mini' }
     }
-    // A map stored before F-5.15 gains the local map with its defaults.
-    expect(AiModels.parse(models)).toEqual({ ...models, local: LOCAL_DEFAULT_MODELS })
+    // A map stored before F-5.15 gains the local map with its defaults, and before 2026-10-07
+    // the OpenRouter map.
+    expect(AiModels.parse(models)).toEqual({
+      ...models,
+      local: LOCAL_DEFAULT_MODELS,
+      openrouter: OPENROUTER_DEFAULT_MODELS
+    })
     expect(AiModels.parse(defaultAiModels())).toEqual(defaultAiModels())
   })
 
@@ -163,7 +197,8 @@ describe('AiModels (F-15.4)', () => {
     expect(defaultAiModels()).toEqual({
       openai: DEFAULT_MODELS,
       cloud: DEFAULT_MODELS,
-      local: LOCAL_DEFAULT_MODELS
+      local: LOCAL_DEFAULT_MODELS,
+      openrouter: OPENROUTER_DEFAULT_MODELS
     })
   })
 })

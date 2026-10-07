@@ -14,6 +14,11 @@ export interface AiMessage {
 export interface CompletionUsage {
   inputTokens: number
   outputTokens: number
+  /**
+   * How many of `inputTokens` the provider served from its prompt cache (AI-BILLING-SPEC A4,
+   * R6); absent when the provider does not say. Priced at the cached-input rate.
+   */
+  cachedInputTokens?: number
 }
 
 export interface CompletionRequest {
@@ -74,7 +79,8 @@ export interface Provider {
   price?: (
     model: string,
     inputTokens: number,
-    outputTokens: number
+    outputTokens: number,
+    cachedInputTokens?: number
   ) => { costUsd: number; priced: boolean }
 }
 

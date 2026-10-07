@@ -16,6 +16,7 @@ import {
   InvalidKeyError,
   type CompletionRequest,
   type CompletionResult,
+  type CompletionUsage,
   type Provider,
   type StreamChunk
 } from './types'
@@ -39,6 +40,35 @@ export interface OpenAiProviderOptions {
   baseURL?: string
   id?: AiProviderId
   label?: string
+  /**
+   * 2026-10-07: OpenRouter (AI-BILLING-SPEC A2), OpenAI-compatible at `OPENROUTER_BASE_URL`.
+   * Its own model ids and error copy, its attribution headers, and a key check on `GET /key`
+   * (its `/models` answers without a key, so it would not test one).
+   */
+  openRouter?: boolean
+}
+
+/** OpenRouter's optional attribution headers: the app's site and name on its dashboard. */
+const OPENROUTER_HEADERS = { 'HTTP-Referer': 'https://mythscribe.app', 'X-Title': 'MythScribe' }
+
+/** The usage block every Chat Completions answer (and the final stream chunk) carries. */
+interface UsageBlock {
+  prompt_tokens: number
+  completion_tokens: number
+  prompt_tokens_details?: { cached_tokens?: number } | null
+}
+
+/**
+ * The SDK's usage in the provider-neutral shape; `cachedInputTokens` only when the provider
+ * reported prompt-cache hits (OpenAI and OpenRouter both use `prompt_tokens_details`).
+ */
+export function usageOf(usage: UsageBlock | undefined | null): CompletionUsage {
+  const cached = usage?.prompt_tokens_details?.cached_tokens
+  return {
+    inputTokens: usage?.prompt_tokens ?? 0,
+    outputTokens: usage?.completion_tokens ?? 0,
+    ...(typeof cached === 'number' && cached >= 0 ? { cachedInputTokens: cached } : {})
+  }
 }
 
 /**
@@ -52,11 +82,13 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
     apiKey: key,
     fetch: options.fetch,
     maxRetries: 0,
-    ...(options.baseURL === undefined ? {} : { baseURL: options.baseURL })
+    ...(options.baseURL === undefined ? {} : { baseURL: options.baseURL }),
+    ...(options.openRouter ? { defaultHeaders: OPENROUTER_HEADERS } : {})
   })
   const resolveModel = options.resolveModel ?? ((tier: Tier): string => DEFAULT_MODELS[tier])
   const label = options.label ?? 'OpenAI'
-  const mapError = (err: unknown): AiProviderError => mapOpenAiError(err, label)
+  const mapError = (err: unknown): AiProviderError =>
+    mapOpenAiError(err, label, options.openRouter ? OPENROUTER_NOT_FOUND : undefined)
   const compatible = options.baseURL !== undefined
 
   const params = (request: CompletionRequest): OpenAI.ChatCompletionCreateParamsNonStreaming => ({
@@ -81,10 +113,7 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
         return {
           text: completion.choices[0]?.message.content ?? '',
           model: completion.model,
-          usage: {
-            inputTokens: completion.usage?.prompt_tokens ?? 0,
-            outputTokens: completion.usage?.completion_tokens ?? 0
-          }
+          usage: usageOf(completion.usage)
         }
       } catch (err) {
         throw mapError(err)
@@ -103,10 +132,7 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
           const delta = chunk.choices[0]?.delta.content ?? ''
           const usage = chunk.usage
           if (usage) {
-            yield {
-              delta,
-              usage: { inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens }
-            }
+            yield { delta, usage: usageOf(usage) }
           } else if (delta) {
             yield { delta }
           }
@@ -121,6 +147,11 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
 
     async testConnection(): Promise<{ model: string }> {
       try {
+        if (options.openRouter) {
+          // OpenRouter's key check: authenticated, token-free, 401 for a bad key.
+          await client.get('/key')
+          return { model: resolveModel('fast') }
+        }
         // A plain authenticated GET: costs no tokens, still answers 401 / 429 like a completion.
         const model = await client.models.retrieve(resolveModel('fast'))
         return { model: model.id }
@@ -133,6 +164,9 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
 
 const CANCELLED_MESSAGE = 'The request was stopped.'
 
+const OPENROUTER_NOT_FOUND =
+  'OpenRouter does not have that model. Check the model names in Settings against openrouter.ai/models (ids look like vendor/model).'
+
 function assertNotCancelled(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw new AiCancelledError(CANCELLED_MESSAGE)
 }
@@ -142,7 +176,7 @@ function assertNotCancelled(signal: AbortSignal | undefined): void {
  * 401 text echoes (a masked form of) the key, and a 400 can echo the request, so neither is
  * passed through. The original error stays reachable as `cause` for the console.
  */
-export function mapOpenAiError(err: unknown, label = 'OpenAI'): AiProviderError {
+export function mapOpenAiError(err: unknown, label = 'OpenAI', notFound?: string): AiProviderError {
   if (err instanceof AiProviderError) return err
   if (err instanceof APIUserAbortError || (err instanceof Error && err.name === 'AbortError')) {
     return new AiCancelledError(CANCELLED_MESSAGE, err)
@@ -158,6 +192,11 @@ export function mapOpenAiError(err: unknown, label = 'OpenAI'): AiProviderError 
     return new AiRateLimitError(`${label} is rate-limiting this key.`, err)
   }
   if (err instanceof APIError) {
+    // OpenRouter answers 402 when the account's credits are used up.
+    if (err.status === 402) {
+      return new AiQuotaError(`This key's ${label} account has no credit left.`, err)
+    }
+    if (err.status === 404 && notFound !== undefined) return new AiFallbackError(notFound, err)
     if (err.status === 404 && label !== 'OpenAI') {
       return new AiFallbackError(
         `${label} does not have that model. Check the model names in Settings, or download it (for Ollama: ollama pull <model>).`,

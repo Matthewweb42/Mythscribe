@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { cloudApiUrl } from '@shared/account'
+import { effectiveOwnKeyProvider } from '@shared/ai'
 import { ASSET_SCHEME } from '@shared/focus'
 import { licensePublicKey } from '@shared/license'
 import { projectToReopen, restorableBounds } from '@shared/windowState'
@@ -21,6 +22,7 @@ import { UI_SCALE_FACTORS } from '@shared/zoom'
 import { themeBackground } from '@shared/themes'
 import { AccountService } from './account/accountService'
 import { createCloudAuthClient } from './account/cloudAuthClient'
+import { CloudPricingService } from './account/cloudPricing'
 import { AiKeyStore } from './ai/keyStore'
 import { buildCloudProvider } from './ai/providers/cloud'
 import { AiProviderRegistry } from './ai/registry'
@@ -114,8 +116,9 @@ if (process.env.MYTHSCRIBE_USER_DATA) app.setPath('userData', process.env.MYTHSC
 
 /**
  * F-5.1: without a keyring Linux has no safe storage at all; this opts into Electron's
- * obfuscating fallback so a key can still be saved. `ai:getStatus` reports it as `plain` and
- * the AI tab warns. The method exists only on Linux.
+ * obfuscating fallback so the Cloud session can still be saved. `ai:getStatus` reports it as
+ * `plain`, and since 2026-10-07 (AI-BILLING-SPEC S2) a provider key is refused there and the AI
+ * tab says how to install a keyring. The method exists only on Linux.
  */
 if (process.platform === 'linux') safeStorage.setUsePlainTextEncryption(true)
 
@@ -259,13 +262,24 @@ if (!primaryInstance) {
       return net.fetch(pathToFileURL(file).toString())
     })
     const appState = new AppStateStore(join(app.getPath('userData'), 'app-state.json'))
-    const keyStore = new AiKeyStore(join(app.getPath('userData'), 'ai-keys.json'), safeStorage)
+    // AI-BILLING-SPEC S2: provider keys only in the OS keychain; the e2e has none under xvfb.
+    const keyStore = new AiKeyStore(
+      join(app.getPath('userData'), 'ai-keys.json'),
+      safeStorage,
+      process.platform,
+      process.env.MYTHSCRIBE_E2E_PLAINTEXT_KEYS === '1'
+    )
     // F-15.2: the account is constructed here, not in the handlers, because it pushes
     // `account:changed` by itself when a sign-in link is opened or its attempt expires.
     const cloudBaseUrl = cloudApiUrl(process.env)
     const cloudClient = createCloudAuthClient({
       baseUrl: cloudBaseUrl,
       fetch: (input, init) => globalThis.fetch(input, init)
+    })
+    const cloudPricing = new CloudPricingService({
+      baseUrl: cloudBaseUrl,
+      fetch: (input, init) => globalThis.fetch(input, init),
+      appState
     })
     account = new AccountService({
       client: cloudClient,
@@ -275,13 +289,18 @@ if (!primaryInstance) {
       // constant (`MYTHSCRIBE_LICENSE_PUBLIC_KEY` overrides it for dev and the e2e).
       appState,
       licensePublicKey: licensePublicKey(process.env),
-      onChange: (status) => emit(BrowserWindow.getAllWindows(), 'account:changed', status),
+      onChange: (status) => {
+        emit(BrowserWindow.getAllWindows(), 'account:changed', status)
+        // AI-BILLING-SPEC P5: the hosted price and routing table follows a sign-in.
+        if (status.state === 'signedIn') void cloudPricing.refresh()
+      },
       onSupporterChange: (status) =>
         emit(BrowserWindow.getAllWindows(), 'account:supporterChanged', status)
     })
     // F-15.4: the Cloud adapter reads the session live through the account service, so it is
     // built once here and never rebuilt; a 401 from the proxy ends the session the same way a
     // refresh does. `credits` comes from the one auth client, so there is one piece of wire code.
+    if (account.status().state === 'signedIn') void cloudPricing.refresh()
     const signedInAccount = account
     const cloud = (): Provider =>
       buildCloudProvider({
@@ -291,6 +310,7 @@ if (!primaryInstance) {
         onSessionEnded: () => signedInAccount.sessionEnded(),
         resolveModel: (tier) => appState.get().models.cloud[tier],
         credits: (token) => cloudClient.credits(token),
+        pricing: () => cloudPricing.current(),
         // F-15.5: every answered request carries the balance it left behind, so the usage meter
         // and the low-credit notice follow a charge without asking `/credits` again.
         onBalance: (balanceMicros) =>
@@ -348,7 +368,9 @@ if (!primaryInstance) {
         () => appState.get().models,
         undefined,
         cloud,
-        () => appState.get().localAi
+        () => appState.get().localAi,
+        undefined,
+        () => effectiveOwnKeyProvider(appState.get().ownKeyProvider, keyStore.hasKey('openai'))
       ),
       account,
       updates,

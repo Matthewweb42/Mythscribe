@@ -29,6 +29,17 @@ export const NO_SAFE_STORAGE_MESSAGE =
   'On Linux, install and unlock a keyring (GNOME Keyring or KWallet), then try again.'
 
 /**
+ * AI-BILLING-SPEC S2 (decided 2026-10-07): an API key is kept only in the OS keychain. On Linux
+ * without a keyring Electron would fall back to obfuscated plain text, so the key is refused
+ * instead, with how to fix it.
+ */
+export const NO_KEYCHAIN_MESSAGE =
+  'MythScribe keeps API keys only in your system keychain, and none is running. ' +
+  'On Linux, install and unlock GNOME Keyring or KWallet (for example: sudo apt install ' +
+  'gnome-keyring), sign out and back in, then save the key again. Until then, use MythScribe ' +
+  'Cloud or a local model.'
+
+/**
  * The one owner of provider keys (F-5.1) and the Cloud session (F-15.2): `<userData>/ai-keys.json`, separate from
  * `app-state.json` so the layout file never carries even ciphertext. Read lazily and written
  * atomically like `AppStateStore`; an unreadable file or ciphertext warns (naming only the
@@ -40,7 +51,12 @@ export class AiKeyStore {
   constructor(
     private readonly file: string,
     private readonly safeStorage: SafeStorageLike,
-    private readonly platform: NodeJS.Platform = process.platform
+    private readonly platform: NodeJS.Platform = process.platform,
+    /**
+     * Test-only: lets the e2e (xvfb, no keyring) save a provider key in the plain-text fallback.
+     * Set from `MYTHSCRIBE_E2E_PLAINTEXT_KEYS=1` in `index.ts`; never on in a real install.
+     */
+    private readonly allowPlainText = false
   ) {}
 
   encryption(): AiKeyEncryption {
@@ -48,6 +64,12 @@ export class AiKeyStore {
     if (this.platform === 'linux' && this.safeStorage.getSelectedStorageBackend() === 'basic_text')
       return 'plain'
     return 'os'
+  }
+
+  /** Whether a provider key may be saved: only in the OS keychain (S2), or the e2e's fallback. */
+  canStoreProviderKey(): boolean {
+    const encryption = this.encryption()
+    return encryption === 'os' || (encryption === 'plain' && this.allowPlainText)
   }
 
   /** The decrypted key, or null when none is stored or the stored one cannot be decrypted. */
@@ -72,9 +94,16 @@ export class AiKeyStore {
     return key === null ? null : maskKey(key)
   }
 
-  /** Encrypts and stores the key; throws `AppError('IO')` before touching the file when it cannot be protected. */
+  /**
+   * Encrypts and stores the key; throws `AppError('IO')` before touching the file when it cannot
+   * be protected. A provider key also needs the OS keychain (S2): the plain-text fallback is
+   * refused. The Cloud session keeps the fallback until the session rework (billing slice B3).
+   */
   setKey(id: SecretId, key: string): void {
     if (this.encryption() === 'none') throw new AppError('IO', NO_SAFE_STORAGE_MESSAGE)
+    if (id !== 'cloudSession' && !this.canStoreProviderKey()) {
+      throw new AppError('IO', NO_KEYCHAIN_MESSAGE)
+    }
     const cipher = this.safeStorage.encryptString(key).toString('base64')
     const current = this.read()
     this.write({ ...current, keys: { ...current.keys, [id]: cipher } })

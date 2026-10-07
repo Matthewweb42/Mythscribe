@@ -2,11 +2,16 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defaultAiModels, type AiModels, type Tier } from '@shared/ai'
+import { defaultAiModels, type AiModels, type OwnKeyProvider, type Tier } from '@shared/ai'
 import { AiKeyStore } from './keyStore'
 import { fakeSafeStorage } from './keyStoreFixture'
 import type { Provider } from './providers/types'
-import { AiProviderRegistry, buildLocalProvider, type BuildProvider } from './registry'
+import {
+  AiProviderRegistry,
+  buildLocalProvider,
+  buildOwnKeyProvider,
+  type BuildProvider
+} from './registry'
 
 /** A provider whose `testConnection` answers with what `resolveModel` says for the fast tier. */
 function fakeProvider(key: string, resolveModel: (tier: Tier) => string): Provider {
@@ -42,6 +47,47 @@ afterEach(() => {
 })
 
 describe('AiProviderRegistry (F-5.1)', () => {
+  it('uses the key and models of the own-key provider in effect (OpenRouter or OpenAI)', async () => {
+    let owner: OwnKeyProvider = 'openrouter'
+    const routed = new AiProviderRegistry(
+      keyStore,
+      () => models,
+      build,
+      null,
+      null,
+      buildLocalProvider,
+      () => owner
+    )
+    keyStore.setKey('openai', 'sk-openai-key-1234abcd')
+    expect(routed.get()).toBeNull()
+    keyStore.setKey('openrouter', 'sk-or-v1-key-5678efgh')
+    const viaOpenRouter = routed.get()
+    expect(build).toHaveBeenLastCalledWith(
+      'sk-or-v1-key-5678efgh',
+      expect.any(Function),
+      'openrouter'
+    )
+    await expect(viaOpenRouter?.testConnection()).resolves.toEqual({
+      model: models.openrouter.fast
+    })
+    owner = 'openai'
+    const viaOpenAi = routed.get()
+    expect(viaOpenAi).not.toBe(viaOpenRouter)
+    expect(build).toHaveBeenLastCalledWith('sk-openai-key-1234abcd', expect.any(Function), 'openai')
+  })
+
+  it('points an OpenRouter key at OpenRouter under its own id', () => {
+    const provider = buildOwnKeyProvider(
+      'sk-or-v1-key-5678efgh',
+      () => 'openai/gpt-5.4',
+      'openrouter'
+    )
+    expect(provider.id).toBe('openrouter')
+    expect(buildOwnKeyProvider('sk-openai-key-1234abcd', () => 'gpt-5.4', 'openai').id).toBe(
+      'openai'
+    )
+  })
+
   it('has no provider without a key and builds nothing', () => {
     expect(registry.get()).toBeNull()
     expect(build).not.toHaveBeenCalled()
@@ -53,7 +99,7 @@ describe('AiProviderRegistry (F-5.1)', () => {
     expect(first).not.toBeNull()
     expect(registry.get()).toBe(first)
     expect(build).toHaveBeenCalledTimes(1)
-    expect(build).toHaveBeenCalledWith('sk-first-key-1234abcd', expect.any(Function))
+    expect(build).toHaveBeenCalledWith('sk-first-key-1234abcd', expect.any(Function), 'openai')
   })
 
   it('rebuilds after the key changes and drops the provider after a clear', () => {
@@ -62,7 +108,7 @@ describe('AiProviderRegistry (F-5.1)', () => {
     keyStore.setKey('openai', 'sk-second-key-9999wxyz')
     const second = registry.get()
     expect(second).not.toBe(first)
-    expect(build).toHaveBeenLastCalledWith('sk-second-key-9999wxyz', expect.any(Function))
+    expect(build).toHaveBeenLastCalledWith('sk-second-key-9999wxyz', expect.any(Function), 'openai')
     keyStore.clearKey('openai')
     expect(registry.get()).toBeNull()
     // Saving the same key again builds a fresh client; the old one was dropped with the key.

@@ -1,6 +1,6 @@
 import { APIUserAbortError } from 'openai'
 import { describe, expect, it, vi } from 'vitest'
-import { DEFAULT_MODELS, type Tier } from '@shared/ai'
+import { DEFAULT_MODELS, OPENROUTER_BASE_URL, type Tier } from '@shared/ai'
 import { buildOpenAiProvider, mapOpenAiError, type FetchLike } from './openai'
 import { AiProviderError, type CompletionRequest, type StreamChunk } from './types'
 
@@ -390,5 +390,101 @@ describe('an OpenAI-compatible local server (F-5.15)', () => {
     await expect(
       down.complete({ tier: 'fast', messages: [{ role: 'user', content: 'Hi' }], maxTokens: 10 })
     ).rejects.toMatchObject({ code: 'NETWORK', message: 'Could not reach the local model server.' })
+  })
+})
+
+describe('cached input tokens (AI-BILLING-SPEC A4, R6)', () => {
+  it('reads prompt_tokens_details.cached_tokens from a completion and leaves it out when absent', async () => {
+    const cachedAnswer = {
+      ...completion,
+      usage: { ...completion.usage, prompt_tokens_details: { cached_tokens: 5 } }
+    }
+    const cached = answering(() => json(200, cachedAnswer))
+    await expect(
+      buildOpenAiProvider(KEY, { fetch: cached.fetch }).complete(request)
+    ).resolves.toMatchObject({
+      usage: { inputTokens: 7, outputTokens: 2, cachedInputTokens: 5 }
+    })
+    const plain = await buildOpenAiProvider(KEY, {
+      fetch: answering(() => json(200, completion)).fetch
+    }).complete(request)
+    expect('cachedInputTokens' in plain.usage).toBe(false)
+  })
+
+  it('reads them from the final stream chunk too', async () => {
+    const { fetch } = answering(() =>
+      sse([
+        {
+          id: 's',
+          object: 'chat.completion.chunk',
+          created: 0,
+          model: 'm',
+          choices: [{ index: 0, delta: { content: 'hi' }, finish_reason: null }]
+        },
+        {
+          id: 's',
+          object: 'chat.completion.chunk',
+          created: 0,
+          model: 'm',
+          choices: [],
+          usage: {
+            prompt_tokens: 9,
+            completion_tokens: 1,
+            total_tokens: 10,
+            prompt_tokens_details: { cached_tokens: 8 }
+          }
+        }
+      ])
+    )
+    const chunks: StreamChunk[] = []
+    for await (const chunk of buildOpenAiProvider(KEY, { fetch }).stream(request))
+      chunks.push(chunk)
+    expect(chunks.at(-1)?.usage).toEqual({ inputTokens: 9, outputTokens: 1, cachedInputTokens: 8 })
+  })
+})
+
+describe('OpenRouter (AI-BILLING-SPEC A2)', () => {
+  const openRouter = (fetch: FetchLike) =>
+    buildOpenAiProvider(KEY, {
+      fetch,
+      baseURL: OPENROUTER_BASE_URL,
+      id: 'openrouter',
+      label: 'OpenRouter',
+      openRouter: true,
+      resolveModel: () => 'openai/gpt-5.4-mini'
+    })
+
+  it('posts to OpenRouter with its model id, max_tokens, and the attribution headers', async () => {
+    const { fetch, calls } = answering(() => json(200, completion))
+    const provider = openRouter(fetch)
+    expect(provider.id).toBe('openrouter')
+    await provider.complete(request)
+    expect(calls[0]?.url).toBe(`${OPENROUTER_BASE_URL}/chat/completions`)
+    expect(bodyOf(calls[0])).toMatchObject({ model: 'openai/gpt-5.4-mini', max_tokens: 20 })
+    const headers = new Headers(calls[0]?.init?.headers)
+    expect(headers.get('authorization')).toBe(`Bearer ${KEY}`)
+    expect(headers.get('x-title')).toBe('MythScribe')
+  })
+
+  it('tests the key on GET /key and answers with the fast model', async () => {
+    const { fetch, calls } = answering(() => json(200, { data: { label: 'k' } }))
+    await expect(openRouter(fetch).testConnection()).resolves.toEqual({
+      model: 'openai/gpt-5.4-mini'
+    })
+    expect(calls[0]?.url).toBe(`${OPENROUTER_BASE_URL}/key`)
+    const rejected = openRouter(answering(() => apiError(401, null)).fetch)
+    await expect(rejected.testConnection()).rejects.toMatchObject({
+      code: 'INVALID_KEY',
+      message: 'OpenRouter rejected the API key.'
+    })
+  })
+
+  it('reads 402 as no credit and 404 as an unknown OpenRouter model', async () => {
+    await expect(
+      openRouter(answering(() => apiError(402, null)).fetch).complete(request)
+    ).rejects.toMatchObject({ code: 'QUOTA' })
+    await expect(
+      openRouter(answering(() => apiError(404, null)).fetch).complete(request)
+    ).rejects.toThrowError(/OpenRouter does not have that model.*openrouter\.ai\/models/)
   })
 })

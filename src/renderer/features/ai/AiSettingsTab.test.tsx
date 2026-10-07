@@ -4,12 +4,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_MODELS,
   LOCAL_DEFAULT_MODELS,
+  OPENROUTER_DEFAULT_MODELS,
   type AiErrorCode,
   type AiModelMap,
   type AiStatus,
   type AiTestConnectionResult,
-  type AiUsageSummary
+  type AiUsageRecent,
+  type AiUsageSummary,
+  type OwnKeyProvider,
+  USAGE_HISTORY_PAGE
 } from '@shared/ai'
+import { defaultAiRouting, type AiModelChoice, type AiRouting } from '@shared/aiRouting'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { defaultAuthorRules } from '@shared/authorRules'
 import type { Channel, Input, Output, ProvenanceReport, VoiceProfile } from '@shared/ipc/contract'
@@ -30,7 +35,12 @@ const NO_KEY: AiStatus = {
   hasKey: false,
   hint: null,
   encryption: 'os',
-  models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS, local: LOCAL_DEFAULT_MODELS },
+  models: {
+    openai: DEFAULT_MODELS,
+    cloud: DEFAULT_MODELS,
+    local: LOCAL_DEFAULT_MODELS,
+    openrouter: OPENROUTER_DEFAULT_MODELS
+  },
   local: { baseUrl: 'http://localhost:11434/v1' }
 }
 const WITH_KEY: AiStatus = { ...NO_KEY, hasKey: true, hint: 'sk-…abcd' }
@@ -87,6 +97,10 @@ interface Fake {
   setModelsAnswer: (provider: 'openai' | 'cloud' | 'local', models: AiModelMap) => AiStatus
   /** What `ai:setDailyCap` answers; by default the usage with the sent cap. */
   setDailyCapAnswer: (dailyCapUsd: number) => AiUsageSummary
+  /** Model choice (AI-BILLING-SPEC M8, R4); `ai:setRouting` replaces its overrides. */
+  choice: AiModelChoice
+  /** Every ledger row `ai:usageHistory` pages through. */
+  historyRows: AiUsageRecent[]
 }
 
 /** Answers with the fake's current `status`; `ai:setKey` flips it to `WITH_KEY` unless told otherwise. */
@@ -103,6 +117,8 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
       models: { ...fake.status.models, [provider]: models }
     }),
     setDailyCapAnswer: (dailyCapUsd) => ({ ...fake.usage, dailyCapUsd }),
+    choice: { routing: defaultAiRouting(), cloudPricing: null },
+    historyRows: [],
     client: {
       async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
         calls.push({ channel, input })
@@ -129,6 +145,26 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
             return fake.status as Output<C>
           case 'ai:testConnection':
             return fake.testAnswer() as Output<C>
+          case 'ai:setOwnKeyProvider':
+            fake.status = {
+              ...fake.status,
+              provider: (input as { provider: OwnKeyProvider }).provider,
+              hasKey: false,
+              hint: null
+            }
+            return fake.status as Output<C>
+          case 'ai:getModelChoice':
+            return fake.choice as Output<C>
+          case 'ai:setRouting':
+            fake.choice = { ...fake.choice, routing: input as AiRouting }
+            return fake.choice as Output<C>
+          case 'ai:usageHistory': {
+            const { offset, limit } = input as { offset: number; limit: number }
+            return {
+              rows: fake.historyRows.slice(offset, offset + limit),
+              total: fake.historyRows.length
+            } as Output<C>
+          }
           case 'ai:usageSummary':
             return fake.usage as Output<C>
           case 'ai:setDailyCap':
@@ -184,6 +220,8 @@ const hint = (): HTMLElement => screen.getByTestId('ai-key-hint')
 const modelField = (label: string): HTMLElement =>
   screen.getByLabelText(label, { selector: 'input' })
 const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.message)
+const lastCall = (channel: Channel): Fake['calls'][number] | undefined =>
+  fake.calls.filter((c) => c.channel === channel).at(-1)
 
 const capField = (): HTMLElement => screen.getByLabelText('Daily cap (USD)', { selector: 'input' })
 
@@ -227,6 +265,7 @@ describe('AiSettingsTab (F-5.1)', () => {
       { channel: 'voice:notes', input: undefined },
       { channel: 'ai:getStatus', input: undefined },
       { channel: 'ai:usageSummary', input: undefined },
+      { channel: 'ai:getModelChoice', input: undefined },
       // Last because its store flushes pending saves before asking (F-14.6).
       { channel: 'provenance:report', input: undefined }
     ])
@@ -237,7 +276,7 @@ describe('AiSettingsTab (F-5.1)', () => {
     expect(button('Save')).toBeDisabled()
     expect(button('Clear')).toBeDisabled()
     expect(button('Test connection')).toBeDisabled()
-    expect(screen.getByText(/stored only on this machine/)).toBeInTheDocument()
+    expect(screen.getByText(/kept in your system keychain on this machine/)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByTestId('provenance-section')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Export disclosure report' })).toBeEnabled()
@@ -249,7 +288,10 @@ describe('AiSettingsTab (F-5.1)', () => {
     expect(button('Save')).toBeEnabled()
     await userEvent.click(button('Save'))
     await waitFor(() => expect(hint()).toHaveTextContent('Key saved: sk-…abcd'))
-    expect(fake.calls[7]).toEqual({ channel: 'ai:setKey', input: { key: 'sk-test-1234abcd' } })
+    expect(lastCall('ai:setKey')).toEqual({
+      channel: 'ai:setKey',
+      input: { key: 'sk-test-1234abcd' }
+    })
     expect(keyField()).toHaveValue('')
     expect(button('Clear')).toBeEnabled()
     expect(button('Test connection')).toBeEnabled()
@@ -259,7 +301,10 @@ describe('AiSettingsTab (F-5.1)', () => {
     await open()
     await userEvent.type(keyField(), '  sk-test-1234abcd  {Enter}')
     await waitFor(() => expect(hint()).toHaveTextContent('Key saved: sk-…abcd'))
-    expect(fake.calls[7]).toEqual({ channel: 'ai:setKey', input: { key: 'sk-test-1234abcd' } })
+    expect(lastCall('ai:setKey')).toEqual({
+      channel: 'ai:setKey',
+      input: { key: 'sk-test-1234abcd' }
+    })
   })
 
   it('clears the key and goes back to no key', async () => {
@@ -267,7 +312,7 @@ describe('AiSettingsTab (F-5.1)', () => {
     expect(hint()).toHaveTextContent('Key saved: sk-…abcd')
     await userEvent.click(button('Clear'))
     await waitFor(() => expect(hint()).toHaveTextContent('No key'))
-    expect(fake.calls[7]).toEqual({ channel: 'ai:clearKey', input: undefined })
+    expect(lastCall('ai:clearKey')).toEqual({ channel: 'ai:clearKey', input: undefined })
     expect(button('Test connection')).toBeDisabled()
   })
 
@@ -289,7 +334,7 @@ describe('AiSettingsTab (F-5.1)', () => {
     [
       'QUOTA',
       "This key's OpenAI account has no credit left.",
-      'Add credit to your OpenAI account.'
+      'Add credit to your provider account (OpenRouter or OpenAI).'
     ],
     ['NETWORK', 'Could not reach OpenAI.', 'Check your internet connection and retry.'],
     ['PROVIDER', 'OpenAI reported a problem (HTTP 500).', 'Try again in a moment.']
@@ -311,21 +356,42 @@ describe('AiSettingsTab (F-5.1)', () => {
     await waitFor(() => expect(screen.queryByTestId('ai-test-result')).not.toBeInTheDocument())
   })
 
-  it('warns about obfuscated storage on a keyring-less Linux box but still lets the author save', async () => {
-    await open({ ...NO_KEY, encryption: 'plain' })
-    expect(screen.getByRole('alert')).toHaveTextContent(/stored obfuscated, not encrypted/)
-    expect(keyField()).toBeEnabled()
-    await userEvent.type(keyField(), 'sk-test-1234abcd{Enter}')
-    await waitFor(() => expect(hint()).toHaveTextContent('Key saved: sk-…abcd'))
-    expect(screen.getByRole('alert')).toBeInTheDocument()
+  it('refuses a new key without the OS keychain (S2) but lets an old one be cleared', async () => {
+    await open({ ...WITH_KEY, encryption: 'plain' })
+    expect(screen.getByTestId('ai-no-keychain')).toHaveTextContent(
+      /only in your system keychain.*GNOME Keyring or KWallet/
+    )
+    expect(keyField()).toBeDisabled()
+    expect(button('Save')).toBeDisabled()
+    await userEvent.click(button('Clear'))
+    await waitFor(() => expect(hint()).toHaveTextContent('No key'))
   })
 
-  it('replaces the key field with the keychain warning when nothing can protect the key', async () => {
+  it('closes the key field with the keychain warning when nothing can protect the key', async () => {
     await open({ ...NO_KEY, encryption: 'none' })
-    expect(screen.getByRole('alert')).toHaveTextContent(/no safe storage available/)
-    expect(screen.queryByLabelText('API key', { selector: 'input' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('ai-no-keychain')).toHaveTextContent(/only in your system keychain/)
+    expect(keyField()).toBeDisabled()
+    expect(button('Save')).toBeDisabled()
     expect(button('Test connection')).toBeDisabled()
+  })
+
+  it('switches the key provider between OpenRouter and OpenAI, naming it on the key field', async () => {
+    await open({ ...NO_KEY, provider: 'openrouter' })
+    const picker = screen.getByRole('radiogroup', { name: 'Key provider' })
+    expect(within(picker).getByTestId('own-key-provider-openrouter')).toHaveAttribute(
+      'aria-checked',
+      'true'
+    )
+    expect(screen.getByRole('form', { name: 'OpenRouter API key' })).toBeInTheDocument()
+    expect(keyField()).toHaveAttribute('placeholder', 'Paste your OpenRouter API key')
+    expect(modelField('Fast tier')).toHaveValue(OPENROUTER_DEFAULT_MODELS.fast)
+    await userEvent.click(within(picker).getByTestId('own-key-provider-openai'))
+    await waitFor(() =>
+      expect(screen.getByRole('form', { name: 'OpenAI API key' })).toBeInTheDocument()
+    )
+    expect(lastCall('ai:setOwnKeyProvider')?.input).toEqual({ provider: 'openai' })
+    expect(modelField('Fast tier')).toHaveValue(DEFAULT_MODELS.fast)
+    expect(screen.getByText(/sent only to OpenAI when you use/)).toBeInTheDocument()
   })
 
   it('toasts an unexpected save failure and keeps the typed key', async () => {
@@ -401,7 +467,8 @@ describe('AiSettingsTab models (F-5.11)', () => {
       models: {
         openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4-pro' },
         cloud: DEFAULT_MODELS,
-        local: LOCAL_DEFAULT_MODELS
+        local: LOCAL_DEFAULT_MODELS,
+        openrouter: OPENROUTER_DEFAULT_MODELS
       }
     })
     expect(modelField('Fast tier')).toHaveValue('gpt-5.4-nano')
@@ -630,7 +697,7 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
     expect(screen.getByTestId('ai-cloud-account')).toHaveTextContent(
       'Signed in as author@example.com. Manage credits on the Account tab.'
     )
-    expect(screen.getByText(/relays it to OpenAI and stores none of it/)).toBeInTheDocument()
+    expect(screen.getByText(/relays it to the model and stores none of it/)).toBeInTheDocument()
     // The data-sharing table says where the text goes now.
     expect(screen.getAllByText('MythScribe Cloud').length).toBeGreaterThan(1)
   })
@@ -657,7 +724,8 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
         models: {
           openai: DEFAULT_MODELS,
           cloud: { fast: 'gpt-5.4-mini', strong: 'my-finetune' },
-          local: LOCAL_DEFAULT_MODELS
+          local: LOCAL_DEFAULT_MODELS,
+          openrouter: OPENROUTER_DEFAULT_MODELS
         }
       },
       NO_USAGE,
@@ -665,10 +733,11 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
     )
     expect(screen.queryByTestId('ai-model-rate-fast')).not.toBeInTheDocument()
     await userEvent.click(sourceRadio('cloud'))
-    // 0.75 and 4.50 per 1M at the provider, doubled by CLOUD_RATE_MULTIPLIER.
+    // AI-BILLING-SPEC C4: a price line without tokens; the bundled table stands in for the server's.
     expect(await screen.findByTestId('ai-model-rate-fast')).toHaveTextContent(
-      'MythScribe Cloud rate: $1.50 input, $9.00 output per 1M tokens.'
+      'Paid from your MythScribe Cloud balance at the published price.'
     )
+    expect(screen.getByTestId('ai-model-rate-fast')).not.toHaveTextContent(/token/i)
     // A model outside the rate table cannot be billed, so the proxy refuses it; the line says so.
     expect(screen.getByTestId('ai-model-rate-strong')).toHaveTextContent(
       'MythScribe Cloud has no rate for this model'
@@ -684,7 +753,8 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
         models: {
           openai: { fast: 'gpt-5.4-nano', strong: 'gpt-5.4' },
           cloud: DEFAULT_MODELS,
-          local: LOCAL_DEFAULT_MODELS
+          local: LOCAL_DEFAULT_MODELS,
+          openrouter: OPENROUTER_DEFAULT_MODELS
         }
       },
       NO_USAGE,
@@ -710,5 +780,94 @@ describe('AiSettingsTab AI source (F-15.4)', () => {
       fast: 'gpt-5.4-nano',
       strong: 'gpt-5.4'
     })
+  })
+})
+
+describe('AiSettingsTab model choice (AI-BILLING-SPEC M8, R4)', () => {
+  it('puts every task on one model, or one task on its own, through ai:setRouting', async () => {
+    await open()
+    const all = screen.getByRole('combobox', { name: 'All tasks' })
+    expect(all).toHaveValue('auto')
+    await userEvent.selectOptions(all, 'strong')
+    await waitFor(() =>
+      expect(lastCall('ai:setRouting')?.input).toEqual({ all: 'strong', features: {} })
+    )
+    const summaries = screen.getByRole('combobox', {
+      name: 'Model for Scene summaries, story bible, and tags'
+    })
+    // Auto follows the one-model choice once it is set.
+    expect(
+      within(summaries).getByRole('option', { name: 'Auto (strong model)' })
+    ).toBeInTheDocument()
+    await userEvent.selectOptions(summaries, 'fast')
+    await waitFor(() =>
+      expect(lastCall('ai:setRouting')?.input).toEqual({
+        all: 'strong',
+        features: { summary: 'fast' }
+      })
+    )
+    await userEvent.selectOptions(summaries, 'auto')
+    await waitFor(() =>
+      expect(lastCall('ai:setRouting')?.input).toEqual({ all: 'strong', features: {} })
+    )
+  })
+
+  it('labels Auto per task from the routing table, and edit passes as depending on the request', async () => {
+    await open()
+    const tags = screen.getByRole('combobox', { name: 'Model for Tag suggestions' })
+    expect(within(tags).getByRole('option', { name: 'Auto (fast model)' })).toBeInTheDocument()
+    const passes = screen.getByRole('combobox', { name: 'Model for Edit passes' })
+    expect(
+      within(passes).getByRole('option', { name: 'Auto (depends on the request)' })
+    ).toBeInTheDocument()
+  })
+})
+
+describe('AiSettingsTab usage history (AI-BILLING-SPEC E7, C4)', () => {
+  const row = (i: number): AiUsageRecent => ({
+    id: `r${i}`,
+    at: new Date(2026, 9, 7, 9, i % 60).toISOString(),
+    feature: 'summary',
+    model: 'openai/gpt-5.4-mini',
+    promptTokens: 1_000 + i,
+    completionTokens: 100,
+    cachedTokens: i === 0 ? 800 : null,
+    costUsd: 0.001,
+    cached: false
+  })
+
+  it('opens the history on demand and pages through it, newest first', async () => {
+    await open()
+    fake.historyRows = Array.from({ length: USAGE_HISTORY_PAGE + 3 }, (_, i) => row(i))
+    expect(screen.queryByTestId('ai-usage-history')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('ai-usage-history-toggle'))
+    const table = await screen.findByTestId('ai-usage-history')
+    expect(within(table).getAllByRole('row')).toHaveLength(USAGE_HISTORY_PAGE + 1)
+    expect(within(table).getByText('1,000 / 100 (800 cached)')).toBeInTheDocument()
+    expect(screen.getByTestId('ai-usage-history-range')).toHaveTextContent(
+      `1\u2013${USAGE_HISTORY_PAGE} of ${USAGE_HISTORY_PAGE + 3}`
+    )
+    expect(button('Newer')).toBeDisabled()
+    await userEvent.click(button('Older'))
+    await waitFor(() =>
+      expect(screen.getByTestId('ai-usage-history-range')).toHaveTextContent(
+        `${USAGE_HISTORY_PAGE + 1}\u2013${USAGE_HISTORY_PAGE + 3} of ${USAGE_HISTORY_PAGE + 3}`
+      )
+    )
+    expect(button('Older')).toBeDisabled()
+    expect(lastCall('ai:usageHistory')?.input).toEqual({
+      offset: USAGE_HISTORY_PAGE,
+      limit: USAGE_HISTORY_PAGE
+    })
+  })
+
+  it('keeps tokens out of the usage block on MythScribe Cloud', async () => {
+    await open(WITH_KEY, SOME_USAGE, { cloudAvailable: true })
+    expect(screen.getByTestId('ai-usage-total')).toHaveTextContent(/tokens/)
+    await userEvent.click(screen.getByTestId('ai-source-cloud'))
+    await waitFor(() =>
+      expect(screen.getByTestId('ai-usage-total')).toHaveTextContent('$0.75 · 12 requests')
+    )
+    expect(screen.getByTestId('ai-usage')).not.toHaveTextContent(/token/i)
   })
 })

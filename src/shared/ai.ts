@@ -7,15 +7,41 @@ import { z } from 'zod'
  */
 
 /** The provider ids as a tuple, so Drizzle enum columns and the zod enum share one owner. */
-export const AI_PROVIDER_IDS = ['openai', 'cloud', 'local'] as const
+export const AI_PROVIDER_IDS = ['openai', 'cloud', 'local', 'openrouter'] as const
 export const AiProviderId = z.enum(AI_PROVIDER_IDS)
 export type AiProviderId = z.infer<typeof AiProviderId>
 
 export const AI_PROVIDER_LABEL: Record<AiProviderId, string> = {
   openai: 'OpenAI',
   cloud: 'MythScribe Cloud',
-  local: 'Local model'
+  local: 'Local model',
+  openrouter: 'OpenRouter'
 }
+
+/**
+ * The providers an own key can be for (AI-BILLING-SPEC A2): OpenRouter, the default since
+ * 2026-10-07 (one key, every model), or OpenAI directly. App-wide, like the key itself.
+ */
+export const OWN_KEY_PROVIDERS = ['openrouter', 'openai'] as const
+export const OwnKeyProvider = z.enum(OWN_KEY_PROVIDERS)
+export type OwnKeyProvider = z.infer<typeof OwnKeyProvider>
+export const DEFAULT_OWN_KEY_PROVIDER: OwnKeyProvider = 'openrouter'
+
+/**
+ * The own-key provider in effect. A choice the author made wins; with none stored, an install
+ * that already holds an OpenAI key keeps using it (never break a working setup), and anything
+ * else gets the default, OpenRouter.
+ */
+export function effectiveOwnKeyProvider(
+  stored: OwnKeyProvider | undefined,
+  hasOpenAiKey: boolean
+): OwnKeyProvider {
+  if (stored !== undefined) return stored
+  return hasOpenAiKey ? 'openai' : DEFAULT_OWN_KEY_PROVIDER
+}
+
+/** OpenRouter's OpenAI-compatible API root; the OpenAI adapter talks to it with a `baseURL`. */
+export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 
 /** Feature code requests a tier, never a model name (CLAUDE.md, token efficiency rule 1). */
 export const Tier = z.enum(['fast', 'strong'])
@@ -36,6 +62,16 @@ export const TIER_USE: Record<Tier, string> = {
 export const DEFAULT_MODELS: Record<Tier, string> = { fast: 'gpt-5.4-mini', strong: 'gpt-5.4' }
 
 /**
+ * The same two models through OpenRouter, by its `vendor/model` ids. Kept equal to
+ * `DEFAULT_MODELS` until the author approves the proposed OpenRouter defaults (QUESTIONS.md,
+ * 2026-10-07); changing them is this one line.
+ */
+export const OPENROUTER_DEFAULT_MODELS: Record<Tier, string> = {
+  fast: 'openai/gpt-5.4-mini',
+  strong: 'openai/gpt-5.4'
+}
+
+/**
  * F-5.15: what a local server is asked for until the author names their own models. Ollama's
  * names; one model for both tiers, since most machines hold one model in memory at a time.
  */
@@ -43,7 +79,9 @@ export const LOCAL_DEFAULT_MODELS: Record<Tier, string> = { fast: 'llama3.1', st
 
 /** The default tier → model mapping of one provider (F-5.11 "Reset to defaults"). */
 export function defaultModelsFor(provider: AiProviderId): Record<Tier, string> {
-  return { ...(provider === 'local' ? LOCAL_DEFAULT_MODELS : DEFAULT_MODELS) }
+  if (provider === 'local') return { ...LOCAL_DEFAULT_MODELS }
+  if (provider === 'openrouter') return { ...OPENROUTER_DEFAULT_MODELS }
+  return { ...DEFAULT_MODELS }
 }
 
 /**
@@ -91,7 +129,9 @@ export const AiModels = z.object({
   /** F-15.4: the models the MythScribe Cloud proxy is asked for; same defaults as the key path. */
   cloud: AiModelMap.default(() => ({ ...DEFAULT_MODELS })),
   /** F-5.15: the models a local OpenAI-compatible server is asked for. */
-  local: AiModelMap.default(() => ({ ...LOCAL_DEFAULT_MODELS }))
+  local: AiModelMap.default(() => ({ ...LOCAL_DEFAULT_MODELS })),
+  /** 2026-10-07: the models an OpenRouter key asks for, by OpenRouter's ids. */
+  openrouter: AiModelMap.default(() => ({ ...OPENROUTER_DEFAULT_MODELS }))
 })
 export type AiModels = z.infer<typeof AiModels>
 
@@ -99,7 +139,8 @@ export function defaultAiModels(): AiModels {
   return {
     openai: { ...DEFAULT_MODELS },
     cloud: { ...DEFAULT_MODELS },
-    local: { ...LOCAL_DEFAULT_MODELS }
+    local: { ...LOCAL_DEFAULT_MODELS },
+    openrouter: { ...OPENROUTER_DEFAULT_MODELS }
   }
 }
 
@@ -138,7 +179,7 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
   NO_KEY: 'Add a key above and save it.',
   INVALID_KEY: 'Check the key and try again.',
   RATE_LIMIT: 'Wait a moment and retry.',
-  QUOTA: 'Add credit to your OpenAI account.',
+  QUOTA: 'Add credit to your provider account (OpenRouter or OpenAI).',
   NETWORK: 'Check your internet connection and retry.',
   PROVIDER: 'Try again in a moment.',
   BUDGET: 'Raise the daily cap in Settings or wait until tomorrow.',
@@ -157,11 +198,20 @@ export const AiKeyEncryption = z.enum(['os', 'plain', 'none'])
 export type AiKeyEncryption = z.infer<typeof AiKeyEncryption>
 
 export const AiStatus = z.object({
+  /**
+   * The provider an own key is for (`OwnKeyProvider`, AI-BILLING-SPEC A2); `hasKey` and `hint`
+   * describe that provider's key.
+   */
   provider: AiProviderId,
   hasKey: z.boolean(),
   /** The masked key while one is saved, null otherwise. */
   hint: z.string().nullable(),
   encryption: AiKeyEncryption,
+  /**
+   * Whether a provider key can be saved here (AI-BILLING-SPEC S2: only in the OS keychain).
+   * Main owns the rule; absent from an older main, where `encryption` decides.
+   */
+  canStoreKey: z.boolean().optional(),
   /**
    * The effective tier → model mapping of every provider (F-5.11); the AI tab edits the map of
    * the source the project sends through (F-15.4), so both are carried rather than one.
@@ -381,6 +431,8 @@ export function inputBudget(feature: AiFeatureId): number {
 export interface ModelPrice {
   inUsdPerM: number
   outUsdPerM: number
+  /** The price of an input token the provider served from its prompt cache (AI-BILLING-SPEC R6). */
+  cachedInUsdPerM?: number
   priced: boolean
 }
 
@@ -390,28 +442,71 @@ export interface ModelPrice {
  * page; nothing fetches it, so keep it current by hand when a default model changes. A model
  * outside this table costs 0 with `priced: false` (the ledger never invents a price). Checked
  * against developers.openai.com/api/docs/pricing on 2026-10-05 (`gpt-5.4` at the under-272K
- * context rate). Cached input (a tenth of the input rate) is billed here at the full input rate,
- * so a cache hit is over-counted, never under-counted.
+ * context rate). Cached input is a tenth of the input rate (AI-BILLING-SPEC R6); a model with no
+ * cached price bills cached tokens at the full input rate, over-counted, never under-counted.
+ * This is the own-key estimate only: hosted prices come from the server (`CloudPricing`); the
+ * bundled Cloud rates (`cloudRates.ts`) still read this table until the Worker serves one.
  */
+const GPT_5_4: ModelPrice = { inUsdPerM: 2.5, outUsdPerM: 15, cachedInUsdPerM: 0.25, priced: true }
+const GPT_5_4_MINI: ModelPrice = {
+  inUsdPerM: 0.75,
+  outUsdPerM: 4.5,
+  cachedInUsdPerM: 0.075,
+  priced: true
+}
+const GPT_5_4_NANO: ModelPrice = {
+  inUsdPerM: 0.2,
+  outUsdPerM: 1.25,
+  cachedInUsdPerM: 0.02,
+  priced: true
+}
 export const MODEL_PRICING: Record<string, ModelPrice> = {
-  'gpt-5.4': { inUsdPerM: 2.5, outUsdPerM: 15, priced: true },
-  'gpt-5.4-mini': { inUsdPerM: 0.75, outUsdPerM: 4.5, priced: true },
-  'gpt-5.4-nano': { inUsdPerM: 0.2, outUsdPerM: 1.25, priced: true }
+  'gpt-5.4': GPT_5_4,
+  'gpt-5.4-mini': GPT_5_4_MINI,
+  'gpt-5.4-nano': GPT_5_4_NANO
+}
+
+/**
+ * The same models by their OpenRouter ids (2026-10-07). OpenRouter passes the provider's price
+ * through, so they carry the same rates. Kept apart from `MODEL_PRICING` so the Cloud rate table
+ * does not list each model twice.
+ */
+export const OPENROUTER_PRICING: Record<string, ModelPrice> = {
+  'openai/gpt-5.4': GPT_5_4,
+  'openai/gpt-5.4-mini': GPT_5_4_MINI,
+  'openai/gpt-5.4-nano': GPT_5_4_NANO
 }
 
 const UNPRICED: ModelPrice = { inUsdPerM: 0, outUsdPerM: 0, priced: false }
 
-/** The cost of `inTok` prompt and `outTok` completion tokens on `model`; 0 and unpriced for an unknown model. */
+/**
+ * The cost of `inTok` prompt and `outTok` completion tokens on `model`, of which `cachedInTok`
+ * prompt tokens were served from the provider's cache at the cached-input price; 0 and unpriced
+ * for an unknown model.
+ */
 export function priceFor(
   model: string,
   inTok: number,
-  outTok: number
+  outTok: number,
+  cachedInTok = 0
 ): { costUsd: number; priced: boolean } {
-  const price = MODEL_PRICING[model] ?? UNPRICED
-  return {
-    costUsd: (inTok * price.inUsdPerM + outTok * price.outUsdPerM) / 1_000_000,
-    priced: price.priced
-  }
+  const price = MODEL_PRICING[model] ?? OPENROUTER_PRICING[model] ?? UNPRICED
+  return { costUsd: costOf(price, inTok, outTok, cachedInTok), priced: price.priced }
+}
+
+/** USD for one request at `price`; cached prompt tokens (at most `inTok`) at the cached rate. */
+export function costOf(
+  price: Pick<ModelPrice, 'inUsdPerM' | 'outUsdPerM' | 'cachedInUsdPerM'>,
+  inTok: number,
+  outTok: number,
+  cachedInTok = 0
+): number {
+  const cached = Math.min(Math.max(cachedInTok, 0), inTok)
+  const cachedRate = price.cachedInUsdPerM ?? price.inUsdPerM
+  return (
+    ((inTok - cached) * price.inUsdPerM + cached * cachedRate + outTok * price.outUsdPerM) /
+    1_000_000
+  )
 }
 
 /**
@@ -440,6 +535,8 @@ export const AiUsageRecent = z.object({
   model: z.string(),
   promptTokens: z.number().int().nonnegative(),
   completionTokens: z.number().int().nonnegative(),
+  /** Prompt tokens the provider served from its cache; null when it did not say (AI-BILLING-SPEC A4). */
+  cachedTokens: z.number().int().nonnegative().nullable().optional(),
   costUsd: z.number(),
   cached: z.boolean()
 })
@@ -447,6 +544,15 @@ export type AiUsageRecent = z.infer<typeof AiUsageRecent>
 
 /** How many of the newest ledger rows `ai:usageSummary` carries. */
 export const USAGE_RECENT_LIMIT = 10
+
+/** One page of the usage history (AI-BILLING-SPEC E7): every ledger row, newest first. */
+export const USAGE_HISTORY_PAGE = 50
+export const AiUsageHistory = z.object({
+  rows: z.array(AiUsageRecent),
+  /** Every row in the project's ledger, for the pager. */
+  total: z.number().int().nonnegative()
+})
+export type AiUsageHistory = z.infer<typeof AiUsageHistory>
 
 /**
  * What the AI tab's Usage block shows (F-5.14, extended by F-5.9). `today`, `session` and

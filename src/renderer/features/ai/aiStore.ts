@@ -1,11 +1,19 @@
 import { create } from 'zustand'
-import type {
-  AiModelMap,
-  AiProviderId,
-  AiStatus,
-  AiTestConnectionResult,
-  AiUsageSummary
+import {
+  DEFAULT_OWN_KEY_PROVIDER,
+  OwnKeyProvider,
+  USAGE_HISTORY_PAGE,
+  type AiFeatureId,
+  type AiModelMap,
+  type AiProviderId,
+  type AiStatus,
+  type AiTestConnectionResult,
+  type AiUsageHistory,
+  type AiUsageSummary,
+  type Tier
 } from '@shared/ai'
+import { autoTable, resolveTier, type AiModelChoice, type AiRouting } from '@shared/aiRouting'
+import { providerForSource, type AiSource } from '@shared/aiSettings'
 import { ipc } from '@renderer/lib/ipc'
 import { flushAiSettings } from './aiSettingsStore'
 
@@ -40,6 +48,16 @@ interface AiState {
   /** F-5.15: where the local model server answers. */
   setLocalEndpoint: (baseUrl: string) => Promise<void>
   test: () => Promise<void>
+  /** 2026-10-07: which provider an own key is for (OpenRouter or OpenAI). */
+  setOwnKeyProvider: (provider: OwnKeyProvider) => Promise<void>
+  /** Model choice (AI-BILLING-SPEC M8, R4): the overrides and the Cloud table; null until loaded. */
+  choice: AiModelChoice | null
+  loadChoice: () => Promise<void>
+  setRouting: (routing: AiRouting) => Promise<void>
+  /** One page of the usage history (E7); null until a page is asked for. */
+  history: AiUsageHistory | null
+  historyOffset: number
+  loadHistory: (offset: number) => Promise<void>
 }
 
 /** Bumped by every reset so a response from a superseded request is dropped. */
@@ -50,6 +68,9 @@ export const useAiStore = create<AiState>((set) => ({
   testResult: null,
   testing: false,
   usage: null,
+  choice: null,
+  history: null,
+  historyOffset: 0,
 
   async load() {
     const mine = generation
@@ -100,6 +121,37 @@ export const useAiStore = create<AiState>((set) => ({
     set({ status, testResult: null })
   },
 
+  async setOwnKeyProvider(provider) {
+    const mine = generation
+    const status = await ipc().invoke('ai:setOwnKeyProvider', { provider })
+    if (mine !== generation) return
+    set({ status, testResult: null })
+  },
+
+  async loadChoice() {
+    const mine = generation
+    const choice = await ipc().invoke('ai:getModelChoice', undefined)
+    if (mine !== generation) return
+    set({ choice })
+  },
+
+  async setRouting(routing) {
+    const mine = generation
+    const choice = await ipc().invoke('ai:setRouting', routing)
+    if (mine !== generation) return
+    set({ choice })
+  },
+
+  async loadHistory(offset) {
+    const mine = generation
+    const history = await ipc().invoke('ai:usageHistory', {
+      offset,
+      limit: USAGE_HISTORY_PAGE
+    })
+    if (mine !== generation) return
+    set({ history, historyOffset: offset })
+  },
+
   async test() {
     const mine = generation
     set({ testing: true, testResult: null })
@@ -120,5 +172,40 @@ export const useAiStore = create<AiState>((set) => ({
 /** Empties the store and invalidates in-flight requests. For tests only. */
 export function resetAiStore(): void {
   generation++
-  useAiStore.setState({ status: null, testResult: null, testing: false, usage: null })
+  useAiStore.setState({
+    status: null,
+    testResult: null,
+    testing: false,
+    usage: null,
+    choice: null,
+    history: null,
+    historyOffset: 0
+  })
+}
+
+/** The provider an own key is for, from the status main answered; the default before it loads. */
+export function ownKeyOf(status: AiStatus | null): OwnKeyProvider {
+  const parsed = OwnKeyProvider.safeParse(status?.provider)
+  return parsed.success ? parsed.data : DEFAULT_OWN_KEY_PROVIDER
+}
+
+/** The provider whose models a source uses, given what main answered (F-15.4, 2026-10-07). */
+export function providerOf(status: AiStatus | null, source: AiSource): AiProviderId {
+  return providerForSource(source, ownKeyOf(status))
+}
+
+/**
+ * The tier a feature's request goes out on, as main's request path routes it (`resolveTier`):
+ * the author's overrides, then the Auto table (the Cloud one on Cloud). Before the choice has
+ * loaded, the tier the feature asks for.
+ */
+export function routedTier(
+  choice: AiModelChoice | null,
+  source: AiSource,
+  feature: AiFeatureId,
+  requested: Tier
+): Tier {
+  if (choice === null) return requested
+  const cloudTable = source === 'cloud' ? (choice.cloudPricing?.routing ?? null) : null
+  return resolveTier({ feature, requested, routing: choice.routing, table: autoTable(cloudTable) })
 }

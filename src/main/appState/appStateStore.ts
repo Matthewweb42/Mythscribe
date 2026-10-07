@@ -1,7 +1,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
-import { AiModels, LocalAiSettings, defaultAiModels, defaultLocalAiSettings } from '@shared/ai'
+import {
+  AiModels,
+  LocalAiSettings,
+  OwnKeyProvider,
+  defaultAiModels,
+  defaultLocalAiSettings
+} from '@shared/ai'
+import { AiRouting, CloudPricingCache, defaultAiRouting } from '@shared/aiRouting'
 import { BackupSettings, defaultBackupSettings } from '@shared/backups'
 import { RecentProjectEntry } from '@shared/ipc/contract'
 import { DiagnosticsSettings, defaultDiagnosticsSettings } from '@shared/diagnostics'
@@ -58,7 +65,20 @@ export const AppState = z.object({
   /** F-4.11: the author's saved tag templates, loadable in any project; none in older files. */
   tagTemplates: z.array(CustomTagTemplate).default([]),
   /** F-5.15: where the local model server answers; Ollama's default address in older files. */
-  localAi: LocalAiSettings.default(defaultLocalAiSettings)
+  localAi: LocalAiSettings.default(defaultLocalAiSettings),
+  /**
+   * 2026-10-07: which provider an own key is for. Absent until the author picks one, so an older
+   * file holding an OpenAI key keeps OpenAI (`effectiveOwnKeyProvider`); a fresh one gets
+   * OpenRouter. Read leniently: an unknown value reads as absent rather than failing the file.
+   */
+  ownKeyProvider: OwnKeyProvider.optional().catch(undefined),
+  /**
+   * 2026-10-07 (AI-BILLING-SPEC M8, R4): the author's model-choice overrides; Auto in older
+   * files. Read leniently, so a bad value resets only this, never the recents.
+   */
+  routing: AiRouting.catch(defaultAiRouting),
+  /** The MythScribe Cloud price and routing table last fetched from `/pricing`, or null. */
+  cloudPricing: CloudPricingCache.nullable().catch(null)
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -75,7 +95,9 @@ export const EMPTY_APP_STATE: AppState = {
   backups: defaultBackupSettings(),
   window: defaultWindowState(),
   tagTemplates: [],
-  localAi: defaultLocalAiSettings()
+  localAi: defaultLocalAiSettings(),
+  routing: defaultAiRouting(),
+  cloudPricing: null
 }
 
 export class AppStateStore {

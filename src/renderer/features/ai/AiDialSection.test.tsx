@@ -1,7 +1,12 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { AI_FEATURE_IDS, DEFAULT_MODELS, type AiStatus } from '@shared/ai'
+import {
+  AI_FEATURE_IDS,
+  DEFAULT_MODELS,
+  OPENROUTER_DEFAULT_MODELS,
+  type AiStatus
+} from '@shared/ai'
 import { AI_DATA_SHARING, AiSettings, defaultAiSettings } from '@shared/aiSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -15,7 +20,12 @@ const STATUS: AiStatus = {
   hasKey: false,
   hint: null,
   encryption: 'os',
-  models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS, local: DEFAULT_MODELS },
+  models: {
+    openai: DEFAULT_MODELS,
+    cloud: DEFAULT_MODELS,
+    local: DEFAULT_MODELS,
+    openrouter: OPENROUTER_DEFAULT_MODELS
+  },
   local: { baseUrl: 'http://localhost:11434/v1' }
 }
 

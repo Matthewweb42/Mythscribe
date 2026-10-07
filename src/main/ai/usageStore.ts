@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { RunResult } from 'better-sqlite3'
 import { asc, count, desc, sql } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
-import type { AiUsageRecent, AiUsageSummary, UsageTotals } from '@shared/ai'
+import type { AiUsageHistory, AiUsageRecent, AiUsageSummary, UsageTotals } from '@shared/ai'
 import type * as schema from '../db/schema'
 import { aiUsage, type AiUsageInsert, type AiUsageRow } from '../db/schema'
 
@@ -37,6 +37,11 @@ export function listUsage(db: AiDb): AiUsageRow[] {
  * at zero cost, flagged `cached`.
  */
 export function recentUsage(db: AiDb, limit: number): AiUsageRecent[] {
+  return usagePage(db, 0, limit)
+}
+
+/** Rows `offset` to `offset + limit` of the ledger, newest first, as the history lists them. */
+function usagePage(db: AiDb, offset: number, limit: number): AiUsageRecent[] {
   return db
     .select({
       id: aiUsage.id,
@@ -45,13 +50,25 @@ export function recentUsage(db: AiDb, limit: number): AiUsageRecent[] {
       model: aiUsage.model,
       promptTokens: aiUsage.promptTokens,
       completionTokens: aiUsage.completionTokens,
+      cachedTokens: aiUsage.cachedTokens,
       costUsd: aiUsage.costUsd,
       cached: aiUsage.cached
     })
     .from(aiUsage)
     .orderBy(desc(aiUsage.at), desc(sql`rowid`))
     .limit(limit)
+    .offset(offset)
     .all()
+}
+
+/**
+ * One page of the usage history (AI-BILLING-SPEC E7): date, action, model, tokens (with the
+ * prompt-cache hits), and cost of every request this project made, whatever the source, newest
+ * first, and how many rows there are in all.
+ */
+export function usageHistory(db: AiDb, offset: number, limit: number): AiUsageHistory {
+  const total = db.select({ n: count() }).from(aiUsage).get()?.n ?? 0
+  return { rows: usagePage(db, offset, limit), total }
 }
 
 /**

@@ -25,9 +25,12 @@ export const formatCount = (n: number, unit?: string): string => {
   return unit === undefined ? digits : `${digits} ${unit}${n === 1 ? '' : 's'}`
 }
 
-/** One line for a totals row: cost, requests, tokens. */
-export const describeTotals = (t: UsageTotals): string =>
-  `${formatUsd(t.costUsd)} · ${formatCount(t.requests, 'request')} · ${formatCount(t.tokens, 'token')}`
+/**
+ * One line for a totals row: cost, requests, tokens. `showTokens` is false for MythScribe Cloud
+ * (AI-BILLING-SPEC C4: hosted users see dollars; tokens stay in the usage history).
+ */
+export const describeTotals = (t: UsageTotals, showTokens = true): string =>
+  `${formatUsd(t.costUsd)} · ${formatCount(t.requests, 'request')}${showTokens ? ` · ${formatCount(t.tokens, 'token')}` : ''}`
 
 /**
  * The line under every AI answer (F-5.9, CLAUDE.md rule 10): the model, what the request cost,

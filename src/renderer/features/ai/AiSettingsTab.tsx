@@ -2,6 +2,9 @@ import { useEffect, useId, useState } from 'react'
 import {
   AI_KEY_MAX,
   AI_MODEL_MAX,
+  AI_PROVIDER_LABEL,
+  OWN_KEY_PROVIDERS,
+  USAGE_HISTORY_PAGE,
   DAILY_CAP_MAX,
   DAILY_CAP_MIN,
   LOCAL_AI_BASE_URL_MAX,
@@ -12,9 +15,20 @@ import {
   type AiModelMap,
   type AiProviderId,
   type AiStatus,
+  type AiUsageHistory,
+  type AiUsageRecent,
   type AiUsageSummary,
+  type OwnKeyProvider,
   type Tier
 } from '@shared/ai'
+import {
+  ROUTABLE_FEATURES,
+  ROUTE_CHOICE_LABEL,
+  autoTable,
+  multiplierLabel,
+  type AiModelChoice,
+  type CloudPricing
+} from '@shared/aiRouting'
 import {
   AI_SOURCE_LABEL,
   AI_SOURCE_MEANING,
@@ -22,8 +36,7 @@ import {
   CLOUD_COMING_SOON,
   CLOUD_UNAVAILABLE_NOTICE,
   LOCAL_QUALITY_WARNING,
-  isFeatureAllowed,
-  providerForSource
+  isFeatureAllowed
 } from '@shared/aiSettings'
 import { CLOUD_AI_AVAILABLE } from '@shared/cloudApi'
 import { cloudRateFor } from '@shared/cloudRates'
@@ -36,7 +49,7 @@ import { ProvenanceSection } from './ProvenanceSection'
 import { VoiceSection } from './VoiceSection'
 import { WritingPresetsSection } from './WritingPresetsSection'
 import { useAiSettingsStore } from './aiSettingsStore'
-import { useAiStore } from './aiStore'
+import { ownKeyOf, providerOf, useAiStore } from './aiStore'
 import { useIndexingStore } from './indexingStore'
 import {
   describeTotals,
@@ -50,31 +63,35 @@ const FIELD = 'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-1 text
 const BUTTON =
   'shrink-0 rounded-md border border-line px-2 py-1 text-sm hover:bg-surface disabled:opacity-50 disabled:hover:bg-transparent'
 
-const NO_SAFE_STORAGE_COPY =
-  'This system has no safe storage available, so MythScribe cannot store a key here. ' +
-  'On Linux, install and unlock a keyring (GNOME Keyring or KWallet), then try again.'
+/**
+ * AI-BILLING-SPEC S2 (decided 2026-10-07): keys live only in the OS keychain, so without one
+ * (no safe storage, or Linux's plain-text fallback) the key field is closed, with how to fix it.
+ */
+const NO_KEYCHAIN_COPY =
+  'MythScribe keeps API keys only in your system keychain, and none is available here. ' +
+  'On Linux, install and unlock GNOME Keyring or KWallet (for example: sudo apt install ' +
+  'gnome-keyring), sign out and back in, then save the key. Until then, use MythScribe Cloud ' +
+  'or a local model.'
 
-const PLAIN_STORAGE_COPY =
-  'No system keyring found: the key is stored obfuscated, not encrypted. ' +
-  'Install a keyring (GNOME Keyring or KWallet) for real encryption.'
+/** Where each own-key provider's keys are made; shown under the key field. */
+const KEY_HELP: Record<OwnKeyProvider, string> = {
+  openrouter: 'One OpenRouter key reaches every model. Create one at openrouter.ai/keys.',
+  openai: 'Create a key at platform.openai.com/api-keys.'
+}
 
 /**
  * The storage claim follows the real backend: no "encrypted" under the plain-text warning. On
  * MythScribe Cloud there is no key here at all, so the line names where the text goes instead.
  */
-const privacyCopy = (
-  encryption: 'os' | 'plain' | 'none' | undefined,
-  source: AiSource,
-  localUrl: string
-): string =>
+const privacyCopy = (source: AiSource, localUrl: string, ownKey: OwnKeyProvider): string =>
   source === 'local'
     ? isLoopbackUrl(localUrl)
       ? `Nothing leaves this computer: the text listed in the table above goes only to the model server at ${localUrl}.`
       : `The text listed in the table above goes to the model server at ${localUrl}, over your network.`
     : source === 'cloud'
       ? 'Your key stays out of it on MythScribe Cloud: the text listed in the table above goes ' +
-        'to MythScribe Cloud, which relays it to OpenAI and stores none of it.'
-      : `Your key is ${encryption === 'plain' ? 'stored only on this machine' : 'encrypted and stored only on this machine'}, and is sent only to OpenAI when you use an AI feature.`
+        'to MythScribe Cloud, which relays it to the model and stores none of it.'
+      : `Your key is kept in your system keychain on this machine, and is sent only to ${AI_PROVIDER_LABEL[ownKey]} when you use an AI feature.`
 
 const RADIO =
   'flex min-w-0 flex-1 flex-col gap-0.5 rounded-md border border-line px-2 py-1.5 text-left hover:bg-surface focus-visible:outline-2 focus-visible:outline-accent aria-checked:border-accent aria-checked:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent'
@@ -135,17 +152,23 @@ export function AiSettingsTab({
   const updateSettings = useAiSettingsStore((s) => s.update)
   const account = useAccountStore((s) => s.status)
   const source: AiSource = settings?.source ?? 'ownKey'
-  const provider = providerForSource(source)
+  const provider = providerOf(status, source)
+  const ownKey = ownKeyOf(status)
+  const setOwnKeyProvider = useAiStore((s) => s.setOwnKeyProvider)
+  const loadChoice = useAiStore((s) => s.loadChoice)
+  const choice = useAiStore((s) => s.choice)
   const signedIn = account?.state === 'signedIn'
 
   useEffect(() => {
     load().catch(report)
     loadUsage().catch(report)
-  }, [load, loadUsage])
+    loadChoice().catch(report)
+  }, [load, loadUsage, loadChoice])
 
   const trimmed = draft.trim()
   const hasKey = status?.hasKey ?? false
-  const canStore = status !== null && status.encryption !== 'none'
+  // S2: a key is stored only in the OS keychain (`os`); the plain-text fallback is refused.
+  const canStore = status !== null && (status.canStoreKey ?? status.encryption === 'os')
 
   const run = async (action: () => Promise<void>): Promise<void> => {
     if (busy) return
@@ -248,57 +271,64 @@ export function AiSettingsTab({
         <CloudAccountLine signedIn={signedIn} email={signedIn ? account.email : null} />
       ) : source === 'local' ? (
         <LocalEndpointForm key={localUrl} current={localUrl} disabled={status === null || busy} />
-      ) : status !== null && status.encryption === 'none' ? (
-        <p role="alert" className="m-0 rounded-md border border-warning/40 px-3 py-2 text-warning">
-          {NO_SAFE_STORAGE_COPY}
-        </p>
       ) : (
-        <form
-          aria-label="OpenAI API key"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (trimmed.length > 0 && canStore) void save()
-          }}
-          className="flex flex-col gap-1.5"
-        >
-          <div className="flex items-center gap-2">
-            <input
-              type="password"
-              aria-label="API key"
-              placeholder="Paste your OpenAI API key"
-              autoComplete="off"
-              spellCheck={false}
-              maxLength={AI_KEY_MAX}
-              value={draft}
-              disabled={!canStore || busy}
-              onChange={(event) => setDraft(event.target.value)}
-              className={FIELD}
-            />
-            <button
-              type="submit"
-              disabled={trimmed.length === 0 || !canStore || busy}
-              className={BUTTON}
+        <>
+          <OwnKeyProviderPicker
+            value={ownKey}
+            disabled={status === null || busy}
+            onChange={(next) => void run(() => setOwnKeyProvider(next))}
+          />
+          {status !== null && !canStore ? (
+            <p
+              role="alert"
+              data-testid="ai-no-keychain"
+              className="m-0 rounded-md border border-warning/40 px-3 py-2 text-warning"
             >
-              Save
-            </button>
-            <button
-              type="button"
-              disabled={!hasKey || busy}
-              onClick={() => void run(clearKey)}
-              className={BUTTON}
-            >
-              Clear
-            </button>
-          </div>
-          <KeyHint status={status} />
-        </form>
+              {NO_KEYCHAIN_COPY}
+            </p>
+          ) : null}
+          <form
+            aria-label={`${AI_PROVIDER_LABEL[ownKey]} API key`}
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (trimmed.length > 0 && canStore) void save()
+            }}
+            className="flex flex-col gap-1.5"
+          >
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                aria-label="API key"
+                placeholder={`Paste your ${AI_PROVIDER_LABEL[ownKey]} API key`}
+                autoComplete="off"
+                spellCheck={false}
+                maxLength={AI_KEY_MAX}
+                value={draft}
+                disabled={!canStore || busy}
+                onChange={(event) => setDraft(event.target.value)}
+                className={FIELD}
+              />
+              <button
+                type="submit"
+                disabled={trimmed.length === 0 || !canStore || busy}
+                className={BUTTON}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                disabled={!hasKey || busy}
+                onClick={() => void run(clearKey)}
+                className={BUTTON}
+              >
+                Clear
+              </button>
+            </div>
+            <KeyHint status={status} />
+            <p className="m-0 text-xs text-fg-muted">{KEY_HELP[ownKey]}</p>
+          </form>
+        </>
       )}
-
-      {source === 'ownKey' && status?.encryption === 'plain' ? (
-        <p role="alert" className="m-0 text-xs text-warning">
-          {PLAIN_STORAGE_COPY}
-        </p>
-      ) : null}
 
       <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
         <div className="flex items-center justify-between gap-3">
@@ -319,10 +349,13 @@ export function AiSettingsTab({
             value={models?.[tier] ?? ''}
             disabled={models === null || busy}
             showCloudRate={source === 'cloud' && models !== null}
+            pricing={choice?.cloudPricing ?? null}
             onCommit={(model) => saveModel(tier, model)}
           />
         ))}
       </fieldset>
+
+      <ModelChoiceSection choice={choice} source={source} models={models} disabled={busy} />
 
       <div className="flex flex-col gap-1.5">
         <button
@@ -349,12 +382,13 @@ export function AiSettingsTab({
       <UsageBlock
         usage={usage}
         disabled={busy}
+        showTokens={source !== 'cloud'}
         onCommitCap={(usd) => run(() => setDailyCap(usd))}
       />
 
-      <p className="m-0 text-xs text-fg-muted">
-        {privacyCopy(status?.encryption, source, localUrl)}
-      </p>
+      <UsageHistory />
+
+      <p className="m-0 text-xs text-fg-muted">{privacyCopy(source, localUrl, ownKey)}</p>
     </div>
   )
 }
@@ -455,10 +489,13 @@ const clockTime = (iso: string): string => {
 function UsageBlock({
   usage,
   disabled,
+  showTokens,
   onCommitCap
 }: {
   usage: AiUsageSummary | null
   disabled: boolean
+  /** AI-BILLING-SPEC C4: false on MythScribe Cloud, where tokens stay in the usage history. */
+  showTokens: boolean
   onCommitCap: (usd: number) => Promise<void>
 }): React.JSX.Element | null {
   if (usage === null) return null
@@ -473,11 +510,11 @@ function UsageBlock({
       </div>
       <div className="flex items-center justify-between gap-3">
         <span>This session, all projects</span>
-        <span data-testid="ai-usage-session">{describeTotals(usage.session)}</span>
+        <span data-testid="ai-usage-session">{describeTotals(usage.session, showTokens)}</span>
       </div>
       <div className="flex items-center justify-between gap-3">
         <span>This project, all time</span>
-        <span data-testid="ai-usage-total">{describeTotals(usage.total)}</span>
+        <span data-testid="ai-usage-total">{describeTotals(usage.total, showTokens)}</span>
       </div>
       {usage.byFeature.length > 0 ? (
         <table aria-label="This project by feature" className="w-full text-xs">
@@ -489,9 +526,11 @@ function UsageBlock({
               <th scope="col" className="text-right font-normal">
                 Requests
               </th>
-              <th scope="col" className="text-right font-normal">
-                Tokens
-              </th>
+              {showTokens ? (
+                <th scope="col" className="text-right font-normal">
+                  Tokens
+                </th>
+              ) : null}
               <th scope="col" className="text-right font-normal">
                 Cost
               </th>
@@ -504,7 +543,9 @@ function UsageBlock({
                   {featureLabel(row.feature)}
                 </th>
                 <td className="text-right tabular-nums">{formatCount(row.requests)}</td>
-                <td className="text-right tabular-nums">{formatCount(row.tokens)}</td>
+                {showTokens ? (
+                  <td className="text-right tabular-nums">{formatCount(row.tokens)}</td>
+                ) : null}
                 <td className="text-right tabular-nums">{formatUsd(row.costUsd)}</td>
               </tr>
             ))}
@@ -530,9 +571,11 @@ function UsageBlock({
               <th scope="col" className="text-left font-normal">
                 Model
               </th>
-              <th scope="col" className="text-right font-normal">
-                Tokens
-              </th>
+              {showTokens ? (
+                <th scope="col" className="text-right font-normal">
+                  Tokens
+                </th>
+              ) : null}
               <th scope="col" className="text-right font-normal">
                 Cost
               </th>
@@ -546,9 +589,11 @@ function UsageBlock({
                 </th>
                 <td className="text-left">{featureLabel(row.feature)}</td>
                 <td className="text-left">{row.model}</td>
-                <td className="text-right tabular-nums">
-                  {`${formatCount(row.promptTokens)} / ${formatCount(row.completionTokens)}`}
-                </td>
+                {showTokens ? (
+                  <td className="text-right tabular-nums">
+                    {`${formatCount(row.promptTokens)} / ${formatCount(row.completionTokens)}`}
+                  </td>
+                ) : null}
                 <td className="text-right tabular-nums">
                   {`${formatRequestCost(row.costUsd)}${row.cached ? ' · cached' : ''}`}
                 </td>
@@ -640,12 +685,15 @@ function ModelField({
   value,
   disabled,
   showCloudRate,
+  pricing,
   onCommit
 }: {
   tier: Tier
   value: string
   disabled: boolean
   showCloudRate: boolean
+  /** The server's table (`GET /pricing`), or null until one was fetched. */
+  pricing: CloudPricing | null
   onCommit: (model: string) => Promise<void>
 }): React.JSX.Element {
   const hintId = useId()
@@ -692,17 +740,33 @@ function ModelField({
       <p id={hintId} className="m-0 pl-27 text-xs text-fg-muted">
         {TIER_USE[tier]}
       </p>
-      {showCloudRate ? <CloudRateLine tier={tier} model={value} /> : null}
+      {showCloudRate ? <CloudRateLine tier={tier} model={value} pricing={pricing} /> : null}
     </div>
   )
 }
 
-/** The MythScribe Cloud rate of one tier's saved model, from the one published table (`cloudRates.ts`). */
-function CloudRateLine({ tier, model }: { tier: Tier; model: string }): React.JSX.Element {
-  const rate = cloudRateFor(model)
-  return rate.priced ? (
+/**
+ * What one tier's saved model costs on MythScribe Cloud, without tokens (AI-BILLING-SPEC C4,
+ * E5): a model the server marks with a multiplier says "about 2x the default"; the server's
+ * table wins over the bundled one (`cloudRates.ts`), which stands in until it is fetched.
+ */
+function CloudRateLine({
+  tier,
+  model,
+  pricing
+}: {
+  tier: Tier
+  model: string
+  pricing: CloudPricing | null
+}): React.JSX.Element {
+  const listed = pricing?.models.some((entry) => entry.model === model) ?? false
+  const priced = listed || cloudRateFor(model).priced
+  const multiplier = multiplierLabel(pricing, model)
+  return priced ? (
     <p data-testid={`ai-model-rate-${tier}`} className="m-0 pl-27 text-xs text-fg-muted">
-      {`MythScribe Cloud rate: ${formatUsd(rate.inUsdPerM)} input, ${formatUsd(rate.outUsdPerM)} output per 1M tokens.`}
+      {multiplier === null
+        ? 'Paid from your MythScribe Cloud balance at the published price.'
+        : `Paid from your MythScribe Cloud balance: ${multiplier} the default model\u2019s price.`}
     </p>
   ) : (
     <p
@@ -729,5 +793,256 @@ function KeyHint({ status }: { status: AiStatus | null }): React.JSX.Element | n
         'No key'
       )}
     </p>
+  )
+}
+
+/**
+ * Which provider an own key is for (2026-10-07, AI-BILLING-SPEC A2): OpenRouter (the default:
+ * one key, every model) or OpenAI directly. Each keeps its own key and its own models.
+ */
+function OwnKeyProviderPicker({
+  value,
+  disabled,
+  onChange
+}: {
+  value: OwnKeyProvider
+  disabled: boolean
+  onChange: (provider: OwnKeyProvider) => void
+}): React.JSX.Element {
+  return (
+    <div role="radiogroup" aria-label="Key provider" className="flex gap-2">
+      {OWN_KEY_PROVIDERS.map((option) => (
+        <button
+          key={option}
+          type="button"
+          role="radio"
+          data-testid={`own-key-provider-${option}`}
+          aria-checked={option === value}
+          disabled={disabled}
+          onClick={() => {
+            if (option !== value) onChange(option)
+          }}
+          className={RADIO}
+        >
+          <span className="text-sm font-medium">{AI_PROVIDER_LABEL[option]}</span>
+          <span className="text-xs text-fg-muted">
+            {option === 'openrouter'
+              ? 'One key for every model (recommended).'
+              : 'A key from OpenAI, for OpenAI models only.'}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+type RouteValue = 'auto' | Tier
+
+const SELECT = 'min-w-0 rounded-md border border-line bg-bg px-2 py-1 text-sm'
+
+/**
+ * Model choice (AI-BILLING-SPEC M8, R4): Auto routes each task to the fast or the strong model
+ * by a table (the server's on MythScribe Cloud); the author can put every task on one model, or
+ * override single tasks, which wins over both. App-wide, like the models themselves.
+ */
+function ModelChoiceSection({
+  choice,
+  source,
+  models,
+  disabled
+}: {
+  choice: AiModelChoice | null
+  source: AiSource
+  models: AiModelMap | null
+  disabled: boolean
+}): React.JSX.Element | null {
+  const setRouting = useAiStore((s) => s.setRouting)
+  const hintId = useId()
+  if (choice === null) return null
+  const { routing } = choice
+  const table = autoTable(source === 'cloud' ? (choice.cloudPricing?.routing ?? null) : null)
+  const named = (tier: Tier): string =>
+    models === null ? ROUTE_CHOICE_LABEL[tier] : `${ROUTE_CHOICE_LABEL[tier]} (${models[tier]})`
+  const save = (next: typeof routing): void => {
+    setRouting(next).catch(report)
+  }
+  const setAll = (value: RouteValue): void =>
+    save({ ...routing, all: value === 'auto' ? null : value })
+  const setFeature = (feature: (typeof ROUTABLE_FEATURES)[number], value: RouteValue): void => {
+    const { [feature]: _dropped, ...rest } = routing.features
+    save({ ...routing, features: value === 'auto' ? rest : { ...rest, [feature]: value } })
+  }
+  const autoLabel = (feature: (typeof ROUTABLE_FEATURES)[number]): string => {
+    const tier = routing.all ?? table[feature]
+    return tier === undefined
+      ? `${ROUTE_CHOICE_LABEL.auto} (depends on the request)`
+      : `${ROUTE_CHOICE_LABEL.auto} (${ROUTE_CHOICE_LABEL[tier].toLowerCase()})`
+  }
+  return (
+    <fieldset
+      data-testid="ai-model-choice"
+      className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0"
+    >
+      <legend className="float-left p-0 font-medium">Which model each task uses</legend>
+      <label className="flex items-center gap-3">
+        <span className="w-24 shrink-0">All tasks</span>
+        <select
+          aria-describedby={hintId}
+          value={routing.all ?? 'auto'}
+          disabled={disabled}
+          onChange={(event) => setAll(event.target.value as RouteValue)}
+          className={SELECT}
+        >
+          <option value="auto">{`${ROUTE_CHOICE_LABEL.auto}: by task`}</option>
+          <option value="fast">{named('fast')}</option>
+          <option value="strong">{named('strong')}</option>
+        </select>
+      </label>
+      <p id={hintId} className="m-0 pl-27 text-xs text-fg-muted">
+        Auto sends small jobs (tags, summaries, proofreading) to the fast model and judgement jobs
+        (questions, critique, the beta reader) to the strong one. A choice for one task below wins
+        over this.
+      </p>
+      <details>
+        <summary className="cursor-pointer text-xs text-fg-muted">Choose per task</summary>
+        <table aria-label="Model per task" className="mt-1 w-full text-xs">
+          <tbody>
+            {ROUTABLE_FEATURES.map((feature) => (
+              <tr key={feature}>
+                <th scope="row" className="py-0.5 pr-2 text-left font-normal">
+                  {featureLabel(feature)}
+                </th>
+                <td className="py-0.5 text-right">
+                  <select
+                    aria-label={`Model for ${featureLabel(feature)}`}
+                    value={routing.features[feature] ?? 'auto'}
+                    disabled={disabled}
+                    onChange={(event) => setFeature(feature, event.target.value as RouteValue)}
+                    className={SELECT}
+                  >
+                    <option value="auto">{autoLabel(feature)}</option>
+                    <option value="fast">{ROUTE_CHOICE_LABEL.fast}</option>
+                    <option value="strong">{ROUTE_CHOICE_LABEL.strong}</option>
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
+    </fieldset>
+  )
+}
+
+/** A ledger row's local date and time, `YYYY-MM-DD HH:MM`, the history's Date column. */
+const dateTime = (iso: string): string => {
+  const at = new Date(iso)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${clockTime(iso)}`
+}
+
+/** In / out tokens of one row, with the prompt-cache hits when the provider reported any. */
+const rowTokens = (row: AiUsageRecent): string =>
+  `${formatCount(row.promptTokens)} / ${formatCount(row.completionTokens)}${row.cachedTokens ? ` (${formatCount(row.cachedTokens)} cached)` : ''}`
+
+/**
+ * The usage history (AI-BILLING-SPEC E7): every request this project made, whatever the source,
+ * newest first, a page at a time: date, action, model, tokens, and cost. Tokens are shown here
+ * for every source; this is the usage view C4 allows them in. Loaded only when opened.
+ */
+function UsageHistory(): React.JSX.Element {
+  const history = useAiStore((s) => s.history)
+  const offset = useAiStore((s) => s.historyOffset)
+  const loadHistory = useAiStore((s) => s.loadHistory)
+  const [open, setOpen] = useState(false)
+  const show = (at: number): void => {
+    loadHistory(at).catch(report)
+  }
+  const toggle = (): void => {
+    if (!open) show(0)
+    setOpen(!open)
+  }
+  const page: AiUsageHistory | null = open ? history : null
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button
+        type="button"
+        aria-expanded={open}
+        data-testid="ai-usage-history-toggle"
+        onClick={toggle}
+        className={`${BUTTON} self-start`}
+      >
+        {open ? 'Hide usage history' : 'Show usage history'}
+      </button>
+      {page === null ? null : page.total === 0 ? (
+        <p className="m-0 text-xs text-fg-muted">No AI requests in this project yet.</p>
+      ) : (
+        <>
+          <table
+            aria-label="Usage history"
+            data-testid="ai-usage-history"
+            className="w-full text-xs"
+          >
+            <thead className="text-fg-muted">
+              <tr>
+                <th scope="col" className="text-left font-normal">
+                  Date
+                </th>
+                <th scope="col" className="text-left font-normal">
+                  Action
+                </th>
+                <th scope="col" className="text-left font-normal">
+                  Model
+                </th>
+                <th scope="col" className="text-right font-normal">
+                  Tokens in / out
+                </th>
+                <th scope="col" className="text-right font-normal">
+                  Cost
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {page.rows.map((row) => (
+                <tr key={row.id}>
+                  <th scope="row" className="text-left font-normal tabular-nums">
+                    {dateTime(row.at)}
+                  </th>
+                  <td className="text-left">{featureLabel(row.feature)}</td>
+                  <td className="text-left">{row.model}</td>
+                  <td className="text-right tabular-nums">{rowTokens(row)}</td>
+                  <td className="text-right tabular-nums">
+                    {`${formatRequestCost(row.costUsd)}${row.cached ? ' · cached' : ''}`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="flex items-center justify-between gap-3 text-xs text-fg-muted">
+            <span data-testid="ai-usage-history-range">
+              {`${formatCount(offset + 1)}\u2013${formatCount(offset + page.rows.length)} of ${formatCount(page.total)}`}
+            </span>
+            <span className="flex gap-2">
+              <button
+                type="button"
+                disabled={offset === 0}
+                onClick={() => show(Math.max(0, offset - USAGE_HISTORY_PAGE))}
+                className={BUTTON}
+              >
+                Newer
+              </button>
+              <button
+                type="button"
+                disabled={offset + page.rows.length >= page.total}
+                onClick={() => show(offset + USAGE_HISTORY_PAGE)}
+                className={BUTTON}
+              >
+                Older
+              </button>
+            </span>
+          </div>
+        </>
+      )}
+    </div>
   )
 }

@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { estimateTokens, FEATURE_BUDGETS, inputBudget, priceFor } from '@shared/ai'
+import { CloudPricing, autoTable, defaultAiRouting } from '@shared/aiRouting'
 import { AppStateStore } from '../appState/appStateStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { getCached, type CacheEntry, type CachedResponse } from './cacheStore'
@@ -616,5 +617,78 @@ describe('a provider that prices its own requests (F-15.4)', () => {
     await expect(runAiRequest(f.deps, input)).rejects.toThrow(/cap/)
     expect(f.complete).not.toHaveBeenCalled()
     expect(f.ledger).toEqual([])
+  })
+})
+
+describe('model choice and cached input (AI-BILLING-SPEC M8, R4, A4, R6)', () => {
+  it('sends the routed tier, resolves its model, and records both in the ledger', async () => {
+    const f = fakes()
+    f.deps.routing = () => ({
+      routing: { all: null, features: { tags: 'strong' } },
+      table: autoTable(null)
+    })
+    const result = await runAiRequest(f.deps, input)
+    expect(f.complete.mock.calls[0]?.[0]).toMatchObject({ tier: 'strong' })
+    expect(result.model).toBe('gpt-5.4')
+    expect(f.ledger[0]).toMatchObject({ tier: 'strong', model: 'gpt-5.4' })
+  })
+
+  it('leaves the requested tier alone under Auto', async () => {
+    const f = fakes()
+    f.deps.routing = () => ({ routing: defaultAiRouting(), table: autoTable(null) })
+    await runAiRequest(f.deps, input)
+    expect(f.complete.mock.calls[0]?.[0]).toMatchObject({ tier: 'fast' })
+    expect(f.ledger[0]).toMatchObject({ tier: 'fast', model: 'gpt-5.4-mini' })
+  })
+
+  it('records the cached prompt tokens and prices them at the cached rate', async () => {
+    const f = fakes()
+    f.complete.mockResolvedValueOnce({
+      text: '{"tags":[]}',
+      model: 'gpt-5.4-mini',
+      usage: { inputTokens: 4_000, outputTokens: 100, cachedInputTokens: 3_000 }
+    })
+    const result = await runAiRequest(f.deps, input)
+    expect(result.costUsd).toBeCloseTo(priceFor('gpt-5.4-mini', 4_000, 100, 3_000).costUsd)
+    expect(result.costUsd).toBeLessThan(priceFor('gpt-5.4-mini', 4_000, 100).costUsd)
+    expect(f.ledger[0]).toMatchObject({ cachedTokens: 3_000, costUsd: result.costUsd })
+  })
+
+  it('records null cached tokens when the provider does not report them', async () => {
+    const f = fakes()
+    await runAiRequest(f.deps, input)
+    expect(f.ledger[0]?.cachedTokens).toBeNull()
+  })
+
+  it('binds the overrides from app state, and the Cloud table only for Cloud', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-route-'))
+    const appState = new AppStateStore(path.join(tmp, 'app-state.json'))
+    appState.update((s) => ({
+      ...s,
+      routing: { all: null, features: { chat: 'strong' } },
+      cloudPricing: {
+        fetchedAt: NOW.toISOString(),
+        pricing: CloudPricing.parse({ markup: 0.2, models: [], routing: { tags: 'strong' } })
+      }
+    }))
+    const f = fakes()
+    const project = createProject(projectFolderFor(tmp, 'Route'), 'Route', 'novel')
+    try {
+      const deps = buildAiRequestDeps({
+        db: project.connection.orm,
+        providers: { get: () => f.provider },
+        appState,
+        session: f.session,
+        now: () => NOW
+      })
+      expect(deps.routing?.('openai')).toEqual({
+        routing: { all: null, features: { chat: 'strong' } },
+        table: autoTable(null)
+      })
+      expect(deps.routing?.('cloud').table.tags).toBe('strong')
+    } finally {
+      project.close()
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })

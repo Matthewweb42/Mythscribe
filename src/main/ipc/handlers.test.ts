@@ -16,7 +16,14 @@ import {
   type Tag
 } from '@shared/ipc/contract'
 import { z } from 'zod'
-import { AI_NEXT_STEP, DEFAULT_MODELS, LOCAL_DEFAULT_MODELS, USAGE_RECENT_LIMIT } from '@shared/ai'
+import {
+  AI_NEXT_STEP,
+  DEFAULT_MODELS,
+  LOCAL_DEFAULT_MODELS,
+  OPENROUTER_DEFAULT_MODELS,
+  USAGE_RECENT_LIMIT,
+  effectiveOwnKeyProvider
+} from '@shared/ai'
 import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
 import type { DiagnosticsBody } from '@shared/cloudApi'
 import { RENDERER_ERROR_MESSAGE_MAX } from '@shared/diagnostics'
@@ -112,6 +119,8 @@ let backupFolder: string | null
 /** Every list the handlers synced the spellchecker to (F-3.11), in order. */
 let spellSync: ReturnType<typeof vi.fn<(words: string[]) => Promise<void>>>
 let safe: ReturnType<typeof fakeSafeStorage>
+/** The store the handlers read; a test can write a key the way an older build left it. */
+let keyStore: AiKeyStore
 let keyFile: string
 /** What the fake provider's `testConnection` does; the registry builds it for any saved key. */
 let testConnection: ReturnType<typeof vi.fn<() => Promise<{ model: string }>>>
@@ -272,7 +281,7 @@ beforeEach(() => {
   spellSync = vi.fn<(words: string[]) => Promise<void>>(() => Promise.resolve())
   safe = fakeSafeStorage()
   keyFile = path.join(tmp, 'userData', 'ai-keys.json')
-  const keyStore = new AiKeyStore(keyFile, safe, 'win32')
+  keyStore = new AiKeyStore(keyFile, safe, 'win32')
   testConnection = vi.fn<() => Promise<{ model: string }>>(() =>
     Promise.resolve({ model: 'gpt-fake' })
   )
@@ -328,7 +337,9 @@ beforeEach(() => {
       () => provider,
       () => cloudProvider,
       () => appState.get().localAi,
-      () => provider
+      () => provider,
+      // As in index.ts: the author's choice, else OpenAI for an install holding an OpenAI key.
+      () => effectiveOwnKeyProvider(appState.get().ownKeyProvider, keyStore.hasKey('openai'))
     ),
     account: new AccountService({
       client: cloudClient,
@@ -1665,6 +1676,11 @@ describe('ai:chat (F-5.4)', () => {
       completionTokens: 8,
       cached: false
     })
+    // AI-BILLING-SPEC E7: the same row heads the usage history, with the page's row count.
+    expect(await invoke('ai:usageHistory', { offset: 0, limit: 50 })).toMatchObject({
+      total: 1,
+      rows: [{ feature: 'chat', model: 'gpt-fake', promptTokens: 90, cachedTokens: null }]
+    })
   })
 
   it('Agent mode: no deltas, the post-processed draft, a proposal carrying the fidelity flag', async () => {
@@ -1709,8 +1725,7 @@ describe('ai:chat (F-5.4)', () => {
       ok: false,
       code: 'DISABLED',
       message: 'Assistant chat needs Use AI turned on (it is off).',
-      nextStep:
-        'Turn on Use AI in Settings › AI, or enable the feature there.',
+      nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'req-9'
     })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
@@ -1872,8 +1887,7 @@ describe('ai:rewrite (F-14.10)', () => {
       ok: false,
       code: 'DISABLED',
       message: 'Rewrite in my voice needs Use AI turned on (it is off).',
-      nextStep:
-        'Turn on Use AI in Settings › AI, or enable the feature there.',
+      nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'rw-3'
     })
     expect(deltasSent()).toEqual([])
@@ -1998,8 +2012,7 @@ describe('ai:critique (F-14.8)', () => {
       ok: false,
       code: 'DISABLED',
       message: "Editor's notes needs Use AI turned on (it is off).",
-      nextStep:
-        'Turn on Use AI in Settings › AI, or enable the feature there.',
+      nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'cq-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -2119,8 +2132,7 @@ describe('ai:proofread (F-14.12)', () => {
       ok: false,
       code: 'DISABLED',
       message: 'Proofread needs Use AI turned on (it is off).',
-      nextStep:
-        'Turn on Use AI in Settings › AI, or enable the feature there.',
+      nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'pr-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -2228,8 +2240,7 @@ describe('ai:whatNext (F-5.17)', () => {
       ok: false,
       code: 'DISABLED',
       message: 'What comes next needs Use AI turned on (it is off).',
-      nextStep:
-        'Turn on Use AI in Settings › AI, or enable the feature there.',
+      nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'wn-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -2906,8 +2917,7 @@ describe('ai:betaReader (F-14.11)', () => {
       ok: false,
       code: 'DISABLED',
       message: 'Beta reader needs Use AI turned on (it is off).',
-      nextStep:
-        'Turn on Use AI in Settings › AI, or enable the feature there.',
+      nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'br-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -3035,8 +3045,7 @@ describe('ai:query (F-5.7)', () => {
       ok: false,
       code: 'DISABLED',
       message: 'Story Intelligence needs Use AI turned on (it is off).',
-      nextStep:
-        'Turn on Use AI in Settings › AI, or enable the feature there.',
+      nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'q-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -3110,27 +3119,28 @@ describe('ai:agent (F-5.22)', () => {
       model: 'gpt-fake',
       usage: { inputTokens: 400, outputTokens: 30 }
     })
-    complete
-      .mockResolvedValueOnce(said({ tool: 'outline', args: {} }))
-      .mockResolvedValueOnce(
-        said({
-          answer: 'Under the elm.',
-          found: true,
-          citations: [],
-          edits: [
-            {
-              edit: 'text',
-              id: loadAgentProject(manager.require().connection.orm).refOf.get(scene.id),
-              find: 'Mara copied the ledger twice',
-              replace: 'Mara copied it twice'
-            }
-          ]
-        })
-      )
+    complete.mockResolvedValueOnce(said({ tool: 'outline', args: {} })).mockResolvedValueOnce(
+      said({
+        answer: 'Under the elm.',
+        found: true,
+        citations: [],
+        edits: [
+          {
+            edit: 'text',
+            id: loadAgentProject(manager.require().connection.orm).refOf.get(scene.id),
+            find: 'Mara copied the ledger twice',
+            replace: 'Mara copied it twice'
+          }
+        ]
+      })
+    )
     const result = await invoke('ai:agent', ask(scene.id))
     if (!result.ok) throw new Error(result.message)
     expect(stepsSent()).toEqual([
-      ['ai:agentStep', { requestId: 'ag-1', step: { tool: 'outline', label: 'Reading the outline…' } }]
+      [
+        'ai:agentStep',
+        { requestId: 'ag-1', step: { tool: 'outline', label: 'Reading the outline…' } }
+      ]
     ])
     expect(result.steps).toHaveLength(1)
     expect(result.usage).toEqual({ inputTokens: 800, outputTokens: 60 })
@@ -3257,8 +3267,7 @@ describe('ai:draftBrief (F-14.3)', () => {
       ok: false,
       code: 'DISABLED',
       message: 'Scene brief drafts needs Use AI turned on (it is off).',
-      nextStep:
-        'Turn on Use AI in Settings › AI, or enable the feature there.',
+      nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'br-3'
     })
     expect(manager.require().connection.orm.select().from(aiProposal).all()).toHaveLength(0)
@@ -3535,10 +3544,8 @@ describe('scene summaries (F-5.6)', () => {
     expect(await invoke('ai:summarize', { nodeId: scene, requestId: 's-3' })).toEqual({
       ok: false,
       code: 'DISABLED',
-      message:
-        'Scene summaries, story bible, and tags needs Use AI turned on (it is off).',
-      nextStep:
-        'Turn on Use AI in Settings › AI, or enable the feature there.',
+      message: 'Scene summaries, story bible, and tags needs Use AI turned on (it is off).',
+      nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 's-3'
     })
     expect(complete).not.toHaveBeenCalled()
@@ -6230,12 +6237,19 @@ describe('ai handlers (F-5.1)', () => {
 
   it('reports no key and the encryption kind before anything is saved', async () => {
     expect(await invoke('ai:getStatus', undefined)).toEqual({
-      provider: 'openai',
+      // 2026-10-07: a fresh install's own key is for OpenRouter.
+      provider: 'openrouter',
       hasKey: false,
       hint: null,
       encryption: 'os',
+      canStoreKey: true,
       // F-15.4: both provider maps, since the AI tab edits the one the project's source names.
-      models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS, local: LOCAL_DEFAULT_MODELS },
+      models: {
+        openai: DEFAULT_MODELS,
+        cloud: DEFAULT_MODELS,
+        local: LOCAL_DEFAULT_MODELS,
+        openrouter: OPENROUTER_DEFAULT_MODELS
+      },
       local: { baseUrl: 'http://localhost:11434/v1' }
     })
   })
@@ -6243,17 +6257,60 @@ describe('ai handlers (F-5.1)', () => {
   it('stores a key, answers with a mask only, and never returns the key', async () => {
     const status = await invoke('ai:setKey', { key: `  ${KEY}  ` })
     expect(status).toEqual({
-      provider: 'openai',
+      provider: 'openrouter',
       hasKey: true,
       hint: 'sk-…abcd',
       encryption: 'os',
-      models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS, local: LOCAL_DEFAULT_MODELS },
+      canStoreKey: true,
+      models: {
+        openai: DEFAULT_MODELS,
+        cloud: DEFAULT_MODELS,
+        local: LOCAL_DEFAULT_MODELS,
+        openrouter: OPENROUTER_DEFAULT_MODELS
+      },
       local: { baseUrl: 'http://localhost:11434/v1' }
     })
     expect(JSON.stringify(status)).not.toContain(KEY)
     expect(await invoke('ai:getStatus', undefined)).toEqual(status)
     expect(fs.readFileSync(keyFile, 'utf8')).not.toContain(KEY)
     expect(safe.encrypted).toEqual([KEY])
+  })
+
+  it('keeps one key per provider and switches between them (OpenRouter, OpenAI)', async () => {
+    await invoke('ai:setKey', { key: KEY })
+    const openai = await invoke('ai:setOwnKeyProvider', { provider: 'openai' })
+    expect(openai).toMatchObject({ provider: 'openai', hasKey: false, hint: null })
+    await invoke('ai:setKey', { key: 'sk-openai-key-9999wxyz' })
+    expect(await invoke('ai:setOwnKeyProvider', { provider: 'openrouter' })).toMatchObject({
+      provider: 'openrouter',
+      hasKey: true,
+      hint: 'sk-…abcd'
+    })
+    await invoke('ai:clearKey', undefined)
+    expect(await invoke('ai:setOwnKeyProvider', { provider: 'openai' })).toMatchObject({
+      provider: 'openai',
+      hasKey: true,
+      hint: 'sk-…wxyz'
+    })
+  })
+
+  it('keeps an install that already holds an OpenAI key on OpenAI until the author picks', async () => {
+    // A key saved by a build from before OpenRouter, straight into the store.
+    keyStore.setKey('openai', KEY)
+    expect(await invoke('ai:getStatus', undefined)).toMatchObject({
+      provider: 'openai',
+      hasKey: true
+    })
+  })
+
+  it('stores the model-choice overrides and answers them with the Cloud table (M8, R4)', async () => {
+    expect(await invoke('ai:getModelChoice', undefined)).toEqual({
+      routing: { all: null, features: {} },
+      cloudPricing: null
+    })
+    const routing = { all: 'strong' as const, features: { tags: 'fast' as const } }
+    expect(await invoke('ai:setRouting', routing)).toEqual({ routing, cloudPricing: null })
+    expect(await invoke('ai:getModelChoice', undefined)).toMatchObject({ routing })
   })
 
   it('refuses a key outside the length bounds with VALIDATION', async () => {
@@ -6399,8 +6456,7 @@ describe('ai:recommendTags (F-4.7)', () => {
       ok: false,
       code: 'DISABLED',
       message: 'Tag suggestions needs Use AI turned on (it is off).',
-      nextStep:
-        'Turn on Use AI in Settings › AI, or enable the feature there.'
+      nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.'
     })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     complete.mockRejectedValueOnce(new InvalidKeyError('OpenAI rejected the API key.'))
@@ -6630,8 +6686,7 @@ describe('ai:ghostText (F-5.3)', () => {
       ok: false,
       code: 'DISABLED',
       message: 'Ghost text needs Use AI turned on (it is off).',
-      nextStep:
-        'Turn on Use AI in Settings › AI, or enable the feature there.',
+      nextStep: 'Turn on Use AI in Settings › AI, or enable the feature there.',
       requestId: 'req-8'
     })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
@@ -6883,7 +6938,12 @@ describe('ai:setModels (F-5.11)', () => {
   it('writes the Cloud map on its own, leaving the key path alone (F-15.4)', async () => {
     const cloud = { fast: 'gpt-5.4-mini', strong: 'gpt-5.4-nano' }
     const status = await invoke('ai:setModels', { provider: 'cloud', models: cloud })
-    expect(status.models).toEqual({ openai: DEFAULT_MODELS, cloud, local: LOCAL_DEFAULT_MODELS })
+    expect(status.models).toEqual({
+      openai: DEFAULT_MODELS,
+      cloud,
+      local: LOCAL_DEFAULT_MODELS,
+      openrouter: OPENROUTER_DEFAULT_MODELS
+    })
   })
 
   it('refuses an empty or over-long model id with VALIDATION and keeps the stored mapping', async () => {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_MODELS,
+  OPENROUTER_DEFAULT_MODELS,
   type AiModelMap,
   type AiStatus,
   type AiTestConnectionResult,
@@ -15,7 +16,12 @@ const NO_KEY: AiStatus = {
   hasKey: false,
   hint: null,
   encryption: 'os',
-  models: { openai: DEFAULT_MODELS, cloud: DEFAULT_MODELS, local: DEFAULT_MODELS },
+  models: {
+    openai: DEFAULT_MODELS,
+    cloud: DEFAULT_MODELS,
+    local: DEFAULT_MODELS,
+    openrouter: OPENROUTER_DEFAULT_MODELS
+  },
   local: { baseUrl: 'http://localhost:11434/v1' }
 }
 const WITH_KEY: AiStatus = { ...NO_KEY, hasKey: true, hint: 'sk-…abcd' }

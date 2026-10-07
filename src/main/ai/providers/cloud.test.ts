@@ -7,6 +7,7 @@ import {
   type CloudErrorCode,
   type CreditsResult
 } from '@shared/cloudApi'
+import { CloudPricing, hostedPriceFor } from '@shared/aiRouting'
 import { cloudPriceFor } from '@shared/cloudRates'
 import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import { AccountError } from '../../account/cloudAuthClient'
@@ -441,5 +442,17 @@ describe('buildCloudProvider.testConnection and price', () => {
       cloudPriceFor('gpt-5.4-mini', 100, 20)
     )
     expect(provider.id).toBe('cloud')
+  })
+
+  it('prices at the server table when it lists the model (P5), else at the bundled rate', () => {
+    const table = CloudPricing.parse({
+      markup: 0.2,
+      models: [{ model: 'gpt-5.4-mini', inUsdPerM: 1, outUsdPerM: 2, cachedInUsdPerM: 0.1 }]
+    })
+    const provider = build({ pricing: () => table })
+    expect(provider.price?.('gpt-5.4-mini', 1_000, 100, 500)).toEqual(
+      hostedPriceFor(table, 'gpt-5.4-mini', 1_000, 100, 500)
+    )
+    expect(provider.price?.('gpt-5.4', 100, 20)).toEqual(cloudPriceFor('gpt-5.4', 100, 20))
   })
 })
