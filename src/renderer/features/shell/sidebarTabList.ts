@@ -4,6 +4,7 @@ import {
   CalendarRange,
   FilePenLine,
   Globe,
+  Library,
   ListTree,
   MapPin,
   Tag,
@@ -14,6 +15,7 @@ import type { NovelFormat } from '@shared/ipc/contract'
 import type { SidebarTabId } from '@shared/sidebarTabs'
 import { EditPassTab } from '@renderer/features/editPass/EditPassTab'
 import { EntityTab } from '@renderer/features/entities/EntityTab'
+import { LibraryTab } from '@renderer/features/library/LibraryTab'
 import { ManuscriptTab } from '@renderer/features/manuscript/ManuscriptTab'
 import { OutlineTab } from '@renderer/features/outline/OutlineTab'
 import { TagsTab } from '@renderer/features/tags/TagsTab'
@@ -82,5 +84,11 @@ export const SIDEBAR_TABS: readonly [SidebarTab, ...SidebarTab[]] = [
     label: 'Edits',
     icon: FilePenLine,
     render: () => createElement(EditPassTab)
+  },
+  {
+    id: 'library',
+    label: 'Library',
+    icon: Library,
+    render: () => createElement(LibraryTab)
   }
 ]

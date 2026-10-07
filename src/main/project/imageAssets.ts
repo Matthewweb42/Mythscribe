@@ -33,9 +33,10 @@ export function addImageAsset(
   folder: string,
   dir: AssetDir,
   source: string,
-  fallbackStem: string
+  fallbackStem: string,
+  /** The name the stored file is named after; the source file name unless the caller knows better (F-9.8). */
+  name: string = path.basename(source)
 ): string {
-  const name = path.basename(source)
   const ext = imageExtension(name)
   if (ext === null) {
     throw new AppError(

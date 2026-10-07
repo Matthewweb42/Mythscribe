@@ -32,6 +32,16 @@ import { BackupSettingsPatch, BackupState } from '../backups'
 import { CheckoutBody, CreditsResult, EMAIL_MAX } from '../cloudApi'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { CompiledManuscript } from '../compile'
+import {
+  CONTEXT_FILE_MAX_BYTES,
+  ContextAddResult,
+  ContextApplyCounts,
+  ContextEstimate,
+  ContextFile,
+  ContextProcessResult,
+  ContextProgress,
+  ContextReview
+} from '../contextLibrary'
 import { ContinuityFinding } from '../continuity'
 import { CritiqueNotes } from '../critique'
 import {
@@ -1401,6 +1411,76 @@ export const contract = {
       replaced: z.number().int().nonnegative()
     })
   },
+  /** The context library (F-9.8): every uploaded file, newest first, with its state. */
+  'library:list': { input: z.undefined(), output: z.array(ContextFile) },
+  /**
+   * Opens the OS dialog for files to add to the library and answers their paths (empty when
+   * cancelled). Needs no open project: the new-project wizard picks files before the project
+   * exists and adds them with `library:add` once it does.
+   */
+  'library:choose': { input: z.undefined(), output: z.array(z.string()) },
+  /**
+   * Adds files to the library (F-9.8): `paths` as given, or the ones the author picks in the OS
+   * dialog when omitted (null when it is cancelled). A file whose name matches a stored one, or
+   * the row `replaceId` names (Update), replaces its original; an identical file changes nothing.
+   * Unsupported, oversized, and unreadable files are skipped with the reason. Nothing is sorted.
+   */
+  'library:add': {
+    input: z.object({
+      paths: z.array(z.string()).min(1).optional(),
+      replaceId: z.string().optional()
+    }),
+    output: ContextAddResult.nullable()
+  },
+  /** The same as `library:add` for files dropped on the window, carried as bytes. */
+  'library:addData': {
+    input: z.object({
+      files: z
+        .array(
+          z.object({
+            name: z.string().min(1),
+            data: z
+              .instanceof(Uint8Array)
+              .refine((data) => data.byteLength <= CONTEXT_FILE_MAX_BYTES, 'The file is too large')
+          })
+        )
+        .min(1)
+    }),
+    output: ContextAddResult
+  },
+  /** Opens a stored original in the OS's own app for its type. NOT_FOUND for an unknown id. */
+  'library:open': { input: z.object({ id: z.string() }), output: z.null() },
+  /**
+   * What sorting these files would send and cost (F-9.8), shown before the author confirms:
+   * the chunks of their new or changed text on the strong tier. Writes nothing.
+   */
+  'library:estimate': {
+    input: z.object({ fileIds: z.array(z.string()).min(1) }),
+    output: ContextEstimate
+  },
+  /**
+   * Sorts the files with the AI (F-9.8): every chunk is a request on the strong tier (a ledger
+   * row and a pending proposal each, `library:progress` after each), and the answer is the review
+   * — sheets to create or fill, conflicts, matches, tags, Project notes. Expected AI failures (Use
+   * AI off, no key, the cap, a stop through `ai:cancel { requestId }`) are data. Writes nothing.
+   */
+  'library:process': {
+    input: z.object({ fileIds: z.array(z.string()).min(1), requestId: z.string() }),
+    output: ContextProcessResult
+  },
+  /**
+   * Applies a reviewed upload in one transaction (F-9.8) and answers the sheets it wrote and the
+   * library with the files marked sorted. A sheet deleted since is NOT_FOUND, a name taken since
+   * ALREADY_EXISTS; either rolls everything back. Tags created here reach every bank as
+   * `tag:changed` and the manuscript is rescanned once.
+   */
+  'library:apply': {
+    input: z.object({ review: ContextReview }),
+    output: ContextApplyCounts.extend({
+      entities: z.array(Entity),
+      files: z.array(ContextFile)
+    })
+  },
   /**
    * What the manuscript states about one entity (F-5.16): every observed fact of it, oldest
    * first, the hidden ones included and flagged so the page can offer to restore them. An
@@ -2324,6 +2404,8 @@ export const events = {
   'jobs:changed': IndexQueueStatus,
   /** One more chunk of the import structure pass (F-12.3) was answered; the dialog shows chunks done and the spend so far. */
   'import:detectProgress': ImportDetectProgress,
+  /** One more chunk of a context-library upload was sorted (F-9.8); the dialog shows chunks done and the spend so far. */
+  'library:progress': ContextProgress,
   /** A running export (F-12.1) moved on: the stage and how far through it; the dialog shows a progress bar. */
   'export:progress': ExportProgress,
   /** The recorded mentions of these documents changed (F-4.12): a scan wrote rows, or a tag's tracking was turned off or the tag deleted (then every document). */

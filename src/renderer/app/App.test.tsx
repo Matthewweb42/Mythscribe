@@ -225,6 +225,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'snapshots:list') return []
     if (channel === 'structure:get') return { template: null }
     if (channel === 'timeline:get') return { events: [] }
+    if (channel === 'library:list') return []
     return null
   })
   const on = <E extends EventName>(
@@ -267,7 +268,9 @@ async function fillWizard(
   if (source) await userEvent.click(await screen.findByRole('radio', { name: source }))
   await userEvent.click(screen.getByRole('button', { name: 'Next' }))
   await userEvent.click(await screen.findByRole('radio', { name: dial }))
-  await userEvent.click(screen.getByRole('button', { name: 'Create' }))
+  // F-9.8: the optional worldbuilding step, skipped.
+  await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Create' }))
 }
 
 const createdScene = {
@@ -361,7 +364,8 @@ describe('App', () => {
       'Outline',
       'Timeline',
       'Tags',
-      'Edits'
+      'Edits',
+      'Library'
     ])
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
@@ -1047,7 +1051,7 @@ describe('App', () => {
     install({ 'project:create': new Error('Folder is not empty: /x') })
     render(<App />)
     await fillWizard('Smoke', /^novel/i)
-    const wizard = screen.getByRole('dialog', { name: 'Choose whether AI helps' })
+    const wizard = screen.getByRole('dialog', { name: 'Have worldbuilding docs? Add them' })
     expect(await within(wizard).findByRole('alert')).toHaveTextContent('Folder is not empty: /x')
     expect(screen.getByRole('status')).toBeEmptyDOMElement()
   })
@@ -1064,7 +1068,7 @@ describe('App', () => {
       aiSwitch: 'off'
     })
     expect(screen.getByRole('status')).toBeEmptyDOMElement()
-    expect(screen.getByRole('dialog', { name: 'Choose whether AI helps' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Have worldbuilding docs? Add them' })).toBeInTheDocument()
   })
 
   it('Cancel in the wizard returns to the welcome buttons', async () => {

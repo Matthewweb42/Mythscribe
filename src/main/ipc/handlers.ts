@@ -24,6 +24,7 @@ import {
   toExchangeRecord
 } from '@shared/entityExchange'
 import type { Background } from '@shared/focus'
+import type { ContextProcessResult } from '@shared/contextLibrary'
 import type { ImportDetectResult, PendingTagProposal } from '@shared/importStructure'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
 import { VOICE_JOB_DEBOUNCE_MS } from '@shared/voice'
@@ -99,6 +100,7 @@ import { assertFeatureAllowed } from '../ai/dial'
 import { draftBrief } from '../ai/draftBrief'
 import { generateGhostText } from '../ai/ghostText'
 import { detectImportStructure } from '../ai/importStructure'
+import { estimateContextImport, sortContextFiles } from '../ai/contextImport'
 import { cancelInflight, regenRequestId, registerInflight, releaseInflight } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
 import type { AutoTagsChange } from '../ai/autoTags'
@@ -152,6 +154,13 @@ import {
   updateGoals
 } from '../goals/goalsStore'
 import { importEntities, readEntityFile, writeEntityFile } from '../entity/entityExchange'
+import { applyContextReview } from '../library/apply'
+import {
+  addContextFiles,
+  listContextFiles,
+  requireContextFileRow,
+  storedPath
+} from '../library/libraryStore'
 import { getNotes, saveNotes } from '../document/notesStore'
 import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
 import { getSummary } from '../document/summaryStore'
@@ -1559,6 +1568,93 @@ export function registerHandlers({
       added: result.added,
       merged: result.merged,
       replaced: result.replaced
+    }
+  })
+
+  // F-9.8: the context library. Adding a file stores its original and reads its text; nothing is
+  // sent anywhere until the author confirms the estimate, and nothing reaches the story bible
+  // until they apply the review.
+  register('library:list', () => listContextFiles(manager.require().connection.orm))
+
+  register('library:choose', async () => (await dialogs.chooseContextFiles()) ?? [])
+
+  register('library:add', async ({ paths, replaceId }) => {
+    const session = manager.require()
+    const chosen = paths ?? (await dialogs.chooseContextFiles())
+    if (chosen === null) return null
+    const sources = (replaceId === undefined ? chosen : chosen.slice(0, 1)).map((file) => ({
+      name: path.basename(file),
+      read: () => fs.readFileSync(file)
+    }))
+    return addContextFiles(session.connection.orm, session.folder, sources, replaceId)
+  })
+
+  register('library:addData', async ({ files }) => {
+    const session = manager.require()
+    const sources = files.map((file) => ({ name: file.name, read: () => Buffer.from(file.data) }))
+    return addContextFiles(session.connection.orm, session.folder, sources)
+  })
+
+  register('library:open', async ({ id }) => {
+    const session = manager.require()
+    const row = requireContextFileRow(session.connection.orm, id)
+    const failure = await openPath(storedPath(session.folder, row.stored))
+    if (failure !== '') throw new AppError('IO', failure)
+    return null
+  })
+
+  register('library:estimate', async ({ fileIds }) => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const model = ai.get(sourceOf(db))?.resolveModel('strong') ?? ''
+    return estimateContextImport(db, session.folder, fileIds, model)
+  })
+
+  // Like `import:detectStructure` (F-12.3): the parent `requestId` is registered here so
+  // `ai:cancel` stops the whole pass; expected AI failures come back as data.
+  register('library:process', async ({ fileIds, requestId }): Promise<ContextProcessResult> => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const controller = registerInflight(requestId)
+    try {
+      const review = await sortContextFiles(db, requestDeps(db), {
+        folder: session.folder,
+        fileIds,
+        requestId,
+        signal: controller.signal,
+        onProgress: (progress) => emit(windows(), 'library:progress', progress)
+      })
+      return { ok: true, review }
+    } catch (err) {
+      if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
+      throw err
+    } finally {
+      releaseInflight(requestId)
+    }
+  })
+
+  /**
+   * F-9.8: the reviewed upload, in one transaction. As with `entity:importCommit`, the manuscript
+   * is rescanned once however many tags the sheets created, each created tag is announced on its
+   * own, and the new names reach the spellchecker.
+   */
+  register('library:apply', async ({ review }) => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const result = await applyContextReview(db, session.folder, review)
+    const announce = result.tagChanges.filter((change) => change.created || change.renamed)
+    if (announce.length > 0) {
+      rescanManuscript(db)
+      publishProposed()
+      for (const change of announce) emit(windows(), 'tag:changed', change.tag)
+    }
+    void syncSpelling()
+    return {
+      entities: result.entities,
+      files: result.files,
+      created: result.created,
+      updated: result.updated,
+      notes: result.notes
     }
   })
 

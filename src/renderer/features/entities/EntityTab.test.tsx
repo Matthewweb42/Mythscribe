@@ -97,6 +97,12 @@ describe('EntityTab (F-9.2)', () => {
     expect(screen.queryByRole('combobox', { name: 'Category' })).toBeNull()
   })
 
+  it('offers Upload context… on every story-bible tab, which opens the Library add (F-9.8)', async () => {
+    const calls = await renderLoaded('setting', { 'library:add': () => null })
+    await userEvent.click(screen.getByTestId('upload-context'))
+    expect(calls.at(-1)).toEqual(['library:add', {}])
+  })
+
   it('marks an entity the AI logged until the author edits it (F-5.16)', async () => {
     await renderLoaded('character', {
       'entity:list': () =>

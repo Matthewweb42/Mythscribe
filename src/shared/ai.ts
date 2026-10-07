@@ -253,7 +253,9 @@ export const AI_FEATURE_IDS = [
   // F-14.15: the edit passes (developmental, line, copy, proofread, continuity, custom).
   'editPass',
   // F-5.22: the chat agent, which looks things up in the project before it answers or edits.
-  'agent'
+  'agent',
+  // F-9.8: the context library, sorting the author's uploaded worldbuilding documents into sheets.
+  'contextImport'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -306,7 +308,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-14.15: up to 40 changes or notes for one chunk as JSON, each a quote, a replacement, and a reason.
   editPass: 4_000,
   // F-5.22: one step as JSON: a tool call, or the answer with citations and up to 8 edits.
-  agent: 1_500
+  agent: 1_500,
+  // F-9.8: one chunk's people, places, and things as JSON, each with its fields and details.
+  contextImport: 3_000
 }
 
 /**
@@ -364,7 +368,10 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-5.22: per step: the rules, the voice block, the open document (synopsis, notes head,
   // summary, caret window, selection), recent turns, and the tool results so far (each capped at
   // 6,000 characters; the oldest are dropped first when the step would go over).
-  agent: 12_000
+  agent: 12_000,
+  // F-9.8: one chunk of an uploaded document (≤ 16,000 characters, ~4,000 tokens), the rules,
+  // the existing sheet names (≤ 6,000 characters), and up to 40 image file names.
+  contextImport: 8_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

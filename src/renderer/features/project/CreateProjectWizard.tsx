@@ -12,17 +12,19 @@ import {
 } from '@shared/aiSettings'
 import { CLOUD_AI_AVAILABLE } from '@shared/cloudApi'
 import { PROJECT_NAME_MAX, type NovelFormat } from '@shared/ipc/contract'
+import { useLibraryStore } from '@renderer/features/library/libraryStore'
 import { PROJECT_FORMATS } from './formats'
 
-type Step = 'name' | 'format' | 'source' | 'dial'
+type Step = 'name' | 'format' | 'source' | 'dial' | 'context'
 
-const STEPS: readonly Step[] = ['name', 'format', 'source', 'dial']
+const STEPS: readonly Step[] = ['name', 'format', 'source', 'dial', 'context']
 
 const STEP_TITLE: Record<Step, string> = {
   name: 'New project',
   format: 'Choose a format',
   source: 'Choose an AI source',
-  dial: 'Choose whether AI helps'
+  dial: 'Choose whether AI helps',
+  context: 'Have worldbuilding docs? Add them'
 }
 
 /**
@@ -54,7 +56,8 @@ const sourceHint = (source: AiSource, signedInEmail: string | null): string =>
 const PREVIOUS: Record<Exclude<Step, 'name'>, Step> = {
   format: 'name',
   source: 'format',
-  dial: 'source'
+  dial: 'source',
+  context: 'dial'
 }
 
 function validateName(name: string): string | null {
@@ -71,9 +74,10 @@ const OPTION =
   'block cursor-pointer rounded-md border border-line bg-surface px-3 py-2 hover:bg-bg has-checked:border-accent has-focus-visible:outline-2 has-focus-visible:outline-accent has-disabled:cursor-not-allowed has-disabled:opacity-60 has-disabled:hover:bg-surface'
 
 /**
- * Four-step create-project form: name, then format (F-1.2), then where AI requests go
+ * Five-step create-project form: name, then format (F-1.2), then where AI requests go
  * (F-15.11), then whether AI helps (F-5.18, Use AI); both AI choices are switchable later in the AI
- * tab. The caller owns the save location. Own key is preselected; while Cloud does not serve AI
+ * tab. Last, optional, the author's worldbuilding files for the context library (F-9.8), only
+ * picked here; the caller adds them once the project exists. The caller owns the save location. Own key is preselected; while Cloud does not serve AI
  * yet (decided by the author 2026-10-07) its option is shown disabled with "Coming soon".
  */
 export function CreateProjectWizard({
@@ -91,7 +95,9 @@ export function CreateProjectWizard({
     name: string,
     format: NovelFormat,
     aiSource: AiSource,
-    aiSwitch: AiSwitch
+    aiSwitch: AiSwitch,
+    /** F-9.8: worldbuilding files for the context library, added once the project exists. */
+    contextPaths: string[]
   ) => Promise<void>
   /** Whether the Cloud source can be chosen; the shared flag unless a test says otherwise. */
   cloudAvailable?: boolean
@@ -102,6 +108,7 @@ export function CreateProjectWizard({
   const [format, setFormat] = useState<NovelFormat>('novel')
   const [aiSource, setAiSource] = useState<AiSource>('ownKey')
   const [useAi, setUseAi] = useState<UseAi>(RECOMMENDED_USE_AI)
+  const [contextPaths, setContextPaths] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fieldsetRef = useRef<HTMLFieldSetElement>(null)
@@ -138,9 +145,13 @@ export function CreateProjectWizard({
       setStep('dial')
       return
     }
+    if (step === 'dial') {
+      setStep('context')
+      return
+    }
     setError(null)
     try {
-      await onCreate(trimmed, format, aiSource, switchFor(useAi))
+      await onCreate(trimmed, format, aiSource, switchFor(useAi), contextPaths)
     } catch (err) {
       // The author is looking at this form, so the failure belongs here, not in a toast.
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -253,6 +264,72 @@ export function CreateProjectWizard({
                 › AI.
               </p>
             </>
+          ) : step === 'context' ? (
+            <>
+              <p className="mt-4 mb-0 text-sm text-fg-muted">
+                Character notes, settings, world rules, a plot outline, maps, or art (Word,
+                Markdown, text, PDF, images). They are kept in the project’s Library.
+                {useAi === 'on'
+                  ? ' Once the project is open, the AI sorts them into your story bible: you see the cost first and review everything before it lands.'
+                  : ' Turn on Use AI later to have them sorted into your story bible.'}{' '}
+                Optional: skip this and press Create.
+              </p>
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="wizard-context-add"
+                  disabled={busy}
+                  onClick={() => {
+                    useLibraryStore
+                      .getState()
+                      .choosePaths()
+                      .then((chosen) =>
+                        setContextPaths((held) => [
+                          ...held,
+                          ...chosen.filter((file) => !held.includes(file))
+                        ])
+                      )
+                      .catch((err: unknown) =>
+                        setError(err instanceof Error ? err.message : 'Something went wrong')
+                      )
+                  }}
+                  className={SECONDARY_BUTTON}
+                >
+                  Add files…
+                </button>
+                <span className="text-xs text-fg-subtle">
+                  {contextPaths.length === 0
+                    ? 'No files yet'
+                    : `${contextPaths.length} ${contextPaths.length === 1 ? 'file' : 'files'}`}
+                </span>
+              </div>
+              {contextPaths.length > 0 ? (
+                <ul className="mt-2 mb-0 list-none p-0" aria-label="Files to add">
+                  {contextPaths.map((file) => {
+                    const fileName = file.split(/[\\/]/).pop() ?? file
+                    return (
+                      <li key={file} className="flex items-center gap-2 text-sm">
+                        <span className="min-w-0 flex-1 truncate" title={file}>
+                          {fileName}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${fileName}`}
+                          disabled={busy}
+                          onClick={() => setContextPaths((held) => held.filter((f) => f !== file))}
+                          className="rounded px-1.5 text-fg-muted hover:bg-surface hover:text-fg"
+                        >
+                          ×
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : null}
+              <p className="mt-3 mb-0 text-xs text-fg-muted">
+                Next, choose where to save the project (defaults to Documents/MythScribe).
+              </p>
+            </>
           ) : (
             <>
               <p data-testid="wizard-dial-explainer" className="mt-4 mb-0 text-sm text-fg-muted">
@@ -288,8 +365,7 @@ export function CreateProjectWizard({
                 ))}
               </fieldset>
               <p className="mt-3 mb-0 text-xs text-fg-muted">
-                Change it any time in Settings › AI. Next, choose where to save the project
-                (defaults to Documents/MythScribe).
+                Change it any time in Settings › AI.
               </p>
             </>
           )}
@@ -314,7 +390,7 @@ export function CreateProjectWizard({
               Cancel
             </button>
             <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
-              {step === 'dial' ? 'Create' : 'Next'}
+              {step === 'context' ? 'Create' : 'Next'}
             </button>
           </div>
         </>

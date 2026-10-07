@@ -1,0 +1,24 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`contextImport.v1 prompt (F-9.8) > matches the golden messages for the fixture and asks for the feature output budget 1`] = `
+[
+  {
+    "content": "You are the context-library feature inside a novel-writing app, sorting the author’s own notes into their story bible. Read the document and list every character (people and beings), setting (places), and world item (cultures, magic, history, organisations, objects, rules of the world) it describes. Use only what the document states, in the author’s words; never invent or embellish. When someone or something is one of the existing sheets listed (or a nickname of one), use that sheet’s name exactly and put the other names in "aliases". Put a fact in a field when one fits, using these field ids per kind: character: age, born, gender, appearance, personality, background, goals, relationships; setting: type, description, atmosphere, features, associatedCharacters; world: category, description, rules, impact. Keep one-line fields (age, born, gender, type, category) short. Everything else about it goes in "details" as short paragraphs, each starting with a topic and a colon ("History: …"). What fits no sheet (themes, the plot outline, rules for the book) goes in "notes" the same way. When an image file name or the text says whom or what a listed image shows, add it to "images". Reply with JSON only: {"entities":[{"kind":"character","name":"Mara Vell","aliases":["Mara"],"fields":{"age":"34"},"details":["History: …"]}],"notes":["Theme: …"],"images":[{"file":"mara.png","name":"Mara Vell"}]}. Empty lists are fine.",
+    "role": "system",
+  },
+  {
+    "content": "Existing sheets:
+Characters: Mara Vell, Tomas
+Settings: The Ferry Landing
+World: (none)
+
+Images: mara-portrait.png
+
+Document "characters.md":
+Mara Vell, called Mara, is thirty-four.
+
+The Elm Court: the old guild of ferrymen.",
+    "role": "user",
+  },
+]
+`;

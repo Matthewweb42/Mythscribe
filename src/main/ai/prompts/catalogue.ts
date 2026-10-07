@@ -52,6 +52,7 @@ import { SYNOPSIS_PROMPT_VERSION } from './synopsis.v1'
 import { NOTES_SUGGEST_PROMPT_VERSION } from './notesSuggest.v1'
 import { AGENT_PROMPT_VERSION } from './agent.v1'
 import { EDIT_PASS_PROMPT_VERSION } from './editPass.v1'
+import { CONTEXT_IMPORT_PROMPT_VERSION } from './contextImport.v1'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -118,7 +119,8 @@ export const PROMPT_VERSIONS = [
   NOTES_SUGGEST_PROMPT_VERSION,
   VOICE_NOTES_PROMPT_VERSION,
   EDIT_PASS_PROMPT_VERSION,
-  AGENT_PROMPT_VERSION
+  AGENT_PROMPT_VERSION,
+  CONTEXT_IMPORT_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -370,7 +372,13 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     output: 'json',
     since: 'F-14.15'
   },
-  [AGENT_PROMPT_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-5.22' }
+  [AGENT_PROMPT_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-5.22' },
+  [CONTEXT_IMPORT_PROMPT_VERSION]: {
+    feature: 'contextImport',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-9.8'
+  }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

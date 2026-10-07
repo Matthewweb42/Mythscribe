@@ -45,10 +45,15 @@ const STEM_MAX = 40
  * The stored file name for an imported image: the original stem, reduced to letters, digits,
  * `_` and `-` (spaces become `-`) and capped, then a short id, then the extension, so the
  * author still recognises `sunset-over-harbor.png` where the name is shown. `fallbackStem`
- * stands in when nothing of the stem survives.
+ * stands in when nothing of the stem survives. `ext` defaults to the image extension of the name
+ * (`png` for none); the context library (F-9.8) passes the document's own.
  */
-export function assetFileName(originalName: string, shortId: string, fallbackStem: string): string {
-  const ext = imageExtension(originalName) ?? 'png'
+export function assetFileName(
+  originalName: string,
+  shortId: string,
+  fallbackStem: string,
+  ext: string = imageExtension(originalName) ?? 'png'
+): string {
   const dot = originalName.lastIndexOf('.')
   const rawStem = dot > 0 ? originalName.slice(0, dot) : ''
   const stem =

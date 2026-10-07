@@ -234,6 +234,34 @@ function scoreStructure(
     : { kind: 'json', ok: false, problem: `outside the chunk or the bank: ${strays.join(', ')}` }
 }
 
+const ContextImportAnswer = z.object({
+  entities: z.array(z.object({ kind: z.enum(['character', 'setting', 'world']), name: z.string() })),
+  notes: z.array(z.string()).nullish()
+})
+
+/**
+ * A context-library chunk (F-9.8) scores on what the runner keeps: the answer must parse to the
+ * shape the prompt asks for, and every name the document clearly describes must be among the
+ * entities (compared lower-cased, so "the ferry landing" counts).
+ */
+function scoreContextImport(expected: string[], answer: string): LiveResult['verdict'] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(answer)
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not JSON' }
+  }
+  const result = ContextImportAnswer.safeParse(parsed)
+  if (!result.success) {
+    return { kind: 'json', ok: false, problem: 'not { entities: [{ kind, name }], notes }' }
+  }
+  const names = new Set(result.data.entities.map((entity) => entity.name.trim().toLowerCase()))
+  const missing = expected.filter((name) => !names.has(name.toLowerCase()))
+  return missing.length === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `missing: ${missing.join(', ')}` }
+}
+
 const ContinuityAnswer = z.object({
   findings: z.array(z.object({ ref: z.number(), quote: z.string() }))
 })
@@ -604,6 +632,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
       }
       if (c.scoring.kind === 'voiceNotes') {
         results.push({ ...base, answer: reply.text, verdict: scoreVoiceNotes(reply.text) })
+        continue
+      }
+      if (c.scoring.kind === 'contextImport') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreContextImport(c.scoring.expected, reply.text)
+        })
         continue
       }
       if (c.scoring.kind === 'structure') {

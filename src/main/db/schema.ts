@@ -24,6 +24,7 @@ import {
   EDIT_PASS_STATUSES,
   EDIT_PASS_TYPES
 } from '../../shared/editPass'
+import { CONTEXT_FILE_TYPES } from '../../shared/contextLibrary'
 import { ENTITY_KINDS, ENTITY_ORIGINS, ENTITY_TEMPLATES } from '../../shared/entities'
 import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
@@ -661,3 +662,33 @@ export const editChange = sqliteTable(
   ]
 )
 export type EditChangeRow = typeof editChange.$inferSelect
+
+/**
+ * One uploaded file of the context library (F-9.8). `stored` is the original's file name under
+ * the project's `assets/library/` (`<stem>.<8 hex>.<ext>`); `hash` is the file's SHA-256, so an
+ * identical re-upload changes nothing. `text_hash` is the SHA-256 of the extracted text (null for
+ * an image, or a document with no text: a scanned PDF). `processed_text` and `processed_hash` are
+ * the text as it was last sorted into the story bible, so an updated upload sends only the
+ * paragraphs that changed; `processed_at` is when Apply ran. The state is derived from the hashes.
+ */
+export const contextFile = sqliteTable(
+  'context_file',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    type: text('type', { enum: CONTEXT_FILE_TYPES }).notNull(),
+    size: integer('size').notNull(),
+    hash: text('hash').notNull(),
+    stored: text('stored').notNull(),
+    words: integer('words').notNull().default(0),
+    textHash: text('text_hash'),
+    processedHash: text('processed_hash'),
+    processedText: text('processed_text'),
+    processedAt: text('processed_at'),
+    created: text('created').notNull(),
+    modified: text('modified').notNull()
+  },
+  (t) => [index('context_file_name_idx').on(t.name)]
+)
+export type ContextFileRow = typeof contextFile.$inferSelect
+export type ContextFileInsert = typeof contextFile.$inferInsert
