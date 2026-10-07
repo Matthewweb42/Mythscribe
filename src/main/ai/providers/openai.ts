@@ -56,6 +56,7 @@ interface UsageBlock {
   prompt_tokens: number
   completion_tokens: number
   prompt_tokens_details?: { cached_tokens?: number } | null
+  completion_tokens_details?: { reasoning_tokens?: number } | null
 }
 
 /**
@@ -64,10 +65,12 @@ interface UsageBlock {
  */
 export function usageOf(usage: UsageBlock | undefined | null): CompletionUsage {
   const cached = usage?.prompt_tokens_details?.cached_tokens
+  const reasoning = usage?.completion_tokens_details?.reasoning_tokens
   return {
     inputTokens: usage?.prompt_tokens ?? 0,
     outputTokens: usage?.completion_tokens ?? 0,
-    ...(typeof cached === 'number' && cached >= 0 ? { cachedInputTokens: cached } : {})
+    ...(typeof cached === 'number' && cached >= 0 ? { cachedInputTokens: cached } : {}),
+    ...(typeof reasoning === 'number' && reasoning > 0 ? { reasoningTokens: reasoning } : {})
   }
 }
 
@@ -110,10 +113,12 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
         const completion = await client.chat.completions.create(params(request), {
           signal: request.signal
         })
+        const finishReason = completion.choices[0]?.finish_reason
         return {
           text: completion.choices[0]?.message.content ?? '',
           model: completion.model,
-          usage: usageOf(completion.usage)
+          usage: usageOf(completion.usage),
+          ...(finishReason ? { finishReason } : {})
         }
       } catch (err) {
         throw mapError(err)
@@ -130,9 +135,12 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
         for await (const chunk of chunks) {
           assertNotCancelled(request.signal)
           const delta = chunk.choices[0]?.delta.content ?? ''
+          const finishReason = chunk.choices[0]?.finish_reason
           const usage = chunk.usage
           if (usage) {
             yield { delta, usage: usageOf(usage) }
+          } else if (finishReason) {
+            yield { delta, finishReason }
           } else if (delta) {
             yield { delta }
           }

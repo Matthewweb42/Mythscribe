@@ -87,6 +87,7 @@ import { aiProposal } from '../db/schema'
 import { AppStateStore } from '../appState/appStateStore'
 import { BackupService } from '../backups/backupService'
 import { DiagnosticsService } from '../diagnostics/diagnosticsService'
+import { DevToolsService } from '../devtools/devToolsService'
 import { UpdateService } from '../updates/updateService'
 import type { ProjectDialogs } from '../dialogs'
 import { ProjectManager } from '../project/manager'
@@ -223,6 +224,18 @@ const localDiagnostics = (appState: AppStateStore): DiagnosticsService =>
     onChange: () => {}
   })
 
+/** Developer tools over the test's app state; `devtoolsOpenChromium` records the DevTools button. */
+let devtoolsOpenChromium = vi.fn<() => void>()
+let devtools: DevToolsService
+const localDevTools = (appState: AppStateStore): DevToolsService =>
+  new DevToolsService({
+    appState,
+    onChange: () => {},
+    onLog: () => {},
+    onRequest: () => {},
+    openChromium: () => devtoolsOpenChromium()
+  })
+
 const dialogs: ProjectDialogs = {
   chooseProjectSavePath: async () => null,
   chooseProjectToOpen: async () => null,
@@ -348,6 +361,8 @@ beforeEach(() => {
     now: () => accessNow,
     schedule: () => () => {}
   })
+  devtoolsOpenChromium = vi.fn<() => void>()
+  devtools = localDevTools(appState)
   registerHandlers({
     manager,
     appState,
@@ -375,6 +390,7 @@ beforeEach(() => {
     // itself is tested in `updates/updateService.test.ts`.
     updates: unsupportedUpdates(appState),
     diagnostics: localDiagnostics(appState),
+    devtools,
     backups: localBackups(appState),
     dialogs,
     windows: () => [fakeWin],
@@ -5945,6 +5961,7 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
       access,
       updates: unsupportedUpdates(appState),
       diagnostics: localDiagnostics(appState),
+      devtools: localDevTools(appState),
       backups: localBackups(appState),
       dialogs,
       windows: () => [fakeWin],
@@ -6209,6 +6226,132 @@ describe('backups handlers (F-8.4)', () => {
     const dirs = fs.readdirSync(backupsRoot())
     expect(dirs).toHaveLength(1)
     expect(fs.readdirSync(path.join(backupsRoot(), dirs[0] ?? ''))).toHaveLength(1)
+  })
+})
+
+describe('developer tools handlers (2026-10-07)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const BEFORE = 'The storm broke at dusk over the dark forest. Mara counted the lightning gaps.'
+
+  async function sceneWithKey(): Promise<string> {
+    await invoke('project:create', { name: 'Dev', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    await invoke('ai:setKey', { key: KEY })
+    return scene.id
+  }
+
+  it('is off on a fresh install and records nothing while off', async () => {
+    expect(await invoke('devtools:getState', undefined)).toEqual({ enabled: false })
+    const scene = await sceneWithKey()
+    complete.mockRejectedValueOnce(new AiNetworkError('The network is down.'))
+    await invoke('ai:ghostText', { nodeId: scene, before: BEFORE, after: '', requestId: 'g-1' })
+    await invoke('devtools:ghostSkip', { reason: 'newChars' })
+    await invoke('devtools:log', { level: 'error', message: 'boom', details: null })
+    expect(await invoke('devtools:snapshot', undefined)).toEqual({
+      enabled: false,
+      log: [],
+      requests: []
+    })
+    await expect(invoke('devtools:openChromium', undefined)).rejects.toThrowError(/^VALIDATION/)
+    expect(devtoolsOpenChromium).not.toHaveBeenCalled()
+  })
+
+  it('traces a failed AI request with its code and logs it, and an IPC failure with channel and code', async () => {
+    const scene = await sceneWithKey()
+    await invoke('devtools:setEnabled', { on: true })
+    complete.mockRejectedValueOnce(new AiNetworkError('The network is down.'))
+    const failed = await invoke('ai:ghostText', {
+      nodeId: scene,
+      before: BEFORE,
+      after: '',
+      requestId: 'g-2'
+    })
+    expect(failed.ok).toBe(false)
+    await expect(invoke('tree:rename', { id: 'missing', title: 'x' })).rejects.toThrowError()
+
+    const { requests, log } = await invoke('devtools:snapshot', undefined)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      feature: 'ghostText',
+      requestId: 'g-2',
+      status: 'failed',
+      errorCode: 'NETWORK',
+      provider: 'openai',
+      model: 'gpt-fake',
+      tier: 'fast',
+      maxTokens: 40,
+      hasText: true
+    })
+    expect(requests[0]!.totalMs).not.toBeNull()
+    expect(log.map((e) => [e.level, e.source])).toEqual([
+      ['error', 'ai'],
+      ['warn', 'ipc']
+    ])
+    expect(log[0]!.message).toContain('NETWORK')
+    expect(log[1]!.message).toMatch(/^tree:rename failed: [A-Z_]+: /)
+  })
+
+  it('says why ghost text showed nothing: empty after post-processing, with the finish reason and reasoning tokens', async () => {
+    const scene = await sceneWithKey()
+    await invoke('devtools:setEnabled', { on: true })
+    complete.mockResolvedValueOnce({
+      text: '',
+      model: 'gpt-fake',
+      usage: { inputTokens: 900, outputTokens: 40, reasoningTokens: 40 },
+      finishReason: 'length'
+    })
+    const result = await invoke('ai:ghostText', {
+      nodeId: scene,
+      before: BEFORE,
+      after: '',
+      requestId: 'g-3'
+    })
+    expect(result).toMatchObject({ ok: true, text: '' })
+    await invoke('devtools:ghostSkip', { reason: 'visible' })
+
+    const { requests } = await invoke('devtools:snapshot', undefined)
+    expect(requests[0]).toMatchObject({
+      status: 'ok',
+      finishReason: 'length',
+      outputTokens: 40,
+      reasoningTokens: 40,
+      answerChars: 0
+    })
+    expect(requests[0]!.note).toBe(
+      'No suggestion: empty after post-processing (raw answer 0 characters, finish reason length, 40 of 40 output tokens, 40 of them reasoning)'
+    )
+    expect(requests[1]).toMatchObject({ feature: 'ghostText', status: 'skipped' })
+    expect(requests[1]!.note).toBe('A suggestion is showing')
+
+    const text = await invoke('devtools:requestText', { id: requests[0]!.id })
+    expect(text?.response).toBe('')
+    expect(text?.messages.some((m) => m.content.includes('Mara counted'))).toBe(true)
+  })
+
+  it('opens Chromium DevTools, copies a report without the key, and drops everything when turned off', async () => {
+    await sceneWithKey()
+    await invoke('devtools:setEnabled', { on: true })
+    await invoke('devtools:log', { level: 'warn', message: `leaked ${KEY}`, details: null })
+    await invoke('devtools:openChromium', undefined)
+    expect(devtoolsOpenChromium).toHaveBeenCalledTimes(1)
+
+    const report = await invoke('devtools:report', undefined)
+    expect(report).toContain('MythScribe diagnostics')
+    expect(report).toContain('Key saved: yes')
+    expect(report).toContain('Project source: ownKey')
+    expect(report).toContain('[renderer] leaked [redacted]')
+    expect(report).not.toContain(KEY)
+    expect(report).not.toContain('1234abcd')
+
+    await invoke('devtools:clear', { what: 'log' })
+    expect((await invoke('devtools:snapshot', undefined)).log).toEqual([])
+    await invoke('devtools:log', { level: 'warn', message: 'again', details: null })
+    await invoke('devtools:setEnabled', { on: false })
+    await invoke('devtools:setEnabled', { on: true })
+    expect((await invoke('devtools:snapshot', undefined)).log).toEqual([])
   })
 })
 

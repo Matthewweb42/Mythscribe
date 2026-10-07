@@ -19,6 +19,12 @@ export interface CompletionUsage {
    * R6); absent when the provider does not say. Priced at the cached-input rate.
    */
   cachedInputTokens?: number
+  /**
+   * How many of `outputTokens` a reasoning model spent thinking (OpenAI's and OpenRouter's
+   * `completion_tokens_details.reasoning_tokens`); absent when the provider does not say. Shown
+   * by the developer tools' AI inspector only.
+   */
+  reasoningTokens?: number
 }
 
 export interface CompletionRequest {
@@ -45,6 +51,8 @@ export interface CompletionResult {
   text: string
   model: string
   usage: CompletionUsage
+  /** Why the answer ended (`stop`, `length`…), when the provider said; for the AI inspector. */
+  finishReason?: string
 }
 
 export interface StreamChunk {
@@ -55,6 +63,8 @@ export interface StreamChunk {
    * request path then falls back to its own estimate.
    */
   usage?: CompletionUsage
+  /** Why the answer ended, on the chunk that carries it; for the AI inspector. */
+  finishReason?: string
 }
 
 export interface Provider {

@@ -1,8 +1,8 @@
 import { Menu, type MenuItemConstructorOptions } from 'electron'
 import type { NovelFormat } from '@shared/ipc/contract'
 import {
-  MENU,
   isMenuItemEnabled,
+  menuFor,
   isSeparator,
   menuAccelerator,
   menuItemChord,
@@ -53,6 +53,8 @@ export function buildMenuTemplate(
 
 export interface InstallMenuDeps {
   manager: Pick<ProjectManager, 'current' | 'onChange'>
+  /** Whether developer tools are on (Help › Developer items); read on every rebuild. */
+  devTools: () => boolean
   platform: NodeJS.Platform
   /** The window a click goes to: the focused one, else the first. */
   target: () => EmitTarget | null
@@ -62,12 +64,15 @@ export interface InstallMenuDeps {
  * Builds and sets the application menu, and rebuilds it whenever the project changes so the
  * `project` items enable and the Insert labels follow the format. Each click emits
  * `menu:action` to the target window; the renderer's `runMenuAction` does the work. Returns
- * the unsubscribe from the manager.
+ * the unsubscribe from the manager and `rebuild`, which the developer tools switch calls.
  */
-export function installApplicationMenu({ manager, platform, target }: InstallMenuDeps): () => void {
+export function installApplicationMenu({ manager, devTools, platform, target }: InstallMenuDeps): {
+  dispose: () => void
+  rebuild: () => void
+} {
   const apply = (): void => {
     const template = buildMenuTemplate(
-      MENU,
+      menuFor({ devTools: devTools() }),
       { format: manager.current()?.format ?? null, platform },
       (id) => {
         const win = target()
@@ -77,5 +82,5 @@ export function installApplicationMenu({ manager, platform, target }: InstallMen
     Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   }
   apply()
-  return manager.onChange(apply)
+  return { dispose: manager.onChange(apply), rebuild: apply }
 }

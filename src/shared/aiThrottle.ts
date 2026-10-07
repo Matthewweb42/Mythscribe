@@ -32,8 +32,20 @@ export interface ThrottleInput {
 }
 
 export function shouldTrigger(input: ThrottleInput): boolean {
-  if (input.pending || input.visible) return false
-  if (input.idleMs < input.minIdleMs) return false
-  if (input.newChars < input.minNewChars) return false
-  return input.requestsToday < input.dailyRequestCap
+  return throttleReason(input) === null
+}
+
+/**
+ * Why `shouldTrigger` says no, in the order it asks, or null when a request may leave. The
+ * developer tools' AI inspector shows it (2026-10-07), so "VibeWrite shows nothing" has a cause.
+ */
+export function throttleReason(
+  input: ThrottleInput
+): 'pending' | 'visible' | 'idle' | 'newChars' | 'dailyCap' | null {
+  if (input.pending) return 'pending'
+  if (input.visible) return 'visible'
+  if (input.idleMs < input.minIdleMs) return 'idle'
+  if (input.newChars < input.minNewChars) return 'newChars'
+  if (input.requestsToday >= input.dailyRequestCap) return 'dailyCap'
+  return null
 }

@@ -64,8 +64,23 @@ describe('AppStateStore', () => {
       localAi: defaultLocalAiSettings(),
       routing: defaultAiRouting(),
       cloudPricing: null,
-      trial: null
+      trial: null,
+      devTools: false
     })
+  })
+
+  it('reads the developer tools switch leniently: off in older files and for a bad value', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().devTools).toBe(false)
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ version: 1, recents: [entry], devTools: 'yes' }),
+      'utf8'
+    )
+    const bad = new AppStateStore(file).get()
+    expect(bad.devTools).toBe(false)
+    expect(bad.recents).toEqual([entry])
   })
 
   it('reads the M1 trial clock leniently: none in older files, and a bad value starts afresh', () => {

@@ -1,7 +1,7 @@
 import { APIUserAbortError } from 'openai'
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, OPENROUTER_BASE_URL, type Tier } from '@shared/ai'
-import { buildOpenAiProvider, mapOpenAiError, type FetchLike } from './openai'
+import { buildOpenAiProvider, mapOpenAiError, usageOf, type FetchLike } from './openai'
 import { AiProviderError, type CompletionRequest, type StreamChunk } from './types'
 
 interface Call {
@@ -94,7 +94,9 @@ describe('buildOpenAiProvider.complete (F-5.1)', () => {
     expect(result).toEqual({
       text: 'hi',
       model: 'gpt-5.4-mini-2026-03-17',
-      usage: { inputTokens: 7, outputTokens: 2 }
+      usage: { inputTokens: 7, outputTokens: 2 },
+      // Developer tools: the AI inspector shows why the answer ended.
+      finishReason: 'stop'
     })
     expect(calls).toHaveLength(1)
     expect(calls[0]?.url).toMatch(/\/chat\/completions$/)
@@ -486,5 +488,24 @@ describe('OpenRouter (AI-BILLING-SPEC A2)', () => {
     await expect(
       openRouter(answering(() => apiError(404, null)).fetch).complete(request)
     ).rejects.toThrowError(/OpenRouter does not have that model.*openrouter\.ai\/models/)
+  })
+})
+
+describe('usageOf', () => {
+  it('reports reasoning tokens only when the provider counted some (developer tools)', () => {
+    expect(
+      usageOf({
+        prompt_tokens: 900,
+        completion_tokens: 40,
+        completion_tokens_details: { reasoning_tokens: 40 }
+      })
+    ).toEqual({ inputTokens: 900, outputTokens: 40, reasoningTokens: 40 })
+    expect(
+      usageOf({
+        prompt_tokens: 9,
+        completion_tokens: 4,
+        completion_tokens_details: { reasoning_tokens: 0 }
+      })
+    ).toEqual({ inputTokens: 9, outputTokens: 4 })
   })
 })

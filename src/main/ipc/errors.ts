@@ -1,5 +1,8 @@
 import type { IpcError, IpcErrorCode } from '@shared/ipc/contract'
 
+/** How a failed channel is written to the console; developer tools skip such lines (they log the failure itself). */
+export const IPC_LOG_PREFIX = '[ipc]'
+
 /** Throw this from handlers to return a typed error to the renderer. */
 export class AppError extends Error {
   constructor(

@@ -169,8 +169,10 @@ describe('installApplicationMenu (F-7.1)', () => {
         return () => listeners.splice(listeners.indexOf(listener), 1)
       }
     }
-    const off = installApplicationMenu({
+    let devTools = false
+    const { dispose: off, rebuild } = installApplicationMenu({
       manager: fakeManager,
+      devTools: () => devTools,
       platform: 'linux',
       target: () => win
     })
@@ -187,13 +189,27 @@ describe('installApplicationMenu (F-7.1)', () => {
 
     item(second, 'openShortcuts').click?.(undefined as never, undefined, undefined as never)
     expect(send).toHaveBeenCalledWith('menu:action', { id: 'openShortcuts' })
+    expect(JSON.stringify(second)).not.toContain('openDeveloperTools')
+
+    // Developer tools: the Help items appear on the rebuild after the switch turns on.
+    devTools = true
+    rebuild()
+    const third = built(2)
+    item(third, 'openDeveloperTools').click?.(undefined as never, undefined, undefined as never)
+    expect(send).toHaveBeenCalledWith('menu:action', { id: 'openDeveloperTools' })
+    expect(item(third, 'openChromiumDevTools').enabled).toBe(true)
     off()
     expect(listeners).toEqual([])
   })
 
   it('drops a click when there is no window to send it to', () => {
     const manager = new ProjectManager()
-    installApplicationMenu({ manager, platform: 'win32', target: () => null })
+    installApplicationMenu({
+      manager,
+      devTools: () => false,
+      platform: 'win32',
+      target: () => null
+    })
     const template = built(0)
     expect(() =>
       item(template, 'openAbout').click?.(undefined as never, undefined, undefined as never)

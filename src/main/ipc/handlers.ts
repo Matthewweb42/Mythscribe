@@ -3,9 +3,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
 import {
-  aiFailure,
+  aiFailure as aiFailureEnvelope,
   AiFeatureId,
   testConnectionFailure,
+  type AiErrorCode,
   type AiStatus,
   type AiTestConnectionResult,
   USAGE_RECENT_LIMIT,
@@ -19,6 +20,7 @@ import { EXPORT_EXTENSIONS, EXPORT_FORMAT_LABELS } from '@shared/bookExport'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl, type PricingResult } from '@shared/cloudApi'
 import { bundledPricing, hostedQuote } from '@shared/hostedPricing'
 import { aiRequestCounter } from '@shared/diagnostics'
+import { formatDiagnosticsReport } from '@shared/devtools'
 import { ENTITY_IMAGES_DIR, ENTITY_KIND_LABEL } from '@shared/entities'
 import {
   ENTITY_EXCHANGE_EXTENSIONS,
@@ -52,6 +54,7 @@ import type {
   AiSuggestSynopsisResult,
   Channel,
   Entity,
+  IpcError,
   JobsIndexAllResult
 } from '@shared/ipc/contract'
 import {
@@ -75,6 +78,7 @@ import type { AccountService } from '../account/accountService'
 import type { AppAccessService } from '../account/appAccess'
 import type { BackupService } from '../backups/backupService'
 import type { DiagnosticsService } from '../diagnostics/diagnosticsService'
+import type { DevToolsService } from '../devtools/devToolsService'
 import type { UpdateService } from '../updates/updateService'
 import { runBetaReader } from '../ai/betaReader'
 import { runChat } from '../ai/chat'
@@ -360,6 +364,12 @@ export interface HandlerDeps {
    */
   diagnostics: DiagnosticsService
   /**
+   * Developer tools (2026-10-07): the live log and the AI inspector, in memory only and only
+   * while the author's switch is on. Every channel's error envelope and every AI request is
+   * reported to it; it drops them itself while off.
+   */
+  devtools: DevToolsService
+  /**
    * F-8.4: automatic backups. Like the update service it owns its settings, its timer, and what
    * it pushes (`backups:changed`); these handlers forward the author's choices and wire it to
    * the project's open and close.
@@ -399,6 +409,7 @@ export function registerHandlers({
   access,
   updates,
   diagnostics,
+  devtools,
   backups,
   cloudPricing,
   dialogs,
@@ -414,14 +425,30 @@ export function registerHandlers({
    * is refused after the trial without the license; reading, export, and backup never are.
    */
   const register = <C extends Channel>(channel: C, fn: Handler<C>): void => {
+    // Developer tools: every error envelope reaches the live log (a no-op while it is off).
+    const onFailure = (failed: Channel, error: IpcError, cause?: unknown): void =>
+      devtools.ipcFailure(failed, error, cause)
     if (!isWriteChannel(channel)) {
-      registerChannel(channel, fn)
+      registerChannel(channel, fn, onFailure)
       return
     }
-    registerChannel(channel, (input) => {
-      access.assertWritable()
-      return fn(input)
-    })
+    registerChannel(
+      channel,
+      (input) => {
+        access.assertWritable()
+        return fn(input)
+      },
+      onFailure
+    )
+  }
+  /**
+   * The failure envelope every AI channel answers with. Developer tools: the request path traces
+   * and logs its own failures, but a feature the AI switch or its toggle forbids is refused
+   * before any request exists (DISABLED), so that refusal is logged here.
+   */
+  const aiFailure = (code: AiErrorCode, message: string): ReturnType<typeof aiFailureEnvelope> => {
+    if (code === 'DISABLED') devtools.record('warn', 'ai', `AI refused: ${code}: ${message}`, null)
+    return aiFailureEnvelope(code, message)
   }
   /**
    * F-5.9: one session tally for this run of the app, shared by every request these handlers
@@ -451,6 +478,8 @@ export function registerHandlers({
     // column, so it is checked against the enum before it can become a counter name.
     return {
       ...deps,
+      // Developer tools' AI inspector: a trace per request while the switch is on.
+      observe: devtools.observer,
       ledger: {
         insert: (entry) => {
           deps.ledger.insert(entry)
@@ -1879,6 +1908,71 @@ export function registerHandlers({
 
   register('ai:getStatus', aiStatus)
 
+  // Developer tools (2026-10-07): the switch, the panel's buffers, Chromium's DevTools, and the
+  // copied report. All `read`: none of them touches what the author wrote.
+  register('devtools:getState', () => devtools.state())
+  register('devtools:setEnabled', ({ on }) => devtools.setEnabled(on))
+  register('devtools:snapshot', () => devtools.snapshot())
+  register('devtools:requestText', ({ id }) => devtools.text(id))
+  register('devtools:log', ({ level, message, details }) => {
+    devtools.record(level, 'renderer', message, details)
+    return null
+  })
+  register('devtools:ghostSkip', ({ reason }) => {
+    devtools.ghostSkip(reason)
+    return null
+  })
+  register('devtools:clear', ({ what }) => {
+    devtools.clear(what)
+    return null
+  })
+  register('devtools:openChromium', () => {
+    devtools.openChromium()
+    return null
+  })
+  register('devtools:report', () => {
+    const state = appState.get()
+    const projectAi =
+      manager.current() === null ? null : getAiSettings(manager.require().connection.orm)
+    const snapshot = devtools.snapshot()
+    const status = aiStatus()
+    return formatDiagnosticsReport({
+      generatedAt: new Date().toISOString(),
+      app: {
+        version: app.getVersion(),
+        platform: process.platform,
+        arch: process.arch,
+        electron: process.versions.electron ?? '-',
+        node: process.versions.node,
+        chrome: process.versions.chrome ?? '-'
+      },
+      ai: {
+        source: projectAi?.source ?? null,
+        ownKeyProvider: status.provider,
+        keySaved: status.hasKey,
+        encryption: status.encryption,
+        models: status.models
+      },
+      // Not the recents, the window, or the diagnostics queue: paths and crash reports, not settings.
+      settings: {
+        app: {
+          models: state.models,
+          routing: state.routing,
+          localAi: state.localAi,
+          aiUsage: state.aiUsage,
+          view: state.view,
+          updates: { channel: state.updates.channel, autoCheck: state.updates.autoCheck },
+          backups: state.backups,
+          diagnosticsEnabled: state.diagnostics.enabled,
+          devTools: state.devTools
+        },
+        project: projectAi
+      },
+      log: snapshot.log,
+      requests: snapshot.requests
+    })
+  })
+
   register('ai:setKey', ({ key }) => {
     keyStore.setKey(ownKey(), key)
     backfillSummaries(true)
@@ -2010,6 +2104,8 @@ export function registerHandlers({
         const deps = requestDeps(db)
         const result = await generateGhostText(db, deps, { nodeId, before, after, requestId })
         const { text, usage, costUsd, cached, model, flagged, violation } = result
+        // Developer tools: an answer post-processing emptied is the silent "shows nothing" case.
+        if (text === '') devtools.ghostEmpty(requestId)
         // F-14.5: a shown suggestion is a proposal; "no suggestion" has nothing to settle.
         const proposalId =
           text === ''

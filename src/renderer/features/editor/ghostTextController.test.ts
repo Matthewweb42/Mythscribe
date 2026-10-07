@@ -7,6 +7,7 @@ import type { AiGhostTextResult, Channel, Input, Output } from '@shared/ipc/cont
 import { resetAiActivityStore, useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
+import { resetDevToolsStore, useDevToolsStore } from '@renderer/features/devtools/devToolsStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
@@ -35,6 +36,8 @@ let settingsWrites: AiSettings[]
 let settles: Input<'proposal:settle'>[]
 /** The request ids `ai:cancel` was asked to stop. */
 let cancels: string[]
+/** The skip reasons reported to developer tools. */
+let skips: string[]
 
 function fakeClient(): IpcClient {
   return {
@@ -56,6 +59,10 @@ function fakeClient(): IpcClient {
         const value = AiSettings.parse(input)
         settingsWrites.push(value)
         return value as Output<C>
+      }
+      if (channel === 'devtools:ghostSkip') {
+        skips.push((input as Input<'devtools:ghostSkip'>).reason)
+        return null as Output<C>
       }
       if (channel === 'proposal:settle') {
         settles.push(input as Input<'proposal:settle'>)
@@ -152,6 +159,8 @@ beforeEach(() => {
   settingsWrites = []
   settles = []
   cancels = []
+  skips = []
+  resetDevToolsStore()
   setIpcClient(fakeClient())
   useAiSettingsStore.setState({ settings: settings() })
   editor = new Editor({
@@ -169,6 +178,7 @@ afterEach(() => {
   resetAiActivityStore()
   resetGhostTextController()
   resetProposalStore()
+  resetDevToolsStore()
   vi.useRealTimers()
 })
 
@@ -220,6 +230,26 @@ describe('useGhostTextController (F-5.3)', () => {
     })
     await answer(ok(1))
     expect(ghostText()).toBe(' Rain followed.')
+  })
+
+  it('tells developer tools why an idle tick sent nothing, once per reason, only while they are on', async () => {
+    mount()
+    type('ab')
+    await idle()
+    expect(skips).toEqual([])
+
+    useDevToolsStore.setState({ enabled: true })
+    type('c')
+    await idle()
+    type('d')
+    await idle()
+    expect(skips).toEqual(['newChars'])
+    type(ENOUGH)
+    await idle()
+    expect(requests).toHaveLength(1)
+    type(ENOUGH)
+    await idle()
+    expect(skips).toEqual(['newChars', 'pending'])
   })
 
   it('hands a flagged answer and its violation to the widget (F-14.7)', async () => {

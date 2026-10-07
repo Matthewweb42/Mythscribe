@@ -8,14 +8,16 @@ import {
   GHOST_BACKOFF_MS,
   GHOST_MAX_PER_DAY,
   GHOST_MIN_NEW_CHARS,
-  shouldTrigger
+  throttleReason
 } from '@shared/aiThrottle'
+import type { GhostSkipReason } from '@shared/devtools'
 import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
 import type { AiGhostTextResult } from '@shared/ipc/contract'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { reportGhostSkip } from '@renderer/features/devtools/rendererDevLog'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { GHOST_TEXT_KEY, ghostOf, type GhostSettleHandler } from './ghostText'
@@ -146,6 +148,15 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
   let disposed = false
   /** The proposal behind the suggestion showing; null while none shows or it came without one. */
   let shownProposalId: string | null = null
+  /**
+   * Developer tools: the last reason an idle tick sent nothing, so a run of identical ticks is
+   * reported once; cleared when a request leaves.
+   */
+  let lastSkip: GhostSkipReason | null = null
+  const skip = (reason: GhostSkipReason): void => {
+    if (reason === lastSkip) return
+    if (reportGhostSkip(reason)) lastSkip = reason
+  }
 
   const onSettle: GhostSettleHandler = (status) => {
     const id = shownProposalId
@@ -215,9 +226,12 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
     const { armed, idleMs } = deps.config()
     if (!armed) return
     rollDay()
-    if (session.failedAt !== null && now() - session.failedAt < GHOST_BACKOFF_MS) return
+    if (session.failedAt !== null && now() - session.failedAt < GHOST_BACKOFF_MS) {
+      skip('backoff')
+      return
+    }
     const visible = ghostOf(editor.state) !== null
-    const ok = shouldTrigger({
+    const throttled = throttleReason({
       idleMs: now() - lastEditAt,
       minIdleMs: idleMs,
       newChars,
@@ -227,9 +241,12 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
       requestsToday: session.requestsToday,
       dailyRequestCap: GHOST_MAX_PER_DAY
     })
-    if (!ok || !focused || !editor.state.selection.empty) return
+    if (throttled !== null) return skip(throttled)
+    if (!focused) return skip('unfocused')
+    if (!editor.state.selection.empty) return skip('selection')
     const { before, after } = caretWindow(editor.state)
-    if (!before.trim()) return
+    if (!before.trim()) return skip('emptyBefore')
+    lastSkip = null
     pending = true
     cancelRequested = false
     editedSinceSend = false
@@ -260,6 +277,7 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
     clearTimer()
     const { armed, idleMs } = deps.config()
     if (armed) timer = setTimeout(check, idleMs)
+    else skip('off')
   }
 
   const onUpdate = ({ transaction }: { transaction: Transaction }): void => {

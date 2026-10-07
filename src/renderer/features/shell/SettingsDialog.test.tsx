@@ -96,7 +96,8 @@ describe('SettingsDialog (F-7.5)', () => {
       'Appearance',
       'Account',
       'Updates',
-      'Diagnostics'
+      'Diagnostics',
+      'Advanced'
     ])
     expect(tab('Editor')).toHaveAttribute('aria-selected', 'true')
     expect(tab('Editor')).toHaveFocus()
@@ -152,7 +153,8 @@ describe('SettingsDialog (F-7.5)', () => {
       'Appearance',
       'Account',
       'Updates',
-      'Diagnostics'
+      'Diagnostics',
+      'Advanced'
     ])
     expect(tab('Backups')).toHaveAttribute('aria-selected', 'true')
   })

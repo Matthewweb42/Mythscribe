@@ -1005,7 +1005,7 @@ describe('App', () => {
       within(dialog)
         .getAllByRole('tab')
         .map((t) => t.textContent)
-    ).toEqual(['Backups', 'Appearance', 'Account', 'Updates', 'Diagnostics'])
+    ).toEqual(['Backups', 'Appearance', 'Account', 'Updates', 'Diagnostics', 'Advanced'])
     // The dialog opens on the first app-wide tab, so Account's text is a tab click away.
     await userEvent.click(within(dialog).getByRole('tab', { name: 'Account' }))
     expect(

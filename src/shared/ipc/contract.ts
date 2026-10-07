@@ -55,6 +55,18 @@ import {
   RENDERER_ERROR_NAME_MAX,
   RENDERER_ERROR_STACK_MAX
 } from '../diagnostics'
+import {
+  DEV_LOG_DETAILS_MAX,
+  DEV_LOG_MESSAGE_MAX,
+  DevAiRequest,
+  DevClearTarget,
+  DevLogEntry,
+  DevLogLevel,
+  DevRequestText,
+  DevToolsSnapshot,
+  DevToolsState,
+  GhostSkipReason
+} from '../devtools'
 import { DictionaryWord, ProjectDictionary } from '../dictionary'
 import { DraftChange, DraftComparison, DraftList, DraftName } from '../drafts'
 import {
@@ -1725,6 +1737,43 @@ export const contract = {
     output: z.null()
   },
   /**
+   * Developer tools (2026-10-07): whether the switch in Settings › Advanced is on. App-wide, off
+   * on every install; while it is off nothing is recorded.
+   */
+  'devtools:getState': { input: z.undefined(), output: DevToolsState },
+  /** Turns developer tools on or off. Off drops the log and the AI requests held in memory. */
+  'devtools:setEnabled': { input: z.object({ on: z.boolean() }), output: DevToolsState },
+  /** The live log and the AI inspector rows held now (empty while the switch is off). */
+  'devtools:snapshot': { input: z.undefined(), output: DevToolsSnapshot },
+  /**
+   * One inspector row's prompt and raw answer, held in main's memory only and asked for only
+   * when the author presses "Show text"; null once the row has left the buffer or when off.
+   */
+  'devtools:requestText': {
+    input: z.object({ id: z.number().int() }),
+    output: DevRequestText.nullable()
+  },
+  /** A renderer error or warning for the live log; dropped while the switch is off. */
+  'devtools:log': {
+    input: z.object({
+      level: DevLogLevel,
+      message: z.string().max(DEV_LOG_MESSAGE_MAX),
+      details: z.string().max(DEV_LOG_DETAILS_MAX).nullable()
+    }),
+    output: z.null()
+  },
+  /** Ghost text skipped an idle tick (why it sent nothing); an inspector row while the switch is on. */
+  'devtools:ghostSkip': { input: z.object({ reason: GhostSkipReason }), output: z.null() },
+  /** Empties the live log or the AI inspector. */
+  'devtools:clear': { input: z.object({ what: DevClearTarget }), output: z.null() },
+  /** Opens Chromium's DevTools for the focused window; refused (VALIDATION) while the switch is off. */
+  'devtools:openChromium': { input: z.undefined(), output: z.null() },
+  /**
+   * The plain-text diagnostics report "Copy diagnostics" puts on the clipboard: versions, the AI
+   * setup, settings without keys or secrets, recent errors, recent AI requests without text.
+   */
+  'devtools:report': { input: z.undefined(), output: z.string() },
+  /**
    * The AI provider status (F-5.1): whether a key is saved (with a masked hint, never the key)
    * and how the key is protected. App-wide, no project needed.
    */
@@ -2495,6 +2544,12 @@ export const events = {
   'updates:changed': UpdateState,
   /** Diagnostics were switched, or a report was sent (F-15.8); the tab shows what is pending now. */
   'diagnostics:changed': DiagnosticsState,
+  /** Developer tools were switched on or off (2026-10-07); the menu and the panel follow. */
+  'devtools:changed': DevToolsState,
+  /** A new live-log entry, pushed only while developer tools are on. */
+  'devtools:logAdded': DevLogEntry,
+  /** An AI inspector row was added or moved on (started, first token, settled), pushed only while on. */
+  'devtools:requestChanged': DevAiRequest,
   /** The backup state changed without a renderer call (F-8.4): a scheduled or on-close backup ran or failed, or a project opened or closed. */
   'backups:changed': BackupState,
   /** The app's access changed (M1): the trial ended, or a license was verified or dropped. */

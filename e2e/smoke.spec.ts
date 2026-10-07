@@ -489,6 +489,8 @@ const BANNED_PHRASE = 'picked up'
 const SLOW_SENTINEL = 'SLOW'
 const SLOW_DELAY_MS = 3_000
 const OFF_VOICE_SENTINEL = 'She counted the lanterns on the far bank.'
+/** Developer tools (2026-10-07): a request carrying this is answered with a 500, a failing request. */
+const DEVTOOLS_FAIL_SENTINEL = 'The devtools probe fails here.'
 const OFF_VOICE_CONTINUATION =
   'I am running now, and I know we are lost, and my hands are cold, and I am tired.'
 /** Third-person past narration typed into Scene 1 five times, so the profile resolves tense and person and crosses 200 words. */
@@ -558,6 +560,13 @@ function startFakeOpenAi(): Promise<string> {
         }
         openAiChatBodies.push({ messages: request.messages })
         // Recorded on arrival: a stopped request still left the app. The answer may wait.
+        if (request.messages.some((m) => m.content.includes(DEVTOOLS_FAIL_SENTINEL))) {
+          res.statusCode = 500
+          res.end(
+            JSON.stringify({ error: { message: 'The fake server failed', type: 'server_error' } })
+          )
+          return
+        }
         const respond = (): void => {
           const json = request.response_format?.type === 'json_object'
           const agent = request.messages.some(
@@ -6179,6 +6188,69 @@ test('create, close, reopen a project on disk', async () => {
   await expect
     .poll(async () => (await getLayout()).dock.columns[0], { timeout: 3000 })
     .toEqual(['sidebar'])
+
+  // Developer tools (2026-10-07): off by default, so Help has no developer items; Settings ›
+  // Advanced turns them on, Help › Developer tools opens the panel, and a ghost-text request the
+  // fake server fails shows in the AI inspector with its code, and in the live log. The project
+  // has no key by now, so the probe goes to the local server (the fake one, saved above).
+  const devMenuBar = page.getByRole('menubar', { name: 'Application menu' })
+  await devMenuBar.getByRole('menuitem', { name: 'Help' }).click()
+  await expect(page.getByRole('menu', { name: 'Help' })).toBeVisible()
+  await expect(
+    page.getByRole('menu', { name: 'Help' }).getByRole('menuitem', { name: 'Developer tools' })
+  ).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const devSettings = page.getByRole('dialog', { name: 'Settings' })
+  await devSettings.getByRole('tab', { name: 'Advanced' }).click()
+  await devSettings.getByTestId('devtools-enabled').check()
+  await expect(devSettings.getByTestId('devtools-enabled')).toBeChecked()
+  await devSettings.getByRole('button', { name: 'Close settings' }).click()
+  await devMenuBar.getByRole('menuitem', { name: 'Help' }).click()
+  await page
+    .getByRole('menu', { name: 'Help' })
+    .getByRole('menuitem', { name: 'Developer tools' })
+    .click()
+  const devPanel = page.getByRole('region', { name: 'Developer tools' })
+  await expect(devPanel).toBeVisible()
+  const devAiBefore = await aiSettings()
+  const devScene = (await listTree()).find((n) => n.hierarchyLevel === 'scene')
+  if (!devScene) throw new Error('no scene for the devtools probe')
+  const devProbe = await page.evaluate(
+    async (input) => {
+      const set = await window.mythscribe.invoke('aiSettings:set', input.settings)
+      if (!set.ok) return set
+      return window.mythscribe.invoke('ai:ghostText', input.request)
+    },
+    {
+      settings: {
+        ...devAiBefore,
+        source: 'local' as const,
+        dial: 1,
+        features: { ...devAiBefore.features, ghostText: true }
+      },
+      request: {
+        nodeId: devScene.id,
+        before: `${DEVTOOLS_FAIL_SENTINEL} `,
+        after: '',
+        requestId: 'devtools-probe'
+      }
+    }
+  )
+  expect(devProbe).toMatchObject({ ok: true, data: { ok: false, code: 'PROVIDER' } })
+  const devRow = devPanel.getByTestId('devtools-request').filter({ hasText: 'failed' }).first()
+  await expect(devRow).toContainText('ghostText')
+  await expect(devRow).toContainText('PROVIDER')
+  await devRow.getByRole('button').first().click()
+  await expect(devRow).toContainText('devtools-probe')
+  await devPanel.getByRole('tab', { name: /Log/ }).click()
+  await expect(devPanel.getByTestId('devtools-log')).toContainText('ghostText failed: PROVIDER')
+  await page.evaluate(
+    (settings) => window.mythscribe.invoke('aiSettings:set', settings),
+    devAiBefore
+  )
+  await devPanel.getByRole('button', { name: 'Close developer tools' }).click()
+  await expect(devPanel).toHaveCount(0)
 
   // Flexible nesting (the author, 2026-10-07): right-click Arc 1 → New Scene creates the scene
   // right under the arc (Interlude); a second one (Prologue) dragged onto Arc 1's top edge lands

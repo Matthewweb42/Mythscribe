@@ -73,6 +73,39 @@ export interface AiRequestResult {
   priced: boolean
 }
 
+/**
+ * Developer tools (2026-10-07): one trace per request through this path, for the AI inspector.
+ * `start` is called as the request enters, the rest as it moves on; a trace never throws into
+ * the request and never changes it. Absent (tests, the eval harness) the path is unchanged.
+ */
+export interface AiRequestTrace {
+  /** The pre-checks passed: where it goes and on what. */
+  prepared(info: { provider: AiProviderId; model: string; tier: Tier; maxTokens: number }): void
+  /** The provider call began (after the pre-checks and the cache lookup). */
+  sent(): void
+  /** The first streamed piece arrived. */
+  firstToken(): void
+  done(info: {
+    text: string
+    usage: CompletionUsage
+    costUsd: number
+    cached: boolean
+    finishReason: string | null
+  }): void
+  failed(err: unknown): void
+}
+
+export interface AiRequestObserver {
+  start(info: {
+    feature: AiFeatureId
+    tier: Tier
+    promptVersion: string
+    requestId: string | null
+    streamed: boolean
+    messages: AiMessage[]
+  }): AiRequestTrace
+}
+
 /** Everything the path touches, so tests run it over fakes and production binds the real stores. */
 export interface AiRequestDeps {
   providers: { get(): Provider | null }
@@ -98,6 +131,8 @@ export interface AiRequestDeps {
     routing: AiRouting
     table: Partial<Record<AiFeatureId, Tier>>
   }
+  /** Developer tools' AI inspector; absent, nothing is traced. */
+  observe?: AiRequestObserver
 }
 
 /** What the shared pre-checks settle before either path calls the provider. */
@@ -279,13 +314,68 @@ function completionRequest(
 }
 
 export function runAiRequest(deps: AiRequestDeps, input: AiRequestInput): Promise<AiRequestResult> {
-  return withInflight(input, async (signal) => {
-    const prepared = prepare(deps, input)
-    const hit = deps.cache.get(prepared.key)
-    if (hit) return serveCached(deps, prepared, hit)
+  return traced(deps, input, false, (trace) =>
+    withInflight(input, async (signal) => {
+      const prepared = prepare(deps, input)
+      tracePrepared(trace, prepared)
+      const hit = deps.cache.get(prepared.key)
+      if (hit) {
+        const served = serveCached(deps, prepared, hit)
+        trace?.done({
+          text: served.text,
+          usage: served.usage,
+          costUsd: 0,
+          cached: true,
+          finishReason: null
+        })
+        return served
+      }
 
-    const result = await prepared.provider.complete(completionRequest(input, prepared, signal))
-    return record(deps, input, prepared, { text: result.text, usage: result.usage })
+      trace?.sent()
+      const result = await prepared.provider.complete(completionRequest(input, prepared, signal))
+      const recorded = record(deps, input, prepared, { text: result.text, usage: result.usage })
+      trace?.done({
+        text: recorded.text,
+        usage: recorded.usage,
+        costUsd: recorded.costUsd,
+        cached: false,
+        finishReason: result.finishReason ?? null
+      })
+      return recorded
+    })
+  )
+}
+
+/** Starts the request's trace (when developer tools observe) and reports a failure to it. */
+async function traced<T>(
+  deps: AiRequestDeps,
+  input: AiRequestInput,
+  streamed: boolean,
+  run: (trace: AiRequestTrace | null) => Promise<T>
+): Promise<T> {
+  const trace =
+    deps.observe?.start({
+      feature: input.feature,
+      tier: input.tier,
+      promptVersion: input.promptVersion,
+      requestId: input.requestId ?? null,
+      streamed,
+      messages: input.messages
+    }) ?? null
+  try {
+    return await run(trace)
+  } catch (err) {
+    trace?.failed(err)
+    throw err
+  }
+}
+
+function tracePrepared(trace: AiRequestTrace | null, prepared: PreparedRequest): void {
+  trace?.prepared({
+    provider: prepared.provider.id,
+    model: prepared.model,
+    tier: prepared.tier,
+    maxTokens: prepared.maxTokens
   })
 }
 
@@ -304,29 +394,52 @@ export function runAiStream(
   input: AiRequestInput,
   onDelta: (delta: string) => void
 ): Promise<AiRequestResult> {
-  return withInflight(input, async (signal) => {
-    const prepared = prepare(deps, input)
-    const hit = deps.cache.get(prepared.key)
-    if (hit) {
-      if (hit.text) onDelta(hit.text)
-      return serveCached(deps, prepared, hit)
-    }
-
-    let text = ''
-    let usage: CompletionUsage | undefined
-    const chunks = prepared.provider.stream(completionRequest(input, prepared, signal))
-    for await (const chunk of chunks) {
-      if (chunk.delta) {
-        text += chunk.delta
-        onDelta(chunk.delta)
+  return traced(deps, input, true, (trace) =>
+    withInflight(input, async (signal) => {
+      const prepared = prepare(deps, input)
+      tracePrepared(trace, prepared)
+      const hit = deps.cache.get(prepared.key)
+      if (hit) {
+        if (hit.text) onDelta(hit.text)
+        const served = serveCached(deps, prepared, hit)
+        trace?.done({
+          text: served.text,
+          usage: served.usage,
+          costUsd: 0,
+          cached: true,
+          finishReason: null
+        })
+        return served
       }
-      if (chunk.usage) usage = chunk.usage
-    }
-    return record(deps, input, prepared, {
-      text,
-      usage: usage ?? { inputTokens: prepared.estimatedIn, outputTokens: estimateTokens(text) }
+
+      trace?.sent()
+      let text = ''
+      let usage: CompletionUsage | undefined
+      let finishReason: string | null = null
+      const chunks = prepared.provider.stream(completionRequest(input, prepared, signal))
+      for await (const chunk of chunks) {
+        if (chunk.delta) {
+          if (text === '') trace?.firstToken()
+          text += chunk.delta
+          onDelta(chunk.delta)
+        }
+        if (chunk.usage) usage = chunk.usage
+        if (chunk.finishReason) finishReason = chunk.finishReason
+      }
+      const recorded = record(deps, input, prepared, {
+        text,
+        usage: usage ?? { inputTokens: prepared.estimatedIn, outputTokens: estimateTokens(text) }
+      })
+      trace?.done({
+        text: recorded.text,
+        usage: recorded.usage,
+        costUsd: recorded.costUsd,
+        cached: false,
+        finishReason
+      })
+      return recorded
     })
-  })
+  )
 }
 
 /** The stored cache key: the feature, prompt version, model, context hash, and the messages themselves. */

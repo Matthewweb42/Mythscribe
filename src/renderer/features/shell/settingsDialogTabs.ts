@@ -4,6 +4,7 @@ import {
   Archive,
   Download,
   Monitor,
+  SlidersHorizontal,
   Sparkles,
   Type,
   UserRound,
@@ -14,13 +15,14 @@ import { AccountSettingsTab } from '@renderer/features/account/AccountSettingsTa
 import { AiSettingsTab } from '@renderer/features/ai/AiSettingsTab'
 import { BackupsSettingsTab } from '@renderer/features/backups/BackupsSettingsTab'
 import { DiagnosticsSettingsTab } from '@renderer/features/diagnostics/DiagnosticsSettingsTab'
+import { AdvancedSettingsTab } from '@renderer/features/devtools/AdvancedSettingsTab'
 import { EditorSettingsTab } from '@renderer/features/editor/EditorSettingsTab'
 import { UpdatesSettingsTab } from '@renderer/features/updates/UpdatesSettingsTab'
 import { AppearanceSettingsTab } from './AppearanceSettingsTab'
 
 /** The ids of the Settings dialog tabs (F-7.5). Not persisted: the dialog opens on the first. */
 export type SettingsDialogTabId =
-  'editor' | 'ai' | 'backups' | 'appearance' | 'account' | 'updates' | 'diagnostics'
+  'editor' | 'ai' | 'backups' | 'appearance' | 'account' | 'updates' | 'diagnostics' | 'advanced'
 
 interface SettingsDialogTabBase {
   id: SettingsDialogTabId
@@ -98,6 +100,14 @@ export const SETTINGS_DIALOG_TABS: SettingsDialogTabs = [
     icon: Activity,
     scope: 'app',
     render: () => createElement(DiagnosticsSettingsTab)
+  },
+  {
+    // 2026-10-07: the developer tools switch; app-wide, so it works from the welcome screen too.
+    id: 'advanced',
+    label: 'Advanced',
+    icon: SlidersHorizontal,
+    scope: 'app',
+    render: () => createElement(AdvancedSettingsTab)
   }
 ]
 

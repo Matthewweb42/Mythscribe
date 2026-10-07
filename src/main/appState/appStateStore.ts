@@ -85,7 +85,12 @@ export const AppState = z.object({
    * has it (older files included). Read leniently: an unreadable value starts a fresh clock
    * rather than failing the whole file.
    */
-  trial: AppTrial.nullable().catch(null)
+  trial: AppTrial.nullable().catch(null),
+  /**
+   * 2026-10-07: the developer tools switch (Settings › Advanced), off on every install and in
+   * older files. Read leniently, so a bad value turns it off rather than failing the file.
+   */
+  devTools: z.boolean().catch(false)
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -105,7 +110,8 @@ export const EMPTY_APP_STATE: AppState = {
   localAi: defaultLocalAiSettings(),
   routing: defaultAiRouting(),
   cloudPricing: null,
-  trial: null
+  trial: null,
+  devTools: false
 }
 
 export class AppStateStore {

@@ -36,6 +36,7 @@ import { createDialogs } from './dialogs'
 import { installCrashHandlers, processGoneError } from './diagnostics/crashHandlers'
 import { createDiagnosticsSend } from './diagnostics/diagnosticsClient'
 import { DiagnosticsService, type DiagnosticsSend } from './diagnostics/diagnosticsService'
+import { DevToolsService } from './devtools/devToolsService'
 import { registerHandlers } from './ipc/handlers'
 import { emit } from './ipc/registry'
 import { installSingleInstance } from './lifecycle'
@@ -60,6 +61,8 @@ let updates: UpdateService | null = null
 let diagnostics: DiagnosticsService | null = null
 /** F-8.4: built once the app is ready; its schedule timer is dropped on quit. */
 let backups: BackupService | null = null
+/** Developer tools (2026-10-07): built once app state is readable; off unless the author turned it on. */
+let devtools: DevToolsService | null = null
 
 /**
  * Where backups go unless the author picks a folder (F-8.4): `Documents/MythScribe Backups`,
@@ -107,12 +110,16 @@ function diagnosticsSender(baseUrl: string): DiagnosticsSend | null {
  */
 installCrashHandlers({
   process,
-  report: (kind, error) => diagnostics?.reportError(kind, error),
+  report: (kind, error) => {
+    devtools?.recordError('main', error)
+    diagnostics?.reportError(kind, error)
+  },
   showErrorBox: (title, content) => dialog.showErrorBox(title, content)
 })
 
 // A helper process that died says only what the event says: a reason, a type, and an exit code.
 app.on('child-process-gone', (_event, details) => {
+  devtools?.record('error', 'main', `A ${details.type} process is gone: ${details.reason}`, null)
   diagnostics?.reportError('processGone', processGoneError('child', details))
 })
 
@@ -209,6 +216,7 @@ function createWindow(appState: AppStateStore): BrowserWindow {
   })
   // A dead renderer can never flush, so do not let it wedge the window.
   win.webContents.on('render-process-gone', (_event, details) => {
+    devtools?.record('error', 'main', `The window's renderer is gone: ${details.reason}`, null)
     diagnostics?.reportError('processGone', processGoneError('renderer', details))
     manager.close()
   })
@@ -254,8 +262,9 @@ if (!primaryInstance) {
   void app.whenReady().then(() => {
     // F-7.1: the native menu from the shared definition, for its accelerators and macOS; on
     // Windows and Linux every window hides its bar, the in-app bar being the visible one.
-    installApplicationMenu({
+    const menu = installApplicationMenu({
       manager,
+      devTools: () => devtools?.enabled() ?? false,
       platform: process.platform,
       target: () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
     })
@@ -267,6 +276,23 @@ if (!primaryInstance) {
       return net.fetch(pathToFileURL(file).toString())
     })
     const appState = new AppStateStore(join(app.getPath('userData'), 'app-state.json'))
+    // Developer tools (2026-10-07): the switch in Settings › Advanced. Built first so the rest of
+    // startup's warnings reach the log; it records nothing while off. Main's console is wrapped
+    // once (the original still prints); the menu is rebuilt so Help › Developer follows the switch.
+    const targetWindow = (): BrowserWindow | null =>
+      BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
+    devtools = new DevToolsService({
+      appState,
+      onChange: (state) => {
+        emit(BrowserWindow.getAllWindows(), 'devtools:changed', state)
+        menu.rebuild()
+      },
+      onLog: (entry) => emit(BrowserWindow.getAllWindows(), 'devtools:logAdded', entry),
+      onRequest: (row) => emit(BrowserWindow.getAllWindows(), 'devtools:requestChanged', row),
+      openChromium: () => targetWindow()?.webContents.openDevTools({ mode: 'detach' })
+    })
+    devtools.hookConsole(console)
+    menu.rebuild()
     // AI-BILLING-SPEC S2: provider keys and the account sign-in only in the OS keychain; the e2e
     // has none under xvfb. The escape hatch is honoured only in an unpackaged build (the e2e runs
     // `out/` with Electron directly), so no installed copy can be talked into plain text.
@@ -405,6 +431,7 @@ if (!primaryInstance) {
       access,
       updates,
       diagnostics,
+      devtools,
       backups,
       cloudPricing,
       dialogs: createDialogs(
