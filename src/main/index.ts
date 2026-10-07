@@ -16,11 +16,12 @@ import { pathToFileURL } from 'node:url'
 import { cloudApiUrl } from '@shared/account'
 import { effectiveOwnKeyProvider } from '@shared/ai'
 import { ASSET_SCHEME } from '@shared/focus'
-import { licensePublicKey } from '@shared/license'
+import { licensePublicKey, licenseVerifiable } from '@shared/license'
 import { projectToReopen, restorableBounds } from '@shared/windowState'
 import { UI_SCALE_FACTORS } from '@shared/zoom'
 import { themeBackground } from '@shared/themes'
 import { AccountService } from './account/accountService'
+import { AppAccessService } from './account/appAccess'
 import { createCloudAuthClient } from './account/cloudAuthClient'
 import { CloudPricingService } from './account/cloudPricing'
 import { AiKeyStore } from './ai/keyStore'
@@ -49,6 +50,8 @@ const isDev = !app.isPackaged
 const manager = new ProjectManager()
 /** F-15.2: built once the app is ready (it reads userData); its poll timer is dropped on quit. */
 let account: AccountService | null = null
+/** AI-BILLING-SPEC M1: the trial and the license; built after the account, its timer dropped on quit. */
+let access: AppAccessService | null = null
 /** F-15.7: built once the app is ready; its check timer is dropped on quit. */
 let updates: UpdateService | null = null
 /** F-15.8: built once the app is ready; off until the author turns it on. */
@@ -294,8 +297,20 @@ if (!primaryInstance) {
         // AI-BILLING-SPEC P5: the hosted price and routing table follows a sign-in.
         if (status.state === 'signedIn') void cloudPricing.refresh()
       },
-      onSupporterChange: (status) =>
+      onSupporterChange: (status) => {
         emit(BrowserWindow.getAllWindows(), 'account:supporterChanged', status)
+        // M1: the license is what keeps the app writable after the trial.
+        access?.refresh()
+      }
+    })
+    // AI-BILLING-SPEC M1: the 30-day trial clock and the read-only state after it. Built after
+    // the account, whose verified license token is the app license.
+    const licensedAccount = account
+    access = new AppAccessService({
+      appState,
+      licensed: () => licensedAccount.supporter().licensed,
+      enforced: licenseVerifiable(licensePublicKey(process.env)),
+      onChange: (status) => emit(BrowserWindow.getAllWindows(), 'app:accessChanged', status)
     })
     // F-15.4: the Cloud adapter reads the session live through the account service, so it is
     // built once here and never rebuilt; a 401 from the proxy ends the session the same way a
@@ -373,6 +388,7 @@ if (!primaryInstance) {
         () => effectiveOwnKeyProvider(appState.get().ownKeyProvider, keyStore.hasKey('openai'))
       ),
       account,
+      access,
       updates,
       diagnostics,
       backups,
@@ -422,6 +438,7 @@ app.on('before-quit', () => {
 /** `will-quit`, not `before-quit`: the renderer must flush before the DB closes. */
 app.on('will-quit', () => {
   account?.dispose()
+  access?.dispose()
   updates?.dispose()
   diagnostics?.dispose()
   // Only the timer stops: the close below still runs the on-close backup (F-8.4).

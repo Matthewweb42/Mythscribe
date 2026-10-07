@@ -8,6 +8,7 @@ import {
   formatLicenseToken,
   LICENSE_GRACE_MS,
   LICENSE_PUBLIC_KEY_JWK,
+  licenseVerifiable,
   type LicenseClaims,
   licensePublicKey,
   parseLicenseToken
@@ -79,5 +80,12 @@ describe('ACCENTS', () => {
         expect(colour).toMatch(/^#[0-9a-f]{6}$/)
       }
     }
+  })
+})
+
+describe('licenseVerifiable', () => {
+  it('is false for the embedded placeholder and true for a real key', () => {
+    expect(licenseVerifiable(LICENSE_PUBLIC_KEY_JWK)).toBe(false)
+    expect(licenseVerifiable({ kty: 'OKP', crv: 'Ed25519', x: 'q7f3' })).toBe(true)
   })
 })

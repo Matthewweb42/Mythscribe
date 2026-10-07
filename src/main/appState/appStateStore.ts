@@ -9,6 +9,7 @@ import {
   defaultLocalAiSettings
 } from '@shared/ai'
 import { AiRouting, CloudPricingCache, defaultAiRouting } from '@shared/aiRouting'
+import { AppTrial } from '@shared/appAccess'
 import { BackupSettings, defaultBackupSettings } from '@shared/backups'
 import { RecentProjectEntry } from '@shared/ipc/contract'
 import { DiagnosticsSettings, defaultDiagnosticsSettings } from '@shared/diagnostics'
@@ -78,7 +79,13 @@ export const AppState = z.object({
    */
   routing: AiRouting.catch(defaultAiRouting),
   /** The MythScribe Cloud price and routing table last fetched from `/pricing`, or null. */
-  cloudPricing: CloudPricingCache.nullable().catch(null)
+  cloudPricing: CloudPricingCache.nullable().catch(null),
+  /**
+   * AI-BILLING-SPEC M1 (2026-10-07): the 30-day trial clock, started on the first launch that
+   * has it (older files included). Read leniently: an unreadable value starts a fresh clock
+   * rather than failing the whole file.
+   */
+  trial: AppTrial.nullable().catch(null)
 })
 export type AppState = z.infer<typeof AppState>
 
@@ -97,7 +104,8 @@ export const EMPTY_APP_STATE: AppState = {
   tagTemplates: [],
   localAi: defaultLocalAiSettings(),
   routing: defaultAiRouting(),
-  cloudPricing: null
+  cloudPricing: null,
+  trial: null
 }
 
 export class AppStateStore {

@@ -245,7 +245,7 @@ export function nextTheme(settings: ThemeSettings, licensed: boolean): string {
 
 /** Why main refused a Supporter theme (Sepia, custom) without the license. */
 export const THEME_NEEDS_LICENSE_MESSAGE =
-  'Sepia and custom themes come with the Supporter license. Dark, Light, and High contrast are free.'
+  'Sepia and custom themes come with the MythScribe license. Dark, Light, and High contrast are free.'
 
 /** Why main refused an id that names no theme (a custom one deleted in another window). */
 export const THEME_NOT_FOUND_MESSAGE = 'That theme no longer exists.'

@@ -30,6 +30,15 @@ export const LICENSE_PUBLIC_KEY_JWK: LicensePublicKeyJwk = {
   x: 'REPLACE_WITH_THE_OPERATOR_PUBLIC_KEY_FROM_cloud_license-keygen'
 }
 
+/**
+ * Whether a build can verify a license at all: false while the embedded key is still the
+ * placeholder. Such a build cannot sell or check the app license, so the trial never locks it
+ * (decided 2026-10-07: no one is made read-only by a purchase they cannot make).
+ */
+export function licenseVerifiable(key: LicensePublicKeyJwk): boolean {
+  return !key.x.startsWith('REPLACE_')
+}
+
 /** An Ed25519 public key in JWK form, the only shape the verifier accepts. */
 export const LicensePublicKeyJwk = z.object({
   kty: z.literal('OKP'),
@@ -83,7 +92,8 @@ export function base64urlEncode(bytes: Uint8Array): string {
 
 export function base64urlDecode(text: string): Uint8Array | null {
   if (text === '' || !BASE64URL.test(text)) return null
-  const padded = text.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (text.length % 4)) % 4)
+  const padded =
+    text.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (text.length % 4)) % 4)
   try {
     const binary = atob(padded)
     const bytes = new Uint8Array(binary.length)

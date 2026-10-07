@@ -6,6 +6,7 @@ import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
 import { toTagName } from '@shared/tags'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
+import { resetAppAccessStore, useAppAccessStore } from '@renderer/features/account/appAccessStore'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -202,6 +203,7 @@ async function mountReadyWithEditor(
 }
 
 beforeEach(() => {
+  resetAppAccessStore()
   resetDocumentStore()
   resetEditorSettingsStore()
   resetPendingSaves()
@@ -223,6 +225,7 @@ beforeEach(() => {
   useDialogStore.setState({ modals: [], toasts: [] })
 })
 afterEach(() => {
+  resetAppAccessStore()
   resetDocumentStore()
   resetEditorSettingsStore()
   resetPendingSaves()
@@ -239,6 +242,17 @@ afterEach(() => {
   resetAiSettingsStore()
   resetAssistantStore()
   resetSessionStore()
+})
+
+describe('DocumentEditor after the trial (AI-BILLING-SPEC M1)', () => {
+  it('is read-only without the license, and editable again once one is verified', async () => {
+    await mountReady()
+    act(() => useAppAccessStore.setState({ access: { state: 'expired', trialEndsAt: new Date(0).toISOString(), daysLeft: 0 } }))
+    await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'false'))
+    expect(box()).toHaveTextContent('Into the')
+    act(() => useAppAccessStore.setState({ access: { state: 'licensed', trialEndsAt: new Date(0).toISOString(), daysLeft: 0 } }))
+    await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
+  })
 })
 
 describe('DocumentEditor AI on a selection (2026-10-06)', () => {

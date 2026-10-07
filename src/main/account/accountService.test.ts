@@ -698,7 +698,7 @@ describe('AccountService Supporter license (F-15.9)', () => {
   it('refuses a refresh while signed out', async () => {
     const service = build()
     expect((await caught(service.refreshLicense())).message).toBe(
-      'Sign in to check your MythScribe Supporter license.'
+      'Sign in to check your MythScribe license.'
     )
     expect(license).not.toHaveBeenCalled()
     service.dispose()
@@ -754,7 +754,7 @@ describe('AccountService Supporter license (F-15.9)', () => {
     const service = build()
     const refused = caughtSync(() => service.setAccent('ember'))
     expect(refused.code).toBe('VALIDATION')
-    expect(refused.message).toContain('Supporter license')
+    expect(refused.message).toContain('MythScribe license')
     expect(stored().accent).toBe('default')
     // `default` is every install's, so it is never refused.
     expect(service.setAccent('default')).toEqual(UNLICENSED)
@@ -778,7 +778,7 @@ describe('AccountService Supporter license (F-15.9)', () => {
     const service = build(signedInStore())
     await settle()
     expect((await caught(service.supporterCheckoutUrl())).message).toBe(
-      'The Supporter license is not on sale yet. Try again later.'
+      'The MythScribe license is not on sale yet. Try again later.'
     )
     expect(checkout).not.toHaveBeenCalled()
     service.dispose()
