@@ -39,7 +39,7 @@ async function goToSourceStep(name: string): Promise<void> {
 async function goToDialStep(name: string): Promise<void> {
   await goToSourceStep(name)
   await userEvent.click(screen.getByRole('button', { name: 'Next' }))
-  await screen.findByRole('dialog', { name: 'Choose how much AI helps' })
+  await screen.findByRole('dialog', { name: 'Choose whether AI helps' })
 }
 
 describe('CreateProjectWizard', () => {
@@ -124,16 +124,18 @@ describe('CreateProjectWizard', () => {
     expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'cloud', 'ask')
   })
 
-  it('explains the background work and recommends Ask on step 4, with Off one click away (F-5.18)', async () => {
+  it('explains the background work and recommends Use AI on (chat in Ask) on step 4, with off one click away (F-5.18, 2026-10-07)', async () => {
     const { onCreate } = setup()
     await goToDialStep('My Book')
     expect(screen.getByRole('dialog')).toHaveTextContent('Step 4 of 4')
-    expect(screen.getAllByRole('radio')).toHaveLength(3)
+    expect(screen.getByRole('group', { name: 'Use AI' })).toBeInTheDocument()
+    expect(screen.getAllByRole('radio')).toHaveLength(2)
     expect(screen.getByTestId('wizard-dial-explainer')).toHaveTextContent('summarizes the scene')
     expect(screen.getByTestId('wizard-dial-explainer')).toHaveTextContent('flags contradictions')
-    const ask = screen.getByRole('radio', { name: /^ask/i })
-    expect(ask).toBeChecked()
-    expect(ask.closest('label')).toHaveTextContent('Recommended')
+    expect(screen.getByTestId('wizard-dial-explainer')).toHaveTextContent('It starts in Ask')
+    const on = screen.getByRole('radio', { name: /^on/i })
+    expect(on).toBeChecked()
+    expect(on.closest('label')).toHaveTextContent('Recommended')
     expect(screen.getByRole('radio', { name: /^off/i }).closest('label')).not.toHaveTextContent(
       'Recommended'
     )
@@ -157,7 +159,7 @@ describe('CreateProjectWizard', () => {
     await userEvent.keyboard('{Enter}')
     await screen.findByRole('dialog', { name: 'Choose an AI source' })
     await userEvent.keyboard('{Enter}')
-    await screen.findByRole('dialog', { name: 'Choose how much AI helps' })
+    await screen.findByRole('dialog', { name: 'Choose whether AI helps' })
     expect(onCreate).not.toHaveBeenCalled()
     await userEvent.keyboard('{Enter}')
     expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'ownKey', 'ask')
@@ -195,7 +197,7 @@ describe('CreateProjectWizard', () => {
     await userEvent.keyboard('{Escape}')
     expect(onCancel).toHaveBeenCalledTimes(5)
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
-    await screen.findByRole('dialog', { name: 'Choose how much AI helps' })
+    await screen.findByRole('dialog', { name: 'Choose whether AI helps' })
     await userEvent.keyboard('{Escape}')
     expect(onCancel).toHaveBeenCalledTimes(6)
   })
@@ -206,7 +208,7 @@ describe('CreateProjectWizard', () => {
     await goToDialStep('My Book')
     await userEvent.click(screen.getByRole('button', { name: 'Create' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('A project already exists at /x')
-    expect(screen.getByRole('dialog', { name: 'Choose how much AI helps' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Choose whether AI helps' })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(screen.queryByRole('alert')).toBeNull()
   })

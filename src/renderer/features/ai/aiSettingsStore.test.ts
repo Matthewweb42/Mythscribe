@@ -81,7 +81,7 @@ describe('useAiSettingsStore (F-14.4)', () => {
 
   it('replaces the toggles wholesale and coalesces rapid updates into one write', async () => {
     await store().load()
-    store().update({ auto: true })
+    store().update({ chatMode: 'auto' })
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS - 50)
     store().update({ features: { ...defaults.features, ghostText: false } })
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS - 50)
@@ -92,7 +92,7 @@ describe('useAiSettingsStore (F-14.4)', () => {
     expect(sets[0]?.value).toEqual({
       ...defaults,
       dial: 1,
-      auto: true,
+      chatMode: 'auto',
       features: { ...defaults.features, ghostText: false, chat: false }
     })
   })
@@ -101,7 +101,7 @@ describe('useAiSettingsStore (F-14.4)', () => {
     await store().load()
     store().update({ dial: 0 })
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
-    store().update({ auto: true })
+    store().update({ chatMode: 'auto' })
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(2)
     sets[0]?.resolve()
@@ -116,10 +116,10 @@ describe('useAiSettingsStore (F-14.4)', () => {
     store().update({ dial: 0 })
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(1)
-    store().update({ auto: true }) // pending while the first write is on the wire
+    store().update({ chatMode: 'auto' }) // pending while the first write is on the wire
     sets[0]?.reject(new Error('locked'))
     await settle()
-    expect(store().settings?.auto).toBe(true)
+    expect(store().settings?.chatMode).toBe('auto')
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(2)
     sets[1]?.reject(new Error('locked again'))

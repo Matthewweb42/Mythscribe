@@ -55,7 +55,7 @@ function fakeClient(initial: AiSettings): Fake {
 }
 
 let fake: Fake
-const radio = (name: string): HTMLElement => screen.getByRole('radio', { name })
+const useAi = (): HTMLElement => screen.getByRole('switch', { name: 'Use AI' })
 const checkbox = (name: RegExp | string): HTMLElement => screen.getByRole('checkbox', { name })
 const sets = (): AiSettings[] =>
   fake.calls.filter((c) => c.channel === 'aiSettings:set').map((c) => AiSettings.parse(c.input))
@@ -68,7 +68,7 @@ async function open(initial: AiSettings = defaultAiSettings()): Promise<void> {
   render(<AiDialSection />)
   await useAiStore.getState().load()
   await useAiSettingsStore.getState().load()
-  await screen.findByRole('radiogroup', { name: 'AI switch' })
+  await screen.findByRole('switch', { name: 'Use AI' })
 }
 
 beforeEach(() => {
@@ -81,63 +81,40 @@ afterEach(() => {
 })
 
 describe('AiDialSection (F-14.4, F-5.21)', () => {
-  it('renders nothing until the settings load, then the switch at Off with its meanings', async () => {
+  it('renders nothing until the settings load, then Use AI off with its meaning (2026-10-07)', async () => {
     fake = fakeClient(defaultAiSettings())
     setIpcClient(fake.client)
     render(<AiDialSection />)
-    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument()
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
     await useAiSettingsStore.getState().load()
-    const group = await screen.findByRole('radiogroup', { name: 'AI switch' })
-    expect(
-      within(group)
-        .getAllByRole('radio')
-        .map((r) => r.getAttribute('aria-checked'))
-    ).toEqual(['true', 'false', 'false'])
-    expect(radio('Off')).toHaveAccessibleDescription('No AI at all. Nothing leaves this machine.')
-    expect(radio('Ask')).toHaveAccessibleDescription(/asks you first/)
-    expect(radio('Auto')).toHaveAccessibleDescription(/deletions still ask/)
-    expect(radio('Off')).toHaveAttribute('tabindex', '0')
-    expect(radio('Ask')).toHaveAttribute('tabindex', '-1')
+    const control = await screen.findByRole('switch', { name: 'Use AI' })
+    expect(control).not.toBeChecked()
+    expect(control).toHaveAccessibleDescription('No AI at all. Nothing leaves this machine.')
+    // The chat's Auto/Ask/Plan lives under the chat box, not here.
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument()
     expect(screen.getByText('This project')).toBeInTheDocument()
   })
 
-  it('selects a position on click and writes it once after the debounce', async () => {
-    await open()
-    await userEvent.click(radio('Auto'))
-    expect(radio('Auto')).toHaveAttribute('aria-checked', 'true')
-    expect(radio('Off')).toHaveAttribute('aria-checked', 'false')
+  it('turns AI on and off and writes it once after the debounce, leaving the chat mode alone', async () => {
+    await open({ ...defaultAiSettings(), chatMode: 'plan' })
+    await userEvent.click(useAi())
+    expect(useAi()).toBeChecked()
+    expect(useAi()).toHaveAccessibleDescription(/mode picked under the chat box/)
     await waitFor(() => expect(sets()).toHaveLength(1))
-    expect(sets()[0]).toEqual({ ...defaultAiSettings(), dial: 1, auto: true })
+    expect(sets()[0]).toEqual({ ...defaultAiSettings(), dial: 1, chatMode: 'plan' })
+    await userEvent.click(useAi())
+    expect(useAi()).not.toBeChecked()
+    await waitFor(() => expect(sets()).toHaveLength(2))
+    expect(sets()[1]).toMatchObject({ dial: 0, chatMode: 'plan' })
   })
 
-  it('moves and selects with the arrow keys, Home, and End', async () => {
-    await open()
-    radio('Off').focus()
-    await userEvent.keyboard('{ArrowRight}')
-    expect(radio('Ask')).toHaveAttribute('aria-checked', 'true')
-    expect(radio('Ask')).toHaveFocus()
-    await userEvent.keyboard('{ArrowRight}')
-    expect(radio('Auto')).toHaveAttribute('aria-checked', 'true')
-    await userEvent.keyboard('{ArrowRight}')
-    expect(radio('Off')).toHaveAttribute('aria-checked', 'true') // wraps
-    await userEvent.keyboard('{ArrowLeft}')
-    expect(radio('Auto')).toHaveAttribute('aria-checked', 'true')
-    await userEvent.keyboard('{Home}')
-    expect(radio('Off')).toHaveAttribute('aria-checked', 'true')
-    await userEvent.keyboard('{End}')
-    expect(radio('Auto')).toHaveAttribute('aria-checked', 'true')
-    expect(radio('Auto')).toHaveFocus()
-    await waitFor(() => expect(sets()).toHaveLength(1))
-    expect(sets()[0]).toMatchObject({ dial: 1, auto: true })
-  })
-
-  it('disables every toggle at Off and enables them all at Ask', async () => {
+  it('disables every toggle while AI is off and enables them all once it is on', async () => {
     await open()
     for (const id of AI_FEATURE_IDS) {
       expect(checkbox(AI_DATA_SHARING[id].label)).toBeDisabled()
     }
     expect(checkbox('Ghost text')).toBeChecked()
-    await userEvent.click(radio('Ask'))
+    await userEvent.click(useAi())
     for (const id of AI_FEATURE_IDS) {
       expect(checkbox(AI_DATA_SHARING[id].label)).toBeEnabled()
     }
@@ -164,10 +141,10 @@ describe('AiDialSection (F-14.4, F-5.21)', () => {
     fake.setAnswer = () => {
       throw new IpcRequestError({ code: 'IO', message: 'Disk is read-only' })
     }
-    await userEvent.click(radio('Auto'))
-    expect(radio('Auto')).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(useAi())
+    expect(useAi()).toBeChecked()
     await waitFor(() => expect(toasts()).toEqual(['Disk is read-only']))
-    expect(radio('Off')).toHaveAttribute('aria-checked', 'true')
+    expect(useAi()).not.toBeChecked()
   })
 
   it('shows the ghost-text idle delay in seconds and commits a clamped value on blur or Enter (F-5.3)', async () => {

@@ -795,6 +795,6 @@ describe('MetadataPane summary (F-5.6)', () => {
       'Write 200 characters before asking for a summary'
     )
     act(() => useAiSettingsStore.setState({ settings: defaultAiSettings() }))
-    expect(refreshButton().getAttribute('title')).toContain('needs the AI switch at Ask or Auto')
+    expect(refreshButton().getAttribute('title')).toContain('needs Use AI turned on')
   })
 })

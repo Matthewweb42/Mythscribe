@@ -179,7 +179,7 @@ describe('runProofread (F-14.12)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Proofread needs the AI switch at Ask or Auto (it is at Off).'
+      message: 'Proofread needs Use AI turned on (it is off).'
     })
     const on = defaultAiSettings()
     setAiSettings(db, { ...on, dial: 1, features: { ...on.features, proofread: false } })

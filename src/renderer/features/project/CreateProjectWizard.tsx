@@ -2,11 +2,12 @@ import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent 
 import {
   AI_SOURCE_LABEL,
   AI_SOURCE_MEANING,
-  AI_SWITCH_LABEL,
-  AI_SWITCH_MEANING,
-  AI_SWITCH_POSITIONS,
+  ASSISTANT_MODE_LABEL,
   AiSource,
   CLOUD_COMING_SOON,
+  DEFAULT_ASSISTANT_MODE,
+  USE_AI_LABEL,
+  USE_AI_MEANING,
   type AiSwitch
 } from '@shared/aiSettings'
 import { CLOUD_AI_AVAILABLE } from '@shared/cloudApi'
@@ -21,15 +22,20 @@ const STEP_TITLE: Record<Step, string> = {
   name: 'New project',
   format: 'Choose a format',
   source: 'Choose an AI source',
-  dial: 'Choose how much AI helps'
+  dial: 'Choose whether AI helps'
 }
 
 /**
- * The switch position the wizard recommends and preselects (F-5.18, F-5.21): Ask, at which the
- * background work runs (summaries with the story bible and tags, PLAN.md §2.6) and every AI edit
- * asks first. The author still chooses; Off is one click away.
+ * The wizard's AI step (F-5.18; since 2026-10-07 Use AI on or off, decided by the author): on is
+ * recommended and preselected, so the background work runs (summaries with the story bible and
+ * tags, PLAN.md §2.6) and the chat starts in Ask, where every AI edit asks first. The author
+ * still chooses; off is one click away. On is sent as the `ask` position, off as `off`.
  */
-const RECOMMENDED_SWITCH: AiSwitch = 'ask'
+const USE_AI_OPTIONS = ['on', 'off'] as const
+type UseAi = (typeof USE_AI_OPTIONS)[number]
+const RECOMMENDED_USE_AI: UseAi = 'on'
+const USE_AI_OPTION_LABEL: Record<UseAi, string> = { on: 'On', off: 'Off' }
+const switchFor = (useAi: UseAi): AiSwitch => (useAi === 'on' ? 'ask' : 'off')
 
 /**
  * What the choice asks of the author next (F-15.11). Neither option is a dead end: the key and
@@ -66,7 +72,7 @@ const OPTION =
 
 /**
  * Four-step create-project form: name, then format (F-1.2), then where AI requests go
- * (F-15.11), then how much AI helps (F-5.18); both AI choices are switchable later in the AI
+ * (F-15.11), then whether AI helps (F-5.18, Use AI); both AI choices are switchable later in the AI
  * tab. The caller owns the save location. Own key is preselected; while Cloud does not serve AI
  * yet (decided by the author 2026-10-07) its option is shown disabled with "Coming soon".
  */
@@ -95,7 +101,7 @@ export function CreateProjectWizard({
   const [name, setName] = useState('')
   const [format, setFormat] = useState<NovelFormat>('novel')
   const [aiSource, setAiSource] = useState<AiSource>('ownKey')
-  const [aiSwitch, setAiSwitch] = useState<AiSwitch>(RECOMMENDED_SWITCH)
+  const [useAi, setUseAi] = useState<UseAi>(RECOMMENDED_USE_AI)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fieldsetRef = useRef<HTMLFieldSetElement>(null)
@@ -134,7 +140,7 @@ export function CreateProjectWizard({
     }
     setError(null)
     try {
-      await onCreate(trimmed, format, aiSource, aiSwitch)
+      await onCreate(trimmed, format, aiSource, switchFor(useAi))
     } catch (err) {
       // The author is looking at this form, so the failure belongs here, not in a toast.
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -250,36 +256,34 @@ export function CreateProjectWizard({
           ) : (
             <>
               <p data-testid="wizard-dial-explainer" className="mt-4 mb-0 text-sm text-fg-muted">
-                You write; at {AI_SWITCH_LABEL[RECOMMENDED_SWITCH]} the AI works behind you. When
-                you pause typing it summarizes the scene, notes what it states about your
-                characters, places, and world in the story bible, tags it, and flags contradictions.
-                The assistant panel opens beside the editor for questions and one-click actions.
-                Every change to your prose asks you first; at Auto the assistant makes its edits
-                itself, each with Undo.
+                You write; with AI on, it works behind you. When you pause typing it summarizes the
+                scene, notes what it states about your characters, places, and world in the story
+                bible, tags it, and flags contradictions. The assistant panel opens beside the
+                editor for questions and one-click actions. It starts in{' '}
+                {ASSISTANT_MODE_LABEL[DEFAULT_ASSISTANT_MODE]}: every change it wants to make asks
+                you first. Switch to Auto or Plan under the chat box.
               </p>
               <fieldset ref={fieldsetRef} className="mt-3 m-0 flex flex-col gap-2 border-0 p-0">
-                <legend className="mb-2 p-0 text-sm font-medium">AI level</legend>
-                {AI_SWITCH_POSITIONS.map((position) => (
-                  <label key={position} className={OPTION}>
+                <legend className="mb-2 p-0 text-sm font-medium">{USE_AI_LABEL}</legend>
+                {USE_AI_OPTIONS.map((option) => (
+                  <label key={option} className={OPTION}>
                     <input
                       type="radio"
-                      name="aiSwitch"
-                      value={position}
+                      name="useAi"
+                      value={option}
                       className="sr-only"
-                      checked={aiSwitch === position}
-                      onChange={() => setAiSwitch(position)}
+                      checked={useAi === option}
+                      onChange={() => setUseAi(option)}
                     />
                     <span className="block text-sm font-medium">
-                      {AI_SWITCH_LABEL[position]}
-                      {position === RECOMMENDED_SWITCH ? (
+                      {USE_AI_OPTION_LABEL[option]}
+                      {option === RECOMMENDED_USE_AI ? (
                         <span className="ml-2 rounded-sm bg-accent px-1.5 py-0.5 text-xs font-medium text-accent-fg">
                           Recommended
                         </span>
                       ) : null}
                     </span>
-                    <span className="block text-sm text-fg-muted">
-                      {AI_SWITCH_MEANING[position]}
-                    </span>
+                    <span className="block text-sm text-fg-muted">{USE_AI_MEANING[option]}</span>
                   </label>
                 ))}
               </fieldset>

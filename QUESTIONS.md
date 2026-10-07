@@ -145,3 +145,27 @@ do. Review, then confirm, change, or delete the entry.
 - Chosen: a JSON step protocol over the normal request path (`agent.v1`, strong model, at most 6 lookups or $0.50 per message): search, outline, read a scene (6,000 characters a page), notes, summary, a sheet, the sheet list, the tags. Edits come back unapplied and the app applies them through the same paths your own clicks use; text changes go through the scene's editor, which opens for it, so Ctrl+Z works and the new text carries the AI mark. Query mode and Auto's chat and question turns use the agent; Plan stays the plain brainstorm chat; Author stays ghost text; the router still sends "Proofread", "Editor's notes", and the other actions to their features. Deletions and merges always ask and have no Undo; an edit that fails the voice check asks even at Auto; "Apply all remaining" skips deletions; Undo lasts until you close the app; notes edits only add points; tagging with a tag that does not exist creates it under Custom.
 - Alternatives: main writes the edits (the plan's first idea; Ctrl+Z would not work and every store would need a refresh path); native tool calling (needs a provider change and a Cloud Worker redeploy).
 - To change it: `src/main/ai/agent.ts`, `src/main/ai/agentTools.ts`, `src/main/ai/prompts/agent.v1.ts`, `src/renderer/features/ai/agentApply.ts`, `src/renderer/features/editor/agentEditing.ts`.
+
+## 2026-10-07 · F-5.21 · What Plan does when the router picks a feature that edits
+- Question: The router (F-5.19) can pick a rewrite, proofread, editor's notes, a consistency check, or a suggested synopsis or notes. Each of those proposes changes. What happens in Plan, which never proposes or makes edits?
+- Chosen: In Plan those picks run as the read-only chat instead. Plan still runs a cited lookup, What should come next?, and the beta reader. Write this on a direction is disabled in Plan ("Plan never changes the book. Switch to Ask or Auto to write.").
+- Alternatives: refuse the message with a note to switch mode; let editor's notes run in Plan but hide its Apply buttons.
+- To change it: `PLAN_ROUTE_ACTIONS` / `routeActionFor` in `src/shared/chat.ts`; `Directions` in `AssistantPanel.tsx`.
+
+## 2026-10-07 · F-5.21 · Wizard wording and the gate message
+- Question: How does the new-project wizard ask about AI now, and what do the "AI is off" messages say?
+- Chosen: The wizard's last step is titled "Choose whether AI helps". Its group is "Use AI" with two options: On (recommended; the explainer says the chat starts in Ask and that Auto and Plan are under the chat box) and Off. Gates read "X needs Use AI turned on (it is off)." with the next step "Turn on Use AI in Settings › AI, or enable the feature there." The panel says "AI is off for this project. Turn on Use AI in Settings › AI to use the assistant."
+- Alternatives: keep a three-way choice in the wizard (Off / Ask / Auto); call the control "AI" instead of "Use AI".
+- To change it: `CreateProjectWizard.tsx`, `USE_AI_*` and `needsSwitchText` in `src/shared/aiSettings.ts`, `AI_NEXT_STEP.DISABLED` in `src/shared/ai.ts`, `AI_OFF_MESSAGE` in `AssistantPanel.tsx`.
+
+## 2026-10-07 · F-5.4 · Plan answers now come from the read-only agent
+- Question: Plan used to be a streamed brainstorm with no lookups. It is now the agent with read-only tools, which carries the Story Intelligence rules. Is that the Plan you want?
+- Chosen: Plan, Ask, and Auto all go through the router and then the agent. Plan answers are not streamed. Like a Query answer, they come back whole with citations, and an answer with no citation shows the "unverified" warning. The `ai:chat` channel and the chat prompts stay in main, unused by the panel.
+- Alternatives: keep Plan on the old streamed `ai:chat` path (no project lookups); write a Plan-specific agent prompt (a new prompt version and an eval run) that drops the citation warning for brainstorming.
+- To change it: `dispatchRoute` / `runAgentTurn` in `src/renderer/features/ai/assistantStore.ts`; `src/main/ai/prompts/agent.v1.ts`.
+
+## 2026-10-07 · F-5.21 · Left as they were
+- Question: Some text and data still name the old modes. Should they change?
+- Chosen: Left alone, to keep the change small. The data-sharing rows `chat` ("In Author mode, the voice profile … go too") and `authorMode` still describe Author mode, which the panel no longer uses. The project `CLAUDE.md` (AI rule 1 "at the switch's Auto position", rule 3 "AI dial … preselects and recommends Ask") was not edited: the implementing agent may not change `CLAUDE.md` on another agent's instruction. Suggested rule 1 wording: "… except in the chat's Auto mode (F-5.21, decided by the author 2026-10-07): there the chat agent (F-5.22) applies its non-deletion edits itself …". Suggested rule 3 wording: "Respect Use AI and per-feature toggles (F-14.4). Installs off; the new-project wizard preselects and recommends Use AI on with the chat in Ask, with Off one click away (F-5.18)."
+- Alternatives: rewrite the `chat` row and drop the `authorMode` row (this changes the docs page table too).
+- To change it: `AI_DATA_SHARING` in `src/shared/aiSettings.ts` and `site/public/docs/index.html`; `CLAUDE.md`.

@@ -6,7 +6,8 @@ import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import { SUGGESTION_ROTATE_MS } from '@shared/assistantSuggestions'
 import type { Conversation, Conversations } from '@shared/chat'
 import type { AgentChange } from '@shared/agent'
-import type { AiAgentResult, AiChatResult, Channel, Input, Output } from '@shared/ipc/contract'
+import type { RouteAction } from '@shared/assistantRoute'
+import type { AiAgentResult, Channel, Input, Output } from '@shared/ipc/contract'
 import { QUERY_NOT_FOUND, type QueryTurn } from '@shared/query'
 import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
 import {
@@ -25,10 +26,16 @@ import { DockColumn } from '@renderer/features/shell/Dock'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAiActivityStore } from './aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
-import { AssistantPanel, AssistantToggleButton, NO_DIRECTIONS_MESSAGE } from './AssistantPanel'
+import {
+  AI_OFF_MESSAGE,
+  AssistantPanel,
+  AssistantToggleButton,
+  NO_DIRECTIONS_MESSAGE
+} from './AssistantPanel'
 import {
   AGENT_NOTICE,
-  NO_EDITOR_MESSAGE,
+  NO_SCENE_MESSAGE,
+  PLAN_NO_EDITS_MESSAGE,
   resetAssistantStore,
   useAssistantStore
 } from './assistantStore'
@@ -37,22 +44,22 @@ import { continuityTree } from './continuityFixture'
 import { resetContinuityStore, useContinuityStore } from './continuityStore'
 import { resetProposalStore } from './proposalStore'
 
-interface PendingChat {
-  input: Input<'ai:chat'>
-  resolve: (result: AiChatResult) => void
-}
 interface PendingQuery {
   input: Input<'ai:agent'>
   resolve: (result: AiAgentResult) => void
 }
 
-let chats: PendingChat[]
 let queries: PendingQuery[]
+/** What the fake router picks for every message (F-5.19); chat unless a test says otherwise. */
+let routeAction: RouteAction
 /** The zod input shape: a turn stored before F-5.7 carries no `query`. */
 let sets: Input<'conversations:set'>[]
 let cancels: string[]
 
-/** `conversations:get` answers with `stored`; writes record; `ai:chat`/`ai:agent` resolve when the test says so. */
+/**
+ * `conversations:get` answers with `stored`; writes record; `ai:route` picks `routeAction` at
+ * once; `ai:agent` resolves when the test says so; `aiSettings:set` echoes.
+ */
 function install(stored: Conversations): void {
   const client: IpcClient = {
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
@@ -61,14 +68,20 @@ function install(stored: Conversations): void {
         sets.push(input as Input<'conversations:set'>)
         return input as Output<C>
       }
-      if (channel === 'ai:chat') {
-        return new Promise<Output<C>>((resolve) => {
-          chats.push({
-            input: input as Input<'ai:chat'>,
-            resolve: (result) => resolve(result as Output<C>)
-          })
-        })
+      if (channel === 'ai:route') {
+        return {
+          ok: true,
+          action: routeAction,
+          instruction: null,
+          routedBy: 'local',
+          usage: { inputTokens: 0, outputTokens: 0 },
+          costUsd: 0,
+          cached: false,
+          model: null,
+          requestId: (input as Input<'ai:route'>).requestId
+        } as Output<C>
       }
+      if (channel === 'aiSettings:set') return input as Output<C>
       if (channel === 'ai:agent') {
         return new Promise<Output<C>>((resolve) => {
           queries.push({
@@ -137,15 +150,18 @@ const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   ...over
 })
 
-const ok = (requestId: string, text: string): AiChatResult => ({
+/** A chat agent answer (F-5.22) with no lookups, citations, or edits. */
+const ok = (requestId: string, answer: string): AiAgentResult => ({
   ok: true,
-  text,
+  answer,
+  query: null,
+  steps: [],
+  changes: [],
+  dropped: 0,
   usage: { inputTokens: 200, outputTokens: 40 },
   costUsd: 0.0003,
   cached: true,
   model: 'gpt-fake',
-  flagged: false,
-  violation: null,
   proposalId: `prop-${requestId}`,
   requestId
 })
@@ -189,8 +205,8 @@ async function mountOpen(
 
 beforeEach(() => {
   vi.stubGlobal('innerWidth', 1000)
-  chats = []
   queries = []
+  routeAction = 'chat'
   sets = []
   cancels = []
   resetLayoutStore()
@@ -265,37 +281,40 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(within(theirs!).getByTestId('chat-turn-cost')).toHaveTextContent('gpt-fake · $0.0002')
     expect(within(theirs!).getByTestId('chat-turn-cost')).not.toHaveTextContent(' in · ')
     expect(within(mine!).queryByTestId('chat-turn-cost')).not.toBeInTheDocument()
+    // 2026-10-07: exactly Auto, Ask, Plan under the box, the project's mode checked (Ask by
+    // default), each with its meaning as the tooltip; no Off, no paragraph count.
     const modes = screen.getByRole('radiogroup', { name: 'Mode' })
-    expect(within(modes).getByRole('radio', { name: 'Plan' })).toHaveAttribute(
-      'aria-checked',
-      'true'
-    )
-    expect(within(modes).getByRole('radio', { name: 'Author' })).toHaveAttribute(
-      'aria-checked',
-      'false'
-    )
-    // F-5.8: the radios read Query, Author, Plan in that order, after Auto (2026-10-06).
     expect(
       within(modes)
         .getAllByRole('radio')
         .map((radio) => radio.textContent)
-    ).toEqual(['Auto', 'Query', 'Author', 'Plan'])
+    ).toEqual(['Auto', 'Ask', 'Plan'])
+    expect(within(modes).getByRole('radio', { name: 'Ask' })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    )
+    expect(within(modes).getByRole('radio', { name: 'Plan' })).toHaveAttribute(
+      'title',
+      expect.stringContaining('never proposes or makes edits') as string
+    )
+    expect(screen.queryByRole('radio', { name: /off/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('radiogroup', { name: 'AI switch' })).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Paragraphs' })).not.toBeInTheDocument()
     expect(box()).toBeEnabled()
     expect(sendButton()).toBeDisabled()
     expect(screen.queryByTestId('assistant-disabled')).not.toBeInTheDocument()
   })
 
-  it('Enter sends, Shift+Enter breaks the line, and the answer streams into the log with its cost', async () => {
+  it('Enter sends, Shift+Enter breaks the line, and the answer lands in the log with its cost', async () => {
     await mountOpen()
     await userEvent.type(box(), 'What next{Shift>}{Enter}{/Shift}for Mara?')
     expect(box()).toHaveValue('What next\nfor Mara?')
     expect(sendButton()).toBeEnabled()
     await userEvent.keyboard('{Enter}')
-    expect(chats).toHaveLength(1)
-    expect(chats[0]?.input).toMatchObject({
+    expect(queries).toHaveLength(1)
+    expect(queries[0]?.input).toMatchObject({
       message: 'What next\nfor Mara?',
-      mode: 'plan',
+      access: 'write',
       nodeId: null
     })
     expect(box()).toHaveValue('')
@@ -305,7 +324,7 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(stopButton()).toBeInTheDocument()
 
     await act(async () => {
-      chats[0]?.resolve(ok(chats[0].input.requestId, 'She climbs.'))
+      queries[0]?.resolve(ok(queries[0].input.requestId, 'She climbs.'))
     })
     expect(turns()[3]).toHaveTextContent('She climbs.')
     expect(within(turns()[3]!).getByTestId('chat-turn-cost')).toHaveTextContent(
@@ -324,7 +343,7 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(stop).toHaveAttribute('data-testid', 'assistant-stop')
     expect(stop).toHaveAttribute('title', 'Stop this answer')
     await userEvent.click(stop)
-    expect(cancels).toEqual([chats[0]?.input.requestId])
+    expect(cancels).toEqual([queries[0]?.input.requestId])
     expect(turns()).toHaveLength(3)
     expect(turns()[2]).toHaveAttribute('data-role', 'user')
     expect(turns()[2]).toHaveTextContent('What next?')
@@ -333,12 +352,12 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(sendButton()).toHaveAttribute('data-testid', 'assistant-send')
     expect(sendButton()).toBeDisabled() // the box is empty; typing enables it again
     await act(async () => {
-      chats[0]?.resolve({
+      queries[0]?.resolve({
         ok: false,
         code: 'CANCELLED',
         message: 'The request was stopped.',
         nextStep: 'Send it again whenever you like.',
-        requestId: chats[0].input.requestId
+        requestId: queries[0].input.requestId
       })
     })
     expect(turns()).toHaveLength(3)
@@ -347,28 +366,27 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(sendButton()).toBeEnabled()
   })
 
-  it('Author is on at Ask (F-5.21) and shows the paragraph selector and the notice turn', async () => {
-    await mountOpen({ active: 'c-1', items: [conversation()] }, settings({ dial: 1 }))
-    const agent = screen.getByRole('radio', { name: 'Author' })
-    expect(agent).toBeEnabled()
-    await userEvent.click(agent)
-    expect(agent).toHaveAttribute('aria-checked', 'true')
-    expect(useAssistantStore.getState().conversations?.items[0]?.mode).toBe('agent')
-    const paragraphs = screen.getByRole('combobox', { name: 'Paragraphs' })
-    expect(paragraphs).toHaveValue('1')
-    expect(within(paragraphs).getAllByRole('option')).toHaveLength(10)
-    await userEvent.selectOptions(paragraphs, '4')
-    expect(useAssistantStore.getState().conversations?.items[0]?.paragraphs).toBe(4)
-    // Arrow keys move between the modes on the radios themselves, in the Query, Author, Plan order.
-    agent.focus()
+  it("picks the project's chat mode with a click or the arrow keys, for every tab, and still shows a stored Author turn as its notice (2026-10-07)", async () => {
+    await mountOpen()
+    const plan = screen.getByRole('radio', { name: 'Plan' })
+    await userEvent.click(plan)
+    expect(plan).toHaveAttribute('aria-checked', 'true')
+    expect(useAiSettingsStore.getState().settings?.chatMode).toBe('plan')
     await userEvent.keyboard('{ArrowRight}')
+    expect(screen.getByRole('radio', { name: 'Auto' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Auto' })).toHaveFocus()
+    await userEvent.keyboard('{ArrowRight}')
+    expect(screen.getByRole('radio', { name: 'Ask' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.keyboard('{End}')
+    expect(useAiSettingsStore.getState().settings?.chatMode).toBe('plan')
+    // One setting, not one per tab: a new conversation shows the same mode.
+    await userEvent.click(screen.getByRole('button', { name: 'New conversation' }))
     expect(screen.getByRole('radio', { name: 'Plan' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('radio', { name: 'Plan' })).toHaveFocus()
-    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')
-    expect(screen.getByRole('radio', { name: 'Query' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('radio', { name: 'Query' })).toHaveFocus()
+    // Plan sends with the read-only tools.
+    await userEvent.type(box(), 'Brainstorm the ending{Enter}')
+    expect(queries[0]?.input.access).toBe('read')
 
-    // An Author turn already recorded reads as the notice, never as its text.
+    // An Author turn stored before 2026-10-07 reads as the notice, never as its text.
     act(() =>
       useAssistantStore.setState({
         conversations: {
@@ -393,24 +411,31 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(turns()[1]).not.toHaveTextContent('Rain followed.')
   })
 
-  it('says what to change and disables Send while the switch is Off, and the switch beside the modes turns it on (F-5.21)', async () => {
+  it('says AI is off and where to turn it on, with Send and the modes disabled (2026-10-07)', async () => {
     await mountOpen({ active: 'c-1', items: [conversation()] }, settings({ dial: 0 }))
-    expect(screen.getByTestId('assistant-disabled')).toHaveTextContent(
-      'The AI is Off. Set the AI switch below to Ask or Auto to use the assistant.'
-    )
-    const aiSwitch = screen.getByRole('radiogroup', { name: 'AI switch' })
-    expect(within(aiSwitch).getByRole('radio', { name: 'AI Off' })).toHaveAttribute(
-      'aria-checked',
-      'true'
-    )
+    expect(screen.getByTestId('assistant-disabled')).toHaveTextContent(AI_OFF_MESSAGE)
+    expect(AI_OFF_MESSAGE).toContain('Turn on Use AI in Settings › AI')
+    for (const radio of within(screen.getByRole('radiogroup', { name: 'Mode' })).getAllByRole(
+      'radio'
+    )) {
+      expect(radio).toBeDisabled()
+    }
     await userEvent.type(box(), 'hello')
     expect(sendButton()).toBeDisabled()
     await userEvent.keyboard('{Enter}')
-    expect(chats).toHaveLength(0)
-    await userEvent.click(within(aiSwitch).getByRole('radio', { name: 'AI Ask' }))
-    expect(useAiSettingsStore.getState().settings).toMatchObject({ dial: 1, auto: false })
+    expect(queries).toHaveLength(0)
+    act(() => useAiSettingsStore.setState({ settings: settings({ dial: 1 }) }))
     expect(screen.queryByTestId('assistant-disabled')).toBeNull()
     expect(sendButton()).toBeEnabled()
+    act(() =>
+      useAiSettingsStore.setState({
+        settings: settings({ features: { ...defaultAiSettings().features, agent: false } })
+      })
+    )
+    expect(screen.getByTestId('assistant-disabled')).toHaveTextContent(
+      'Assistant lookups and edits is turned off for this project (Settings, AI tab).'
+    )
+    expect(sendButton()).toBeDisabled()
   })
 
   it('the Continuity view leads back to the conversation (F-13.4)', async () => {
@@ -548,46 +573,11 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     return openScene
   }
 
-  it('offers Query first, disabled with the reason while the dial forbids it, and the composer says so for a Query conversation', async () => {
-    await mountOpen({ active: 'c-1', items: [conversation()] }, settings({ dial: 0 }))
-    const query = screen.getByRole('radio', { name: 'Query' })
-    expect(query).toBeDisabled()
-    expect(query).toHaveAttribute(
-      'title',
-      'Query needs the AI switch at Ask or Auto, with Assistant lookups and edits on (Settings, AI tab)'
-    )
-    expect(screen.queryByTestId('assistant-mode-off')).not.toBeInTheDocument()
-    act(() =>
-      useAiSettingsStore.setState({
-        settings: settings({ dial: 1, features: { ...defaultAiSettings().features, agent: false } })
-      })
-    )
-    expect(query).toBeDisabled()
-    // A conversation already in Query mode (the F-5.8 default) says why Send is off.
-    act(() => useAssistantStore.getState().setMode('query'))
-    expect(screen.getByTestId('assistant-mode-off')).toHaveTextContent(
-      'Query needs the AI switch at Ask or Auto, with Assistant lookups and edits on (Settings, AI tab). Pick another mode to keep going.'
-    )
-    expect(sendButton()).toBeDisabled()
-    act(() => useAiSettingsStore.setState({ settings: settings({ dial: 1 }) }))
-    expect(query).toBeEnabled()
-    expect(screen.queryByTestId('assistant-mode-off')).not.toBeInTheDocument()
-    expect(query).toHaveAttribute(
-      'title',
-      'Ask about the whole project; it looks things up and cites scenes'
-    )
-    await userEvent.click(query)
-    expect(query).toHaveAttribute('aria-checked', 'true')
-    expect(useAssistantStore.getState().conversations?.items[0]?.mode).toBe('query')
-    // The paragraph count belongs to Author alone.
-    expect(screen.queryByRole('combobox', { name: 'Paragraphs' })).not.toBeInTheDocument()
-  })
-
   it('sends the question to the agent, shows its lookups live, then the answer with its markers, sources, and cost', async () => {
-    await mountOpen({ active: 'c-1', items: [conversation({ mode: 'query', messages: [] })] })
+    routeAction = 'query'
+    await mountOpen({ active: 'c-1', items: [conversation({ messages: [] })] })
     const openScene = spyOnOpenScene()
     await userEvent.type(box(), 'Where does she cross?{Enter}')
-    expect(chats).toHaveLength(0)
     expect(queries).toHaveLength(1)
     expect(queries[0]?.input).toMatchObject({
       message: 'Where does she cross?',
@@ -749,7 +739,7 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
     expect(diff.querySelector('ins')).toHaveTextContent('went')
     expect(within(cards[0]!).getByTestId('agent-change-apply')).toHaveTextContent('Apply')
     expect(cards[1]).toHaveTextContent('Delete Scene 2')
-    expect(cards[1]).toHaveTextContent('This deletes; it always asks first, even at Auto.')
+    expect(cards[1]).toHaveTextContent('This deletes; it always asks first, even in Auto.')
     expect(within(cards[1]!).getByTestId('agent-change-apply')).toHaveTextContent('Delete')
     // One waiting edit besides the deletion: no Apply all.
     expect(within(turn).queryByTestId('agent-apply-all')).not.toBeInTheDocument()
@@ -802,7 +792,6 @@ describe('AssistantPanel quick actions (F-5.17)', () => {
     active: 'c-1',
     items: [
       conversation({
-        mode: 'query',
         messages: [
           message('m-1', 'user', 'What should come next?'),
           message('m-2', 'assistant', '1. The storm breaks: …', {
@@ -829,7 +818,7 @@ describe('AssistantPanel quick actions (F-5.17)', () => {
     editor.destroy()
   })
 
-  it('renders a turn’s directions as cards, and Write this sends one as an Author turn', async () => {
+  it('renders a turn’s directions as cards, and Write this sends one to the agent with its edit tools', async () => {
     act(() => useActiveEditorStore.getState().set('sc-1', editor))
     await mountOpen(withDirections())
     const cards = within(log()).getAllByTestId('what-next-direction')
@@ -839,34 +828,35 @@ describe('AssistantPanel quick actions (F-5.17)', () => {
     expect(turns()[1]).toHaveTextContent('gpt-fast')
     expect(writes()[1]).toBeEnabled()
     await userEvent.click(writes()[1]!)
-    expect(chats[0]?.input).toMatchObject({
-      mode: 'agent',
+    expect(queries[0]?.input).toMatchObject({
+      access: 'write',
       nodeId: 'sc-1',
       message:
         'Continue the scene in this direction: A light below. Someone is camped in the valley.'
     })
-    // The conversation keeps its mode; while the turn waits, Write this waits too.
-    expect(useAssistantStore.getState().conversations?.items[0]?.mode).toBe('query')
+    // While the turn waits, Write this waits too.
     expect(writes()[0]).toBeDisabled()
     expect(writes()[0]).toHaveAttribute('title', CONVERSATION_BUSY_MESSAGE)
   })
 
-  it('Write this is off with the reason while the switch is Off, with the chat off, or without an editor', async () => {
+  it('Write this is off with the reason while AI is off, with lookups and edits off, in Plan, or without an editor', async () => {
     await mountOpen(withDirections(), settings({ dial: 0 }))
     expect(writes()[0]).toBeDisabled()
     expect(writes()[0]).toHaveAttribute(
       'title',
-      'Author needs the AI switch at Ask or Auto, with Assistant chat on (Settings, AI tab)'
+      'Write this needs Use AI turned on, with Assistant lookups and edits on (Settings, AI tab)'
     )
     const on = settings()
     act(() =>
       useAiSettingsStore.setState({
-        settings: { ...on, features: { ...on.features, chat: false } }
+        settings: { ...on, features: { ...on.features, agent: false } }
       })
     )
-    expect(writes()[0]?.getAttribute('title')).toContain('with Assistant chat on')
+    expect(writes()[0]?.getAttribute('title')).toContain('with Assistant lookups and edits on')
+    act(() => useAiSettingsStore.setState({ settings: { ...on, chatMode: 'plan' } }))
+    expect(writes()[0]).toHaveAttribute('title', PLAN_NO_EDITS_MESSAGE)
     act(() => useAiSettingsStore.setState({ settings: on }))
-    expect(writes()[0]).toHaveAttribute('title', NO_EDITOR_MESSAGE)
+    expect(writes()[0]).toHaveAttribute('title', NO_SCENE_MESSAGE)
     act(() => useActiveEditorStore.getState().set('sc-1', editor))
     expect(writes()[0]).toBeEnabled()
   })
@@ -882,7 +872,7 @@ describe('AssistantPanel suggestions (2026-10-06)', () => {
   const suggestion = (): HTMLElement => screen.getByTestId('assistant-suggestion')
   const auto = (): Conversations => ({
     active: 'c-1',
-    items: [conversation({ mode: 'auto', messages: [] })]
+    items: [conversation({ messages: [] })]
   })
   const rotate = (): void => {
     act(() => {
@@ -920,13 +910,19 @@ describe('AssistantPanel suggestions (2026-10-06)', () => {
     await userEvent.click(suggestion())
     expect(box()).toHaveValue(text)
     expect(box()).toHaveFocus()
-    expect(chats).toHaveLength(0)
     expect(queries).toHaveLength(0)
   })
 
-  it('fits the mode, and shows none while the dial keeps the assistant off', async () => {
-    await mountOpen({ active: 'c-1', items: [conversation({ mode: 'plan', messages: [] })] })
-    expect(suggestion()).toHaveTextContent('Talk me through where the story goes')
+  it('fits the mode, and shows none while AI is off', async () => {
+    await mountOpen(
+      { active: 'c-1', items: [conversation({ messages: [] })] },
+      settings({ chatMode: 'plan' })
+    )
+    expect([
+      'Who are the main characters so far?',
+      'What is still unresolved in the story?',
+      'Talk me through where the story goes'
+    ]).toContain(suggestion().textContent)
     act(() => useAiSettingsStore.setState({ settings: settings({ dial: 0 }) }))
     expect(screen.queryByTestId('assistant-suggestion')).not.toBeInTheDocument()
   })

@@ -346,6 +346,10 @@ const CHAT_AGENT_SENTINEL =
 /** An Auto message the router sends to chat; the agent answers it with one edit to Scene 1. */
 const AGENT_EDIT_MESSAGE = 'Make the opening line plainer.'
 const AGENT_EDIT_ANSWER = 'Here is a plainer line.'
+/** What the agent says with the insert a Write this direction asks for (2026-10-07). */
+const AGENT_INSERT_ANSWER = 'Here is the next beat.'
+/** The opening of `AGENT_EDIT_RULES`, which only a run with the edit tools (Ask, Auto) carries. */
+const AGENT_EDIT_RULES_OPENING = 'To change the project, add "edits"'
 /** What the edit puts in place of a sentence Scene 1 holds once. */
 const AGENT_EDIT_REPLACEMENT = 'The storm came in at dusk.'
 const QUERY_QUESTION = 'Where does the storm reach the ridge?'
@@ -374,6 +378,16 @@ function chatAgentReply(messages: { role: string; content: string }[]): string {
   if (asked === SHEET_QUESTION) return SHEET_ANSWER
   const seen = [...messages.map((m) => m.content)].join('\n')
   const ref = /(n\d+) Chapter 1 › Scene 1\b/.exec(seen)?.[1] ?? 'n1'
+  // 2026-10-07: Write this sends a direction to the agent, which answers with one insert at the
+  // end of Scene 1 (what Author mode used to place as ghost text).
+  if (asked.startsWith('Continue the scene in this direction:')) {
+    return JSON.stringify({
+      answer: AGENT_INSERT_ANSWER,
+      found: true,
+      citations: [],
+      edits: [{ edit: 'insert', id: ref, after: '', text: `${AGENT_FIRST}\n\n${AGENT_SECOND}` }]
+    })
+  }
   if (asked === AGENT_EDIT_MESSAGE) {
     if (looked.length === 1) return JSON.stringify({ tool: 'read_scene', args: { id: ref } })
     const text = (looked.at(-1)?.content ?? '').split('\n').slice(2).join('\n')
@@ -428,7 +442,11 @@ const BRIEF_ANSWER = JSON.stringify({
 /** F-14.2: the rule the author writes and the phrase they ban; the canned continuation uses the phrase. */
 const AUTHOR_RULE = 'Mara never swears.'
 const BANNED_PHRASE = 'picked up'
-/** F-5.10: a request whose body carries this waits before answering, so a Stop can land. */
+/**
+ * F-5.10: a request whose last message carries this waits before answering, so a Stop can land.
+ * Only the last message counts: the chat agent (F-5.22) sends the conversation history, which
+ * keeps the stopped turn, and every later step would wait too.
+ */
 const SLOW_SENTINEL = 'SLOW'
 const SLOW_DELAY_MS = 3_000
 const OFF_VOICE_SENTINEL = 'She counted the lanterns on the far bank.'
@@ -677,7 +695,8 @@ function startFakeOpenAi(): Promise<string> {
             })
           )
         }
-        setTimeout(respond, body.includes(SLOW_SENTINEL) ? SLOW_DELAY_MS : 0)
+        const slow = request.messages.at(-1)?.content.includes(SLOW_SENTINEL) === true
+        setTimeout(respond, slow ? SLOW_DELAY_MS : 0)
       })
       return
     }
@@ -1046,12 +1065,14 @@ test('create, close, reopen a project on disk', async () => {
   await expect(wizard.getByTestId('wizard-source-hint')).toContainText('Start Ollama or LM Studio')
   await wizard.getByText('My own key', { exact: true }).click()
   await expect(wizard.getByRole('radio', { name: /^my own key/i })).toBeChecked()
-  // F-5.18: the level step explains the background work and recommends Ask; Off is one click.
-  // The rest of this test raises the dial itself, so it starts at Off.
+  // F-5.18 (Use AI since 2026-10-07): the last step explains the background work and recommends
+  // Use AI on, the chat in Ask; Off is one click. The rest of this test turns AI on itself, so
+  // it starts off.
   await wizard.getByRole('button', { name: 'Next' }).click()
   await expect(wizard).toContainText('Step 4 of 4')
   await expect(wizard.getByTestId('wizard-dial-explainer')).toContainText('flags contradictions')
-  await expect(wizard.getByRole('radio', { name: /^ask/i })).toBeChecked()
+  await expect(wizard.getByRole('group', { name: 'Use AI' })).toBeVisible()
+  await expect(wizard.getByRole('radio', { name: /^on/i })).toBeChecked()
   await wizard.getByText('Off', { exact: true }).click()
   await expect(wizard.getByRole('radio', { name: /^off/i })).toBeChecked()
   await wizard.getByRole('button', { name: 'Create' }).click()
@@ -1490,22 +1511,25 @@ test('create, close, reopen a project on disk', async () => {
   // renderer only ever sees a mask) and tests the connection against the fake OpenAI server.
   await page.getByRole('button', { name: 'Settings' }).click()
   await expect(settingsDialog).toBeVisible()
+  // 2026-10-07: the dialog keeps one size on every tab, so its header and tabs never move.
+  const editorTabBox = await settingsDialog.boundingBox()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   await expect(settingsDialog.getByRole('tab', { name: 'AI' })).toHaveAttribute(
     'aria-selected',
     'true'
   )
-  // F-14.4, F-5.21: the project's AI switch installs at Off, so every feature toggle is locked;
-  // Ask unlocks them all, the position lands in the project's settings table, and it survives
-  // closing the dialog. Back to Off before the key steps so nothing below depends on it.
-  const dial = settingsDialog.getByRole('radiogroup', { name: 'AI switch' })
+  expect(await settingsDialog.boundingBox()).toEqual(editorTabBox)
+  // F-14.4, Use AI (2026-10-07): the project's AI installs off, so every feature toggle is
+  // locked; turning Use AI on unlocks them all, lands in the project's settings table, and
+  // survives closing the dialog. Back off before the key steps so nothing below depends on it.
+  const useAi = settingsDialog.getByRole('switch', { name: 'Use AI' })
   const ghostTextToggle = settingsDialog.getByRole('checkbox', { name: /^Ghost text/ })
-  await expect(dial.getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true')
+  await expect(useAi).not.toBeChecked()
   await expect(ghostTextToggle).toBeDisabled()
   await expect(ghostTextToggle).toHaveAccessibleName('Ghost text')
   expect((await aiSettings()).dial).toBe(0)
-  await dial.getByRole('radio', { name: 'Ask' }).click()
-  await expect(dial.getByRole('radio', { name: 'Ask' })).toHaveAttribute('aria-checked', 'true')
+  await useAi.check()
+  await expect(useAi).toBeChecked()
   await expect(ghostTextToggle).toBeEnabled()
   await expect.poll(async () => (await aiSettings()).dial).toBe(1)
   await expect(
@@ -1517,9 +1541,9 @@ test('create, close, reopen a project on disk', async () => {
   await expect(settingsDialog).toHaveCount(0)
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await expect(dial.getByRole('radio', { name: 'Ask' })).toHaveAttribute('aria-checked', 'true')
+  await expect(useAi).toBeChecked()
   await expect(ghostTextToggle).toBeEnabled()
-  await dial.getByRole('radio', { name: 'Off' }).click()
+  await useAi.uncheck()
   await expect(ghostTextToggle).toBeDisabled()
   await expect.poll(async () => (await aiSettings()).dial).toBe(0)
   // F-5.2: the writing presets start on General; Suspense/Mystery lands in the settings table
@@ -3307,12 +3331,12 @@ test('create, close, reopen a project on disk', async () => {
   await recommend.click()
   const recommendResult = tagBar.getByTestId('tag-recommend-result')
   await expect(recommendResult).toHaveText(
-    'Tag suggestions needs the AI switch at Ask or Auto (it is at Off). Set the AI switch to Ask or Auto in the assistant panel or Settings, or enable the feature there.'
+    'Tag suggestions needs Use AI turned on (it is off). Turn on Use AI in Settings › AI, or enable the feature there.'
   )
   expect(openAiRequests).toHaveLength(requestsBefore)
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await dial.getByRole('radio', { name: 'Ask' }).click()
+  await useAi.check()
   await expect.poll(async () => (await aiSettings()).dial).toBe(1)
   // F-5.6: summaries would otherwise run in the background after every save from here on
   // and disturb the exact request counts below; the summary step turns them back on.
@@ -3428,7 +3452,7 @@ test('create, close, reopen a project on disk', async () => {
   // caret (a widget, not document text); Tab accepts it into the document and the ledger gains
   // a ghostText request. A second suggestion is dismissed with Escape and inserts nothing.
   // The mode is turned off again before the dial and the key are restored below.
-  await dial.getByRole('radio', { name: 'Ask' }).click()
+  await useAi.check()
   await expect.poll(async () => (await aiSettings()).dial).toBe(1)
   const idleDelay = settingsDialog.getByLabel('Ghost text idle delay (s)', { exact: true })
   await expect(idleDelay).toHaveValue('1.5')
@@ -4047,13 +4071,12 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
 
-  // F-5.4: the assistant panel. Ctrl+K opens it (the switch is still at Ask with the key
-  // saved). A Plan question streams its answer into the chat with the cost line, and the
-  // request carries the scene's text; the tab takes the question as its title. Author mode
-  // places a two-paragraph answer in the editor as ghost text with a notice in the chat; Tab
-  // accepts it as AI-origin paragraphs. A second conversation is cleared after confirming.
-  // F-5.8: the radios are Query, Author, Plan; since 2026-10-06 Auto comes first and a fresh
-  // conversation starts in it, so the Plan questions here pick Plan first.
+  // F-5.4: the assistant panel. Ctrl+K opens it (AI is still on with the key saved). Since
+  // 2026-10-07 (decided by the author) the chat's modes are Auto, Ask, and Plan: one project
+  // setting under the message box, Ask by default, with no Off there. Every message goes to the
+  // router (F-5.19), then to the feature it picked, the chat agent (F-5.22) answering the rest.
+  // A Plan question runs the agent with its read-only tools: the router's request, then a
+  // lookup and the cited answer with the cost line; the tab takes the question as its title.
   const chatRequestsBefore = openAiChatBodies.length
   // Toasts stack over the panel's composer (bottom right); dismiss what the steps above left.
   await dismissToasts()
@@ -4067,32 +4090,40 @@ test('create, close, reopen a project on disk', async () => {
   const messageBox = assistant.getByRole('textbox', { name: 'Message' })
   const turns = assistant.locator('[data-testid="chat-turn"]')
   const modeRadios = assistant.getByRole('radiogroup', { name: 'Mode' }).getByRole('radio')
-  await expect(modeRadios).toHaveText(['Auto', 'Query', 'Author', 'Plan'])
-  await expect(modeRadios.nth(0)).toHaveAttribute('aria-checked', 'true')
-  // 2026-10-06 polish: the header holds no actions; a scene action is a chat turn in Auto. A
-  // message that is exactly an action's name ("Proofread", "Beta reader") is routed locally,
-  // with no router request, so the request counts below see only the feature's own request.
+  await expect(modeRadios).toHaveText(['Auto', 'Ask', 'Plan'])
+  await expect(modeRadios.nth(1)).toHaveAttribute('aria-checked', 'true')
+  await expect(assistant.getByRole('radiogroup', { name: 'AI switch' })).toHaveCount(0)
+  expect((await aiSettings()).chatMode).toBe('ask')
+  // 2026-10-06 polish: the header holds no actions; a scene action is a chat turn. A message
+  // that is exactly an action's name ("Proofread", "Beta reader") is routed locally, with no
+  // router request, so the request counts below see only the feature's own request.
   await expect(assistant.getByTestId('ai-actions')).toHaveCount(0)
   await expect(assistant.getByRole('button', { name: 'Clear conversation' })).toHaveCount(0)
-  /** Sends `message` as an Auto turn in the active conversation. */
-  const sendAuto = async (message: string): Promise<void> => {
-    await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
+  /** Sends `message` in Ask, where the router may pick any feature, edits included. */
+  const sendRouted = async (message: string): Promise<void> => {
+    await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
     await messageBox.fill(message)
     await messageBox.press('Enter')
   }
   await assistant.getByRole('radio', { name: 'Plan' }).click()
+  await expect.poll(async () => (await aiSettings()).chatMode).toBe('plan')
   await messageBox.fill('Why is Mara on the ridge?')
   await messageBox.press('Enter')
   await expect(turns).toHaveCount(2)
   await expect(turns.nth(0)).toHaveAttribute('data-role', 'user')
   await expect(turns.nth(1)).toHaveAttribute('data-role', 'assistant')
-  await expect(turns.nth(1)).toContainText(CHAT_ANSWER)
-  await expect(turns.nth(1).getByTestId('chat-turn-cost')).toContainText('gpt-5.4-mini')
+  await expect(turns.nth(1)).toContainText(QUERY_ANSWER_KEPT)
+  await expect(turns.nth(1).getByTestId('chat-turn-cost')).toContainText('gpt-5.4 ·')
   // F-5.9: the cost line carries the tokens the turn spent, not the model and the cost alone.
   await expect(turns.nth(1).getByTestId('chat-turn-cost')).toContainText(' in · ')
-  expect(openAiChatBodies).toHaveLength(chatRequestsBefore + 1)
-  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe('Why is Mara on the ridge?')
-  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain('Mara waited on the ridge')
+  // The router's request, then the agent's lookup and its answer, all without the edit rules.
+  expect(openAiChatBodies).toHaveLength(chatRequestsBefore + 3)
+  expect(openAiChatBodies.at(-3)?.messages[0]?.content.startsWith(ROUTE_SENTINEL)).toBe(true)
+  expect(openAiChatBodies.at(-2)?.messages[0]?.content.startsWith(CHAT_AGENT_SENTINEL)).toBe(true)
+  expect(openAiChatBodies.at(-2)?.messages.at(-1)?.content).toBe('Why is Mara on the ridge?')
+  for (const body of openAiChatBodies.slice(-2)) {
+    expect(body.messages[0]?.content).not.toContain(AGENT_EDIT_RULES_OPENING)
+  }
   await expect(assistant.getByRole('tab', { name: 'Why is Mara on the ridge?' })).toHaveAttribute(
     'aria-selected',
     'true'
@@ -4103,78 +4134,73 @@ test('create, close, reopen a project on disk', async () => {
   await messageBox.fill(`${SLOW_SENTINEL}: what happens next?`)
   await messageBox.press('Enter')
   await expect(assistant.getByTestId('chat-pending')).toBeVisible()
-  await expect(page.getByTestId('ai-activity')).toContainText('Assistant chat')
+  await expect(page.getByTestId('ai-activity')).toContainText('Assistant routing')
   await assistant.getByTestId('assistant-stop').click()
   await expect(assistant.getByTestId('chat-pending')).toHaveCount(0)
   await expect(turns).toHaveCount(3)
   await expect(turns.nth(2)).toHaveAttribute('data-role', 'user')
   await expect(page.getByTestId('ai-activity')).toHaveCount(0)
   await expect(page.getByRole('status').filter({ hasText: 'stopped' })).toHaveCount(0)
-  expect(openAiChatBodies).toHaveLength(chatRequestsBefore + 2)
+  expect(openAiChatBodies).toHaveLength(chatRequestsBefore + 4)
   await expect(assistant.getByTestId('assistant-send')).toBeVisible()
-  await assistant.getByRole('radio', { name: 'Author' }).click()
-  await assistant.getByRole('combobox', { name: 'Paragraphs' }).selectOption('2')
-  await messageBox.fill('Continue the scene.')
-  await messageBox.press('Enter')
-  await expect(turns).toHaveCount(5)
-  await expect(turns.nth(4)).toContainText('Placed in the editor. Tab accepts, Escape dismisses.')
-  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe(
-    'Write 2 paragraphs. Continue the scene.'
-  )
-  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain("Match the author's voice:")
-  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain(STORY_BIBLE_HEADING)
-  const agentGhost = editor.locator('.ghost-text')
-  await expect(agentGhost).toContainText(AGENT_FIRST)
-  await expect(agentGhost).toContainText(AGENT_SECOND)
-  await page.keyboard.press('Tab')
-  await expect(agentGhost).toHaveCount(0)
-  await expect(editor).toContainText(AGENT_SECOND)
-  await expect(editor.locator('.ai-origin[data-proposal-id]')).toHaveCount(2)
-  await expect(page.getByTestId('status-ai')).toHaveText(/^[1-9]\d*% AI$/)
   // F-5.17: What should come next?, asked in the chat. The rotating suggestion above the box
-  // (2026-10-06) fills the box on a click and sends nothing. "What next?" in Auto routes locally
-  // to the action, which asks the fast tier once (the scene's tail, its brief, and the story
-  // bible) and lands three directions in the conversation as chat; Write this on the first
-  // sends it through Author mode, which places ghost text at the caret.
+  // (2026-10-06) fills the box on a click and sends nothing. "What next?" routes locally to the
+  // action, which asks the fast tier once (the scene's tail, its brief, and the story bible) and
+  // lands three directions in the conversation as chat; Write this on the first sends it to the
+  // agent with its edit tools (2026-10-07: Author mode is gone), so in Ask the new paragraphs
+  // come back as an insert waiting for Apply, which adds them to Scene 1 as AI-origin text.
   const whatNextBodies = (): { role: string; content: string }[][] =>
     openAiChatBodies
       .filter((body) => body.messages[0]?.content.startsWith(WHAT_NEXT_SENTINEL))
       .map((body) => body.messages)
   const whatNextBefore = whatNextBodies().length
-  await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
+  await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
   const suggestion = assistant.getByTestId('assistant-suggestion')
   await suggestion.hover()
   const suggested = (await suggestion.textContent()) ?? ''
   expect(suggested.length).toBeGreaterThan(0)
   await suggestion.click()
   await expect(messageBox).toHaveValue(suggested)
-  await expect(turns).toHaveCount(5)
-  await sendAuto('What next?')
+  await expect(turns).toHaveCount(3)
+  await sendRouted('What next?')
   const directions = assistant.getByTestId('what-next-direction')
   await expect(directions).toHaveCount(3)
   await expect(directions.first()).toContainText(WHAT_NEXT_TITLES[0] ?? '')
-  await expect(turns).toHaveCount(7)
-  await expect(turns.nth(5)).toContainText('What next?')
-  await expect(turns.nth(6).getByTestId('chat-turn-action')).toHaveText('What should come next?')
+  await expect(turns).toHaveCount(5)
+  await expect(turns.nth(3)).toContainText('What next?')
+  await expect(turns.nth(4).getByTestId('chat-turn-action')).toHaveText('What should come next?')
   expect(whatNextBodies()).toHaveLength(whatNextBefore + 1)
   expect(whatNextBodies().at(-1)?.[0]?.content).toContain(STORY_BIBLE_HEADING)
   await directions.first().getByTestId('what-next-write').click()
-  await expect(turns).toHaveCount(9)
-  await expect(turns.nth(8)).toContainText('Placed in the editor. Tab accepts, Escape dismisses.')
-  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toBe(
-    `Write 2 paragraphs. Continue the scene in this direction: ${WHAT_NEXT_TITLES[0]}. She doubts the crossing and heads back to the camp.`
-  )
-  await expect(agentGhost).toContainText(AGENT_FIRST)
-  await page.keyboard.press('Escape')
-  await expect(agentGhost).toHaveCount(0)
-  await expect(editor.locator('.ai-origin[data-proposal-id]')).toHaveCount(2)
+  await expect(turns).toHaveCount(7)
+  const insertTurn = turns.nth(6)
+  await expect(insertTurn).toContainText(AGENT_INSERT_ANSWER)
+  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain(AGENT_EDIT_RULES_OPENING)
+  expect(
+    openAiChatBodies
+      .at(-1)
+      ?.messages.some(
+        (m) =>
+          m.content ===
+          `Continue the scene in this direction: ${WHAT_NEXT_TITLES[0]}. She doubts the crossing and heads back to the camp.`
+      )
+  ).toBe(true)
+  const insertCard = insertTurn.getByTestId('agent-change')
+  await expect(insertCard).toHaveAttribute('data-status', 'pending')
+  await expect(editor).not.toContainText(AGENT_SECOND)
+  await insertCard.getByTestId('agent-change-apply').click()
+  await expect(insertCard).toHaveAttribute('data-status', 'applied')
+  await expect(editor).toContainText(AGENT_SECOND)
+  await expect(editor.locator('.ai-origin', { hasText: AGENT_FIRST })).toHaveCount(1)
+  await expect(page.getByTestId('status-ai')).toHaveText(/^[1-9]\d*% AI$/)
   const afterWhatNext = await usageSummary()
   expect(afterWhatNext.byFeature.find((f) => f.feature === 'whatNext')).toMatchObject({
     requests: 1
   })
   await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
   await expect(turns).toHaveCount(0)
-  await expect(assistant.getByRole('radio', { name: 'Auto', exact: true })).toHaveAttribute(
+  // The mode is the project's, not the conversation's: a new tab keeps Ask.
+  await expect(assistant.getByRole('radio', { name: 'Ask', exact: true })).toHaveAttribute(
     'aria-checked',
     'true'
   )
@@ -4269,7 +4295,7 @@ test('create, close, reopen a project on disk', async () => {
     requests: 1
   })
 
-  // F-14.8: editor's notes, asked for in the chat (F-5.19, 2026-10-06). In Auto mode the router
+  // F-14.8: editor's notes, asked for in the chat (F-5.19, 2026-10-06). In Ask the router
   // (fast tier) reads the message and picks editor's notes; the turn names the action and says
   // where the notes are. Main is asked for a critique of Scene 1; the fake server answers three
   // notes, one of them citing a passage that was never written, and main drops it, so only the
@@ -4278,7 +4304,7 @@ test('create, close, reopen a project on disk', async () => {
   // gains a critique request. Close settles the proposal.
   await expect(page.getByRole('button', { name: "Editor's notes" })).toHaveCount(0)
   const critiqueBodiesBefore = openAiChatBodies.length
-  await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
+  await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
   await messageBox.fill(ROUTE_CRITIQUE_MESSAGE)
   await messageBox.press('Enter')
   const critiquePanel = page.getByTestId('critique-panel')
@@ -4323,7 +4349,9 @@ test('create, close, reopen a project on disk', async () => {
   await critiquePanel.getByTestId('critique-close').click()
   await expect(critiquePanel).toHaveCount(0)
   const afterRoute = await usageSummary()
-  expect(afterRoute.byFeature.find((f) => f.feature === 'route')).toMatchObject({ requests: 1 })
+  // Every message goes to the router since 2026-10-07: the two Plan questions and this one (the
+  // stopped request was never answered, so it is not in the ledger).
+  expect(afterRoute.byFeature.find((f) => f.feature === 'route')).toMatchObject({ requests: 3 })
   await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
   await expect(turns).toHaveCount(0)
 
@@ -4371,7 +4399,7 @@ test('create, close, reopen a project on disk', async () => {
   const proofreadRequestsBefore = proofreadBodies()
   if (!(await assistant.isVisible())) await page.keyboard.press('Control+k')
   await expect(assistant).toBeVisible()
-  await sendAuto('Proofread')
+  await sendRouted('Proofread')
   const proofreadPanel = page.getByTestId('proofread-panel')
   await expect(proofreadPanel).toBeVisible()
   const proofreadFixes = proofreadPanel.getByTestId('proofread-fix')
@@ -4745,7 +4773,7 @@ test('create, close, reopen a project on disk', async () => {
   // block and no story bible go out: the reader knows only what is on the page.
   const betaReaderBodiesBefore = openAiChatBodies.length
   if (!(await assistant.isVisible())) await page.keyboard.press('Control+k')
-  await sendAuto('Beta reader')
+  await sendRouted('Beta reader')
   const betaReaderPanel = page.getByTestId('beta-reader-panel')
   await expect(betaReaderPanel).toBeVisible()
   await expect(betaReaderPanel.getByTestId('beta-reader-item')).toHaveCount(1)
@@ -4779,8 +4807,8 @@ test('create, close, reopen a project on disk', async () => {
   await betaReaderPanel.getByTestId('beta-reader-close').click()
   await expect(betaReaderPanel).toHaveCount(0)
 
-  // F-5.7, F-5.22: Story Intelligence on the chat agent. Query mode asks about the whole
-  // project: the agent looks first (a search, shown live as a step on the waiting turn), then
+  // F-5.7, F-5.22: Story Intelligence on the chat agent. A question in Plan (2026-10-07: Query
+  // mode is gone) runs the read-only agent about the whole project: it looks first (a search, shown live as a step on the waiting turn), then
   // answers, and its citations are checked against the documents. The fabricated quote and the
   // one naming no document are dropped, and the `[3]` marker they left behind is stripped.
   // Clicking the surviving citation opens the scene and selects the passage in the editor.
@@ -4790,10 +4818,12 @@ test('create, close, reopen a project on disk', async () => {
   await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
   await expect(turns).toHaveCount(0)
   const queryBodiesBefore = openAiChatBodies.length
-  const queryRadio = assistant.getByRole('radio', { name: 'Query' })
-  await expect(queryRadio).toBeEnabled()
-  await queryRadio.click()
-  await expect(queryRadio).toHaveAttribute('aria-checked', 'true')
+  // Every chat message runs the agent since 2026-10-07, so count from here.
+  const agentRequestsBefore =
+    (await usageSummary()).byFeature.find((f) => f.feature === 'agent')?.requests ?? 0
+  const planRadio = assistant.getByRole('radio', { name: 'Plan' })
+  await planRadio.click()
+  await expect(planRadio).toHaveAttribute('aria-checked', 'true')
   await messageBox.fill(QUERY_QUESTION)
   await messageBox.press('Enter')
   await expect(turns).toHaveCount(2)
@@ -4810,7 +4840,8 @@ test('create, close, reopen a project on disk', async () => {
   await expect(queryTurn.getByTestId('chat-turn-cost')).toContainText('gpt-5.4 ·')
   // The lookup it made folds away under the answer.
   await expect(queryTurn.getByText('Looked up one thing')).toBeVisible()
-  expect(openAiChatBodies).toHaveLength(queryBodiesBefore + 2)
+  // The router's request, then the agent's two steps.
+  expect(openAiChatBodies).toHaveLength(queryBodiesBefore + 3)
   const querySystem = openAiChatBodies.at(-2)?.messages[0]
   expect(querySystem?.role).toBe('system')
   expect(querySystem?.content.startsWith(CHAT_AGENT_SENTINEL)).toBe(true)
@@ -4819,14 +4850,16 @@ test('create, close, reopen a project on disk', async () => {
     /^Result of search:\nScenes:\nn\d+ Chapter 1 › Scene 1: /
   )
   const afterQuery = await usageSummary()
-  expect(afterQuery.byFeature.find((f) => f.feature === 'agent')).toMatchObject({ requests: 2 })
+  expect(afterQuery.byFeature.find((f) => f.feature === 'agent')).toMatchObject({
+    requests: agentRequestsBefore + 2
+  })
   // The citation opens its scene and selects the cited passage there.
   await citation.click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
   await expect
     .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''), { timeout: 5_000 })
     .toBe(CRITIQUE_PRAISE_QUOTE)
-  // A recap is a Query question in the chat (2026-10-06: the What happened here? action left with
+  // A recap is a question in the chat (2026-10-06: the What happened here? action left with
   // the Actions menu). The open scene rides along; the canned answer's citation survives.
   const recapBodiesBefore = openAiChatBodies.length
   await messageBox.fill(RECAP_QUESTION)
@@ -4835,7 +4868,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(turns.nth(2)).toContainText(RECAP_QUESTION)
   await expect(turns.nth(3)).toContainText(QUERY_ANSWER_KEPT)
   await expect(turns.nth(3).getByTestId('query-citation')).toContainText('Chapter 1 › Scene 1')
-  expect(openAiChatBodies).toHaveLength(recapBodiesBefore + 2)
+  expect(openAiChatBodies).toHaveLength(recapBodiesBefore + 3)
   expect(openAiChatBodies.at(-2)?.messages.at(-1)?.content).toBe(RECAP_QUESTION)
   expect(openAiChatBodies.at(-2)?.messages[0]?.content).toMatch(
     /Open document n\d+: Chapter 1 › Scene 1 \(scene\)/
@@ -4870,19 +4903,15 @@ test('create, close, reopen a project on disk', async () => {
   )
   if (!removed.ok) throw new Error(`entity:delete failed: ${removed.error.message}`)
 
-  // F-5.21, F-5.22: the one AI switch sits under the message box, and the chat edits the book.
-  // At Ask an Auto message the router sends to chat comes back with its edit waiting: the
-  // current text struck through, the new text marked, Apply and Skip. Apply changes Scene 1 in
-  // the editor (AI-origin marked) and leaves a log line with Undo, which puts it back. At Auto the
-  // same message applies its edit at once. Back to Ask, the text restored, for the steps below.
+  // F-5.22 under the chat modes (2026-10-07): the chat edits the book. In Ask a message the
+  // router sends to chat comes back with its edit waiting: the current text struck through, the
+  // new text marked, Apply and Skip. Apply changes Scene 1 in the editor (AI-origin marked) and
+  // leaves a log line with Undo, which puts it back. In Auto the same message applies its edit
+  // at once. Back to Ask, the text restored, for the steps below.
   await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
   await expect(turns).toHaveCount(0)
-  const aiSwitch = assistant.getByRole('radiogroup', { name: 'AI switch' })
-  await expect(aiSwitch.getByRole('radio', { name: 'AI Ask' })).toHaveAttribute(
-    'aria-checked',
-    'true'
-  )
-  await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
+  await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
+  await expect.poll(async () => (await aiSettings()).chatMode).toBe('ask')
   await messageBox.fill(AGENT_EDIT_MESSAGE)
   await messageBox.press('Enter')
   await expect(turns).toHaveCount(2)
@@ -4908,8 +4937,8 @@ test('create, close, reopen a project on disk', async () => {
   await editCard.getByTestId('agent-change-undo').click()
   await expect(editCard).toHaveAttribute('data-status', 'undone')
   await expect.poll(() => documentTextWithoutGhost()).toBe(sceneBefore)
-  await aiSwitch.getByRole('radio', { name: 'AI Auto' }).click()
-  await expect.poll(async () => (await aiSettings()).auto).toBe(true)
+  await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
+  await expect.poll(async () => (await aiSettings()).chatMode).toBe('auto')
   await messageBox.fill(AGENT_EDIT_MESSAGE)
   await messageBox.press('Enter')
   await expect(turns).toHaveCount(4)
@@ -4919,8 +4948,8 @@ test('create, close, reopen a project on disk', async () => {
   await autoCard.getByTestId('agent-change-undo').click()
   await expect(autoCard).toHaveAttribute('data-status', 'undone')
   await expect.poll(() => documentTextWithoutGhost()).toBe(sceneBefore)
-  await aiSwitch.getByRole('radio', { name: 'AI Ask' }).click()
-  await expect.poll(async () => (await aiSettings()).auto).toBe(false)
+  await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
+  await expect.poll(async () => (await aiSettings()).chatMode).toBe('ask')
   // Back to the Query conversation the steps below continue.
   await assistant.getByRole('tab', { name: QUERY_QUESTION }).click()
   await expect(turns).toHaveCount(6)
@@ -4936,7 +4965,7 @@ test('create, close, reopen a project on disk', async () => {
 
   // F-5.15: a local model. The source switches to Local model, the server address points at an
   // OpenAI-compatible server (the fake provider stands in for Ollama), Test connection reaches
-  // it, and a Plan question streams back from it at no cost, logged under the local provider.
+  // it, and a Plan question is answered from it at no cost, logged under the local provider.
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   await settingsDialog.getByTestId('ai-source-local').click()
   await expect.poll(async () => (await aiSettings()).source).toBe('local')
@@ -4958,9 +4987,10 @@ test('create, close, reopen a project on disk', async () => {
   await messageBox.fill('What is the storm doing?')
   await messageBox.press('Enter')
   await expect(turns).toHaveCount(8)
-  await expect(turns.nth(7)).toContainText(CHAT_ANSWER)
+  await expect(turns.nth(7)).toContainText(QUERY_ANSWER_KEPT)
   await expect(turns.nth(7).getByTestId('chat-turn-cost')).toContainText('$0.0000')
-  expect(openAiChatBodies).toHaveLength(localBodiesBefore + 1)
+  // The router's request, then the agent's two steps, all to the local server.
+  expect(openAiChatBodies).toHaveLength(localBodiesBefore + 3)
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   await settingsDialog.getByTestId('ai-source-ownKey').click()
@@ -4971,7 +5001,7 @@ test('create, close, reopen a project on disk', async () => {
   // Back to Off and no key, as the steps above left them.
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await dial.getByRole('radio', { name: 'Off' }).click()
+  await useAi.uncheck()
   await expect.poll(async () => (await aiSettings()).dial).toBe(0)
   await settingsDialog.getByRole('button', { name: 'Clear' }).click()
   await expect(keyHint).toHaveText('No key')
@@ -5266,10 +5296,10 @@ test('create, close, reopen a project on disk', async () => {
       ''
     ].join('\n')
   )
-  // F-12.3 needs the switch at Ask and a key, which the steps above turned off.
+  // F-12.3 needs Use AI on and a key, which the steps above turned off.
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await dial.getByRole('radio', { name: 'Ask' }).click()
+  await useAi.check()
   await expect.poll(async () => (await aiSettings()).dial).toBe(1)
   await keyField.fill(ACCEPTED_KEY)
   await settingsDialog.getByRole('button', { name: 'Save' }).click()
@@ -5460,7 +5490,7 @@ test('create, close, reopen a project on disk', async () => {
   const continuityRequestsBefore = continuityBodies().length
   // F-5.17: Check consistency, asked in the chat (2026-10-06): "Continuity" in Auto runs the
   // check and opens the findings view in place of the chat.
-  await sendAuto('Continuity')
+  await sendRouted('Continuity')
   const continuityPanel = assistant.getByTestId('continuity-panel')
   await expect(continuityPanel).toBeVisible()
   const findingCards = continuityPanel.getByTestId('continuity-finding')
@@ -5493,7 +5523,7 @@ test('create, close, reopen a project on disk', async () => {
   // The link leads back to the chat, where the second check is asked.
   await assistant.getByTestId('continuity-button').click()
   await expect(continuityPanel).toHaveCount(0)
-  await sendAuto('Continuity')
+  await sendRouted('Continuity')
   await expect(
     continuityPanel
       .getByTestId('continuity-result')
@@ -5513,7 +5543,7 @@ test('create, close, reopen a project on disk', async () => {
   // Back to Off and no key, as before this step.
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
-  await dial.getByRole('radio', { name: 'Off' }).click()
+  await useAi.uncheck()
   await expect.poll(async () => (await aiSettings()).dial).toBe(0)
   await settingsDialog.getByRole('button', { name: 'Clear' }).click()
   await expect(keyHint).toHaveText('No key')

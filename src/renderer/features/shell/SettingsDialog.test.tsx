@@ -157,6 +157,19 @@ describe('SettingsDialog (F-7.5)', () => {
     expect(tab('Backups')).toHaveAttribute('aria-selected', 'true')
   })
 
+  it('keeps one fixed size on every tab; only the panel scrolls (2026-10-07)', async () => {
+    render(<SettingsDialog format="novel" onClose={vi.fn()} tabs={tabs} />)
+    const size = ['h-[min(640px,85vh)]', 'w-[min(640px,90vw)]']
+    const sized = (): string[] =>
+      dialog()
+        .className.split(' ')
+        .filter((name) => /^(max-)?[hw]-/.test(name))
+    expect(sized()).toEqual(size)
+    expect(panel()).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto')
+    await userEvent.click(tab('AI'))
+    expect(sized()).toEqual(size)
+  })
+
   it('switches between injected tabs by click and by the arrow keys, one panel at a time', async () => {
     render(<SettingsDialog format="novel" onClose={vi.fn()} tabs={tabs} />)
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Editor', 'AI'])

@@ -35,7 +35,7 @@ export function EditPassTab(): React.JSX.Element {
         </button>
         {allowed ? null : (
           <p className="m-0 text-xs text-fg-muted" data-testid="edit-pass-off">
-            Edit passes need AI at Ask or higher for this project (Settings, AI).
+            Edit passes need Use AI on for this project (Settings, AI).
           </p>
         )}
         {running === null ? null : (

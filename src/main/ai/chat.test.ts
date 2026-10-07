@@ -297,7 +297,7 @@ describe('runChat, Plan mode (F-5.4)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Assistant chat needs the AI switch at Ask or Auto (it is at Off).'
+      message: 'Assistant chat needs Use AI turned on (it is off).'
     })
     const on = defaultAiSettings()
     setAiSettings(db, { ...on, dial: 1, features: { ...on.features, chat: false } })
@@ -546,7 +546,7 @@ describe('runChat, Agent mode (F-5.4, F-14.7)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure(agent())).toEqual({
       code: 'DISABLED',
-      message: 'Assistant chat needs the AI switch at Ask or Auto (it is at Off).'
+      message: 'Assistant chat needs Use AI turned on (it is off).'
     })
     expect(complete).not.toHaveBeenCalled()
     // The ghost-text toggle does not gate Agent mode: only the switch does.

@@ -99,7 +99,12 @@ export function SettingsDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         onKeyDown={onDialogKeyDown}
-        className="flex max-h-[85vh] w-[640px] max-w-[90vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel"
+        // 2026-10-07 (decided by the author): one fixed size on every tab, so the header and
+        // the tab strip never move; a long tab scrolls inside the panel below. 640 × 640 CSS
+        // pixels, capped at 90 % of the window's width and 85 % of its height (510 px at the
+        // 900 × 600 minimum window); the UI scale zooms CSS pixels, so the size scales with it.
+        data-testid="settings-dialog"
+        className="flex h-[min(640px,85vh)] w-[min(640px,90vw)] flex-col rounded-lg border border-line bg-surface-raised shadow-panel"
       >
         <div className="flex items-center justify-between gap-2 px-5 pt-4">
           <h2 id={titleId} className="m-0 text-base font-semibold">

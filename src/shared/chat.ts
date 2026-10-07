@@ -1,6 +1,7 @@
 import { z } from 'zod'
-import { AgentTurn } from './agent'
+import { AgentTurn, type AgentAccess } from './agent'
 import { AiUsage } from './ai'
+import type { AssistantMode } from './aiSettings'
 import { RouteAction } from './assistantRoute'
 import { QueryTurn } from './query'
 import { toTagName } from './tags'
@@ -15,10 +16,11 @@ import { WhatNextDirection } from './whatNext'
 export const CONVERSATIONS_KEY = 'conversations'
 
 /**
- * Query (F-5.7, the default) answers about the whole manuscript with citations; Author places
- * its answer in the editor as ghost text; Plan answers in the chat about the open scene
- * (ideas and feedback). F-5.8 named them and set this order; the stored values (`agent` for
- * Author) stay, so conversations written before it parse unchanged.
+ * The request a stored turn was made in: Query (F-5.7) answered about the whole manuscript with
+ * citations; Author (`agent`) placed its answer in the editor as ghost text; Plan answered in
+ * the chat. Since 2026-10-07 the chat's modes are Auto, Ask, and Plan (`AssistantMode`, one
+ * setting per project); these values stay so every stored turn parses and renders as it was,
+ * and a new turn records `query` for a cited lookup and `plan` for a chat answer.
  */
 export const CHAT_MODES = ['query', 'agent', 'plan'] as const
 export const ChatMode = z.enum(CHAT_MODES)
@@ -30,17 +32,44 @@ export const CHAT_MODE_LABEL: Record<ChatMode, string> = {
 }
 
 /**
- * What a conversation answers in (2026-10-06, all AI in the assistant): `auto`, the default for
- * a new conversation, asks the router (F-5.19) which feature answers each message; the three
- * request modes above pin one. `auto` is never sent to main: a routed turn runs in the mode or
- * feature the router picked. Decided by Claude, unconfirmed.
+ * The per-conversation mode stored before 2026-10-07 (`auto` routed, the others pinned one
+ * request). Still parsed so old conversations load; ignored since the chat mode became one
+ * project setting (`AiSettings.chatMode`), and no longer written.
  */
 export const CONVERSATION_MODES = ['auto', ...CHAT_MODES] as const
 export const ConversationMode = z.enum(CONVERSATION_MODES)
 export type ConversationMode = z.infer<typeof ConversationMode>
-export const CONVERSATION_MODE_LABEL: Record<ConversationMode, string> = {
-  auto: 'Auto',
-  ...CHAT_MODE_LABEL
+
+/**
+ * What the chat agent (F-5.22) may do in a chat mode (decided by the author 2026-10-07): Plan
+ * gets the read-only tools, so it researches the whole project but never proposes an edit; Ask
+ * and Auto may propose edits.
+ */
+export function agentAccessFor(mode: AssistantMode): AgentAccess {
+  return mode === 'plan' ? 'read' : 'write'
+}
+
+/** Whether the chat applies the agent's edits itself (each with Undo; deletions still ask): only Auto. */
+export function appliesEditsItself(mode: AssistantMode): boolean {
+  return mode === 'auto'
+}
+
+/**
+ * The router's picks (F-5.19) a Plan turn may run as they are: the answer in the chat, a cited
+ * lookup, three directions, and a beta read, none of which proposes an edit. Every other pick
+ * (a rewrite, proofread, editor's notes with fixes, a consistency check with fixes, a suggested
+ * synopsis or notes) is answered by the read-only chat instead. Decided by Claude, unconfirmed.
+ */
+export const PLAN_ROUTE_ACTIONS: readonly RouteAction[] = [
+  'chat',
+  'query',
+  'whatNext',
+  'betaReader'
+]
+
+/** The action a routed turn runs in `mode`: the router's pick, or chat where Plan forbids it. */
+export function routeActionFor(mode: AssistantMode, action: RouteAction): RouteAction {
+  return mode === 'plan' && !PLAN_ROUTE_ACTIONS.includes(action) ? 'chat' : action
 }
 
 export const CHAT_PARAGRAPHS_MIN = 1
@@ -101,7 +130,8 @@ export type ChatMessage = z.infer<typeof ChatMessage>
 export const Conversation = z.object({
   id: z.string(),
   title: z.string().max(CHAT_TITLE_MAX),
-  mode: ConversationMode,
+  /** Stored before 2026-10-07; ignored and no longer written (`ConversationMode`). */
+  mode: ConversationMode.optional(),
   paragraphs: z.number().int().min(CHAT_PARAGRAPHS_MIN).max(CHAT_PARAGRAPHS_MAX),
   messages: z.array(ChatMessage).max(CHAT_MAX_MESSAGES),
   created: z.string(),

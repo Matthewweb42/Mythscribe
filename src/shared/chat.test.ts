@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
+import { ROUTE_ACTIONS } from './assistantRoute'
 import {
   CHAT_MAX_REFS,
   CHAT_TITLE_MAX,
+  PLAN_ROUTE_ACTIONS,
   type Conversations,
+  agentAccessFor,
+  appliesEditsItself,
   defaultConversations,
   parseStoredConversations,
   parseTagRefs,
+  routeActionFor,
   titleFor
 } from './chat'
 
@@ -171,5 +176,55 @@ describe('chat model (F-5.4)', () => {
     expect(parseTagRefs('#Zoë waits')).toEqual(['zoë'])
     const many = Array.from({ length: CHAT_MAX_REFS + 3 }, (_, i) => `#tag${i}`).join(' ')
     expect(parseTagRefs(many)).toHaveLength(CHAT_MAX_REFS)
+  })
+})
+
+describe('chat modes (decided by the author 2026-10-07)', () => {
+  it('gives Plan the read-only tools and Ask and Auto the edit tools', () => {
+    expect(agentAccessFor('plan')).toBe('read')
+    expect(agentAccessFor('ask')).toBe('write')
+    expect(agentAccessFor('auto')).toBe('write')
+  })
+
+  it('applies edits itself only in Auto', () => {
+    expect(appliesEditsItself('auto')).toBe(true)
+    expect(appliesEditsItself('ask')).toBe(false)
+    expect(appliesEditsItself('plan')).toBe(false)
+  })
+
+  it('never routes a Plan turn to a feature that edits, and keeps every pick in Ask and Auto', () => {
+    expect(PLAN_ROUTE_ACTIONS).toEqual(['chat', 'query', 'whatNext', 'betaReader'])
+    for (const action of ROUTE_ACTIONS) {
+      expect(routeActionFor('ask', action)).toBe(action)
+      expect(routeActionFor('auto', action)).toBe(action)
+      expect(routeActionFor('plan', action)).toBe(
+        PLAN_ROUTE_ACTIONS.includes(action) ? action : 'chat'
+      )
+    }
+    for (const action of [
+      'rewrite',
+      'proofread',
+      'critique',
+      'continuity',
+      'synopsis',
+      'notes'
+    ] as const) {
+      expect(routeActionFor('plan', action)).toBe('chat')
+    }
+  })
+
+  it('still loads a conversation stored with a per-conversation mode, or without one', () => {
+    const conversation = {
+      id: 'c',
+      title: 'Old',
+      paragraphs: 1,
+      messages: [],
+      created: '2026-10-01T00:00:00.000Z',
+      modified: '2026-10-01T00:00:00.000Z'
+    }
+    for (const mode of ['auto', 'query', 'agent', 'plan', undefined]) {
+      const parsed = parseStoredConversations({ active: 'c', items: [{ ...conversation, mode }] })
+      expect(parsed.items).toHaveLength(1)
+    }
   })
 })

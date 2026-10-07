@@ -6,52 +6,92 @@ import { DEFAULT_HONESTY, Honesty } from './critique'
 export const AI_SETTINGS_KEY = 'ai'
 
 /**
- * The stored AI level (F-14.4, narrowed by F-5.21): 0 Off, 1 on. A row stored while the dial had
- * four levels may carry 2 (Suggest) or 3 (Draft); both read as 1, which is Ask, never Auto
- * (the author decided 2026-10-06 that nothing moves to Auto silently). Whether an "on" project
- * applies the chat's edits itself is `AiSettings.auto`; `aiSwitchOf` reads the two as the one
- * switch the author sees.
+ * The stored AI level (F-14.4, narrowed by F-5.21): 0 Off, 1 on. Since 2026-10-07 it is the
+ * "Use AI" control in Settings › AI (decided by the author): off means nothing leaves the
+ * machine. A row stored while the dial had four levels may carry 2 (Suggest) or 3 (Draft); both
+ * read as 1, on. How the chat acts once AI is on is `AiSettings.chatMode`.
  */
 export const AiDial = z
   .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
   .transform((level): 0 | 1 => (level === 0 ? 0 : 1))
 export type AiDial = z.output<typeof AiDial>
 
+/** What the one on/off control is called in Settings › AI and in the new-project wizard. */
+export const USE_AI_LABEL = 'Use AI'
+
+/** One-line meaning of each state of Use AI; shown in Settings, the wizard, and the docs page. */
+export const USE_AI_MEANING = {
+  on: 'AI features on. The assistant works in the mode picked under the chat box.',
+  off: 'No AI at all. Nothing leaves this machine.'
+} as const
+
 /**
- * The one AI switch (F-5.21, decided by the author 2026-10-06): Off (no AI at all, nothing
- * leaves the machine), Ask (every AI feature on; every AI edit asks first), Auto (every AI
- * feature on; the chat applies its edits itself, each with Undo, and deletions still ask).
+ * The assistant chat's mode (decided by the author 2026-10-07; replaces the F-5.21 switch's Ask
+ * and Auto and the chat's Query, Author, and Plan modes): one setting per project, picked under
+ * the chat box. Auto: the chat agent (F-5.22) looks things up, answers with sources, and makes
+ * its own edits, each logged with Undo (deletions still ask). Ask: the same agent, every edit
+ * waiting for Apply. Plan: the agent with read-only tools, to discuss and brainstorm; it never
+ * proposes or makes an edit. The mode governs the chat only: edit passes always return tracked
+ * changes and background indexing runs whenever AI is on.
+ */
+export const ASSISTANT_MODES = ['auto', 'ask', 'plan'] as const
+export const AssistantMode = z.enum(ASSISTANT_MODES)
+export type AssistantMode = z.infer<typeof AssistantMode>
+/** New projects start the chat in Ask (decided by the author 2026-10-07). */
+export const DEFAULT_ASSISTANT_MODE: AssistantMode = 'ask'
+
+export const ASSISTANT_MODE_LABEL: Record<AssistantMode, string> = {
+  auto: 'Auto',
+  ask: 'Ask',
+  plan: 'Plan'
+}
+
+/** One-line meaning per mode: the tooltip of each option under the chat box, and the docs page. */
+export const ASSISTANT_MODE_MEANING: Record<AssistantMode, string> = {
+  auto:
+    'The assistant looks things up, answers with sources, and makes its edits itself, each ' +
+    'with Undo; deletions still ask.',
+  ask:
+    'The assistant looks things up and answers with sources; every edit it wants to make ' +
+    'waits for your Apply.',
+  plan:
+    'The assistant reads the whole project to discuss and brainstorm with you; it never ' +
+    'proposes or makes edits.'
+}
+
+/**
+ * The AI level the new-project wizard (F-5.18) and `project:create` speak: `off` is Use AI off,
+ * `ask` and `auto` are Use AI on with that chat mode. The wizard offers only `off` and `ask`
+ * since 2026-10-07; `auto` stays in the contract.
  */
 export const AI_SWITCH_POSITIONS = ['off', 'ask', 'auto'] as const
 export const AiSwitch = z.enum(AI_SWITCH_POSITIONS)
 export type AiSwitch = z.infer<typeof AiSwitch>
 
-export const AI_SWITCH_LABEL: Record<AiSwitch, string> = {
-  off: 'Off',
-  ask: 'Ask',
-  auto: 'Auto'
+/** The settings fields one wizard position writes. */
+export function aiSwitchPatch(position: AiSwitch): Pick<AiSettings, 'dial' | 'chatMode'> {
+  return {
+    dial: position === 'off' ? 0 : 1,
+    chatMode: position === 'auto' ? 'auto' : DEFAULT_ASSISTANT_MODE
+  }
 }
 
-/** One-line meaning per position; shown under each radio in Settings and in the new-project wizard. */
-export const AI_SWITCH_MEANING: Record<AiSwitch, string> = {
-  off: 'No AI at all. Nothing leaves this machine.',
-  ask: 'AI features on. Every change the AI wants to make asks you first.',
-  auto: 'AI features on. The chat makes its changes itself, each with Undo; deletions still ask.'
-}
-
-/** The switch position a project's settings stand at. */
-export function aiSwitchOf(settings: Pick<AiSettings, 'dial' | 'auto'>): AiSwitch {
-  if (settings.dial === 0) return 'off'
-  return settings.auto ? 'auto' : 'ask'
-}
-
-/** The settings fields one switch position writes. */
-export function aiSwitchPatch(position: AiSwitch): Pick<AiSettings, 'dial' | 'auto'> {
-  return { dial: position === 'off' ? 0 : 1, auto: position === 'auto' }
+/**
+ * The chat mode a stored row stands at. A row from before 2026-10-07 has no `chatMode` and never
+ * gains autonomy silently (decided by the author): the F-5.21 switch at Auto (on, with `auto`
+ * true) becomes Auto, anything else Ask.
+ */
+export function storedAssistantMode(row: {
+  dial: AiDial
+  auto?: boolean | undefined
+  chatMode?: AssistantMode | undefined
+}): AssistantMode {
+  if (row.chatMode !== undefined) return row.chatMode
+  return row.dial !== 0 && row.auto === true ? 'auto' : DEFAULT_ASSISTANT_MODE
 }
 
 /** The label for a stored level, as gate messages name it. */
-export const AI_DIAL_LABEL: Record<AiDial, string> = { 0: 'Off', 1: 'Ask' }
+export const AI_DIAL_LABEL: Record<AiDial, string> = { 0: 'Off', 1: 'On' }
 
 /** Bounds for the ghost-text idle delay (F-5.3): the spec's 0.5–5 s, stored in milliseconds. */
 export const GHOST_IDLE_MS_MIN = 500
@@ -62,7 +102,7 @@ export const DEFAULT_GHOST_IDLE_MS = 1_500
  * The VibeWrite mode (F-5.3), per project. `enabled` is the toolbar toggle's state, the
  * author's moment-to-moment "write with me" switch; it is independent of `features.ghostText`,
  * the dial's per-feature gate (F-14.4), which decides whether ghost text may ever run. Both
- * must be on (and the switch at Ask or Auto) before a request leaves.
+ * must be on (and Use AI on) before a request leaves.
  */
 export const GhostTextSettings = z.object({
   enabled: z.boolean(),
@@ -132,28 +172,32 @@ export function defaultFeatureToggles(): Record<AiFeatureId, boolean> {
   return Object.fromEntries(AI_FEATURE_IDS.map((id) => [id, true])) as Record<AiFeatureId, boolean>
 }
 
-export const AiSettings = z.object({
-  dial: AiDial,
-  /**
-   * F-5.21: at Auto the chat applies its non-deletion edits itself. Defaulted, so every row
-   * stored before the switch reads as Ask (or Off), never Auto.
-   */
-  auto: z.boolean().default(false),
-  /**
-   * One toggle per feature. A stored row from before a feature existed lacks its key, so the
-   * missing toggles are filled from the defaults (on) instead of the whole row falling back
-   * and resetting the dial (F-14.10 added `rewrite` after projects had settings rows).
-   */
-  features: z
-    .partialRecord(AiFeatureId, z.boolean())
-    .transform((stored) => ({ ...defaultFeatureToggles(), ...stored })),
-  /** Defaulted, so a row stored before F-5.3 (no `ghostText` key) still parses instead of falling back wholesale. */
-  ghostText: GhostTextSettings.default(defaultGhostTextSettings),
-  /** Defaulted likewise for a row stored before F-14.8. */
-  critique: CritiqueSettings.default(defaultCritiqueSettings),
-  /** Defaulted likewise for a row stored before F-15.4: an existing project keeps its own key. */
-  source: AiSource.default('ownKey')
-})
+export const AiSettings = z
+  .object({
+    dial: AiDial,
+    /** F-5.21's Auto bit, read only to migrate a row stored before `chatMode` (2026-10-07). */
+    auto: z.boolean().optional(),
+    /** The assistant chat's mode; absent on a row stored before 2026-10-07 (`storedAssistantMode`). */
+    chatMode: AssistantMode.optional(),
+    /**
+     * One toggle per feature. A stored row from before a feature existed lacks its key, so the
+     * missing toggles are filled from the defaults (on) instead of the whole row falling back
+     * and resetting the dial (F-14.10 added `rewrite` after projects had settings rows).
+     */
+    features: z
+      .partialRecord(AiFeatureId, z.boolean())
+      .transform((stored) => ({ ...defaultFeatureToggles(), ...stored })),
+    /** Defaulted, so a row stored before F-5.3 (no `ghostText` key) still parses instead of falling back wholesale. */
+    ghostText: GhostTextSettings.default(defaultGhostTextSettings),
+    /** Defaulted likewise for a row stored before F-14.8. */
+    critique: CritiqueSettings.default(defaultCritiqueSettings),
+    /** Defaulted likewise for a row stored before F-15.4: an existing project keeps its own key. */
+    source: AiSource.default('ownKey')
+  })
+  .transform(({ auto, chatMode, ...rest }) => ({
+    ...rest,
+    chatMode: storedAssistantMode({ dial: rest.dial, auto, chatMode })
+  }))
 export type AiSettings = z.infer<typeof AiSettings>
 /** The shape before parsing: `ghostText` may be absent (a row stored before F-5.3) and `features` may lack newer ids. */
 export type AiSettingsInput = z.input<typeof AiSettings>
@@ -162,7 +206,7 @@ export type AiSettingsInput = z.input<typeof AiSettings>
 export function defaultAiSettings(): AiSettings {
   return {
     dial: 0,
-    auto: false,
+    chatMode: DEFAULT_ASSISTANT_MODE,
     features: defaultFeatureToggles(),
     ghostText: defaultGhostTextSettings(),
     critique: defaultCritiqueSettings(),
@@ -176,8 +220,8 @@ export interface AiDataSharing {
   /** Exactly what leaves the machine when the feature runs; the rule "no text the panel does not list" refers to this. */
   sends: string
   /**
-   * The lowest stored level at which the feature may run: 1 (Ask, which Auto includes) for every
-   * feature since the one switch (F-5.21); Off runs nothing.
+   * The lowest stored level at which the feature may run: 1 (Use AI on) for every feature since
+   * the one switch (F-5.21); off runs nothing.
    */
   minDial: AiDial
 }
@@ -186,8 +230,7 @@ export interface AiDataSharing {
  * The one registry of what each feature sends and the dial level it needs (CLAUDE.md, author
  * control rule 3). `isFeatureAllowed` and the panel's disabled state read the same `minDial`,
  * so the table can never disagree with the gate. Exhaustive over `AiFeatureId` by type and by
- * test. `chat` is Plan-mode conversation that drafts nothing into the manuscript, so it sits at
- * Ask with the other cited, on-request features.
+ * test. Every feature needs only Use AI on and its own toggle.
  */
 /**
  * What the story bible block (F-14.9, `renderStoryBible`) carries, phrased once for every
@@ -397,10 +440,10 @@ export function isFeatureAllowed(settings: AiSettings, feature: AiFeatureId): bo
 }
 
 /**
- * How a gate says a feature cannot run at Off (F-5.21): every feature runs at Ask and Auto, so
- * the one level to name is the switch's. Main appends the current position; the renderer
- * appends where the switch lives.
+ * How a gate says a feature cannot run with AI off (F-5.21; Use AI since 2026-10-07): every
+ * feature runs whenever AI is on, so the one control to name is Use AI. Main appends the
+ * current state; the renderer appends where the control lives.
  */
 export function needsSwitchText(label: string): string {
-  return `${label} needs the AI switch at Ask or Auto`
+  return `${label} needs ${USE_AI_LABEL} turned on`
 }

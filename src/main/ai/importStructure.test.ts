@@ -410,7 +410,7 @@ describe('detectImportStructure (F-12.3)', () => {
     setAiSettings(db, { ...defaultAiSettings(), dial: 0 })
     expect(await failure()).toEqual({
       code: 'DISABLED',
-      message: 'Import structure detection needs the AI switch at Ask or Auto (it is at Off).'
+      message: 'Import structure detection needs Use AI turned on (it is off).'
     })
     const on = defaultAiSettings()
     setAiSettings(db, {

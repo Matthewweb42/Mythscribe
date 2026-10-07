@@ -49,12 +49,12 @@ describe('quickActionReason (F-5.17)', () => {
     [
       'settings not loaded read as the dial',
       state({ settings: null, scene: false, busy: 'Busy' }),
-      'What comes next needs the AI switch at Ask or Auto (Settings, AI tab)'
+      'What comes next needs Use AI turned on (Settings, AI tab)'
     ],
     [
       'the dial comes before the toggle, the scene, the length, and busy',
       state({ settings: { ...off('whatNext'), dial: 0 }, scene: false, length: 0, busy: 'Busy' }),
-      'What comes next needs the AI switch at Ask or Auto (Settings, AI tab)'
+      'What comes next needs Use AI turned on (Settings, AI tab)'
     ],
     [
       'the toggle comes before the scene',
@@ -89,7 +89,7 @@ describe('quickActionReason (F-5.17)', () => {
       'Consistency check is turned off for this project (Settings, AI tab)'
     )
     expect(quickActionReason('proofread', state({ settings: settings({ dial: 0 }) }))).toBe(
-      'Proofread needs the AI switch at Ask or Auto (Settings, AI tab)'
+      'Proofread needs Use AI turned on (Settings, AI tab)'
     )
     expect(quickActionReason('continuity', state({ length: 10, minLength: 1_200 }))).toBe(
       'Write 1,200 characters first'

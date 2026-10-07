@@ -207,7 +207,7 @@ describe('VoiceSection (F-14.1)', () => {
     expect(section()).toHaveTextContent('No rules yet')
     expect(section()).toHaveTextContent('No exemplars yet.')
     expect(screen.getByTestId('voice-notes')).toHaveTextContent(
-      'Nothing yet. With the AI switch at Ask or Auto, MythScribe notes how you write once the manuscript holds 2,000 words.'
+      'Nothing yet. With Use AI on, MythScribe notes how you write once the manuscript holds 2,000 words.'
     )
     expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument()
     expect(screen.queryByRole('list', { name: 'Voice rules' })).not.toBeInTheDocument()

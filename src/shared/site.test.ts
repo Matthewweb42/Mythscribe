@@ -5,14 +5,16 @@ import { describe, expect, it } from 'vitest'
 import {
   AI_DATA_SHARING,
   AI_FEATURES_BY_LEVEL,
-  AI_SWITCH_LABEL,
-  AI_SWITCH_MEANING,
-  AI_SWITCH_POSITIONS
+  ASSISTANT_MODES,
+  ASSISTANT_MODE_LABEL,
+  ASSISTANT_MODE_MEANING,
+  USE_AI_LABEL,
+  USE_AI_MEANING
 } from './aiSettings'
 
 /**
  * The website (F-15.10) is static HTML under `site/public/`, deployed as-is. These tests keep it
- * honest without a build step: the docs page must quote the app's AI switch and data-sharing copy
+ * honest without a build step: the docs page must quote the app's Use AI, chat mode, and data-sharing copy
  * verbatim (author-control rule 3: a feature must not send text the panel does not list, so the
  * public page and the panel have to say the same thing), every relative link and asset must
  * resolve, and every page must carry the basics a browser and a screen reader need.
@@ -43,13 +45,12 @@ function cells(doc: Document, tableId: string): string[][] {
 describe('docs page mirrors the AI settings copy (F-15.10)', () => {
   const doc = load(join(SITE_ROOT, 'docs/index.html'))
 
-  it('lists the three switch positions with their labels and meanings verbatim (F-5.21)', () => {
-    expect(cells(doc, 'dial-levels')).toEqual(
-      AI_SWITCH_POSITIONS.map((position) => [
-        AI_SWITCH_LABEL[position],
-        AI_SWITCH_MEANING[position]
-      ])
-    )
+  it('lists Use AI off and on and the three chat modes with their meanings verbatim (2026-10-07)', () => {
+    expect(cells(doc, 'dial-levels')).toEqual([
+      [`${USE_AI_LABEL} off`, USE_AI_MEANING.off],
+      [`${USE_AI_LABEL} on`, USE_AI_MEANING.on],
+      ...ASSISTANT_MODES.map((mode) => [ASSISTANT_MODE_LABEL[mode], ASSISTANT_MODE_MEANING[mode]])
+    ])
   })
 
   it('lists every feature and what it sends, in the app’s order', () => {
