@@ -16,7 +16,7 @@ import { pathToFileURL } from 'node:url'
 import { cloudApiUrl } from '@shared/account'
 import { effectiveOwnKeyProvider } from '@shared/ai'
 import { ASSET_SCHEME } from '@shared/focus'
-import { licensePublicKey } from '@shared/license'
+import { licensePublicKey, licenseVerifiable } from '@shared/license'
 import { projectToReopen, restorableBounds } from '@shared/windowState'
 import { UI_SCALE_FACTORS } from '@shared/zoom'
 import { themeBackground } from '@shared/themes'
@@ -309,6 +309,7 @@ if (!primaryInstance) {
     access = new AppAccessService({
       appState,
       licensed: () => licensedAccount.supporter().licensed,
+      enforced: licenseVerifiable(licensePublicKey(process.env)),
       onChange: (status) => emit(BrowserWindow.getAllWindows(), 'app:accessChanged', status)
     })
     // F-15.4: the Cloud adapter reads the session live through the account service, so it is

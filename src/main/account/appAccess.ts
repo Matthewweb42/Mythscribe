@@ -28,6 +28,11 @@ export interface AppAccessServiceOptions {
   /** Whether a verified app license is held now (`AccountService.supporter().licensed`). */
   licensed: () => boolean
   onChange: (access: AppAccess) => void
+  /**
+   * Whether the trial can end. False in a build that cannot verify a license (the placeholder
+   * key, `licenseVerifiable`): the app then answers as licensed and never turns read-only.
+   */
+  enforced?: boolean
   now?: () => number
   schedule?: Schedule
 }
@@ -40,6 +45,7 @@ export class AppAccessService {
   private readonly appState: AppStateStore
   private readonly licensed: () => boolean
   private readonly onChange: (access: AppAccess) => void
+  private readonly enforced: boolean
   private readonly now: () => number
   private readonly schedule: Schedule
 
@@ -47,6 +53,7 @@ export class AppAccessService {
     this.appState = options.appState
     this.licensed = options.licensed
     this.onChange = options.onChange
+    this.enforced = options.enforced ?? true
     this.now = options.now ?? (() => Date.now())
     this.schedule = options.schedule ?? defaultSchedule
     this.current = this.compute()
@@ -94,7 +101,7 @@ export class AppAccessService {
     if (stored?.lastSeenAt !== trial.lastSeenAt) {
       this.appState.update((s) => ({ ...s, trial }))
     }
-    return appAccessFor(trial, this.licensed(), now)
+    return appAccessFor(trial, !this.enforced || this.licensed(), now)
   }
 
   private arm(): void {

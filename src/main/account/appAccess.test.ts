@@ -16,9 +16,10 @@ let licensed: boolean
 let changes: AppAccess[]
 let timers: { run: () => void; ms: number }[]
 
-function build(): AppAccessService {
+function build(enforced = true): AppAccessService {
   return new AppAccessService({
     appState,
+    enforced,
     licensed: () => licensed,
     onChange: (access) => changes.push(access),
     now: () => now,
@@ -94,6 +95,14 @@ describe('AppAccessService (AI-BILLING-SPEC M1)', () => {
     expect(thrown).toMatchObject({ code: 'VALIDATION', message: TRIAL_ENDED_MESSAGE })
     // The timer re-armed itself.
     expect(timers).toHaveLength(1)
+  })
+
+  it('never turns read-only in a build that cannot verify a license', () => {
+    const service = build(false)
+    now = trialEndsAt(startedAt()) + 90 * 24 * 60 * 60_000
+    service.refresh()
+    expect(service.status().state).toBe('licensed')
+    expect(service.writable()).toBe(true)
   })
 
   it('arms the last timer for the exact end of the trial', () => {
