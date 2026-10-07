@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import type { AiUsage } from '@shared/ai'
 import type { AiSuggestNotesResult, AiSuggestSynopsisResult } from '@shared/ipc/contract'
-import { AI_ORIGIN_MARK } from '@shared/provenance'
 import { NOTES_SUGGEST_INSTRUCTION_MAX } from '@shared/sceneSuggest'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
@@ -36,9 +35,10 @@ export type SuggestionKind = 'synopsis' | 'notes'
  * The side-panel suggestions (F-5.20) in the notes column, per node: a suggested synopsis and
  * suggested key points for the notes. Each is a proposal (F-14.5) nothing writes into the panel
  * until the author accepts it: Accept puts the synopsis in the Synopsis box through the
- * scene-metadata autosave store; Add to notes appends the chosen points to the notes as a
- * bullet list carrying the AI-origin mark (F-14.6), settling `accepted` for every point or
- * `acceptedPart` for some; Dismiss settles `rejected`. Started from the Suggest buttons in the
+ * scene-metadata autosave store; Add to notes appends the chosen points to the notes, one
+ * "• " paragraph each (the notes schema has no lists and no AI-origin mark, so the points carry
+ * no provenance once added; decided by Claude, unconfirmed), settling `accepted` for every point
+ * or `acceptedPart` for some; Dismiss settles `rejected`. Started from the Suggest buttons in the
  * notes column, the assistant's actions menu, or a routed chat turn (F-5.19). One request per
  * node and kind at a time; asking again replaces (and rejects) a suggestion still on screen.
  */
@@ -142,38 +142,21 @@ function request<T>(
     )
 }
 
+/** What starts each added point in the notes: the notes schema has no lists, so a bullet character. */
+export const NOTE_POINT_PREFIX = '• '
+
 /**
- * `doc` with `points` appended as one bullet list, each point's text carrying the AI-origin mark
- * of `proposalId` (F-14.6; `accepted` is the characters taken from the proposal, the baseline
- * the mark's share is measured against). An empty document (one empty paragraph) is replaced.
+ * `doc` with `points` appended, one paragraph each starting with `NOTE_POINT_PREFIX`. An empty
+ * document (one empty paragraph) is replaced rather than left as a blank line above them.
  */
-export function appendNotePoints(
-  doc: TiptapNodeT,
-  points: readonly string[],
-  proposalId: string
-): TiptapNodeT {
-  const accepted = points.reduce((sum, point) => sum + point.length, 0)
-  const list: TiptapNodeT = {
-    type: 'bulletList',
-    content: points.map((point) => ({
-      type: 'listItem',
-      content: [
-        {
-          type: 'paragraph',
-          content: [
-            {
-              type: 'text',
-              text: point,
-              marks: [{ type: AI_ORIGIN_MARK, attrs: { proposalId, accepted } }]
-            }
-          ]
-        }
-      ]
-    }))
-  }
+export function appendNotePoints(doc: TiptapNodeT, points: readonly string[]): TiptapNodeT {
+  const added: TiptapNodeT[] = points.map((point) => ({
+    type: 'paragraph',
+    content: [{ type: 'text', text: `${NOTE_POINT_PREFIX}${point}` }]
+  }))
   const blocks = doc.content ?? []
   const empty = blocks.length === 0 || (blocks.length === 1 && isEmptyParagraph(blocks[0]))
-  return { ...doc, type: 'doc', content: empty ? [list] : [...blocks, list] }
+  return { ...doc, type: 'doc', content: empty ? added : [...blocks, ...added] }
 }
 
 function isEmptyParagraph(node: TiptapNodeT | undefined): boolean {
@@ -249,7 +232,7 @@ export const useSceneSuggestStore = create<SceneSuggestState>((set, get) => ({
       const stored = (await ipc().invoke('notes:get', { id: nodeId })).notes ?? EMPTY_DOC
       await ipc().invoke('notes:save', {
         id: nodeId,
-        notes: appendNotePoints(stored, points, current.proposalId)
+        notes: appendNotePoints(stored, points)
       })
       if (useNotesStore.getState().docs[nodeId] !== undefined) {
         await useNotesStore.getState().reload([nodeId])

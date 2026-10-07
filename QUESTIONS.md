@@ -24,6 +24,24 @@ do. Review, then confirm, change, or delete the entry.
 - Alternatives: include the voice profile (not prose, so no); send the whole notes (cost).
 - To change it: `src/shared/sceneSuggest.ts`, `src/main/ai/sceneSuggest.ts`, `src/main/ai/prompts/chat.v5.ts`, `src/main/ai/prompts/query.v4.ts`.
 
+## 2026-10-06 · F-5.19 · Auto mode, the selection bubble, and the Actions menu
+- Question: How does "all AI in the AI panel" look in the app?
+- Chosen: the toolbar keeps VibeWrite only. A conversation defaults to Auto (the router picks what answers); Query, Author, and Plan stay as radios because Author (ghost text at the caret) is no router action. A text selection shows a small bubble (Rewrite, Ask AI), repeated in the right-click menu; a button the dial forbids is not shown. Ask AI puts the passage in the composer as a removable quote that rides on the next message. The quick-action row became an "Actions" menu in the panel header with ten items; an item that cannot run is disabled with the reason as its tooltip. Results of rewrite, editor's notes, proofread, beta reader, and the brief draft show above the conversation; a routed turn names the action and says where the result is.
+- Alternatives: drop the mode radios entirely (loses Author mode); hide unavailable menu items instead of disabling them; results as cards inside the thread.
+- To change it: `src/renderer/features/ai/{AiActionsMenu,AiResults,aiActions,assistantStore}.ts(x)`, `src/renderer/features/editor/{SelectionBubble,selectionActions}.ts(x)`, `src/shared/chat.ts` (`CONVERSATION_MODES`).
+
+## 2026-10-06 · F-5.20 · Added notes points carry no AI mark
+- Question: How do accepted note points enter the notes, and are they marked as AI-made (F-14.6)?
+- Chosen: one paragraph per point starting "• " (the notes editor has no lists), no AI-origin mark (the notes schema has none). The suggestion card is marked "Suggested by AI" until accepted; the proposal row records the acceptance. The synopsis, plain text in the metadata, has no mark either.
+- Alternatives: add the AI-origin mark (and lists) to the notes schema.
+- To change it: `src/renderer/features/editor/sceneSuggestStore.ts` (`appendNotePoints`), `src/renderer/features/editor/extensions.ts`.
+
+## 2026-10-06 · F-14.1 · No way to hand-mark a voice exemplar in the UI
+- Question: The author asked for no "voice exemplar" button; should hand-marking move elsewhere (right-click menu)?
+- Chosen: removed with no replacement; the voice job picks exemplars (F-14.14) and the channel stays for a later UI.
+- Alternatives: "Mark as voice exemplar" in the editor's right-click menu or the Actions menu.
+- To change it: `src/renderer/features/editor/DocumentEditor.tsx` (`rangeMenuItems`), `useVoiceStore.add`.
+
 ## 2026-10-06 · F-12.2 · Where imported parts land in a project with content
 - Question: when importing into a project that already has parts, should the imported chapters go into the last existing part, or arrive as new parts?
 - Chosen: new parts after the project's own, marked New in the combined outline; the author drags chapters into an existing part (or uses Move up / Move down).

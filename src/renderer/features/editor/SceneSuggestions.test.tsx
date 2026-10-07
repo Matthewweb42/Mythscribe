@@ -139,41 +139,23 @@ afterEach(() => {
 })
 
 describe('appendNotePoints (F-5.20)', () => {
-  it('appends one bullet list whose text carries the AI-origin mark of the proposal', () => {
+  it('appends one bulleted paragraph per point after the notes', () => {
     const notes: TiptapNodeT = {
       type: 'doc',
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Mine.' }] }]
     }
-    const next = appendNotePoints(notes, ['One.', 'Two!'], 'p-1')
-    expect(next.content?.[0]).toEqual(notes.content?.[0])
-    expect(next.content?.[1]).toEqual({
-      type: 'bulletList',
-      content: ['One.', 'Two!'].map((text) => ({
-        type: 'listItem',
-        content: [
-          {
-            type: 'paragraph',
-            content: [
-              {
-                type: 'text',
-                text,
-                marks: [{ type: 'aiOrigin', attrs: { proposalId: 'p-1', accepted: 8 } }]
-              }
-            ]
-          }
-        ]
-      }))
-    })
+    expect(appendNotePoints(notes, ['One.', 'Two!']).content).toEqual([
+      notes.content?.[0],
+      { type: 'paragraph', content: [{ type: 'text', text: '• One.' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: '• Two!' }] }
+    ])
   })
 
-  it('replaces an empty document instead of leaving a blank line above the list', () => {
-    const next = appendNotePoints(
-      { type: 'doc', content: [{ type: 'paragraph' }] },
-      ['One.'],
-      'p-1'
-    )
-    expect(next.content).toHaveLength(1)
-    expect(next.content?.[0]?.type).toBe('bulletList')
+  it('replaces an empty document instead of leaving a blank line above the points', () => {
+    const next = appendNotePoints({ type: 'doc', content: [{ type: 'paragraph' }] }, ['One.'])
+    expect(next.content).toEqual([
+      { type: 'paragraph', content: [{ type: 'text', text: '• One.' }] }
+    ])
   })
 })
 
@@ -259,11 +241,10 @@ describe('Suggest notes (F-5.20)', () => {
     await waitFor(() =>
       expect(settlements()).toEqual([{ id: 'p-notes', status: 'acceptedPart', note: null }])
     )
-    const list = storedNotes?.content?.[1]
-    expect(list?.type).toBe('bulletList')
-    expect(list?.content?.map((item) => item.content?.[0]?.content?.[0]?.text)).toEqual([
-      POINTS[0],
-      POINTS[2]
+    expect(storedNotes?.content?.map((block) => block.content?.[0]?.text)).toEqual([
+      'Mine.',
+      `• ${POINTS[0]}`,
+      `• ${POINTS[2]}`
     ])
     expect(screen.queryByRole('group', { name: 'Suggested notes' })).not.toBeInTheDocument()
   })
@@ -277,7 +258,7 @@ describe('Suggest notes (F-5.20)', () => {
       instruction: 'Tomas'
     })
     await act(() => useSceneSuggestStore.getState().addNotes('sc-1', [0, 1, 2]))
-    expect(useNotesStore.getState().docs['sc-1']?.content?.content?.[0]?.type).toBe('bulletList')
+    expect(useNotesStore.getState().docs['sc-1']?.content?.content).toHaveLength(3)
     await waitFor(() =>
       expect(settlements()).toEqual([{ id: 'p-notes', status: 'accepted', note: null }])
     )

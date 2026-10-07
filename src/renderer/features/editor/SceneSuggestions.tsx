@@ -29,10 +29,13 @@ const FEATURE: Record<SuggestionKind, 'synopsis' | 'notesSuggest'> = {
  */
 export function SuggestButton({
   id,
-  kind
+  kind,
+  compact = false
 }: {
   id: string
   kind: SuggestionKind
+  /** Icon only (the notes column's heading is narrow); the label stays as the accessible name. */
+  compact?: boolean
 }): React.JSX.Element | null {
   const settings = useAiSettingsStore((s) => s.settings)
   const scene = useTreeStore(
@@ -67,7 +70,7 @@ export function SuggestButton({
       ) : (
         <Sparkles size={12} aria-hidden="true" />
       )}
-      Suggest
+      {compact ? null : 'Suggest'}
     </button>
   )
 }
@@ -156,7 +159,7 @@ export function SynopsisSuggestion({ id }: { id: string }): React.JSX.Element | 
 
 /**
  * The suggested key points over the notes (F-5.20): one checkbox each (all ticked), Add to notes
- * (appends the ticked points to the notes as a bullet list marked as AI-made, F-14.6) and
+ * (appends the ticked points to the notes, one "• " line each) and
  * Dismiss. Nothing while there is no suggestion for `id`.
  */
 export function NotesSuggestion({ id }: { id: string }): React.JSX.Element | null {

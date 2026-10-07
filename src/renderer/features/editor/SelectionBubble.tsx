@@ -63,11 +63,15 @@ export function SelectionBubble({
 
   if (!editor || selection === null || (!offer.rewrite && !offer.ask)) return null
   const reason = offer.rewrite ? rewriteReason(settings, selection.length) : null
-  // Above the selection's first line, or under it when the line is at the top of the window.
+  // Above the selection's first line, or under it when the line is at the top of the window;
+  // kept inside the window, so a selection that starts out of view still has its bubble at hand.
   const start = editor.view.coordsAtPos(selection.from)
   const above = start.top >= BUBBLE_ROOM
   const left = Math.max(4, Math.min(start.left, window.innerWidth - BUBBLE_WIDTH))
-  const top = above ? start.top - BUBBLE_GAP : start.bottom + BUBBLE_GAP
+  const top = Math.min(
+    Math.max(above ? start.top - BUBBLE_GAP : start.bottom + BUBBLE_GAP, 4),
+    window.innerHeight - BUBBLE_ROOM
+  )
   return (
     <div
       role="toolbar"

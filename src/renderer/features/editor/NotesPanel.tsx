@@ -61,7 +61,7 @@ function NotesHeading({ id }: { id: string | null }): React.JSX.Element {
     <div className="flex shrink-0 items-center gap-2 pt-3 pr-4 pb-2 pl-2">
       <DockPanelControls id="notes" />
       <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Notes</h2>
-      {id === null ? null : <SuggestButton id={id} kind="notes" />}
+      {id === null ? null : <SuggestButton id={id} kind="notes" compact />}
       {id === null ? null : <PinNotesButton id={id} />}
     </div>
   )

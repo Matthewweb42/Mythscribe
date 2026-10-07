@@ -32,7 +32,8 @@ const preview = (text: string): string =>
  * confidence (a meter with the words it was built from and how to raise it), the rules the
  * profile currently renders into prompts, and the exemplar list with Remove. The profile is
  * loaded on mount (local, cached in main) and nothing renders until it lands; the exemplars
- * come from the store the project loaded, so a mark from the toolbar shows here at once. The
+ * come from the store the project loaded (the toolbar's mark button is gone since 2026-10-06;
+ * the voice job picks exemplars, F-14.14, and `voice:addExemplar` stays for a hand mark). The
  * consistency report (F-14.7) is on demand: the button scores every scene against the profile
  * and lists the drifting ones first; a title selects that scene in the tree. Since F-14.14 the
  * section also shows what was learned automatically: the AI-made style notes with Clear, and
