@@ -8,7 +8,7 @@
       name="description"
       content="MythScribe's Use AI setting and the assistant's Auto, Ask, and Plan modes, what each AI feature sends, and the rules that keep the author in control."
     />
-    <meta name="theme-color" content="#1b1b1f" />
+    <meta name="theme-color" content="#08161e" />
     <link rel="icon" href="../img/favicon.png" type="image/png" />
     <link rel="stylesheet" href="../styles.css" />
   </head>
@@ -16,30 +16,31 @@
     <header class="site-header">
       <div class="wrap">
         <a class="brand" href="../">
-          <img src="../img/favicon.png" alt="" width="32" height="32" />
-          MythScribe
+          <img src="../img/favicon.png" alt="" width="34" height="34" />
+          <span class="wordmark">Myth<span>Scribe</span></span>
         </a>
         <nav class="site-nav" aria-label="Site">
           <ul>
-            <li><a href="../#download">Download</a></li>
+            <li><a href="../#features">Features</a></li>
+            <li><a href="../#pricing">Pricing</a></li>
+            <li><a href="../#faq">FAQ</a></li>
             <li><a href="./" aria-current="page">AI settings</a></li>
-            <li><a href="../privacy">Privacy</a></li>
-            <li><a href="../terms">Terms</a></li>
-            <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
+            <li class="nav-extra"><a href="../privacy">Privacy</a></li>
+            <li class="nav-extra"><a href="../terms">Terms</a></li>
           </ul>
         </nav>
       </div>
     </header>
 
-    <main class="wrap">
+    <main class="page wrap">
       <article class="prose">
         <h1>How MythScribe's AI settings work</h1>
         <p class="meta">Matches the app’s Settings as of 7 October 2026</p>
 
         <p>
           MythScribe installs with AI off. One control in Settings, Use AI, decides whether the app
-          may use AI at all. The assistant's mode (Auto, Ask, or Plan, picked under its message
-          box) decides what the chat may do with your book. A toggle per feature lets you turn off
+          may use AI at all. The assistant's mode (Auto, Ask, or Plan, picked under its message box)
+          decides what the chat may do with your book. A toggle per feature lets you turn off
           anything you do not want even when AI is on. This page reproduces those settings and the
           data-sharing table from the app, word for word. The text is copied from the app's source,
           and a test in the repository fails if the two drift apart.
@@ -61,8 +62,8 @@
           </li>
           <li>
             <strong>Use AI and the toggles are the law.</strong> Nothing runs with AI off, and a
-            feature runs only with its own toggle on. A feature may not send any text
-            that the table below does not list.
+            feature runs only with its own toggle on. A feature may not send any text that the table
+            below does not list.
           </li>
           <li>
             <strong>Answers are grounded.</strong> Story Intelligence answers cite the passages they
@@ -73,10 +74,10 @@
 
         <h2 id="dial">Use AI and the assistant's modes</h2>
         <p>
-          Both are set per project, so a project you are experimenting with can run the assistant
-          in Auto while your novel keeps AI off. The modes govern only the assistant's chat:
-          background indexing (summaries, story bible, tags) runs whenever AI is on, and edit
-          passes always come back as tracked changes.
+          Both are set per project, so a project you are experimenting with can run the assistant in
+          Auto while your novel keeps AI off. The modes govern only the assistant's chat: background
+          indexing (summaries, story bible, tags) runs whenever AI is on, and edit passes always
+          come back as tracked changes.
         </p>
         <div class="table-wrap">
           <table id="dial-levels">
@@ -351,38 +352,44 @@
 
         <h2 id="cost">Seeing what it costs</h2>
         <p>
-          Every request records the model, the tokens in and out, and the cost in your project's
-          usage ledger, and the AI tab in Settings shows today's spend and the running total. You
-          can set a daily cap; at a cap of zero the app makes no requests at all, cached answers
-          included. Ghost text has its own brakes: it waits for a pause in typing, needs a minimum
-          of new text since the last request, never asks while a suggestion is showing, and stops
-          after a daily limit.
+          Every request records the model, how much text went in and came out, and the cost in your
+          project's usage ledger, and the AI tab in Settings shows today's spend and the running
+          total. You can set a daily cap; at a cap of zero the app makes no requests at all, cached
+          answers included. Ghost text has its own brakes: it waits for a pause in typing, needs a
+          minimum of new text since the last request, never asks while a suggestion is showing, and
+          stops after a daily limit.
         </p>
 
         <h2 id="where">Where to find it</h2>
         <p>
           Open Settings (<kbd>Ctrl</kbd>+<kbd>,</kbd>, or <kbd>Cmd</kbd>+<kbd>,</kbd> on macOS),
           choose the AI tab, and Use AI is at the top under &ldquo;This project&rdquo;; the
-          assistant's mode sits under its message box. Your API
-          key, the model tiers, and the usage figures are on the same tab.
+          assistant's mode sits under its message box. Your API key, the model tiers, and the usage
+          figures are on the same tab.
         </p>
 
         <p>
-          In short: in Ask nothing enters the manuscript without your explicit accept, in Auto
-          every change can be undone and deletions still ask, in Plan nothing changes, and AI is
-          off until you turn Use AI on.
+          In short: in Ask nothing enters the manuscript without your explicit accept, in Auto every
+          change can be undone and deletions still ask, in Plan nothing changes, and AI is off until
+          you turn Use AI on.
         </p>
       </article>
     </main>
 
     <footer class="site-footer">
       <div class="wrap">
-        <p>MythScribe is made by Matthew Webecke.</p>
+        <div>
+          <a class="brand" href="../">
+            <img src="../img/favicon.png" alt="" width="34" height="34" />
+            <span class="wordmark">Myth<span>Scribe</span></span>
+          </a>
+          <p>Made for novelists by Matthew Webecke.</p>
+        </div>
         <nav aria-label="Footer">
           <ul>
+            <li><a href="./" aria-current="page">AI settings</a></li>
             <li><a href="../privacy">Privacy</a></li>
             <li><a href="../terms">Terms</a></li>
-            <li><a href="./" aria-current="page">AI settings</a></li>
             <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
             <li><a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a></li>
           </ul>
