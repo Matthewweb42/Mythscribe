@@ -85,7 +85,15 @@ describe('ACCENTS', () => {
 
 describe('licenseVerifiable', () => {
   it('is false for the embedded placeholder and true for a real key', () => {
-    expect(licenseVerifiable(LICENSE_PUBLIC_KEY_JWK)).toBe(false)
+    expect(
+      licenseVerifiable({
+        kty: 'OKP',
+        crv: 'Ed25519',
+        x: 'REPLACE_WITH_THE_OPERATOR_PUBLIC_KEY_FROM_cloud_license-keygen'
+      })
+    ).toBe(false)
+    // The operator's key, embedded 2026-10-07.
+    expect(licenseVerifiable(LICENSE_PUBLIC_KEY_JWK)).toBe(true)
     expect(licenseVerifiable({ kty: 'OKP', crv: 'Ed25519', x: 'q7f3' })).toBe(true)
   })
 })

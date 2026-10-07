@@ -27,7 +27,7 @@ export const LICENSE_REFRESH_INTERVAL_MS = 24 * 60 * 60_000
 export const LICENSE_PUBLIC_KEY_JWK: LicensePublicKeyJwk = {
   kty: 'OKP',
   crv: 'Ed25519',
-  x: 'REPLACE_WITH_THE_OPERATOR_PUBLIC_KEY_FROM_cloud_license-keygen'
+  x: 'ITaziKFk61sv-oiCpqbqO0gkHm_tYM414cCzTSrVyvw'
 }
 
 /**
