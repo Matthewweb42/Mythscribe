@@ -36,7 +36,10 @@ import { AuthorRules } from '../authorRules'
 import { BackupSettingsPatch, BackupState } from '../backups'
 import { CheckoutBody, CreditsResult, EMAIL_MAX, PricingResult, UsageResult } from '../cloudApi'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
+import { BookDetails } from '../bookDetails'
 import { CompiledManuscript } from '../compile'
+import { CompileFormat, CompileFormatName, CompileProjectState } from '../compileFormat'
+import { CompileSource } from '../compileModel'
 import {
   CONTEXT_FILE_MAX_BYTES,
   ContextAddResult,
@@ -1095,6 +1098,60 @@ export const contract = {
     input: z.object({ options: ExportOptions, requestId: z.string() }),
     output: ExportResult.nullable()
   },
+  /**
+   * Compile v2: the compile model's source, the front matter, manuscript, and end matter in
+   * reading order, each node with its level, depth, title, scene metadata, tags, stored content,
+   * synopsis, and notes (unreadable content or notes are null). The renderer runs `compileBook`
+   * on it for the live preview; it flushes the document, notes, and scene metadata stores first.
+   */
+  'compile:source': { input: z.undefined(), output: CompileSource },
+  /**
+   * Compile v2: the project's last format, output, quick pick, and "Include in compile"
+   * exclusions; the defaults (Standard Manuscript, whole manuscript, all included) when unset.
+   */
+  'compileState:get': { input: z.undefined(), output: CompileProjectState },
+  /** Replaces the project's compile state and answers what was stored. */
+  'compileState:set': { input: CompileProjectState, output: CompileProjectState },
+  /** Compile v2: the project's Book details; every field empty (language `en`) when unset. */
+  'bookDetails:get': { input: z.undefined(), output: BookDetails },
+  /**
+   * Replaces the project's Book details and answers what was stored. The cover is kept as
+   * stored: it changes only through `bookDetails:setCover` / `bookDetails:removeCover`.
+   */
+  'bookDetails:set': { input: BookDetails, output: BookDetails },
+  /**
+   * Opens the OS file dialog for one image and makes it the book's cover: the file is copied into
+   * the project's `assets/covers/` (served as `assetUrl('covers', cover)`), the previous cover
+   * file is deleted, and the updated details are answered; null when the dialog was cancelled.
+   * VALIDATION for a type outside `IMAGE_EXTENSIONS` or a file over `IMAGE_MAX_BYTES`.
+   */
+  'bookDetails:setCover': { input: z.undefined(), output: BookDetails.nullable() },
+  /** Removes the cover: the file is deleted and `cover` is null again. */
+  'bookDetails:removeCover': { input: z.undefined(), output: BookDetails },
+  /**
+   * Compile v2: the author's own formats ("My formats"), app-wide, sorted by name. The built-ins
+   * are not listed: they are `BUILTIN_COMPILE_FORMATS` in `@shared/compileFormat`.
+   */
+  'compileFormat:list': { input: z.undefined(), output: z.array(CompileFormat) },
+  /**
+   * Duplicates a built-in or library format into the library (default name "<name> copy",
+   * numbered when taken) and answers the new format. NOT_FOUND for an unknown `fromId`,
+   * ALREADY_EXISTS for a taken name, VALIDATION at `COMPILE_FORMATS_MAX`.
+   */
+  'compileFormat:create': {
+    input: z.object({ fromId: z.string(), name: CompileFormatName.optional() }),
+    output: CompileFormat
+  },
+  /**
+   * Replaces a library format (rename and every setting). VALIDATION for a built-in id,
+   * NOT_FOUND for an id not in the library, ALREADY_EXISTS for a name another format has.
+   */
+  'compileFormat:save': { input: CompileFormat, output: CompileFormat },
+  /**
+   * Deletes a library format. A project whose last format it was falls back to the default the
+   * next time the compile window resolves it. VALIDATION for a built-in, NOT_FOUND for unknown.
+   */
+  'compileFormat:delete': { input: z.object({ id: z.string() }), output: z.null() },
   /** Every tag of the open project (F-4.1), ordered by name. */
   'tag:list': { input: z.undefined(), output: z.array(Tag) },
   /**

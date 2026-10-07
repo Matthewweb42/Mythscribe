@@ -71,6 +71,20 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'stats:dashboard': 'read',
   'manuscript:compile': 'read',
   'export:run': 'read',
+  'compile:source': 'read',
+  // Compile preferences (format, output, scope, include ticks) are like export: read.
+  'compileState:get': 'read',
+  'compileState:set': 'read',
+  'bookDetails:get': 'read',
+  // Book details hold the author's own text (dedication, about the author): write.
+  'bookDetails:set': 'write',
+  'bookDetails:setCover': 'write',
+  'bookDetails:removeCover': 'write',
+  // App-wide settings, like the tag templates.
+  'compileFormat:list': 'read',
+  'compileFormat:create': 'read',
+  'compileFormat:save': 'read',
+  'compileFormat:delete': 'read',
   'tag:list': 'read',
   'tag:create': 'write',
   'tag:update': 'write',

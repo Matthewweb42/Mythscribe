@@ -10,7 +10,9 @@ import {
   DEFAULT_BANNED_PHRASES,
   defaultAuthorRules
 } from '@shared/authorRules'
+import { BOOK_DETAILS_KEY, defaultBookDetails } from '@shared/bookDetails'
 import { CONVERSATIONS_KEY, defaultConversations } from '@shared/chat'
+import { COMPILE_STATE_KEY, defaultCompileProjectState } from '@shared/compileFormat'
 import { DICTIONARY_KEY, defaultProjectDictionary } from '@shared/dictionary'
 import { EDITOR_SETTINGS_KEY, defaultEditorSettings } from '@shared/editorSettings'
 import { FOCUS_SETTINGS_KEY, defaultFocusSettings } from '@shared/focus'
@@ -26,6 +28,10 @@ import { createProject, projectFolderFor, type ProjectSession } from './projectS
 import {
   getAiSettings,
   getAuthorRules,
+  getBookDetails,
+  getCompileState,
+  setBookDetails,
+  setCompileState,
   getConversations,
   getEditorSettings,
   getFocusSettings,
@@ -557,5 +563,50 @@ describe('getProjectStructure / setProjectStructure (F-11.1b)', () => {
     expect(getProjectStructure(db)).toEqual(defaultProjectStructure())
     setRaw(JSON.stringify({ template: 'fiveAct' }), STRUCTURE_KEY)
     expect(getProjectStructure(db)).toEqual(defaultProjectStructure())
+  })
+})
+
+describe('getBookDetails / setBookDetails (Compile v2)', () => {
+  it('answers the defaults with no row, round-trips, and fills omitted fields', () => {
+    open('novel')
+    expect(rows(BOOK_DETAILS_KEY)).toHaveLength(0)
+    expect(getBookDetails(db)).toEqual(defaultBookDetails())
+    const stored = setBookDetails(db, { title: 'River', alsoBy: ['Lake'] })
+    expect(stored).toEqual({ ...defaultBookDetails(), title: 'River', alsoBy: ['Lake'] })
+    expect(getBookDetails(db)).toEqual(stored)
+    setBookDetails(db, { author: 'Ann Lee' })
+    expect(rows(BOOK_DETAILS_KEY)).toHaveLength(1)
+    expect(getBookDetails(db)).toEqual({ ...defaultBookDetails(), author: 'Ann Lee' })
+  })
+
+  it('falls back when the stored value is not JSON or no longer fits', () => {
+    open('novel')
+    setRaw('{not json', BOOK_DETAILS_KEY)
+    expect(getBookDetails(db)).toEqual(defaultBookDetails())
+    setRaw(JSON.stringify({ title: 3 }), BOOK_DETAILS_KEY)
+    expect(getBookDetails(db)).toEqual(defaultBookDetails())
+  })
+})
+
+describe('getCompileState / setCompileState (Compile v2)', () => {
+  it('answers the defaults with no row and round-trips the state', () => {
+    open('novel')
+    expect(getCompileState(db)).toEqual(defaultCompileProjectState())
+    const state = {
+      formatId: 'my:1',
+      output: 'pdf' as const,
+      scope: { kind: 'chapters' as const, ids: ['c1'] },
+      excluded: ['n1', 'n2']
+    }
+    expect(setCompileState(db, state)).toEqual(state)
+    expect(getCompileState(db)).toEqual(state)
+  })
+
+  it('falls back when the stored value is not JSON or no longer fits', () => {
+    open('novel')
+    setRaw('{not json', COMPILE_STATE_KEY)
+    expect(getCompileState(db)).toEqual(defaultCompileProjectState())
+    setRaw(JSON.stringify({ formatId: '', output: null }), COMPILE_STATE_KEY)
+    expect(getCompileState(db)).toEqual(defaultCompileProjectState())
   })
 })

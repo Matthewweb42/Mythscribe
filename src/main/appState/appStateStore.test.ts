@@ -9,6 +9,7 @@ import {
   defaultLocalAiSettings
 } from '@shared/ai'
 import { defaultBackupSettings } from '@shared/backups'
+import { BUILTIN_COMPILE_FORMATS } from '@shared/compileFormat'
 import { defaultDiagnosticsSettings } from '@shared/diagnostics'
 import { defaultDock } from '@shared/dock'
 import { defaultFloating, defaultLayout } from '@shared/layout'
@@ -64,7 +65,8 @@ describe('AppStateStore', () => {
       localAi: defaultLocalAiSettings(),
       routing: defaultAiRouting(),
       cloudPricing: null,
-      trial: null
+      trial: null,
+      compileFormats: []
     })
   })
 
@@ -109,6 +111,26 @@ describe('AppStateStore', () => {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
     expect(new AppStateStore(file).get().tagTemplates).toEqual([])
+  })
+
+  it('reads the compile format library leniently: none in older files, a bad format dropped alone', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().compileFormats).toEqual([])
+    const ebook = BUILTIN_COMPILE_FORMATS.find((f) => f.id === 'builtin:ebook')
+    const mine = { ...ebook, id: 'my:1', name: 'Mine' }
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ version: 1, recents: [entry], compileFormats: [mine, { id: 'broken' }] }),
+      'utf8'
+    )
+    const state = new AppStateStore(file).get()
+    expect(state.recents).toEqual([entry])
+    expect(state.compileFormats).toEqual([mine])
+    // And it round-trips.
+    const store = new AppStateStore(file)
+    store.update((s) => ({ ...s, compileFormats: [] }))
+    expect(new AppStateStore(file).get().compileFormats).toEqual([])
   })
 
   it('parses a file written before F-15.9 (no supporter) as unlicensed with the default accent', () => {

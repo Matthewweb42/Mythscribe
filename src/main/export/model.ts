@@ -1,12 +1,13 @@
-import type { CompiledEntry } from '@shared/compile'
-import { compiledBlocks } from '@shared/compiledBlocks'
-import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
-import type { TiptapNodeT } from '@shared/tiptap'
+import type { ExportOptions } from '@shared/bookExport'
+import { BUILTIN_COMPILE_FORMATS, type CompileFormat } from '@shared/compileFormat'
+import type { CompiledBook, ContentBlock, Inline as CompiledInline } from '@shared/compileModel'
 
 /**
- * The export's neutral book model (F-12.1): the Tiptap JSON of the editor schema read into
- * paragraphs, headings, quotes, and scene breaks with plain runs, so every format renders the
- * same reading of a document. Pure; the renderers own all escaping.
+ * The F-12.1 writers' book model: units of titles, paragraphs, headings, quotes, and scene breaks
+ * with plain runs. Since Compile v2 (CV1) it is no longer built from the tree here: `collect.ts`
+ * runs the shared compile model (`@shared/compileModel`) and `legacyUnits` adapts its items, so
+ * the Export dialog keeps working until the CV2 writers render `CompiledBook` directly. Pure; the
+ * renderers own all escaping.
  */
 
 /** A stretch of text with the marks a book can print (the AI-origin mark is never printed). */
@@ -53,114 +54,112 @@ export interface BookUnit {
   blocks: BookBlock[]
 }
 
-function alignOf(node: TiptapNodeT): Align | null {
-  const value = node.attrs?.textAlign
-  return EXPORT_ALIGNMENTS.find((align) => align === value) ?? null
-}
-
-function runOf(text: string, node: TiptapNodeT): Run {
-  const marks = new Set((node.marks ?? []).map((mark) => mark.type))
+/**
+ * The compile format the F-12.1 Export dialog's options stand for, until the compile window
+ * (Compile v2, CV3) replaces the dialog: node titles as headings (nothing numbered), the dialog's
+ * scene break text, the project's own front and end matter when asked, no generated pages, no
+ * replacements. Only structure is read from it; the legacy writers still take
+ * `ExportOptions.formatting` for the look.
+ */
+export function legacyCompileFormat(options: ExportOptions): CompileFormat {
+  const plain = BUILTIN_COMPILE_FORMATS.find((f) => f.id === 'builtin:plain-text')
+  if (plain === undefined) throw new Error('The built-in Plain text format is missing')
   return {
-    kind: 'text',
-    text,
-    bold: marks.has('bold'),
-    italic: marks.has('italic'),
-    underline: marks.has('underline'),
-    strike: marks.has('strike'),
-    code: marks.has('code')
+    ...plain,
+    id: 'legacy:export',
+    name: 'Export',
+    sceneSeparator: { kind: 'text', text: options.formatting.sceneBreak },
+    matter: {
+      ...plain.matter,
+      titlePage: 'none',
+      frontMatter: options.includeFront,
+      endMatter: options.includeEnd
+    },
+    contents: { body: 'text', notes: 'none', keepTags: false, keepAiMarks: false },
+    replacements: []
   }
 }
 
-/**
- * The inline content of a paragraph or heading. An inline tag token prints its name without the
- * `#`: the token is a word of the author's sentence. Unknown inline nodes give their content.
- */
-function inlines(nodes: readonly TiptapNodeT[]): Inline[] {
-  const out: Inline[] = []
-  for (const node of nodes) {
-    if (node.type === 'text') {
-      if (node.text !== undefined && node.text.length > 0) out.push(runOf(node.text, node))
-    } else if (node.type === 'hardBreak') {
-      out.push({ kind: 'hardBreak' })
-    } else if (node.type === INLINE_TAG_NODE_TYPE) {
-      const name = node.attrs?.name
-      if (typeof name === 'string' && name.length > 0) out.push(runOf(name, node))
-    } else {
-      out.push(...inlines(node.content ?? []))
-    }
-  }
-  return out
+function legacyInlines(runs: readonly CompiledInline[]): Inline[] {
+  return runs.map((run): Inline =>
+    run.kind === 'hardBreak'
+      ? run
+      : {
+          kind: 'text',
+          text: run.text,
+          bold: run.bold,
+          italic: run.italic,
+          underline: run.underline,
+          strike: run.strike,
+          code: run.code
+        }
+  )
 }
 
-const INLINE_TYPES = new Set(['text', 'hardBreak', INLINE_TAG_NODE_TYPE])
+function legacyBlocks(blocks: readonly ContentBlock[]): BookBlock[] {
+  return blocks.map((block): BookBlock => {
+    switch (block.kind) {
+      case 'paragraph':
+        return { kind: 'paragraph', runs: legacyInlines(block.runs), align: block.align }
+      case 'heading':
+        return {
+          kind: 'heading',
+          level: block.level,
+          runs: legacyInlines(block.runs),
+          align: block.align
+        }
+      case 'quote':
+        return { kind: 'quote', blocks: legacyBlocks(block.blocks) }
+      case 'separator':
+        return { kind: 'sceneBreak' }
+    }
+  })
+}
 
-/**
- * The blocks of a stored document. An empty paragraph prints nothing (books space paragraphs by
- * style, not by blank lines); inline content found at block level reads as its own paragraph;
- * unknown block nodes give their content.
- */
-export function docBlocks(doc: TiptapNodeT): BookBlock[] {
-  const out: BookBlock[] = []
-  const walk = (nodes: readonly TiptapNodeT[], into: BookBlock[]): void => {
-    let stray: TiptapNodeT[] = []
-    const flush = (): void => {
-      const runs = inlines(stray)
-      if (runs.length > 0) into.push({ kind: 'paragraph', runs, align: null })
-      stray = []
-    }
-    for (const node of nodes) {
-      if (INLINE_TYPES.has(node.type)) {
-        stray.push(node)
-        continue
-      }
-      flush()
-      if (node.type === 'paragraph') {
-        const runs = inlines(node.content ?? [])
-        if (runs.length > 0) into.push({ kind: 'paragraph', runs, align: alignOf(node) })
-      } else if (node.type === 'heading') {
-        const runs = inlines(node.content ?? [])
-        const raw = node.attrs?.level
-        const level = raw === 2 || raw === 3 ? raw : 1
-        if (runs.length > 0) into.push({ kind: 'heading', level, runs, align: alignOf(node) })
-      } else if (node.type === 'blockquote') {
-        const blocks: BookBlock[] = []
-        walk(node.content ?? [], blocks)
-        if (blocks.length > 0) into.push({ kind: 'quote', blocks })
-      } else if (node.type === 'sceneBreak') {
-        into.push({ kind: 'sceneBreak' })
-      } else {
-        walk(node.content ?? [], into)
-      }
-    }
-    flush()
-  }
-  walk(doc.type === 'doc' ? (doc.content ?? []) : [doc], out)
-  return out
+function matterUnit(item: Extract<CompiledBook['items'][number], { kind: 'matter' }>): BookUnit {
+  return { kind: 'matter', title: item.title, blocks: legacyBlocks(item.blocks) }
 }
 
 /**
- * The body's blocks in reading order, by the compiled preview's rules (`compiledBlocks` without
- * scene headers): a part or chapter prints its title, a break between scenes the scene break,
- * and a document its text.
+ * The compiled book as the F-12.1 writers' units: each matter item its own unit, and the body one
+ * unit titled `bodyTitle` (left out when it prints no word of text, titles included). Section
+ * headings become titles (a chapter-level scene a chapter title), separators scene breaks.
  */
-export function bodyBlocks(entries: readonly CompiledEntry[]): BookBlock[] {
-  const out: BookBlock[] = []
-  for (const block of compiledBlocks(entries, false)) {
-    if (block.kind === 'heading') {
-      // A part always sits on the root, so a chapter-level title below the root is in a part.
-      out.push({
-        kind: 'title',
-        level: block.level,
-        text: block.entry.title,
-        inPart: block.level === 'chapter' && block.entry.depth > 0
-      })
-    } else if (block.kind === 'break') {
-      out.push({ kind: 'sceneBreak' })
-    } else if (block.kind === 'text') {
-      out.push(...docBlocks(block.content))
+export function legacyUnits(book: CompiledBook, bodyTitle: string): BookUnit[] {
+  const front: BookUnit[] = []
+  const back: BookUnit[] = []
+  const body: BookBlock[] = []
+  for (const item of book.items) {
+    switch (item.kind) {
+      case 'matter':
+        if (item.division === 'front') front.push(matterUnit(item))
+        else back.push(matterUnit(item))
+        break
+      case 'section':
+        if (item.heading !== null && item.level !== 'scene') {
+          body.push({
+            kind: 'title',
+            level: item.level === 'part' ? 'part' : 'chapter',
+            text: item.heading.lines.join(' '),
+            inPart: item.inPart
+          })
+        }
+        break
+      case 'separator':
+        body.push({ kind: 'sceneBreak' })
+        break
+      case 'text':
+        body.push(...legacyBlocks(item.blocks))
+        break
+      case 'page':
+      case 'synopsis':
+      case 'note':
+        break
     }
   }
-  return out
+  const bodyUnits: BookUnit[] =
+    book.metadata.bodyWords > 0 ? [{ kind: 'body', title: bodyTitle, blocks: body }] : []
+  return [...front, ...bodyUnits, ...back]
 }
 
 /**
