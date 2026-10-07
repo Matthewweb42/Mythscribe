@@ -214,7 +214,7 @@ export const GHOST_AFTER_CHARS = 100
  * `FEATURE_INPUT_BUDGETS` in the change that builds it (F-5.3 ghost text, F-4.7 tags, F-5.6
  * summaries, F-5.4 chat, F-5.5 Author mode, F-5.7 queries, F-14.8 critique, F-5.8 embeddings,
  * F-14.10 rewrite, F-14.3 brief, F-13.4 continuity, F-14.12 proofread, F-5.19 route, F-5.20
- * synopsis and notes suggestions).
+ * synopsis and notes suggestions, F-5.22 the chat agent).
  */
 export const AI_FEATURE_IDS = [
   'ghostText',
@@ -246,7 +246,9 @@ export const AI_FEATURE_IDS = [
   // F-5.20: suggested key points for the scene's notes.
   'notesSuggest',
   // F-14.14: the learned style notes, refreshed in the background from the author's own prose.
-  'voiceNotes'
+  'voiceNotes',
+  // F-5.22: the chat agent, which looks things up in the project before it answers or edits.
+  'agent'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -295,7 +297,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-5.20: up to 8 key points as JSON, each up to 200 characters.
   notesSuggest: 600,
   // F-14.14: up to 8 style notes of at most 160 characters each as JSON.
-  voiceNotes: 400
+  voiceNotes: 400,
+  // F-5.22: one step as JSON: a tool call, or the answer with citations and up to 8 edits.
+  agent: 1_500
 }
 
 /**
@@ -346,7 +350,11 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // the author's focus, and the story bible at its 400-token budget.
   notesSuggest: 6_000,
   // F-14.14: up to 6,000 characters of the author's paragraphs, the previous notes, and the rules.
-  voiceNotes: 2_500
+  voiceNotes: 2_500,
+  // F-5.22: per step: the rules, the voice block, the open document (synopsis, notes head,
+  // summary, caret window, selection), recent turns, and the tool results so far (each capped at
+  // 6,000 characters; the oldest are dropped first when the step would go over).
+  agent: 12_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

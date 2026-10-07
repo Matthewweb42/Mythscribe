@@ -40,7 +40,8 @@ describe('chat model (F-5.4)', () => {
               mode: null,
               query: null,
               directions: null,
-              action: null
+              action: null,
+              agent: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',
@@ -103,7 +104,8 @@ describe('chat model (F-5.4)', () => {
               mode: 'plan',
               query: null,
               directions: null,
-              action: null
+              action: null,
+              agent: null
               // no `usage` field at all, as a turn written before F-5.9 has.
             }
           ],
@@ -138,7 +140,8 @@ describe('chat model (F-5.4)', () => {
               mode: 'plan',
               query: null,
               directions: null,
-              action: null
+              action: null,
+              agent: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',

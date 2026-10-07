@@ -107,6 +107,7 @@ const message = (
   query: null,
   directions: null,
   action: null,
+  agent: null,
   ...over
 })
 

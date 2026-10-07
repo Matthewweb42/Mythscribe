@@ -264,7 +264,8 @@ const turn = (role: ChatMessage['role'], content: string, mode: ChatMode | null)
   mode,
   query: null,
   directions: null,
-  action: null
+  action: null,
+  agent: null
 })
 
 /** `value` with the active conversation replaced by `patch(conversation)`, its `modified` bumped. */

@@ -1,6 +1,13 @@
 import { estimateTokens, GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS, inputBudget } from '@shared/ai'
 import { AUTHOR_RULES_TEXT_MAX, defaultAuthorRules } from '@shared/authorRules'
 import {
+  AGENT_CARET_CHARS,
+  AGENT_MAX_STEPS,
+  AGENT_NOTES_CHARS,
+  AGENT_RESULT_CHARS,
+  AGENT_SELECTION_CHARS
+} from '@shared/agent'
+import {
   CHAT_HISTORY_TURNS,
   CHAT_MAX_REFS,
   CHAT_MESSAGE_MAX,
@@ -247,6 +254,7 @@ import {
   EMPTY_SCENE_BRIEF,
   renderSceneBriefBlock,
   SCENE_BRIEF_FIELD_MAX,
+  SCENE_SYNOPSIS_MAX,
   type SceneBrief
 } from '@shared/sceneMeta'
 import { renderSceneSteer, SCENE_STEER_CATEGORIES, SCENE_STEER_NAMES_MAX } from '@shared/sceneSteer'
@@ -291,6 +299,8 @@ import {
   NOTES_SUGGEST_PROMPT_VERSION,
   type BuildNotesSuggestPromptInput
 } from '../prompts/notesSuggest.v1'
+import { renderAgentFocus } from '../prompts/agent.v1'
+import { fitAgentPrompt } from '../agent'
 
 /**
  * The eval harness's fixtures (F-5.12): one manuscript passage, the voice profile it yields,
@@ -589,6 +599,11 @@ export interface EvalCase {
     | { kind: 'synopsis' }
     /** Suggested notes (F-5.20): the answer must survive the feature's own parser, nothing dropped. */
     | { kind: 'notesSuggest' }
+    /**
+     * One chat agent step (F-5.22): the answer must be JSON and read, through the feature's own
+     * parser, as `expected` (a tool call while it still needs to look, or the reply).
+     */
+    | { kind: 'agent'; expected: 'tool' | 'answer' }
 }
 
 const general = builtinParams('general')
@@ -1883,6 +1898,60 @@ function routeCase(
   }
 }
 
+function agentCase(
+  name: string,
+  note: string,
+  input: Parameters<typeof fitAgentPrompt>[0],
+  expected: 'tool' | 'answer'
+): EvalCase {
+  // Fitted to the input budget exactly as the feature fits every step (token rule 8).
+  const built = fitAgentPrompt(input)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'agent', expected }
+  }
+}
+
+/** The open fixture scene as an agent run carries it (F-5.22). */
+const AGENT_FOCUS = renderAgentFocus({
+  ref: 'n7',
+  title: 'Chapter 1 › The ferry landing',
+  level: 'scene',
+  synopsis: 'Mara confronts Tomas over the mill ledger.',
+  notes: NOTES,
+  summary:
+    'Mara meets Tomas at the ferry landing. He wants the mill ledger back; she reveals her ' +
+    'brother only copied it.',
+  beforeCaret: FIXTURE_PASSAGE.slice(-AGENT_CARET_CHARS),
+  selection: ''
+})
+const AGENT_MAXED_FOCUS = renderAgentFocus({
+  ref: 'n7',
+  title: `${'C'.repeat(100)} › ${'T'.repeat(100)}`,
+  level: 'scene',
+  synopsis: 'S'.repeat(SCENE_SYNOPSIS_MAX),
+  notes: FIXTURE_PASSAGE.repeat(2).slice(0, AGENT_NOTES_CHARS),
+  summary: 'M'.repeat(SUMMARY_MAX_CHARS),
+  beforeCaret: FIXTURE_PASSAGE.repeat(2).slice(-AGENT_CARET_CHARS),
+  selection: FIXTURE_PASSAGE.repeat(2).slice(0, AGENT_SELECTION_CHARS)
+})
+/** A lookup already made: the call as the model wrote it and the result main appended. */
+const AGENT_STEP = {
+  call: '{"tool":"search","args":{"query":"ledger elm"}}',
+  result:
+    'Result of search:\nScenes:\nn7 Chapter 1 › The ferry landing: Mara meets Tomas at the ' +
+    'ferry landing. He wants the mill ledger back.\nn9 Chapter 2 › The elm: Mara digs under ' +
+    'the elm at night.'
+}
+const AGENT_MAXED_STEP = {
+  call: '{"tool":"read_scene","args":{"id":"n9","from":0}}',
+  result: `Result of read_scene:\n${FIXTURE_PASSAGE.repeat(4).slice(0, AGENT_RESULT_CHARS)}`
+}
+
 function synopsisCase(name: string, note: string, input: BuildSynopsisPromptInput): EvalCase {
   // The scene is fitted to the input budget exactly as the feature fits it (token rule 8).
   const { sceneText } = fitSceneToBudget(
@@ -2775,5 +2844,47 @@ export const EVAL_CASES: EvalCase[] = [
       passages: Array.from({ length: 40 }, () => FIXTURE_PASSAGE.slice(0, 600)),
       previous: MAXED_VOICE_NOTES
     }
+  ),
+  agentCase(
+    'fresh',
+    'a read run with no document open and no history: the first step of a Query question',
+    {
+      access: 'read',
+      voice: null,
+      focus: null,
+      history: [],
+      message: 'Who owes the mill money?',
+      steps: [],
+      final: false
+    },
+    'tool'
+  ),
+  agentCase(
+    'full',
+    'a write run on the open scene with the voice block, two turns, and one lookup made',
+    {
+      access: 'write',
+      voice: voiceBlock(FIXTURE_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' }),
+      focus: AGENT_FOCUS,
+      history: CHAT_HISTORY,
+      message: 'Tighten the last paragraph and add a beat where Tomas looks at the elm.',
+      steps: [AGENT_STEP],
+      final: false
+    },
+    'answer'
+  ),
+  agentCase(
+    'maxed',
+    'the last step of a write run as the fit leaves it: every focus part at its cap, the maxed voice block, six lookups of full results, and the final turn',
+    {
+      access: 'write',
+      voice: voiceBlock(MAXED_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' }),
+      focus: AGENT_MAXED_FOCUS,
+      history: CHAT_HISTORY,
+      message: FIXTURE_PASSAGE.repeat(3).slice(0, 2_000),
+      steps: Array.from({ length: AGENT_MAX_STEPS }, () => AGENT_MAXED_STEP),
+      final: true
+    },
+    'answer'
   )
 ]

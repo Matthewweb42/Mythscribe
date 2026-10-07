@@ -344,6 +344,19 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'it broke; a regenerate carries your note.',
     minDial: 1
   },
+  agent: {
+    label: 'Assistant lookups and edits',
+    sends:
+      "Your message, the recent turns of the conversation, the open document's title, synopsis, " +
+      'notes (the first 1,500 characters), and stored summary, up to 1,500 characters before ' +
+      'the caret and 2,000 of the selected passage, and then, one lookup at a time (at most 6 ' +
+      'per message), what the assistant asks to read: search results with scene summaries, ' +
+      'the outline of titles and word counts, up to 6,000 characters of a document per read, ' +
+      'notes, summaries, story-bible sheets, and tag names. When it may edit, the voice ' +
+      'profile (stylometric rules, learned style notes, and up to 3 exemplar passages) and ' +
+      'your author rules and banned phrases go too.',
+    minDial: 1
+  },
   authorMode: {
     label: 'Author mode',
     sends: "The active scene's text, referenced notes, the scene brief, and your instruction.",

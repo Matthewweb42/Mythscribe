@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AgentTurn } from './agent'
 import { AiUsage } from './ai'
 import { RouteAction } from './assistantRoute'
 import { QueryTurn } from './query'
@@ -88,7 +89,12 @@ export const ChatMessage = z.object({
    * The feature the router (F-5.19) picked for this turn in an Auto conversation, shown as a
    * label on the turn; null for a turn sent in a fixed mode and for rows written before it.
    */
-  action: RouteAction.nullable().default(null)
+  action: RouteAction.nullable().default(null),
+  /**
+   * A chat agent turn's lookups and edits (F-5.22) and where each edit stands; null for every
+   * other turn and for rows written before it.
+   */
+  agent: AgentTurn.nullable().default(null)
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
 

@@ -64,6 +64,7 @@ import {
   type StreamChunk
 } from '../ai/providers/types'
 import { AiProviderRegistry } from '../ai/registry'
+import { loadAgentProject } from '../ai/agentTools'
 import { getProposal } from '../ai/proposalStore'
 import { insertUsage } from '../ai/usageStore'
 import { upsertSummary } from '../document/summaryStore'
@@ -3044,6 +3045,101 @@ describe('ai:query (F-5.7)', () => {
     const empty = await handlerFor('ai:query')(undefined, ask())
     expect(empty.ok).toBe(false)
     if (!empty.ok) expect(empty.error.code).toBe('VALIDATION')
+  })
+})
+
+describe('ai:agent (F-5.22)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+  const LEDGER =
+    'The ledger sat on the mill desk where Tomas had left it. Mara copied the ledger twice ' +
+    'and hid the copy under the elm in the north pasture.'
+
+  const body = (text: string): Input<'document:save'>['content'] => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+  })
+
+  /** The `ai:agentStep` events sent to the window. */
+  const stepsSent = (): unknown[][] =>
+    vi.mocked(fakeWin.webContents.send).mock.calls.filter(([channel]) => channel === 'ai:agentStep')
+
+  const ask = (nodeId: string, over: Partial<Input<'ai:agent'>> = {}): Input<'ai:agent'> => ({
+    nodeId,
+    message: 'Where did Mara hide the ledger? Tighten the line too.',
+    history: [],
+    access: 'write',
+    focus: { beforeCaret: '', selection: '' },
+    requestId: 'ag-1',
+    ...over
+  })
+
+  it('announces each lookup, answers with the resolved edits unapplied, and records one pending proposal', async () => {
+    await invoke('project:create', { name: 'Agent', format: 'novel', directory: tmp })
+    const scene = manuscriptDocuments(manager.require().connection.orm)[0]
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('document:save', { id: scene.id, content: body(LEDGER) })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1, auto: true })
+    await invoke('ai:setKey', { key: KEY })
+    const said = (value: unknown): CompletionResult => ({
+      text: JSON.stringify(value),
+      model: 'gpt-fake',
+      usage: { inputTokens: 400, outputTokens: 30 }
+    })
+    complete
+      .mockResolvedValueOnce(said({ tool: 'outline', args: {} }))
+      .mockResolvedValueOnce(
+        said({
+          answer: 'Under the elm.',
+          found: true,
+          citations: [],
+          edits: [
+            {
+              edit: 'text',
+              id: loadAgentProject(manager.require().connection.orm).refOf.get(scene.id),
+              find: 'Mara copied the ledger twice',
+              replace: 'Mara copied it twice'
+            }
+          ]
+        })
+      )
+    const result = await invoke('ai:agent', ask(scene.id))
+    if (!result.ok) throw new Error(result.message)
+    expect(stepsSent()).toEqual([
+      ['ai:agentStep', { requestId: 'ag-1', step: { tool: 'outline', label: 'Reading the outline…' } }]
+    ])
+    expect(result.steps).toHaveLength(1)
+    expect(result.usage).toEqual({ inputTokens: 800, outputTokens: 60 })
+    expect(result.dropped).toBe(0)
+    expect(result.changes).toEqual([
+      {
+        edit: {
+          kind: 'text',
+          nodeId: scene.id,
+          title: loadAgentProject(manager.require().connection.orm).titleOf(scene.id),
+          find: 'Mara copied the ledger twice',
+          replace: 'Mara copied it twice'
+        },
+        violation: null
+      }
+    ])
+    // Nothing was written: the scene still reads as it did.
+    const stored = await invoke('document:get', { id: scene.id })
+    expect(JSON.stringify(stored.content)).toContain('Mara copied the ledger twice')
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'agent',
+      status: 'pending'
+    })
+  })
+
+  it('answers DISABLED as data at Off, with the requestId', async () => {
+    await invoke('project:create', { name: 'Off', format: 'novel', directory: tmp })
+    const scene = manuscriptDocuments(manager.require().connection.orm)[0]
+    if (!scene) throw new Error('skeleton not seeded')
+    expect(await invoke('ai:agent', ask(scene.id, { requestId: 'ag-2' }))).toMatchObject({
+      ok: false,
+      code: 'DISABLED',
+      requestId: 'ag-2'
+    })
   })
 })
 

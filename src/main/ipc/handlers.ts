@@ -35,6 +35,7 @@ import type {
   AiProofreadResult,
   AiDraftBriefResult,
   AiGhostTextResult,
+  AiAgentResult,
   AiQueryResult,
   AiRecommendTagsResult,
   AiRewriteResult,
@@ -92,6 +93,7 @@ import { createProposal, listPendingProposals, settleProposal } from '../ai/prop
 import { clearVoiceNotes } from '../ai/voiceNotes'
 import { AiCancelledError, AiProviderError, NoKeyError } from '../ai/providers/types'
 import { runQuery } from '../ai/query'
+import { runAgent } from '../ai/agent'
 import { runWhatNext } from '../ai/whatNext'
 import { runRoute } from '../ai/route'
 import { runSuggestNotes, runSuggestSynopsis } from '../ai/sceneSuggest'
@@ -2293,6 +2295,59 @@ export function registerHandlers({
           skipped: result.skipped,
           missing: result.missing,
           dropped: result.dropped,
+          usage,
+          costUsd,
+          cached,
+          model,
+          proposalId: proposal.id,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
+
+  // F-5.22: one chat agent turn. Each lookup is announced as `ai:agentStep` while the run goes
+  // on; the reply carries the answer, the citations main verified, and the edits it resolved
+  // against the project as it is now, none of them applied (the renderer applies or asks, per
+  // the switch). One proposal (F-14.5) holds the answer and the edits; it stays pending until
+  // the renderer settles it with the edits' fate.
+  register(
+    'ai:agent',
+    async ({ nodeId, message, history, access, focus, requestId }): Promise<AiAgentResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const deps = requestDeps(db)
+        const result = await runAgent(
+          db,
+          deps,
+          { nodeId, message, history, access, focus, requestId },
+          (step) => emit(windows(), 'ai:agentStep', { requestId, step })
+        )
+        const { answer, query, steps, changes, dropped, usage, costUsd, cached, model } = result
+        const proposal = createProposal(db, {
+          feature: 'agent',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model,
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          costUsd,
+          cached,
+          content: JSON.stringify({ answer, edits: changes.map((change) => change.edit) }),
+          flagged: changes.some((change) => change.violation !== null),
+          violation: changes.find((change) => change.violation !== null)?.violation ?? null
+        })
+        return {
+          ok: true,
+          answer,
+          query,
+          steps,
+          changes,
+          dropped,
           usage,
           costUsd,
           cached,
