@@ -198,8 +198,10 @@ export function SynopsisBox({ id }: { id: string }): React.JSX.Element {
   }, [id, load, unload])
 
   return (
-    <div className="flex shrink-0 flex-col gap-1 px-4 pb-2">
-      <div className="flex items-center gap-1">
+    // The top section of the notes, flush with the column (2026-10-06, the author's call): no box,
+    // a rule under it, the text where the notes' text sits.
+    <div className="flex shrink-0 flex-col border-b border-line">
+      <div className="flex items-center gap-1 px-4 pt-2">
         <label htmlFor={synopsisId} className="min-w-0 flex-1 text-xs font-medium text-fg-muted">
           Synopsis
         </label>
@@ -215,7 +217,7 @@ export function SynopsisBox({ id }: { id: string }): React.JSX.Element {
         onChange={(event) => {
           if (meta !== null) edit(id, { ...meta, synopsis: event.target.value })
         }}
-        className="w-full resize-none rounded-md border border-line bg-bg px-2 py-1 text-sm leading-5 disabled:opacity-50"
+        className="field-sizing-content max-h-48 min-h-16 w-full resize-none border-0 bg-transparent px-4 py-1.5 text-sm leading-5 placeholder:text-fg-muted focus:outline-none disabled:opacity-50"
       />
       <SynopsisSuggestion id={id} />
     </div>

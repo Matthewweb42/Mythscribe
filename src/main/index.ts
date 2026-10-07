@@ -152,7 +152,9 @@ function createWindow(appState: AppStateStore): BrowserWindow {
     minWidth: WINDOW_MIN.width,
     minHeight: WINDOW_MIN.height,
     show: false,
-    autoHideMenuBar: true,
+    // The in-app bar is the menu (2026-10-06, the author's call): Alt must not pop the native bar
+    // up as well, so it stays hidden (set below) while its accelerators keep working.
+    autoHideMenuBar: false,
     // F-7.8: the stored theme's background, so the first frame is not the dark one under a light
     // theme. Painted as if licensed: the license is not checked yet, and a lapsed one only costs
     // a frame before the renderer paints Dark.
@@ -166,6 +168,7 @@ function createWindow(appState: AppStateStore): BrowserWindow {
       nodeIntegration: false
     }
   })
+  win.setMenuBarVisibility(false)
   if (saved.maximized) win.maximize()
 
   // Under the e2e harness the window must not steal the desktop's keyboard focus: on WSLg a
@@ -241,8 +244,8 @@ if (!primaryInstance) {
   app.quit()
 } else {
   void app.whenReady().then(() => {
-    // F-7.1: the native menu from the shared definition; on Windows and Linux the window's
-    // `autoHideMenuBar` keeps it behind Alt, the in-app bar being the visible one.
+    // F-7.1: the native menu from the shared definition, for its accelerators and macOS; on
+    // Windows and Linux every window hides its bar, the in-app bar being the visible one.
     installApplicationMenu({
       manager,
       platform: process.platform,
