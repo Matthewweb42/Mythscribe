@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, defaultAiModels, defaultLocalAiSettings } from '@shared/ai'
 import { defaultBackupSettings } from '@shared/backups'
 import { defaultDiagnosticsSettings } from '@shared/diagnostics'
+import { defaultDock } from '@shared/dock'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultSupporterSettings } from '@shared/license'
 import { RELEASE_NOTES_MAX, defaultUpdateSettings } from '@shared/updates'
@@ -108,7 +109,8 @@ describe('AppStateStore', () => {
       tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
-      floating: defaultFloating()
+      floating: defaultFloating(),
+      dock: { columns: defaultDock() }
     })
   })
 
@@ -126,7 +128,8 @@ describe('AppStateStore', () => {
       tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
-      floating: defaultFloating()
+      floating: defaultFloating(),
+      dock: { columns: defaultDock() }
     })
   })
 
@@ -146,7 +149,8 @@ describe('AppStateStore', () => {
       tags: { open: true, size: 0.25 },
       assistant: { open: true, size: 0.25 },
       references: { open: false, size: 0.22 },
-      floating: defaultFloating()
+      floating: defaultFloating(),
+      dock: { columns: defaultDock() }
     }
     expect(store.update((s) => ({ ...s, layout })).layout).toEqual(layout)
     expect(new AppStateStore(file).get().layout).toEqual(layout)

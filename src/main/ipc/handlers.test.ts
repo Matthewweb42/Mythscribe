@@ -29,6 +29,7 @@ import { defaultConversations, type Conversations } from '@shared/chat'
 import { entityImageUrl } from '@shared/entities'
 import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import { defaultEditorSettings } from '@shared/editorSettings'
+import { defaultDock } from '@shared/dock'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_BRIEF, EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { SUMMARY_BACKFILL_DELAY_MS } from '@shared/summary'
@@ -4898,7 +4899,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
       tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
-      floating: defaultFloating()
+      floating: defaultFloating(),
+      dock: { columns: defaultDock() }
     }
     expect(await invoke('layout:set', next)).toEqual(next)
     expect(await invoke('layout:get', undefined)).toEqual(next)
@@ -4914,7 +4916,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
       tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
-      floating: defaultFloating()
+      floating: defaultFloating(),
+      dock: { columns: defaultDock() }
     }
     await invoke('layout:set', stored)
     const raw = handlerFor('layout:set')
@@ -4940,7 +4943,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
       tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
-      floating: defaultFloating()
+      floating: defaultFloating(),
+      dock: { columns: defaultDock() }
     }
     await invoke('layout:set', next)
     const list = await invoke('recents:list', undefined)
@@ -4958,7 +4962,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
       tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
-      floating: defaultFloating()
+      floating: defaultFloating(),
+      dock: { columns: defaultDock() }
     }
     const raw = handlerFor('layout:set')
     const result = await raw(undefined, bothMaxed)
@@ -4983,7 +4988,8 @@ describe('layout:get / layout:set (F-7.2)', () => {
           tags: { open: false, size: 0.2 },
           assistant: { open: false, size: 0.3 },
           references: { open: false, size: 0.22 },
-          floating: defaultFloating()
+          floating: defaultFloating(),
+          dock: { columns: defaultDock() }
         }
       })
     )

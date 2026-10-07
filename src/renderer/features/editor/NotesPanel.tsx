@@ -1,9 +1,8 @@
 import { useId, useState } from 'react'
 import { ChevronDown, ChevronRight, Pin, StickyNote } from 'lucide-react'
-import { LAYOUT_LIMITS } from '@shared/layout'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
-import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
-import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
+import { DockPanelControls } from '@renderer/features/shell/Dock'
+import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
 import { MetadataPane, SynopsisBox } from './MetadataPane'
 import { NotesEditor } from './NotesEditor'
@@ -30,14 +29,13 @@ export function NotesToggleButton(): React.JSX.Element {
 }
 
 /**
- * The notes column (F-3.7): a column beside the editor for the selected node (`id`; null while an
- * entity page or nothing is selected), resizable by dragging its left edge or with the arrow keys
- * on the handle. Since 2026-10-06 it is the node's whole side panel: for a scene, chapter, or
+ * The notes panel (F-3.7): a dock panel (layout 3c) for the selected node (`id`; null while an
+ * entity page or nothing is selected); its column, width, and resize handle are the dock's
+ * (`DockColumn`). Since 2026-10-06 it is the node's whole side panel: for a scene, chapter, or
  * part a compact Synopsis box at the top (`SynopsisBox`), then the notes editor filling the rest
  * as a scratch pad, then a collapsed "Scene details" disclosure with the rest of the metadata
- * (`MetadataPane`: location, POV, timeline, status, beat, brief, AI summary). Its open state and
- * width live in the layout store (F-7.2), as a fraction of the window rendered in `vw`, so it
- * follows a window resize on its own and is back after a restart. Renders nothing while closed,
+ * (`MetadataPane`: location, POV, timeline, status, beat, brief, AI summary). Its open state
+ * lives in the layout store (F-7.2), so it is back after a restart. Renders nothing while closed,
  * so the editor gets the whole pane and no notes are loaded. Not mounted in focus mode, where
  * `NotesBody` floats instead (F-6.6).
  */
@@ -48,30 +46,19 @@ export function NotesPanel({ id }: { id: string | null }): React.JSX.Element | n
   const [detailsOpen, setDetailsOpen] = useState(false)
   if (!notes.open) return null
   return (
-    <div
-      data-testid="notes-panel"
-      className="relative flex shrink-0 flex-col border-l border-line bg-surface"
-      style={{ width: `${notes.size * 100}vw` }}
-    >
-      <ResizeHandle
-        side="left"
-        value={notes.size}
-        min={LAYOUT_LIMITS.notes[0]}
-        max={LAYOUT_LIMITS.notes[1]}
-        ariaLabel="Resize notes"
-        onChange={(deltaPx) => resizePanelBy('notes', deltaPx)}
-      />
+    <div data-testid="notes-panel" className="flex min-h-0 flex-1 flex-col bg-surface">
       <NotesHeading id={id} />
       <NotesContent id={id} detailsOpen={detailsOpen} onDetailsOpen={setDetailsOpen} />
     </div>
   )
 }
 
-/** The column's heading, with the pin button while a node is shown. */
-export function NotesHeading({ id }: { id: string | null }): React.JSX.Element {
+/** The panel's heading: the dock grip and menu, the title, and the pin button while a node is shown. */
+function NotesHeading({ id }: { id: string | null }): React.JSX.Element {
   return (
-    <div className="flex shrink-0 items-center justify-between gap-2 px-4 pt-4 pb-2">
-      <h2 className="m-0 text-sm font-medium text-fg-muted">Notes</h2>
+    <div className="flex shrink-0 items-center gap-2 pt-3 pr-4 pb-2 pl-2">
+      <DockPanelControls id="notes" />
+      <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Notes</h2>
       {id === null ? null : <PinNotesButton id={id} />}
     </div>
   )
@@ -82,7 +69,7 @@ export function NotesHeading({ id }: { id: string | null }): React.JSX.Element {
  * hint while no node is selected. A node without a hierarchy level (front or end matter) has
  * notes only.
  */
-export function NotesContent({
+function NotesContent({
   id,
   detailsOpen,
   onDetailsOpen

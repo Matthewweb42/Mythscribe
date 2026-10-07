@@ -1,11 +1,15 @@
 import { z } from 'zod'
+import { DockPanelId, columnOf, defaultDock, isValidDock, normalizeDock } from './dock'
 import { SidebarTabId } from './sidebarTabs'
 
 /**
  * The resizable panel layout (F-7.2). Every size is a fraction of the window width, so a
  * persisted layout means the same thing at any window size and the panels follow an OS resize
  * without a listener. The assistant panel (F-5.4) and the references panel (F-9.6) each joined as
- * a field `StoredLayout` defaults, so a layout written before them still loads.
+ * a field `StoredLayout` defaults, so a layout written before them still loads. Since layout 3c
+ * (2026-10-06) the panels sit in dockable columns (`dock`, see `./dock.ts`): a column is as wide
+ * as its first open panel's `size`, panels stacked in one column share its width, and the editor
+ * minimum is counted per column, not per panel.
  */
 
 export const LAYOUT_PANELS = ['sidebar', 'notes', 'tags', 'assistant', 'references'] as const
@@ -99,7 +103,11 @@ export const Layout = z.object({
   // F-9.6: the quick reference panel on the right, between the main pane and the assistant.
   references: referencesSchema,
   // F-6.6: where the notes and assistant windows float in focus mode.
-  floating: floatingSchema
+  floating: floatingSchema,
+  // Layout 3c: the columns the panels and the editor sit in, left to right.
+  dock: z.object({
+    columns: z.array(z.array(DockPanelId)).refine(isValidDock, 'not a valid panel arrangement')
+  })
 })
 export type Layout = z.infer<typeof Layout>
 
@@ -118,7 +126,14 @@ export const StoredLayout = z.object({
   // A layout written before F-9.6 has no references panel and parses to the closed default.
   references: referencesSchema.default({ ...DEFAULT_REFERENCES }),
   // A layout written before F-6.6 has no floating windows and parses to the default geometry.
-  floating: floatingSchema.default(defaultFloating())
+  floating: floatingSchema.default(defaultFloating()),
+  // A layout written before the dock (3c) has none and parses to the default arrangement, so
+  // every panel keeps its open state and width; a damaged one is repaired, never refused.
+  dock: z
+    .object({ columns: z.array(z.array(z.string())) })
+    .transform((dock) => ({ columns: normalizeDock(dock.columns) }))
+    .default({ columns: defaultDock() })
+    .catch({ columns: defaultDock() })
 })
 
 /**
@@ -134,7 +149,8 @@ export function defaultLayout(): Layout {
     tags: { ...DEFAULT_TAGS },
     assistant: { ...DEFAULT_ASSISTANT },
     references: { ...DEFAULT_REFERENCES },
-    floating: defaultFloating()
+    floating: defaultFloating(),
+    dock: { columns: defaultDock() }
   }
 }
 
@@ -171,34 +187,72 @@ export function clampPanel(panel: LayoutPanel, size: number): number {
   return Math.min(max, Math.max(min, size))
 }
 
+/** The side panels in `panel`'s column, top to bottom (the panel alone when it is not docked). */
+export function columnPanels(layout: Layout, panel: LayoutPanel): LayoutPanel[] {
+  const column = layout.dock.columns[columnOf(layout.dock.columns, panel)] ?? [panel]
+  return column.filter((id): id is LayoutPanel => id !== 'editor')
+}
+
+/** A column's width: the size of its first open panel, or 0 while all of its panels are closed. */
+export function columnWidth(layout: Layout, column: readonly DockPanelId[]): number {
+  const first = column.find((id): id is LayoutPanel => id !== 'editor' && layout[id].open)
+  return first === undefined ? 0 : layout[first].size
+}
+
 /**
- * The size `panel` may take so that the editor keeps at least `editorMin` of the window next
- * to the other open panels (closed panels count 0), then clamped to the panel's own limits.
- * Only the dragged panel gives way; the others keep their size.
+ * The `[min, max]` a column may take: the tightest bounds of its open panels and `panel` (the
+ * one being resized or opened), so every panel stacked in it stays inside its own limits.
  */
-export function clampForEditorMin(layout: Layout, panel: LayoutPanel, proposed: number): number {
-  const others = LAYOUT_PANELS.filter((p) => p !== panel).reduce(
-    (sum, p) => sum + (layout[p].open ? layout[p].size : 0),
+export function columnLimits(layout: Layout, panel: LayoutPanel): [number, number] {
+  const members = columnPanels(layout, panel).filter((p) => p === panel || layout[p].open)
+  const min = Math.max(...members.map((p) => LAYOUT_LIMITS[p][0]))
+  const max = Math.min(...members.map((p) => LAYOUT_LIMITS[p][1]))
+  return [min, Math.max(min, max)]
+}
+
+/** The widths of the side columns other than `panel`'s (all of them for null), summed. */
+function otherColumnsWidth(layout: Layout, panel: LayoutPanel | null): number {
+  const own = panel === null ? -1 : columnOf(layout.dock.columns, panel)
+  return layout.dock.columns.reduce(
+    (sum, column, index) => (index === own ? sum : sum + columnWidth(layout, column)),
     0
   )
-  const room = 1 - LAYOUT_LIMITS.editorMin - others
-  return clampPanel(panel, Math.min(proposed, room))
+}
+
+/**
+ * The width `panel`'s column may take so that the editor keeps at least `editorMin` of the
+ * window next to the other columns (columns whose panels are all closed count 0), then clamped
+ * to the column's limits. Only the dragged column gives way; the others keep their width.
+ */
+export function clampForEditorMin(layout: Layout, panel: LayoutPanel, proposed: number): number {
+  const room = 1 - LAYOUT_LIMITS.editorMin - otherColumnsWidth(layout, panel)
+  const [min, max] = columnLimits(layout, panel)
+  return Math.min(max, Math.max(min, Math.min(proposed, room)))
+}
+
+/** `layout` with every panel of `panel`'s column at `size` (each kept inside its own limits). */
+export function withColumnSize(layout: Layout, panel: LayoutPanel, size: number): Layout {
+  let next = layout
+  for (const p of columnPanels(layout, panel)) {
+    next = { ...next, [p]: { ...next[p], size: clampPanel(p, size) } }
+  }
+  return next
 }
 
 /** Rounding slack for fractions that were produced by pixel arithmetic. */
 const EPSILON = 1e-9
 
-/** The share of the window left to the editor by the open panels. */
+/** The share of the window left to the editor by the side columns. */
 export function editorFraction(layout: Layout): number {
-  return LAYOUT_PANELS.reduce((left, p) => left - (layout[p].open ? layout[p].size : 0), 1)
+  return 1 - otherColumnsWidth(layout, null)
 }
 
-/** True when the open panels leave the editor its minimum. Each size is still checked by the schema. */
+/** True when the side columns leave the editor its minimum. Each size is still checked by the schema. */
 export function fitsEditorMin(layout: Layout): boolean {
   return editorFraction(layout) >= LAYOUT_LIMITS.editorMin - EPSILON
 }
 
-/** The order in which open panels give way when the editor would get too little: assistant, references, tags, notes, sidebar. */
+/** The order in which open panels' columns give way when the editor would get too little: assistant, references, tags, notes, sidebar. */
 const GIVE_WAY_ORDER: readonly LayoutPanel[] = [
   'assistant',
   'references',
@@ -227,10 +281,8 @@ export function normalizeLayout(layout: Layout, keep?: LayoutPanel): Layout {
   for (const panel of GIVE_WAY_ORDER) {
     if (fitsEditorMin(next)) return next
     if (!next[panel].open) continue
-    next = {
-      ...next,
-      [panel]: { ...next[panel], size: clampForEditorMin(next, panel, next[panel].size) }
-    }
+    const width = columnWidth(next, columnPanels(next, panel))
+    next = withColumnSize(next, panel, clampForEditorMin(next, panel, width))
   }
   for (const panel of CLOSE_ORDER) {
     if (fitsEditorMin(next)) return next

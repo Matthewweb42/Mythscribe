@@ -3914,7 +3914,7 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('Control+k')
   const assistant = page.getByTestId('assistant-panel')
   await expect(assistant).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Assistant' })).toHaveAttribute(
+  await expect(page.getByRole('button', { name: 'Assistant', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true'
   )
@@ -5411,6 +5411,24 @@ test('create, close, reopen a project on disk', async () => {
   await snapshotsDialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(snapshotsDialog).toHaveCount(0)
 
+  // Layout 3c: the panel menu is the keyboard alternative to dragging a grip. Move right puts
+  // the sidebar's column right of the editor; the arrangement is written to app state and comes
+  // back after the relaunch below, where View › Reset layout puts it back.
+  const sidebarTabsList = page.getByRole('tablist', { name: 'Sidebar' })
+  const editorColumn = page.locator('main > section')
+  const leftOf = async (a: Locator, b: Locator): Promise<boolean> => {
+    const [boxA, boxB] = [await a.boundingBox(), await b.boundingBox()]
+    if (!boxA || !boxB) throw new Error('not laid out')
+    return boxA.x < boxB.x
+  }
+  expect(await leftOf(sidebarTabsList, editorColumn)).toBe(true)
+  await page.getByRole('button', { name: 'Sidebar panel options' }).click()
+  await page.getByRole('menuitem', { name: 'Move right' }).click()
+  await expect.poll(() => leftOf(editorColumn, sidebarTabsList)).toBe(true)
+  await expect
+    .poll(async () => (await getLayout()).dock.columns.slice(0, 2), { timeout: 3000 })
+    .toEqual([['editor'], ['sidebar']])
+
   // F-7.9: the window closes somewhere else at another size, with the project still open; the
   // next launch puts the window back there and opens the project again.
   const left = await app.evaluate(({ BrowserWindow }) => {
@@ -5444,6 +5462,29 @@ test('create, close, reopen a project on disk', async () => {
   expect(
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getNormalBounds())
   ).toEqual(left)
+  // Layout 3c: the sidebar came back right of the editor; View › Reset layout returns it.
+  const relaunchedTabs = page.getByRole('tablist', { name: 'Sidebar' })
+  const relaunchedEditor = page.locator('main > section')
+  const boxOf = async (locator: Locator): Promise<number> => {
+    const box = await locator.boundingBox()
+    if (!box) throw new Error('not laid out')
+    return box.x
+  }
+  expect(await boxOf(relaunchedEditor)).toBeLessThan(await boxOf(relaunchedTabs))
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'View' })
+    .click()
+  await page
+    .getByRole('menu', { name: 'View' })
+    .getByRole('menuitem', { name: 'Reset layout' })
+    .click()
+  await expect
+    .poll(async () => (await boxOf(relaunchedTabs)) < (await boxOf(relaunchedEditor)))
+    .toBe(true)
+  await expect
+    .poll(async () => (await getLayout()).dock.columns[0], { timeout: 3000 })
+    .toEqual(['sidebar'])
 })
 
 /** The single-document editor's text with the ghost-text widget (F-5.3) left out. */

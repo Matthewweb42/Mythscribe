@@ -188,6 +188,9 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         useLayoutStore.getState().toggle(id === 'toggleTags' ? 'tags' : 'references')
         return
       }
+      case 'resetLayout':
+        useLayoutStore.getState().resetLayout()
+        return
       case 'toggleFocusMode':
         await useFocusStore.getState().toggle()
         return

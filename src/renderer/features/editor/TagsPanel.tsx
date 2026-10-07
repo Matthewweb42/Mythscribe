@@ -5,7 +5,6 @@ import { TAGS_MIN_CHARS, type AiUsage } from '@shared/ai'
 import { docToText } from '@shared/docText'
 import { countInlineTags } from '@shared/inlineTags'
 import type { Tag } from '@shared/ipc/contract'
-import { LAYOUT_LIMITS } from '@shared/layout'
 import type { MentionRange } from '@shared/mentions'
 import { PROPOSAL_NOTE_MAX, normalizeProposalNote } from '@shared/proposal'
 import type { ProposedTag } from '@shared/proposedTags'
@@ -17,8 +16,8 @@ import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { describeRequest } from '@renderer/features/ai/usageFormat'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
-import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
-import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
+import { DockPanelControls } from '@renderer/features/shell/Dock'
+import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
 import { useProposedTagStore } from '@renderer/features/tags/proposedTagStore'
@@ -91,12 +90,11 @@ export function TagsToggleButton(): React.JSX.Element {
 }
 
 /**
- * The tags column (2026-10-06, replacing the F-4.4 tag bar above the editor): a column at the
- * right of the project screen, toggled from the header and View › Tags, for the selected node
+ * The tags panel (2026-10-06, replacing the F-4.4 tag bar above the editor): a dock panel (layout
+ * 3c; its column, width, and handle are the dock's), toggled from the header and View › Tags, for the selected node
  * (`id`: a document, a stacked folder, a cork-board folder; null while an entity page or nothing
- * taggable is selected) wherever the tag bar used to show. Its open
- * state and width live in the layout store (F-7.2), as a fraction of the window rendered in
- * `vw`. Renders nothing while closed; not mounted in focus mode.
+ * taggable is selected) wherever the tag bar used to show. Its open state lives in the layout
+ * store (F-7.2). Renders nothing while closed; not mounted in focus mode.
  */
 export function TagsColumn({ id }: { id: string | null }): React.JSX.Element | null {
   const tags = useLayoutStore((s) => s.layout.tags)
@@ -105,20 +103,12 @@ export function TagsColumn({ id }: { id: string | null }): React.JSX.Element | n
     <aside
       data-testid="tags-panel"
       aria-label="Tags column"
-      className="relative flex shrink-0 flex-col border-l border-line bg-surface"
-      style={{ width: `${tags.size * 100}vw` }}
+      className="flex min-h-0 flex-1 flex-col bg-surface"
     >
-      <ResizeHandle
-        side="left"
-        value={tags.size}
-        min={LAYOUT_LIMITS.tags[0]}
-        max={LAYOUT_LIMITS.tags[1]}
-        ariaLabel="Resize tags"
-        onChange={(deltaPx) => resizePanelBy('tags', deltaPx)}
-      />
       {id === null ? (
         <>
-          <div className="flex shrink-0 items-center px-4 pt-4 pb-2">
+          <div className="flex shrink-0 items-center gap-2 pt-3 pr-4 pb-2 pl-2">
+            <DockPanelControls id="tags" />
             <h2 className="m-0 text-sm font-medium text-fg-muted">Tags</h2>
           </div>
           <p className="m-0 px-4 text-sm text-fg-muted">Select a document to see its tags.</p>
@@ -442,11 +432,14 @@ export function TagsPanel({ id }: { id: string }): React.JSX.Element {
 
   return (
     <div role="region" aria-label="Tags" className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 flex-col gap-1 px-4 pt-4 pb-2">
-        <h2 className="m-0 flex items-center gap-2 text-sm font-medium text-fg-muted">
-          Tags
-          <span className="text-xs font-normal text-fg-subtle tabular-nums">{linked.length}</span>
-        </h2>
+      <div className="flex shrink-0 flex-col gap-1 pt-3 pr-4 pb-2 pl-2">
+        <div className="flex items-center gap-2">
+          <DockPanelControls id="tags" />
+          <h2 className="m-0 flex items-center gap-2 text-sm font-medium text-fg-muted">
+            Tags
+            <span className="text-xs font-normal text-fg-subtle tabular-nums">{linked.length}</span>
+          </h2>
+        </div>
         {/* The labels never break inside a button, so a narrow column wraps the row instead. */}
         <div className="flex flex-wrap items-center gap-1">
           <button

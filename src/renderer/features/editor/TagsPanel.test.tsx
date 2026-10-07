@@ -8,6 +8,7 @@ import { emptySceneMeta } from '@shared/sceneMeta'
 import { UNAVAILABLE_SUMMARY } from '@shared/summary'
 import { resetAiActivityStore, useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
+import { DockColumn } from '@renderer/features/shell/Dock'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -339,7 +340,7 @@ describe('TagsPanel (F-4.4, the tags column)', () => {
     const view = render(
       <>
         <TagsToggleButton />
-        <TagsColumn id={null} />
+        <DockColumn column={['tags']} side="left" render={() => <TagsColumn id={null} />} />
       </>
     )
     const toggle = screen.getByRole('button', { name: 'Tags' })
@@ -347,8 +348,8 @@ describe('TagsPanel (F-4.4, the tags column)', () => {
     expect(screen.queryByTestId('tags-panel')).not.toBeInTheDocument()
     await userEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('dock-column').style.width).toBe('20vw')
     const column = screen.getByTestId('tags-panel')
-    expect(column.style.width).toBe('20vw')
     expect(column).toHaveTextContent('Select a document to see its tags.')
     expect(screen.getByRole('separator', { name: 'Resize tags' })).toHaveAttribute(
       'aria-valuemax',
@@ -357,7 +358,7 @@ describe('TagsPanel (F-4.4, the tags column)', () => {
     view.rerender(
       <>
         <TagsToggleButton />
-        <TagsColumn id="sc-1" />
+        <DockColumn column={['tags']} side="left" render={() => <TagsColumn id="sc-1" />} />
       </>
     )
     await waitFor(() => expect(chipNames()).toEqual(['Remove dark-forest']))

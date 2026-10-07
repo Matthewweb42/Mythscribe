@@ -1,10 +1,20 @@
 import { create } from 'zustand'
 import {
+  defaultDock,
+  movePanel as moveInDock,
+  sameDock,
+  stepPanel as stepInDock,
+  type DockPanelId,
+  type DockTarget
+} from '@shared/dock'
+import {
   clampForEditorMin,
   clampRect,
+  columnWidth,
   defaultLayout,
   normalizeLayout,
   rectEquals,
+  withColumnSize,
   type FloatingPanel,
   type Layout,
   type LayoutPanel,
@@ -33,8 +43,9 @@ interface LayoutState {
   layout: Layout
   load: () => Promise<void>
   /**
-   * Sets a panel's size (a fraction of the window), clamped to the panel's limits and so the
-   * editor keeps its minimum share next to the other open panels, then schedules the write.
+   * Sets the width of a panel's column (a fraction of the window), clamped to the column's limits
+   * and so the editor keeps its minimum share next to the other columns, then schedules the
+   * write. Every panel stacked in the column takes the width (layout 3c).
    */
   setSize: (panel: LayoutPanel, size: number) => void
   /**
@@ -44,6 +55,16 @@ interface LayoutState {
    * being opened), so main never refuses the write.
    */
   toggle: (panel: LayoutPanel) => void
+  /**
+   * Moves a panel to a drop target (layout 3c): a new column beside another panel, or stacked
+   * into its column. A move that changes nothing schedules no write; one that leaves the editor
+   * too little makes the others give way, the moved panel last.
+   */
+  movePanel: (panel: DockPanelId, target: DockTarget) => void
+  /** Move left / Move right from a panel's menu (`stepPanel` in `@shared/dock`). */
+  stepPanel: (panel: DockPanelId, direction: 'left' | 'right') => void
+  /** View › Reset layout: the default columns, open panels, and widths; the sidebar tab and the floating windows stay. */
+  resetLayout: () => void
   /** Shows a sidebar tab (F-7.3); a no-op for the tab already shown, so no write is scheduled. */
   setSidebarTab: (tab: SidebarTabId) => void
   /**
@@ -122,18 +143,53 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   setSize(panel, size) {
     const base = get().layout
     const clamped = clampForEditorMin(base, panel, size)
-    if (clamped === base[panel].size) return
-    schedule({ ...base, [panel]: { ...base[panel], size: clamped } }, base)
+    const column = base.dock.columns.find((c) => c.includes(panel)) ?? [panel]
+    if (clamped === columnWidth(base, column) && clamped === base[panel].size) return
+    schedule(withColumnSize(base, panel, clamped), base)
   },
 
   toggle(panel) {
     const base = get().layout
     const current = base[panel]
-    const size = current.open ? current.size : clampForEditorMin(base, panel, current.size)
-    schedule(
-      normalizeLayout({ ...base, [panel]: { ...current, open: !current.open, size } }, panel),
-      base
+    if (current.open) {
+      schedule(normalizeLayout({ ...base, [panel]: { ...current, open: false } }, panel), base)
+      return
+    }
+    // A panel opening into a column that is already showing takes the column's width; one
+    // opening alone keeps its own, given way if the editor would get too little.
+    const column = base.dock.columns.find((c) => c.includes(panel)) ?? [panel]
+    const shown = columnWidth(base, column)
+    const size = clampForEditorMin(base, panel, shown > 0 ? shown : current.size)
+    const opened = withColumnSize({ ...base, [panel]: { ...current, open: true } }, panel, size)
+    schedule(normalizeLayout(opened, panel), base)
+  },
+
+  movePanel(panel, target) {
+    const base = get().layout
+    const columns = moveInDock(base.dock.columns, panel, target)
+    if (columns === base.dock.columns) return
+    placeDock(base, columns, panel)
+  },
+
+  stepPanel(panel, direction) {
+    const base = get().layout
+    const columns = stepInDock(base.dock.columns, panel, direction, (column) =>
+      isColumnShown(base, column)
     )
+    if (sameDock(columns, base.dock.columns)) return
+    placeDock(base, columns, panel)
+  },
+
+  resetLayout() {
+    const base = get().layout
+    const fresh = defaultLayout()
+    const next: Layout = {
+      ...fresh,
+      sidebar: { ...fresh.sidebar, tab: base.sidebar.tab },
+      floating: base.floating,
+      dock: { columns: defaultDock() }
+    }
+    schedule(next, base)
   },
 
   setSidebarTab(tab) {
@@ -150,6 +206,29 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   }
 }))
 
+/** True when a column shows on screen: it holds the editor or an open panel. */
+export function isColumnShown(layout: Layout, column: readonly DockPanelId[]): boolean {
+  return column.some((id) => id === 'editor' || layout[id].open)
+}
+
+/**
+ * Applies a new arrangement: a side panel that joined a showing column takes that column's
+ * width, then the editor minimum is restored with the moved panel kept open.
+ */
+function placeDock(base: Layout, columns: DockPanelId[][], panel: DockPanelId): void {
+  let next: Layout = { ...base, dock: { columns } }
+  if (panel !== 'editor') {
+    const column = columns.find((c) => c.includes(panel)) ?? [panel]
+    const others = column.filter((id) => id !== panel)
+    const shown = columnWidth(next, others)
+    if (shown > 0) next = withColumnSize(next, panel, shown)
+    next = normalizeLayout(next, panel)
+  } else {
+    next = normalizeLayout(next)
+  }
+  schedule(next, base)
+}
+
 /** The current layout; components read the panel they render from it. */
 export function useLayout(): Layout {
   return useLayoutStore((s) => s.layout)
@@ -161,7 +240,9 @@ export function useLayout(): Layout {
  */
 export function resizePanelBy(panel: LayoutPanel, deltaPx: number): void {
   const state = useLayoutStore.getState()
-  state.setSize(panel, state.layout[panel].size + deltaPx / window.innerWidth)
+  const column = state.layout.dock.columns.find((c) => c.includes(panel)) ?? [panel]
+  const width = columnWidth(state.layout, column) || state.layout[panel].size
+  state.setSize(panel, width + deltaPx / window.innerWidth)
 }
 
 /** Applies a drag or key step on a floating window's title bar (F-6.6): the px deltas move it. */

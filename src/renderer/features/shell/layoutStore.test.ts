@@ -1,6 +1,7 @@
 import { renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
+import { defaultDock } from '@shared/dock'
 import { defaultFloating, defaultLayout, type Layout } from '@shared/layout'
 import { flushPendingSaves, resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -55,7 +56,8 @@ const stored: Layout = {
   tags: { open: false, size: 0.2 },
   assistant: { open: false, size: 0.3 },
   references: { open: false, size: 0.22 },
-  floating: defaultFloating()
+  floating: defaultFloating(),
+  dock: { columns: defaultDock() }
 }
 let sets: PendingSet[]
 let gets: (() => void)[]
@@ -133,7 +135,8 @@ describe('useLayoutStore', () => {
       tags: { open: false, size: 0.2 },
       assistant: { open: false, size: 0.3 },
       references: { open: false, size: 0.22 },
-      floating: defaultFloating()
+      floating: defaultFloating(),
+      dock: { columns: defaultDock() }
     })
   })
 
@@ -201,7 +204,8 @@ describe('useLayoutStore', () => {
         tags: { open: false, size: 0.2 },
         assistant: { open: false, size: 0.3 },
         references: { open: false, size: 0.22 },
-        floating: defaultFloating()
+        floating: defaultFloating(),
+        dock: { columns: defaultDock() }
       }
     })
     store().toggle('notes')
@@ -218,7 +222,8 @@ describe('useLayoutStore', () => {
         tags: { open: false, size: 0.2 },
         assistant: { open: false, size: 0.3 },
         references: { open: false, size: 0.22 },
-        floating: defaultFloating()
+        floating: defaultFloating(),
+        dock: { columns: defaultDock() }
       }
     })
     store().toggle('assistant')
@@ -387,5 +392,74 @@ describe('useLayout', () => {
     await load()
     rerender()
     expect(result.current).toEqual(stored)
+  })
+})
+
+describe('dock (layout 3c)', () => {
+  it('movePanel stacks a panel into a showing column at that column’s width, and writes once', async () => {
+    await load()
+    store().toggle('assistant')
+    store().movePanel('assistant', { kind: 'stack', panel: 'notes', position: 'after' })
+    const layout = store().layout
+    expect(layout.dock.columns).toEqual([
+      ['sidebar'],
+      ['editor'],
+      ['notes', 'assistant'],
+      ['tags'],
+      ['references']
+    ])
+    expect(layout.assistant.size).toBe(0.2)
+    expect(layout.notes.size).toBe(0.2)
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(1)
+    expect(sets[0]?.value.dock.columns).toEqual(layout.dock.columns)
+  })
+
+  it('a move that changes nothing schedules no write', async () => {
+    await load()
+    store().movePanel('notes', { kind: 'beside', panel: 'notes', side: 'left' })
+    store().movePanel('notes', { kind: 'stack', panel: 'editor', position: 'before' })
+    store().stepPanel('sidebar', 'left')
+    await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DELAY_MS)
+    expect(sets).toHaveLength(0)
+  })
+
+  it('stepPanel skips the columns whose panels are closed', async () => {
+    await load()
+    // With every panel on the right closed there is nowhere to go.
+    store().stepPanel('notes', 'right')
+    expect(store().layout.dock.columns).toEqual(defaultLayout().dock.columns)
+    // Tags and references are closed, so the notes step past them to the assistant's right.
+    store().toggle('assistant')
+    store().stepPanel('notes', 'right')
+    expect(store().layout.dock.columns).toEqual([
+      ['sidebar'],
+      ['editor'],
+      ['tags'],
+      ['references'],
+      ['assistant'],
+      ['notes']
+    ])
+  })
+
+  it('resizing a stacked column resizes every panel in it', async () => {
+    await load()
+    store().toggle('assistant')
+    store().movePanel('assistant', { kind: 'stack', panel: 'notes', position: 'before' })
+    resizePanelBy('notes', 50)
+    expect(store().layout.notes.size).toBeCloseTo(0.25)
+    expect(store().layout.assistant.size).toBeCloseTo(0.25)
+  })
+
+  it('resetLayout restores the default columns, panels, and widths but keeps the tab and the floating windows', async () => {
+    await load()
+    store().setSidebarTab('characters')
+    store().stepPanel('sidebar', 'right')
+    store().toggle('tags')
+    store().resetLayout()
+    expect(store().layout).toEqual({
+      ...defaultLayout(),
+      sidebar: { ...defaultLayout().sidebar, tab: 'characters' }
+    })
   })
 })

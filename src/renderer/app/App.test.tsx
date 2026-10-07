@@ -17,6 +17,7 @@ import type {
   RecentProject
 } from '@shared/ipc/contract'
 import { IDLE_INDEX_QUEUE } from '@shared/jobs'
+import { defaultDock } from '@shared/dock'
 import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultViewSettings } from '@shared/zoom'
 import type { TiptapNodeT } from '@shared/tiptap'
@@ -272,6 +273,15 @@ const createdScene = {
   created: 'c',
   modified: 'm'
 } as const
+
+/** The dock column holding the sidebar (layout 3c): it carries the width and the resize handle. */
+const sidebarColumn = (): HTMLElement => {
+  const column = screen
+    .getByRole('complementary')
+    .closest<HTMLElement>('[data-testid="dock-column"]')
+  if (!column) throw new Error('the sidebar is not in a dock column')
+  return column
+}
 
 describe('App', () => {
   it('shows the welcome screen, creates a project through the wizard, then closes it', async () => {
@@ -549,14 +559,16 @@ describe('App', () => {
         tags: { open: false, size: 0.2 },
         assistant: { open: false, size: 0.3 },
         references: { open: false, size: 0.22 },
-        floating: defaultFloating()
+        floating: defaultFloating(),
+        dock: { columns: defaultDock() }
       }
     })
     render(<App />)
     expect(await screen.findByTestId('project-name')).toHaveTextContent('Smoke')
     expect(invoke).toHaveBeenCalledWith('layout:get', undefined)
     await waitFor(() => expect(useLayoutStore.getState().layout.sidebar.size).toBe(0.3))
-    const aside = screen.getByRole('complementary')
+    // The width and the handle are the dock column's (layout 3c), around the sidebar.
+    const aside = sidebarColumn()
     expect(aside.style.width).toBe('30vw')
     const handle = within(aside).getByRole('separator', { name: 'Resize sidebar' })
     expect(handle).toHaveAttribute('aria-valuenow', '30')
@@ -573,7 +585,7 @@ describe('App', () => {
       })
       render(<App />)
       await screen.findByRole('treeitem', { name: 'Volume 1' })
-      const aside = screen.getByRole('complementary')
+      const aside = sidebarColumn()
       expect(aside.style.width).toBe('22vw')
       const handle = within(aside).getByRole('separator', { name: 'Resize sidebar' })
       handle.focus()
@@ -600,7 +612,8 @@ describe('App', () => {
         tags: { open: false, size: 0.2 },
         assistant: { open: false, size: 0.3 },
         references: { open: false, size: 0.22 },
-        floating: defaultFloating()
+        floating: defaultFloating(),
+        dock: { columns: defaultDock() }
       })
     } finally {
       vi.useRealTimers()
@@ -627,7 +640,7 @@ describe('App', () => {
     await userEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('tree')).toBeInTheDocument()
-    expect(screen.getByRole('complementary').style.width).toBe('22vw')
+    expect(sidebarColumn().style.width).toBe('22vw')
   })
 
   it('does not show the sidebar button on the welcome screen', async () => {
@@ -926,7 +939,7 @@ describe('App', () => {
     await userEvent.keyboard('{Control>}k{/Control}')
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
     const panel = screen.getByRole('complementary', { name: 'Assistant' })
-    expect(panel.style.width).toBe('30vw')
+    expect(panel.closest<HTMLElement>('[data-testid="dock-column"]')?.style.width).toBe('30vw')
     expect(within(panel).getByRole('tab', { name: 'Why the ridge?' })).toBeInTheDocument()
     // Docked at the right edge: after the main pane, full height.
     expect(

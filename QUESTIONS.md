@@ -25,3 +25,18 @@ do. Review, then confirm, change, or delete the entry.
   editor drop under 30 %.
 - To change it: `src/shared/layout.ts` (`DEFAULT_TAGS`, `normalizeLayout`),
   `src/renderer/features/editor/NotesPanel.tsx` (`SceneDetails`).
+
+## 2026-10-06 · F-7.2 · Dockable columns (layout 3c)
+- Question: How do column widths, stacking, and the editor's grip behave?
+- Chosen: Each panel keeps its own width; a column is as wide as its first open panel and
+  resizing it resizes every panel stacked in it, so the author's widths from before survived
+  unchanged. Stacked panels split the column height evenly (no handle between them yet). The
+  editor is never stacked with a panel. Its grip and menu float in a 12 px strip over the
+  toolbar's left padding instead of a header row. Dropping uses 48 px strips along a panel's
+  left and right edges for "new column here" and its top/bottom halves for "stack above/below".
+  View › Reset layout restores the default columns, open panels, and widths (the sidebar tab and
+  the floating windows stay).
+- Alternatives: a stored width per column; a resize handle between stacked panels; a visible
+  header row above the editor.
+- To change it: `src/shared/dock.ts`, `src/shared/layout.ts` (`columnWidth`, `withColumnSize`),
+  `src/renderer/features/shell/Dock.tsx`.

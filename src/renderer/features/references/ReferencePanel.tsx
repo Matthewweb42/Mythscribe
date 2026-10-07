@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ImagePlus, Pin } from 'lucide-react'
-import { LAYOUT_LIMITS } from '@shared/layout'
 import { hasPin, pinKey, type ReferencePin } from '@shared/references'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
-import { resizePanelBy, useLayoutStore } from '@renderer/features/shell/layoutStore'
-import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
+import { DockPanelControls } from '@renderer/features/shell/Dock'
+import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
@@ -36,11 +35,10 @@ export function ReferencesToggleButton(): React.JSX.Element {
 }
 
 /**
- * The quick reference panel (F-9.6): a column at the right of the project screen, between the
- * main pane and the assistant, so what the author pinned stays in view beside the manuscript and
- * beside an entity page alike. Its open state and width live in the layout store (F-7.2), as a
- * fraction of the window rendered in `vw`. Renders nothing while closed; not mounted in focus
- * mode.
+ * The quick reference panel (F-9.6): a dock panel (layout 3c; by default its own column between
+ * the tags and the assistant), so what the author pinned stays in view beside the manuscript and
+ * beside an entity page alike. Its open state lives in the layout store (F-7.2); its column and
+ * width are the dock's (`DockColumn`). Renders nothing while closed; not mounted in focus mode.
  */
 export function ReferencePanel(): React.JSX.Element | null {
   const references = useLayoutStore((s) => s.layout.references)
@@ -49,19 +47,13 @@ export function ReferencePanel(): React.JSX.Element | null {
     <aside
       aria-label="References"
       data-testid="references-panel"
-      className="relative flex shrink-0 flex-col border-l border-line bg-surface"
-      style={{ width: `${references.size * 100}vw` }}
+      className="flex min-h-0 flex-1 flex-col bg-surface"
     >
-      <ResizeHandle
-        side="left"
-        value={references.size}
-        min={LAYOUT_LIMITS.references[0]}
-        max={LAYOUT_LIMITS.references[1]}
-        ariaLabel="Resize references"
-        onChange={(deltaPx) => resizePanelBy('references', deltaPx)}
-      />
-      <div className="flex shrink-0 items-center justify-between gap-2 px-4 pt-4 pb-2">
-        <h2 className="m-0 text-sm font-medium text-fg-muted">References</h2>
+      <div className="flex shrink-0 items-center gap-2 pt-3 pr-4 pb-2 pl-2">
+        <DockPanelControls id="references" />
+        <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">
+          References
+        </h2>
         <button
           type="button"
           onClick={() => void useReferenceStore.getState().addImages()}

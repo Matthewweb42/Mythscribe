@@ -10,6 +10,7 @@ import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { DockColumn } from '@renderer/features/shell/Dock'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import {
   resetReferenceStore,
@@ -75,6 +76,8 @@ const handle = (): HTMLElement => screen.getByRole('separator', { name: 'Resize 
 /** The stored fraction, as the source of truth the `vw` width and the ARIA percent derive from. */
 const size = (): number => useLayoutStore.getState().layout.notes.size
 const panel = (): HTMLElement => screen.getByTestId('notes-panel')
+/** The dock column the panel sits in (layout 3c), which carries the width and the handle. */
+const column = (): HTMLElement => screen.getByTestId('dock-column')
 const openNotes = (): void => act(() => useLayoutStore.getState().toggle('notes'))
 
 function Host({ id }: { id: string | null }): React.JSX.Element {
@@ -83,7 +86,7 @@ function Host({ id }: { id: string | null }): React.JSX.Element {
       <NotesToggleButton />
       <div className="flex">
         <div>editor</div>
-        <NotesPanel id={id} />
+        <DockColumn column={['notes']} side="left" render={() => <NotesPanel id={id} />} />
       </div>
     </div>
   )
@@ -171,7 +174,7 @@ describe('NotesPanel (F-3.7)', () => {
     openNotes()
     render(<Host id="sc-1" />)
     expect(size()).toBe(DEFAULT_SIZE)
-    expect(panel().style.width).toBe(`${DEFAULT_SIZE * 100}vw`)
+    expect(column().style.width).toBe(`${DEFAULT_SIZE * 100}vw`)
     expect(handle()).toHaveAttribute('aria-orientation', 'vertical')
     expect(handle()).toHaveAttribute('aria-valuenow', String(Math.round(DEFAULT_SIZE * 100)))
     expect(handle()).toHaveAttribute('aria-valuemin', '15')
@@ -180,7 +183,7 @@ describe('NotesPanel (F-3.7)', () => {
     handle().focus()
     await userEvent.keyboard('{ArrowLeft}')
     expect(size()).toBeCloseTo(DEFAULT_SIZE + 16 / WINDOW_WIDTH)
-    expect(panel().style.width).toBe(`${(DEFAULT_SIZE + 16 / WINDOW_WIDTH) * 100}vw`)
+    expect(column().style.width).toBe(`${(DEFAULT_SIZE + 16 / WINDOW_WIDTH) * 100}vw`)
     await userEvent.keyboard('{ArrowRight}{ArrowRight}')
     expect(size()).toBeCloseTo(DEFAULT_SIZE - 16 / WINDOW_WIDTH)
 
@@ -206,7 +209,7 @@ describe('NotesPanel (F-3.7)', () => {
     // After release, movement no longer resizes.
     fireEvent.pointerMove(window, { clientX: 300 })
     expect(size()).toBeCloseTo(DEFAULT_SIZE - 40 / WINDOW_WIDTH)
-    expect(panel().style.width).toBe(`${size() * 100}vw`)
+    expect(column().style.width).toBe(`${size() * 100}vw`)
   })
 
   it('keeps the width across a close and reopen', async () => {

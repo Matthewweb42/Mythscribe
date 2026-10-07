@@ -99,6 +99,7 @@ describe('menu definition (F-7.1)', () => {
       'toggleAssistant',
       'toggleReferences',
       'toggleTags',
+      'resetLayout',
       'openCompile',
       'separator',
       'toggleFocusMode',

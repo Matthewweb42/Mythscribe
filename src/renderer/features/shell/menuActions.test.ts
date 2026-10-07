@@ -367,6 +367,14 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useLayoutStore.getState().layout.references.open).toBe(true)
   })
 
+  it('View › Reset layout puts the columns and widths back to the defaults', async () => {
+    await withProject()
+    useLayoutStore.getState().stepPanel('sidebar', 'right')
+    useLayoutStore.getState().toggle('notes')
+    await runMenuAction('resetLayout')
+    expect(useLayoutStore.getState().layout).toEqual(defaultLayout())
+  })
+
   it('View › Tags toggles the tags column, leaving focus mode first', async () => {
     await withProject()
     await runMenuAction('toggleTags')
