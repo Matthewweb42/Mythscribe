@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type FocusEvent, type MouseEvent } from 'react'
-import { Image, MessageSquare, Minimize2, RefreshCw, StickyNote } from 'lucide-react'
+import { Image, MessageSquare, Minimize2, Pin, RefreshCw, StickyNote } from 'lucide-react'
 import { OVERLAY_DARKNESS, OVERLAY_WIDTH, clampInt, defaultFocusSettings } from '@shared/focus'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { useLiveDocStats } from '@renderer/features/editor/liveDocStats'
@@ -23,7 +23,7 @@ const keepCaret = (event: MouseEvent<HTMLButtonElement>): void => event.preventD
  * it is over the bar, while keyboard focus is inside it, or while its Backgrounds dialog is
  * open, plus an intro on entering focus mode; the timing lives in `useAutoHide`. Left to right:
  * Backgrounds (the same `BackgroundManager` as Settings → Editor), Rotate (the rotation
- * setting), VibeWrite (the toolbar's toggle), Notes and AI assistant (the focus store's
+ * setting), VibeWrite (the toolbar's toggle), Notes, References, and AI assistant (the focus store's
  * session flags, never the persisted layout), the darkness and width sliders (the overlay
  * setting, as in Settings → Editor), the active editor's live word count, and Exit. Mounted
  * by `App` inside `<main>` only in focus mode, outside the editor's scroll container.
@@ -100,6 +100,16 @@ export function FocusControlBar(): React.JSX.Element {
         >
           <StickyNote size={14} aria-hidden="true" />
           Notes
+        </button>
+        <button
+          type="button"
+          aria-pressed={panels.references}
+          onMouseDown={keepCaret}
+          onClick={() => togglePanel('references')}
+          className={BUTTON}
+        >
+          <Pin size={14} aria-hidden="true" />
+          References
         </button>
         <button
           type="button"

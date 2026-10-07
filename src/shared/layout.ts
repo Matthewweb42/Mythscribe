@@ -50,8 +50,11 @@ const DEFAULT_REFERENCES = { open: false, size: 0.22 } as const
 
 const referencesSchema = panelSchema(LAYOUT_LIMITS.references)
 
-/** The panels focus mode shows as floating windows (F-6.6). */
-export const FLOATING_PANELS = ['notes', 'assistant'] as const
+/**
+ * The panels focus mode shows as floating windows (F-6.6); the references window (with its
+ * story bible sheet cards) joined them on 2026-10-07.
+ */
+export const FLOATING_PANELS = ['notes', 'assistant', 'references'] as const
 export type FloatingPanel = (typeof FLOATING_PANELS)[number]
 
 /** The smallest a floating window may be, in px: room for the notes editor or the composer. */
@@ -79,18 +82,39 @@ export interface Viewport {
   height: number
 }
 
-const floatingSchema = z.object({ notes: Rect, assistant: Rect })
+const floatingSchema = z.object({ notes: Rect, assistant: Rect, references: Rect })
 
-/** The notes window at the right third of a 1280 × 800 window and the assistant below it. */
+/**
+ * The notes window at the right third of a 1280 × 800 window, the assistant below it, and the
+ * references on the left, clear of the centred writing column.
+ */
 const DEFAULT_FLOATING: Record<FloatingPanel, Rect> = {
   notes: { x: 860, y: 48, width: 380, height: 320 },
-  assistant: { x: 860, y: 392, width: 380, height: 380 }
+  assistant: { x: 860, y: 392, width: 380, height: 380 },
+  references: { x: 40, y: 48, width: 340, height: 480 }
 }
 
 /** A fresh copy of the default floating-window geometry (F-6.6). */
 export function defaultFloating(): Record<FloatingPanel, Rect> {
-  return { notes: { ...DEFAULT_FLOATING.notes }, assistant: { ...DEFAULT_FLOATING.assistant } }
+  return {
+    notes: { ...DEFAULT_FLOATING.notes },
+    assistant: { ...DEFAULT_FLOATING.assistant },
+    references: { ...DEFAULT_FLOATING.references }
+  }
 }
+
+/**
+ * `floating` as read from the app-state file: a layout written before F-6.6 has none and a
+ * layout written before the references window (2026-10-07) lacks that rect; each missing rect
+ * takes its default, so an old file loads.
+ */
+const storedFloatingSchema = z
+  .object({
+    notes: Rect.default(() => ({ ...DEFAULT_FLOATING.notes })),
+    assistant: Rect.default(() => ({ ...DEFAULT_FLOATING.assistant })),
+    references: Rect.default(() => ({ ...DEFAULT_FLOATING.references }))
+  })
+  .default(defaultFloating)
 
 export const Layout = z.object({
   // F-7.3: the sidebar's active tab.
@@ -125,8 +149,9 @@ export const StoredLayout = z.object({
   assistant: assistantSchema.default({ ...DEFAULT_ASSISTANT }),
   // A layout written before F-9.6 has no references panel and parses to the closed default.
   references: referencesSchema.default({ ...DEFAULT_REFERENCES }),
-  // A layout written before F-6.6 has no floating windows and parses to the default geometry.
-  floating: floatingSchema.default(defaultFloating()),
+  // A layout written before F-6.6 has no floating windows and parses to the default geometry;
+  // one written before the references window gets its default rect.
+  floating: storedFloatingSchema,
   // A layout written before the dock (3c) has none and parses to the default arrangement, so
   // every panel keeps its open state and width; a damaged one is repaired, never refused.
   dock: z
@@ -179,6 +204,41 @@ export function clampRect(
 /** True when two rects have the same geometry. */
 export function rectEquals(a: Rect, b: Rect): boolean {
   return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+}
+
+/** The edges and corners a floating window resizes from (2026-10-07), as compass points. */
+export const RESIZE_EDGES = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'] as const
+export type ResizeEdge = (typeof RESIZE_EDGES)[number]
+
+/** `value` kept in `[lo, hi]`; `lo` wins when the range is empty. */
+const within = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value))
+
+/**
+ * `from` resized by dragging its `edge` by `(dx, dy)` px, like a desktop window: only the
+ * dragged edges move, the opposite ones stay put. A dragged edge stops at the viewport and at
+ * `minSize` from its opposite edge, so a left-edge drag past the minimum never pushes the right
+ * edge. Edges are rounded to whole px (the size is the rounded edges' difference, so a
+ * sub-pixel drag never shifts the anchored edge).
+ */
+export function resizeRect(
+  from: Rect,
+  edge: ResizeEdge,
+  dx: number,
+  dy: number,
+  viewport: Viewport,
+  minSize: { width: number; height: number } = FLOATING_MIN_SIZE
+): Rect {
+  let left = from.x
+  let top = from.y
+  let right = from.x + from.width
+  let bottom = from.y + from.height
+  if (edge.includes('w')) left = within(from.x + dx, 0, right - minSize.width)
+  if (edge.includes('e')) right = within(right + dx, left + minSize.width, viewport.width)
+  if (edge.includes('n')) top = within(from.y + dy, 0, bottom - minSize.height)
+  if (edge.includes('s')) bottom = within(bottom + dy, top + minSize.height, viewport.height)
+  const x = Math.round(left)
+  const y = Math.round(top)
+  return { x, y, width: Math.round(right) - x, height: Math.round(bottom) - y }
 }
 
 /** `size` clamped to the panel's own `[min, max]`. */

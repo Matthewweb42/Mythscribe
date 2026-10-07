@@ -7,10 +7,10 @@ import { ipc } from '@renderer/lib/ipc'
 /** The side panels the control bar (F-6.5) can show in focus mode; they float there (F-6.6). */
 export type FocusPanel = FloatingPanel
 
-/** Which side panels are shown in focus mode; session state, both closed on entry. */
+/** Which side panels are shown in focus mode; session state, all closed on entry. */
 export type FocusPanels = Record<FocusPanel, boolean>
 
-const closedPanels = (): FocusPanels => ({ notes: false, assistant: false })
+const closedPanels = (): FocusPanels => ({ notes: false, assistant: false, references: false })
 
 /**
  * Focus mode (F-6.1): OS fullscreen plus hidden chrome. `active` is the window's real
@@ -19,8 +19,9 @@ const closedPanels = (): FocusPanels => ({ notes: false, assistant: false })
  * app for (the window manager or the OS leaving fullscreen on its own). A refused call toasts
  * and leaves `active` as it was. The project's session (F-1.7) remembers it, so a project closed
  * in focus mode reopens in it. F-6.5: the
- * notes and assistant panels have their own flags here for focus mode, so the persisted
- * layout (which governs the normal screen) is never touched; leaving focus mode closes both,
+ * notes and assistant panels (and, since 2026-10-07, the references) have their own flags here
+ * for focus mode, so the persisted layout (which governs the normal screen) is never touched;
+ * leaving focus mode closes them all,
  * so every entry starts with the editor alone.
  */
 interface FocusState {

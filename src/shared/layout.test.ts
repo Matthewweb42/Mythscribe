@@ -4,6 +4,7 @@ import {
   LAYOUT_LIMITS,
   LAYOUT_PANELS,
   Layout,
+  RESIZE_EDGES,
   StoredLayout,
   clampForEditorMin,
   clampPanel,
@@ -17,10 +18,12 @@ import {
   fitsEditorMin,
   normalizeLayout,
   rectEquals,
+  resizeRect,
   withColumnSize,
   FLOATING_MIN_SIZE,
   FLOATING_PANELS,
-  type Rect
+  type Rect,
+  type ResizeEdge
 } from './layout'
 
 describe('defaultLayout', () => {
@@ -59,11 +62,13 @@ describe('defaultLayout', () => {
   })
 
   it('floats the notes at the right third and the assistant below it, each a fresh copy (F-6.6)', () => {
-    expect(FLOATING_PANELS).toEqual(['notes', 'assistant'])
+    expect(FLOATING_PANELS).toEqual(['notes', 'assistant', 'references'])
     const floating = defaultFloating()
     expect(defaultLayout().floating).toEqual(floating)
     expect(floating.notes).toEqual({ x: 860, y: 48, width: 380, height: 320 })
     expect(floating.assistant).toEqual({ x: 860, y: 392, width: 380, height: 380 })
+    expect(floating.references).toEqual({ x: 40, y: 48, width: 340, height: 480 })
+    expect(floating.references.x + floating.references.width).toBeLessThanOrEqual(floating.notes.x)
     // Both fit a 1280 × 800 window, one under the other.
     expect(floating.notes.x + floating.notes.width).toBeLessThanOrEqual(1280)
     expect(floating.notes.y + floating.notes.height).toBeLessThanOrEqual(floating.assistant.y)
@@ -149,8 +154,20 @@ describe('Layout schema', () => {
     const { floating: _dropped, ...withoutFloating } = base
     expect(Layout.safeParse(withoutFloating).success).toBe(false)
     expect(StoredLayout.parse(withoutFloating)).toEqual(base)
-    const stored = { notes: rect({ x: 10, y: 20 }), assistant: rect({ width: 300, height: 250 }) }
+    const stored = {
+      notes: rect({ x: 10, y: 20 }),
+      assistant: rect({ width: 300, height: 250 }),
+      references: rect({ x: 30 })
+    }
     expect(StoredLayout.parse({ ...withoutFloating, floating: stored }).floating).toEqual(stored)
+    // A layout from before the references window (2026-10-07) keeps its two rects and gets the
+    // default third; the strict contract refuses it.
+    const { references: _old, ...twoWindows } = stored
+    expect(StoredLayout.parse({ ...withoutFloating, floating: twoWindows }).floating).toEqual({
+      ...twoWindows,
+      references: defaultFloating().references
+    })
+    expect(Layout.safeParse({ ...base, floating: twoWindows }).success).toBe(false)
   })
 
   it('StoredLayout gives a layout from before the tags column the closed default and drops the old tag bar', () => {
@@ -391,6 +408,69 @@ describe('the references panel in the layout arithmetic (F-9.6)', () => {
     expect(editorFraction(floors)).toBeCloseTo(0.35, 9)
     expect(fitsEditorMin(floors)).toBe(true)
     expect(normalizeLayout(floors)).toBe(floors)
+  })
+})
+
+describe('resizeRect (2026-10-07)', () => {
+  const viewport = { width: 1000, height: 800 }
+  const from: Rect = { x: 200, y: 100, width: 400, height: 300 }
+
+  it('every edge and corner moves only its own sides', () => {
+    expect(RESIZE_EDGES).toEqual(['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'])
+    const cases: Record<ResizeEdge, Rect> = {
+      n: { x: 200, y: 80, width: 400, height: 320 },
+      ne: { x: 200, y: 80, width: 430, height: 320 },
+      e: { x: 200, y: 100, width: 430, height: 300 },
+      se: { x: 200, y: 100, width: 430, height: 280 },
+      s: { x: 200, y: 100, width: 400, height: 280 },
+      sw: { x: 230, y: 100, width: 370, height: 280 },
+      w: { x: 230, y: 100, width: 370, height: 300 },
+      nw: { x: 230, y: 80, width: 370, height: 320 }
+    }
+    for (const edge of RESIZE_EDGES) {
+      expect(resizeRect(from, edge, 30, -20, viewport), edge).toEqual(cases[edge])
+    }
+  })
+
+  it('a left or top drag past the minimum stops there, keeping the right and bottom edges', () => {
+    expect(resizeRect(from, 'nw', 500, 500, viewport)).toEqual({
+      x: 600 - 280,
+      y: 400 - 200,
+      width: 280,
+      height: 200
+    })
+    expect(resizeRect(from, 'se', -500, -500, viewport)).toEqual({
+      x: 200,
+      y: 100,
+      width: 280,
+      height: 200
+    })
+  })
+
+  it('a dragged edge stops at the viewport, never moving the opposite edge', () => {
+    expect(resizeRect(from, 'nw', -900, -900, viewport)).toEqual({
+      x: 0,
+      y: 0,
+      width: 600,
+      height: 400
+    })
+    expect(resizeRect(from, 'se', 900, 900, viewport)).toEqual({
+      x: 200,
+      y: 100,
+      width: 800,
+      height: 700
+    })
+  })
+
+  it('honours a custom minimum and rounds the edges, so a sub-pixel drag keeps the anchor', () => {
+    expect(resizeRect(from, 'w', 350, 0, viewport, { width: 100, height: 100 })).toEqual({
+      ...from,
+      x: 500,
+      width: 100
+    })
+    const r = resizeRect(from, 'w', 10.6, 0, viewport)
+    expect(r).toEqual({ ...from, x: 211, width: 389 })
+    expect(r.x + r.width).toBe(from.x + from.width)
   })
 })
 

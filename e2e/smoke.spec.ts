@@ -4091,7 +4091,34 @@ test('create, close, reopen a project on disk', async () => {
     steps: 6
   })
   await page.mouse.up()
-  const resized = { ...moved, width: moved.width - 40, height: moved.height + 30 }
+  const gripResized = { ...moved, width: moved.width - 40, height: moved.height + 30 }
+  await expect.poll(windowBox).toEqual(gripResized)
+  await expect
+    .poll(async () => (await getLayout()).floating.notes, { timeout: 3000 })
+    .toEqual(gripResized)
+  // 2026-10-07: every edge and corner resizes, like a desktop window. The left edge dragged 50 px
+  // left widens it with the right edge kept; the top-left corner dragged up and left grows both
+  // ways with the bottom-right corner kept. The size persists through the layout.
+  const dragHandle = async (testId: string, dx: number, dy: number): Promise<void> => {
+    const box = await notesWindow.getByTestId(testId).boundingBox()
+    if (!box) throw new Error(`${testId} has no box`)
+    const startX = box.x + box.width / 2
+    const startY = box.y + box.height / 2
+    await page.mouse.move(startX, startY)
+    await page.mouse.down()
+    await page.mouse.move(startX + dx, startY + dy, { steps: 5 })
+    await page.mouse.up()
+  }
+  await dragHandle('floating-notes-resize-w', -50, 0)
+  const leftResized = { ...gripResized, x: gripResized.x - 50, width: gripResized.width + 50 }
+  await expect.poll(windowBox).toEqual(leftResized)
+  await dragHandle('floating-notes-resize-nw', -30, -20)
+  const resized = {
+    x: leftResized.x - 30,
+    y: leftResized.y - 20,
+    width: leftResized.width + 30,
+    height: leftResized.height + 20
+  }
   await expect.poll(windowBox).toEqual(resized)
   await expect
     .poll(async () => (await getLayout()).floating.notes, { timeout: 3000 })
@@ -4105,6 +4132,19 @@ test('create, close, reopen a project on disk', async () => {
   await expect(notesWindow).toBeVisible()
   expect(await windowBox()).toEqual(resized)
   expect((await getLayout()).floating.notes).toEqual(resized)
+  // The references (pins and the scene's story bible sheets) and the assistant float beside it.
+  const focusReferences = controlBar.getByRole('button', { name: 'References' })
+  await focusReferences.click()
+  const referencesWindow = page.getByRole('dialog', { name: 'References' })
+  await expect(referencesWindow).toBeVisible()
+  await expect(page.getByTestId('references-panel')).toHaveCount(0)
+  const focusAssistant = controlBar.getByRole('button', { name: 'AI assistant' })
+  await focusAssistant.click()
+  await expect(page.getByRole('dialog', { name: 'Assistant' })).toBeVisible()
+  await focusReferences.click()
+  await focusAssistant.click()
+  await expect(referencesWindow).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: 'Assistant' })).toHaveCount(0)
   await focusNotes.click()
   await expect(notesWindow).toHaveCount(0)
   await page.mouse.move(screenSize.w / 2, screenSize.h / 2)

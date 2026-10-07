@@ -38,7 +38,8 @@ export function ReferencesToggleButton(): React.JSX.Element {
  * The quick reference panel (F-9.6): a dock panel (layout 3c; by default its own column between
  * the tags and the assistant), so what the author pinned stays in view beside the manuscript and
  * beside an entity page alike. Its open state lives in the layout store (F-7.2); its column and
- * width are the dock's (`DockColumn`). Renders nothing while closed; not mounted in focus mode.
+ * width are the dock's (`DockColumn`). Renders nothing while closed; not mounted in focus mode,
+ * where `ReferencesBody` floats in its own window instead (2026-10-07).
  */
 export function ReferencePanel(): React.JSX.Element | null {
   const references = useLayoutStore((s) => s.layout.references)
@@ -54,20 +55,37 @@ export function ReferencePanel(): React.JSX.Element | null {
         <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">
           References
         </h2>
-        <button
-          type="button"
-          onClick={() => void useReferenceStore.getState().addImages()}
-          className="flex items-center gap-1.5 rounded-md border border-line px-2 py-0.5 text-xs hover:bg-surface-raised"
-        >
-          <ImagePlus size={12} aria-hidden="true" />
-          Add image…
-        </button>
+        <AddReferenceImageButton />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 pb-4">
-        <InThisScene />
-        <PinList />
-      </div>
+      <ReferencesBody />
     </aside>
+  )
+}
+
+/** "Add image…" (F-9.6): pins images picked from disk; the docked header and the focus window share it. */
+export function AddReferenceImageButton(): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={() => void useReferenceStore.getState().addImages()}
+      className="flex items-center gap-1.5 rounded-md border border-line px-2 py-0.5 text-xs hover:bg-surface-raised"
+    >
+      <ImagePlus size={12} aria-hidden="true" />
+      Add image…
+    </button>
+  )
+}
+
+/**
+ * The reference panel's scrolling body: the open scene's story bible sheets, then the pins.
+ * Hosted by the docked panel and by the focus-mode References window (2026-10-07).
+ */
+export function ReferencesBody(): React.JSX.Element {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 pb-4">
+      <InThisScene />
+      <PinList />
+    </div>
   )
 }
 

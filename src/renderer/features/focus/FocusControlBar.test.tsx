@@ -178,7 +178,7 @@ describe('FocusControlBar (F-6.5)', () => {
     expect(vibe).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('Notes and AI assistant toggle the focus store flags, never the layout', () => {
+  it('Notes, References, and AI assistant toggle the focus store flags, never the layout', () => {
     install()
     render(<FocusControlBar />)
     const notes = within(bar()).getByRole('button', { name: 'Notes' })
@@ -186,12 +186,33 @@ describe('FocusControlBar (F-6.5)', () => {
     expect(notes).toHaveAttribute('aria-pressed', 'false')
     expect(assistant).toHaveAttribute('aria-pressed', 'false')
     fireEvent.click(notes)
-    expect(useFocusStore.getState().panels).toEqual({ notes: true, assistant: false })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: true,
+      assistant: false,
+      references: false
+    })
     expect(notes).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(assistant)
-    expect(useFocusStore.getState().panels).toEqual({ notes: true, assistant: true })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: true,
+      assistant: true,
+      references: false
+    })
     fireEvent.click(notes)
-    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: true })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: false,
+      assistant: true,
+      references: false
+    })
+    const references = within(bar()).getByRole('button', { name: 'References' })
+    expect(references).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(references)
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: false,
+      assistant: true,
+      references: true
+    })
+    expect(references).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('the darkness and width sliders drive the overlay setting and show their values', () => {

@@ -115,10 +115,17 @@ describe('focusStore (F-6.1)', () => {
   it('resets to windowed with the panels closed and drops the subscription', () => {
     install()
     useFocusStore.getState().subscribe()
-    useFocusStore.setState({ active: true, panels: { notes: true, assistant: true } })
+    useFocusStore.setState({
+      active: true,
+      panels: { notes: true, assistant: true, references: true }
+    })
     resetFocusStore()
     expect(useFocusStore.getState().active).toBe(false)
-    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: false,
+      assistant: false,
+      references: false
+    })
     expect(listeners.size).toBe(0)
   })
 })
@@ -127,24 +134,54 @@ describe('focusStore panels (F-6.5)', () => {
   it('starts with both panels closed and toggles each on its own', async () => {
     install()
     await useFocusStore.getState().enter()
-    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: false,
+      assistant: false,
+      references: false
+    })
     useFocusStore.getState().togglePanel('notes')
-    expect(useFocusStore.getState().panels).toEqual({ notes: true, assistant: false })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: true,
+      assistant: false,
+      references: false
+    })
     useFocusStore.getState().togglePanel('assistant')
-    expect(useFocusStore.getState().panels).toEqual({ notes: true, assistant: true })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: true,
+      assistant: true,
+      references: false
+    })
     useFocusStore.getState().togglePanel('notes')
-    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: true })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: false,
+      assistant: true,
+      references: false
+    })
   })
 
-  it('closes both panels on exit, so the next entry starts with the editor alone', async () => {
+  it('closes every panel on exit, so the next entry starts with the editor alone', async () => {
     install()
     await useFocusStore.getState().enter()
     useFocusStore.getState().togglePanel('notes')
     useFocusStore.getState().togglePanel('assistant')
+    useFocusStore.getState().togglePanel('references')
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: true,
+      assistant: true,
+      references: true
+    })
     await useFocusStore.getState().exit()
-    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: false,
+      assistant: false,
+      references: false
+    })
     await useFocusStore.getState().enter()
-    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: false,
+      assistant: false,
+      references: false
+    })
   })
 
   it('closes both panels when the window leaves fullscreen on its own', () => {
@@ -154,7 +191,11 @@ describe('focusStore panels (F-6.5)', () => {
     useFocusStore.getState().togglePanel('notes')
     fire(false)
     expect(useFocusStore.getState().active).toBe(false)
-    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: false })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: false,
+      assistant: false,
+      references: false
+    })
   })
 
   it('keeps the panels when a refused exit leaves focus mode active', async () => {
@@ -163,6 +204,10 @@ describe('focusStore panels (F-6.5)', () => {
     useFocusStore.getState().togglePanel('assistant')
     await useFocusStore.getState().exit()
     expect(useFocusStore.getState().active).toBe(true)
-    expect(useFocusStore.getState().panels).toEqual({ notes: false, assistant: true })
+    expect(useFocusStore.getState().panels).toEqual({
+      notes: false,
+      assistant: true,
+      references: false
+    })
   })
 })

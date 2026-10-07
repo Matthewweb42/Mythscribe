@@ -12,6 +12,12 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-07 · F-6.6 · Focus-mode windows: what "story bible sheets" means
+- Question: The author asked for References and story bible sheets as resizable floating windows in focus mode. Which windows exactly?
+- Chosen: three floating windows: Notes, AI assistant, and References. The References window is the docked reference panel's body (the open scene's story bible sheet cards, then the pins) with Add image in its title bar, toggled from the control bar; its default rect is on the left (40, 48, 340 × 480). No separate Story bible window: picking an entity still opens its page in the main pane. A resize edge dragged past the screen now stops at it (the old grip shrank the window into the corner instead).
+- Alternatives: a fourth "Story bible" window listing every entity with a read-only sheet view inside it; opening an entity page in a floating window.
+- To change it: `src/renderer/features/focus/FocusFloatingPanels.tsx`, `FLOATING_PANELS` in `src/shared/layout.ts`.
+
 ## 2026-10-07 · F-12.4 (CV1) · Compile model: storage and engine shape
 - Question: Where do Book details, the include ticks, and "My formats" live, and how is the engine shaped?
 - Chosen: no migration. Book details are one project `settings` row (`bookDetails`); the project's last format, output, quick pick, and the "Include in compile" ticks are another (`compile.state`), stored as the list of *excluded* node ids so a new document is included by default and an unticked folder leaves out everything below it. "My formats" are a list in app state (`compileFormats`, beside the tag templates), read leniently. Formats are output-agnostic (pick the output at compile time; each format preselects one). One pure model, `compileBook` in `src/shared/compileModel.ts`, makes a typed item list every writer and the live preview render; the old Export dialog runs through it until the compile window replaces it.
