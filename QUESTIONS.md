@@ -174,6 +174,7 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: `src/shared/assistantSuggestions.ts`, `src/renderer/features/ai/AssistantPanel.tsx` (`SuggestionLine`), `src/renderer/features/editor/SceneSuggestions.tsx` (`BriefDraftButton`).
 
 ## 2026-10-06 · F-14.15 · Edit passes: where they live and what they cost
+- **Confirmed by the author 2026-10-07:** reports stay as a list in the Edits sidebar tab (not documents in a tree folder). The "vs a professional editor" price was removed (spec C1).
 - Question: The pass types, the workspace, the report, and the tracked changes were confirmed; how
   are the details built?
 - Chosen: an **Edits** sidebar tab (New edit pass opens the workspace in the main pane; the tab
@@ -319,6 +320,7 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: `grantTrial` in `cloud/src/auth.ts`.
 
 ## 2026-10-07 · AI billing B2 · Refunds of unused balance
+- **Confirmed by the author 2026-10-07:** unused balance is refundable for 30 days after purchase (`refund_window_days` 30); refunds stay operator-issued in Lemon Squeezy.
 - Question: How does the ledger follow a refund, and is the 30-day window enforced?
 - Chosen: the operator refunds (part of) an order in Lemon Squeezy; the `order_refunded` webhook writes a `refund` row of the order's cumulative `refunded_amount` (the whole pack if absent), capped at the pack, minus what was already refunded on that order. The window (`refund_window_days`, 30, unconfirmed) is published in `GET /pricing` but not enforced by the Worker, because refunds are issued by the operator. A refund of spent money can take the balance below zero; requests are then refused.
 - Alternatives: an in-app "refund my balance" request route; enforce the window on the webhook (it would then ignore a refund Lemon Squeezy already paid out).
