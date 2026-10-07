@@ -62,7 +62,7 @@ describe('AccentPicker (F-15.9)', () => {
   it('locks every accent but the default without a license, and says why', () => {
     useAccountStore.setState({ supporter: UNLICENSED })
     render(<AccentPicker />)
-    expect(screen.getByText('Accent colour — Supporter license needed')).toBeInTheDocument()
+    expect(screen.getByText('Accent colour — MythScribe license needed')).toBeInTheDocument()
     const moss = screen.getByTestId('account-accent-default')
     expect(moss).toBeEnabled()
     expect(moss).toHaveAttribute('aria-pressed', 'true')
@@ -70,7 +70,7 @@ describe('AccentPicker (F-15.9)', () => {
     for (const id of ['ember', 'sky', 'rose', 'gold', 'violet']) {
       const swatch = screen.getByTestId(`account-accent-${id}`)
       expect(swatch).toBeDisabled()
-      expect(swatch).toHaveAttribute('title', 'Supporter license needed')
+      expect(swatch).toHaveAttribute('title', 'MythScribe license needed')
     }
   })
 

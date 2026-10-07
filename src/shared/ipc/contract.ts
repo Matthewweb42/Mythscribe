@@ -31,6 +31,7 @@ import {
   Conversations
 } from '../chat'
 import { AccountStatus } from '../account'
+import { AppAccess } from '../appAccess'
 import { AuthorRules } from '../authorRules'
 import { BackupSettingsPatch, BackupState } from '../backups'
 import { CheckoutBody, CreditsResult, EMAIL_MAX } from '../cloudApi'
@@ -829,6 +830,8 @@ export const contract = {
     input: z.undefined(),
     output: z.object({ version: z.string(), platform: z.string() })
   },
+  /** AI-BILLING-SPEC M1: the trial, the license, or read-only after the trial (main owns the clock). */
+  'app:getAccess': { input: z.undefined(), output: AppAccess },
   'project:create': {
     input: z.object({
       name: z.string().trim().min(1).max(PROJECT_NAME_MAX),
@@ -2478,7 +2481,9 @@ export const events = {
   /** Diagnostics were switched, or a report was sent (F-15.8); the tab shows what is pending now. */
   'diagnostics:changed': DiagnosticsState,
   /** The backup state changed without a renderer call (F-8.4): a scheduled or on-close backup ran or failed, or a project opened or closed. */
-  'backups:changed': BackupState
+  'backups:changed': BackupState,
+  /** The app's access changed (M1): the trial ended, or a license was verified or dropped. */
+  'app:accessChanged': AppAccess
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

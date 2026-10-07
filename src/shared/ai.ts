@@ -170,7 +170,9 @@ export const AiErrorCode = z.enum([
   'NO_CREDIT',
   // The project's source is MythScribe Cloud, which does not serve AI yet (`CLOUD_AI_AVAILABLE`),
   // or the Worker answered `/ai/complete` with NOT_FOUND.
-  'CLOUD_UNAVAILABLE'
+  'CLOUD_UNAVAILABLE',
+  // AI-BILLING-SPEC M1: the 30-day trial has ended without the app license; the app is read-only.
+  'TRIAL_ENDED'
 ])
 export type AiErrorCode = z.infer<typeof AiErrorCode>
 
@@ -187,7 +189,8 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
   CANCELLED: 'Send it again whenever you like.',
   SIGNED_OUT: 'Sign in on the Account tab in Settings.',
   NO_CREDIT: 'Buy credits on the Account tab in Settings.',
-  CLOUD_UNAVAILABLE: 'Switch to My own key or Local model in Settings › AI.'
+  CLOUD_UNAVAILABLE: 'Switch to My own key or Local model in Settings › AI.',
+  TRIAL_ENDED: 'Buy MythScribe on the Account tab in Settings.'
 }
 
 /**

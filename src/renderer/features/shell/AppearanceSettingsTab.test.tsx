@@ -234,7 +234,7 @@ describe('AppearanceSettingsTab theme (F-7.8)', () => {
     ).toEqual(['Dark', 'Light', 'High contrast', 'Sepia'])
     expect(themeCard('dark')).toHaveAttribute('aria-checked', 'true')
     expect(themeCard('sepia')).toBeDisabled()
-    expect(themeCard('sepia')).toHaveAttribute('title', 'Supporter license needed')
+    expect(themeCard('sepia')).toHaveAttribute('title', 'MythScribe license needed')
     expect(screen.getByTestId('appearance-theme-new')).toBeDisabled()
     await userEvent.click(themeCard('light'))
     await waitFor(() => expect(themeCard('light')).toHaveAttribute('aria-checked', 'true'))

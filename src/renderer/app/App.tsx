@@ -6,6 +6,8 @@ import { formatLabel, type HierarchyLevel } from '@shared/labels'
 import type { DockPanelId } from '@shared/dock'
 import { DEFAULT_THEME, THEME_TOKENS, THEME_TOKEN_VARS, resolveTheme } from '@shared/themes'
 import { useAccountStore } from '@renderer/features/account/accountStore'
+import { useAppAccessStore } from '@renderer/features/account/appAccessStore'
+import { TrialBanner } from '@renderer/features/account/TrialBanner'
 import { useBackupStore } from '@renderer/features/backups/backupStore'
 import { useDiagnosticsStore } from '@renderer/features/diagnostics/diagnosticsStore'
 import { AboutDialog } from '@renderer/features/shell/AboutDialog'
@@ -150,6 +152,13 @@ export function App(): React.JSX.Element {
     // F-15.9: the Supporter license is a local cache, so it is read at start whether anyone is
     // signed in or not; main pushes it again after a background refresh, a sign-in, or a sign-out.
     void useAccountStore.getState().loadSupporter()
+    // AI-BILLING-SPEC M1: the trial or the license, app-wide; main pushes it when the trial ends
+    // or a license is verified or dropped.
+    const offAccess = useAppAccessStore.getState().subscribe()
+    useAppAccessStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
     // F-7.10: the document zoom is app-wide and the editor multiplies the project's formatting by
     // it, so it is read here — before any project opens, which is before an editor mounts — and
     // the writing surface is at the author's level on its first paint. (The interface size is
@@ -175,6 +184,7 @@ export function App(): React.JSX.Element {
       offFocus()
       offMenu()
       offAccount()
+      offAccess()
       offUpdates()
       offDiagnostics()
       offBackups()
@@ -451,6 +461,8 @@ export function App(): React.JSX.Element {
           </div>
         </header>
       )}
+      {/* M1: the trial's last week, and the read-only state after it. */}
+      {focus ? null : <TrialBanner />}
       {current ? <FocusShortcuts /> : null}
       <SettingsShortcut />
       <ZoomShortcuts />
