@@ -296,6 +296,44 @@ const IMPORT_STRUCTURE_ANSWER = JSON.stringify({
  * is nowhere in it, and one naming a scene the reader was never sent, so both drop rules show.
  */
 const BETA_READER_SENTINEL = 'You are the beta-reader feature inside a novel-writing app.'
+/**
+ * F-9.8: the opening of the context-library prompt's system turn (`CONTEXT_IMPORT_RULES` in
+ * `src/main/ai/prompts/contextImport.v1.ts`, repeated here for the same reason). The answer
+ * depends on the document named in the user turn: people.md describes Mara twice (once by her
+ * full name, with her nickname) and carries a theme; places.txt describes Tomas Reed and a place.
+ */
+const CONTEXT_IMPORT_SENTINEL = 'You are the context-library feature inside a novel-writing app'
+function contextImportAnswer(messages: { role: string; content: string }[]): string {
+  const user = messages.at(-1)?.content ?? ''
+  if (user.includes('Document "people.md"')) {
+    return JSON.stringify({
+      entities: [
+        { kind: 'character', name: 'Mara', aliases: [], fields: { age: '35' }, details: [] },
+        {
+          kind: 'character',
+          name: 'Mara Vell',
+          aliases: ['Mara'],
+          fields: { goals: 'Keep the ferry running.' },
+          details: ['History: She runs the ferry her father built.']
+        }
+      ],
+      notes: ['Theme: The book is about debts that outlive the people who made them.'],
+      images: []
+    })
+  }
+  return JSON.stringify({
+    entities: [
+      { kind: 'character', name: 'Tomas Reed', fields: { age: '29' }, details: ['Debts: owes the mill money.'] },
+      {
+        kind: 'setting',
+        name: 'The Landing',
+        fields: { description: 'A jetty of black planks on the north bank.' }
+      }
+    ],
+    notes: [],
+    images: []
+  })
+}
 const BETA_READER_NOTE = 'I expect the ridge to matter: she keeps looking at it.'
 const BETA_READER_ANSWER = JSON.stringify({
   items: [
@@ -576,6 +614,10 @@ function startFakeOpenAi(): Promise<string> {
           const importStructure = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(IMPORT_STRUCTURE_SENTINEL)
           )
+          // F-9.8: a context-library chunk comes back as the people and places of its file.
+          const contextImport = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(CONTEXT_IMPORT_SENTINEL)
+          )
           // F-5.19: the router picks editor's notes for the routed step's message, else chat.
           const route = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(ROUTE_SENTINEL)
@@ -640,7 +682,9 @@ function startFakeOpenAi(): Promise<string> {
                   message: {
                     role: 'assistant',
                     content: json
-                      ? chatAgent
+                      ? contextImport
+                        ? contextImportAnswer(request.messages)
+                        : chatAgent
                         ? chatAgentReply(request.messages)
                         : route
                           ? JSON.stringify({
@@ -1055,7 +1099,7 @@ test('create, close, reopen a project on disk', async () => {
   // F-15.11: own key is the default. Until Cloud serves AI (`CLOUD_AI_AVAILABLE`, decided by the
   // author 2026-10-07) its card is shown disabled with "Coming soon", and clicking it changes
   // nothing; a local model can still be picked, and the test goes back to the own key.
-  await expect(wizard).toContainText('Step 3 of 4')
+  await expect(wizard).toContainText('Step 3 of 5')
   await expect(wizard.getByRole('radio', { name: /^my own key/i })).toBeChecked()
   await expect(wizard.getByRole('radio', { name: /^mythscribe cloud/i })).toBeDisabled()
   await expect(wizard.getByTestId('wizard-cloud-coming-soon')).toHaveText('Coming soon')
@@ -1069,12 +1113,16 @@ test('create, close, reopen a project on disk', async () => {
   // Use AI on, the chat in Ask; Off is one click. The rest of this test turns AI on itself, so
   // it starts off.
   await wizard.getByRole('button', { name: 'Next' }).click()
-  await expect(wizard).toContainText('Step 4 of 4')
+  await expect(wizard).toContainText('Step 4 of 5')
   await expect(wizard.getByTestId('wizard-dial-explainer')).toContainText('flags contradictions')
   await expect(wizard.getByRole('group', { name: 'Use AI' })).toBeVisible()
   await expect(wizard.getByRole('radio', { name: /^on/i })).toBeChecked()
   await wizard.getByText('Off', { exact: true }).click()
   await expect(wizard.getByRole('radio', { name: /^off/i })).toBeChecked()
+  // F-9.8: the optional worldbuilding step; skipped here (the Library step below adds files).
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await expect(wizard).toContainText('Step 5 of 5')
+  await expect(wizard.getByTestId('wizard-context-add')).toBeVisible()
   await wizard.getByRole('button', { name: 'Create' }).click()
 
   await expect(page.getByTestId('project-name')).toHaveText('Smoke Novel')
@@ -1364,7 +1412,8 @@ test('create, close, reopen a project on disk', async () => {
     'Outline',
     'Timeline',
     'Tags',
-    'Edits'
+    'Edits',
+    'Library'
   ])
   const manuscriptTab = sidebarTabs.getByRole('tab', { name: 'Manuscript' })
   await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
@@ -5558,6 +5607,83 @@ test('create, close, reopen a project on disk', async () => {
   ).toBeGreaterThanOrEqual(1)
   await assistant.getByTestId('continuity-button').click()
   await expect(continuityPanel).toHaveCount(0)
+
+  // F-9.8: the context library, while Use AI is on and Mara's sheet says she is 34. Two files go
+  // in through the Library tab (the OS dialog stubbed): the estimate shows first and nothing is
+  // sent until Sort with AI; the fake server answers each file by name (Mara at 35 with a
+  // nickname, Tomas Reed, The Landing, a theme). The review shows the conflict side by side with
+  // the sheet's value kept by default; the author picks the upload's, applies, and the sheets,
+  // their tags, and the Project notes page are there, and both files read "Sorted".
+  const contextDir = path.join(tmp, 'context')
+  fs.mkdirSync(contextDir, { recursive: true })
+  const peopleFile = path.join(contextDir, 'people.md')
+  const placesFile = path.join(contextDir, 'places.txt')
+  fs.writeFileSync(
+    peopleFile,
+    '# Mara\n\nMara Vell, Mara to everyone at the landing, is thirty-five. Grey eyes, a burn scar on the left wrist.\n\nShe runs the ferry her father built.\n\nThe book is about debts that outlive the people who made them.\n'
+  )
+  fs.writeFileSync(
+    placesFile,
+    'Tomas Reed is twenty-nine and owes the mill money.\n\nThe Landing is a jetty of black planks on the north bank.\n'
+  )
+  await sidebarTabs.getByRole('tab', { name: 'Library' }).click()
+  const libraryPanel = page.getByRole('tabpanel', { name: 'Library' })
+  await expect(libraryPanel).toContainText('No files yet')
+  await stubOpenDialogFiles([peopleFile, placesFile])
+  const contextBodies = (): string[] =>
+    openAiChatBodies
+      .filter((body) => body.messages[0]?.content.startsWith(CONTEXT_IMPORT_SENTINEL))
+      .map((body) => body.messages.at(-1)?.content ?? '')
+  await libraryPanel.getByTestId('library-add').click()
+  const libraryDialog = page.getByTestId('library-dialog')
+  await expect(libraryDialog.getByTestId('library-estimate')).toContainText('2 files · 2 requests')
+  expect(contextBodies()).toHaveLength(0)
+  await libraryDialog.getByTestId('library-confirm').click()
+  const libraryReview = libraryDialog.getByTestId('library-review')
+  await expect(libraryReview).toBeVisible({ timeout: 15_000 })
+  expect(contextBodies()).toHaveLength(2)
+  expect(contextBodies()[0]).toMatch(/^Existing sheets:\nCharacters: .*\bMara\b/)
+  await expect(libraryDialog.getByTestId('library-review-summary')).toHaveText(
+    '2 new sheets · 1 sheet to update · 1 conflict · 1 note for Project notes'
+  )
+  const maraItem = libraryReview.locator('[data-item-name="Mara"]')
+  await expect(maraItem).toContainText('existing sheet')
+  // The two descriptions were merged by the nickname; Split would separate them again.
+  await expect(maraItem.getByTestId('library-matches')).toContainText(
+    'Matched: “Mara” (people.md), “Mara Vell” (people.md) Split'
+  )
+  const ageConflict = maraItem.getByTestId('library-conflict')
+  await expect(ageConflict.getByRole('radio', { name: /Keep the sheet’s\s*34/ })).toBeChecked()
+  await ageConflict.getByText('Use the upload’s').click()
+  await expect(ageConflict.getByRole('radio', { name: /Use the upload’s\s*35/ })).toBeChecked()
+  await expect(libraryReview.locator('[data-item-name="Tomas Reed"]')).toContainText('Tag #tomas-reed')
+  await expect(libraryReview.getByTestId('library-notes')).toContainText('Theme: The book is about debts')
+  await libraryDialog.getByTestId('library-apply').click()
+  await expect(libraryDialog).toHaveCount(0)
+  await expect(libraryPanel.getByTestId('library-file-state')).toHaveText(['Sorted', 'Sorted'])
+  const afterLibrary = await page.evaluate(async () => {
+    const listed = (await window.mythscribe.invoke('entity:list', undefined)) as IpcResult<Entity[]>
+    const tags = (await window.mythscribe.invoke('tag:list', undefined)) as IpcResult<Tag[]>
+    if (!listed.ok || !tags.ok) throw new Error('list failed')
+    return { entities: listed.data, tags: tags.data.map((tag) => tag.name) }
+  })
+  const librarySheet = (name: string): Entity | undefined =>
+    afterLibrary.entities.find((entity) => entity.name === name)
+  expect(librarySheet('Mara')?.fields).toMatchObject({ age: '35', goals: 'Keep the ferry running.' })
+  expect(librarySheet('Mara')?.fields.notes).toContain('History: She runs the ferry her father built.')
+  expect(librarySheet('Tomas Reed')).toMatchObject({ kind: 'character', fields: { age: '29' } })
+  expect(librarySheet('The Landing')).toMatchObject({ kind: 'setting' })
+  expect(librarySheet('Project notes')).toMatchObject({
+    kind: 'world',
+    template: 'blank',
+    body: 'Theme: The book is about debts that outlive the people who made them.',
+    tagId: null
+  })
+  expect(afterLibrary.tags).toEqual(expect.arrayContaining(['tomas-reed', 'the-landing']))
+  expect((await usageSummary()).byFeature.find((f) => f.feature === 'contextImport')?.requests).toBe(2)
+  await dismissToasts()
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+
   // Back to Off and no key, as before this step.
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
@@ -6048,6 +6174,13 @@ async function stubOpenDialog(filePath: string): Promise<void> {
   await app.evaluate(({ dialog }, chosen) => {
     dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] })
   }, filePath)
+}
+
+/** The native open dialog answers these paths, as a multiple selection does (F-9.8). */
+async function stubOpenDialogFiles(filePaths: string[]): Promise<void> {
+  await app.evaluate(({ dialog }, chosen) => {
+    dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: chosen })
+  }, filePaths)
 }
 
 /** The native save dialog answers this path (F-9.5 exports; the wizard patches it the same way). */

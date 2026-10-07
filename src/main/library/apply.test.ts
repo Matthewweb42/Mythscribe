@@ -80,8 +80,16 @@ describe('applyContextReview (F-9.8)', () => {
     }).entity
     const review = reviewOf(
       [
-        record({ name: 'Mara Vell', fields: { age: '35', appearance: 'Grey eyes' }, details: ['History: ran the ferry.'] }),
-        record({ name: 'Tomas', fields: { relationships: 'Brother of Mara' }, details: ['Debts: owes the mill.'] })
+        record({
+          name: 'Mara Vell',
+          fields: { age: '35', appearance: 'Grey eyes' },
+          details: ['History: ran the ferry.']
+        }),
+        record({
+          name: 'Tomas',
+          fields: { relationships: 'Brother of Mara' },
+          details: ['Debts: owes the mill.']
+        })
       ],
       ['Theme: debts.']
     )
@@ -95,16 +103,27 @@ describe('applyContextReview (F-9.8)', () => {
       notes: 'Old note.\n\nHistory: ran the ferry.'
     })
     const tomas = listEntities(db).find((e) => e.name === 'Tomas')!
-    expect(tomas.fields).toEqual({ relationships: 'Brother of Mara', notes: 'Debts: owes the mill.' })
+    expect(tomas.fields).toEqual({
+      relationships: 'Brother of Mara',
+      notes: 'Debts: owes the mill.'
+    })
     expect(tomas.tagId).not.toBeNull()
     expect(listTags(db).map((t) => t.name)).toEqual(expect.arrayContaining(['tomas', 'mara-vell']))
     expect(result.tagChanges.map((c) => c.tag.name)).toEqual(['tomas'])
     const notes = listEntities(db).find((e) => e.name === PROJECT_NOTES_NAME)!
-    expect(notes).toMatchObject({ kind: 'world', template: 'blank', body: 'Theme: debts.', tagId: null })
+    expect(notes).toMatchObject({
+      kind: 'world',
+      template: 'blank',
+      body: 'Theme: debts.',
+      tagId: null
+    })
     expect(result.files.find((f) => f.id === fileId)?.state).toBe('processed')
 
     // The author picks the upload's age on a second pass, and the notes page grows.
-    const again = reviewOf([record({ name: 'Mara Vell', fields: { age: '36' } })], ['Outline: three acts.'])
+    const again = reviewOf(
+      [record({ name: 'Mara Vell', fields: { age: '36' } })],
+      ['Outline: three acts.']
+    )
     again.entities[0]!.fields[0]!.choice = 'upload'
     await applyContextReview(db, session.folder, again)
     expect(getEntity(db, mara.id)?.fields.age).toBe('36')
@@ -112,7 +131,10 @@ describe('applyContextReview (F-9.8)', () => {
   })
 
   it('writes nothing it was told to leave out and makes no tag when unticked', async () => {
-    const review = reviewOf([record({ name: 'Ilse' }), record({ name: 'Pell', fields: { age: '9' } })], ['x'])
+    const review = reviewOf(
+      [record({ name: 'Ilse' }), record({ name: 'Pell', fields: { age: '9' } })],
+      ['x']
+    )
     review.entities[0]!.include = false
     review.entities[1]!.tag = false
     review.entities[1]!.fields[0]!.include = false
@@ -128,7 +150,9 @@ describe('applyContextReview (F-9.8)', () => {
     await applyContextReview(db, session.folder, review)
     const mara = listEntities(db).find((e) => e.name === 'Mara')!
     expect(mara.image).toMatch(/^mara-portrait\.[0-9a-f]{8}\.png$/)
-    expect(fs.existsSync(path.join(assetDir(session.folder, ENTITY_IMAGES_DIR), mara.image!))).toBe(true)
+    expect(fs.existsSync(path.join(assetDir(session.folder, ENTITY_IMAGES_DIR), mara.image!))).toBe(
+      true
+    )
     expect(listContextFiles(db)).toHaveLength(2)
   })
 

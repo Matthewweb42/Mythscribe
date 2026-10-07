@@ -44,13 +44,22 @@ export interface ContextApplyResult extends ContextApplyCounts {
 }
 
 /** `existing` with `paragraphs` appended as paragraphs, or VALIDATION when it would be over `max`. */
-function appended(existing: string, paragraphs: readonly string[], max: number, name: string): string {
+function appended(
+  existing: string,
+  paragraphs: readonly string[],
+  max: number,
+  name: string
+): string {
   const added = paragraphs.join('\n\n')
   const text = existing.trim() === '' ? added : `${existing.trimEnd()}\n\n${added}`
   if (text.length > max) {
-    throw new AppError('VALIDATION', `"${name}" would be longer than ${max.toLocaleString()} characters`, {
-      name
-    })
+    throw new AppError(
+      'VALIDATION',
+      `"${name}" would be longer than ${max.toLocaleString()} characters`,
+      {
+        name
+      }
+    )
   }
   return text
 }
@@ -97,7 +106,10 @@ export async function applyContextReview(
       const image = item.images.find((entry) => entry.include)
       if (image === undefined) continue
       const row = requireContextFileRow(db, image.fileId)
-      copies.set(item.id, addImageAsset(folder, ENTITY_IMAGES_DIR, storedPath(folder, row.stored), 'image', row.name))
+      copies.set(
+        item.id,
+        addImageAsset(folder, ENTITY_IMAGES_DIR, storedPath(folder, row.stored), 'image', row.name)
+      )
     }
     result = db.transaction((tx) => {
       const written = new Map<string, Entity>()
@@ -110,7 +122,12 @@ export async function applyContextReview(
         if (item.existingId === null) {
           const write = createEntity(
             tx,
-            { kind: item.kind, name: item.name, template: 'structured', fields: fieldPatch(item, null) },
+            {
+              kind: item.kind,
+              name: item.name,
+              template: 'structured',
+              fields: fieldPatch(item, null)
+            },
             'author',
             { tag: item.tag !== false }
           )

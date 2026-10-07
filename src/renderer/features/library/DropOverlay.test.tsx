@@ -43,7 +43,9 @@ describe('DropOverlay (F-9.8)', () => {
     act(() => {
       window.dispatchEvent(drag('dragenter', ['Files']))
     })
-    expect(screen.getByTestId('library-drop-overlay')).toHaveTextContent('Drop to add to the Library')
+    expect(screen.getByTestId('library-drop-overlay')).toHaveTextContent(
+      'Drop to add to the Library'
+    )
 
     const file = new File(['Mara.'], 'people.md')
     const drop = drag('drop', ['Files'], [file])

@@ -51,7 +51,13 @@ export function contextReviewFixture(): ContextReview {
         ],
         fields: [
           { field: 'age', upload: '35', existing: '34', include: true, choice: 'existing' },
-          { field: 'appearance', upload: 'Grey eyes', existing: null, include: true, choice: 'upload' }
+          {
+            field: 'appearance',
+            upload: 'Grey eyes',
+            existing: null,
+            include: true,
+            choice: 'upload'
+          }
         ],
         details: ['History: ran the ferry.'],
         includeDetails: true,

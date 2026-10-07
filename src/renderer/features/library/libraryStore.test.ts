@@ -133,7 +133,10 @@ describe('useLibraryStore (F-9.8)', () => {
         added({ changed: [], unchanged: 1, skipped: [{ name: 'a.epub', reason: 'Nope.' }] })
     })
     await useLibraryStore.getState().add()
-    expect(toasts()).toEqual(['a.epub: Nope.', 'Those files are already in the Library, unchanged.'])
+    expect(toasts()).toEqual([
+      'a.epub: Nope.',
+      'Those files are already in the Library, unchanged.'
+    ])
     expect(useLibraryStore.getState().flow).toBeNull()
   })
 
@@ -148,14 +151,22 @@ describe('useLibraryStore (F-9.8)', () => {
     useLibraryStore.getState().discard()
     expect(useLibraryStore.getState().flow).toBeNull()
     await vi.waitFor(() =>
-      expect(calls).toContainEqual(['proposal:settle', { id: 'p1', status: 'rejected', note: null }])
+      expect(calls).toContainEqual([
+        'proposal:settle',
+        { id: 'p1', status: 'rejected', note: null }
+      ])
     )
     expect(channelsCalled()).not.toContain('library:apply')
   })
 
   it('shows a failure with its next step, and a stop goes back to nothing', async () => {
     install({
-      'library:process': () => ({ ok: false, code: 'NO_KEY', message: 'No key.', nextStep: 'Add one.' })
+      'library:process': () => ({
+        ok: false,
+        code: 'NO_KEY',
+        message: 'No key.',
+        nextStep: 'Add one.'
+      })
     })
     await useLibraryStore.getState().sort(['f1'])
     await useLibraryStore.getState().confirm()
@@ -185,7 +196,9 @@ describe('useLibraryStore (F-9.8)', () => {
       )
     }))
     await useLibraryStore.getState().apply()
-    const sent = calls.find(([channel]) => channel === 'library:apply')?.[1] as Input<'library:apply'>
+    const sent = calls.find(
+      ([channel]) => channel === 'library:apply'
+    )?.[1] as Input<'library:apply'>
     expect(sent.review.entities[0]?.fields[0]?.choice).toBe('upload')
     expect(sent.review.entities[1]?.tag).toBe(false)
     expect(useEntityStore.getState().byId.tomas?.name).toBe('Tomas')
@@ -193,9 +206,14 @@ describe('useLibraryStore (F-9.8)', () => {
       flow: null,
       files: [{ state: 'processed' }]
     })
-    expect(toasts()).toContain('Story bible: 1 sheet created, 1 sheet updated, Project notes updated.')
+    expect(toasts()).toContain(
+      'Story bible: 1 sheet created, 1 sheet updated, Project notes updated.'
+    )
     await vi.waitFor(() =>
-      expect(calls).toContainEqual(['proposal:settle', { id: 'p1', status: 'acceptedPart', note: null }])
+      expect(calls).toContainEqual([
+        'proposal:settle',
+        { id: 'p1', status: 'acceptedPart', note: null }
+      ])
     )
   })
 

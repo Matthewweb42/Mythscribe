@@ -58,7 +58,9 @@ describe('LibraryTab (F-9.8)', () => {
       loaded: true
     })
     render(<LibraryTab />)
-    const rows = within(screen.getByRole('list', { name: 'Library files' })).getAllByRole('listitem')
+    const rows = within(screen.getByRole('list', { name: 'Library files' })).getAllByRole(
+      'listitem'
+    )
     expect(rows.map((row) => row.textContent)).toEqual([
       expect.stringContaining('Markdown · Oct 7, 2026 · Not sorted yet'),
       expect.stringContaining('Image · Oct 7, 2026 · Reference image'),

@@ -82,7 +82,8 @@ export function getContextFileRow(db: LibraryDb, id: string): ContextFileRow | u
 /** The row with this id, or NOT_FOUND. */
 export function requireContextFileRow(db: LibraryDb, id: string): ContextFileRow {
   const row = getContextFileRow(db, id)
-  if (row === undefined) throw new AppError('NOT_FOUND', 'That file is no longer in the Library', { id })
+  if (row === undefined)
+    throw new AppError('NOT_FOUND', 'That file is no longer in the Library', { id })
   return row
 }
 
@@ -130,7 +131,10 @@ export async function addContextFiles(
     const name = path.basename(source.name)
     const type = contextFileTypeOf(name)
     if (type === null) {
-      skipped.push({ name, reason: 'The Library takes Word, Markdown, text, PDF, and image files.' })
+      skipped.push({
+        name,
+        reason: 'The Library takes Word, Markdown, text, PDF, and image files.'
+      })
       continue
     }
     let data: Buffer
@@ -220,7 +224,11 @@ export function markContextFileProcessed(
 ): void {
   const row = requireContextFileRow(db, id)
   db.update(contextFile)
-    .set({ processedText: text, processedHash: text === null ? null : row.textHash, processedAt: at })
+    .set({
+      processedText: text,
+      processedHash: text === null ? null : row.textHash,
+      processedAt: at
+    })
     .where(eq(contextFile.id, id))
     .run()
 }

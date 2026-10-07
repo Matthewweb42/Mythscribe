@@ -9,6 +9,7 @@ import {
 } from '@shared/contextLibrary'
 import { ENTITY_FIELDS, ENTITY_KIND_NOUN, entityTagName } from '@shared/entities'
 import { describeRequest, formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
+import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useLibraryStore, type LibraryFlow } from './libraryStore'
 
 const BUTTON =
@@ -26,7 +27,9 @@ function estimateLine(estimate: ContextEstimate): string {
   const files = formatCount(estimate.files, 'file')
   const tokens = `≈ ${formatCount(estimate.tokensIn)} tokens in, ${formatCount(estimate.tokensOut)} out`
   const model = estimate.model === '' ? 'the strong model' : estimate.model
-  const cost = estimate.priced ? `about ${formatUsd(estimate.costUsd)}` : 'cost unknown for this model'
+  const cost = estimate.priced
+    ? `about ${formatUsd(estimate.costUsd)}`
+    : 'cost unknown for this model'
   return `${files} · ${requests} to ${model} · ${tokens} · ${cost}`
 }
 
@@ -106,7 +109,11 @@ function Dialog({ flow }: { flow: LibraryFlow }): React.JSX.Element {
             </>
           ) : null}
         </div>
-        {flow.stage === 'review' ? <Review review={flow.review} busy={flow.busy} /> : <Status flow={flow} />}
+        {flow.stage === 'review' ? (
+          <Review review={flow.review} busy={flow.busy} />
+        ) : (
+          <Status flow={flow} />
+        )}
       </div>
     </div>
   )
@@ -135,7 +142,11 @@ function Status({ flow }: { flow: Exclude<LibraryFlow, { stage: 'review' }> }): 
             </p>
           </>
         ) : flow.stage === 'running' ? (
-          <p className="m-0 text-fg-muted tabular-nums" role="status" data-testid="library-progress">
+          <p
+            className="m-0 text-fg-muted tabular-nums"
+            role="status"
+            data-testid="library-progress"
+          >
             {flow.progress === null
               ? `Reading ${formatCount(flow.estimate.chunks, 'request')}…`
               : `Request ${flow.progress.done} of ${flow.progress.total} · ${formatUsd(flow.progress.costUsd)} so far`}
@@ -210,10 +221,24 @@ function Review({ review, busy }: { review: ContextReview; busy: boolean }): Rea
         {review.notes.paragraphs.length > 0 ? <NotesCard review={review} busy={busy} /> : null}
       </ul>
       <div className="flex shrink-0 items-center gap-2 border-t border-line px-5 py-3">
-        <span className="flex-1 text-xs text-fg-subtle tabular-nums" data-testid="library-review-cost">
-          {describeRequest({ model: review.model, costUsd: review.costUsd, usage: review.usage, cached: false })}
+        <span
+          className="flex-1 text-xs text-fg-subtle tabular-nums"
+          data-testid="library-review-cost"
+        >
+          {describeRequest({
+            model: review.model,
+            costUsd: review.costUsd,
+            usage: review.usage,
+            cached: false
+          })}
         </span>
-        <button type="button" data-testid="library-discard" disabled={busy} onClick={discard} className={BUTTON}>
+        <button
+          type="button"
+          data-testid="library-discard"
+          disabled={busy}
+          onClick={discard}
+          className={BUTTON}
+        >
           Cancel
         </button>
         <button
@@ -231,7 +256,9 @@ function Review({ review, busy }: { review: ContextReview; busy: boolean }): Rea
 }
 
 /** Replaces one review item through the store. */
-function useItemEdit(itemId: string): (change: (item: ContextReviewEntity) => ContextReviewEntity) => void {
+function useItemEdit(
+  itemId: string
+): (change: (item: ContextReviewEntity) => ContextReviewEntity) => void {
   const edit = useLibraryStore((s) => s.edit)
   return (change) =>
     edit((review) => ({
@@ -240,12 +267,22 @@ function useItemEdit(itemId: string): (change: (item: ContextReviewEntity) => Co
     }))
 }
 
-function EntityCard({ item, busy }: { item: ContextReviewEntity; busy: boolean }): React.JSX.Element {
+function EntityCard({
+  item,
+  busy
+}: {
+  item: ContextReviewEntity
+  busy: boolean
+}): React.JSX.Element {
   const editItem = useItemEdit(item.id)
   const split = useLibraryStore((s) => s.split)
   const off = busy || !item.include
   const tagName = entityTagName(item.name)
-  const detailsPlace = item.existingId === null ? 'Notes' : 'Notes or page'
+  // Details go to a structured sheet's Notes field, or to a blank sheet's page.
+  const blank = useEntityStore((s) =>
+    item.existingId === null ? false : s.byId[item.existingId]?.template === 'blank'
+  )
+  const detailsPlace = blank ? 'the page' : 'Notes'
   const setField = (index: number, patch: Partial<ContextReviewField>): void =>
     editItem((current) => ({
       ...current,
@@ -263,11 +300,14 @@ function EntityCard({ item, busy }: { item: ContextReviewEntity; busy: boolean }
           aria-label={`Include ${item.name}`}
           checked={item.include}
           disabled={busy}
-          onChange={(event) => editItem((current) => ({ ...current, include: event.target.checked }))}
+          onChange={(event) =>
+            editItem((current) => ({ ...current, include: event.target.checked }))
+          }
         />
         <span className="text-sm font-medium">{item.name}</span>
         <span className="text-xs text-fg-muted">
-          {ENTITY_KIND_NOUN[item.kind]} · {item.existingId === null ? 'new sheet' : 'existing sheet'}
+          {ENTITY_KIND_NOUN[item.kind]} ·{' '}
+          {item.existingId === null ? 'new sheet' : 'existing sheet'}
         </span>
       </div>
       {item.records.length > 1 || (item.existingId !== null && item.records.length > 0) ? (
@@ -277,12 +317,7 @@ function EntityCard({ item, busy }: { item: ContextReviewEntity; busy: boolean }
           {canSplit(item) ? (
             <>
               {' '}
-              <button
-                type="button"
-                className={LINK}
-                disabled={busy}
-                onClick={() => split(item.id)}
-              >
+              <button type="button" className={LINK} disabled={busy} onClick={() => split(item.id)}>
                 Split
               </button>
             </>
@@ -296,7 +331,9 @@ function EntityCard({ item, busy }: { item: ContextReviewEntity; busy: boolean }
               type="checkbox"
               checked={item.tag}
               disabled={off}
-              onChange={(event) => editItem((current) => ({ ...current, tag: event.target.checked }))}
+              onChange={(event) =>
+                editItem((current) => ({ ...current, tag: event.target.checked }))
+              }
             />
             {`Tag #${tagName}`}
           </label>
@@ -384,7 +421,9 @@ function EntityCard({ item, busy }: { item: ContextReviewEntity; busy: boolean }
                 editItem((current) => ({
                   ...current,
                   images: current.images.map((entry) =>
-                    entry.fileId === image.fileId ? { ...entry, include: event.target.checked } : entry
+                    entry.fileId === image.fileId
+                      ? { ...entry, include: event.target.checked }
+                      : entry
                   )
                 }))
               }
@@ -400,7 +439,10 @@ function EntityCard({ item, busy }: { item: ContextReviewEntity; busy: boolean }
 function NotesCard({ review, busy }: { review: ContextReview; busy: boolean }): React.JSX.Element {
   const edit = useLibraryStore((s) => s.edit)
   return (
-    <li className="m-0 mb-2 list-none rounded-md border border-line p-3" data-testid="library-notes">
+    <li
+      className="m-0 mb-2 list-none rounded-md border border-line p-3"
+      data-testid="library-notes"
+    >
       <label className="flex items-center gap-2">
         <input
           type="checkbox"

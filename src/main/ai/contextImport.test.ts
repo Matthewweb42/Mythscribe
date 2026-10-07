@@ -94,7 +94,9 @@ afterEach(() => {
 
 describe('contextWork (F-9.8)', () => {
   it('cuts long text at paragraph boundaries, lists images, and skips a file with no text', async () => {
-    const long = Array.from({ length: 6 }, (_, i) => `${i}`.repeat(CONTEXT_CHUNK_CHARS / 4)).join('\n\n')
+    const long = Array.from({ length: 6 }, (_, i) => `${i}`.repeat(CONTEXT_CHUNK_CHARS / 4)).join(
+      '\n\n'
+    )
     const a = await add('long.txt', long)
     const image = (
       await addContextFiles(db, session.folder, [{ name: 'map.png', read: () => Buffer.from([1]) }])
@@ -144,7 +146,13 @@ describe('sortContextFiles (F-9.8)', () => {
     const id = await add('people.md', 'Mara, 35, ferrywoman.\n\nTomas, her brother.')
     answer({
       entities: [
-        { kind: 'character', name: 'Mara Vell', aliases: ['Mara'], fields: { age: 35 }, details: [] },
+        {
+          kind: 'character',
+          name: 'Mara Vell',
+          aliases: ['Mara'],
+          fields: { age: 35 },
+          details: []
+        },
         { kind: 'character', name: 'Tomas', fields: { relationships: 'Brother of Mara' } },
         { kind: 'spaceship', name: 'Nope' },
         { kind: 'world', name: 'Project notes', details: ['x'] }
@@ -168,7 +176,9 @@ describe('sortContextFiles (F-9.8)', () => {
     expect(request.messages[1]?.content).toContain('Document "people.md":\nMara, 35')
     expect(ledger).toHaveLength(1)
     expect(ledger[0]).toMatchObject({ feature: 'contextImport', promptVersion: 'contextImport.v1' })
-    expect(progress).toEqual([{ done: 1, total: 1, costUsd: priceFor('gpt-5.4', 900, 120).costUsd }])
+    expect(progress).toEqual([
+      { done: 1, total: 1, costUsd: priceFor('gpt-5.4', 900, 120).costUsd }
+    ])
     expect(review).toMatchObject({
       fileIds: [id],
       chunks: 1,
@@ -210,7 +220,9 @@ describe('sortContextFiles (F-9.8)', () => {
   })
 
   it('stops on a cancel between chunks and settles what was answered', async () => {
-    const long = Array.from({ length: 6 }, (_, i) => `${i}`.repeat(CONTEXT_CHUNK_CHARS / 4)).join('\n\n')
+    const long = Array.from({ length: 6 }, (_, i) => `${i}`.repeat(CONTEXT_CHUNK_CHARS / 4)).join(
+      '\n\n'
+    )
     const id = await add('long.txt', long)
     const controller = registerInflight('r-1')
     complete.mockImplementation(() => {

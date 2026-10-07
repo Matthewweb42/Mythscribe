@@ -34,7 +34,9 @@ const record = (over: Partial<ContextRecord> & Pick<ContextRecord, 'name'>): Con
   ...over
 })
 
-const sheet = (over: Partial<ExistingSheet> & Pick<ExistingSheet, 'id' | 'name'>): ExistingSheet => ({
+const sheet = (
+  over: Partial<ExistingSheet> & Pick<ExistingSheet, 'id' | 'name'>
+): ExistingSheet => ({
   kind: 'character',
   template: 'structured',
   fields: {},
@@ -75,7 +77,9 @@ describe('file types and states (F-9.8)', () => {
   })
 
   it('derives the state from the hashes', () => {
-    expect(contextFileState({ type: 'image', textHash: null, processedHash: null })).toBe('reference')
+    expect(contextFileState({ type: 'image', textHash: null, processedHash: null })).toBe(
+      'reference'
+    )
     expect(contextFileState({ type: 'pdf', textHash: null, processedHash: null })).toBe('noText')
     expect(contextFileState({ type: 'md', textHash: 'a', processedHash: null })).toBe('new')
     expect(contextFileState({ type: 'md', textHash: 'a', processedHash: 'a' })).toBe('processed')
@@ -102,10 +106,9 @@ describe('paragraphs, chunks, and the estimate', () => {
   })
 
   it('keeps only the paragraphs an updated file did not have', () => {
-    expect(changedParagraphs(['Same.', 'New one.', 'Changed  text.'], ['same.', 'Changed text'])).toEqual([
-      'New one.',
-      'Changed  text.'
-    ])
+    expect(
+      changedParagraphs(['Same.', 'New one.', 'Changed  text.'], ['same.', 'Changed text'])
+    ).toEqual(['New one.', 'Changed  text.'])
   })
 
   it('estimates from the chunk sizes on the given model', () => {
@@ -129,7 +132,13 @@ describe('recordFields', () => {
   it('keeps only the kind fillable fields, trimmed and non-empty, numbers as text', () => {
     expect(contextFieldsFor('character')).not.toContain('notes')
     expect(
-      recordFields('character', { age: 34, appearance: ' Grey eyes ', notes: 'x', rules: 'y', gender: '' })
+      recordFields('character', {
+        age: 34,
+        appearance: ' Grey eyes ',
+        notes: 'x',
+        rules: 'y',
+        gender: ''
+      })
     ).toEqual({ age: '34', appearance: 'Grey eyes' })
   })
 })
@@ -140,7 +149,12 @@ describe('planContextReview (F-9.8)', () => {
     const { entities } = plan(
       [
         record({ name: 'Mara', fields: { age: '35' }, details: ['History: ran the ferry.'] }),
-        record({ name: 'Mara Vell', aliases: ['Mara'], fileName: 'b.md', fields: { appearance: 'Grey eyes' } }),
+        record({
+          name: 'Mara Vell',
+          aliases: ['Mara'],
+          fileName: 'b.md',
+          fields: { appearance: 'Grey eyes' }
+        }),
         record({ name: 'Tomas', fields: { age: '29' } })
       ],
       existing
@@ -162,11 +176,21 @@ describe('planContextReview (F-9.8)', () => {
       sheet({
         id: 'mara',
         name: 'Mara Vell',
-        fields: { age: '34', appearance: 'Grey eyes, a burn scar', notes: 'History: ran the ferry.' }
+        fields: {
+          age: '34',
+          appearance: 'Grey eyes, a burn scar',
+          notes: 'History: ran the ferry.'
+        }
       })
     ]
     const { entities } = plan(
-      [record({ name: 'Mara Vell', fields: { age: '34', appearance: 'grey eyes' }, details: ['History: ran the ferry.'] })],
+      [
+        record({
+          name: 'Mara Vell',
+          fields: { age: '34', appearance: 'grey eyes' },
+          details: ['History: ran the ferry.']
+        })
+      ],
       existing
     )
     expect(entities).toEqual([])
@@ -192,18 +216,41 @@ describe('planContextReview (F-9.8)', () => {
 
   it('reads a blank sheet page for the details already there, and offers a tag to an untagged sheet', () => {
     const existing = [
-      sheet({ id: 'elm', kind: 'world', name: 'Elm Court', template: 'blank', body: 'Founded: long ago.', tagId: null })
+      sheet({
+        id: 'elm',
+        kind: 'world',
+        name: 'Elm Court',
+        template: 'blank',
+        body: 'Founded: long ago.',
+        tagId: null
+      })
     ]
     const { entities } = plan(
-      [record({ kind: 'world', name: 'Elm Court', details: ['Founded: long ago.', 'Members: ferrymen.'] })],
+      [
+        record({
+          kind: 'world',
+          name: 'Elm Court',
+          details: ['Founded: long ago.', 'Members: ferrymen.']
+        })
+      ],
       existing
     )
-    expect(entities[0]).toMatchObject({ existingId: 'elm', tag: true, details: ['Members: ferrymen.'] })
+    expect(entities[0]).toMatchObject({
+      existingId: 'elm',
+      tag: true,
+      details: ['Members: ferrymen.']
+    })
   })
 
   it('keeps only notes the Project notes page does not have yet', () => {
     const existing = [
-      sheet({ id: 'pn', kind: 'world', name: PROJECT_NOTES_NAME, template: 'blank', body: 'Theme: debts.' })
+      sheet({
+        id: 'pn',
+        kind: 'world',
+        name: PROJECT_NOTES_NAME,
+        template: 'blank',
+        body: 'Theme: debts.'
+      })
     ]
     const { notes } = plan([], existing, { notes: ['Theme: debts.', 'Outline: three acts.'] })
     expect(notes).toEqual({ existingId: 'pn', paragraphs: ['Outline: three acts.'], include: true })
@@ -259,14 +306,25 @@ describe('splitReviewEntity', () => {
 
 describe('what Apply writes', () => {
   it('writes a fill, a conflict only when the upload is picked, and reports whether anything changes', () => {
-    expect(writesField({ field: 'age', upload: '3', existing: null, include: true, choice: 'upload' })).toBe(true)
-    expect(writesField({ field: 'age', upload: '3', existing: '4', include: true, choice: 'existing' })).toBe(false)
-    expect(writesField({ field: 'age', upload: '3', existing: '4', include: true, choice: 'upload' })).toBe(true)
-    expect(writesField({ field: 'age', upload: '3', existing: null, include: false, choice: 'upload' })).toBe(false)
+    expect(
+      writesField({ field: 'age', upload: '3', existing: null, include: true, choice: 'upload' })
+    ).toBe(true)
+    expect(
+      writesField({ field: 'age', upload: '3', existing: '4', include: true, choice: 'existing' })
+    ).toBe(false)
+    expect(
+      writesField({ field: 'age', upload: '3', existing: '4', include: true, choice: 'upload' })
+    ).toBe(true)
+    expect(
+      writesField({ field: 'age', upload: '3', existing: null, include: false, choice: 'upload' })
+    ).toBe(false)
     const review = reviewOf(plan([record({ name: 'Ilse' })]))
     expect(reviewHasChanges(review)).toBe(true)
     expect(
-      reviewHasChanges({ ...review, entities: review.entities.map((e) => ({ ...e, include: false })) })
+      reviewHasChanges({
+        ...review,
+        entities: review.entities.map((e) => ({ ...e, include: false }))
+      })
     ).toBe(false)
   })
 })

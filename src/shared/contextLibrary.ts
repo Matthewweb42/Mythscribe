@@ -162,7 +162,10 @@ export function paragraphKey(text: string): string {
  * The paragraphs of `current` that `previous` did not have (F-9.8 re-upload): an updated file is
  * sorted again only for what changed, so the review shows new or changed information only.
  */
-export function changedParagraphs(current: readonly string[], previous: readonly string[]): string[] {
+export function changedParagraphs(
+  current: readonly string[],
+  previous: readonly string[]
+): string[] {
   const seen = new Set(previous.map(paragraphKey))
   return current.filter((paragraph) => !seen.has(paragraphKey(paragraph)))
 }
@@ -367,7 +370,9 @@ export interface ExistingSheet {
 const norm = (text: string): string => text.replace(/\s+/g, ' ').trim().toLowerCase()
 
 /** Where a sheet's details go: the page of a blank sheet, the Notes field of a structured one. */
-export function detailsTarget(sheet: Pick<ExistingSheet, 'template' | 'fields' | 'body'> | null): string {
+export function detailsTarget(
+  sheet: Pick<ExistingSheet, 'template' | 'fields' | 'body'> | null
+): string {
   if (sheet === null) return ''
   return sheet.template === 'blank' ? (sheet.body ?? '') : (sheet.fields.notes ?? '')
 }
@@ -392,7 +397,11 @@ function keysOf(record: Pick<ContextRecord, 'name' | 'aliases'>): string[] {
 }
 
 /** One field's merged upload value: distinct values in record order, joined by the field's shape. */
-function mergedValue(kind: EntityKind, field: EntityFieldId, records: readonly ContextRecord[]): string {
+function mergedValue(
+  kind: EntityKind,
+  field: EntityFieldId,
+  records: readonly ContextRecord[]
+): string {
   const values: string[] = []
   for (const record of records) {
     const value = record.fields[field]?.trim() ?? ''
@@ -666,7 +675,11 @@ export function splitReviewEntity(
   const keys = [...groups.keys()]
   const keeper = sheet === null ? null : (keys.find((key) => key === sheetKey) ?? keys[0])
   const replaced = keys.map((key, i) => {
-    const next = entityItem(`${item.id}.${i + 1}`, groups.get(key) ?? [], key === keeper ? sheet : null)
+    const next = entityItem(
+      `${item.id}.${i + 1}`,
+      groups.get(key) ?? [],
+      key === keeper ? sheet : null
+    )
     if (key === keeper || (keeper === null && key === keys[0])) next.images = item.images
     return next
   })

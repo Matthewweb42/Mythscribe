@@ -12,6 +12,30 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-07 · F-9.8 · Context library: where a sheet's extra details go
+- Question: You said details with no matching field go into "the sheet's free-text page". A structured sheet's editor shows only its fields, not the page, so details written to the page would be invisible there.
+- Chosen: on a structured sheet (every sheet the library creates, and most existing ones) the details are appended to its Notes field as paragraphs ("History: …"); on a blank-page sheet they are appended to the page. The AI never fills Notes itself, so nothing there is overwritten.
+- Alternatives: always the page (hidden until the author switches the template to Blank page); show the page under the fields on structured sheets.
+- To change it: `fieldPatch`/`applyContextReview` in `src/main/library/apply.ts`, `detailsTarget` and `contextFieldsFor` in `src/shared/contextLibrary.ts`.
+
+## 2026-10-07 · F-9.8 · Context library: the default for a conflict
+- Question: A conflict needs an answer when the author presses Apply after "Include everything". Which value wins by default?
+- Chosen: the sheet's own value (the "Keep the sheet's" option is preselected); the upload's value is written only when the author picks it. Accepting everything therefore never overwrites what they wrote.
+- Alternatives: preselect the upload's value; refuse Apply until every conflict is picked.
+- To change it: `reviewFields` in `src/shared/contextLibrary.ts`.
+
+## 2026-10-07 · F-9.8 · Context library: what "attach an image to the right sheet" does
+- Question: Where does a map or character art go?
+- Chosen: it becomes the picture of a character or setting sheet (the existing F-9.3 image slot) when the model says whose it is or the file name spells the name or a nickname ("mara-portrait.png"). A sheet that already has a picture is offered the new one unticked ("replaces the current one"). World items have no picture slot, so an image of one (or an unmatched map) stays in the Library only, where it opens from the row. Images are never sent to the AI; only their file names are.
+- Alternatives: pin matched images to the References panel (F-9.6) instead; add a picture slot to world items (a schema change).
+- To change it: `attachImages` in `src/shared/contextLibrary.ts`, `applyContextReview` in `src/main/library/apply.ts`.
+
+## 2026-10-07 · F-9.8 · Context library: smaller choices
+- Question: Several details the plan left open.
+- Chosen: (1) names and nicknames are matched by the model (it is given the existing sheet names and told to use them, listing other names as aliases) and then merged locally by exact name or alias, with no second "merge" request; (2) "Sort again" on a file that has not changed re-reads it whole (the review still leaves out what the sheets already say), while an updated file sends only its changed paragraphs; (3) a sort that finds nothing new marks the files sorted with a toast instead of an empty review; (4) a batch with nothing to send (only images, or nothing changed) skips the cost confirmation, since it costs nothing; (5) the wizard's step is the fifth and last, and the files are added and the estimate shown right after the project opens; (6) "Upload context…" is a button under each story-bible tab's search row; (7) the Library has no Remove action (not asked for); (8) each request is one proposal (F-14.5), settled accepted, accepted in part, or rejected with the review; (9) PDF text comes from `unpdf` 1.8.1 (dependency-free pdf.js build, 2.1 MB) rather than `pdfjs-dist` (35 MB, needs a worker).
+- Alternatives: per item, as written.
+- To change it: `src/renderer/features/library/`, `src/main/ai/contextImport.ts`, `src/shared/contextLibrary.ts`.
+
 ## 2026-10-07 · F-2.2 · Flexible nesting: where the bottom buttons and Insert put a new scene
 - Question: With scenes allowed directly under a part or the manuscript, where do the bottom Scene/Chapter/Part buttons, Insert, and the empty-folder "Add a scene" put a new node? (Your decision covered right-click and drag only.)
 - Chosen: unchanged where the old rule had an answer (Scene with a part selected still goes into its last chapter; with nothing selected, into the last chapter of the last part). Where it used to refuse, it now places directly: a part with no chapters takes the scene itself, a manuscript with no parts takes the chapter or scene on the root, and the empty-part invitation reads "Add a scene" instead of "Add a chapter first". With nothing selected, a new node is appended after the last leveled node at the bottom of the outline, so after an Epilogue scene on the root a new scene goes on the root too. A new chapter from a loose scene goes right after it.

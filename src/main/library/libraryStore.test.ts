@@ -57,9 +57,9 @@ describe('extractContextText (F-9.8)', () => {
   })
 
   it('reads the text layer of a PDF, and finds none in a PDF without one (no OCR)', async () => {
-    expect(await extractContextText('pdf', textPdf(['Mara Vell is a ferrywoman.', 'She is 34.']))).toBe(
-      'Mara Vell is a ferrywoman.\nShe is 34.'
-    )
+    expect(
+      await extractContextText('pdf', textPdf(['Mara Vell is a ferrywoman.', 'She is 34.']))
+    ).toBe('Mara Vell is a ferrywoman.\nShe is 34.')
     expect(await extractContextText('pdf', textPdf([]))).toBeNull()
   })
 
@@ -113,10 +113,15 @@ describe('addContextFiles (F-9.8)', () => {
     const same = await addContextFiles(db, session.folder, [source('NOTES.md', 'One.\n\nTwo.')])
     expect(same).toMatchObject({ changed: [], unchanged: 1 })
 
-    const updated = await addContextFiles(db, session.folder, [source('notes.md', 'One.\n\nThree.')])
+    const updated = await addContextFiles(db, session.folder, [
+      source('notes.md', 'One.\n\nThree.')
+    ])
     expect(updated.changed).toEqual([id])
     expect(updated.files).toHaveLength(1)
-    expect(updated.files[0]).toMatchObject({ state: 'changed', processedAt: '2026-10-07T10:00:00.000Z' })
+    expect(updated.files[0]).toMatchObject({
+      state: 'changed',
+      processedAt: '2026-10-07T10:00:00.000Z'
+    })
     const row = getContextFileRow(db, id)!
     expect(row.processedText).toBe('One.\n\nTwo.')
     expect(row.stored).not.toBe(oldStored)
@@ -129,9 +134,9 @@ describe('addContextFiles (F-9.8)', () => {
     const result = await addContextFiles(db, session.folder, [source('draft-2.txt', 'New.')], id)
     expect(result.changed).toEqual([id])
     expect(result.files.map((f) => f.name)).toEqual(['draft-2.txt'])
-    await expect(addContextFiles(db, session.folder, [source('x.txt', 'x')], 'nope')).rejects.toThrow(
-      AppError
-    )
+    await expect(
+      addContextFiles(db, session.folder, [source('x.txt', 'x')], 'nope')
+    ).rejects.toThrow(AppError)
   })
 
   it('refuses a stored name that reaches outside the library folder', () => {

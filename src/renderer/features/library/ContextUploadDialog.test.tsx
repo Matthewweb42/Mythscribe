@@ -69,7 +69,9 @@ describe('ContextUploadDialog (F-9.8)', () => {
   })
 
   it('reviews matches, conflicts side by side, tags, details, and notes, and applies the picks', async () => {
-    useLibraryStore.setState({ flow: { stage: 'review', review: contextReviewFixture(), busy: false } })
+    useLibraryStore.setState({
+      flow: { stage: 'review', review: contextReviewFixture(), busy: false }
+    })
     render(<ContextUploadDialog />)
     expect(screen.getByTestId('library-review-summary')).toHaveTextContent(
       '1 new sheet · 1 sheet to update · 1 conflict · 1 note for Project notes'
@@ -100,7 +102,9 @@ describe('ContextUploadDialog (F-9.8)', () => {
   })
 
   it('disables Apply when nothing is included', async () => {
-    useLibraryStore.setState({ flow: { stage: 'review', review: contextReviewFixture(), busy: false } })
+    useLibraryStore.setState({
+      flow: { stage: 'review', review: contextReviewFixture(), busy: false }
+    })
     render(<ContextUploadDialog />)
     await userEvent.click(screen.getByRole('button', { name: 'Include nothing' }))
     expect(screen.getByTestId('library-apply')).toBeDisabled()
@@ -127,7 +131,9 @@ describe('ContextUploadDialog (F-9.8)', () => {
       }
     })
     const { unmount } = render(<ContextUploadDialog />)
-    expect(screen.getByTestId('library-progress')).toHaveTextContent('Request 1 of 2 · $0.01 so far')
+    expect(screen.getByTestId('library-progress')).toHaveTextContent(
+      'Request 1 of 2 · $0.01 so far'
+    )
     expect(screen.getByTestId('library-stop')).toBeInTheDocument()
     unmount()
     useLibraryStore.setState({

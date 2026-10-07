@@ -238,7 +238,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
       const mine = generation
       const requestId = nextRequestId()
       set({
-        flow: { stage: 'running', fileIds: flow.fileIds, estimate: flow.estimate, requestId, progress: null }
+        flow: {
+          stage: 'running',
+          fileIds: flow.fileIds,
+          estimate: flow.estimate,
+          requestId,
+          progress: null
+        }
       })
       let result
       try {
@@ -251,7 +257,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
           )
       } catch (err) {
         if (mine === generation) {
-          set({ flow: { stage: 'failed', fileIds: flow.fileIds, message: describeError(err), nextStep: '' } })
+          set({
+            flow: {
+              stage: 'failed',
+              fileIds: flow.fileIds,
+              message: describeError(err),
+              nextStep: ''
+            }
+          })
         }
         return
       }
@@ -265,7 +278,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
           flow:
             result.code === 'CANCELLED'
               ? null
-              : { stage: 'failed', fileIds: flow.fileIds, message: result.message, nextStep: result.nextStep }
+              : {
+                  stage: 'failed',
+                  fileIds: flow.fileIds,
+                  message: result.message,
+                  nextStep: result.nextStep
+                }
         })
         return
       }
@@ -278,7 +296,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
           if (mine === generation) set({ files: applied.files, flow: null })
           toast.info('Nothing new to add to the story bible from those files.')
         } catch (err) {
-          if (mine === generation) set({ flow: { stage: 'review', review: result.review, busy: false } })
+          if (mine === generation)
+            set({ flow: { stage: 'review', review: result.review, busy: false } })
           toast.error(describeError(err))
         }
         return
@@ -332,7 +351,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
         const entityStore = useEntityStore.getState()
         for (const entity of result.entities) entityStore.merge(entity)
         set({ files: result.files, flow: null })
-        const parts = [`${plural(result.created, 'sheet')} created`, `${plural(result.updated, 'sheet')} updated`]
+        const parts = [
+          `${plural(result.created, 'sheet')} created`,
+          `${plural(result.updated, 'sheet')} updated`
+        ]
         if (result.notes) parts.push('Project notes updated')
         toast.success(`Story bible: ${parts.join(', ')}.`)
       } catch (err) {
