@@ -54,6 +54,7 @@ import { CorkBoard } from '@renderer/features/outline/CorkBoard'
 import { SelectionCrumb } from '@renderer/features/shell/SelectionCrumb'
 import { useOutlineViewStore } from '@renderer/features/outline/outlineViewStore'
 import { useStructureStore } from '@renderer/features/outline/structureStore'
+import { usePlanLinksStore } from '@renderer/features/outline/planLinksStore'
 import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { SpellcheckMenu } from '@renderer/features/editor/SpellcheckMenu'
 import { useDictionaryStore } from '@renderer/features/editor/dictionaryStore'
@@ -271,6 +272,8 @@ export function App(): React.JSX.Element {
       useStructureStore.getState().clear()
       // F-11.2: and the timeline events.
       useTimelineStore.getState().clear()
+      // F-11.1d: and the plan-link suggestions the Outline tab loaded.
+      usePlanLinksStore.getState().clear()
       useVoiceStore.getState().clear()
       useProvenanceStore.getState().clear()
       useAssistantStore.getState().clear()

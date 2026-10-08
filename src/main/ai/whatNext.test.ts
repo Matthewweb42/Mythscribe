@@ -6,6 +6,7 @@ import { priceFor } from '@shared/ai'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { EMPTY_SCENE_BRIEF, emptySceneMeta } from '@shared/sceneMeta'
 import { SCENE_STEER_HEADING } from '@shared/sceneSteer'
+import { STORY_MAP_HEADING } from '@shared/storyTime'
 import type { TiptapNodeT } from '@shared/tiptap'
 import {
   WHAT_NEXT_CHAR_BUDGET,
@@ -26,6 +27,7 @@ import { manuscriptDocuments } from '../voice/profile'
 import { resetVoiceProfileCache } from '../voice/versionCache'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { resetInflight } from './inflight'
+import { WHAT_NEXT_TIME_RULE } from './prompts/whatNext.v3'
 import {
   AiProviderError,
   type CompletionRequest,
@@ -144,7 +146,7 @@ afterEach(() => {
 })
 
 describe('runWhatNext (F-5.17)', () => {
-  it('sends the scene as JSON to the fast tier under whatNext.v2 and answers the directions', async () => {
+  it('sends the scene as JSON to the fast tier under whatNext.v3 and answers the directions', async () => {
     const result = await whatNext()
     expect(result).toEqual({
       directions: DIRECTIONS,
@@ -154,7 +156,7 @@ describe('runWhatNext (F-5.17)', () => {
       costUsd: priceFor('gpt-5.4-mini', 600, 80).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'whatNext.v2'
+      promptVersion: 'whatNext.v3'
     })
     const request = complete.mock.calls[0]![0]
     expect(request).toMatchObject({ tier: 'fast', json: true, maxTokens: 300 })
@@ -165,11 +167,15 @@ describe('runWhatNext (F-5.17)', () => {
     ).toBe(true)
     // Directions are advice, not prose: no voice block goes out.
     expect(sent().system).not.toContain('Never use these phrases')
+    // F-5.23: the story-time rule and the story map, with now on this scene.
+    expect(sent().system).toContain(WHAT_NEXT_TIME_RULE)
+    expect(sent().system).toContain(STORY_MAP_HEADING)
+    expect(sent().system).toMatch(/\] ▶ NOW/)
     expect(ledger).toHaveLength(1)
     expect(ledger[0]).toMatchObject({
       feature: 'whatNext',
       tier: 'fast',
-      promptVersion: 'whatNext.v2'
+      promptVersion: 'whatNext.v3'
     })
   })
 

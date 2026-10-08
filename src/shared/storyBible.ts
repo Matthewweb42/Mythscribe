@@ -42,6 +42,17 @@ export const STORY_BIBLE_HEADING =
   'Story bible (ground truth: use only the characters and places it names; where the passage ' +
   'and the bible disagree, follow the bible):'
 
+/**
+ * F-5.23: the opening line of the bible in the prompt versions that reason about plot facts
+ * (`whatNext.v3`, `notesSuggest.v2`): the sheets are the author's notes and plans, true of who
+ * people are and what places are like, but an event told only there, or in the next scene, has
+ * not happened yet at this scene.
+ */
+export const STORY_BIBLE_PLANS_HEADING =
+  "Story bible (the author's notes and plans: use only the characters and places it names, and " +
+  'trust it for who they are; an event told only here or in the next scene has not happened yet ' +
+  'in this scene):'
+
 export interface SceneNeighbor {
   title: string
   location: string
@@ -123,7 +134,11 @@ const MIN_NAMES_WHEN_CUT = 1
  * about who is in the scene), their observed facts last of all, so facts are dropped before
  * sheets (`renderStoryBibleEntities`).
  */
-export function renderStoryBible(facts: StoryBibleFacts, maxTokens: number): string | null {
+export function renderStoryBible(
+  facts: StoryBibleFacts,
+  maxTokens: number,
+  heading: string = STORY_BIBLE_HEADING
+): string | null {
   const hasTags = facts.scene !== null && facts.scene.tags.length > 0
   if (facts.bank.length === 0 && facts.previous === null && facts.next === null && !hasTags) {
     return null
@@ -131,7 +146,7 @@ export function renderStoryBible(facts: StoryBibleFacts, maxTokens: number): str
 
   const sceneLine = facts.scene ? renderScene(facts.scene) : null
 
-  const base = [STORY_BIBLE_HEADING, sceneLine].filter((line): line is string => line !== null)
+  const base = [heading, sceneLine].filter((line): line is string => line !== null)
   let used = estimateTokens(base.join('\n'))
   const fits = (line: string): boolean => estimateTokens(`${line}\n`) + used <= maxTokens
   const admit = (line: string, into: string[]): void => {
@@ -177,14 +192,7 @@ export function renderStoryBible(facts: StoryBibleFacts, maxTokens: number): str
 
   entityLines.admitObserved(maxTokens - used)
 
-  return [
-    STORY_BIBLE_HEADING,
-    ...categories,
-    sceneLine,
-    ...entityLines.lines(),
-    ...neighbours,
-    ...summaries
-  ]
+  return [heading, ...categories, sceneLine, ...entityLines.lines(), ...neighbours, ...summaries]
     .filter((line): line is string => line !== null)
     .join('\n')
 }

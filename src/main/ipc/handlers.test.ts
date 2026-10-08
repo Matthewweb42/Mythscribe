@@ -40,7 +40,7 @@ import { builtinParams, defaultWritingPresets } from '@shared/presets'
 import { defaultEditorSettings } from '@shared/editorSettings'
 import { defaultDock } from '@shared/dock'
 import { defaultFloating, defaultLayout } from '@shared/layout'
-import { EMPTY_SCENE_BRIEF, EMPTY_SCENE_META } from '@shared/sceneMeta'
+import { EMPTY_SCENE_BRIEF, EMPTY_SCENE_META, emptySceneMeta } from '@shared/sceneMeta'
 import { SUMMARY_BACKFILL_DELAY_MS } from '@shared/summary'
 import { writeV0Project } from '../project/legacyFixture'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
@@ -2304,7 +2304,7 @@ describe('ai:whatNext (F-5.17)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'whatNext',
       nodeId: scene,
-      promptVersion: 'whatNext.v2',
+      promptVersion: 'whatNext.v3',
       content: JSON.stringify(DIRECTIONS),
       flagged: false,
       violation: null,
@@ -2344,6 +2344,80 @@ describe('ai:whatNext (F-5.17)', () => {
     })
     expect(short.ok).toBe(false)
     if (!short.ok) expect(short.error.code).toBe('VALIDATION')
+  })
+})
+
+describe('planLinks:* (F-11.1d)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+
+  /** A project at Ask with a key: the first scene written and summarized, the second a planned stub. */
+  async function ready(): Promise<{ written: string; planned: string }> {
+    await invoke('project:create', { name: 'Links', format: 'novel', directory: tmp })
+    const db = manager.require().connection.orm
+    const [written] = manuscriptDocuments(db)
+    if (!written) throw new Error('skeleton not seeded')
+    const planned = await invoke('tree:create', {
+      parentId: written.parentId ?? '',
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'The finding'
+    })
+    await invoke('document:save', {
+      id: written.id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Mara finds the copy.' }] }]
+      }
+    })
+    upsertSummary(db, {
+      nodeId: written.id,
+      summary: 'Mara finds the ledger copy.',
+      keyPoints: [],
+      characters: [],
+      contentHash: 'h',
+      promptVersion: 'summary.v3',
+      model: 'gpt-fake',
+      truncated: false,
+      createdAt: '2026-10-08T10:00:00.000Z'
+    })
+    await invoke('sceneMeta:set', {
+      id: planned.id,
+      meta: { ...emptySceneMeta(), synopsis: 'Mara finds the ledger.' }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    await invoke('ai:setKey', { key: KEY })
+    complete.mockResolvedValue({
+      text: JSON.stringify({ links: [{ plan: 'P1', scene: 'S1', why: 'She finds it there.' }] }),
+      model: 'gpt-fake',
+      usage: { inputTokens: 300, outputTokens: 30 }
+    })
+    return { written: written.id, planned: planned.id }
+  }
+
+  it('runs on request, stores a suggestion at Ask, and confirms it into the planned scene', async () => {
+    const { written, planned } = await ready()
+    expect(await invoke('planLinks:get', undefined)).toEqual({ suggestions: [], aiApplied: [] })
+    const result = await invoke('planLinks:run', { requestId: 'pl-1' })
+    expect(result).toMatchObject({ suggested: 1, applied: 0, requested: true })
+    const view = await invoke('planLinks:get', undefined)
+    expect(view.suggestions).toEqual([
+      { plan: { kind: 'scene', nodeId: planned }, sceneId: written, reason: 'She finds it there.' }
+    ])
+    const key = `scene:${planned}>${written}`
+    expect(await invoke('planLinks:confirm', { key })).toEqual({ changedNodeIds: [planned] })
+    expect((await invoke('sceneMeta:get', { id: planned })).meta.fulfilledBy).toBe(written)
+    expect(await invoke('planLinks:unlink', { plan: { kind: 'scene', nodeId: planned } })).toEqual({
+      changedNodeIds: [planned]
+    })
+    expect((await invoke('sceneMeta:get', { id: planned })).meta.fulfilledBy).toBeUndefined()
+    await expect(invoke('planLinks:confirm', { key })).rejects.toThrowError(/^NOT_FOUND: /)
+  })
+
+  it('dismisses a suggestion', async () => {
+    const { written, planned } = await ready()
+    await invoke('planLinks:run', { requestId: 'pl-2' })
+    expect(await invoke('planLinks:dismiss', { key: `scene:${planned}>${written}` })).toBeNull()
+    expect((await invoke('planLinks:get', undefined)).suggestions).toEqual([])
   })
 })
 
@@ -2533,7 +2607,7 @@ describe('ai:suggestSynopsis and ai:suggestNotes (F-5.20)', () => {
     expect(result).toMatchObject({ ok: true, points, dropped: 1, requestId: 'notes-1' })
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'notesSuggest',
-      promptVersion: 'notesSuggest.v1',
+      promptVersion: 'notesSuggest.v2',
       content: JSON.stringify(points),
       status: 'pending'
     })
@@ -2709,7 +2783,7 @@ describe('continuity (F-13.4)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId ?? '')).toMatchObject({
       feature: 'continuity',
       nodeId: scene,
-      promptVersion: 'continuity.v1',
+      promptVersion: 'continuity.v2',
       status: 'pending'
     })
     expect(await invoke('continuity:list', undefined)).toEqual(result.findings)
@@ -2805,7 +2879,7 @@ describe('continuity (F-13.4)', () => {
     const check = complete.mock.calls[1]![0]
     expect(check).toMatchObject({ tier: 'fast', json: true })
     expect(check.messages[1]?.content).toBe(
-      'References:\n[1] Mara (character), sheet, Age: 34\n\n' +
+      'References:\n[1] Mara (character), sheet (notes and plans), Age: 34\n\n' +
         `Scene text:\n"""\n${AGE_LINE}\n"""\n\nList the contradictions.`
     )
     const findings = await invoke('continuity:list', undefined)

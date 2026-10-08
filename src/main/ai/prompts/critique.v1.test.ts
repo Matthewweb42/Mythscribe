@@ -117,7 +117,12 @@ describe('critique.v1 prompt (F-14.8)', () => {
     const built = buildCritiquePrompt({
       sceneText: 's'.repeat(CRITIQUE_SCENE_CHAR_BUDGET),
       notes: 'n'.repeat(CRITIQUE_NOTES_CHAR_CAP),
-      meta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500), brief: EMPTY_SCENE_BRIEF },
+      meta: {
+        location: 'L'.repeat(200),
+        pov: 'P'.repeat(200),
+        timeline: 'T'.repeat(500),
+        brief: EMPTY_SCENE_BRIEF
+      },
       voice: 'v'.repeat(2_400),
       honesty: 'brutal'
     })

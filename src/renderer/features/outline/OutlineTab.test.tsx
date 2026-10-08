@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
@@ -16,6 +16,7 @@ import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { OutlineTab } from './OutlineTab'
 import { resetOutlineViewStore } from './outlineViewStore'
+import { resetPlanLinksStore } from './planLinksStore'
 import { resetStructureStore, useStructureStore } from './structureStore'
 
 const meta = (over: Partial<SceneMeta>): SceneMeta => ({ ...EMPTY_SCENE_META, ...over })
@@ -79,6 +80,7 @@ const LINKS: Output<'documentTag:listAll'> = [
 ]
 
 let calls: [Channel, unknown][] = []
+let planView: Output<'planLinks:get'> = { suggestions: [], aiApplied: [] }
 
 function install(): void {
   calls = []
@@ -95,6 +97,12 @@ function install(): void {
       }
       if (channel === 'structure:set') return input as Output<C>
       if (channel === 'documentTag:listAll') return links as Output<C>
+      // F-11.1d: the plan links the outline loads, and its writes.
+      if (channel === 'planLinks:get') return planView as Output<C>
+      if (channel === 'planLinks:confirm' || channel === 'planLinks:unlink') {
+        return { changedNodeIds: [] } as Output<C>
+      }
+      if (channel === 'planLinks:dismiss') return null as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -119,6 +127,8 @@ beforeEach(() => {
   resetTagStore()
   resetDocumentTagStore()
   links = LINKS
+  planView = { suggestions: [], aiApplied: [] }
+  resetPlanLinksStore()
   useTreeStore.setState({ ...buildIndex(treeFixture), selectedId: null, loaded: true })
   useDialogStore.setState({ modals: [], toasts: [] })
   install()
@@ -128,13 +138,109 @@ afterEach(() => {
   resetSceneMetaStore()
   resetSummaryStore()
   resetPendingSaves()
+  resetPlanLinksStore()
   setIpcClient(null)
+})
+
+describe('OutlineTab, planned and written (F-11.1d)', () => {
+  it('marks each row Planned, Drafted, or Revised from its words and status, folders rolled up, and counts them', async () => {
+    render(<OutlineTab />)
+    await waitFor(() => expect(row('Scene 4')).toHaveAttribute('data-progress', 'revised'))
+    expect(row('Scene 1')).toHaveAttribute('data-progress', 'drafted')
+    expect(row('Scene 3')).toHaveAttribute('data-progress', 'planned')
+    expect(within(row('Scene 3')).getByTestId('outline-progress-badge')).toHaveTextContent(
+      'Planned'
+    )
+    expect(row('Chapter 3')).toHaveAttribute('data-progress', 'planned')
+    expect(row('Chapter 4')).toHaveAttribute('data-progress', 'revised')
+    expect(row('Arc 1')).toHaveAttribute('data-progress', 'drafted')
+    expect(screen.getByTestId('outline-progress')).toHaveTextContent(
+      '2 planned · 3 drafted · 1 revised'
+    )
+  })
+
+  it('mirrors the binder: a new, renamed, moved, or deleted scene shows at once', () => {
+    render(<OutlineTab />)
+    const titles = (): (string | null | undefined)[] =>
+      rows().map((r) => within(r).getAllByRole('button')[0]?.textContent)
+    const added = {
+      ...treeFixture.find((n) => n.id === 'sc-1')!,
+      id: 'sc-new',
+      title: 'The siege',
+      position: 1,
+      wordCount: 0
+    }
+    act(() => useTreeStore.setState(buildIndex([...treeFixture, added])))
+    expect(titles().slice(0, 4)).toEqual(['Arc 1', 'Chapter 1', 'Scene 1', 'The siege'])
+    expect(row('The siege')).toHaveAttribute('data-progress', 'planned')
+    const renamed = treeFixture.map((n) => (n.id === 'sc-1' ? { ...n, title: 'Landing' } : n))
+    act(() => useTreeStore.setState(buildIndex(renamed)))
+    expect(titles()).toContain('Landing')
+    const moved = treeFixture.map((n) =>
+      n.id === 'sc-1' ? { ...n, parentId: 'ch-2', position: 1 } : n
+    )
+    act(() => useTreeStore.setState(buildIndex(moved)))
+    expect(titles().slice(0, 5)).toEqual(['Arc 1', 'Chapter 1', 'Chapter 2', 'Scene 2', 'Scene 1'])
+    act(() => useTreeStore.setState(buildIndex(treeFixture.filter((n) => n.id !== 'sc-1'))))
+    expect(titles()).not.toContain('Scene 1')
+  })
+
+  it('shows a confirmed link both ways, with Unlink, and the AI mark on one the AI applied', async () => {
+    stored['sc-3'] = meta({ fulfilledBy: 'sc-2' })
+    planView = { suggestions: [], aiApplied: ['scene:sc-3>sc-2'] }
+    try {
+      render(<OutlineTab />)
+      const fulfilled = await within(row('Scene 3')).findByTestId('outline-fulfilled')
+      expect(fulfilled).toHaveTextContent('Fulfilled by Scene 2')
+      expect(within(fulfilled).getByText('AI')).toHaveAttribute('title', 'Linked by the AI')
+      expect(within(row('Scene 2')).getByTestId('outline-fulfils')).toHaveTextContent(
+        'Fulfils plan Scene 3'
+      )
+      await userEvent.click(within(fulfilled).getByRole('button', { name: 'Unlink' }))
+      await waitFor(() =>
+        expect(calls).toContainEqual([
+          'planLinks:unlink',
+          { plan: { kind: 'scene', nodeId: 'sc-3' } }
+        ])
+      )
+    } finally {
+      delete stored['sc-3']
+    }
+  })
+
+  it('lists the AI’s suggestions on their rows with Confirm and Dismiss', async () => {
+    planView = {
+      suggestions: [
+        { plan: { kind: 'scene', nodeId: 'sc-5' }, sceneId: 'sc-6', reason: 'Same beat.' },
+        {
+          plan: { kind: 'beat', template: 'saveTheCat', beatId: 'finale' },
+          sceneId: 'sc-1',
+          reason: ''
+        }
+      ],
+      aiApplied: []
+    }
+    render(<OutlineTab />)
+    const planned = await within(row('Scene 5')).findByRole('group', { name: 'Suggested link' })
+    expect(planned).toHaveTextContent('Fulfilled by Scene 6?')
+    expect(planned).toHaveTextContent('Same beat.')
+    const beat = within(row('Scene 1')).getByRole('group', { name: 'Suggested link' })
+    expect(beat).toHaveTextContent('On the beat Finale?')
+    await userEvent.click(within(planned).getByRole('button', { name: 'Confirm' }))
+    await waitFor(() =>
+      expect(calls).toContainEqual(['planLinks:confirm', { key: 'scene:sc-5>sc-6' }])
+    )
+    await userEvent.click(within(beat).getByRole('button', { name: 'Dismiss' }))
+    await waitFor(() =>
+      expect(calls).toContainEqual(['planLinks:dismiss', { key: 'beat:saveTheCat:finale>sc-1' }])
+    )
+  })
 })
 
 describe('OutlineTab (F-11.1)', () => {
   it('lists the manuscript section in tree order with its depth, leaving out the other sections', () => {
     render(<OutlineTab />)
-    expect(rows().map((r) => r.textContent)).toEqual([
+    expect(rows().map((r) => within(r).getAllByRole('button')[0]?.textContent)).toEqual([
       'Arc 1',
       'Chapter 1',
       'Scene 1',

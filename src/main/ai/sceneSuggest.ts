@@ -9,7 +9,7 @@ import {
   SCENE_SUGGEST_CHAR_BUDGET,
   SCENE_SUGGEST_TEXT_MIN
 } from '@shared/sceneSuggest'
-import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
+import { STORY_BIBLE_PLANS_HEADING, STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
 import { getDocumentContent } from '../document/documentStore'
 import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { getSummary } from '../document/summaryStore'
@@ -22,7 +22,7 @@ import { notesText } from './context/scenePanel'
 import { buildStoryBible } from './context/storyBible'
 import { fitSceneToBudget } from './critique'
 import { assertFeatureAllowed } from './dial'
-import { buildNotesSuggestPrompt } from './prompts/notesSuggest.v1'
+import { buildNotesSuggestPromptV2 } from './prompts/notesSuggest.v2'
 import { buildSynopsisPrompt } from './prompts/synopsis.v1'
 import { AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
@@ -157,17 +157,22 @@ export async function runSuggestNotes(
   )
   const notes = current || null
   const brief = sceneBriefBlock(db, input.nodeId)
-  const bible = buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+  // F-5.23: the bible as the author's notes and plans, not ground truth about events.
+  const bible = buildStoryBible(db, {
+    nodeId: input.nodeId,
+    maxTokens: STORY_BIBLE_TOKEN_BUDGET,
+    heading: STORY_BIBLE_PLANS_HEADING
+  })
   const focus = input.instruction?.trim() ?? ''
   const instruction = focus === '' ? null : focus
   const context = { summary: scene.summary, brief, notes, bible, instruction }
   const { sceneText, truncated } = fitSceneToBudget(
     scene.text,
     inputBudget('notesSuggest'),
-    (cut) => buildNotesSuggestPrompt({ ...context, sceneText: cut }).messages,
+    (cut) => buildNotesSuggestPromptV2({ ...context, sceneText: cut }).messages,
     SCENE_LIMITS
   )
-  const prompt = buildNotesSuggestPrompt({ ...context, sceneText })
+  const prompt = buildNotesSuggestPromptV2({ ...context, sceneText })
   const result = await runAiRequest(deps, {
     feature: 'notesSuggest',
     tier: 'fast',

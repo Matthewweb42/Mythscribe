@@ -308,7 +308,7 @@ describe('continuityRefs (F-13.4)', () => {
       costUsd: 0,
       cached: false,
       model: 'gpt-fake',
-      promptVersion: 'continuity.v1',
+      promptVersion: 'continuity.v2',
       requested: true,
       fullText: text()
     }
@@ -608,7 +608,7 @@ describe('runContinuity, on demand (F-13.4)', () => {
       costUsd: priceFor('gpt-5.4', 700, 90).costUsd,
       cached: false,
       model: 'gpt-5.4',
-      promptVersion: 'continuity.v1',
+      promptVersion: 'continuity.v2',
       requested: true,
       fullText: [OPENING, AGE_LINE, CLOSING].join('\n')
     })
@@ -618,14 +618,14 @@ describe('runContinuity, on demand (F-13.4)', () => {
       sent().system.startsWith('You are the continuity feature inside a novel-writing app.')
     ).toBe(true)
     expect(sent().user).toBe(
-      'References:\n[1] Mara (character), sheet, Age: 34\n\n' +
+      'References:\n[1] Mara (character), sheet (notes and plans), Age: 34\n\n' +
         `Scene text:\n"""\n${OPENING}\n${AGE_LINE}\n${CLOSING}\n"""\n\nList the contradictions.`
     )
     expect(ledger).toHaveLength(1)
     expect(ledger[0]).toMatchObject({
       feature: 'continuity',
       tier: 'strong',
-      promptVersion: 'continuity.v1',
+      promptVersion: 'continuity.v2',
       cached: false
     })
     // Nothing is stored and nothing is in the manuscript until the handler stores the run.
@@ -768,7 +768,7 @@ describe('runBackgroundContinuity (F-13.4)', () => {
     })
     expect(complete.mock.calls[0]![0]).toMatchObject({ tier: 'fast', json: true, maxTokens: 800 })
     expect(sent().user).toBe(
-      'References:\n[1] Mara (character), sheet, Age: 34\n\n' +
+      'References:\n[1] Mara (character), sheet (notes and plans), Age: 34\n\n' +
         `Scene text:\n"""\n${AGE_LINE}\n"""\n\nList the contradictions.`
     )
     expect(ledger[0]).toMatchObject({ feature: 'continuity', tier: 'fast' })
@@ -789,7 +789,7 @@ describe('runBackgroundContinuity (F-13.4)', () => {
     answers([found()])
     expect(await background()).toMatchObject({ requested: true, references: 1 })
     expect(sent().user).toContain(
-      '[1] Mara (character), sheet, Age: 34 at this scene (born 1166, scene year 1200)'
+      '[1] Mara (character), sheet (notes and plans), Age: 34 at this scene (born 1166, scene year 1200)'
     )
   })
 
@@ -808,8 +808,24 @@ describe('runBackgroundContinuity (F-13.4)', () => {
       quote: 'She was thirty-four.'
     })
     expect(sent().user).toContain(
-      '[1] Mara (character), another scene, Age: thirty-four; passage: "She was thirty-four."'
+      '[1] Mara (character), an earlier scene, Age: thirty-four; passage: "She was thirty-four."'
     )
+  })
+
+  it('labels a fact read from a later scene as this scene’s future, and sends continuity.v2 (F-5.23)', async () => {
+    updateEntity(db, mara, { fields: { age: '' } })
+    const later = manuscriptDocuments(db)[2]?.id ?? ''
+    replaceSceneFacts(db, later, [
+      { entityId: mara, attribute: 'age', value: 'forty', quote: 'She was forty by then.' }
+    ])
+    logAge()
+    answers([found()])
+    const run = await background()
+    expect(run?.promptVersion).toBe('continuity.v2')
+    expect(sent().user).toContain(
+      '[1] Mara (character), a later scene, Age: forty; passage: "She was forty by then."'
+    )
+    expect(sent().system).toContain('Story time:')
   })
 
   it('does not ask again while the candidate paragraphs and references are what they were', async () => {
@@ -896,7 +912,7 @@ describe('storeContinuityRun and settleContinuityFinding (F-13.4)', () => {
     costUsd: 0.002,
     cached: false,
     model: 'gpt-fake',
-    promptVersion: 'continuity.v1',
+    promptVersion: 'continuity.v2',
     requested: true,
     fullText,
     ...over
@@ -922,7 +938,7 @@ describe('storeContinuityRun and settleContinuityFinding (F-13.4)', () => {
     expect(proposal).toMatchObject({
       feature: 'continuity',
       nodeId: scene,
-      promptVersion: 'continuity.v1',
+      promptVersion: 'continuity.v2',
       model: 'gpt-fake',
       promptTokens: 700,
       completionTokens: 90,

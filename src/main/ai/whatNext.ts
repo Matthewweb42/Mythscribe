@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { estimateTokens, inputBudget } from '@shared/ai'
 import { docToText } from '@shared/docText'
-import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
+import { STORY_BIBLE_PLANS_HEADING, STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
+import { STORY_MAP_SMALL_TOKEN_BUDGET } from '@shared/storyTime'
 import {
   WHAT_NEXT_CHAR_BUDGET,
   WHAT_NEXT_DIRECTIONS,
@@ -18,8 +19,9 @@ import type { TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { buildSceneSteer } from './context/sceneSteer'
 import { buildStoryBible } from './context/storyBible'
+import { buildStoryMap, storyTime } from './context/storyTime'
 import { assertFeatureAllowed } from './dial'
-import { buildWhatNextPromptV2 } from './prompts/whatNext.v2'
+import { buildWhatNextPromptV3 } from './prompts/whatNext.v3'
 import { AiFallbackError, type AiMessage, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -95,10 +97,18 @@ export async function runWhatNext(
   }
 
   const brief = sceneBriefBlock(db, input.nodeId)
-  const bible = buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+  // F-5.23: the bible as the author's notes and plans, and the story map with now at this scene.
+  const bible = buildStoryBible(db, {
+    nodeId: input.nodeId,
+    maxTokens: STORY_BIBLE_TOKEN_BUDGET,
+    heading: STORY_BIBLE_PLANS_HEADING
+  })
+  const map = buildStoryMap(db, storyTime(db, input.nodeId), {
+    maxTokens: STORY_MAP_SMALL_TOKEN_BUDGET
+  })
   const steer = buildSceneSteer(db, input.nodeId)
-  const build = (text: string): ReturnType<typeof buildWhatNextPromptV2> =>
-    buildWhatNextPromptV2({ text, brief, steer, bible })
+  const build = (text: string): ReturnType<typeof buildWhatNextPromptV3> =>
+    buildWhatNextPromptV3({ text, brief, steer, bible, map })
 
   const { text, truncated } = fitTailToBudget(
     fullText,
@@ -113,7 +123,7 @@ export async function runWhatNext(
     messages: prompt.messages,
     maxTokens: prompt.maxTokens,
     json: true,
-    contextHash: sha256(JSON.stringify({ text, brief, steer, bible })),
+    contextHash: sha256(JSON.stringify({ text, brief, steer, bible, map })),
     promptVersion: prompt.version,
     ...(input.requestId === undefined ? {} : { requestId: input.requestId })
   })
