@@ -121,11 +121,11 @@ describe('EntityCreateDialog (F-9.3)', () => {
       useLayoutStore.getState().toggle('sidebar')
     })
     expect(useLayoutStore.getState().layout.sidebar.open).toBe(false)
-    const form = dialog('New setting')
+    const form = dialog('New place')
     await user.type(within(form).getByRole('textbox', { name: 'Name' }), 'The Harbour{Enter}')
     expect(useLayoutStore.getState().layout.sidebar).toMatchObject({
       open: true,
-      tab: 'settings'
+      tab: 'setting'
     })
   })
 

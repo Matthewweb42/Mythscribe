@@ -172,10 +172,10 @@ describe('sortContextFiles (F-9.8)', () => {
     expect(request.tier).toBe('strong')
     expect(request.json).toBe(true)
     expect(request.maxTokens).toBe(6_000)
-    expect(request.messages[1]?.content).toContain('Characters: Mara Vell')
+    expect(request.messages[1]?.content).toContain('character: Mara Vell')
     expect(request.messages[1]?.content).toContain('Document "people.md":\nMara, 35')
     expect(ledger).toHaveLength(1)
-    expect(ledger[0]).toMatchObject({ feature: 'contextImport', promptVersion: 'contextImport.v1' })
+    expect(ledger[0]).toMatchObject({ feature: 'contextImport', promptVersion: 'contextImport.v2' })
     expect(progress).toEqual([
       { done: 1, total: 1, costUsd: priceFor('gpt-5.4', 900, 120).costUsd }
     ])
@@ -183,18 +183,72 @@ describe('sortContextFiles (F-9.8)', () => {
       fileIds: [id],
       chunks: 1,
       model: 'gpt-5.4',
-      promptVersion: 'contextImport.v1',
+      promptVersion: 'contextImport.v2',
       notes: { existingId: null, paragraphs: ['Theme: debts.'], include: true }
     })
     expect(review.proposalIds).toHaveLength(1)
     expect(statuses()).toEqual(['pending'])
-    expect(review.entities.map((e) => [e.name, e.existingId === null])).toEqual([
-      ['Mara Vell', false],
-      ['Tomas', true]
+    // F-9.11: a kind the sort does not know (and nobody proposed) is filed under World.
+    expect(review.entities.map((e) => [e.name, e.kind, e.existingId === null])).toEqual([
+      ['Mara Vell', 'character', false],
+      ['Tomas', 'character', true],
+      ['Nope', 'world', true]
     ])
     expect(review.entities[0]?.fields).toEqual([
       { field: 'age', upload: '35', existing: '34', include: true, choice: 'existing' }
     ])
+    expect(review.categories).toEqual([])
+  })
+
+  it('files things under library categories and proposes the categories the model invents (F-9.11)', async () => {
+    createEntity(db, { kind: 'world', name: 'The Weave', fields: {} })
+    const id = await add(
+      'lore.md',
+      'The Weave.\n\nThe Gull, a cutter.\n\nThe Heron.\n\nHouse Vell.'
+    )
+    answer({
+      entities: [
+        { kind: 'magic', name: 'The Weave', fields: { costs: 'a memory per knot' } },
+        { kind: 'ships', name: 'The Gull', fields: { Crew: 'twelve', 'home port': 'Kael' } },
+        { kind: 'Ships', name: 'The Heron', fields: { crew: 'thirty' } },
+        { kind: 'Factions & Organisations', name: 'House Vell' }
+      ],
+      categories: [
+        { kind: 'ships', name: 'Ships', noun: 'ship', fields: ['Crew', 'Home port'] },
+        { kind: 'guild', name: 'factions', fields: ['Seat'] }
+      ]
+    })
+    const review = await sortContextFiles(db, deps, {
+      folder: session.folder,
+      fileIds: [id],
+      requestId: 'r-2'
+    })
+    expect(review.categories).toEqual([
+      expect.objectContaining({
+        id: 'c-ships',
+        name: 'Ships',
+        noun: 'ship',
+        proposed: true,
+        origin: 'ai',
+        fields: [
+          { id: 'crew', label: 'Crew', multiline: true },
+          { id: 'homePort', label: 'Home port', multiline: true },
+          { id: 'notes', label: 'Notes', multiline: true }
+        ]
+      })
+    ])
+    const byName = new Map(review.entities.map((e) => [e.name, e]))
+    // The existing World sheet keeps its category; the magic facts land in its details.
+    expect(byName.get('The Weave')?.kind).toBe('world')
+    expect(byName.get('The Weave')?.existingId).not.toBeNull()
+    expect(byName.get('The Weave')?.details).toEqual(['Costs and limits: a memory per knot'])
+    expect(byName.get('The Gull')?.kind).toBe('c-ships')
+    expect(byName.get('The Gull')?.fields.map((f) => [f.field, f.upload])).toEqual([
+      ['crew', 'twelve'],
+      ['homePort', 'Kael']
+    ])
+    expect(byName.get('The Heron')?.kind).toBe('c-ships')
+    expect(byName.get('House Vell')?.kind).toBe('faction')
   })
 
   it('is refused with DISABLED while Use AI is off, before anything is sent', async () => {

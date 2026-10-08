@@ -1,31 +1,21 @@
 import { z } from 'zod'
 import { assetUrl } from './assets'
-import { TAG_NAME_MAX, toTagName, type TagCategory } from './tags'
+import { TAG_NAME_MAX, toTagName } from './tags'
 
 /**
  * Entity vocabulary shared by the database schema, the entity store, the IPC contract, and the
- * UI (F-9.1). One owner for the three kinds, the fields of their structured templates, the
- * stored limits, and the name normalization the store's uniqueness check uses.
+ * UI (F-9.1). One owner for the sheet's category id and field id shapes, the stored limits, and
+ * the name normalization the store's uniqueness check uses; the categories themselves and their
+ * templates are `categories.ts` (F-9.11).
  */
 
-/** The three kinds of the story bible; the sidebar gives each its own tab (F-9.2). */
-export const ENTITY_KINDS = ['character', 'setting', 'world'] as const
-export const EntityKind = z.enum(ENTITY_KINDS)
+/**
+ * The category a sheet belongs to (F-9.11): a library category id (`character`, `setting`,
+ * `world`, `magic`…, see `categories.ts`) or a project category's (`c-…`). Before F-9.11 these
+ * were the three fixed kinds of F-9.1, whose ids the library keeps.
+ */
+export const EntityKind = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/, 'Not a category id')
 export type EntityKind = z.infer<typeof EntityKind>
-
-/** The tab and section heading per kind. */
-export const ENTITY_KIND_LABEL: Record<EntityKind, string> = {
-  character: 'Characters',
-  setting: 'Settings',
-  world: 'World'
-}
-
-/** The singular noun for one entity of the kind, for messages and buttons ("New character"). */
-export const ENTITY_KIND_NOUN: Record<EntityKind, string> = {
-  character: 'character',
-  setting: 'setting',
-  world: 'world-building item'
-}
 
 /**
  * How an entity is written: the kind's structured template (a value per field) or a blank page
@@ -46,29 +36,11 @@ export const EntityOrigin = z.enum(ENTITY_ORIGINS)
 export type EntityOrigin = z.infer<typeof EntityOrigin>
 
 /**
- * Every field id of every structured template, in kind order. `name` is a column and not a
- * field (every entity has one, whatever its template), and so is `image`.
+ * A field id of a category's structured template (F-9.11: the project's own categories make
+ * their own, `fieldIdFromLabel`). `name` is a column and not a field (every entity has one,
+ * whatever its template), and so is `image`.
  */
-export const ENTITY_FIELD_IDS = [
-  'age',
-  'born',
-  'gender',
-  'appearance',
-  'personality',
-  'background',
-  'goals',
-  'relationships',
-  'type',
-  'description',
-  'atmosphere',
-  'features',
-  'associatedCharacters',
-  'category',
-  'rules',
-  'impact',
-  'notes'
-] as const
-export const EntityFieldId = z.enum(ENTITY_FIELD_IDS)
+export const EntityFieldId = z.string().regex(/^[a-z][a-zA-Z0-9]{0,39}$/, 'Not a field id')
 export type EntityFieldId = z.infer<typeof EntityFieldId>
 
 /** One field of a structured template: what it is stored under, its label, and its input shape. */
@@ -80,44 +52,7 @@ export interface EntityFieldDef {
 }
 
 /**
- * The structured template of each kind (F-9.1), in display and storage order. A field carries a
- * plain string; an empty one is not stored at all, so a template that grows later costs nothing
- * in the rows written before it.
- */
-export const ENTITY_FIELDS: Record<EntityKind, readonly EntityFieldDef[]> = {
-  character: [
-    { id: 'age', label: 'Age', multiline: false },
-    { id: 'born', label: 'Born (story year)', multiline: false },
-    { id: 'gender', label: 'Gender', multiline: false },
-    { id: 'appearance', label: 'Appearance', multiline: true },
-    { id: 'personality', label: 'Personality', multiline: true },
-    { id: 'background', label: 'Background', multiline: true },
-    { id: 'goals', label: 'Goals / motivations', multiline: true },
-    { id: 'relationships', label: 'Relationships', multiline: true },
-    { id: 'notes', label: 'Notes', multiline: true }
-  ],
-  setting: [
-    { id: 'type', label: 'Type', multiline: false },
-    { id: 'description', label: 'Description', multiline: true },
-    { id: 'atmosphere', label: 'Atmosphere', multiline: true },
-    { id: 'features', label: 'Features', multiline: true },
-    { id: 'associatedCharacters', label: 'Associated characters', multiline: true },
-    { id: 'notes', label: 'Notes', multiline: true }
-  ],
-  world: [
-    { id: 'category', label: 'Category', multiline: false },
-    { id: 'description', label: 'Description', multiline: true },
-    { id: 'rules', label: 'Rules', multiline: true },
-    { id: 'impact', label: 'Impact on story', multiline: true },
-    { id: 'notes', label: 'Notes', multiline: true }
-  ]
-}
-
-/** The kinds whose entity carries a portrait or a photograph (F-9.3 uploads it). */
-export const ENTITY_KINDS_WITH_IMAGE: readonly EntityKind[] = ['character', 'setting']
-
-/**
- * What the World kind's `category` field suggests (magic system, culture, technology…). Only
+ * What the World category's `category` field suggests (magic system, culture, technology…). Only
  * suggestions: the field is free text, so an author's own category is as good as these.
  */
 export const WORLD_CATEGORY_SUGGESTIONS: readonly string[] = [
@@ -142,20 +77,8 @@ export const ENTITY_BODY_MAX = 200_000
 /** The stored values of a structured template; a field with no text has no key. */
 export type EntityFields = Partial<Record<EntityFieldId, string>>
 
-/** The field ids of one kind, in template order. */
-export function fieldIdsFor(kind: EntityKind): readonly EntityFieldId[] {
-  return ENTITY_FIELDS[kind].map((field) => field.id)
-}
-
-/** Whether `id` is a field of `kind`'s template ("age" is a character's, never a setting's). */
-export function isFieldOf(kind: EntityKind, id: string): id is EntityFieldId {
-  return ENTITY_FIELDS[kind].some((field) => field.id === id)
-}
-
-/** Whether entities of this kind carry an image (F-9.3). */
-export function kindHasImage(kind: EntityKind): boolean {
-  return ENTITY_KINDS_WITH_IMAGE.includes(kind)
-}
+/** The wire schema of `EntityFields`; the channels that write cap the values themselves. */
+export const EntityFieldsSchema = z.record(EntityFieldId, z.string())
 
 /** The folder under the project's `assets/` that holds the entity images (F-9.3). */
 export const ENTITY_IMAGES_DIR = 'entities' as const
@@ -163,17 +86,6 @@ export const ENTITY_IMAGES_DIR = 'entities' as const
 /** The asset URL the renderer loads an entity's `image` file from (F-9.3). */
 export function entityImageUrl(fileName: string): string {
   return assetUrl(ENTITY_IMAGES_DIR, fileName)
-}
-
-/**
- * The tag category an entity of each kind is tagged under (F-9.4). The three entity kinds are
- * the first three tag categories by another name; a tag the author later recategorizes is left
- * alone, the link is by id.
- */
-export const ENTITY_TAG_CATEGORY: Record<EntityKind, TagCategory> = {
-  character: 'character',
-  setting: 'setting',
-  world: 'worldBuilding'
 }
 
 /**
@@ -198,12 +110,13 @@ export function toEntityNameKey(name: string): string {
 const StoredFields = z.record(z.string(), z.unknown())
 
 /**
- * The stored `entity.fields` column as the values of `kind`'s template. Lenient on purpose: a
- * null cell, invalid JSON, a key no template knows, a value that is not a string, and an empty
- * string all read as "that field has nothing", rather than as an error. A row therefore survives
- * a later change to the vocabulary instead of keeping the author out of their own story bible.
+ * The stored `entity.fields` column as values keyed by field id. Lenient on purpose: a null cell,
+ * invalid JSON, a key that is not a field id, a value that is not a string, and an empty string
+ * all read as "that field has nothing", rather than as an error. Every well-formed key is kept,
+ * whatever the sheet's category (F-9.11): a value outside the template is not shown, but a write
+ * never drops it, so nothing the author typed is lost when a category's template changes.
  */
-export function parseEntityFields(raw: string | null, kind: EntityKind): EntityFields {
+export function parseEntityFields(raw: string | null): EntityFields {
   if (raw === null) return {}
   let json: unknown
   try {
@@ -214,9 +127,10 @@ export function parseEntityFields(raw: string | null, kind: EntityKind): EntityF
   const parsed = StoredFields.safeParse(json)
   if (!parsed.success) return {}
   const fields: EntityFields = {}
-  for (const id of fieldIdsFor(kind)) {
-    const value = parsed.data[id]
-    if (typeof value === 'string' && value !== '') fields[id] = value
+  for (const [id, value] of Object.entries(parsed.data)) {
+    if (typeof value === 'string' && value !== '' && EntityFieldId.safeParse(id).success) {
+      fields[id] = value
+    }
   }
   return fields
 }

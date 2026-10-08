@@ -3,18 +3,17 @@ import { ImagePlus, Pin, Trash2, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   ENTITY_BODY_MAX,
-  ENTITY_FIELDS,
   ENTITY_FIELD_MAX,
-  ENTITY_KIND_NOUN,
   ENTITY_NAME_MAX,
   ENTITY_TEMPLATES,
   WORLD_CATEGORY_SUGGESTIONS,
   entityImageUrl,
-  kindHasImage,
   type EntityFields,
   type EntityTemplate
 } from '@shared/entities'
+import { categoryOf } from '@shared/categories'
 import type { Entity } from '@shared/ipc/contract'
+import { useCategoryStore } from './categoryStore'
 import { parseYear } from '@shared/timeline'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
@@ -54,6 +53,7 @@ const capitalize = (word: string): string => `${word[0]?.toUpperCase() ?? ''}${w
  */
 export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
   const entity = useEntityStore((s) => s.byId[id])
+  const categories = useCategoryStore((s) => s.categories)
   const draft = useEntityDraftStore((s) => (s.draft?.id === id ? s.draft : null))
   const status = useEntityDraftStore((s) => s.status)
   const edit = useEntityDraftStore((s) => s.edit)
@@ -77,6 +77,7 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
   }, [missing])
 
   if (!entity) return null
+  const category = categoryOf(entity.kind, categories)
 
   // Until the draft opens (the first paint, before the effect) the stored row is what is shown.
   const values = draft ?? {
@@ -136,7 +137,7 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
               className="w-full rounded-md border border-transparent bg-transparent px-1 py-0.5 text-2xl font-semibold hover:border-line focus:border-line focus:outline-none"
             />
             <p className="m-0 px-1 text-sm text-fg-muted">
-              {capitalize(ENTITY_KIND_NOUN[entity.kind])} · {ENTITY_TEMPLATE_LABEL[entity.template]}
+              {capitalize(category.noun)} · {ENTITY_TEMPLATE_LABEL[entity.template]}
               {entity.origin === 'ai' ? ' · Added by AI' : ''}
             </p>
           </div>
@@ -180,7 +181,7 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
           </button>
         </div>
 
-        {kindHasImage(entity.kind) ? (
+        {category.hasImage ? (
           <div className="flex items-start gap-3">
             {entity.image === null ? (
               <span
@@ -229,7 +230,7 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
 
         {entity.template === 'structured' ? (
           <div className="flex flex-col gap-3">
-            {ENTITY_FIELDS[entity.kind].map((field) => {
+            {category.fields.map((field) => {
               const controlId = `${uid}-${field.id}`
               const value = values.fields[field.id] ?? ''
               return (

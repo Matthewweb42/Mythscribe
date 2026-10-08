@@ -2,7 +2,8 @@ import { useEffect, useId, useState, type DragEvent, type KeyboardEvent } from '
 import { ChevronDown, ChevronUp, Pin, PinOff, X } from 'lucide-react'
 import { assetDisplayName } from '@shared/assets'
 import { docToText } from '@shared/docText'
-import { ENTITY_FIELDS, ENTITY_KIND_NOUN, entityImageUrl, kindHasImage } from '@shared/entities'
+import { entityImageUrl } from '@shared/entities'
+import { useCategory } from '@renderer/features/entities/categoryStore'
 import { referenceImageUrl, type ReferencePin } from '@shared/references'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
@@ -205,11 +206,12 @@ function EntityCard({
 }): React.JSX.Element | null {
   const entity = useEntityStore((s) => s.byId[id])
   const [expanded, setExpanded] = useState(false)
+  const category = useCategory(entity?.kind ?? '')
   if (!entity) return null
 
   const fields =
     entity.template === 'structured'
-      ? ENTITY_FIELDS[entity.kind].flatMap((field) => {
+      ? category.fields.flatMap((field) => {
           const value = (entity.fields[field.id] ?? '').trim()
           return value === '' ? [] : [{ id: field.id, label: field.label, value }]
         })
@@ -222,11 +224,11 @@ function EntityCard({
   return (
     <CardFrame
       title={entity.name}
-      typeLabel={capitalize(ENTITY_KIND_NOUN[entity.kind])}
+      typeLabel={capitalize(category.noun)}
       frame={frame}
       onPinToggle={() => (frame === null ? void useReferenceStore.getState().pin(pin) : unpin(pin))}
     >
-      {kindHasImage(entity.kind) && entity.image !== null ? (
+      {category.hasImage && entity.image !== null ? (
         <img
           alt=""
           src={entityImageUrl(entity.image)}

@@ -7,11 +7,14 @@ import {
   type ContextReviewEntity,
   type ContextReviewField
 } from '@shared/contextLibrary'
-import { ENTITY_FIELDS, ENTITY_KIND_NOUN, entityTagName } from '@shared/entities'
+import { categoryFieldLabel, categoryOf, type StoryCategory } from '@shared/categories'
+import { entityTagName } from '@shared/entities'
 import { itemAliases, REVIEW_CHAT_MESSAGE_MAX, REVIEW_NOTES_ID } from '@shared/reviewChat'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
+import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
+import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLibraryStore, type LibraryFlow } from './libraryStore'
 
 const BUTTON =
@@ -20,8 +23,20 @@ const PRIMARY =
   'rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60'
 const LINK = 'text-xs text-accent hover:underline disabled:opacity-60'
 
-const fieldLabel = (item: ContextReviewEntity, field: ContextReviewField): string =>
-  ENTITY_FIELDS[item.kind].find((def) => def.id === field.field)?.label ?? field.field
+/**
+ * The category of a review item (F-9.11): a proposed one of the review, the project's (as the
+ * author renamed it), or the library's.
+ */
+function itemCategory(review: ContextReview, kind: string): StoryCategory {
+  const proposed = review.categories.find((category) => category.id === kind)
+  return proposed ?? categoryOf(kind, useCategoryStore.getState().categories)
+}
+
+const fieldLabel = (
+  review: ContextReview,
+  item: ContextReviewEntity,
+  field: ContextReviewField
+): string => categoryFieldLabel(itemCategory(review, item.kind), field.field)
 
 /** The estimate as one line (CLAUDE.md rule 10: cost is visible before anything is sent). */
 function estimateLine(estimate: ContextEstimate): string {
@@ -219,8 +234,15 @@ function Review({ review, busy }: { review: ContextReview; busy: boolean }): Rea
         </button>
       </div>
       <ul className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-3" data-testid="library-review">
+        <ProposedCategories review={review} busy={busy} />
         {review.entities.map((item) => (
-          <EntityCard key={item.id} item={item} busy={busy} changed={changed.includes(item.id)} />
+          <EntityCard
+            key={item.id}
+            review={review}
+            item={item}
+            busy={busy}
+            changed={changed.includes(item.id)}
+          />
         ))}
         {review.notes.paragraphs.length > 0 ? (
           <NotesCard review={review} busy={busy} changed={changed.includes(REVIEW_NOTES_ID)} />
@@ -288,11 +310,93 @@ function ChangedBadge(): React.JSX.Element {
   )
 }
 
+/**
+ * The new categories the AI proposes (F-9.11), above the sheets: each with its fields and how
+ * many sheets it would hold. Apply creates it; Rename changes its name first; Decline moves its
+ * sheets to World (their fields World lacks go to their details).
+ */
+function ProposedCategories({
+  review,
+  busy
+}: {
+  review: ContextReview
+  busy: boolean
+}): React.JSX.Element | null {
+  const declineCategory = useLibraryStore((s) => s.declineCategory)
+  const renameCategory = useLibraryStore((s) => s.renameCategory)
+  const proposed = review.categories.filter((category) => category.proposed)
+  if (proposed.length === 0) return null
+  const rename = async (id: string, current: string): Promise<void> => {
+    const taken = useCategoryStore
+      .getState()
+      .categories.map((category) => category.name.toLowerCase())
+    const name = await dialogs.prompt({
+      title: 'Rename the proposed category',
+      initialValue: current,
+      confirmLabel: 'Rename',
+      validate: (value) =>
+        value.trim() === ''
+          ? 'A category needs a name.'
+          : taken.includes(value.trim().toLowerCase())
+            ? 'The story bible already has a category of that name.'
+            : null
+    })
+    if (name !== null) renameCategory(id, name)
+  }
+  return (
+    <>
+      {proposed.map((category) => {
+        const count = review.entities.filter((item) => item.kind === category.id).length
+        const fields = category.fields.filter((field) => field.id !== 'notes')
+        return (
+          <li
+            key={category.id}
+            className="mb-2 rounded-md border border-dashed border-accent p-3"
+            data-testid="library-proposed-category"
+          >
+            <p className="m-0 text-sm">
+              <span className="font-medium">Proposed new category: {category.name}</span>
+              <span className="text-xs text-fg-muted">
+                {' '}
+                · {formatCount(count, 'sheet')}
+                {fields.length > 0 ? ` · fields: ${fields.map((f) => f.label).join(', ')}` : ''}
+              </span>
+            </p>
+            <p className="mt-1 mb-0 text-xs text-fg-muted">
+              Apply creates it in the story bible. Decline files its sheets under World.
+            </p>
+            <div className="mt-2 flex gap-3">
+              <button
+                type="button"
+                className={LINK}
+                disabled={busy}
+                onClick={() => void rename(category.id, category.name)}
+              >
+                Rename…
+              </button>
+              <button
+                type="button"
+                className={LINK}
+                disabled={busy}
+                onClick={() => declineCategory(category.id)}
+              >
+                Decline
+              </button>
+            </div>
+          </li>
+        )
+      })}
+    </>
+  )
+}
+
 function EntityCard({
+  review,
   item,
   busy,
   changed
 }: {
+  review: ContextReview
   item: ContextReviewEntity
   busy: boolean
   changed: boolean
@@ -331,7 +435,7 @@ function EntityCard({
         />
         <span className="text-sm font-medium">{item.name}</span>
         <span className="text-xs text-fg-muted">
-          {ENTITY_KIND_NOUN[item.kind]} ·{' '}
+          {itemCategory(review, item.kind).noun} ·{' '}
           {item.existingId === null ? 'new sheet' : 'existing sheet'}
         </span>
         {changed ? <ChangedBadge /> : null}
@@ -380,7 +484,7 @@ function EntityCard({
                 onChange={(event) => setField(index, { include: event.target.checked })}
               />
               <span>
-                <span className="font-medium">{fieldLabel(item, field)}: </span>
+                <span className="font-medium">{fieldLabel(review, item, field)}: </span>
                 <span className="whitespace-pre-wrap">{field.upload}</span>
               </span>
             </label>
@@ -392,7 +496,7 @@ function EntityCard({
               disabled={off}
             >
               <legend className="px-1 text-xs font-medium text-warning">
-                {`${fieldLabel(item, field)}: conflict, pick one`}
+                {`${fieldLabel(review, item, field)}: conflict, pick one`}
               </legend>
               <div className="grid grid-cols-2 gap-2">
                 {(['existing', 'upload'] as const).map((choice) => (

@@ -26,8 +26,10 @@ describe('ProjectSession (F-1.7)', () => {
     ])
   })
 
-  it('refuses an unknown sidebar tab, a negative caret, and a bad folder view', () => {
-    expect(ProjectSession.safeParse({ sidebarTab: 'nope' }).success).toBe(false)
+  it('refuses a malformed section id, a negative caret, and a bad folder view', () => {
+    expect(ProjectSession.safeParse({ sidebarTab: 'Not An Id' }).success).toBe(false)
+    // F-9.11: any well-formed id reads (a category's section, or one from a later build).
+    expect(ProjectSession.safeParse({ sidebarTab: 'c-ships' }).success).toBe(true)
     expect(
       ProjectSession.safeParse({
         positions: [{ id: 'd', selection: { anchor: -1, head: 0 } }]

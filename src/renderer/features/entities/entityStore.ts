@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { ENTITY_KINDS, toEntityNameKey, type EntityKind } from '@shared/entities'
+import { compareCategoryIds } from '@shared/categories'
+import { toEntityNameKey, type EntityKind } from '@shared/entities'
 import type {
   EntityExchangeFormat,
   EntityImportAction,
@@ -25,8 +26,8 @@ interface EntityState {
   /** Every entity id in the order `entity:list` returns: kind, then name key, then id. */
   ids: string[]
   loaded: boolean
-  /** List or cards, per kind; cards until the author toggles. Session state, not persisted. */
-  view: Record<EntityKind, EntityView>
+  /** List or cards, per category; cards until the author toggles. Session state, not persisted. */
+  view: Readonly<Record<EntityKind, EntityView>>
   /** The entity the author picked in a tab, if any; F-9.3 opens it in the editor. */
   selectedId: string | null
   /** The kind the creation dialog is open for (F-9.3), or null while it is closed. */
@@ -102,7 +103,7 @@ interface EntityState {
 
 /** The `entity:list` order: kind order, then `toEntityNameKey`, then id (as main sorts). */
 const compareEntities = (a: Entity, b: Entity): number => {
-  const kind = ENTITY_KINDS.indexOf(a.kind) - ENTITY_KINDS.indexOf(b.kind)
+  const kind = compareCategoryIds(a.kind, b.kind)
   if (kind !== 0) return kind
   const name = toEntityNameKey(a.name).localeCompare(toEntityNameKey(b.name))
   return name !== 0 ? name : a.id.localeCompare(b.id)
@@ -115,10 +116,15 @@ export function orderedIds(byId: Record<string, Entity>): string[] {
     .map((entity) => entity.id)
 }
 
-const DEFAULT_VIEW: Record<EntityKind, EntityView> = {
-  character: 'cards',
-  setting: 'cards',
-  world: 'cards'
+/** No category has a view of its own yet: each reads as cards (`viewOf`). */
+const DEFAULT_VIEW: Readonly<Record<EntityKind, EntityView>> = {}
+
+/** A category's list/cards choice; cards until the author toggles. */
+export function viewOf(
+  view: Readonly<Record<EntityKind, EntityView>>,
+  kind: EntityKind
+): EntityView {
+  return view[kind] ?? 'cards'
 }
 
 /** Bumped by every load() and clear() so a response from a superseded load is dropped. */

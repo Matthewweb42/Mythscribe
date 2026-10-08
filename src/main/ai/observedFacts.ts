@@ -1,13 +1,14 @@
-import {
-  ENTITY_KINDS,
-  ENTITY_TAG_CATEGORY,
-  entityTagName,
-  toEntityNameKey,
-  type EntityKind
-} from '@shared/entities'
+import { builtinCategory } from '@shared/categories'
+import { entityTagName, toEntityNameKey } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
 import { nameWords } from '@shared/mentions'
-import { isObservedAttribute, isObservedDismissed, type ExtractedFact } from '@shared/observedFacts'
+import {
+  OBSERVED_KINDS,
+  ObservedKind,
+  isObservedAttribute,
+  isObservedDismissed,
+  type ExtractedFact
+} from '@shared/observedFacts'
 import { SUMMARY_KNOWN_NAMES_MAX } from '@shared/summary'
 import { createEntity, listEntities, type EntityWrite } from '../entity/entityStore'
 import { replaceSceneFacts, type SceneFactInput } from '../entity/observedFactStore'
@@ -24,7 +25,16 @@ import type { TreeDb } from '../tree/treeStore'
  */
 
 /** The story-bible names occurring in a scene, by kind, each as the bible (or the scene) spells it. */
-export type KnownNames = Record<EntityKind, string[]>
+export type KnownNames = Record<ObservedKind, string[]>
+
+/**
+ * The kind a sheet's name is listed under: its own for the three the job knows, World for every
+ * other library or project category (F-9.11), as a magic system was a World sheet before.
+ */
+const observedKindOf = (kind: string): ObservedKind => {
+  const parsed = ObservedKind.safeParse(kind)
+  return parsed.success ? parsed.data : 'world'
+}
 
 /**
  * `words` as they would stand in prose — separated by whitespace, on word boundaries of any
@@ -86,7 +96,7 @@ export function entitiesNamedIn(entities: readonly Entity[], sceneText: string):
 export function knownNames(db: TreeDb, sceneText: string): KnownNames {
   const known: KnownNames = { character: [], setting: [], world: [] }
   const keys = new Set<string>()
-  const add = (kind: EntityKind, name: string): void => {
+  const add = (kind: ObservedKind, name: string): void => {
     const key = `${kind}\u0000${toEntityNameKey(name)}`
     if (keys.has(key)) return
     keys.add(key)
@@ -94,12 +104,15 @@ export function knownNames(db: TreeDb, sceneText: string): KnownNames {
   }
 
   const entities = listEntities(db)
-  for (const entity of entitiesNamedIn(entities, sceneText)) add(entity.kind, entity.name)
+  for (const entity of entitiesNamedIn(entities, sceneText))
+    add(observedKindOf(entity.kind), entity.name)
 
   const linked = new Set(entities.map((entity) => entity.tagId))
   for (const tag of listTags(db)) {
     if (linked.has(tag.id)) continue
-    const kind = ENTITY_KINDS.find((candidate) => ENTITY_TAG_CATEGORY[candidate] === tag.category)
+    const kind = OBSERVED_KINDS.find(
+      (candidate) => builtinCategory(candidate)?.tagCategory === tag.category
+    )
     if (kind === undefined) continue
     const pattern = wordsPattern(nameWords(tag.name))
     if (pattern === null) continue
@@ -111,7 +124,7 @@ export function knownNames(db: TreeDb, sceneText: string): KnownNames {
   }
 
   let room = SUMMARY_KNOWN_NAMES_MAX
-  for (const kind of ENTITY_KINDS) {
+  for (const kind of OBSERVED_KINDS) {
     known[kind] = known[kind].slice(0, room)
     room -= known[kind].length
   }

@@ -300,9 +300,11 @@ const IMPORT_STRUCTURE_ANSWER = JSON.stringify({
 const BETA_READER_SENTINEL = 'You are the beta-reader feature inside a novel-writing app.'
 /**
  * F-9.8: the opening of the context-library prompt's system turn (`CONTEXT_IMPORT_RULES` in
- * `src/main/ai/prompts/contextImport.v1.ts`, repeated here for the same reason). The answer
- * depends on the document named in the user turn: people.md describes Mara twice (once by her
- * full name, with her nickname) and carries a theme; places.txt describes Tomas Reed and a place.
+ * `src/main/ai/prompts/contextImport.v1.ts`, kept by v2, repeated here for the same reason). The
+ * answer depends on the document named in the user turn: people.md describes Mara twice (once by
+ * her full name, with her nickname) and carries a theme; places.txt describes Tomas Reed, a
+ * place, a magic system (F-9.11: filed under Magic Systems), and a ship under a category the
+ * model proposes (Ships).
  */
 const CONTEXT_IMPORT_SENTINEL = 'You are the context-library feature inside a novel-writing app'
 function contextImportAnswer(messages: { role: string; content: string }[]): string {
@@ -335,8 +337,11 @@ function contextImportAnswer(messages: { role: string; content: string }[]): str
         kind: 'setting',
         name: 'The Landing',
         fields: { description: 'A jetty of black planks on the north bank.' }
-      }
+      },
+      { kind: 'magic', name: 'The Weave', fields: { costs: 'A memory for every knot.' } },
+      { kind: 'ships', name: 'The Gull', fields: { Crew: 'twelve' } }
     ],
+    categories: [{ kind: 'ships', name: 'Ships', noun: 'ship', fields: ['Crew'] }],
     notes: [],
     images: []
   })
@@ -1560,23 +1565,36 @@ test('create, close, reopen a project on disk', async () => {
     .poll(async () => (await getLayout()).sidebar, { timeout: 3000 })
     .toEqual({ open: true, size: sidebarFinal, tab: 'manuscript' })
 
-  // F-7.3: the sidebar is a tab bar; only the built tabs are listed (no placeholders: the entity
-  // tabs arrived with F-9.2), Manuscript is selected, and its panel holds the tree.
-  const sidebarTabs = page.getByRole('tablist', { name: 'Sidebar' })
-  await expect(sidebarTabs.getByRole('tab')).toHaveText([
-    'Manuscript',
-    'Characters',
-    'Settings',
-    'World',
-    'Outline',
-    'Timeline',
-    'Tags',
-    'Edits',
-    'Library'
+  // F-9.11: the sidebar's sections are one labelled picker, not a row of tabs. It shows the
+  // current section by name; opened, it lists the sections in use by name — Manuscript, the
+  // story-bible categories with sheets (Characters and Places always), then the tools (Tags
+  // always, Outline once the manuscript has a document) — with every empty category and tool
+  // behind "Show unused sections", and "New category…" last. Its panel holds the tree.
+  const sectionPicker = page.getByRole('button', { name: /^Section: / })
+  await expect(sectionPicker).toHaveAccessibleName('Section: Manuscript')
+  await sectionPicker.click()
+  const sectionList = page.getByRole('listbox', { name: 'Sections' })
+  await expect(sectionOptions()).toHaveText([
+    /^Manuscript\d*$/,
+    /^Characters\d*$/,
+    /^Places\d*$/,
+    /^Tags\d*$/,
+    /^Outline\d*$/,
+    /^Show unused sections \(\d+\)$/,
+    'New category…'
   ])
-  const manuscriptTab = sidebarTabs.getByRole('tab', { name: 'Manuscript' })
-  await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('tabpanel', { name: 'Manuscript' }).getByRole('tree')).toBeVisible()
+  await expect(sectionList.getByRole('option', { name: 'Magic Systems' })).toHaveCount(0)
+  await sectionList.getByRole('option', { name: /^Show unused sections/ }).click()
+  await expect(sectionList.getByRole('option', { name: 'Magic Systems' })).toBeVisible()
+  await expect(sectionList.getByRole('option', { name: 'Library' })).toBeVisible()
+  await sectionList.getByRole('option', { name: 'Hide unused sections' }).click()
+  await page.keyboard.press('Escape')
+  await expect(sectionList).toHaveCount(0)
+  await expect(sectionPicker).toBeFocused()
+  await expect(sectionPicker).toHaveAccessibleName('Section: Manuscript')
+  await expect(
+    page.getByRole('region', { name: 'Manuscript section', exact: true }).getByRole('tree')
+  ).toBeVisible()
 
   // F-2.2: "New scene" from the bar inserts after the selected scene and opens inline rename;
   // Enter commits the title and the row keeps its place right after Scene 1.
@@ -2417,8 +2435,8 @@ test('create, close, reopen a project on disk', async () => {
   // store loaded it on reopen) under All and under its category, creates one through the form
   // (the color pre-fills from the chosen category), opens its detail view, renames it inline,
   // and deletes it after a confirmation.
-  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
-  const tagsPanel = page.getByRole('tabpanel', { name: 'Tags' })
+  await showSection('Tags')
+  const tagsPanel = page.getByRole('region', { name: 'Tags section', exact: true })
   const categories = tagsPanel.getByRole('tablist', { name: 'Tag categories' })
   await expect(categories.getByRole('tab')).toHaveText([
     'All',
@@ -2575,8 +2593,8 @@ test('create, close, reopen a project on disk', async () => {
   // that appears as a card and is selected, the search hides and shows it, the list view drops
   // the card border, and Delete asks first and then removes it, so the tab says the kind is
   // empty again (the empty-kind message wins over the search's "no match").
-  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
-  const charactersPanel = page.getByRole('tabpanel', { name: 'Characters' })
+  await showSection('Characters')
+  const charactersPanel = page.getByRole('region', { name: 'Characters section', exact: true })
   await expect(charactersPanel.getByText('No characters yet.')).toBeVisible()
   const characterForm = charactersPanel.getByRole('form', { name: 'New character' })
   await characterForm.getByRole('textbox', { name: 'Character name' }).fill('Mara')
@@ -2734,11 +2752,11 @@ test('create, close, reopen a project on disk', async () => {
   await characterSearch.fill('')
   const tomasRow = characterRows.getByRole('button', { name: 'Tomas', exact: true })
   await expect(tomasRow).toHaveAttribute('aria-current', 'true')
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await scene1.click()
   await expect(entityEditor).toHaveCount(0)
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
-  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  await showSection('Characters')
   await expect(tomasRow).not.toHaveAttribute('aria-current', 'true')
 
   // F-9.6: the quick reference panel. Pinning Tomas from his page opens the panel with his card;
@@ -2788,10 +2806,10 @@ test('create, close, reopen a project on disk', async () => {
   await page.getByRole('button', { name: 'References', exact: true }).click()
   await expect(referencesPanel).toHaveCount(0)
   await expect.poll(async () => (await getLayout()).references.open).toBe(false)
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await scene1.click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
-  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  await showSection('Characters')
   await charactersPanel.getByRole('button', { name: 'List' }).click()
   await expect(tomasRow).toBeVisible()
   await expect(tomasRow).not.toHaveAttribute('aria-current', 'true')
@@ -3016,8 +3034,8 @@ test('create, close, reopen a project on disk', async () => {
     })
     .toEqual([])
   expect(await spellcheckerWords()).toEqual(expect.arrayContaining(['mara', 'vell', 'tomas']))
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
-  await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
+  await showSection('Manuscript')
+  await expect(sectionPicker).toHaveAccessibleName('Section: Manuscript')
   await expect(tree).toBeVisible()
 
   // F-4.4: the tags column (it replaced the tag bar above the editor on 2026-10-06) opens from
@@ -3058,12 +3076,12 @@ test('create, close, reopen a project on disk', async () => {
   // "Show in tree" hands the Manuscript tab the same filter: the select shows dark-forest, the
   // count line reads one, and only Scene 1 and its ancestors remain in the tree. Clear filter
   // brings the whole tree back. (The Tags tab remounts on its list view when it is next shown.)
-  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await showSection('Tags')
   await tagRows.getByRole('button', { name: /^dark-forest/ }).click()
   const taggedDocuments = tagsPanel.getByRole('list', { name: 'Documents with this tag' })
   await expect(taggedDocuments.getByRole('button')).toHaveText(['Scene 1Chapter 1'])
   await tagsPanel.getByRole('button', { name: 'Show in tree' }).click()
-  await expect(manuscriptTab).toHaveAttribute('aria-selected', 'true')
+  await expect(sectionPicker).toHaveAccessibleName('Section: Manuscript')
   const tagFilter = page.getByRole('combobox', { name: 'Filter by tag' })
   await expect(tagFilter.locator('option:checked')).toHaveText('dark-forest')
   await expect(page.getByText('1 document carries #dark-forest')).toBeVisible()
@@ -3075,18 +3093,18 @@ test('create, close, reopen a project on disk', async () => {
   await expect(tagFilter.locator('option:checked')).toHaveText('All documents')
   await expect(tree.getByRole('treeitem', { name: 'Arc 2', exact: true })).toBeVisible()
   await expect(tree.getByRole('treeitem', { name: 'Front Matter', exact: true })).toBeVisible()
-  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await showSection('Tags')
   await expect(tagRows.getByRole('button', { name: /^dark-forest/ })).toHaveText(
     'dark-forest 1 use'
   )
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await tagBar.getByRole('button', { name: 'Remove dark-forest' }).click()
   await expect(tagBar.getByRole('listitem')).toHaveCount(0)
-  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await showSection('Tags')
   await expect(tagRows.getByRole('button', { name: /^dark-forest/ })).toHaveText(
     'dark-forest 0 uses'
   )
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await tagsToggle.click()
   await expect(tagsToggle).toHaveAttribute('aria-pressed', 'false')
   await expect(tagBar).toHaveCount(0)
@@ -3222,8 +3240,8 @@ test('create, close, reopen a project on disk', async () => {
   // own metadata under the template's id. The Beats view lists Opening under Catalyst, marks the
   // empty beats, and counts one of fifteen filled. Back to the outline, no template, and the
   // Manuscript tab so the later steps find the tree as they left it.
-  await sidebarTabs.getByRole('tab', { name: 'Outline' }).click()
-  const outlinePanel = page.getByRole('tabpanel', { name: 'Outline' })
+  await showSection('Outline')
+  const outlinePanel = page.getByRole('region', { name: 'Outline section', exact: true })
   const structureSelect = outlinePanel.getByRole('combobox', { name: 'Structure' })
   await expect(structureSelect).toBeEnabled()
   await structureSelect.selectOption({ label: 'Save the Cat' })
@@ -3290,8 +3308,8 @@ test('create, close, reopen a project on disk', async () => {
   // the event in the tab rewrites Opening's text in the open pane and on disk; the Reading order
   // view lists Opening on the event. Deleting both events keeps Opening's text and drops the
   // link; clearing the field leaves the scene as it was, and the Manuscript tab comes back.
-  await sidebarTabs.getByRole('tab', { name: 'Timeline' }).click()
-  const timelinePanel = page.getByRole('tabpanel', { name: 'Timeline' })
+  await showSection('Timeline')
+  const timelinePanel = page.getByRole('region', { name: 'Timeline section', exact: true })
   await expect(timelinePanel.getByText('No events yet.')).toBeVisible()
   const addEventForm = timelinePanel.getByRole('form', { name: 'Add event' })
   const timelineEvents = timelinePanel.getByTestId('timeline-event')
@@ -3346,7 +3364,7 @@ test('create, close, reopen a project on disk', async () => {
   // F-11.2b: character ages. Rowan, born 1170, is 30 at the siege (year 1200): her page's "Age on
   // the timeline" says so. Named as Opening's POV, she is listed on the siege's card with her age.
   // The POV is cleared and Rowan deleted again, so the later steps see the characters they expect.
-  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  await showSection('Characters')
   await charactersPanel.getByRole('button', { name: 'New character…' }).click()
   const rowanDialog = page.getByRole('dialog', { name: 'New character' })
   await rowanDialog.getByRole('textbox', { name: 'Name' }).fill('Rowan')
@@ -3362,13 +3380,13 @@ test('create, close, reopen a project on disk', async () => {
   await showSceneDetails()
   const openingPov = metadata.getByRole('combobox', { name: 'POV' })
   await openingPov.fill('Rowan')
-  await sidebarTabs.getByRole('tab', { name: 'Timeline' }).click()
+  await showSection('Timeline')
   await expect(
     timelineEvents.filter({ hasText: 'The siege' }).getByTestId('event-ages')
   ).toHaveText('Ages: Rowan 30')
   // F-11.2c: as Opening's POV, Rowan appears in Opening; her page's Appearances log says so, and
   // in story order lists it under the siege. (The location conflict is covered by unit tests.)
-  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  await showSection('Characters')
   await characterRows.getByRole('button', { name: 'Rowan', exact: true }).click()
   await expect(entityName).toHaveValue('Rowan')
   const appearances = entityEditor.getByRole('region', { name: 'Appearances' })
@@ -3381,7 +3399,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('selected-title')).toHaveText('Opening')
   await openingPov.fill('')
   await expect.poll(async () => (await sceneMetaOf(openingRow.id)).pov, { timeout: 3000 }).toBe('')
-  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  await showSection('Characters')
   const rowanRow = characterRows.getByRole('button', { name: 'Rowan', exact: true })
   await rowanRow.hover()
   await characterRows.getByRole('button', { name: 'Delete Rowan' }).click()
@@ -3389,7 +3407,7 @@ test('create, close, reopen a project on disk', async () => {
   await deleteRowanDialog.getByRole('button', { name: 'Delete' }).click()
   await expect(deleteRowanDialog).toBeHidden()
   await expect(charactersPanel.getByText('No characters yet.')).toBeVisible()
-  await sidebarTabs.getByRole('tab', { name: 'Timeline' }).click()
+  await showSection('Timeline')
   for (const label of ['The siege', 'The fall']) {
     await timelinePanel.getByRole('button', { name: `Delete ${label}` }).click()
     const deleteEventDialog = page.getByRole('dialog', { name: `Delete "${label}"?` })
@@ -3405,7 +3423,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect
     .poll(async () => (await sceneMetaOf(openingRow.id)).timeline, { timeout: 3000 })
     .toBe('')
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
 
   // F-4.6: inline tags. Back in Scene 1, `#` at the end of the text opens a suggestion list at
   // the caret, filtered by what follows it (the template's "dark" tone tag and dark-forest);
@@ -3442,18 +3460,15 @@ test('create, close, reopen a project on disk', async () => {
   await expect(inlineList.getByRole('listitem')).toHaveText(['dark-forest ×1', 'stormfront ×1'])
   await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest', 'stormfront'])
   await expect(page.getByTestId('status-words')).toHaveText(`${SENTENCE_WORDS + 3} words`)
-  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await showSection('Tags')
   await categories.getByRole('tab', { name: 'Custom' }).click()
   await expect(tagRows.getByRole('button')).toHaveText(['stormfront 1 use'])
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await tokens.first().click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Open in Tag Manager' }).click()
-  await expect(sidebarTabs.getByRole('tab', { name: 'Tags' })).toHaveAttribute(
-    'aria-selected',
-    'true'
-  )
+  await expect(sectionPicker).toHaveAccessibleName('Section: Tags')
   await expect(tagsPanel.getByRole('textbox', { name: 'Tag name' })).toHaveValue('dark-forest')
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await tokens.last().click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Remove' }).click()
   await expect(tokens).toHaveText(['#dark-forest'])
@@ -3536,13 +3551,13 @@ test('create, close, reopen a project on disk', async () => {
   // Tag Manager's detail shows the document with a jump of its own, and Track mentions off
   // drops the rows at once (on again rescans). None of the template's tag names appear in
   // Scene 1 as plain words, so the list holds exactly the one row.
-  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await showSection('Tags')
   await categories.getByRole('tab', { name: 'Characters' }).click()
   const roseForm = tagsPanel.getByRole('form', { name: 'New tag' })
   await roseForm.getByRole('textbox', { name: 'Tag name' }).fill('Rose')
   await roseForm.getByRole('button', { name: 'Create tag' }).click()
   await expect(tagRows.getByRole('button', { name: /^rose/ })).toHaveText('rose 0 uses')
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await editor.click()
   await page.keyboard.press('End')
   await page.keyboard.type(' Rose waited.')
@@ -3555,7 +3570,7 @@ test('create, close, reopen a project on disk', async () => {
   // A click collapses the selection, so the detail view's jump is seen to select it again.
   await editor.click()
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('')
-  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await showSection('Tags')
   await categories.getByRole('tab', { name: 'Characters' }).click()
   await tagRows.getByRole('button', { name: /^rose/ }).click()
   await expect(tagsPanel.getByRole('textbox', { name: 'Tag name' })).toHaveValue('rose')
@@ -3573,7 +3588,7 @@ test('create, close, reopen a project on disk', async () => {
   await trackMentions.check()
   await expect(tagsPanel.getByText('Mentioned in 1 document')).toBeVisible({ timeout: 15_000 })
   await expect(mentionList.getByRole('listitem')).toHaveText(['rose ×1'])
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
 
   // F-4.12b: proposed tags. A capitalised name the manuscript keeps using mid-sentence that no
   // tag stands for is proposed in the bar of the document that carries it, with its count.
@@ -3590,10 +3605,10 @@ test('create, close, reopen a project on disk', async () => {
   await expect(mentionList.getByRole('listitem')).toHaveText(['rose ×1', 'tash ×3'], {
     timeout: 15_000
   })
-  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await showSection('Tags')
   await categories.getByRole('tab', { name: 'Characters' }).click()
   await expect(tagRows.getByRole('button', { name: /^tash/ })).toHaveText('tash 0 uses')
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await editor.click()
   await page.keyboard.press('Control+End')
   await page.keyboard.type(' But Bren saw Bren, then Bren.')
@@ -3610,14 +3625,14 @@ test('create, close, reopen a project on disk', async () => {
   // F-4.14: aliases and misspellings. An alias added on the tag's detail counts as a mention
   // of the tag in the prose; a close misspelling of the name is offered as a fix in the tags
   // column, and only the author's Fix changes the text.
-  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await showSection('Tags')
   await categories.getByRole('tab', { name: 'Characters' }).click()
   await tagRows.getByRole('button', { name: /^tash/ }).click()
   const aliasGroup = tagsPanel.getByRole('group', { name: 'Aliases' })
   await aliasGroup.getByRole('textbox', { name: 'Add alias' }).fill('The Smith')
   await aliasGroup.getByRole('textbox', { name: 'Add alias' }).press('Enter')
   await expect(aliasGroup.getByRole('listitem')).toHaveText(['The Smith'])
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await editor.click()
   await page.keyboard.press('Control+End')
   await page.keyboard.type(' The Smith nodded. Then Taash left.')
@@ -3719,12 +3734,12 @@ test('create, close, reopen a project on disk', async () => {
   // Exactly "Dismiss": a proposed tag's row (F-4.12b) carries a "Dismiss <name>" button too.
   await tagBar.getByRole('button', { name: 'Dismiss', exact: true }).click()
   await expect(suggestedList).toHaveCount(0)
-  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await showSection('Tags')
   await categories.getByRole('tab', { name: 'All' }).click()
   await expect(tagRows.getByRole('button', { name: /^protagonist/ })).toHaveText(
     'protagonist 1 use'
   )
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   const spent = await usageSummary()
   expect(spent.total).toMatchObject({ requests: 2, tokens: 824 })
   expect(spent.total.costUsd).toBeGreaterThan(0)
@@ -4850,8 +4865,7 @@ test('create, close, reopen a project on disk', async () => {
   const editPassBodies = (): (typeof openAiChatBodies)[number][] =>
     openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(EDIT_PASS_SENTINEL))
   const editPassRequestsBefore = editPassBodies().length
-  const editsTab = sidebarTabs.getByRole('tab', { name: 'Edits' })
-  await editsTab.click()
+  await showSection('Edits')
   await page.getByTestId('edit-pass-new').click()
   const workspace = page.getByTestId('edit-pass-workspace')
   await expect(workspace).toBeVisible()
@@ -4869,7 +4883,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(report.getByTestId('edit-report-diff')).toHaveCount(1)
   await expect(report.getByTestId('edit-report-cost')).toContainText('gpt-5.4-mini')
 
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await scene1.click()
   await expect(report).toHaveCount(0)
   await expect(editor.locator('.tracked-del')).toHaveText(EDIT_PASS_QUOTE)
@@ -4878,7 +4892,7 @@ test('create, close, reopen a project on disk', async () => {
     '1 tracked change from an edit pass'
   )
 
-  await editsTab.click()
+  await showSection('Edits')
   await page.getByTestId('edit-pass-new').click()
   await workspace.getByRole('radio', { name: 'Custom pass' }).check()
   await workspace.getByTestId('edit-pass-instruction').fill('Cut every doubled word.')
@@ -4900,7 +4914,7 @@ test('create, close, reopen a project on disk', async () => {
     )
     .toBe(true)
   await expect(page.getByTestId('edit-report-row')).toHaveCount(2)
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await scene1.click()
   await expect(editor.locator('.ai-origin').filter({ hasText: EDIT_PASS_REPLACEMENT })).toHaveCount(
     1
@@ -4991,7 +5005,7 @@ test('create, close, reopen a project on disk', async () => {
   expect((await listTags()).find((tag) => tag.name === 'kael')).toMatchObject({
     category: 'character'
   })
-  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  await showSection('Characters')
   const kaelRow = characterRows.getByRole('button', { name: /^Kael/ })
   await expect(kaelRow).toContainText('Added by AI')
   await kaelRow.click()
@@ -5031,7 +5045,7 @@ test('create, close, reopen a project on disk', async () => {
   // Summary disclosure is closed again and is reopened here.
   await entityEditor.getByRole('button', { name: 'Close Kael' }).click()
   await expect(entityEditor).toHaveCount(0)
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
   await showSceneDetails()
   await metadata.getByRole('button', { name: 'Summary' }).click()
@@ -5095,13 +5109,13 @@ test('create, close, reopen a project on disk', async () => {
       .filter((entity) => entity.kind === 'character')
       .map((entity) => entity.name)
   ).toEqual(['Kael', 'Mara'])
-  await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
+  await showSection('Characters')
   await kaelRow.click()
   await expect(observedFacts.getByRole('button', { name: 'Show hidden (1)' })).toBeVisible()
   await expect(observedFacts.getByRole('list', { name: 'Observed facts' })).toHaveCount(0)
   await entityEditor.getByRole('button', { name: 'Close Kael' }).click()
   await expect(entityEditor).toHaveCount(0)
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
 
   // F-9.7: in this scene. Scene 1 names Kael and Mara, so the References panel opens with a card
@@ -5344,8 +5358,8 @@ test('create, close, reopen a project on disk', async () => {
   await expect.poll(async () => (await aiSettings()).features.planLinks).toBe(true)
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
-  await sidebarTabs.getByRole('tab', { name: 'Outline' }).click()
-  const planPanel = page.getByRole('tabpanel', { name: 'Outline' })
+  await showSection('Outline')
+  const planPanel = page.getByRole('region', { name: 'Outline section', exact: true })
   const outlineRows = planPanel.getByTestId('outline-row')
   await expect(outlineRows.filter({ hasText: 'Scene 1' }).first()).toHaveAttribute(
     'data-progress',
@@ -5370,7 +5384,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(planPanel.getByTestId('outline-fulfils')).toHaveCount(1)
   await fulfilledLine.getByRole('button', { name: 'Unlink' }).click()
   await expect(fulfilledLine).toHaveCount(0)
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await showSection('Manuscript')
   await page.getByRole('button', { name: 'Settings' }).click()
   await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   await planLinksToggle.uncheck()
@@ -6051,10 +6065,10 @@ test('create, close, reopen a project on disk', async () => {
   )
   fs.writeFileSync(
     placesFile,
-    'Tomas Reed is twenty-nine and owes the mill money.\n\nThe Landing is a jetty of black planks on the north bank.\n'
+    'Tomas Reed is twenty-nine and owes the mill money.\n\nThe Landing is a jetty of black planks on the north bank.\n\nThe Weave costs a memory for every knot.\n\nThe Gull, a cutter, has a crew of twelve.\n'
   )
-  await sidebarTabs.getByRole('tab', { name: 'Library' }).click()
-  const libraryPanel = page.getByRole('tabpanel', { name: 'Library' })
+  await showSection('Library')
+  const libraryPanel = page.getByRole('region', { name: 'Library section', exact: true })
   await expect(libraryPanel).toContainText('No files yet')
   await stubOpenDialogFiles([peopleFile, placesFile])
   const contextBodies = (): string[] =>
@@ -6069,10 +6083,23 @@ test('create, close, reopen a project on disk', async () => {
   const libraryReview = libraryDialog.getByTestId('library-review')
   await expect(libraryReview).toBeVisible({ timeout: 15_000 })
   expect(contextBodies()).toHaveLength(2)
-  expect(contextBodies()[0]).toMatch(/^Existing sheets:\nCharacters: .*\bMara\b/)
+  expect(contextBodies()[0]).toMatch(/^Existing sheets by kind:\ncharacter: .*\bMara\b/)
   await expect(libraryDialog.getByTestId('library-review-summary')).toHaveText(
-    '2 new sheets · 1 sheet to update · 1 conflict · 1 note for Project notes'
+    '4 new sheets · 1 sheet to update · 1 conflict · 1 note for Project notes'
   )
+  // F-9.11: the model filed The Weave under Magic Systems and proposed a Ships category for The
+  // Gull; the review shows the proposal above the sheets with Rename and Decline, and the sheet
+  // as a ship. Rename changes the name before anything is created.
+  const proposedCategory = libraryReview.getByTestId('library-proposed-category')
+  await expect(proposedCategory).toContainText('Proposed new category: Ships')
+  await expect(proposedCategory).toContainText('1 sheet · fields: Crew')
+  await expect(libraryReview.locator('[data-item-name="The Weave"]')).toContainText('magic system')
+  await expect(libraryReview.locator('[data-item-name="The Gull"]')).toContainText('ship ·')
+  await proposedCategory.getByRole('button', { name: 'Rename…' }).click()
+  const renameProposal = page.getByRole('dialog', { name: 'Rename the proposed category' })
+  await renameProposal.getByRole('textbox').fill('Vessels')
+  await renameProposal.getByRole('button', { name: 'Rename' }).click()
+  await expect(proposedCategory).toContainText('Proposed new category: Vessels')
   const maraItem = libraryReview.locator('[data-item-name="Mara"]')
   await expect(maraItem).toContainText('existing sheet')
   // The two descriptions were merged by the nickname; Split would separate them again.
@@ -6129,6 +6156,11 @@ test('create, close, reopen a project on disk', async () => {
   )
   expect(librarySheet('Tomas Reed')).toMatchObject({ kind: 'character', fields: { age: '29' } })
   expect(librarySheet('The Landing')).toMatchObject({ kind: 'setting' })
+  expect(librarySheet('The Weave')).toMatchObject({
+    kind: 'magic',
+    fields: { costs: 'A memory for every knot.' }
+  })
+  expect(librarySheet('The Gull')).toMatchObject({ kind: 'c-vessels', fields: { crew: 'twelve' } })
   expect(librarySheet('Project notes')).toMatchObject({
     kind: 'world',
     template: 'blank',
@@ -6141,7 +6173,32 @@ test('create, close, reopen a project on disk', async () => {
   ).toBe(2)
   expect((await usageSummary()).byFeature.find((f) => f.feature === 'reviewChat')?.requests).toBe(1)
   await dismissToasts()
-  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  // F-9.11: the sheets made Magic Systems and the accepted Vessels category appear in the picker
+  // (an empty category stays hidden), each with its count; Library shows now that it has files.
+  await sectionPicker.click()
+  await expect(sectionOptions()).toHaveText([
+    /^Manuscript\d+$/,
+    /^Characters\d+$/,
+    /^Places\d+$/,
+    /^World\d+$/,
+    'Magic Systems1',
+    'Vessels1',
+    /^Tags\d+$/,
+    /^Outline\d+$/,
+    /^Edits\d+$/,
+    'Library2',
+    /^Show unused sections \(\d+\)$/,
+    'New category…'
+  ])
+  await expect(sectionList.getByRole('option', { name: 'Religions' })).toHaveCount(0)
+  await sectionList.getByRole('option', { name: 'Magic Systems' }).click()
+  await expect(sectionPicker).toHaveAccessibleName('Section: Magic Systems')
+  await expect(
+    page.getByRole('region', { name: 'Magic Systems section', exact: true }).getByRole('button', {
+      name: /^The Weave/
+    })
+  ).toBeVisible()
+  await showSection('Manuscript')
 
   // Back to Off and no key, as before this step.
   await page.getByRole('button', { name: 'Settings' }).click()
@@ -6412,7 +6469,7 @@ test('create, close, reopen a project on disk', async () => {
   // Layout 3c: the panel menu is the keyboard alternative to dragging a grip. Move right puts
   // the sidebar's column right of the editor; the arrangement is written to app state and comes
   // back after the relaunch below, where View › Reset layout puts it back.
-  const sidebarTabsList = page.getByRole('tablist', { name: 'Sidebar' })
+  const sidebarTabsList = page.getByRole('button', { name: /^Section: / })
   const editorColumn = page.locator('main > section')
   const leftOf = async (a: Locator, b: Locator): Promise<boolean> => {
     const [boxA, boxB] = [await a.boundingBox(), await b.boundingBox()]
@@ -6434,7 +6491,7 @@ test('create, close, reopen a project on disk', async () => {
   // below the same scene is open with the caret there (a typed letter lands at that spot), the
   // folder is still folded, and the Outline tab is showing.
   const resumeEditor = page.getByRole('textbox', { name: 'Document' })
-  const resumeTabs = page.getByRole('tablist', { name: 'Sidebar' })
+  const resumeTabs = page.getByRole('button', { name: /^Section: / })
   const resumeTree = page.getByRole('tree', { name: 'Document tree' })
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1 (split)')
   const resumeText = (await documentText(draftScene)) ?? ''
@@ -6464,11 +6521,8 @@ test('create, close, reopen a project on disk', async () => {
   expect(foldName).not.toBe('')
   await foldButton.click()
   await expect(resumeTree.getByRole('button', { name: `Expand ${foldName}` })).toBeVisible()
-  await resumeTabs.getByRole('tab', { name: 'Outline' }).click()
-  await expect(resumeTabs.getByRole('tab', { name: 'Outline' })).toHaveAttribute(
-    'aria-selected',
-    'true'
-  )
+  await showSection('Outline')
+  await expect(resumeTabs).toHaveAccessibleName('Section: Outline')
 
   // F-7.9: the window closes somewhere else at another size, with the project still open; the
   // next launch puts the window back there and opens the project again.
@@ -6496,7 +6550,7 @@ test('create, close, reopen a project on disk', async () => {
   // F-1.7: the same scene, focused at the same caret; the Outline tab; the folder still folded.
   // (The relaunch made a new page, so the locators are taken again.)
   const resumedEditor = page.getByRole('textbox', { name: 'Document' })
-  const resumedTabs = page.getByRole('tablist', { name: 'Sidebar' })
+  const resumedTabs = page.getByRole('button', { name: /^Section: / })
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1 (split)')
   await expect(resumedEditor).toBeFocused()
   await page.keyboard.type('Z')
@@ -6505,12 +6559,11 @@ test('create, close, reopen a project on disk', async () => {
     .toBe(`${resumeText.slice(0, 3)}Z${resumeText.slice(3)}`)
   await page.keyboard.press('Backspace')
   await expect.poll(() => documentText(draftScene)).toBe(resumeText)
-  await expect(resumedTabs.getByRole('tab', { name: 'Outline' })).toHaveAttribute(
-    'aria-selected',
-    'true'
-  )
-  await resumedTabs.getByRole('tab', { name: 'Manuscript' }).click()
-  const resumedTree = page.getByRole('tabpanel', { name: 'Manuscript' }).getByRole('tree')
+  await expect(resumedTabs).toHaveAccessibleName('Section: Outline')
+  await showSection('Manuscript')
+  const resumedTree = page
+    .getByRole('region', { name: 'Manuscript section', exact: true })
+    .getByRole('tree')
   await expect(resumedTree).toBeVisible()
   await expect(resumedTree.getByRole('button', { name: `Expand ${foldName}` })).toBeVisible()
   const relaunched = await page.evaluate(
@@ -6524,7 +6577,7 @@ test('create, close, reopen a project on disk', async () => {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getNormalBounds())
   ).toEqual(left)
   // Layout 3c: the sidebar came back right of the editor; View › Reset layout returns it.
-  const relaunchedTabs = page.getByRole('tablist', { name: 'Sidebar' })
+  const relaunchedTabs = page.getByRole('button', { name: /^Section: / })
   const relaunchedEditor = page.locator('main > section')
   const boxOf = async (locator: Locator): Promise<number> => {
     const box = await locator.boundingBox()
@@ -6668,6 +6721,27 @@ test('create, close, reopen a project on disk', async () => {
  * its own between the count and the click, so the list is counted again before every click and
  * a click on a toast that just left is not an error.
  */
+/**
+ * F-9.11: shows a sidebar section through the section picker — the used sections are listed,
+ * the unused ones behind "Show unused sections", which is opened only when the section is not
+ * already listed.
+ */
+async function showSection(name: string): Promise<void> {
+  await page.getByRole('button', { name: /^Section: / }).click()
+  const list = page.getByRole('listbox', { name: 'Sections' })
+  const option = list.getByRole('option', { name, exact: true })
+  if ((await option.count()) === 0) {
+    await list.getByRole('option', { name: /^Show unused sections/ }).click()
+  }
+  await option.click()
+  await expect(list).toHaveCount(0)
+}
+
+/** The picker's options as their visible text (name and count). */
+function sectionOptions(): Locator {
+  return page.getByRole('listbox', { name: 'Sections' }).getByRole('option')
+}
+
 async function dismissToasts(): Promise<void> {
   const buttons = page.getByRole('button', { name: 'Dismiss notification' })
   while ((await buttons.count()) > 0) {

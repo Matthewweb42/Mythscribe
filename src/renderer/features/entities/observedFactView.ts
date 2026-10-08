@@ -1,6 +1,6 @@
+import { builtinCategory } from '@shared/categories'
 import {
   ENTITY_BODY_MAX,
-  ENTITY_FIELDS,
   ENTITY_FIELD_MAX,
   type EntityFieldId,
   type EntityFields
@@ -36,7 +36,9 @@ export function sheetTarget(
   if (entity.template === 'blank') return { type: 'body' }
   const field = observedAttributeField(entity.kind, attribute)
   if (field === null) return null
-  const multiline = ENTITY_FIELDS[entity.kind].find((f) => f.id === field)?.multiline ?? true
+  // Facts are logged only about the F-9.1 kinds, which are library categories (F-9.11).
+  const multiline =
+    builtinCategory(entity.kind)?.fields.find((f) => f.id === field)?.multiline ?? true
   return { type: 'field', field, multiline }
 }
 

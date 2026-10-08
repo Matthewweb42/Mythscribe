@@ -8,6 +8,7 @@ import {
   type ContextRecord,
   type ContextReview
 } from '@shared/contextLibrary'
+import { categoryFromInput } from '@shared/categories'
 import { ENTITY_IMAGES_DIR } from '@shared/entities'
 import { createEntity, getEntity, listEntities } from '../entity/entityStore'
 import { assetDir } from '../project/imageAssets'
@@ -37,6 +38,7 @@ function reviewOf(records: ContextRecord[], notes: string[] = [], images = false
   const plan = planContextReview({
     records,
     existing: listEntities(db),
+    categories: [],
     images: images ? [{ id: imageId, name: 'mara-portrait.png' }] : [],
     hints: [],
     notes
@@ -45,6 +47,7 @@ function reviewOf(records: ContextRecord[], notes: string[] = [], images = false
     fileIds: images ? [fileId, imageId] : [fileId],
     entities: plan.entities,
     notes: plan.notes,
+    categories: [],
     proposalIds: [],
     chunks: 1,
     usage: { inputTokens: 0, outputTokens: 0 },
@@ -186,5 +189,53 @@ describe('applyContextReview (F-9.8)', () => {
     const images = assetDir(session.folder, ENTITY_IMAGES_DIR)
     expect(fs.existsSync(images) ? fs.readdirSync(images) : []).toEqual([])
     expect(listContextFiles(db).find((f) => f.id === fileId)?.state).toBe('new')
+  })
+
+  it('creates an accepted proposed category and files its sheets there (F-9.11)', async () => {
+    const ships = {
+      ...categoryFromInput('c-ships', { name: 'Vessels', fields: ['Crew'] }, 'ai'),
+      proposed: true
+    }
+    const plan = planContextReview({
+      records: [record({ name: 'The Gull', kind: 'c-ships', fields: { crew: '12' } })],
+      existing: [],
+      categories: [ships],
+      images: [],
+      hints: [],
+      notes: []
+    })
+    const review: ContextReview = {
+      ...reviewOf([]),
+      entities: plan.entities,
+      categories: plan.categories
+    }
+    const result = await applyContextReview(db, session.folder, review)
+    const vessels = result.categories.find((c) => c.name === 'Vessels')
+    expect(vessels).toMatchObject({ id: 'c-vessels', origin: 'ai', builtIn: false })
+    expect(listEntities(db)).toEqual([
+      expect.objectContaining({ name: 'The Gull', kind: 'c-vessels', fields: { crew: '12' } })
+    ])
+  })
+
+  it('creates no category when none of its sheets is included', async () => {
+    const ships = {
+      ...categoryFromInput('c-ships', { name: 'Ships', fields: [] }, 'ai'),
+      proposed: true
+    }
+    const plan = planContextReview({
+      records: [record({ name: 'The Gull', kind: 'c-ships' })],
+      existing: [],
+      categories: [ships],
+      images: [],
+      hints: [],
+      notes: []
+    })
+    const review: ContextReview = {
+      ...reviewOf([]),
+      entities: plan.entities.map((item) => ({ ...item, include: false })),
+      categories: plan.categories
+    }
+    const result = await applyContextReview(db, session.folder, review)
+    expect(result.categories.some((c) => c.id.startsWith('c-'))).toBe(false)
   })
 })

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { categoryFromInput, categoryOf } from './categories'
 import { priceFor } from './ai'
 import {
   canSplit,
   changedParagraphs,
+  declineReviewCategory,
+  renameReviewCategory,
   chunkParagraphs,
   CONTEXT_CHUNK_OVERHEAD_TOKENS,
   CONTEXT_OUT_TOKENS_PER_CHUNK,
@@ -51,12 +54,21 @@ const plan = (
   existing: ExistingSheet[] = [],
   extra: Partial<Parameters<typeof planContextReview>[0]> = {}
 ): ReturnType<typeof planContextReview> =>
-  planContextReview({ records, existing, images: [], hints: [], notes: [], ...extra })
+  planContextReview({
+    records,
+    existing,
+    categories: [],
+    images: [],
+    hints: [],
+    notes: [],
+    ...extra
+  })
 
 const reviewOf = (entities: ReturnType<typeof planContextReview>): ContextReview => ({
   fileIds: ['f1'],
   entities: entities.entities,
   notes: entities.notes,
+  categories: [],
   proposalIds: [],
   chunks: 1,
   usage: { inputTokens: 0, outputTokens: 0 },
@@ -130,9 +142,9 @@ describe('paragraphs, chunks, and the estimate', () => {
 
 describe('recordFields', () => {
   it('keeps only the kind fillable fields, trimmed and non-empty, numbers as text', () => {
-    expect(contextFieldsFor('character')).not.toContain('notes')
+    expect(contextFieldsFor(categoryOf('character'))).not.toContain('notes')
     expect(
-      recordFields('character', {
+      recordFields(categoryOf('character'), {
         age: 34,
         appearance: ' Grey eyes ',
         notes: 'x',
@@ -332,5 +344,76 @@ describe('what Apply writes', () => {
         entities: review.entities.map((e) => ({ ...e, include: false }))
       })
     ).toBe(false)
+  })
+})
+
+describe('categories in the review (F-9.11)', () => {
+  const ships = {
+    ...categoryFromInput('c-ships', { name: 'Ships', fields: ['Crew'] }, 'ai'),
+    proposed: true
+  }
+
+  it('fills a same-named sheet of another category where it is, its fields moved to details', () => {
+    const weave = sheet({ id: 's-weave', kind: 'world', name: 'The Weave', tagId: 't9' })
+    const result = plan(
+      [
+        record({
+          kind: 'magic',
+          name: 'The Weave',
+          fields: { costs: 'A memory', description: 'Threads' }
+        })
+      ],
+      [weave]
+    )
+    expect(result.entities).toHaveLength(1)
+    expect(result.entities[0]).toMatchObject({ kind: 'world', existingId: 's-weave' })
+    expect(result.entities[0]?.fields.map((f) => f.field)).toEqual(['description'])
+    expect(result.entities[0]?.details).toEqual(['Costs and limits: A memory'])
+  })
+
+  it('reads a proposed category’s fields and drops a proposal no item ended up in', () => {
+    const unused = { ...ships, id: 'c-guilds', name: 'Guilds' }
+    const result = plan(
+      [record({ kind: 'c-ships', name: 'The Gull', fields: { crew: '12' } })],
+      [],
+      {
+        categories: [ships, unused]
+      }
+    )
+    expect(result.entities[0]?.fields).toEqual([
+      { field: 'crew', upload: '12', existing: null, include: true, choice: 'upload' }
+    ])
+    expect(result.categories.map((c) => c.id)).toEqual(['c-ships'])
+  })
+
+  it('declines a proposal: its items become World sheets, filling a same-named one', () => {
+    const tides = sheet({ id: 's-tides', kind: 'world', name: 'The Tides', tagId: 't2' })
+    const planned = plan(
+      [
+        record({ kind: 'c-ships', name: 'The Gull', fields: { crew: '12' } }),
+        record({ kind: 'c-ships', name: 'The Tides' })
+      ],
+      [],
+      { categories: [ships] }
+    )
+    const review = { ...reviewOf(planned), categories: planned.categories }
+    const declined = declineReviewCategory(review, 'c-ships', [tides])
+    expect(declined.categories).toEqual([])
+    const gull = declined.entities.find((e) => e.name === 'The Gull')
+    expect(gull).toMatchObject({ kind: 'world', existingId: null })
+    expect(gull?.details).toEqual(['Crew: 12'])
+    // "The Tides" said nothing new about the existing World sheet, so it leaves the review.
+    expect(declined.entities.map((e) => e.name)).toEqual(['The Gull'])
+    expect(declineReviewCategory(review, 'world', [])).toBe(review)
+  })
+
+  it('renames a proposal before it is created, and ignores an empty name', () => {
+    const review = { ...reviewOf(plan([])), categories: [ships] }
+    expect(renameReviewCategory(review, 'c-ships', ' Vessels ').categories[0]?.name).toBe('Vessels')
+    expect(renameReviewCategory(review, 'c-ships', '  ')).toBe(review)
+  })
+
+  it('takes a proposed category’s field by its label as well as its id', () => {
+    expect(recordFields(ships, { Crew: 'twelve', other: 'x' })).toEqual({ crew: 'twelve' })
   })
 })

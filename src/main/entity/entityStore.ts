@@ -4,13 +4,14 @@ import { and, eq, inArray, ne } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import { normalizeAliases, parseAliases } from '@shared/aliases'
 import {
-  ENTITY_KIND_NOUN,
-  ENTITY_KINDS,
-  ENTITY_TAG_CATEGORY,
+  categoryFieldIds,
+  categoryOf,
+  compareCategoryIds,
+  isCategoryField,
+  type StoryCategory
+} from '@shared/categories'
+import {
   entityTagName,
-  fieldIdsFor,
-  isFieldOf,
-  kindHasImage,
   parseEntityFields,
   toEntityNameKey,
   type EntityFields,
@@ -31,6 +32,7 @@ import {
   getTagWithUsage,
   updateTag
 } from '../tag/tagStore'
+import { listCategories, requireCategory } from './categoryStore'
 import { hasFacts } from './observedFactStore'
 
 /** Accepts both the connection's orm and a transaction handle (both extend this base). */
@@ -46,7 +48,7 @@ function rowToEntity(row: EntityRow, tagAliases: readonly string[] = []): Entity
     kind: row.kind,
     name: row.name,
     template: row.template,
-    fields: parseEntityFields(row.fields, row.kind),
+    fields: parseEntityFields(row.fields),
     body: row.body,
     image: row.image,
     tagId: row.tagId,
@@ -81,13 +83,14 @@ function toEntity(db: EntityDb, row: EntityRow): Entity {
 }
 
 /**
- * The story bible's order (F-9.1): characters, then settings, then world, each by name key so
+ * The story bible's order (F-9.1): by category (F-9.11: the library's order, then the project's
+ * own categories), each by name key so
  * "ada" and "Ada" sort together whatever their spelling; the id breaks a true tie. SQLite's
  * `lower()` is ASCII-only and the key collapses whitespace, so the comparison is made here and
  * not in the query.
  */
 function compareEntities(a: Entity, b: Entity): number {
-  const kind = ENTITY_KINDS.indexOf(a.kind) - ENTITY_KINDS.indexOf(b.kind)
+  const kind = compareCategoryIds(a.kind, b.kind)
   if (kind !== 0) return kind
   const name = toEntityNameKey(a.name).localeCompare(toEntityNameKey(b.name))
   return name !== 0 ? name : a.id.localeCompare(b.id)
@@ -142,31 +145,46 @@ function findByNameKey(
     .find((row) => toEntityNameKey(row.name) === key)?.id
 }
 
-/** Refuses a name another entity of the same kind already carries; kinds do not collide. */
-function assertNameFree(db: EntityDb, kind: EntityKind, name: string, exceptId?: string): void {
-  const clash = findByNameKey(db, kind, toEntityNameKey(name), exceptId)
+/** Refuses a name another sheet of the same category already carries; categories do not collide. */
+function assertNameFree(
+  db: EntityDb,
+  category: StoryCategory,
+  name: string,
+  exceptId?: string
+): void {
+  const clash = findByNameKey(db, category.id, toEntityNameKey(name), exceptId)
   if (clash !== undefined) {
-    throw new AppError('ALREADY_EXISTS', `A ${kind} named "${name}" already exists`, {
-      kind,
+    throw new AppError('ALREADY_EXISTS', `A ${category.noun} named "${name}" already exists`, {
+      kind: category.id,
       name,
       id: clash
     })
   }
 }
 
-/** Refuses a field that is not of this kind's template ("age" on a setting). */
-function assertFieldsOf(kind: EntityKind, fields: EntityFields): void {
+/** Refuses a field that is not of the category's template ("age" on a place). */
+function assertFieldsOf(category: StoryCategory, fields: EntityFields): void {
   for (const id of Object.keys(fields)) {
-    if (!isFieldOf(kind, id)) {
-      throw new AppError('VALIDATION', `"${id}" is not a field of a ${kind}`, { kind, field: id })
+    if (!isCategoryField(category, id)) {
+      throw new AppError('VALIDATION', `"${id}" is not a field of a ${category.noun}`, {
+        kind: category.id,
+        field: id
+      })
     }
   }
 }
 
-/** The given values of the kind's template, empty ones left out: what the column stores. */
-function collectFields(kind: EntityKind, base: EntityFields, patch: EntityFields): EntityFields {
+/**
+ * The given values of the category's template merged over what is stored, empty ones left out:
+ * what the column stores. A stored value outside the template (F-9.11) is kept as it was.
+ */
+function collectFields(
+  category: StoryCategory,
+  base: EntityFields,
+  patch: EntityFields
+): EntityFields {
   const merged: EntityFields = { ...base }
-  for (const id of fieldIdsFor(kind)) {
+  for (const id of categoryFieldIds(category)) {
     const value = patch[id]
     if (value === undefined) continue
     // An empty value is how a patch removes a field, and is never stored.
@@ -235,7 +253,10 @@ function linkTag(db: EntityDb, row: EntityRow): EntityTagChange | null {
     const aliased = row.tagId !== existing && setTagId(db, row, existing)
     return { tag: requireTagWithUsage(db, existing), created: false, renamed: false, aliased }
   }
-  const created = createTag(db, { name, category: ENTITY_TAG_CATEGORY[row.kind] })
+  const created = createTag(db, {
+    name,
+    category: categoryOf(row.kind, listCategories(db)).tagCategory
+  })
   setTagId(db, row, created.id)
   return { tag: requireTagWithUsage(db, created.id), created: true, renamed: false, aliased: false }
 }
@@ -296,17 +317,18 @@ export function createEntity(
   options: { tag?: boolean } = {}
 ): EntityWrite {
   return db.transaction((tx) => {
+    const category = requireCategory(tx, input.kind)
     const name = normalizeName(input.name)
-    assertNameFree(tx, input.kind, name)
+    assertNameFree(tx, category, name)
     const fields = input.fields ?? {}
-    assertFieldsOf(input.kind, fields)
+    assertFieldsOf(category, fields)
     const now = new Date().toISOString()
     const row: EntityInsert = {
       id: randomUUID(),
       kind: input.kind,
       name,
       template: input.template ?? 'structured',
-      fields: JSON.stringify(collectFields(input.kind, {}, fields)),
+      fields: JSON.stringify(collectFields(category, {}, fields)),
       body: input.body ?? null,
       image: null,
       tagId: null,
@@ -348,21 +370,18 @@ export function updateEntity(
     const existing = getRow(tx, id)
     if (!existing) throw new AppError('NOT_FOUND', 'Entity not found', { id })
     const changes: Partial<EntityInsert> = {}
+    const category = categoryOf(existing.kind, listCategories(tx))
     if (patch.name !== undefined) {
       const name = normalizeName(patch.name)
       if (toEntityNameKey(name) !== toEntityNameKey(existing.name)) {
-        assertNameFree(tx, existing.kind, name, id)
+        assertNameFree(tx, category, name, id)
       }
       changes.name = name
     }
     if (patch.template !== undefined) changes.template = patch.template
     if (patch.fields !== undefined) {
-      assertFieldsOf(existing.kind, patch.fields)
-      const merged = collectFields(
-        existing.kind,
-        parseEntityFields(existing.fields, existing.kind),
-        patch.fields
-      )
+      assertFieldsOf(category, patch.fields)
+      const merged = collectFields(category, parseEntityFields(existing.fields), patch.fields)
       changes.fields = JSON.stringify(merged)
     }
     if (patch.body !== undefined) changes.body = patch.body
@@ -486,8 +505,9 @@ export function setEntityImage(db: EntityDb, id: string, image: string | null): 
   return db.transaction((tx) => {
     const existing = getRow(tx, id)
     if (!existing) throw new AppError('NOT_FOUND', 'Entity not found', { id })
-    if (!kindHasImage(existing.kind)) {
-      throw new AppError('VALIDATION', `A ${ENTITY_KIND_NOUN[existing.kind]} has no image`, {
+    const category = categoryOf(existing.kind, listCategories(tx))
+    if (!category.hasImage) {
+      throw new AppError('VALIDATION', `A ${category.noun} has no image`, {
         id,
         kind: existing.kind
       })

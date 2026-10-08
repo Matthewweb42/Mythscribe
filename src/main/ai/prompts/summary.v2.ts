@@ -1,7 +1,8 @@
 import { outputBudget } from '@shared/ai'
-import { ENTITY_KINDS, type EntityKind } from '@shared/entities'
 import {
   OBSERVED_ATTRIBUTES,
+  OBSERVED_KINDS,
+  type ObservedKind,
   OBSERVED_FACT_QUOTE_MAX,
   OBSERVED_FACT_VALUE_MAX
 } from '@shared/observedFacts'
@@ -28,7 +29,7 @@ import type { AiMessage } from '../providers/types'
 export const SUMMARY_PROMPT_V2_VERSION = 'summary.v2'
 
 /** The attribute vocabulary as the rules state it: `character: age, gender, …; setting: …`. */
-const ATTRIBUTE_LISTS = ENTITY_KINDS.map(
+const ATTRIBUTE_LISTS = OBSERVED_KINDS.map(
   (kind) => `${kind}: ${OBSERVED_ATTRIBUTES[kind].join(', ')}`
 ).join('; ')
 
@@ -53,10 +54,10 @@ export const SUMMARY_RULES_V2 =
   '"kind":"character","attribute":"age","value":"...","quote":"..."}]}.'
 
 /** The story-bible names that occur in the scene, by kind, each as the bible spells it. */
-export type SummaryKnownNames = Record<EntityKind, string[]>
+export type SummaryKnownNames = Record<ObservedKind, string[]>
 
 /** How each kind's names are introduced in the known-names line. */
-const KNOWN_LABEL: Record<EntityKind, string> = {
+const KNOWN_LABEL: Record<ObservedKind, string> = {
   character: 'characters',
   setting: 'settings',
   world: 'world'
@@ -81,7 +82,7 @@ export interface BuiltSummaryPromptV2 {
 function knownLine(known: SummaryKnownNames): string {
   let room = SUMMARY_KNOWN_NAMES_MAX
   const parts: string[] = []
-  for (const kind of ENTITY_KINDS) {
+  for (const kind of OBSERVED_KINDS) {
     const names = known[kind].slice(0, room)
     room -= names.length
     if (names.length > 0) parts.push(`${KNOWN_LABEL[kind]} ${names.join(', ')}`)
