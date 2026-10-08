@@ -89,6 +89,7 @@ export function contextReviewFixture(): ContextReview {
       }
     ],
     notes: { existingId: null, paragraphs: ['Theme: debts.'], include: true },
+    categories: [],
     proposalIds: ['p1'],
     chunks: 1,
     usage: { inputTokens: 900, outputTokens: 120 },

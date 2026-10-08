@@ -1,16 +1,12 @@
 import { useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import {
-  ENTITY_KIND_LABEL,
-  ENTITY_KIND_NOUN,
-  ENTITY_NAME_MAX,
-  type EntityKind
-} from '@shared/entities'
+import { ENTITY_NAME_MAX, type EntityKind } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { describeError } from '@renderer/lib/errors'
+import { useCategory, useCategoryStore } from './categoryStore'
 import { useEntityDraftStore } from './entityDraftStore'
 import { useEntityStore } from './entityStore'
 import { excerptOf, type EntityView } from './entityView'
@@ -38,6 +34,9 @@ export function EntityList({ kind, ids, filtered, view }: EntityListProps): Reac
   const select = useEntityStore((s) => s.select)
   const remove = useEntityStore((s) => s.remove)
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  const category = useCategory(kind)
+  const categories = useCategoryStore((s) => s.categories)
+  const plural = category.name.toLowerCase()
 
   const rename = async (id: string, name: string): Promise<void> => {
     const drafts = useEntityDraftStore.getState()
@@ -52,7 +51,7 @@ export function EntityList({ kind, ids, filtered, view }: EntityListProps): Reac
   const onDelete = async (entity: Entity): Promise<void> => {
     const ok = await dialogs.confirm({
       title: `Delete "${entity.name}"?`,
-      message: `This removes the ${ENTITY_KIND_NOUN[kind]} and everything written on its page. This cannot be undone.`,
+      message: `This removes the ${category.noun} and everything written on its page. This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true
     })
@@ -67,22 +66,20 @@ export function EntityList({ kind, ids, filtered, view }: EntityListProps): Reac
   if (ids.length === 0) {
     return (
       <p className="m-0 px-3 py-4 text-center text-xs text-fg-muted">
-        {filtered
-          ? `No ${ENTITY_KIND_LABEL[kind].toLowerCase()} match.`
-          : `No ${ENTITY_KIND_LABEL[kind].toLowerCase()} yet.`}
+        {filtered ? `No ${plural} match.` : `No ${plural} yet.`}
       </p>
     )
   }
   return (
     <ul
       role="list"
-      aria-label={ENTITY_KIND_LABEL[kind]}
+      aria-label={category.name}
       className={`m-0 list-none p-1 ${view === 'cards' ? 'flex flex-col gap-1' : ''}`}
     >
       {entities.map((entity) => {
         if (!entity) return null
-        const excerpt = view === 'cards' ? excerptOf(entity) : ''
-        const category = view === 'cards' && kind === 'world' ? entity.fields.category : undefined
+        const excerpt = view === 'cards' ? excerptOf(entity, categories) : ''
+        const chip = view === 'cards' && kind === 'world' ? entity.fields.category : undefined
         const selected = entity.id === selectedId
         if (entity.id === renamingId) {
           return (
@@ -122,9 +119,9 @@ export function EntityList({ kind, ids, filtered, view }: EntityListProps): Reac
                   Added by AI
                 </span>
               ) : null}
-              {category !== undefined && category.length > 0 ? (
+              {chip !== undefined && chip.length > 0 ? (
                 <span className="mt-0.5 w-fit max-w-full truncate rounded-full border border-line px-1.5 text-[11px] text-fg-muted">
-                  {category}
+                  {chip}
                 </span>
               ) : null}
               {excerpt.length > 0 ? (

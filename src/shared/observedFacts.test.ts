@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { ENTITY_KINDS, isFieldOf } from './entities'
+import { categoryOf, isCategoryField } from './categories'
 import {
   ExtractedFact,
   OBSERVED_ATTRIBUTES,
+  OBSERVED_KINDS,
   OBSERVED_FACT_VALUE_MAX,
   ObservedDismissed,
   defaultObservedDismissed,
@@ -35,10 +36,10 @@ function fact(patch: Partial<ObservedFact>): ObservedFact {
 
 describe('OBSERVED_ATTRIBUTES', () => {
   it('maps every attribute onto a field of the same kind', () => {
-    for (const kind of ENTITY_KINDS) {
+    for (const kind of OBSERVED_KINDS) {
       expect(OBSERVED_ATTRIBUTES[kind].length).toBeGreaterThan(0)
       for (const attribute of OBSERVED_ATTRIBUTES[kind]) {
-        expect(isFieldOf(kind, attribute)).toBe(true)
+        expect(isCategoryField(categoryOf(kind), attribute)).toBe(true)
         expect(observedAttributeField(kind, attribute)).toBe(attribute)
       }
     }

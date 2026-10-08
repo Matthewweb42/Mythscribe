@@ -1,5 +1,16 @@
 import { z } from 'zod'
 import {
+  CATEGORY_FIELD_LABEL_MAX,
+  CATEGORY_NAME_MAX,
+  categoryFromInput,
+  categoryOf,
+  customCategoryId,
+  isKnownCategory,
+  type StoryCategory
+} from '@shared/categories'
+import {
+  CONTEXT_PROPOSED_CATEGORIES_MAX,
+  CONTEXT_PROPOSED_FIELDS_MAX,
   changedParagraphs,
   chunkParagraphs,
   estimateContextCost,
@@ -11,20 +22,22 @@ import {
   type ContextImageHint,
   type ContextProgress,
   type ContextRecord,
-  type ContextReview
+  type ContextReview,
+  type ContextReviewCategory
 } from '@shared/contextLibrary'
-import { ENTITY_NAME_MAX, EntityKind, toEntityNameKey } from '@shared/entities'
+import { ENTITY_NAME_MAX, toEntityNameKey } from '@shared/entities'
 import { JOB_MIN_INTERVAL_MS } from '@shared/jobs'
+import { listCategories } from '../entity/categoryStore'
 import { listEntities } from '../entity/entityStore'
 import { readContextText, requireContextFileRow, type LibraryDb } from '../library/libraryStore'
 import { getAiSettings } from '../project/settingsStore'
 import { assertFeatureAllowed } from './dial'
 import { cancelInflight } from './inflight'
 import {
-  buildContextImportPrompt,
-  CONTEXT_IMPORT_PROMPT_VERSION,
-  type ContextSheetNames
-} from './prompts/contextImport.v1'
+  buildContextImportPromptV2,
+  CONTEXT_IMPORT_PROMPT_V2_VERSION,
+  type ContextSheetGroup
+} from './prompts/contextImport.v2'
 import { createProposal, settleProposal } from './proposalStore'
 import { AiCancelledError, AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
@@ -136,9 +149,95 @@ const ModelAnswer = z.object({
     )
     .nullish(),
   notes: z.array(z.string()).nullish(),
-  images: z.array(z.object({ file: z.string(), name: z.string() })).nullish()
+  images: z.array(z.object({ file: z.string(), name: z.string() })).nullish(),
+  /** F-9.11: categories the model proposes for things no category fits. */
+  categories: z
+    .array(
+      z.object({
+        kind: z.string(),
+        name: z.string(),
+        noun: z.string().nullish(),
+        fields: z.array(z.string()).nullish()
+      })
+    )
+    .nullish()
 })
 type ModelAnswer = z.infer<typeof ModelAnswer>
+
+/**
+ * The categories of one sort (F-9.11): the project's, and the new ones the model proposed, each
+ * under a provisional `c-…` id. A proposal named like a category the project has (by name or
+ * singular) is that category; past `CONTEXT_PROPOSED_CATEGORIES_MAX` the rest are not taken, and
+ * their things are filed under World.
+ */
+export class SortCategories {
+  readonly proposed: ContextReviewCategory[] = []
+  private readonly byToken = new Map<string, string>()
+
+  constructor(readonly project: readonly StoryCategory[]) {}
+
+  private all(): StoryCategory[] {
+    return [...this.project, ...this.proposed]
+  }
+
+  /** Takes in what one answer proposed. */
+  learn(answer: ModelAnswer): void {
+    for (const given of answer.categories ?? []) {
+      const token = given.kind.trim().toLowerCase()
+      const name = given.name.trim().slice(0, CATEGORY_NAME_MAX).trim()
+      if (token === '' || name === '' || this.byToken.has(token)) continue
+      if (isKnownCategory(token, this.project)) continue
+      const same = this.byName(name)
+      if (same !== undefined) {
+        this.byToken.set(token, same.id)
+        continue
+      }
+      if (this.proposed.length >= CONTEXT_PROPOSED_CATEGORIES_MAX) continue
+      const id = customCategoryId(
+        name,
+        this.all().map((category) => category.id)
+      )
+      const noun = given.noun?.trim().slice(0, CATEGORY_NAME_MAX).trim()
+      const fields = (given.fields ?? [])
+        .map((label) => label.trim().slice(0, CATEGORY_FIELD_LABEL_MAX).trim())
+        .filter((label) => label !== '')
+        .slice(0, CONTEXT_PROPOSED_FIELDS_MAX)
+      const category = categoryFromInput(
+        id,
+        { name, ...(noun ? { noun } : {}), fields, hint: '' },
+        'ai'
+      )
+      this.proposed.push({ ...category, proposed: true })
+      this.byToken.set(token, id)
+    }
+  }
+
+  private byName(name: string): StoryCategory | undefined {
+    const key = name.toLowerCase()
+    return this.all().find(
+      (category) => category.name.toLowerCase() === key || category.noun.toLowerCase() === key
+    )
+  }
+
+  /** The category the model meant by `kind`; World when it is none the sort knows. */
+  resolve(kind: string): StoryCategory {
+    const token = kind.trim().toLowerCase()
+    const id =
+      this.byToken.get(token) ??
+      (isKnownCategory(token, this.project) ? token : this.byName(token)?.id)
+    return categoryOf(id ?? 'world', this.all())
+  }
+
+  /** The review's categories: the project's own (for their templates) and the proposed ones. */
+  forReview(): ContextReviewCategory[] {
+    return [
+      ...this.project
+        .filter((category) => !category.builtIn)
+        .map((category) => ({ ...category, proposed: false })),
+      ...this.proposed
+    ]
+  }
+}
 
 const BAD_FORMAT = 'The model did not answer in the expected format.'
 
@@ -185,23 +284,31 @@ export function halvePiece(piece: ContextChunk): [ContextChunk, ContextChunk] | 
 
 const NOTES_KEY = toEntityNameKey(PROJECT_NOTES_NAME)
 
-/** The answer's entities as records of this chunk; unknown kinds and nameless items are dropped. */
-function toRecords(answer: ModelAnswer, chunk: ContextChunk, first: number): ContextRecord[] {
+/**
+ * The answer's entities as records of this chunk; nameless items are dropped, and an item of a
+ * kind the sort does not know is filed under World (F-9.11).
+ */
+function toRecords(
+  answer: ModelAnswer,
+  chunk: ContextChunk,
+  first: number,
+  categories: SortCategories
+): ContextRecord[] {
   const records: ContextRecord[] = []
   for (const item of answer.entities ?? []) {
-    const kind = EntityKind.safeParse(item.kind.trim().toLowerCase())
+    const category = categories.resolve(item.kind)
     const name = item.name.trim().slice(0, ENTITY_NAME_MAX).trim()
-    if (!kind.success || name === '' || toEntityNameKey(name) === NOTES_KEY) continue
+    if (name === '' || toEntityNameKey(name) === NOTES_KEY) continue
     records.push({
       id: `r${first + records.length + 1}`,
       fileId: chunk.fileId,
       fileName: chunk.fileName,
-      kind: kind.data,
+      kind: category.id,
       name,
       aliases: (item.aliases ?? [])
         .map((alias) => alias.trim().slice(0, ENTITY_NAME_MAX))
         .filter((alias) => alias !== ''),
-      fields: recordFields(kind.data, item.fields ?? {}),
+      fields: recordFields(category, item.fields ?? {}),
       details: (item.details ?? []).map((detail) => detail.trim()).filter((d) => d !== '')
     })
   }
@@ -220,13 +327,11 @@ export async function sortContextFiles(
   assertFeatureAllowed(getAiSettings(db), 'contextImport')
   const work = await contextWork(db, input.folder, input.fileIds)
   const existing = listEntities(db)
-  const namesOf = (kind: EntityKind): string[] =>
-    existing.filter((entity) => entity.kind === kind).map((entity) => entity.name)
-  const sheets: ContextSheetNames = {
-    character: namesOf('character'),
-    setting: namesOf('setting'),
-    world: namesOf('world')
-  }
+  const categories = new SortCategories(listCategories(db))
+  const sheets: ContextSheetGroup[] = categories.project.map((category) => ({
+    category,
+    names: existing.filter((entity) => entity.kind === category.id).map((entity) => entity.name)
+  }))
   const imageNames = work.images.map((image) => image.name)
 
   const records: ContextRecord[] = []
@@ -254,7 +359,12 @@ export async function sortContextFiles(
         if (next === undefined) break
         const { piece, depth, id: chunkId } = next
         stopIfCancelled(input.signal)
-        const prompt = buildContextImportPrompt({ ...piece, sheets, images: imageNames })
+        const prompt = buildContextImportPromptV2({
+          ...piece,
+          categories: categories.project,
+          sheets,
+          images: imageNames
+        })
         inFlight = chunkId
         const answer = await runAiRequest(deps, {
           feature: 'contextImport',
@@ -308,7 +418,8 @@ export async function sortContextFiles(
           )
           continue
         }
-        records.push(...toRecords(parsed, piece, records.length))
+        categories.learn(parsed)
+        records.push(...toRecords(parsed, piece, records.length, categories))
         notes.push(...(parsed.notes ?? []).map((note) => note.trim()).filter((n) => n !== ''))
         for (const image of parsed.images ?? []) {
           if (imageNames.includes(image.file))
@@ -330,17 +441,25 @@ export async function sortContextFiles(
     input.signal?.removeEventListener('abort', onAbort)
   }
 
-  const plan = planContextReview({ records, existing, images: work.images, hints, notes })
+  const plan = planContextReview({
+    records,
+    existing,
+    categories: categories.forReview(),
+    images: work.images,
+    hints,
+    notes
+  })
   return {
     fileIds: [...input.fileIds],
     entities: plan.entities,
+    categories: plan.categories,
     notes: plan.notes,
     proposalIds,
     chunks: work.chunks.length,
     usage,
     costUsd,
     model,
-    promptVersion: CONTEXT_IMPORT_PROMPT_VERSION
+    promptVersion: CONTEXT_IMPORT_PROMPT_V2_VERSION
   }
 }
 

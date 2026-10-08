@@ -16,7 +16,7 @@ import {
   type ContinuityRef
 } from '@shared/continuity'
 import { findQuote, normalizeForMatch } from '@shared/critique'
-import { ENTITY_FIELDS } from '@shared/entities'
+import { categoryOf, type StoryCategory } from '@shared/categories'
 import type { Entity } from '@shared/ipc/contract'
 import {
   factKey,
@@ -28,6 +28,7 @@ import type { SettledStatus } from '@shared/proposal'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import { ageAt, characterBirthYear } from '@shared/timeline'
 import type { NodeRow } from '../db/schema'
+import { listCategories } from '../entity/categoryStore'
 import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { getDocumentContent } from '../document/documentStore'
 import { listEntities } from '../entity/entityStore'
@@ -133,7 +134,11 @@ export function computedAgeValue(born: number, year: number): string {
  * carries it in place of the sheet's static age, which cannot be right at every point of the
  * story, or is added where the sheet has none.
  */
-function sheetRefs(entity: Entity, age: { born: number; year: number } | null): ContinuityRef[] {
+function sheetRefs(
+  entity: Entity,
+  category: StoryCategory,
+  age: { born: number; year: number } | null
+): ContinuityRef[] {
   const base = {
     kind: 'sheet' as const,
     entityId: entity.id,
@@ -146,7 +151,7 @@ function sheetRefs(entity: Entity, age: { born: number; year: number } | null): 
     const page = clip(entity.body ?? '')
     return page ? [{ ...base, attribute: 'notes', label: 'Notes', value: page }] : []
   }
-  return ENTITY_FIELDS[entity.kind].flatMap((field) => {
+  return category.fields.flatMap((field) => {
     const value =
       field.id === 'age' && age !== null
         ? computedAgeValue(age.born, age.year)
@@ -201,6 +206,7 @@ export function continuityRefs(db: TreeDb, nodeId: string, sceneText: string): C
   const dismissed = dismissedKeys(db, nodeId)
   const live = (ref: ContinuityRef): boolean => !dismissed.has(continuityDedupeKey(nodeId, ref))
 
+  const categories = listCategories(db)
   const sheets: ContinuityRef[] = []
   const facts: ContinuityRef[] = []
   const ages = new Map<string, number>()
@@ -218,7 +224,7 @@ export function continuityRefs(db: TreeDb, nodeId: string, sceneText: string): C
         : null
     const age = born === null || year === null ? null : { born, year }
     if (age !== null) ages.set(entity.id, ageAt(age.born, age.year))
-    const sheet = sheetRefs(entity, age)
+    const sheet = sheetRefs(entity, categoryOf(entity.kind, categories), age)
     // The sheet's own fields decide what the facts may add, dismissed or not.
     const filled = new Set(sheet.map((ref) => ref.attribute))
     sheets.push(...sheet.filter(live))

@@ -1499,7 +1499,7 @@ describe('session (F-1.7)', () => {
 
   it('refuses a value outside the schema with VALIDATION', async () => {
     await invoke('project:create', { name: 'Resume', format: 'novel', directory: tmp })
-    const result = await handlerFor('session:set')(undefined, { sidebarTab: 'nowhere' })
+    const result = await handlerFor('session:set')(undefined, { sidebarTab: 'No Where!' })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     expect(await invoke('session:get', undefined)).toEqual(defaultProjectSession())
@@ -3952,8 +3952,9 @@ describe('entity handlers (F-9.1)', () => {
     // the store.
     const raw = handlerFor('entity:create')
     for (const bad of [
-      { kind: 'creature', name: 'Wyrm' },
-      { kind: 'character', name: 'Ada', fields: { favourite: 'tea' } },
+      { kind: 'dragonkin', name: 'Wyrm' },
+      { kind: 'Not A Kind', name: 'Wyrm' },
+      { kind: 'character', name: 'Ada Two', fields: { favourite: 'tea' } },
       { kind: 'character', name: '   ' }
     ]) {
       const result = await raw(undefined, bad)
@@ -4652,9 +4653,9 @@ describe('entity export and import (F-9.5)', () => {
     await expect(
       invoke('entity:importOpen', {
         kind: 'character',
-        path: write('c.csv', 'kind,name\r\ncreature,Wyrm\r\n')
+        path: write('c.csv', 'kind,name\r\ndragonkin,Wyrm\r\n')
       })
-    ).rejects.toThrowError(/^VALIDATION: Row 1: "creature" is not a kind of entity/)
+    ).rejects.toThrowError(/^VALIDATION: Row 1: "dragonkin" is not a category of this project/)
   })
 
   it('commits the reviewed rows, rescans once, and announces each created tag', async () => {

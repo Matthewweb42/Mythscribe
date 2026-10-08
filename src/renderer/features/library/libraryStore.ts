@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { AI_DATA_SHARING, isFeatureAllowed, needsSwitchText } from '@shared/aiSettings'
 import {
   CONTEXT_FILE_MAX_BYTES,
+  declineReviewCategory,
+  renameReviewCategory,
   reviewHasChanges,
   splitReviewEntity,
   writesField,
@@ -16,6 +18,7 @@ import { applyReviewOps, type ReviewChange } from '@shared/reviewChat'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
+import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -108,6 +111,10 @@ interface LibraryState {
   edit: (change: (review: ContextReview) => ContextReview) => void
   /** Splits a merged sheet back into one per name. */
   split: (itemId: string) => void
+  /** Declines a category the AI proposed (F-9.11): its sheets become World sheets. */
+  declineCategory: (categoryId: string) => void
+  /** Renames a category the AI proposed before Apply creates it (F-9.11). */
+  renameCategory: (categoryId: string, name: string) => void
   /** Writes the review in one transaction. */
   apply: () => Promise<void>
   /** Sends the author's instruction about the review; the AI's changes land on it at once (F-9.9). */
@@ -360,7 +367,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
         try {
           const applied = await ipc().invoke('library:apply', { review: result.review })
           settle(result.review, 'rejected')
-          if (mine === generation) set({ files: applied.files, flow: null })
+          if (mine === generation) {
+            useCategoryStore.getState().replace(applied.categories)
+            set({ files: applied.files, flow: null })
+          }
           toast.info('Nothing new to add to the story bible from those files.')
         } catch (err) {
           if (mine === generation)
@@ -409,6 +419,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
       get().edit((review) => splitReviewEntity(review, itemId, existing))
     },
 
+    declineCategory(categoryId) {
+      const existing = existingSheets()
+      get().edit((review) => declineReviewCategory(review, categoryId, existing))
+    },
+
+    renameCategory(categoryId, name) {
+      get().edit((review) => renameReviewCategory(review, categoryId, name))
+    },
+
     async apply() {
       const flow = get().flow
       if (flow?.stage !== 'review' || flow.busy || get().chat.requestId !== null) return
@@ -421,6 +440,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
         if (mine !== generation) return
         const entityStore = useEntityStore.getState()
         for (const entity of result.entities) entityStore.merge(entity)
+        // F-9.11: the accepted proposals are categories of the project now.
+        useCategoryStore.getState().replace(result.categories)
         set({ files: result.files, flow: null, chat: emptyReviewChat() })
         const parts = [
           `${plural(result.created, 'sheet')} created`,

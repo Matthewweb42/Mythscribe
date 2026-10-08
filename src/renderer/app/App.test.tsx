@@ -1,3 +1,4 @@
+import { BUILTIN_CATEGORIES } from '@shared/categories'
 import { defaultFocusSettings } from '@shared/focus'
 import { defaultProjectSession } from '@shared/session'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -53,6 +54,7 @@ import { resetSearchStore, useSearchStore } from '@renderer/features/search/sear
 import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
+import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import { resetObservedFactStore } from '@renderer/features/entities/observedFactStore'
 import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { resetMentionStore } from '@renderer/features/tags/mentionStore'
@@ -126,6 +128,7 @@ beforeEach(() => {
   // F-9.3: the entity page is part of the main pane, so its stores belong to the fixture too.
   resetEntityDraftStore()
   resetEntityStore()
+  resetCategoryStore()
   resetObservedFactStore()
   resetFocusStore()
   resetBackgroundStore()
@@ -161,6 +164,7 @@ afterEach(() => {
   resetSnapshotStore()
   resetEntityDraftStore()
   resetEntityStore()
+  resetCategoryStore()
   resetObservedFactStore()
   // F-10.1: a search debounce left pending must not fire into the next file's IPC fake.
   resetSearchStore()
@@ -198,6 +202,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'tag:list') return []
     if (channel === 'tag:aliases') return {}
     if (channel === 'entity:list') return []
+    if (channel === 'category:list') return BUILTIN_CATEGORIES
     if (channel === 'observedFact:listForEntity') return []
     if (channel === 'documentTag:list') return []
     if (channel === 'tag:proposed') return []
@@ -306,6 +311,14 @@ const sidebarColumn = (): HTMLElement => {
   return column
 }
 
+/** Picks a sidebar section through the section picker (F-9.11). */
+async function showSection(name: string): Promise<void> {
+  await userEvent.click(screen.getByRole('button', { name: /^Section: / }))
+  await userEvent.click(
+    within(screen.getByRole('listbox', { name: 'Sections' })).getByRole('option', { name })
+  )
+}
+
 describe('App', () => {
   it('shows the welcome screen, creates a project through the wizard, then closes it', async () => {
     const invoke = install({ 'project:create': { ...info, format: 'epic' } })
@@ -358,24 +371,33 @@ describe('App', () => {
       'Select a document to start writing.'
     )
     expect(screen.queryByTestId('selected-title')).not.toBeInTheDocument()
-    // F-4.2: the tag bank loads with the project and the Tags tab is registered beside Manuscript.
+    // F-4.2: the tag bank loads with the project. F-9.11: the section picker lists the sections in
+    // use by name — Manuscript, the categories with sheets (Characters and Places always), then
+    // the tools — and keeps the empty ones behind "Show unused sections".
     await waitFor(() => expect(useTagStore.getState().loaded).toBe(true))
     expect(useTagStore.getState().ids).toEqual(['t-forest', 't-mara', 't-moody'])
-    expect(
-      within(aside)
-        .getAllByRole('tab')
-        .map((t) => t.textContent)
-    ).toEqual([
+    const picker = within(aside).getByRole('button', { name: 'Section: Manuscript' })
+    await userEvent.click(picker)
+    const listbox = within(aside).getByRole('listbox', { name: 'Sections' })
+    const names = (): string[] =>
+      within(listbox)
+        .getAllByRole('option')
+        .map((o) => o.getAttribute('aria-label') ?? o.textContent ?? '')
+    expect(names()).toEqual([
       'Manuscript',
       'Characters',
-      'Settings',
-      'World',
-      'Outline',
-      'Timeline',
+      'Places',
       'Tags',
-      'Edits',
-      'Library'
+      'Outline',
+      'Show unused sections (14)',
+      'New category…'
     ])
+    await userEvent.click(within(listbox).getByRole('option', { name: /^Show unused sections/ }))
+    expect(names()).toContain('Magic Systems')
+    expect(names()).toContain('Library')
+    await userEvent.keyboard('{Escape}')
+    expect(within(aside).queryByRole('listbox')).not.toBeInTheDocument()
+    expect(picker).toHaveFocus()
 
     await userEvent.click(screen.getByRole('button', { name: /close project/i }))
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
@@ -447,7 +469,7 @@ describe('App', () => {
     await userEvent.click(within(scene).getByText('Scene 1'))
     expect(screen.getByTestId('selected-title')).toHaveTextContent('Scene 1')
 
-    await userEvent.click(screen.getByRole('tab', { name: 'Characters' }))
+    await showSection('Characters')
     await userEvent.click(await screen.findByRole('button', { name: /^Mara/ }))
     // The page replaces the title block, the editor, and the notes panel.
     expect(screen.getByRole('article', { name: 'Mara' })).toBeInTheDocument()
@@ -455,7 +477,7 @@ describe('App', () => {
     expect(screen.queryByRole('textbox', { name: 'Document' })).not.toBeInTheDocument()
 
     // Back to the manuscript: the tree selection was never touched.
-    await userEvent.click(screen.getByRole('tab', { name: 'Manuscript' }))
+    await showSection('Manuscript')
     await userEvent.click(
       within(screen.getByRole('treeitem', { name: 'Scene 1' })).getByText('Scene 1')
     )

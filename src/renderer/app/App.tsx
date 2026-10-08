@@ -30,7 +30,7 @@ import { SettingsDialog } from '@renderer/features/shell/SettingsDialog'
 import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
 import { ShortcutsDialog } from '@renderer/features/shell/ShortcutsDialog'
 import { APP_SHORTCUTS, matchesShortcut, type Chord } from '@renderer/features/shell/shortcuts'
-import { SidebarTabs } from '@renderer/features/shell/SidebarTabs'
+import { SidebarSections } from '@renderer/features/shell/SidebarSections'
 import { useViewStore } from '@renderer/features/shell/viewStore'
 import { BookDetailsDialog } from '@renderer/features/compile/BookDetailsDialog'
 import { useBookDetailsStore } from '@renderer/features/compile/bookDetailsStore'
@@ -83,6 +83,8 @@ import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusSt
 import { ImportDialog } from '@renderer/features/import/ImportDialog'
 import { useImportStore } from '@renderer/features/import/importStore'
 import { EntityCreateDialog } from '@renderer/features/entities/EntityCreateDialog'
+import { CategoryCreateDialog } from '@renderer/features/entities/CategoryCreateDialog'
+import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { EntityImportDialog } from '@renderer/features/entities/EntityImportDialog'
 import { ContextUploadDialog } from '@renderer/features/library/ContextUploadDialog'
 import { DropOverlay } from '@renderer/features/library/DropOverlay'
@@ -284,6 +286,8 @@ export function App(): React.JSX.Element {
       useImportStore.getState().cancel()
       useTagStore.getState().clear()
       useEntityStore.getState().clear()
+      // F-9.11: the project's categories go with its sheets.
+      useCategoryStore.getState().clear()
       // F-9.8: the Library and any upload under review belong to the project that closed.
       useLibraryStore.getState().clear()
       useObservedFactStore.getState().clear()
@@ -399,6 +403,11 @@ export function App(): React.JSX.Element {
     // (F-1.7) checks a restored entity page against it.
     const entitiesLoaded = useEntityStore.getState().load()
     entitiesLoaded.catch((err: unknown) => toast.error(describeError(err)))
+    // F-9.11: the story-bible categories, which the section picker and every sheet read.
+    useCategoryStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
     void useSessionStore.getState().load(Promise.all([treeLoaded, tagsLoaded, entitiesLoaded]))
     // F-9.6: the pins of the quick reference panel; the cards read the stores above.
     useReferenceStore
@@ -978,6 +987,7 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       {focus ? <FocusFloatingPanels /> : null}
       {/* F-9.3: the entity creation dialog, open while a kind is being created. */}
       <EntityCreateDialog />
+      <CategoryCreateDialog />
       {/* F-9.5: the entity import review, open only while a plan is under review. */}
       <EntityImportDialog />
       {/* F-9.8: the context library's estimate, progress, and review, open while it sorts. */}
@@ -1004,7 +1014,7 @@ function SidebarPanel({ format }: { format: NovelFormat }): React.JSX.Element {
       <div className="flex shrink-0 items-center justify-end px-1 pt-1">
         <DockPanelControls id="sidebar" />
       </div>
-      <SidebarTabs format={format} />
+      <SidebarSections format={format} />
     </aside>
   )
 }

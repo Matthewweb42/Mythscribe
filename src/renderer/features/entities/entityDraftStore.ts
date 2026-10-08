@@ -1,10 +1,12 @@
 import { create } from 'zustand'
-import { fieldIdsFor, type EntityFields } from '@shared/entities'
+import { categoryFieldIds } from '@shared/categories'
+import type { EntityFields } from '@shared/entities'
 import type { Entity, EntityUpdateInput } from '@shared/ipc/contract'
 import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { IpcRequestError } from '@renderer/lib/ipc'
+import { getCategory } from './categoryStore'
 import { useEntityStore } from './entityStore'
 
 /** How long after the last keystroke the debounced `entity:update` fires (F-9.3). */
@@ -71,7 +73,7 @@ export function draftPatch(
   const name = draft.name.trim()
   if (name.length > 0 && name !== stored.name) patch.name = name
   const fields: EntityFields = {}
-  for (const id of fieldIdsFor(stored.kind)) {
+  for (const id of categoryFieldIds(getCategory(stored.kind))) {
     const next = draft.fields[id] ?? ''
     if (next !== (stored.fields[id] ?? '')) fields[id] = next
   }

@@ -1,18 +1,11 @@
-import { ENTITY_FIELDS, type EntityKind, type EntityTemplate } from '@shared/entities'
+import { categoryOf, type StoryCategory } from '@shared/categories'
+import type { EntityTemplate } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
-import type { SidebarTabId } from '@shared/sidebarTabs'
 
 /** How an entity tab lays its rows out (F-9.2): one line each, or a card with an excerpt. */
 export type EntityView = 'list' | 'cards'
 export const ENTITY_VIEWS: readonly EntityView[] = ['list', 'cards']
 export const ENTITY_VIEW_LABEL: Record<EntityView, string> = { list: 'List', cards: 'Cards' }
-
-/** The sidebar tab each kind lives on (F-9.2), so a new entity is shown where its list is. */
-export const ENTITY_KIND_TAB: Record<EntityKind, SidebarTabId> = {
-  character: 'characters',
-  setting: 'settings',
-  world: 'world'
-}
 
 /** What the two templates are called wherever the author chooses or switches one (F-9.3). */
 export const ENTITY_TEMPLATE_LABEL: Record<EntityTemplate, string> = {
@@ -53,10 +46,13 @@ export function matchesQuery(entity: Entity, needle: string): boolean {
  * Takes only what it reads, so an entity that is not stored yet — an incoming import row (F-9.5)
  * — gets the same line as a card.
  */
-export function excerptOf(entity: Pick<Entity, 'kind' | 'template' | 'fields' | 'body'>): string {
+export function excerptOf(
+  entity: Pick<Entity, 'kind' | 'template' | 'fields' | 'body'>,
+  categories: readonly StoryCategory[] = []
+): string {
   let source = ''
   if (entity.template === 'structured') {
-    for (const field of ENTITY_FIELDS[entity.kind]) {
+    for (const field of categoryOf(entity.kind, categories).fields) {
       if (field.id === 'category') continue
       const value = entity.fields[field.id]
       if (value !== undefined && value.trim().length > 0) {

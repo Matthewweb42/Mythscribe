@@ -1,3 +1,4 @@
+import { categoryOf, type StoryCategory } from '@shared/categories'
 import {
   PROJECT_NOTES_NAME,
   writesField,
@@ -11,11 +12,11 @@ import {
   ENTITY_FIELD_MAX,
   ENTITY_IMAGES_DIR,
   entityTagName,
-  kindHasImage,
   toEntityNameKey,
   type EntityFields
 } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
+import { createCategory, listCategories } from '../entity/categoryStore'
 import {
   addEntityAliases,
   createEntity,
@@ -42,6 +43,8 @@ export interface ContextApplyResult extends ContextApplyCounts {
   entities: Entity[]
   tagChanges: EntityTagChange[]
   files: ContextFile[]
+  /** F-9.11: every category of the project after Apply, the accepted proposals among them. */
+  categories: StoryCategory[]
 }
 
 /** `existing` with `paragraphs` appended as paragraphs, or VALIDATION when it would be over `max`. */
@@ -100,10 +103,10 @@ export async function applyContextReview(
   }
   const copies = new Map<string, string>()
   const replacedImages: string[] = []
-  let result: Omit<ContextApplyResult, 'files'>
+  let result: Omit<ContextApplyResult, 'files' | 'categories'>
   try {
     for (const item of review.entities) {
-      if (!item.include || !kindHasImage(item.kind)) continue
+      if (!item.include || !categoryOf(item.kind, review.categories).hasImage) continue
       const image = item.images.find((entry) => entry.include)
       if (image === undefined) continue
       const row = requireContextFileRow(db, image.fileId)
@@ -113,6 +116,25 @@ export async function applyContextReview(
       )
     }
     result = db.transaction((tx) => {
+      // F-9.11: a category the AI proposed is created when Apply writes a sheet into it (the
+      // review is where the author accepted, renamed, or declined it); its sheets take its id.
+      const madeIds = new Map<string, string>()
+      for (const category of review.categories) {
+        if (!category.proposed) continue
+        if (!review.entities.some((item) => item.include && item.kind === category.id)) continue
+        const made = createCategory(
+          tx,
+          {
+            name: category.name,
+            noun: category.noun,
+            icon: category.icon,
+            fields: category.fields.filter((field) => field.id !== 'notes').map((f) => f.label),
+            hint: category.hint
+          },
+          'ai'
+        )
+        madeIds.set(category.id, made.id)
+      }
       const written = new Map<string, Entity>()
       const tagChanges: EntityTagChange[] = []
       let created = 0
@@ -124,7 +146,7 @@ export async function applyContextReview(
           const write = createEntity(
             tx,
             {
-              kind: item.kind,
+              kind: madeIds.get(item.kind) ?? item.kind,
               name: item.name,
               template: 'structured',
               fields: fieldPatch(item, null)
@@ -210,5 +232,5 @@ export async function applyContextReview(
     throw err
   }
   for (const image of replacedImages) removeImageAsset(folder, ENTITY_IMAGES_DIR, image)
-  return { ...result, files: listContextFiles(db) }
+  return { ...result, files: listContextFiles(db), categories: listCategories(db) }
 }

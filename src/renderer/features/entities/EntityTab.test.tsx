@@ -121,11 +121,7 @@ describe('EntityTab (F-9.2)', () => {
     await user.click(screen.getByRole('button', { name: 'List' }))
     expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true')
     expect(row('Aldous')).not.toHaveTextContent('cartographer')
-    expect(useEntityStore.getState().view).toEqual({
-      character: 'list',
-      setting: 'cards',
-      world: 'cards'
-    })
+    expect(useEntityStore.getState().view).toEqual({ character: 'list' })
   })
 
   it('search matches the name, the fields, and the page; the empty message says so', async () => {
@@ -148,7 +144,7 @@ describe('EntityTab (F-9.2)', () => {
       await useEntityStore.getState().load()
     })
     render(<EntityTab kind="setting" />)
-    expect(screen.getByText('No settings yet.')).toBeInTheDocument()
+    expect(screen.getByText('No places yet.')).toBeInTheDocument()
   })
 
   it('the World tab shows the category chip and filters by category', async () => {
@@ -226,8 +222,8 @@ describe('EntityTab (F-9.2)', () => {
   it('quick-add creates a structured entity of the kind, selects it, and clears the field', async () => {
     const user = userEvent.setup()
     const calls = await renderLoaded('setting')
-    const form = screen.getByRole('form', { name: 'New setting' })
-    const name = within(form).getByRole('textbox', { name: 'Setting name' })
+    const form = screen.getByRole('form', { name: 'New place' })
+    const name = within(form).getByRole('textbox', { name: 'Place name' })
     const add = within(form).getByRole('button', { name: 'Add' })
     expect(add).toBeDisabled()
     await user.type(name, '  The Harbour ')
@@ -236,7 +232,7 @@ describe('EntityTab (F-9.2)', () => {
       'entity:create',
       { kind: 'setting', name: 'The Harbour', template: 'structured' }
     ])
-    expect(rowNames('Settings')).toEqual(['Dark Forest', 'The Harbour'])
+    expect(rowNames('Places')).toEqual(['Dark Forest', 'The Harbour'])
     expect(name).toHaveValue('')
     expect(useEntityStore.getState().selectedId).toBe('e-new-1')
   })
@@ -334,7 +330,7 @@ describe('EntityTab (F-9.2)', () => {
         within(menu)
           .getAllByRole('menuitem')
           .map((el) => el.textContent)
-      ).toEqual(['Export as JSON…', 'Export as CSV…', 'Import…'])
+      ).toEqual(['Export as JSON…', 'Export as CSV…', 'Import…', 'Rename category…'])
       expect(item('Export as JSON…')).toBeEnabled()
     })
 

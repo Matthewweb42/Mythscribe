@@ -296,7 +296,7 @@ describe('the review chat (F-9.9)', () => {
       ['assistant', 'Tomas is now a place.']
     ])
     expect(chat.entries[1]?.changes).toEqual([
-      { text: '“Tomas” is now a setting (a new sheet).', itemIds: ['e2'], skipped: false }
+      { text: '“Tomas” is now a place (a new sheet).', itemIds: ['e2'], skipped: false }
     ])
     expect(chat.entries[1]?.request).toMatchObject({ model: 'gpt-5.4', costUsd: 0.003 })
 

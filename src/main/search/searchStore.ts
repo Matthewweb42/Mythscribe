@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { docToText } from '@shared/docText'
-import { ENTITY_FIELDS, ENTITY_KIND_NOUN } from '@shared/entities'
+import { categoryOf, type StoryCategory } from '@shared/categories'
 import type { Entity } from '@shared/ipc/contract'
 import {
   EMPTY_SEARCH_RESPONSE,
@@ -17,6 +17,7 @@ import {
 } from '@shared/search'
 import { documentTag, tagMention, type NodeRow } from '../db/schema'
 import { parseStoredTiptap } from '../document/documentStore'
+import { listCategories } from '../entity/categoryStore'
 import { listEntities } from '../entity/entityStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 
@@ -134,9 +135,9 @@ interface EntityText {
   text: string
 }
 
-function entityTexts(entity: Entity): EntityText[] {
+function entityTexts(entity: Entity, category: StoryCategory): EntityText[] {
   const texts: EntityText[] = []
-  for (const def of ENTITY_FIELDS[entity.kind]) {
+  for (const def of category.fields) {
     const value = entity.fields[def.id]
     if (value !== undefined) texts.push({ field: def.label, text: searchableText(value) })
   }
@@ -169,10 +170,18 @@ function nodeHit(
   })
 }
 
-function entityHit(entity: Entity, query: string): Hit | null {
+/**
+ * The search type a sheet is found under: its own for the three of F-9.1, World for every other
+ * story-bible category (F-9.11), which is where those sheets lived before categories.
+ */
+function entityType(kind: string): 'character' | 'setting' | 'world' {
+  return kind === 'character' || kind === 'setting' ? kind : 'world'
+}
+
+function entityHit(entity: Entity, category: StoryCategory, query: string): Hit | null {
   const title = searchableText(entity.name)
   const titleHighlights = findOccurrences(title, query)
-  const texts = entityTexts(entity).map((entry) => ({
+  const texts = entityTexts(entity, category).map((entry) => ({
     ...entry,
     occurrences: findOccurrences(entry.text, query)
   }))
@@ -182,10 +191,10 @@ function entityHit(entity: Entity, query: string): Hit | null {
   const matched = texts.find((entry) => entry.occurrences.length > 0)
   const shown = matched ?? texts[0]
   return () => ({
-    type: entity.kind,
+    type: entityType(entity.kind),
     id: entity.id,
     title,
-    location: ENTITY_KIND_NOUN[entity.kind],
+    location: category.noun,
     field: matched?.field ?? null,
     snippet: buildSnippet(shown?.text ?? '', shown?.occurrences ?? []),
     titleHighlights,
@@ -231,10 +240,11 @@ export function searchProject(db: TreeDb, request: SearchRequest): SearchRespons
   }
 
   if (types.has('character') || types.has('setting') || types.has('world')) {
+    const categories = listCategories(db)
     for (const entity of listEntities(db)) {
-      if (!types.has(entity.kind)) continue
+      if (!types.has(entityType(entity.kind))) continue
       if (request.tagId !== null && entity.tagId !== request.tagId) continue
-      add(entityHit(entity, query))
+      add(entityHit(entity, categoryOf(entity.kind, categories), query))
     }
   }
 

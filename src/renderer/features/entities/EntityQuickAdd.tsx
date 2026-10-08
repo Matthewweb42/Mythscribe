@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
-import { ENTITY_KIND_NOUN, ENTITY_NAME_MAX, type EntityKind } from '@shared/entities'
+import { ENTITY_NAME_MAX, type EntityKind } from '@shared/entities'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
+import { useCategory } from './categoryStore'
 import { useEntityStore } from './entityStore'
 
 /**
@@ -18,7 +19,7 @@ export function EntityQuickAdd({ kind }: { kind: EntityKind }): React.JSX.Elemen
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const trimmed = name.trim()
-  const noun = ENTITY_KIND_NOUN[kind]
+  const noun = useCategory(kind).noun
 
   const submit = async (): Promise<void> => {
     if (trimmed.length === 0 || busy) return

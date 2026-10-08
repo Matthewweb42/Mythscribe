@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ENTITY_BODY_MAX, ENTITY_FIELD_MAX, ENTITY_NAME_MAX } from './entities'
 import {
   CSV_BOM,
-  ENTITY_CSV_COLUMNS,
+  entityCsvColumns,
   EntityExchangeError,
   actionsFor,
   countImportActions,
@@ -99,8 +99,8 @@ describe('JSON', () => {
       }
       throw new Error('expected a refusal')
     }
-    expect(thrown(file('{"kind":"creature","name":"Wyrm"}')).message).toBe(
-      'Entity 2: "creature" is not a kind of entity'
+    expect(thrown(file('{"kind":"dragonkin","name":"Wyrm"}')).message).toBe(
+      'Entity 2: "dragonkin" is not a category of this project'
     )
     expect(thrown(file('{"name":"Nameless"}')).row).toBe(2)
     expect(thrown(file('{"kind":"character","name":"  "}')).message).toBe(
@@ -157,7 +157,10 @@ describe('CSV', () => {
     const text = serializeEntitiesCsv([toExchangeRecord(mara)])
     expect(text.startsWith(CSV_BOM)).toBe(true)
     const [header, row] = text.slice(CSV_BOM.length).split('\r\n')
-    expect(header).toBe(ENTITY_CSV_COLUMNS.join(','))
+    expect(header).toBe(entityCsvColumns([toExchangeRecord(mara)]).join(','))
+    expect(header).toBe(
+      'kind,name,template,age,born,gender,appearance,personality,background,goals,relationships,notes,body'
+    )
     expect(row?.startsWith('character,Mara Vell,structured,31,')).toBe(true)
     expect(text.endsWith('\r\n')).toBe(true)
   })
@@ -192,7 +195,8 @@ describe('CSV', () => {
   })
 
   it('ignores a column of another kind and a heading it does not know', () => {
-    const text = 'kind,name,age,atmosphere,notes,colour\r\nsetting,Harbour,400,Salt air,Busy,blue\r\n'
+    const text =
+      'kind,name,age,atmosphere,notes,colour\r\nsetting,Harbour,400,Salt air,Busy,blue\r\n'
     expect(parseEntitiesCsv(text, 'character')).toEqual([
       {
         kind: 'setting',
@@ -217,8 +221,8 @@ describe('CSV', () => {
     expect(() => parseEntitiesCsv('kind,age\r\ncharacter,30\r\n', 'character')).toThrow(
       'That file has no "name" column.'
     )
-    expect(() => parseEntitiesCsv('kind,name\r\ncreature,Wyrm\r\n', 'character')).toThrow(
-      'Row 1: "creature" is not a kind of entity'
+    expect(() => parseEntitiesCsv('kind,name\r\ndragonkin,Wyrm\r\n', 'character')).toThrow(
+      'Row 1: "dragonkin" is not a category of this project'
     )
     expect(() => parseEntitiesCsv('name\r\nOk\r\n  \r\n,\r\n', 'character')).not.toThrow()
   })
@@ -310,10 +314,16 @@ describe('mergePatch', () => {
 
 describe('file names', () => {
   it('names an export after the project and the kind', () => {
-    expect(entityExportFileName('Smoke Novel', 'character', 'json')).toBe(
+    expect(entityExportFileName('Smoke Novel', 'Characters', 'json')).toBe(
       'Smoke Novel-characters.json'
     )
-    expect(entityExportFileName('Smoke Novel', 'world', 'csv')).toBe('Smoke Novel-world.csv')
+    expect(entityExportFileName('Smoke Novel', 'World', 'csv')).toBe('Smoke Novel-world.csv')
+    expect(entityExportFileName('Smoke Novel', 'Items & Artifacts', 'csv')).toBe(
+      'Smoke Novel-items & artifacts.csv'
+    )
+    expect(entityExportFileName('Smoke Novel', 'Ships/Boats', 'csv')).toBe(
+      'Smoke Novel-ships-boats.csv'
+    )
   })
 
   it('reads the format from the extension, and nothing else', () => {

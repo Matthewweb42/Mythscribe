@@ -66,9 +66,9 @@ const rows = (): HTMLElement[] => screen.getAllByTestId('entity-import-item')
 const actionOf = (name: string): HTMLElement =>
   screen.getByRole('combobox', { name: `Action for ${name}` })
 
-async function openPlan(overrides: Partial<Record<Channel, Handler>> = {}): Promise<
-  [Channel, unknown][]
-> {
+async function openPlan(
+  overrides: Partial<Record<Channel, Handler>> = {}
+): Promise<[Channel, unknown][]> {
   const calls = install(overrides)
   await act(async () => {
     await useEntityStore.getState().load()

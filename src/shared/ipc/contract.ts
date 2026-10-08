@@ -96,6 +96,7 @@ import {
   UpdateSnapshot
 } from '../snapshots'
 import { EditorSettings } from '../editorSettings'
+import { CategoryIcon, CATEGORY_NAME_MAX, NewCategoryInput, StoryCategory } from '../categories'
 import {
   ENTITY_BODY_MAX,
   ENTITY_FIELD_MAX,
@@ -1536,6 +1537,30 @@ export const contract = {
       replaced: z.number().int().nonnegative()
     })
   },
+  /**
+   * Every story-bible category of the project (F-9.11), in picker order: the built-in library
+   * (under the author's names for it), then the project's own categories, oldest first.
+   */
+  'category:list': { input: z.undefined(), output: z.array(StoryCategory) },
+  /**
+   * Adds a project category by hand (F-9.11): a name, the field labels of its template (Notes is
+   * added at the end), optionally its singular and icon. ALREADY_EXISTS for a name another
+   * category carries. It shows in the section picker once it has a sheet.
+   */
+  'category:create': { input: NewCategoryInput, output: StoryCategory },
+  /**
+   * Renames a category or changes its singular or icon (F-9.11); a library category keeps its
+   * template. NOT_FOUND for an unknown id, ALREADY_EXISTS for a taken name.
+   */
+  'category:update': {
+    input: z.object({
+      id: z.string(),
+      name: z.string().trim().min(1).max(CATEGORY_NAME_MAX).optional(),
+      noun: z.string().trim().min(1).max(CATEGORY_NAME_MAX).optional(),
+      icon: CategoryIcon.optional()
+    }),
+    output: StoryCategory
+  },
   /** The context library (F-9.8): every uploaded file, newest first, with its state. */
   'library:list': { input: z.undefined(), output: z.array(ContextFile) },
   /**
@@ -1620,7 +1645,9 @@ export const contract = {
     input: z.object({ review: ContextReview }),
     output: ContextApplyCounts.extend({
       entities: z.array(Entity),
-      files: z.array(ContextFile)
+      files: z.array(ContextFile),
+      /** F-9.11: every category of the project after Apply, the accepted proposals among them. */
+      categories: z.array(StoryCategory)
     })
   },
   /**
@@ -2632,6 +2659,7 @@ export type TagUpdateInput = Input<'tag:update'>
 export type TagLoadTemplateInput = Input<'tag:loadTemplate'>
 export type EntityCreateInput = Input<'entity:create'>
 export type EntityUpdateInput = Input<'entity:update'>
+export type CategoryUpdateInput = Input<'category:update'>
 
 /** Events pushed from main to the renderer. */
 export const events = {

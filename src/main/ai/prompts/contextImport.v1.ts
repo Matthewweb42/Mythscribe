@@ -4,7 +4,7 @@ import {
   CONTEXT_SHEET_NAMES_CHARS,
   contextFieldsFor
 } from '@shared/contextLibrary'
-import { ENTITY_KIND_LABEL, ENTITY_KINDS, type EntityKind } from '@shared/entities'
+import { builtinCategory } from '@shared/categories'
 import type { AiMessage } from '../providers/types'
 
 /**
@@ -21,7 +21,24 @@ import type { AiMessage } from '../providers/types'
  */
 export const CONTEXT_IMPORT_PROMPT_VERSION = 'contextImport.v1'
 
-const fieldLine = (kind: EntityKind): string => `${kind}: ${contextFieldsFor(kind).join(', ')}`
+/**
+ * The three kinds this version knows, under the names they had when it shipped (F-9.11 renamed
+ * Settings to Places and added categories; version 2 lists them).
+ */
+const V1_KINDS = ['character', 'setting', 'world'] as const
+type V1Kind = (typeof V1_KINDS)[number]
+const V1_LABEL: Record<V1Kind, string> = {
+  character: 'Characters',
+  setting: 'Settings',
+  world: 'World'
+}
+
+const v1Fields = (kind: V1Kind): readonly string[] => {
+  const category = builtinCategory(kind)
+  return category === undefined ? [] : contextFieldsFor(category)
+}
+
+const fieldLine = (kind: V1Kind): string => `${kind}: ${v1Fields(kind).join(', ')}`
 
 /**
  * The rules. The opening sentence is load-bearing beyond the model: the e2e's fake OpenAI
@@ -35,7 +52,7 @@ export const CONTEXT_IMPORT_RULES =
   'author’s words; never invent or embellish. When someone or something is one of the existing ' +
   'sheets listed (or a nickname of one), use that sheet’s name exactly and put the other names ' +
   'in "aliases". Put a fact in a field when one fits, using these field ids per kind: ' +
-  `${ENTITY_KINDS.map(fieldLine).join('; ')}. Keep one-line fields (age, born, gender, type, ` +
+  `${V1_KINDS.map(fieldLine).join('; ')}. Keep one-line fields (age, born, gender, type, ` +
   'category) short. Everything else about it goes in "details" as short paragraphs, each ' +
   'starting with a topic and a colon ("History: …"). What fits no sheet (themes, the plot ' +
   'outline, rules for the book) goes in "notes" the same way. When an image file name or the ' +
@@ -45,7 +62,7 @@ export const CONTEXT_IMPORT_RULES =
   '"images":[{"file":"mara.png","name":"Mara Vell"}]}. Empty lists are fine.'
 
 /** The existing sheets by kind, as the prompt lists them. */
-export type ContextSheetNames = Record<EntityKind, readonly string[]>
+export type ContextSheetNames = Record<V1Kind, readonly string[]>
 
 export interface BuildContextImportPromptInput {
   sheets: ContextSheetNames
@@ -70,14 +87,14 @@ export interface BuiltContextImportPrompt {
 export function sheetNamesBlock(sheets: ContextSheetNames): string {
   let budget = CONTEXT_SHEET_NAMES_CHARS
   const lines: string[] = []
-  for (const kind of ENTITY_KINDS) {
+  for (const kind of V1_KINDS) {
     const kept: string[] = []
     for (const name of sheets[kind]) {
       if (name.length + 2 > budget) break
       budget -= name.length + 2
       kept.push(name)
     }
-    lines.push(`${ENTITY_KIND_LABEL[kind]}: ${kept.length > 0 ? kept.join(', ') : '(none)'}`)
+    lines.push(`${V1_LABEL[kind]}: ${kept.length > 0 ? kept.join(', ') : '(none)'}`)
   }
   return lines.join('\n')
 }

@@ -1,4 +1,4 @@
-import { ENTITY_FIELDS } from '@shared/entities'
+import { categoryOf } from '@shared/categories'
 import type { Entity } from '@shared/ipc/contract'
 import { groupFacts, observedAttributeLabel } from '@shared/observedFacts'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
@@ -13,6 +13,7 @@ import {
 } from '@shared/storyBible'
 import type { NodeRow } from '../../db/schema'
 import { summariesFor } from '../../document/summaryStore'
+import { listCategories } from '../../entity/categoryStore'
 import { listEntities } from '../../entity/entityStore'
 import { factsForEntities } from '../../entity/observedFactStore'
 import { listDocumentTags } from '../../tag/documentTagStore'
@@ -127,6 +128,7 @@ export function storyBibleEntities(
   sceneTitle?: (nodeId: string) => string
 ): StoryBibleEntity[] {
   if (entities.length === 0) return []
+  const categories = listCategories(db)
   const groups = groupFacts(
     factsForEntities(
       db,
@@ -137,7 +139,7 @@ export function storyBibleEntities(
   return entities.flatMap((entity) => {
     const fields =
       entity.template === 'structured'
-        ? ENTITY_FIELDS[entity.kind].flatMap((field) => {
+        ? categoryOf(entity.kind, categories).fields.flatMap((field) => {
             const value = entity.fields[field.id]
             return value === undefined ? [] : [{ id: field.id, label: field.label, value }]
           })

@@ -5,7 +5,14 @@ import type {
   ContextReviewEntity,
   ExistingSheet
 } from './contextLibrary'
-import { applyReviewOps, itemAliases, ReviewOp, type ReviewOp as Op } from './reviewChat'
+import { categoryFromInput } from './categories'
+import {
+  applyReviewOps,
+  itemAliases,
+  resolveKind,
+  ReviewOp,
+  type ReviewOp as Op
+} from './reviewChat'
 
 const record = (id: string, name: string, over: Partial<ContextRecord> = {}): ContextRecord => ({
   id,
@@ -81,6 +88,7 @@ function fixture(): ContextReview {
       paragraphs: ['Ashfall War: burned the south.', 'Theme: debts.'],
       include: true
     },
+    categories: [],
     proposalIds: ['p1'],
     chunks: 1,
     usage: { inputTokens: 0, outputTokens: 0 },
@@ -103,7 +111,8 @@ describe('ReviewOp (F-9.9)', () => {
       item: 'e1',
       kind: 'setting'
     })
-    expect(ReviewOp.safeParse({ op: 'kind', item: 'e1', kind: 'place' }).success).toBe(false)
+    // F-9.11: any spelling parses; `resolveKind` reads it against the review's categories.
+    expect(ReviewOp.safeParse({ op: 'kind', item: 'e1', kind: '' }).success).toBe(false)
     expect(ReviewOp.safeParse({ op: 'merge', items: ['e1'] }).success).toBe(false)
   })
 })
@@ -176,6 +185,30 @@ describe('applyReviewOps (F-9.9)', () => {
 
     const asSetting = byId(run([{ op: 'kind', item: 'e3', kind: 'setting' }]).review, 'e3')!
     expect(asSetting.images).toHaveLength(1)
+  })
+
+  it('moves an item into any library category by id, name, or singular, and skips an unknown one (F-9.11)', () => {
+    for (const kind of ['culture', 'Cultures', 'CULTURE']) {
+      const { review, changes } = run([{ op: 'kind', item: 'e3', kind }])
+      expect(byId(review, 'e3')?.kind).toBe('culture')
+      expect(changes[0]?.text).toBe('“Kael” is now a culture (a new sheet).')
+    }
+    const { review, changes } = run([{ op: 'kind', item: 'e3', kind: 'spaceship' }])
+    expect(byId(review, 'e3')?.kind).toBe('character')
+    expect(changes[0]).toMatchObject({ skipped: true })
+    expect(changes[0]?.text).toContain('there is no category “spaceship”')
+  })
+
+  it('moves an item into a category proposed in the review (F-9.11)', () => {
+    const withShips = fixture()
+    withShips.categories = [
+      { ...categoryFromInput('c-ships', { name: 'Ships', fields: ['Crew'] }, 'ai'), proposed: true }
+    ]
+    const { review } = run([{ op: 'kind', item: 'e3', kind: 'ships' }], [], withShips)
+    expect(byId(review, 'e3')?.kind).toBe('c-ships')
+    expect(resolveKind(withShips, 'c-ships')).toBe('c-ships')
+    expect(resolveKind(withShips, 'ship')).toBe('c-ships')
+    expect(resolveKind(withShips, 'boats')).toBeNull()
   })
 
   it('fills an existing sheet of the new kind by name, or joins the same-named item', () => {
