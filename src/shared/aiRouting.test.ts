@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AI_FEATURE_IDS } from './ai'
+import { AI_FEATURE_IDS, reasoningParam } from './ai'
 import {
   AiRouting,
   DEFAULT_ROUTING_TABLE,
@@ -7,6 +7,7 @@ import {
   autoTable,
   defaultAiRouting,
   hostedAutoTable,
+  resolveReasoning,
   resolveTier
 } from './aiRouting'
 import { bundledPricing } from './hostedPricing'
@@ -44,7 +45,7 @@ describe('model routing (AI-BILLING-SPEC M8, R4)', () => {
 
   it('orders the overrides: per task, then every task, then the table, then the caller', () => {
     const table = autoTable(null)
-    const routing: AiRouting = { all: 'strong', features: { tags: 'fast' } }
+    const routing: AiRouting = { all: 'strong', features: { tags: 'fast' }, reasoning: {} }
     expect(resolveTier({ feature: 'tags', requested: 'strong', routing, table })).toBe('fast')
     expect(resolveTier({ feature: 'summary', requested: 'fast', routing, table })).toBe('strong')
     expect(
@@ -64,8 +65,22 @@ describe('model routing (AI-BILLING-SPEC M8, R4)', () => {
     expect(AiRouting.parse({})).toEqual(defaultAiRouting())
     expect(AiRouting.parse({ all: null, features: { tags: 'strong', gone: 'fast' } })).toEqual({
       all: null,
-      features: { tags: 'strong' }
+      features: { tags: 'strong' },
+      reasoning: {}
     })
+    // 2026-10-07: a reasoning choice this build does not know drops the whole map, not the routing.
+    expect(AiRouting.parse({ reasoning: { fast: 'max' } }).reasoning).toEqual({})
+    expect(AiRouting.parse({ reasoning: { strong: 'off' } }).reasoning).toEqual({ strong: 'off' })
+  })
+
+  it('asks a tier for the author’s reasoning mode, else the bundled table’s (2026-10-07)', () => {
+    const routing = { ...defaultAiRouting(), reasoning: { fast: 'low' as const } }
+    expect(resolveReasoning(routing, 'fast', 'deepseek/deepseek-v4-flash')).toBe('low')
+    expect(resolveReasoning(routing, 'strong', 'deepseek/deepseek-v4-pro')).toBe('default')
+    expect(resolveReasoning(routing, 'strong', 'unknown/model')).toBe('default')
+    expect(reasoningParam('off')).toEqual({ enabled: false })
+    expect(reasoningParam('low')).toEqual({ effort: 'low' })
+    expect(reasoningParam('default')).toBeUndefined()
     expect(ROUTABLE_FEATURES).toEqual(
       AI_FEATURE_IDS.filter((id) => id !== 'authorMode' && id !== 'embeddings')
     )

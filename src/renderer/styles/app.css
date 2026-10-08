@@ -231,8 +231,11 @@ select {
   opacity: 0.55;
   pointer-events: none;
   user-select: none;
-  /* F-5.4: an Agent-mode answer keeps its paragraph breaks while it shows. */
-  white-space: pre-wrap;
+  /*
+   * A multi-paragraph suggestion keeps its breaks as <br> elements (2026-10-07: a newline in the
+   * widget showed as a space at the end of a paragraph); the newlines beside them collapse.
+   */
+  white-space: normal;
 }
 
 /*

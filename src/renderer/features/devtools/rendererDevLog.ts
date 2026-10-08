@@ -46,6 +46,18 @@ export function reportGhostSkip(reason: GhostSkipReason): boolean {
   return true
 }
 
+/**
+ * 2026-10-07: what the window did with an AI answer, or why nothing was shown (a chat insertion
+ * landed at its anchor or at the caret, was accepted or dismissed, never reached an editor), as
+ * a note on that request's inspector row while developer tools are on; a no-op otherwise.
+ */
+export function reportAiNote(requestId: string, note: string): void {
+  if (!useDevToolsStore.getState().enabled) return
+  void ipc()
+    .invoke('devtools:aiNote', { requestId, note: cut(note, DEV_LOG_MESSAGE_MAX) })
+    .catch(() => undefined)
+}
+
 function cut(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
 }

@@ -6,9 +6,16 @@ import {
   priceFor,
   type AiFeatureId,
   type AiProviderId,
+  type ReasoningMode,
   type Tier
 } from '@shared/ai'
-import { autoTable, hostedAutoTable, resolveTier, type AiRouting } from '@shared/aiRouting'
+import {
+  autoTable,
+  hostedAutoTable,
+  resolveReasoning,
+  resolveTier,
+  type AiRouting
+} from '@shared/aiRouting'
 import type { AppStateStore } from '../appState/appStateStore'
 import { getCached, putCached, type CacheEntry, type CachedResponse } from './cacheStore'
 import { dayOf, rollIfNewDay, spend, wouldExceed, type AiUsageState } from './dailyCap'
@@ -71,6 +78,11 @@ export interface AiRequestResult {
   cached: boolean
   /** False when the model is outside `MODEL_PRICING`, so a 0 is "unknown", not "free". */
   priced: boolean
+  /**
+   * Why the answer ended (`stop`, `length`…) when the provider said; null for a cache hit or a
+   * provider that did not say (2026-10-07: a `length` answer was cut off by its output cap).
+   */
+  finishReason?: string | null
 }
 
 /**
@@ -79,8 +91,14 @@ export interface AiRequestResult {
  * the request and never changes it. Absent (tests, the eval harness) the path is unchanged.
  */
 export interface AiRequestTrace {
-  /** The pre-checks passed: where it goes and on what. */
-  prepared(info: { provider: AiProviderId; model: string; tier: Tier; maxTokens: number }): void
+  /** The pre-checks passed: where it goes and on what (and the reasoning mode it asked for). */
+  prepared(info: {
+    provider: AiProviderId
+    model: string
+    tier: Tier
+    maxTokens: number
+    reasoning: ReasoningMode
+  }): void
   /** The provider call began (after the pre-checks and the cache lookup). */
   sent(): void
   /** The first streamed piece arrived. */
@@ -148,6 +166,8 @@ interface PreparedRequest {
   tier: Tier
   model: string
   maxTokens: number
+  /** How much the model may think (2026-10-07); `default` asks nothing of the provider. */
+  reasoning: ReasoningMode
   /** The local estimate of the prompt, what the input budget was checked against. */
   estimatedIn: number
   key: string
@@ -166,10 +186,17 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
   const provider = deps.providers.get()
   if (!provider) throw new NoKeyError('No API key is saved.')
   const maxTokens = Math.min(input.maxTokens, outputBudget(input.feature))
-  const tier = deps.routing
-    ? resolveTier({ feature: input.feature, requested: input.tier, ...deps.routing(provider.id) })
+  const routed = deps.routing?.(provider.id) ?? null
+  const tier = routed
+    ? resolveTier({ feature: input.feature, requested: input.tier, ...routed })
     : input.tier
   const model = provider.resolveModel(tier)
+  // 2026-10-07: the own-key reasoning mode (Settings, else the bundled table); MythScribe Cloud
+  // decides its own on the server, so nothing is asked of it here.
+  const reasoning: ReasoningMode =
+    routed === null || provider.id === 'cloud'
+      ? 'default'
+      : resolveReasoning(routed.routing, tier, model)
   // Called through a closure rather than passed as a method reference: the provider owns it.
   const providerPrice = provider.price
   const price: typeof priceFor = providerPrice
@@ -198,6 +225,7 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
     tier,
     model,
     maxTokens,
+    reasoning,
     estimatedIn,
     key: cacheKey(input, model),
     base: {
@@ -238,12 +266,29 @@ function serveCached(
   }
 }
 
-/** The post-steps after the provider answered: price, ledger row, cache row, the day's and the session's tallies. */
+/**
+ * Whether an answer may be served again from the cache (2026-10-07): never an empty one (a
+ * reasoning model that spent its whole cap thinking answers '', and caching that kept the same
+ * caret context returning nothing), and never a JSON answer the output cap cut off (it does not
+ * parse, so it is a failure, not an answer).
+ */
+export function cacheable(
+  input: Pick<AiRequestInput, 'json'>,
+  answer: { text: string; finishReason: string | null }
+): boolean {
+  if (answer.text.trim() === '') return false
+  return !(input.json === true && answer.finishReason === 'length')
+}
+
+/**
+ * The post-steps after the provider answered: price, ledger row, cache row (only for a
+ * `cacheable` answer), the day's and the session's tallies.
+ */
 function record(
   deps: AiRequestDeps,
   input: AiRequestInput,
   prepared: PreparedRequest,
-  answer: { text: string; usage: CompletionUsage }
+  answer: { text: string; usage: CompletionUsage; finishReason: string | null }
 ): AiRequestResult {
   const { model, key } = prepared
   const cachedTokens = answer.usage.cachedInputTokens ?? null
@@ -264,18 +309,28 @@ function record(
     costUsd,
     cached: false
   })
-  deps.cache.put({
-    key,
-    feature: input.feature,
-    promptVersion: input.promptVersion,
-    model,
-    text: answer.text,
-    usage: answer.usage,
-    createdAt: at
-  })
+  if (cacheable(input, answer)) {
+    deps.cache.put({
+      key,
+      feature: input.feature,
+      promptVersion: input.promptVersion,
+      model,
+      text: answer.text,
+      usage: answer.usage,
+      createdAt: at
+    })
+  }
   deps.dailyCap.spend({ costUsd, tokens })
   deps.session.spend({ costUsd, tokens })
-  return { text: answer.text, model, usage: answer.usage, costUsd, cached: false, priced }
+  return {
+    text: answer.text,
+    model,
+    usage: answer.usage,
+    costUsd,
+    cached: false,
+    priced,
+    ...(answer.finishReason === null ? {} : { finishReason: answer.finishReason })
+  }
 }
 
 /**
@@ -309,6 +364,7 @@ function completionRequest(
     maxTokens: prepared.maxTokens,
     json: input.json,
     ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+    ...(prepared.reasoning === 'default' ? {} : { reasoning: prepared.reasoning }),
     ...(signal === undefined ? {} : { signal })
   }
 }
@@ -333,13 +389,18 @@ export function runAiRequest(deps: AiRequestDeps, input: AiRequestInput): Promis
 
       trace?.sent()
       const result = await prepared.provider.complete(completionRequest(input, prepared, signal))
-      const recorded = record(deps, input, prepared, { text: result.text, usage: result.usage })
+      const finishReason = result.finishReason ?? null
+      const recorded = record(deps, input, prepared, {
+        text: result.text,
+        usage: result.usage,
+        finishReason
+      })
       trace?.done({
         text: recorded.text,
         usage: recorded.usage,
         costUsd: recorded.costUsd,
         cached: false,
-        finishReason: result.finishReason ?? null
+        finishReason
       })
       return recorded
     })
@@ -375,7 +436,8 @@ function tracePrepared(trace: AiRequestTrace | null, prepared: PreparedRequest):
     provider: prepared.provider.id,
     model: prepared.model,
     tier: prepared.tier,
-    maxTokens: prepared.maxTokens
+    maxTokens: prepared.maxTokens,
+    reasoning: prepared.reasoning
   })
 }
 
@@ -428,7 +490,8 @@ export function runAiStream(
       }
       const recorded = record(deps, input, prepared, {
         text,
-        usage: usage ?? { inputTokens: prepared.estimatedIn, outputTokens: estimateTokens(text) }
+        usage: usage ?? { inputTokens: prepared.estimatedIn, outputTokens: estimateTokens(text) },
+        finishReason
       })
       trace?.done({
         text: recorded.text,

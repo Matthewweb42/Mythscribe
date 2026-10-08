@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AI_FEATURE_IDS, AiFeatureId, Tier } from './ai'
+import { AI_FEATURE_IDS, AiFeatureId, ReasoningMode, Tier, bundledReasoning } from './ai'
 import { PricingResult } from './cloudApi'
 
 /**
@@ -54,12 +54,22 @@ export const AiRouting = z.object({
   /** Every task on this tier; null is Auto (the routing table, then the per-task overrides). */
   all: Tier.nullable().default(null),
   /** Per-task overrides; a task not listed follows `all`, then Auto. */
-  features: LenientTierTable.default({})
+  features: LenientTierTable.default({}),
+  /**
+   * 2026-10-07: the reasoning mode per tier on an own key (`ReasoningMode`); a tier not listed
+   * follows the bundled price table (`bundledReasoning`). MythScribe Cloud uses its server table.
+   */
+  reasoning: z.partialRecord(Tier, ReasoningMode).catch({}).default({})
 })
 export type AiRouting = z.infer<typeof AiRouting>
 
 export function defaultAiRouting(): AiRouting {
-  return { all: null, features: {} }
+  return { all: null, features: {}, reasoning: {} }
+}
+
+/** The reasoning mode a request on `tier` asks `model` for: the author's choice, else the table's. */
+export function resolveReasoning(routing: AiRouting, tier: Tier, model: string): ReasoningMode {
+  return routing.reasoning[tier] ?? bundledReasoning(model)
 }
 
 /** What Settings says for each choice. */

@@ -17,7 +17,14 @@ import {
   GHOST_AFTER_CHARS,
   GHOST_BEFORE_CHARS
 } from '../ai'
-import { AgentAccess, AgentEdit, AgentFocus, AgentStep } from '../agent'
+import {
+  AGENT_BRIEF_MAX,
+  AGENT_WORDS_MAX,
+  AgentAccess,
+  AgentEdit,
+  AgentFocus,
+  AgentStep
+} from '../agent'
 import { AiModelChoice, AiRouting } from '../aiRouting'
 import { AiSettings, AiSource, AiSwitch } from '../aiSettings'
 import { ExportOptions, ExportProgress, ExportResult } from '../bookExport'
@@ -26,6 +33,7 @@ import {
   CHAT_MESSAGE_MAX,
   CHAT_PARAGRAPHS_MAX,
   CHAT_PARAGRAPHS_MIN,
+  CHAT_SCENE_CHAR_BUDGET,
   ChatMode,
   ChatRole,
   Conversations
@@ -1821,6 +1829,15 @@ export const contract = {
   },
   /** Ghost text skipped an idle tick (why it sent nothing); an inspector row while the switch is on. */
   'devtools:ghostSkip': { input: z.object({ reason: GhostSkipReason }), output: z.null() },
+  /**
+   * 2026-10-07: what the window did with an AI answer, or why nothing was shown (a chat insertion
+   * landed at its anchor or at the caret, was accepted or dismissed, or never reached an editor):
+   * a note on the newest inspector row of `requestId` while the switch is on.
+   */
+  'devtools:aiNote': {
+    input: z.object({ requestId: z.string().max(200), note: z.string().max(DEV_LOG_MESSAGE_MAX) }),
+    output: z.null()
+  },
   /** Empties the live log or the AI inspector. */
   'devtools:clear': { input: z.object({ what: DevClearTarget }), output: z.null() },
   /** Opens Chromium's DevTools for the focused window; refused (VALIDATION) while the switch is off. */
@@ -1978,6 +1995,26 @@ export const contract = {
       requestId: z.string()
     }),
     output: AiAgentResult
+  },
+  /**
+   * 2026-10-07: the prose behind one of the agent's write intents, drafted in the author's voice
+   * and fidelity-checked: an insertion (`passage` null; `before` is the scene's text before the
+   * insertion point) or a rewrite of `passage` (`before` and `after` its context). The first
+   * draft streams as `ai:agentDraftDelta` events for `requestId`; the answer is the final text
+   * (after any regenerate), its proposal (F-14.5), and the fidelity flag. Expected AI failures
+   * come back as data.
+   */
+  'ai:agentDraft': {
+    input: z.object({
+      nodeId: z.string(),
+      brief: z.string().trim().min(1).max(AGENT_BRIEF_MAX),
+      words: z.number().int().min(0).max(AGENT_WORDS_MAX),
+      before: z.string().max(CHAT_SCENE_CHAR_BUDGET),
+      after: z.string().max(REWRITE_CONTEXT_CHARS),
+      passage: z.string().min(REWRITE_TEXT_MIN).max(REWRITE_TEXT_MAX).nullable(),
+      requestId: z.string()
+    }),
+    output: AiChatResult
   },
   /**
    * One Story Intelligence turn (F-5.7). `nodeId` is the active document (null with none open;
@@ -2547,6 +2584,13 @@ export const events = {
   'ai:chatDelta': z.object({ requestId: z.string(), delta: z.string() }),
   /** One lookup of a chat agent turn (F-5.22), sent as it starts; the chat shows it on the turn with this `requestId`. */
   'ai:agentStep': z.object({ requestId: z.string(), step: AgentStep }),
+  /**
+   * 2026-10-07: a streamed piece of a chat agent turn's answer text, for the turn with this
+   * `requestId`; `reset` voids what streamed so far (the step was cut off and is asked again).
+   */
+  'ai:agentDelta': z.object({ requestId: z.string(), delta: z.string(), reset: z.boolean() }),
+  /** 2026-10-07: a streamed piece of an `ai:agentDraft` first draft, for the draft with this `requestId`. */
+  'ai:agentDraftDelta': z.object({ requestId: z.string(), delta: z.string() }),
   /** A streamed piece of a rewrite's first draft (F-14.10); the panel appends it to the draft with this `requestId`. */
   'ai:rewriteDelta': z.object({ requestId: z.string(), delta: z.string() }),
   /** A node's background summary run changed status (F-5.6): pending → idle or failed; the pane refetches `summary:get`. */

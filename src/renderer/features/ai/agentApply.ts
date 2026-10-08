@@ -146,7 +146,7 @@ export async function applyAgentEdit(
 }
 
 /** Opens a document in the editor pane (the tree's selection drives it) and answers its live editor. */
-async function openEditor(nodeId: string): Promise<Editor> {
+export async function openEditor(nodeId: string): Promise<Editor> {
   useTreeStore.getState().select(nodeId)
   const editor = await editorFor(nodeId)
   if (editor === null || editor.isDestroyed) throw new AgentEditError('The scene did not open')

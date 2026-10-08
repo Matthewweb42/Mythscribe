@@ -318,6 +318,24 @@ describe('generateGhostText (F-5.3)', () => {
     )
   })
 
+  it('treats an answer that was all reasoning as a failure, and never caches it (2026-10-07)', async () => {
+    complete.mockResolvedValue({
+      text: '',
+      model: 'gpt-5.4-mini',
+      usage: { inputTokens: 120, outputTokens: 60, reasoningTokens: 60 },
+      finishReason: 'length'
+    })
+    expect(await failure()).toEqual({
+      code: 'PROVIDER',
+      message:
+        'The model used its whole output allowance (60 tokens, 60 of them reasoning) before writing anything.'
+    })
+    // The same caret context asks again rather than returning the empty answer from the cache.
+    answer('Somewhere ahead the river was rising.')
+    expect((await ask()).text).toBe(' Somewhere ahead the river was rising.')
+    expect(complete).toHaveBeenCalledTimes(2)
+  })
+
   it('never asks for more than the ghost-text output budget', async () => {
     setWritingPresets(db, {
       active: 'custom',

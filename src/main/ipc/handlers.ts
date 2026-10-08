@@ -122,12 +122,14 @@ import { createProposal, listPendingProposals, settleProposal } from '../ai/prop
 import { clearVoiceNotes } from '../ai/voiceNotes'
 import {
   AiCancelledError,
+  AiCutOffError,
   AiProviderError,
   AiTrialEndedError,
   NoKeyError
 } from '../ai/providers/types'
 import { runQuery } from '../ai/query'
 import { runAgent } from '../ai/agent'
+import { draftForAgent } from '../ai/agentDraft'
 import { runWhatNext } from '../ai/whatNext'
 import { runRoute } from '../ai/route'
 import { runSuggestNotes, runSuggestSynopsis } from '../ai/sceneSuggest'
@@ -1986,6 +1988,10 @@ export function registerHandlers({
     devtools.ghostSkip(reason)
     return null
   })
+  register('devtools:aiNote', ({ requestId, note }) => {
+    devtools.annotate(requestId, note)
+    return null
+  })
   register('devtools:clear', ({ what }) => {
     devtools.clear(what)
     return null
@@ -2200,6 +2206,10 @@ export function registerHandlers({
           requestId
         }
       } catch (err) {
+        // 2026-10-07: an answer that was all reasoning is a failure the inspector explains.
+        if (err instanceof AiCutOffError) {
+          devtools.annotate(requestId, `No suggestion: ${err.message} Treated as a failure.`)
+        }
         if (err instanceof AiProviderError)
           return { ...aiFailure(err.code, err.message), requestId }
         throw err
@@ -2788,7 +2798,12 @@ export function registerHandlers({
           db,
           deps,
           { nodeId, message, history, access, focus, requestId },
-          (step) => emit(windows(), 'ai:agentStep', { requestId, step })
+          (step) => emit(windows(), 'ai:agentStep', { requestId, step }),
+          {
+            answer: (delta) => emit(windows(), 'ai:agentDelta', { requestId, delta, reset: false }),
+            reset: () => emit(windows(), 'ai:agentDelta', { requestId, delta: '', reset: true }),
+            note: (stepId, note) => devtools.annotate(stepId, note)
+          }
         )
         const { answer, query, steps, changes, dropped, usage, costUsd, cached, model } = result
         const proposal = createProposal(db, {
@@ -2819,6 +2834,59 @@ export function registerHandlers({
           requestId
         }
       } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
+
+  // 2026-10-07: the prose behind one of the agent's write intents, streamed as
+  // `ai:agentDraftDelta` while the first draft arrives. The answer is a proposal (F-14.5) of the
+  // drafting feature (`chat` for an insertion, `rewrite` for a passage), settled by the renderer
+  // when the author accepts or dismisses the ghost text or the change.
+  register(
+    'ai:agentDraft',
+    async ({ nodeId, brief, words, before, after, passage, requestId }): Promise<AiChatResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const deps = requestDeps(db)
+        const result = await draftForAgent(
+          db,
+          deps,
+          { nodeId, brief, words, before, after, passage, requestId },
+          (delta) => emit(windows(), 'ai:agentDraftDelta', { requestId, delta })
+        )
+        const { text, usage, costUsd, cached, model, flagged, violation } = result
+        const proposal = createProposal(db, {
+          feature: passage === null ? 'chat' : 'rewrite',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model,
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          costUsd,
+          cached,
+          content: text,
+          flagged,
+          violation
+        })
+        return {
+          ok: true,
+          text,
+          usage,
+          costUsd,
+          cached,
+          model,
+          flagged,
+          violation,
+          proposalId: proposal.id,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiCutOffError) {
+          devtools.annotate(requestId, `Nothing drafted: ${err.message} Treated as a failure.`)
+        }
         if (err instanceof AiProviderError)
           return { ...aiFailure(err.code, err.message), requestId }
         throw err

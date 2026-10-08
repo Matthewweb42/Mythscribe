@@ -45,6 +45,14 @@ export interface ChatInput {
    * regenerate under `regenRequestId(id)`. Optional so the eval harness can run without one.
    */
   requestId?: string
+  /**
+   * 2026-10-07, the chat agent's drafted insertions (`draftInsertion`): the scene text the
+   * draft continues, the text before the insertion point (at most `CHAT_SCENE_CHAR_BUDGET`
+   * characters), in place of the scene's head. Absent, the scene's text rides as before.
+   */
+  sceneText?: string
+  /** 2026-10-07: Agent mode streams its first draft to `onDelta` too (the regenerate does not). */
+  streamDraft?: boolean
 }
 
 export interface ChatResult {
@@ -64,6 +72,8 @@ export interface ChatResult {
   flagged: boolean
   /** The first violation's message when flagged; null otherwise and always in Plan mode. */
   violation: string | null
+  /** Why the call that produced `text` ended, when the provider said (2026-10-07). */
+  finishReason?: string
 }
 
 /** Below this many words a draft is scored as a fragment (`checkGhostTextFidelity`), above as a document. */
@@ -104,7 +114,8 @@ export async function runChat(
   assertFeatureAllowed(settings, 'chat')
   const agent = input.mode === 'agent'
 
-  const context = buildChatContext(db, { nodeId: input.nodeId, message: input.message })
+  const built = buildChatContext(db, { nodeId: input.nodeId, message: input.message })
+  const context = input.sceneText === undefined ? built : { ...built, sceneText: input.sceneText }
   const preset = agent ? resolvePreset(getWritingPresets(db)) : null
   const pov = context.sceneMeta?.pov.trim() ?? ''
   const profile = agent ? buildVoiceProfile(db, { pov: pov || undefined }) : null
@@ -176,13 +187,17 @@ export async function runChat(
     return shown(answer, answer.text, prompt.version)
   }
 
-  const first = await runAiRequest(deps, {
+  const firstInput = {
     ...request,
     ...requestId,
     messages: prompt.messages,
     contextHash: sha256(JSON.stringify(hashed)),
     promptVersion: prompt.version
-  })
+  }
+  const first =
+    input.streamDraft === true
+      ? await runAiStream(deps, firstInput, onDelta)
+      : await runAiRequest(deps, firstInput)
   const firstText = postProcessChatText(first.text)
   // The fidelity check (F-14.7): skipped with nothing to check against (no voice block at all)
   // or an empty draft; the banned phrases (F-14.2) alone make the block non-null.
@@ -274,6 +289,7 @@ function shown(call: AiRequestResult, text: string, version: string): ChatResult
     model: call.model,
     promptVersion: version,
     flagged: false,
-    violation: null
+    violation: null,
+    ...(call.finishReason ? { finishReason: call.finishReason } : {})
   }
 }

@@ -272,7 +272,9 @@ export async function handleAiComplete(request: Request, deps: AiDeps): Promise<
     messages: body.messages,
     maxTokens: body.maxTokens,
     ...(body.json === undefined ? {} : { json: body.json }),
-    ...(body.temperature === undefined ? {} : { temperature: body.temperature })
+    ...(body.temperature === undefined ? {} : { temperature: body.temperature }),
+    // 2026-10-07: the model's reasoning mode is server config (the price table's entry).
+    ...(price.reasoning === undefined ? {} : { reasoning: price.reasoning })
   }
 
   if (body.stream) return streamAnswer(metered, upstream, params)

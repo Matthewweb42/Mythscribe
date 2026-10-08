@@ -352,6 +352,10 @@ function MessageLog(): React.JSX.Element {
     const requestId = conversation ? s.pending[conversation.id] : undefined
     return requestId === undefined ? undefined : s.agentSteps[requestId]
   })
+  const liveAnswer = useAssistantStore((s) => {
+    const requestId = conversation ? s.pending[conversation.id] : undefined
+    return requestId === undefined ? '' : (s.agentAnswer[requestId] ?? '')
+  })
   const log = useRef<HTMLDivElement>(null)
   const messages = conversation?.messages ?? []
   const lastId = messages[messages.length - 1]?.id ?? null
@@ -361,7 +365,7 @@ function MessageLog(): React.JSX.Element {
   useEffect(() => {
     const element = log.current
     if (element) element.scrollTop = element.scrollHeight
-  }, [lastId, lastLength, stepCount])
+  }, [lastId, lastLength, stepCount, liveAnswer.length])
 
   return (
     <div
@@ -387,6 +391,7 @@ function MessageLog(): React.JSX.Element {
           busy={pending}
           cached={cached[message.id] === true}
           liveSteps={index === messages.length - 1 ? (liveSteps ?? []) : []}
+          liveAnswer={index === messages.length - 1 ? liveAnswer : ''}
         />
       ))}
     </div>
@@ -407,13 +412,16 @@ function Turn({
   pending,
   busy,
   cached,
-  liveSteps
+  liveSteps,
+  liveAnswer
 }: {
   message: ChatMessage
   pending: boolean
   busy: boolean
   cached: boolean
   liveSteps: readonly AgentStep[]
+  /** 2026-10-07: the agent's answer as it streams, shown in place of "Thinking…". */
+  liveAnswer: string
 }): React.JSX.Element {
   const mine = message.role === 'user'
   return (
@@ -430,8 +438,14 @@ function Turn({
       ) : null}
       {!mine && message.content === '' && pending ? (
         <div role="status" data-testid="chat-pending" className="flex flex-col gap-0.5">
-          <p className="m-0 text-xs text-fg-muted">Thinking…</p>
           <AgentSteps steps={liveSteps} live />
+          {liveAnswer === '' ? (
+            <p className="m-0 text-xs text-fg-muted">Thinking…</p>
+          ) : (
+            <p data-testid="chat-streaming" className="m-0 break-words whitespace-pre-wrap text-sm">
+              {liveAnswer}
+            </p>
+          )}
         </div>
       ) : !mine && message.directions !== null ? (
         <Directions directions={message.directions} busy={busy} />

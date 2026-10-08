@@ -28,6 +28,7 @@ import {
 } from '@renderer/features/editor/activeEditorStore'
 import { resetDocumentStore } from '@renderer/features/editor/documentStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
+import { ghostOf } from '@renderer/features/editor/ghostText'
 import { locateText } from '@renderer/features/editor/locateText'
 import { SETTINGS_SAVE_DELAY_MS } from '@renderer/features/editor/settingsStore'
 import { flushPendingSaves, resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -65,6 +66,9 @@ interface PendingWhatNext {
   resolve: (result: AiWhatNextResult) => void
   reject: (err: Error) => void
 }
+
+/** What the fake `ai:agentDraft` drafts for an agent's insertion (2026-10-07). */
+const DRAFTED = 'Rain followed her up the ridge.'
 
 let sets: PendingSet[]
 let whatNexts: PendingWhatNext[]
@@ -141,6 +145,21 @@ function deferredClient(stored: Conversations): IpcClient {
       if (channel === 'ai:cancel') {
         cancels.push((input as Input<'ai:cancel'>).requestId)
         return { cancelled: true } as Output<C>
+      }
+      if (channel === 'ai:agentDraft') {
+        const { requestId } = input as Input<'ai:agentDraft'>
+        return {
+          ok: true,
+          text: DRAFTED,
+          usage: { inputTokens: 400, outputTokens: 20 },
+          costUsd: 0.0001,
+          cached: false,
+          model: 'gpt-fake',
+          flagged: false,
+          violation: null,
+          proposalId: `draft-${requestId}`,
+          requestId
+        } as Output<C>
       }
       throw new Error(`unexpected ${channel}`)
     },
@@ -352,7 +371,8 @@ describe('useAssistantStore load and persistence (F-5.4)', () => {
     store().newConversation()
     store().clear()
     expect(store().conversations).toBeNull()
-    expect(unsubscribed).toBe(1)
+    // The lookup steps and (2026-10-07) the streamed answer.
+    expect(unsubscribed).toBe(2)
     expect(stepListener).toBeNull()
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(0)
@@ -943,6 +963,85 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
     expect(renames).toEqual([{ id: 'sc-1', title: 'The ridge' }])
     expect(changes().map((c) => c.status)).toEqual(['applied', 'pending'])
     expect(settles).toEqual([])
+  })
+
+  describe('insertions as ghost text (2026-10-07)', () => {
+    const INSERT = {
+      kind: 'insert',
+      nodeId: 'sc-1',
+      title: 'Chapter 1 › Scene 1',
+      after: 'Mara climbed the ridge alone.',
+      text: '',
+      brief: 'Rain follows her.',
+      words: 40
+    } as const
+    let editor: Editor
+
+    beforeEach(() => {
+      editor = new Editor({
+        extensions: buildExtensions({
+          sceneBreak: '~~~',
+          onSave: () => {},
+          inlineTagNodeId: 'sc-1'
+        }),
+        content: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Mara climbed the ridge alone.' }]
+            }
+          ]
+        }
+      })
+      useActiveEditorStore.getState().set('sc-1', editor)
+    })
+    afterEach(() => {
+      editor.destroy()
+    })
+
+    async function answerWithInsert(auto: boolean): Promise<string> {
+      useTreeStore.setState(buildIndex(treeFixture))
+      inMode(auto ? 'auto' : 'ask')
+      await store().load()
+      const asking = store().send('Add the rain.')
+      await settle()
+      const request = queries[0]
+      if (!request) throw new Error('nothing was asked')
+      request.resolve(
+        ok(request.input.requestId, 'Adding the rain.', {
+          changes: [{ edit: INSERT, violation: null }]
+        })
+      )
+      await asking
+      for (let i = 0; i < 5; i++) await settle()
+      return active().messages.at(-1)?.id ?? ''
+    }
+
+    const text = (): string => editor.state.doc.textBetween(0, editor.state.doc.content.size, '\n')
+
+    it('in Auto the draft lands after its anchor and is accepted, logged with Undo', async () => {
+      const messageId = await answerWithInsert(true)
+      expect(text()).toBe(`Mara climbed the ridge alone.\n${DRAFTED}`)
+      const change = active().messages.at(-1)?.agent?.changes[0]
+      expect(change).toMatchObject({ status: 'applied', edit: { text: DRAFTED } })
+      expect(change?.proposalId).toMatch(/^draft-/)
+      expect(settles).toContainEqual({ id: change?.proposalId, status: 'accepted', note: null })
+      await store().undoChange(messageId, change?.id ?? '')
+      expect(text()).toBe('Mara climbed the ridge alone.')
+    })
+
+    it('in Ask the draft waits in the editor; the card mirrors it and its Dismiss skips it', async () => {
+      const messageId = await answerWithInsert(false)
+      const change = active().messages.at(-1)?.agent?.changes[0]
+      expect(change?.status).toBe('shown')
+      expect(ghostOf(editor.state)?.text).toBe(`\n\n${DRAFTED}`)
+      expect(text()).toBe('Mara climbed the ridge alone.')
+      store().skipChange(messageId, change?.id ?? '')
+      for (let i = 0; i < 3; i++) await settle()
+      expect(active().messages.at(-1)?.agent?.changes[0]?.status).toBe('skipped')
+      expect(ghostOf(editor.state)).toBeNull()
+    })
   })
 })
 

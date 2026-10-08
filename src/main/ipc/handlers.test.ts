@@ -3224,6 +3224,10 @@ describe('ai:agent (F-5.22)', () => {
         ]
       })
     )
+    // 2026-10-07: every step streams; the stream answers with what `complete` was told to say.
+    streamChunks = [
+      (request) => complete(request).then((reply) => ({ delta: reply.text, usage: reply.usage }))
+    ]
     const result = await invoke('ai:agent', ask(scene.id))
     if (!result.ok) throw new Error(result.message)
     expect(stepsSent()).toEqual([
@@ -3231,6 +3235,14 @@ describe('ai:agent (F-5.22)', () => {
         'ai:agentStep',
         { requestId: 'ag-1', step: { tool: 'outline', label: 'Reading the outline…' } }
       ]
+    ])
+    // The answer text streamed to the chat as it arrived.
+    expect(
+      vi
+        .mocked(fakeWin.webContents.send)
+        .mock.calls.filter(([channel]) => channel === 'ai:agentDelta')
+    ).toEqual([
+      ['ai:agentDelta', { requestId: 'ag-1', delta: 'Under the elm.', reset: false }]
     ])
     expect(result.steps).toHaveLength(1)
     expect(result.usage).toEqual({ inputTokens: 800, outputTokens: 60 })
@@ -3242,7 +3254,8 @@ describe('ai:agent (F-5.22)', () => {
           nodeId: scene.id,
           title: loadAgentProject(manager.require().connection.orm).titleOf(scene.id),
           find: 'Mara copied the ledger twice',
-          replace: 'Mara copied it twice'
+          replace: 'Mara copied it twice',
+          brief: ''
         },
         violation: null
       }
@@ -6294,7 +6307,7 @@ describe('developer tools handlers (2026-10-07)', () => {
     expect(log[1]!.message).toMatch(/^tree:rename failed: [A-Z_]+: /)
   })
 
-  it('says why ghost text showed nothing: empty after post-processing, with the finish reason and reasoning tokens', async () => {
+  it('says why ghost text showed nothing: all reasoning (a failure, 2026-10-07), or empty after post-processing', async () => {
     const scene = await sceneWithKey()
     await invoke('devtools:setEnabled', { on: true })
     complete.mockResolvedValueOnce({
@@ -6309,7 +6322,20 @@ describe('developer tools handlers (2026-10-07)', () => {
       after: '',
       requestId: 'g-3'
     })
-    expect(result).toMatchObject({ ok: true, text: '' })
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER' })
+    complete.mockResolvedValueOnce({
+      text: '   ',
+      model: 'gpt-fake',
+      usage: { inputTokens: 900, outputTokens: 2 },
+      finishReason: 'stop'
+    })
+    const empty = await invoke('ai:ghostText', {
+      nodeId: scene,
+      before: BEFORE,
+      after: '',
+      requestId: 'g-4'
+    })
+    expect(empty).toMatchObject({ ok: true, text: '' })
     await invoke('devtools:ghostSkip', { reason: 'visible' })
 
     const { requests } = await invoke('devtools:snapshot', undefined)
@@ -6321,10 +6347,13 @@ describe('developer tools handlers (2026-10-07)', () => {
       answerChars: 0
     })
     expect(requests[0]!.note).toBe(
-      'No suggestion: empty after post-processing (raw answer 0 characters, finish reason length, 40 of 40 output tokens, 40 of them reasoning)'
+      'No suggestion: The model used its whole output allowance (40 tokens, 40 of them reasoning) before writing anything. Treated as a failure.'
     )
-    expect(requests[1]).toMatchObject({ feature: 'ghostText', status: 'skipped' })
-    expect(requests[1]!.note).toBe('A suggestion is showing')
+    expect(requests[1]!.note).toBe(
+      'No suggestion: empty after post-processing (raw answer 3 characters, finish reason stop, 2 of 40 output tokens)'
+    )
+    expect(requests[2]).toMatchObject({ feature: 'ghostText', status: 'skipped' })
+    expect(requests[2]!.note).toBe('A suggestion is showing')
 
     const text = await invoke('devtools:requestText', { id: requests[0]!.id })
     expect(text?.response).toBe('')
@@ -6542,10 +6571,14 @@ describe('ai handlers (F-5.1)', () => {
 
   it('stores the model-choice overrides and answers them with the Cloud table (M8, R4)', async () => {
     expect(await invoke('ai:getModelChoice', undefined)).toEqual({
-      routing: { all: null, features: {} },
+      routing: { all: null, features: {}, reasoning: {} },
       cloudPricing: null
     })
-    const routing = { all: 'strong' as const, features: { tags: 'fast' as const } }
+    const routing = {
+      all: 'strong' as const,
+      features: { tags: 'fast' as const },
+      reasoning: { strong: 'low' as const }
+    }
     expect(await invoke('ai:setRouting', routing)).toEqual({ routing, cloudPricing: null })
     expect(await invoke('ai:getModelChoice', undefined)).toMatchObject({ routing })
   })

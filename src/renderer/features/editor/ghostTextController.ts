@@ -95,6 +95,12 @@ export function caretWindow(state: EditorState): { before: string; after: string
   return { before, after }
 }
 
+/** VibeWrite's own suggestion is showing (not a pinned chat insertion, which its landing owns). */
+function ownGhostShowing(editor: Editor): boolean {
+  const ghost = ghostOf(editor.state)
+  return ghost !== null && ghost.pin === null
+}
+
 export interface GhostConfig {
   /** VibeWrite is on, the dial allows ghost text, and this editor is the single-document view. */
   armed: boolean
@@ -210,6 +216,8 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
     if (disposed || result.requestId !== latestRequestId || editedSinceSend || !focused) {
       return
     }
+    // 2026-10-07: a chat insertion landed meanwhile; VibeWrite never replaces it.
+    if (ghostOf(editor.state) !== null) return
     deps.onError(null)
     // Set the id after the command: a suggestion this one replaces settles under its own id first.
     if (
@@ -308,7 +316,7 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
       editor.off('selectionUpdate', onSelection)
       editor.off('focus', onFocus)
       editor.off('blur', onBlur)
-      if (!editor.isDestroyed && ghostOf(editor.state) !== null) editor.commands.clearGhost()
+      if (!editor.isDestroyed && ownGhostShowing(editor)) editor.commands.clearGhost()
       if (storage?.onSettle === onSettle) storage.onSettle = null
     }
   }
@@ -372,7 +380,7 @@ export function useGhostTextController({
     if (!editor) return
     if (!armed) {
       sessionRef.current?.cancelPending()
-      if (!editor.isDestroyed && ghostOf(editor.state) !== null) editor.commands.clearGhost()
+      if (!editor.isDestroyed && ownGhostShowing(editor)) editor.commands.clearGhost()
     } else {
       session = { ...session, turnOffToastShown: false, failedAt: null }
     }

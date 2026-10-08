@@ -704,7 +704,8 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
     nodeId: 'sc-1',
     title: 'Chapter 1 › Scene 1',
     find: 'Mara climbed the ridge alone.',
-    replace: 'Mara went up the ridge alone.'
+    replace: 'Mara went up the ridge alone.',
+    brief: ''
   } as const
   const DELETE = { kind: 'delete', target: 'node', id: 'sc-2', name: 'Scene 2' } as const
 
@@ -740,6 +741,8 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
     status: 'pending',
     violation: null,
     error: null,
+    proposalId: null,
+    notice: null,
     ...over
   })
 

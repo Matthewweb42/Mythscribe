@@ -321,7 +321,8 @@ import {
   NOTES_SUGGEST_PROMPT_VERSION,
   type BuildNotesSuggestPromptInput
 } from '../prompts/notesSuggest.v1'
-import { renderAgentFocus } from '../prompts/agent.v1'
+import { buildAgentPrompt, renderAgentFocus } from '../prompts/agent.v1'
+import { buildAgentPromptV2 } from '../prompts/agent.v2'
 import { fitAgentPrompt } from '../agent'
 
 /**
@@ -1998,10 +1999,14 @@ function agentCase(
   name: string,
   note: string,
   input: Parameters<typeof fitAgentPrompt>[0],
-  expected: 'tool' | 'answer'
+  expected: 'tool' | 'answer',
+  build: (
+    input: Parameters<typeof fitAgentPrompt>[0]
+  ) =>
+    ReturnType<typeof buildAgentPrompt> | ReturnType<typeof buildAgentPromptV2> = buildAgentPrompt
 ): EvalCase {
   // Fitted to the input budget exactly as the feature fits every step (token rule 8).
-  const built = fitAgentPrompt(input)
+  const built = fitAgentPrompt(input, build)
   return {
     version: built.version,
     name,
@@ -3047,6 +3052,69 @@ export const EVAL_CASES: EvalCase[] = [
       final: true
     },
     'answer'
+  ),
+  // agent.v2 (2026-10-07): no prose in a step and no voice block; the same three shapes, plus
+  // the one retry of a reply that was cut off.
+  agentCase(
+    'fresh',
+    'a read run with no document open and no history: the first step of a Query question',
+    {
+      access: 'read',
+      voice: null,
+      focus: null,
+      history: [],
+      message: 'Who owes the mill money?',
+      steps: [],
+      final: false
+    },
+    'tool',
+    buildAgentPromptV2
+  ),
+  agentCase(
+    'full',
+    'a write run on the open scene with two turns and one lookup made (no voice block: the draft carries it)',
+    {
+      access: 'write',
+      voice: null,
+      focus: AGENT_FOCUS,
+      history: CHAT_HISTORY,
+      message: 'Tighten the last paragraph and add a beat where Tomas looks at the elm.',
+      steps: [AGENT_STEP],
+      final: false
+    },
+    'answer',
+    buildAgentPromptV2
+  ),
+  agentCase(
+    'maxed',
+    'the last step of a write run as the fit leaves it: every focus part at its cap, six lookups of full results, and the final turn',
+    {
+      access: 'write',
+      voice: null,
+      focus: AGENT_MAXED_FOCUS,
+      history: CHAT_HISTORY,
+      message: FIXTURE_PASSAGE.repeat(3).slice(0, 2_000),
+      steps: Array.from({ length: AGENT_MAX_STEPS }, () => AGENT_MAXED_STEP),
+      final: true
+    },
+    'answer',
+    buildAgentPromptV2
+  ),
+  agentCase(
+    'retry',
+    'the one retry of a write step whose reply was cut off: the full case plus the retry turn, at the larger cap',
+    {
+      access: 'write',
+      voice: null,
+      focus: AGENT_FOCUS,
+      history: CHAT_HISTORY,
+      message: 'Tighten the last paragraph and add a beat where Tomas looks at the elm.',
+      steps: [AGENT_STEP],
+      final: false,
+      retry: true
+    },
+    'answer',
+    buildAgentPromptV2
   ),
   contextImportCase(
     'fixture',
