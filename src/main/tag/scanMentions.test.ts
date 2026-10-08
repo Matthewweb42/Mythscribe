@@ -141,6 +141,27 @@ describe('scanMentions (F-4.12)', () => {
     expect(listMentionsForNode(db, scene())).toEqual([])
   })
 
+  it('counts an alias as a mention of its tag, and rescans when the aliases change (F-4.14)', () => {
+    const rynna = createTag(db, { name: 'Rynna Falsire', category: 'character' })
+    write(scene(), 'Rynna waited for the High Crown.')
+    expect(scanMentions(db, scene(), at(0))).toEqual({ changed: false, scanned: true })
+    expect(listMentionsForNode(db, scene())).toEqual([])
+
+    updateTag(db, rynna.id, { aliases: ['Rynna', 'High Crown'] })
+    expect(scanMentions(db, scene(), at(1))).toEqual({ changed: true, scanned: true })
+    expect(listMentionsForNode(db, scene())).toEqual([
+      {
+        tagId: rynna.id,
+        nodeId: scene(),
+        count: 2,
+        ranges: [
+          [1, 6],
+          [22, 32]
+        ]
+      }
+    ])
+  })
+
   it('empties the rows of a document the author cleared', () => {
     const rose = createTag(db, { name: 'Rose', category: 'character' })
     write(scene(), 'Rose waited.')

@@ -368,6 +368,13 @@ export interface ExistingSheet {
   body: string | null
   image: string | null
   tagId: string | null
+  /** F-4.14: the sheet's other names (its tag's, when linked); a record may match by any of them. */
+  aliases?: readonly string[]
+}
+
+/** Every name key a sheet answers to: its name, then its aliases (F-4.14). */
+function sheetKeys(sheet: ExistingSheet): string[] {
+  return [sheet.name, ...(sheet.aliases ?? [])].map(toEntityNameKey).filter((key) => key !== '')
 }
 
 const norm = (text: string): string => text.replace(/\s+/g, ' ').trim().toLowerCase()
@@ -473,7 +480,9 @@ function groupRecords(records: readonly ContextRecord[]): ContextRecord[][] {
 
 /**
  * The sheet a group of records describes: an existing sheet of the kind named by a record's own
- * name first, then by an alias; null for a new one. `taken` keeps two groups off one sheet.
+ * name first, then by a record's alias, then by one of the sheet's own aliases (F-4.14: the
+ * file says "Rynna", the sheet "Rynna Falsire" with the alias Rynna); null for a new one.
+ * `taken` keeps two groups off one sheet.
  */
 function matchSheet(
   group: readonly ContextRecord[],
@@ -490,6 +499,12 @@ function matchSheet(
   for (const record of group) {
     for (const key of keysOf(record)) {
       const hit = byKey.get(key)
+      if (hit) return hit
+    }
+  }
+  for (const record of group) {
+    for (const key of keysOf(record)) {
+      const hit = ofKind.find((sheet) => sheetKeys(sheet).includes(key))
       if (hit) return hit
     }
   }
@@ -570,7 +585,7 @@ function attachImages(
     ...existing
       .filter((sheet) => kindHasImage(sheet.kind))
       .filter((sheet) => !items.some((item) => item.existingId === sheet.id))
-      .map((sheet) => ({ keys: [toEntityNameKey(sheet.name)], item: null, sheet }))
+      .map((sheet) => ({ keys: sheetKeys(sheet), item: null, sheet }))
   ]
   for (const image of images) {
     const hint = hints.find((h) => h.fileName === image.name)

@@ -175,4 +175,22 @@ describe('findMentions', () => {
     const odd: MentionCandidate = { id: 't-odd', name: 'a.b', category: 'tone' }
     expect(surface(doc, rangesOf(doc, [odd], odd.id))).toEqual(['a.b'])
   })
+
+  it('counts every alias as a mention of its tag, in document order, under the same rules (F-4.14)', () => {
+    const rynna: MentionCandidate = {
+      id: 't-rynna',
+      name: 'rynna-falsire',
+      category: 'character',
+      aliases: ['High Crown Falsire', 'Rynna', 'rynna-falsire', '???']
+    }
+    const doc = docOf(
+      paragraph('The High Crown Falsire spoke. Rynna Falsire listened, and Rynna left.'),
+      paragraph('A rynna is not her.')
+    )
+    expect(surface(doc, rangesOf(doc, [rynna], rynna.id))).toEqual([
+      'High Crown Falsire',
+      'Rynna Falsire',
+      'Rynna'
+    ])
+  })
 })

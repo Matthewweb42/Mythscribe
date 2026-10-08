@@ -12,6 +12,7 @@ import { getObservedDismissed } from '../project/settingsStore'
 import { listNodes } from '../tree/treeStore'
 import { createTag, deleteTag, getTagWithUsage, listTags, updateTag } from '../tag/tagStore'
 import {
+  addEntityAliases,
   createEntity,
   deleteEntity,
   getEntity,
@@ -83,6 +84,7 @@ describe('createEntity', () => {
       image: null,
       // F-9.4: the tag of the name comes with the entity.
       tagId: tagOf(id)?.id,
+      aliases: [],
       origin: 'author',
       created: '2026-09-22T10:00:00.000Z',
       modified: '2026-09-22T10:00:00.000Z'
@@ -377,7 +379,12 @@ describe('the tag link (F-9.4)', () => {
   it('links the tag the bank already carries, whatever its category, and creates no second one', () => {
     const rose = createTag(db, { name: 'Rose', category: 'plotThread' })
     const { entity: created, tagChange } = createEntity(db, { kind: 'character', name: 'Rose' })
-    expect(tagChange).toEqual({ tag: getTagWithUsage(db, rose.id), created: false, renamed: false })
+    expect(tagChange).toEqual({
+      tag: getTagWithUsage(db, rose.id),
+      created: false,
+      renamed: false,
+      aliased: false
+    })
     expect(created.tagId).toBe(rose.id)
     expect(listTags(db).map((t) => t.name)).toEqual(['rose'])
     // A second entity of another kind takes the same tag rather than a duplicate name.
@@ -416,7 +423,12 @@ describe('the tag link (F-9.4)', () => {
     const vell = createTag(db, { name: 'mara-vell', category: 'character' })
     const mara = create({ kind: 'character', name: 'Mara' })
     const { entity: renamed, tagChange } = updateEntity(db, mara.id, { name: 'Mara Vell' })
-    expect(tagChange).toEqual({ tag: getTagWithUsage(db, vell.id), created: false, renamed: false })
+    expect(tagChange).toEqual({
+      tag: getTagWithUsage(db, vell.id),
+      created: false,
+      renamed: false,
+      aliased: false
+    })
     expect(renamed.tagId).toBe(vell.id)
     // The tag the entity had is a tag of the bank like any other; it stays.
     expect(listTags(db).map((t) => t.name)).toEqual(['mara', 'mara-vell'])
@@ -466,7 +478,8 @@ describe('the tag link (F-9.4)', () => {
     expect(tagChange).toEqual({
       tag: getTagWithUsage(db, mara.tagId ?? ''),
       created: false,
-      renamed: false
+      renamed: false,
+      aliased: false
     })
     expect(listTags(db)).toHaveLength(1)
   })
@@ -483,5 +496,49 @@ describe('the tag link (F-9.4)', () => {
     expect(() =>
       db.update(entity).set({ tagId: randomUUID() }).where(eq(entity.id, created.id)).run()
     ).toThrow(/FOREIGN KEY/)
+  })
+})
+
+describe('aliases (F-4.14)', () => {
+  it('reads and writes a linked sheet’s aliases on its tag: one owner', () => {
+    const rynna = create({ kind: 'character', name: 'Rynna Falsire' })
+    const { entity: updated, tagChange } = updateEntity(db, rynna.id, {
+      aliases: ['Rynna', 'High Crown Falsire']
+    })
+    expect(updated.aliases).toEqual(['Rynna', 'High Crown Falsire'])
+    expect(getTagWithUsage(db, rynna.tagId ?? '')?.aliases).toEqual(['Rynna', 'High Crown Falsire'])
+    expect(tagChange).toMatchObject({ created: false, renamed: false, aliased: true })
+    expect(db.select().from(entity).where(eq(entity.id, rynna.id)).get()?.aliases).toBe('[]')
+    // Editing the tag shows on the sheet.
+    updateTag(db, rynna.tagId ?? '', { aliases: ['Rynna'] })
+    expect(getEntity(db, rynna.id)?.aliases).toEqual(['Rynna'])
+    expect(listEntities(db)[0]?.aliases).toEqual(['Rynna'])
+  })
+
+  it('keeps an untagged sheet’s aliases on the sheet, and moves them to the tag it is linked to', () => {
+    const { entity: notes } = createEntity(db, { kind: 'character', name: 'Kael' }, 'author', {
+      tag: false
+    })
+    const { entity: aliased, tagChange } = updateEntity(db, notes.id, { aliases: ['The Smith'] })
+    expect(aliased.aliases).toEqual(['The Smith'])
+    expect(tagChange).toBeNull()
+    const linked = linkEntityTag(db, notes.id)
+    expect(linked.entity.aliases).toEqual(['The Smith'])
+    expect(linked.tagChange.tag.aliases).toEqual(['The Smith'])
+  })
+
+  it('refuses an alias another tag owns', () => {
+    create({ kind: 'character', name: 'Kael' })
+    const rynna = create({ kind: 'character', name: 'Rynna' })
+    expectCode(() => updateEntity(db, rynna.id, { aliases: ['Kael'] }), 'ALREADY_EXISTS')
+  })
+
+  it('adds names without refusing any, skipping the sheet’s own name and other tags’ names', () => {
+    create({ kind: 'character', name: 'Kael' })
+    const rynna = create({ kind: 'character', name: 'Rynna Falsire' })
+    const write = addEntityAliases(db, rynna.id, ['Rynna Falsire', 'Rynna', 'Kael'])
+    expect(write.entity.aliases).toEqual(['Rynna'])
+    expect(write.tagChange?.aliased).toBe(true)
+    expect(addEntityAliases(db, rynna.id, ['Rynna']).tagChange).toBeNull()
   })
 })

@@ -1,3 +1,4 @@
+import { aliasKey } from '@shared/aliases'
 import type { Tag } from '@shared/ipc/contract'
 import {
   AUTO_TAG_BANK_CATEGORIES,
@@ -71,7 +72,13 @@ export function applyAutoTags(
   sceneText: string
 ): AutoTagsChange {
   return db.transaction((tx) => {
-    const byName = new Map(listTags(tx).map((tag) => [tag.name, tag.id]))
+    // F-4.14: an alias the model answered ("Rynna") links its tag, never makes a second one.
+    const byName = new Map(
+      listTags(tx).flatMap((tag) => [
+        ...tag.aliases.map((alias): [string, string] => [aliasKey(alias), tag.id]),
+        [tag.name, tag.id] as [string, string]
+      ])
+    )
     const dismissed = new Set(getDismissedNames(tx).names)
     const createdIds: string[] = []
     const wanted: string[] = []

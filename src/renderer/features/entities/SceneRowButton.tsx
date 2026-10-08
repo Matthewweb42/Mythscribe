@@ -1,6 +1,7 @@
 import { Tag as TagIcon } from 'lucide-react'
 import { openMention } from '@renderer/features/editor/openPassage'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { useTagStore } from '@renderer/features/tags/tagStore'
 import type { TagSceneRow } from '@renderer/features/tags/tagUsage'
 
 /**
@@ -20,12 +21,19 @@ export function SceneRowButton({
   /** Badges shown before the mention count (the log's "POV"). */
   children?: React.ReactNode
 }): React.JSX.Element {
+  // F-4.14: the mention may be an alias of the tag, so the jump checks those spellings too.
+  const aliases = useTagStore((s) =>
+    tagName === null
+      ? undefined
+      : Object.values(s.byId).find((tag) => tag.name === tagName)?.aliases
+  )
   return (
     <button
       type="button"
       onClick={() => {
-        if (row.first !== null && tagName !== null) void openMention(row.id, row.first, tagName)
-        else useTreeStore.getState().select(row.id)
+        if (row.first !== null && tagName !== null) {
+          void openMention(row.id, row.first, tagName, aliases)
+        } else useTreeStore.getState().select(row.id)
       }}
       className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
     >

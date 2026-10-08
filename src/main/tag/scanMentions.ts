@@ -106,17 +106,24 @@ export function staleMentionNodeIds(db: TreeDb): string[] {
     .map((row) => row.id)
 }
 
-/** The tags the scan looks for: every tag whose tracking the author has left on. */
+/** The tags the scan looks for: every tag whose tracking the author has left on, with its aliases (F-4.14). */
 function mentionCandidates(db: TreeDb): MentionCandidate[] {
   return listTags(db)
     .filter((tag) => tag.trackMentions)
-    .map((tag) => ({ id: tag.id, name: tag.name, category: tag.category }))
+    .map((tag) => ({ id: tag.id, name: tag.name, category: tag.category, aliases: tag.aliases }))
 }
 
-/** The hash of everything a scan reads: the document's text and the candidates, by id. */
+/**
+ * The hash of everything a scan reads: the document's text and the candidates, by id. A tag
+ * without aliases hashes as it did before F-4.14, so an upgrade does not rescan the manuscript.
+ */
 function mentionHash(text: string, candidates: MentionCandidate[]): string {
   const names = [...candidates]
     .sort((a, b) => a.id.localeCompare(b.id))
-    .map((candidate) => [candidate.id, candidate.name, candidate.category])
+    .map((candidate) =>
+      (candidate.aliases ?? []).length === 0
+        ? [candidate.id, candidate.name, candidate.category]
+        : [candidate.id, candidate.name, candidate.category, ...(candidate.aliases ?? [])]
+    )
   return sha256(JSON.stringify({ text, names }))
 }

@@ -3,6 +3,7 @@ import type { Attrs } from '@tiptap/pm/model'
 import { PluginKey } from '@tiptap/pm/state'
 import { ReactRenderer } from '@tiptap/react'
 import { Suggestion, type SuggestionProps } from '@tiptap/suggestion'
+import { aliasKey, findByNameOrAlias } from '@shared/aliases'
 import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
 import type { Tag } from '@shared/ipc/contract'
 import { resolveTagId, type TagAliases } from '@shared/tagExchange'
@@ -36,16 +37,26 @@ export const INLINE_TAG_SELECTOR = '[data-inline-tag]'
 
 /**
  * The rows for a query (F-4.6): the bank tags whose name contains the typed text
- * (case-insensitive, like the tag bar's picker), then a "Create" row for the kebab-cased text
- * unless it is empty or a tag of exactly that name already exists (main would refuse it).
+ * (case-insensitive, like the tag bar's picker), then those whose alias does (F-4.14, so
+ * `#rynna` offers `rynna-falsire`), then a "Create" row for the kebab-cased text unless it is
+ * empty or already the name or an alias of a tag (main would refuse it, or it would be a second
+ * tag for one character).
  */
 export function suggestItems(tags: Tag[], query: string): SuggestItem[] {
   const needle = query.toLowerCase()
-  const items: SuggestItem[] = tags
-    .filter((tag) => tag.name.toLowerCase().includes(needle))
-    .map((tag) => ({ kind: 'tag', tag }))
+  const key = aliasKey(query)
+  const byName = tags.filter((tag) => tag.name.toLowerCase().includes(needle))
+  const byAlias = tags.filter(
+    (tag) =>
+      !byName.includes(tag) &&
+      tag.aliases.some(
+        (alias) =>
+          alias.toLowerCase().includes(needle) || (key !== '' && aliasKey(alias).includes(key))
+      )
+  )
+  const items: SuggestItem[] = [...byName, ...byAlias].map((tag) => ({ kind: 'tag', tag }))
   const name = toTagName(query)
-  if (name.length > 0 && !tags.some((tag) => tag.name === name))
+  if (name.length > 0 && findByNameOrAlias(tags, name) === undefined)
     items.push({ kind: 'create', name })
   return items
 }

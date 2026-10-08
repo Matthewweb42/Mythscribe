@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { aliasKey } from './aliases'
 import { INLINE_TAG_NODE_TYPE } from './inlineTags'
 import type { TagCategory } from './tags'
 import type { TiptapNodeT } from './tiptap'
@@ -36,11 +37,15 @@ export function nameWords(name: string): string[] {
   return name.split('-').filter((word) => word.length > 0)
 }
 
-/** A tag the scan looks for: its id, its kebab-case name, and the category that decides the case rule. */
+/**
+ * A tag the scan looks for: its id, its kebab-case name, the category that decides the case
+ * rule, and its aliases (F-4.14), each of which is looked for as well and counts for the tag.
+ */
 export interface MentionCandidate {
   id: string
   name: string
   category: TagCategory
+  aliases?: readonly string[]
 }
 
 /**
@@ -58,7 +63,7 @@ const LEAF_TYPES: ReadonlySet<string> = new Set([
 ])
 
 /** One text node of the document: its string and the ProseMirror position its first character sits at. */
-interface TextRun {
+export interface TextRun {
   text: string
   from: number
 }
@@ -84,7 +89,9 @@ interface Span {
  *   is told from "rose" the flower; every other category matches case-insensitively;
  * - the longest names go first (most words, then most characters, characters before the rest)
  *   and a matched range is consumed, so `rose-marsh` leaves no second hit for `rose` inside it;
- * - inline tag tokens are skipped: an explicit link (F-4.6) is not a mention.
+ * - inline tag tokens are skipped: an explicit link (F-4.6) is not a mention;
+ * - every alias of a tag (F-4.14) is looked for as a name of its own, under the same rules, and
+ *   its occurrences count for the tag: one list per tag, in document order.
  *
  * Tags without a single occurrence are absent from the map, never present with an empty list.
  */
@@ -97,7 +104,7 @@ export function findMentions(
   if (runs.length === 0) return found
   /** What is already spoken for, per run: a longer name's range is never matched again. */
   const taken = runs.map((): Span[] => [])
-  for (const candidate of ordered(candidates)) {
+  for (const candidate of ordered(expandAliases(candidates))) {
     const pattern = patternFor(candidate.name)
     if (pattern === null) continue
     const ranges: MentionRange[] = []
@@ -117,9 +124,25 @@ export function findMentions(
         ranges.push([run.from + start, run.from + end])
       }
     })
-    if (ranges.length > 0) found.set(candidate.id, ranges)
+    if (ranges.length === 0) continue
+    const before = found.get(candidate.id)
+    found.set(
+      candidate.id,
+      before === undefined ? ranges : [...before, ...ranges].sort((a, b) => a[0] - b[0])
+    )
   }
   return found
+}
+
+/** One candidate per name a tag answers to: its own, then each alias as a kebab-case name. */
+function expandAliases(candidates: MentionCandidate[]): MentionCandidate[] {
+  return candidates.flatMap((candidate) => [
+    candidate,
+    ...(candidate.aliases ?? [])
+      .map((alias) => aliasKey(alias))
+      .filter((name) => name !== '' && name !== candidate.name)
+      .map((name) => ({ id: candidate.id, name, category: candidate.category }))
+  ])
 }
 
 /**
@@ -127,7 +150,7 @@ export function findMentions(
  * arithmetic over the stored JSON: the root's children start at 0, a container costs 1 before
  * its content and 1 after it, a text node costs its length, and a leaf costs 1.
  */
-function textRuns(doc: TiptapNodeT): TextRun[] {
+export function textRuns(doc: TiptapNodeT): TextRun[] {
   const runs: TextRun[] = []
   let offset = 0
   for (const child of doc.content ?? []) offset += walk(child, offset, runs)
@@ -179,7 +202,7 @@ function escapeRegExp(word: string): string {
  * must look like in prose. A script without upper and lower case (Japanese, Hebrew) cannot
  * answer the question, so its words are accepted rather than silently never matched.
  */
-function isProperNoun(matched: string): boolean {
+export function isProperNoun(matched: string): boolean {
   return matched
     .split(/\s+/)
     .filter((word) => word.length > 0)

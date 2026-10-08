@@ -21,6 +21,7 @@ import { useReferenceStore } from '@renderer/features/references/referenceStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
+import { AliasEditor } from '@renderer/features/tags/AliasEditor'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { sceneRowsForTag } from '@renderer/features/tags/tagUsage'
@@ -220,6 +221,11 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
         ) : null}
 
         <EntityTagBlock entity={entity} />
+        <AliasEditor
+          name={entity.name}
+          aliases={entity.aliases}
+          onChange={(aliases) => useEntityStore.getState().update(id, { aliases })}
+        />
 
         {entity.template === 'structured' ? (
           <div className="flex flex-col gap-3">

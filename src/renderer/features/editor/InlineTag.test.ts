@@ -47,6 +47,25 @@ describe('suggestItems (F-4.6)', () => {
     expect(suggestItems(bank(), 'MARA')).toEqual([{ kind: 'tag', tag: tagFixture[1] }])
     expect(suggestItems(bank(), '--')).toEqual([])
   })
+
+  it('offers a tag by its alias after the name matches, and never a Create row for an alias (F-4.14)', () => {
+    const rynna: Tag = {
+      ...tagFixture[1]!,
+      id: 't-rynna',
+      name: 'rynna-falsire',
+      aliases: ['Rynna', 'High Crown Falsire']
+    }
+    const tags = [...bank(), rynna]
+    expect(suggestItems(tags, 'high-crown')).toEqual([
+      { kind: 'tag', tag: rynna },
+      { kind: 'create', name: 'high-crown' }
+    ])
+    expect(suggestItems(tags, 'High_Crown_Falsire')).toEqual([{ kind: 'tag', tag: rynna }])
+    expect(suggestItems(tags, 'ryn')).toEqual([
+      { kind: 'tag', tag: rynna },
+      { kind: 'create', name: 'ryn' }
+    ])
+  })
 })
 
 describe('InlineTag node (F-4.6)', () => {

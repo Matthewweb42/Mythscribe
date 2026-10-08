@@ -39,6 +39,7 @@ import {
   Conversations
 } from '../chat'
 import { AccountStatus } from '../account'
+import { AliasList } from '../aliases'
 import { AppAccess } from '../appAccess'
 import { AuthorRules } from '../authorRules'
 import { BackupSettingsPatch, BackupState } from '../backups'
@@ -243,6 +244,11 @@ export const Tag = z.object({
   parentId: z.string().nullable(),
   usageCount: z.number().int().nonnegative(),
   trackMentions: z.boolean(),
+  /**
+   * F-4.14: the tag's other names (nicknames, titles, kept spellings) as the author typed them;
+   * each one counts as a mention (F-4.12) and resolves `#alias` (F-4.6). `[]` when none.
+   */
+  aliases: z.array(z.string()),
   created: z.string(),
   modified: z.string()
 })
@@ -283,6 +289,11 @@ export const Entity = z.object({
    * "???"). `entity:linkTag` makes one for an entity that has none.
    */
   tagId: z.string().nullable(),
+  /**
+   * F-4.14: the sheet's other names. One owner: for a sheet linked to a tag these are the tag's
+   * aliases (read and written there); only an untagged sheet keeps its own.
+   */
+  aliases: z.array(z.string()),
   /**
    * Who made it (F-5.16): `ai` for an entity the story-bible job created from a name in the
    * manuscript, shown as "Added by AI" until the author's first edit of its name, fields, or
@@ -1204,7 +1215,12 @@ export const contract = {
       color: z.string().regex(HEX_COLOR).optional(),
       parentId: z.string().nullable().optional(),
       /** F-4.12: off deletes the tag's recorded mentions at once; on rescans the manuscript. */
-      trackMentions: z.boolean().optional()
+      trackMentions: z.boolean().optional(),
+      /**
+       * F-4.14: replaces the alias list (normalized by `normalizeAliases`: duplicates and the
+       * main name dropped). ALREADY_EXISTS when an alias is another tag's name or alias.
+       */
+      aliases: AliasList.optional()
     }),
     output: Tag
   },
@@ -1268,7 +1284,8 @@ export const contract = {
    * Merges tags into one (F-4.9), in one transaction: every document link, tagging dismissal,
    * and entity of a source moves to the target (a node carrying both keeps one link, the author's
    * if either was), the sources are deleted, and each source id becomes an alias of the target so
-   * inline tokens keep resolving. The target keeps its name, category, and color. VALIDATION when
+   * inline tokens keep resolving; each source's name (as its sheet spells it) and aliases also
+   * become aliases of the target (F-4.14). The target keeps its name, category, and color. VALIDATION when
    * the target is among the sources; NOT_FOUND for an unknown id. Answers the target with its new
    * usage, the deleted ids, and the aliases as now stored.
    */
@@ -1361,6 +1378,20 @@ export const contract = {
    */
   'tag:dismissedNames': { input: z.undefined(), output: z.array(z.string()) },
   /**
+   * The spellings the author kept for the project (F-4.14, "Not a typo" on a likely misspelling
+   * of a story name), as `aliasKey` keys; the tags column reads them so it never offers them again.
+   */
+  'tag:keptSpellings': { input: z.undefined(), output: z.array(z.string()) },
+  /**
+   * Keeps a spelling (F-4.14): `text` as written ("Falseer") is stored by its key and answered
+   * with the whole list. It is never offered as a misspelling again, and is free to be proposed
+   * as a tag of its own (F-4.12b) again. Nothing in the text changes.
+   */
+  'tag:keepSpelling': {
+    input: z.object({ text: z.string().trim().min(1).max(TAG_NAME_MAX) }),
+    output: z.array(z.string())
+  },
+  /**
    * Global search (F-10.1): documents (title and text), notes, and entities (name, template
    * fields, page) holding the query, case-insensitively, filtered by type and tag; one result per
    * matching source with a highlighted snippet, at most `SEARCH_MAX_RESULTS` of them. A query
@@ -1433,7 +1464,12 @@ export const contract = {
       name: z.string().trim().min(1).max(ENTITY_NAME_MAX).optional(),
       template: EntityTemplate.optional(),
       fields: z.partialRecord(EntityFieldId, z.string().max(ENTITY_FIELD_MAX)).optional(),
-      body: z.string().max(ENTITY_BODY_MAX).nullable().optional()
+      body: z.string().max(ENTITY_BODY_MAX).nullable().optional(),
+      /**
+       * F-4.14: replaces the alias list; written to the linked tag when there is one (the tag
+       * then changes too), else kept on the sheet. Same refusals as `tag:update`'s aliases.
+       */
+      aliases: AliasList.optional()
     }),
     output: Entity
   },

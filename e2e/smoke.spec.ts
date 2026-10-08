@@ -3562,6 +3562,35 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.type(' But Kael saw Kael, then Kael.')
   await expect(proposedList.getByRole('listitem')).toHaveText(['Kael ×3'], { timeout: 15_000 })
 
+  // F-4.14: aliases and misspellings. An alias added on the tag's detail counts as a mention
+  // of the tag in the prose; a close misspelling of the name is offered as a fix in the tags
+  // column, and only the author's Fix changes the text.
+  await sidebarTabs.getByRole('tab', { name: 'Tags' }).click()
+  await categories.getByRole('tab', { name: 'Characters' }).click()
+  await tagRows.getByRole('button', { name: /^tash/ }).click()
+  const aliasGroup = tagsPanel.getByRole('group', { name: 'Aliases' })
+  await aliasGroup.getByRole('textbox', { name: 'Add alias' }).fill('The Smith')
+  await aliasGroup.getByRole('textbox', { name: 'Add alias' }).press('Enter')
+  await expect(aliasGroup.getByRole('listitem')).toHaveText(['The Smith'])
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await editor.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(' The Smith nodded. Then Taash left.')
+  await expect(mentionList.getByRole('listitem')).toHaveText(['tash ×4', 'rose ×1'], {
+    timeout: 15_000
+  })
+  const misspellings = tagBar.getByRole('list', { name: 'Possible misspellings' })
+  const taash = misspellings.getByRole('listitem').filter({ hasText: 'Taash → Tash' })
+  await expect(taash).toHaveCount(1, { timeout: 15_000 })
+  await expect(editor).toContainText('Then Taash left.')
+  await taash.getByRole('button', { name: 'Fix Taash to Tash' }).click()
+  await expect(editor).toContainText('Then Tash left.')
+  await expect(taash).toHaveCount(0)
+  await page.keyboard.press('Control+s')
+  await expect(mentionList.getByRole('listitem')).toHaveText(['tash ×5', 'rose ×1'], {
+    timeout: 15_000
+  })
+
   // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.
   await closeProject()
   await stubOpenDialog(path.join(projectPath, 'project.db'))

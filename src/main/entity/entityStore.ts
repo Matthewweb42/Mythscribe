@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { RunResult } from 'better-sqlite3'
-import { and, eq, ne } from 'drizzle-orm'
+import { and, eq, inArray, ne } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
+import { normalizeAliases, parseAliases } from '@shared/aliases'
 import {
   ENTITY_KIND_NOUN,
   ENTITY_KINDS,
@@ -19,17 +20,27 @@ import {
 import type { Entity, EntityCreateInput, EntityUpdateInput, Tag } from '@shared/ipc/contract'
 import { withObservedDismissed, withoutObservedDismissed } from '@shared/observedFacts'
 import type * as schema from '../db/schema'
-import { entity, type EntityInsert, type EntityRow } from '../db/schema'
+import { entity, tag, type EntityInsert, type EntityRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { getObservedDismissed, setObservedDismissed } from '../project/settingsStore'
-import { createTag, findTagByName, getTag, getTagWithUsage, updateTag } from '../tag/tagStore'
+import {
+  addTagAliases,
+  createTag,
+  findTagByName,
+  getTag,
+  getTagWithUsage,
+  updateTag
+} from '../tag/tagStore'
 import { hasFacts } from './observedFactStore'
 
 /** Accepts both the connection's orm and a transaction handle (both extend this base). */
 export type EntityDb = BaseSQLiteDatabase<'sync', RunResult, typeof schema>
 
-/** The stored row as the contract's entity: the only place `fields` is parsed. */
-function rowToEntity(row: EntityRow): Entity {
+/**
+ * The stored row as the contract's entity: the only place `fields` is parsed. `tagAliases` is
+ * the linked tag's alias list (F-4.14, one owner); a row with no tag answers its own.
+ */
+function rowToEntity(row: EntityRow, tagAliases: readonly string[] = []): Entity {
   return {
     id: row.id,
     kind: row.kind,
@@ -39,6 +50,7 @@ function rowToEntity(row: EntityRow): Entity {
     body: row.body,
     image: row.image,
     tagId: row.tagId,
+    aliases: row.tagId === null ? parseAliases(row.aliases) : [...tagAliases],
     origin: row.origin,
     created: row.created,
     modified: row.modified
@@ -47,6 +59,25 @@ function rowToEntity(row: EntityRow): Entity {
 
 function getRow(db: EntityDb, id: string): EntityRow | undefined {
   return db.select().from(entity).where(eq(entity.id, id)).get()
+}
+
+/** The alias lists of the given tags (F-4.14), by tag id. */
+function tagAliasesById(db: EntityDb, tagIds: readonly string[]): Map<string, string[]> {
+  if (tagIds.length === 0) return new Map()
+  return new Map(
+    db
+      .select({ id: tag.id, aliases: tag.aliases })
+      .from(tag)
+      .where(inArray(tag.id, [...new Set(tagIds)]))
+      .all()
+      .map((row) => [row.id, parseAliases(row.aliases)])
+  )
+}
+
+/** The row as the contract's entity, its linked tag's aliases read for it (F-4.14). */
+function toEntity(db: EntityDb, row: EntityRow): Entity {
+  if (row.tagId === null) return rowToEntity(row)
+  return rowToEntity(row, tagAliasesById(db, [row.tagId]).get(row.tagId))
 }
 
 /**
@@ -64,13 +95,20 @@ function compareEntities(a: Entity, b: Entity): number {
 
 /** Every entity of the project (F-9.1), in story-bible order. */
 export function listEntities(db: EntityDb): Entity[] {
-  return db.select().from(entity).all().map(rowToEntity).sort(compareEntities)
+  const rows = db.select().from(entity).all()
+  const aliases = tagAliasesById(
+    db,
+    rows.flatMap((row) => (row.tagId === null ? [] : [row.tagId]))
+  )
+  return rows
+    .map((row) => rowToEntity(row, row.tagId === null ? [] : aliases.get(row.tagId)))
+    .sort(compareEntities)
 }
 
 /** One entity, or undefined when the id is unknown (the handler answers NOT_FOUND). */
 export function getEntity(db: EntityDb, id: string): Entity | undefined {
   const row = getRow(db, id)
-  return row === undefined ? undefined : rowToEntity(row)
+  return row === undefined ? undefined : toEntity(db, row)
 }
 
 /** Trims the name and refuses one that has nothing left. */
@@ -147,6 +185,8 @@ export interface EntityTagChange {
   tag: Tag
   created: boolean
   renamed: boolean
+  /** F-4.14: the tag's aliases changed with the write, which a rescan must hear about too. */
+  aliased: boolean
 }
 
 /** An entity write and what it did to the tag bank (F-9.4); `tagChange` is null when nothing did. */
@@ -167,8 +207,17 @@ function requireTagWithUsage(db: EntityDb, id: string): Tag {
   return found
 }
 
-function setTagId(db: EntityDb, id: string, tagId: string): void {
-  db.update(entity).set({ tagId }).where(eq(entity.id, id)).run()
+/**
+ * Links the row to `tagId`. F-4.14, one owner: the aliases the sheet kept while it had no tag
+ * move onto the tag (the ones another tag owns are dropped) and the sheet's own list is emptied.
+ * Answers whether the tag's aliases changed.
+ */
+function setTagId(db: EntityDb, row: EntityRow, tagId: string): boolean {
+  const own = parseAliases(row.aliases)
+  db.update(entity).set({ tagId, aliases: '[]' }).where(eq(entity.id, row.id)).run()
+  if (own.length === 0) return false
+  const before = getTag(db, tagId)?.aliases
+  return addTagAliases(db, tagId, own).aliases.length !== parseAliases(before).length
 }
 
 /**
@@ -183,12 +232,12 @@ function linkTag(db: EntityDb, row: EntityRow): EntityTagChange | null {
   if (name === '') return null
   const existing = findTagByName(db, name)
   if (existing !== undefined) {
-    if (row.tagId !== existing) setTagId(db, row.id, existing)
-    return { tag: requireTagWithUsage(db, existing), created: false, renamed: false }
+    const aliased = row.tagId !== existing && setTagId(db, row, existing)
+    return { tag: requireTagWithUsage(db, existing), created: false, renamed: false, aliased }
   }
   const created = createTag(db, { name, category: ENTITY_TAG_CATEGORY[row.kind] })
-  setTagId(db, row.id, created.id)
-  return { tag: created, created: true, renamed: false }
+  setTagId(db, row, created.id)
+  return { tag: requireTagWithUsage(db, created.id), created: true, renamed: false, aliased: false }
 }
 
 /** Whether another entity carries the same tag: then a rename must leave that tag alone. */
@@ -219,10 +268,10 @@ function mirrorRename(db: EntityDb, before: EntityRow, after: EntityRow): Entity
   if (name === '' || name === tag.name) return null
   const taken = findTagByName(db, name)
   if (taken !== undefined) {
-    setTagId(db, after.id, taken)
-    return { tag: requireTagWithUsage(db, taken), created: false, renamed: false }
+    const aliased = setTagId(db, after, taken)
+    return { tag: requireTagWithUsage(db, taken), created: false, renamed: false, aliased }
   }
-  return { tag: updateTag(db, tagId, { name }), created: false, renamed: true }
+  return { tag: updateTag(db, tagId, { name }), created: false, renamed: true, aliased: false }
 }
 
 /**
@@ -273,7 +322,7 @@ export function createEntity(
     }
     const tagChange = options.tag === false ? null : linkTag(tx, inserted)
     return {
-      entity: rowToEntity(tagChange === null ? inserted : { ...inserted, tagId: tagChange.tag.id }),
+      entity: toEntity(tx, requireRow(tx, inserted.id)),
       tagChange
     }
   })
@@ -319,7 +368,10 @@ export function updateEntity(
     if (patch.body !== undefined) changes.body = patch.body
     if (
       existing.origin === 'ai' &&
-      (patch.name !== undefined || patch.fields !== undefined || patch.body !== undefined)
+      (patch.name !== undefined ||
+        patch.fields !== undefined ||
+        patch.body !== undefined ||
+        patch.aliases !== undefined)
     ) {
       changes.origin = 'author'
     }
@@ -329,11 +381,72 @@ export function updateEntity(
       .where(eq(entity.id, id))
       .returning()
       .get()
-    const tagChange = changes.name === undefined ? null : mirrorRename(tx, existing, updated)
-    return {
-      entity: rowToEntity(tagChange === null ? updated : { ...updated, tagId: tagChange.tag.id }),
-      tagChange
+    const renamed = changes.name === undefined ? null : mirrorRename(tx, existing, updated)
+    const tagChange =
+      patch.aliases === undefined
+        ? renamed
+        : writeAliases(tx, requireRow(tx, id), patch.aliases, renamed)
+    return { entity: toEntity(tx, requireRow(tx, id)), tagChange }
+  })
+}
+
+/** The row, read again after a write; NOT_FOUND only if it vanished inside the transaction. */
+function requireRow(db: EntityDb, id: string): EntityRow {
+  const row = getRow(db, id)
+  if (row === undefined) throw new AppError('NOT_FOUND', 'Entity not found', { id })
+  return row
+}
+
+/**
+ * Writes a sheet's alias list (F-4.14) to its one owner: the linked tag through `updateTag`
+ * (whose refusals apply: an alias that is another tag's name or alias is ALREADY_EXISTS), or the
+ * sheet's own column when it has no tag. Answers what the bank now owes the windows: the rename
+ * `mirrorRename` already made, with `aliased` set when the tag's aliases moved.
+ */
+function writeAliases(
+  db: EntityDb,
+  row: EntityRow,
+  aliases: readonly string[],
+  renamed: EntityTagChange | null
+): EntityTagChange | null {
+  if (row.tagId === null) {
+    db.update(entity)
+      .set({ aliases: JSON.stringify(normalizeAliases(aliases, row.name)) })
+      .where(eq(entity.id, row.id))
+      .run()
+    return renamed
+  }
+  const before = getTag(db, row.tagId)
+  const updated = updateTag(db, row.tagId, { aliases: [...aliases] })
+  const aliased = JSON.stringify(parseAliases(before?.aliases)) !== JSON.stringify(updated.aliases)
+  if (renamed !== null) return { ...renamed, tag: updated, aliased: renamed.aliased || aliased }
+  return aliased ? { tag: updated, created: false, renamed: false, aliased } : null
+}
+
+/**
+ * Adds names to a sheet's aliases (F-4.14) without refusing any: on its tag through
+ * `addTagAliases` (names another tag owns are skipped), or on the sheet itself when it has no
+ * tag. The context import's apply (F-9.8) records the nicknames the model read this way. Answers
+ * the sheet as it now stands and the tag change the windows must hear about, or null.
+ */
+export function addEntityAliases(db: EntityDb, id: string, names: readonly string[]): EntityWrite {
+  return db.transaction((tx) => {
+    const row = requireRow(tx, id)
+    let tagChange: EntityTagChange | null = null
+    if (row.tagId === null) {
+      const next = normalizeAliases([...parseAliases(row.aliases), ...names], row.name)
+      tx.update(entity)
+        .set({ aliases: JSON.stringify(next) })
+        .where(eq(entity.id, id))
+        .run()
+    } else {
+      const before = parseAliases(getTag(tx, row.tagId)?.aliases).length
+      const updated = addTagAliases(tx, row.tagId, names)
+      if (updated.aliases.length !== before) {
+        tagChange = { tag: updated, created: false, renamed: false, aliased: true }
+      }
     }
+    return { entity: toEntity(tx, requireRow(tx, id)), tagChange }
   })
 }
 
@@ -359,7 +472,7 @@ export function linkEntityTag(db: EntityDb, id: string): EntityTagWrite {
         }
       )
     }
-    return { entity: rowToEntity({ ...row, tagId: tagChange.tag.id }), tagChange }
+    return { entity: toEntity(tx, requireRow(tx, id)), tagChange }
   })
 }
 
@@ -385,7 +498,7 @@ export function setEntityImage(db: EntityDb, id: string, image: string | null): 
       .where(eq(entity.id, id))
       .returning()
       .get()
-    return rowToEntity(updated)
+    return toEntity(tx, updated)
   })
 }
 
@@ -405,7 +518,8 @@ export function deleteEntity(db: EntityDb, id: string): Entity {
     if (row.origin === 'ai' || hasFacts(tx, id)) {
       setObservedDismissed(tx, withObservedDismissed(getObservedDismissed(tx), row.kind, row.name))
     }
+    const deleted = toEntity(tx, row)
     tx.delete(entity).where(eq(entity.id, id)).run()
-    return rowToEntity(row)
+    return deleted
   })
 }

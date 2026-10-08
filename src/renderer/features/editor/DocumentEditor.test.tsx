@@ -78,6 +78,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
           parentId: null,
           usageCount: 0,
           trackMentions: true,
+          aliases: [],
           created: '2026-09-12T08:00:00.000Z',
           modified: '2026-09-12T08:00:00.000Z'
         }
@@ -247,10 +248,18 @@ afterEach(() => {
 describe('DocumentEditor after the trial (AI-BILLING-SPEC M1)', () => {
   it('is read-only without the license, and editable again once one is verified', async () => {
     await mountReady()
-    act(() => useAppAccessStore.setState({ access: { state: 'expired', trialEndsAt: new Date(0).toISOString(), daysLeft: 0 } }))
+    act(() =>
+      useAppAccessStore.setState({
+        access: { state: 'expired', trialEndsAt: new Date(0).toISOString(), daysLeft: 0 }
+      })
+    )
     await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'false'))
     expect(box()).toHaveTextContent('Into the')
-    act(() => useAppAccessStore.setState({ access: { state: 'licensed', trialEndsAt: new Date(0).toISOString(), daysLeft: 0 } }))
+    act(() =>
+      useAppAccessStore.setState({
+        access: { state: 'licensed', trialEndsAt: new Date(0).toISOString(), daysLeft: 0 }
+      })
+    )
     await waitFor(() => expect(box()).toHaveAttribute('contenteditable', 'true'))
   })
 })

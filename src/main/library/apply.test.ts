@@ -130,6 +130,26 @@ describe('applyContextReview (F-9.8)', () => {
     expect(getEntity(db, notes.id)?.body).toBe('Theme: debts.\n\nOutline: three acts.')
   })
 
+  it('makes the other names the files used aliases of the sheet, on its tag (F-4.14)', async () => {
+    const review = reviewOf([
+      record({ name: 'Rynna Falsire', aliases: ['High Crown Falsire'] }),
+      record({ name: 'Rynna', aliases: ['Rynna Falsire'], fileName: 'b.md' })
+    ])
+    expect(review.entities).toHaveLength(1)
+    const result = await applyContextReview(db, session.folder, review)
+    const rynna = listEntities(db).find((e) => e.name === 'Rynna Falsire')!
+    expect(rynna.aliases).toEqual(['High Crown Falsire', 'Rynna'])
+    expect(listTags(db).find((t) => t.id === rynna.tagId)?.aliases).toEqual([
+      'High Crown Falsire',
+      'Rynna'
+    ])
+    expect(result.tagChanges.at(-1)).toMatchObject({ aliased: true })
+
+    // A later file that says only "Rynna" lands on the same sheet through the alias.
+    const again = reviewOf([record({ name: 'Rynna', fields: { age: '40' } })])
+    expect(again.entities[0]).toMatchObject({ existingId: rynna.id })
+  })
+
   it('writes nothing it was told to leave out and makes no tag when unticked', async () => {
     const review = reviewOf(
       [record({ name: 'Ilse' }), record({ name: 'Pell', fields: { age: '9' } })],

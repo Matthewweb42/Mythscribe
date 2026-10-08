@@ -27,7 +27,7 @@ import type { NodeRow } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
 import { listEntities } from '../entity/entityStore'
 import { nodesInTreeOrder } from '../search/searchStore'
-import { findTagByName, listTags } from '../tag/tagStore'
+import { findTagByNameOrAlias, getTag, listTags } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { documentText } from '../voice/profile'
 import { headTruncate } from './context/chatContext'
@@ -77,12 +77,19 @@ export function nodeByRef(project: AgentProject, ref: unknown): NodeRow | undefi
   return project.byRef.get(/^\d+$/.test(key) ? `n${key}` : key)
 }
 
-/** The sheet a name points at: the exact name first, then the only one whose name holds it. */
+/**
+ * The sheet a name points at: the exact name first, then an exact alias (F-4.14), then the only
+ * one whose name holds it.
+ */
 export function sheetByName(project: AgentProject, name: unknown): Entity | undefined {
   if (typeof name !== 'string' || name.trim() === '') return undefined
   const key = toEntityNameKey(name)
   const exact = project.entities.find((entity) => toEntityNameKey(entity.name) === key)
   if (exact) return exact
+  const aliased = project.entities.find((entity) =>
+    entity.aliases.some((alias) => toEntityNameKey(alias) === key)
+  )
+  if (aliased) return aliased
   const partial = project.entities.filter((entity) => toEntityNameKey(entity.name).includes(key))
   return partial.length === 1 ? partial[0] : undefined
 }
@@ -497,10 +504,13 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
     case 'tag': {
       const row = documentArg()
       if (typeof row === 'string') return { error: row }
-      const tag = toTagName(str(edit.tag))
-      if (!tag) return { error: 'no "tag"' }
+      const typed = toTagName(str(edit.tag))
+      if (!typed) return { error: 'no "tag"' }
+      // F-4.14: an alias names its tag, so `#rynna` tags with `rynna-falsire`.
+      const known = findTagByNameOrAlias(project.db, typed)
+      const tag = known === undefined ? typed : (getTag(project.db, known)?.name ?? typed)
       const add = edit.add !== false
-      if (!add && findTagByName(project.db, tag) === undefined) return { error: `no tag #${tag}` }
+      if (!add && known === undefined) return { error: `no tag #${tag}` }
       return { edit: { kind: 'tag', nodeId: row.id, title: nameOf(row), tag, add } }
     }
     case 'delete': {
@@ -511,7 +521,7 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
       }
       if (typeof edit.tag === 'string') {
         const tag = toTagName(edit.tag)
-        const id = findTagByName(project.db, tag)
+        const id = findTagByNameOrAlias(project.db, tag)
         if (id === undefined) return { error: `no tag #${tag}` }
         return { edit: { kind: 'delete', target: 'tag', id, name: tag } }
       }

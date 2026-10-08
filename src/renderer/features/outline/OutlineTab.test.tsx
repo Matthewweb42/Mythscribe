@@ -60,6 +60,7 @@ const tag = (id: string, name: string, category: Tag['category'], color: string)
   parentId: null,
   usageCount: 0,
   trackMentions: true,
+  aliases: [],
   created: '2026-10-05T10:00:00.000Z',
   modified: '2026-10-05T10:00:00.000Z'
 })
