@@ -71,7 +71,9 @@ describe('MenuBar (F-7.1)', () => {
       'New project',
       'Open project…',
       'Import manuscript…',
+      'Compile…',
       'Export…',
+      'Book details…',
       'SaveCtrl+S',
       'Close project'
     ])

@@ -7,7 +7,8 @@ import { APP_SHORTCUTS, type Chord, type ShortcutId } from './shortcuts'
  * The one menu definition (F-7.1): main renders it as the native application menu (with the
  * F-2.7 chords as accelerators) and the renderer as the in-app menu bar, and every click on
  * either side becomes one `menu:action` handled by `runMenuAction`. Items whose feature is not
- * built are absent, never disabled or stubbed: Export… arrived with F-12.1,
+ * built are absent, never disabled or stubbed: Export… arrived with F-12.1 (Compile… and Book
+ * details… with F-12.4, Export… now opening the compile window),
  * Character, Setting, and World-building note arrived with F-9.3, References with F-9.6, Search
  * project… with F-10.1, Replace in project… with F-10.2, Find… and Replace… with F-3.10, Goals… with F-10.3, Word count… with F-10.4, Compiled preview with F-3.12, Drafts… with F-8.5, Snapshots… with F-8.6. Edit items carry an Electron role, so the native menu
  * edits natively; the in-app bar routes them through `menu:edit` to the same `webContents`
@@ -17,7 +18,9 @@ export const MENU_ITEM_IDS = [
   'newProject',
   'openProject',
   'importManuscript',
+  'compileManuscript',
   'exportManuscript',
+  'openBookDetails',
   'saveDocument',
   'closeProject',
   'undo',
@@ -113,8 +116,11 @@ export const MENU: readonly MenuSection[] = [
       { id: 'openProject', label: 'Open project…', when: 'always' },
       // F-12.2: the import goes into the open project, so it waits for one.
       { id: 'importManuscript', label: 'Import manuscript…', when: 'project' },
-      // F-12.1: PDF, DOCX, EPUB, or Markdown of the open project.
+      // F-12.4 (Compile v2): the compile window; Export… is kept as an alias that opens it.
+      { id: 'compileManuscript', label: 'Compile…', when: 'project' },
       { id: 'exportManuscript', label: 'Export…', when: 'project' },
+      // F-12.4: the project's publishing facts, which compile prints.
+      { id: 'openBookDetails', label: 'Book details…', when: 'project' },
       SEPARATOR,
       { id: 'saveDocument', label: 'Save', shortcut: 'save', when: 'project' },
       SEPARATOR,

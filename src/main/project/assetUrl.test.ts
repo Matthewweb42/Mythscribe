@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { assetPathFor } from './assetUrl'
+import { assetPathFor, bookFontPathFor } from './assetUrl'
 
 const root = path.join('/', 'projects', 'Book.mythscribe')
 const dir = path.join(root, 'assets', 'backgrounds')
@@ -52,5 +52,38 @@ describe('assetPathFor (F-6.2)', () => {
     expect(assetPathFor(root, 'mythscribe-asset://backgrounds/project.db')).toBeNull()
     expect(assetPathFor(root, 'mythscribe-asset://backgrounds/a1.svg')).toBeNull()
     expect(assetPathFor(root, 'mythscribe-asset://backgrounds/a1')).toBeNull()
+  })
+})
+
+describe('bookFontPathFor (Compile v2 preview fonts)', () => {
+  const fonts = path.join('/', 'app', 'resources', 'fonts')
+
+  it('resolves a shipped font file under the fonts folder', () => {
+    expect(
+      bookFontPathFor(
+        fonts,
+        'mythscribe-asset://book-fonts/eb-garamond/eb-garamond-latin-400-normal.woff2'
+      )
+    ).toBe(path.join(fonts, 'eb-garamond', 'eb-garamond-latin-400-normal.woff2'))
+    expect(
+      bookFontPathFor(
+        fonts,
+        'mythscribe-asset://book-fonts/liberation-serif/LiberationSerif-Regular.ttf'
+      )
+    ).toBe(path.join(fonts, 'liberation-serif', 'LiberationSerif-Regular.ttf'))
+  })
+
+  it('refuses anything that is not a listed font file', () => {
+    expect(bookFontPathFor(fonts, 'mythscribe-asset://book-fonts/eb-garamond/OFL.txt')).toBeNull()
+    expect(
+      bookFontPathFor(fonts, 'mythscribe-asset://book-fonts/..%2Feb-garamond/x.woff2')
+    ).toBeNull()
+    expect(bookFontPathFor(fonts, 'mythscribe-asset://covers/a.png')).toBeNull()
+    expect(
+      bookFontPathFor(
+        fonts,
+        'mythscribe-asset://book-fonts/eb-garamond/eb-garamond-latin-400-normal.woff2/x'
+      )
+    ).toBeNull()
   })
 })

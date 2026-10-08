@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { ASSET_SCHEME, imageExtension, isAssetDir } from '@shared/assets'
+import { BOOK_FONT_HOST, isBookFontFile } from '@shared/bookFonts'
 import { ASSETS_DIR } from './projectStore'
 
 /**
@@ -33,4 +34,31 @@ export function assetPathFor(root: string, url: string): string | null {
   const relative = path.relative(dir, resolved)
   if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return null
   return resolved
+}
+
+/**
+ * Resolves the compile preview's font URL (`bookFontUrl`, Compile v2 CV3) to a file under the
+ * bundled fonts folder, or null for anything that is not `mythscribe-asset://book-fonts/<dir>/
+ * <file>` naming one of the shipped font files. Pure, like `assetPathFor`.
+ */
+export function bookFontPathFor(fontsDir: string, url: string): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== `${ASSET_SCHEME}:` || parsed.hostname !== BOOK_FONT_HOST) return null
+  const segments = parsed.pathname.split('/')
+  if (segments.length !== 3 || segments[0] !== '') return null
+  let dir: string
+  let file: string
+  try {
+    dir = decodeURIComponent(segments[1] ?? '')
+    file = decodeURIComponent(segments[2] ?? '')
+  } catch {
+    return null
+  }
+  if (!isBookFontFile(dir, file)) return null
+  return path.join(fontsDir, dir, file)
 }

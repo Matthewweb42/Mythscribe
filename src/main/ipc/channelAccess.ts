@@ -70,7 +70,6 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'stats:wordCount': 'read',
   'stats:dashboard': 'read',
   'manuscript:compile': 'read',
-  'export:run': 'read',
   'compile:source': 'read',
   // Compiling writes a file outside the project, like export: read.
   'compile:run': 'read',

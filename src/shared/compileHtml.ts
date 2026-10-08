@@ -450,29 +450,41 @@ function lang(book: CompiledBook): string {
  *   again from 1 at the body's first page (`ms-restart`). Paged.js's own `counter-reset: page`
  *   does not carry past the page it is set on in this Chromium, so the folio is ours;
  * - writes each contents entry's folio into its link (`data-folio`), printed after the label.
- * Run after the Paged.js polyfill loads.
+ * Run after the Paged.js polyfill loads. The work is `furnishPagedPages`, which the compile
+ * window's preview (CV3) calls itself once its frame's layout is done (its page may not run
+ * inline script); the function must stay self-contained, since its source text is the handler's.
  */
 export const PAGED_FURNITURE_HANDLER = `(function () {
+  const furnish = ${furnishPagedPages.toString()}
   class MythScribeFurniture extends window.Paged.Handler {
     afterRendered() {
-      let folio = 0
-      for (const page of document.querySelectorAll('.pagedjs_page')) {
-        if (page.querySelector('.ms-front') || page.querySelector('.ms-opener:not([data-split-from])')) {
-          page.classList.add('ms-bare')
-        }
-        folio = page.querySelector('.ms-restart:not([data-split-from])') ? 1 : folio + 1
-        page.style.setProperty('--ms-folio', '"' + folio + '"')
-        page.setAttribute('data-ms-folio', String(folio))
-      }
-      for (const link of document.querySelectorAll('.gen-toc a[href^="#"]')) {
-        const target = document.getElementById(link.getAttribute('href').slice(1))
-        const page = target ? target.closest('.pagedjs_page') : null
-        if (page) link.setAttribute('data-folio', page.getAttribute('data-ms-folio'))
-      }
+      furnish(document)
     }
   }
   window.Paged.registerHandlers(MythScribeFurniture)
 })()`
+
+/** The furniture pass on a laid-out Paged.js document (see `PAGED_FURNITURE_HANDLER`). */
+export function furnishPagedPages(doc: Document): void {
+  let folio = 0
+  for (const page of Array.from(doc.querySelectorAll<HTMLElement>('.pagedjs_page'))) {
+    if (
+      page.querySelector('.ms-front') ||
+      page.querySelector('.ms-opener:not([data-split-from])')
+    ) {
+      page.classList.add('ms-bare')
+    }
+    folio = page.querySelector('.ms-restart:not([data-split-from])') ? 1 : folio + 1
+    page.style.setProperty('--ms-folio', '"' + folio + '"')
+    page.setAttribute('data-ms-folio', String(folio))
+  }
+  for (const link of Array.from(doc.querySelectorAll('.gen-toc a[href^="#"]'))) {
+    const target = doc.getElementById((link.getAttribute('href') ?? '').slice(1))
+    const page = target ? target.closest('.pagedjs_page') : null
+    const pageFolio = page ? page.getAttribute('data-ms-folio') : null
+    if (pageFolio !== null) link.setAttribute('data-folio', pageFolio)
+  }
+}
 
 export interface PrintDocumentOptions {
   /** `@font-face` rules for the format's fonts (`fontFaceCss`), URLs the window can load. */

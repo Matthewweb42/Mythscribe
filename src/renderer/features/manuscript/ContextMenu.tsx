@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Check } from 'lucide-react'
 import type { MenuItem } from './contextMenuItems'
 
 interface ContextMenuProps {
@@ -79,13 +80,21 @@ export function ContextMenu({
         <li key={item.id} role="none" className="m-0 p-0">
           <button
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+            aria-checked={item.checked}
             tabIndex={-1}
             disabled={item.disabled}
             title={item.title}
             onClick={() => onSelect(item.id)}
-            className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-surface focus:bg-surface focus:outline-none disabled:opacity-50 disabled:hover:bg-transparent"
+            className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-sm hover:bg-surface focus:bg-surface focus:outline-none disabled:opacity-50 disabled:hover:bg-transparent"
           >
+            {item.checked !== undefined ? (
+              <Check
+                size={14}
+                aria-hidden="true"
+                className={item.checked ? 'shrink-0' : 'shrink-0 opacity-0'}
+              />
+            ) : null}
             {item.label}
           </button>
         </li>

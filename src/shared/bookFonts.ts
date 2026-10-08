@@ -1,4 +1,5 @@
-import { BOOK_FONT_INFO, type BookFont, type CompileFormat } from './compileFormat'
+import { ASSET_SCHEME } from './assets'
+import { BOOK_FONTS, BOOK_FONT_INFO, type BookFont, type CompileFormat } from './compileFormat'
 
 /**
  * The bundled book fonts (Compile v2, CV2): every `BookFont` ships under `resources/fonts/<dir>/`
@@ -124,4 +125,23 @@ export function fontFaceCss(
     }
   }
   return rules.join('\n')
+}
+
+/**
+ * The host the compile window's live preview (CV3) loads the bundled fonts from, on the project
+ * asset scheme: `mythscribe-asset://book-fonts/<dir>/<file>`. Main serves only the files
+ * `bookFontFaces` lists, from the same `resources/fonts/` the PDF printer reads.
+ */
+export const BOOK_FONT_HOST = 'book-fonts'
+
+/** The preview's URL for one bundled font file (`fontFaceCss`'s `urlFor`). */
+export function bookFontUrl(dir: string, file: string): string {
+  return `${ASSET_SCHEME}://${BOOK_FONT_HOST}/${encodeURIComponent(dir)}/${encodeURIComponent(file)}`
+}
+
+/** Whether `dir`/`file` is one of the bundled font files (the scheme serves nothing else). */
+export function isBookFontFile(dir: string, file: string): boolean {
+  return BOOK_FONTS.some(
+    (font) => BOOK_FONT_DIRS[font] === dir && bookFontFaces(font).some((face) => face.file === file)
+  )
 }

@@ -14,6 +14,10 @@ import { MatterTemplateId, matterTemplate } from '@shared/matterTemplates'
 import { countWords } from '@shared/wordCount'
 import { goalsStatusFixture } from '@renderer/features/goals/goalsFixture'
 import { resetGoalsStore, useGoalsStore } from '@renderer/features/goals/goalsStore'
+import {
+  resetCompileWindowStore,
+  useCompileWindowStore
+} from '@renderer/features/compile/compileWindowStore'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import {
@@ -187,6 +191,7 @@ const treeNames = (): (string | null)[] =>
 beforeEach(() => {
   useTreeStore.getState().clear()
   resetGoalsStore()
+  resetCompileWindowStore()
   resetTagStore()
   resetDocumentTagStore()
   useDialogStore.setState({ modals: [], toasts: [] })
@@ -195,6 +200,7 @@ beforeEach(() => {
 afterEach(() => {
   // F-10.3: the word-target tests leave a goals status behind for the next file otherwise.
   resetGoalsStore()
+  resetCompileWindowStore()
 })
 
 /** Puts dark-forest in the bank, links it to `nodeIds`, and filters the tree by it (F-4.10). */
@@ -557,6 +563,23 @@ describe('ManuscriptTree', () => {
     expect(labels).not.toContain('Rename')
     expect(labels).not.toContain('Duplicate')
     expect(labels).not.toContain('Delete')
+  })
+
+  it('Include in compile in the menu ticks and unticks the row (F-12.4)', async () => {
+    useCompileWindowStore.setState({ stateLoaded: true, excluded: [] })
+    render(<ManuscriptTree format="webnovel" />)
+    fireEvent.contextMenu(row('Scene 1'), { clientX: 40, clientY: 50 })
+    const include = screen.getByRole('menuitemcheckbox', { name: 'Include in compile' })
+    expect(include).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(include)
+    expect(useCompileWindowStore.getState().excluded).toEqual(['sc-1'])
+    fireEvent.contextMenu(row('Scene 1'), { clientX: 40, clientY: 50 })
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Include in compile' })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    )
+    await userEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Include in compile' }))
+    expect(useCompileWindowStore.getState().excluded).toEqual([])
   })
 
   it('Rename from the menu opens the inline editor prefilled with the title (F-2.3)', async () => {

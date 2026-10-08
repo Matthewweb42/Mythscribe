@@ -134,6 +134,22 @@ describe('treeContextMenuItems', () => {
       expect(ids(section)).not.toContain('set-target')
   })
 
+  it('offers Include in compile as a checkbox on documents and folders once the ticks are known (F-12.4)', () => {
+    expect(treeContextMenuItems(index, 'sc-1', 'novel', false, false).at(-1)).toEqual({
+      id: 'include-compile',
+      label: 'Include in compile',
+      checked: false
+    })
+    expect(treeContextMenuItems(index, 'title-page', 'novel', false, true).at(-1)).toMatchObject({
+      id: 'include-compile',
+      checked: true
+    })
+    expect(ids('sc-1')).not.toContain('include-compile')
+    expect(
+      treeContextMenuItems(index, 'manuscript', 'novel', false, true).map((item) => item.id)
+    ).not.toContain('include-compile')
+  })
+
   it('returns nothing for an unknown row', () => {
     expect(ids('missing')).toEqual([])
   })

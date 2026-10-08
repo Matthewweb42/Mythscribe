@@ -27,7 +27,7 @@ import {
 } from '../agent'
 import { AiModelChoice, AiRouting } from '../aiRouting'
 import { AiSettings, AiSource, AiSwitch } from '../aiSettings'
-import { ExportOptions, ExportProgress, ExportResult } from '../bookExport'
+import { ExportProgress } from '../bookExport'
 import {
   CHAT_HISTORY_TURNS,
   CHAT_MESSAGE_MAX,
@@ -1113,17 +1113,6 @@ export const contract = {
    * scene metadata stores first.
    */
   'manuscript:compile': { input: z.undefined(), output: CompiledManuscript },
-  /**
-   * Exports the book (F-12.1): main asks for the file path (`<project>.<ext>` beside the project
-   * folder), collects the chosen scope in reading order (front and end matter when asked), renders
-   * it in the format, and writes the file, pushing `export:progress` with `requestId` as it goes.
-   * Null when the save dialog is cancelled. A scope with nothing to print is VALIDATION. The
-   * renderer flushes the document and scene metadata stores first.
-   */
-  'export:run': {
-    input: z.object({ options: ExportOptions, requestId: z.string() }),
-    output: ExportResult.nullable()
-  },
   /**
    * Compile v2: the compile model's source, the front matter, manuscript, and end matter in
    * reading order, each node with its level, depth, title, scene metadata, tags, stored content,

@@ -41,7 +41,8 @@ import { registerHandlers } from './ipc/handlers'
 import { emit } from './ipc/registry'
 import { installSingleInstance } from './lifecycle'
 import { installApplicationMenu } from './menu'
-import { assetPathFor } from './project/assetUrl'
+import { bookFontsDir } from './export/pdf'
+import { assetPathFor, bookFontPathFor } from './project/assetUrl'
 import { ProjectManager } from './project/manager'
 import { isProjectFolder } from './project/projectStore'
 import { spellMenuPayload } from './spellcheck/contextMenu'
@@ -141,7 +142,11 @@ if (process.platform === 'linux') safeStorage.setUsePlainTextEncryption(true)
  * `ready`; `standard` and `secure` let CSS `url()` and `<img>` load it like https.
  */
 protocol.registerSchemesAsPrivileged([
-  { scheme: ASSET_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }
+  // corsEnabled: the compile window's preview loads the bundled fonts from it (Compile v2, CV3).
+  {
+    scheme: ASSET_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+  }
 ])
 
 /** The lock lives in userData, so it must be requested after the override above. */
@@ -269,7 +274,17 @@ if (!primaryInstance) {
       target: () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
     })
     // No project open, a URL outside the backgrounds folder, or a file that is gone: 404.
-    protocol.handle(ASSET_SCHEME, (request) => {
+    protocol.handle(ASSET_SCHEME, async (request) => {
+      // Compile v2 (CV3): the bundled book fonts for the compile window's live preview. A font
+      // is a cross-origin load, so the answer says any origin may use it.
+      const font = bookFontPathFor(bookFontsDir(), request.url)
+      if (font !== null) {
+        if (!existsSync(font)) return new Response(null, { status: 404 })
+        const response = await net.fetch(pathToFileURL(font).toString())
+        const headers = new Headers(response.headers)
+        headers.set('Access-Control-Allow-Origin', '*')
+        return new Response(response.body, { status: response.status, headers })
+      }
       const folder = manager.current()?.path
       const file = folder === undefined ? null : assetPathFor(folder, request.url)
       if (file === null || !existsSync(file)) return new Response(null, { status: 404 })
