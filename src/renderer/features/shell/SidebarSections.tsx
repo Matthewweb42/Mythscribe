@@ -91,6 +91,8 @@ export function SidebarSections({ format, sections }: SidebarSectionsProps): Rea
   const openList = (): void => {
     const at = rows.findIndex((row) => row.id === current?.id)
     setActiveRow(at === -1 ? 0 : at)
+    // Each opening starts with the unused sections folded away again.
+    setShowUnused(false)
     setOpen(true)
   }
 
@@ -278,7 +280,7 @@ export function SidebarSections({ format, sections }: SidebarSectionsProps): Rea
       <div
         role="region"
         id="sidebar-panel"
-        aria-label={current?.label ?? 'Sidebar'}
+        aria-label={`${current?.label ?? 'Sidebar'} section`}
         className="flex min-h-0 flex-1 flex-col"
       >
         {current?.render(format)}

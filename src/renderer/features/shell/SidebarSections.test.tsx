@@ -63,7 +63,7 @@ describe('SidebarSections (F-9.11)', () => {
     render(<SidebarSections format="novel" sections={sections} />)
     expect(picker()).toHaveAccessibleName('Section: Manuscript')
     expect(picker()).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getByRole('region', { name: 'Manuscript' })).toHaveTextContent('Manuscript here')
+    expect(screen.getByRole('region', { name: 'Manuscript section' })).toHaveTextContent('Manuscript here')
   })
 
   it('lists the used sections by name with their counts, grouped, the unused behind a toggle', async () => {
@@ -94,6 +94,10 @@ describe('SidebarSections (F-9.11)', () => {
       'Library',
       'New category…'
     ])
+    // Reopened, the list starts folded again.
+    await user.keyboard('{Escape}')
+    await user.click(picker())
+    expect(optionNames()).toContain('Show unused sections (2)')
   })
 
   it('picks a section with the mouse, closes, and shows its panel', async () => {
@@ -104,7 +108,7 @@ describe('SidebarSections (F-9.11)', () => {
     expect(current()).toBe('magic')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
     expect(picker()).toHaveAccessibleName('Section: Magic Systems')
-    expect(screen.getByRole('region', { name: 'Magic Systems' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Magic Systems section' })).toBeInTheDocument()
   })
 
   it('works from the keyboard: arrows move and wrap, Enter picks, Escape closes', async () => {

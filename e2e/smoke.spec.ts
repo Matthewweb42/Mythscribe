@@ -1593,7 +1593,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(sectionPicker).toBeFocused()
   await expect(sectionPicker).toHaveAccessibleName('Section: Manuscript')
   await expect(
-    page.getByRole('region', { name: 'Manuscript', exact: true }).getByRole('tree')
+    page.getByRole('region', { name: 'Manuscript section', exact: true }).getByRole('tree')
   ).toBeVisible()
 
   // F-2.2: "New scene" from the bar inserts after the selected scene and opens inline rename;
@@ -2436,7 +2436,7 @@ test('create, close, reopen a project on disk', async () => {
   // (the color pre-fills from the chosen category), opens its detail view, renames it inline,
   // and deletes it after a confirmation.
   await showSection('Tags')
-  const tagsPanel = page.getByRole('region', { name: 'Tags', exact: true })
+  const tagsPanel = page.getByRole('region', { name: 'Tags section', exact: true })
   const categories = tagsPanel.getByRole('tablist', { name: 'Tag categories' })
   await expect(categories.getByRole('tab')).toHaveText([
     'All',
@@ -2594,7 +2594,7 @@ test('create, close, reopen a project on disk', async () => {
   // the card border, and Delete asks first and then removes it, so the tab says the kind is
   // empty again (the empty-kind message wins over the search's "no match").
   await showSection('Characters')
-  const charactersPanel = page.getByRole('region', { name: 'Characters', exact: true })
+  const charactersPanel = page.getByRole('region', { name: 'Characters section', exact: true })
   await expect(charactersPanel.getByText('No characters yet.')).toBeVisible()
   const characterForm = charactersPanel.getByRole('form', { name: 'New character' })
   await characterForm.getByRole('textbox', { name: 'Character name' }).fill('Mara')
@@ -3241,7 +3241,7 @@ test('create, close, reopen a project on disk', async () => {
   // empty beats, and counts one of fifteen filled. Back to the outline, no template, and the
   // Manuscript tab so the later steps find the tree as they left it.
   await showSection('Outline')
-  const outlinePanel = page.getByRole('region', { name: 'Outline', exact: true })
+  const outlinePanel = page.getByRole('region', { name: 'Outline section', exact: true })
   const structureSelect = outlinePanel.getByRole('combobox', { name: 'Structure' })
   await expect(structureSelect).toBeEnabled()
   await structureSelect.selectOption({ label: 'Save the Cat' })
@@ -3309,7 +3309,7 @@ test('create, close, reopen a project on disk', async () => {
   // view lists Opening on the event. Deleting both events keeps Opening's text and drops the
   // link; clearing the field leaves the scene as it was, and the Manuscript tab comes back.
   await showSection('Timeline')
-  const timelinePanel = page.getByRole('region', { name: 'Timeline', exact: true })
+  const timelinePanel = page.getByRole('region', { name: 'Timeline section', exact: true })
   await expect(timelinePanel.getByText('No events yet.')).toBeVisible()
   const addEventForm = timelinePanel.getByRole('form', { name: 'Add event' })
   const timelineEvents = timelinePanel.getByTestId('timeline-event')
@@ -5359,7 +5359,7 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
   await showSection('Outline')
-  const planPanel = page.getByRole('region', { name: 'Outline', exact: true })
+  const planPanel = page.getByRole('region', { name: 'Outline section', exact: true })
   const outlineRows = planPanel.getByTestId('outline-row')
   await expect(outlineRows.filter({ hasText: 'Scene 1' }).first()).toHaveAttribute(
     'data-progress',
@@ -6068,7 +6068,7 @@ test('create, close, reopen a project on disk', async () => {
     'Tomas Reed is twenty-nine and owes the mill money.\n\nThe Landing is a jetty of black planks on the north bank.\n\nThe Weave costs a memory for every knot.\n\nThe Gull, a cutter, has a crew of twelve.\n'
   )
   await showSection('Library')
-  const libraryPanel = page.getByRole('region', { name: 'Library', exact: true })
+  const libraryPanel = page.getByRole('region', { name: 'Library section', exact: true })
   await expect(libraryPanel).toContainText('No files yet')
   await stubOpenDialogFiles([peopleFile, placesFile])
   const contextBodies = (): string[] =>
@@ -6184,7 +6184,6 @@ test('create, close, reopen a project on disk', async () => {
     'Magic Systems1',
     'Vessels1',
     /^Tags\d+$/,
-    /^Timeline\d+$/,
     /^Outline\d+$/,
     /^Edits\d+$/,
     'Library2',
@@ -6192,13 +6191,10 @@ test('create, close, reopen a project on disk', async () => {
     'New category…'
   ])
   await expect(sectionList.getByRole('option', { name: 'Religions' })).toHaveCount(0)
-  if (process.env.MYTHSCRIBE_E2E_SHOT) {
-    await page.screenshot({ path: process.env.MYTHSCRIBE_E2E_SHOT })
-  }
   await sectionList.getByRole('option', { name: 'Magic Systems' }).click()
   await expect(sectionPicker).toHaveAccessibleName('Section: Magic Systems')
   await expect(
-    page.getByRole('region', { name: 'Magic Systems', exact: true }).getByRole('button', {
+    page.getByRole('region', { name: 'Magic Systems section', exact: true }).getByRole('button', {
       name: /^The Weave/
     })
   ).toBeVisible()
@@ -6495,7 +6491,7 @@ test('create, close, reopen a project on disk', async () => {
   // below the same scene is open with the caret there (a typed letter lands at that spot), the
   // folder is still folded, and the Outline tab is showing.
   const resumeEditor = page.getByRole('textbox', { name: 'Document' })
-  const resumeTabs = page.getByRole('tablist', { name: 'Sidebar' })
+  const resumeTabs = page.getByRole('button', { name: /^Section: / })
   const resumeTree = page.getByRole('tree', { name: 'Document tree' })
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1 (split)')
   const resumeText = (await documentText(draftScene)) ?? ''
@@ -6525,11 +6521,8 @@ test('create, close, reopen a project on disk', async () => {
   expect(foldName).not.toBe('')
   await foldButton.click()
   await expect(resumeTree.getByRole('button', { name: `Expand ${foldName}` })).toBeVisible()
-  await resumeTabs.getByRole('tab', { name: 'Outline' }).click()
-  await expect(resumeTabs.getByRole('tab', { name: 'Outline' })).toHaveAttribute(
-    'aria-selected',
-    'true'
-  )
+  await showSection('Outline')
+  await expect(resumeTabs).toHaveAccessibleName('Section: Outline')
 
   // F-7.9: the window closes somewhere else at another size, with the project still open; the
   // next launch puts the window back there and opens the project again.
@@ -6557,7 +6550,7 @@ test('create, close, reopen a project on disk', async () => {
   // F-1.7: the same scene, focused at the same caret; the Outline tab; the folder still folded.
   // (The relaunch made a new page, so the locators are taken again.)
   const resumedEditor = page.getByRole('textbox', { name: 'Document' })
-  const resumedTabs = page.getByRole('tablist', { name: 'Sidebar' })
+  const resumedTabs = page.getByRole('button', { name: /^Section: / })
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1 (split)')
   await expect(resumedEditor).toBeFocused()
   await page.keyboard.type('Z')
@@ -6566,13 +6559,10 @@ test('create, close, reopen a project on disk', async () => {
     .toBe(`${resumeText.slice(0, 3)}Z${resumeText.slice(3)}`)
   await page.keyboard.press('Backspace')
   await expect.poll(() => documentText(draftScene)).toBe(resumeText)
-  await expect(resumedTabs.getByRole('tab', { name: 'Outline' })).toHaveAttribute(
-    'aria-selected',
-    'true'
-  )
-  await resumedTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await expect(resumedTabs).toHaveAccessibleName('Section: Outline')
+  await showSection('Manuscript')
   const resumedTree = page
-    .getByRole('region', { name: 'Manuscript', exact: true })
+    .getByRole('region', { name: 'Manuscript section', exact: true })
     .getByRole('tree')
   await expect(resumedTree).toBeVisible()
   await expect(resumedTree.getByRole('button', { name: `Expand ${foldName}` })).toBeVisible()
@@ -6587,7 +6577,7 @@ test('create, close, reopen a project on disk', async () => {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getNormalBounds())
   ).toEqual(left)
   // Layout 3c: the sidebar came back right of the editor; View › Reset layout returns it.
-  const relaunchedTabs = page.getByRole('tablist', { name: 'Sidebar' })
+  const relaunchedTabs = page.getByRole('button', { name: /^Section: / })
   const relaunchedEditor = page.locator('main > section')
   const boxOf = async (locator: Locator): Promise<number> => {
     const box = await locator.boundingBox()
