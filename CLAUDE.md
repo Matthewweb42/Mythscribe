@@ -75,6 +75,7 @@ apply to all of `FEATURES.md` §2.5, §2.14, §2.15 and are checked in review.
 8. **Count before you send.** Estimate tokens locally; if a request would exceed its budget, trim context by priority (drop far summaries, then exemplars, then recent text) rather than failing or overspending.
 9. **Prompts are compact and versioned** (F-5.12): no restated instructions, no examples the retrieval already supplies, no reasoning dumps. Every prompt change runs the eval harness and reports token delta and fidelity delta in the PR.
 10. **Cost is visible.** Each proposal records model, tokens in/out, and cost; Settings shows the running total. A feature that cannot report its cost is not done.
+11. **The cost registry is always complete** (author request 2026-10-08): every `AiFeatureId` has an entry in `src/shared/aiCostNotes.ts` (trigger, when, calls per use, typical output, ideas); a new feature does not compile without one. `npm run eval:ai -- -u` regenerates `docs/AI-COST-REGISTRY.md` (every AI feature with estimated cost per call per provider); update the note's typical sizes when the ledger shows real numbers.
 
 **Token efficiency in this repo (for Claude Code itself)**: do not re-read files already in context; grep before reading; delegate broad searches to `Explore`; keep agent prompts to the feature ID and a plan file path; one implementer per feature; the full gate suite runs at most twice per feature (see the global Delegation section), targeted checks otherwise.
 

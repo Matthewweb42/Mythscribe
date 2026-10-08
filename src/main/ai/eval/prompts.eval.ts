@@ -10,6 +10,7 @@ import { SCENE_BRIEF_FIELD_MAX } from '@shared/sceneMeta'
 import { SceneSummary } from '@shared/summary'
 import { toTagName } from '@shared/tags'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
+import { renderCostRegistry } from './costRegistry'
 import { WHAT_NEXT_DIRECTIONS } from '@shared/whatNext'
 import { parseAgentReply } from '../agent'
 import { checkChatFidelity, postProcessChatText } from '../chat'
@@ -40,6 +41,8 @@ import { renderLiveReport, renderTokenReport, tokenRows, type LiveResult } from 
 
 const LIVE = process.env.MYTHSCRIBE_EVAL_LIVE === '1'
 const TOKEN_REPORT = './token-report.md'
+/** Every AI feature with its estimated cost per call (author request 2026-10-08). */
+const COST_REGISTRY = '../../../../docs/AI-COST-REGISTRY.md'
 
 describe('prompt eval harness (F-5.12)', () => {
   it('has at least one case for every catalogued prompt version, in catalogue order', () => {
@@ -78,6 +81,10 @@ describe('prompt eval harness (F-5.12)', () => {
 
   it('the token report matches the committed baseline (accept a change with `npm run eval:ai -- -u`)', async () => {
     await expect(renderTokenReport(tokenRows(EVAL_CASES))).toMatchFileSnapshot(TOKEN_REPORT)
+  })
+
+  it('the AI cost registry matches the committed one (docs/AI-COST-REGISTRY.md; accept with `-u`)', async () => {
+    await expect(renderCostRegistry(tokenRows(EVAL_CASES))).toMatchFileSnapshot(COST_REGISTRY)
   })
 })
 

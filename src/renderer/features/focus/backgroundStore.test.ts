@@ -62,9 +62,13 @@ async function settle(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0)
 }
 
-beforeEach(() => {
-  vi.useFakeTimers()
+beforeEach(async () => {
+  // Workers are reused across files: let whatever an earlier file left pending (an IPC answer that
+  // calls load() or clear() and bumps the generation) land on real timers first, then reset, so it
+  // cannot drop this file's debounced write (flaked in the full suite on 2026-10-07 and 2026-10-08).
+  await new Promise((resolve) => setTimeout(resolve, 0))
   resetBackgroundStore()
+  vi.useFakeTimers()
   resetPendingSaves()
   useDialogStore.setState({ modals: [], toasts: [] })
   stored = { ...defaultFocusSettings(), backgroundId: 'b' }
