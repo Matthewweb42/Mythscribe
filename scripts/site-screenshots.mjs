@@ -2,13 +2,14 @@
  * Captures the website's product screenshots (F-15.10) from the built app.
  *
  *   npm run build            # or any run that leaves out/
- *   xvfb-run -a -s "-screen 0 1600x1000x24" node scripts/site-screenshots.mjs
+ *   xvfb-run -a -s "-screen 0 1600x1000x24" node scripts/site-screenshots.mjs [--out <dir>]
  *
  * It builds a short demo novel ("The Lantern Ferry") in a throwaway project through the IPC
  * bridge, answers every AI request from a fake OpenAI server on loopback (the same approach as
  * `e2e/smoke.spec.ts`; no request leaves the machine and no key is real), drives the real UI to
- * each view, and writes `site/public/img/shot-<name>.webp` and `.png`. Recapture when the UI
- * changes. Nothing here is part of the gate suite.
+ * each view, and writes `shot-<name>.webp` and `.png` into `site/public/img/` (or `--out`, for a
+ * trial run that leaves the live images alone). Recapture when the UI changes. Nothing here is
+ * part of the gate suite.
  */
 import fs from 'node:fs'
 import http from 'node:http'
@@ -21,7 +22,11 @@ import { fileURLToPath } from 'node:url'
 import { _electron as electron } from 'playwright'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const OUT_DIR = path.join(ROOT, 'site/public/img')
+const outFlag = process.argv.indexOf('--out')
+const OUT_DIR =
+  outFlag > 0 && process.argv[outFlag + 1]
+    ? path.resolve(process.argv[outFlag + 1])
+    : path.join(ROOT, 'site/public/img')
 const WIDTH = 1440
 const HEIGHT = 900
 /** Exported widths: the full shot and a smaller one for phones (`srcset`). */
@@ -34,6 +39,8 @@ const ROUTER = "You are the router inside a novel-writing app's assistant."
 const EDIT_PASS = 'You are the edit-pass feature inside a novel-writing app.'
 const SUMMARY = 'You are the scene-summary feature inside a novel-writing app.'
 const CONTINUITY = 'You are the continuity feature inside a novel-writing app.'
+const CONTEXT_IMPORT = 'You are the context-library feature inside a novel-writing app'
+const REVIEW_CHAT = 'You are the review assistant inside a novel-writing app.'
 
 // ---------------------------------------------------------------------------------------------
 // The demo novel. Original text written for the site.
@@ -202,6 +209,75 @@ const ENTITIES = [
   }
 ]
 
+/** Names and titles the story bible files under one sheet (F-4.14). */
+const ALIASES = { 'Tomas Reed': ['Old Reed', 'the ferryman'] }
+
+/** The author's worldbuilding notes, uploaded to the context library (F-9.8). */
+const LORE_FILE = 'lantern-lore.md'
+const LORE = `# Notes on the river
+
+Marta Varrow rang the harbour bell for twenty years. Everyone on the quay called her the bell-ringer; she drowned the winter Ilse turned nine.
+
+Edda Cassel, the Warden, is fifty-two. She keeps the Salt House ledgers and has never once crossed the river herself.
+
+The Tide Reckoning counts years from the night the river first ran green. Ferrymen date their contracts by it.
+
+The East Quay is where the ferry ties up at dusk: three iron rings, a bell post, a slipway green with weed.
+
+Theme: what a town agrees not to say.
+`
+
+/** What the fake sorts the notes into: new sheets, an update with a conflict, a note. */
+const CONTEXT_ANSWER = {
+  entities: [
+    {
+      kind: 'character',
+      name: 'Marta Varrow',
+      aliases: ['the bell-ringer'],
+      fields: { background: 'Rang the Greywater harbour bell for twenty years. Ilse’s mother.' },
+      details: ['Drowned the winter Ilse turned nine.']
+    },
+    {
+      kind: 'character',
+      name: 'Warden Cassel',
+      aliases: ['Edda Cassel', 'the Warden'],
+      fields: { age: '52' },
+      details: ['Has never once crossed the river herself.']
+    },
+    {
+      kind: 'world',
+      name: 'The Tide Reckoning',
+      aliases: [],
+      fields: {
+        category: 'Calendar',
+        description: 'Years counted from the night the river first ran green.'
+      },
+      details: ['Ferrymen date their contracts by it.']
+    },
+    {
+      kind: 'setting',
+      name: 'The East Quay',
+      aliases: [],
+      fields: { description: 'Three iron rings, a bell post, and a slipway green with weed.' },
+      details: []
+    }
+  ],
+  notes: ['Theme: what a town agrees not to say.'],
+  images: []
+}
+const REVIEW_REQUEST = 'Marta is Mother Varrow to the ferrymen.'
+
+/** File › Book details, which the compile prints (F-12.4). */
+const BOOK_DETAILS = {
+  title: 'The Lantern Ferry',
+  author: 'E. M. Hollis',
+  copyrightYear: '2026',
+  rights: 'All rights reserved.',
+  dedication: 'For everyone who has crossed in the dark.',
+  epigraph: 'Count the bells, and you will always find the shore.',
+  epigraphSource: 'Greywater saying'
+}
+
 // ---------------------------------------------------------------------------------------------
 // The fake OpenAI server.
 
@@ -234,6 +310,20 @@ function answerFor(request) {
     return { changes: LINE_EDITS.filter((change) => text.includes(change.quote)) }
   }
   if (system.startsWith(CONTINUITY)) return { findings: [] }
+  if (system.startsWith(CONTEXT_IMPORT)) return CONTEXT_ANSWER
+  if (system.startsWith(REVIEW_CHAT)) {
+    // The review lists each item as `<id> · <name> · …`; the reply works on those ids.
+    const listing = request.messages[1]?.content ?? ''
+    const item =
+      listing
+        .split('\n')
+        .find((line) => line.includes(' · Marta Varrow · '))
+        ?.split(' · ')[0] ?? ''
+    return {
+      reply: 'Marta Varrow now also answers to Mother Varrow.',
+      ops: [{ op: 'aliases', item, aliases: ['the bell-ringer', 'Mother Varrow'] }]
+    }
+  }
   if (system.startsWith(SUMMARY)) {
     const user = request.messages.at(-1)?.content ?? ''
     const scene = SCENES.find((s) => user.includes(s.text[0].slice(0, 40)))
@@ -248,25 +338,55 @@ function answerFor(request) {
   return { tags: [] }
 }
 
+/** One server-sent-events chunk in the shape the OpenAI SDK parses. */
+const sseChunk = (model, payload) =>
+  `data: ${JSON.stringify({ id: 'chatcmpl-site', object: 'chat.completion.chunk', created: 0, model, ...payload })}\n\n`
+
 function startFakeOpenAi() {
   const server = http.createServer((req, res) => {
-    res.setHeader('content-type', 'application/json')
     if (req.method === 'POST' && (req.url ?? '').endsWith('/chat/completions')) {
       let body = ''
       req.setEncoding('utf8')
       req.on('data', (chunk) => (body += chunk))
       req.on('end', () => {
         const request = JSON.parse(body)
-        const json = request.response_format?.type === 'json_object'
+        const model = request.model ?? 'gpt-5.4'
+        const system = request.messages[0]?.content ?? ''
+        // The chat agent streams every step (its answer shows as it arrives), JSON or not.
+        const json =
+          request.response_format?.type === 'json_object' || system.startsWith(CHAT_AGENT)
         const content = json ? JSON.stringify(answerFor(request)) : ''
         // A short pause so the live lookup steps are on screen long enough to see.
         setTimeout(() => {
+          if (request.stream) {
+            res.setHeader('content-type', 'text/event-stream')
+            const cut = Math.floor(content.length / 2)
+            for (const [piece, finish] of [
+              [content.slice(0, cut), null],
+              [content.slice(cut), 'stop']
+            ]) {
+              res.write(
+                sseChunk(model, {
+                  choices: [{ index: 0, delta: { content: piece }, finish_reason: finish }]
+                })
+              )
+            }
+            res.write(
+              sseChunk(model, {
+                choices: [],
+                usage: { prompt_tokens: 2400, completion_tokens: 180, total_tokens: 2580 }
+              })
+            )
+            res.end('data: [DONE]\n\n')
+            return
+          }
+          res.setHeader('content-type', 'application/json')
           res.end(
             JSON.stringify({
               id: 'chatcmpl-site',
               object: 'chat.completion',
               created: 0,
-              model: request.model ?? 'gpt-5.4',
+              model,
               choices: [
                 { index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }
               ],
@@ -277,6 +397,7 @@ function startFakeOpenAi() {
       })
       return
     }
+    res.setHeader('content-type', 'application/json')
     const id = (req.url ?? '').split('/').pop() ?? ''
     res.end(JSON.stringify({ id, object: 'model', created: 0, owned_by: 'system' }))
   })
@@ -349,6 +470,7 @@ async function shoot(page, name, clip) {
 }
 
 async function main() {
+  fs.mkdirSync(OUT_DIR, { recursive: true })
   const { server, url } = await startFakeOpenAi()
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-site-'))
   const env = {
@@ -384,6 +506,9 @@ async function main() {
       directory: tmp,
       aiSwitch: 'ask'
     })
+    // A fresh install's own key is for OpenRouter; the fake speaks OpenAI's API at
+    // OPENAI_BASE_URL, so the demo picks OpenAI first (as the e2e does).
+    await invoke(page, 'ai:setOwnKeyProvider', { provider: 'openai' })
     await invoke(page, 'ai:setKey', { key: 'sk-site-demo-not-a-real-key' })
 
     // The starter is Arc 1 → Chapter 1 → Scene 1; rename it and grow the rest.
@@ -402,7 +527,12 @@ async function main() {
     })
     const chapters = { 'The Harbour': chapter1.id, 'The Warden': chapter2.id }
 
-    for (const entity of ENTITIES) await invoke(page, 'entity:create', entity)
+    for (const entity of ENTITIES) {
+      const created = await invoke(page, 'entity:create', entity)
+      const aliases = ALIASES[entity.name]
+      if (aliases) await invoke(page, 'entity:update', { id: created.id, aliases })
+    }
+    await invoke(page, 'bookDetails:set', BOOK_DETAILS)
     for (const name of ['foreboding']) await invoke(page, 'tag:create', { name, category: 'tone' })
     const tags = await invoke(page, 'tag:list')
 
@@ -493,6 +623,76 @@ async function main() {
     await page.getByTestId('entity-editor').waitFor()
     await page.waitForTimeout(500)
     await shoot(page, 'shot-story-bible')
+
+    // 5. The context library: the author's worldbuilding notes sorted into sheets, names and
+    // titles merged under one entry, a conflict with an existing sheet, and the review chat.
+    // Nothing is written until Apply.
+    const loreFile = path.join(tmp, LORE_FILE)
+    fs.writeFileSync(loreFile, LORE)
+    await app.evaluate(
+      ({ dialog }, chosen) => {
+        dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: chosen })
+      },
+      [loreFile]
+    )
+    await sidebarTabs.getByRole('tab', { name: 'Library' }).click()
+    await page.getByRole('tabpanel', { name: 'Library' }).getByTestId('library-add').click()
+    const library = page.getByTestId('library-dialog')
+    await library.getByTestId('library-estimate').waitFor()
+    await library.getByTestId('library-confirm').click()
+    const review = library.getByTestId('library-review')
+    await review.waitFor({ timeout: 30_000 })
+    const reviewChat = library.getByTestId('review-chat')
+    await reviewChat.getByTestId('review-chat-input').fill(REVIEW_REQUEST)
+    await reviewChat.getByTestId('review-chat-send').click()
+    await review
+      .locator('[data-item-name="Marta Varrow"]')
+      .getByTestId('library-item-changed')
+      .waitFor({ timeout: 30_000 })
+    await shoot(page, 'shot-library-review')
+    await library.getByTestId('library-apply').click()
+    await library.waitFor({ state: 'detached' })
+
+    // 6. Compile: the paperback format with its live page preview, from File › Compile….
+    await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+    await page
+      .getByRole('menubar', { name: 'Application menu' })
+      .getByRole('menuitem', { name: 'File' })
+      .click()
+    await page
+      .getByRole('menu', { name: 'File' })
+      .getByRole('menuitem', { name: 'Compile…' })
+      .click()
+    const compile = page.getByRole('dialog', { name: 'Compile' })
+    await compile
+      .getByRole('navigation', { name: 'Formats' })
+      .getByRole('button', { name: 'Paperback 6 × 9', exact: true })
+      .click()
+    const preview = compile.getByTestId('compile-window-preview')
+    const ready = preview.and(page.locator('[data-state="ready"]'))
+    await ready.waitFor({ timeout: 60_000 })
+    // Start the preview at the first chapter, so the shot shows body pages, not the title page.
+    const from = compile.getByRole('combobox', { name: 'Preview from' })
+    const harbour = await from
+      .locator('option')
+      .filter({ hasText: 'The Harbour' })
+      .first()
+      .getAttribute('value')
+    if (harbour !== null) await from.selectOption(harbour)
+    await page.waitForTimeout(500)
+    await ready.waitFor({ timeout: 60_000 })
+    await page.waitForTimeout(1_000)
+    await shoot(page, 'shot-compile')
+    await page.keyboard.press('Escape')
+  } catch (error) {
+    // The window as it was when a step gave up: the quickest way to see what changed in the UI.
+    const failure = path.join(os.tmpdir(), 'mythscribe-site-failure.png')
+    const shot = await app
+      .firstWindow()
+      .then((page) => page.screenshot({ path: failure }))
+      .catch(() => null)
+    if (shot) process.stderr.write(`window at the failure: ${failure}\n`)
+    throw error
   } finally {
     await app.close()
     server.close()

@@ -12,6 +12,18 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-08 · F-15.10 · Website refresh, phase 1: where the three new highlights sit
+- Question: The new screenshots (library review, compile) are not taken yet (they wait for the sidebar section picker), and `npm run site:check` fails on an image that does not exist. How do the three highlights (worldbuilding upload + aliases, AI that knows "now", compile) go on the page now?
+- Chosen: a row of three text cards (`ul.cards.highlights`) at the top of the feature tour, plus small edits: a story-bible tick for aliases and uploads, the import card says "Compile to a print-ready PDF, EPUB, Word, or Markdown", and the FAQ on bringing notes mentions the Library. Once the shots exist, the upload and compile cards become tour articles with `shot-library-review` and `shot-compile`. The compile card does not name Scrivener ("From manuscript to print-ready book"), so the page makes no comparison with another product. The "categories like Magic Systems" line assumes the sidebar categories work merges first.
+- Alternatives: tour articles now with placeholder images; holding the copy until the shots; naming Scrivener ("Compile like Scrivener").
+- To change it: `site/public/index.html` (the `highlights` list), `.highlights` in `site/public/styles.css`.
+
+## 2026-10-08 · F-15.10 · Screenshot script: the demo additions
+- Question: What does the demo novel need for the new shots?
+- Chosen: Tomas Reed gets the aliases "Old Reed" and "the ferryman" (shown on his sheet); a worldbuilding file `lantern-lore.md` goes through the Library, and the fake sorts it into Marta Varrow (alias "the bell-ringer"), an update to Warden Cassel (aliases "Edda Cassel", "the Warden", an age conflict 50s vs 52), The Tide Reckoning (world), The East Quay (place), and a theme note; the review chat adds "Mother Varrow"; Book details carry the title, a pen name "E. M. Hollis" (invented for the demo), a dedication, and an epigraph. The compile shot is Paperback 6 × 9 previewed from Chapter One. The script picks OpenAI as the own-key provider (fresh installs default to OpenRouter, which the fake does not answer), answers streamed agent steps, and takes `--out <dir>` for trial runs.
+- Alternatives: a different pen name, or the author's own; previewing the title page instead.
+- To change it: `scripts/site-screenshots.mjs` (`ALIASES`, `LORE`, `CONTEXT_ANSWER`, `BOOK_DETAILS`).
+
 ## 2026-10-08 · F-4.14 · How a likely misspelling is detected
 - Question: The author asked that misspellings of known names ("Rynna Falseer") be offered as text fixes. What counts as one?
 - Chosen: local only, no AI: a run of capitalised words whose every word is the same as, or a close spelling of, the matching word of a tag's name or alias — same first letter, at most 1 edit for a 4–5-letter word and 2 for 6+ (insertions, deletions, substitutions, adjacent swaps); words under 4 letters are never compared; each 5+-letter word of a multi-word name is also checked on its own ("Falseer" alone). Exact names and aliases of any tag are never flagged. Not a typo keeps the spelling for the project. The optional AI confirmation step from the plan was not built.
