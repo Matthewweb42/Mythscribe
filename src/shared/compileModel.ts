@@ -425,7 +425,7 @@ export function formatNumber(n: number, style: NumberingStyle): string {
  * A section's heading as printed. `label` is prefix + number + suffix (null when unnumbered),
  * `title` the node's title after replacements (null when hidden or blank), `lines` what prints,
  * one or two lines, upper-cased for the `upper` case (small caps is the writer's style), and
- * `plain` the same text joined on one line without the case change (contents entries).
+ * `plain` the same text on one line without the case change (contents entries).
  */
 export interface SectionHeading {
   label: string | null
@@ -451,7 +451,13 @@ export function sectionHeading(
   const parts = [label, title].filter((p): p is string => p !== null && p.length > 0)
   const plainLines = layout.titleOnNewLine ? parts : [parts.join(' ')]
   const lines = layout.case === 'upper' ? plainLines.map((l) => l.toLocaleUpperCase()) : plainLines
-  return { label, title, lines, plain: parts.join(' ') }
+  // On one line, a label set above its title reads "Chapter One: The Storm" (CV2, decided by
+  // Claude, unconfirmed); a label that ends in its own punctuation ("1.") keeps just the space.
+  const joiner =
+    layout.titleOnNewLine && label !== null && title !== null && !/[.:;,—–-]$/u.test(label)
+      ? ': '
+      : ' '
+  return { label, title, lines, plain: parts.join(joiner) }
 }
 
 // ---------------------------------------------------------------------------------------------

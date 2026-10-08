@@ -38,7 +38,13 @@ import { CheckoutBody, CreditsResult, EMAIL_MAX, PricingResult, UsageResult } fr
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { BookDetails } from '../bookDetails'
 import { CompiledManuscript } from '../compile'
-import { CompileFormat, CompileFormatName, CompileProjectState } from '../compileFormat'
+import {
+  CompileFormat,
+  CompileFormatName,
+  CompileProjectState,
+  CompileRunInput,
+  CompileRunResult
+} from '../compileFormat'
 import { CompileSource } from '../compileModel'
 import {
   CONTEXT_FILE_MAX_BYTES,
@@ -1117,6 +1123,15 @@ export const contract = {
    * on it for the live preview; it flushes the document, notes, and scene metadata stores first.
    */
   'compile:source': { input: z.undefined(), output: CompileSource },
+  /**
+   * Compile v2: compiles the project with `format` (as shown, unsaved edits included) into
+   * `output`. Main asks for the file path (`<book title>.<ext>` beside the project folder),
+   * compiles the scope with the stored include ticks and Book details, renders the output (PDF
+   * through Paged.js in a hidden window), and writes the file, pushing `export:progress` with
+   * `requestId`. Null when the save dialog is cancelled; nothing to print is VALIDATION. The
+   * renderer flushes the document, notes, and scene metadata stores first.
+   */
+  'compile:run': { input: CompileRunInput, output: CompileRunResult.nullable() },
   /**
    * Compile v2: the project's last format, output, quick pick, and "Include in compile"
    * exclusions; the defaults (Standard Manuscript, whole manuscript, all included) when unset.

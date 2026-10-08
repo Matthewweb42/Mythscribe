@@ -3,14 +3,15 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultExportFormatting, type ExportOptions } from '@shared/bookExport'
+import type { CompiledBook, ContentBlock } from '@shared/compileModel'
 import type { TiptapNodeT } from '@shared/tiptap'
 import type { NodeRow } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { createSeededProject } from '../project/testProject'
 import { createNode, listNodes, moveNode, type TreeDb } from '../tree/treeStore'
-import { collectBook } from './collect'
-import type { BookBlock } from './model'
+import { compileProject } from './collect'
+import { exportDialogFormat } from './exportDialog'
 
 let tmp: string
 let session: ProjectSession
@@ -51,14 +52,36 @@ function sceneOf(chapter: NodeRow): NodeRow {
   return scene
 }
 
-function texts(blocks: readonly BookBlock[]): string[] {
-  return blocks.map((b) =>
-    b.kind === 'title'
-      ? `${b.level}:${b.text}`
-      : b.kind === 'paragraph'
-        ? b.runs.map((r) => (r.kind === 'text' ? r.text : '\n')).join('')
-        : b.kind
-  )
+function blockText(block: ContentBlock): string {
+  return block.kind === 'paragraph' || block.kind === 'heading'
+    ? block.runs.map((r) => (r.kind === 'text' ? r.text : '\n')).join('')
+    : block.kind
+}
+
+/** The book's items as text: `level:heading`, `matter:title`, and each printed paragraph. */
+function texts(book: CompiledBook): string[] {
+  return book.items.flatMap((item) => {
+    switch (item.kind) {
+      case 'section':
+        return item.heading === null ? [] : [`${item.level}:${item.heading.plain}`]
+      case 'matter':
+        return [`matter:${item.title}`, ...item.blocks.map(blockText)]
+      case 'text':
+        return item.blocks.map(blockText)
+      default:
+        return [item.kind]
+    }
+  })
+}
+
+/** The F-12.1 dialog's compile, as `export:run` runs it. */
+function collectBook(db: TreeDb, opts: ExportOptions, projectName: string): CompiledBook {
+  return compileProject(db, {
+    format: exportDialogFormat(opts),
+    output: opts.format,
+    scope: opts.scope,
+    projectName
+  })
 }
 
 function matter(type: 'front' | 'end', title: string, text: string | null): NodeRow {
@@ -82,7 +105,7 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
-describe('collectBook (F-12.1)', () => {
+describe('compileProject with the Export dialog format (F-12.1)', () => {
   it('collects the manuscript with front and end matter units, text only, and counts words', () => {
     const [c1, c2] = chapters()
     if (!c1 || !c2) throw new Error('seed changed')
@@ -93,19 +116,17 @@ describe('collectBook (F-12.1)', () => {
     matter('end', 'Afterword', 'Thanks to all.')
 
     const book = collectBook(db, options(), 'Export')
-    expect(book.units.map((u) => [u.kind, u.title])).toEqual([
-      ['matter', 'Title page'],
-      ['body', 'Export'],
-      ['matter', 'Afterword']
-    ])
-    expect(texts(book.units[0]?.blocks ?? [])).toEqual(['Export'])
-    expect(texts(book.units[1]?.blocks ?? []).slice(0, 5)).toEqual([
+    const all = texts(book)
+    expect(all.slice(0, 7)).toEqual([
+      'matter:Title page',
+      'Export',
       'part:Part 1',
       'chapter:Chapter 1',
       'The storm broke.',
       'chapter:Chapter 2',
       'Rain fell.'
     ])
+    expect(all.slice(-2)).toEqual(['matter:Afterword', 'Thanks to all.'])
     expect(book.words).toBe(1 + 3 + 2 + 3)
   })
 
@@ -115,7 +136,7 @@ describe('collectBook (F-12.1)', () => {
     saveDocument(db, sceneOf(c1).id, para('Words here.'))
     matter('front', 'Dedication', 'For M.')
     const book = collectBook(db, options({ includeFront: false, includeEnd: false }), 'Export')
-    expect(book.units.map((u) => u.kind)).toEqual(['body'])
+    expect(book.items.some((i) => i.kind === 'matter')).toBe(false)
     expect(book.words).toBe(2)
   })
 
@@ -129,11 +150,7 @@ describe('collectBook (F-12.1)', () => {
       options({ scope: { kind: 'chapters', ids: [chosen.id] }, includeFront: false }),
       'Export'
     )
-    expect(texts(book.units[0]?.blocks ?? [])).toEqual([
-      'part:Part 2',
-      'chapter:Chapter 2',
-      'Only this.'
-    ])
+    expect(texts(book)).toEqual(['part:Part 2', 'chapter:Chapter 2', 'Only this.'])
     expect(book.words).toBe(2)
   })
 
@@ -162,23 +179,22 @@ describe('collectBook (F-12.1)', () => {
       hierarchyLevel: 'scene'
     })
     saveDocument(db, end.id, para('The end.'))
-    const blocks = collectBook(db, options({ includeFront: false, includeEnd: false }), 'Export')
-      .units[0]?.blocks
-    expect(texts(blocks ?? []).slice(0, 5)).toEqual([
-      'chapter:Prologue',
+    const book = collectBook(db, options({ includeFront: false, includeEnd: false }), 'Export')
+    expect(texts(book).slice(0, 5)).toEqual([
+      'chapterScene:Prologue',
       'Before it all.',
       'part:Part 1',
       'chapter:Chapter 1',
       'Then this.'
     ])
-    expect(texts(blocks ?? []).slice(-2)).toEqual(['chapter:Last Chapter', 'The end.'])
-    expect(blocks?.find((b) => b.kind === 'title' && b.text === 'Last Chapter')).toMatchObject({
-      inPart: false
-    })
+    expect(texts(book).slice(-2)).toEqual(['chapter:Last Chapter', 'The end.'])
+    expect(
+      book.items.find((i) => i.kind === 'section' && i.heading?.plain === 'Last Chapter')
+    ).toMatchObject({ inPart: false })
 
     // Printed alone, the prologue is its text only, like any scene.
     const alone = collectBook(db, options({ scope: { kind: 'document', id: prologue.id } }), 'X')
-    expect(texts(alone.units[0]?.blocks ?? [])).toEqual(['Before it all.'])
+    expect(texts(alone)).toEqual(['Before it all.'])
   })
 
   it('prints one document alone, from any section, without matter', () => {
@@ -189,19 +205,7 @@ describe('collectBook (F-12.1)', () => {
       options({ scope: { kind: 'document', id: dedication.id } }),
       'Export'
     )
-    expect(book.units).toEqual([
-      {
-        kind: 'body',
-        title: 'Dedication',
-        blocks: [
-          {
-            kind: 'paragraph',
-            align: null,
-            runs: [expect.objectContaining({ kind: 'text', text: 'For M.' })]
-          }
-        ]
-      }
-    ])
+    expect(texts(book)).toEqual(['For M.'])
     expect(book.words).toBe(2)
   })
 

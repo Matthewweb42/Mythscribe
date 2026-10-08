@@ -1,127 +1,127 @@
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { defaultExportFormatting } from '@shared/bookExport'
+import { BUILTIN_COMPILE_FORMATS } from '@shared/compileFormat'
 import { readZip, readZipDirectory } from '../backups/zip'
-import { epubFiles, renderEpub } from './epub'
-import type { BookUnit, Run } from './model'
+import { epubFiles, isbnUrn, renderEpub } from './epub'
+import { sampleBook, SAMPLE_DETAILS, xmlError } from './testBook'
 
-const run = (text: string): Run => ({
-  kind: 'text',
-  text,
-  bold: false,
-  italic: false,
-  underline: false,
-  strike: false,
-  code: false
-})
-const p = (text: string): BookUnit['blocks'][number] => ({
-  kind: 'paragraph',
-  runs: [run(text)],
-  align: null
-})
+const MODIFIED = new Date('2026-10-07T10:00:00Z')
+const COVER = { data: Buffer.from([0x89, 0x50, 0x4e, 0x47]), extension: 'png' as const }
 
-const units: BookUnit[] = [
-  { kind: 'matter', title: 'Dedication', blocks: [p('For M.')] },
-  {
-    kind: 'body',
-    title: 'Book',
-    blocks: [
-      p('Prologue text'),
-      { kind: 'title', level: 'part', text: 'Part One', inPart: false },
-      { kind: 'title', level: 'chapter', text: 'Chapter One', inPart: true },
-      p('First'),
-      { kind: 'title', level: 'chapter', text: 'Chapter Two', inPart: true },
-      { kind: 'sceneBreak' },
-      { kind: 'title', level: 'part', text: 'Part Two', inPart: false }
-    ]
-  },
-  { kind: 'matter', title: 'Afterword', blocks: [p('Thanks & more')] }
-]
+function files(buffer: Buffer): Map<string, string> {
+  return new Map(readZip(buffer).map((e) => [e.name, e.data.toString('utf8')]))
+}
 
-describe('epubFiles (F-12.1)', () => {
-  it('gives every matter unit and every title a file, and text before the first title one too', () => {
-    expect(epubFiles(units).map((f) => [f.name, f.label, f.role, f.blocks.length])).toEqual([
-      ['s001.xhtml', 'Dedication', 'other', 1],
-      ['s002.xhtml', 'Book', 'other', 1],
-      ['s003.xhtml', 'Part One', 'part', 1],
-      ['s004.xhtml', 'Chapter One', 'chapter', 2],
-      ['s005.xhtml', 'Chapter Two', 'chapter', 2],
-      ['s006.xhtml', 'Part Two', 'part', 1],
-      ['s007.xhtml', 'Afterword', 'other', 1]
+/**
+ * The structural checks epubcheck would make that matter for KDP, Apple, and Kobo: mimetype first
+ * and stored, the container points at the package, every manifest item exists, every spine item
+ * is in the manifest, exactly one nav, every XHTML and XML file well-formed, and every internal
+ * link resolves to a file and an id.
+ */
+function validate(buffer: Buffer): void {
+  const directory = readZipDirectory(buffer)
+  expect(directory[0]?.name).toBe('mimetype')
+  expect(directory[0]?.method).toBe(0)
+  const all = files(buffer)
+  expect(all.get('mimetype')).toBe('application/epub+zip')
+  expect(all.get('META-INF/container.xml')).toContain('full-path="OEBPS/content.opf"')
+  const opf = all.get('OEBPS/content.opf') ?? ''
+  expect(xmlError(opf)).toBeNull()
+  const manifest = [...opf.matchAll(/<item id="([^"]+)" href="([^"]+)"/g)].map((m) => ({
+    id: m[1] ?? '',
+    href: m[2] ?? ''
+  }))
+  for (const item of manifest) expect(all.has(`OEBPS/${item.href}`), item.href).toBe(true)
+  for (const [, idref] of opf.matchAll(/<itemref idref="([^"]+)"/g))
+    expect(manifest.some((m) => m.id === idref)).toBe(true)
+  expect(opf.match(/properties="nav"/g)).toHaveLength(1)
+  for (const [name, text] of all) {
+    if (!name.endsWith('.xhtml')) continue
+    expect(xmlError(text, 'application/xhtml+xml'), name).toBeNull()
+    for (const [, href] of text.matchAll(/href="([^"]+)"/g)) {
+      if (href === undefined || href.endsWith('.css') || href === '#toc') continue
+      const [file = '', fragment] = href.split('#')
+      const target = file === '' ? name : path.posix.join(path.posix.dirname(name), file)
+      expect(all.has(target), `${name} → ${href}`).toBe(true)
+      if (fragment) expect(all.get(target), `${name} → ${href}`).toContain(`id="${fragment}"`)
+    }
+  }
+}
+
+describe('renderEpub (Compile v2)', () => {
+  it('writes a structurally valid EPUB 3 for every built-in format', () => {
+    for (const format of BUILTIN_COMPILE_FORMATS) {
+      validate(renderEpub(sampleBook(format, 'epub'), { modified: MODIFIED, cover: COVER }))
+    }
+  })
+
+  it('splits files at generated pages, matter, and chapter-level sections', () => {
+    const labels = epubFiles(sampleBook('ebook', 'epub')).map((f) => [f.label, f.epubType])
+    expect(labels).toEqual([
+      ['The Salt Road', 'titlepage'],
+      ['Copyright', 'copyright-page'],
+      ['Dedication', 'dedication'],
+      ['Epigraph', 'epigraph'],
+      ['Contents', 'toc'],
+      ['Foreword', null],
+      ['Prologue', 'chapter'],
+      ['Part One: Beginnings', 'part'],
+      ['Chapter One: The Storm', 'chapter'],
+      ['Chapter Two: The Calm', 'chapter'],
+      ['Afterword', null],
+      ['About the Author', 'appendix'],
+      ['Also By', 'appendix']
     ])
   })
 
-  it('keeps a chapter-level title right under the root out of the part above it (flexible nesting)', () => {
-    const files = epubFiles([
-      {
-        kind: 'body',
-        title: 'Book',
-        blocks: [
-          { kind: 'title', level: 'part', text: 'Part One', inPart: false },
-          { kind: 'title', level: 'chapter', text: 'Chapter 1', inPart: true },
-          p('One'),
-          { kind: 'title', level: 'chapter', text: 'Epilogue', inPart: false },
-          p('After')
-        ]
-      }
-    ])
-    expect(files.map((f) => [f.label, f.role])).toEqual([
-      ['Part One', 'part'],
-      ['Chapter 1', 'chapter'],
-      ['Epilogue', 'other']
-    ])
-  })
-})
-
-describe('renderEpub (F-12.1)', () => {
-  const buffer = renderEpub(units, defaultExportFormatting('* * *'), 'My & Book', {
-    identifier: 'urn:uuid:test',
-    modified: new Date('2026-10-05T10:00:00.123Z')
-  })
-  const files = new Map(readZip(buffer).map((e) => [e.name, e.data.toString('utf8')]))
-
-  it('puts mimetype first and stored', () => {
-    const [first] = readZipDirectory(buffer)
-    expect(first?.name).toBe('mimetype')
-    expect(first?.method).toBe(0)
-    expect(files.get('mimetype')).toBe('application/epub+zip')
-    // The bytes right after the first local header spell the mimetype, as readers check.
-    expect(buffer.toString('latin1', 30, 38)).toBe('mimetype')
-    expect(buffer.toString('latin1', 38, 58)).toBe('application/epub+zip')
-    expect(files.get('META-INF/container.xml')).toContain('full-path="OEBPS/content.opf"')
+  it('carries the Book details as package metadata, with the ebook ISBN and the cover', () => {
+    const all = files(renderEpub(sampleBook('ebook', 'epub'), { modified: MODIFIED, cover: COVER }))
+    const opf = all.get('OEBPS/content.opf') ?? ''
+    expect(opf).toContain('<dc:identifier id="book-id">urn:isbn:9780000000019</dc:identifier>')
+    expect(opf).toContain('<dc:title id="title">The Salt Road</dc:title>')
+    expect(opf).toContain('<dc:title id="subtitle">A Novel</dc:title>')
+    expect(opf).toContain('<dc:creator id="creator">Ada Marlowe</dc:creator>')
+    expect(opf).toContain('<dc:language>en-GB</dc:language>')
+    expect(opf).toContain('<dc:publisher>Gull Press</dc:publisher>')
+    expect(opf).toContain('<dc:description>A road of salt.</dc:description>')
+    expect(opf).toContain('<dc:subject>salt</dc:subject>')
+    expect(opf).toContain('<meta refines="#series" property="group-position">2</meta>')
+    expect(opf).toContain('properties="cover-image"')
+    expect(opf).toContain('<meta property="dcterms:modified">2026-10-07T10:00:00Z</meta>')
+    expect(all.get('OEBPS/cover.xhtml')).toContain('src="images/cover.png"')
   })
 
-  it('lists every file in the manifest and spine, in order', () => {
-    const opf = files.get('OEBPS/content.opf') ?? ''
-    expect(opf).toContain('<dc:identifier id="book-id">urn:uuid:test</dc:identifier>')
-    expect(opf).toContain('<dc:title>My &amp; Book</dc:title>')
-    expect(opf).toContain('<meta property="dcterms:modified">2026-10-05T10:00:00Z</meta>')
-    const hrefs = [...opf.matchAll(/href="(text\/s\d+\.xhtml)"/g)].map((m) => m[1])
-    expect(hrefs).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `text/s00${n}.xhtml`))
-    const spine = [...opf.matchAll(/<itemref idref="(s\d+)"\/>/g)].map((m) => m[1])
-    expect(spine).toEqual(['s1', 's2', 's3', 's4', 's5', 's6', 's7'])
-    for (const href of hrefs) expect(files.has(`OEBPS/${href}`)).toBe(true)
-    expect(opf).toContain('properties="nav"')
-  })
-
-  it('nests chapters under their part in the contents', () => {
-    const nav = files.get('OEBPS/nav.xhtml') ?? ''
-    expect(nav).toContain('<nav epub:type="toc" id="toc">')
-    expect(nav).toContain(
-      '<li><a href="text/s003.xhtml">Part One</a><ol><li><a href="text/s004.xhtml">Chapter One</a></li><li><a href="text/s005.xhtml">Chapter Two</a></li></ol></li>'
+  it('nests chapters under their part in the navigation and lists landmarks', () => {
+    const nav =
+      files(renderEpub(sampleBook('ebook', 'epub'), { modified: MODIFIED })).get(
+        'OEBPS/nav.xhtml'
+      ) ?? ''
+    expect(nav).toMatch(
+      /Prologue<\/a><\/li>\n<li><a [^>]+>Part One: Beginnings<\/a><ol><li><a [^>]+>Chapter One: The Storm<\/a><\/li><li>/
     )
-    expect(nav).toContain(
-      '<li><a href="text/s006.xhtml">Part Two</a></li>\n<li><a href="text/s007.xhtml">Afterword</a></li>'
-    )
+    expect(nav).toContain('epub:type="landmarks"')
+    expect(nav).toContain('epub:type="bodymatter"')
+    expect(nav).not.toContain('epub:type="cover"')
   })
 
-  it('writes each file as XHTML with the shared style', () => {
-    const chapter = files.get('OEBPS/text/s005.xhtml') ?? ''
-    expect(chapter.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true)
-    expect(chapter).toContain('<link rel="stylesheet" type="text/css" href="../style.css"/>')
-    expect(chapter).toContain(
-      '<h2 class="chapter">Chapter Two</h2>\n<div class="scene-break">* * *</div>'
-    )
-    expect(files.get('OEBPS/text/s007.xhtml')).toContain('<p>Thanks &amp; more</p>')
-    expect(files.get('OEBPS/style.css')).not.toContain('@page')
+  it('escapes the author text and uses em sizes so the reader sets the body size', () => {
+    const all = files(renderEpub(sampleBook('ebook', 'epub'), { modified: MODIFIED }))
+    const css = all.get('OEBPS/style.css') ?? ''
+    expect(css).not.toMatch(/body \{[^}]*font-size/)
+    expect(css).toContain(".sec-chapter { font-family: 'EB Garamond'")
+    expect(css).toMatch(/\.sec-chapter \{[^}]*font-size: 1\.5em/)
+    const dedication = [...all.values()].find((t) => t.includes('epub:type="dedication"')) ?? ''
+    expect(dedication).toContain('For R. &amp; the &lt;sea&gt;')
+  })
+
+  it('makes an ISBN URN only from 10 or 13 digits', () => {
+    expect(isbnUrn('978-0-00-000000-2')).toBe('urn:isbn:9780000000002')
+    expect(isbnUrn('0-306-40615-x')).toBe('urn:isbn:030640615X')
+    expect(isbnUrn('12345')).toBeNull()
+    const noIsbn = renderEpub(sampleBook('ebook', 'epub', { ...SAMPLE_DETAILS, isbns: [] }), {
+      identifier: 'urn:uuid:fixed',
+      modified: MODIFIED
+    })
+    expect(files(noIsbn).get('OEBPS/content.opf')).toContain('>urn:uuid:fixed</dc:identifier>')
   })
 })

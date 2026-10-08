@@ -29,6 +29,7 @@ import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
 import type { DiagnosticsBody } from '@shared/cloudApi'
 import { RENDERER_ERROR_MESSAGE_MAX } from '@shared/diagnostics'
 import { defaultExportFormatting } from '@shared/bookExport'
+import { BUILTIN_COMPILE_FORMATS } from '@shared/compileFormat'
 import {
   AUTHOR_RULES_TEXT_MAX,
   DEFAULT_BANNED_PHRASES,
@@ -7527,6 +7528,64 @@ describe('export handler (F-12.1)', () => {
       invoke('export:run', { options: options(), requestId: 'r3' })
     ).rejects.toThrowError(/^VALIDATION: Nothing to export\.$/)
     expect(fs.existsSync(exportPath)).toBe(false)
+  })
+})
+
+describe('compile handler (Compile v2)', () => {
+  const plainText = BUILTIN_COMPILE_FORMATS.find((f) => f.id === 'builtin:plain-text')
+
+  async function ready(): Promise<void> {
+    await invoke('project:create', { name: 'My Book', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'The storm broke.' }] }]
+      }
+    })
+  }
+
+  it('compiles with the given format into the chosen file, named after the book title', async () => {
+    if (!plainText) throw new Error('no plain text format')
+    await ready()
+    await invoke('bookDetails:set', {
+      ...(await invoke('bookDetails:get', undefined)),
+      title: 'Salt: Road'
+    })
+    exportPath = path.join(tmp, 'book.txt')
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    expect(
+      await invoke('compile:run', {
+        format: plainText,
+        output: 'txt',
+        scope: { kind: 'manuscript' },
+        requestId: 'c1'
+      })
+    ).toEqual({ path: exportPath, output: 'txt', words: 3 })
+    expect(exportAsked?.directory).toBe(tmp)
+    expect(exportAsked?.defaultName).toMatch(/^Salt.+Road\.txt$/)
+    expect(fs.readFileSync(exportPath, 'utf8')).toContain('The storm broke.')
+    const pushed = vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([channel]) => channel === 'export:progress')
+    expect(pushed).toHaveLength(6)
+  })
+
+  it('answers null when the save dialog is cancelled', async () => {
+    if (!plainText) throw new Error('no plain text format')
+    await ready()
+    exportPath = null
+    expect(
+      await invoke('compile:run', {
+        format: plainText,
+        output: 'md',
+        scope: { kind: 'manuscript' },
+        requestId: 'c2'
+      })
+    ).toBeNull()
   })
 })
 

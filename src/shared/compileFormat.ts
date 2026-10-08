@@ -940,3 +940,26 @@ export function setIncluded(
   const rest = state.excluded.filter((x) => x !== id)
   return { ...state, excluded: included ? rest : [...rest, id] }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Running a compile (CV2: `compile:run`)
+
+/**
+ * One compile: the format as shown (unsaved edits included), the output, the quick pick, and the
+ * id `export:progress` reports under. The include ticks are the project's stored ones.
+ */
+export const CompileRunInput = z.object({
+  format: CompileFormat,
+  output: CompileOutput,
+  scope: CompileScope,
+  requestId: z.string()
+})
+export type CompileRunInput = z.infer<typeof CompileRunInput>
+
+export const CompileRunResult = z.object({
+  path: z.string(),
+  output: CompileOutput,
+  /** Printed words: the body's and the project matter's documents. */
+  words: z.number().int().nonnegative()
+})
+export type CompileRunResult = z.infer<typeof CompileRunResult>

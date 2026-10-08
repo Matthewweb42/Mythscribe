@@ -14,6 +14,7 @@ import type { AiStatus, AiUsageSummary } from '../src/shared/ai'
 import type { AiSettings } from '../src/shared/aiSettings'
 import type { AuthorRules } from '../src/shared/authorRules'
 import { LOGIN_ATTEMPT_TTL_MS } from '../src/shared/cloudApi'
+import { BUILTIN_COMPILE_FORMATS } from '../src/shared/compileFormat'
 import { MICROS_PER_USD } from '../src/shared/cloudBilling'
 import { bundledPricing, hostedPriceFor } from '../src/shared/hostedPricing'
 import { USAGE_PERIOD_DAYS } from '../src/shared/cloudUsage'
@@ -324,7 +325,12 @@ function contextImportAnswer(messages: { role: string; content: string }[]): str
   }
   return JSON.stringify({
     entities: [
-      { kind: 'character', name: 'Tomas Reed', fields: { age: '29' }, details: ['Debts: owes the mill money.'] },
+      {
+        kind: 'character',
+        name: 'Tomas Reed',
+        fields: { age: '29' },
+        details: ['Debts: owes the mill money.']
+      },
       {
         kind: 'setting',
         name: 'The Landing',
@@ -695,43 +701,43 @@ function startFakeOpenAi(): Promise<string> {
                       ? contextImport
                         ? contextImportAnswer(request.messages)
                         : chatAgent
-                        ? chatAgentReply(request.messages)
-                        : route
-                          ? JSON.stringify({
-                              action: (request.messages.at(-1)?.content ?? '').includes(
-                                ROUTE_CRITIQUE_MESSAGE
-                              )
-                                ? 'critique'
-                                : 'chat',
-                              instruction: null
-                            })
-                          : synopsis
-                            ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
-                            : notesSuggest
-                              ? JSON.stringify({ points: SUGGESTED_POINTS })
-                              : whatNext
-                                ? WHAT_NEXT_ANSWER
-                                : editPass
-                                  ? EDIT_PASS_ANSWER
-                                  : proofread
-                                    ? PROOFREAD_ANSWER
-                                    : continuity
-                                      ? continuityAnswer(request.messages)
-                                      : importStructure
-                                        ? IMPORT_STRUCTURE_ANSWER
-                                        : critique
-                                          ? CRITIQUE_ANSWER
-                                          : betaReader
-                                            ? BETA_READER_ANSWER
-                                            : query
-                                              ? QUERY_ANSWER
-                                              : brief
-                                                ? BRIEF_ANSWER
-                                                : summary
-                                                  ? SUMMARY_ANSWER
-                                                  : regen
-                                                    ? '{"tags":["antagonist","protagonist"]}'
-                                                    : '{"tags":["dark-forest","protagonist"]}'
+                          ? chatAgentReply(request.messages)
+                          : route
+                            ? JSON.stringify({
+                                action: (request.messages.at(-1)?.content ?? '').includes(
+                                  ROUTE_CRITIQUE_MESSAGE
+                                )
+                                  ? 'critique'
+                                  : 'chat',
+                                instruction: null
+                              })
+                            : synopsis
+                              ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
+                              : notesSuggest
+                                ? JSON.stringify({ points: SUGGESTED_POINTS })
+                                : whatNext
+                                  ? WHAT_NEXT_ANSWER
+                                  : editPass
+                                    ? EDIT_PASS_ANSWER
+                                    : proofread
+                                      ? PROOFREAD_ANSWER
+                                      : continuity
+                                        ? continuityAnswer(request.messages)
+                                        : importStructure
+                                          ? IMPORT_STRUCTURE_ANSWER
+                                          : critique
+                                            ? CRITIQUE_ANSWER
+                                            : betaReader
+                                              ? BETA_READER_ANSWER
+                                              : query
+                                                ? QUERY_ANSWER
+                                                : brief
+                                                  ? BRIEF_ANSWER
+                                                  : summary
+                                                    ? SUMMARY_ANSWER
+                                                    : regen
+                                                      ? '{"tags":["antagonist","protagonist"]}'
+                                                      : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -2166,6 +2172,41 @@ test('create, close, reopen a project on disk', async () => {
     'PK'
   )
   expect((await exportAs('EPUB', 'epub')).subarray(0, 2).toString('latin1')).toBe('PK')
+
+  // Compile v2 (CV2): `compile:run` (the compile window's channel, CV3) writes the smoke novel
+  // with three built-in formats. The Paperback PDF is laid out by Paged.js: 6 × 9 in pages
+  // (432 × 648 pt) with the bundled EB Garamond embedded; the Standard Manuscript DOCX and the
+  // Ebook EPUB are zips with their main parts (stored names are plain in the archive).
+  const compileAs = async (formatId: string, output: 'pdf' | 'docx' | 'epub'): Promise<Buffer> => {
+    const file = path.join(tmp, `compile-${output}.${output}`)
+    await stubSaveDialog(file)
+    const format = BUILTIN_COMPILE_FORMATS.find((f) => f.id === formatId)
+    if (!format) throw new Error(`no built-in ${formatId}`)
+    const result = await page.evaluate(
+      ([fmt, out]) =>
+        window.mythscribe.invoke('compile:run', {
+          format: fmt,
+          output: out,
+          scope: { kind: 'manuscript' },
+          requestId: 'e2e-compile'
+        }),
+      [format, output] as const
+    )
+    expect(result).toEqual({ ok: true, data: expect.objectContaining({ path: file, output }) })
+    return fs.readFileSync(file)
+  }
+  const paperback = (await compileAs('builtin:paperback-6x9', 'pdf')).toString('latin1')
+  expect(paperback.startsWith('%PDF')).toBe(true)
+  expect(paperback).toContain('/MediaBox [0 0 432 648]')
+  expect(paperback).toMatch(/\/FontName \/[A-Z]{6}\+EBGaramond-Regular/)
+  const manuscript = (await compileAs('builtin:standard-manuscript', 'docx')).toString('latin1')
+  expect(manuscript.startsWith('PK')).toBe(true)
+  expect(manuscript).toContain('word/document.xml')
+  expect(manuscript).toContain('word/header1.xml')
+  const ebook = (await compileAs('builtin:ebook', 'epub')).toString('latin1')
+  expect(ebook.startsWith('PK')).toBe(true)
+  expect(ebook).toContain('mimetypeapplication/epub+zip')
+  expect(ebook).toContain('OEBPS/nav.xhtml')
   // Put back the stub the project was created with; no step in between relied on another.
   await app.evaluate(({ dialog }, filePath) => {
     dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
@@ -5797,8 +5838,12 @@ test('create, close, reopen a project on disk', async () => {
   await expect(ageConflict.getByRole('radio', { name: /Keep the sheet’s\s*34/ })).toBeChecked()
   await ageConflict.getByText('Use the upload’s').click()
   await expect(ageConflict.getByRole('radio', { name: /Use the upload’s\s*35/ })).toBeChecked()
-  await expect(libraryReview.locator('[data-item-name="Tomas Reed"]')).toContainText('Tag #tomas-reed')
-  await expect(libraryReview.getByTestId('library-notes')).toContainText('Theme: The book is about debts')
+  await expect(libraryReview.locator('[data-item-name="Tomas Reed"]')).toContainText(
+    'Tag #tomas-reed'
+  )
+  await expect(libraryReview.getByTestId('library-notes')).toContainText(
+    'Theme: The book is about debts'
+  )
   await libraryDialog.getByTestId('library-apply').click()
   await expect(libraryDialog).toHaveCount(0)
   await expect(libraryPanel.getByTestId('library-file-state')).toHaveText(['Sorted', 'Sorted'])
@@ -5810,8 +5855,13 @@ test('create, close, reopen a project on disk', async () => {
   })
   const librarySheet = (name: string): Entity | undefined =>
     afterLibrary.entities.find((entity) => entity.name === name)
-  expect(librarySheet('Mara')?.fields).toMatchObject({ age: '35', goals: 'Keep the ferry running.' })
-  expect(librarySheet('Mara')?.fields.notes).toContain('History: She runs the ferry her father built.')
+  expect(librarySheet('Mara')?.fields).toMatchObject({
+    age: '35',
+    goals: 'Keep the ferry running.'
+  })
+  expect(librarySheet('Mara')?.fields.notes).toContain(
+    'History: She runs the ferry her father built.'
+  )
   expect(librarySheet('Tomas Reed')).toMatchObject({ kind: 'character', fields: { age: '29' } })
   expect(librarySheet('The Landing')).toMatchObject({ kind: 'setting' })
   expect(librarySheet('Project notes')).toMatchObject({
@@ -5821,7 +5871,9 @@ test('create, close, reopen a project on disk', async () => {
     tagId: null
   })
   expect(afterLibrary.tags).toEqual(expect.arrayContaining(['tomas-reed', 'the-landing']))
-  expect((await usageSummary()).byFeature.find((f) => f.feature === 'contextImport')?.requests).toBe(2)
+  expect(
+    (await usageSummary()).byFeature.find((f) => f.feature === 'contextImport')?.requests
+  ).toBe(2)
   await dismissToasts()
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
 

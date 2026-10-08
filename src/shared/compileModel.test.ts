@@ -440,7 +440,7 @@ describe('sectionHeading', () => {
       label: 'Chapter Three',
       title: 'Mara—alone',
       lines: ['CHAPTER THREE', 'MARA—ALONE'],
-      plain: 'Chapter Three Mara—alone'
+      plain: 'Chapter Three: Mara—alone'
     })
   })
 })
@@ -533,8 +533,8 @@ describe('compileBook: body structure', () => {
     expect(book.toc.map((t) => [t.id, t.level, t.label, t.inPart])).toEqual([
       ['pro', 'chapterScene', 'Prologue', false],
       ['p1', 'part', 'Beginnings', false],
-      ['ca', 'chapter', 'Chapter One The Storm', true],
-      ['cb', 'chapter', 'Chapter Two The Calm', true]
+      ['ca', 'chapter', 'Chapter One: The Storm', true],
+      ['cb', 'chapter', 'Chapter Two: The Calm', true]
     ])
   })
 

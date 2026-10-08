@@ -72,6 +72,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'manuscript:compile': 'read',
   'export:run': 'read',
   'compile:source': 'read',
+  // Compiling writes a file outside the project, like export: read.
+  'compile:run': 'read',
   // Compile preferences (format, output, scope, include ticks) are like export: read.
   'compileState:get': 'read',
   'compileState:set': 'read',

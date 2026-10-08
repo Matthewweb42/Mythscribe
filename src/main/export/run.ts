@@ -1,70 +1,134 @@
+import fs from 'node:fs'
+import { assetUrl, imageExtension } from '@shared/assets'
+import type { ExportOptions, ExportProgress, ExportResult } from '@shared/bookExport'
+import { webDocument } from '@shared/compileHtml'
 import type {
-  ExportOptions,
-  ExportPageSize,
-  ExportProgress,
-  ExportResult
-} from '@shared/bookExport'
+  CompileFormat,
+  CompileOutput,
+  CompileRunResult,
+  CompileScope
+} from '@shared/compileFormat'
+import type { CompiledBook } from '@shared/compileModel'
 import { writeBufferAtomic, writeTextAtomic } from '../fs'
+import { assetPathFor } from '../project/assetUrl'
 import type { TreeDb } from '../tree/treeStore'
-import { collectBook } from './collect'
+import { compileProject } from './collect'
 import { renderDocx } from './docx'
-import { renderEpub } from './epub'
-import { renderPrintHtml } from './html'
+import { renderEpub, type EpubCover } from './epub'
+import { exportDialogFormat } from './exportDialog'
 import { renderMarkdown } from './markdown'
+import { renderOdt } from './odt'
+import { renderRtf } from './rtf'
+import { renderText } from './text'
 
-export interface ExportBookInput {
-  options: ExportOptions
-  /** The book's title in the file's metadata. */
+/** Prints a compiled book to PDF; Electron's Paged.js printer in the app, a fake in tests. */
+export type PdfRenderer = (book: CompiledBook) => Promise<Buffer>
+
+/**
+ * The book's cover for the EPUB: the Book details cover file under the project's
+ * `assets/covers/`, when the format includes it and the file reads; null otherwise.
+ */
+export function readCover(projectFolder: string, book: CompiledBook): EpubCover | null {
+  const name = book.metadata.cover
+  if (name === null) return null
+  const extension = imageExtension(name)
+  const file = assetPathFor(projectFolder, assetUrl('covers', name))
+  if (extension === null || file === null) return null
+  try {
+    return { data: fs.readFileSync(file), extension }
+  } catch {
+    return null
+  }
+}
+
+/** The compiled book in one output: text for the text formats, bytes for the packages. */
+export async function renderOutput(
+  book: CompiledBook,
+  output: CompileOutput,
+  projectFolder: string,
+  renderPdf: PdfRenderer
+): Promise<string | Buffer> {
+  switch (output) {
+    case 'pdf':
+      return renderPdf(book)
+    case 'docx':
+      return renderDocx(book)
+    case 'epub':
+      return renderEpub(book, { cover: readCover(projectFolder, book) })
+    case 'rtf':
+      return renderRtf(book)
+    case 'odt':
+      return renderOdt(book)
+    case 'html':
+      return webDocument(book)
+    case 'txt':
+      return renderText(book)
+    case 'md':
+      return renderMarkdown(book)
+  }
+}
+
+export interface CompileFileInput {
+  format: CompileFormat
+  output: CompileOutput
+  scope: CompileScope
+  /** The book's title when Book details has none. */
   projectName: string
+  /** The project folder (the cover lives under its `assets/covers/`). */
+  projectFolder: string
   /** The chosen file. */
   path: string
   requestId: string
   onProgress: (progress: ExportProgress) => void
-  /** Prints the HTML to PDF; Electron's in the app, a fake in tests. */
-  renderPdf: (html: string, pageSize: ExportPageSize) => Promise<Buffer>
+  renderPdf: PdfRenderer
 }
 
 /**
- * Runs one export (F-12.1): collects the book, renders it in the chosen format, and writes the
- * file atomically, reporting each stage under `requestId`. Rendering counts the book's units
- * (front matter, body, end matter) so a long manuscript shows progress; PDF renders in one step
- * once the page is built.
+ * Runs one compile (Compile v2): compiles the project through the model, renders the output, and
+ * writes the file atomically, reporting each stage (`collect`, `render`, `write`) under
+ * `requestId` on the `export:progress` shape.
  */
+export async function compileToFile(
+  db: TreeDb,
+  input: CompileFileInput
+): Promise<CompileRunResult> {
+  const { requestId, onProgress } = input
+  const report = (stage: ExportProgress['stage'], done: number): void =>
+    onProgress({ requestId, stage, done, total: 1 })
+
+  report('collect', 0)
+  const book = compileProject(db, input)
+  report('collect', 1)
+
+  report('render', 0)
+  const output = await renderOutput(book, input.output, input.projectFolder, input.renderPdf)
+  report('render', 1)
+
+  report('write', 0)
+  if (typeof output === 'string') writeTextAtomic(input.path, output)
+  else writeBufferAtomic(input.path, output)
+  report('write', 1)
+  return { path: input.path, output: input.output, words: book.words }
+}
+
+export interface ExportBookInput {
+  options: ExportOptions
+  projectName: string
+  projectFolder: string
+  path: string
+  requestId: string
+  onProgress: (progress: ExportProgress) => void
+  renderPdf: PdfRenderer
+}
+
+/** The F-12.1 Export dialog's run: its options as a format (`exportDialogFormat`), then a compile. */
 export async function exportBook(db: TreeDb, input: ExportBookInput): Promise<ExportResult> {
-  const { options, projectName, path, requestId, onProgress } = input
-  const report = (stage: ExportProgress['stage'], done: number, total: number): void =>
-    onProgress({ requestId, stage, done, total })
-
-  report('collect', 0, 1)
-  const book = collectBook(db, options, projectName)
-  report('collect', 1, 1)
-
-  const { formatting } = options
-  const total = book.units.length
-  report('render', 0, total)
-  let output: string | Buffer
-  switch (options.format) {
-    case 'md':
-      output = renderMarkdown(book.units, formatting.sceneBreak)
-      break
-    case 'docx':
-      output = renderDocx(book.units, formatting, projectName)
-      break
-    case 'epub':
-      output = renderEpub(book.units, formatting, projectName)
-      break
-    case 'pdf':
-      output = await input.renderPdf(
-        renderPrintHtml(book.units, formatting, projectName),
-        formatting.pageSize
-      )
-      break
-  }
-  report('render', total, total)
-
-  report('write', 0, 1)
-  if (typeof output === 'string') writeTextAtomic(path, output)
-  else writeBufferAtomic(path, output)
-  report('write', 1, 1)
-  return { path, format: options.format, words: book.words }
+  const { options } = input
+  const result = await compileToFile(db, {
+    ...input,
+    format: exportDialogFormat(options),
+    output: options.format,
+    scope: options.scope
+  })
+  return { path: result.path, format: options.format, words: result.words }
 }
