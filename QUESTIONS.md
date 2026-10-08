@@ -12,6 +12,13 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-08 · F-8.7 · Migration safety: what happens when the pre-migration backup fails
+- Question: Before a schema upgrade the database is copied to the project's backups folder. What if that copy cannot be written (the chosen backup folder is on a drive that is not there, or is read-only)?
+- Chosen: the upgrade does not run and the project is left exactly as it was; opening it fails with the folder and "choose another backup folder in Settings › Backups". The newest 3 pre-migration copies are kept per project (`pre-migration-<from>-<to>-<date>.db`, beside the zip backups; the zip retention never counts them).
+- Alternatives: upgrade anyway and warn; fall back to a folder beside the database; keep more (or all) pre-migration copies.
+- To change it: `src/main/db/preMigrationBackup.ts` (`PRE_MIGRATION_KEEP`, the error), `openProject` in `src/main/project/projectStore.ts`.
+- Rollout (D14, the plan's own rule): this build has to be the installed one on your computer before the knowledge-index build (F-9.12) lands, because an older build refuses a project the newer one migrated ("saved by a newer version"). Before installing F-9.12, copy the project folder and run Settings › Backups › Back up now.
+
 ## 2026-10-08 · F-8.1 · Google Drive projects work on a local copy: the details
 - Question: You chose "work on a local copy" for projects in Google Drive (the disk I/O errors). Which details?
 - Chosen: (1) detection by path (Google Drive "My Drive", "Shared drives", "Other computers", or a drive whose label says Google Drive; OneDrive by its environment variables or a folder starting "OneDrive"; Dropbox by name or a `.dropbox` above the project; iCloud Drive; macOS `Library/CloudStorage`), leaning towards "synced": a false positive only costs a copy; (2) only `project.db` moves to the copy (userData `working/<hash of the path>/`); assets, the open marker, and the backups stay where they were; the crash journal (written every quarter second while typing) moves with the copy; (3) copied back every 3 minutes when something changed, after an import, on close, when switching project, and on quit; a failure retries quietly (30 s, doubling to 3 min) and shows in the status bar, and closing or switching after a failure asks "Retry" or "Close anyway"; (4) a session left open by a crash counts as "possibly ahead"; if the cloud changed too, the cloud version is kept beside the project as `<Name> (conflict YYYY-MM-DD HHmm).mythscribe`, yours opens, and a toast says so; (5) the database in Drive is written as a plain (non-WAL) file, so nothing else ever sits beside it.

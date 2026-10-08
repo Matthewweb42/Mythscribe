@@ -31,6 +31,7 @@ import { buildCloudProvider } from './ai/providers/cloud'
 import { AiProviderRegistry } from './ai/registry'
 import type { Provider } from './ai/providers/types'
 import { AppStateStore } from './appState/appStateStore'
+import { projectBackupDir } from './backups/backupArchive'
 import { BackupService } from './backups/backupService'
 import { createDialogs } from './dialogs'
 import { installCrashHandlers, processGoneError } from './diagnostics/crashHandlers'
@@ -45,7 +46,7 @@ import { bookFontsDir } from './export/pdf'
 import { assetPathFor, bookFontPathFor } from './project/assetUrl'
 import { CloudSyncService } from './project/cloudSyncService'
 import { ProjectManager } from './project/manager'
-import { isProjectFolder } from './project/projectStore'
+import { isProjectFolder, sanitizeName } from './project/projectStore'
 import { spellMenuPayload } from './spellcheck/contextMenu'
 import { createSessionDictionary } from './spellcheck/sessionDictionary'
 import { loadAutoUpdater } from './updates/autoUpdater'
@@ -54,7 +55,14 @@ import { UpdateService } from './updates/updateService'
 const isDev = !app.isPackaged
 // 2026-10-08: a project in Google Drive, OneDrive, Dropbox, or iCloud is worked on through a
 // local copy under userData (read lazily: the e2e moves userData before the app is ready).
-const manager = new ProjectManager({ workingRoot: () => join(app.getPath('userData'), 'working') })
+// F-8.7: a schema upgrade first writes the database to the project's backups folder. The
+// backup service is built once the app is ready, before any project can open.
+const manager = new ProjectManager({
+  workingRoot: () => join(app.getPath('userData'), 'working'),
+  backupDirFor: (project) =>
+    backups?.dirForProject(project) ??
+    projectBackupDir(defaultBackupFolder(), sanitizeName(project.name), project.id)
+})
 /** F-15.2: built once the app is ready (it reads userData); its poll timer is dropped on quit. */
 let account: AccountService | null = null
 /** AI-BILLING-SPEC M1: the trial and the license; built after the account, its timer dropped on quit. */

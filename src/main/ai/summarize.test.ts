@@ -686,6 +686,17 @@ describe('staleSummaryNodeIds (F-5.13)', () => {
     expect(staleSummaryNodeIds(db)).toEqual([scene])
   })
 
+  it('leaves alone a scene whose summary came from a newer build (F-8.7)', async () => {
+    await summarize()
+    const stored = getSummary(db, scene)
+    if (!stored) throw new Error('no stored summary')
+    upsertSummary(db, { ...stored, promptVersion: 'summary.v9' })
+    expect(staleSummaryNodeIds(db)).toEqual([])
+    const again = await summarize()
+    expect(again.cached).toBe(true)
+    expect(again.promptVersion).toBe('summary.v9')
+  })
+
   it('answers in reading order', () => {
     secondScene(SCENE)
     expect(staleSummaryNodeIds(db)).toEqual([scene, 'scene-2'])

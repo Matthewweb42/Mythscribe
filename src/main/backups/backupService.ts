@@ -207,7 +207,12 @@ export class BackupService {
   }
 
   private dirFor(session: ProjectSession): string {
-    return projectBackupDir(this.folder(), sanitizeName(session.info.name), session.info.id)
+    return this.dirForProject(session.info)
+  }
+
+  /** One project's backups folder, open or not (F-8.7: the pre-migration backup goes here too). */
+  dirForProject(project: { id: string; name: string }): string {
+    return projectBackupDir(this.folder(), sanitizeName(project.name), project.id)
   }
 
   private currentBackups(): BackupEntry[] {

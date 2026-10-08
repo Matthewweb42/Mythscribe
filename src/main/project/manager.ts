@@ -7,6 +7,7 @@ import {
   DB_FILE,
   createProject,
   openProject,
+  type BackupDirFor,
   type CreateProjectOptions,
   type ProjectSession
 } from './projectStore'
@@ -23,6 +24,8 @@ export interface ProjectManagerOptions {
   workingRoot?: () => string
   /** Which sync app holds a folder; `cloudProviderFor` unless a test says otherwise. */
   detectCloud?: (folder: string) => CloudProvider | null
+  /** Where a project's backups go (F-8.7: the pre-migration backup); absent, none is written. */
+  backupDirFor?: BackupDirFor
 }
 
 /** Owns the single open project and notifies listeners when it changes. */
@@ -32,9 +35,11 @@ export class ProjectManager {
   private readonly beforeClose = new Set<BeforeCloseListener>()
   private readonly workingRoot: (() => string) | null
   private readonly detectCloud: (folder: string) => CloudProvider | null
+  private readonly backupDirFor: BackupDirFor | undefined
 
   constructor(options: ProjectManagerOptions = {}) {
     this.workingRoot = options.workingRoot ?? null
+    this.backupDirFor = options.backupDirFor
     this.detectCloud = options.detectCloud ?? ((folder) => cloudProviderFor(folder))
   }
 
@@ -64,7 +69,11 @@ export class ProjectManager {
 
   open(folder: string): ProjectInfo {
     this.closeIfOpen(folder)
-    const next = openProject(folder, (target) => this.workingCopyFor(target, 'open'))
+    const next = openProject(
+      folder,
+      (target) => this.workingCopyFor(target, 'open'),
+      this.backupDirFor
+    )
     this.replace(next)
     return next.info
   }
