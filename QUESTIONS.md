@@ -12,6 +12,24 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-08 · F-4.14 · How a likely misspelling is detected
+- Question: The author asked that misspellings of known names ("Rynna Falseer") be offered as text fixes. What counts as one?
+- Chosen: local only, no AI: a run of capitalised words whose every word is the same as, or a close spelling of, the matching word of a tag's name or alias — same first letter, at most 1 edit for a 4–5-letter word and 2 for 6+ (insertions, deletions, substitutions, adjacent swaps); words under 4 letters are never compared; each 5+-letter word of a multi-word name is also checked on its own ("Falseer" alone). Exact names and aliases of any tag are never flagged. Not a typo keeps the spelling for the project. The optional AI confirmation step from the plan was not built.
+- Alternatives: phonetic matching (Soundex/Metaphone) as well; an AI pass that confirms each finding (costed); lower-case words too.
+- To change it: `isCloseSpelling`, `allowedEdits`, `formsOf` in `src/shared/misspellings.ts`.
+
+## 2026-10-08 · F-4.14 · Where misspellings are offered, and what Fix does
+- Question: Over the whole manuscript, or where the author is?
+- Chosen: on the open document only, as a "Possible misspellings" list in the tags column (live text, before any save); Fix replaces every occurrence of that spelling in that document in one undo step, Ask-style whatever the AI dial. A likely misspelling is not proposed as a new tag (F-4.12b) until the author keeps it.
+- Alternatives: a manuscript-wide list (for example in the Tags tab, or in OR3's Organise plan); fix one occurrence at a time.
+- To change it: `src/renderer/features/editor/MisspellingList.tsx`; `listProposedTags` in `src/main/tag/proposedTags.ts`.
+
+## 2026-10-08 · F-4.14 · Alias rules
+- Question: Clashes, limits, and where aliases travel.
+- Chosen: an alias that is another tag's name or alias is refused on the author's edit (ALREADY_EXISTS, toasted) and skipped in silence when added by a merge or the context import; at most 30 aliases of up to 60 characters; aliases are compared like tag names ("High Crown" = "high-crown"); renaming a tag to one of its aliases drops that alias; a character alias must read as a proper noun to count as a mention ("the High Crown" needs a capital "The" — use "High Crown"). Not yet in the tag-bank file (F-4.9) or custom templates (F-4.11), and the AI prompts do not list aliases (answers are mapped through them, so no prompt version changed).
+- Alternatives: allow shared aliases between tags; carry aliases in the `mythscribe-tags` file as v2; send aliases to the tagging prompts.
+- To change it: `assertAliasesFree`/`addTagAliases` in `src/main/tag/tagStore.ts`, `src/shared/aliases.ts`, `src/shared/tagExchange.ts`.
+
 ## 2026-10-07 · F-5.22 · How a chat insertion sits in the editor
 - Question: The author decided chat insertions land as ghost text (Tab accepts, Esc dismisses). The author is usually typing in the chat box when one lands; must the editor take the focus?
 - Chosen: no. The insertion is a *pinned* ghost suggestion at its anchor: it does not steal the focus, and moving the caret, editing elsewhere, or leaving the editor keeps it (VibeWrite's own suggestions still clear on all of those). Tab or Escape works once the author is in the editor (a click anywhere is enough); the card's Accept and Dismiss work from the chat. The anchor is "after the paragraph holding `after`" (as the old insert edit placed text), so the draft opens a new paragraph; an `after` the scene lacks or holds twice falls back to the caret when the scene was the open one, else its end, and the card says so. Several insertions in one answer land one after the other, each after the last is settled; the turn is not held while one waits. In Auto the suggestion is accepted once the draft is in, unless the voice check flagged it (then it waits like Ask).

@@ -45,6 +45,7 @@ import {
 } from '@shared/observedFacts'
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
 import { DISMISSED_NAMES_KEY, DismissedNames, defaultDismissedNames } from '@shared/proposedTags'
+import { KEPT_SPELLINGS_KEY, KEPT_SPELLINGS_MAX, KeptSpellings } from '@shared/misspellings'
 import { REFERENCE_PINS_KEY, ReferencePins, defaultReferencePins } from '@shared/references'
 import {
   SESSION_KEY,
@@ -363,6 +364,35 @@ export function setDismissedNames(db: TreeDb, value: DismissedNames): DismissedN
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored
+}
+
+/**
+ * Reads the spellings the author kept (F-4.14, "Not a typo") from the `settings` row under
+ * `KEPT_SPELLINGS_KEY`. A missing or unreadable row answers with none: the worst case is that a
+ * spelling is offered for a fix again.
+ */
+export function getKeptSpellings(db: TreeDb): string[] {
+  const row = db.select().from(settings).where(eq(settings.key, KEPT_SPELLINGS_KEY)).get()
+  if (!row) return []
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return []
+  }
+  const parsed = KeptSpellings.safeParse(json)
+  return parsed.success ? parsed.data.keys : []
+}
+
+/** Replaces the kept spellings (F-4.14), the newest `KEPT_SPELLINGS_MAX` kept, and returns them. */
+export function setKeptSpellings(db: TreeDb, keys: readonly string[]): string[] {
+  const kept = [...new Set(keys)].slice(-KEPT_SPELLINGS_MAX)
+  const serialized = JSON.stringify({ keys: kept })
+  db.insert(settings)
+    .values({ key: KEPT_SPELLINGS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return kept
 }
 
 /**

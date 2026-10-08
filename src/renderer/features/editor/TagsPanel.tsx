@@ -25,6 +25,7 @@ import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useDocumentStore } from './documentStore'
+import { MisspellingList } from './MisspellingList'
 import { openMention } from './openPassage'
 import { TagPicker } from './TagPicker'
 
@@ -623,6 +624,7 @@ export function TagsPanel({ id }: { id: string }): React.JSX.Element {
             </ul>
           </>
         ) : null}
+        <MisspellingList id={id} />
         {titleTag ? (
           <>
             <p className="mt-2 mb-1 text-xs text-fg-subtle">From the title</p>
@@ -751,7 +753,7 @@ function MentionRow({
         type="button"
         aria-label={`Jump to first mention of ${tag.name}`}
         title="Jump to the first mention"
-        onClick={() => void openMention(nodeId, range, tag.name)}
+        onClick={() => void openMention(nodeId, range, tag.name, tag.aliases)}
         className="rounded p-0.5 text-fg-muted hover:bg-surface-raised hover:text-fg"
       >
         <CornerDownRight size={12} aria-hidden="true" />

@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(19)
+    expect(result.version).toBe(20)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -839,5 +839,30 @@ describe('edit_pass and edit_change tables (0017_edit_passes)', () => {
     db.prepare('DELETE FROM node WHERE id = ?').run('scene')
     expect(count('edit_change')).toEqual({ n: 0 })
     expect(count('edit_pass')).toEqual({ n: 1 })
+  })
+})
+
+describe('tag.aliases and entity.aliases (0019_aliases)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+  })
+  afterEach(() => db.close())
+
+  it('gives every tag and entity written before F-4.14 an empty list, and refuses a null one', () => {
+    migrate(db, loadMigrations().slice(0, 19))
+    db.prepare(
+      `INSERT INTO tag (id, name, category, color, created, modified)
+       VALUES ('t1', 'rynna', 'character', '#dc2626', '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO entity (id, kind, name, created, modified)
+       VALUES ('e1', 'character', 'Rynna', '2026-01-01', '2026-01-01')`
+    ).run()
+    migrate(db)
+    expect(db.prepare('SELECT aliases FROM tag').get()).toEqual({ aliases: '[]' })
+    expect(db.prepare('SELECT aliases FROM entity').get()).toEqual({ aliases: '[]' })
+    expect(() => db.prepare('UPDATE tag SET aliases = NULL').run()).toThrow(/NOT NULL/)
   })
 })

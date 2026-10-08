@@ -17,6 +17,7 @@ import {
 } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
 import {
+  addEntityAliases,
   createEntity,
   getEntity,
   linkEntityTag,
@@ -159,6 +160,14 @@ export async function applyContextReview(
             tagChanges.push(link.tagChange)
           }
           updated += 1
+        }
+        // F-4.14: every other name the files used for it (a nickname, a title, the second name
+        // of a merged match) becomes an alias of the sheet, on its tag when it has one.
+        const names = item.records.flatMap((record) => [record.name, ...record.aliases])
+        if (names.length > 0) {
+          const aliased = addEntityAliases(tx, entity.id, names)
+          entity = aliased.entity
+          if (aliased.tagChange !== null) tagChanges.push(aliased.tagChange)
         }
         const copy = copies.get(item.id)
         if (copy !== undefined) {

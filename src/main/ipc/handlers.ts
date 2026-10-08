@@ -15,6 +15,7 @@ import {
 } from '@shared/ai'
 import type { AiModelChoice } from '@shared/aiRouting'
 import { TRIAL_ENDED_MESSAGE } from '@shared/appAccess'
+import { aliasKey } from '@shared/aliases'
 import { type AiSource, aiSwitchPatch, isFeatureAllowed } from '@shared/aiSettings'
 import { BOOK_COVER_DIR, bookTitle } from '@shared/bookDetails'
 import {
@@ -244,6 +245,8 @@ import {
   getAuthorRules,
   getConversations,
   getDismissedNames,
+  getKeptSpellings,
+  setKeptSpellings,
   getEditorSettings,
   getFocusSettings,
   getProjectDictionary,
@@ -1207,15 +1210,24 @@ export function registerHandlers({
         updated.trackMentions &&
         (before.name !== updated.name ||
           before.category !== updated.category ||
+          before.aliases !== JSON.stringify(updated.aliases) ||
           !before.trackMentions)
       ) {
         rescanManuscript(db)
+      }
+      // F-4.14: a linked sheet reads its aliases from the tag, so an open page hears of them.
+      if (before.aliases !== JSON.stringify(updated.aliases)) {
+        for (const linked of listEntities(db)) {
+          if (linked.tagId === id) emit(windows(), 'entity:changed', linked)
+        }
       }
     }
     // F-4.12b: a rename frees the old name to be proposed and takes the new one out of the list,
     // whatever tracking says — the proposals are about the bank's names, not about the scan.
     publishProposed()
-    if (before?.name !== updated.name) void syncSpelling()
+    if (before?.name !== updated.name || before.aliases !== JSON.stringify(updated.aliases)) {
+      void syncSpelling()
+    }
     return updated
   })
 
@@ -1278,9 +1290,9 @@ export function registerHandlers({
     }
     if (mentionNodeIds.length > 0) emit(windows(), 'mention:changed', { nodeIds: mentionNodeIds })
     // An entity that lived on a source lives on the target now; an open page shows its new tag.
-    for (const id of result.entityIds) {
-      const moved = getEntity(db, id)
-      if (moved) emit(windows(), 'entity:changed', moved)
+    // F-4.14: every sheet of the target hears too, since the merged names are its aliases now.
+    for (const linked of listEntities(db)) {
+      if (linked.tagId === targetId) emit(windows(), 'entity:changed', linked)
     }
     rescanManuscript(db)
     publishProposed()
@@ -1413,6 +1425,20 @@ export function registerHandlers({
   // F-2.8: the tag bar's title offer honours the same dismissals as the proposals.
   register('tag:dismissedNames', () => getDismissedNames(manager.require().connection.orm).names)
 
+  // F-4.14: the tags column's misspelling offers honour these; the proposals may now offer the
+  // kept spelling as a tag of its own, so they are published again.
+  register('tag:keptSpellings', () => getKeptSpellings(manager.require().connection.orm))
+
+  register('tag:keepSpelling', ({ text }) => {
+    const db = manager.require().connection.orm
+    const key = aliasKey(text)
+    const stored = getKeptSpellings(db)
+    const kept =
+      key === '' || stored.includes(key) ? stored : setKeptSpellings(db, [...stored, key])
+    publishProposed()
+    return kept
+  })
+
   register('documentTag:list', ({ nodeId }) =>
     listDocumentTags(manager.require().connection.orm, nodeId)
   )
@@ -1544,7 +1570,7 @@ export function registerHandlers({
    * linked is unchanged and already in every bank, so it is announced to no one.
    */
   const publishTagChange = (db: TreeDb, change: EntityTagChange | null): void => {
-    if (change === null || !(change.created || change.renamed)) return
+    if (change === null || !(change.created || change.renamed || change.aliased)) return
     rescanManuscript(db)
     publishProposed()
     emit(windows(), 'tag:changed', change.tag)
@@ -1709,7 +1735,9 @@ export function registerHandlers({
   register('entity:importCommit', ({ items }) => {
     const db = manager.require().connection.orm
     const result = importEntities(db, items)
-    const announce = result.tagChanges.filter((change) => change.created || change.renamed)
+    const announce = result.tagChanges.filter(
+      (change) => change.created || change.renamed || change.aliased
+    )
     if (announce.length > 0) {
       rescanManuscript(db)
       publishProposed()
@@ -1828,7 +1856,9 @@ export function registerHandlers({
     const session = manager.require()
     const db = session.connection.orm
     const result = await applyContextReview(db, session.folder, review)
-    const announce = result.tagChanges.filter((change) => change.created || change.renamed)
+    const announce = result.tagChanges.filter(
+      (change) => change.created || change.renamed || change.aliased
+    )
     if (announce.length > 0) {
       rescanManuscript(db)
       publishProposed()

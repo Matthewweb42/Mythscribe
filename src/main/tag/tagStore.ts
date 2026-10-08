@@ -3,6 +3,7 @@ import type { RunResult } from 'better-sqlite3'
 import { and, asc, count, eq, inArray, ne, type SQL } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import type { Tag, TagCreateInput, TagUpdateInput } from '@shared/ipc/contract'
+import { aliasKey, normalizeAliases, parseAliases, tagNameAsAlias } from '@shared/aliases'
 import { DEFAULT_CATEGORY_COLOR, toTagName } from '@shared/tags'
 import {
   dropAliasesTo,
@@ -33,7 +34,7 @@ export type TagDb = BaseSQLiteDatabase<'sync', RunResult, typeof schema>
 
 /** The tag columns plus the derived usage count, one row per matching tag, ordered by name. */
 function selectWithUsage(db: TagDb, where?: SQL): Tag[] {
-  return db
+  const rows = db
     .select({
       id: tag.id,
       name: tag.name,
@@ -41,6 +42,7 @@ function selectWithUsage(db: TagDb, where?: SQL): Tag[] {
       color: tag.color,
       parentId: tag.parentId,
       trackMentions: tag.trackMentions,
+      aliases: tag.aliases,
       created: tag.created,
       modified: tag.modified,
       usageCount: count(documentTag.id)
@@ -51,6 +53,7 @@ function selectWithUsage(db: TagDb, where?: SQL): Tag[] {
     .groupBy(tag.id)
     .orderBy(asc(tag.name), asc(tag.id))
     .all()
+  return rows.map((row) => ({ ...row, aliases: parseAliases(row.aliases) }))
 }
 
 /** Every tag with its usage count (F-4.1), ordered by name. */
@@ -82,6 +85,80 @@ function normalizeName(input: string): string {
  */
 export function findTagByName(db: TagDb, name: string): string | undefined {
   return findByName(db, name)
+}
+
+/**
+ * The id of the tag whose name, or else one of whose aliases (F-4.14), has the key of `name`
+ * (any spelling: "High Crown", "high-crown"); undefined when none does. The AI tagging, the
+ * context import, and the agent map a name to the bank through it, so an alias never makes a
+ * second tag.
+ */
+export function findTagByNameOrAlias(db: TagDb, name: string): string | undefined {
+  const key = aliasKey(name)
+  if (key === '') return undefined
+  const byName = findByName(db, key)
+  if (byName !== undefined) return byName
+  return db
+    .select({ id: tag.id, aliases: tag.aliases })
+    .from(tag)
+    .orderBy(asc(tag.name), asc(tag.id))
+    .all()
+    .find((row) => parseAliases(row.aliases).some((alias) => aliasKey(alias) === key))?.id
+}
+
+/**
+ * The alias keys of the bank that belong to another tag than `exceptId`: every other tag's name
+ * and aliases (F-4.14). An alias must not be one of them, so a name in the prose stands for one
+ * tag only.
+ */
+function takenNameKeys(db: TagDb, exceptId: string): Set<string> {
+  const taken = new Set<string>()
+  for (const row of db
+    .select({ id: tag.id, name: tag.name, aliases: tag.aliases })
+    .from(tag)
+    .all()) {
+    if (row.id === exceptId) continue
+    taken.add(row.name)
+    for (const alias of parseAliases(row.aliases)) taken.add(aliasKey(alias))
+  }
+  return taken
+}
+
+/** Refuses an alias that is another tag's name or alias (F-4.14). */
+function assertAliasesFree(db: TagDb, id: string, aliases: readonly string[]): void {
+  const taken = takenNameKeys(db, id)
+  const clash = aliases.find((alias) => taken.has(aliasKey(alias)))
+  if (clash !== undefined) {
+    throw new AppError('ALREADY_EXISTS', `"${clash}" is already the name of another tag`, {
+      alias: clash
+    })
+  }
+}
+
+/**
+ * Adds `names` to the tag's aliases (F-4.14) and answers the tag: each one normalized, the ones
+ * the tag already answers to and the ones another tag owns (its name or alias) skipped in
+ * silence, never refused. A merge, the context import, and linking a sheet's own aliases to its
+ * tag come through here. Writes nothing (and keeps `modified`) when nothing is new.
+ */
+export function addTagAliases(db: TagDb, id: string, names: readonly string[]): Tag {
+  return db.transaction((tx) => {
+    const existing = getTag(tx, id)
+    if (!existing) throw new AppError('NOT_FOUND', 'Tag not found', { id })
+    const stored = parseAliases(existing.aliases)
+    const taken = takenNameKeys(tx, id)
+    const free = names.filter((name) => !taken.has(aliasKey(name)))
+    const next = normalizeAliases([...stored, ...free], existing.name)
+    if (next.length !== stored.length) {
+      tx.update(tag)
+        .set({ aliases: JSON.stringify(next), modified: new Date().toISOString() })
+        .where(eq(tag.id, id))
+        .run()
+    }
+    const updated = getTagWithUsage(tx, id)
+    if (!updated) throw new AppError('NOT_FOUND', 'Tag not found', { id })
+    return updated
+  })
 }
 
 /** The id of the tag (other than `exceptId`) that carries `name`, or undefined when it is free. */
@@ -173,7 +250,7 @@ function insertTag(
     modified: now
   }
   const { origin: _origin, ...inserted } = db.insert(tag).values(row).returning().get()
-  return { ...inserted, usageCount: 0 }
+  return { ...inserted, aliases: parseAliases(inserted.aliases), usageCount: 0 }
 }
 
 /**
@@ -215,6 +292,14 @@ export function updateTag(db: TagDb, id: string, patch: Omit<TagUpdateInput, 'id
       const name = normalizeName(patch.name)
       if (name !== existing.name) assertNameFree(tx, name, id)
       changes.name = name
+    }
+    // F-4.14: the list is normalized against the name the tag ends up with, so renaming a tag to
+    // one of its aliases drops that alias rather than keeping the name twice.
+    const finalName = changes.name ?? existing.name
+    if (patch.aliases !== undefined || finalName !== existing.name) {
+      const aliases = normalizeAliases(patch.aliases ?? parseAliases(existing.aliases), finalName)
+      if (patch.aliases !== undefined) assertAliasesFree(tx, id, aliases)
+      changes.aliases = JSON.stringify(aliases)
     }
     if (patch.category !== undefined) changes.category = patch.category
     if (patch.color !== undefined) changes.color = patch.color
@@ -267,6 +352,15 @@ function removeTags(tx: TagDb, ids: readonly string[]): void {
     return existing
   })
   if (rows.length === 0) return
+  // F-4.14: a sheet keeps the names its tag answered to, now as its own aliases (one owner).
+  for (const row of rows) {
+    const aliases = parseAliases(row.aliases)
+    if (aliases.length === 0) continue
+    tx.update(entity)
+      .set({ aliases: JSON.stringify(aliases) })
+      .where(eq(entity.tagId, row.id))
+      .run()
+  }
   tx.delete(tag).where(inArray(tag.id, unique)).run()
   const aiNames = rows.filter((row) => row.origin === 'ai').map((row) => row.name)
   if (aiNames.length > 0) {
@@ -376,6 +470,15 @@ export function mergeTags(
         .onConflictDoNothing()
         .run()
     }
+    // F-4.14: every merged tag's name and aliases become aliases of the target, the name spelled
+    // as its sheet spells it when it has one ("Rynna", not "rynna").
+    const sourceNames = sources.flatMap((id) => {
+      const row = getTag(tx, id)
+      if (!row) return []
+      const sheet = tx.select({ name: entity.name }).from(entity).where(eq(entity.tagId, id)).get()
+      const spelled = sheet !== undefined && aliasKey(sheet.name) === row.name
+      return [spelled ? sheet.name : tagNameAsAlias(row.name), ...parseAliases(row.aliases)]
+    })
     const entityIds = tx
       .select({ id: entity.id })
       .from(entity)
@@ -387,6 +490,7 @@ export function mergeTags(
     // nothing left to drop.
     setTagAliases(tx, mergeAliases(getTagAliases(tx), sources, targetId))
     removeTags(tx, sources)
+    addTagAliases(tx, targetId, sourceNames)
     const target = getTagWithUsage(tx, targetId)
     if (!target) throw new AppError('NOT_FOUND', 'Tag not found', { id: targetId })
     return {

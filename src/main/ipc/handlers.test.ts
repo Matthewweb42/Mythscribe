@@ -4828,6 +4828,25 @@ describe('automatic mentions (F-4.12)', () => {
     }
   })
 
+  it('finds a tag by its aliases once they are set, and its sheet hears of them (F-4.14)', async () => {
+    vi.useFakeTimers()
+    try {
+      await ready('Rynna waited at the landing.')
+      const sheet = await invoke('entity:create', { kind: 'character', name: 'Rynna Falsire' })
+      await vi.advanceTimersByTimeAsync(SCAN)
+      const tagId = sheet.tagId ?? ''
+      expect(await invoke('mention:listForTag', { tagId })).toEqual([])
+
+      const updated = await invoke('tag:update', { id: tagId, aliases: ['Rynna'] })
+      expect(updated.aliases).toEqual(['Rynna'])
+      expect((await invoke('entity:get', { id: sheet.id })).aliases).toEqual(['Rynna'])
+      await vi.advanceTimersByTimeAsync(SCAN)
+      expect(await invoke('mention:listForTag', { tagId })).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('rescans after a rename and forgets everything when the tag is deleted', async () => {
     vi.useFakeTimers()
     try {
@@ -4975,6 +4994,23 @@ describe('proposed tags (F-4.12b)', () => {
       await save(scene, TASH, 'Tash rode on with Tash and Tash.')
       await vi.advanceTimersByTimeAsync(SCAN)
       expect(await invoke('tag:proposed', undefined)).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('offers a likely misspelling of a tag as a fix rather than a proposal, until it is kept (F-4.14)', async () => {
+    vi.useFakeTimers()
+    try {
+      await ready(TASH)
+      await vi.advanceTimersByTimeAsync(SCAN)
+      await invoke('tag:create', { name: 'Tasha', category: 'character' })
+      expect(await invoke('tag:proposed', undefined)).toEqual([])
+      expect(await invoke('tag:keptSpellings', undefined)).toEqual([])
+      expect(await invoke('tag:keepSpelling', { text: 'Tash' })).toEqual(['tash'])
+      expect(await invoke('tag:keepSpelling', { text: 'TASH' })).toEqual(['tash'])
+      expect(await invoke('tag:proposed', undefined)).toMatchObject([{ name: 'tash' }])
+      expect(published().at(-1)).toEqual(['tash'])
     } finally {
       vi.useRealTimers()
     }

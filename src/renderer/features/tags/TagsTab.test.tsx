@@ -46,6 +46,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
           parentId: null,
           usageCount: 0,
           trackMentions: true,
+          aliases: [],
           created: '2026-09-12T08:00:00.000Z',
           modified: '2026-09-12T08:00:00.000Z'
         }
@@ -638,6 +639,24 @@ describe('TagDetail mentions (F-4.12)', () => {
     await user.click(trackBox())
     expect(calls.at(-1)).toEqual(['tag:update', { id: 't-mara', trackMentions: true }])
     await waitFor(() => expect(mentions()).toBeInTheDocument())
+  })
+
+  it('adds an alias on Enter and removes one from its chip (F-4.14)', async () => {
+    const user = userEvent.setup()
+    const calls = await renderLoaded()
+    await user.click(row('mara'))
+    const aliases = screen.getByRole('group', { name: 'Aliases' })
+    await user.type(
+      within(aliases).getByRole('textbox', { name: 'Add alias' }),
+      'The Navigator{Enter}'
+    )
+    expect(calls.at(-1)).toEqual(['tag:update', { id: 't-mara', aliases: ['The Navigator'] }])
+    await waitFor(() =>
+      expect(useTagStore.getState().byId['t-mara']?.aliases).toEqual(['The Navigator'])
+    )
+    expect(within(aliases).getByRole('textbox', { name: 'Add alias' })).toHaveValue('')
+    await user.click(within(aliases).getByRole('button', { name: 'Remove alias The Navigator' }))
+    expect(calls.at(-1)).toEqual(['tag:update', { id: 't-mara', aliases: [] }])
   })
 
   it('a failed toggle toasts and leaves the checkbox as the stored tag has it', async () => {

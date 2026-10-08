@@ -111,6 +111,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'tag:proposed': 'read',
   'tag:dismissProposed': 'write',
   'tag:dismissedNames': 'read',
+  'tag:keptSpellings': 'read',
+  'tag:keepSpelling': 'write',
   'search:query': 'read',
   'replace:preview': 'read',
   'replace:commit': 'write',

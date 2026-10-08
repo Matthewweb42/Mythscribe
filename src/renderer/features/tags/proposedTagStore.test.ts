@@ -58,6 +58,7 @@ const tag = (name: string): Tag => ({
   parentId: null,
   usageCount: 0,
   trackMentions: true,
+  aliases: [],
   created: '2026-09-22T10:00:00.000Z',
   modified: '2026-09-22T10:00:00.000Z'
 })

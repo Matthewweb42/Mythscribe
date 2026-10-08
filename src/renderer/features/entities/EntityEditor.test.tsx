@@ -56,6 +56,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
           ...(patch.name === undefined ? {} : { name: patch.name }),
           ...(patch.template === undefined ? {} : { template: patch.template }),
           ...(patch.body === undefined ? {} : { body: patch.body }),
+          ...(patch.aliases === undefined ? {} : { aliases: patch.aliases }),
           fields: { ...stored.fields, ...patch.fields }
         }
         return merged as Output<C>
@@ -191,6 +192,18 @@ describe('EntityEditor (F-9.3)', () => {
     await flushDraft()
     expect(calls.at(-1)).toEqual(['entity:update', { id: 'e-mara', name: 'Mara Vell' }])
     expect(screen.getByRole('article', { name: 'Mara Vell' })).toBeInTheDocument()
+  })
+
+  it('edits the sheet´s aliases, which main writes on its tag when it has one (F-4.14)', async () => {
+    const user = userEvent.setup()
+    const calls = await openPage('e-mara')
+    const aliases = screen.getByRole('group', { name: 'Aliases' })
+    await user.type(
+      within(aliases).getByRole('textbox', { name: 'Add alias' }),
+      'The Navigator{Enter}'
+    )
+    expect(calls.at(-1)).toEqual(['entity:update', { id: 'e-mara', aliases: ['The Navigator'] }])
+    expect(await within(aliases).findByText('The Navigator')).toBeInTheDocument()
   })
 
   it('Close leaves the page, and the entity keeps its edits', async () => {

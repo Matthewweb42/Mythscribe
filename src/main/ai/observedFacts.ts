@@ -12,7 +12,7 @@ import { SUMMARY_KNOWN_NAMES_MAX } from '@shared/summary'
 import { createEntity, listEntities, type EntityWrite } from '../entity/entityStore'
 import { replaceSceneFacts, type SceneFactInput } from '../entity/observedFactStore'
 import { getObservedDismissed } from '../project/settingsStore'
-import { findTagByName, listTags } from '../tag/tagStore'
+import { findTagByNameOrAlias, listTags } from '../tag/tagStore'
 import type { TreeDb } from '../tree/treeStore'
 
 /**
@@ -65,8 +65,11 @@ export function sceneNamesTag(sceneText: string, tagName: string, properNoun: bo
  * checker's references (F-13.4) both read it.
  */
 export function entitiesNamedIn(entities: readonly Entity[], sceneText: string): Entity[] {
-  return entities.filter(
-    (entity) => wordsPattern(toEntityNameKey(entity.name).split(' '))?.test(sceneText) === true
+  // F-4.14: an alias ("Rynna", "the High Crown") names the sheet as well as its full name does.
+  return entities.filter((entity) =>
+    [entity.name, ...entity.aliases].some(
+      (name) => wordsPattern(toEntityNameKey(name).split(' '))?.test(sceneText) === true
+    )
   )
 }
 
@@ -141,8 +144,14 @@ function resolveEntity(
   const named = entities.filter((entity) => toEntityNameKey(entity.name) === key)
   const byName = named.find((entity) => entity.kind === fact.kind) ?? named[0]
   if (byName !== undefined) return byName
+  // F-4.14: a fact about "Rynna" belongs on the sheet that has Rynna as an alias.
+  const aliased = entities.filter((entity) =>
+    entity.aliases.some((alias) => toEntityNameKey(alias) === key)
+  )
+  const byAlias = aliased.find((entity) => entity.kind === fact.kind) ?? aliased[0]
+  if (byAlias !== undefined) return byAlias
   const tagName = entityTagName(fact.entity)
-  const tagId = tagName === '' ? undefined : findTagByName(db, tagName)
+  const tagId = tagName === '' ? undefined : findTagByNameOrAlias(db, tagName)
   if (tagId === undefined) return undefined
   const tagged = entities.filter((entity) => entity.tagId === tagId)
   return tagged.find((entity) => entity.kind === fact.kind) ?? tagged[0]

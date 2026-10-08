@@ -108,6 +108,7 @@ import { useSearchStore } from '@renderer/features/search/searchStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
+import { useKeptSpellingStore } from '@renderer/features/tags/keptSpellingStore'
 import { useProposedTagStore } from '@renderer/features/tags/proposedTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { UpdateNotice } from '@renderer/features/updates/UpdateNotice'
@@ -296,6 +297,8 @@ export function App(): React.JSX.Element {
       useDocumentTagStore.getState().clear()
       useMentionStore.getState().clear()
       useProposedTagStore.getState().clear()
+      // F-4.14: the kept spellings belong to the project that closed.
+      useKeptSpellingStore.getState().clear()
       useBackgroundStore.getState().clear()
       useDictionaryStore.getState().clear()
       // F-8.5: the drafts belong to the project that closed.

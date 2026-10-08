@@ -16,6 +16,8 @@ import {
   resetDocumentTagStore,
   useDocumentTagStore
 } from '@renderer/features/tags/documentTagStore'
+import { resetEntityStore } from '@renderer/features/entities/entityStore'
+import { resetKeptSpellingStore } from '@renderer/features/tags/keptSpellingStore'
 import { resetMentionStore, useMentionStore } from '@renderer/features/tags/mentionStore'
 import {
   resetProposedTagStore,
@@ -192,6 +194,8 @@ beforeEach(() => {
   resetDocumentTagStore()
   resetMentionStore()
   resetProposedTagStore()
+  resetKeptSpellingStore()
+  resetEntityStore()
   resetActiveEditorStore()
   resetLayoutStore()
   resetSceneMetaStore()
@@ -1173,6 +1177,84 @@ describe('TagsPanel (F-4.4, the tags column)', () => {
       expect(suggestionNames()).toEqual(['moody'])
       expect(screen.getByTestId('tag-recommend-cost')).toHaveTextContent('$0.0012')
       expect(settlements(calls)).toEqual([])
+    })
+  })
+
+  describe('possible misspellings (F-4.14)', () => {
+    const write = (text: string): void =>
+      act(() => {
+        useDocumentStore.setState({
+          docs: {
+            'sc-1': {
+              content: {
+                type: 'doc',
+                content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+              },
+              dirty: false
+            }
+          }
+        })
+      })
+
+    it('offers a fix for a close spelling of a tag name, and replaces it in the editor on Fix', async () => {
+      const calls = install({ 'tag:keptSpellings': () => [] })
+      write('Marra waited. Mara came, then Marra left.')
+      await mount()
+      const list = await within(bar()).findByRole('list', { name: 'Possible misspellings' })
+      expect(
+        within(list)
+          .getAllByRole('listitem')
+          .map((row) => row.textContent)
+      ).toEqual(['Marra → Mara×2'])
+      expect(calls).toContainEqual(['tag:keptSpellings', undefined])
+
+      const editor = new Editor({
+        extensions: buildExtensions({
+          sceneBreak: '~~~',
+          onSave: () => {},
+          inlineTagNodeId: 'sc-1'
+        }),
+        content: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Marra waited. Mara came, then Marra left.' }]
+            }
+          ]
+        }
+      })
+      useActiveEditorStore.getState().set('sc-1', editor)
+      await userEvent.click(within(list).getByRole('button', { name: 'Fix Marra to Mara' }))
+      await waitFor(() =>
+        expect(editor.state.doc.textContent).toBe('Mara waited. Mara came, then Mara left.')
+      )
+      expect(toasts()).toEqual([])
+      editor.destroy()
+    })
+
+    it('keeps a spelling the author says is not a typo, and shows nothing for kept ones', async () => {
+      const calls = install({
+        'tag:keptSpellings': () => [],
+        'tag:keepSpelling': () => ['marra']
+      })
+      write('Marra waited.')
+      await mount()
+      const list = await within(bar()).findByRole('list', { name: 'Possible misspellings' })
+      await userEvent.click(within(list).getByRole('button', { name: 'Keep Marra' }))
+      expect(calls).toContainEqual(['tag:keepSpelling', { text: 'Marra' }])
+      await waitFor(() =>
+        expect(
+          within(bar()).queryByRole('list', { name: 'Possible misspellings' })
+        ).not.toBeInTheDocument()
+      )
+    })
+
+    it('never asks for the kept spellings when there is nothing to offer', async () => {
+      const calls = install()
+      write('Mara waited.')
+      await mount()
+      expect(calls.map(([channel]) => channel)).not.toContain('tag:keptSpellings')
     })
   })
 })

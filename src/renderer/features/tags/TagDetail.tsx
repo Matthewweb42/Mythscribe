@@ -8,6 +8,7 @@ import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { describeError } from '@renderer/lib/errors'
+import { AliasEditor } from './AliasEditor'
 import { useDocumentTagStore } from './documentTagStore'
 import { useMentionStore } from './mentionStore'
 import { useTagStore } from './tagStore'
@@ -244,6 +245,11 @@ export function TagDetail({
           ))}
         </select>
       </label>
+      <AliasEditor
+        name={tag.name}
+        aliases={tag.aliases}
+        onChange={(aliases) => update(tag.id, { aliases })}
+      />
       <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"
@@ -304,7 +310,9 @@ export function TagDetail({
               <li key={document.id}>
                 <button
                   type="button"
-                  onClick={() => void openMention(document.id, document.first ?? [0, 0], tag.name)}
+                  onClick={() =>
+                    void openMention(document.id, document.first ?? [0, 0], tag.name, tag.aliases)
+                  }
                   className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
                 >
                   <span className="min-w-0 flex-1 truncate">{document.title}</span>{' '}

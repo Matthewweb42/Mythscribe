@@ -12,8 +12,9 @@ import type { TreeDb } from '../tree/treeStore'
  */
 export function projectNameWords(db: TreeDb): string[] {
   const names = [
-    ...listEntities(db).map((entity) => entity.name),
-    ...listTags(db).map((tag) => tag.name)
+    ...listEntities(db).flatMap((entity) => [entity.name, ...entity.aliases]),
+    // F-4.14: an alias is a story name the author spells on purpose.
+    ...listTags(db).flatMap((tag) => [tag.name, ...tag.aliases])
   ]
   return storyNameWords(names)
 }

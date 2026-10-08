@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { TAGS_MIN_CHARS } from '@shared/ai'
+import { aliasKey } from '@shared/aliases'
 import { docToText } from '@shared/docText'
 import type { Tag } from '@shared/ipc/contract'
 import { normalizeProposalNote } from '@shared/proposal'
@@ -100,7 +101,13 @@ export async function recommendTags(
   })
 
   const names = parseAnswer(result.text)
-  const byName = new Map(bank.map((tag) => [toTagName(tag.name), tag]))
+  // F-4.14: a name the model answered may be an alias of a bank tag; the name wins a clash.
+  const byName = new Map(
+    bank.flatMap((tag) => [
+      ...tag.aliases.map((alias): [string, Tag] => [aliasKey(alias), tag]),
+      [toTagName(tag.name), tag] as [string, Tag]
+    ])
+  )
   const seen = new Set<string>()
   const suggestions: Tag[] = []
   for (const name of names) {

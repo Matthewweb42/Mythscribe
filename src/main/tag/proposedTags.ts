@@ -6,7 +6,9 @@ import {
   type WordCount
 } from '@shared/proposedTags'
 import { toTagName } from '@shared/tags'
-import { getDismissedNames, setDismissedNames } from '../project/settingsStore'
+import { aliasKey } from '@shared/aliases'
+import { isMisspeltName } from '@shared/misspellings'
+import { getDismissedNames, getKeptSpellings, setDismissedNames } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { documentText, manuscriptDocuments } from '../voice/profile'
 import { listTags } from './tagStore'
@@ -53,10 +55,13 @@ export function listProposedTags(db: TreeDb): ProposedTag[] {
     perDocument.push({ nodeId: row.id, counts: counted.counts })
   }
   memo = next
-  return proposeTags(
-    perDocument,
-    listTags(db).map((tag) => tag.name),
-    getDismissedNames(db).names
+  // F-4.14: an alias is a name the bank already has; it is never proposed as a tag of its own.
+  const bankNames = listTags(db).flatMap((tag) => [tag.name, ...tag.aliases.map(aliasKey)])
+  const kept = new Set(getKeptSpellings(db))
+  // A likely misspelling of a bank name ("Falseer" beside `rynna-falsire`) is offered as a fix in
+  // the tags column instead, until the author keeps the spelling.
+  return proposeTags(perDocument, bankNames, getDismissedNames(db).names).filter(
+    (proposal) => kept.has(proposal.name) || !isMisspeltName(proposal.name, bankNames)
   )
 }
 

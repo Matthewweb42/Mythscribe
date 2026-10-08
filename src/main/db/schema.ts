@@ -117,6 +117,8 @@ export const tag = sqliteTable(
     origin: text('origin', { enum: ['author', 'ai'] })
       .notNull()
       .default('author'),
+    /** F-4.14: JSON array of the tag's other names (nicknames, titles), as the author typed them. */
+    aliases: text('aliases').notNull().default('[]'),
     created: text('created').notNull(),
     modified: text('modified').notNull()
   },
@@ -419,6 +421,11 @@ export const entity = sqliteTable(
     tagId: text('tag_id').references(() => tag.id, { onDelete: 'set null' }),
     /** F-5.16: `ai` for an entity the story-bible job created, until the author's first edit. */
     origin: text('origin', { enum: ENTITY_ORIGINS }).notNull().default('author'),
+    /**
+     * F-4.14: JSON array of the sheet's other names, used only while `tag_id` is null; a linked
+     * sheet's aliases live on its tag (one owner).
+     */
+    aliases: text('aliases').notNull().default('[]'),
     created: text('created').notNull(),
     modified: text('modified').notNull()
   },
@@ -656,10 +663,7 @@ export const editChange = sqliteTable(
     status: text('status', { enum: EDIT_CHANGE_STATUSES }).notNull().default('pending'),
     proposalId: text('proposal_id').references(() => aiProposal.id, { onDelete: 'set null' })
   },
-  (t) => [
-    index('edit_change_pass_idx').on(t.passId),
-    index('edit_change_node_idx').on(t.nodeId)
-  ]
+  (t) => [index('edit_change_pass_idx').on(t.passId), index('edit_change_node_idx').on(t.nodeId)]
 )
 export type EditChangeRow = typeof editChange.$inferSelect
 

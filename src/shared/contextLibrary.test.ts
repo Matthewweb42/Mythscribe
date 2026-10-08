@@ -171,6 +171,12 @@ describe('planContextReview (F-9.8)', () => {
     expect(entities[1]).toMatchObject({ name: 'Tomas', existingId: null, tag: true })
   })
 
+  it('matches a record to a sheet by one of the sheet’s own aliases (F-4.14)', () => {
+    const existing = [sheet({ id: 'rynna', name: 'Rynna Falsire', aliases: ['The High Crown'] })]
+    const { entities } = plan([record({ name: 'The High Crown', fields: { age: '40' } })], existing)
+    expect(entities[0]).toMatchObject({ name: 'Rynna Falsire', existingId: 'rynna' })
+  })
+
   it('drops what the sheet already says and an existing sheet with nothing new', () => {
     const existing = [
       sheet({

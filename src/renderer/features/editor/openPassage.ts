@@ -1,4 +1,5 @@
 import type { Node as PmNode } from '@tiptap/pm/model'
+import { aliasKey } from '@shared/aliases'
 import { nameWords, type MentionRange } from '@shared/mentions'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -32,23 +33,32 @@ export async function openPassage(
 }
 
 /**
- * Opens the document and selects one recorded mention of `name` (F-4.12). The stored range comes
- * from the last saved document, so it is used only when it still spells the tag's words; live
- * typing above it moves everything, and then the words are searched for instead. Neither found
- * means the author rewrote the sentence: `openPassage` says so.
+ * Opens the document and selects one recorded mention of `name` (F-4.12) or of one of its
+ * `aliases` (F-4.14). The stored range comes from the last saved document, so it is used only
+ * when it still spells one of those names; live typing above it moves everything, and then the
+ * names are searched for instead, the main name first. None found means the author rewrote the
+ * sentence: `openPassage` says so.
  */
-export function openMention(nodeId: string, range: MentionRange, name: string): Promise<void> {
-  const words = nameWords(name).join(' ')
+export function openMention(
+  nodeId: string,
+  range: MentionRange,
+  name: string,
+  aliases: readonly string[] = []
+): Promise<void> {
+  const spellings = [name, ...aliases.map(aliasKey)]
+    .map((each) => nameWords(each).join(' '))
+    .filter((words) => words !== '')
   return openPassage(nodeId, (doc) => {
     const [from, to] = range
-    if (
-      from < to &&
-      to <= doc.content.size &&
-      doc.textBetween(from, to, ' ').toLowerCase() === words.toLowerCase()
-    ) {
-      return { from, to }
+    if (from < to && to <= doc.content.size) {
+      const text = doc.textBetween(from, to, ' ').toLowerCase()
+      if (spellings.some((words) => words.toLowerCase() === text)) return { from, to }
     }
     // The tag's name is kebab-case, the prose may capitalize it: the search ignores case.
-    return locateText(doc, words, { ignoreCase: true })
+    for (const words of spellings) {
+      const found = locateText(doc, words, { ignoreCase: true })
+      if (found !== null) return found
+    }
+    return null
   })
 }

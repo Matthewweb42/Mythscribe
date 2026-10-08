@@ -10,6 +10,7 @@ export const tagFixture: Tag[] = [
     parentId: null,
     usageCount: 3,
     trackMentions: true,
+    aliases: [],
     created: '2026-09-01T10:00:00.000Z',
     modified: '2026-09-02T11:30:00.000Z'
   },
@@ -21,6 +22,7 @@ export const tagFixture: Tag[] = [
     parentId: null,
     usageCount: 1,
     trackMentions: true,
+    aliases: [],
     created: '2026-09-03T10:00:00.000Z',
     modified: '2026-09-03T10:00:00.000Z'
   },
@@ -32,6 +34,7 @@ export const tagFixture: Tag[] = [
     parentId: null,
     usageCount: 0,
     trackMentions: true,
+    aliases: [],
     created: '2026-09-04T10:00:00.000Z',
     modified: '2026-09-04T10:00:00.000Z'
   }

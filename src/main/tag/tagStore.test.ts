@@ -13,10 +13,12 @@ import { createSeededProject } from '../project/testProject'
 import { getDismissedNames, getTagAliases, setTagAliases } from '../project/settingsStore'
 import { listNodes } from '../tree/treeStore'
 import {
+  addTagAliases,
   createTag,
   deleteTag,
   deleteTags,
   exportTagBank,
+  findTagByNameOrAlias,
   getTag,
   getTagWithUsage,
   importTagBank,
@@ -77,6 +79,7 @@ describe('createTag', () => {
       usageCount: 0,
       // F-4.12: a new tag is looked for in the manuscript until the author says otherwise.
       trackMentions: true,
+      aliases: [],
       created: '2026-09-12T10:00:00.000Z',
       modified: '2026-09-12T10:00:00.000Z'
     })
@@ -533,5 +536,69 @@ describe('exportTagBank / importTagBank (F-4.9)', () => {
     )
     importTagBank(db, records)
     expect(exportTagBank(db)).toEqual(records)
+  })
+})
+
+describe('aliases (F-4.14)', () => {
+  it('starts empty, replaces the list on update, and drops the main name and duplicates', () => {
+    const rynna = createTag(db, { name: 'Rynna Falsire', category: 'character' })
+    expect(rynna.aliases).toEqual([])
+    const updated = updateTag(db, rynna.id, {
+      aliases: ['Rynna', ' rynna ', 'Rynna Falsire', 'High Crown Falsire']
+    })
+    expect(updated.aliases).toEqual(['Rynna', 'High Crown Falsire'])
+    expect(listTags(db)[0]?.aliases).toEqual(['Rynna', 'High Crown Falsire'])
+  })
+
+  it('refuses an alias that is another tag’s name or alias, writing nothing', () => {
+    const rynna = createTag(db, { name: 'Rynna Falsire', category: 'character' })
+    const kael = createTag(db, { name: 'Kael', category: 'character' })
+    updateTag(db, kael.id, { aliases: ['The Smith'] })
+    expectCode(() => updateTag(db, rynna.id, { aliases: ['Kael'] }), 'ALREADY_EXISTS')
+    expectCode(() => updateTag(db, rynna.id, { aliases: ['the smith'] }), 'ALREADY_EXISTS')
+    expect(getTagWithUsage(db, rynna.id)?.aliases).toEqual([])
+  })
+
+  it('drops an alias the tag is renamed to', () => {
+    const tag = createTag(db, { name: 'Rynna Falsire', category: 'character' })
+    updateTag(db, tag.id, { aliases: ['Rynna', 'Falsire'] })
+    expect(updateTag(db, tag.id, { name: 'Rynna' }).aliases).toEqual(['Falsire'])
+  })
+
+  it('adds without refusing: names another tag owns and ones already there are skipped', () => {
+    const rynna = createTag(db, { name: 'Rynna Falsire', category: 'character' })
+    createTag(db, { name: 'Kael', category: 'character' })
+    expect(
+      addTagAliases(db, rynna.id, ['Rynna', 'Kael', 'rynna', 'The High Crown']).aliases
+    ).toEqual(['Rynna', 'The High Crown'])
+  })
+
+  it('finds a tag by its name first, then by an alias, in any spelling', () => {
+    const rynna = createTag(db, { name: 'Rynna Falsire', category: 'character' })
+    updateTag(db, rynna.id, { aliases: ['High Crown'] })
+    expect(findTagByNameOrAlias(db, 'rynna-falsire')).toBe(rynna.id)
+    expect(findTagByNameOrAlias(db, 'high  crown')).toBe(rynna.id)
+    expect(findTagByNameOrAlias(db, 'nobody')).toBeUndefined()
+  })
+
+  it('turns merged tags into aliases of the kept one: their names (as their sheets spell them) and aliases', () => {
+    const rynna = createTag(db, { name: 'Rynna Falsire', category: 'character' })
+    const nick = createTag(db, { name: 'Rynna', category: 'character' })
+    const title = createTag(db, { name: 'high-crown', category: 'custom' })
+    updateTag(db, title.id, { aliases: ['Her Majesty'] })
+    insertEntity('Rynna', nick.id)
+    const result = mergeTags(db, rynna.id, [nick.id, title.id])
+    expect(result.target.aliases).toEqual(['Rynna', 'High Crown', 'Her Majesty'])
+    expect(result.aliases).toEqual({ [nick.id]: rynna.id, [title.id]: rynna.id })
+  })
+
+  it('leaves a sheet the aliases of the tag it loses', () => {
+    const tag = createTag(db, { name: 'Rynna Falsire', category: 'character' })
+    updateTag(db, tag.id, { aliases: ['Rynna'] })
+    const sheet = insertEntity('Rynna Falsire', tag.id)
+    deleteTag(db, tag.id)
+    const row = db.select().from(entity).where(eq(entity.id, sheet)).get()
+    expect(row?.tagId).toBeNull()
+    expect(row?.aliases).toBe('["Rynna"]')
   })
 })
