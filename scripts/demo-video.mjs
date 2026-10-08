@@ -11,8 +11,9 @@
  *
  * Three steps, each Node-heavy one under `flock /tmp/mythscribe-heavy.lock` where `flock`
  * exists: `electron-vite build` (skip with `--skip-build`), the recording (this script again
- * with `--record`, under `xvfb-run` on a 1920×1080 screen), and the edit (ffmpeg from the
- * `ffmpeg-static` devDependency; `--edit-only` redoes just this step from `raw/`). The recording builds "The Lantern Ferry" (`lantern-ferry.mjs`)
+ * with `--record`, under `xvfb-run` on a 1920×1080 screen), and the edit (ffmpeg: `MYTHSCRIBE_FFMPEG`,
+ * else `ffmpeg-static` if installed with `npm i --no-save ffmpeg-static@5.3.0` (not a dependency:
+ * it has no Windows on Arm build and broke the personal install), else `ffmpeg` on PATH; `--edit-only` redoes just this step from `raw/`). The recording builds "The Lantern Ferry" (`lantern-ferry.mjs`)
  * in a throwaway project over IPC, answers AI from a fake OpenAI on loopback (no key, no
  * network), and drives the UI like a person: a drawn cursor that glides to each control, a soft
  * highlight on what it points at, typing at a human pace, and a badge for each shortcut pressed.
@@ -27,8 +28,22 @@ import path from 'node:path'
 import process from 'node:process'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import ffmpegPath from 'ffmpeg-static'
 import { _electron as electron } from 'playwright'
+
+/** ffmpeg for the edit step; see the header for where it comes from. */
+async function findFfmpeg() {
+  if (process.env.MYTHSCRIBE_FFMPEG) return process.env.MYTHSCRIBE_FFMPEG
+  const bundled = await import('ffmpeg-static').then(
+    (m) => m.default,
+    () => null
+  )
+  if (bundled) return bundled
+  if (spawnSync('ffmpeg', ['-version']).status === 0) return 'ffmpeg'
+  throw new Error(
+    'No ffmpeg: set MYTHSCRIBE_FFMPEG, run `npm i --no-save ffmpeg-static@5.3.0`, or install ffmpeg'
+  )
+}
+const ffmpegPath = process.argv.includes('--record') ? null : await findFfmpeg()
 import {
   DRAFTING,
   LORE,
@@ -875,7 +890,6 @@ function edit() {
 if (process.argv.includes('--record')) {
   await record()
 } else {
-  if (!ffmpegPath) throw new Error('ffmpeg-static has no binary for this platform')
   fs.mkdirSync(OUT_DIR, { recursive: true })
   const editOnly = process.argv.includes('--edit-only')
   if (!editOnly && !process.argv.includes('--skip-build')) heavy('npx', ['electron-vite', 'build'])
