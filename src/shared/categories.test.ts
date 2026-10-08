@@ -16,7 +16,9 @@ import {
   fieldIdFromLabel,
   isCategoryField,
   isKnownCategory,
+  joinSheetText,
   mergeCategories,
+  refileFields,
   singularOf
 } from './categories'
 import { EntityFieldId, EntityKind } from './entities'
@@ -195,5 +197,23 @@ describe('words', () => {
     expect(countNoun(3, { noun: 'magic system' })).toBe('3 magic systems')
     expect(countNoun(2, { noun: 'history' })).toBe('2 histories')
     expect(countNoun(2, { noun: 'church' })).toBe('2 churches')
+  })
+})
+
+describe('joinSheetText and refileFields (F-9.10)', () => {
+  it('joins two texts once, a blank line apart', () => {
+    expect(joinSheetText('', 'b')).toBe('b')
+    expect(joinSheetText('a', '  ')).toBe('a')
+    expect(joinSheetText('Grey eyes. Tall.', 'grey  eyes.')).toBe('Grey eyes. Tall.')
+    expect(joinSheetText('a', 'b')).toBe('a\n\nb')
+  })
+
+  it('keeps the fields the new template has and moves the rest into Notes', () => {
+    const character = categoryOf('character')
+    const setting = categoryOf('setting')
+    expect(
+      refileFields(character, setting, { age: '40', notes: 'Old.', description: 'x' })
+    ).toEqual({ description: 'x', notes: 'Old.\n\nAge: 40' })
+    expect(refileFields(character, setting, { age: '  ' })).toEqual({})
   })
 })

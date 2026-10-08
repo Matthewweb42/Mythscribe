@@ -465,6 +465,17 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'characters) with the opening of each Project note (up to 3,000 characters).',
     minDial: 1
   },
+  organise: {
+    label: 'Organise',
+    sends:
+      'Only when you ask to organise (the Organise button, its offer, or the chat): your ' +
+      'instruction, the names, categories, aliases, and usage of your tags, your story-bible ' +
+      'sheets with their field values (up to 300 characters each), page text (up to 400), and ' +
+      'observed facts, the notes of your documents (up to 800 characters each), and the ' +
+      'outline of titles and word counts, in chunks of about 14,000 characters. Never the ' +
+      'manuscript text.',
+    minDial: 1
+  },
   authorMode: {
     label: 'Author mode',
     sends: "The active scene's text, referenced notes, the scene brief, and your instruction.",

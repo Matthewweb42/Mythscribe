@@ -88,6 +88,8 @@ import { CategoryCreateDialog } from '@renderer/features/entities/CategoryCreate
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { EntityImportDialog } from '@renderer/features/entities/EntityImportDialog'
 import { ContextUploadDialog } from '@renderer/features/library/ContextUploadDialog'
+import { OrganiseDialog } from '@renderer/features/organise/OrganiseDialog'
+import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { DropOverlay } from '@renderer/features/library/DropOverlay'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
@@ -288,6 +290,7 @@ export function App(): React.JSX.Element {
       // F-12.2: a draft under review belongs to the project it would be written into.
       useImportStore.getState().cancel()
       useTagStore.getState().clear()
+      useOrganiseStore.getState().clear()
       useEntityStore.getState().clear()
       // F-9.11: the project's categories go with its sheets.
       useCategoryStore.getState().clear()
@@ -995,6 +998,7 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <EntityImportDialog />
       {/* F-9.8: the context library's estimate, progress, and review, open while it sorts. */}
       <ContextUploadDialog />
+      <OrganiseDialog />
       {/* F-9.8: files dropped anywhere on the window go to the Library. */}
       <DropOverlay />
       {/* F-10.1: the project search, open while the search store says so. */}

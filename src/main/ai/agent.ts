@@ -14,6 +14,7 @@ import {
   type AgentStep
 } from '@shared/agent'
 import { findQuote } from '@shared/critique'
+import { ORGANISE_INSTRUCTION_MAX, OrganiseScope, type OrganiseRequest } from '@shared/organise'
 import {
   QUERY_QUOTE_MAX,
   stripDanglingMarkers,
@@ -43,11 +44,8 @@ import { assertFeatureAllowed } from './dial'
 import { cancelInflight, registerInflight, releaseInflight } from './inflight'
 import { renderAgentFocus, type AgentTranscriptStep } from './prompts/agent.v1'
 import type { BuildAgentPromptV2Input } from './prompts/agent.v2'
-import {
-  buildAgentPromptV3,
-  type BuildAgentPromptV3Input,
-  type BuiltAgentPromptV3
-} from './prompts/agent.v3'
+import type { BuildAgentPromptV3Input } from './prompts/agent.v3'
+import { buildAgentPromptV4, type BuiltAgentPromptV4 } from './prompts/agent.v4'
 import type { ChatTurn } from './prompts/chat.v1'
 import { AiCancelledError, type CompletionUsage } from './providers/types'
 import { runAiStream, sha256, type AiRequestDeps, type AiRequestResult } from './request'
@@ -76,6 +74,8 @@ export interface AgentResult {
   query: QueryTurn | null
   steps: AgentStep[]
   changes: AgentProposal[]
+  /** F-9.10 (agent.v4): the organise run the answer asks for, or null. */
+  organise: OrganiseRequest | null
   /** Citations whose quote the document does not hold, and edits that could not be offered. */
   dropped: number
   /** Summed over every step. */
@@ -118,7 +118,15 @@ export function agentRetryRequestId(requestId: string, n: number): string {
 /** One parsed reply: a tool call, or the answer with its raw citations and edits. */
 export type AgentReply =
   | { kind: 'tool'; tool: unknown; args: Record<string, unknown> }
-  | { kind: 'answer'; answer: string; found: boolean; citations: unknown[]; edits: unknown[] }
+  | {
+      kind: 'answer'
+      answer: string
+      found: boolean
+      citations: unknown[]
+      edits: unknown[]
+      /** F-9.10 (agent.v4): the raw organise request, or undefined. */
+      organise?: unknown
+    }
 
 /**
  * A reply that is not usable (2026-10-07): `cutOff` when the output cap ended it, `unreadable`
@@ -161,7 +169,8 @@ export function parseAgentReply(text: string): AgentReply {
     answer: typeof reply.answer === 'string' ? reply.answer.trim() : '',
     found: reply.found !== false,
     citations: Array.isArray(reply.citations) ? reply.citations : [],
-    edits: Array.isArray(reply.edits) ? reply.edits : []
+    edits: Array.isArray(reply.edits) ? reply.edits : [],
+    organise: reply.organise
   }
 }
 
@@ -253,7 +262,7 @@ const ESCAPES: Record<string, string> = { n: '\n', t: '\t', r: '', b: '', f: '',
  * allows at Ask and Auto). The open document goes in every step (title, synopsis, notes head,
  * stored summary, the caret window and the selection the renderer sends); everything else the
  * model reads only through the tools, one step at a time, each step shown live through `onStep`.
- * Every step is one strong-tier JSON request (`agent.v2`) through `runAiStream` (a ledger row
+ * Every step is one strong-tier JSON request (`agent.v4` since F-9.10) through `runAiStream` (a ledger row
  * each); the reply's `answer` text streams to `hooks.answer` as it arrives (2026-10-07). Before
  * a step goes, the oldest tool results are dropped until it fits the input budget, then the
  * oldest history. After `AGENT_MAX_STEPS` lookups, or once the run has spent
@@ -321,7 +330,7 @@ export async function runAgent(
   let promptVersion = ''
   /** Sends one step (or its retry), streaming the answer text, and adds it to the run's totals. */
   const send = async (
-    prompt: BuiltAgentPromptV3,
+    prompt: BuiltAgentPromptV4,
     requestId: string | null
   ): Promise<AiRequestResult> => {
     if (outer?.signal.aborted === true) throw new AiCancelledError('The request was stopped.')
@@ -392,6 +401,7 @@ export async function runAgent(
               id === null ? AGENT_CUT_OFF_MESSAGE : `${AGENT_CUT_OFF_MESSAGE} (Request ${id})`,
             query: null,
             changes: [],
+            organise: null,
             dropped: 0,
             steps,
             usage,
@@ -457,12 +467,12 @@ export function fitAgentPrompt<
   I extends BuildAgentPromptV2Input,
   T extends { messages: { content: string }[] }
 >(input: I, build: (input: I) => T): T
-export function fitAgentPrompt(input: BuildAgentPromptV3Input): BuiltAgentPromptV3
+export function fitAgentPrompt(input: BuildAgentPromptV3Input): BuiltAgentPromptV4
 export function fitAgentPrompt(
   input: BuildAgentPromptV3Input,
   build: (input: BuildAgentPromptV3Input) => {
     messages: { content: string }[]
-  } = buildAgentPromptV3
+  } = buildAgentPromptV4
 ): { messages: { content: string }[] } {
   const budget = inputBudget('agent')
   const estimate = (built: { messages: { content: string }[] }): number =>
@@ -487,6 +497,26 @@ interface SettledReply {
   found: boolean
   citations: unknown[]
   edits: unknown[]
+  organise?: unknown
+}
+
+/**
+ * The organise request an answer carries (F-9.10, agent.v4), read leniently: a scope that is not
+ * one of the four is dropped, an instruction is cut to its cap; anything that is not an object is
+ * no request.
+ */
+export function readOrganiseRequest(raw: unknown): OrganiseRequest | null {
+  if (raw === true) return { instruction: '', scope: [] }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const record = asRecord(raw)
+  const scope = Array.isArray(record.scope)
+    ? record.scope.filter((s): s is OrganiseScope => OrganiseScope.safeParse(s).success)
+    : []
+  const instruction =
+    typeof record.instruction === 'string'
+      ? record.instruction.trim().slice(0, ORGANISE_INSTRUCTION_MAX)
+      : ''
+  return { instruction, scope: [...new Set(scope)] }
 }
 
 /**
@@ -500,7 +530,7 @@ function finishAnswer(
   access: AgentAccess,
   reply: SettledReply,
   profile: VoiceProfile | null
-): Pick<AgentResult, 'answer' | 'query' | 'changes' | 'dropped'> {
+): Pick<AgentResult, 'answer' | 'query' | 'changes' | 'dropped' | 'organise'> {
   let dropped = 0
   const citations: QueryCitation[] = []
   const sheets: QuerySheetRef[] = []
@@ -565,5 +595,5 @@ function finishAnswer(
   } else {
     dropped += reply.edits.length
   }
-  return { answer, query, changes, dropped }
+  return { answer, query, changes, dropped, organise: readOrganiseRequest(reply.organise) }
 }

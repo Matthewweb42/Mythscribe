@@ -222,6 +222,20 @@ import {
   REVIEW_CHAT_PROMPT_V2_VERSION,
   type BuildReviewChatPromptV2Input
 } from '../prompts/reviewChat.v2'
+import {
+  buildOrganisePrompt,
+  organiseChunks,
+  organiseIndex,
+  type OrganiseListing
+} from '../prompts/organise.v1'
+import { buildAgentPromptV4 } from '../prompts/agent.v4'
+import {
+  ORGANISE_CHUNK_CHARS,
+  ORGANISE_INSTRUCTION_MAX,
+  ORGANISE_SCOPES,
+  type OrganiseOp,
+  type OrganiseScope
+} from '@shared/organise'
 import { BUILTIN_CATEGORIES, categoryFromInput, categoryOf } from '@shared/categories'
 import {
   CONTEXT_CHUNK_CHARS,
@@ -688,6 +702,11 @@ export interface EvalCase {
     | { kind: 'storyTime'; forbidden: string[] }
     /** Plan links (F-11.1d): the answer must parse to `{ links }` naming only labels that were sent. */
     | { kind: 'planLinks'; plans: number; scenes: number }
+    /**
+     * An organise request (F-9.10): the answer must parse through the feature's own parser with
+     * no operation dropped, and hold an operation of each kind in `expected`.
+     */
+    | { kind: 'organise'; expected: OrganiseOp['op'][] }
 }
 
 const general = builtinParams('general')
@@ -2640,6 +2659,203 @@ const MAXED_VOICE_NOTES = Array.from({ length: VOICE_NOTES_MAX }, (_, i) =>
   `${i + 1}. ${FIXTURE_PASSAGE.replace(/\s+/g, ' ')}`.slice(0, VOICE_NOTE_MAX_CHARS)
 )
 
+/** F-9.10: the fixture project as Organise lists it: Rynna under three names, a stray tag, notes. */
+const ORGANISE_LISTING: OrganiseListing = {
+  categories: [],
+  tags: [
+    {
+      ref: 't1',
+      name: 'rynna-falsire',
+      category: 'character',
+      parent: null,
+      aliases: [],
+      docs: 4,
+      mentions: 9,
+      sheet: 's1'
+    },
+    {
+      ref: 't2',
+      name: 'rynna',
+      category: 'custom',
+      parent: null,
+      aliases: [],
+      docs: 2,
+      mentions: 3,
+      sheet: null
+    },
+    {
+      ref: 't3',
+      name: 'high-crown-falsire',
+      category: 'character',
+      parent: null,
+      aliases: [],
+      docs: 1,
+      mentions: 1,
+      sheet: 's2'
+    },
+    {
+      ref: 't4',
+      name: 'mill',
+      category: 'setting',
+      parent: null,
+      aliases: [],
+      docs: 3,
+      mentions: 5,
+      sheet: 's3'
+    },
+    {
+      ref: 't5',
+      name: 'old-draft',
+      category: 'custom',
+      parent: null,
+      aliases: [],
+      docs: 0,
+      mentions: 0,
+      sheet: null
+    }
+  ],
+  sheets: [
+    {
+      ref: 's1',
+      kind: 'character',
+      name: 'Rynna Falsire',
+      aliases: [],
+      fields: [{ label: 'Age', value: '19' }],
+      empty: ['Appearance', 'Personality'],
+      page: '',
+      facts: ['appearance: grey eyes']
+    },
+    {
+      ref: 's2',
+      kind: 'character',
+      name: 'High Crown Falsire',
+      aliases: [],
+      fields: [{ label: 'Background', value: 'Crowned at the Ashfall.' }],
+      empty: ['Age'],
+      page: '',
+      facts: []
+    },
+    {
+      ref: 's3',
+      kind: 'setting',
+      name: 'The mill',
+      aliases: [],
+      fields: [],
+      empty: ['Description'],
+      page: 'Where Pell hid the ledger. Where Pell hid the ledger.',
+      facts: []
+    }
+  ],
+  notes: [
+    {
+      ref: 'n3',
+      title: 'Chapter 1 › The mill',
+      notes: 'Rynna has grey eyes. Pell hides the ledger. remember: mill wheel creaks'
+    }
+  ],
+  outline: [
+    { ref: 'n1', depth: 0, title: 'Manuscript', level: 'section', words: null },
+    { ref: 'n2', depth: 1, title: 'Chapter 1', level: 'chapter', words: null },
+    { ref: 'n3', depth: 2, title: 'The mill', level: 'scene', words: 1200 },
+    { ref: 'n4', depth: 2, title: 'Untitled', level: 'scene', words: 800 }
+  ],
+  findings: 'Found locally (check them): Likely duplicates: t1 + t2 + t3; s1 + s2. Unused tags: t5.'
+}
+
+/** Every listing at its cap: enough tags, sheets, notes, and outline to fill the index and every chunk. */
+function maxedOrganiseListing(): OrganiseListing {
+  const long = FIXTURE_PASSAGE.repeat(2)
+  return {
+    categories: [{ id: 'c-ships', name: 'Ships' }],
+    tags: Array.from({ length: 200 }, (_, i) => ({
+      ref: `t${i + 1}`,
+      name: `tag-number-${i + 1}-${'x'.repeat(30)}`,
+      category: 'custom',
+      parent: i > 0 ? 't1' : null,
+      aliases: ['Alias one', 'Alias two'],
+      docs: i,
+      mentions: i,
+      sheet: null
+    })),
+    sheets: Array.from({ length: 200 }, (_, i) => ({
+      ref: `s${i + 1}`,
+      kind: 'character',
+      name: `Sheet ${i + 1} ${'N'.repeat(40)}`,
+      aliases: ['Other name'],
+      fields: [
+        { label: 'Appearance', value: long },
+        { label: 'Background', value: long }
+      ],
+      empty: ['Age'],
+      page: long,
+      facts: Array.from({ length: 8 }, () => long.slice(0, 200))
+    })),
+    notes: Array.from({ length: 100 }, (_, i) => ({
+      ref: `n${i + 1}`,
+      title: `Scene ${i + 1}`,
+      notes: long
+    })),
+    outline: Array.from({ length: 300 }, (_, i) => ({
+      ref: `n${i + 1}`,
+      depth: 2,
+      title: `Scene ${i + 1}`,
+      level: 'scene',
+      words: 2_000
+    })),
+    findings: `Found locally (check them): Likely duplicates: ${Array.from({ length: 30 }, (_, i) => `t${i + 1} + t${i + 2}`).join('; ')}.`
+  }
+}
+
+/** One organise request (F-9.10): part `part` of the run the listing and scopes make. */
+function organiseCase(
+  name: string,
+  note: string,
+  listing: OrganiseListing,
+  scopes: readonly OrganiseScope[],
+  instruction: string,
+  expected: OrganiseOp['op'][],
+  options: { part?: number; retry?: boolean } = {}
+): EvalCase {
+  const chunks = organiseChunks(listing, scopes)
+  const part = Math.min(options.part ?? 1, chunks.length)
+  const built = buildOrganisePrompt({
+    index: organiseIndex(listing),
+    chunk: chunks[part - 1] ?? '',
+    part,
+    parts: chunks.length,
+    scopes,
+    instruction,
+    findings: listing.findings,
+    retry: options.retry
+  })
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'organise', expected }
+  }
+}
+
+/** F-9.10: an agent.v4 step, fitted as the feature fits it. */
+function agentCaseV4(
+  name: string,
+  note: string,
+  input: BuildAgentPromptV3Input,
+  scoring: EvalCase['scoring']
+): EvalCase {
+  const built = fitAgentPrompt(input, buildAgentPromptV4)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring
+  }
+}
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -3992,5 +4208,105 @@ export const EVAL_CASES: EvalCase[] = [
       retry: true
     },
     []
+  ),
+  // organise.v1 (F-9.10).
+  organiseCase(
+    'tags',
+    'merge duplicate tags: Rynna under three tags, with the local findings',
+    ORGANISE_LISTING,
+    ['tags'],
+    'Clean up the tags.',
+    ['mergeTags']
+  ),
+  organiseCase(
+    'everything',
+    'organise everything with no instruction: tags, sheets, notes, and the outline in one chunk',
+    ORGANISE_LISTING,
+    [...ORGANISE_SCOPES],
+    '',
+    ['mergeTags', 'mergeSheets']
+  ),
+  organiseCase(
+    'maxed',
+    `every cap: the index at its cap, a full chunk of ${ORGANISE_CHUNK_CHARS.toLocaleString('en-US')} characters, the longest instruction`,
+    maxedOrganiseListing(),
+    [...ORGANISE_SCOPES],
+    FIXTURE_PASSAGE.repeat(4).slice(0, ORGANISE_INSTRUCTION_MAX),
+    []
+  ),
+  organiseCase(
+    'retry',
+    'the one retry of a later part at the larger cap, every cap as in maxed',
+    maxedOrganiseListing(),
+    [...ORGANISE_SCOPES],
+    FIXTURE_PASSAGE.repeat(4).slice(0, ORGANISE_INSTRUCTION_MAX),
+    [],
+    { part: 2, retry: true }
+  ),
+  // agent.v4 (F-9.10): version 3's shapes plus the organise rule, and the organise request.
+  agentCaseV4(
+    'fresh',
+    'a read run with no document open and no history: the story map with now at the latest written scene',
+    {
+      access: 'read',
+      voice: null,
+      map: renderStoryMap(
+        STORY_MAP_ITEMS,
+        { nowId: 's3', basis: 'latest' },
+        STORY_MAP_TOKEN_BUDGET
+      ),
+      focus: null,
+      history: [],
+      message: 'Who owes the mill money?',
+      steps: [],
+      final: false
+    },
+    { kind: 'agent', expected: 'tool' }
+  ),
+  agentCaseV4(
+    'organise',
+    'the author asks the chat to organise everything: an answer carrying the organise request',
+    {
+      access: 'write',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: [],
+      message: 'Organise everything and make it all streamlined.',
+      steps: [],
+      final: false
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV4(
+    'maxed',
+    'the last step of a write run as the fit leaves it: the story map at its budget, every focus part at its cap, six lookups of full results, and the final turn',
+    {
+      access: 'write',
+      voice: null,
+      map: MAXED_STORY_MAP,
+      focus: AGENT_MAXED_FOCUS,
+      history: CHAT_HISTORY,
+      message: FIXTURE_PASSAGE.repeat(3).slice(0, 2_000),
+      steps: Array.from({ length: AGENT_MAX_STEPS }, () => AGENT_MAXED_STEP),
+      final: true
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV4(
+    'retry',
+    'the one retry of a write step whose reply was cut off: the organise case plus the retry turn, at the larger cap',
+    {
+      access: 'write',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: CHAT_HISTORY,
+      message: 'Organise everything and make it all streamlined.',
+      steps: [AGENT_STEP],
+      final: false,
+      retry: true
+    },
+    { kind: 'agent', expected: 'answer' }
   )
 ]

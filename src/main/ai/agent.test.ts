@@ -26,6 +26,7 @@ import {
   fitAgentPrompt,
   parseAgentReply,
   readAgentReply,
+  readOrganiseRequest,
   runAgent,
   type AgentInput
 } from './agent'
@@ -42,6 +43,7 @@ import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import { AGENT_FINAL_TURN, AGENT_RULES } from './prompts/agent.v1'
 import { AGENT_EDIT_RULES_V2, AGENT_RETRY_TURN } from './prompts/agent.v2'
 import { AGENT_TIME_RULES } from './prompts/agent.v3'
+import { AGENT_ORGANISE_RULES } from './prompts/agent.v4'
 import { STORY_MAP_HEADING } from '@shared/storyTime'
 import {
   AiCancelledError,
@@ -200,8 +202,10 @@ describe('runAgent (F-5.22)', () => {
     expect(system).not.toContain(AGENT_EDIT_RULES_V2)
     expect(system).toContain(`Open document ${ref(scenes[0])}:`)
     // F-5.23 (agent.v3): the story-time rule, then the story map with now on the open scene,
-    // before the open document.
-    expect(result.promptVersion).toBe('agent.v3')
+    // before the open document. F-9.10: version 4 adds the organise rule.
+    expect(result.promptVersion).toBe('agent.v4')
+    expect(system).toContain(AGENT_ORGANISE_RULES)
+    expect(result.organise).toBeNull()
     expect(system).toContain(AGENT_TIME_RULES)
     expect(system).toContain(STORY_MAP_HEADING)
     expect(system).toMatch(new RegExp(`${ref(scenes[0])} [^\\n]*\\[drafted\\] ▶ NOW`))
@@ -554,6 +558,38 @@ describe('readAgentReply', () => {
       answer: 'She hid it under the elm.'
     })
     expect(readAgentReply('{"tool":"tags"}', 'stop')).toMatchObject({ kind: 'tool' })
+  })
+})
+
+describe('the organise request (F-9.10, agent.v4)', () => {
+  it('reads the scopes it knows and the instruction, leniently', () => {
+    expect(
+      readOrganiseRequest({ scope: ['tags', 'planets', 'tags'], instruction: ' Tidy. ' })
+    ).toEqual({
+      scope: ['tags'],
+      instruction: 'Tidy.'
+    })
+    expect(readOrganiseRequest(true)).toEqual({ instruction: '', scope: [] })
+    expect(readOrganiseRequest({})).toEqual({ instruction: '', scope: [] })
+    expect(readOrganiseRequest(undefined)).toBeNull()
+    expect(readOrganiseRequest('organise')).toBeNull()
+    expect(parseAgentReply('{"answer":"I will.","organise":{"scope":[]}}')).toMatchObject({
+      kind: 'answer',
+      organise: { scope: [] }
+    })
+  })
+
+  it('comes back on the answer of a run', async () => {
+    replies({
+      answer: 'I will plan a tidier story bible.',
+      found: true,
+      organise: { scope: ['sheets'], instruction: 'Merge the duplicate sheets.' }
+    })
+    const result = await run()
+    expect(result.organise).toEqual({
+      scope: ['sheets'],
+      instruction: 'Merge the duplicate sheets.'
+    })
   })
 })
 

@@ -21,6 +21,7 @@ import {
   matchesQuery,
   type EntityView
 } from './entityView'
+import { OrganiseBar } from '@renderer/features/organise/OrganiseBar'
 
 const VIEW_ICON: Record<EntityView, typeof List> = { list: List, cards: LayoutGrid }
 
@@ -111,6 +112,8 @@ export function EntityTab({ kind }: { kind: EntityKind }): React.JSX.Element {
 
   return (
     <>
+      {/* F-9.10: Organise, and its quiet offer when the local pass finds duplicates. */}
+      <OrganiseBar />
       <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-2 pt-2">
         <input
           type="search"

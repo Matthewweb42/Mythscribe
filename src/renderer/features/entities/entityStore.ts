@@ -49,6 +49,11 @@ interface EntityState {
   /** Deletes an entity and drops it from the list (and from the selection). */
   remove: (id: string) => Promise<void>
   /**
+   * F-9.10: merges sheets into `targetId` (`entity:merge`): the sources leave the store, the
+   * target takes the answer, and a tag merge inside it reaches the tag bank.
+   */
+  mergeSheets: (targetId: string, sourceIds: string[]) => Promise<Entity>
+  /**
    * Opens the OS image dialog and makes the chosen file the entity's image (F-9.3), merging the
    * returned row; resolves with null when the dialog was cancelled, leaving the entity as it was.
    */
@@ -197,6 +202,24 @@ export const useEntityStore = create<EntityState>((set, get) => ({
       ids: get().ids.filter((other) => other !== id),
       selectedId: get().selectedId === id ? null : get().selectedId
     })
+  },
+
+  async mergeSheets(targetId, sourceIds) {
+    const mine = generation
+    const result = await ipc().invoke('entity:merge', { targetId, sourceIds })
+    if (mine === generation) {
+      const gone = new Set(result.removedIds)
+      const byId = { ...get().byId, [result.entity.id]: result.entity }
+      for (const id of gone) delete byId[id]
+      const selectedId = get().selectedId
+      set({
+        byId,
+        ids: orderedIds(byId),
+        selectedId: selectedId !== null && gone.has(selectedId) ? result.entity.id : selectedId
+      })
+      if (result.tags !== null) useTagStore.getState().applyMerge(result.tags)
+    }
+    return result.entity
   },
 
   async setImage(id) {

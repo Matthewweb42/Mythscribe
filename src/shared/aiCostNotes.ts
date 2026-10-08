@@ -190,6 +190,14 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     ideas:
       'Skip when no planned beat is open; match locally by title/summary words first and ask the AI only for ambiguous ones.'
   },
+  organise: {
+    trigger: 'on request',
+    when: 'Organise (button, the quiet offer, or the chat): one request per chunk of the tags, sheets, notes, and outline listing.',
+    callsPerUse: 3,
+    typicalOutTokens: 1200,
+    ideas:
+      'Send only the local findings for a quick tidy; skip sections the instruction does not name (already); fast tier for tag-only runs.'
+  },
   reviewChat: {
     trigger: 'on request',
     when: 'A message on the upload review screen that changes the pending plan.',

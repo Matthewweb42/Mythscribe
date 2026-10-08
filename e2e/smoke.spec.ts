@@ -368,6 +368,35 @@ function reviewChatAnswer(messages: { role: string; content: string }[]): string
     ]
   })
 }
+/**
+ * F-9.10: the opening of the organise prompt's system turn (`ORGANISE_RULES` in
+ * `src/main/ai/prompts/organise.v1.ts`, repeated here for the same reason). The answer reads the
+ * refs from the index: the stray tag #reed merges into #tomas-reed (while it exists), and The
+ * Landing's atmosphere is filled.
+ */
+const ORGANISE_SENTINEL = "You organise a novelist's project notes inside a writing app."
+const ORGANISE_ATMOSPHERE = 'Tar and river fog.'
+function organiseAnswer(messages: { role: string; content: string }[]): string {
+  const index = (messages[1]?.content ?? '').split('\n')
+  const ref = (pattern: RegExp): string =>
+    index.find((line) => pattern.test(line))?.split(' ')[0] ?? ''
+  const tomasReed = ref(/^t\d+ #tomas-reed · /)
+  const stray = ref(/^t\d+ #reed · /)
+  const landing = ref(/^s\d+ setting · The Landing/)
+  const ops: object[] = []
+  if (stray !== '' && tomasReed !== '') {
+    ops.push({ op: 'mergeTags', keep: tomasReed, merge: [stray], why: 'one person' })
+  }
+  if (landing !== '') {
+    ops.push({
+      op: 'sheet',
+      sheet: landing,
+      set: { Atmosphere: ORGANISE_ATMOSPHERE },
+      why: 'notes'
+    })
+  }
+  return JSON.stringify({ reply: 'One Tomas, and the Landing filled in.', ops })
+}
 const BETA_READER_NOTE = 'I expect the ridge to matter: she keeps looking at it.'
 const BETA_READER_ANSWER = JSON.stringify({
   items: [
@@ -694,6 +723,10 @@ function startFakeOpenAi(): Promise<string> {
           const reviewChat = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(REVIEW_CHAT_SENTINEL)
           )
+          // F-9.10: an organise request comes back as a plan over the listed refs.
+          const organise = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(ORGANISE_SENTINEL)
+          )
           // F-5.19: the router picks editor's notes for the routed step's message, else chat.
           const route = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(ROUTE_SENTINEL)
@@ -779,44 +812,46 @@ function startFakeOpenAi(): Promise<string> {
                           ? contextImportAnswer(request.messages)
                           : reviewChat
                             ? reviewChatAnswer(request.messages)
-                            : chatAgent
-                              ? chatAgentReply(request.messages)
-                              : route
-                                ? JSON.stringify({
-                                    action: (request.messages.at(-1)?.content ?? '').includes(
-                                      ROUTE_CRITIQUE_MESSAGE
-                                    )
-                                      ? 'critique'
-                                      : 'chat',
-                                    instruction: null
-                                  })
-                                : synopsis
-                                  ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
-                                  : notesSuggest
-                                    ? JSON.stringify({ points: SUGGESTED_POINTS })
-                                    : whatNext
-                                      ? WHAT_NEXT_ANSWER
-                                      : editPass
-                                        ? EDIT_PASS_ANSWER
-                                        : proofread
-                                          ? PROOFREAD_ANSWER
-                                          : continuity
-                                            ? continuityAnswer(request.messages)
-                                            : importStructure
-                                              ? IMPORT_STRUCTURE_ANSWER
-                                              : critique
-                                                ? CRITIQUE_ANSWER
-                                                : betaReader
-                                                  ? BETA_READER_ANSWER
-                                                  : query
-                                                    ? QUERY_ANSWER
-                                                    : brief
-                                                      ? BRIEF_ANSWER
-                                                      : summary
-                                                        ? SUMMARY_ANSWER
-                                                        : regen
-                                                          ? '{"tags":["antagonist","protagonist"]}'
-                                                          : '{"tags":["dark-forest","protagonist"]}'
+                            : organise
+                              ? organiseAnswer(request.messages)
+                              : chatAgent
+                                ? chatAgentReply(request.messages)
+                                : route
+                                  ? JSON.stringify({
+                                      action: (request.messages.at(-1)?.content ?? '').includes(
+                                        ROUTE_CRITIQUE_MESSAGE
+                                      )
+                                        ? 'critique'
+                                        : 'chat',
+                                      instruction: null
+                                    })
+                                  : synopsis
+                                    ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
+                                    : notesSuggest
+                                      ? JSON.stringify({ points: SUGGESTED_POINTS })
+                                      : whatNext
+                                        ? WHAT_NEXT_ANSWER
+                                        : editPass
+                                          ? EDIT_PASS_ANSWER
+                                          : proofread
+                                            ? PROOFREAD_ANSWER
+                                            : continuity
+                                              ? continuityAnswer(request.messages)
+                                              : importStructure
+                                                ? IMPORT_STRUCTURE_ANSWER
+                                                : critique
+                                                  ? CRITIQUE_ANSWER
+                                                  : betaReader
+                                                    ? BETA_READER_ANSWER
+                                                    : query
+                                                      ? QUERY_ANSWER
+                                                      : brief
+                                                        ? BRIEF_ANSWER
+                                                        : summary
+                                                          ? SUMMARY_ANSWER
+                                                          : regen
+                                                            ? '{"tags":["antagonist","protagonist"]}'
+                                                            : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -6198,6 +6233,83 @@ test('create, close, reopen a project on disk', async () => {
       name: /^The Weave/
     })
   ).toBeVisible()
+  // F-9.10: Organise. A stray #reed tag beside #tomas-reed is what an upload leaves behind; the
+  // local pass finds the look-alike and the Tags section offers to organise, quietly. Opening the
+  // offer asks the AI for a plan (the fake merges the tags and fills The Landing's atmosphere).
+  // In Ask every change waits with a checkbox; Apply lands both through the stores, and Undo
+  // takes the sheet change back. In Auto the change that can be undone lands at once and "Undo
+  // the whole reorganisation" takes it back. No scene text changes.
+  const organiseBodies = (): number =>
+    openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(ORGANISE_SENTINEL))
+      .length
+  const sheetField = async (name: string, field: string): Promise<string | undefined> =>
+    page.evaluate(
+      async ({ name, field }) => {
+        const listed = (await window.mythscribe.invoke('entity:list', undefined)) as IpcResult<
+          Entity[]
+        >
+        if (!listed.ok) throw new Error('entity:list failed')
+        return listed.data.find((entity) => entity.name === name)?.fields[field]
+      },
+      { name, field }
+    )
+  const sceneTextBeforeOrganise = await documentText(imported[3]?.id ?? '')
+  const strayTag = await page.evaluate(() =>
+    window.mythscribe.invoke('tag:create', { name: 'reed', category: 'custom' })
+  )
+  if (!strayTag.ok) throw new Error(`tag:create failed: ${strayTag.error.message}`)
+  expect((await aiSettings()).chatMode).toBe('ask')
+  await showSection('Tags')
+  const tagsSection = page.getByRole('region', { name: 'Tags section', exact: true })
+  const organiseOffer = tagsSection.getByTestId('organise-offer')
+  await expect(organiseOffer).toContainText('possible duplicate', { timeout: 10_000 })
+  expect(organiseBodies()).toBe(0)
+  await organiseOffer.getByRole('button', { name: 'Review' }).click()
+  const organiseDialog = page.getByTestId('organise-dialog')
+  const organiseChanges = organiseDialog.getByTestId('organise-change')
+  await expect(organiseChanges).toHaveCount(2, { timeout: 15_000 })
+  expect(organiseBodies()).toBe(1)
+  await expect(organiseDialog.getByTestId('organise-reply')).toHaveText(
+    'One Tomas, and the Landing filled in.'
+  )
+  await expect(organiseChanges.first()).toContainText('Merge tags “#reed” into #tomas-reed')
+  await expect(organiseChanges.nth(1)).toContainText('Sheet “The Landing”: 1 field')
+  await expect(organiseChanges.nth(1).locator('ins')).toHaveText(ORGANISE_ATMOSPHERE)
+  await expect(organiseDialog.getByRole('checkbox')).toHaveCount(2)
+  await organiseDialog.getByTestId('organise-apply').click()
+  await expect(organiseChanges.first()).toHaveAttribute('data-status', 'applied')
+  await expect(organiseChanges.nth(1)).toHaveAttribute('data-status', 'applied')
+  const afterOrganise = await page.evaluate(async () => {
+    const tags = (await window.mythscribe.invoke('tag:list', undefined)) as IpcResult<Tag[]>
+    if (!tags.ok) throw new Error('tag:list failed')
+    return tags.data
+  })
+  expect(afterOrganise.map((tag) => tag.name)).not.toContain('reed')
+  expect(afterOrganise.find((tag) => tag.name === 'tomas-reed')?.aliases).toContain('Reed')
+  expect(await sheetField('The Landing', 'atmosphere')).toBe(ORGANISE_ATMOSPHERE)
+  await organiseChanges
+    .nth(1)
+    .getByRole('button', { name: /^Undo: / })
+    .click()
+  await expect(organiseChanges.nth(1)).toHaveAttribute('data-status', 'undone')
+  await expect.poll(() => sheetField('The Landing', 'atmosphere')).toBeUndefined()
+  await organiseDialog.getByRole('button', { name: 'Done' }).click()
+  await expect(organiseDialog).toHaveCount(0)
+  // Auto: the button asks again; the sheet change lands at once, and one Undo takes it all back.
+  await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
+  await expect.poll(async () => (await aiSettings()).chatMode).toBe('auto')
+  await tagsSection.getByTestId('organise-button').click()
+  await expect(organiseChanges).toHaveCount(1, { timeout: 15_000 })
+  await expect(organiseChanges.first()).toHaveAttribute('data-status', 'applied')
+  expect(await sheetField('The Landing', 'atmosphere')).toBe(ORGANISE_ATMOSPHERE)
+  await organiseDialog.getByTestId('organise-undo-all').click()
+  await expect(organiseChanges.first()).toHaveAttribute('data-status', 'undone')
+  await expect.poll(() => sheetField('The Landing', 'atmosphere')).toBeUndefined()
+  await organiseDialog.getByRole('button', { name: 'Done' }).click()
+  await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
+  await expect.poll(async () => (await aiSettings()).chatMode).toBe('ask')
+  expect(await documentText(imported[3]?.id ?? '')).toBe(sceneTextBeforeOrganise)
+  expect((await usageSummary()).byFeature.find((f) => f.feature === 'organise')?.requests).toBe(2)
   await showSection('Manuscript')
 
   // Back to Off and no key, as before this step.

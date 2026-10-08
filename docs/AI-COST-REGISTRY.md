@@ -36,10 +36,11 @@ git history of this file is the log of each feature's cost over time (author req
 | `notesSuggest` | Notes suggestions | on request | notesSuggest.v2 | fast | 961 / 4798 | 300 / 600 | $0.000413 · $0.000912 | $0.000495 | $0.00207 | 1 | $0.000413 |
 | `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000356 · $0.000568 | $0.000427 | $0.00202 | 1 | $0.000356 |
 | `editPass` | Edit passes | on request | editPass.v1 | strong | 620 / 5161 | 1500 / 4000 | $0.000760 · $0.00276 | $0.000912 | $0.0240 | 60 | $0.0456 |
-| `agent` | Assistant lookups and edits | every chat message | agent.v3 | strong | 1530 / 11085 | 400 / 3000 | $0.000489 · $0.00359 | $0.000587 | $0.00983 | 3 | $0.00147 |
+| `agent` | Assistant lookups and edits | every chat message | agent.v4 | strong | 1606 / 11199 | 400 / 3000 | $0.000505 · $0.00361 | $0.000606 | $0.0100 | 3 | $0.00152 |
 | `contextImport` | Context library sorting | on request | contextImport.v2 | strong | 884 / 3490 | 1500 / 6000 | $0.000816 · $0.00325 | $0.000979 | $0.0247 | 10 | $0.00816 |
 | `reviewChat` | Upload review chat | on request | reviewChat.v2 | strong | 676 / 5618 | 300 / 3000 | $0.000268 · $0.00244 | $0.000322 | $0.00619 | 1 | $0.000268 |
 | `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000285 · $0.000690 | $0.000341 | $0.00299 | 1 | $0.000285 |
+| `organise` | Organise | on request | organise.v1 | strong | 3491 / 6060 | 1200 / 5000 | $0.00124 · $0.00337 | $0.00148 | $0.0267 | 3 | $0.00371 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -162,3 +163,8 @@ git history of this file is the log of each feature's cost over time (author req
 
 - **When:** About 20 s after a summary run (and from Find links): links planned scenes and template beats to the written scene that fulfils them.
 - **Ideas:** Skip when no planned beat is open; match locally by title/summary words first and ask the AI only for ambiguous ones.
+
+### `organise` — Organise
+
+- **When:** Organise (button, the quiet offer, or the chat): one request per chunk of the tags, sheets, notes, and outline listing.
+- **Ideas:** Send only the local findings for a quick tidy; skip sections the instruction does not name (already); fast tier for tag-only runs.

@@ -165,7 +165,7 @@ export function notePoints(text: string): string[] {
  * Rewrites a node's notes from what is stored (the author's unsaved notes are saved first, and
  * a loaded record is read again so its editor shows the result). Answers what was stored before.
  */
-async function rewriteNotes(
+export async function rewriteNotes(
   nodeId: string,
   change: (stored: TiptapNodeT) => TiptapNodeT
 ): Promise<TiptapNodeT> {

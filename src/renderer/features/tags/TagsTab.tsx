@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { CATEGORY_FILTERS, filterLabel, type CategoryFilter } from './categoryFilter'
+import { OrganiseBar } from '@renderer/features/organise/OrganiseBar'
 import { TagBankActions } from './TagBankActions'
 import { TagBulkBar } from './TagBulkBar'
 import { TagDetail } from './TagDetail'
@@ -186,6 +187,7 @@ export function TagsTab(): React.JSX.Element {
           <>
             {/* Select mode needs the height for its rows and bar, not the template row. */}
             {selecting ? null : <TemplateLoader bankEmpty={total === 0} />}
+            {selecting ? null : <OrganiseBar />}
             <TagBankActions
               selecting={selecting}
               empty={total === 0}

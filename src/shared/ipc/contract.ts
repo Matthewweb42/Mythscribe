@@ -67,6 +67,13 @@ import {
 } from '../contextLibrary'
 import { ContinuityFinding } from '../continuity'
 import { REVIEW_CHAT_MESSAGE_MAX, ReviewChatResult, ReviewChatTurn } from '../reviewChat'
+import {
+  ORGANISE_INSTRUCTION_MAX,
+  OrganiseCandidates,
+  OrganisePlanResult,
+  OrganiseRequest,
+  OrganiseScope
+} from '../organise'
 import { CritiqueNotes } from '../critique'
 import {
   DiagnosticsState,
@@ -444,6 +451,11 @@ export const AiAgentResult = z.discriminatedUnion('ok', [
     query: QueryTurn.nullable(),
     steps: z.array(AgentStep),
     changes: z.array(z.object({ edit: AgentEdit, violation: z.string().nullable() })),
+    /**
+     * F-9.10 (agent.v4): the author asked to organise; the renderer starts an Organise run with
+     * this request, which follows the chat mode. Null for a turn that did not ask.
+     */
+    organise: OrganiseRequest.nullable().default(null),
     dropped: z.number().int().nonnegative(),
     usage: AiUsage,
     costUsd: z.number(),
@@ -1473,7 +1485,7 @@ export const contract = {
   /**
    * Patches the given parts of an entity (F-9.1); omitted ones keep their value. `fields` is
    * merged over what is stored and an empty value removes that field, so a patch never has to
-   * carry the whole template. `kind` is immutable (delete and recreate instead) and `image` has
+   * carry the whole template. `kind` moves the sheet into another category (F-9.10) and `image` has
    * its own channels (F-9.3). Same refusals as `entity:create`, plus NOT_FOUND.
    *
    * F-9.4: a rename carries the tag with it, but only while the tag still mirrors the entity —
@@ -1492,9 +1504,35 @@ export const contract = {
        * F-4.14: replaces the alias list; written to the linked tag when there is one (the tag
        * then changes too), else kept on the sheet. Same refusals as `tag:update`'s aliases.
        */
-      aliases: AliasList.optional()
+      aliases: AliasList.optional(),
+      /**
+       * F-9.10: moves the sheet into another category (Organise). A value of a field the new
+       * template lacks moves into its Notes as "Label: value"; the name must be free there
+       * (ALREADY_EXISTS); an unknown category is VALIDATION. `fields` are then the new template's.
+       */
+      kind: EntityKind.optional()
     }),
     output: Entity
+  },
+  /**
+   * F-9.10: merges sheets into one (Organise), in one transaction. Each source's field values
+   * fill the target's empty fields, or are added under the target's text when they differ (a
+   * field the target's category lacks goes into its Notes as "Label: value"); its page is added
+   * to the target's; its name and aliases become the target's aliases; its observed facts move to
+   * the target; its tag is merged into the target's (as `tag:merge` does; the target takes it
+   * when it has none); a picture moves when the target has none. The sources are then deleted.
+   * VALIDATION when the target is a source, NOT_FOUND for an unknown id. Answers the target, the
+   * deleted ids, and the tag merge when there was one.
+   */
+  'entity:merge': {
+    input: z.object({ targetId: z.string(), sourceIds: z.array(z.string()).min(1) }),
+    output: z.object({
+      entity: Entity,
+      removedIds: z.array(z.string()),
+      tags: z
+        .object({ target: Tag, removedIds: z.array(z.string()), aliases: TagAliases })
+        .nullable()
+    })
   },
   /**
    * Opens the OS file dialog for one image and makes it the entity's portrait or photograph
@@ -1563,6 +1601,28 @@ export const contract = {
    * (under the author's names for it), then the project's own categories, oldest first.
    */
   'category:list': { input: z.undefined(), output: z.array(StoryCategory) },
+  /**
+   * F-9.10, Organise's local pass (no AI): tags and sheets whose names or aliases look alike,
+   * tags nothing uses (no document, mention, sheet, or child), and empty sheets. Feeds the quiet
+   * offer after an upload is applied and as duplicates build up.
+   */
+  'organise:candidates': { input: z.undefined(), output: OrganiseCandidates },
+  /**
+   * F-9.10: the AI's organise plan for the tags, the story bible, the notes, and the binder
+   * (`scope`; none for all), following the author's instruction. Gated on `organise`; one request
+   * per chunk of the listing on the strong tier (each retried once when cut off), cancellable
+   * through `ai:cancel` with `requestId`. Nothing is written: the plan's changes come back with
+   * real ids and the values they replace, and the renderer applies the ones the author keeps
+   * through its stores. One proposal (F-14.5) for the run. Expected AI failures come back as data.
+   */
+  'organise:plan': {
+    input: z.object({
+      instruction: z.string().trim().max(ORGANISE_INSTRUCTION_MAX),
+      scope: z.array(OrganiseScope).max(4),
+      requestId: z.string()
+    }),
+    output: OrganisePlanResult
+  },
   /**
    * Adds a project category by hand (F-9.11): a name, the field labels of its template (Notes is
    * added at the end), optionally its singular and icon. ALREADY_EXISTS for a name another

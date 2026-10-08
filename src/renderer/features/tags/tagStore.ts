@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Tag, TagCreateInput, TagUpdateInput } from '@shared/ipc/contract'
+import type { Output, Tag, TagCreateInput, TagUpdateInput } from '@shared/ipc/contract'
 import { dropAliasesTo, type TagAliases } from '@shared/tagExchange'
 import type { TagTemplateId } from '@shared/tagTemplates'
 import { ipc } from '@renderer/lib/ipc'
@@ -41,6 +41,11 @@ interface TagState {
    * merged-away tags leave the list, and the aliases become what main now stores.
    */
   mergeInto: (targetId: string, sourceIds: string[]) => Promise<void>
+  /**
+   * F-9.10: a merge main already made (inside `entity:merge`): the sources leave the bank, the
+   * target and the merge aliases are taken as answered.
+   */
+  applyMerge: (result: Output<'tag:merge'>) => void
   /**
    * Imports a tag bank file (F-4.9) through main's open dialog and merges every created tag;
    * resolves with main's counts, or null when the author cancelled the dialog.
@@ -190,6 +195,10 @@ export const useTagStore = create<TagState>((set, get) => ({
     const mine = generation
     const result = await ipc().invoke('tag:merge', { targetId, sourceIds })
     if (mine !== generation) return
+    get().applyMerge(result)
+  },
+
+  applyMerge(result) {
     const { byId } = dropTags(get(), new Set(result.removedIds))
     byId[result.target.id] = result.target
     set({ byId, ids: orderedIds(byId), aliases: result.aliases })

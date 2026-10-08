@@ -116,6 +116,7 @@ function client(): IpcClient {
                 : null,
             steps: [],
             changes: [],
+            organise: null,
             dropped: 0,
             usage,
             costUsd: 0.001,

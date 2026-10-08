@@ -19,6 +19,7 @@ import { buildOpenAiProvider } from '../providers/openai'
 import { PROMPT_CATALOGUE, PROMPT_VERSIONS } from '../prompts/catalogue'
 import { parseEditChanges, parseEditNotes } from '../editPass'
 import { parseProofreadAnswer } from '../proofread'
+import { parseOrganiseAnswer } from '../organise'
 import { parseReviewChatAnswer } from '../reviewChat'
 import { parseRouteAnswer } from '../route'
 import { parseNotesSuggestAnswer, parseSynopsisAnswer } from '../sceneSuggest'
@@ -278,6 +279,19 @@ function scoreContextImport(expected: string[], answer: string): LiveResult['ver
  */
 function scoreReviewChat(expected: string[], answer: string): LiveResult['verdict'] {
   const parsed = parseReviewChatAnswer(answer)
+  if (parsed === null) return { kind: 'json', ok: false, problem: 'not { reply, ops }' }
+  if (parsed.dropped > 0) {
+    return { kind: 'json', ok: false, problem: `${parsed.dropped} operations did not parse` }
+  }
+  const missing = expected.filter((op) => !parsed.ops.some((o) => o.op === op))
+  return missing.length === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `missing: ${missing.join(', ')}` }
+}
+
+/** An organise answer (F-9.10) scores as a review chat answer does, through its own parser. */
+function scoreOrganise(expected: string[], answer: string): LiveResult['verdict'] {
+  const parsed = parseOrganiseAnswer(answer)
   if (parsed === null) return { kind: 'json', ok: false, problem: 'not { reply, ops }' }
   if (parsed.dropped > 0) {
     return { kind: 'json', ok: false, problem: `${parsed.dropped} operations did not parse` }
@@ -731,6 +745,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreContextImport(c.scoring.expected, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'organise') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreOrganise(c.scoring.expected, reply.text)
         })
         continue
       }

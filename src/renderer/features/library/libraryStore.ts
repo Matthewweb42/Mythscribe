@@ -20,6 +20,7 @@ import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
+import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -449,6 +450,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
         ]
         if (result.notes) parts.push('Project notes updated')
         toast.success(`Story bible: ${parts.join(', ')}.`)
+        // F-9.10: an upload is when duplicates arrive; the local pass looks, the offer may show.
+        void useOrganiseStore.getState().refreshCandidates()
       } catch (err) {
         if (mine === generation) {
           set((s) => (s.flow?.stage === 'review' ? { flow: { ...s.flow, busy: false } } : {}))

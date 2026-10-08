@@ -369,6 +369,49 @@ export function categoryFieldLabel(category: StoryCategory, id: string): string 
 }
 
 /**
+ * Two pieces of a sheet's text as one (F-9.10): either alone when the other is empty, the first
+ * when it already holds the second (compared without case and spacing), else both, a blank line
+ * apart.
+ */
+export function joinSheetText(
+  first: string | null | undefined,
+  second: string | null | undefined
+): string {
+  const a = (first ?? '').trim()
+  const b = (second ?? '').trim()
+  if (b === '') return a
+  if (a === '') return b
+  const flat = (text: string): string => text.replace(/\s+/g, ' ').toLowerCase()
+  return flat(a).includes(flat(b)) ? a : `${a}\n\n${b}`
+}
+
+/**
+ * A sheet's field values as they read in another category (F-9.10, a sheet moved by Organise):
+ * a value of a field the new template has stays under it; every other one moves into the new
+ * template's Notes as "Label: value" (the label as the old category names it), after what Notes
+ * held. A template without Notes (never expected) keeps the values as they were stored.
+ */
+export function refileFields(
+  from: StoryCategory,
+  to: StoryCategory,
+  fields: Readonly<Partial<Record<string, string>>>
+): Record<string, string> {
+  const kept: Record<string, string> = {}
+  const all: Record<string, string> = {}
+  const moved: string[] = []
+  for (const [id, raw] of Object.entries(fields)) {
+    const value = raw ?? ''
+    all[id] = value
+    if (isCategoryField(to, id)) kept[id] = value
+    else if (value.trim() !== '') moved.push(`${categoryFieldLabel(from, id)}: ${value.trim()}`)
+  }
+  if (moved.length === 0) return kept
+  if (!isCategoryField(to, 'notes')) return all
+  const notes = moved.reduce((text, line) => joinSheetText(text, line), kept.notes ?? '')
+  return { ...kept, notes }
+}
+
+/**
  * The order sheets and categories are listed in: the library's order, then project categories
  * by id. `entity:list` sorts by it, and so does the renderer's store.
  */

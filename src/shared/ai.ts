@@ -332,7 +332,9 @@ export const AI_FEATURE_IDS = [
   // F-9.9: the review chat, turning the author's instruction into changes to a pending upload review.
   'reviewChat',
   // F-11.1d: plan links, tying the author's planned scenes and beats to the written scene that fulfils them.
-  'planLinks'
+  'planLinks',
+  // F-9.10: organise, a plan of changes to the tags, the story bible, the notes, and the binder.
+  'organise'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -396,7 +398,11 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // that was cut off (the agent's pattern).
   reviewChat: 3_000,
   // F-11.1d: up to 30 links as JSON, each two labels and a one-sentence reason.
-  planLinks: 400
+  planLinks: 400,
+  // F-9.10: up to 40 operations on tags, sheets, notes, and the binder as JSON, a sheet's tidied
+  // text included. A request asks `ORGANISE_MAX_TOKENS` (2,500); the cap is twice that for the
+  // one retry of an answer that was cut off (the agent's pattern).
+  organise: 5_000
 }
 
 /**
@@ -463,7 +469,11 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   reviewChat: 7_000,
   // F-11.1d: the rules, up to 30 plans and 40 written scenes, each a title cut to 80 characters
   // and a synopsis, beat hint, or summary cut to 240.
-  planLinks: 7_000
+  planLinks: 7_000,
+  // F-9.10: per chunk: the rules, the instruction (≤ 2,000 characters), the name index of every
+  // tag and sheet (≤ 6,000 characters), the local findings, and one chunk of the listing
+  // (≤ 14,000 characters of tags, sheets with their fields and observed facts, notes, or outline).
+  organise: 8_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

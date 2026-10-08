@@ -59,6 +59,7 @@ import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
+import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { applyAgentEdit, openEditor } from './agentApply'
 import { removeInsertedProse } from '@renderer/features/editor/agentEditing'
 import {
@@ -1101,6 +1102,9 @@ async function runAgentTurn(
     },
     result.cached
   )
+  // F-9.10 (agent.v4): the author asked to organise; the plan screen takes it from here, in the
+  // chat mode the turn was sent in.
+  if (result.organise !== null) void useOrganiseStore.getState().start(result.organise)
   if (messageId === null) return
   if (autoApply) {
     const store = useAssistantStore.getState()

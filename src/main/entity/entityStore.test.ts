@@ -18,6 +18,7 @@ import {
   getEntity,
   linkEntityTag,
   listEntities,
+  mergeEntities,
   setEntityImage,
   updateEntity,
   type EntityDb
@@ -540,5 +541,68 @@ describe('aliases (F-4.14)', () => {
     expect(write.entity.aliases).toEqual(['Rynna'])
     expect(write.tagChange?.aliased).toBe(true)
     expect(addEntityAliases(db, rynna.id, ['Rynna']).tagChange).toBeNull()
+  })
+})
+
+describe('moving a sheet into another category (F-9.10)', () => {
+  it('refiles the values the new template lacks into Notes and checks the name there', () => {
+    const kael = create({
+      kind: 'character',
+      name: 'Kael',
+      fields: { age: '40', appearance: 'Grey stone walls', notes: 'Old.' }
+    })
+    const moved = update(kael.id, { kind: 'setting' })
+    expect(moved.kind).toBe('setting')
+    expect(moved.fields.notes).toBe('Old.\n\nAge: 40\n\nAppearance: Grey stone walls')
+    expect(moved.fields.age).toBeUndefined()
+    create({ kind: 'world', name: 'Mara' })
+    const mara = create({ kind: 'character', name: 'Mara' })
+    expectCode(() => update(mara.id, { kind: 'world' }), 'ALREADY_EXISTS')
+    expectCode(() => update(mara.id, { kind: 'no-such' }), 'VALIDATION')
+  })
+
+  it('takes fields of the new template in the same patch, and moves back for Undo', () => {
+    const ash = create({ kind: 'world', name: 'Ashfall', fields: { description: 'A war.' } })
+    const moved = update(ash.id, { kind: 'history', fields: { when: 'Year 12' } })
+    expect(moved.kind).toBe('history')
+    expect(moved.fields.when).toBe('Year 12')
+    const back = update(ash.id, { kind: 'world', fields: { description: 'A war.', notes: '' } })
+    expect(back.kind).toBe('world')
+    expect(back.fields.description).toBe('A war.')
+  })
+})
+
+describe('mergeEntities (F-9.10)', () => {
+  it('fills empty fields, adds differing ones, joins pages, keeps names as aliases, and deletes the sources', () => {
+    const rynna = create({ kind: 'character', name: 'Rynna Falsire', fields: { age: '19' } })
+    const crown = create({
+      kind: 'character',
+      name: 'High Crown Falsire',
+      fields: { age: '20', background: 'Crowned at the Ashfall.' },
+      body: 'Her page.'
+    })
+    const write = mergeEntities(db, rynna.id, [crown.id])
+    expect(write.entity.fields).toEqual({ age: '19\n\n20', background: 'Crowned at the Ashfall.' })
+    expect(write.entity.body).toBe('Her page.')
+    expect(write.entity.aliases).toContain('High Crown Falsire')
+    expect(write.removed.map((r) => r.id)).toEqual([crown.id])
+    expect(getEntity(db, crown.id)).toBeUndefined()
+    // The tags were merged: one tag, the merged one's name an alias of it.
+    expect(write.tagMerge?.removedIds).toEqual([crown.tagId])
+    expect(listTags(db).map((t) => t.name)).not.toContain('high-crown-falsire')
+  })
+
+  it('moves the observed facts, refiles a field of another category, and refuses itself', () => {
+    const scene = listNodes(db).find((node) => node.kind === 'document')
+    const mill = create({ kind: 'setting', name: 'The Mill' })
+    const other = create({ kind: 'character', name: 'Mill Keeper', fields: { age: '60' } })
+    replaceSceneFacts(db, scene?.id ?? '', [
+      { entityId: other.id, attribute: 'age', value: 'sixty', quote: 'He was sixty.' }
+    ])
+    const write = mergeEntities(db, mill.id, [other.id])
+    expect(write.entity.fields.notes).toBe('Age: 60')
+    expect(listFactsForEntity(db, mill.id).map((f) => f.value)).toEqual(['sixty'])
+    expectCode(() => mergeEntities(db, mill.id, [mill.id]), 'VALIDATION')
+    expectCode(() => mergeEntities(db, mill.id, ['nope']), 'NOT_FOUND')
   })
 })

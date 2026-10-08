@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`agent.v4 prompt (F-9.10 organise) > keeps the rule in a read run, and asks the retry at the larger cap 1`] = `"Organising: when the message asks to organise, clean up, merge duplicates in, or streamline the tags, story-bible sheets, notes, or binder, add "organise":{"scope":[…],"instruction":"…"} to your answer instead of edits: scope is any of tags, sheets, notes, binder ([] for all); instruction is what the author asked, in a sentence. The app plans the changes and shows them; say so in the answer in a sentence. Organising never changes the manuscript text."`;

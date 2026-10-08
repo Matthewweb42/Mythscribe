@@ -8086,4 +8086,51 @@ describe('context library', () => {
       requestId: 'rc-2'
     })
   })
+
+  // F-9.10: Organise's local pass, the plan as data (nothing written), and the sheet merge.
+  it('finds look-alikes locally, answers a plan, and merges two sheets with their tags', async () => {
+    await ready()
+    const rynna = await invoke('entity:create', { kind: 'character', name: 'Rynna Falsire' })
+    const short = await invoke('entity:create', {
+      kind: 'character',
+      name: 'Rynna',
+      fields: { age: '19' }
+    })
+    const found = await invoke('organise:candidates', undefined)
+    expect(found.duplicates.map((d) => [d.of, d.names])).toEqual([
+      ['tag', ['rynna', 'rynna-falsire']],
+      ['sheet', ['Rynna', 'Rynna Falsire']]
+    ])
+    complete.mockResolvedValue({
+      text: '{"reply":"One Rynna.","ops":[{"op":"mergeSheets","keep":"s2","merge":["s1"]}]}',
+      model: 'gpt-fake',
+      usage: { inputTokens: 300, outputTokens: 20 }
+    })
+    const plan = await invoke('organise:plan', { instruction: '', scope: [], requestId: 'o-1' })
+    if (!plan.ok) throw new Error(plan.message)
+    expect(plan.plan.changes.map((c) => c.action)).toEqual([
+      {
+        kind: 'mergeSheets',
+        target: { id: rynna.id, name: 'Rynna Falsire' },
+        sources: [{ id: short.id, name: 'Rynna' }],
+        withText: true
+      }
+    ])
+    expect(getProposal(manager.require().connection.orm, plan.proposalId)).toMatchObject({
+      feature: 'organise'
+    })
+    expect(await invoke('entity:list', undefined)).toHaveLength(2)
+
+    const merged = await invoke('entity:merge', { targetId: rynna.id, sourceIds: [short.id] })
+    expect(merged.entity).toMatchObject({ name: 'Rynna Falsire', fields: { age: '19' } })
+    expect(merged.entity.aliases).toContain('Rynna')
+    expect(merged.removedIds).toEqual([short.id])
+    expect(merged.tags?.removedIds).toEqual([short.tagId])
+    expect((await invoke('entity:list', undefined)).map((e) => e.name)).toEqual(['Rynna Falsire'])
+
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 0 })
+    expect(
+      await invoke('organise:plan', { instruction: '', scope: [], requestId: 'o-2' })
+    ).toMatchObject({ ok: false, code: 'DISABLED', requestId: 'o-2' })
+  })
 })

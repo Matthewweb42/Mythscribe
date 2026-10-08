@@ -228,6 +228,7 @@ const ok = (requestId: string, answer: string, over: Partial<AgentOk> = {}): AiA
   query: null,
   steps: [],
   changes: [],
+  organise: null,
   dropped: 0,
   usage: { inputTokens: 200, outputTokens: 40 },
   costUsd: 0.0003,
@@ -754,6 +755,7 @@ describe("useAssistantStore send, a cited lookup (F-5.7; the router's query pick
     query: QUERY,
     steps: [{ tool: 'search', label: 'Searching “storm”…' }],
     changes: [],
+    organise: null,
     dropped: 1,
     usage: { inputTokens: 900, outputTokens: 60 },
     costUsd: 0.0009,
@@ -908,6 +910,7 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
       { edit: RENAME, violation: null },
       { edit: DELETE, violation: null }
     ],
+    organise: null,
     dropped: 0,
     usage: { inputTokens: 900, outputTokens: 60 },
     costUsd: 0.0009,

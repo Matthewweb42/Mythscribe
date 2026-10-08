@@ -62,6 +62,8 @@ import { NOTES_SUGGEST_PROMPT_V2_VERSION } from './notesSuggest.v2'
 import { PLAN_LINKS_PROMPT_VERSION } from './planLinks.v1'
 import { CONTEXT_IMPORT_PROMPT_V2_VERSION } from './contextImport.v2'
 import { REVIEW_CHAT_PROMPT_V2_VERSION } from './reviewChat.v2'
+import { ORGANISE_PROMPT_VERSION } from './organise.v1'
+import { AGENT_PROMPT_V4_VERSION } from './agent.v4'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -138,7 +140,9 @@ export const PROMPT_VERSIONS = [
   NOTES_SUGGEST_PROMPT_V2_VERSION,
   PLAN_LINKS_PROMPT_VERSION,
   CONTEXT_IMPORT_PROMPT_V2_VERSION,
-  REVIEW_CHAT_PROMPT_V2_VERSION
+  REVIEW_CHAT_PROMPT_V2_VERSION,
+  ORGANISE_PROMPT_VERSION,
+  AGENT_PROMPT_V4_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -441,7 +445,14 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'strong',
     output: 'json',
     since: 'F-9.11'
-  }
+  },
+  [ORGANISE_PROMPT_VERSION]: {
+    feature: 'organise',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-9.10'
+  },
+  [AGENT_PROMPT_V4_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-9.10' }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

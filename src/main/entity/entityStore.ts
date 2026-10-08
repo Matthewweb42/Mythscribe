@@ -8,6 +8,8 @@ import {
   categoryOf,
   compareCategoryIds,
   isCategoryField,
+  joinSheetText,
+  refileFields,
   type StoryCategory
 } from '@shared/categories'
 import {
@@ -21,7 +23,7 @@ import {
 import type { Entity, EntityCreateInput, EntityUpdateInput, Tag } from '@shared/ipc/contract'
 import { withObservedDismissed, withoutObservedDismissed } from '@shared/observedFacts'
 import type * as schema from '../db/schema'
-import { entity, tag, type EntityInsert, type EntityRow } from '../db/schema'
+import { entity, observedFact, tag, type EntityInsert, type EntityRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { getObservedDismissed, setObservedDismissed } from '../project/settingsStore'
 import {
@@ -30,7 +32,9 @@ import {
   findTagByName,
   getTag,
   getTagWithUsage,
-  updateTag
+  mergeTags,
+  updateTag,
+  type TagMergeResult
 } from '../tag/tagStore'
 import { listCategories, requireCategory } from './categoryStore'
 import { hasFacts } from './observedFactStore'
@@ -352,8 +356,9 @@ export function createEntity(
 
 /**
  * Patches the given parts of an entity (F-9.1); omitted ones keep their value. `fields` is
- * merged over the stored map and an empty value removes that field. The kind cannot change, so
- * the name and the fields are checked against the stored one. Stamps `modified`.
+ * merged over the stored map and an empty value removes that field. The name and the fields are
+ * checked against the sheet's category; F-9.10: `kind` moves the sheet into another category
+ * first (`refileFields`), and the name must then be free there. Stamps `modified`.
  *
  * F-9.4: a rename carries the entity's tag with it under `mirrorRename`'s rules; every other
  * patch leaves the bank alone.
@@ -370,18 +375,28 @@ export function updateEntity(
     const existing = getRow(tx, id)
     if (!existing) throw new AppError('NOT_FOUND', 'Entity not found', { id })
     const changes: Partial<EntityInsert> = {}
-    const category = categoryOf(existing.kind, listCategories(tx))
-    if (patch.name !== undefined) {
-      const name = normalizeName(patch.name)
-      if (toEntityNameKey(name) !== toEntityNameKey(existing.name)) {
+    let category = categoryOf(existing.kind, listCategories(tx))
+    let stored = parseEntityFields(existing.fields)
+    // F-9.10: a move into another category refiles the values its template lacks into Notes.
+    const moved = patch.kind !== undefined && patch.kind !== existing.kind
+    if (moved) {
+      const target = requireCategory(tx, patch.kind ?? existing.kind)
+      stored = refileFields(category, target, stored)
+      changes.kind = target.id
+      changes.fields = JSON.stringify(stored)
+      category = target
+    }
+    if (patch.name !== undefined || moved) {
+      const name = patch.name === undefined ? existing.name : normalizeName(patch.name)
+      if (moved || toEntityNameKey(name) !== toEntityNameKey(existing.name)) {
         assertNameFree(tx, category, name, id)
       }
-      changes.name = name
+      if (patch.name !== undefined) changes.name = name
     }
     if (patch.template !== undefined) changes.template = patch.template
     if (patch.fields !== undefined) {
       assertFieldsOf(category, patch.fields)
-      const merged = collectFields(category, parseEntityFields(existing.fields), patch.fields)
+      const merged = collectFields(category, stored, patch.fields)
       changes.fields = JSON.stringify(merged)
     }
     if (patch.body !== undefined) changes.body = patch.body
@@ -541,5 +556,108 @@ export function deleteEntity(db: EntityDb, id: string): Entity {
     const deleted = toEntity(tx, row)
     tx.delete(entity).where(eq(entity.id, id)).run()
     return deleted
+  })
+}
+
+/** What `mergeEntities` did: the target as it now stands, the sheets it took in, and the tag merge. */
+export interface EntityMergeWrite {
+  entity: Entity
+  /** The merged-away sheets as they stood when deleted (a picture that moved is no longer on one). */
+  removed: Entity[]
+  tagMerge: TagMergeResult | null
+  /** The target's tag after the write, when its aliases changed without a tag merge. */
+  aliasedTag: Tag | null
+}
+
+/**
+ * Merges sheets into one (F-9.10, Organise) in one transaction: each source's values fill the
+ * target's empty fields or are added under the target's text when they differ (a field the
+ * target's category lacks goes into its Notes, `refileFields`); its page joins the target's; its
+ * observed facts move; its tag is merged into the target's (`mergeTags`; a target without a tag
+ * takes the first); its picture moves when the target's category has pictures and the target has
+ * none; its name and aliases become the target's aliases. The sources are then deleted as
+ * `deleteEntity` deletes. The target becomes the author's. VALIDATION when the target is a
+ * source; NOT_FOUND for any unknown id.
+ */
+export function mergeEntities(
+  db: EntityDb,
+  targetId: string,
+  sourceIds: readonly string[]
+): EntityMergeWrite {
+  const sources = [...new Set(sourceIds)]
+  if (sources.includes(targetId)) {
+    throw new AppError('VALIDATION', 'A sheet cannot be merged into itself', { id: targetId })
+  }
+  return db.transaction((tx) => {
+    const target = requireRow(tx, targetId)
+    const rows = sources.map((id) => requireRow(tx, id))
+    const categories = listCategories(tx)
+    const category = categoryOf(target.kind, categories)
+    const fields: Record<string, string> = {}
+    for (const [id, value] of Object.entries(parseEntityFields(target.fields))) {
+      if (value !== undefined) fields[id] = value
+    }
+    let body = target.body ?? ''
+    let image = target.image
+    const names: string[] = []
+    for (const row of rows) {
+      const theirs = refileFields(
+        categoryOf(row.kind, categories),
+        category,
+        parseEntityFields(row.fields)
+      )
+      for (const [id, value] of Object.entries(theirs))
+        fields[id] = joinSheetText(fields[id], value)
+      body = joinSheetText(body, row.body)
+      if (image === null && category.hasImage && row.image !== null) {
+        image = row.image
+        // The file now belongs to the target, so deleting the source must not take it.
+        tx.update(entity).set({ image: null }).where(eq(entity.id, row.id)).run()
+      }
+      names.push(row.name, ...toEntity(tx, row).aliases)
+    }
+    tx.update(entity)
+      .set({
+        fields: JSON.stringify(fields),
+        body: body === '' ? target.body : body,
+        image,
+        origin: 'author',
+        modified: new Date().toISOString()
+      })
+      .where(eq(entity.id, targetId))
+      .run()
+    tx.update(observedFact)
+      .set({ entityId: targetId })
+      .where(inArray(observedFact.entityId, sources))
+      .run()
+
+    const sourceTags = [
+      ...new Set(rows.map((row) => row.tagId).filter((id): id is string => id !== null))
+    ].filter((id) => id !== target.tagId)
+    let current = requireRow(tx, targetId)
+    const first = sourceTags[0]
+    if (current.tagId === null && first !== undefined) {
+      setTagId(tx, current, first)
+      sourceTags.shift()
+      current = requireRow(tx, targetId)
+    }
+    const tagMerge =
+      current.tagId !== null && sourceTags.length > 0
+        ? mergeTags(tx, current.tagId, sourceTags)
+        : null
+    const removed = rows.map((row) => deleteEntity(tx, row.id))
+    let aliasedTag: Tag | null = null
+    if (current.tagId === null) {
+      const next = normalizeAliases([...parseAliases(current.aliases), ...names], current.name)
+      tx.update(entity)
+        .set({ aliases: JSON.stringify(next) })
+        .where(eq(entity.id, targetId))
+        .run()
+    } else {
+      const before = parseAliases(getTag(tx, current.tagId)?.aliases).length
+      const updated = addTagAliases(tx, current.tagId, names)
+      if (updated.aliases.length !== before || first !== undefined) aliasedTag = updated
+    }
+    return { entity: toEntity(tx, requireRow(tx, targetId)), removed, tagMerge, aliasedTag }
   })
 }

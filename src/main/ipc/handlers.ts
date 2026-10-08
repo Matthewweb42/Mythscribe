@@ -37,6 +37,7 @@ import {
 } from '@shared/entityExchange'
 import type { Background } from '@shared/focus'
 import type { ContextProcessResult } from '@shared/contextLibrary'
+import type { OrganisePlanResult } from '@shared/organise'
 import type { ReviewChatResult } from '@shared/reviewChat'
 import type { ImportDetectResult, PendingTagProposal } from '@shared/importStructure'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
@@ -119,6 +120,7 @@ import { draftBrief } from '../ai/draftBrief'
 import { generateGhostText } from '../ai/ghostText'
 import { detectImportStructure } from '../ai/importStructure'
 import { estimateContextImport, sortContextFiles } from '../ai/contextImport'
+import { runOrganise } from '../ai/organise'
 import { runReviewChat } from '../ai/reviewChat'
 import { cancelInflight, regenRequestId, registerInflight, releaseInflight } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
@@ -205,10 +207,12 @@ import {
   getEntity,
   linkEntityTag,
   listEntities,
+  mergeEntities,
   setEntityImage,
   updateEntity,
   type EntityTagChange
 } from '../entity/entityStore'
+import { loadOrganiseProject, organiseCandidates } from '../organise/organiseProject'
 import {
   createCategory,
   listCategories,
@@ -1698,6 +1702,69 @@ export function registerHandlers({
     return updated
   })
 
+  /**
+   * F-9.10: sheets merged by Organise. A tag merge inside it reaches the windows exactly as
+   * `tag:merge` does; the merged-away sheets' pictures that did not move go with them.
+   */
+  register('entity:merge', ({ targetId, sourceIds }) => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const result = mergeEntities(db, targetId, sourceIds)
+    for (const removed of result.removed) {
+      if (removed.image !== null) removeImageAsset(session.folder, ENTITY_IMAGES_DIR, removed.image)
+    }
+    const merge = result.tagMerge
+    if (merge !== null && merge.nodeIds.length > 0) {
+      emit(windows(), 'documentTag:changed', { nodeIds: merge.nodeIds })
+    }
+    if (merge !== null || result.aliasedTag !== null) {
+      rescanManuscript(db)
+      publishProposed()
+    }
+    if (result.aliasedTag !== null) emit(windows(), 'tag:changed', result.aliasedTag)
+    void syncSpelling()
+    emit(windows(), 'observedFact:changed', { entityIds: [targetId] })
+    emit(windows(), 'continuity:changed', { nodeIds: [] })
+    return {
+      entity: result.entity,
+      removedIds: result.removed.map((removed) => removed.id),
+      tags:
+        merge === null
+          ? null
+          : { target: merge.target, removedIds: merge.removedIds, aliases: merge.aliases }
+    }
+  })
+
+  // F-9.10: Organise's local pass, and the AI's plan. Like `library:reviewChat`, the parent
+  // `requestId` is registered here so `ai:cancel` stops the chunk in flight; expected AI failures
+  // come back as data.
+  register('organise:candidates', () =>
+    organiseCandidates(loadOrganiseProject(manager.require().connection.orm))
+  )
+
+  register(
+    'organise:plan',
+    async ({ instruction, scope, requestId }): Promise<OrganisePlanResult> => {
+      const db = manager.require().connection.orm
+      const controller = registerInflight(requestId)
+      try {
+        const answer = await runOrganise(db, requestDeps(db), {
+          instruction,
+          scope,
+          requestId,
+          signal: controller.signal
+        })
+        return { ok: true, ...answer, requestId }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      } finally {
+        releaseInflight(requestId)
+      }
+    }
+  )
+
   register('entity:linkTag', ({ id }) => {
     const db = manager.require().connection.orm
     const { entity: linked, tagChange } = linkEntityTag(db, id)
@@ -2964,7 +3031,8 @@ export function registerHandlers({
             note: (stepId, note) => devtools.annotate(stepId, note)
           }
         )
-        const { answer, query, steps, changes, dropped, usage, costUsd, cached, model } = result
+        const { answer, query, steps, changes, organise, dropped, usage, costUsd, cached, model } =
+          result
         const proposal = createProposal(db, {
           feature: 'agent',
           nodeId,
@@ -2984,6 +3052,7 @@ export function registerHandlers({
           query,
           steps,
           changes,
+          organise,
           dropped,
           usage,
           costUsd,
