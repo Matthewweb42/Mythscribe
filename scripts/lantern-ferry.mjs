@@ -496,6 +496,13 @@ export async function seedLanternFerry(page, tmp) {
   // OPENAI_BASE_URL, so the demo picks OpenAI first (as the e2e does).
   await invoke(page, 'ai:setOwnKeyProvider', { provider: 'openai' })
   await invoke(page, 'ai:setKey', { key: 'sk-site-demo-not-a-real-key' })
+  // Cost lines name and price the app's real defaults (OpenRouter's DeepSeek pair), not OpenAI's.
+  await invoke(page, 'ai:setModels', {
+    provider: 'openai',
+    models: { fast: 'deepseek/deepseek-v4-flash', strong: 'deepseek/deepseek-v4-pro' }
+  })
+  // The novel is in British spelling; keep the spellchecker's underline off it.
+  for (const word of ['colour', 'harbour']) await invoke(page, 'dictionary:add', { word })
 
   // The starter is Arc 1 → Chapter 1 → Scene 1; rename it and grow the rest.
   const seeded = await invoke(page, 'tree:list')
