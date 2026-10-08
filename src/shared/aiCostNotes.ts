@@ -182,6 +182,14 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     typicalOutTokens: 1500,
     ideas: 'Fast tier for simple lists; skip unchanged files (already); batch API.'
   },
+  planLinks: {
+    trigger: 'background',
+    when: 'About 20 s after a summary run (and from Find links): links planned scenes and template beats to the written scene that fulfils them.',
+    callsPerUse: 1,
+    typicalOutTokens: 150,
+    ideas:
+      'Skip when no planned beat is open; match locally by title/summary words first and ask the AI only for ambiguous ones.'
+  },
   reviewChat: {
     trigger: 'on request',
     when: 'A message on the upload review screen that changes the pending plan.',

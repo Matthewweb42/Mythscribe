@@ -28,17 +28,18 @@ git history of this file is the log of each feature's cost over time (author req
 | `brief` | Scene brief drafts | on request | brief.v1 | fast | 2959 / 5410 | 120 / 200 | $0.000242 · $0.000418 | $0.000291 | $0.00276 | 1 | $0.000242 |
 | `betaReader` | Beta reader | on request | betaReader.v1 | strong | 673 / 11599 | 700 / 1200 | $0.000435 · $0.00294 | $0.000522 | $0.0122 | 1 | $0.000435 |
 | `importStructure` | Import structure detection | on request | importStructure.v1 | fast | 2428 / 4178 | 150 / 400 | $0.000265 · $0.000637 | $0.000318 | $0.00250 | 40 | $0.0106 |
-| `continuity` | Consistency check | background | continuity.v1 | strong | 1232 / 5636 | 300 / 800 | $0.000385 · $0.00152 | $0.000462 | $0.00758 | 1 | $0.000385 |
+| `continuity` | Consistency check | background | continuity.v2 | strong | 1334 / 5702 | 300 / 800 | $0.000406 · $0.00153 | $0.000487 | $0.00783 | 1 | $0.000406 |
 | `proofread` | Proofread | on request | proofread.v1 | fast | 1055 / 7578 | 600 / 2000 | $0.000800 · $0.00279 | $0.000960 | $0.00349 | 1 | $0.000800 |
-| `whatNext` | What comes next | on request | whatNext.v2 | fast | 882 / 2589 | 200 / 300 | $0.000282 · $0.000462 | $0.000339 | $0.00156 | 1 | $0.000282 |
+| `whatNext` | What comes next | on request | whatNext.v3 | fast | 1079 / 3027 | 200 / 300 | $0.000288 · $0.000475 | $0.000346 | $0.00171 | 1 | $0.000288 |
 | `route` | Assistant routing | every chat message | route.v1 | fast | 407 / 780 | 40 / 120 | $0.0000634 · $0.000177 | $0.0000761 | $0.000485 | 1 | $0.0000634 |
 | `synopsis` | Synopsis suggestions | on request | synopsis.v1 | fast | 495 / 3400 | 120 / 350 | $0.000168 · $0.000550 | $0.000202 | $0.000911 | 1 | $0.000168 |
-| `notesSuggest` | Notes suggestions | on request | notesSuggest.v1 | fast | 899 / 4753 | 300 / 600 | $0.000411 · $0.000911 | $0.000493 | $0.00202 | 1 | $0.000411 |
+| `notesSuggest` | Notes suggestions | on request | notesSuggest.v2 | fast | 961 / 4798 | 300 / 600 | $0.000413 · $0.000912 | $0.000495 | $0.00207 | 1 | $0.000413 |
 | `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000356 · $0.000568 | $0.000427 | $0.00202 | 1 | $0.000356 |
 | `editPass` | Edit passes | on request | editPass.v1 | strong | 620 / 5161 | 1500 / 4000 | $0.000760 · $0.00276 | $0.000912 | $0.0240 | 60 | $0.0456 |
-| `agent` | Assistant lookups and edits | every chat message | agent.v2 | strong | 1294 / 11096 | 400 / 3000 | $0.000440 · $0.00359 | $0.000528 | $0.00924 | 3 | $0.00132 |
+| `agent` | Assistant lookups and edits | every chat message | agent.v3 | strong | 1530 / 11085 | 400 / 3000 | $0.000489 · $0.00359 | $0.000587 | $0.00983 | 3 | $0.00147 |
 | `contextImport` | Context library sorting | on request | contextImport.v1 | strong | 1855 / 3193 | 1500 / 6000 | $0.00102 · $0.00319 | $0.00122 | $0.0271 | 10 | $0.0102 |
 | `reviewChat` | Upload review chat | on request | reviewChat.v1 | strong | 527 / 5457 | 300 / 3000 | $0.000237 · $0.00241 | $0.000284 | $0.00582 | 1 | $0.000237 |
+| `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000285 · $0.000690 | $0.000341 | $0.00299 | 1 | $0.000285 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -156,3 +157,8 @@ git history of this file is the log of each feature's cost over time (author req
 
 - **When:** A message on the upload review screen that changes the pending plan.
 - **Ideas:** Send a compact review summary instead of every record.
+
+### `planLinks` — Plan links
+
+- **When:** About 20 s after a summary run (and from Find links): links planned scenes and template beats to the written scene that fulfils them.
+- **Ideas:** Skip when no planned beat is open; match locally by title/summary words first and ask the AI only for ambiguous ones.
