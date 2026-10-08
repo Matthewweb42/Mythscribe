@@ -205,6 +205,24 @@ export class DevToolsService {
     this.deliver(() => this.deps.onRequest({ ...row }))
   }
 
+  /**
+   * 2026-10-07: what a caller did with a request's answer, or why nothing was shown (an agent
+   * step cut off and retried, a ghost answer that was all reasoning, where a chat insertion
+   * landed in the editor and how the author settled it). The note goes on the newest row of that
+   * request id (or of the id with a suffix the caller added, `:step2`, `:regen`); notes on one
+   * row are joined with " · ". A no-op while off or when no such row is held.
+   */
+  annotate(requestId: string, note: string): void {
+    if (!this.enabled()) return
+    const row = [...this.requests]
+      .reverse()
+      .find((r) => r.requestId === requestId || r.requestId?.startsWith(`${requestId}:`) === true)
+    if (row === undefined) return
+    const text = cut(redactSecrets(note), DEV_LOG_MESSAGE_MAX)
+    row.note = row.note === null ? text : `${row.note} · ${text}`
+    this.deliver(() => this.deps.onRequest({ ...row }))
+  }
+
   /** One row's held prompt and answer, or null when it is gone or the switch is off. */
   text(id: number): DevRequestText | null {
     if (!this.enabled()) return null
@@ -238,11 +256,12 @@ export class DevToolsService {
         if (this.requests.includes(row)) this.deliver(() => this.deps.onRequest({ ...row }))
       }
       return {
-        prepared: ({ provider, model, tier, maxTokens }) => {
+        prepared: ({ provider, model, tier, maxTokens, reasoning }) => {
           row.provider = provider
           row.model = model
           row.tier = tier
           row.maxTokens = maxTokens
+          row.reasoning = reasoning
           push()
         },
         sent: () => {
@@ -306,6 +325,7 @@ export class DevToolsService {
       outputTokens: null,
       cachedTokens: null,
       reasoningTokens: null,
+      reasoning: null,
       costUsd: null,
       finishReason: null,
       answerChars: null,

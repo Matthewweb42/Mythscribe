@@ -2,6 +2,8 @@ import { Check, Undo2 } from 'lucide-react'
 import {
   describeEdit,
   isDeletion,
+  isDraftIntent,
+  isRewriteIntent,
   type AgentChange,
   type AgentEdit,
   type AgentStep
@@ -20,6 +22,12 @@ const EXCERPT_CHARS = 80
 const excerpt = (text: string): string => {
   const flat = text.replace(/\s+/g, ' ').trim()
   return flat.length > EXCERPT_CHARS ? `${flat.slice(0, EXCERPT_CHARS - 1).trimEnd()}…` : flat
+}
+
+/** The newest words of a draft on its way, so the card follows it as it grows. */
+const tail = (text: string): string => {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > EXCERPT_CHARS * 2 ? `…${flat.slice(-EXCERPT_CHARS * 2).trimStart()}` : flat
 }
 
 /**
@@ -60,6 +68,18 @@ export function AgentSteps({
 
 /** What a pending edit shows under its heading: the current text with what goes struck through and what comes in colour. */
 function EditPreview({ edit }: { edit: AgentEdit }): React.JSX.Element | null {
+  if (
+    (edit.kind === 'insert' || edit.kind === 'text') &&
+    (isDraftIntent(edit) || isRewriteIntent(edit))
+  ) {
+    // 2026-10-07: the prose is drafted when it is wanted; the card says what it will be about.
+    return (
+      <p data-testid="agent-change-brief" className="m-0 text-xs text-fg-muted italic">
+        {edit.kind === 'text' ? `“${excerpt(edit.find)}”: ` : ''}
+        {edit.brief}
+      </p>
+    )
+  }
   switch (edit.kind) {
     case 'text':
       return <FixDiff quote={edit.find} fix={edit.replace} testId="agent-change-diff" />
@@ -91,6 +111,69 @@ function EditPreview({ edit }: { edit: AgentEdit }): React.JSX.Element | null {
     default:
       return null
   }
+}
+
+/**
+ * An edit whose prose is being drafted or waits in the editor (2026-10-07): the card mirrors the
+ * ghost text. While it is written the draft so far shows here too; once it shows in the editor,
+ * Tab or Accept takes it and Escape or Dismiss drops it. The buttons keep the editor's focus.
+ */
+function DraftCard({
+  change,
+  text,
+  onAccept,
+  onDismiss
+}: {
+  change: AgentChange
+  text: string
+  onAccept: () => void
+  onDismiss: () => void
+}): React.JSX.Element {
+  const insertion = change.edit.kind === 'insert'
+  const shown = change.status === 'shown'
+  return (
+    <div
+      data-testid="agent-change"
+      data-status={change.status}
+      className="flex flex-col gap-1 rounded-md border border-accent p-2"
+    >
+      <p className="m-0 text-xs font-medium">{describeEdit(change.edit)}</p>
+      <p role="status" className="m-0 text-xs text-fg-muted">
+        {shown
+          ? 'In the editor: Tab accepts, Escape dismisses.'
+          : insertion
+            ? 'Writing into the editor…'
+            : 'Writing the new text…'}
+      </p>
+      {text !== '' ? (
+        <p data-testid="agent-change-draft" className="m-0 text-sm whitespace-pre-wrap">
+          <ins>{tail(text)}</ins>
+        </p>
+      ) : null}
+      <div className="flex gap-1">
+        {shown ? (
+          <button
+            type="button"
+            data-testid="agent-change-accept"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={onAccept}
+            className={FIX_PRIMARY_BUTTON}
+          >
+            Accept
+          </button>
+        ) : null}
+        <button
+          type="button"
+          data-testid="agent-change-skip"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onDismiss}
+          className={FIX_BUTTON}
+        >
+          {shown ? 'Dismiss' : 'Stop'}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 /** The line an applied, skipped, undone, or failed edit leaves in the chat. */
@@ -130,8 +213,10 @@ export function AgentChanges({
   changes: readonly AgentChange[]
 }): React.JSX.Element | null {
   const changing = useAssistantStore((s) => s.changing)
+  const drafts = useAssistantStore((s) => s.drafts)
   const applyChange = useAssistantStore((s) => s.applyChange)
   const skipChange = useAssistantStore((s) => s.skipChange)
+  const acceptChange = useAssistantStore((s) => s.acceptChange)
   const undoChange = useAssistantStore((s) => s.undoChange)
   const applyAll = useAssistantStore((s) => s.applyAll)
   if (changes.length === 0) return null
@@ -142,6 +227,17 @@ export function AgentChanges({
     <div className="flex flex-col gap-1.5">
       {changes.map((change) => {
         const busy = changing[change.id] === true
+        if (change.status === 'writing' || change.status === 'shown') {
+          return (
+            <DraftCard
+              key={change.id}
+              change={change}
+              text={drafts[change.id] ?? ''}
+              onAccept={() => acceptChange(messageId, change.id)}
+              onDismiss={() => skipChange(messageId, change.id)}
+            />
+          )
+        }
         if (change.status !== 'pending') {
           return (
             <div
@@ -153,7 +249,14 @@ export function AgentChanges({
               {change.status === 'applied' ? (
                 <Check size={12} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
               ) : null}
-              <span className="min-w-0 flex-1 break-words">{logLine(change)}</span>
+              <span className="min-w-0 flex-1 break-words">
+                {logLine(change)}
+                {change.notice !== null ? (
+                  <span data-testid="agent-change-notice" className="block text-fg-muted">
+                    {change.notice}
+                  </span>
+                ) : null}
+              </span>
               {change.status === 'applied' && canUndoChange(change.id) ? (
                 <button
                   type="button"
@@ -197,7 +300,11 @@ export function AgentChanges({
                 onClick={() => void applyChange(messageId, change.id)}
                 className={FIX_PRIMARY_BUTTON}
               >
-                {deletion ? 'Delete' : 'Apply'}
+                {deletion
+                  ? 'Delete'
+                  : isDraftIntent(change.edit) || isRewriteIntent(change.edit)
+                    ? 'Write'
+                    : 'Apply'}
               </button>
               <button
                 type="button"

@@ -43,6 +43,27 @@ export const AGENT_ANSWER_MAX = 4_000
 /** Citations kept per answer. */
 export const AGENT_MAX_CITATIONS = 6
 
+/**
+ * 2026-10-07 (author report: a draft inside the JSON reply hit the cap and the raw JSON showed):
+ * prose never travels inside a step. The model names what to write (`brief`, `words`) and where;
+ * the app drafts the prose afterwards through the voice-checked drafting path and streams it into
+ * the editor as ghost text (an insertion) or into the change card (a rewrite of a passage).
+ */
+/** The `max_tokens` one step asks for; small, since a step carries no prose any more. */
+export const AGENT_STEP_MAX_TOKENS = 1_500
+/** What the one retry of a reply that was cut off or did not parse asks for (`outputBudget('agent')`). */
+export const AGENT_RETRY_MAX_TOKENS = 3_000
+/** The longest brief an edit may carry: what to write, in a sentence or two. */
+export const AGENT_BRIEF_MAX = 600
+/** The length an insertion may ask for, in words; outside it the ask is clamped. */
+export const AGENT_WORDS_MIN = 20
+export const AGENT_WORDS_MAX = 900
+/** The length of an insertion that names none. */
+export const AGENT_WORDS_DEFAULT = 150
+/** What the chat says when a step's reply was still cut off or unreadable after the retry. */
+export const AGENT_CUT_OFF_MESSAGE =
+  "The model's reply was cut off. Try again, or pick a faster model in Settings › AI."
+
 /** What a run may do: `read` answers only (Query); `write` may also propose edits (Auto). */
 export const AGENT_ACCESS = ['read', 'write'] as const
 export const AgentAccess = z.enum(AGENT_ACCESS)
@@ -71,16 +92,39 @@ export type AgentStep = z.infer<typeof AgentStep>
 
 const Passage = z.string().max(AGENT_EDIT_TEXT_MAX)
 const NodeRef = { nodeId: z.string(), title: z.string() }
+/** What the app is to write (2026-10-07); empty for an edit that carries its text itself. */
+const Brief = z.string().max(AGENT_BRIEF_MAX).default('')
 
 /**
  * One edit as main resolved it: real ids, the titles the chat names them by, and for a
  * replacement the current value it replaces (`before`), so the Ask view can show what goes.
  */
 export const AgentEdit = z.discriminatedUnion('kind', [
-  /** Replace one passage of a document (`replace` empty removes it). */
-  z.object({ kind: z.literal('text'), ...NodeRef, find: Passage.min(1), replace: Passage }),
-  /** New paragraphs after the paragraph holding `after` (empty: at the end of the document). */
-  z.object({ kind: z.literal('insert'), ...NodeRef, after: Passage, text: Passage.min(1) }),
+  /**
+   * Replace one passage of a document (`replace` empty removes it). With a `brief` (2026-10-07)
+   * the replacement is drafted by the app: `replace` stays empty until the draft is in.
+   */
+  z.object({
+    kind: z.literal('text'),
+    ...NodeRef,
+    find: Passage.min(1),
+    replace: Passage,
+    brief: Brief
+  }),
+  /**
+   * New prose after the paragraph holding `after` (empty: at the caret of the open document,
+   * else at the end). With a `brief` (2026-10-07) the app drafts it at `words` words and streams
+   * it into the editor as ghost text; `text` holds what the author accepted, empty until then.
+   * Without one (an older turn) `text` is the prose itself.
+   */
+  z.object({
+    kind: z.literal('insert'),
+    ...NodeRef,
+    after: Passage,
+    text: Passage,
+    brief: Brief,
+    words: z.number().int().min(0).max(AGENT_WORDS_MAX).default(0)
+  }),
   z.object({
     kind: z.literal('synopsis'),
     ...NodeRef,
@@ -143,7 +187,21 @@ export const AgentEdit = z.discriminatedUnion('kind', [
 export type AgentEdit = z.infer<typeof AgentEdit>
 export type AgentEditKind = AgentEdit['kind']
 
-export const AGENT_CHANGE_STATUSES = ['pending', 'applied', 'skipped', 'undone', 'failed'] as const
+/**
+ * Where an edit stands. 2026-10-07: `writing` while the app drafts an edit's prose (streaming
+ * into the editor or the card), `shown` while a drafted insertion waits in the editor as ghost
+ * text for Tab or Escape (or the card's Accept and Dismiss). Neither survives a reload: a turn
+ * stored in either is read back as `pending` (`settledAfterReload`).
+ */
+export const AGENT_CHANGE_STATUSES = [
+  'pending',
+  'writing',
+  'shown',
+  'applied',
+  'skipped',
+  'undone',
+  'failed'
+] as const
 export const AgentChangeStatus = z.enum(AGENT_CHANGE_STATUSES)
 export type AgentChangeStatus = z.infer<typeof AgentChangeStatus>
 
@@ -155,9 +213,36 @@ export const AgentChange = z.object({
   /** The voice check's complaint about the edit's prose (F-14.7); such an edit asks even in Auto. */
   violation: z.string().nullable(),
   /** Why applying or undoing it failed, shown on the line. */
-  error: z.string().nullable()
+  error: z.string().nullable(),
+  /**
+   * 2026-10-07: the proposal of the prose the app drafted for this edit (F-14.5), which its
+   * accepted text is marked with (F-14.6); null for an edit whose text came with the answer.
+   */
+  proposalId: z.string().nullable().default(null),
+  /**
+   * 2026-10-07: what the author should know about how the edit landed ("“…” is not in the
+   * scene; placed at the caret instead."), shown on its line; null for nothing to say.
+   */
+  notice: z.string().nullable().default(null)
 })
 export type AgentChange = z.infer<typeof AgentChange>
+
+/** A change as a reload finds it: a draft that was in flight or showing is waiting again. */
+export function settledAfterReload(change: AgentChange): AgentChange {
+  return change.status === 'writing' || change.status === 'shown'
+    ? { ...change, status: 'pending' }
+    : change
+}
+
+/** An insertion whose prose the app drafts (2026-10-07): a brief and no text yet. */
+export function isDraftIntent(edit: AgentEdit): boolean {
+  return edit.kind === 'insert' && edit.brief !== '' && edit.text === ''
+}
+
+/** A rewrite of a passage whose replacement the app drafts (2026-10-07): a brief, no replacement yet. */
+export function isRewriteIntent(edit: AgentEdit): boolean {
+  return edit.kind === 'text' && edit.brief !== '' && edit.replace === ''
+}
 
 /** What an agent turn carries beside its answer text (stored with the conversation). */
 export const AgentTurn = z.object({
@@ -196,9 +281,10 @@ const TARGET_NOUN: Record<Extract<AgentEdit, { kind: 'delete' }>['target'], stri
 export function describeEdit(edit: AgentEdit): string {
   switch (edit.kind) {
     case 'text':
+      if (isRewriteIntent(edit)) return `Rewrite a passage of ${edit.title}`
       return edit.replace === '' ? `Cut a passage from ${edit.title}` : `Changed ${edit.title}`
     case 'insert':
-      return `Added to ${edit.title}`
+      return isDraftIntent(edit) ? `Write in ${edit.title}` : `Added to ${edit.title}`
     case 'synopsis':
       return `Set the synopsis of ${edit.title}`
     case 'notes':

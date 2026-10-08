@@ -9,7 +9,11 @@ import {
   DAILY_CAP_MIN,
   LOCAL_AI_BASE_URL_MAX,
   LocalAiBaseUrl,
+  REASONING_LABEL,
+  REASONING_MODES,
+  ReasoningMode,
   TIER_USE,
+  bundledReasoning,
   defaultModelsFor,
   isLoopbackUrl,
   type AiModelMap,
@@ -931,7 +935,64 @@ function ModelChoiceSection({
           </tbody>
         </table>
       </details>
+      {source === 'cloud' ? null : (
+        <ReasoningChoice routing={routing} models={models} disabled={disabled} onSave={save} />
+      )}
     </fieldset>
+  )
+}
+
+/**
+ * How much each model may think before it answers (2026-10-07, "measure, then decide"): the
+ * built-in table's mode per model (`bundledReasoning`, the model's default unless the table says
+ * otherwise) or the author's choice per tier. Sent to OpenRouter only; MythScribe Cloud decides
+ * on its server, so the choice is not offered there.
+ */
+function ReasoningChoice({
+  routing,
+  models,
+  disabled,
+  onSave
+}: {
+  routing: AiModelChoice['routing']
+  models: AiModelMap | null
+  disabled: boolean
+  onSave: (next: AiModelChoice['routing']) => void
+}): React.JSX.Element {
+  const setTier = (tier: Tier, value: string): void => {
+    const { [tier]: _dropped, ...rest } = routing.reasoning
+    const parsed = ReasoningMode.safeParse(value)
+    onSave({ ...routing, reasoning: parsed.success ? { ...rest, [tier]: parsed.data } : rest })
+  }
+  return (
+    <details data-testid="ai-reasoning-choice">
+      <summary className="cursor-pointer text-xs text-fg-muted">Thinking (OpenRouter)</summary>
+      <p className="m-0 mt-1 text-xs text-fg-muted">
+        Some models think before they write, which is slower and counts against each reply&apos;s
+        length. Off asks the model not to; Low asks it to think briefly.
+      </p>
+      {(['fast', 'strong'] as const).map((tier) => (
+        <label key={tier} className="mt-1 flex items-center gap-3 text-xs">
+          <span className="w-24 shrink-0">{ROUTE_CHOICE_LABEL[tier]}</span>
+          <select
+            aria-label={`Thinking for the ${tier} model`}
+            value={routing.reasoning[tier] ?? 'table'}
+            disabled={disabled}
+            onChange={(event) => setTier(tier, event.target.value)}
+            className={SELECT}
+          >
+            <option value="table">
+              {`Built-in (${REASONING_LABEL[models === null ? 'default' : bundledReasoning(models[tier])].toLowerCase()})`}
+            </option>
+            {REASONING_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {REASONING_LABEL[mode]}
+              </option>
+            ))}
+          </select>
+        </label>
+      ))}
+    </details>
   )
 }
 

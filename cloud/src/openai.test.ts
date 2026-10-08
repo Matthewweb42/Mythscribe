@@ -240,6 +240,22 @@ describe('openRouterUpstream (A9) and cached tokens (A4, R6)', () => {
     expect(body.model).toBe('openai/gpt-5.4-mini')
     expect(body.max_tokens).toBe(60)
     expect(body.max_completion_tokens).toBeUndefined()
+    expect(body.reasoning).toBeUndefined()
+  })
+
+  it('passes the price table’s reasoning mode to OpenRouter only, and nothing for default (2026-10-07)', async () => {
+    const reply = (): Response =>
+      jsonResponse({ choices: [{ message: { content: 'x' } }], usage: {} })
+    const router = fakeFetch(reply)
+    await openRouterUpstream('k', router.fetch).complete({ ...PARAMS, reasoning: 'off' })
+    await openRouterUpstream('k', router.fetch).complete({ ...PARAMS, reasoning: 'low' })
+    await openRouterUpstream('k', router.fetch).complete({ ...PARAMS, reasoning: 'default' })
+    expect(bodyOf(router.sent[0]).reasoning).toEqual({ enabled: false })
+    expect(bodyOf(router.sent[1]).reasoning).toEqual({ effort: 'low' })
+    expect(bodyOf(router.sent[2]).reasoning).toBeUndefined()
+    const direct = fakeFetch(reply)
+    await openAiUpstream(KEY, direct.fetch, BASE).complete({ ...PARAMS, reasoning: 'off' })
+    expect(bodyOf(direct.sent[0]).reasoning).toBeUndefined()
   })
 
   it('reads the cached tokens from the last streamed chunk', async () => {

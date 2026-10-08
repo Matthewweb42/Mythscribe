@@ -628,7 +628,7 @@ describe('model choice and cached input (AI-BILLING-SPEC M8, R4, A4, R6)', () =>
   it('sends the routed tier, resolves its model, and records both in the ledger', async () => {
     const f = fakes()
     f.deps.routing = () => ({
-      routing: { all: null, features: { tags: 'strong' } },
+      routing: { all: null, features: { tags: 'strong' }, reasoning: {} },
       table: autoTable(null)
     })
     const result = await runAiRequest(f.deps, input)
@@ -669,7 +669,7 @@ describe('model choice and cached input (AI-BILLING-SPEC M8, R4, A4, R6)', () =>
     const appState = new AppStateStore(path.join(tmp, 'app-state.json'))
     appState.update((s) => ({
       ...s,
-      routing: { all: null, features: { chat: 'strong' } },
+      routing: { all: null, features: { chat: 'strong' }, reasoning: {} },
       cloudPricing: {
         fetchedAt: NOW.toISOString(),
         pricing: {
@@ -689,7 +689,7 @@ describe('model choice and cached input (AI-BILLING-SPEC M8, R4, A4, R6)', () =>
         now: () => NOW
       })
       expect(deps.routing?.('openai')).toEqual({
-        routing: { all: null, features: { chat: 'strong' } },
+        routing: { all: null, features: { chat: 'strong' }, reasoning: {} },
         table: autoTable(null)
       })
       expect(deps.routing?.('cloud').table.tags).toBe('strong')
@@ -741,10 +741,16 @@ describe('the developer tools observer (2026-10-07)', () => {
       provider: 'openai',
       model: 'gpt-5.4-mini',
       tier: 'fast',
-      maxTokens: 120
+      maxTokens: 120,
+      reasoning: 'default'
     })
     expect(calls[3]![1]).toMatchObject({ text: '', cached: false, finishReason: 'length' })
 
+    // 2026-10-07: that empty answer was not cached, so the same request goes out again; the
+    // answer it then gets is, and the third is a cache hit with no provider call.
+    calls.length = 0
+    await runAiRequest({ ...f.deps, observe }, input)
+    expect(calls.map(([step]) => step)).toEqual(['start', 'prepared', 'sent', 'done'])
     calls.length = 0
     await runAiRequest({ ...f.deps, observe }, input)
     expect(calls.map(([step]) => step)).toEqual(['start', 'prepared', 'done'])
@@ -763,5 +769,62 @@ describe('the developer tools observer (2026-10-07)', () => {
     f.provider = null
     await expect(runAiRequest({ ...f.deps, observe }, input)).rejects.toThrow(NoKeyError)
     expect(calls.map(([step]) => step)).toEqual(['start', 'failed'])
+  })
+})
+
+describe('answers that are not cached, and the reasoning mode (2026-10-07)', () => {
+  it('never caches an empty answer or a JSON answer the cap cut off, and reports the finish reason', async () => {
+    const f = fakes()
+    f.complete.mockResolvedValueOnce({
+      text: '',
+      model: 'gpt-5.4-mini',
+      usage: { inputTokens: 40, outputTokens: 60, reasoningTokens: 60 },
+      finishReason: 'length'
+    })
+    const empty = await runAiRequest(f.deps, { ...input, json: false })
+    expect(empty).toMatchObject({ text: '', finishReason: 'length', cached: false })
+    expect(f.cache.size).toBe(0)
+    f.complete.mockResolvedValueOnce({
+      text: '{"tags":["dark-',
+      model: 'gpt-5.4-mini',
+      usage: { inputTokens: 40, outputTokens: 120 },
+      finishReason: 'length'
+    })
+    await runAiRequest(f.deps, input)
+    expect(f.cache.size).toBe(0)
+    // Both were billed: the ledger has a row for each.
+    expect(f.ledger).toHaveLength(2)
+    // Prose cut off at the cap is still an answer, and is cached.
+    f.complete.mockResolvedValueOnce({
+      text: 'The storm broke and',
+      model: 'gpt-5.4-mini',
+      usage: { inputTokens: 40, outputTokens: 60 },
+      finishReason: 'length'
+    })
+    await runAiRequest(f.deps, { ...input, json: false })
+    expect(f.cache.size).toBe(1)
+    const hit = await runAiRequest(f.deps, { ...input, json: false })
+    expect(hit).toMatchObject({ cached: true, text: 'The storm broke and' })
+  })
+
+  it('asks an own-key provider for the reasoning mode Settings or the table names; Cloud and default ask nothing', async () => {
+    const f = fakes()
+    const seen: CompletionRequest[] = []
+    f.complete.mockImplementation((request) => {
+      seen.push(request)
+      return Promise.resolve({ text: 'x', model: 'm', usage: { inputTokens: 1, outputTokens: 1 } })
+    })
+    const routing = { ...defaultAiRouting(), reasoning: { fast: 'off' as const } }
+    f.deps.routing = () => ({ routing, table: autoTable(null) })
+    await runAiRequest(f.deps, { ...input, contextHash: 'a' })
+    expect(seen.at(-1)?.reasoning).toBe('off')
+    f.deps.routing = () => ({ routing: defaultAiRouting(), table: autoTable(null) })
+    await runAiRequest(f.deps, { ...input, contextHash: 'b' })
+    expect(seen.at(-1)).not.toHaveProperty('reasoning')
+    if (f.provider === null) throw new Error('no provider')
+    f.provider = { ...f.provider, id: 'cloud' }
+    f.deps.routing = () => ({ routing, table: autoTable(null) })
+    await runAiRequest(f.deps, { ...input, contextHash: 'c' })
+    expect(seen.at(-1)).not.toHaveProperty('reasoning')
   })
 })

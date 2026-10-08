@@ -93,7 +93,7 @@ export function undoReplacePassage(editor: Editor, undo: PassageUndo): void {
 }
 
 /** The end of the last textblock's content, where text added "at the end" goes. */
-function endOfText(doc: PmNode): number {
+export function endOfText(doc: PmNode): number {
   let end = -1
   doc.descendants((node, pos) => {
     if (node.isTextblock) {
@@ -144,6 +144,23 @@ export function undoInsertParagraphs(editor: Editor, text: string): void {
   const $to = doc.resolve(range.to)
   const tr = editor.state.tr.delete($from.before($from.depth), $to.after($to.depth))
   finish(editor, tr, $from.before($from.depth))
+}
+
+/**
+ * Takes out prose a chat insertion put in through its ghost text (2026-10-07): the text itself,
+ * and the paragraphs it made when it filled them whole (never the document's only content).
+ */
+export function removeInsertedProse(editor: Editor, text: string): void {
+  const { doc } = editor.state
+  const range = locate(doc, text, 'The added text')
+  const $from = doc.resolve(range.from)
+  const $to = doc.resolve(range.to)
+  const whole = $from.parentOffset === 0 && $to.parentOffset === $to.parent.content.size
+  const start = whole ? $from.before($from.depth) : range.from
+  const end = whole ? $to.after($to.depth) : range.to
+  const all = start === 0 && end === doc.content.size
+  const tr = all ? editor.state.tr.delete(range.from, range.to) : editor.state.tr.delete(start, end)
+  finish(editor, tr, all ? range.from : start)
 }
 
 /** Where the top-level block holding `at` starts; refuses the first block (nothing would stay). */

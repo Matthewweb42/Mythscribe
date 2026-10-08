@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AI_MODEL_MAX, HOSTED_DEFAULT_MODELS, Tier } from './ai'
+import { AI_MODEL_MAX, HOSTED_DEFAULT_MODELS, ReasoningMode, Tier } from './ai'
 
 /** Micro-USD (1e-6 USD) is the unit of every balance and charge (L2); a $10 pack is 10_000_000. */
 export const MICROS_PER_USD = 1_000_000
@@ -30,7 +30,13 @@ export const HostedModelPrice = z
     outputUsdPerM: z.number().positive(),
     cachedInputUsdPerM: z.number().nonnegative().nullable(),
     displayMultiplier: z.number().positive(),
-    aliases: z.array(HostedModelId).default([])
+    aliases: z.array(HostedModelId).default([]),
+    /**
+     * 2026-10-07: how much the model may think (`ReasoningMode`), sent upstream as OpenRouter's
+     * `reasoning` parameter; absent is `default` (nothing sent). Server config: the operator
+     * sets it in `billing_config` once measurements say so.
+     */
+    reasoning: ReasoningMode.optional()
   })
   .refine(
     (price) => price.cachedInputUsdPerM === null || price.cachedInputUsdPerM <= price.inputUsdPerM,

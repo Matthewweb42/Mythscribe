@@ -18,7 +18,7 @@ import { buildSceneSteer } from './context/sceneSteer'
 import { buildStoryBible } from './context/storyBible'
 import { buildGhostTextPromptV4 } from './prompts/ghostText.v4'
 import { buildGhostTextRegenPromptV4 } from './prompts/ghostTextRegen.v4'
-import { AiCancelledError, type CompletionUsage } from './providers/types'
+import { AiCancelledError, AiCutOffError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from './request'
 
 export interface GhostTextInput {
@@ -146,6 +146,10 @@ export async function generateGhostText(
     promptVersion: prompt.version,
     ...(input.requestId === undefined ? {} : { requestId: input.requestId })
   })
+  // 2026-10-07: an answer the output cap ended before any text came (a reasoning model that
+  // thought through the whole 60 tokens) is a failure, not "no suggestion"; the request path
+  // did not cache it, so the next idle tick asks again.
+  if (first.text.trim() === '' && first.finishReason === 'length') throw cutOff(first)
   const firstText = postProcessGhostText(first.text, input.before, input.after)
   const shown = (call: AiRequestResult, text: string, version: string): GhostTextResult => ({
     text,
@@ -203,6 +207,18 @@ export async function generateGhostText(
     flagged: !recheck.ok,
     violation: recheck.violations[0]?.message ?? null
   }
+}
+
+/**
+ * The failure for an answer its output cap cut off before any text (2026-10-07), with the
+ * tokens it spent, so the developer tools and the toolbar line say why nothing showed.
+ */
+export function cutOff(call: AiRequestResult): AiCutOffError {
+  const reasoning = call.usage.reasoningTokens
+  return new AiCutOffError(
+    `The model used its whole output allowance (${call.usage.outputTokens} tokens` +
+      `${reasoning === undefined ? '' : `, ${reasoning} of them reasoning`}) before writing anything.`
+  )
 }
 
 /** Matching quote pairs an answer may be wrapped in; stripped only when the pair encloses the whole answer. */

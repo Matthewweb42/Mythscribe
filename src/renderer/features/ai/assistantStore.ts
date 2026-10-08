@@ -4,8 +4,12 @@ import {
   AGENT_CARET_CHARS,
   AGENT_SELECTION_CHARS,
   isDeletion,
+  isDraftIntent,
+  isRewriteIntent,
+  settledAfterReload,
   type AgentAccess,
   type AgentChange,
+  type AgentEdit,
   type AgentFocus,
   type AgentStep
 } from '@shared/agent'
@@ -55,7 +59,15 @@ import { registerPendingSave } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
-import { applyAgentEdit } from './agentApply'
+import { applyAgentEdit, openEditor } from './agentApply'
+import { removeInsertedProse } from '@renderer/features/editor/agentEditing'
+import {
+  acceptLanding,
+  dismissLanding,
+  draftReplacement,
+  landDraft,
+  resetLandings
+} from './draftLanding'
 import {
   aiActionReason,
   openSceneNow,
@@ -134,6 +146,13 @@ interface AssistantState {
   agentSteps: Record<string, AgentStep[]>
   /** The agent edits being applied or undone right now, by change id. */
   changing: Record<string, true>
+  /**
+   * 2026-10-07: the answer text of each agent turn still on its way, by request id, as it
+   * streams (not persisted); the turn shows it in place of "Thinking…".
+   */
+  agentAnswer: Record<string, string>
+  /** 2026-10-07: the prose being drafted for an edit, by change id, as it streams (not persisted). */
+  drafts: Record<string, string>
   load: () => Promise<void>
   /** The selected passage Ask AI attached to the composer (2026-10-06), or null. */
   attachment: string | null
@@ -184,8 +203,13 @@ interface AssistantState {
   applyChange: (messageId: string, changeId: string) => Promise<void>
   /** Apply all remaining: the turn's pending edits but its deletions, one after the other. */
   applyAll: (messageId: string) => Promise<void>
-  /** Skips a pending edit; nothing changes in the book. */
+  /**
+   * Skips a pending edit; nothing changes in the book. 2026-10-07: an insertion showing in the
+   * editor is dismissed, and one still being drafted is stopped.
+   */
   skipChange: (messageId: string, changeId: string) => void
+  /** 2026-10-07: the card's Accept for an insertion showing in the editor as ghost text (Tab). */
+  acceptChange: (messageId: string, changeId: string) => void
   /** Takes an applied edit back (this session only: the undo lives in memory). */
   undoChange: (messageId: string, changeId: string) => Promise<void>
 }
@@ -210,9 +234,14 @@ let persisted: Conversations | null = null
 let generation = 0
 let unregister: (() => void) | null = null
 let unsubscribeSteps: (() => void) | null = null
+let unsubscribeAnswer: (() => void) | null = null
 let counter = 0
 /** Change id → how to take an applied agent edit back; gone with the session or the project. */
 const undoers = new Map<string, () => Promise<void>>()
+/** Change id → the request drafting its prose right now (2026-10-07), so Skip can stop it. */
+const writing = new Map<string, string>()
+/** Changes the author skipped while their prose was being drafted: the stop reads as a skip. */
+const skipped = new Set<string>()
 
 const nextId = (prefix: string): string => `${prefix}-${Date.now().toString(36)}-${++counter}`
 
@@ -314,13 +343,67 @@ function onAgentStep({ requestId, step }: { requestId: string; step: AgentStep }
   }))
 }
 
+/**
+ * Records a streamed piece of an agent turn's answer (2026-10-07); `reset` voids what came so
+ * far (main asked the step again after a reply was cut off).
+ */
+function onAgentDelta({
+  requestId,
+  delta,
+  reset
+}: {
+  requestId: string
+  delta: string
+  reset: boolean
+}): void {
+  if (conversationOfRequest(requestId) === null) return
+  useAssistantStore.setState((s) => ({
+    agentAnswer: {
+      ...s.agentAnswer,
+      [requestId]: reset ? '' : `${s.agentAnswer[requestId] ?? ''}${delta}`
+    }
+  }))
+}
+
 function dropSteps(requestId: string): void {
   useAssistantStore.setState((s) => {
-    if (s.agentSteps[requestId] === undefined) return {}
+    if (s.agentSteps[requestId] === undefined && s.agentAnswer[requestId] === undefined) return {}
     const agentSteps = { ...s.agentSteps }
     delete agentSteps[requestId]
-    return { agentSteps }
+    const agentAnswer = { ...s.agentAnswer }
+    delete agentAnswer[requestId]
+    return { agentSteps, agentAnswer }
   })
+}
+
+/** The prose being drafted for change `changeId` so far; null drops it. */
+function setDraft(changeId: string, text: string | null): void {
+  useAssistantStore.setState((s) => {
+    const drafts = { ...s.drafts }
+    if (text === null) delete drafts[changeId]
+    else drafts[changeId] = text
+    return { drafts }
+  })
+}
+
+/** The stored conversations as a reload finds them: no draft is still in flight or showing. */
+function settledConversations(value: Conversations): Conversations {
+  return {
+    ...value,
+    items: value.items.map((conversation) => ({
+      ...conversation,
+      messages: conversation.messages.map((m) =>
+        m.agent === null
+          ? m
+          : { ...m, agent: { ...m.agent, changes: m.agent.changes.map(settledAfterReload) } }
+      )
+    }))
+  }
+}
+
+/** An edit whose prose the app drafts first (2026-10-07). */
+function isIntent(edit: AgentEdit): boolean {
+  return isDraftIntent(edit) || isRewriteIntent(edit)
 }
 
 /** Whether `undoChange` can still take this change back (its undo lives in memory). */
@@ -426,6 +509,8 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   cached: {},
   agentSteps: {},
   changing: {},
+  agentAnswer: {},
+  drafts: {},
   attachment: null,
 
   attach(text) {
@@ -447,11 +532,12 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   async load() {
     unregister ??= registerPendingSave(flush)
     unsubscribeSteps ??= ipc().on('ai:agentStep', onAgentStep)
+    unsubscribeAnswer ??= ipc().on('ai:agentDelta', onAgentDelta)
     const mine = ++generation
     const value = await ipc().invoke('conversations:get', undefined)
     if (mine !== generation) return
     // A fresh project gets an in-memory conversation to write in; it is persisted with its first change.
-    set({ conversations: withOne(value) })
+    set({ conversations: withOne(settledConversations(value)) })
   },
 
   clear() {
@@ -462,13 +548,20 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     unregister = null
     unsubscribeSteps?.()
     unsubscribeSteps = null
+    unsubscribeAnswer?.()
+    unsubscribeAnswer = null
     undoers.clear()
+    writing.clear()
+    skipped.clear()
+    resetLandings()
     set({
       conversations: null,
       pending: {},
       cached: {},
       agentSteps: {},
       changing: {},
+      agentAnswer: {},
+      drafts: {},
       attachment: null
     })
   },
@@ -601,11 +694,22 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   async applyChange(messageId, changeId) {
     const found = findChange(messageId, changeId)
     if (found?.change.status !== 'pending' || get().changing[changeId]) return
+    // 2026-10-07: prose the app drafts first; Apply on one asks for it (an insertion lands in
+    // the editor as ghost text and waits for Tab there).
+    if (isIntent(found.change.edit)) {
+      await writeIntent(messageId, changeId, false)
+      return
+    }
+    const drafted = found.change.proposalId
     setChanging(changeId, true)
     try {
-      const undo = await applyAgentEdit(found.change.edit, found.message.proposalId ?? '')
+      const undo = await applyAgentEdit(
+        found.change.edit,
+        drafted ?? found.message.proposalId ?? ''
+      )
       if (undo !== null) undoers.set(changeId, undo)
       patchChange(messageId, changeId, { status: 'applied', error: null })
+      if (drafted !== null) void proposalStore.settle(drafted, 'accepted', null)
     } catch (err) {
       patchChange(messageId, changeId, { status: 'failed', error: describeError(err) })
     } finally {
@@ -625,9 +729,28 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
 
   skipChange(messageId, changeId) {
     const found = findChange(messageId, changeId)
-    if (found?.change.status !== 'pending' || get().changing[changeId]) return
+    if (found === null || get().changing[changeId]) return
+    if (found.change.status === 'shown') {
+      // Its landing settles the turn once the suggestion has left the editor.
+      dismissLanding(changeId)
+      return
+    }
+    if (found.change.status === 'writing') {
+      const requestId = writing.get(changeId)
+      skipped.add(changeId)
+      if (requestId !== undefined) void useAiActivityStore.getState().cancel(requestId)
+      return
+    }
+    if (found.change.status !== 'pending') return
     patchChange(messageId, changeId, { status: 'skipped' })
+    if (found.change.proposalId !== null) {
+      void proposalStore.settle(found.change.proposalId, 'rejected', null)
+    }
     settleChanges(messageId)
+  },
+
+  acceptChange(_messageId, changeId) {
+    acceptLanding(changeId)
   },
 
   async undoChange(messageId, changeId) {
@@ -956,7 +1079,9 @@ async function runAgentTurn(
     edit: change.edit,
     status: 'pending',
     violation: change.violation,
-    error: null
+    error: null,
+    proposalId: null,
+    notice: null
   }))
   const messageId =
     useAssistantStore
@@ -976,11 +1101,116 @@ async function runAgentTurn(
     },
     result.cached
   )
-  if (messageId === null || !autoApply) return
-  const store = useAssistantStore.getState()
-  for (const change of changes) {
-    if (isDeletion(change.edit) || change.violation !== null) continue
-    await store.applyChange(messageId, change.id)
+  if (messageId === null) return
+  if (autoApply) {
+    const store = useAssistantStore.getState()
+    for (const change of changes) {
+      if (isDeletion(change.edit) || change.violation !== null || isIntent(change.edit)) continue
+      await store.applyChange(messageId, change.id)
+    }
+  }
+  // 2026-10-07: the prose of insertions and rewrites is drafted after the answer, one at a
+  // time, and the turn is not held for it: an insertion in Ask waits for the author's Tab.
+  void writeIntents(messageId, autoApply)
+}
+
+/** Drafts every intent of turn `messageId` still waiting, in order, each after the last settled. */
+async function writeIntents(messageId: string, autoApply: boolean): Promise<void> {
+  const mine = generation
+  const ids = (findMessage(messageId)?.agent?.changes ?? [])
+    .filter((change) => change.status === 'pending' && isIntent(change.edit))
+    .map((change) => change.id)
+  for (const changeId of ids) {
+    if (mine !== generation) return
+    await writeIntent(messageId, changeId, autoApply)
+  }
+}
+
+/**
+ * Drafts the prose of one intent (2026-10-07). An insertion lands in its scene as ghost text at
+ * its anchor (`landDraft`): the card mirrors it (`writing`, then `shown`), Tab or the card's
+ * Accept applies it, Escape or Dismiss skips it, and with `autoApply` it is accepted once the
+ * draft is in unless the voice check flagged it. A rewrite gets its replacement drafted into the
+ * card (`draftReplacement`) and then waits for Apply like any replacement, or is applied at once
+ * with `autoApply` unless flagged.
+ */
+async function writeIntent(messageId: string, changeId: string, autoApply: boolean): Promise<void> {
+  const found = findChange(messageId, changeId)
+  if (found?.change.status !== 'pending') return
+  const { edit } = found.change
+  const requestId = nextId('d')
+  writing.set(changeId, requestId)
+  patchChange(messageId, changeId, { status: 'writing', error: null })
+  try {
+    if (edit.kind === 'insert') {
+      const outcome = await landDraft(
+        changeId,
+        edit,
+        { requestId, autoAccept: autoApply },
+        {
+          progress: (status, text) => {
+            setDraft(changeId, text)
+            if (status === 'shown') patchChange(messageId, changeId, { status: 'shown' })
+          }
+        }
+      )
+      if (outcome.status === 'failed') {
+        patchChange(
+          messageId,
+          changeId,
+          skipped.has(changeId) || outcome.error === null
+            ? { status: 'skipped', error: null }
+            : { status: 'failed', error: outcome.error }
+        )
+      } else if (outcome.status === 'rejected') {
+        patchChange(messageId, changeId, { status: 'skipped', notice: outcome.notice })
+      } else {
+        const text = outcome.text
+        undoers.set(changeId, async () => removeInsertedProse(await openEditor(edit.nodeId), text))
+        patchChange(messageId, changeId, {
+          status: 'applied',
+          error: null,
+          edit: { ...edit, text },
+          proposalId: outcome.proposalId,
+          notice: outcome.notice
+        })
+      }
+      settleChanges(messageId)
+      return
+    }
+    if (edit.kind !== 'text') return
+    const result = await draftReplacement(edit, requestId, (text) => setDraft(changeId, text))
+    if (!result.ok) {
+      const error = 'error' in result ? result.error : `${result.message} ${result.nextStep}`.trim()
+      const stopped = skipped.has(changeId) || ('code' in result && result.code === 'CANCELLED')
+      patchChange(
+        messageId,
+        changeId,
+        stopped ? { status: 'skipped', error: null } : { status: 'failed', error }
+      )
+      settleChanges(messageId)
+      return
+    }
+    if (skipped.has(changeId)) {
+      void proposalStore.settle(result.proposalId, 'rejected', null)
+      patchChange(messageId, changeId, { status: 'skipped', error: null })
+      settleChanges(messageId)
+      return
+    }
+    const violation = result.flagged ? result.violation : null
+    patchChange(messageId, changeId, {
+      status: 'pending',
+      edit: { ...edit, replace: result.text },
+      proposalId: result.proposalId,
+      violation
+    })
+    if (autoApply && violation === null) {
+      await useAssistantStore.getState().applyChange(messageId, changeId)
+    }
+  } finally {
+    writing.delete(changeId)
+    skipped.delete(changeId)
+    setDraft(changeId, null)
   }
 }
 
@@ -1006,7 +1236,9 @@ function findChange(
 function patchChange(
   messageId: string,
   changeId: string,
-  patch: Partial<Pick<AgentChange, 'status' | 'error'>>
+  patch: Partial<
+    Pick<AgentChange, 'status' | 'error' | 'edit' | 'proposalId' | 'violation' | 'notice'>
+  >
 ): void {
   const value = useAssistantStore.getState().conversations
   if (value === null) return

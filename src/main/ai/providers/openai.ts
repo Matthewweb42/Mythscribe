@@ -5,7 +5,7 @@ import OpenAI, {
   AuthenticationError,
   RateLimitError
 } from 'openai'
-import { DEFAULT_MODELS, type AiProviderId, type Tier } from '@shared/ai'
+import { DEFAULT_MODELS, reasoningParam, type AiProviderId, type Tier } from '@shared/ai'
 import {
   AiCancelledError,
   AiFallbackError,
@@ -46,6 +46,11 @@ export interface OpenAiProviderOptions {
    * (its `/models` answers without a key, so it would not test one).
    */
   openRouter?: boolean
+}
+
+/** The request body: Chat Completions plus OpenRouter's `reasoning` parameter when one is sent. */
+type CreateParams = OpenAI.ChatCompletionCreateParamsNonStreaming & {
+  reasoning?: ReturnType<typeof reasoningParam>
 }
 
 /** OpenRouter's optional attribution headers: the app's site and name on its dashboard. */
@@ -94,15 +99,23 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
     mapOpenAiError(err, label, options.openRouter ? OPENROUTER_NOT_FOUND : undefined)
   const compatible = options.baseURL !== undefined
 
-  const params = (request: CompletionRequest): OpenAI.ChatCompletionCreateParamsNonStreaming => ({
-    model: resolveModel(request.tier),
-    messages: request.messages,
-    ...(compatible
-      ? { max_tokens: request.maxTokens }
-      : { max_completion_tokens: request.maxTokens }),
-    ...(request.json ? { response_format: { type: 'json_object' as const } } : {}),
-    ...(request.temperature === undefined ? {} : { temperature: request.temperature })
-  })
+  const params = (request: CompletionRequest): CreateParams => {
+    const base: OpenAI.ChatCompletionCreateParamsNonStreaming = {
+      model: resolveModel(request.tier),
+      messages: request.messages,
+      ...(compatible
+        ? { max_tokens: request.maxTokens }
+        : { max_completion_tokens: request.maxTokens }),
+      ...(request.json ? { response_format: { type: 'json_object' as const } } : {}),
+      ...(request.temperature === undefined ? {} : { temperature: request.temperature })
+    }
+    // 2026-10-07: OpenRouter's reasoning control; `default` (and every other server) sends nothing.
+    const reasoning =
+      options.openRouter && request.reasoning !== undefined
+        ? reasoningParam(request.reasoning)
+        : undefined
+    return reasoning === undefined ? base : { ...base, reasoning }
+  }
 
   return {
     id: options.id ?? 'openai',

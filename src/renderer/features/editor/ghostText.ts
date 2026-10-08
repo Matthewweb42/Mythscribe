@@ -26,6 +26,13 @@ export interface GhostState {
   proposalId: string | null
   /** Characters accepted through Tab or Shift+Tab so far: the `accepted` baseline the mark carries (F-14.6). */
   acceptedChars: number
+  /**
+   * 2026-10-07: a suggestion the chat placed (an agent insertion), keyed by its landing. It is
+   * pinned at its anchor rather than the caret: moving the caret, editing elsewhere, or leaving
+   * the editor keeps it (the author is usually in the chat box when it lands); Tab, Shift+Tab,
+   * and Escape still act on it, and the chat's card can settle it. Null for VibeWrite's own.
+   */
+  pin: string | null
 }
 
 /**
@@ -38,17 +45,38 @@ export type GhostSettleStatus = Extract<SettledStatus, 'accepted' | 'acceptedPar
 /** Reports one shown suggestion's settlement; `consumed` is the prefix of `full` that entered the manuscript. */
 export type GhostSettleHandler = (status: GhostSettleStatus, consumed: string) => void
 
+/** How one suggestion left the screen, with what it was: the listeners' view (2026-10-07). */
+export interface GhostExit {
+  status: GhostSettleStatus
+  consumed: string
+  /** The suggestion's pin (`GhostState.pin`); null for VibeWrite's own. */
+  pin: string | null
+}
+
 /**
  * The extension's per-editor storage: the settlement hook, set by the ghost-text controller
- * (it knows which proposal the suggestion belongs to) and null while nobody is listening.
+ * (it knows which proposal the suggestion belongs to) and null while nobody is listening; and
+ * (2026-10-07) every other listener, such as a chat insertion waiting for its pinned
+ * suggestion to be accepted or dismissed. Each hears every exit once and picks its own by pin.
  */
 export interface GhostTextStorage {
   onSettle: GhostSettleHandler | null
+  listeners: Set<(exit: GhostExit) => void>
 }
 
-interface GhostExit {
-  status: GhostSettleStatus
-  consumed: string
+/** Where `setGhost` puts a suggestion other than at the caret, and the pin that keeps it there. */
+export interface GhostPlacement {
+  /** A document position; the caret when absent. */
+  at?: number
+  /** Pins the suggestion (`GhostState.pin`). */
+  pin?: string | null
+}
+
+/** What `streamGhost` may change besides the text, once the draft has finished. */
+export interface GhostUpdate {
+  flagged?: boolean
+  violation?: string | null
+  proposalId?: string | null
 }
 
 /**
@@ -70,8 +98,11 @@ type GhostMeta =
       flagged: boolean
       violation: string | null
       proposalId: string | null
+      at: number | null
+      pin: string | null
     }
   | { type: 'advance'; text: string; from: number; acceptedChars: number }
+  | { type: 'stream'; pin: string; full: string; update: GhostUpdate }
   | { type: 'accept' }
   | { type: 'clear' }
 
@@ -94,8 +125,15 @@ declare module '@tiptap/core' {
         text: string,
         flagged?: boolean,
         violation?: string | null,
-        proposalId?: string | null
+        proposalId?: string | null,
+        placement?: GhostPlacement
       ) => ReturnType
+      /**
+       * 2026-10-07: the pinned suggestion `pin` grows to `full` as its draft streams in (what the
+       * author already took with Shift+Tab stays taken), and takes the draft's final flag and
+       * proposal; false when that suggestion is no longer showing.
+       */
+      streamGhost: (pin: string, full: string, update?: GhostUpdate) => ReturnType
       /** Drop the suggestion without inserting anything; false when none is showing. */
       clearGhost: () => ReturnType
       /** Insert the whole remaining suggestion as plain text with the caret's marks (Tab). */
@@ -130,7 +168,7 @@ function exitOf(ghost: GhostState, restInserted: boolean): GhostExit {
       : consumed.length > 0
         ? 'acceptedPart'
         : 'rejected'
-  return { status, consumed }
+  return { status, consumed, pin: ghost.pin }
 }
 
 const ended = (ghost: GhostState, restInserted: boolean): GhostPluginState => ({
@@ -144,17 +182,38 @@ function applyMeta(tr: Transaction, meta: GhostMeta, ghost: GhostState | null): 
       // A suggestion replaced while showing ended without the rest: settle it on its own.
       const exit = ghost === null ? null : exitOf(ghost, false)
       if (!meta.text) return { ghost: null, exit }
+      const from =
+        meta.at === null ? tr.selection.from : Math.max(0, Math.min(meta.at, tr.doc.content.size))
       return {
         ghost: {
           text: meta.text,
           full: meta.text,
-          from: tr.selection.from,
+          from,
           flagged: meta.flagged,
           violation: meta.violation,
           proposalId: meta.proposalId,
-          acceptedChars: 0
+          acceptedChars: 0,
+          pin: meta.pin
         },
         exit
+      }
+    }
+    case 'stream': {
+      if (ghost?.pin !== meta.pin || ghost === null) return { ghost, exit: null }
+      // What the author already took (Shift+Tab) stays taken; the rest is the new draft's.
+      const taken = ghost.full.length - ghost.text.length
+      const full = meta.full.length > taken ? meta.full : ghost.full
+      return {
+        ghost: {
+          ...ghost,
+          full,
+          text: full.slice(taken),
+          flagged: meta.update.flagged ?? ghost.flagged,
+          violation: meta.update.violation === undefined ? ghost.violation : meta.update.violation,
+          proposalId:
+            meta.update.proposalId === undefined ? ghost.proposalId : meta.update.proposalId
+        },
+        exit: null
       }
     }
     case 'advance':
@@ -196,6 +255,13 @@ function apply(tr: Transaction, value: GhostPluginState): GhostPluginState {
     if (tr.steps.every((step) => step instanceof AddMarkStep || step instanceof RemoveMarkStep)) {
       return value.exit === null ? value : { ghost, exit: null }
     }
+    if (ghost.pin !== null) {
+      // 2026-10-07: a pinned suggestion follows its anchor through edits elsewhere and ends
+      // only when the text it hangs on is deleted.
+      const mapped = tr.mapping.mapResult(ghost.from, -1)
+      if (mapped.deleted) return ended(ghost, false)
+      return { ghost: { ...ghost, from: mapped.pos }, exit: null }
+    }
     if (!tr.selection.empty) return ended(ghost, false)
     // Map the anchor to stay before text inserted exactly there (assoc -1), so what was typed
     // at it lies between the anchor and the caret.
@@ -207,7 +273,11 @@ function apply(tr: Transaction, value: GhostPluginState): GhostPluginState {
     const rest = ghost.text.slice(typed.length)
     return rest ? { ghost: { ...ghost, text: rest, from: caret }, exit: null } : ended(ghost, true)
   }
-  if (tr.selectionSet && (!tr.selection.empty || tr.selection.from !== ghost.from)) {
+  if (
+    ghost.pin === null &&
+    tr.selectionSet &&
+    (!tr.selection.empty || tr.selection.from !== ghost.from)
+  ) {
     return ended(ghost, false)
   }
   return value.exit === null ? value : { ghost, exit: null }
@@ -217,7 +287,16 @@ function renderGhost(ghost: GhostState): HTMLElement {
   const span = document.createElement('span')
   span.className = GHOST_TEXT_CLASS
   span.setAttribute('aria-hidden', 'true')
-  span.textContent = ghost.text
+  // Line breaks as elements (2026-10-07): a chat insertion that opens a new paragraph starts with
+  // a blank line, which the widget at the end of a paragraph showed as a space. The newline
+  // stays in the text (so the widget reads as the suggestion) and collapses before its break.
+  ghost.text.split('\n').forEach((line, index) => {
+    if (index > 0) {
+      span.appendChild(document.createTextNode('\n'))
+      span.appendChild(document.createElement('br'))
+    }
+    if (line) span.appendChild(document.createTextNode(line))
+  })
   span.dataset.flagged = ghost.flagged ? 'true' : 'false'
   if (ghost.flagged) {
     const flag = document.createElement('span')
@@ -270,23 +349,44 @@ function insertAccepted(tr: Transaction, ghost: GhostState, text: string): numbe
  * Every shown suggestion is a proposal (F-14.5): whichever path takes it off the screen (an
  * accept, Escape, blur, a composition, a mismatching edit, a moved caret, a replacement, or
  * the editor being torn down) reports its settlement once through `storage.onSettle`.
+ *
+ * 2026-10-07: the chat's insertions use the same widget, pinned (`GhostState.pin`): placed at an
+ * anchor rather than the caret, grown as the draft streams (`streamGhost`), kept through caret
+ * moves, edits elsewhere, and blur, and reported to `storage.listeners` instead of `onSettle`.
  */
 export const GhostText = Extension.create<Record<string, never>, GhostTextStorage>({
   name: 'ghostText',
 
   addStorage() {
-    return { onSettle: null }
+    return { onSettle: null, listeners: new Set() }
   },
 
   addCommands() {
     return {
       setGhost:
-        (text, flagged = false, violation = null, proposalId = null) =>
+        (text, flagged = false, violation = null, proposalId = null, placement = {}) =>
         ({ tr, dispatch }) => {
           if (!text) return false
           if (dispatch) {
-            const meta: GhostMeta = { type: 'set', text, flagged, violation, proposalId }
+            const meta: GhostMeta = {
+              type: 'set',
+              text,
+              flagged,
+              violation,
+              proposalId,
+              at: placement.at ?? null,
+              pin: placement.pin ?? null
+            }
             tr.setMeta(GHOST_TEXT_KEY, meta)
+          }
+          return true
+        },
+      streamGhost:
+        (pin, full, update = {}) =>
+        ({ state, tr, dispatch }) => {
+          if (ghostOf(state)?.pin !== pin || !full) return false
+          if (dispatch) {
+            tr.setMeta(GHOST_TEXT_KEY, { type: 'stream', pin, full, update } satisfies GhostMeta)
           }
           return true
         },
@@ -347,10 +447,14 @@ export const GhostText = Extension.create<Record<string, never>, GhostTextStorag
   addProseMirrorPlugins() {
     const storage = this.storage
     const report = (exit: GhostExit): void => {
-      storage.onSettle?.(exit.status, exit.consumed)
+      // VibeWrite's controller settles its own suggestions; a pinned one belongs to its listener.
+      if (exit.pin === null) storage.onSettle?.(exit.status, exit.consumed)
+      for (const listener of [...storage.listeners]) listener(exit)
     }
+    // Leaving the editor or composing drops VibeWrite's suggestion, never a pinned one.
     const clear = (view: { state: EditorState; dispatch: (tr: Transaction) => void }): false => {
-      if (ghostOf(view.state) !== null) {
+      const ghost = ghostOf(view.state)
+      if (ghost !== null && ghost.pin === null) {
         view.dispatch(view.state.tr.setMeta(GHOST_TEXT_KEY, { type: 'clear' } satisfies GhostMeta))
       }
       return false

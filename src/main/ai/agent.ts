@@ -2,6 +2,7 @@ import { estimateTokens, inputBudget } from '@shared/ai'
 import {
   AGENT_ANSWER_MAX,
   AGENT_COST_CAP_USD,
+  AGENT_CUT_OFF_MESSAGE,
   AGENT_MAX_CITATIONS,
   AGENT_MAX_EDITS,
   AGENT_MAX_STEPS,
@@ -25,7 +26,6 @@ import { getSummary } from '../document/summaryStore'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, documentText, type VoiceProfile } from '../voice/profile'
-import { voiceBlock } from '../voice/voiceBlock'
 import {
   loadAgentProject,
   nodeByRef,
@@ -39,16 +39,15 @@ import { headTruncate } from './context/chatContext'
 import { notesText } from './context/scenePanel'
 import { assertFeatureAllowed } from './dial'
 import { cancelInflight, registerInflight, releaseInflight } from './inflight'
+import { renderAgentFocus, type AgentTranscriptStep } from './prompts/agent.v1'
 import {
-  buildAgentPrompt,
-  renderAgentFocus,
-  type AgentTranscriptStep,
-  type BuildAgentPromptInput,
-  type BuiltAgentPrompt
-} from './prompts/agent.v1'
+  buildAgentPromptV2,
+  type BuildAgentPromptV2Input,
+  type BuiltAgentPromptV2
+} from './prompts/agent.v2'
 import type { ChatTurn } from './prompts/chat.v1'
 import { AiCancelledError, type CompletionUsage } from './providers/types'
-import { runAiRequest, sha256, type AiRequestDeps } from './request'
+import { runAiStream, sha256, type AiRequestDeps, type AiRequestResult } from './request'
 
 export interface AgentInput {
   /** The open document, or null with none open. */
@@ -85,6 +84,18 @@ export interface AgentResult {
   promptVersion: string
 }
 
+/**
+ * What a run reports while it goes, beside its lookups (2026-10-07): the answer as it streams
+ * (`answer`, each new piece of the reply's `answer` text), `reset` when what streamed so far is
+ * void (the step was cut off and is asked again), and `note` for the developer tools' AI
+ * inspector (the step's request id and what happened to its reply).
+ */
+export interface AgentHooks {
+  answer?: (delta: string) => void
+  reset?: () => void
+  note?: (requestId: string, note: string) => void
+}
+
 /** The answer when the model was still looking things up after the last allowed step. */
 export const AGENT_OUT_OF_STEPS =
   'I ran out of lookups before I could answer. Ask again, a little more narrowly.'
@@ -96,15 +107,35 @@ export function agentStepRequestId(requestId: string, n: number): string {
   return `${requestId}:step${n}`
 }
 
+/** The request id of the one retry of step `n` (2026-10-07). */
+export function agentRetryRequestId(requestId: string, n: number): string {
+  return `${requestId}:step${n}:retry`
+}
+
 /** One parsed reply: a tool call, or the answer with its raw citations and edits. */
 export type AgentReply =
   | { kind: 'tool'; tool: unknown; args: Record<string, unknown> }
   | { kind: 'answer'; answer: string; found: boolean; citations: unknown[]; edits: unknown[] }
 
+/**
+ * A reply that is not usable (2026-10-07): `cutOff` when the output cap ended it, `unreadable`
+ * when it set out as JSON (or came back empty) and does not parse. Never shown to the author.
+ */
+export interface BrokenReply {
+  kind: 'broken'
+  reason: 'cutOff' | 'unreadable'
+}
+
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
+
+const unfence = (text: string): string =>
+  text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
 
 /**
  * The model's reply, leniently: a fenced or bare JSON object with `tool` is a call, one with
@@ -112,13 +143,9 @@ const asRecord = (value: unknown): Record<string, unknown> =>
  * so a model that forgets the protocol still answers the author.
  */
 export function parseAgentReply(text: string): AgentReply {
-  const body = text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '')
   let json: unknown
   try {
-    json = JSON.parse(body)
+    json = JSON.parse(unfence(text))
   } catch {
     return { kind: 'answer', answer: text.trim(), found: true, citations: [], edits: [] }
   }
@@ -136,18 +163,110 @@ export function parseAgentReply(text: string): AgentReply {
 }
 
 /**
+ * `parseAgentReply` with the failures told apart (2026-10-07: a reply cut off mid-JSON used to
+ * reach the chat raw). A reply that does not parse is broken when the output cap ended it, when
+ * it is empty, or when it set out as JSON (a brace, a fence, a protocol key); only prose that
+ * never tried to be JSON is still the plain answer.
+ */
+export function readAgentReply(
+  text: string,
+  finishReason: string | null
+): AgentReply | BrokenReply {
+  const body = unfence(text)
+  let parses = true
+  try {
+    JSON.parse(body)
+  } catch {
+    parses = false
+  }
+  if (!parses) {
+    if (finishReason === 'length') return { kind: 'broken', reason: 'cutOff' }
+    const jsonish =
+      body === '' ||
+      /^[{[]/.test(body) ||
+      text.trim().startsWith('```') ||
+      /"(answer|tool)"\s*:/.test(body)
+    if (jsonish) return { kind: 'broken', reason: 'unreadable' }
+  }
+  return parseAgentReply(text)
+}
+
+/**
+ * Pulls the `answer` string out of a JSON reply while it streams (2026-10-07), so the chat shows
+ * the first words as they arrive: once `"answer": "` has come, every further character of the
+ * string, unescaped, is handed back by `feed`; nothing before it, and nothing after its closing
+ * quote. An escape split across two pieces waits for the rest.
+ */
+export class AnswerStream {
+  private buffer = ''
+  private start = -1
+  private read = 0
+  private done = false
+
+  feed(delta: string): string {
+    if (this.done) return ''
+    this.buffer += delta
+    if (this.start < 0) {
+      const opening = /"answer"\s*:\s*"/.exec(this.buffer)
+      if (opening === null) return ''
+      this.start = opening.index + opening[0].length
+      this.read = this.start
+    }
+    let out = ''
+    let i = this.read
+    while (i < this.buffer.length) {
+      const ch = this.buffer[i] ?? ''
+      if (ch === '"') {
+        this.done = true
+        i++
+        break
+      }
+      if (ch !== '\\') {
+        out += ch
+        i++
+        continue
+      }
+      const next = this.buffer[i + 1]
+      if (next === undefined) break
+      if (next === 'u') {
+        const hex = this.buffer.slice(i + 2, i + 6)
+        if (hex.length < 4) break
+        out += String.fromCharCode(Number.parseInt(hex, 16) || 0x3f)
+        i += 6
+        continue
+      }
+      out += ESCAPES[next] ?? next
+      i += 2
+    }
+    this.read = i
+    return out
+  }
+}
+
+const ESCAPES: Record<string, string> = { n: '\n', t: '\t', r: '', b: '', f: '', '/': '/' }
+
+/**
  * The chat agent (F-5.22): research, then answer. The gate first (`agent`, which the one switch
  * allows at Ask and Auto). The open document goes in every step (title, synopsis, notes head,
  * stored summary, the caret window and the selection the renderer sends); everything else the
  * model reads only through the tools, one step at a time, each step shown live through `onStep`.
- * Every step is one strong-tier JSON request through `runAiRequest` (a ledger row each); before a
- * step goes, the oldest tool results are dropped until it fits the input budget, then the oldest
- * history. After `AGENT_MAX_STEPS` lookups, or once the run has spent `AGENT_COST_CAP_USD`, the
- * model is told to answer at once. A write run carries the voice block, and every edit's prose
- * is checked against the profile (F-14.7): an off-voice edit is offered flagged, never applied
- * on its own. Citations are kept only when the cited document holds the quote (a cited sheet
- * only when the project has it; the chat lists it under "From your notes"); edits only when
- * `resolveAgentEdit` can place them. Nothing is written here.
+ * Every step is one strong-tier JSON request (`agent.v2`) through `runAiStream` (a ledger row
+ * each); the reply's `answer` text streams to `hooks.answer` as it arrives (2026-10-07). Before
+ * a step goes, the oldest tool results are dropped until it fits the input budget, then the
+ * oldest history. After `AGENT_MAX_STEPS` lookups, or once the run has spent
+ * `AGENT_COST_CAP_USD`, the model is told to answer at once.
+ *
+ * A reply that was cut off by its output cap or does not parse (`readAgentReply`) is never
+ * shown: the step is asked once more with a larger cap and a nudge to be brief (`hooks.reset`
+ * voids what streamed); if that fails too, the answer is `AGENT_CUT_OFF_MESSAGE` with the step's
+ * request id for the developer tools. Neither reply is cached (the request path's rule).
+ *
+ * Prose never travels in a step (agent.v2): an insertion or a rewrite comes back as an intent
+ * with a brief, which the renderer has drafted through `ai:agentDraft`. Prose the model wrote
+ * anyway is still voice-checked against the profile (F-14.7): an off-voice edit is offered
+ * flagged, never applied on its own. Citations are kept only when the cited document holds the
+ * quote (a cited sheet only when the project has it); edits only when `resolveAgentEdit` can
+ * place them. Nothing is written here.
  *
  * Cancel (F-5.10): the run registers `requestId` itself, and an abort of it stops the step in
  * flight (each step registers `agentStepRequestId`) and the loop before the next.
@@ -156,16 +275,15 @@ export async function runAgent(
   db: TreeDb,
   deps: AiRequestDeps,
   input: AgentInput,
-  onStep: (step: AgentStep) => void
+  onStep: (step: AgentStep) => void,
+  hooks: AgentHooks = {}
 ): Promise<AgentResult> {
   assertFeatureAllowed(getAiSettings(db), 'agent')
   const project = loadAgentProject(db)
   const active = input.nodeId === null ? undefined : project.byId.get(input.nodeId)
-  const activeText = active?.kind === 'document' ? documentText(active) : ''
   const pov = active ? parseStoredSceneMeta(active.sceneMeta).pov.trim() : ''
   const profile: VoiceProfile | null =
     input.access === 'write' ? buildVoiceProfile(db, { pov: pov || undefined }) : null
-  const voice = profile ? voiceBlock(profile, { text: activeText, pov: pov || null }) : null
   const focus = !active?.parentId
     ? null
     : renderAgentFocus({
@@ -191,23 +309,20 @@ export async function runAgent(
   const usage: CompletionUsage = { inputTokens: 0, outputTokens: 0 }
   let costUsd = 0
   let cached = true
-  let model: string
-  let promptVersion: string
-  try {
-    for (let n = 0; ; n++) {
-      if (outer?.signal.aborted === true) throw new AiCancelledError('The request was stopped.')
-      const final = n >= AGENT_MAX_STEPS || costUsd >= AGENT_COST_CAP_USD
-      const prompt = fitAgentPrompt({
-        access: input.access,
-        voice,
-        focus,
-        history: input.history,
-        message: input.message,
-        steps: transcript,
-        final
-      })
-      current = input.requestId === undefined ? null : agentStepRequestId(input.requestId, n)
-      const reply = await runAiRequest(deps, {
+  let model = ''
+  let promptVersion = ''
+  /** Sends one step (or its retry), streaming the answer text, and adds it to the run's totals. */
+  const send = async (
+    prompt: BuiltAgentPromptV2,
+    requestId: string | null
+  ): Promise<AiRequestResult> => {
+    if (outer?.signal.aborted === true) throw new AiCancelledError('The request was stopped.')
+    current = requestId
+    const answer = new AnswerStream()
+    let streamed = false
+    const reply = await runAiStream(
+      deps,
+      {
         feature: 'agent',
         tier: 'strong',
         messages: prompt.messages,
@@ -215,17 +330,69 @@ export async function runAgent(
         json: true,
         contextHash: sha256(JSON.stringify(prompt.messages)),
         promptVersion: prompt.version,
-        ...(current === null ? {} : { requestId: current })
-      })
-      current = null
-      usage.inputTokens += reply.usage.inputTokens
-      usage.outputTokens += reply.usage.outputTokens
-      costUsd += reply.costUsd
-      cached &&= reply.cached
-      model = reply.model
-      promptVersion = prompt.version
+        ...(requestId === null ? {} : { requestId })
+      },
+      (delta) => {
+        const piece = answer.feed(delta)
+        if (piece === '') return
+        streamed = true
+        hooks.answer?.(piece)
+      }
+    )
+    current = null
+    usage.inputTokens += reply.usage.inputTokens
+    usage.outputTokens += reply.usage.outputTokens
+    costUsd += reply.costUsd
+    cached &&= reply.cached
+    model = reply.model
+    promptVersion = prompt.version
+    if (streamed && readAgentReply(reply.text, reply.finishReason ?? null).kind === 'broken') {
+      hooks.reset?.()
+    }
+    return reply
+  }
 
-      const parsed = parseAgentReply(reply.text)
+  try {
+    for (let n = 0; ; n++) {
+      const final = n >= AGENT_MAX_STEPS || costUsd >= AGENT_COST_CAP_USD
+      const base: BuildAgentPromptV2Input = {
+        access: input.access,
+        voice: null,
+        focus,
+        history: input.history,
+        message: input.message,
+        steps: transcript,
+        final
+      }
+      const stepId = input.requestId === undefined ? null : agentStepRequestId(input.requestId, n)
+      const first = await send(fitAgentPrompt(base), stepId)
+      let reply = first
+      let parsed = readAgentReply(first.text, first.finishReason ?? null)
+      if (parsed.kind === 'broken') {
+        // 2026-10-07: asked once more, briefly and with room, before anything is shown.
+        if (stepId !== null) hooks.note?.(stepId, brokenNote(parsed.reason, first, true))
+        const retryId =
+          input.requestId === undefined ? null : agentRetryRequestId(input.requestId, n)
+        reply = await send(fitAgentPrompt({ ...base, retry: true }), retryId)
+        parsed = readAgentReply(reply.text, reply.finishReason ?? null)
+        if (parsed.kind === 'broken') {
+          if (retryId !== null) hooks.note?.(retryId, brokenNote(parsed.reason, reply, false))
+          const id = retryId ?? stepId
+          return {
+            answer:
+              id === null ? AGENT_CUT_OFF_MESSAGE : `${AGENT_CUT_OFF_MESSAGE} (Request ${id})`,
+            query: null,
+            changes: [],
+            dropped: 0,
+            steps,
+            usage,
+            costUsd,
+            cached: false,
+            model,
+            promptVersion
+          }
+        }
+      }
       if (parsed.kind === 'tool' && !final) {
         const outcome = runAgentTool(project, active?.id ?? null, parsed.tool, parsed.args)
         steps.push(outcome.step)
@@ -257,26 +424,51 @@ export async function runAgent(
   }
 }
 
+/** The developer tools' note on a step whose reply could not be used. */
+function brokenNote(
+  reason: BrokenReply['reason'],
+  reply: AiRequestResult,
+  retrying: boolean
+): string {
+  const what =
+    reason === 'cutOff'
+      ? `Reply cut off by the output cap (finish reason length, ${reply.usage.outputTokens} output tokens` +
+        `${reply.usage.reasoningTokens === undefined ? '' : `, ${reply.usage.reasoningTokens} reasoning`})`
+      : `Reply was not one JSON object (${reply.text.length} characters, finish reason ${reply.finishReason ?? 'not reported'})`
+  return `${what}; ${retrying ? 'not shown, asked again with a larger cap' : 'not shown; the chat says it was cut off'}`
+}
+
 /**
  * The prompt for one step within `inputBudget('agent')`, measured as `runAiRequest` measures:
  * the oldest tool results give way first (the call stays, so the model knows it looked), then
- * the oldest history turns. Whatever still does not fit is refused by the request path.
+ * the oldest history turns. Whatever still does not fit is refused by the request path. The
+ * builder is `agent.v2`'s; the eval harness passes `agent.v1`'s for that version's cases.
  */
-export function fitAgentPrompt(input: BuildAgentPromptInput): BuiltAgentPrompt {
+export function fitAgentPrompt<T extends { messages: { content: string }[] }>(
+  input: BuildAgentPromptV2Input,
+  build: (input: BuildAgentPromptV2Input) => T
+): T
+export function fitAgentPrompt(input: BuildAgentPromptV2Input): BuiltAgentPromptV2
+export function fitAgentPrompt(
+  input: BuildAgentPromptV2Input,
+  build: (input: BuildAgentPromptV2Input) => {
+    messages: { content: string }[]
+  } = buildAgentPromptV2
+): { messages: { content: string }[] } {
   const budget = inputBudget('agent')
-  const estimate = (built: BuiltAgentPrompt): number =>
+  const estimate = (built: { messages: { content: string }[] }): number =>
     estimateTokens(built.messages.map((m) => m.content).join('\n'))
   let steps = input.steps
   let history = input.history
-  let built = buildAgentPrompt({ ...input, steps, history })
+  let built = build({ ...input, steps, history })
   for (let i = 0; i < steps.length && estimate(built) > budget; i++) {
     if (steps[i]?.result === AGENT_DROPPED_RESULT) continue
     steps = steps.map((step, j) => (j === i ? { ...step, result: AGENT_DROPPED_RESULT } : step))
-    built = buildAgentPrompt({ ...input, steps, history })
+    built = build({ ...input, steps, history })
   }
   while (history.length > 0 && estimate(built) > budget) {
     history = history.slice(1)
-    built = buildAgentPrompt({ ...input, steps, history })
+    built = build({ ...input, steps, history })
   }
   return built
 }

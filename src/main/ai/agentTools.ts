@@ -1,5 +1,9 @@
 import {
+  AGENT_BRIEF_MAX,
   AGENT_EDIT_TEXT_MAX,
+  AGENT_WORDS_DEFAULT,
+  AGENT_WORDS_MAX,
+  AGENT_WORDS_MIN,
   AGENT_READ_CHARS,
   AGENT_RESULT_CHARS,
   AGENT_SEARCH_RESULTS,
@@ -302,6 +306,13 @@ export type ResolvedEdit = { edit: AgentEdit } | { error: string }
 const text = (value: unknown, max = AGENT_EDIT_TEXT_MAX): string =>
   typeof value === 'string' ? value.trim().slice(0, max) : ''
 
+/** The length a drafted insertion asks for: the model's number (or numeric string), clamped; the default without one. */
+export function draftWords(value: unknown): number {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isFinite(n) || n <= 0) return AGENT_WORDS_DEFAULT
+  return Math.min(AGENT_WORDS_MAX, Math.max(AGENT_WORDS_MIN, Math.round(n)))
+}
+
 /**
  * Turns one edit the model wrote into a typed `AgentEdit` against the project as it is now, or
  * says why not: an id that names nothing, a passage the document does not hold exactly once, a
@@ -331,14 +342,26 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
       const row = documentArg()
       if (typeof row === 'string') return { error: row }
       const find = text(edit.find)
+      // agent.v2: a brief without a replacement asks the app to draft one (2026-10-07); a
+      // replacement the model wrote anyway (or a cut, `"replace":""`) is taken as it is.
+      const brief = typeof edit.replace === 'string' ? '' : text(edit.brief, AGENT_BRIEF_MAX)
       const replace =
         typeof edit.replace === 'string' ? edit.replace.slice(0, AGENT_EDIT_TEXT_MAX) : ''
       if (!find) return { error: 'no "find"' }
       const problem = unique(row, find, 'the passage')
       if (problem) return { error: problem }
-      if (normalizeForMatch(find) === normalizeForMatch(replace)) return { error: 'no change' }
+      if (brief === '' && normalizeForMatch(find) === normalizeForMatch(replace)) {
+        return { error: 'no change' }
+      }
       return {
-        edit: { kind: 'text', nodeId: row.id, title: nameOf(row), find, replace: replace.trim() }
+        edit: {
+          kind: 'text',
+          nodeId: row.id,
+          title: nameOf(row),
+          find,
+          replace: replace.trim(),
+          brief
+        }
       }
     }
     case 'insert': {
@@ -346,12 +369,25 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
       if (typeof row === 'string') return { error: row }
       const after = text(edit.after)
       const body = text(edit.text)
-      if (!body) return { error: 'no "text"' }
-      if (after) {
+      const brief = body === '' ? text(edit.brief, AGENT_BRIEF_MAX) : ''
+      if (!body && !brief) return { error: 'no "brief"' }
+      // A drafted insertion keeps an "after" the scene does not hold once: the renderer places it
+      // at the caret instead and says so (2026-10-07). Prose the model wrote itself must fit.
+      if (after && brief === '') {
         const problem = unique(row, after, 'the "after" passage')
         if (problem) return { error: problem }
       }
-      return { edit: { kind: 'insert', nodeId: row.id, title: nameOf(row), after, text: body } }
+      return {
+        edit: {
+          kind: 'insert',
+          nodeId: row.id,
+          title: nameOf(row),
+          after,
+          text: body,
+          brief,
+          words: brief === '' ? 0 : draftWords(edit.words)
+        }
+      }
     }
     case 'synopsis': {
       const row = documentArg()

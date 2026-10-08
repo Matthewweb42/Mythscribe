@@ -26,6 +26,7 @@ const ROW: DevAiRequest = {
   outputTokens: 40,
   cachedTokens: null,
   reasoningTokens: 40,
+  reasoning: 'default',
   costUsd: 0.0001,
   finishReason: 'length',
   answerChars: 0,

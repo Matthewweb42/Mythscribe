@@ -10,6 +10,8 @@
  * messages are the author's manuscript.
  */
 
+import { reasoningParam, type ReasoningMode } from '../../src/shared/ai'
+
 export interface UpstreamMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
@@ -28,6 +30,11 @@ export interface UpstreamParams {
   maxTokens: number
   json?: boolean
   temperature?: number
+  /**
+   * 2026-10-07: the price-table entry's reasoning mode; only a gateway that takes OpenRouter's
+   * `reasoning` parameter sends it (`UpstreamOptions.reasoning`), and `default` sends nothing.
+   */
+  reasoning?: ReasoningMode
 }
 
 export interface UpstreamAnswer {
@@ -84,19 +91,26 @@ export interface UpstreamOptions {
   headers?: Record<string, string>
   /** Maps the price table's id to the gateway's (OpenAI direct drops the `openai/` prefix). */
   modelId?: (model: string) => string
+  /** 2026-10-07: the gateway takes OpenRouter's `reasoning` parameter (OpenRouter only). */
+  reasoning?: boolean
 }
 
 function body(
   params: UpstreamParams,
   stream: boolean,
-  options: Required<Pick<UpstreamOptions, 'maxTokensField' | 'modelId'>>
+  options: Required<Pick<UpstreamOptions, 'maxTokensField' | 'modelId' | 'reasoning'>>
 ): string {
+  const reasoning =
+    options.reasoning && params.reasoning !== undefined
+      ? reasoningParam(params.reasoning)
+      : undefined
   return JSON.stringify({
     model: options.modelId(params.model),
     messages: params.messages,
     [options.maxTokensField]: params.maxTokens,
     ...(params.json ? { response_format: { type: 'json_object' } } : {}),
     ...(params.temperature === undefined ? {} : { temperature: params.temperature }),
+    ...(reasoning === undefined ? {} : { reasoning }),
     ...(stream ? { stream: true, stream_options: { include_usage: true } } : {})
   })
 }
@@ -154,7 +168,8 @@ export function openAiUpstream(
   const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`
   const shape = {
     maxTokensField: options.maxTokensField ?? 'max_completion_tokens',
-    modelId: options.modelId ?? ((model: string) => model)
+    modelId: options.modelId ?? ((model: string) => model),
+    reasoning: options.reasoning ?? false
   }
 
   const send = async (
@@ -228,7 +243,8 @@ export function openRouterUpstream(
   return openAiUpstream(key, fetchImpl, {
     baseUrl: OPENROUTER_BASE_URL,
     maxTokensField: 'max_tokens',
-    headers: { 'HTTP-Referer': 'https://mythscribe.app', 'X-Title': 'MythScribe' }
+    headers: { 'HTTP-Referer': 'https://mythscribe.app', 'X-Title': 'MythScribe' },
+    reasoning: true
   })
 }
 

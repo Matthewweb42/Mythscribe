@@ -468,6 +468,26 @@ describe('OpenRouter (AI-BILLING-SPEC A2)', () => {
     expect(headers.get('x-title')).toBe('MythScribe')
   })
 
+  it('sends the reasoning mode as OpenRouter’s reasoning parameter, and nothing for default (2026-10-07)', async () => {
+    const { fetch, calls } = answering(() => json(200, completion))
+    const provider = openRouter(fetch)
+    await provider.complete({ ...request, reasoning: 'off' })
+    await provider.complete({ ...request, reasoning: 'low' })
+    await provider.complete({ ...request, reasoning: 'default' })
+    await provider.complete(request)
+    expect(bodyOf(calls[0]).reasoning).toEqual({ enabled: false })
+    expect(bodyOf(calls[1]).reasoning).toEqual({ effort: 'low' })
+    expect(bodyOf(calls[2])).not.toHaveProperty('reasoning')
+    expect(bodyOf(calls[3])).not.toHaveProperty('reasoning')
+    // OpenAI itself is never sent OpenRouter's parameter.
+    const direct = answering(() => json(200, completion))
+    await buildOpenAiProvider(KEY, { fetch: direct.fetch }).complete({
+      ...request,
+      reasoning: 'off'
+    })
+    expect(bodyOf(direct.calls[0])).not.toHaveProperty('reasoning')
+  })
+
   it('tests the key on GET /key and answers with the fast model', async () => {
     const { fetch, calls } = answering(() => json(200, { data: { label: 'k' } }))
     await expect(openRouter(fetch).testConnection()).resolves.toEqual({

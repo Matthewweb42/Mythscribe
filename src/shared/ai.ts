@@ -380,8 +380,10 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   voiceNotes: 400,
   // F-14.15: up to 40 changes or notes for one chunk as JSON, each a quote, a replacement, and a reason.
   editPass: 4_000,
-  // F-5.22: one step as JSON: a tool call, or the answer with citations and up to 8 edits.
-  agent: 1_500,
+  // F-5.22: one step as JSON: a tool call, or the answer with citations and up to 8 edits. A step
+  // asks `AGENT_STEP_MAX_TOKENS` (1,500); the cap is twice that so the one retry of a reply that
+  // was cut off can ask for more (2026-10-07).
+  agent: 3_000,
   // F-9.8: one chunk's people, places, and things as JSON, each with its fields and details.
   contextImport: 3_000
 }
@@ -457,6 +459,37 @@ export function inputBudget(feature: AiFeatureId): number {
   return FEATURE_INPUT_BUDGETS[feature] ?? DEFAULT_INPUT_BUDGET
 }
 
+/**
+ * How much a reasoning model may think before it answers (2026-10-07, "measure, then decide"):
+ * `default` sends nothing, so the model does what it does by default; `low` asks for little
+ * thinking; `off` asks for none. Sent to OpenRouter as its `reasoning` request parameter
+ * (`reasoningParam`); other providers ignore it. Every output cap budgets visible text only, which
+ * holds when reasoning is off; with reasoning on, thinking tokens count against the same cap.
+ */
+export const REASONING_MODES = ['off', 'low', 'default'] as const
+export const ReasoningMode = z.enum(REASONING_MODES)
+export type ReasoningMode = z.infer<typeof ReasoningMode>
+
+/** What Settings says for each reasoning mode. */
+export const REASONING_LABEL: Record<ReasoningMode, string> = {
+  off: 'Off',
+  low: 'Low',
+  default: "The model's default"
+}
+
+/**
+ * OpenRouter's `reasoning` request parameter for a mode (its unified reasoning control:
+ * `{ enabled: false }` turns thinking off on models that can skip it, `{ effort: 'low' }` asks
+ * for little); undefined for `default`, which sends nothing, so the request is unchanged.
+ */
+export function reasoningParam(
+  mode: ReasoningMode
+): { enabled: false } | { effort: 'low' } | undefined {
+  if (mode === 'off') return { enabled: false }
+  if (mode === 'low') return { effort: 'low' }
+  return undefined
+}
+
 /** USD per million tokens for one model; `priced: false` marks a model this table does not know. */
 export interface ModelPrice {
   inUsdPerM: number
@@ -464,6 +497,8 @@ export interface ModelPrice {
   /** The price of an input token the provider served from its prompt cache (AI-BILLING-SPEC R6). */
   cachedInUsdPerM?: number
   priced: boolean
+  /** The model's reasoning mode on an own key (2026-10-07); absent is `default`. */
+  reasoning?: ReasoningMode
 }
 
 /**
@@ -520,6 +555,14 @@ export const OPENROUTER_PRICING: Record<string, ModelPrice> = {
 }
 
 const UNPRICED: ModelPrice = { inUsdPerM: 0, outUsdPerM: 0, priced: false }
+
+/**
+ * The bundled reasoning mode of a model (its price-table entry's `reasoning`), `default` for a
+ * model the tables do not know or do not set. Settings › AI can override it per tier.
+ */
+export function bundledReasoning(model: string): ReasoningMode {
+  return (MODEL_PRICING[model] ?? OPENROUTER_PRICING[model])?.reasoning ?? 'default'
+}
 
 /**
  * The cost of `inTok` prompt and `outTok` completion tokens on `model`, of which `cachedInTok`

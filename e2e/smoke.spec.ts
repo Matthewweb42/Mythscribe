@@ -393,6 +393,15 @@ const AGENT_EDIT_MESSAGE = 'Make the opening line plainer.'
 const AGENT_EDIT_ANSWER = 'Here is a plainer line.'
 /** What the agent says with the insert a Write this direction asks for (2026-10-07). */
 const AGENT_INSERT_ANSWER = 'Here is the next beat.'
+/**
+ * 2026-10-07: a message the agent answers with an insertion after a sentence Scene 1 holds once
+ * (`insertAnchor`, recorded by the fake when it picks it); the app drafts the prose and lands it
+ * there as ghost text.
+ */
+const AGENT_INSERT_MESSAGE = 'Add the rain after the opening line.'
+const AGENT_INSERT_HERE_ANSWER = 'I will add the rain there.'
+/** The sentence the fake agent last anchored an insertion after. */
+let insertAnchor = ''
 /** The opening of `AGENT_EDIT_RULES`, which only a run with the edit tools (Ask, Auto) carries. */
 const AGENT_EDIT_RULES_OPENING = 'To change the project, add "edits"'
 /** What the edit puts in place of a sentence Scene 1 holds once. */
@@ -423,17 +432,17 @@ function chatAgentReply(messages: { role: string; content: string }[]): string {
   if (asked === SHEET_QUESTION) return SHEET_ANSWER
   const seen = [...messages.map((m) => m.content)].join('\n')
   const ref = /(n\d+) Chapter 1 › Scene 1\b/.exec(seen)?.[1] ?? 'n1'
-  // 2026-10-07: Write this sends a direction to the agent, which answers with one insert at the
-  // end of Scene 1 (what Author mode used to place as ghost text).
+  // 2026-10-07: Write this sends a direction to the agent, which answers with one insertion at
+  // the caret of Scene 1: a brief (agent.v2), whose prose the app drafts and lands as ghost text.
   if (asked.startsWith('Continue the scene in this direction:')) {
     return JSON.stringify({
       answer: AGENT_INSERT_ANSWER,
       found: true,
       citations: [],
-      edits: [{ edit: 'insert', id: ref, after: '', text: `${AGENT_FIRST}\n\n${AGENT_SECOND}` }]
+      edits: [{ edit: 'insert', id: ref, after: '', brief: 'She turns back.', words: 60 }]
     })
   }
-  if (asked === AGENT_EDIT_MESSAGE) {
+  if (asked === AGENT_EDIT_MESSAGE || asked === AGENT_INSERT_MESSAGE) {
     if (looked.length === 1) return JSON.stringify({ tool: 'read_scene', args: { id: ref } })
     const text = (looked.at(-1)?.content ?? '').split('\n').slice(2).join('\n')
     const find =
@@ -441,6 +450,16 @@ function chatAgentReply(messages: { role: string; content: string }[]): string {
         .split(/(?<=[.!?])\s+/)
         .map((sentence) => sentence.trim())
         .find((sentence) => sentence.length >= 15 && text.split(sentence).length === 2) ?? ''
+    // 2026-10-07: an insertion after a sentence the scene holds once, by brief.
+    if (asked === AGENT_INSERT_MESSAGE) {
+      insertAnchor = find
+      return JSON.stringify({
+        answer: AGENT_INSERT_HERE_ANSWER,
+        found: true,
+        citations: [],
+        edits: [{ edit: 'insert', id: ref, after: find, brief: 'The rain arrives.', words: 60 }]
+      })
+    }
     return JSON.stringify({
       answer: AGENT_EDIT_ANSWER,
       found: true,
@@ -652,10 +671,21 @@ function startFakeOpenAi(): Promise<string> {
             res.setHeader('Content-Type', 'text/event-stream')
             const chunk = (payload: object): string =>
               `data: ${JSON.stringify({ id: 'chatcmpl-fake', object: 'chat.completion.chunk', created: 0, model: 'gpt-5.4-mini', ...payload })}\n\n`
-            const answer = rewrite ? REWRITE_ANSWER : CHAT_ANSWER
-            const cut = rewrite
-              ? REWRITE_ANSWER.indexOf(' Rain')
-              : CHAT_ANSWER.indexOf(' ridge') + 6
+            // 2026-10-07: every chat agent step streams (its answer shows as it arrives), and so
+            // does the draft behind an agent insertion (the Author-mode prompt, `AGENT_SENTINEL`).
+            const answer = chatAgent
+              ? chatAgentReply(request.messages)
+              : agent
+                ? `${AGENT_FIRST}\n\n${AGENT_SECOND}`
+                : rewrite
+                  ? REWRITE_ANSWER
+                  : CHAT_ANSWER
+            const cut =
+              chatAgent || agent
+                ? Math.floor(answer.length / 2)
+                : rewrite
+                  ? REWRITE_ANSWER.indexOf(' Rain')
+                  : CHAT_ANSWER.indexOf(' ridge') + 6
             res.write(
               chunk({
                 choices: [
@@ -4426,21 +4456,28 @@ test('create, close, reopen a project on disk', async () => {
   await expect(turns).toHaveCount(7)
   const insertTurn = turns.nth(6)
   await expect(insertTurn).toContainText(AGENT_INSERT_ANSWER)
-  expect(openAiChatBodies.at(-1)?.messages[0]?.content).toContain(AGENT_EDIT_RULES_OPENING)
+  // The agent's last step, not the draft request that follows it (2026-10-07).
+  const lastAgentBody = [...openAiChatBodies]
+    .reverse()
+    .find((body) => body.messages[0]?.content.startsWith(CHAT_AGENT_SENTINEL))
+  expect(lastAgentBody?.messages[0]?.content).toContain(AGENT_EDIT_RULES_OPENING)
   expect(
-    openAiChatBodies
-      .at(-1)
-      ?.messages.some(
+    lastAgentBody?.messages.some(
         (m) =>
           m.content ===
           `Continue the scene in this direction: ${WHAT_NEXT_TITLES[0]}. She doubts the crossing and heads back to the camp.`
       )
   ).toBe(true)
+  // 2026-10-07: the insertion lands in the editor as ghost text (the draft streams in at the
+  // caret); the card mirrors it, and Tab in the editor accepts it.
   const insertCard = insertTurn.getByTestId('agent-change')
-  await expect(insertCard).toHaveAttribute('data-status', 'pending')
-  await expect(editor).not.toContainText(AGENT_SECOND)
-  await insertCard.getByTestId('agent-change-apply').click()
+  await expect(insertCard).toHaveAttribute('data-status', 'shown')
+  await expect(editor.locator('.ghost-text')).toContainText(AGENT_SECOND)
+  expect(await documentTextWithoutGhost()).not.toContain(AGENT_SECOND)
+  await editor.focus()
+  await page.keyboard.press('Tab')
   await expect(insertCard).toHaveAttribute('data-status', 'applied')
+  await expect(editor.locator('.ghost-text')).toHaveCount(0)
   await expect(editor).toContainText(AGENT_SECOND)
   await expect(editor.locator('.ai-origin', { hasText: AGENT_FIRST })).toHaveCount(1)
   await expect(page.getByTestId('status-ai')).toHaveText(/^[1-9]\d*% AI$/)
@@ -5199,6 +5236,72 @@ test('create, close, reopen a project on disk', async () => {
   await expect.poll(() => documentTextWithoutGhost()).toBe(sceneBefore)
   await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
   await expect.poll(async () => (await aiSettings()).chatMode).toBe('ask')
+
+  // 2026-10-07 (the author's report: chat insertions never reached the editor): the agent
+  // answers an insertion as a brief (agent.v2) and its answer streams into the turn; the app
+  // drafts the prose and it lands as ghost text right after the sentence the agent named (the
+  // fake picks one Scene 1 holds once), with the card mirroring it. Tab accepts it into the
+  // document, AI-origin marked; the card's Undo takes it out again. The same in focus mode,
+  // from the floating assistant.
+  await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
+  await expect(turns).toHaveCount(0)
+  const beforeInsert = await documentTextWithoutGhost()
+  await messageBox.fill(AGENT_INSERT_MESSAGE)
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(2)
+  const insertHereTurn = turns.nth(1)
+  await expect(insertHereTurn).toContainText(AGENT_INSERT_HERE_ANSWER)
+  const insertHereCard = insertHereTurn.getByTestId('agent-change')
+  await expect(insertHereCard).toHaveAttribute('data-status', 'shown')
+  expect(insertAnchor.length).toBeGreaterThan(0)
+  const ghostParagraph = editor.locator('p', { has: page.locator('.ghost-text') })
+  await expect(ghostParagraph).toHaveCount(1)
+  await expect(ghostParagraph).toContainText(insertAnchor)
+  await expect(editor.locator('.ghost-text')).toContainText(AGENT_FIRST)
+  await editor.focus()
+  await page.keyboard.press('Tab')
+  await expect(insertHereCard).toHaveAttribute('data-status', 'applied')
+  const afterInsert = await documentTextWithoutGhost()
+  expect(afterInsert).toContain(AGENT_SECOND)
+  expect(afterInsert.indexOf(insertAnchor)).toBeLessThan(afterInsert.indexOf(AGENT_FIRST))
+  await insertHereCard.getByTestId('agent-change-undo').click()
+  await expect(insertHereCard).toHaveAttribute('data-status', 'undone')
+  await expect.poll(() => documentTextWithoutGhost()).toBe(beforeInsert)
+  // Focus mode: the same editor, the assistant floating beside it.
+  await editor.click()
+  await page.keyboard.press('F11')
+  await expect.poll(isFullScreen).toBe(true)
+  const focusBar = page.getByTestId('focus-control-bar')
+  const focusSize = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  await page.mouse.move(focusSize.w / 2, focusSize.h - 8)
+  await expect(focusBar).toHaveAttribute('data-visible', 'true')
+  await focusBar.getByRole('button', { name: 'AI assistant' }).click()
+  const floatingAssistant = page.getByRole('dialog', { name: 'Assistant' })
+  await expect(floatingAssistant).toBeVisible()
+  const floatingTurns = floatingAssistant.locator('[data-testid="chat-turn"]')
+  const turnsBeforeFocus = await floatingTurns.count()
+  const floatingBox = floatingAssistant.getByRole('textbox', { name: 'Message' })
+  await floatingBox.fill(AGENT_INSERT_MESSAGE)
+  await floatingBox.press('Enter')
+  await expect(floatingTurns).toHaveCount(turnsBeforeFocus + 2)
+  const focusCard = floatingTurns.last().getByTestId('agent-change')
+  await expect(focusCard).toHaveAttribute('data-status', 'shown')
+  await expect(editor.locator('p', { has: page.locator('.ghost-text') })).toContainText(
+    insertAnchor
+  )
+  await editor.focus()
+  await page.keyboard.press('Tab')
+  await expect(focusCard).toHaveAttribute('data-status', 'applied')
+  await expect(editor).toContainText(AGENT_SECOND)
+  await focusCard.getByTestId('agent-change-undo').click()
+  await expect(focusCard).toHaveAttribute('data-status', 'undone')
+  await expect.poll(() => documentTextWithoutGhost()).toBe(beforeInsert)
+  await page.mouse.move(focusSize.w / 2, focusSize.h - 8)
+  await expect(focusBar).toHaveAttribute('data-visible', 'true')
+  await focusBar.getByRole('button', { name: 'AI assistant' }).click()
+  await focusBar.getByRole('button', { name: 'Exit focus mode' }).click()
+  await expect.poll(isFullScreen).toBe(false)
+  await expect(assistant).toBeVisible()
   // Back to the Query conversation the steps below continue.
   await assistant.getByRole('tab', { name: QUERY_QUESTION }).click()
   await expect(turns).toHaveCount(6)

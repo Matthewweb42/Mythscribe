@@ -1,4 +1,4 @@
-import type { AiErrorCode, AiFeatureId, AiProviderId, Tier } from '@shared/ai'
+import type { AiErrorCode, AiFeatureId, AiProviderId, ReasoningMode, Tier } from '@shared/ai'
 
 /**
  * The provider interface every adapter implements (PLAN.md §3, F-5.1). Feature code in main
@@ -44,6 +44,11 @@ export interface CompletionRequest {
    * it is sent with the request; the OpenAI adapter ignores it.
    */
   feature?: AiFeatureId
+  /**
+   * 2026-10-07: how much the model may think (`ReasoningMode`). The OpenRouter adapter sends it
+   * as OpenRouter's `reasoning` parameter; every other adapter ignores it. Absent is `default`.
+   */
+  reasoning?: ReasoningMode
 }
 
 /** `usage` is on every result so the ledger (F-5.14) can price it. */
@@ -121,6 +126,15 @@ export class AiNetworkError extends AiProviderError {
   readonly code = 'NETWORK' as const
 }
 export class AiFallbackError extends AiProviderError {
+  readonly code = 'PROVIDER' as const
+}
+/**
+ * 2026-10-07: the provider answered, but its output cap cut the answer off before anything
+ * usable came back (a reasoning model that spent the whole cap thinking and wrote nothing, or a
+ * JSON reply that stops mid-object). A failure the author is told about and the developer tools
+ * annotate, never an empty or raw answer; nothing of it was cached.
+ */
+export class AiCutOffError extends AiProviderError {
   readonly code = 'PROVIDER' as const
 }
 /** The request path refused before sending anything (F-5.14): over the feature budget or the daily cap. */

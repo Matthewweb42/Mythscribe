@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { estimateTokens, inputBudget, priceFor } from '@shared/ai'
-import { AGENT_MAX_STEPS, type AgentStep } from '@shared/agent'
+import { AGENT_CUT_OFF_MESSAGE, AGENT_MAX_STEPS, type AgentStep } from '@shared/agent'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { emptySceneMeta } from '@shared/sceneMeta'
 import type { TiptapNodeT } from '@shared/tiptap'
@@ -21,16 +21,19 @@ import { manuscriptDocuments } from '../voice/profile'
 import {
   AGENT_DROPPED_RESULT,
   AGENT_OUT_OF_STEPS,
+  AnswerStream,
   agentStepRequestId,
   fitAgentPrompt,
   parseAgentReply,
+  readAgentReply,
   runAgent,
   type AgentInput
 } from './agent'
 import { loadAgentProject, occurrencesOf, resolveAgentEdit, runAgentTool } from './agentTools'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
-import { AGENT_FINAL_TURN, AGENT_RULES, AGENT_EDIT_RULES } from './prompts/agent.v1'
+import { AGENT_FINAL_TURN, AGENT_RULES } from './prompts/agent.v1'
+import { AGENT_EDIT_RULES_V2, AGENT_RETRY_TURN } from './prompts/agent.v2'
 import {
   AiCancelledError,
   AiProviderError,
@@ -119,7 +122,18 @@ beforeEach(() => {
     id: 'openai',
     resolveModel: (tier) => (tier === 'fast' ? 'gpt-5.4-mini' : 'gpt-5.4'),
     complete,
-    stream: async function* () {},
+    // 2026-10-07: every step streams; the fake answers a stream with `complete`'s reply in
+    // two pieces, so one queue of replies drives both.
+    stream: async function* (req) {
+      const reply = await complete(req)
+      const cut = Math.floor(reply.text.length / 2)
+      yield { delta: reply.text.slice(0, cut) }
+      yield {
+        delta: reply.text.slice(cut),
+        usage: reply.usage,
+        ...(reply.finishReason === undefined ? {} : { finishReason: reply.finishReason })
+      }
+    },
     testConnection: () => Promise.resolve({ model: 'gpt-5.4-mini' })
   }
   const cache = new Map<string, { text: string; usage: CompletionResult['usage'] }>()
@@ -174,7 +188,7 @@ describe('runAgent (F-5.22)', () => {
     // The open document is in every step; the tool results join as turns.
     const system = request(0).messages[0]?.content ?? ''
     expect(system.startsWith(AGENT_RULES)).toBe(true)
-    expect(system).not.toContain(AGENT_EDIT_RULES)
+    expect(system).not.toContain(AGENT_EDIT_RULES_V2)
     expect(system).toContain(`Open document ${ref(scenes[0])}:`)
     const third = request(2).messages
     expect(third.at(-2)).toEqual({
@@ -294,7 +308,7 @@ describe('runAgent, write runs (F-5.22)', () => {
       ]
     })
     const result = await run({ access: 'write' })
-    expect(request(0).messages[0]?.content).toContain(AGENT_EDIT_RULES)
+    expect(request(0).messages[0]?.content).toContain(AGENT_EDIT_RULES_V2)
     expect(result.query).toBeNull()
     expect(result.changes.map((c) => c.edit)).toEqual([
       {
@@ -302,18 +316,72 @@ describe('runAgent, write runs (F-5.22)', () => {
         nodeId: scenes[0],
         title: loadAgentProject(db).titleOf(scenes[0] ?? ''),
         find: 'The rain came after.',
-        replace: 'Rain followed.'
+        replace: 'Rain followed.',
+        brief: ''
       },
       {
         kind: 'insert',
         nodeId: scenes[1],
         title: loadAgentProject(db).titleOf(scenes[1] ?? ''),
         after: '',
-        text: 'The lantern guttered.'
+        text: 'The lantern guttered.',
+        brief: '',
+        words: 0
       }
     ])
     // "ledger" occurs twice; "fly" is no edit.
     expect(result.dropped).toBe(2)
+  })
+
+  it('takes prose as intents (agent.v2): an insertion keeps an anchor the scene lacks, a rewrite keeps its brief', async () => {
+    replies({
+      answer: 'I will add the beat and rework the line.',
+      edits: [
+        {
+          edit: 'insert',
+          id: ref(scenes[0]),
+          after: 'A sentence the scene does not hold.',
+          brief: 'Tomas looks at the elm and says nothing.',
+          words: 5000
+        },
+        {
+          edit: 'text',
+          id: ref(scenes[0]),
+          find: 'The rain came after.',
+          brief: 'Make the rain arrive with a sound.'
+        },
+        { edit: 'insert', id: ref(scenes[1]), after: '' }
+      ]
+    })
+    const result = await run({ access: 'write' })
+    const title = loadAgentProject(db).titleOf(scenes[0] ?? '')
+    expect(result.changes).toEqual([
+      {
+        edit: {
+          kind: 'insert',
+          nodeId: scenes[0],
+          title,
+          after: 'A sentence the scene does not hold.',
+          text: '',
+          brief: 'Tomas looks at the elm and says nothing.',
+          words: 900
+        },
+        violation: null
+      },
+      {
+        edit: {
+          kind: 'text',
+          nodeId: scenes[0],
+          title,
+          find: 'The rain came after.',
+          replace: '',
+          brief: 'Make the rain arrive with a sound.'
+        },
+        violation: null
+      }
+    ])
+    // An insertion with neither prose nor a brief is no edit.
+    expect(result.dropped).toBe(1)
   })
 
   it('flags an edit whose prose breaks the author rules, and never edits in a read run', async () => {
@@ -351,6 +419,124 @@ describe('fitAgentPrompt', () => {
     expect(contents).toContain('Tone: grim')
     expect(contents).toContain('old question')
     expect(estimateTokens(contents.join('\n'))).toBeLessThanOrEqual(inputBudget('agent'))
+  })
+})
+
+/** The truncated reply of the author's report: the JSON stops mid-draft at the output cap. */
+const CUT_OFF_REPLY =
+  '{"answer": "I\'ve inserted a draft…", "edits": [{ "edit": "insert", "id": "n3", ' +
+  '"after": "Stunned silence.", "text": "Aos\'s pen stopped…That\'s what'
+
+const cutOff = (text = CUT_OFF_REPLY): CompletionResult => ({
+  text,
+  model: 'gpt-5.4',
+  usage: { inputTokens: 500, outputTokens: 1500, reasoningTokens: 1200 },
+  finishReason: 'length'
+})
+
+describe('runAgent, replies that cannot be used (2026-10-07)', () => {
+  it('never shows a reply cut off mid-JSON: asks once more, briefly, with a larger cap, and caches neither', async () => {
+    complete.mockResolvedValueOnce(cutOff())
+    replies({ answer: 'Short answer.', found: true, citations: [] })
+    const answers: string[] = []
+    let resets = 0
+    const notes: [string, string][] = []
+    const result = await runAgent(
+      db,
+      deps,
+      {
+        nodeId: scenes[0] ?? null,
+        message: 'Add a beat.',
+        history: [],
+        access: 'write',
+        focus: { beforeCaret: '', selection: '' },
+        requestId: 'r-9'
+      },
+      () => undefined,
+      {
+        answer: (delta) => answers.push(delta),
+        reset: () => resets++,
+        note: (id, note) => notes.push([id, note])
+      }
+    )
+    expect(result.answer).toBe('Short answer.')
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(request(0).maxTokens).toBe(1_500)
+    expect(request(1).maxTokens).toBe(3_000)
+    expect(request(1).messages.at(-1)?.content).toBe(AGENT_RETRY_TURN)
+    // The cut-off reply's answer had streamed, so the chat was told to drop it.
+    expect(resets).toBe(1)
+    expect(answers.join('')).toBe("I've inserted a draft…Short answer.")
+    expect(notes).toEqual([
+      ['r-9:step0', expect.stringMatching(/cut off .*1200 reasoning.*asked again/)]
+    ])
+    // The cut-off reply is never served again: the same step asks the provider anew; the
+    // retry's good answer is.
+    complete.mockResolvedValueOnce(cutOff())
+    const again = await run({ message: 'Add a beat.', access: 'write' })
+    expect(complete).toHaveBeenCalledTimes(3)
+    expect(again.answer).toBe('Short answer.')
+  })
+
+  it('says the reply was cut off, with the request id, when the retry fails too', async () => {
+    complete.mockResolvedValueOnce(cutOff()).mockResolvedValueOnce(said('{"answer": "Still'))
+    const result = await run({ requestId: 'r-10' })
+    expect(result.answer).toBe(`${AGENT_CUT_OFF_MESSAGE} (Request r-10:step0:retry)`)
+    expect(result.answer).not.toContain('{')
+    expect(result.changes).toEqual([])
+    expect(result.query).toBeNull()
+  })
+
+  it('streams the answer text as it arrives', async () => {
+    replies({ answer: 'Under the "elm",\nin the north.', found: true, citations: [] })
+    const answers: string[] = []
+    await runAgent(
+      db,
+      deps,
+      {
+        nodeId: null,
+        message: 'Where?',
+        history: [],
+        access: 'read',
+        focus: { beforeCaret: '', selection: '' }
+      },
+      () => undefined,
+      { answer: (delta) => answers.push(delta) }
+    )
+    expect(answers.join('')).toBe('Under the "elm",\nin the north.')
+  })
+})
+
+describe('AnswerStream', () => {
+  it('hands back the answer string only, unescaped, across any split', () => {
+    const json = JSON.stringify({ found: true, answer: 'Say "hi"\\ now\né', citations: [] })
+    for (let size = 1; size <= 5; size++) {
+      const stream = new AnswerStream()
+      let out = ''
+      for (let i = 0; i < json.length; i += size) out += stream.feed(json.slice(i, i + size))
+      expect(out).toBe('Say "hi"\\ now\né')
+    }
+    expect(new AnswerStream().feed('{"tool":"search","args":{"query":"x"}}')).toBe('')
+  })
+})
+
+describe('readAgentReply', () => {
+  it('tells a cut-off or broken JSON reply from a plain-prose answer', () => {
+    expect(readAgentReply(CUT_OFF_REPLY, 'length')).toEqual({ kind: 'broken', reason: 'cutOff' })
+    expect(readAgentReply('{"answer": "Hal', 'stop')).toEqual({
+      kind: 'broken',
+      reason: 'unreadable'
+    })
+    expect(readAgentReply('', null)).toEqual({ kind: 'broken', reason: 'unreadable' })
+    expect(readAgentReply('Plain words, cut', 'length')).toEqual({
+      kind: 'broken',
+      reason: 'cutOff'
+    })
+    expect(readAgentReply('She hid it under the elm.', 'stop')).toMatchObject({
+      kind: 'answer',
+      answer: 'She hid it under the elm.'
+    })
+    expect(readAgentReply('{"tool":"tags"}', 'stop')).toMatchObject({ kind: 'tool' })
   })
 })
 

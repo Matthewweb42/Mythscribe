@@ -790,7 +790,11 @@ describe('AiSettingsTab model choice (AI-BILLING-SPEC M8, R4)', () => {
     expect(all).toHaveValue('auto')
     await userEvent.selectOptions(all, 'strong')
     await waitFor(() =>
-      expect(lastCall('ai:setRouting')?.input).toEqual({ all: 'strong', features: {} })
+      expect(lastCall('ai:setRouting')?.input).toEqual({
+        all: 'strong',
+        features: {},
+        reasoning: {}
+      })
     )
     const summaries = screen.getByRole('combobox', {
       name: 'Model for Scene summaries, story bible, and tags'
@@ -803,13 +807,30 @@ describe('AiSettingsTab model choice (AI-BILLING-SPEC M8, R4)', () => {
     await waitFor(() =>
       expect(lastCall('ai:setRouting')?.input).toEqual({
         all: 'strong',
-        features: { summary: 'fast' }
+        features: { summary: 'fast' },
+        reasoning: {}
       })
     )
     await userEvent.selectOptions(summaries, 'auto')
     await waitFor(() =>
-      expect(lastCall('ai:setRouting')?.input).toEqual({ all: 'strong', features: {} })
+      expect(lastCall('ai:setRouting')?.input).toEqual({
+        all: 'strong',
+        features: {},
+        reasoning: {}
+      })
     )
+  })
+
+  it('sets how much each tier may think, or leaves it to the built-in table (2026-10-07)', async () => {
+    await open()
+    const fast = screen.getByRole('combobox', { name: 'Thinking for the fast model' })
+    expect(fast).toHaveValue('table')
+    await userEvent.selectOptions(fast, 'off')
+    await waitFor(() =>
+      expect(lastCall('ai:setRouting')?.input).toMatchObject({ reasoning: { fast: 'off' } })
+    )
+    await userEvent.selectOptions(fast, 'table')
+    await waitFor(() => expect(lastCall('ai:setRouting')?.input).toMatchObject({ reasoning: {} }))
   })
 
   it('labels Auto per task from the routing table, and edit passes as depending on the request', async () => {

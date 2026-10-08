@@ -62,7 +62,8 @@ describe('GhostText extension (F-5.3)', () => {
       flagged: false,
       violation: null,
       proposalId: null,
-      acceptedChars: 0
+      acceptedChars: 0,
+      pin: null
     })
     expect(widget()?.dataset.flagged).toBe('false')
     expect(widget()?.querySelector(`.${GHOST_TEXT_FLAG_CLASS}`)).toBeNull()
@@ -116,7 +117,8 @@ describe('GhostText extension (F-5.3)', () => {
       flagged: true,
       violation,
       proposalId: null,
-      acceptedChars: 0
+      acceptedChars: 0,
+      pin: null
     })
     expect(widget()?.dataset.flagged).toBe('true')
     const flag = widget()?.querySelector<HTMLElement>(`.${GHOST_TEXT_FLAG_CLASS}`)
@@ -317,7 +319,7 @@ describe('GhostText settlement (F-14.5)', () => {
     const quiet = new Editor({
       extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-2' })
     })
-    expect(quiet.storage.ghostText).toEqual({ onSettle: null })
+    expect(quiet.storage.ghostText).toEqual({ onSettle: null, listeners: new Set() })
     quiet.commands.setGhost(SUGGESTION)
     expect(() => quiet.commands.clearGhost()).not.toThrow()
     quiet.destroy()
@@ -449,5 +451,61 @@ describe('GhostText settlement (F-14.5)', () => {
     leaving.destroy()
     expect(onSettle).toHaveBeenCalledExactlyOnceWith('acceptedPart', ' R')
     // Our own editor has nothing showing: destroying it in afterEach settles nothing.
+  })
+})
+
+describe('pinned suggestions, the chat’s insertions (2026-10-07)', () => {
+  const exits = (): { status: string; consumed: string; pin: string | null }[] => {
+    const seen: { status: string; consumed: string; pin: string | null }[] = []
+    editor.storage.ghostText?.listeners.add((exit) => seen.push(exit))
+    return seen
+  }
+
+  it('shows at its anchor, grows as the draft streams, survives caret moves and blur, and Tab puts it at the anchor', () => {
+    const seen = exits()
+    const onSettle = vi.fn<GhostSettleHandler>()
+    const storage = editor.storage.ghostText
+    if (storage) storage.onSettle = onSettle
+    // The anchor is after "The storm"; the caret stays at the end.
+    expect(editor.commands.setGhost(' slowly', false, null, null, { at: 10, pin: 'e-1' })).toBe(
+      true
+    )
+    expect(ghostOf(editor.state)).toMatchObject({ from: 10, pin: 'e-1', text: ' slowly' })
+    expect(
+      editor.commands.streamGhost('e-1', ' slowly, then all at once', { proposalId: 'p-1' })
+    ).toBe(true)
+    expect(widget()?.textContent).toBe(' slowly, then all at once')
+    expect(editor.commands.streamGhost('other', ' no')).toBe(false)
+    editor.commands.setTextSelection(1)
+    editor.view.dom.dispatchEvent(new FocusEvent('blur'))
+    editor.commands.insertContentAt(1, 'So: ')
+    expect(ghostOf(editor.state)).toMatchObject({ from: 14, pin: 'e-1' })
+    editor.commands.focus()
+    expect(press('Tab')).toBe(true)
+    expect(text()).toBe('So: The storm slowly, then all at once broke at dusk.')
+    expect(seen).toEqual([
+      { status: 'accepted', consumed: ' slowly, then all at once', pin: 'e-1' }
+    ])
+    // VibeWrite's own hook never hears about a pinned suggestion.
+    expect(onSettle).not.toHaveBeenCalled()
+  })
+
+  it('shows a new paragraph as line breaks, not a space', () => {
+    editor.commands.setGhost('\n\nRain.', false, null, null, { at: CONTENT.length + 1, pin: 'e-1' })
+    expect(widget()?.querySelectorAll('br')).toHaveLength(2)
+    expect(widget()?.textContent).toBe('\n\nRain.')
+  })
+
+  it('Escape dismisses it, and deleting the text it hangs on ends it', () => {
+    const seen = exits()
+    editor.commands.setGhost(' slowly', false, null, null, { at: 10, pin: 'e-1' })
+    expect(press('Escape')).toBe(true)
+    editor.commands.setGhost(' again', false, null, null, { at: 10, pin: 'e-2' })
+    editor.commands.deleteRange({ from: 5, to: 10 })
+    expect(ghostOf(editor.state)).toBeNull()
+    expect(seen.map((e) => [e.status, e.pin])).toEqual([
+      ['rejected', 'e-1'],
+      ['rejected', 'e-2']
+    ])
   })
 })

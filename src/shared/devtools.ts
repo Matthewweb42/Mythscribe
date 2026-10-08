@@ -105,6 +105,8 @@ export const DevAiRequest = z.object({
   outputTokens: z.number().nullable(),
   cachedTokens: z.number().nullable(),
   reasoningTokens: z.number().nullable(),
+  /** The reasoning mode the request asked for (`off`, `low`, `default`); null until prepared. */
+  reasoning: z.string().nullable(),
   costUsd: z.number().nullable(),
   /** The provider's reason the answer ended (`stop`, `length`…), when it said. */
   finishReason: z.string().nullable(),
@@ -112,7 +114,11 @@ export const DevAiRequest = z.object({
   answerChars: z.number().nullable(),
   errorCode: z.string().nullable(),
   errorMessage: z.string().nullable(),
-  /** A skip reason, or what the caller did with the answer (ghost text: empty after post-processing). */
+  /**
+   * A skip reason, or what the caller did with the answer (ghost text: empty after
+   * post-processing; an agent step cut off and retried; where a chat insertion landed or why
+   * nothing was shown). Several notes on one request are joined with " · ".
+   */
   note: z.string().nullable(),
   /** Whether "Show text" has something to show (held in main's memory only). */
   hasText: z.boolean()
@@ -219,6 +225,9 @@ export function requestSummaryLine(row: DevAiRequest): string {
     `finish ${row.finishReason ?? '-'}`,
     `answer ${row.answerChars ?? '-'} chars`
   ]
+  if (row.reasoning !== null && row.reasoning !== 'default') {
+    parts.push(`reasoning ${row.reasoning}`)
+  }
   if (row.costUsd !== null) parts.push(`$${row.costUsd.toFixed(6)}`)
   if (row.requestId !== null) parts.push(`id ${row.requestId}`)
   if (row.errorCode !== null) parts.push(`error ${row.errorCode}: ${row.errorMessage ?? ''}`)

@@ -58,7 +58,13 @@ describe('DevToolsService', () => {
   it('times a streamed request: wait, first token, total, tokens, and the held text', () => {
     service.setEnabled(true)
     const trace = service.observer.start(START)
-    trace.prepared({ provider: 'openrouter', model: 'm/x', tier: 'strong', maxTokens: 900 })
+    trace.prepared({
+      provider: 'openrouter',
+      model: 'm/x',
+      tier: 'strong',
+      maxTokens: 900,
+      reasoning: 'off'
+    })
     clock += 40
     trace.sent()
     clock += 2_000
@@ -95,6 +101,25 @@ describe('DevToolsService', () => {
       messages: [{ role: 'user', content: 'Where is Mara?' }],
       response: 'In the mill.'
     })
+  })
+
+  it('notes what happened to an answer on the newest row of its request (or a suffixed step), joined (2026-10-07)', () => {
+    service.annotate('c-1', 'ignored while off')
+    service.setEnabled(true)
+    service.observer.start({ ...START, requestId: 'a-1:step0' }).prepared({
+      provider: 'openrouter',
+      model: 'deepseek/deepseek-v4-pro',
+      tier: 'strong',
+      maxTokens: 1500,
+      reasoning: 'default'
+    })
+    service.annotate('a-1:step0', 'Reply cut off; asked again')
+    service.annotate('a-1', 'Answer streamed')
+    service.annotate('nobody', 'dropped')
+    const row = service.snapshot().requests[0]
+    expect(row?.note).toBe('Reply cut off; asked again · Answer streamed')
+    expect(row?.reasoning).toBe('default')
+    expect(rows.at(-1)?.note).toBe('Reply cut off; asked again · Answer streamed')
   })
 
   it('marks a cancel as cancelled without logging it, and a failure as failed with an ai log entry', () => {
