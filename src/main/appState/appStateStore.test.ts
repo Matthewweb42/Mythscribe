@@ -301,7 +301,7 @@ describe('AppStateStore', () => {
     )
     const kept = new AppStateStore(file).get()
     expect(kept.ownKeyProvider).toBe('openai')
-    expect(kept.routing).toEqual({ all: null, features: { summary: 'strong' } })
+    expect(kept.routing).toEqual({ all: null, features: { summary: 'strong' }, reasoning: {} })
   })
 
   it('parses a file written before F-5.14 (no aiUsage) to the default cap with no tally', () => {
