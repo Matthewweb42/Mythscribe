@@ -179,14 +179,14 @@ const ENTITIES = [
     }
   },
   {
-    kind: 'world',
+    kind: 'magic',
     name: 'Tide-lanterns',
     fields: {
-      category: 'Magic system',
       description:
         'Ferry lanterns trimmed with river salt. They burn yellow, except when they do not.',
       rules:
-        'The flame turns green while something crosses beneath the boat. Counting aloud keeps the boat steady. Nobody knows why.',
+        'The flame turns green while something crosses beneath the boat. Counting aloud keeps the boat steady.',
+      costs: 'Nobody knows why the counting works, or what it takes from the one who counts.',
       impact: 'The whole plot turns on what the green light is and who has been keeping count.'
     }
   }
@@ -377,7 +377,9 @@ export function startFakeOpenAi(options = {}) {
               const last = index === pieces.length - 1
               res.write(
                 sseChunk(model, {
-                  choices: [{ index: 0, delta: { content: piece }, finish_reason: last ? 'stop' : null }]
+                  choices: [
+                    { index: 0, delta: { content: piece }, finish_reason: last ? 'stop' : null }
+                  ]
                 })
               )
               if (!json && proseChunkMs > 0 && !last) await wait(proseChunkMs)
@@ -441,6 +443,32 @@ export async function invoke(page, channel, input) {
   const result = await page.evaluate(([c, i]) => window.mythscribe.invoke(c, i), [channel, input])
   if (!result.ok) throw new Error(`${channel} failed: ${result.error.message}`)
   return result.data
+}
+
+/**
+ * The sidebar section picker (F-9.11): the button that opens it and the option for `name`,
+ * which sits behind "Show unused sections" while the section is empty.
+ */
+export function sectionPicker(page) {
+  const button = page.getByRole('button', { name: /^Section: / })
+  const list = page.getByRole('listbox', { name: 'Sections' })
+  return {
+    button,
+    list,
+    option: (name) => list.getByRole('option', { name, exact: true }),
+    unused: list.getByRole('option', { name: /^Show unused sections/ }),
+    panel: (name) => page.getByRole('region', { name: `${name} section`, exact: true })
+  }
+}
+
+/** Shows a sidebar section through the picker (instantly; the demo video glides instead). */
+export async function showSection(page, name) {
+  const picker = sectionPicker(page)
+  await picker.button.click()
+  if ((await picker.option(name).count()) === 0) await picker.unused.click()
+  await picker.option(name).click()
+  await picker.list.waitFor({ state: 'detached' })
+  return picker.panel(name)
 }
 
 export async function dismissToasts(page) {

@@ -23,6 +23,7 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac",
     "build:linux": "npm run build && electron-builder --linux",
+    "demo:video": "node scripts/demo-video.mjs",
     "site:check": "vitest run src/shared/site.test.ts",
     "site:deploy": "wrangler deploy --config site/wrangler.toml",
     "cloud:dev": "wrangler dev --config cloud/wrangler.toml",

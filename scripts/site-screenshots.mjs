@@ -25,6 +25,7 @@ import {
   demoEnv,
   dismissToasts,
   seedLanternFerry,
+  showSection,
   startFakeOpenAi
 } from './lantern-ferry.mjs'
 
@@ -131,8 +132,7 @@ async function main() {
     // 2026-10-07).
     await page.keyboard.press('Control+k')
     await dismissToasts(page)
-    const sidebarTabs = page.getByRole('tablist', { name: 'Sidebar' })
-    await sidebarTabs.getByRole('tab', { name: 'Edits' }).click()
+    await showSection(page, 'Edits')
     await page.getByTestId('edit-pass-new').click()
     const workspace = page.getByTestId('edit-pass-workspace')
     await workspace.getByRole('radio', { name: 'Line edit' }).check()
@@ -147,14 +147,13 @@ async function main() {
     })
     await workspace.getByTestId('edit-pass-start').click()
     await page.getByTestId('edit-report-diff').first().waitFor({ timeout: 30_000 })
-    await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+    await showSection(page, 'Manuscript')
     await tree.getByRole('treeitem', { name: 'The Last Ferry', exact: true }).click()
     await page.getByTestId('tracked-changes-count').waitFor()
     await shoot(page, 'shot-edit-review')
 
     // 4. The story bible: Tomas's sheet.
-    await sidebarTabs.getByRole('tab', { name: 'Characters' }).click()
-    const characters = page.getByRole('tabpanel', { name: 'Characters' })
+    const characters = await showSection(page, 'Characters')
     await characters
       .getByRole('button', { name: /^Tomas Reed/ })
       .first()
@@ -174,8 +173,8 @@ async function main() {
       },
       [loreFile]
     )
-    await sidebarTabs.getByRole('tab', { name: 'Library' }).click()
-    await page.getByRole('tabpanel', { name: 'Library' }).getByTestId('library-add').click()
+    const libraryPanel = await showSection(page, 'Library')
+    await libraryPanel.getByTestId('library-add').click()
     const library = page.getByTestId('library-dialog')
     await library.getByTestId('library-estimate').waitFor()
     await library.getByTestId('library-confirm').click()
@@ -193,7 +192,7 @@ async function main() {
     await library.waitFor({ state: 'detached' })
 
     // 6. Compile: the paperback format with its live page preview, from File › Compile….
-    await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+    await showSection(page, 'Manuscript')
     await page
       .getByRole('menubar', { name: 'Application menu' })
       .getByRole('menuitem', { name: 'File' })

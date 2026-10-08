@@ -2,7 +2,7 @@
  * Records the product demo video from the built app: about 90 seconds, silent, title cards
  * between the sections, the real app on screen and every AI answer scripted.
  *
- *   npm run demo:video -- [--out <dir>] [--skip-build]
+ *   npm run demo:video -- [--out <dir>] [--skip-build | --edit-only]
  *
  * Writes `mythscribe-demo.mp4` (H.264, 1080p, title cards), `mythscribe-hero.webm` (a short
  * loop for the website hero, no cards), `stills/*.png` (six frames to review), and `raw/` (the
@@ -12,13 +12,14 @@
  * Three steps, each Node-heavy one under `flock /tmp/mythscribe-heavy.lock` where `flock`
  * exists: `electron-vite build` (skip with `--skip-build`), the recording (this script again
  * with `--record`, under `xvfb-run` on a 1920×1080 screen), and the edit (ffmpeg from the
- * `ffmpeg-static` devDependency). The recording builds "The Lantern Ferry" (`lantern-ferry.mjs`)
+ * `ffmpeg-static` devDependency; `--edit-only` redoes just this step from `raw/`). The recording builds "The Lantern Ferry" (`lantern-ferry.mjs`)
  * in a throwaway project over IPC, answers AI from a fake OpenAI on loopback (no key, no
  * network), and drives the UI like a person: a drawn cursor that glides to each control, a soft
  * highlight on what it points at, typing at a human pace, and a badge for each shortcut pressed.
  * Playwright records the window at 1280×720 CSS pixels ×1.5, so the video is a sharp 1920×1080.
  * Recapture when the UI changes. Nothing here is part of the gate suite.
  */
+import { Buffer } from 'node:buffer'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -38,7 +39,9 @@ import {
   dismissToasts,
   lookupsIn,
   sceneRef,
+  sectionPicker,
   seedLanternFerry,
+  showSection,
   startFakeOpenAi
 } from './lantern-ferry.mjs'
 
@@ -59,7 +62,7 @@ const VIEW = { width: 1280, height: 720 }
 const SCALE = 1.5
 const VIDEO = { width: 1920, height: 1080 }
 const FPS = 30
-const CARD_SECONDS = 2.6
+const CARD_SECONDS = 2.4
 const FADE = 0.35
 /** Seconds of each section the website loop takes, from its highlight mark. */
 const HERO_SECONDS = 4.5
@@ -159,7 +162,10 @@ function demoAgent(messages) {
     answer:
       'As of this scene, she has seen it once. Halfway across on the last ferry the lantern burned green, something passed under the boat, and Tomas counted until the flame went back to yellow. Nobody has told her what it means, and she has just told the Warden it was yellow.',
     citations: [
-      { id: sceneRef(messages, 'The Last Ferry'), quote: 'for the space of a breath, it burned green' },
+      {
+        id: sceneRef(messages, 'The Last Ferry'),
+        quote: 'for the space of a breath, it burned green'
+      },
       {
         id: sceneRef(messages, 'Green Light'),
         quote: 'At ninety, the lantern guttered back to yellow'
@@ -197,7 +203,10 @@ const OVERLAY_CSS = `
   transform: translateX(-50%) translateY(8px); opacity: 0; transition: opacity 0.2s ease, transform 0.2s ease;
   font: 600 15px/1 Inter, system-ui, sans-serif; color: #e7efec; background: rgb(8 22 30 / 0.9);
   border: 1px solid rgb(110 231 183 / 0.6); border-radius: 8px; padding: 9px 14px; letter-spacing: 0.02em;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.35); }
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.35); display: flex; align-items: center; gap: 6px; }
+#demo-key kbd { font: 600 14px/1 Inter, system-ui, sans-serif; color: #6ee7b7; background: rgb(52 211 153 / 0.12);
+  border: 1px solid rgb(110 231 183 / 0.45); border-bottom-width: 2px; border-radius: 5px; padding: 4px 8px; }
+#demo-key kbd:last-of-type { margin-right: 6px; }
 #demo-key.on { opacity: 1; transform: translateX(-50%) translateY(0); }`
 
 const CURSOR_SVG =
@@ -260,16 +269,11 @@ async function pointAt(page, x, y, hoverable) {
 async function glide(page, x, y) {
   const from = { ...pointer }
   const distance = Math.hypot(x - from.x, y - from.y)
-  const steps = Math.max(8, Math.min(34, Math.round(distance / 22)))
+  const steps = Math.max(8, Math.min(26, Math.round(distance / 28)))
   for (let i = 1; i <= steps; i++) {
     const t = i / steps
     const eased = t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2
-    await pointAt(
-      page,
-      from.x + (x - from.x) * eased,
-      from.y + (y - from.y) * eased,
-      i === steps
-    )
+    await pointAt(page, from.x + (x - from.x) * eased, from.y + (y - from.y) * eased, i === steps)
     await sleep(14)
   }
 }
@@ -299,30 +303,58 @@ async function click(page, locator, options = {}) {
   await page.mouse.down()
   await page.mouse.up()
   await sleep(90)
-  await page.evaluate(() => document.getElementById('demo-cursor')?.classList.remove('down'))
+  await page.evaluate(() => {
+    document.getElementById('demo-cursor')?.classList.remove('down')
+    const hover = document.getElementById('demo-hover')
+    if (hover) hover.style.opacity = '0'
+  })
 }
 
 /** Types at a human pace: a little uneven, slower after punctuation. */
 async function type(page, text) {
   for (const char of text) {
     await page.keyboard.type(char)
-    const base = /[.,!?:]/.test(char) ? 140 : char === ' ' ? 70 : 45
-    await sleep(base + random() * 55)
+    const base = /[.,!?:]/.test(char) ? 100 : char === ' ' ? 50 : 32
+    await sleep(base + random() * 40)
   }
 }
 
 /** Presses a shortcut and shows it in a badge, since a silent video cannot show a keypress. */
-async function press(page, key, label = key) {
-  await page.evaluate((text) => {
-    const badge = document.getElementById('demo-key')
-    if (!badge) return
-    badge.textContent = text
-    badge.classList.add('on')
-    window.clearTimeout(Number(badge.dataset.timer ?? 0))
-    badge.dataset.timer = String(window.setTimeout(() => badge.classList.remove('on'), 1300))
-  }, label)
+async function press(page, key, chord, caption) {
+  await page.evaluate(
+    ([keys, text]) => {
+      const badge = document.getElementById('demo-key')
+      if (!badge) return
+      badge.replaceChildren()
+      for (const part of keys) {
+        const kbd = document.createElement('kbd')
+        kbd.textContent = part
+        badge.append(kbd)
+      }
+      if (text) badge.append(text)
+      badge.classList.add('on')
+      window.clearTimeout(Number(badge.dataset.timer ?? 0))
+      badge.dataset.timer = String(window.setTimeout(() => badge.classList.remove('on'), 1300))
+    },
+    [chord, caption]
+  )
   await sleep(350)
   await page.keyboard.press(key)
+}
+
+/** Shows a sidebar section through the section picker, by hand; returns its panel. */
+async function pickSection(page, name) {
+  const picker = sectionPicker(page)
+  await click(page, picker.button)
+  await picker.list.waitFor()
+  await sleep(500)
+  if ((await picker.option(name).count()) === 0) {
+    await click(page, picker.unused)
+    await sleep(400)
+  }
+  await click(page, picker.option(name))
+  await picker.list.waitFor({ state: 'detached' })
+  return picker.panel(name)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -338,8 +370,8 @@ async function record() {
   const { server, url } = await startFakeOpenAi({
     agent: demoAgent,
     prose: demoProse,
-    delayMs: 650,
-    proseChunkMs: 55
+    delayMs: 450,
+    proseChunkMs: 38
   })
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-demo-'))
   const launchedAt = Date.now()
@@ -381,31 +413,30 @@ async function record() {
 
     // 1. Writing: the binder, typing, the notes and synopsis, focus mode.
     mark('write.start')
-    await sleep(1_200)
-    await click(page, scene('Green Light'))
-    await sleep(1_300)
+    await sleep(600)
     await click(page, scene('The Drowned Steps'))
-    await sleep(900)
+    await sleep(700)
     await click(page, editor.locator('p').last(), { at: 'end' })
     await page.keyboard.press('End')
     mark('write.hl')
     await type(page, TYPED_LINE)
-    await sleep(700)
+    await sleep(500)
     await click(page, notesToggle)
     await notesPanel.waitFor()
-    await sleep(600)
+    await sleep(400)
     await hoverOn(page, notesPanel.getByRole('textbox', { name: 'Synopsis' }))
-    await sleep(1_800)
-    await click(page, editor.locator('p').last(), { at: 'end' })
-    await press(page, 'F11', 'F11  Focus mode')
-    await page.getByTestId('focus-control-bar').waitFor({ state: 'attached' })
+    mark('write.still')
     await sleep(1_400)
+    await click(page, editor.locator('p').last(), { at: 'end' })
+    await press(page, 'F11', ['F11'], 'Focus mode')
+    await page.getByTestId('focus-control-bar').waitFor({ state: 'attached' })
+    await sleep(1_000)
     await page.keyboard.press('End')
     await page.keyboard.press('Enter')
     await type(page, FOCUS_LINE)
-    await sleep(1_400)
-    await press(page, 'Escape', 'Esc')
-    await sleep(1_300)
+    await sleep(1_000)
+    await press(page, 'Escape', ['Esc'], 'Leave focus mode')
+    await sleep(1_000)
     mark('write.end')
 
     // Off camera: back to a calm layout, with the scene the questions are about.
@@ -416,11 +447,11 @@ async function record() {
 
     // 2. Ask: a question about the book, answered from it as of the open scene.
     mark('ask.start')
-    await sleep(900)
-    await press(page, 'Control+k', 'Ctrl K  Assistant')
+    await sleep(600)
+    await press(page, 'Control+k', ['Ctrl', 'K'], 'Assistant')
     const assistant = page.getByTestId('assistant-panel')
     await assistant.waitFor()
-    await sleep(500)
+    await sleep(300)
     await click(page, assistant.getByRole('radio', { name: 'Ask', exact: true }))
     const messageBox = assistant.getByRole('textbox', { name: 'Message' })
     await click(page, messageBox)
@@ -429,9 +460,10 @@ async function record() {
     await page.keyboard.press('Enter')
     mark('ask.hl')
     await assistant.getByText('As of this scene').waitFor({ timeout: 30_000 })
-    await sleep(600)
+    await sleep(400)
     await pointAt(page, VIEW.width * 0.55, VIEW.height * 0.4, false)
-    await sleep(3_600)
+    mark('ask.still')
+    await sleep(2_800)
     mark('ask.end')
 
     // 3. Draft: the assistant writes the next beat; it lands as ghost text and Tab keeps it.
@@ -439,7 +471,7 @@ async function record() {
     await page.keyboard.press('Control+End')
     await dismissToasts(page)
     mark('draft.start')
-    await sleep(600)
+    await sleep(400)
     await click(page, messageBox)
     await type(page, WRITE_REQUEST)
     await sleep(300)
@@ -447,22 +479,20 @@ async function record() {
     const ghost = editor.locator('.ghost-text')
     await ghost.first().waitFor({ timeout: 30_000 })
     mark('draft.hl')
-    await assistant
-      .getByTestId('agent-change')
-      .last()
-      .waitFor({ timeout: 30_000 })
+    await assistant.getByTestId('agent-change').last().waitFor({ timeout: 30_000 })
     await page.waitForFunction(
       (tail) => document.querySelector('.ghost-text')?.textContent?.includes(tail),
       'already written: green.',
       { timeout: 30_000 }
     )
-    await sleep(1_400)
+    await sleep(600)
     await hoverOn(page, ghost.last())
-    await sleep(500)
+    mark('draft.still')
+    await sleep(800)
     await editor.focus()
-    await press(page, 'Tab', 'Tab  Keep it')
+    await press(page, 'Tab', ['Tab'], 'Keep it')
     await ghost.first().waitFor({ state: 'detached', timeout: 10_000 })
-    await sleep(2_600)
+    await sleep(1_500)
     mark('draft.end')
 
     // Off camera: close the assistant, stub the file dialog with the author's notes.
@@ -479,20 +509,19 @@ async function record() {
 
     // 4. Upload: worldbuilding notes sorted into sheets, a change asked in the review chat,
     // applied into the story bible.
-    const sidebarTabs = page.getByRole('tablist', { name: 'Sidebar' })
     mark('upload.start')
-    await sleep(700)
-    await click(page, sidebarTabs.getByRole('tab', { name: 'Library' }))
-    await sleep(600)
-    await click(page, page.getByRole('tabpanel', { name: 'Library' }).getByTestId('library-add'))
+    await sleep(400)
+    const libraryPanel = await pickSection(page, 'Library')
+    await sleep(300)
+    await click(page, libraryPanel.getByTestId('library-add'))
     const library = page.getByTestId('library-dialog')
     await library.getByTestId('library-estimate').waitFor()
-    await sleep(900)
+    await sleep(300)
     await click(page, library.getByTestId('library-confirm'))
     const review = library.getByTestId('library-review')
     await review.waitFor({ timeout: 30_000 })
     mark('upload.hl')
-    await sleep(1_800)
+    await sleep(900)
     const reviewChat = library.getByTestId('review-chat')
     await click(page, reviewChat.getByTestId('review-chat-input'))
     await type(page, REVIEW_REQUEST)
@@ -502,45 +531,49 @@ async function record() {
     await marta.getByTestId('library-item-changed').waitFor({ timeout: 30_000 })
     await sleep(500)
     await hoverOn(page, marta)
-    await sleep(1_800)
+    mark('upload.still')
+    await sleep(1_100)
     await click(page, library.getByTestId('library-apply'))
     await library.waitFor({ state: 'detached' })
-    await sleep(500)
-    await click(page, sidebarTabs.getByRole('tab', { name: 'Characters' }))
-    const characters = page.getByRole('tabpanel', { name: 'Characters' })
+    await sleep(300)
+    const characters = await pickSection(page, 'Characters')
     await click(page, characters.getByRole('button', { name: /^Marta Varrow/ }).first())
     await page.getByTestId('entity-editor').waitFor()
-    await sleep(2_400)
+    await sleep(1_500)
     mark('upload.end')
 
     // Off camera: back to the manuscript, a save dialog that answers a throwaway file.
-    await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+    await showSection(page, 'Manuscript')
     await scene('The Last Ferry').click()
     await dismissToasts(page)
-    const book = path.join(tmp, 'The Lantern Ferry.pdf')
+    // A short, readable path for the "Compiled to" notice; the file is removed afterwards.
+    const book = path.join(os.tmpdir(), 'Books', 'The Lantern Ferry.pdf')
+    fs.mkdirSync(path.dirname(book), { recursive: true })
     await app.evaluate(({ dialog }, chosen) => {
       dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath: chosen })
     }, book)
 
     // 5. Compile: the Paperback 6 × 9 with its live page preview, then the PDF.
     mark('compile.start')
-    await sleep(700)
+    await sleep(400)
     const menubar = page.getByRole('menubar', { name: 'Application menu' })
     await click(page, menubar.getByRole('menuitem', { name: 'File' }))
-    await sleep(400)
+    await sleep(300)
     await click(
       page,
       page.getByRole('menu', { name: 'File' }).getByRole('menuitem', { name: 'Compile…' })
     )
     const compile = page.getByRole('dialog', { name: 'Compile' })
-    await sleep(700)
+    await sleep(500)
     await click(
       page,
       compile
         .getByRole('navigation', { name: 'Formats' })
         .getByRole('button', { name: 'Paperback 6 × 9', exact: true })
     )
-    const ready = compile.getByTestId('compile-window-preview').and(page.locator('[data-state="ready"]'))
+    const ready = compile
+      .getByTestId('compile-window-preview')
+      .and(page.locator('[data-state="ready"]'))
     await ready.waitFor({ timeout: 60_000 })
     const from = compile.getByRole('combobox', { name: 'Preview from' })
     const harbour = await from
@@ -554,15 +587,14 @@ async function record() {
     await ready.waitFor({ timeout: 60_000 })
     mark('compile.hl')
     await pointAt(page, VIEW.width * 0.7, VIEW.height * 0.5, false)
-    await sleep(2_600)
+    mark('compile.still')
+    await sleep(1_800)
     await click(page, compile.getByRole('button', { name: 'Compile', exact: true }))
-    await page
-      .getByRole('status')
-      .filter({ hasText: 'Compiled to' })
-      .waitFor({ timeout: 60_000 })
-    await sleep(2_400)
+    await page.getByRole('status').filter({ hasText: 'Compiled to' }).waitFor({ timeout: 60_000 })
+    await sleep(1_800)
     mark('compile.end')
     if (!fs.existsSync(book)) throw new Error('the compile wrote no PDF')
+    fs.rmSync(book)
     if (!sceneIds['Salt and Ledgers']) throw new Error('the demo novel has no Salt and Ledgers')
 
     // The title cards, rendered in the app's own Chromium (a second window, after the takes).
@@ -589,14 +621,13 @@ async function record() {
 // ---------------------------------------------------------------------------------------------
 // Title cards.
 
-const escapeHtml = (text) =>
-  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const escapeHtml = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 function cardHtml(card) {
   const fonts = pathToFileURL(path.join(ROOT, 'site/public/fonts')).href
   const icon = pathToFileURL(path.join(ROOT, 'resources/icon.png')).href
   const brand = card.brand
-    ? `<div class="brand"><img src="${icon}" alt=""><span class="myth">Myth</span><span class="scribe">Scribe</span></div>`
+    ? `<div class="brand"><img src="${icon}" alt=""><span><span class="myth">Myth</span><span class="scribe">Scribe</span></span></div>`
     : `<div class="mark"><img src="${icon}" alt=""><span>MythScribe</span></div>`
   return `<!doctype html><html><head><meta charset="utf-8"><style>
 @font-face { font-family: Fraunces; font-weight: 400 700; src: url('${fonts}/fraunces-latin.woff2') format('woff2'); }
@@ -628,8 +659,10 @@ async function renderCards(app) {
       async ({ BrowserWindow }, [file, w, h]) => {
         const win = new BrowserWindow({ width: w, height: h, show: true, frame: false })
         await win.loadFile(file)
-        await win.webContents.executeJavaScript('document.fonts.ready.then(() => true)')
-        await new Promise((resolve) => setTimeout(resolve, 300))
+        // The fonts, then a short settle so the first paint is complete.
+        await win.webContents.executeJavaScript(
+          'document.fonts.ready.then(() => new Promise((done) => setTimeout(done, 300)))'
+        )
         const image = await win.webContents.capturePage()
         win.destroy()
         return image.toPNG().toString('base64')
@@ -671,7 +704,12 @@ function edit() {
   const clips = Object.fromEntries(
     ['write', 'ask', 'draft', 'upload', 'compile'].map((name) => [
       name,
-      { from: at(`${name}.start`), to: at(`${name}.end`), hl: at(`${name}.hl`) }
+      {
+        from: at(`${name}.start`),
+        to: at(`${name}.end`),
+        hl: at(`${name}.hl`),
+        still: at(`${name}.still`)
+      }
     ])
   )
 
@@ -691,7 +729,16 @@ function edit() {
   for (const [index, [kind, name]] of SEQUENCE.entries()) {
     const label = `[p${index}]`
     if (kind === 'card') {
-      inputs.push('-loop', '1', '-framerate', String(FPS), '-t', String(CARD_SECONDS), '-i', manifest.cards[name])
+      inputs.push(
+        '-loop',
+        '1',
+        '-framerate',
+        String(FPS),
+        '-t',
+        String(CARD_SECONDS),
+        '-i',
+        manifest.cards[name]
+      )
       const input = inputs.filter((arg) => arg === '-i').length - 1
       filters.push(
         `[${input}:v]scale=${VIDEO.width}:${VIDEO.height}:flags=lanczos,fps=${FPS},format=yuv420p,setsar=1,` +
@@ -707,7 +754,7 @@ function edit() {
           `scale=${VIDEO.width}:${VIDEO.height}:flags=lanczos,fps=${FPS},format=yuv420p,setsar=1,` +
           `fade=t=in:st=0:d=${FADE},fade=t=out:st=${fixed(length - FADE)}:d=${FADE}${label}`
       )
-      timeline.push({ kind, name, at: clock, length, hl: clip.hl - clip.from })
+      timeline.push({ kind, name, at: clock, length, still: clip.still - clip.from })
       clock += length
       clipIndex++
     }
@@ -731,8 +778,6 @@ function edit() {
     'slow',
     '-crf',
     '20',
-    '-tune',
-    'stillimage',
     '-pix_fmt',
     'yuv420p',
     '-r',
@@ -778,6 +823,8 @@ function edit() {
     '[hero]',
     '-c:v',
     'libvpx-vp9',
+    '-pix_fmt',
+    'yuv420p',
     '-crf',
     '36',
     '-b:v',
@@ -795,10 +842,7 @@ function edit() {
     ['1-intro-card', timeline[0].at + CARD_SECONDS / 2],
     ...timeline
       .filter((part) => part.kind === 'clip')
-      .map((part, i) => [
-        `${i + 2}-${part.name}`,
-        part.at + Math.min(part.length - 0.6, part.hl + (part.length - part.hl) * 0.75)
-      ])
+      .map((part, i) => [`${i + 2}-${part.name}`, part.at + part.still + 0.3])
   ]
   for (const [name, second] of moments) {
     heavy(ffmpegPath, [
@@ -833,9 +877,11 @@ if (process.argv.includes('--record')) {
 } else {
   if (!ffmpegPath) throw new Error('ffmpeg-static has no binary for this platform')
   fs.mkdirSync(OUT_DIR, { recursive: true })
-  if (!process.argv.includes('--skip-build')) heavy('npx', ['electron-vite', 'build'])
+  const editOnly = process.argv.includes('--edit-only')
+  if (!editOnly && !process.argv.includes('--skip-build')) heavy('npx', ['electron-vite', 'build'])
   const recordArgs = [SELF, '--record', '--out', OUT_DIR]
-  if (process.platform === 'linux')
+  if (editOnly) process.stdout.write(`re-editing the recording in ${RAW_DIR}\n`)
+  else if (process.platform === 'linux')
     heavy('xvfb-run', [
       '-a',
       '-s',
