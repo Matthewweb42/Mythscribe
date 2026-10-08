@@ -63,11 +63,18 @@ export interface WorkingCopyDeps {
 
 const defaultDeps: WorkingCopyDeps = { now: () => new Date() }
 
+/** A cloud folder's identity: its absolute path, case-folded where the file system ignores case. */
+function folderKey(cloudFolder: string): string {
+  const resolved = path.resolve(cloudFolder)
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+}
+
 /** One folder per cloud project, named by its path, so two projects never share a copy. */
 export function workingDirFor(root: string, cloudFolder: string): string {
-  const resolved = path.resolve(cloudFolder)
-  const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved
-  return path.join(root, createHash('sha256').update(key).digest('hex').slice(0, 32))
+  return path.join(
+    root,
+    createHash('sha256').update(folderKey(cloudFolder)).digest('hex').slice(0, 32)
+  )
 }
 
 function statOrNull(file: string): fs.Stats | null {
@@ -116,7 +123,9 @@ function readState(dir: string, cloudFolder: string): WorkingState | null {
       JSON.parse(fs.readFileSync(path.join(dir, WORKING_STATE_FILE), 'utf8'))
     )
     if (!parsed.success) return null
-    return path.resolve(parsed.data.cloudFolder) === path.resolve(cloudFolder) ? parsed.data : null
+    // `G:\Book` and `g:\book` are one folder on Windows: the same key as `workingDirFor`, or
+    // reopening by a differently cased path would treat a stale copy as ahead of the cloud.
+    return folderKey(parsed.data.cloudFolder) === folderKey(cloudFolder) ? parsed.data : null
   } catch {
     return null
   }
@@ -455,7 +464,7 @@ export class WorkingCopy {
       }
       writeState(this.dir, this.state)
     }
-    fs.renameSync(tmp, cloudDb)
+    renameRetrying(tmp, cloudDb)
     this.state = {
       ...this.state,
       cloud: fingerprintOf(this.cloudFolder),
@@ -491,6 +500,29 @@ function snapshotOf(sqlite: Database.Database): Buffer {
     data[19] = 1
   }
   return data
+}
+
+/** Errors Windows gives while another program (the sync app, a virus scanner) holds the file. */
+const TRANSIENT = new Set(['EPERM', 'EACCES', 'EBUSY'])
+const RENAME_RETRY_MS = [100, 250, 500]
+
+/**
+ * `fs.renameSync`, retried briefly when the target is held: Google Drive and OneDrive keep the
+ * database open for a moment while they upload the previous copy, and Windows then refuses to
+ * replace it. Blocks for at most `RENAME_RETRY_MS` in total; a longer hold fails as before.
+ */
+function renameRetrying(from: string, to: string): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(from, to)
+      return
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      const wait = RENAME_RETRY_MS[attempt]
+      if (code === undefined || !TRANSIENT.has(code) || wait === undefined) throw err
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait)
+    }
+  }
 }
 
 function totalChanges(sqlite: Database.Database): number {

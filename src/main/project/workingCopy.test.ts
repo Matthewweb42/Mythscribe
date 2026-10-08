@@ -257,6 +257,48 @@ describe('working copies of projects in cloud-synced folders', () => {
     expect(session.workingCopy?.hasChanges(session.connection.sqlite)).toBe(true)
   })
 
+  it('retries a rename Windows refuses while the sync app holds the database', () => {
+    const folder = projectFolderFor(drive, 'Book')
+    manager.create(folder, 'Book', 'novel')
+    rename('Mine')
+    const real = fs.renameSync
+    let refused = 0
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(to) === path.join(folder, DB_FILE) && refused < 2) {
+        refused++
+        throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' })
+      }
+      real(from, to)
+    })
+    const session = manager.require()
+    session.workingCopy?.syncNow(session.connection.sqlite)
+    expect(refused).toBe(2)
+    expect(cloudName(folder)).toBe('Mine')
+  })
+
+  it('finds its record when Windows names the same folder with other letter case', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    try {
+      const folder = projectFolderFor(drive, 'Book')
+      manager.create(folder, 'Book', 'novel')
+      manager.close()
+      // The record was written when the project was opened as `G:\MY DRIVE\BOOK.MYTHSCRIBE`.
+      const record = path.join(workingDirFor(workingRoot, folder), WORKING_STATE_FILE)
+      const stored = JSON.parse(fs.readFileSync(record, 'utf8')) as Record<string, unknown>
+      fs.writeFileSync(record, JSON.stringify({ ...stored, cloudFolder: folder.toUpperCase() }))
+      changeInCloud(folder, 'Newer elsewhere')
+
+      manager.open(folder)
+      // A clean copy whose cloud changed takes the cloud version; nothing is "in conflict".
+      expect(manager.require().info.name).toBe('Newer elsewhere')
+      expect(manager.require().workingCopy?.conflictCopy).toBeNull()
+      expect(siblings()).toEqual(['Book.mythscribe'])
+    } finally {
+      if (platform) Object.defineProperty(process, 'platform', platform)
+    }
+  })
+
   it('never lets a slower copy land over a newer one', async () => {
     const folder = projectFolderFor(drive, 'Book')
     manager.create(folder, 'Book', 'novel')
