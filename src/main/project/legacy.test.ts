@@ -39,6 +39,23 @@ describe('isLegacyDatabase', () => {
     expect(isLegacyDatabase(path.join(folder, 'project.db'))).toBe(false)
   })
 
+  it('checks a WAL database with a leftover -wal on a copy, leaving no -shm beside it', () => {
+    const file = path.join(tmp, 'project.db')
+    const writer = new Database(file)
+    writer.pragma('journal_mode = WAL')
+    writer.pragma('wal_autocheckpoint = 0')
+    writer.exec('CREATE TABLE node (id TEXT PRIMARY KEY)')
+    // Copy the files while the writer is open, as a crashed build leaves them.
+    const crashed = path.join(tmp, 'crashed')
+    fs.mkdirSync(crashed)
+    const db = path.join(crashed, 'project.db')
+    fs.copyFileSync(file, db)
+    fs.copyFileSync(`${file}-wal`, `${db}-wal`)
+    writer.close()
+    expect(isLegacyDatabase(db)).toBe(false)
+    expect(fs.readdirSync(crashed).sort()).toEqual(['project.db', 'project.db-wal'])
+  })
+
   it('throws IO for a file that is not SQLite', () => {
     const file = path.join(tmp, 'text.mythscribe')
     fs.writeFileSync(file, 'this is not a database')
