@@ -58,6 +58,7 @@ const review = (entities: ContextReviewEntity[], notes: string[] = []): ContextR
   fileIds: ['f1', 'f2'],
   entities,
   notes: { existingId: null, paragraphs: notes, include: true },
+  categories: [],
   proposalIds: [],
   chunks: 2,
   usage: { inputTokens: 0, outputTokens: 0 },

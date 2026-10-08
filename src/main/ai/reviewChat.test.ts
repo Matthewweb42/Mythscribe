@@ -62,6 +62,7 @@ const review: ContextReview = {
     }
   ],
   notes: { existingId: null, paragraphs: [], include: true },
+  categories: [],
   proposalIds: [],
   chunks: 1,
   usage: { inputTokens: 0, outputTokens: 0 },
@@ -168,7 +169,7 @@ describe('runReviewChat (F-9.9)', () => {
     expect(request.messages[1]?.content).toContain('e1 · character · Rynna · new sheet')
     expect(request.messages.at(-1)?.content).toBe('Rynna is a place.')
     expect(ledger.map((row) => [row.feature, row.tier, row.promptVersion])).toEqual([
-      ['reviewChat', 'strong', 'reviewChat.v1']
+      ['reviewChat', 'strong', 'reviewChat.v2']
     ])
     const proposals = db.select().from(aiProposal).all()
     expect(proposals.map((p) => [p.id, p.feature, p.status])).toEqual([

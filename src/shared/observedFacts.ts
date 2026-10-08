@@ -1,12 +1,6 @@
 import { z } from 'zod'
-import {
-  ENTITY_FIELD_IDS,
-  ENTITY_FIELDS,
-  ENTITY_NAME_MAX,
-  EntityKind,
-  toEntityNameKey,
-  type EntityFieldId
-} from './entities'
+import { builtinCategory, categoryFieldLabel } from './categories'
+import { ENTITY_NAME_MAX, EntityKind, toEntityNameKey, type EntityFieldId } from './entities'
 
 /**
  * Observed facts (F-5.16): what the manuscript states about a character, a place, or an in-world
@@ -23,6 +17,14 @@ export const OBSERVED_FACT_VALUE_MAX = 160
 export const OBSERVED_FACT_QUOTE_MAX = 160
 
 /**
+ * The categories the story-bible job logs facts about and creates sheets in (F-5.16): the three
+ * of F-9.1. The library's other categories (F-9.11) are the author's and the context import's.
+ */
+export const OBSERVED_KINDS = ['character', 'setting', 'world'] as const
+export const ObservedKind = z.enum(OBSERVED_KINDS)
+export type ObservedKind = z.infer<typeof ObservedKind>
+
+/**
  * What a fact can be about, per kind: a fixed list, so the same thing said in two scenes lands
  * under the same attribute and can be merged or seen to differ. Every attribute is a field of
  * the kind's structured template under the same id, which is where `Add to sheet` writes it. The
@@ -32,14 +34,16 @@ export const OBSERVED_ATTRIBUTES = {
   character: ['age', 'gender', 'appearance', 'personality', 'background', 'goals', 'relationships'],
   setting: ['type', 'description', 'atmosphere', 'features'],
   world: ['category', 'description', 'rules', 'impact']
-} as const satisfies Record<EntityKind, readonly EntityFieldId[]>
+} as const satisfies Record<ObservedKind, readonly EntityFieldId[]>
 
 /** Whether `attribute` is one a fact about an entity of `kind` may carry. */
 export function isObservedAttribute(
   kind: EntityKind,
   attribute: string
 ): attribute is EntityFieldId {
-  const allowed: readonly string[] = OBSERVED_ATTRIBUTES[kind]
+  const parsed = ObservedKind.safeParse(kind)
+  if (!parsed.success) return false
+  const allowed: readonly string[] = OBSERVED_ATTRIBUTES[parsed.data]
   return allowed.includes(attribute)
 }
 
@@ -53,7 +57,8 @@ export function observedAttributeField(kind: EntityKind, attribute: string): Ent
 
 /** The attribute as the sheet names it ("Goals / motivations"); the raw id when the kind has no such field. */
 export function observedAttributeLabel(kind: EntityKind, attribute: string): string {
-  return ENTITY_FIELDS[kind].find((field) => field.id === attribute)?.label ?? attribute
+  const category = builtinCategory(kind)
+  return category === undefined ? attribute : categoryFieldLabel(category, attribute)
 }
 
 /** A stored fact: one statement of one scene about one entity. */
@@ -80,7 +85,7 @@ export type ObservedFact = z.infer<typeof ObservedFact>
  */
 export const ExtractedFact = z.object({
   entity: z.string().trim().min(1).max(ENTITY_NAME_MAX),
-  kind: EntityKind,
+  kind: ObservedKind,
   attribute: z.string().trim().min(1),
   value: z.string().trim().min(1).max(OBSERVED_FACT_VALUE_MAX),
   quote: z.string().trim().min(1).max(OBSERVED_FACT_QUOTE_MAX)
@@ -130,9 +135,16 @@ export interface FactGroup {
 
 /** Where an attribute sorts: template order, an attribute no template knows last. */
 function attributeRank(attribute: string): number {
-  const at = (ENTITY_FIELD_IDS as readonly string[]).indexOf(attribute)
-  return at === -1 ? ENTITY_FIELD_IDS.length : at
+  const at = ATTRIBUTE_ORDER.indexOf(attribute)
+  return at === -1 ? ATTRIBUTE_ORDER.length : at
 }
+
+/** Every field of the observed kinds' templates, in order (character, place, world). */
+const ATTRIBUTE_ORDER: readonly string[] = [
+  ...new Set(
+    OBSERVED_KINDS.flatMap((kind) => (builtinCategory(kind)?.fields ?? []).map((field) => field.id))
+  )
+]
 
 /**
  * Merges the visible facts for display (F-5.16), with no AI: facts of one entity and attribute

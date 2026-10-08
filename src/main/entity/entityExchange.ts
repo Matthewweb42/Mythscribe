@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import type { StoryCategory } from '@shared/categories'
 import type { EntityKind } from '@shared/entities'
 import {
   ENTITY_EXCHANGE_EXTENSIONS,
@@ -24,6 +25,7 @@ import {
   type EntityDb,
   type EntityTagChange
 } from './entityStore'
+import { listCategories } from './categoryStore'
 
 /**
  * Entity export and import in main (F-9.5): the file, the parsers' refusals as `AppError`s, and
@@ -45,16 +47,24 @@ export interface EntityFileRead {
  * extension we do not read, an unreadable file, a file of another format, a row with a bad value
  * — is VALIDATION with the parser's own message, which names the row.
  */
-export function readEntityFile(file: string, fallbackKind: EntityKind): EntityFileRead {
+export function readEntityFile(
+  file: string,
+  fallbackKind: EntityKind,
+  categories: readonly StoryCategory[] = []
+): EntityFileRead {
   const name = path.basename(file)
   const format = entityExchangeFormatOf(name)
   if (format === null) {
     const extensions = Object.values(ENTITY_EXCHANGE_EXTENSIONS)
       .map((extension) => `.${extension}`)
       .join(' or ')
-    throw new AppError('VALIDATION', `Unsupported file type: entities are read from ${extensions}`, {
-      file: name
-    })
+    throw new AppError(
+      'VALIDATION',
+      `Unsupported file type: entities are read from ${extensions}`,
+      {
+        file: name
+      }
+    )
   }
   let text: string
   try {
@@ -64,7 +74,10 @@ export function readEntityFile(file: string, fallbackKind: EntityKind): EntityFi
   }
   let records: EntityExchangeRecord[]
   try {
-    records = format === 'json' ? parseEntitiesJson(text) : parseEntitiesCsv(text, fallbackKind)
+    records =
+      format === 'json'
+        ? parseEntitiesJson(text, categories)
+        : parseEntitiesCsv(text, fallbackKind, categories)
   } catch (err) {
     if (err instanceof EntityExchangeError) {
       throw new AppError('VALIDATION', err.message, { file: name, row: err.row })
@@ -86,9 +99,11 @@ function describe(err: unknown): string {
 export function writeEntityFile(
   file: string,
   format: EntityExchangeFormat,
-  records: readonly EntityExchangeRecord[]
+  records: readonly EntityExchangeRecord[],
+  categories: readonly StoryCategory[] = []
 ): void {
-  const text = format === 'json' ? serializeEntitiesJson(records) : serializeEntitiesCsv(records)
+  const text =
+    format === 'json' ? serializeEntitiesJson(records) : serializeEntitiesCsv(records, categories)
   writeTextAtomic(file, text)
 }
 
@@ -108,7 +123,10 @@ export interface EntityImportResult {
  * bible exactly as it was. A matched row whose patch turns out to be empty still counts as merged
  * or replaced — the author chose it, and `updateEntity` only stamps `modified`.
  */
-export function importEntities(db: EntityDb, items: readonly EntityImportItem[]): EntityImportResult {
+export function importEntities(
+  db: EntityDb,
+  items: readonly EntityImportItem[]
+): EntityImportResult {
   return db.transaction((tx) => {
     const result: EntityImportResult = {
       entities: [],
@@ -140,7 +158,8 @@ export function importEntities(db: EntityDb, items: readonly EntityImportItem[])
       }
       const existing = getEntity(tx, id)
       if (existing === undefined) throw new AppError('NOT_FOUND', 'Entity not found', { id })
-      const write = updateEntity(tx, id, mergePatch(existing, item.record, item.action))
+      const patch = mergePatch(existing, item.record, item.action, listCategories(tx))
+      const write = updateEntity(tx, id, patch)
       result.entities.push(write.entity)
       if (write.tagChange !== null) result.tagChanges.push(write.tagChange)
       if (item.action === 'merge') result.merged += 1

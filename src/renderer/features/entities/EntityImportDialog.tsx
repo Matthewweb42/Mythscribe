@@ -1,5 +1,4 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
-import { ENTITY_KIND_NOUN } from '@shared/entities'
 import {
   EntityImportAction,
   actionsFor,
@@ -10,6 +9,7 @@ import {
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { useEntityStore } from './entityStore'
+import { useCategory, useCategoryStore } from './categoryStore'
 import { excerptOf } from './entityView'
 
 /** What each action promises, as the row's own label; the dialog explains nothing twice. */
@@ -139,9 +139,13 @@ function ImportReview({ plan }: { plan: EntityImportPlan }): React.JSX.Element {
 
 function ImportRow({ item }: { item: EntityImportItem }): React.JSX.Element {
   const setAction = useEntityStore((s) => s.setImportAction)
-  const existing = useEntityStore((s) => (item.existingId === null ? null : s.byId[item.existingId]))
+  const existing = useEntityStore((s) =>
+    item.existingId === null ? null : s.byId[item.existingId]
+  )
   // The excerpt is of the incoming values, so the row says what the file would bring.
-  const excerpt = excerptOf(item.record)
+  const categories = useCategoryStore((s) => s.categories)
+  const noun = useCategory(item.record.kind).noun
+  const excerpt = excerptOf(item.record, categories)
   return (
     <li
       className="m-0 flex list-none items-start gap-2 rounded-md px-2 py-1.5 hover:bg-surface"
@@ -151,7 +155,7 @@ function ImportRow({ item }: { item: EntityImportItem }): React.JSX.Element {
       <div className="min-w-0 flex-1">
         <p className="m-0 truncate text-sm font-medium">{item.record.name}</p>
         <p className="m-0 text-xs text-fg-muted">
-          {ENTITY_KIND_NOUN[item.record.kind]}
+          {noun}
           {existing ? ` · Existing: ${existing.name}` : ''}
         </p>
         {excerpt.length > 0 ? (

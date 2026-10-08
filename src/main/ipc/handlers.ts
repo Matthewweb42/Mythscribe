@@ -27,7 +27,7 @@ import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl, type PricingResult } from '@shared
 import { bundledPricing, hostedQuote } from '@shared/hostedPricing'
 import { aiRequestCounter } from '@shared/diagnostics'
 import { formatDiagnosticsReport } from '@shared/devtools'
-import { ENTITY_IMAGES_DIR, ENTITY_KIND_LABEL } from '@shared/entities'
+import { ENTITY_IMAGES_DIR } from '@shared/entities'
 import {
   ENTITY_EXCHANGE_EXTENSIONS,
   ENTITY_EXCHANGE_LABEL,
@@ -209,6 +209,12 @@ import {
   updateEntity,
   type EntityTagChange
 } from '../entity/entityStore'
+import {
+  createCategory,
+  listCategories,
+  requireCategory,
+  updateCategory
+} from '../entity/categoryStore'
 import { listFactsForEntity, setFactHidden } from '../entity/observedFactStore'
 import { importDraft, type ImportResult } from '../import/commit'
 import { withExisting } from '../import/existing'
@@ -1762,19 +1768,25 @@ export function registerHandlers({
   register('entity:export', async ({ kind, format, path: given }) => {
     const session = manager.require()
     const rows = listEntities(session.connection.orm).filter((row) => row.kind === kind)
-    const label = ENTITY_KIND_LABEL[kind].toLowerCase()
+    const label = requireCategory(session.connection.orm, kind).name.toLowerCase()
     if (rows.length === 0) {
       throw new AppError('VALIDATION', `No ${label} to export`, { kind })
     }
     const chosen =
       given ??
       (await dialogs.chooseExportPath(
-        entityExportFileName(sanitizeName(session.info.name), kind, format),
+        entityExportFileName(sanitizeName(session.info.name), label, format),
         [{ name: ENTITY_EXCHANGE_LABEL[format], extensions: [ENTITY_EXCHANGE_EXTENSIONS[format]] }],
         path.dirname(session.folder)
       ))
     if (chosen === null) return null
-    writeEntityFile(chosen, format, rows.map(toExchangeRecord))
+    const categories = listCategories(session.connection.orm)
+    writeEntityFile(
+      chosen,
+      format,
+      rows.map((row) => toExchangeRecord(row, categories)),
+      categories
+    )
     diagnostics.count('export.run')
     return { path: chosen, count: rows.length }
   })
@@ -1786,7 +1798,7 @@ export function registerHandlers({
     const session = manager.require()
     const chosen = given ?? (await dialogs.chooseEntityLibraryFile())
     if (chosen === null) return null
-    const file = readEntityFile(chosen, kind)
+    const file = readEntityFile(chosen, kind, listCategories(session.connection.orm))
     const { items, duplicates } = planEntityImport(
       listEntities(session.connection.orm),
       file.records
@@ -1818,6 +1830,18 @@ export function registerHandlers({
       replaced: result.replaced
     }
   })
+
+  // F-9.11: the story-bible categories. The library is code; the project's own categories and
+  // the author's renames of library ones are rows.
+  register('category:list', () => listCategories(manager.require().connection.orm))
+
+  register('category:create', (input) =>
+    createCategory(manager.require().connection.orm, input, 'author')
+  )
+
+  register('category:update', ({ id, ...patch }) =>
+    updateCategory(manager.require().connection.orm, id, patch)
+  )
 
   // F-9.8: the context library. Adding a file stores its original and reads its text; nothing is
   // sent anywhere until the author confirms the estimate, and nothing reaches the story bible
@@ -1935,6 +1959,7 @@ export function registerHandlers({
     return {
       entities: result.entities,
       files: result.files,
+      categories: result.categories,
       created: result.created,
       updated: result.updated,
       notes: result.notes

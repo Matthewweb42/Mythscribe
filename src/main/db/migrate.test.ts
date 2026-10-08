@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(20)
+    expect(result.version).toBe(21)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -864,5 +864,39 @@ describe('tag.aliases and entity.aliases (0019_aliases)', () => {
     expect(db.prepare('SELECT aliases FROM tag').get()).toEqual({ aliases: '[]' })
     expect(db.prepare('SELECT aliases FROM entity').get()).toEqual({ aliases: '[]' })
     expect(() => db.prepare('UPDATE tag SET aliases = NULL').run()).toThrow(/NOT NULL/)
+  })
+})
+
+describe('story_category (0020_story_categories)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+  })
+  afterEach(() => db.close())
+
+  it('keeps every sheet written before F-9.11 under its kind (now a library category id) and starts with no project categories', () => {
+    migrate(db, loadMigrations().slice(0, 20))
+    const insert = db.prepare(
+      `INSERT INTO entity (id, kind, name, created, modified) VALUES (?, ?, ?, '2026-01-01', '2026-01-01')`
+    )
+    insert.run('e1', 'character', 'Rynna')
+    insert.run('e2', 'setting', 'Kael')
+    insert.run('e3', 'world', 'The Weave')
+    migrate(db)
+    expect(db.prepare('SELECT id, kind FROM entity ORDER BY id').all()).toEqual([
+      { id: 'e1', kind: 'character' },
+      { id: 'e2', kind: 'setting' },
+      { id: 'e3', kind: 'world' }
+    ])
+    expect(db.prepare('SELECT COUNT(*) AS n FROM story_category').get()).toEqual({ n: 0 })
+    db.prepare(
+      `INSERT INTO story_category (id, name, noun, icon, origin, created, modified)
+       VALUES ('setting', 'Locations', 'location', 'map-pin', 'author', '2026-01-01', '2026-01-01')`
+    ).run()
+    expect(db.prepare('SELECT hint, fields FROM story_category').get()).toEqual({
+      hint: '',
+      fields: null
+    })
   })
 })

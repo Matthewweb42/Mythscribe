@@ -66,7 +66,13 @@ describe('writeEntityFile / readEntityFile', () => {
     const records = [
       record(),
       record({ kind: 'setting', name: 'Harbour', fields: { atmosphere: 'Salt air' } }),
-      record({ kind: 'world', name: 'Tide Law', template: 'blank', fields: {}, body: 'Salt binds.' })
+      record({
+        kind: 'world',
+        name: 'Tide Law',
+        template: 'blank',
+        fields: {},
+        body: 'Salt binds.'
+      })
     ]
     const file = path.join(tmp, 'library.json')
     writeEntityFile(file, 'json', records)
@@ -105,15 +111,18 @@ describe('writeEntityFile / readEntityFile', () => {
   })
 
   it('refuses an unsupported extension, an unreadable file, another format, and an empty one', () => {
-    expect(expectCode(() => readEntityFile(write('a.txt', 'x'), 'character'), 'VALIDATION').message)
-      .toMatch(/^Unsupported file type/)
+    expect(
+      expectCode(() => readEntityFile(write('a.txt', 'x'), 'character'), 'VALIDATION').message
+    ).toMatch(/^Unsupported file type/)
     expect(
       expectCode(() => readEntityFile(path.join(tmp, 'missing.json'), 'character'), 'VALIDATION')
         .message
     ).toMatch(/^Could not read the file/)
     expect(
-      expectCode(() => readEntityFile(write('other.json', '{"format":"x"}'), 'character'), 'VALIDATION')
-        .message
+      expectCode(
+        () => readEntityFile(write('other.json', '{"format":"x"}'), 'character'),
+        'VALIDATION'
+      ).message
     ).toBe('That file is not a MythScribe entity file.')
     expect(
       expectCode(
@@ -128,9 +137,9 @@ describe('writeEntityFile / readEntityFile', () => {
   })
 
   it('names the row a bad value is in', () => {
-    const file = write('rows.csv', 'kind,name\r\ncharacter,Ilse\r\ncreature,Wyrm\r\n')
+    const file = write('rows.csv', 'kind,name\r\ncharacter,Ilse\r\ndragonkin,Wyrm\r\n')
     const error = expectCode(() => readEntityFile(file, 'character'), 'VALIDATION')
-    expect(error.message).toBe('Row 2: "creature" is not a kind of entity')
+    expect(error.message).toBe('Row 2: "dragonkin" is not a category of this project')
     expect(error.details).toMatchObject({ row: 2 })
   })
 })
@@ -184,14 +193,17 @@ describe('importEntities', () => {
 
     const replaced = importEntities(db, [{ ...merge, action: 'replace' }])
     expect(replaced).toMatchObject({ added: 0, merged: 0, replaced: 1 })
-    expect(replaced.entities[0]).toMatchObject({ fields: { age: '99', background: 'Born at sea.' } })
+    expect(replaced.entities[0]).toMatchObject({
+      fields: { age: '99', background: 'Born at sea.' }
+    })
   })
 
   it('skips what the author skipped and writes nothing for it', () => {
     const items = plan([record(), record({ name: 'Tomas' })])
-    const result = importEntities(db, items.map((item, index) =>
-      index === 0 ? { ...item, action: 'skip' as const } : item
-    ))
+    const result = importEntities(
+      db,
+      items.map((item, index) => (index === 0 ? { ...item, action: 'skip' as const } : item))
+    )
     expect(result).toMatchObject({ added: 1, merged: 0, replaced: 0 })
     expect(listEntities(db).map((entity) => entity.name)).toEqual(['Tomas'])
   })
@@ -207,16 +219,13 @@ describe('importEntities', () => {
     createEntity(db, { kind: 'character', name: 'Ilse' })
     const items = plan([record({ fields: { goals: 'Sail.' } })])
     expect(items[0]?.action).toBe('merge')
-    expectCode(
-      () => importEntities(db, [{ ...items[0]!, existingId: 'gone' }]),
-      'NOT_FOUND'
-    )
+    expectCode(() => importEntities(db, [{ ...items[0]!, existingId: 'gone' }]), 'NOT_FOUND')
   })
 
   it('an import of a project’s own export changes nothing but the stamp', () => {
     createEntity(db, { kind: 'character', name: 'Ilse', fields: { age: '30' } })
     const before = listEntities(db)
-    const items = plan(before.map(toExchangeRecord))
+    const items = plan(before.map((entity) => toExchangeRecord(entity)))
     expect(items.map((item) => item.action)).toEqual(['merge'])
     const result = importEntities(db, items)
     expect(result).toMatchObject({ added: 0, merged: 1, replaced: 0 })

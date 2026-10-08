@@ -60,6 +60,8 @@ import { CONTINUITY_PROMPT_V2_VERSION } from './continuity.v2'
 import { WHAT_NEXT_PROMPT_V3_VERSION } from './whatNext.v3'
 import { NOTES_SUGGEST_PROMPT_V2_VERSION } from './notesSuggest.v2'
 import { PLAN_LINKS_PROMPT_VERSION } from './planLinks.v1'
+import { CONTEXT_IMPORT_PROMPT_V2_VERSION } from './contextImport.v2'
+import { REVIEW_CHAT_PROMPT_V2_VERSION } from './reviewChat.v2'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -134,7 +136,9 @@ export const PROMPT_VERSIONS = [
   CONTINUITY_PROMPT_V2_VERSION,
   WHAT_NEXT_PROMPT_V3_VERSION,
   NOTES_SUGGEST_PROMPT_V2_VERSION,
-  PLAN_LINKS_PROMPT_VERSION
+  PLAN_LINKS_PROMPT_VERSION,
+  CONTEXT_IMPORT_PROMPT_V2_VERSION,
+  REVIEW_CHAT_PROMPT_V2_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -425,6 +429,18 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-11.1d'
+  },
+  [CONTEXT_IMPORT_PROMPT_V2_VERSION]: {
+    feature: 'contextImport',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-9.11'
+  },
+  [REVIEW_CHAT_PROMPT_V2_VERSION]: {
+    feature: 'reviewChat',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-9.11'
   }
 }
 

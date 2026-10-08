@@ -213,6 +213,17 @@ import {
   type BuildContextImportPromptInput
 } from '../prompts/contextImport.v1'
 import {
+  buildContextImportPromptV2,
+  CONTEXT_IMPORT_PROMPT_V2_VERSION,
+  type BuildContextImportPromptV2Input
+} from '../prompts/contextImport.v2'
+import {
+  buildReviewChatPromptV2,
+  REVIEW_CHAT_PROMPT_V2_VERSION,
+  type BuildReviewChatPromptV2Input
+} from '../prompts/reviewChat.v2'
+import { BUILTIN_CATEGORIES, categoryFromInput, categoryOf } from '@shared/categories'
+import {
   CONTEXT_CHUNK_CHARS,
   CONTEXT_IMAGE_NAMES_MAX,
   chunkParagraphs,
@@ -1776,6 +1787,7 @@ function reviewChatReview(): ContextReview {
       ],
       include: true
     },
+    categories: [],
     proposalIds: ['p1'],
     chunks: 1,
     usage: { inputTokens: 1_200, outputTokens: 400 },
@@ -1838,6 +1850,53 @@ function reviewChatCase(
     scoring: { kind: 'reviewChat', expected }
   }
 }
+
+function contextImportCaseV2(
+  name: string,
+  note: string,
+  input: BuildContextImportPromptV2Input,
+  expected: string[]
+): EvalCase {
+  const built = buildContextImportPromptV2(input)
+  return {
+    version: CONTEXT_IMPORT_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'contextImport', expected }
+  }
+}
+
+function reviewChatCaseV2(
+  name: string,
+  note: string,
+  input: BuildReviewChatPromptV2Input,
+  expected: ReviewOp['op'][]
+): EvalCase {
+  const built = buildReviewChatPromptV2(input)
+  return {
+    version: REVIEW_CHAT_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'reviewChat', expected }
+  }
+}
+
+/** A worldbuilding page about a magic system and a fleet, for the category cases (F-9.11). */
+const CONTEXT_MAGIC_DOCUMENT = [
+  '# The Weave',
+  'The Weave is the magic of the coast: weavers pull threads of tide-light into knots that hold ' +
+    'a shape. Every knot costs the weaver a memory, and a knot cut too soon burns the hand.',
+  '# The fleet',
+  'The Gull: a two-masted cutter, crew of twelve, home port Kael.',
+  'The Heron: a slow grain hauler out of the Ferry Landing, crew of thirty.'
+].join('\n\n')
+
+/** A project category for the maxed category case. */
+const SHIPS = categoryFromInput('c-ships', { name: 'Ships', fields: ['Crew', 'Home port'] }, 'ai')
 
 function queryCase(name: string, note: string, input: BuildQueryPromptInput): EvalCase {
   const built = buildQueryPrompt(input)
@@ -3827,5 +3886,111 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed',
     'every cap: 30 plans and 40 written scenes, each title and text at its cap',
     PLAN_LINKS_MAXED
+  ),
+  contextImportCaseV2(
+    'fixture',
+    'version 1’s short document against a bible that has Mara, the library of categories in the rules',
+    {
+      categories: BUILTIN_CATEGORIES,
+      sheets: [{ category: categoryOf('character'), names: ['Mara Vell'] }],
+      images: ['mara-portrait.png'],
+      fileName: 'worldbuilding.md',
+      part: 1,
+      parts: 1,
+      changedOnly: false,
+      text: CONTEXT_DOCUMENT
+    },
+    ['Mara Vell', 'Tomas', 'The Ferry Landing']
+  ),
+  contextImportCaseV2(
+    'categories',
+    'a magic system for Magic Systems and two ships no library category fits, which may be proposed as a new one',
+    {
+      categories: BUILTIN_CATEGORIES,
+      sheets: [{ category: categoryOf('setting'), names: ['Kael', 'The Ferry Landing'] }],
+      images: [],
+      fileName: 'magic-and-ships.md',
+      part: 1,
+      parts: 1,
+      changedOnly: false,
+      text: CONTEXT_MAGIC_DOCUMENT
+    },
+    ['The Weave', 'The Gull', 'The Heron']
+  ),
+  contextImportCaseV2(
+    'maxed',
+    'a full chunk, 200 sheets over five categories, a project category, and the image list at its cap',
+    {
+      categories: [...BUILTIN_CATEGORIES, SHIPS],
+      sheets: [
+        {
+          category: categoryOf('character'),
+          names: Array.from({ length: 100 }, (_, i) => `Character ${i}`)
+        },
+        {
+          category: categoryOf('setting'),
+          names: Array.from({ length: 40 }, (_, i) => `Place ${i}`)
+        },
+        {
+          category: categoryOf('world'),
+          names: Array.from({ length: 20 }, (_, i) => `World ${i}`)
+        },
+        {
+          category: categoryOf('magic'),
+          names: Array.from({ length: 20 }, (_, i) => `Magic ${i}`)
+        },
+        { category: SHIPS, names: Array.from({ length: 20 }, (_, i) => `Ship ${i}`) }
+      ],
+      images: Array.from({ length: CONTEXT_IMAGE_NAMES_MAX }, (_, i) => `image-${i}.png`),
+      fileName: 'worldbuilding.docx',
+      part: 1,
+      parts: 3,
+      changedOnly: false,
+      text: CONTEXT_MAXED_CHUNK
+    },
+    ['Mara Vell']
+  ),
+  reviewChatCaseV2(
+    'merge',
+    'version 1’s merge, with the library of kinds in the rules',
+    {
+      review: reviewChatReview(),
+      history: [],
+      message: 'Merge Rynna and High Crown Falsire. Her full name is Rynna Falsire.'
+    },
+    ['merge']
+  ),
+  reviewChatCaseV2(
+    'kind',
+    'a ruling house read as a person that belongs in Factions, with a proposed category listed',
+    {
+      review: {
+        ...reviewChatReview(),
+        categories: [{ ...SHIPS, proposed: true }]
+      },
+      history: [],
+      message: 'High Crown Falsire is a faction, not a character.'
+    },
+    ['kind']
+  ),
+  reviewChatCaseV2(
+    'maxed',
+    'the one retry at the larger cap, at both listing caps, with a project and a proposed category',
+    {
+      review: {
+        ...maxedReviewChatReview(),
+        categories: [
+          { ...SHIPS, proposed: false },
+          { ...SHIPS, id: 'c-guilds', name: 'Guilds', proposed: true }
+        ]
+      },
+      history: Array.from({ length: REVIEW_CHAT_HISTORY_TURNS }, (_, i) => ({
+        role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+        content: FIXTURE_PASSAGE.repeat(2).slice(0, REVIEW_CHAT_TURN_CHARS)
+      })),
+      message: `Tidy this up. ${FIXTURE_PASSAGE.repeat(4)}`.slice(0, REVIEW_CHAT_MESSAGE_MAX),
+      retry: true
+    },
+    []
   )
 ]

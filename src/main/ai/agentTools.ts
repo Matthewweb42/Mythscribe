@@ -14,18 +14,20 @@ import {
 } from '@shared/agent'
 import { normalizeForMatch } from '@shared/critique'
 import {
-  ENTITY_FIELDS,
-  ENTITY_KIND_LABEL,
-  EntityKind,
-  isFieldOf,
-  toEntityNameKey
-} from '@shared/entities'
+  ALWAYS_SHOWN_CATEGORIES,
+  categoryFieldLabel,
+  categoryOf,
+  isCategoryField,
+  type StoryCategory
+} from '@shared/categories'
+import { toEntityNameKey } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
 import { SCENE_SYNOPSIS_MAX, parseStoredSceneMeta } from '@shared/sceneMeta'
 import { STORY_MAP_NOW_MARK, sceneProgress } from '@shared/storyTime'
 import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, toTagName } from '@shared/tags'
 import type { NodeRow } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
+import { listCategories } from '../entity/categoryStore'
 import { listEntities } from '../entity/entityStore'
 import { nodesInTreeOrder } from '../search/searchStore'
 import { findTagByNameOrAlias, getTag, listTags } from '../tag/tagStore'
@@ -296,7 +298,7 @@ function readSheet(project: AgentProject, name: unknown): ToolOutcome {
     }
   }
   const lines = [`${entity.name} (${entity.kind}; ${SHEETS_ARE_PLANS})`]
-  for (const field of ENTITY_FIELDS[entity.kind]) {
+  for (const field of categoryOf(entity.kind, listCategories(project.db)).fields) {
     const value = entity.fields[field.id]?.trim() ?? ''
     lines.push(`${field.id} (${field.label}): ${value || '(empty)'}`)
   }
@@ -308,17 +310,39 @@ function readSheet(project: AgentProject, name: unknown): ToolOutcome {
   }
 }
 
+/**
+ * The category a `kind` argument names (F-9.11): an id, a name, or a singular, any case; null
+ * for none (then every category in use is listed).
+ */
+function categoryArg(categories: readonly StoryCategory[], kindArg: string): StoryCategory | null {
+  const key = kindArg.trim().toLowerCase()
+  if (key === '') return null
+  return (
+    categories.find(
+      (c) => c.id === key || c.name.toLowerCase() === key || c.noun.toLowerCase() === key
+    ) ?? null
+  )
+}
+
 function listSheets(project: AgentProject, kindArg: string): ToolOutcome {
-  const kind = EntityKind.safeParse(kindArg.trim().toLowerCase())
-  const kinds = kind.success ? [kind.data] : EntityKind.options
-  const lines = kinds.map((each) => {
-    const names = project.entities.filter((e) => e.kind === each).map((e) => e.name)
-    return `${ENTITY_KIND_LABEL[each]}: ${names.length > 0 ? names.join(', ') : '(none)'}`
+  const categories = listCategories(project.db)
+  const asked = categoryArg(categories, kindArg)
+  // Every category in use, and the two the sidebar always shows (F-9.11).
+  const shown =
+    asked !== null
+      ? [asked]
+      : categories.filter(
+          (c) =>
+            ALWAYS_SHOWN_CATEGORIES.includes(c.id) || project.entities.some((e) => e.kind === c.id)
+        )
+  const lines = shown.map((each) => {
+    const names = project.entities.filter((e) => e.kind === each.id).map((e) => e.name)
+    return `${each.name} (${each.id}): ${names.length > 0 ? names.join(', ') : '(none)'}`
   })
   return {
     step: {
       tool: 'list_sheets',
-      label: kind.success ? `Listing the ${ENTITY_KIND_LABEL[kind.data]}…` : 'Listing the sheets…'
+      label: asked !== null ? `Listing the ${asked.name}…` : 'Listing the sheets…'
     },
     result: cap(lines.join('\n'))
   }
@@ -453,9 +477,10 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
       const entity = sheetByName(project, edit.name)
       if (entity === undefined) return { error: `no sheet called "${str(edit.name)}"` }
       const field = str(edit.field).trim()
-      if (!isFieldOf(entity.kind, field))
-        return { error: `"${field}" is not a ${entity.kind} field` }
-      const label = ENTITY_FIELDS[entity.kind].find((def) => def.id === field)?.label ?? field
+      const category = categoryOf(entity.kind, listCategories(project.db))
+      if (!isCategoryField(category, field))
+        return { error: `"${field}" is not a ${category.noun} field` }
+      const label = categoryFieldLabel(category, field)
       const before = entity.fields[field] ?? ''
       const after = text(edit.text)
       if (after === before.trim()) return { error: 'no change' }

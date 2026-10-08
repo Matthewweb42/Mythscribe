@@ -5,7 +5,7 @@ import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { entityFixture } from './entityFixture'
-import { orderedIds, resetEntityStore, useEntityStore } from './entityStore'
+import { orderedIds, resetEntityStore, useEntityStore, viewOf } from './entityStore'
 
 type Handler = (input: unknown) => unknown
 
@@ -176,12 +176,13 @@ describe('entityStore (F-9.2)', () => {
   })
 
   it('the view is per kind, defaults to cards, and resets on clear', () => {
-    expect(state().view.character).toBe('cards')
+    expect(viewOf(state().view, 'character')).toBe('cards')
     state().setView('character', 'list')
-    expect(state().view).toEqual({ character: 'list', setting: 'cards', world: 'cards' })
+    expect(state().view).toEqual({ character: 'list' })
+    expect(viewOf(state().view, 'magic')).toBe('cards')
     state().select('e-mara')
     state().clear()
-    expect(state().view.character).toBe('cards')
+    expect(viewOf(state().view, 'character')).toBe('cards')
     expect(state().selectedId).toBeNull()
   })
 

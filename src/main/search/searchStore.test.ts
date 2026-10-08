@@ -164,7 +164,7 @@ describe('searchProject (F-10.1)', () => {
       count: 3
     })
     expect(results[0]?.snippet.highlights).toHaveLength(2)
-    expect(results[1]).toMatchObject({ location: 'setting', field: null, count: 1 })
+    expect(results[1]).toMatchObject({ location: 'place', field: null, count: 1 })
     expect(results[1]?.snippet.text).toBe('Fog, and one lantern on the quay.')
     expect(results[2]).toMatchObject({
       location: 'world-building item',

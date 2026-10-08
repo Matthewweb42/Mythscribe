@@ -1,5 +1,5 @@
 import type { ContextReview, ContextReviewEntity } from '@shared/contextLibrary'
-import { ENTITY_FIELDS } from '@shared/entities'
+import { categoryFieldLabel, categoryOf } from '@shared/categories'
 import {
   itemAliases,
   REVIEW_CHAT_HISTORY_TURNS,
@@ -80,8 +80,8 @@ export function reviewItemLine(item: ContextReviewEntity): string {
   const files = [...new Set(item.records.map((record) => record.fileName))]
   if (files.length > 0) parts.push(`from ${files.join(', ')}`)
   if (item.fields.length > 0) {
-    const label = (id: string): string =>
-      ENTITY_FIELDS[item.kind].find((def) => def.id === id)?.label ?? id
+    const category = categoryOf(item.kind)
+    const label = (id: string): string => categoryFieldLabel(category, id)
     parts.push(
       `fields: ${item.fields
         .map(

@@ -1,110 +1,33 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ENTITY_FIELD_IDS,
-  ENTITY_FIELDS,
-  ENTITY_KIND_LABEL,
-  ENTITY_KIND_NOUN,
-  ENTITY_KINDS,
-  ENTITY_KINDS_WITH_IMAGE,
-  ENTITY_TAG_CATEGORY,
+  EntityFieldId,
+  EntityKind,
   entityTagName,
-  fieldIdsFor,
-  isFieldOf,
-  kindHasImage,
   parseEntityFields,
   toEntityNameKey,
   WORLD_CATEGORY_SUGGESTIONS
 } from './entities'
-import { TAG_CATEGORIES, TAG_NAME_MAX } from './tags'
+import { TAG_NAME_MAX } from './tags'
 
-describe('the kinds', () => {
-  it('are the three of the spec, each with a label and a noun', () => {
-    expect(ENTITY_KINDS).toEqual(['character', 'setting', 'world'])
-    for (const kind of ENTITY_KINDS) {
-      expect(ENTITY_KIND_LABEL[kind]).toMatch(/\S/)
-      expect(ENTITY_KIND_NOUN[kind]).toMatch(/\S/)
+describe('the id shapes (F-9.11)', () => {
+  it('take every category id, the F-9.1 kinds and project ones among them', () => {
+    for (const id of ['character', 'setting', 'world', 'magic', 'c-ships', 'c-ships-2']) {
+      expect(EntityKind.safeParse(id).success).toBe(true)
+    }
+    for (const id of ['', 'Ships', 'c ships', '-x', 'a'.repeat(49)]) {
+      expect(EntityKind.safeParse(id).success).toBe(false)
     }
   })
 
-  it('carry an image for characters and settings only', () => {
-    expect(ENTITY_KINDS_WITH_IMAGE).toEqual(['character', 'setting'])
-    expect(kindHasImage('character')).toBe(true)
-    expect(kindHasImage('setting')).toBe(true)
-    expect(kindHasImage('world')).toBe(false)
-  })
-})
-
-describe('the templates', () => {
-  it('give every kind the spec’s fields, each with a label', () => {
-    expect(fieldIdsFor('character')).toEqual([
-      'age',
-      'born',
-      'gender',
-      'appearance',
-      'personality',
-      'background',
-      'goals',
-      'relationships',
-      'notes'
-    ])
-    expect(fieldIdsFor('setting')).toEqual([
-      'type',
-      'description',
-      'atmosphere',
-      'features',
-      'associatedCharacters',
-      'notes'
-    ])
-    expect(fieldIdsFor('world')).toEqual(['category', 'description', 'rules', 'impact', 'notes'])
-    for (const kind of ENTITY_KINDS) {
-      for (const field of ENTITY_FIELDS[kind]) expect(field.label).toMatch(/\S/)
-    }
-  })
-
-  it('use each field id once per kind, and only ids of the shared list', () => {
-    const seen = new Set<string>()
-    for (const kind of ENTITY_KINDS) {
-      const ids = fieldIdsFor(kind)
-      expect(new Set(ids).size).toBe(ids.length)
-      for (const id of ids) {
-        expect(ENTITY_FIELD_IDS).toContain(id)
-        seen.add(id)
-      }
-    }
-    // Nothing in the union that no template uses.
-    expect([...ENTITY_FIELD_IDS].sort()).toEqual([...seen].sort())
-  })
-
-  it('never make `name` or `image` a field: both are columns', () => {
-    expect(ENTITY_FIELD_IDS).not.toContain('name')
-    expect(ENTITY_FIELD_IDS).not.toContain('image')
+  it('take camel-case field ids and refuse anything else', () => {
+    expect(EntityFieldId.safeParse('associatedCharacters').success).toBe(true)
+    expect(EntityFieldId.safeParse('homePort2').success).toBe(true)
+    expect(EntityFieldId.safeParse('Home port').success).toBe(false)
+    expect(EntityFieldId.safeParse('').success).toBe(false)
   })
 
   it('suggest world categories without making the field a list', () => {
     expect(WORLD_CATEGORY_SUGGESTIONS).toContain('Magic system')
-    expect(WORLD_CATEGORY_SUGGESTIONS).toContain('Culture')
-    expect(WORLD_CATEGORY_SUGGESTIONS).toContain('Technology')
-    expect(ENTITY_FIELDS.world.find((f) => f.id === 'category')?.multiline).toBe(false)
-  })
-})
-
-describe('isFieldOf', () => {
-  it('answers for the kind that owns the field, not for any other', () => {
-    expect(isFieldOf('character', 'age')).toBe(true)
-    expect(isFieldOf('setting', 'age')).toBe(false)
-    expect(isFieldOf('world', 'age')).toBe(false)
-    expect(isFieldOf('setting', 'atmosphere')).toBe(true)
-    expect(isFieldOf('world', 'atmosphere')).toBe(false)
-    expect(isFieldOf('world', 'rules')).toBe(true)
-    // `notes` is the one field all three share.
-    for (const kind of ENTITY_KINDS) expect(isFieldOf(kind, 'notes')).toBe(true)
-  })
-
-  it('refuses an id no template knows', () => {
-    expect(isFieldOf('character', 'name')).toBe(false)
-    expect(isFieldOf('character', 'image')).toBe(false)
-    expect(isFieldOf('character', 'favouriteColour')).toBe(false)
-    expect(isFieldOf('character', '')).toBe(false)
   })
 })
 
@@ -131,15 +54,6 @@ describe('toEntityNameKey', () => {
 })
 
 describe('the tag link (F-9.4)', () => {
-  it('gives every kind a category of the tag vocabulary', () => {
-    expect(ENTITY_TAG_CATEGORY).toEqual({
-      character: 'character',
-      setting: 'setting',
-      world: 'worldBuilding'
-    })
-    for (const kind of ENTITY_KINDS) expect(TAG_CATEGORIES).toContain(ENTITY_TAG_CATEGORY[kind])
-  })
-
   it.each([
     ['Mara Vell', 'mara-vell'],
     ['  Mara  ', 'mara'],
@@ -165,18 +79,14 @@ describe('the tag link (F-9.4)', () => {
 })
 
 describe('parseEntityFields', () => {
-  it('reads the values of the kind’s own fields', () => {
-    const raw = JSON.stringify({ age: '31', appearance: 'Tall, grey-eyed.' })
-    expect(parseEntityFields(raw, 'character')).toEqual({
-      age: '31',
-      appearance: 'Tall, grey-eyed.'
-    })
+  it('reads every stored value under a well-formed field id, whatever the category (F-9.11)', () => {
+    const raw = JSON.stringify({ age: '31', atmosphere: 'Damp', homePort: 'Kael' })
+    expect(parseEntityFields(raw)).toEqual({ age: '31', atmosphere: 'Damp', homePort: 'Kael' })
   })
 
-  it('drops keys no template of the kind knows', () => {
-    const raw = JSON.stringify({ age: '31', atmosphere: 'Damp', favourite: 'tea' })
-    expect(parseEntityFields(raw, 'character')).toEqual({ age: '31' })
-    expect(parseEntityFields(raw, 'setting')).toEqual({ atmosphere: 'Damp' })
+  it('drops keys that are not field ids', () => {
+    const raw = JSON.stringify({ age: '31', 'Home port': 'Kael', '': 'x' })
+    expect(parseEntityFields(raw)).toEqual({ age: '31' })
   })
 
   it('drops values that are not strings, and empty ones', () => {
@@ -188,16 +98,16 @@ describe('parseEntityFields', () => {
       background: '',
       notes: 'Keeps the key.'
     })
-    expect(parseEntityFields(raw, 'character')).toEqual({ notes: 'Keeps the key.' })
+    expect(parseEntityFields(raw)).toEqual({ notes: 'Keeps the key.' })
   })
 
   it('reads null, invalid JSON, and JSON that is not an object as nothing at all', () => {
-    expect(parseEntityFields(null, 'character')).toEqual({})
-    expect(parseEntityFields('', 'character')).toEqual({})
-    expect(parseEntityFields('{oops', 'character')).toEqual({})
-    expect(parseEntityFields('"a string"', 'character')).toEqual({})
-    expect(parseEntityFields('42', 'character')).toEqual({})
-    expect(parseEntityFields('null', 'character')).toEqual({})
-    expect(parseEntityFields('{}', 'character')).toEqual({})
+    expect(parseEntityFields(null)).toEqual({})
+    expect(parseEntityFields('')).toEqual({})
+    expect(parseEntityFields('{oops')).toEqual({})
+    expect(parseEntityFields('"a string"')).toEqual({})
+    expect(parseEntityFields('42')).toEqual({})
+    expect(parseEntityFields('null')).toEqual({})
+    expect(parseEntityFields('{}')).toEqual({})
   })
 })

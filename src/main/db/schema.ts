@@ -25,7 +25,8 @@ import {
   EDIT_PASS_TYPES
 } from '../../shared/editPass'
 import { CONTEXT_FILE_TYPES } from '../../shared/contextLibrary'
-import { ENTITY_KINDS, ENTITY_ORIGINS, ENTITY_TEMPLATES } from '../../shared/entities'
+import { CATEGORY_ICONS, CATEGORY_ORIGINS } from '../../shared/categories'
+import { ENTITY_ORIGINS, ENTITY_TEMPLATES } from '../../shared/entities'
 import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
 import { SNAPSHOT_KINDS, SNAPSHOT_SCOPES } from '../../shared/snapshots'
@@ -407,7 +408,8 @@ export const entity = sqliteTable(
   'entity',
   {
     id: text('id').primaryKey(),
-    kind: text('kind', { enum: ENTITY_KINDS }).notNull(),
+    /** F-9.11: a category id (library or `story_category`); the F-9.1 kinds are library ids. */
+    kind: text('kind').notNull(),
     /** The author's spelling, trimmed; compared through `toEntityNameKey`. */
     name: text('name').notNull(),
     template: text('template', { enum: ENTITY_TEMPLATES }).notNull().default('structured'),
@@ -433,6 +435,30 @@ export const entity = sqliteTable(
 )
 export type EntityRow = typeof entity.$inferSelect
 export type EntityInsert = typeof entity.$inferInsert
+
+/**
+ * The project's story-bible categories (F-9.11), beside the built-in library of
+ * `shared/categories.ts`. A row with `fields` is one of the project's own categories (`c-…`, made
+ * by the author or accepted from the AI): its template is the JSON array of `{ id, label,
+ * multiline }`. A row with null `fields` carries a library id and only renames that category
+ * (name, singular, icon); deleting it restores the library's. `entity.kind` points here or at a
+ * library id, by value: there is no foreign key, so a sheet always outlives its category's row.
+ */
+export const storyCategory = sqliteTable('story_category', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  noun: text('noun').notNull(),
+  icon: text('icon', { enum: CATEGORY_ICONS }).notNull(),
+  /** JSON array of the template's fields; null for a rename of a library category. */
+  fields: text('fields'),
+  /** What goes in it, for the AI's sorting prompt; '' when nobody said. */
+  hint: text('hint').notNull().default(''),
+  origin: text('origin', { enum: CATEGORY_ORIGINS }).notNull(),
+  created: text('created').notNull(),
+  modified: text('modified').notNull()
+})
+export type StoryCategoryRow = typeof storyCategory.$inferSelect
+export type StoryCategoryInsert = typeof storyCategory.$inferInsert
 
 /**
  * One thing the manuscript states about an entity (F-5.16): the attribute (a field id of the
@@ -488,7 +514,7 @@ export const continuityFinding = sqliteTable(
     entityId: text('entity_id').references(() => entity.id, { onDelete: 'cascade' }),
     /** The entity's name and kind when the check ran; null for a timeline reference. */
     entityName: text('entity_name'),
-    entityKind: text('entity_kind', { enum: ENTITY_KINDS }),
+    entityKind: text('entity_kind'),
     attribute: text('attribute'),
     refLabel: text('ref_label').notNull(),
     refValue: text('ref_value').notNull(),

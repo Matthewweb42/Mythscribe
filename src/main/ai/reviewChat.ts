@@ -5,7 +5,7 @@ import type { LibraryDb } from '../library/libraryStore'
 import { getAiSettings } from '../project/settingsStore'
 import { assertFeatureAllowed } from './dial'
 import { cancelInflight } from './inflight'
-import { buildReviewChatPrompt, REVIEW_CHAT_PROMPT_VERSION } from './prompts/reviewChat.v1'
+import { buildReviewChatPromptV2, REVIEW_CHAT_PROMPT_V2_VERSION } from './prompts/reviewChat.v2'
 import { createProposal } from './proposalStore'
 import { AiCancelledError, AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from './request'
@@ -91,7 +91,7 @@ export async function runReviewChat(
 
   const send = async (retry: boolean): Promise<AiRequestResult> => {
     if (input.signal?.aborted === true) throw new AiCancelledError('The request was stopped.')
-    const prompt = buildReviewChatPrompt({
+    const prompt = buildReviewChatPromptV2({
       review: input.review,
       history: input.history,
       message: input.message,
@@ -131,7 +131,7 @@ export async function runReviewChat(
     const proposal = createProposal(db, {
       feature: 'reviewChat',
       nodeId: null,
-      promptVersion: REVIEW_CHAT_PROMPT_VERSION,
+      promptVersion: REVIEW_CHAT_PROMPT_V2_VERSION,
       model: reply.model,
       promptTokens: usage.inputTokens,
       completionTokens: usage.outputTokens,

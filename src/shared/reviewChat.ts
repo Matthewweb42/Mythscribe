@@ -1,9 +1,17 @@
 import { z } from 'zod'
 import { AiErrorCode, AiUsage } from './ai'
 import {
+  BUILTIN_CATEGORIES as BUILTIN_LOOKUP,
+  categoryFieldLabel,
+  categoryOf,
+  isKnownCategory,
+  type StoryCategory
+} from './categories'
+import {
   buildReviewEntity,
   canSplit,
   isEmptyUpdate,
+  recordAsKind,
   splitReviewEntity,
   type ContextRecord,
   type ContextReview,
@@ -11,16 +19,7 @@ import {
   type ContextReviewField,
   type ExistingSheet
 } from './contextLibrary'
-import {
-  ENTITY_FIELDS,
-  ENTITY_KIND_NOUN,
-  ENTITY_NAME_MAX,
-  EntityKind,
-  isFieldOf,
-  kindHasImage,
-  toEntityNameKey,
-  type EntityFieldId
-} from './entities'
+import { ENTITY_NAME_MAX, toEntityNameKey, type EntityFieldId, type EntityKind } from './entities'
 
 /**
  * The review chat (F-9.9): on the context library's review screen (F-9.8) the author tells the
@@ -54,10 +53,13 @@ export const REVIEW_NOTES_ID = 'notes'
 
 const Name = z.string().trim().min(1).max(ENTITY_NAME_MAX)
 
-/** A kind as the model may spell it ("Setting", " world "). */
+/**
+ * A category as the model may spell it: an id ("setting", " Magic "), a name ("Magic Systems"),
+ * or a singular; `resolveKind` reads it against the review's categories (F-9.11).
+ */
 const LooseKind = z.preprocess(
   (value) => (typeof value === 'string' ? value.trim().toLowerCase() : value),
-  EntityKind
+  z.string().min(1).max(80)
 )
 
 /** One change to the pending review. Item ids and note numbers are the ones the prompt listed. */
@@ -70,7 +72,7 @@ export const ReviewOp = z.discriminatedUnion('op', [
   }),
   /** A merged item back into one per name (F-9.8's Split). */
   z.object({ op: z.literal('split'), item: z.string() }),
-  /** A different kind: a person, a place, or a world item. */
+  /** A different category: any library category, the project's own, or one proposed in the review. */
   z.object({ op: z.literal('kind'), item: z.string(), kind: LooseKind }),
   /** Into Project notes instead of a sheet. */
   z.object({ op: z.literal('toNotes'), item: z.string() }),
@@ -151,21 +153,24 @@ export function itemAliases(item: Pick<ContextReviewEntity, 'name' | 'records'>)
 
 const quote = (name: string): string => `“${name}”`
 
-/** A record of another kind as one of `kind`: the fields that kind has stay, the rest become details. */
-function recordAsKind(record: ContextRecord, kind: EntityKind): ContextRecord {
-  if (record.kind === kind) return record
-  const fields: ContextRecord['fields'] = {}
-  const moved: string[] = []
-  for (const [id, value] of Object.entries(record.fields)) {
-    if (value === undefined || value.trim() === '') continue
-    if (isFieldOf(kind, id) && id !== 'notes') {
-      fields[id] = value
-    } else {
-      const label = ENTITY_FIELDS[record.kind].find((def) => def.id === id)?.label ?? id
-      moved.push(`${label}: ${value}`)
-    }
-  }
-  return { ...record, kind, fields, details: [...moved, ...record.details] }
+/** The review's categories: the project's own and the proposed ones (F-9.11). */
+const categoriesOf = (review: ContextReview): readonly StoryCategory[] => review.categories
+
+/**
+ * The category id the model meant by `text`: an id, a name, or a singular of a library category,
+ * the project's own, or one proposed in the review; null when none fits.
+ */
+export function resolveKind(review: ContextReview, text: string): EntityKind | null {
+  const key = text.trim().toLowerCase()
+  if (isKnownCategory(key, review.categories)) return key
+  const all = [
+    ...review.categories,
+    ...BUILTIN_LOOKUP.filter((c) => !review.categories.some((own) => own.id === c.id))
+  ]
+  const hit = all.find(
+    (category) => category.name.toLowerCase() === key || category.noun.toLowerCase() === key
+  )
+  return hit?.id ?? null
 }
 
 /** A field's pick carries over only where the same values meet again (a fill never becomes a conflict's pick). */
@@ -187,9 +192,9 @@ function keepPicks(next: ContextReviewEntity, before: readonly ContextReviewEnti
 }
 
 /** The paragraphs an item would leave in Project notes: its fields and details, under its name. */
-function asNotes(item: ContextReviewEntity): string[] {
-  const labelOf = (id: EntityFieldId): string =>
-    ENTITY_FIELDS[item.kind].find((def) => def.id === id)?.label ?? id
+function asNotes(item: ContextReviewEntity, categories: readonly StoryCategory[]): string[] {
+  const category = categoryOf(item.kind, categories)
+  const labelOf = (id: EntityFieldId): string => categoryFieldLabel(category, id)
   return [
     ...item.fields.map((field) => `${item.name}, ${labelOf(field.field)}: ${field.upload}`),
     ...item.details.map((detail) => `${item.name}, ${detail}`)
@@ -276,15 +281,18 @@ function merge(ctx: OpContext, op: Extract<ReviewOp, { op: 'merge' }>): OpOutcom
   const target = items.find((item) => item.existingId !== null) ?? items[0]
   if (target === undefined) return skip(review, 'Merge skipped.')
   const ordered = [target, ...items.filter((item) => item !== target)]
-  const records = ordered.flatMap((item) => item.records.map((r) => recordAsKind(r, target.kind)))
+  const categories = categoriesOf(review)
+  const records = ordered.flatMap((item) =>
+    item.records.map((r) => recordAsKind(r, target.kind, categories))
+  )
   if (records.length === 0) return skip(review, 'Merge skipped: those items hold nothing to merge.')
   const sheet = ctx.existing.find((s) => s.id === target.existingId) ?? null
-  const next = buildReviewEntity(target.id, records, sheet)
+  const next = buildReviewEntity(target.id, records, sheet, categories)
   // A new sheet takes the main name asked for; the merged items' names become its other names.
   if (sheet === null) next.name = op.name ?? target.name
   next.tag = sheet === null ? (target.tag ?? true) : next.tag
   next.include = true
-  next.images = kindHasImage(target.kind)
+  next.images = categoryOf(target.kind, categories).hasImage
     ? (ordered.find((item) => item.images.length > 0)?.images ?? [])
     : []
   keepPicks(next, ordered)
@@ -326,19 +334,23 @@ function changeKind(ctx: OpContext, op: Extract<ReviewOp, { op: 'kind' }>): OpOu
   const { review } = ctx
   const item = review.entities.find((e) => e.id === op.item)
   if (item === undefined) return skip(review, `Change of kind skipped: no item ${op.item}.`)
-  if (item.kind === op.kind) {
-    return skip(review, `${quote(item.name)} is already a ${ENTITY_KIND_NOUN[op.kind]}.`)
+  const kind = resolveKind(review, op.kind)
+  if (kind === null)
+    return skip(review, `Change of kind skipped: there is no category ${quote(op.kind)}.`)
+  const categories = categoriesOf(review)
+  const noun = categoryOf(kind, categories).noun
+  if (item.kind === kind) {
+    return skip(review, `${quote(item.name)} is already a ${noun}.`)
   }
-  const records = item.records.map((record) => recordAsKind(record, op.kind))
+  const records = item.records.map((record) => recordAsKind(record, kind, categories))
   if (records.length === 0) {
     return skip(review, `${quote(item.name)} is an existing sheet with only a picture to add.`)
   }
-  const noun = ENTITY_KIND_NOUN[op.kind]
   // A same-named item of that kind already in the review takes these descriptions.
-  const into = itemNamed(review, op.kind, item.name, item.id)
+  const into = itemNamed(review, kind, item.name, item.id)
   if (into !== undefined) {
     const sheet = ctx.existing.find((s) => s.id === into.existingId) ?? null
-    const next = buildReviewEntity(into.id, [...into.records, ...records], sheet)
+    const next = buildReviewEntity(into.id, [...into.records, ...records], sheet, categories)
     if (sheet === null) next.name = into.name
     next.images = into.images
     keepPicks(next, [into, item])
@@ -352,10 +364,10 @@ function changeKind(ctx: OpContext, op: Extract<ReviewOp, { op: 'kind' }>): OpOu
     }
   }
   const names = [item.name, ...itemAliases(item)]
-  const sheet = sheetFor(ctx, op.kind, names, item.id)
-  const next = buildReviewEntity(item.id, records, sheet)
+  const sheet = sheetFor(ctx, kind, names, item.id)
+  const next = buildReviewEntity(item.id, records, sheet, categories)
   if (sheet === null) next.name = item.name
-  next.images = kindHasImage(op.kind) ? item.images : []
+  next.images = categoryOf(kind, categories).hasImage ? item.images : []
   next.include = item.include
   keepPicks(next, [item])
   return {
@@ -373,7 +385,7 @@ function toNotes(ctx: OpContext, op: Extract<ReviewOp, { op: 'toNotes' }>): OpOu
   const item = review.entities.find((e) => e.id === op.item)
   if (item === undefined) return skip(review, `Move to Project notes skipped: no item ${op.item}.`)
   const seen = new Set(review.notes.paragraphs.map(toEntityNameKey))
-  const added = asNotes(item).filter((p) => !seen.has(toEntityNameKey(p)))
+  const added = asNotes(item, categoriesOf(review)).filter((p) => !seen.has(toEntityNameKey(p)))
   return {
     review: {
       ...review,
@@ -394,6 +406,11 @@ function toNotes(ctx: OpContext, op: Extract<ReviewOp, { op: 'toNotes' }>): OpOu
 
 function fromNotes(ctx: OpContext, op: Extract<ReviewOp, { op: 'fromNotes' }>): OpOutcome {
   const { review } = ctx
+  const kind = resolveKind(review, op.kind)
+  if (kind === null) {
+    return skip(review, `Move from Project notes skipped: there is no category ${quote(op.kind)}.`)
+  }
+  const categories = categoriesOf(review)
   const numbers = [...new Set(op.notes)].filter((n) => n <= review.notes.paragraphs.length)
   if (numbers.length === 0) return skip(review, 'Move from Project notes skipped: no such note.')
   const paragraphs = numbers.flatMap((n) => review.notes.paragraphs[n - 1] ?? [])
@@ -401,7 +418,7 @@ function fromNotes(ctx: OpContext, op: Extract<ReviewOp, { op: 'fromNotes' }>): 
     id: `${ctx.nextId()}r`,
     fileId: review.fileIds[0] ?? '',
     fileName: 'Project notes',
-    kind: op.kind,
+    kind,
     name: op.name,
     aliases: [],
     fields: {},
@@ -411,11 +428,11 @@ function fromNotes(ctx: OpContext, op: Extract<ReviewOp, { op: 'fromNotes' }>): 
     ...review.notes,
     paragraphs: review.notes.paragraphs.filter((_, i) => !numbers.includes(i + 1))
   }
-  const into = itemNamed(review, op.kind, op.name, null)
+  const into = itemNamed(review, kind, op.name, null)
   const noteWord = numbers.length === 1 ? 'note' : `${numbers.length} notes`
   if (into !== undefined) {
     const sheet = ctx.existing.find((s) => s.id === into.existingId) ?? null
-    const next = buildReviewEntity(into.id, [...into.records, record], sheet)
+    const next = buildReviewEntity(into.id, [...into.records, record], sheet, categories)
     if (sheet === null) next.name = into.name
     next.images = into.images
     next.tag = sheet === null ? into.tag : next.tag
@@ -429,15 +446,15 @@ function fromNotes(ctx: OpContext, op: Extract<ReviewOp, { op: 'fromNotes' }>): 
       }
     }
   }
-  const sheet = sheetFor(ctx, op.kind, [op.name], '')
-  const next = buildReviewEntity(ctx.nextId(), [record], sheet)
+  const sheet = sheetFor(ctx, kind, [op.name], '')
+  const next = buildReviewEntity(ctx.nextId(), [record], sheet, categories)
   if (isEmptyUpdate(next)) {
     return skip(review, `${quote(op.name)} already says what those notes say.`)
   }
   return {
     review: { ...review, entities: [...review.entities, next], notes },
     change: {
-      text: `Made ${quote(next.name)} a ${ENTITY_KIND_NOUN[op.kind]} from the ${noteWord}.`,
+      text: `Made ${quote(next.name)} a ${categoryOf(kind, categories).noun} from the ${noteWord}.`,
       itemIds: [next.id],
       skipped: false
     }

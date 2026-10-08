@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import {
-  ENTITY_KIND_NOUN,
   ENTITY_NAME_MAX,
   ENTITY_TEMPLATES,
   type EntityKind,
@@ -9,8 +8,9 @@ import {
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { describeError } from '@renderer/lib/errors'
+import { useCategory } from './categoryStore'
 import { useEntityStore } from './entityStore'
-import { ENTITY_KIND_TAB, ENTITY_TEMPLATE_LABEL } from './entityView'
+import { ENTITY_TEMPLATE_LABEL } from './entityView'
 
 /** What each template means, under its radio. */
 const TEMPLATE_MEANING: Record<EntityTemplate, string> = {
@@ -45,7 +45,7 @@ function CreateForm({ kind }: { kind: EntityKind }): React.JSX.Element {
   const [busy, setBusy] = useState(false)
   const nameInput = useRef<HTMLInputElement>(null)
   const trimmed = name.trim()
-  const noun = ENTITY_KIND_NOUN[kind]
+  const noun = useCategory(kind).noun
 
   useEffect(() => {
     nameInput.current?.focus()
@@ -72,7 +72,8 @@ function CreateForm({ kind }: { kind: EntityKind }): React.JSX.Element {
       const entity = await store.create({ kind, name: trimmed, template })
       store.select(entity.id)
       const layout = useLayoutStore.getState()
-      layout.setSidebarTab(ENTITY_KIND_TAB[kind])
+      // F-9.11: a category's section id is its id.
+      layout.setSidebarTab(kind)
       if (!layout.layout.sidebar.open) layout.toggle('sidebar')
       store.cancelCreate()
     } catch (err) {

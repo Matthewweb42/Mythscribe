@@ -1,13 +1,11 @@
 import { z } from 'zod'
 import { AiErrorCode, AiUsage, priceFor } from './ai'
 import { IMAGE_EXTENSIONS, imageExtension } from './assets'
+import { StoryCategory, categoryFieldLabel, categoryOf, isCategoryField } from './categories'
 import {
-  ENTITY_FIELDS,
   ENTITY_FIELD_MAX,
   EntityFieldId,
   EntityKind,
-  isFieldOf,
-  kindHasImage,
   toEntityNameKey,
   type EntityFields
 } from './entities'
@@ -248,10 +246,27 @@ export type ContextProgress = z.infer<typeof ContextProgress>
 // ---------------------------------------------------------------------------------------------
 // What the model read, and the review
 
-/** The fields the AI may fill per kind: the template's, minus Notes, which takes the details. */
-export function contextFieldsFor(kind: EntityKind): readonly EntityFieldId[] {
-  return ENTITY_FIELDS[kind].map((field) => field.id).filter((id) => id !== 'notes')
+/** The fields the AI may fill per category: the template's, minus Notes, which takes the details. */
+export function contextFieldsFor(category: StoryCategory): readonly EntityFieldId[] {
+  return category.fields.map((field) => field.id).filter((id) => id !== 'notes')
 }
+
+/** The categories the review's lookups go by (F-9.11): the project's own and the proposed ones. */
+type Categories = readonly StoryCategory[]
+
+/**
+ * A category of the review (F-9.11): one of the project's own (`proposed` false, carried so the
+ * pure planner knows its template), or one the AI invented while sorting (`proposed` true), shown
+ * to the author as a proposed new category. Apply creates every proposed category that still has
+ * an included item; declining one moves its items to World first (`declineReviewCategory`).
+ */
+export const ContextReviewCategory = StoryCategory.extend({ proposed: z.boolean() })
+export type ContextReviewCategory = z.infer<typeof ContextReviewCategory>
+
+/** New categories one sort may propose (F-9.11); things in any further ones are filed under World. */
+export const CONTEXT_PROPOSED_CATEGORIES_MAX = 6
+/** Fields of one proposed category, Notes not counted. */
+export const CONTEXT_PROPOSED_FIELDS_MAX = 6
 
 /** The name of the World page that takes what fits no sheet (themes, plot outline, rules). */
 export const PROJECT_NOTES_NAME = 'Project notes'
@@ -333,6 +348,8 @@ export type ContextReviewNotes = z.infer<typeof ContextReviewNotes>
 export const ContextReview = z.object({
   fileIds: z.array(z.string()),
   entities: z.array(ContextReviewEntity),
+  /** F-9.11: the project's own categories and the AI's proposed new ones (`ContextReviewCategory`). */
+  categories: z.array(ContextReviewCategory).default([]),
   notes: ContextReviewNotes,
   /** One proposal per request (F-14.5), settled at Apply or Cancel. */
   proposalIds: z.array(z.string()),
@@ -408,7 +425,7 @@ function keysOf(record: Pick<ContextRecord, 'name' | 'aliases'>): string[] {
 
 /** One field's merged upload value: distinct values in record order, joined by the field's shape. */
 function mergedValue(
-  kind: EntityKind,
+  category: StoryCategory,
   field: EntityFieldId,
   records: readonly ContextRecord[]
 ): string {
@@ -418,19 +435,19 @@ function mergedValue(
     if (value === '' || values.some((seen) => norm(seen) === norm(value))) continue
     values.push(value)
   }
-  const multiline = ENTITY_FIELDS[kind].find((def) => def.id === field)?.multiline ?? true
+  const multiline = category.fields.find((def) => def.id === field)?.multiline ?? true
   return values.join(multiline ? '\n\n' : ' / ').slice(0, ENTITY_FIELD_MAX)
 }
 
 /** The review fields for a group of records against the sheet it matched (or none). */
 function reviewFields(
-  kind: EntityKind,
+  category: StoryCategory,
   records: readonly ContextRecord[],
   sheet: ExistingSheet | null
 ): ContextReviewField[] {
   const fields: ContextReviewField[] = []
-  for (const field of contextFieldsFor(kind)) {
-    const upload = mergedValue(kind, field, records)
+  for (const field of contextFieldsFor(category)) {
+    const upload = mergedValue(category, field, records)
     if (upload === '') continue
     const existing = sheet?.fields[field]?.trim() ?? ''
     if (existing === '') {
@@ -447,6 +464,8 @@ function reviewFields(
 interface PlanInput {
   records: readonly ContextRecord[]
   existing: readonly ExistingSheet[]
+  /** The review's categories (F-9.11): the project's own and the proposed ones. */
+  categories: readonly ContextReviewCategory[]
   /** The images uploaded with (or before) these files, with the model's guesses at whose they are. */
   images: readonly { id: string; name: string }[]
   hints: readonly ContextImageHint[]
@@ -508,7 +527,41 @@ function matchSheet(
       if (hit) return hit
     }
   }
+  // F-9.11: a sheet of another category with the same name is the same thing filed elsewhere
+  // (the author's "The Weave" is a World sheet, the model calls it a magic system): it is filled
+  // where it is, never twinned. Moving it is the author's call.
+  const others = existing.filter((sheet) => sheet.kind !== kind && !taken.has(sheet.id))
+  for (const record of group) {
+    const key = toEntityNameKey(record.name)
+    const hit = others.find((sheet) => sheetKeys(sheet).includes(key))
+    if (hit) return hit
+  }
   return null
+}
+
+/**
+ * A record of another category as one of `kind`: the fields that category's template has stay,
+ * the rest become details under their labels (F-9.9, F-9.11).
+ */
+export function recordAsKind(
+  record: ContextRecord,
+  kind: EntityKind,
+  categories: Categories
+): ContextRecord {
+  if (record.kind === kind) return record
+  const target = categoryOf(kind, categories)
+  const source = categoryOf(record.kind, categories)
+  const fields: ContextRecord['fields'] = {}
+  const moved: string[] = []
+  for (const [id, value] of Object.entries(record.fields)) {
+    if (value === undefined || value.trim() === '') continue
+    if (isCategoryField(target, id) && id !== 'notes') {
+      fields[id] = value
+    } else {
+      moved.push(`${categoryFieldLabel(source, id)}: ${value}`)
+    }
+  }
+  return { ...record, kind, fields, details: [...moved, ...record.details] }
 }
 
 /**
@@ -518,24 +571,29 @@ function matchSheet(
  */
 export function buildReviewEntity(
   id: string,
-  group: readonly ContextRecord[],
-  sheet: ExistingSheet | null
+  given: readonly ContextRecord[],
+  sheet: ExistingSheet | null,
+  categories: Categories
 ): ContextReviewEntity {
-  const first = group[0]
-  if (first === undefined) throw new Error('a review item needs a record')
+  const head = given[0]
+  if (head === undefined) throw new Error('a review item needs a record')
+  // A matched sheet keeps its category (F-9.11): the records are read as that category's.
+  const kind = sheet?.kind ?? head.kind
+  const group = given.map((record) => recordAsKind(record, kind, categories))
+  const first = group[0] ?? head
   const details = newParagraphs(
     group.flatMap((record) => record.details),
     detailsTarget(sheet)
   )
   return {
     id,
-    kind: first.kind,
+    kind,
     name: sheet?.name ?? first.name.trim(),
     existingId: sheet?.id ?? null,
     include: true,
     tag: sheet === null ? true : sheet.tagId === null ? true : null,
     records: [...group],
-    fields: reviewFields(first.kind, group, sheet),
+    fields: reviewFields(categoryOf(kind, categories), group, sheet),
     details,
     includeDetails: true,
     images: []
@@ -571,15 +629,17 @@ function attachImages(
   existing: readonly ExistingSheet[],
   images: PlanInput['images'],
   hints: readonly ContextImageHint[],
-  nextId: () => string
+  nextId: () => string,
+  categories: Categories
 ): void {
+  const hasImage = (kind: EntityKind): boolean => categoryOf(kind, categories).hasImage
   const candidates: {
     keys: string[]
     item: ContextReviewEntity | null
     sheet: ExistingSheet | null
   }[] = [
     ...items
-      .filter((item) => kindHasImage(item.kind))
+      .filter((item) => hasImage(item.kind))
       .map((item) => ({
         keys: [item.name, ...item.records.flatMap((r) => [r.name, ...r.aliases])]
           .map(toEntityNameKey)
@@ -588,7 +648,7 @@ function attachImages(
         sheet: existing.find((sheet) => sheet.id === item.existingId) ?? null
       })),
     ...existing
-      .filter((sheet) => kindHasImage(sheet.kind))
+      .filter((sheet) => hasImage(sheet.kind))
       .filter((sheet) => !items.some((item) => item.existingId === sheet.id))
       .map((sheet) => ({ keys: sheetKeys(sheet), item: null, sheet }))
   ]
@@ -647,6 +707,7 @@ export function projectNotesSheet(existing: readonly ExistingSheet[]): ExistingS
 export function planContextReview(input: PlanInput): {
   entities: ContextReviewEntity[]
   notes: ContextReviewNotes
+  categories: ContextReviewCategory[]
 } {
   let count = 0
   const nextId = (): string => `e${++count}`
@@ -655,12 +716,18 @@ export function planContextReview(input: PlanInput): {
   for (const group of groupRecords(input.records)) {
     const sheet = matchSheet(group, input.existing, taken)
     if (sheet !== null) taken.add(sheet.id)
-    items.push(buildReviewEntity(nextId(), group, sheet))
+    items.push(buildReviewEntity(nextId(), group, sheet, input.categories))
   }
-  attachImages(items, input.existing, input.images, input.hints, nextId)
+  attachImages(items, input.existing, input.images, input.hints, nextId, input.categories)
   const notesSheet = projectNotesSheet(input.existing)
+  const entities = items.filter((item) => !isEmptyUpdate(item))
   return {
-    entities: items.filter((item) => !isEmptyUpdate(item)),
+    entities,
+    // A proposed category none of the items ended up in (they all matched sheets elsewhere) is
+    // not offered.
+    categories: input.categories.filter(
+      (category) => !category.proposed || entities.some((item) => item.kind === category.id)
+    ),
     notes: {
       existingId: notesSheet?.id ?? null,
       paragraphs: newParagraphs(input.notes, notesSheet?.body ?? ''),
@@ -701,7 +768,8 @@ export function splitReviewEntity(
     const next = buildReviewEntity(
       `${item.id}.${i + 1}`,
       groups.get(key) ?? [],
-      key === keeper ? sheet : null
+      key === keeper ? sheet : null,
+      review.categories
     )
     if (key === keeper || (keeper === null && key === keys[0])) next.images = item.images
     return next
@@ -733,15 +801,74 @@ export function writesField(field: ContextReviewField): boolean {
   return field.include && (field.existing === null || field.choice === 'upload')
 }
 
-/** The fields of a record parsed leniently: only the kind's fillable ids, trimmed, non-empty, capped. */
-export function recordFields(kind: EntityKind, raw: Record<string, unknown>): EntityFields {
+/** The fields of a record parsed leniently: only the category's fillable ids, trimmed, non-empty, capped. */
+export function recordFields(category: StoryCategory, raw: Record<string, unknown>): EntityFields {
   const fields: EntityFields = {}
-  const allowed = contextFieldsFor(kind)
-  for (const [key, value] of Object.entries(raw)) {
-    if (!isFieldOf(kind, key) || !allowed.includes(key)) continue
+  const allowed = contextFieldsFor(category)
+  // F-9.11: the model names a proposed category's fields by label ("Home port"); either is taken.
+  const byLabel = new Map(
+    category.fields
+      .filter((field) => allowed.includes(field.id))
+      .map((field) => [field.label.trim().toLowerCase(), field.id])
+  )
+  for (const [given, value] of Object.entries(raw)) {
+    const key = allowed.includes(given) ? given : byLabel.get(given.trim().toLowerCase())
+    if (key === undefined) continue
     if (typeof value !== 'string' && typeof value !== 'number') continue
     const text = String(value).trim().slice(0, ENTITY_FIELD_MAX)
     if (text !== '') fields[key] = text
   }
   return fields
+}
+
+/**
+ * Declines a category the AI proposed (F-9.11): its items become World sheets (the fields World
+ * has stay, the rest move to their details under their labels) and the category leaves the
+ * review. An item that then names an existing World sheet fills it. Pure.
+ */
+export function declineReviewCategory(
+  review: ContextReview,
+  categoryId: string,
+  existing: readonly ExistingSheet[]
+): ContextReview {
+  const category = review.categories.find((c) => c.id === categoryId && c.proposed)
+  if (category === undefined) return review
+  const taken = new Set(review.entities.flatMap((item) => item.existingId ?? []))
+  const entities = review.entities.map((item) => {
+    if (item.kind !== categoryId) return item
+    const records = item.records.map((record) => recordAsKind(record, 'world', review.categories))
+    const keys = [item.name, ...records.flatMap((r) => [r.name, ...r.aliases])].map(toEntityNameKey)
+    const sheet =
+      existing.find(
+        (s) => s.kind === 'world' && !taken.has(s.id) && keys.includes(toEntityNameKey(s.name))
+      ) ?? null
+    if (sheet !== null) taken.add(sheet.id)
+    const next = buildReviewEntity(item.id, records, sheet, review.categories)
+    if (sheet === null) next.name = item.name
+    next.include = item.include
+    next.tag = sheet === null ? item.tag : next.tag
+    next.includeDetails = item.includeDetails
+    return next
+  })
+  return {
+    ...review,
+    entities: entities.filter((item) => !isEmptyUpdate(item)),
+    categories: review.categories.filter((c) => c.id !== categoryId)
+  }
+}
+
+/** Renames a proposed category before it is created (F-9.11); its singular follows unless set apart. Pure. */
+export function renameReviewCategory(
+  review: ContextReview,
+  categoryId: string,
+  name: string
+): ContextReview {
+  const trimmed = name.trim()
+  if (trimmed === '') return review
+  return {
+    ...review,
+    categories: review.categories.map((c) =>
+      c.id === categoryId && c.proposed ? { ...c, name: trimmed } : c
+    )
+  }
 }
