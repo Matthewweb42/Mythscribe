@@ -192,7 +192,8 @@ describe('CSV', () => {
   })
 
   it('ignores a column of another kind and a heading it does not know', () => {
-    const text = 'kind,name,age,atmosphere,notes,colour\r\nsetting,Harbour,400,Salt air,Busy,blue\r\n'
+    const text =
+      'kind,name,age,atmosphere,notes,colour\r\nsetting,Harbour,400,Salt air,Busy,blue\r\n'
     expect(parseEntitiesCsv(text, 'character')).toEqual([
       {
         kind: 'setting',

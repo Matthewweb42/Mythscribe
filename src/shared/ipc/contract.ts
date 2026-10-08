@@ -146,6 +146,7 @@ import { ReferencePins } from '../references'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '../rewrite'
 import { SceneBrief, SceneMeta } from '../sceneMeta'
 import { ProjectStructure } from '../structure'
+import { PlanLinkView, PlanLinksRunResult, PlanRef } from '../planLinks'
 import { Stylometrics } from '../stylometry'
 import { ProjectTimeline } from '../timeline'
 import { SceneSummaryState, SummaryStatus } from '../summary'
@@ -1027,6 +1028,26 @@ export const contract = {
   'structure:get': { input: z.undefined(), output: ProjectStructure },
   /** Replaces the project's structure template (F-11.1b); an unknown template is refused with VALIDATION. */
   'structure:set': { input: ProjectStructure, output: ProjectStructure },
+  /** The plan-link suggestions that still stand and the links the AI applied itself (F-11.1d). */
+  'planLinks:get': { input: z.undefined(), output: PlanLinkView },
+  /**
+   * Runs the plan-link job now (F-11.1d, the outline's Find links): gated on `planLinks`; at
+   * chat mode Auto the links apply, otherwise they are stored as suggestions. Answers what it did
+   * and the nodes whose scene metadata it rewrote, which the renderer reloads.
+   */
+  'planLinks:run': { input: z.object({ requestId: z.string() }), output: PlanLinksRunResult },
+  /** Applies one suggestion by its `planLinkKey`; NOT_FOUND when it is gone, VALIDATION when it no longer fits. */
+  'planLinks:confirm': {
+    input: z.object({ key: z.string() }),
+    output: z.object({ changedNodeIds: z.array(z.string()) })
+  },
+  /** Drops one suggestion by its `planLinkKey` and never proposes the pair again. */
+  'planLinks:dismiss': { input: z.object({ key: z.string() }), output: z.null() },
+  /** Unlinks a plan (a planned scene's `fulfilledBy`, or a beat's scene); the pair is not proposed again. */
+  'planLinks:unlink': {
+    input: z.object({ plan: PlanRef }),
+    output: z.object({ changedNodeIds: z.array(z.string()) })
+  },
   /** The project's timeline events in story order (F-11.2); a missing or unreadable row answers with none. */
   'timeline:get': { input: z.undefined(), output: ProjectTimeline },
   /**
@@ -2682,6 +2703,11 @@ export const events = {
   'observedFact:changed': z.object({ entityIds: z.array(z.string()) }),
   /** The findings of these scenes changed (F-13.4): a check ran in the background or on demand, or one was settled; the store refetches `continuity:list`. */
   'continuity:changed': z.object({ nodeIds: z.array(z.string()) }),
+  /**
+   * The plan links moved without a `planLinks:*` call (F-11.1d): the background job stored new
+   * suggestions or, at Auto, applied links to these nodes' scene metadata.
+   */
+  'planLinks:changed': z.object({ changedNodeIds: z.array(z.string()) }),
   /** An edit pass moved (F-14.15): started, finished a scene, stopped, failed, finished, or had changes settled. */
   'editPass:changed': EditPassSummary,
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */

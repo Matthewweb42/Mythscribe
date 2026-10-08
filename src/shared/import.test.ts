@@ -81,7 +81,11 @@ describe('draftSummary', () => {
             title: 'Chapter 1',
             excluded: false,
             placement: 'manuscript',
-            scenes: [scene('b', ['one two']), scene('c', ['three'], true), scene('d', ['four five'])]
+            scenes: [
+              scene('b', ['one two']),
+              scene('c', ['three'], true),
+              scene('d', ['four five'])
+            ]
           },
           {
             id: 'p1c3',

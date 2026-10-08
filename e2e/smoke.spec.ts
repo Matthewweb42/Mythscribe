@@ -28,7 +28,8 @@ import type { ReferencePin, ReferencePins } from '../src/shared/references'
 import { matterTemplate } from '../src/shared/matterTemplates'
 import type { SceneMeta } from '../src/shared/sceneMeta'
 import type { ProjectSession } from '../src/shared/session'
-import { STORY_BIBLE_HEADING } from '../src/shared/storyBible'
+import { STORY_BIBLE_HEADING, STORY_BIBLE_PLANS_HEADING } from '../src/shared/storyBible'
+import { STORY_MAP_HEADING } from '../src/shared/storyTime'
 import type { TiptapNodeT } from '../src/shared/tiptap'
 import { countWords } from '../src/shared/wordCount'
 
@@ -409,6 +410,16 @@ const QUERY_SENTINEL = 'You are the Story Intelligence feature inside a novel-wr
  */
 const CHAT_AGENT_SENTINEL =
   "You are the assistant inside a novel-writing app, working for the book's author."
+/**
+ * F-11.1d: the opening of the plan-link rules (`PLAN_LINKS_RULES` in
+ * `src/main/ai/prompts/planLinks.v1.ts`); the fake links the first plan sent to the first
+ * written scene sent.
+ */
+const PLAN_LINKS_SENTINEL = 'You are the plan-link feature inside a novel-writing app.'
+const PLAN_LINK_WHY = 'The storm scene carries this plan.'
+const PLAN_LINKS_ANSWER = JSON.stringify({
+  links: [{ plan: 'P1', scene: 'S1', why: PLAN_LINK_WHY }]
+})
 /** An Auto message the router sends to chat; the agent answers it with one edit to Scene 1. */
 const AGENT_EDIT_MESSAGE = 'Make the opening line plainer.'
 const AGENT_EDIT_ANSWER = 'Here is a plainer line.'
@@ -689,6 +700,10 @@ function startFakeOpenAi(): Promise<string> {
           const notesSuggest = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(NOTES_SUGGEST_SENTINEL)
           )
+          // F-11.1d: plan links come back as one link of the first plan to the first scene.
+          const planLinks = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(PLAN_LINKS_SENTINEL)
+          )
           // F-5.4: a Plan turn streams (server-sent events in the shape the SDK parses: content
           // deltas, one usage-only chunk, then [DONE]); an Agent turn is a plain completion.
           if (request.stream) {
@@ -753,48 +768,50 @@ function startFakeOpenAi(): Promise<string> {
                   message: {
                     role: 'assistant',
                     content: json
-                      ? contextImport
-                        ? contextImportAnswer(request.messages)
-                        : reviewChat
-                          ? reviewChatAnswer(request.messages)
-                          : chatAgent
-                            ? chatAgentReply(request.messages)
-                            : route
-                              ? JSON.stringify({
-                                  action: (request.messages.at(-1)?.content ?? '').includes(
-                                    ROUTE_CRITIQUE_MESSAGE
-                                  )
-                                    ? 'critique'
-                                    : 'chat',
-                                  instruction: null
-                                })
-                              : synopsis
-                                ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
-                                : notesSuggest
-                                  ? JSON.stringify({ points: SUGGESTED_POINTS })
-                                  : whatNext
-                                    ? WHAT_NEXT_ANSWER
-                                    : editPass
-                                      ? EDIT_PASS_ANSWER
-                                      : proofread
-                                        ? PROOFREAD_ANSWER
-                                        : continuity
-                                          ? continuityAnswer(request.messages)
-                                          : importStructure
-                                            ? IMPORT_STRUCTURE_ANSWER
-                                            : critique
-                                              ? CRITIQUE_ANSWER
-                                              : betaReader
-                                                ? BETA_READER_ANSWER
-                                                : query
-                                                  ? QUERY_ANSWER
-                                                  : brief
-                                                    ? BRIEF_ANSWER
-                                                    : summary
-                                                      ? SUMMARY_ANSWER
-                                                      : regen
-                                                        ? '{"tags":["antagonist","protagonist"]}'
-                                                        : '{"tags":["dark-forest","protagonist"]}'
+                      ? planLinks
+                        ? PLAN_LINKS_ANSWER
+                        : contextImport
+                          ? contextImportAnswer(request.messages)
+                          : reviewChat
+                            ? reviewChatAnswer(request.messages)
+                            : chatAgent
+                              ? chatAgentReply(request.messages)
+                              : route
+                                ? JSON.stringify({
+                                    action: (request.messages.at(-1)?.content ?? '').includes(
+                                      ROUTE_CRITIQUE_MESSAGE
+                                    )
+                                      ? 'critique'
+                                      : 'chat',
+                                    instruction: null
+                                  })
+                                : synopsis
+                                  ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
+                                  : notesSuggest
+                                    ? JSON.stringify({ points: SUGGESTED_POINTS })
+                                    : whatNext
+                                      ? WHAT_NEXT_ANSWER
+                                      : editPass
+                                        ? EDIT_PASS_ANSWER
+                                        : proofread
+                                          ? PROOFREAD_ANSWER
+                                          : continuity
+                                            ? continuityAnswer(request.messages)
+                                            : importStructure
+                                              ? IMPORT_STRUCTURE_ANSWER
+                                              : critique
+                                                ? CRITIQUE_ANSWER
+                                                : betaReader
+                                                  ? BETA_READER_ANSWER
+                                                  : query
+                                                    ? QUERY_ANSWER
+                                                    : brief
+                                                      ? BRIEF_ANSWER
+                                                      : summary
+                                                        ? SUMMARY_ANSWER
+                                                        : regen
+                                                          ? '{"tags":["antagonist","protagonist"]}'
+                                                          : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -3656,6 +3673,10 @@ test('create, close, reopen a project on disk', async () => {
   await expect(summaryToggle).toBeEnabled()
   await summaryToggle.uncheck()
   await expect.poll(async () => (await aiSettings()).features.summary).toBe(false)
+  // F-11.1d: the plan-link job runs after summaries; its own step turns it on for a moment.
+  const planLinksToggle = settingsDialog.getByRole('checkbox', { name: /^Plan links/ })
+  await planLinksToggle.uncheck()
+  await expect.poll(async () => (await aiSettings()).features.planLinks).toBe(false)
   await keyField.fill(ACCEPTED_KEY)
   await settingsDialog.getByRole('button', { name: 'Save' }).click()
   await expect(keyHint).toHaveText('Key saved: sk-…wxyz')
@@ -4522,7 +4543,9 @@ test('create, close, reopen a project on disk', async () => {
   await expect(turns.nth(3)).toContainText('What next?')
   await expect(turns.nth(4).getByTestId('chat-turn-action')).toHaveText('What should come next?')
   expect(whatNextBodies()).toHaveLength(whatNextBefore + 1)
-  expect(whatNextBodies().at(-1)?.[0]?.content).toContain(STORY_BIBLE_HEADING)
+  // F-5.23 (whatNext.v3): the bible as the author's notes and plans, and the story map.
+  expect(whatNextBodies().at(-1)?.[0]?.content).toContain(STORY_BIBLE_PLANS_HEADING)
+  expect(whatNextBodies().at(-1)?.[0]?.content).toContain(STORY_MAP_HEADING)
   await directions.first().getByTestId('what-next-write').click()
   await expect(turns).toHaveCount(7)
   const insertTurn = turns.nth(6)
@@ -5202,9 +5225,12 @@ test('create, close, reopen a project on disk', async () => {
   const querySystem = openAiChatBodies.at(-2)?.messages[0]
   expect(querySystem?.role).toBe('system')
   expect(querySystem?.content.startsWith(CHAT_AGENT_SENTINEL)).toBe(true)
+  // F-5.23: the story map, with now on the open scene, and the search result's position.
+  expect(querySystem?.content).toContain(STORY_MAP_HEADING)
+  expect(querySystem?.content).toMatch(/n\d+ Scene 1 \[(drafted|revised)\] ▶ NOW/)
   expect(openAiChatBodies.at(-2)?.messages.at(-1)?.content).toBe(QUERY_QUESTION)
   expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toMatch(
-    /^Result of search:\nScenes:\nn\d+ Chapter 1 › Scene 1: /
+    /^Result of search:\nScenes:\nn\d+ Chapter 1 › Scene 1 \((now|before now|after now)[^)]*\): /
   )
   const afterQuery = await usageSummary()
   expect(afterQuery.byFeature.find((f) => f.feature === 'agent')).toMatchObject({
@@ -5307,6 +5333,51 @@ test('create, close, reopen a project on disk', async () => {
   await expect.poll(() => documentTextWithoutGhost()).toBe(sceneBefore)
   await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
   await expect.poll(async () => (await aiSettings()).chatMode).toBe('ask')
+
+  // F-11.1d: the outline marks each row Planned, Drafted, or Revised (Scene 1 has text, the
+  // empty scenes of the other chapters are plans). With Plan links on, Find links asks the fast
+  // tier once; at Ask its link waits on the planned scene's row as a suggestion, Confirm links
+  // it ("Fulfilled by Scene 1"), and Unlink takes it off again. Then the toggle goes back off.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await planLinksToggle.check()
+  await expect.poll(async () => (await aiSettings()).features.planLinks).toBe(true)
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await sidebarTabs.getByRole('tab', { name: 'Outline' }).click()
+  const planPanel = page.getByRole('tabpanel', { name: 'Outline' })
+  const outlineRows = planPanel.getByTestId('outline-row')
+  await expect(outlineRows.filter({ hasText: 'Scene 1' }).first()).toHaveAttribute(
+    'data-progress',
+    /drafted|revised/
+  )
+  await expect(
+    planPanel.locator('[data-testid="outline-row"][data-progress="planned"]').first()
+  ).toBeVisible()
+  await expect(planPanel.getByTestId('outline-progress')).toContainText('planned')
+  const planRequestsBefore = openAiChatBodies.length
+  await planPanel.getByTestId('outline-find-links').click()
+  const planSuggestion = planPanel.getByTestId('plan-suggestion')
+  await expect(planSuggestion).toHaveCount(1)
+  await expect(planSuggestion).toContainText(PLAN_LINK_WHY)
+  expect(openAiChatBodies).toHaveLength(planRequestsBefore + 1)
+  expect(openAiChatBodies.at(-1)?.messages[0]?.content.startsWith(PLAN_LINKS_SENTINEL)).toBe(true)
+  await planSuggestion.getByRole('button', { name: 'Confirm' }).click()
+  const fulfilledLine = planPanel.getByTestId('outline-fulfilled')
+  await expect(fulfilledLine).toHaveCount(1)
+  await expect(fulfilledLine).toContainText('Fulfilled by')
+  await expect(planSuggestion).toHaveCount(0)
+  await expect(planPanel.getByTestId('outline-fulfils')).toHaveCount(1)
+  await fulfilledLine.getByRole('button', { name: 'Unlink' }).click()
+  await expect(fulfilledLine).toHaveCount(0)
+  await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await planLinksToggle.uncheck()
+  await expect.poll(async () => (await aiSettings()).features.planLinks).toBe(false)
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await dismissToasts()
 
   // 2026-10-07 (the author's report: chat insertions never reached the editor): the agent
   // answers an insertion as a brief (agent.v2) and its answer streams into the turn; the app

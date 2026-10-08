@@ -37,6 +37,7 @@ import {
   type FocusSettingsInput
 } from '@shared/focus'
 import { GOALS_KEY, Goals, defaultGoals } from '@shared/goals'
+import { PLAN_LINKS_KEY, PlanLinkState, emptyPlanLinkState } from '@shared/planLinks'
 import type { NovelFormat } from '@shared/ipc/contract'
 import {
   OBSERVED_DISMISSED_KEY,
@@ -654,6 +655,35 @@ export function setCompileState(db: TreeDb, value: CompileProjectState): Compile
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: COMPILE_STATE_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the plan-link suggestions and dismissed links (F-11.1d) from the `settings` row under
+ * `PLAN_LINKS_KEY`. A missing row, unparsable JSON, or a value that no longer fits the schema
+ * answer with `emptyPlanLinkState()`: suggestions are derived and the job proposes them again.
+ */
+export function getPlanLinkState(db: TreeDb): PlanLinkState {
+  const row = db.select().from(settings).where(eq(settings.key, PLAN_LINKS_KEY)).get()
+  if (!row) return emptyPlanLinkState()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return emptyPlanLinkState()
+  }
+  const parsed = PlanLinkState.safeParse(json)
+  return parsed.success ? parsed.data : emptyPlanLinkState()
+}
+
+/** Replaces the plan-link state (upsert on the settings key) and returns what was stored. */
+export function setPlanLinkState(db: TreeDb, value: PlanLinkState): PlanLinkState {
+  const stored = PlanLinkState.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: PLAN_LINKS_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

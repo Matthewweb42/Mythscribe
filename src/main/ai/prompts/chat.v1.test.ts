@@ -154,7 +154,12 @@ describe('chat.v1 prompt (F-5.4)', () => {
       ...agent,
       paragraphs: CHAT_PARAGRAPHS_MAX,
       sceneText: 's'.repeat(CHAT_SCENE_CHAR_BUDGET),
-      sceneMeta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500), brief: EMPTY_SCENE_BRIEF },
+      sceneMeta: {
+        location: 'L'.repeat(200),
+        pov: 'P'.repeat(200),
+        timeline: 'T'.repeat(500),
+        brief: EMPTY_SCENE_BRIEF
+      },
       refs: [1, 2, 3, 4].map((n) => ({
         name: `ref-${n}`,
         notes: 'n'.repeat(CHAT_REF_NOTES_CHAR_BUDGET / 4)

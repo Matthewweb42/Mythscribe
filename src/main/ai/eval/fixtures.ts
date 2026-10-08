@@ -41,6 +41,7 @@ import {
   renderStoryBibleEntities,
   STORY_BIBLE_CATEGORIES,
   STORY_BIBLE_GHOST_TOKEN_BUDGET,
+  STORY_BIBLE_PLANS_HEADING,
   STORY_BIBLE_TOKEN_BUDGET,
   STORY_BIBLE_VALUE_MAX,
   type StoryBibleCategory,
@@ -336,8 +337,20 @@ import {
   type BuildNotesSuggestPromptInput
 } from '../prompts/notesSuggest.v1'
 import { buildAgentPrompt, renderAgentFocus } from '../prompts/agent.v1'
-import { buildAgentPromptV2 } from '../prompts/agent.v2'
+import { buildAgentPromptV2, type BuildAgentPromptV2Input } from '../prompts/agent.v2'
+import { buildAgentPromptV3, type BuildAgentPromptV3Input } from '../prompts/agent.v3'
+import { buildContinuityPromptV2, continuityRefLineV2 } from '../prompts/continuity.v2'
+import { buildWhatNextPromptV3, type BuildWhatNextPromptV3Input } from '../prompts/whatNext.v3'
+import { buildNotesSuggestPromptV2 } from '../prompts/notesSuggest.v2'
+import { buildPlanLinksPrompt, type BuildPlanLinksPromptInput } from '../prompts/planLinks.v1'
 import { fitAgentPrompt } from '../agent'
+import { PLAN_LINKS_PLANS_MAX, PLAN_LINKS_SCENES_MAX, PLAN_LINKS_TEXT_MAX } from '@shared/planLinks'
+import {
+  STORY_MAP_SMALL_TOKEN_BUDGET,
+  STORY_MAP_TOKEN_BUDGET,
+  renderStoryMap,
+  type StoryMapItem
+} from '@shared/storyTime'
 
 /**
  * The eval harness's fixtures (F-5.12): one manuscript passage, the voice profile it yields,
@@ -656,6 +669,14 @@ export interface EvalCase {
      * no operation dropped, and hold an operation of each kind in `expected`.
      */
     | { kind: 'reviewChat'; expected: ReviewOp['op'][] }
+    /**
+     * A chat agent answer about story time (F-5.23): it must be an answer, not a lookup, and must
+     * not state as happened an event the author's notes only plan (`forbidden`, case-insensitive
+     * patterns).
+     */
+    | { kind: 'storyTime'; forbidden: string[] }
+    /** Plan links (F-11.1d): the answer must parse to `{ links }` naming only labels that were sent. */
+    | { kind: 'planLinks'; plans: number; scenes: number }
 }
 
 const general = builtinParams('general')
@@ -2152,10 +2173,10 @@ function routeCase(
 function agentCase(
   name: string,
   note: string,
-  input: Parameters<typeof fitAgentPrompt>[0],
+  input: BuildAgentPromptV2Input,
   expected: 'tool' | 'answer',
   build: (
-    input: Parameters<typeof fitAgentPrompt>[0]
+    input: BuildAgentPromptV2Input
   ) =>
     ReturnType<typeof buildAgentPrompt> | ReturnType<typeof buildAgentPromptV2> = buildAgentPrompt
 ): EvalCase {
@@ -2205,6 +2226,282 @@ const AGENT_STEP = {
 const AGENT_MAXED_STEP = {
   call: '{"tool":"read_scene","args":{"id":"n9","from":0}}',
   result: `Result of read_scene:\n${FIXTURE_PASSAGE.repeat(4).slice(0, AGENT_RESULT_CHARS)}`
+}
+
+/** F-5.23: an agent.v3 step, fitted as the feature fits it. */
+function agentCaseV3(
+  name: string,
+  note: string,
+  input: BuildAgentPromptV3Input,
+  scoring: EvalCase['scoring']
+): EvalCase {
+  const built = fitAgentPrompt(input, buildAgentPromptV3)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring
+  }
+}
+
+/** The fixture book as the story map lists it (F-5.23): the open scene is now, the war is planned. */
+const STORY_MAP_ITEMS: StoryMapItem[] = [
+  {
+    id: 'c1',
+    ref: 'n2',
+    title: 'Chapter 1',
+    depth: 0,
+    kind: 'folder',
+    progress: null,
+    summary: null
+  },
+  {
+    id: 's1',
+    ref: 'n3',
+    title: 'The mill',
+    depth: 1,
+    kind: 'document',
+    progress: 'revised',
+    summary: 'Pell copies the mill ledger and hides it under the elm. He tells no one.'
+  },
+  {
+    id: 's2',
+    ref: 'n7',
+    title: 'The ferry landing',
+    depth: 1,
+    kind: 'document',
+    progress: 'drafted',
+    summary:
+      'Mara meets Tomas at the ferry landing. He wants the mill ledger back; she reveals her ' +
+      'brother only copied it.'
+  },
+  {
+    id: 'c2',
+    ref: 'n8',
+    title: 'Chapter 2',
+    depth: 0,
+    kind: 'folder',
+    progress: null,
+    summary: null
+  },
+  {
+    id: 's3',
+    ref: 'n9',
+    title: 'The elm',
+    depth: 1,
+    kind: 'document',
+    progress: 'drafted',
+    summary: 'Mara digs under the elm at night.'
+  },
+  {
+    id: 's4',
+    ref: 'n10',
+    title: 'The war at Harrow Ford',
+    depth: 1,
+    kind: 'document',
+    progress: 'planned',
+    summary: null
+  }
+]
+const STORY_MAP = renderStoryMap(
+  STORY_MAP_ITEMS,
+  { nowId: 's2', basis: 'open' },
+  STORY_MAP_TOKEN_BUDGET
+)
+const STORY_MAP_SMALL = renderStoryMap(
+  STORY_MAP_ITEMS.map((item) => ({ ...item, ref: '' })),
+  { nowId: 's2', basis: 'open' },
+  STORY_MAP_SMALL_TOKEN_BUDGET
+)
+/** A long book at every cap: 200 scenes with titles and summaries at their caps, now in the middle. */
+const MAXED_STORY_MAP_ITEMS: StoryMapItem[] = Array.from({ length: 220 }, (_, i): StoryMapItem =>
+  i % 11 === 0
+    ? {
+        id: `c${i}`,
+        ref: `n${i + 2}`,
+        title: 'C'.repeat(200),
+        depth: 0,
+        kind: 'folder',
+        progress: null,
+        summary: null
+      }
+    : {
+        id: `s${i}`,
+        ref: `n${i + 2}`,
+        title: 'T'.repeat(200),
+        depth: 1,
+        kind: 'document',
+        progress: 'drafted',
+        summary: 'S'.repeat(600)
+      }
+)
+const MAXED_STORY_MAP = renderStoryMap(
+  MAXED_STORY_MAP_ITEMS,
+  { nowId: 's100', basis: 'open' },
+  STORY_MAP_TOKEN_BUDGET
+)
+const MAXED_STORY_MAP_SMALL = renderStoryMap(
+  MAXED_STORY_MAP_ITEMS.map((item) => ({ ...item, ref: '' })),
+  { nowId: 's100', basis: 'open' },
+  STORY_MAP_SMALL_TOKEN_BUDGET
+)
+/** The read_sheet result of the story-time case: the sheet plans a death the scene is before. */
+const AGENT_WAR_STEP = {
+  call: '{"tool":"read_sheet","args":{"name":"Pell"}}',
+  result:
+    "Result of read_sheet:\nPell (character; the author's notes and plans: true of who and what " +
+    'things are, but an event told only here has not happened yet)\nrole (Role): Mara\u2019s ' +
+    'brother, keeper of the mill ledger\nbackground (Background): Dies in the war at Harrow Ford, ' +
+    'defending the ferry.'
+}
+
+/** The bible under the plans heading (F-5.23), at the same budgets. */
+const FIXTURE_PLANS_BIBLE = renderStoryBible(
+  FIXTURE_FACTS,
+  STORY_BIBLE_TOKEN_BUDGET,
+  STORY_BIBLE_PLANS_HEADING
+)
+const MAXED_PLANS_BIBLE = renderStoryBible(
+  MAXED_FACTS,
+  STORY_BIBLE_TOKEN_BUDGET,
+  STORY_BIBLE_PLANS_HEADING
+)
+
+/** Sheet fields at the value cap, as many as the reference budget admits, measured on version 2's lines. */
+const CONTINUITY_V2_MAXED_REFS: ContinuityRef[] = (() => {
+  const ref = sheetRef('background', 'Background', 'v'.repeat(CONTINUITY_REF_VALUE_MAX))
+  const cost = estimateTokens(`${continuityRefLineV2(ref, 10, new Set())}\n`)
+  return Array<ContinuityRef>(Math.floor(CONTINUITY_REFS_TOKEN_BUDGET / cost)).fill(ref)
+})()
+
+function continuityCaseV2(
+  name: string,
+  note: string,
+  text: string,
+  references: ContinuityRef[],
+  later: ReadonlySet<string>,
+  timeline: string | null,
+  brief: string | null
+): EvalCase {
+  const voice = voiceBlock(FIXTURE_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' })
+  const input = { references, later, timeline, voice, brief }
+  const { sceneText } = fitSceneToBudget(
+    text,
+    inputBudget('continuity'),
+    (cut) => buildContinuityPromptV2({ ...input, sceneText: cut }).messages,
+    { chars: CONTINUITY_SCENE_CHAR_BUDGET, min: CONTINUITY_TEXT_MIN }
+  )
+  const built = buildContinuityPromptV2({ ...input, sceneText })
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'continuity', sceneText, references: references.length }
+  }
+}
+
+function whatNextCaseV3(name: string, note: string, input: BuildWhatNextPromptV3Input): EvalCase {
+  const { text } = fitTailToBudget(
+    input.text,
+    inputBudget('whatNext'),
+    (cut) => buildWhatNextPromptV3({ ...input, text: cut }).messages
+  )
+  const built = buildWhatNextPromptV3({ ...input, text })
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'whatNext' }
+  }
+}
+
+function notesSuggestCaseV2(
+  name: string,
+  note: string,
+  input: BuildNotesSuggestPromptInput
+): EvalCase {
+  const { sceneText } = fitSceneToBudget(
+    input.sceneText,
+    inputBudget('notesSuggest'),
+    (cut) => buildNotesSuggestPromptV2({ ...input, sceneText: cut }).messages,
+    { chars: SCENE_SUGGEST_CHAR_BUDGET, min: SCENE_SUGGEST_TEXT_MIN }
+  )
+  const built = buildNotesSuggestPromptV2({ ...input, sceneText })
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'notesSuggest' }
+  }
+}
+
+function planLinksCase(name: string, note: string, input: BuildPlanLinksPromptInput): EvalCase {
+  const built = buildPlanLinksPrompt(input)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'planLinks', plans: input.plans.length, scenes: input.scenes.length }
+  }
+}
+
+/** The fixture book's plans: a planned scene and two empty beats, against three written scenes. */
+const PLAN_LINKS_FIXTURE: BuildPlanLinksPromptInput = {
+  plans: [
+    {
+      label: 'P1',
+      kind: 'scene',
+      title: 'Mara finds the ledger',
+      text: 'Mara digs up the copy Pell hid and learns what the mill owes.'
+    },
+    {
+      label: 'P2',
+      kind: 'beat',
+      title: 'Catalyst',
+      text: 'The event that turns the hero\u2019s world upside down.'
+    },
+    { label: 'P3', kind: 'beat', title: 'Finale', text: 'The hero wins with everything learned.' }
+  ],
+  scenes: [
+    {
+      label: 'S1',
+      title: 'The mill',
+      summary: 'Pell copies the mill ledger and hides it under the elm.'
+    },
+    {
+      label: 'S2',
+      title: 'The ferry landing',
+      summary: 'Mara meets Tomas, who demands the mill ledger back; she learns Pell only copied it.'
+    },
+    {
+      label: 'S3',
+      title: 'The elm',
+      summary: 'Mara digs under the elm at night and finds the copied ledger.'
+    }
+  ]
+}
+const PLAN_LINKS_MAXED: BuildPlanLinksPromptInput = {
+  plans: Array.from({ length: PLAN_LINKS_PLANS_MAX }, (_, i) => ({
+    label: `P${i + 1}`,
+    kind: i % 2 === 0 ? ('scene' as const) : ('beat' as const),
+    title: `${'T'.repeat(78)}…`,
+    text: `${'s'.repeat(PLAN_LINKS_TEXT_MAX - 1)}…`
+  })),
+  scenes: Array.from({ length: PLAN_LINKS_SCENES_MAX }, (_, i) => ({
+    label: `S${i + 1}`,
+    title: `${'T'.repeat(78)}…`,
+    summary: `${'s'.repeat(PLAN_LINKS_TEXT_MAX - 1)}…`
+  }))
 }
 
 function synopsisCase(name: string, note: string, input: BuildSynopsisPromptInput): EvalCase {
@@ -3344,5 +3641,191 @@ export const EVAL_CASES: EvalCase[] = [
       retry: true
     },
     []
+  ),
+  // agent.v3 (F-5.23): version 2's shapes plus the story map, and the story-time case.
+  agentCaseV3(
+    'fresh',
+    'a read run with no document open and no history: the story map with now at the latest written scene',
+    {
+      access: 'read',
+      voice: null,
+      map: renderStoryMap(
+        STORY_MAP_ITEMS,
+        { nowId: 's3', basis: 'latest' },
+        STORY_MAP_TOKEN_BUDGET
+      ),
+      focus: null,
+      history: [],
+      message: 'Who owes the mill money?',
+      steps: [],
+      final: false
+    },
+    { kind: 'agent', expected: 'tool' }
+  ),
+  agentCaseV3(
+    'full',
+    'a write run on the open scene with the story map, two turns, and one lookup made',
+    {
+      access: 'write',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: CHAT_HISTORY,
+      message: 'Tighten the last paragraph and add a beat where Tomas looks at the elm.',
+      steps: [AGENT_STEP],
+      final: false
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV3(
+    'maxed',
+    'the last step of a write run as the fit leaves it: the story map at its budget, every focus part at its cap, six lookups of full results, and the final turn',
+    {
+      access: 'write',
+      voice: null,
+      map: MAXED_STORY_MAP,
+      focus: AGENT_MAXED_FOCUS,
+      history: CHAT_HISTORY,
+      message: FIXTURE_PASSAGE.repeat(3).slice(0, 2_000),
+      steps: Array.from({ length: AGENT_MAX_STEPS }, () => AGENT_MAXED_STEP),
+      final: true
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV3(
+    'retry',
+    'the one retry of a write step whose reply was cut off: the full case plus the retry turn, at the larger cap',
+    {
+      access: 'write',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: CHAT_HISTORY,
+      message: 'Tighten the last paragraph and add a beat where Tomas looks at the elm.',
+      steps: [AGENT_STEP],
+      final: false,
+      retry: true
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV3(
+    'before the war',
+    'the story-time check: Pell\u2019s sheet says he dies in the war, the war scene is planned after now, and the author asks whether he is alive',
+    {
+      access: 'read',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: [],
+      message: 'Is Pell still alive at this point?',
+      steps: [AGENT_WAR_STEP],
+      final: true
+    },
+    {
+      kind: 'storyTime',
+      forbidden: ['\\bpell (is|was) dead\\b', '\\bpell (has )?died\\b', '\\bpell was killed\\b']
+    }
+  ),
+  continuityCaseV2(
+    'background',
+    'the background run: the voice block, the brief, the one paragraph that states something the sheet states differently, and that one reference',
+    FIXTURE_PASSAGE.split('\n\n')[4] ?? '',
+    [sheetRef('personality', 'Personality', 'Never goes anywhere unarmed.')],
+    new Set(),
+    null,
+    BRIEF_BLOCK
+  ),
+  continuityCaseV2(
+    'full',
+    'Check consistency on the fixture scene: three sheet fields, a fact of a later scene with its passage, and the previous scene\u2019s timeline',
+    FIXTURE_PASSAGE,
+    CONTINUITY_FULL_REFS,
+    new Set(['scene-2']),
+    'The next morning',
+    BRIEF_BLOCK
+  ),
+  continuityCaseV2(
+    'maxed',
+    'the worst input as the fit leaves it: a scene at the character budget against references at their token budget',
+    FIXTURE_PASSAGE.repeat(20),
+    CONTINUITY_V2_MAXED_REFS,
+    new Set(),
+    'T'.repeat(500),
+    MAXED_BRIEF_BLOCK
+  ),
+  whatNextCaseV3('fresh', 'the v2 fresh case plus the story map of the fixture book', {
+    text: FIXTURE_PASSAGE,
+    brief: null,
+    steer: null,
+    bible: null,
+    map: STORY_MAP_SMALL
+  }),
+  whatNextCaseV3(
+    'full',
+    'the fixture scene with its brief, the scene steer, the story bible as notes and plans, and the story map',
+    {
+      text: FIXTURE_PASSAGE,
+      brief: BRIEF_BLOCK,
+      steer: FIXTURE_STEER,
+      bible: FIXTURE_PLANS_BIBLE,
+      map: STORY_MAP_SMALL
+    }
+  ),
+  whatNextCaseV3(
+    'maxed',
+    'the worst input as the fit leaves it: the tail at the character budget, the brief, the steer, the bible, and the story map at their caps',
+    {
+      text: FIXTURE_PASSAGE.repeat(20),
+      brief: MAXED_BRIEF_BLOCK,
+      steer: MAXED_STEER,
+      bible: MAXED_PLANS_BIBLE,
+      map: MAXED_STORY_MAP_SMALL
+    }
+  ),
+  notesSuggestCaseV2(
+    'fresh',
+    'the fixture scene with no summary, brief, notes, story bible, or focus: the shape a new project sends',
+    {
+      sceneText: FIXTURE_PASSAGE,
+      summary: null,
+      brief: null,
+      notes: null,
+      bible: null,
+      instruction: null
+    }
+  ),
+  notesSuggestCaseV2(
+    'full',
+    'the fixture scene with its summary, brief, notes, the story bible as notes and plans, and a focus',
+    {
+      sceneText: FIXTURE_PASSAGE,
+      summary: SUGGEST_SUMMARY,
+      brief: BRIEF_BLOCK,
+      notes: NOTES,
+      bible: FIXTURE_PLANS_BIBLE,
+      instruction: 'What Tomas knows about the ledger.'
+    }
+  ),
+  notesSuggestCaseV2(
+    'maxed',
+    'the worst input as the fit leaves it: every block at its cap and a scene at the character budget',
+    {
+      sceneText: FIXTURE_PASSAGE.repeat(60),
+      summary: MAXED_SUGGEST_SUMMARY,
+      brief: MAXED_BRIEF_BLOCK,
+      notes: `${FIXTURE_PASSAGE.repeat(2).slice(0, NOTES_SUGGEST_CURRENT_CHARS)}…`,
+      bible: MAXED_PLANS_BIBLE,
+      instruction: 'i'.repeat(NOTES_SUGGEST_INSTRUCTION_MAX)
+    }
+  ),
+  planLinksCase(
+    'fixture',
+    'one planned scene and two empty Save the Cat beats against three summarized scenes',
+    PLAN_LINKS_FIXTURE
+  ),
+  planLinksCase(
+    'maxed',
+    'every cap: 30 plans and 40 written scenes, each title and text at its cap',
+    PLAN_LINKS_MAXED
   )
 ]

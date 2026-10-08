@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`whatNext.v3 prompt (F-5.23 story time) > leaves out an empty bible and map 1`] = `"Story time: this scene is the one marked "▶ NOW" in the story map; only what the scenes up to it show has happened. Later and planned scenes, and the story bible, are the author's notes and plans: a direction may move toward them but never treats them as already happened."`;

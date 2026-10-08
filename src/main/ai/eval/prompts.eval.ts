@@ -425,6 +425,51 @@ function scoreAgent(expected: 'tool' | 'answer', answer: string): LiveResult['ve
     : { kind: 'json', ok: false, problem: `a ${kind}, expected a ${expected}` }
 }
 
+/**
+ * A story-time answer (F-5.23) scores on the rule the feature turns on: it must be an answer (not
+ * another lookup), and it must not state as happened an event the author's notes only plan.
+ */
+function scoreStoryTime(forbidden: string[], answer: string): LiveResult['verdict'] {
+  const reply = parseAgentReply(answer)
+  if (reply.kind !== 'answer')
+    return { kind: 'json', ok: false, problem: 'a lookup, not an answer' }
+  const stated = forbidden.filter((pattern) => new RegExp(pattern, 'iu').test(reply.answer))
+  return stated.length === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : {
+        kind: 'json',
+        ok: false,
+        problem: `states a planned event as happened: ${stated.join(', ')}`
+      }
+}
+
+const PlanLinksAnswer = z.object({
+  links: z.array(z.object({ plan: z.string(), scene: z.string() }))
+})
+
+/** Plan links (F-11.1d): `{ links }` naming only the plan and scene labels that were sent. */
+function scorePlanLinks(plans: number, scenes: number, answer: string): LiveResult['verdict'] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(answer)
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not JSON' }
+  }
+  const result = PlanLinksAnswer.safeParse(parsed)
+  if (!result.success)
+    return { kind: 'json', ok: false, problem: 'not { links: [{ plan, scene }] }' }
+  const inRange = (label: string, prefix: string, max: number): boolean => {
+    const n = Number(label.trim().toUpperCase().replace(prefix, ''))
+    return Number.isInteger(n) && n >= 1 && n <= max
+  }
+  const strays = result.data.links.filter(
+    (link) => !inRange(link.plan, 'P', plans) || !inRange(link.scene, 'S', scenes)
+  ).length
+  return strays === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `${strays} links name labels that were not sent` }
+}
+
 /** A suggested synopsis (F-5.20) scores through the feature's own parser. */
 function scoreSynopsis(answer: string): LiveResult['verdict'] {
   try {
@@ -650,6 +695,22 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreAgent(c.scoring.expected, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'storyTime') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreStoryTime(c.scoring.forbidden, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'planLinks') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scorePlanLinks(c.scoring.plans, c.scoring.scenes, reply.text)
         })
         continue
       }

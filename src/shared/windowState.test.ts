@@ -18,12 +18,18 @@ describe('restorableBounds', () => {
   })
 
   it('drops a window left on a monitor that is gone', () => {
-    expect(restorableBounds({ x: 2000, y: 100, width: 1000, height: 700 }, [PRIMARY], MIN)).toBeNull()
+    expect(
+      restorableBounds({ x: 2000, y: 100, width: 1000, height: 700 }, [PRIMARY], MIN)
+    ).toBeNull()
   })
 
   it('drops a window dragged almost off-screen or with its title bar above the display', () => {
-    expect(restorableBounds({ x: 1850, y: 100, width: 1000, height: 700 }, [PRIMARY], MIN)).toBeNull()
-    expect(restorableBounds({ x: 100, y: -50, width: 1000, height: 700 }, [PRIMARY], MIN)).toBeNull()
+    expect(
+      restorableBounds({ x: 1850, y: 100, width: 1000, height: 700 }, [PRIMARY], MIN)
+    ).toBeNull()
+    expect(
+      restorableBounds({ x: 100, y: -50, width: 1000, height: 700 }, [PRIMARY], MIN)
+    ).toBeNull()
   })
 
   it('never restores below the minimum size', () => {

@@ -1,0 +1,21 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`planLinks.v1 prompt (F-11.1d) > sends the rules alone in the system turn and the labelled plans and scenes in the user turn 1`] = `
+[
+  {
+    "content": "You are the plan-link feature inside a novel-writing app. The author planned scenes and story beats before writing them. Match a plan to the one written scene that clearly carries it out, judged by the scene summary; leave a plan unmatched when unsure. A plan gets at most one scene and a scene fulfils at most one beat. Reply with JSON only: {"links":[{"plan":"P1","scene":"S3","why":"one short sentence"}]}; with no clear match, {"links":[]}.",
+    "role": "system",
+  },
+  {
+    "content": "Plans:
+P1 Planned scene "Mara finds the ledger": She digs it up.
+P2 Beat "Catalyst"
+
+Written scenes:
+S1 "The elm": Mara digs under the elm.
+
+Link the plans.",
+    "role": "user",
+  },
+]
+`;

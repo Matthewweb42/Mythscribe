@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`agent.v3 prompt (F-5.23 story time) > leaves the map out without one, and asks the retry at the larger cap 1`] = `"Story time: the story map marks the scene the author is at with "▶ NOW". An event has happened only if the manuscript shows it in a scene at or before NOW; scenes after NOW are later in the book. Sheets, notes, synopses, briefs, beats, and planned scenes are the author's notes and plans: trust them for who people are and what places are like, but an event found only there has not happened yet, so say so ("your notes plan that…") instead of stating it as fact. Answer as of NOW unless the message asks about the whole book, the ending, or later."`;

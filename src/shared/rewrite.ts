@@ -59,7 +59,10 @@ export function diffWords(before: string, after: string): DiffSegment[] {
       push('equal', a[i] ?? '')
       i++
       j++
-    } else if (j >= m || (i < n && (lcs[(i + 1) * width + j] ?? 0) >= (lcs[i * width + j + 1] ?? 0))) {
+    } else if (
+      j >= m ||
+      (i < n && (lcs[(i + 1) * width + j] ?? 0) >= (lcs[i * width + j + 1] ?? 0))
+    ) {
       push('del', a[i] ?? '')
       i++
     } else {
@@ -76,8 +79,14 @@ function orderChanges(segments: DiffSegment[]): DiffSegment[] {
   let run: DiffSegment[] = []
   const flush = (): void => {
     if (run.length === 0) return
-    const del = run.filter((s) => s.kind === 'del').map((s) => s.text).join('')
-    const ins = run.filter((s) => s.kind === 'ins').map((s) => s.text).join('')
+    const del = run
+      .filter((s) => s.kind === 'del')
+      .map((s) => s.text)
+      .join('')
+    const ins = run
+      .filter((s) => s.kind === 'ins')
+      .map((s) => s.text)
+      .join('')
     if (del) out.push({ kind: 'del', text: del })
     if (ins) out.push({ kind: 'ins', text: ins })
     run = []

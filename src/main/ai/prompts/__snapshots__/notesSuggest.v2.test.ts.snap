@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`notesSuggest.v2 prompt (F-5.23 story time) > adds the time rule after v1’s rules, then the bible; the user turn is v1’s 1`] = `"Story time: the story bible is the author's notes and plans; an event told only there, or in the next scene, has not happened by this scene, so never note it as something that has."`;

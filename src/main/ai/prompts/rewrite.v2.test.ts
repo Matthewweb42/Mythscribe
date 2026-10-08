@@ -27,9 +27,9 @@ const promptText = (messages: { content: string }[]): string =>
 
 describe('rewrite.v2 prompt (F-14.10, F-14.9)', () => {
   it('keeps version 1’s rules exactly, sentinel included: only the bible was added', () => {
-    expect(REWRITE_RULES.startsWith('You are the rewrite feature inside a novel-writing app.')).toBe(
-      true
-    )
+    expect(
+      REWRITE_RULES.startsWith('You are the rewrite feature inside a novel-writing app.')
+    ).toBe(true)
     const built = buildRewritePromptV2(bare)
     expect(built.version).toBe('rewrite.v2')
     expect(built.messages).toEqual([

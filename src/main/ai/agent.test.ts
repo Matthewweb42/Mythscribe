@@ -29,11 +29,20 @@ import {
   runAgent,
   type AgentInput
 } from './agent'
-import { loadAgentProject, occurrencesOf, resolveAgentEdit, runAgentTool } from './agentTools'
+import {
+  NOTES_ARE_PLANS,
+  SHEETS_ARE_PLANS,
+  loadAgentProject,
+  occurrencesOf,
+  resolveAgentEdit,
+  runAgentTool
+} from './agentTools'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import { AGENT_FINAL_TURN, AGENT_RULES } from './prompts/agent.v1'
 import { AGENT_EDIT_RULES_V2, AGENT_RETRY_TURN } from './prompts/agent.v2'
+import { AGENT_TIME_RULES } from './prompts/agent.v3'
+import { STORY_MAP_HEADING } from '@shared/storyTime'
 import {
   AiCancelledError,
   AiProviderError,
@@ -190,6 +199,13 @@ describe('runAgent (F-5.22)', () => {
     expect(system.startsWith(AGENT_RULES)).toBe(true)
     expect(system).not.toContain(AGENT_EDIT_RULES_V2)
     expect(system).toContain(`Open document ${ref(scenes[0])}:`)
+    // F-5.23 (agent.v3): the story-time rule, then the story map with now on the open scene,
+    // before the open document.
+    expect(result.promptVersion).toBe('agent.v3')
+    expect(system).toContain(AGENT_TIME_RULES)
+    expect(system).toContain(STORY_MAP_HEADING)
+    expect(system).toMatch(new RegExp(`${ref(scenes[0])} [^\\n]*\\[drafted\\] ▶ NOW`))
+    expect(system.indexOf(STORY_MAP_HEADING)).toBeLessThan(system.indexOf('Open document'))
     const third = request(2).messages
     expect(third.at(-2)).toEqual({
       role: 'assistant',
@@ -405,6 +421,7 @@ describe('fitAgentPrompt', () => {
     const built = fitAgentPrompt({
       access: 'read',
       voice: null,
+      map: null,
       focus: null,
       history: [{ role: 'user', content: 'old question' }],
       message: 'Now?',
@@ -560,7 +577,8 @@ describe('the agent tools (F-5.22)', () => {
     const project = loadAgentProject(db)
     const outline = runAgentTool(project, null, 'outline', {}).result
     expect(outline).toContain(`${ref(scenes[0])} `)
-    expect(outline).toMatch(/words\)/)
+    // F-5.23: each manuscript document's progress after its word count.
+    expect(outline).toMatch(/words, (planned|drafted|revised)\)/)
     const first = runAgentTool(project, null, 'read_scene', { id: ref(scenes[1]) })
     expect(first.result).toContain('characters 0–6000 of 7000')
     expect(first.result).toContain('"from":6000')
@@ -575,7 +593,8 @@ describe('the agent tools (F-5.22)', () => {
     createTag(db, { name: 'grim', category: 'tone' })
     const project = loadAgentProject(db)
     expect(runAgentTool(project, null, 'read_notes', { id: ref(scenes[0]) }).result).toBe(
-      'Synopsis: Mara hides the copy.\nNotes:\nKeep the elm visible.'
+      `${project.titleOf(scenes[0]!)} (${NOTES_ARE_PLANS}):\n` +
+        'Synopsis: Mara hides the copy.\nNotes:\nKeep the elm visible.'
     )
     const sheet = runAgentTool(project, null, 'read_sheet', { name: 'mara' })
     expect(sheet.step.label).toBe('Reading Mara Vell’s sheet…')
@@ -584,6 +603,38 @@ describe('the agent tools (F-5.22)', () => {
       'Mara Vell'
     )
     expect(runAgentTool(project, null, 'tags', {}).result).toContain('grim')
+  })
+
+  it('says where every source sits in story time (F-5.23)', () => {
+    createEntity(db, {
+      kind: 'character',
+      name: 'Pell',
+      fields: { background: 'Dies in the war.' }
+    })
+    // Now is the second scene: the first is before it, the third after it.
+    const project = loadAgentProject(db, scenes[1])
+    expect(project.time.nowId).toBe(scenes[1])
+    const read = (id: string | undefined): string =>
+      runAgentTool(project, null, 'read_scene', { id: ref(id) }).result
+    expect(read(scenes[0])).toContain('(before now: has happened)')
+    expect(read(scenes[1])).toContain('(now: the scene the author is at)')
+    const outline = runAgentTool(project, null, 'outline', {}).result
+    expect(outline).toMatch(new RegExp(`${ref(scenes[1])} [^\n]*▶ NOW`))
+    const sheet = runAgentTool(project, null, 'read_sheet', { name: 'Pell' }).result
+    expect(sheet.split('\n')[0]).toBe(`Pell (character; ${SHEETS_ARE_PLANS})`)
+    const search = runAgentTool(project, null, 'search', { query: 'ledger Pell' }).result
+    expect(search).toContain(
+      `${ref(scenes[0])} ${project.titleOf(scenes[0]!)} (before now: has happened)`
+    )
+    expect(search).toContain(`Sheets (${SHEETS_ARE_PLANS}): Pell (character)`)
+  })
+
+  it('puts now at the latest written scene when no manuscript scene is open (F-5.23)', () => {
+    expect(loadAgentProject(db, null).time).toMatchObject({ nowId: scenes[1], basis: 'latest' })
+    const later = runAgentTool(loadAgentProject(db, scenes[0]), null, 'read_scene', {
+      id: ref(scenes[1])
+    }).result
+    expect(later).toContain('(after now: has not happened yet)')
   })
 
   it('counts a passage the way quotes are matched', () => {
