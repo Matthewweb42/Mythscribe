@@ -192,8 +192,8 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   organise: {
     trigger: 'on request',
-    when: 'Organise (button, the quiet offer, or the chat): one request per chunk of the tags, sheets, notes, and outline listing.',
-    callsPerUse: 3,
+    when: 'Organise (button, the quiet offer, or the chat): one request per chunk of the tags, sheets, notes, and outline listing (up to 16 chunks, reasoning off); a chunk whose answer is cut off is halved and each half sent again, at most twice.',
+    callsPerUse: 4,
     typicalOutTokens: 1200,
     ideas:
       'Send only the local findings for a quick tidy; skip sections the instruction does not name (already); fast tier for tag-only runs.'

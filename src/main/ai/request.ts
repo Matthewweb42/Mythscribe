@@ -56,7 +56,9 @@ import { insertUsage, type AiDb, type UsageEntry } from './usageStore'
 const NO_REASONING_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
   'ghostText',
   'summary',
-  'contextImport'
+  'contextImport',
+  // 2026-10-08: a large project's organise plan came back cut off twice; JSON operations need no thinking.
+  'organise'
 ])
 
 export interface AiRequestInput {

@@ -2,11 +2,13 @@ import { z } from 'zod'
 import { categoryOf } from '@shared/categories'
 import {
   ORGANISE_MAX_OPS,
+  ORGANISE_SPLIT_DEPTH,
   OrganiseOp,
   scopesOf,
   type OrganiseCandidates,
   type OrganisePlan,
-  type OrganiseRequest
+  type OrganiseRequest,
+  type OrganiseScope
 } from '@shared/organise'
 import { notesText } from './context/scenePanel'
 import { getAiSettings } from '../project/settingsStore'
@@ -20,12 +22,17 @@ import type { TreeDb } from '../tree/treeStore'
 import { assertFeatureAllowed } from './dial'
 import { cancelInflight } from './inflight'
 import {
-  buildOrganisePrompt,
-  organiseChunks,
-  organiseIndex,
-  ORGANISE_PROMPT_VERSION,
-  type OrganiseListing
-} from './prompts/organise.v1'
+  buildOrganisePromptV2,
+  describeOrganiseChunk,
+  findingsFor,
+  halveOrganiseChunk,
+  organiseChunksV2,
+  organiseIndexV2,
+  ORGANISE_PROMPT_V2_VERSION,
+  type OrganiseChunk,
+  type OrganiseFinding,
+  type OrganiseListingV2
+} from './prompts/organise.v2'
 import { createProposal } from './proposalStore'
 import { AiCancelledError, AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from './request'
@@ -33,15 +40,18 @@ import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from '
 /**
  * Organise (F-9.10): the AI's plan for the tags, the story bible, the notes, and the binder. The
  * project is listed once (`organiseListing`), split into chunks, and each chunk is one request on
- * the strong tier in JSON mode; an answer cut off by its cap or not one JSON object is asked once
- * more with a larger cap and a nudge to be brief (the agent's retry), and a chunk that still fails
- * fails the run with its next step. Every answer's operations are resolved against the project as
+ * the strong tier in JSON mode with reasoning off, carrying only the local findings about what it
+ * lists. An answer cut off by its cap or not one JSON object is not asked again: its chunk is
+ * halved at an entry boundary and each half sent, at most `ORGANISE_SPLIT_DEPTH` times
+ * (2026-10-08, "Organise at scale"); a piece that still fails is named in the plan's skipped notes
+ * and the run goes on, and so is whatever the chunk cap or the index left out. The run fails only
+ * when no piece came back readable. Every answer's operations are resolved against the project as
  * they arrive (`OrganiseResolver`), so a later chunk cannot undo an earlier one. Nothing is
  * written: the renderer applies the changes the author keeps. The run is one proposal (F-14.5).
  */
 
 export interface OrganiseInput extends OrganiseRequest {
-  /** The renderer's id for `ai:cancel`; chunk `n` goes out as `<id>:<n>` and its retry as `<id>:<n>r`. */
+  /** The renderer's id for `ai:cancel`; chunk `n` goes out as `<id>:<n>`, its halves as `<id>:<n>a` and `<id>:<n>b`. */
   requestId: string
   signal?: AbortSignal
 }
@@ -89,27 +99,25 @@ export function parseOrganiseAnswer(
   return { ops, reply: (parsed.data.reply ?? '').trim(), dropped }
 }
 
-/** The local findings in the run's refs, for the first request; '' for none. */
-export function findingsLine(project: OrganiseProject, found: OrganiseCandidates): string {
+/** The local findings in the run's refs, each sent with the chunk that lists its first ref. */
+export function organiseFindings(
+  project: OrganiseProject,
+  found: OrganiseCandidates
+): OrganiseFinding[] {
   const refOf = (of: 'tag' | 'sheet', id: string): string =>
     (of === 'tag' ? project.tagRef.get(id) : project.sheetRef.get(id)) ?? '?'
-  const parts: string[] = []
-  if (found.duplicates.length > 0) {
-    parts.push(
-      `Likely duplicates: ${found.duplicates.map((d) => d.ids.map((id) => refOf(d.of, id)).join(' + ')).join('; ')}.`
-    )
-  }
-  if (found.unusedTags.length > 0) {
-    parts.push(`Unused tags: ${found.unusedTags.map((t) => refOf('tag', t.id)).join(', ')}.`)
-  }
-  if (found.emptySheets.length > 0) {
-    parts.push(`Empty sheets: ${found.emptySheets.map((s) => refOf('sheet', s.id)).join(', ')}.`)
-  }
-  return parts.length === 0 ? '' : `Found locally (check them): ${parts.join(' ')}`
+  return [
+    ...found.duplicates.map((d) => ({
+      kind: 'duplicate' as const,
+      refs: d.ids.map((id) => refOf(d.of, id))
+    })),
+    ...found.unusedTags.map((t) => ({ kind: 'unusedTag' as const, refs: [refOf('tag', t.id)] })),
+    ...found.emptySheets.map((s) => ({ kind: 'emptySheet' as const, refs: [refOf('sheet', s.id)] }))
+  ]
 }
 
 /** The project in the run's refs, as the prompt lists it. */
-export function organiseListing(project: OrganiseProject): OrganiseListing {
+export function organiseListing(project: OrganiseProject): OrganiseListingV2 {
   const { agent } = project
   const tagRef = (id: string | null): string | null =>
     id === null ? null : (project.tagRef.get(id) ?? null)
@@ -167,8 +175,38 @@ export function organiseListing(project: OrganiseProject): OrganiseListing {
       ]
     }),
     outline,
-    findings: findingsLine(project, organiseCandidates(project))
+    findings: organiseFindings(project, organiseCandidates(project))
   }
+}
+
+/** The note for a piece that failed even halved, or for what a cap left out. */
+const couldNotPlan = (chunk: OrganiseChunk): string =>
+  `Could not plan for ${describeOrganiseChunk(chunk)}: the answer was cut off or unreadable, even in smaller pieces. Run Organise again on that section.`
+
+/** Notes for what the run could not cover, so nothing is dropped without the author being told. */
+export function leftOffNotes(
+  leftOff: OrganiseChunk,
+  index: { tags: number; sheets: number },
+  scopes: readonly OrganiseScope[]
+): string[] {
+  const notes: string[] = []
+  const entries = leftOff.reduce((n, section) => n + section.entries.length, 0)
+  if (entries > 0) {
+    notes.push(
+      `${entries} more entr${entries === 1 ? 'y was' : 'ies were'} not looked at (${describeOrganiseChunk(leftOff)}): the project is larger than one run covers. Run Organise again on that section.`
+    )
+  }
+  const names = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? '' : 's'}`
+  const missed = [
+    scopes.includes('tags') && index.tags > 0 ? names(index.tags, 'tag') : '',
+    scopes.includes('sheets') && index.sheets > 0 ? names(index.sheets, 'sheet') : ''
+  ].filter((part) => part !== '')
+  if (missed.length > 0) {
+    notes.push(
+      `The name index had no room for ${missed.join(' and ')}, so duplicates across parts of the project may be missed.`
+    )
+  }
+  return notes
 }
 
 export async function runOrganise(
@@ -180,33 +218,34 @@ export async function runOrganise(
   const project = loadOrganiseProject(db)
   const listing = organiseListing(project)
   const scopes = scopesOf(input)
-  const index = organiseIndex(listing)
-  const chunks = organiseChunks(listing, scopes)
+  const index = organiseIndexV2(listing)
+  const { chunks, leftOff } = organiseChunksV2(listing, scopes)
   const resolver = new OrganiseResolver(project)
   const usage: CompletionUsage = { inputTokens: 0, outputTokens: 0 }
   let costUsd = 0
   let cached = true
   let model = ''
+  let readable = 0
   const replies: string[] = []
+  const failed: string[] = []
   let current: string | null = null
   const onAbort = (): void => {
     if (current !== null) cancelInflight(current)
   }
   input.signal?.addEventListener('abort', onAbort, { once: true })
 
-  const send = async (part: number, retry: boolean): Promise<AiRequestResult> => {
+  const send = async (part: number, chunk: OrganiseChunk, id: string): Promise<AiRequestResult> => {
     if (input.signal?.aborted === true) throw new AiCancelledError('The request was stopped.')
-    const prompt = buildOrganisePrompt({
-      index,
-      chunk: chunks[part - 1] ?? '',
+    const prompt = buildOrganisePromptV2({
+      index: index.text,
+      chunk,
       part,
       parts: chunks.length,
       scopes,
       instruction: input.instruction,
-      findings: listing.findings,
-      retry
+      findings: findingsFor(listing.findings, chunk)
     })
-    current = `${input.requestId}:${part}${retry ? 'r' : ''}`
+    current = id
     const reply = await runAiRequest(deps, {
       feature: 'organise',
       tier: 'strong',
@@ -215,7 +254,7 @@ export async function runOrganise(
       json: true,
       contextHash: sha256(JSON.stringify(prompt.messages)),
       promptVersion: prompt.version,
-      requestId: current
+      requestId: id
     })
     current = null
     usage.inputTokens += reply.usage.inputTokens
@@ -227,36 +266,54 @@ export async function runOrganise(
   }
 
   try {
-    for (let part = 1; part <= chunks.length; part++) {
-      let reply = await send(part, false)
-      let parsed = reply.finishReason === 'length' ? null : parseOrganiseAnswer(reply.text)
-      if (parsed === null) {
-        reply = await send(part, true)
-        parsed = reply.finishReason === 'length' ? null : parseOrganiseAnswer(reply.text)
+    for (const [i, chunk] of chunks.entries()) {
+      const part = i + 1
+      // Depth first, so the halves of one chunk are resolved in listing order.
+      const queue: { piece: OrganiseChunk; depth: number; id: string }[] = [
+        { piece: chunk, depth: 0, id: `${input.requestId}:${part}` }
+      ]
+      while (queue.length > 0) {
+        const next = queue.shift()
+        if (next === undefined) break
+        const { piece, depth, id } = next
+        const reply = await send(part, piece, id)
+        const parsed = reply.finishReason === 'length' ? null : parseOrganiseAnswer(reply.text)
+        if (parsed === null) {
+          const halves = depth < ORGANISE_SPLIT_DEPTH ? halveOrganiseChunk(piece) : null
+          if (halves === null) failed.push(couldNotPlan(piece))
+          else {
+            queue.unshift(
+              { piece: halves[0], depth: depth + 1, id: `${id}a` },
+              { piece: halves[1], depth: depth + 1, id: `${id}b` }
+            )
+          }
+          continue
+        }
+        readable += 1
+        resolver.add(parsed.ops)
+        if (parsed.dropped > 0) {
+          resolver.skipped.push(
+            `${parsed.dropped} operation${parsed.dropped === 1 ? '' : 's'} could not be read`
+          )
+        }
+        if (parsed.reply !== '') replies.push(parsed.reply)
       }
-      if (parsed === null) {
-        throw new AiFallbackError(
-          'The plan was cut off or unreadable, even when asked again. Try a narrower instruction (for example "merge duplicate tags"), or switch Thinking off for the strong model in Settings › AI.'
-        )
-      }
-      resolver.add(parsed.ops)
-      if (parsed.dropped > 0) {
-        resolver.skipped.push(
-          `${parsed.dropped} operation${parsed.dropped === 1 ? '' : 's'} could not be read`
-        )
-      }
-      if (parsed.reply !== '') replies.push(parsed.reply)
+    }
+    if (readable === 0) {
+      throw new AiFallbackError(
+        'Organise could not read a plan from the model for any part of the project, even in smaller pieces. Try again; if it keeps failing, choose another strong model in Settings › AI.'
+      )
     }
     const plan: OrganisePlan = {
       reply: replies.join(' '),
       changes: resolver.changes,
-      skipped: resolver.skipped,
+      skipped: [...resolver.skipped, ...failed, ...leftOffNotes(leftOff, index.leftOff, scopes)],
       chunks: chunks.length
     }
     const proposal = createProposal(db, {
       feature: 'organise',
       nodeId: null,
-      promptVersion: ORGANISE_PROMPT_VERSION,
+      promptVersion: ORGANISE_PROMPT_V2_VERSION,
       model,
       promptTokens: usage.inputTokens,
       completionTokens: usage.outputTokens,

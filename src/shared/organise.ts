@@ -63,6 +63,15 @@ export const ORGANISE_INDEX_CHARS = 6_000
 /** The `max_tokens` one request asks; the one retry of a cut-off answer asks twice that. */
 export const ORGANISE_MAX_TOKENS = 2_500
 export const ORGANISE_RETRY_MAX_TOKENS = 5_000
+/**
+ * organise.v2 (2026-10-08, "Organise at scale"): chunks one run may send before what is left is
+ * named in the plan's skipped notes (never dropped silently), and the `max_tokens` one request
+ * asks (reasoning is off for organise, so the whole cap is the answer). There is no retry turn: a
+ * chunk whose answer is cut off or unreadable is halved, at most `ORGANISE_SPLIT_DEPTH` times.
+ */
+export const ORGANISE_V2_MAX_CHUNKS = 16
+export const ORGANISE_V2_MAX_TOKENS = 6_000
+export const ORGANISE_SPLIT_DEPTH = 2
 /** Points one notes change may write. */
 export const ORGANISE_NOTE_POINTS_MAX = 30
 /** The longest point of a tidied note. */
