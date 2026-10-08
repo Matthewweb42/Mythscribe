@@ -2,17 +2,15 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  defaultExportFormatting,
-  type ExportFormat,
-  type ExportPageSize,
-  type ExportProgress
-} from '@shared/bookExport'
+import { defaultExportFormatting, type ExportFormat, type ExportProgress } from '@shared/bookExport'
+import { BUILTIN_COMPILE_FORMATS, COMPILE_OUTPUTS } from '@shared/compileFormat'
+import type { CompiledBook } from '@shared/compileModel'
 import { readZip } from '../backups/zip'
 import { saveDocument } from '../document/documentStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
-import { exportBook } from './run'
+import { setBookDetails } from '../project/settingsStore'
+import { compileToFile, exportBook } from './run'
 
 let tmp: string
 let session: ProjectSession
@@ -37,12 +35,12 @@ afterEach(() => {
 async function run(format: ExportFormat): Promise<{
   file: string
   progress: ExportProgress[]
-  renderPdf: ReturnType<typeof vi.fn<(html: string, size: ExportPageSize) => Promise<Buffer>>>
+  renderPdf: ReturnType<typeof vi.fn<(book: CompiledBook) => Promise<Buffer>>>
   words: number
 }> {
   const file = path.join(tmp, `book.${format}`)
   const progress: ExportProgress[] = []
-  const renderPdf = vi.fn<(html: string, size: ExportPageSize) => Promise<Buffer>>(() =>
+  const renderPdf = vi.fn<(book: CompiledBook) => Promise<Buffer>>(() =>
     Promise.resolve(Buffer.from('%PDF-1.4 fake'))
   )
   const result = await exportBook(db, {
@@ -54,6 +52,7 @@ async function run(format: ExportFormat): Promise<{
       formatting: defaultExportFormatting('* * *')
     },
     projectName: 'Run',
+    projectFolder: session.folder,
     path: file,
     requestId: 'req-1',
     onProgress: (p) => progress.push(p),
@@ -78,13 +77,14 @@ describe('exportBook (F-12.1)', () => {
     ])
   })
 
-  it('prints the print page through the injected PDF renderer', async () => {
+  it('prints the compiled book through the injected PDF renderer', async () => {
     const { file, renderPdf } = await run('pdf')
     expect(fs.readFileSync(file, 'utf8')).toBe('%PDF-1.4 fake')
     expect(renderPdf).toHaveBeenCalledOnce()
-    const [html, size] = renderPdf.mock.calls[0] ?? []
-    expect(html).toContain('<p>The storm broke.</p>')
-    expect(size).toBe('letter')
+    const [book] = renderPdf.mock.calls[0] ?? []
+    expect(book?.output).toBe('pdf')
+    expect(book?.format.pageSetup.size).toBe('letter')
+    expect(book?.words).toBe(3)
   })
 
   it('writes DOCX and EPUB as zips', async () => {
@@ -95,5 +95,60 @@ describe('exportBook (F-12.1)', () => {
       const names = readZip(bytes).map((e) => e.name)
       expect(names).toContain(format === 'docx' ? 'word/document.xml' : 'OEBPS/content.opf')
     }
+  })
+})
+
+describe('compileToFile (Compile v2)', () => {
+  const pdf = vi.fn<(book: CompiledBook) => Promise<Buffer>>(() =>
+    Promise.resolve(Buffer.from('%PDF-1.7 fake'))
+  )
+
+  it('writes every output with a built-in format', async () => {
+    const format = BUILTIN_COMPILE_FORMATS.find((f) => f.id === 'builtin:editor-copy')
+    if (!format) throw new Error('no editor copy')
+    for (const output of COMPILE_OUTPUTS) {
+      const file = path.join(tmp, `book.${output}`)
+      const result = await compileToFile(db, {
+        format,
+        output,
+        scope: { kind: 'manuscript' },
+        projectName: 'Run',
+        projectFolder: session.folder,
+        path: file,
+        requestId: 'c1',
+        onProgress: () => undefined,
+        renderPdf: pdf
+      })
+      expect(result).toEqual({ path: file, output, words: 3 })
+      const bytes = fs.readFileSync(file)
+      if (output === 'docx' || output === 'epub' || output === 'odt')
+        expect(bytes.toString('latin1', 0, 2)).toBe('PK')
+      else if (output === 'rtf') expect(bytes.toString('latin1', 0, 6)).toBe('{\\rtf1')
+      else if (output !== 'pdf') expect(bytes.toString('utf8')).toContain('The storm broke.')
+    }
+  })
+
+  it('puts the Book details cover into the EPUB', async () => {
+    const covers = path.join(session.folder, 'assets', 'covers')
+    fs.mkdirSync(covers, { recursive: true })
+    fs.writeFileSync(path.join(covers, 'cover.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    setBookDetails(db, { cover: 'cover.png' })
+    const format = BUILTIN_COMPILE_FORMATS.find((f) => f.id === 'builtin:ebook')
+    if (!format) throw new Error('no ebook')
+    const file = path.join(tmp, 'book.epub')
+    await compileToFile(db, {
+      format,
+      output: 'epub',
+      scope: { kind: 'manuscript' },
+      projectName: 'Run',
+      projectFolder: session.folder,
+      path: file,
+      requestId: 'c2',
+      onProgress: () => undefined,
+      renderPdf: pdf
+    })
+    const names = readZip(fs.readFileSync(file)).map((e) => e.name)
+    expect(names).toContain('OEBPS/images/cover.png')
+    expect(names).toContain('OEBPS/cover.xhtml')
   })
 })

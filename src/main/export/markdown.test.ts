@@ -1,47 +1,58 @@
 import { describe, expect, it } from 'vitest'
+import type { BookItem, CompiledBook, ContentBlock, Inline } from '@shared/compileModel'
+import { plainRun as run } from './inlines'
 import { renderMarkdown } from './markdown'
-import type { BookUnit, Inline, Run } from './model'
+import { sampleBook } from './testBook'
 
-const run = (text: string, marks: Partial<Run> = {}): Run => ({
-  kind: 'text',
-  text,
-  bold: false,
-  italic: false,
-  underline: false,
-  strike: false,
-  code: false,
-  ...marks
-})
-const p = (...runs: Inline[]): BookUnit['blocks'][number] => ({
+const p = (...runs: Inline[]): ContentBlock => ({
   kind: 'paragraph',
   runs,
-  align: null
+  align: null,
+  opening: 'none'
 })
-const body = (...blocks: BookUnit['blocks']): BookUnit[] => [
-  { kind: 'body', title: 'Book', blocks }
-]
 
-describe('renderMarkdown (F-12.1)', () => {
-  it('prints titles, shifted headings, paragraphs, and scene breaks a blank line apart', () => {
-    const md = renderMarkdown(
-      [
-        { kind: 'matter', title: 'Dedication', blocks: [p(run('For M.'))] },
-        ...body(
-          { kind: 'title', level: 'part', text: 'Part One', inPart: false },
-          { kind: 'title', level: 'chapter', text: 'Chapter One', inPart: true },
-          { kind: 'heading', level: 1, runs: [run('Morning')], align: 'center' },
-          p(run('First.')),
-          { kind: 'sceneBreak' },
-          p(run('Second.'))
-        )
-      ],
-      '* * *'
-    )
+/** The sample book with only these body blocks. */
+function body(...blocks: ContentBlock[]): CompiledBook {
+  const item: BookItem = { kind: 'text', division: 'body', id: 't', blocks }
+  return { ...sampleBook('plain-text', 'md'), items: [item] }
+}
+
+describe('renderMarkdown (Compile v2)', () => {
+  it('prints headings by level, shifted document headings, paragraphs, and scene breaks', () => {
+    const md = renderMarkdown(sampleBook('plain-text', 'md'))
     expect(md).toBe(
-      ['For M.', '# Part One', '## Chapter One', '### Morning', 'First.', '* * *', 'Second.'].join(
-        '\n\n'
-      ) + '\n'
+      [
+        'A word first.',
+        '## Prologue',
+        '“Before it all,” she said & left.',
+        '# Beginnings',
+        '## The Storm',
+        'Rain fell hard on the salt road that evening, and nobody came.',
+        '**Bold** and *italic* -- then...',
+        '* * *',
+        'After the break.',
+        '* * *',
+        'Then it stopped.',
+        '## The Calm',
+        '#### Morning',
+        'Quiet now.',
+        '> A quoted line.',
+        'Thanks.'
+      ].join('\n\n') + '\n'
     )
+  })
+
+  it('joins two-line headings, prints generated pages, and quotes notes', () => {
+    const md = renderMarkdown(sampleBook('editor-copy', 'md'))
+    expect(md).toContain(
+      '# The Salt Road\n\n*A Novel*\n\nTides, Book 2\n\nby Ada Marlowe\n\nGull Press'
+    )
+    const chapters = renderMarkdown(sampleBook('ebook', 'md'))
+    expect(chapters).toContain('## Chapter One: The Storm')
+    expect(chapters).toContain(
+      '## Contents\n\n- Prologue\n- Part One: Beginnings\n  - Chapter One: The Storm'
+    )
+    expect(md).toContain('> **Note**\n>\n> Check the tide tables.')
   })
 
   it('wraps marks around whole stretches with whitespace outside the delimiters', () => {
@@ -59,8 +70,7 @@ describe('renderMarkdown (F-12.1)', () => {
           run(' '),
           run('x`y', { code: true })
         )
-      ),
-      '#'
+      )
     )
     expect(md).toBe('A **bold *both*** *tail* gone ~~struck~~ and under ``x`y``\n')
   })
@@ -71,8 +81,7 @@ describe('renderMarkdown (F-12.1)', () => {
         p(run('# not a heading *or* [link] _x_ \\')),
         p(run('1. not a list'), { kind: 'hardBreak' }, run('> not a quote')),
         p(run('- dash'))
-      ),
-      '###'
+      )
     )
     expect(md).toBe(
       [
@@ -81,11 +90,16 @@ describe('renderMarkdown (F-12.1)', () => {
         '\\- dash'
       ].join('\n\n') + '\n'
     )
-    expect(renderMarkdown(body({ kind: 'sceneBreak' }), '###')).toBe('\\###\n')
+    expect(
+      renderMarkdown(body({ kind: 'separator', separator: { kind: 'text', text: '###' } }))
+    ).toBe('\\###\n')
+    expect(renderMarkdown(body({ kind: 'separator', separator: { kind: 'pageBreak' } }))).toBe(
+      '---\n'
+    )
   })
 
   it('prefixes quoted blocks', () => {
-    const md = renderMarkdown(body({ kind: 'quote', blocks: [p(run('One')), p(run('Two'))] }), '*')
+    const md = renderMarkdown(body({ kind: 'quote', blocks: [p(run('One')), p(run('Two'))] }))
     expect(md).toBe('> One\n>\n> Two\n')
   })
 })

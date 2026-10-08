@@ -1,5 +1,5 @@
 /**
- * Escaping for the XML and HTML the export writes (F-12.1). Characters XML 1.0 cannot hold
+ * Escaping for the XML and HTML the compile writers produce (F-12.1, Compile v2). Characters XML 1.0 cannot hold
  * (control characters other than tab, newline, and carriage return; lone surrogates; U+FFFE and
  * U+FFFF) are dropped, so a stray byte pasted into a scene cannot make a DOCX or EPUB unreadable.
  */

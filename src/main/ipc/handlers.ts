@@ -17,8 +17,12 @@ import type { AiModelChoice } from '@shared/aiRouting'
 import { TRIAL_ENDED_MESSAGE } from '@shared/appAccess'
 import { type AiSource, aiSwitchPatch, isFeatureAllowed } from '@shared/aiSettings'
 import { EXPORT_EXTENSIONS, EXPORT_FORMAT_LABELS } from '@shared/bookExport'
-import { BOOK_COVER_DIR } from '@shared/bookDetails'
-import { sortFormats } from '@shared/compileFormat'
+import { BOOK_COVER_DIR, bookTitle } from '@shared/bookDetails'
+import {
+  COMPILE_OUTPUT_EXTENSIONS,
+  COMPILE_OUTPUT_LABELS,
+  sortFormats
+} from '@shared/compileFormat'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl, type PricingResult } from '@shared/cloudApi'
 import { bundledPricing, hostedQuote } from '@shared/hostedPricing'
 import { aiRequestCounter } from '@shared/diagnostics'
@@ -145,7 +149,7 @@ import type { ProjectDialogs } from '../dialogs'
 import { compileManuscript, compileSource } from '../document/compileStore'
 import { createFormat, deleteFormat, saveFormat } from '../export/formatLibrary'
 import { renderPdf } from '../export/pdf'
-import { exportBook } from '../export/run'
+import { compileToFile, exportBook } from '../export/run'
 import {
   compareDrafts,
   deleteDraft,
@@ -1084,11 +1088,43 @@ export function registerHandlers({
     const result = await exportBook(session.connection.orm, {
       options,
       projectName: session.info.name,
+      projectFolder: session.folder,
       path: chosen,
       requestId,
       onProgress: (progress) => emit(windows(), 'export:progress', progress),
       renderPdf
     })
+    diagnostics.count('export.run')
+    return result
+  })
+
+  /**
+   * Compile v2: the book in one output with the compile window's format. The default file is
+   * named after the book's title and sits beside the project folder, as exports do.
+   */
+  register('compile:run', async ({ format, output, scope, requestId }) => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const extension = COMPILE_OUTPUT_EXTENSIONS[output]
+    const title = bookTitle(getBookDetails(db), session.info.name)
+    const chosen = await dialogs.chooseExportPath(
+      `${sanitizeName(title) || sanitizeName(session.info.name)}.${extension}`,
+      [{ name: COMPILE_OUTPUT_LABELS[output], extensions: [extension] }],
+      path.dirname(session.folder)
+    )
+    if (chosen === null) return null
+    const result = await compileToFile(db, {
+      format,
+      output,
+      scope,
+      projectName: session.info.name,
+      projectFolder: session.folder,
+      path: chosen,
+      requestId,
+      onProgress: (progress) => emit(windows(), 'export:progress', progress),
+      renderPdf
+    })
+    // Counted with exports: the diagnostics counters are a fixed, shipped list.
     diagnostics.count('export.run')
     return result
   })

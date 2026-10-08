@@ -1,11 +1,22 @@
-import type { BookBlock, BookUnit, Inline, Run } from './model'
+import type { Separator } from '@shared/compileFormat'
+import type {
+  BookItem,
+  CompiledBook,
+  ContentBlock,
+  GeneratedPage,
+  Inline,
+  Run
+} from '@shared/compileModel'
 
 /**
- * The Markdown export (F-12.1): CommonMark with `~~strike~~`. Part titles are `#`, chapter titles
- * `##`, and an author's own headings move below them (`###` and down). Paragraphs are separated by
- * a blank line, a hard break is two trailing spaces, underline prints as plain text (Markdown has
- * none), alignment and formatting choices do not apply, and the scene-break text sits on its own
- * line. Matter units print their text only, a blank line apart like everything else.
+ * The Markdown writer (F-12.1, Compile v2): CommonMark with `~~strike~~`. Part headings are `#`,
+ * chapter-level headings `##`, scene headings `###`, and an author's own headings move below them
+ * (`####` and down); a two-line heading joins its lines with `: `. Paragraphs are separated by a
+ * blank line, a hard break is two trailing spaces, underline and small caps print as plain text
+ * (Markdown has neither), and alignment and page layout do not apply. A scene-break text sits on
+ * its own line, a blank-line break is a non-breaking space paragraph, and a page break is a
+ * thematic break (`---`). Generated pages print as plain paragraphs under their headings; notes
+ * print after their text as a `> **Note**` quote.
  */
 
 type Emphasis = 'bold' | 'italic' | 'strike'
@@ -101,32 +112,110 @@ function headingLine(text: string): string {
     .replace(/(#+)$/, '\\$1')
 }
 
-function blockMarkdown(block: BookBlock, sceneBreak: string): string {
-  switch (block.kind) {
-    case 'title': {
-      const text = headingLine(escapeInline(block.text))
-      return `${block.level === 'part' ? '#' : '##'} ${text}`
-    }
-    case 'heading':
-      return `${'#'.repeat(block.level + 2)} ${headingLine(inlineMarkdown(block.runs))}`
-    case 'paragraph':
-      return paragraphText(block.runs)
-    case 'quote':
-      return block.blocks
-        .map((inner) => blockMarkdown(inner, sceneBreak))
-        .join('\n\n')
-        .split('\n')
-        .map((line) => (line.length > 0 ? `> ${line}` : '>'))
-        .join('\n')
-    case 'sceneBreak':
-      return sceneBreakLine(sceneBreak)
+function separatorMarkdown(separator: Separator): string {
+  switch (separator.kind) {
+    case 'text':
+      return sceneBreakLine(separator.text)
+    case 'blankLine':
+      return '&nbsp;'
+    case 'pageBreak':
+      return '---'
   }
 }
 
-export function renderMarkdown(units: readonly BookUnit[], sceneBreak: string): string {
-  const parts: string[] = []
-  for (const unit of units) {
-    for (const block of unit.blocks) parts.push(blockMarkdown(block, sceneBreak))
+function blockMarkdown(block: ContentBlock): string {
+  switch (block.kind) {
+    case 'heading':
+      return `${'#'.repeat(block.level + 3)} ${headingLine(inlineMarkdown(block.runs))}`
+    case 'paragraph':
+      return paragraphText(block.runs)
+    case 'quote':
+      return quoted(block.blocks.map(blockMarkdown).join('\n\n'))
+    case 'separator':
+      return separatorMarkdown(block.separator)
   }
-  return `${parts.join('\n\n')}\n`
+}
+
+function quoted(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => (line.length > 0 ? `> ${line}` : '>'))
+    .join('\n')
+}
+
+const plainLine = (text: string): string => escapeLineStart(escapeInline(text))
+
+function generatedMarkdown(page: GeneratedPage): string[] {
+  switch (page.kind) {
+    case 'titlePage':
+      return [
+        `# ${headingLine(escapeInline(page.title))}`,
+        page.subtitle ? `*${escapeInline(page.subtitle)}*` : '',
+        page.series ? plainLine(page.series) : '',
+        page.author ? plainLine(`by ${page.author}`) : '',
+        page.publisher ? plainLine(page.publisher) : ''
+      ].filter(Boolean)
+    case 'manuscriptTitle':
+      return [
+        [...page.contact, page.wordCount].map(plainLine).join('  \n'),
+        `# ${headingLine(escapeInline(page.title))}`,
+        page.byline ? plainLine(page.byline) : ''
+      ].filter(Boolean)
+    case 'copyright':
+      return [page.lines.map(plainLine).join('  \n')]
+    case 'dedication':
+      return page.paragraphs.map((p) => `*${escapeInline(p)}*`)
+    case 'epigraph':
+      return [
+        quoted(
+          [
+            ...page.paragraphs.map(plainLine),
+            ...(page.source ? [plainLine(`— ${page.source}`)] : [])
+          ].join('\n\n')
+        )
+      ]
+    case 'toc':
+      return [
+        `## ${headingLine(escapeInline(page.title))}`,
+        page.entries
+          .map((e) => `${e.level !== 'part' && e.inPart ? '  ' : ''}- ${escapeInline(e.label)}`)
+          .join('\n')
+      ]
+    case 'aboutAuthor':
+      return [`## ${headingLine(escapeInline(page.title))}`, ...page.paragraphs.map(plainLine)]
+    case 'alsoBy':
+      return [
+        `## ${headingLine(escapeInline(page.title))}`,
+        page.titles.map((t) => `- *${escapeInline(t)}*`).join('\n')
+      ]
+  }
+}
+
+const SECTION_HASHES = { part: '#', chapter: '##', chapterScene: '##', scene: '###' } as const
+
+function itemMarkdown(item: BookItem): string[] {
+  switch (item.kind) {
+    case 'page':
+      return generatedMarkdown(item.page)
+    case 'matter':
+    case 'text':
+      return item.blocks.map(blockMarkdown)
+    case 'section':
+      return item.heading === null
+        ? []
+        : [
+            `${SECTION_HASHES[item.level]} ${headingLine(escapeInline(item.heading.lines.join(': ')))}`
+          ]
+    case 'separator':
+      return [separatorMarkdown(item.separator)]
+    case 'synopsis':
+      return [`*${escapeInline(item.text)}*`]
+    case 'note':
+      return [quoted(['**Note**', ...item.blocks.map(blockMarkdown)].join('\n\n'))]
+  }
+}
+
+/** The compiled book as Markdown. */
+export function renderMarkdown(book: CompiledBook): string {
+  return `${book.items.flatMap(itemMarkdown).join('\n\n')}\n`
 }

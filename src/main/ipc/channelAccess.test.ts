@@ -10,6 +10,7 @@ describe('channel access after the trial (AI-BILLING-SPEC M1)', () => {
   it('never refuses export, backup, reading, or the purchase', () => {
     const always = [
       'export:run',
+      'compile:run',
       'manuscript:compile',
       'provenance:export',
       'tag:export',
