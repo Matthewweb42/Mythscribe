@@ -3,6 +3,7 @@ import { appendNotePoints } from '@renderer/features/editor/sceneSuggestStore'
 import { applyAgentEdit, rewriteNotes } from '@renderer/features/ai/agentApply'
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import type { OrganiseAction, SheetPatch } from '@shared/organise'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
@@ -58,6 +59,7 @@ export async function applyOrganiseAction(
     }
     case 'createSheet': {
       const store = useEntityStore.getState()
+      const tagsBefore = useTagStore.getState().byId
       const created = await store.create({
         kind: categoryIds.get(action.category) ?? action.category,
         name: action.name,
@@ -67,7 +69,12 @@ export async function applyOrganiseAction(
       if (action.aliases.length > 0) {
         await useEntityStore.getState().update(created.id, { aliases: action.aliases })
       }
-      return () => useEntityStore.getState().remove(created.id)
+      // A new sheet makes its own #name tag (F-9.4); undoing the sheet removes that tag too.
+      const madeTag = created.tagId !== null && tagsBefore[created.tagId] === undefined
+      return async () => {
+        await useEntityStore.getState().remove(created.id)
+        if (madeTag && created.tagId !== null) await useTagStore.getState().remove(created.tagId)
+      }
     }
     case 'deleteSheet': {
       await useEntityStore.getState().remove(action.entityId)
@@ -97,8 +104,16 @@ export async function applyOrganiseAction(
         })
       }
     }
-    case 'binder':
-      return applyAgentEdit(action.edit, proposalId)
+    case 'binder': {
+      const edit = action.edit
+      // Deleting a folder deletes what is in it: check again now, since the plan or the author
+      // may have filled it after the plan was made.
+      if (edit.kind === 'delete' && edit.target === 'node') {
+        const children = useTreeStore.getState().childrenOf[edit.id] ?? []
+        if (children.length > 0) throw new AgentEditError(`${edit.name} is no longer empty`)
+      }
+      return applyAgentEdit(edit, proposalId)
+    }
   }
 }
 

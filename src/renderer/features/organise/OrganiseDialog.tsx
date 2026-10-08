@@ -73,8 +73,8 @@ function Dialog(): React.JSX.Element {
     mode === 'plan'
       ? 'Plan mode: this only describes the changes. Switch the chat to Ask or Auto to apply them.'
       : mode === 'auto'
-        ? 'Auto: what can be undone is applied, each with Undo. Merges, deletions, and new categories wait for you. Scene text never changes.'
-        : 'Tick what to keep; nothing changes until you apply. Scene text never changes.'
+        ? 'Auto: what can be undone is applied, each with Undo. Merges, deletions, and new categories wait for you. Scene text is never rewritten.'
+        : 'Tick what to keep; nothing changes until you apply. Scene text is never rewritten.'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">

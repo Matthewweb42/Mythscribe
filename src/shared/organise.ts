@@ -14,7 +14,7 @@ import { TAG_NAME_MAX, TagCategory } from './tags'
  * tags, remove unused ones; merge duplicate sheets, fill empty fields from notes and observed
  * facts, tidy page text, move a sheet into another category or a new one; move facts out of
  * scene notes into the right sheets and tidy notes into points; rename, reorder, and merge
- * documents. Organising never changes manuscript scene text.
+ * documents. Organising never rewrites scene text (merging documents joins theirs, after Apply).
  *
  * The plan follows the chat mode (F-5.21): Ask lists every change with a checkbox; Auto applies
  * what can be undone at once (each with Undo, and one Undo for the whole reorganisation); Plan

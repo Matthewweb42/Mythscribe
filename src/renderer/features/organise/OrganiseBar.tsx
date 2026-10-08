@@ -61,7 +61,7 @@ export function OrganiseBar(): React.JSX.Element | null {
         type="button"
         data-testid="organise-button"
         disabled={running}
-        title="Let the AI propose a tidier story bible: merge duplicates, fix categories, fill and tidy sheets, sort notes. You review every change; scene text never changes."
+        title="Let the AI propose a tidier story bible: merge duplicates, fix categories, fill and tidy sheets, sort notes. You review every change; scene text is never rewritten."
         onClick={begin}
         className="flex w-full items-center justify-center gap-1.5 rounded-md border border-line px-2 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-60"
       >

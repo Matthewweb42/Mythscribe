@@ -40,6 +40,9 @@ export class OrganiseResolver {
   /** What an earlier change made a tag or sheet, so a later one builds on it. */
   private readonly tagState = new Map<string, Tag>()
   private readonly sheetState = new Map<string, Entity>()
+  /** Folders an earlier change moves something into, and folders an earlier change deletes. */
+  private readonly filledFolders = new Set<string>()
+  private readonly deletedFolders = new Set<string>()
   private seq = 0
 
   constructor(private readonly project: OrganiseProject) {}
@@ -462,15 +465,26 @@ export class OrganiseResolver {
           : { edit: 'merge', id: op.id, into: op.into }
     const resolved = resolveAgentEdit(this.project.agent, raw)
     if ('error' in resolved) return resolved.error
+    if (resolved.edit.kind === 'move') {
+      // Deleting a folder deletes what is in it: never move into one this plan deletes.
+      if (this.deletedFolders.has(resolved.edit.parentId)) {
+        return `${resolved.edit.parentTitle} is deleted by this plan`
+      }
+      this.filledFolders.add(resolved.edit.parentId)
+    }
     return { action: { kind: 'binder', edit: resolved.edit } }
   }
 
   private deleteFolder(op: Extract<OrganiseOp, { op: 'delete' }>): Resolved | string {
     const row = nodeByRef(this.project.agent, op.id)
     if (row?.kind !== 'folder' || row.parentId === null) return `${op.id} is not a folder`
-    if (this.project.agent.rows.some((other) => other.parentId === row.id)) {
+    if (
+      this.filledFolders.has(row.id) ||
+      this.project.agent.rows.some((other) => other.parentId === row.id)
+    ) {
       return `${row.title} is not empty`
     }
+    this.deletedFolders.add(row.id)
     return {
       action: {
         kind: 'binder',
