@@ -68,6 +68,8 @@ import { resetSnapshotStore } from '@renderer/features/snapshots/snapshotStore'
 import { resetViewStore, useViewStore } from '@renderer/features/shell/viewStore'
 import { resetStructureStore } from '@renderer/features/outline/structureStore'
 import { resetTimelineStore } from '@renderer/features/timeline/timelineStore'
+import { resetCompileWindowStore } from '@renderer/features/compile/compileWindowStore'
+import { defaultCompileProjectState } from '@shared/compileFormat'
 import { App } from './App'
 
 const info: ProjectInfo = {
@@ -137,6 +139,7 @@ beforeEach(() => {
   resetViewStore()
   resetStructureStore()
   resetTimelineStore()
+  resetCompileWindowStore()
   resetMentionStore()
   resetDocumentTagStore()
   resetProposedTagStore()
@@ -174,6 +177,7 @@ afterEach(() => {
   resetViewStore()
   resetStructureStore()
   resetTimelineStore()
+  resetCompileWindowStore()
   resetAppAccessStore()
   vi.unstubAllGlobals()
 })
@@ -229,6 +233,8 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'structure:get') return { template: null }
     if (channel === 'timeline:get') return { events: [] }
     if (channel === 'library:list') return []
+    if (channel === 'compileState:get') return defaultCompileProjectState()
+    if (channel === 'compileFormat:list') return []
     return null
   })
   const on = <E extends EventName>(

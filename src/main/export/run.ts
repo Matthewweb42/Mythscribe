@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import { assetUrl, imageExtension } from '@shared/assets'
-import type { ExportOptions, ExportProgress, ExportResult } from '@shared/bookExport'
+import type { ExportProgress } from '@shared/bookExport'
 import { webDocument } from '@shared/compileHtml'
 import type {
   CompileFormat,
@@ -15,7 +15,6 @@ import type { TreeDb } from '../tree/treeStore'
 import { compileProject } from './collect'
 import { renderDocx } from './docx'
 import { renderEpub, type EpubCover } from './epub'
-import { exportDialogFormat } from './exportDialog'
 import { renderMarkdown } from './markdown'
 import { renderOdt } from './odt'
 import { renderRtf } from './rtf'
@@ -109,26 +108,4 @@ export async function compileToFile(
   else writeBufferAtomic(input.path, output)
   report('write', 1)
   return { path: input.path, output: input.output, words: book.words }
-}
-
-export interface ExportBookInput {
-  options: ExportOptions
-  projectName: string
-  projectFolder: string
-  path: string
-  requestId: string
-  onProgress: (progress: ExportProgress) => void
-  renderPdf: PdfRenderer
-}
-
-/** The F-12.1 Export dialog's run: its options as a format (`exportDialogFormat`), then a compile. */
-export async function exportBook(db: TreeDb, input: ExportBookInput): Promise<ExportResult> {
-  const { options } = input
-  const result = await compileToFile(db, {
-    ...input,
-    format: exportDialogFormat(options),
-    output: options.format,
-    scope: options.scope
-  })
-  return { path: result.path, format: options.format, words: result.words }
 }

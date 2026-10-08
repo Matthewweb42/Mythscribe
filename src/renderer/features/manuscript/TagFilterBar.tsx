@@ -32,9 +32,7 @@ export function TagFilterBar(): React.JSX.Element | null {
   const setTagFilter = useTreeStore((s) => s.setTagFilter)
   const loadAll = useDocumentTagStore((s) => s.loadAll)
   const tagIdsByNode = useDocumentTagStore((s) => s.tagIdsByNode)
-  const index = useTreeStore(
-    useShallow((s) => ({ rootIds: s.rootIds, childrenOf: s.childrenOf }))
-  )
+  const index = useTreeStore(useShallow((s) => ({ rootIds: s.rootIds, childrenOf: s.childrenOf })))
   const filterTag = tagFilterId === null ? undefined : byId[tagFilterId]
   const matchCount = useMemo(
     () => (filterTag ? tagFilterView(index, tagIdsByNode, filterTag.id).matches.length : 0),
@@ -93,9 +91,7 @@ export function TagFilterBar(): React.JSX.Element | null {
         ) : null}
       </div>
       {filterTag ? (
-        <p className="m-0 mt-1 text-xs text-fg-muted">
-          {countLabel(matchCount, filterTag.name)}
-        </p>
+        <p className="m-0 mt-1 text-xs text-fg-muted">{countLabel(matchCount, filterTag.name)}</p>
       ) : null}
     </div>
   )

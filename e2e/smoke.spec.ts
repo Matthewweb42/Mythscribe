@@ -14,7 +14,6 @@ import type { AiStatus, AiUsageSummary } from '../src/shared/ai'
 import type { AiSettings } from '../src/shared/aiSettings'
 import type { AuthorRules } from '../src/shared/authorRules'
 import { LOGIN_ATTEMPT_TTL_MS } from '../src/shared/cloudApi'
-import { BUILTIN_COMPILE_FORMATS } from '../src/shared/compileFormat'
 import { MICROS_PER_USD } from '../src/shared/cloudBilling'
 import { bundledPricing, hostedPriceFor } from '../src/shared/hostedPricing'
 import { USAGE_PERIOD_DAYS } from '../src/shared/cloudUsage'
@@ -2140,73 +2139,88 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('Escape')
   await expect(compiled).toHaveCount(0)
 
-  // F-12.1: File › Export… writes the manuscript in each format to the path the (stubbed) save
-  // dialog answers; the dialog closes on success and a toast names the file. Markdown carries
-  // Scene 1's sentence as text; PDF starts with `%PDF`; DOCX and EPUB are zips (`PK`).
-  const exportAs = async (formatLabel: string, ext: string): Promise<Buffer> => {
-    const exportPath = path.join(tmp, `export-${ext}.${ext}`)
-    await app.evaluate(({ dialog }, filePath) => {
-      dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
-    }, exportPath)
+  // F-12.4 (Compile v2, CV3): File › Book details… stores the author the compile prints.
+  const menuFile = async (label: string): Promise<void> => {
     await page
       .getByRole('menubar', { name: 'Application menu' })
       .getByRole('menuitem', { name: 'File' })
       .click()
-    await page
-      .getByRole('menu', { name: 'File' })
-      .getByRole('menuitem', { name: 'Export…' })
-      .click()
-    const exportDialog = page.getByRole('dialog', { name: 'Export' })
-    await exportDialog.getByRole('radio', { name: formatLabel }).check()
-    await exportDialog.getByRole('button', { name: 'Export', exact: true }).click()
-    await expect(page.getByRole('status').filter({ hasText: exportPath })).toContainText(
-      `Exported to ${exportPath}`,
-      { timeout: 30_000 }
-    )
-    await expect(exportDialog).toHaveCount(0)
-    return fs.readFileSync(exportPath)
+    await page.getByRole('menu', { name: 'File' }).getByRole('menuitem', { name: label }).click()
   }
-  expect((await exportAs('Markdown', 'md')).toString('utf8')).toContain(SENTENCE)
-  expect((await exportAs('PDF', 'pdf')).subarray(0, 4).toString('latin1')).toBe('%PDF')
-  expect((await exportAs('Word document (DOCX)', 'docx')).subarray(0, 2).toString('latin1')).toBe(
-    'PK'
-  )
-  expect((await exportAs('EPUB', 'epub')).subarray(0, 2).toString('latin1')).toBe('PK')
+  await menuFile('Book details…')
+  const bookDetails = page.getByRole('dialog', { name: 'Book details' })
+  await bookDetails.getByRole('textbox', { name: 'Author (pen name)' }).fill('Ada Marlowe')
+  await bookDetails.getByRole('button', { name: 'Save' }).click()
+  await expect(bookDetails).toHaveCount(0)
 
-  // Compile v2 (CV2): `compile:run` (the compile window's channel, CV3) writes the smoke novel
-  // with three built-in formats. The Paperback PDF is laid out by Paged.js: 6 × 9 in pages
-  // (432 × 648 pt) with the bundled EB Garamond embedded; the Standard Manuscript DOCX and the
-  // Ebook EPUB are zips with their main parts (stored names are plain in the archive).
-  const compileAs = async (formatId: string, output: 'pdf' | 'docx' | 'epub'): Promise<Buffer> => {
+  // F-12.4: File › Compile… opens the compile window (File › Export… is its alias): the built-in
+  // formats on the left, the settings tabs, and the live page preview, which lays the smoke
+  // novel out in Paged.js pages. Each built-in compiles from the window into the file the
+  // (stubbed) save dialog answers; the window closes and a toast names the file.
+  const compileWindow = page.getByRole('dialog', { name: 'Compile' })
+  const compileFrom = async (
+    formatName: string,
+    output: 'pdf' | 'docx' | 'epub',
+    menu: 'Compile…' | 'Export…' = 'Compile…'
+  ): Promise<Buffer> => {
     const file = path.join(tmp, `compile-${output}.${output}`)
     await stubSaveDialog(file)
-    const format = BUILTIN_COMPILE_FORMATS.find((f) => f.id === formatId)
-    if (!format) throw new Error(`no built-in ${formatId}`)
-    const result = await page.evaluate(
-      ([fmt, out]) =>
-        window.mythscribe.invoke('compile:run', {
-          format: fmt,
-          output: out,
-          scope: { kind: 'manuscript' },
-          requestId: 'e2e-compile'
-        }),
-      [format, output] as const
+    await menuFile(menu)
+    await expect(compileWindow).toBeVisible()
+    await compileWindow
+      .getByRole('navigation', { name: 'Formats' })
+      .getByRole('button', { name: formatName, exact: true })
+      .click()
+    await expect(compileWindow.getByTestId('compile-format-name')).toHaveText(formatName)
+    await expect(compileWindow.getByRole('combobox', { name: 'Compile for' })).toHaveValue(output)
+    await compileWindow.getByRole('button', { name: 'Compile', exact: true }).click()
+    await expect(page.getByRole('status').filter({ hasText: file })).toContainText(
+      `Compiled to ${file}`,
+      { timeout: 60_000 }
     )
-    expect(result).toEqual({ ok: true, data: expect.objectContaining({ path: file, output }) })
+    await expect(compileWindow).toHaveCount(0)
     return fs.readFileSync(file)
   }
-  const paperback = (await compileAs('builtin:paperback-6x9', 'pdf')).toString('latin1')
-  expect(paperback.startsWith('%PDF')).toBe(true)
-  expect(paperback).toContain('/MediaBox [0 0 432 648]')
-  expect(paperback).toMatch(/\/FontName \/[A-Z]{6}\+EBGaramond-Regular/)
-  const manuscript = (await compileAs('builtin:standard-manuscript', 'docx')).toString('latin1')
+  // The preview: the Paperback lays out in pages, the Contents tab lists the include ticks.
+  await menuFile('Compile…')
+  await compileWindow
+    .getByRole('navigation', { name: 'Formats' })
+    .getByRole('button', { name: 'Paperback 6 × 9', exact: true })
+    .click()
+  const preview = compileWindow.getByTestId('compile-window-preview')
+  await expect(preview).toHaveAttribute('data-state', 'ready', { timeout: 30_000 })
+  expect(Number(await preview.getAttribute('data-pages'))).toBeGreaterThan(0)
+  await expect(preview.contentFrame().locator('body')).toContainText(SENTENCE)
+  const includeScene1 = compileWindow.getByRole('checkbox', {
+    name: 'Include Scene 1',
+    exact: true
+  })
+  await expect(includeScene1.first()).toBeChecked()
+  await expect(compileWindow.getByRole('checkbox', { name: 'Include Front Matter' })).toBeChecked()
+  await page.keyboard.press('Escape')
+  await expect(compileWindow).toHaveCount(0)
+
+  const manuscript = (await compileFrom('Standard Manuscript', 'docx', 'Export…')).toString(
+    'latin1'
+  )
   expect(manuscript.startsWith('PK')).toBe(true)
   expect(manuscript).toContain('word/document.xml')
   expect(manuscript).toContain('word/header1.xml')
-  const ebook = (await compileAs('builtin:ebook', 'epub')).toString('latin1')
+  // The Paperback PDF is laid out by Paged.js: 6 × 9 in pages (432 × 648 pt) with the bundled
+  // EB Garamond embedded.
+  const paperback = (await compileFrom('Paperback 6 × 9', 'pdf')).toString('latin1')
+  expect(paperback.startsWith('%PDF')).toBe(true)
+  expect(paperback).toContain('/MediaBox [0 0 432 648]')
+  expect(paperback).toMatch(/\/FontName \/[A-Z]{6}\+EBGaramond-Regular/)
+  const ebook = (await compileFrom('Ebook', 'epub')).toString('latin1')
   expect(ebook.startsWith('PK')).toBe(true)
   expect(ebook).toContain('mimetypeapplication/epub+zip')
   expect(ebook).toContain('OEBPS/nav.xhtml')
+  // The project remembers the last format.
+  const compileState = await page.evaluate(() =>
+    window.mythscribe.invoke('compileState:get', undefined)
+  )
+  expect(compileState).toMatchObject({ ok: true, data: { formatId: 'builtin:ebook' } })
   // Put back the stub the project was created with; no step in between relied on another.
   await app.evaluate(({ dialog }, filePath) => {
     dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })

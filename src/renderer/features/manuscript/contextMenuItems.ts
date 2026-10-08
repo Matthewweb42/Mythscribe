@@ -11,7 +11,12 @@ export interface MenuItem {
   disabled?: boolean
   /** The item's tooltip: what it does, or why it is disabled; absent means none. */
   title?: string
+  /** A checkbox item (F-12.4 Include in compile) and whether it is ticked; absent: a plain item. */
+  checked?: boolean
 }
+
+/** The id of the `Include in compile` checkbox item (F-12.4). */
+export const INCLUDE_ITEM_ID = 'include-compile'
 
 /** Prefix of the template items' ids (F-2.6): `template:<MatterTemplateId>`. */
 const TEMPLATE_ITEM_PREFIX = 'template:'
@@ -29,13 +34,16 @@ export function templateIdOf(itemId: string): MatterTemplateId | null {
  * part, or chapter when it can hold the level) plus a generic document and folder; front and
  * end matter rows offer the generic items followed by their section's templates as `New <Title>` (F-2.6).
  * Documents and folders (never sections) also offer Rename, Duplicate, and Delete (F-2.3), and
- * those in the manuscript `Set word target…`, plus `Clear word target` when `hasTarget` (F-10.3).
+ * those in the manuscript `Set word target…`, plus `Clear word target` when `hasTarget` (F-10.3),
+ * and, once the compile state is known (`included` given), the `Include in compile` checkbox
+ * (F-12.4).
  */
 export function treeContextMenuItems(
   index: TreeIndex,
   nodeId: string,
   format: NovelFormat,
-  hasTarget = false
+  hasTarget = false,
+  included?: boolean
 ): MenuItem[] {
   const items: MenuItem[] = []
   if (index.sectionOf[nodeId] === 'manuscript') {
@@ -63,6 +71,8 @@ export function treeContextMenuItems(
       items.push({ id: 'set-target', label: 'Set word target…' })
       if (hasTarget) items.push({ id: 'clear-target', label: 'Clear word target' })
     }
+    if (included !== undefined)
+      items.push({ id: INCLUDE_ITEM_ID, label: 'Include in compile', checked: included })
   }
   return items
 }

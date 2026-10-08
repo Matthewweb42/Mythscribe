@@ -16,7 +16,6 @@ import {
 import type { AiModelChoice } from '@shared/aiRouting'
 import { TRIAL_ENDED_MESSAGE } from '@shared/appAccess'
 import { type AiSource, aiSwitchPatch, isFeatureAllowed } from '@shared/aiSettings'
-import { EXPORT_EXTENSIONS, EXPORT_FORMAT_LABELS } from '@shared/bookExport'
 import { BOOK_COVER_DIR, bookTitle } from '@shared/bookDetails'
 import {
   COMPILE_OUTPUT_EXTENSIONS,
@@ -149,7 +148,7 @@ import type { ProjectDialogs } from '../dialogs'
 import { compileManuscript, compileSource } from '../document/compileStore'
 import { createFormat, deleteFormat, saveFormat } from '../export/formatLibrary'
 import { renderPdf } from '../export/pdf'
-import { compileToFile, exportBook } from '../export/run'
+import { compileToFile } from '../export/run'
 import {
   compareDrafts,
   deleteDraft,
@@ -1071,32 +1070,6 @@ export function registerHandlers({
   register('stats:dashboard', () => statsDashboard(manager.require().connection.orm))
 
   register('manuscript:compile', () => compileManuscript(manager.require().connection.orm))
-
-  /**
-   * F-12.1: the book out of the project in one format. The default sits beside the project
-   * folder, as the other exports' do; progress goes to every window under the caller's id.
-   */
-  register('export:run', async ({ options, requestId }) => {
-    const session = manager.require()
-    const extension = EXPORT_EXTENSIONS[options.format]
-    const chosen = await dialogs.chooseExportPath(
-      `${sanitizeName(session.info.name)}.${extension}`,
-      [{ name: EXPORT_FORMAT_LABELS[options.format], extensions: [extension] }],
-      path.dirname(session.folder)
-    )
-    if (chosen === null) return null
-    const result = await exportBook(session.connection.orm, {
-      options,
-      projectName: session.info.name,
-      projectFolder: session.folder,
-      path: chosen,
-      requestId,
-      onProgress: (progress) => emit(windows(), 'export:progress', progress),
-      renderPdf
-    })
-    diagnostics.count('export.run')
-    return result
-  })
 
   /**
    * Compile v2: the book in one output with the compile window's format. The default file is

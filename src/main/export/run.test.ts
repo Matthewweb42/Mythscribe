@@ -2,15 +2,15 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defaultExportFormatting, type ExportFormat, type ExportProgress } from '@shared/bookExport'
-import { BUILTIN_COMPILE_FORMATS, COMPILE_OUTPUTS } from '@shared/compileFormat'
+import type { ExportProgress } from '@shared/bookExport'
+import { BUILTIN_COMPILE_FORMATS, COMPILE_OUTPUTS, type CompileOutput } from '@shared/compileFormat'
 import type { CompiledBook } from '@shared/compileModel'
 import { readZip } from '../backups/zip'
 import { saveDocument } from '../document/documentStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { setBookDetails } from '../project/settingsStore'
-import { compileToFile, exportBook } from './run'
+import { compileToFile } from './run'
 
 let tmp: string
 let session: ProjectSession
@@ -32,7 +32,7 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
-async function run(format: ExportFormat): Promise<{
+async function run(format: Extract<CompileOutput, 'md' | 'pdf' | 'docx' | 'epub'>): Promise<{
   file: string
   progress: ExportProgress[]
   renderPdf: ReturnType<typeof vi.fn<(book: CompiledBook) => Promise<Buffer>>>
@@ -43,14 +43,12 @@ async function run(format: ExportFormat): Promise<{
   const renderPdf = vi.fn<(book: CompiledBook) => Promise<Buffer>>(() =>
     Promise.resolve(Buffer.from('%PDF-1.4 fake'))
   )
-  const result = await exportBook(db, {
-    options: {
-      format,
-      scope: { kind: 'manuscript' },
-      includeFront: true,
-      includeEnd: true,
-      formatting: defaultExportFormatting('* * *')
-    },
+  const editorCopy = BUILTIN_COMPILE_FORMATS.find((f) => f.id === 'builtin:editor-copy')
+  if (!editorCopy) throw new Error('no editor copy')
+  const result = await compileToFile(db, {
+    format: editorCopy,
+    output: format,
+    scope: { kind: 'manuscript' },
     projectName: 'Run',
     projectFolder: session.folder,
     path: file,
@@ -58,11 +56,11 @@ async function run(format: ExportFormat): Promise<{
     onProgress: (p) => progress.push(p),
     renderPdf
   })
-  expect(result).toEqual({ path: file, format, words: 3 })
+  expect(result).toEqual({ path: file, output: format, words: 3 })
   return { file, progress, renderPdf, words: result.words }
 }
 
-describe('exportBook (F-12.1)', () => {
+describe('compileToFile stages and outputs', () => {
   it('writes Markdown atomically and reports every stage under the request id', async () => {
     const { file, progress } = await run('md')
     expect(fs.readFileSync(file, 'utf8')).toContain('The storm broke.')

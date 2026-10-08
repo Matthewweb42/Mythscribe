@@ -2,7 +2,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { defaultExportFormatting, type ExportOptions } from '@shared/bookExport'
+import {
+  BUILTIN_COMPILE_FORMATS,
+  type CompileOutput,
+  type CompileScope
+} from '@shared/compileFormat'
 import type { CompiledBook, ContentBlock } from '@shared/compileModel'
 import type { TiptapNodeT } from '@shared/tiptap'
 import type { NodeRow } from '../db/schema'
@@ -11,7 +15,6 @@ import { projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { createSeededProject } from '../project/testProject'
 import { createNode, listNodes, moveNode, type TreeDb } from '../tree/treeStore'
 import { compileProject } from './collect'
-import { exportDialogFormat } from './exportDialog'
 
 let tmp: string
 let session: ProjectSession
@@ -22,12 +25,18 @@ const para = (text: string): TiptapNodeT => ({
   content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
 })
 
-const options = (over: Partial<ExportOptions> = {}): ExportOptions => ({
+interface Options {
+  format: CompileOutput
+  scope: CompileScope
+  includeFront: boolean
+  includeEnd: boolean
+}
+
+const options = (over: Partial<Options> = {}): Options => ({
   format: 'md',
   scope: { kind: 'manuscript' },
   includeFront: true,
   includeEnd: true,
-  formatting: defaultExportFormatting('* * *'),
   ...over
 })
 
@@ -74,10 +83,15 @@ function texts(book: CompiledBook): string[] {
   })
 }
 
-/** The F-12.1 dialog's compile, as `export:run` runs it. */
-function collectBook(db: TreeDb, opts: ExportOptions, projectName: string): CompiledBook {
+/** A compile with the built-in Plain text format and the project's matter as asked. */
+function collectBook(db: TreeDb, opts: Options, projectName: string): CompiledBook {
+  const plain = BUILTIN_COMPILE_FORMATS.find((f) => f.id === 'builtin:plain-text')
+  if (!plain) throw new Error('no plain text format')
   return compileProject(db, {
-    format: exportDialogFormat(opts),
+    format: {
+      ...plain,
+      matter: { ...plain.matter, frontMatter: opts.includeFront, endMatter: opts.includeEnd }
+    },
     output: opts.format,
     scope: opts.scope,
     projectName

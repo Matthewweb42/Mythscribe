@@ -28,7 +28,6 @@ import {
 import { defaultAiSettings, type AiDial } from '@shared/aiSettings'
 import type { DiagnosticsBody } from '@shared/cloudApi'
 import { RENDERER_ERROR_MESSAGE_MAX } from '@shared/diagnostics'
-import { defaultExportFormatting } from '@shared/bookExport'
 import { BUILTIN_COMPILE_FORMATS } from '@shared/compileFormat'
 import {
   AUTHOR_RULES_TEXT_MAX,
@@ -7472,65 +7471,6 @@ describe('provenance handlers (F-14.6)', () => {
 // F-12.2: the two channels around the review dialog. The heuristics and the write have their own
 // tests under `src/main/import/`; these cover the wiring — the dialog, the errors, and the rows
 // the renderer merges into its tree.
-describe('export handler (F-12.1)', () => {
-  const options = (scope: Input<'export:run'>['options']['scope'] = { kind: 'manuscript' }) => ({
-    format: 'md' as const,
-    scope,
-    includeFront: true,
-    includeEnd: true,
-    formatting: defaultExportFormatting('* * *')
-  })
-
-  async function ready(name = 'Exported'): Promise<string> {
-    await invoke('project:create', { name, format: 'novel', directory: tmp })
-    const rows = await invoke('tree:list', undefined)
-    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
-    if (!scene) throw new Error('skeleton not seeded')
-    return scene.id
-  }
-
-  it('writes the chosen file beside the project folder and pushes progress under the id', async () => {
-    const scene = await ready('My Book')
-    await invoke('document:save', {
-      id: scene,
-      content: {
-        type: 'doc',
-        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'The storm broke.' }] }]
-      }
-    })
-    exportPath = path.join(tmp, 'book.md')
-    vi.mocked(fakeWin.webContents.send).mockClear()
-    expect(await invoke('export:run', { options: options(), requestId: 'r1' })).toEqual({
-      path: exportPath,
-      format: 'md',
-      words: 3
-    })
-    expect(exportAsked).toEqual({ defaultName: 'My Book.md', directory: tmp })
-    expect(fs.readFileSync(exportPath, 'utf8')).toContain('The storm broke.')
-    const pushed = vi
-      .mocked(fakeWin.webContents.send)
-      .mock.calls.filter(([channel]) => channel === 'export:progress')
-      .map(([, progress]) => progress)
-    expect(pushed.at(-1)).toEqual({ requestId: 'r1', stage: 'write', done: 1, total: 1 })
-    expect(pushed).toHaveLength(6)
-  })
-
-  it('answers null and writes nothing when the save dialog is cancelled', async () => {
-    await ready()
-    exportPath = null
-    expect(await invoke('export:run', { options: options(), requestId: 'r2' })).toBeNull()
-  })
-
-  it('refuses a project with nothing to print', async () => {
-    await ready()
-    exportPath = path.join(tmp, 'empty.md')
-    await expect(
-      invoke('export:run', { options: options(), requestId: 'r3' })
-    ).rejects.toThrowError(/^VALIDATION: Nothing to export\.$/)
-    expect(fs.existsSync(exportPath)).toBe(false)
-  })
-})
-
 describe('compile handler (Compile v2)', () => {
   const plainText = BUILTIN_COMPILE_FORMATS.find((f) => f.id === 'builtin:plain-text')
 
@@ -7586,6 +7526,21 @@ describe('compile handler (Compile v2)', () => {
         requestId: 'c2'
       })
     ).toBeNull()
+  })
+
+  it('refuses a project with nothing to print', async () => {
+    if (!plainText) throw new Error('no plain text format')
+    await invoke('project:create', { name: 'Empty', format: 'novel', directory: tmp })
+    exportPath = path.join(tmp, 'empty.md')
+    await expect(
+      invoke('compile:run', {
+        format: plainText,
+        output: 'md',
+        scope: { kind: 'manuscript' },
+        requestId: 'c3'
+      })
+    ).rejects.toThrowError(/^VALIDATION: Nothing to export\.$/)
+    expect(fs.existsSync(exportPath)).toBe(false)
   })
 })
 

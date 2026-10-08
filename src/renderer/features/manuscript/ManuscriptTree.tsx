@@ -3,6 +3,7 @@ import { Check, ChevronDown, ChevronRight } from 'lucide-react'
 import type { NovelFormat, TreeNode } from '@shared/ipc/contract'
 import { goalTargetError, parseGoalTarget } from '@shared/goals'
 import { HierarchyLevel, sectionLabel } from '@shared/labels'
+import { useCompileWindowStore } from '@renderer/features/compile/compileWindowStore'
 import { formatCompactWords } from '@renderer/features/editor/wordFormat'
 import { GoalBar } from '@renderer/features/goals/GoalBar'
 import { useGoalsStore } from '@renderer/features/goals/goalsStore'
@@ -13,7 +14,7 @@ import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { describeError } from '@renderer/lib/errors'
 import { ContextMenu } from './ContextMenu'
 import { LevelIcon } from './LevelIcon'
-import { templateIdOf, treeContextMenuItems } from './contextMenuItems'
+import { INCLUDE_ITEM_ID, templateIdOf, treeContextMenuItems } from './contextMenuItems'
 import { resolveDropTarget, type DropZone } from './placement'
 import { tagFilterView } from './tagFilter'
 import { useTreeStore, type TreeIndex } from './treeStore'
@@ -369,6 +370,13 @@ async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
   if (itemId === 'duplicate') return duplicate(nodeId)
   if (itemId === 'delete') return confirmRemove(nodeId)
   if (itemId === 'set-target') return promptNodeTarget(nodeId)
+  if (itemId === INCLUDE_ITEM_ID) {
+    // F-12.4: the same tick as the compile window's Contents list; the menu shows it unticked
+    // only for the node itself, a folder above it being the compile window's to show.
+    const compile = useCompileWindowStore.getState()
+    compile.setIncluded(nodeId, compile.excluded.includes(nodeId))
+    return
+  }
   if (itemId === 'clear-target') {
     await useGoalsStore.getState().set({ nodeTargets: [{ nodeId, target: null }] })
     return
@@ -408,6 +416,9 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
   const filterTag = useTagStore((s) => (tagFilterId === null ? undefined : s.byId[tagFilterId]))
   const tagIdsByNode = useDocumentTagStore((s) => s.tagIdsByNode)
   const nodeTargets = useGoalsStore((s) => s.status?.goals.nodeTargets)
+  // F-12.4: "Include in compile" in the menu, once the ticks are loaded (App, on open).
+  const compileStateLoaded = useCompileWindowStore((s) => s.stateLoaded)
+  const excluded = useCompileWindowStore((s) => s.excluded)
   const items = useRef(new Map<string, HTMLLIElement>())
   const [menu, setMenu] = useState<MenuAnchor | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -453,9 +464,15 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
   const menuItems = useMemo(
     () =>
       menu
-        ? treeContextMenuItems(index, menu.id, format, nodeTargets?.[menu.id] !== undefined)
+        ? treeContextMenuItems(
+            index,
+            menu.id,
+            format,
+            nodeTargets?.[menu.id] !== undefined,
+            compileStateLoaded ? !excluded.includes(menu.id) : undefined
+          )
         : [],
-    [index, menu, format, nodeTargets]
+    [index, menu, format, nodeTargets, compileStateLoaded, excluded]
   )
 
   const setOver = (over: DragOver | null): void => {
