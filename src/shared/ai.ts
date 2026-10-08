@@ -330,7 +330,9 @@ export const AI_FEATURE_IDS = [
   // F-9.8: the context library, sorting the author's uploaded worldbuilding documents into sheets.
   'contextImport',
   // F-9.9: the review chat, turning the author's instruction into changes to a pending upload review.
-  'reviewChat'
+  'reviewChat',
+  // F-11.1d: plan links, tying the author's planned scenes and beats to the written scene that fulfils them.
+  'planLinks'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -392,7 +394,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-9.9: up to 30 operations on the pending review and a one-sentence reply as JSON. A request
   // asks `REVIEW_CHAT_MAX_TOKENS` (1,500); the cap is twice that for the one retry of an answer
   // that was cut off (the agent's pattern).
-  reviewChat: 3_000
+  reviewChat: 3_000,
+  // F-11.1d: up to 30 links as JSON, each two labels and a one-sentence reason.
+  planLinks: 400
 }
 
 /**
@@ -456,7 +460,10 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   contextImport: 8_000,
   // F-9.9: the rules, the pending review listed within 14,000 characters of items and 3,000 of
   // Project notes, four earlier turns of 400 characters, and the message (≤ 2,000 characters).
-  reviewChat: 7_000
+  reviewChat: 7_000,
+  // F-11.1d: the rules, up to 30 plans and 40 written scenes, each a title cut to 80 characters
+  // and a synopsis, beat hint, or summary cut to 240.
+  planLinks: 7_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

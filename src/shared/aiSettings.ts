@@ -245,6 +245,16 @@ export const STORY_BIBLE_SENDS =
   'story-bible entries linked to those tags with what the manuscript states about them, and ' +
   'the titles, metadata, and summaries of the scenes either side of it)'
 
+/**
+ * F-5.23: the story map, as the data-sharing panel names it: the manuscript's chapter and scene
+ * titles in reading order, each scene's progress, the first sentence of each stored summary, and
+ * which scene the author is at.
+ */
+export const STORY_MAP_SENDS =
+  'the story map (the chapter and scene titles in reading order, whether each scene is planned, ' +
+  'drafted, or revised, the first sentence of each stored scene summary, and which scene you ' +
+  'are at)'
+
 export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   tags: {
     label: 'Tag suggestions',
@@ -305,7 +315,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       'The last 6,000 characters of the scene, or of the text up to the end of the passage you ' +
       "selected, its brief plus the previous scene's reader-knows-after line and the next " +
-      `scene's goal, and ${STORY_BIBLE_SENDS}, only when you click What should come next?.`,
+      `scene's goal, ${STORY_BIBLE_SENDS}, and ${STORY_MAP_SENDS}, only when you click What ` +
+      'should come next?.',
     minDial: 1
   },
   route: {
@@ -416,7 +427,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   agent: {
     label: 'Assistant lookups and edits',
     sends:
-      "Your message, the recent turns of the conversation, the open document's title, synopsis, " +
+      `Your message, the recent turns of the conversation, ${STORY_MAP_SENDS}, the open ` +
+      "document's title, synopsis, " +
       'notes (the first 1,500 characters), and stored summary, up to 1,500 characters before ' +
       'the caret and 2,000 of the selected passage, and then, one lookup at a time (at most 6 ' +
       'per message), what the assistant asks to read: search results with scene summaries, ' +
@@ -433,6 +445,15 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'about 8,000 characters (only the new or changed passages of an updated file), the names ' +
       'of your existing story-bible sheets, and the file names of uploaded images (never the ' +
       'images themselves), only after you confirm the estimate.',
+    minDial: 1
+  },
+  planLinks: {
+    label: 'Plan links',
+    sends:
+      'The titles and synopses (the first 240 characters) of your planned scenes, the names and ' +
+      "hints of your structure template's empty beats, and the titles and stored summaries (the " +
+      'first 240 characters) of your written scenes, to find which written scene fulfils which ' +
+      'plan, in the background after a scene summary changes or when you ask the outline to find links.',
     minDial: 1
   },
   reviewChat: {

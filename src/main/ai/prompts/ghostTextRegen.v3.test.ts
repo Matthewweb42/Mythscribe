@@ -54,7 +54,12 @@ describe('ghostTextRegen.v3 prompt (F-14.7, F-14.3, F-14.9)', () => {
 
   it('keeps the voice block, the preset, and the story bible ahead of the clause, so the cached prefix still applies', () => {
     const voice = "Match the author's voice:\n- Narration is in past tense."
-    const built = buildGhostTextRegenPromptV3({ ...minimal, voice, bible: BIBLE, violation: VIOLATION })
+    const built = buildGhostTextRegenPromptV3({
+      ...minimal,
+      voice,
+      bible: BIBLE,
+      violation: VIOLATION
+    })
     const system = built.messages[0]?.content ?? ''
     expect(system.indexOf(voice)).toBeGreaterThan(0)
     expect(system.indexOf(voice)).toBeLessThan(system.indexOf(general.styleInstruction))

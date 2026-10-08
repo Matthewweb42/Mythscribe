@@ -33,7 +33,10 @@ export const JobKind = z.enum([
   'mentions',
   // F-14.14: the voice job, one per project (keyed to the manuscript root): it re-picks the
   // automatic exemplars locally and, when due and allowed, refreshes the learned style notes.
-  'voice'
+  'voice',
+  // F-11.1d: the plan-link job, one per project (keyed to the manuscript root): it ties planned
+  // scenes and empty beats to the written scenes that fulfil them, after summaries change.
+  'planLinks'
 ])
 export type JobKind = z.infer<typeof JobKind>
 

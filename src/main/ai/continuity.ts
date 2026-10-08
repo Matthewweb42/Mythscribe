@@ -59,11 +59,11 @@ import { fitSceneToBudget, scoreFix } from './critique'
 import { assertFeatureAllowed } from './dial'
 import { entitiesNamedIn } from './observedFacts'
 import {
-  buildContinuityPrompt,
-  CONTINUITY_PROMPT_VERSION,
-  continuityRefLine,
-  type BuiltContinuityPrompt
-} from './prompts/continuity.v1'
+  buildContinuityPromptV2,
+  CONTINUITY_PROMPT_V2_VERSION,
+  continuityRefLineV2,
+  type BuiltContinuityPromptV2
+} from './prompts/continuity.v2'
 import { createProposal, settleProposal } from './proposalStore'
 import { AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
@@ -268,7 +268,9 @@ export function continuityRefs(db: TreeDb, nodeId: string, sceneText: string): C
 
   // Token rule 8: count before sending. The number's width barely moves the estimate, so every
   // line is measured under a two-digit one.
-  const cost = (ref: ContinuityRef): number => estimateTokens(`${continuityRefLine(ref, 10)}\n`)
+  const later = new Set(documents.slice(at + 1).map((row) => row.id))
+  const cost = (ref: ContinuityRef): number =>
+    estimateTokens(`${continuityRefLineV2(ref, 10, later)}\n`)
   let total = [...sheets, ...facts, ...timeline].reduce((sum, ref) => sum + cost(ref), 0)
   let truncated = false
   const drop = (list: ContinuityRef[]): void => {
@@ -447,7 +449,7 @@ export interface ContinuityRun {
   cached: boolean
   /** The model that answered; '' when no request was made. */
   model: string
-  promptVersion: typeof CONTINUITY_PROMPT_VERSION
+  promptVersion: typeof CONTINUITY_PROMPT_V2_VERSION
   /** Whether a request went out (a local cache hit counts: it is a ledger row). */
   requested: boolean
   /** The scene's whole text when the check ran; a stored finding whose passage left it is stale. */
@@ -465,14 +467,14 @@ function nothingToCheck(fullText: string, truncated: boolean): ContinuityRun {
     costUsd: 0,
     cached: false,
     model: '',
-    promptVersion: CONTINUITY_PROMPT_VERSION,
+    promptVersion: CONTINUITY_PROMPT_V2_VERSION,
     requested: false,
     fullText
   }
 }
 
 interface Prepared {
-  prompt: BuiltContinuityPrompt
+  prompt: BuiltContinuityPromptV2
   sceneText: string
   truncated: boolean
   contextHash: string
@@ -502,8 +504,11 @@ function prepare(
     pov: pov || null
   })
   const brief = sceneBriefBlock(db, row.id)
-  const build = (sceneText: string): BuiltContinuityPrompt =>
-    buildContinuityPrompt({ sceneText, references: refs, timeline, voice, brief })
+  // F-5.23: the scenes after this one, so a fact read from one is labelled as its future.
+  const documents = manuscriptDocuments(db).map((document) => document.id)
+  const later = new Set(documents.slice(documents.indexOf(row.id) + 1))
+  const build = (sceneText: string): BuiltContinuityPromptV2 =>
+    buildContinuityPromptV2({ sceneText, references: refs, timeline, voice, brief, later })
   const { sceneText, truncated } = fitSceneToBudget(
     text,
     inputBudget('continuity'),
@@ -519,6 +524,7 @@ function prepare(
         tier,
         sceneText,
         refs,
+        later: refs.map((ref) => ref.nodeId !== null && later.has(ref.nodeId)),
         timeline,
         brief,
         voice: voice === null ? null : voiceProfileVersion()

@@ -23,6 +23,7 @@ import {
 import { toEntityNameKey } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
 import { SCENE_SYNOPSIS_MAX, parseStoredSceneMeta } from '@shared/sceneMeta'
+import { STORY_MAP_NOW_MARK, sceneProgress } from '@shared/storyTime'
 import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, toTagName } from '@shared/tags'
 import type { NodeRow } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
@@ -35,6 +36,7 @@ import { documentText } from '../voice/profile'
 import { headTruncate } from './context/chatContext'
 import { rankCandidates, sceneTitles } from './context/queryContext'
 import { notesText } from './context/scenePanel'
+import { positionNote, storyTime, type StoryTime } from './context/storyTime'
 
 /**
  * The project as one agent run sees it (F-5.22): every node in tree order under a short ref
@@ -50,10 +52,17 @@ export interface AgentProject {
   /** `Chapter › Scene`, as the Query answers name scenes. */
   titleOf: (nodeId: string) => string
   entities: Entity[]
+  /** F-5.23: where now is, so every scene a tool returns says whether it has happened yet. */
+  time: StoryTime
 }
 
-export function loadAgentProject(db: TreeDb): AgentProject {
-  const rows = nodesInTreeOrder(listNodes(db))
+/**
+ * Loads the project for one run. `activeId` is the node the author has selected: it puts now at
+ * that scene (F-5.23), or, outside the manuscript, at the latest written scene.
+ */
+export function loadAgentProject(db: TreeDb, activeId: string | null = null): AgentProject {
+  const all = listNodes(db)
+  const rows = nodesInTreeOrder(all)
   const refOf = new Map<string, string>()
   const byRef = new Map<string, NodeRow>()
   rows.forEach((row, index) => {
@@ -68,9 +77,20 @@ export function loadAgentProject(db: TreeDb): AgentProject {
     refOf,
     byRef,
     titleOf: sceneTitles(db),
-    entities: listEntities(db)
+    entities: listEntities(db),
+    time: storyTime(db, activeId, all)
   }
 }
+
+/**
+ * F-5.23: what a lookup says about where its source sits in story time. Sheets, notes, and
+ * synopses are the author's plans; a scene is before now, now, or after now.
+ */
+export const NOTES_ARE_PLANS =
+  "the author's plans for this document: an event told only here has not happened yet"
+export const SHEETS_ARE_PLANS =
+  "the author's notes and plans: true of who and what things are, but an event told only here " +
+  'has not happened yet'
 
 /** A node by the ref the model wrote (`n3`, also `N3` or a bare `3`), or undefined. */
 export function nodeByRef(project: AgentProject, ref: unknown): NodeRow | undefined {
@@ -158,7 +178,8 @@ function search(project: AgentProject, activeId: string | null, query: string): 
   const lines = ranked.slice(0, AGENT_SEARCH_RESULTS).map((candidate) => {
     const ref = project.refOf.get(candidate.nodeId) ?? '?'
     const about = candidate.summary?.summary ?? headTruncate(candidate.text, 200)
-    return `${ref} ${candidate.title}: ${headTruncate(about, 300)}`
+    const when = positionNote(project.time, candidate.nodeId)
+    return `${ref} ${candidate.title} (${when}): ${headTruncate(about, 300)}`
   })
   const key = toEntityNameKey(query)
   const sheets = project.entities
@@ -172,7 +193,7 @@ function search(project: AgentProject, activeId: string | null, query: string): 
   }
   const parts = []
   if (lines.length > 0) parts.push(`Scenes:\n${lines.join('\n')}`)
-  if (sheets.length > 0) parts.push(`Sheets: ${sheets.join(', ')}`)
+  if (sheets.length > 0) parts.push(`Sheets (${SHEETS_ARE_PLANS}): ${sheets.join(', ')}`)
   return { step, result: cap(parts.join('\n')) }
 }
 
@@ -183,8 +204,14 @@ function outline(project: AgentProject): string {
     const level = row.parentId === null ? 0 : (depth.get(row.parentId) ?? 0) + 1
     depth.set(row.id, level)
     const words = row.kind === 'document' ? `, ${row.wordCount.toLocaleString('en-US')} words` : ''
+    // F-5.23: each manuscript document's progress (F-11.1d) and the mark on now.
+    const inStory = row.kind === 'document' && project.time.positionOf(row.id) !== null
+    const progress = inStory
+      ? `, ${sceneProgress(row.wordCount, parseStoredSceneMeta(row.sceneMeta).status)}`
+      : ''
+    const now = project.time.nowId === row.id ? ` ${STORY_MAP_NOW_MARK}` : ''
     lines.push(
-      `${'  '.repeat(level)}${project.refOf.get(row.id) ?? '?'} ${row.title} (${levelOf(row)}${words})`
+      `${'  '.repeat(level)}${project.refOf.get(row.id) ?? '?'} ${row.title} (${levelOf(row)}${words}${progress})${now}`
     )
   }
   return cap(lines.join('\n'))
@@ -218,7 +245,8 @@ function readScene(project: AgentProject, ref: unknown, fromArg: unknown): ToolO
     Math.min(typeof fromArg === 'number' ? Math.floor(fromArg) : 0, text.length)
   )
   const to = Math.min(text.length, from + AGENT_READ_CHARS)
-  const head = `${project.refOf.get(row.id)} ${title}, characters ${from}–${to} of ${text.length}:`
+  const when = positionNote(project.time, row.id)
+  const head = `${project.refOf.get(row.id)} ${title} (${when}), characters ${from}–${to} of ${text.length}:`
   const more = to < text.length ? `\n(continues; read on with "from":${to})` : ''
   return { step, result: `${head}\n${text.slice(from, to)}${more}` }
 }
@@ -231,7 +259,11 @@ function readNotes(project: AgentProject, ref: unknown): ToolOutcome {
   const { row, title } = found
   const synopsis = parseStoredSceneMeta(row.sceneMeta).synopsis.trim()
   const notes = notesText(row.notes, row.id)
-  const parts = [`Synopsis: ${synopsis || '(none)'}`, `Notes:\n${notes || '(none)'}`]
+  const parts = [
+    `${title} (${NOTES_ARE_PLANS}):`,
+    `Synopsis: ${synopsis || '(none)'}`,
+    `Notes:\n${notes || '(none)'}`
+  ]
   return {
     step: { tool: 'read_notes', label: `Reading the notes of ${title}…` },
     result: cap(parts.join('\n'))
@@ -248,7 +280,13 @@ function readSummary(project: AgentProject, ref: unknown): ToolOutcome {
   const summary = getSummary(project.db, row.id)
   if (summary === null) return { step, result: `${title} has no summary yet; read the scene.` }
   const points = summary.keyPoints.map((point) => `- ${point}`).join('\n')
-  return { step, result: cap(`${summary.summary}${points ? `\nKey points:\n${points}` : ''}`) }
+  const when = positionNote(project.time, row.id)
+  return {
+    step,
+    result: cap(
+      `${title} (${when}):\n${summary.summary}${points ? `\nKey points:\n${points}` : ''}`
+    )
+  }
 }
 
 function readSheet(project: AgentProject, name: unknown): ToolOutcome {
@@ -259,7 +297,7 @@ function readSheet(project: AgentProject, name: unknown): ToolOutcome {
       result: `No sheet is called "${str(name)}"; list the sheets.`
     }
   }
-  const lines = [`${entity.name} (${entity.kind})`]
+  const lines = [`${entity.name} (${entity.kind}; ${SHEETS_ARE_PLANS})`]
   for (const field of categoryOf(entity.kind, listCategories(project.db)).fields) {
     const value = entity.fields[field.id]?.trim() ?? ''
     lines.push(`${field.id} (${field.label}): ${value || '(empty)'}`)

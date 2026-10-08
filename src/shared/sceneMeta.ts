@@ -14,6 +14,8 @@ export const BRIEF_SCENE_CHAR_BUDGET = 20_000
 export const BRIEF_TEXT_MIN = 200
 /** The longest synopsis an index card holds (F-11.1): a paragraph, not a scene. */
 export const SCENE_SYNOPSIS_MAX = 1000
+/** The longest node id `SceneMeta.fulfilledBy` holds (F-11.1d). */
+export const SCENE_FULFILLED_BY_MAX = 64
 
 /**
  * The writing status of a scene, chapter, or part (F-11.1), shown as the colour of its index
@@ -98,7 +100,14 @@ export const SceneMeta = z.object({
   beats: z
     .partialRecord(StructureTemplateId, z.string().max(STRUCTURE_BEAT_ID_MAX))
     .default(() => ({})),
-  eventId: z.string().max(TIMELINE_EVENT_ID_MAX).optional()
+  eventId: z.string().max(TIMELINE_EVENT_ID_MAX).optional(),
+  /**
+   * F-11.1d: on a planned document (a scene with no text yet), the id of the written scene that
+   * fulfils it, linked by the author or by the plan-link job (`src/main/ai/planLinks.ts`).
+   * Optional, not defaulted: absent means unlinked, and an id that names no manuscript document
+   * reads as unlinked. Never reaches a prompt (`promptSceneMeta` leaves it out).
+   */
+  fulfilledBy: z.string().max(SCENE_FULFILLED_BY_MAX).optional()
 })
 export type SceneMeta = z.infer<typeof SceneMeta>
 

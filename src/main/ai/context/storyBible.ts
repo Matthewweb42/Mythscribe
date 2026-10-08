@@ -26,6 +26,8 @@ export interface StoryBibleInput {
   nodeId: string | null
   /** `STORY_BIBLE_TOKEN_BUDGET`, or the ghost-text budget for the feature that runs on every pause. */
   maxTokens: number
+  /** The opening line; `STORY_BIBLE_HEADING` unless a prompt version names another (F-5.23). */
+  heading?: string
 }
 
 /**
@@ -50,7 +52,7 @@ export function buildStoryBible(db: TreeDb, input: StoryBibleInput): string | nu
   )
   const facts: StoryBibleFacts = { bank, scene: null, previous: null, next: null }
   if (input.nodeId !== null) Object.assign(facts, scenePart(db, input.nodeId))
-  return renderStoryBible(facts, input.maxTokens)
+  return renderStoryBible(facts, input.maxTokens, input.heading)
 }
 
 function isStoryCategory(category: string): category is StoryBibleCategory {

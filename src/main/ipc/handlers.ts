@@ -41,6 +41,7 @@ import type { ReviewChatResult } from '@shared/reviewChat'
 import type { ImportDetectResult, PendingTagProposal } from '@shared/importStructure'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
 import { VOICE_JOB_DEBOUNCE_MS } from '@shared/voice'
+import { PLAN_LINKS_DEBOUNCE_MS, type PlanLinksRunResult } from '@shared/planLinks'
 import type {
   AiBetaReaderResult,
   AiChatResult,
@@ -147,6 +148,13 @@ import { createSessionUsage } from '../ai/sessionUsage'
 import { staleSummaryNodeIds, summarizeScene, summarySource } from '../ai/summarize'
 import { ledgerSummary, recentUsage, usageHistory, type AiDb } from '../ai/usageStore'
 import { createIndexQueue } from '../jobs/indexQueue'
+import {
+  confirmPlanLink,
+  dismissPlanLink,
+  getPlanLinks,
+  runPlanLinks,
+  unlinkPlan
+} from '../ai/planLinks'
 import type { AppStateStore } from '../appState/appStateStore'
 import { removeRecent, toRecentEntry, touchRecent, withExists } from '../appState/recents'
 import type { ProjectDialogs } from '../dialogs'
@@ -564,6 +572,9 @@ export function registerHandlers({
         if (err instanceof AiCancelledError) throw err
         checked = null
       }
+      // F-11.1d: a scene with a fresh summary may fulfil a plan; one debounced plan-link job per
+      // burst, gated here so a project with the feature off never queues one.
+      if (!result.cached) queuePlanLinks(db)
       // A stored row whose hash still matches (or a cache hit) made no request, so the rate
       // limit must not charge it a turn; a check that went out is a request like any other.
       const asked = checked !== null && checked.requested && !checked.cached
@@ -658,6 +669,40 @@ export function registerHandlers({
     debounceMs: VOICE_JOB_DEBOUNCE_MS,
     minIntervalMs: 0
   })
+  /**
+   * F-11.1d: the plan-link job's own queue, one `planLinks` job per project keyed to the
+   * manuscript root, debounced well past a burst of summaries. Silent like the voice queue: a
+   * failure is dropped (the next summary queues it again), only a cancel is passed on. What it
+   * did reaches the windows as `planLinks:changed`, so the outline refetches and reloads the
+   * scene metadata it rewrote.
+   */
+  const planQueue = createIndexQueue<PlanLinksRunResult | null>({
+    kind: 'planLinks',
+    db: () => (manager.current() === null ? null : manager.require().connection.orm),
+    run: async (_job, requestId) => {
+      const db = manager.require().connection.orm
+      let value: PlanLinksRunResult
+      try {
+        value = await runPlanLinks(db, requestDeps(db), { requestId })
+      } catch (err) {
+        if (err instanceof AiCancelledError) throw err
+        return { requested: false, value: null }
+      }
+      if (value.requested) {
+        emit(windows(), 'planLinks:changed', { changedNodeIds: value.changedNodeIds })
+      }
+      return { requested: value.requested, value }
+    },
+    cancelRequest: (requestId) => void cancelInflight(requestId),
+    debounceMs: PLAN_LINKS_DEBOUNCE_MS,
+    minIntervalMs: 0
+  })
+  const queuePlanLinks = (db: TreeDb): void => {
+    if (!isFeatureAllowed(getAiSettings(db), 'planLinks')) return
+    const root = manuscriptRootId(db)
+    if (root !== null) planQueue.touch('planLinks', root)
+  }
+
   /** F-14.14: queue the voice job now (open, an AI settings change); it decides itself whether anything is due. */
   const queueVoice = (db: TreeDb): void => {
     const root = manuscriptRootId(db)
@@ -971,7 +1016,29 @@ export function registerHandlers({
 
   register('structure:get', () => getProjectStructure(manager.require().connection.orm))
 
-  register('structure:set', (value) => setProjectStructure(manager.require().connection.orm, value))
+  register('structure:set', (value) => {
+    const db = manager.require().connection.orm
+    const stored = setProjectStructure(db, value)
+    // F-11.1d: a new template brings new empty beats to link.
+    queuePlanLinks(db)
+    return stored
+  })
+
+  register('planLinks:get', () => getPlanLinks(manager.require().connection.orm))
+
+  register('planLinks:run', ({ requestId }) => {
+    const db = manager.require().connection.orm
+    return runPlanLinks(db, requestDeps(db), { requestId })
+  })
+
+  register('planLinks:confirm', ({ key }) => confirmPlanLink(manager.require().connection.orm, key))
+
+  register('planLinks:dismiss', ({ key }) => {
+    dismissPlanLink(manager.require().connection.orm, key)
+    return null
+  })
+
+  register('planLinks:unlink', ({ plan }) => unlinkPlan(manager.require().connection.orm, plan))
 
   register('timeline:get', () => getProjectTimeline(manager.require().connection.orm))
 

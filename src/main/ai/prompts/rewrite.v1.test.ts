@@ -104,7 +104,12 @@ describe('rewrite.v1 prompt (F-14.10)', () => {
       text: 't'.repeat(REWRITE_TEXT_MAX),
       before: 'b'.repeat(REWRITE_CONTEXT_CHARS),
       after: 'a'.repeat(REWRITE_CONTEXT_CHARS),
-      meta: { location: 'L'.repeat(200), pov: 'P'.repeat(200), timeline: 'T'.repeat(500), brief: EMPTY_SCENE_BRIEF },
+      meta: {
+        location: 'L'.repeat(200),
+        pov: 'P'.repeat(200),
+        timeline: 'T'.repeat(500),
+        brief: EMPTY_SCENE_BRIEF
+      },
       voice: 'v'.repeat(2_400)
     })
     const estimate = estimateTokens(promptText(built.messages))
