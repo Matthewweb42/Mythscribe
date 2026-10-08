@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import {
   DevLogLevel,
   DevLogSource,
@@ -7,6 +7,7 @@ import {
   type DevLogEntry,
   type DevRequestText
 } from '@shared/devtools'
+import { ResizeHandle } from '@renderer/features/shell/ResizeHandle'
 import { useDevToolsStore } from './devToolsStore'
 
 const BUTTON =
@@ -14,6 +15,38 @@ const BUTTON =
 const SELECT = 'rounded-md border border-line bg-bg px-1 py-0.5 text-xs'
 
 type PanelTab = 'log' | 'ai'
+
+/** The drawer's height bounds in px (2026-10-08: the author needs to see the screen behind it). */
+export const DEVTOOLS_MIN_HEIGHT_PX = 120
+const DEFAULT_HEIGHT_PX = 320
+const HEIGHT_KEY = 'mythscribe.devtools.height'
+
+/** The tallest the drawer may be: nine tenths of the window, never less than the minimum. */
+function maxHeight(): number {
+  return Math.max(DEVTOOLS_MIN_HEIGHT_PX, Math.round(window.innerHeight * 0.9))
+}
+
+function clampHeight(px: number): number {
+  return Math.min(maxHeight(), Math.max(DEVTOOLS_MIN_HEIGHT_PX, Math.round(px)))
+}
+
+/** The remembered height; a per-window convenience, so unreadable storage just means the default. */
+function storedHeight(): number {
+  try {
+    const raw = Number(window.localStorage.getItem(HEIGHT_KEY))
+    return Number.isFinite(raw) && raw > 0 ? clampHeight(raw) : DEFAULT_HEIGHT_PX
+  } catch {
+    return DEFAULT_HEIGHT_PX
+  }
+}
+
+function rememberHeight(px: number): void {
+  try {
+    window.localStorage.setItem(HEIGHT_KEY, String(px))
+  } catch {
+    // Storage off: the height lasts until the window reloads.
+  }
+}
 
 /**
  * The developer panel (2026-10-07): a drawer over the bottom of the window, not a dock column,
@@ -29,6 +62,8 @@ export function DevToolsPanel(): React.JSX.Element | null {
   const requests = useDevToolsStore((s) => s.requests)
   const error = useDevToolsStore((s) => s.error)
   const [tab, setTab] = useState<PanelTab>('ai')
+  const [height, setHeight] = useState(storedHeight)
+  const [minimized, setMinimized] = useState(false)
   if (!open || !enabled) return null
   const store = useDevToolsStore.getState()
 
@@ -36,8 +71,27 @@ export function DevToolsPanel(): React.JSX.Element | null {
     <section
       aria-label="Developer tools"
       data-testid="devtools-panel"
-      className="fixed inset-x-0 bottom-0 z-40 flex h-[45vh] flex-col border-t border-line bg-surface text-fg shadow-lg"
+      className="fixed inset-x-0 bottom-0 z-40 flex flex-col border-t border-line bg-surface text-fg shadow-lg"
+      // The drawer's height is the one dynamic value: dragged from its top edge, or just the bar.
+      style={minimized ? undefined : { height }}
     >
+      {minimized ? null : (
+        <ResizeHandle
+          side="top"
+          value={height}
+          min={DEVTOOLS_MIN_HEIGHT_PX}
+          max={maxHeight()}
+          ariaLabel="Resize developer tools"
+          ariaValue={Math.round}
+          onChange={(delta) =>
+            setHeight((current) => {
+              const next = clampHeight(current + delta)
+              rememberHeight(next)
+              return next
+            })
+          }
+        />
+      )}
       <header className="flex items-center gap-2 border-b border-line px-3 py-1.5">
         <h2 className="m-0 text-sm font-medium">Developer tools</h2>
         <div role="tablist" aria-label="Developer tools views" className="ml-2 flex gap-1">
@@ -57,6 +111,19 @@ export function DevToolsPanel(): React.JSX.Element | null {
           </button>
           <button
             type="button"
+            aria-label={minimized ? 'Expand developer tools' : 'Minimize developer tools'}
+            aria-expanded={!minimized}
+            className="rounded p-0.5 hover:bg-bg"
+            onClick={() => setMinimized((m) => !m)}
+          >
+            {minimized ? (
+              <ChevronUp size={14} aria-hidden />
+            ) : (
+              <ChevronDown size={14} aria-hidden />
+            )}
+          </button>
+          <button
+            type="button"
             aria-label="Close developer tools"
             className="rounded p-0.5 hover:bg-bg"
             onClick={store.closePanel}
@@ -65,14 +132,16 @@ export function DevToolsPanel(): React.JSX.Element | null {
           </button>
         </div>
       </header>
-      {error === null ? null : (
+      {minimized || error === null ? null : (
         <p role="alert" className="m-0 border-b border-line px-3 py-1 text-xs text-danger">
           {error}
         </p>
       )}
-      <div className="min-h-0 flex-1 overflow-auto">
-        {tab === 'ai' ? <AiInspector requests={requests} /> : <LiveLog entries={log} />}
-      </div>
+      {minimized ? null : (
+        <div className="min-h-0 flex-1 overflow-auto">
+          {tab === 'ai' ? <AiInspector requests={requests} /> : <LiveLog entries={log} />}
+        </div>
+      )}
     </section>
   )
 }

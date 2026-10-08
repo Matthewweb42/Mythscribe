@@ -197,6 +197,24 @@ describe('DevToolsPanel (2026-10-07)', () => {
     expect(writeText).toHaveBeenCalledWith('MythScribe diagnostics\n')
   })
 
+  it('minimizes to its bar and back, and resizes from its top edge with the keyboard (2026-10-08)', async () => {
+    window.localStorage.removeItem('mythscribe.devtools.height')
+    await opened()
+    const panel = screen.getByRole('region', { name: 'Developer tools' })
+    const handle = within(panel).getByRole('separator', { name: 'Resize developer tools' })
+    const before = parseInt(panel.style.height, 10)
+    handle.focus()
+    await userEvent.keyboard('{ArrowUp}')
+    expect(parseInt(panel.style.height, 10)).toBeGreaterThan(before)
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'Minimize developer tools' }))
+    expect(within(panel).queryByTestId('devtools-request')).toBeNull()
+    expect(within(panel).queryByRole('separator')).toBeNull()
+    expect(panel.style.height).toBe('')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Expand developer tools' }))
+    expect(within(panel).getByTestId('devtools-request')).toBeInTheDocument()
+  })
+
   it('shows the live log, filters by level, and closes', async () => {
     await opened()
     await userEvent.click(screen.getByRole('tab', { name: /Log/ }))
