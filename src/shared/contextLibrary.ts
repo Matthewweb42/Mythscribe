@@ -496,7 +496,12 @@ function matchSheet(
   return null
 }
 
-function entityItem(
+/**
+ * One review item for a group of records against the sheet it matched (or none): its fields
+ * compared, its details minus what the sheet holds, everything included. Also the review chat's
+ * rebuild after a merge or a change of kind (F-9.9).
+ */
+export function buildReviewEntity(
   id: string,
   group: readonly ContextRecord[],
   sheet: ExistingSheet | null
@@ -523,7 +528,7 @@ function entityItem(
 }
 
 /** True when an item for an existing sheet would change nothing. */
-function isEmptyUpdate(item: ContextReviewEntity): boolean {
+export function isEmptyUpdate(item: ContextReviewEntity): boolean {
   return (
     item.existingId !== null &&
     item.fields.length === 0 &&
@@ -635,7 +640,7 @@ export function planContextReview(input: PlanInput): {
   for (const group of groupRecords(input.records)) {
     const sheet = matchSheet(group, input.existing, taken)
     if (sheet !== null) taken.add(sheet.id)
-    items.push(entityItem(nextId(), group, sheet))
+    items.push(buildReviewEntity(nextId(), group, sheet))
   }
   attachImages(items, input.existing, input.images, input.hints, nextId)
   const notesSheet = projectNotesSheet(input.existing)
@@ -678,7 +683,7 @@ export function splitReviewEntity(
   const keys = [...groups.keys()]
   const keeper = sheet === null ? null : (keys.find((key) => key === sheetKey) ?? keys[0])
   const replaced = keys.map((key, i) => {
-    const next = entityItem(
+    const next = buildReviewEntity(
       `${item.id}.${i + 1}`,
       groups.get(key) ?? [],
       key === keeper ? sheet : null

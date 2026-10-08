@@ -54,6 +54,7 @@ import { AGENT_PROMPT_VERSION } from './agent.v1'
 import { AGENT_PROMPT_V2_VERSION } from './agent.v2'
 import { EDIT_PASS_PROMPT_VERSION } from './editPass.v1'
 import { CONTEXT_IMPORT_PROMPT_VERSION } from './contextImport.v1'
+import { REVIEW_CHAT_PROMPT_VERSION } from './reviewChat.v1'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -122,7 +123,8 @@ export const PROMPT_VERSIONS = [
   EDIT_PASS_PROMPT_VERSION,
   AGENT_PROMPT_VERSION,
   AGENT_PROMPT_V2_VERSION,
-  CONTEXT_IMPORT_PROMPT_VERSION
+  CONTEXT_IMPORT_PROMPT_VERSION,
+  REVIEW_CHAT_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -381,6 +383,12 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'strong',
     output: 'json',
     since: 'F-9.8'
+  },
+  [REVIEW_CHAT_PROMPT_VERSION]: {
+    feature: 'reviewChat',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-9.9'
   }
 }
 

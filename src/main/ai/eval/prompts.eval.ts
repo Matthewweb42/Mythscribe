@@ -18,6 +18,7 @@ import { buildOpenAiProvider } from '../providers/openai'
 import { PROMPT_CATALOGUE, PROMPT_VERSIONS } from '../prompts/catalogue'
 import { parseEditChanges, parseEditNotes } from '../editPass'
 import { parseProofreadAnswer } from '../proofread'
+import { parseReviewChatAnswer } from '../reviewChat'
 import { parseRouteAnswer } from '../route'
 import { parseNotesSuggestAnswer, parseSynopsisAnswer } from '../sceneSuggest'
 import { parseSummaryAnswer } from '../summarize'
@@ -235,7 +236,9 @@ function scoreStructure(
 }
 
 const ContextImportAnswer = z.object({
-  entities: z.array(z.object({ kind: z.enum(['character', 'setting', 'world']), name: z.string() })),
+  entities: z.array(
+    z.object({ kind: z.enum(['character', 'setting', 'world']), name: z.string() })
+  ),
   notes: z.array(z.string()).nullish()
 })
 
@@ -257,6 +260,22 @@ function scoreContextImport(expected: string[], answer: string): LiveResult['ver
   }
   const names = new Set(result.data.entities.map((entity) => entity.name.trim().toLowerCase()))
   const missing = expected.filter((name) => !names.has(name.toLowerCase()))
+  return missing.length === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `missing: ${missing.join(', ')}` }
+}
+
+/**
+ * A review chat message (F-9.9) scores on what the renderer applies: the answer must parse
+ * through `parseReviewChatAnswer` with no operation dropped, and hold each expected operation.
+ */
+function scoreReviewChat(expected: string[], answer: string): LiveResult['verdict'] {
+  const parsed = parseReviewChatAnswer(answer)
+  if (parsed === null) return { kind: 'json', ok: false, problem: 'not { reply, ops }' }
+  if (parsed.dropped > 0) {
+    return { kind: 'json', ok: false, problem: `${parsed.dropped} operations did not parse` }
+  }
+  const missing = expected.filter((op) => !parsed.ops.some((o) => o.op === op))
   return missing.length === 0
     ? { kind: 'json', ok: true, problem: null }
     : { kind: 'json', ok: false, problem: `missing: ${missing.join(', ')}` }
@@ -384,7 +403,12 @@ function scoreRoute(expected: string, answer: string): LiveResult['verdict'] {
 /** One chat agent step (F-5.22): JSON that the feature's parser reads as the expected kind. */
 function scoreAgent(expected: 'tool' | 'answer', answer: string): LiveResult['verdict'] {
   try {
-    JSON.parse(answer.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))
+    JSON.parse(
+      answer
+        .trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/, '')
+    )
   } catch {
     return { kind: 'json', ok: false, problem: 'not JSON' }
   }
@@ -639,6 +663,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreContextImport(c.scoring.expected, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'reviewChat') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreReviewChat(c.scoring.expected, reply.text)
         })
         continue
       }

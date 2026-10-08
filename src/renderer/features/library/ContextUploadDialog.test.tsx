@@ -142,4 +142,63 @@ describe('ContextUploadDialog (F-9.8)', () => {
     render(<ContextUploadDialog />)
     expect(screen.getByTestId('library-error')).toHaveTextContent('No key. Add one.')
   })
+
+  it('changes the review from the chat: the reply, each change, the card marked, and Undo (F-9.9)', async () => {
+    setIpcClient({
+      async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
+        if (channel === 'library:reviewChat') {
+          const { requestId } = input as Input<'library:reviewChat'>
+          return {
+            ok: true,
+            ops: [
+              { op: 'aliases', item: 'e2', aliases: ['Tom', 'the Younger'] },
+              { op: 'rename', item: 'e1', name: 'Mara' }
+            ],
+            reply: 'Tomas also goes by Tom.',
+            dropped: 0,
+            usage: { inputTokens: 700, outputTokens: 40 },
+            costUsd: 0.003,
+            cached: false,
+            model: 'gpt-5.4',
+            proposalId: 'p-chat',
+            requestId
+          } as Output<C>
+        }
+        if (channel === 'proposal:settle') return null as Output<C>
+        throw new Error(`unexpected ${channel}`)
+      },
+      on: () => () => {}
+    })
+    useLibraryStore.setState({
+      flow: { stage: 'review', review: contextReviewFixture(), busy: false }
+    })
+    render(<ContextUploadDialog />)
+    expect(screen.getAllByTestId('library-item')[0]).toHaveTextContent('Also called: Mara')
+    expect(screen.getByTestId('review-chat-send')).toBeDisabled()
+    await userEvent.type(screen.getByTestId('review-chat-input'), 'Tomas is also Tom{Enter}')
+
+    const entries = await screen.findAllByTestId('review-chat-entry')
+    expect(entries.map((e) => e.dataset.role)).toEqual(['user', 'assistant'])
+    expect(entries[1]).toHaveTextContent('AI: Tomas also goes by Tom.')
+    const changes = screen.getAllByTestId('review-chat-change')
+    expect(changes.map((c) => [c.textContent, c.dataset.skipped])).toEqual([
+      ['“Tomas” is also called “Tom”, “the Younger”.', undefined],
+      ['Rename skipped: “Mara Vell” is an existing sheet; rename it in the story bible.', 'true']
+    ])
+    const tomas = screen.getAllByTestId('library-item')[1]!
+    expect(tomas.dataset.changed).toBe('true')
+    expect(within(tomas).getByTestId('library-item-changed')).toBeInTheDocument()
+    expect(within(tomas).getByTestId('library-item-aliases')).toHaveTextContent(
+      'Also called: Tom, the Younger'
+    )
+    expect(screen.getAllByTestId('library-item')[0]?.dataset.changed).toBeUndefined()
+    expect(screen.getByTestId('review-chat-input')).toHaveValue('')
+
+    await userEvent.click(screen.getByTestId('review-chat-undo'))
+    expect(screen.queryByTestId('library-item-changed')).toBeNull()
+    expect(screen.queryByText('Also called: Tom, the Younger')).toBeNull()
+    expect(screen.getAllByTestId('review-chat-entry').at(-1)).toHaveTextContent(
+      'Undid the last change.'
+    )
+  })
 })

@@ -1,0 +1,41 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`reviewChat.v1 prompt (F-9.9) > matches the golden messages for the fixture and asks for its cap 1`] = `
+[
+  {
+    "content": "You are the review assistant inside a novel-writing app. The author uploaded notes; the AI sorted them into a pending review of story-bible sheets (characters: people and beings; settings: places; world: cultures, magic, history, organisations, objects, rules) and Project notes for what fits no sheet. Nothing is saved yet. Change the review as the author asks, using only these operations, with item ids and note numbers exactly as listed:
+- {"op":"merge","items":["e1","e2"],"name":"Full Name"}: one sheet; the other names become its aliases. "name" is the main (full) name, optional.
+- {"op":"split","item":"e1"}: a merged item back into one per name.
+- {"op":"kind","item":"e1","kind":"setting"}: kind is character, setting, or world.
+- {"op":"toNotes","item":"e1"}: into Project notes instead of a sheet.
+- {"op":"fromNotes","notes":[1,2],"kind":"world","name":"Ashfall War"}: notes into a sheet (an item of that name and kind takes them).
+- {"op":"rename","item":"e1","name":"…"}: new sheets only.
+- {"op":"aliases","item":"e1","aliases":["…"]}: the whole list of its other names and titles.
+- {"op":"include","item":"e1" or "notes","include":false}
+Titles and nicknames are aliases, not sheets of their own. Never invent facts. When asked to tidy up, merge items that are clearly the same and fix kinds; nothing else. Reply with JSON only: {"reply":"one or two sentences on what you changed, or why you could not","ops":[…]}. "ops" may be empty.",
+    "role": "system",
+  },
+  {
+    "content": "Pending review:
+e1 · character · Rynna Falsire · new sheet · also: Rynna, High Crown Falsire · from lore.md, court.docx · fields: Age=31 (conflict); Appearance=Grey eyes · details: History: heir to the Falsire seat. | Rule: speaks at council. (+1 more)
+e2 · character · Kael · existing sheet · picture: kael.png · left out
+
+Project notes:
+1. Ashfall War: the war that burned the southern forests.
+2. Theme: inheritance as a debt.",
+    "role": "user",
+  },
+  {
+    "content": "Is Kael a person?",
+    "role": "user",
+  },
+  {
+    "content": "The notes call Kael a city.",
+    "role": "assistant",
+  },
+  {
+    "content": "Kael is a place, not a character.",
+    "role": "user",
+  },
+]
+`;

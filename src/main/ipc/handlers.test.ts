@@ -3241,9 +3241,7 @@ describe('ai:agent (F-5.22)', () => {
       vi
         .mocked(fakeWin.webContents.send)
         .mock.calls.filter(([channel]) => channel === 'ai:agentDelta')
-    ).toEqual([
-      ['ai:agentDelta', { requestId: 'ag-1', delta: 'Under the elm.', reset: false }]
-    ])
+    ).toEqual([['ai:agentDelta', { requestId: 'ag-1', delta: 'Under the elm.', reset: false }]])
     expect(result.steps).toHaveLength(1)
     expect(result.usage).toEqual({ inputTokens: 800, outputTokens: 60 })
     expect(result.dropped).toBe(0)
@@ -7929,5 +7927,52 @@ describe('context library', () => {
       nextStep: AI_NEXT_STEP.DISABLED
     })
     expect(complete).not.toHaveBeenCalled()
+  })
+
+  // F-9.9: the review chat answers operations as data and writes nothing but its proposal.
+  it('answers the review chat with operations and a proposal, and Use AI off as data', async () => {
+    await ready()
+    const added = await invoke('library:add', { paths: [write('people.md', 'Tomas is 29.')] })
+    complete.mockResolvedValue({
+      text: '{"entities":[{"kind":"character","name":"Tomas"}],"notes":[]}',
+      model: 'gpt-fake',
+      usage: { inputTokens: 40, outputTokens: 10 }
+    })
+    const sorted = await invoke('library:process', {
+      fileIds: added?.changed ?? [],
+      requestId: 'c-1'
+    })
+    if (!sorted.ok) throw new Error(sorted.message)
+    complete.mockResolvedValue({
+      text: '{"reply":"Tomas is a place.","ops":[{"op":"kind","item":"e1","kind":"setting"}]}',
+      model: 'gpt-fake',
+      usage: { inputTokens: 300, outputTokens: 20 }
+    })
+    const input = {
+      review: sorted.review,
+      message: 'Tomas is a place.',
+      history: [],
+      requestId: 'rc-1'
+    }
+    const answer = await invoke('library:reviewChat', input)
+    if (!answer.ok) throw new Error(answer.message)
+    expect(answer).toMatchObject({
+      ops: [{ op: 'kind', item: 'e1', kind: 'setting' }],
+      reply: 'Tomas is a place.',
+      dropped: 0,
+      requestId: 'rc-1'
+    })
+    expect(getProposal(manager.require().connection.orm, answer.proposalId)).toMatchObject({
+      feature: 'reviewChat',
+      status: 'pending'
+    })
+    expect(await invoke('entity:list', undefined)).toEqual([])
+
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 0 })
+    expect(await invoke('library:reviewChat', { ...input, requestId: 'rc-2' })).toMatchObject({
+      ok: false,
+      code: 'DISABLED',
+      requestId: 'rc-2'
+    })
   })
 })

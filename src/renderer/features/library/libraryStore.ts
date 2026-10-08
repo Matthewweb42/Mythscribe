@@ -9,8 +9,10 @@ import {
   type ContextEstimate,
   type ContextFile,
   type ContextProgress,
-  type ContextReview
+  type ContextReview,
+  type ExistingSheet
 } from '@shared/contextLibrary'
+import { applyReviewOps, type ReviewChange } from '@shared/reviewChat'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
@@ -38,6 +40,39 @@ export type LibraryFlow =
   | { stage: 'review'; review: ContextReview; busy: boolean }
   | { stage: 'failed'; fileIds: string[]; message: string; nextStep: string }
 
+/** One line of the review chat (F-9.9): the author's message, or the AI's reply with what it changed. */
+export interface ReviewChatEntry {
+  id: number
+  role: 'user' | 'assistant'
+  text: string
+  /** What the reply's operations did, skipped ones with why. */
+  changes: ReviewChange[]
+  /** The request's model, tokens, and cost (CLAUDE.md rule 10); null for a message or a note. */
+  request: {
+    model: string
+    costUsd: number
+    usage: { inputTokens: number; outputTokens: number }
+    cached: boolean
+  } | null
+  /** An AI failure or a stop, shown in the log and never sent back as a turn. */
+  failed: boolean
+}
+
+/** The review chat beside the review under way (F-9.9); emptied whenever the review closes. */
+export interface ReviewChatState {
+  entries: ReviewChatEntry[]
+  /** The request in flight, while the AI is answering. */
+  requestId: string | null
+  /** The items (and `notes`) the last change touched, marked on the review. */
+  changed: string[]
+  /** The review before the last change and that answer's proposal, for Undo. */
+  undo: { review: ContextReview; proposalId: string } | null
+}
+
+export function emptyReviewChat(): ReviewChatState {
+  return { entries: [], requestId: null, changed: [], undo: null }
+}
+
 /**
  * The context library in the renderer (F-9.8): the uploaded files as main lists them, and the one
  * upload being sorted. Every entry point — the wizard step, the story-bible tabs' "Upload
@@ -48,6 +83,7 @@ interface LibraryState {
   files: ContextFile[]
   loaded: boolean
   flow: LibraryFlow | null
+  chat: ReviewChatState
   load: () => Promise<void>
   clear: () => void
   /** The OS dialog's picks, for the new-project wizard (no project yet, nothing stored). */
@@ -74,14 +110,43 @@ interface LibraryState {
   split: (itemId: string) => void
   /** Writes the review in one transaction. */
   apply: () => Promise<void>
+  /** Sends the author's instruction about the review; the AI's changes land on it at once (F-9.9). */
+  sendReviewChat: (message: string) => Promise<void>
+  /** Stops the chat request in flight. */
+  cancelReviewChat: () => void
+  /** Puts the review back as it was before the last chat change. */
+  undoReviewChat: () => void
 }
 
 let generation = 0
 let counter = 0
+let entryCounter = 0
 let unsubscribe: (() => void) | null = null
 const nextRequestId = (): string => `lib-${Date.now().toString(36)}-${++counter}`
 
 const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? '' : 's'}`
+
+/** The story bible's sheets, as the planner and the chat's operations match against them. */
+function existingSheets(): ExistingSheet[] {
+  const entities = useEntityStore.getState()
+  return entities.ids.flatMap((id) => {
+    const entity = entities.byId[id]
+    return entity ? [entity] : []
+  })
+}
+
+function chatEntry(
+  role: ReviewChatEntry['role'],
+  text: string,
+  over: Partial<Pick<ReviewChatEntry, 'changes' | 'request' | 'failed'>> = {}
+): ReviewChatEntry {
+  return { id: ++entryCounter, role, text, changes: [], request: null, failed: false, ...over }
+}
+
+/** Stops a chat request still in flight; its answer is then dropped and its proposal rejected. */
+function dropChat(chat: ReviewChatState): void {
+  if (chat.requestId !== null) void useAiActivityStore.getState().cancel(chat.requestId)
+}
 
 function onProgress(progress: ContextProgress): void {
   useLibraryStore.setState((s) =>
@@ -156,6 +221,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
     files: [],
     loaded: false,
     flow: null,
+    chat: emptyReviewChat(),
 
     async load() {
       const mine = ++generation
@@ -168,7 +234,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
       const flow = get().flow
       if (flow?.stage === 'review') settle(flow.review, 'rejected')
       if (flow?.stage === 'running') void useAiActivityStore.getState().cancel(flow.requestId)
-      set({ files: [], loaded: false, flow: null })
+      dropChat(get().chat)
+      set({ files: [], loaded: false, flow: null, chat: emptyReviewChat() })
     },
 
     async choosePaths() {
@@ -302,7 +369,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
         }
         return
       }
-      set({ flow: { stage: 'review', review: result.review, busy: false } })
+      set({
+        flow: { stage: 'review', review: result.review, busy: false },
+        chat: emptyReviewChat()
+      })
     },
 
     cancelRun() {
@@ -318,29 +388,30 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
         if (flow.busy) return
         settle(flow.review, 'rejected')
       }
-      set({ flow: null })
+      dropChat(get().chat)
+      set({ flow: null, chat: emptyReviewChat() })
     },
 
     edit(change) {
+      // The author's own edit after a chat change: Undo would take it back too, so Undo goes.
       set((s) =>
         s.flow?.stage === 'review' && !s.flow.busy
-          ? { flow: { ...s.flow, review: change(s.flow.review) } }
+          ? {
+              flow: { ...s.flow, review: change(s.flow.review) },
+              chat: { ...s.chat, undo: null }
+            }
           : {}
       )
     },
 
     split(itemId) {
-      const entities = useEntityStore.getState()
-      const existing = entities.ids.flatMap((id) => {
-        const entity = entities.byId[id]
-        return entity ? [entity] : []
-      })
+      const existing = existingSheets()
       get().edit((review) => splitReviewEntity(review, itemId, existing))
     },
 
     async apply() {
       const flow = get().flow
-      if (flow?.stage !== 'review' || flow.busy) return
+      if (flow?.stage !== 'review' || flow.busy || get().chat.requestId !== null) return
       const mine = generation
       const review = flow.review
       set({ flow: { ...flow, busy: true } })
@@ -350,7 +421,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
         if (mine !== generation) return
         const entityStore = useEntityStore.getState()
         for (const entity of result.entities) entityStore.merge(entity)
-        set({ files: result.files, flow: null })
+        set({ files: result.files, flow: null, chat: emptyReviewChat() })
         const parts = [
           `${plural(result.created, 'sheet')} created`,
           `${plural(result.updated, 'sheet')} updated`
@@ -363,6 +434,115 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
         }
         toast.error(describeError(err))
       }
+    },
+
+    async sendReviewChat(message) {
+      const flow = get().flow
+      const text = message.trim()
+      if (flow?.stage !== 'review' || flow.busy || get().chat.requestId !== null || text === '') {
+        return
+      }
+      const mine = generation
+      const requestId = nextRequestId()
+      const history = get()
+        .chat.entries.filter((entry) => !entry.failed)
+        .map((entry) => ({ role: entry.role, content: entry.text }))
+      set((s) => ({
+        chat: { ...s.chat, requestId, entries: [...s.chat.entries, chatEntry('user', text)] }
+      }))
+      const fail = (reply: string): void =>
+        set((s) => ({
+          chat: {
+            ...s.chat,
+            requestId: null,
+            entries: [...s.chat.entries, chatEntry('assistant', reply, { failed: true })]
+          }
+        }))
+      let result
+      try {
+        result = await useAiActivityStore.getState().track(
+          'reviewChat',
+          requestId,
+          ipc().invoke('library:reviewChat', {
+            review: flow.review,
+            message: text,
+            history,
+            requestId
+          })
+        )
+      } catch (err) {
+        if (mine === generation && get().chat.requestId === requestId) fail(describeError(err))
+        return
+      }
+      const held = get()
+      if (
+        mine !== generation ||
+        held.chat.requestId !== requestId ||
+        held.flow?.stage !== 'review'
+      ) {
+        if (result.ok) void proposalStore.settle(result.proposalId, 'rejected', null)
+        return
+      }
+      if (!result.ok) {
+        fail(
+          result.code === 'CANCELLED' ? 'Stopped.' : `${result.message} ${result.nextStep}`.trim()
+        )
+        return
+      }
+      // Applied to the review as it now stands (the author may have ticked boxes meanwhile).
+      const before = held.flow.review
+      const applied = applyReviewOps(before, result.ops, existingSheets())
+      const landed = applied.changes.some((change) => !change.skipped)
+      const reply =
+        result.reply !== '' ? result.reply : landed ? 'Done.' : 'Nothing in the review changed.'
+      const entry = chatEntry('assistant', reply, {
+        changes: applied.changes,
+        request: {
+          model: result.model,
+          costUsd: result.costUsd,
+          usage: result.usage,
+          cached: result.cached
+        }
+      })
+      // The answer is a proposal settled with the review (F-14.5), whether or not it changed it.
+      const review = {
+        ...applied.review,
+        proposalIds: [...applied.review.proposalIds, result.proposalId]
+      }
+      set({
+        flow: { ...held.flow, review },
+        chat: {
+          entries: [...held.chat.entries, entry],
+          requestId: null,
+          changed: landed
+            ? [...new Set(applied.changes.flatMap((change) => change.itemIds))]
+            : held.chat.changed,
+          undo: landed ? { review: before, proposalId: result.proposalId } : held.chat.undo
+        }
+      })
+    },
+
+    cancelReviewChat() {
+      const requestId = get().chat.requestId
+      if (requestId !== null) void useAiActivityStore.getState().cancel(requestId)
+    },
+
+    undoReviewChat() {
+      const { flow, chat } = get()
+      if (flow?.stage !== 'review' || flow.busy || chat.undo === null || chat.requestId !== null) {
+        return
+      }
+      // The restored review never held the undone answer's proposal, so it is settled here.
+      void proposalStore.settle(chat.undo.proposalId, 'rejected', null)
+      set({
+        flow: { ...flow, review: chat.undo.review },
+        chat: {
+          ...chat,
+          changed: [],
+          undo: null,
+          entries: [...chat.entries, chatEntry('assistant', 'Undid the last change.')]
+        }
+      })
     }
   }
 })
@@ -372,5 +552,5 @@ export function resetLibraryStore(): void {
   generation++
   unsubscribe?.()
   unsubscribe = null
-  useLibraryStore.setState({ files: [], loaded: false, flow: null })
+  useLibraryStore.setState({ files: [], loaded: false, flow: null, chat: emptyReviewChat() })
 }
