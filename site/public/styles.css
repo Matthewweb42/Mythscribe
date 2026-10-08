@@ -1048,6 +1048,14 @@ td {
   }
 }
 
+.highlights {
+  margin-bottom: clamp(3.5rem, 2rem + 5vw, 6rem);
+}
+
+.highlights h3 {
+  margin-top: 0;
+}
+
 .section-cards {
   margin-top: clamp(3.5rem, 2rem + 5vw, 6rem);
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
