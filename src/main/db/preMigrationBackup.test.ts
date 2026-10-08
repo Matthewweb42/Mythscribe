@@ -146,21 +146,22 @@ describe('writePreMigrationBackup (F-8.7)', () => {
 })
 
 describe('openProject writes the backup before an upgrade (F-8.7)', () => {
-  /** A real project put back one schema version: the last migration undone. */
+  /** A real project put back to the schema before F-9.12: migrations 0021 and 0022 undone. */
   function olderProject(): { folder: string; content: string } {
     const folder = path.join(tmp, 'Book.mythscribe')
     const session = createProject(folder, 'Book', 'novel')
     session.close()
     const raw = new Database(path.join(folder, 'project.db'))
-    const last = raw
-      .prepare('SELECT id, name FROM schema_migrations ORDER BY id DESC LIMIT 1')
-      .get() as {
-      id: number
-      name: string
-    }
-    expect(last.name).toBe('story_categories')
-    raw.exec('DROP TABLE story_category')
-    raw.prepare('DELETE FROM schema_migrations WHERE id = ?').run(last.id)
+    const names = (
+      raw.prepare('SELECT name FROM schema_migrations WHERE id >= 21 ORDER BY id').all() as {
+        name: string
+      }[]
+    ).map((row) => row.name)
+    expect(names).toEqual(['knowledge_index', 'passage_fts'])
+    raw.exec('DROP TABLE passage_fts')
+    raw.exec('ALTER TABLE tag_mention DROP COLUMN paragraphs')
+    raw.exec('ALTER TABLE mention_scan DROP COLUMN passage_hash')
+    raw.prepare('DELETE FROM schema_migrations WHERE id >= 21').run()
     const content = JSON.stringify(
       raw.prepare('SELECT id, content, notes FROM node ORDER BY id').all()
     )
@@ -181,11 +182,9 @@ describe('openProject writes the backup before an upgrade (F-8.7)', () => {
     expect(asked[0]?.id).toBe(session.info.id)
     const [file] = listPreMigrationBackups(backups)
     if (file === undefined) throw new Error('no backup written')
-    expect(path.basename(file)).toMatch(/^pre-migration-20-21-/)
+    expect(path.basename(file)).toMatch(/^pre-migration-21-23-/)
     const copy = new Database(file, { readonly: true })
-    const tables = copy
-      .prepare("SELECT name FROM sqlite_master WHERE name = 'story_category'")
-      .all()
+    const tables = copy.prepare("SELECT name FROM sqlite_master WHERE name = 'passage_fts'").all()
     expect(tables).toEqual([])
     copy.close()
     const after = JSON.stringify(
@@ -210,6 +209,6 @@ describe('openProject writes the backup before an upgrade (F-8.7)', () => {
     const raw = new Database(path.join(folder, 'project.db'), { readonly: true })
     const count = raw.prepare('SELECT count(*) AS n FROM schema_migrations').get() as { n: number }
     raw.close()
-    expect(count.n).toBe(20)
+    expect(count.n).toBe(21)
   })
 })

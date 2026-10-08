@@ -66,6 +66,11 @@ interface EntityState {
    * one made before F-9.4, or one whose tag was deleted.
    */
   linkTag: (id: string) => Promise<Entity>
+  /**
+   * "Make a record" (F-9.12, `tag:makeRecord`): the tag's sheet, made now if it has none, merged
+   * here (a new one re-sorts) with the tag merged into the bank; answers the sheet.
+   */
+  makeRecord: (tagId: string) => Promise<Entity>
   /** Upserts a row main pushed (`entity:changed`, F-5.16); a new or renamed one re-sorts. No IPC call. */
   merge: (entity: Entity) => void
   /**
@@ -246,6 +251,16 @@ export const useEntityStore = create<EntityState>((set, get) => ({
     if (mine === generation) {
       // The name cannot change here, so the entity order is untouched.
       set({ byId: { ...get().byId, [entity.id]: entity } })
+      useTagStore.getState().merge(tag)
+    }
+    return entity
+  },
+
+  async makeRecord(tagId) {
+    const mine = generation
+    const { entity, tag } = await ipc().invoke('tag:makeRecord', { tagId })
+    if (mine === generation) {
+      get().merge(entity)
       useTagStore.getState().merge(tag)
     }
     return entity

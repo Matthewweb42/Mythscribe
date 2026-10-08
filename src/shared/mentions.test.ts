@@ -1,6 +1,13 @@
 import { Node as PmNode, Schema } from '@tiptap/pm/model'
 import { describe, expect, it } from 'vitest'
-import { findMentions, nameWords, type MentionCandidate, type MentionRange } from './mentions'
+import {
+  findMentions,
+  nameWords,
+  paragraphIndexes,
+  passageParagraphs,
+  type MentionCandidate,
+  type MentionRange
+} from './mentions'
 import type { TiptapNodeT } from './tiptap'
 
 /**
@@ -192,5 +199,50 @@ describe('findMentions', () => {
       'Rynna Falsire',
       'Rynna'
     ])
+  })
+})
+
+describe('passageParagraphs and paragraphIndexes (F-9.12)', () => {
+  const doc = docOf(
+    paragraph('Rose came in from the rain.'),
+    { type: 'paragraph' },
+    { type: 'sceneBreak' },
+    { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Later' }] },
+    {
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'At dusk' },
+        { type: 'hardBreak' },
+        { type: 'text', text: 'Rose left' },
+        { type: 'inlineTag', attrs: { id: 't', name: 'x' } },
+        { type: 'text', text: 'quietly.' }
+      ]
+    }
+  )
+
+  it('numbers the text blocks with text in order and skips empty ones and leaves', () => {
+    const paragraphs = passageParagraphs(doc)
+    expect(paragraphs.map((p) => [p.index, p.text])).toEqual([
+      [0, 'Rose came in from the rain.'],
+      [1, 'Later'],
+      [2, 'At dusk\nRose left quietly.']
+    ])
+  })
+
+  it('places each block where ProseMirror does', () => {
+    const pm = PmNode.fromJSON(schema, doc)
+    for (const p of passageParagraphs(doc)) {
+      const read = pm.textBetween(p.from, p.to, undefined, (leaf) =>
+        leaf.type.name === 'hardBreak' ? '\n' : ' '
+      )
+      expect(read).toBe(p.text)
+    }
+  })
+
+  it('answers the paragraph each mention starts in', () => {
+    const ranges = rangesOf(doc, [character('rose')], 't-rose')
+    expect(surface(doc, ranges)).toEqual(['Rose', 'Rose'])
+    expect(paragraphIndexes(passageParagraphs(doc), ranges)).toEqual([0, 2])
+    expect(paragraphIndexes(passageParagraphs(doc), [[0, 0]])).toEqual([-1])
   })
 })

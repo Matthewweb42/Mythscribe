@@ -8,6 +8,8 @@ import {
   type ExtractedTag
 } from '@shared/summary'
 import { toTagName, type TagCategory } from '@shared/tags'
+import type { EntityWrite } from '../entity/entityStore'
+import { ensureRecordForTag } from '../knowledge/records'
 import { getDismissedNames } from '../project/settingsStore'
 import { replaceAutoTags } from '../tag/documentTagStore'
 import { createTag, getTagWithUsage, listTags } from '../tag/tagStore'
@@ -54,6 +56,8 @@ export interface AutoTagsChange {
   created: Tag[]
   /** Every tag whose link to the scene was added or dropped, the created ones included, with its usage count after. */
   moved: Tag[]
+  /** F-9.12: the records (AI-made sheets) the created name tags got, in the same transaction. */
+  records: EntityWrite[]
 }
 
 /**
@@ -81,6 +85,7 @@ export function applyAutoTags(
     )
     const dismissed = new Set(getDismissedNames(tx).names)
     const createdIds: string[] = []
+    const records: EntityWrite[] = []
     const wanted: string[] = []
     for (const answered of tags) {
       const name = toTagName(answered.name)
@@ -100,6 +105,9 @@ export function applyAutoTags(
         continue
       }
       const made = createTag(tx, { name, category: answered.category }, 'ai')
+      // F-9.12 (D8): a new name has its record from the start, marked as AI-made.
+      const record = ensureRecordForTag(tx, made, 'ai')
+      if (record !== null) records.push(record)
       byName.set(name, made.id)
       createdIds.push(made.id)
       wanted.push(made.id)
@@ -110,6 +118,6 @@ export function applyAutoTags(
         const tag = getTagWithUsage(tx, id)
         return tag ? [tag] : []
       })
-    return { created: read(createdIds), moved: read(movedIds) }
+    return { created: read(createdIds), moved: read(movedIds), records }
   })
 }

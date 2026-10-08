@@ -28,6 +28,14 @@ export function listMentionsForNode(db: TreeDb, nodeId: string): TagMentions[] {
   return rows(db.select().from(tagMention).where(eq(tagMention.nodeId, nodeId)).all())
 }
 
+/** What F-9.12 stores beside a scan: the paragraph of every range, and the passage index's hash. */
+export interface ScanIndex {
+  /** Per tag, the paragraph index of each of its ranges, in the same order (`paragraphIndexes`). */
+  paragraphs?: ReadonlyMap<string, readonly number[]>
+  /** The hash of the paragraphs written to `passage_fts`; null (the default) when none were. */
+  passageHash?: string | null
+}
+
 /**
  * What one scan leaves behind, in one transaction: the document's old rows go, the tags that
  * were found get a row each, and the scan's hash is recorded. A tag with no occurrence has no
@@ -38,7 +46,8 @@ export function replaceNodeMentions(
   nodeId: string,
   mentions: Map<string, MentionRange[]>,
   contentHash: string,
-  now: Date
+  now: Date,
+  index: ScanIndex = {}
 ): void {
   const at = now.toISOString()
   db.transaction((tx) => {
@@ -52,11 +61,12 @@ export function replaceNodeMentions(
           nodeId,
           count: ranges.length,
           positions: JSON.stringify(ranges),
+          paragraphs: JSON.stringify(index.paragraphs?.get(tagId) ?? []),
           updatedAt: at
         })
         .run()
     }
-    const scan = { nodeId, contentHash, scannedAt: at }
+    const scan = { nodeId, contentHash, scannedAt: at, passageHash: index.passageHash ?? null }
     tx.insert(mentionScan)
       .values(scan)
       .onConflictDoUpdate({ target: mentionScan.nodeId, set: scan })
@@ -68,6 +78,12 @@ export function replaceNodeMentions(
 export function getScanHash(db: TreeDb, nodeId: string): string | null {
   const row = db.select().from(mentionScan).where(eq(mentionScan.nodeId, nodeId)).get()
   return row === undefined ? null : row.contentHash
+}
+
+/** The hash of the paragraphs last indexed for this document (F-9.12), or null for none. */
+export function getPassageHash(db: TreeDb, nodeId: string): string | null {
+  const row = db.select().from(mentionScan).where(eq(mentionScan.nodeId, nodeId)).get()
+  return row?.passageHash ?? null
 }
 
 /** The same for several documents in one query: what the backfill compares against on project open. */

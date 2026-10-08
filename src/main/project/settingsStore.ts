@@ -46,6 +46,7 @@ import {
 } from '@shared/observedFacts'
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
 import { DISMISSED_NAMES_KEY, DismissedNames, defaultDismissedNames } from '@shared/proposedTags'
+import { KNOWLEDGE_MODEL_KEY, KnowledgeModelState } from '@shared/knowledge'
 import { KEPT_SPELLINGS_KEY, KEPT_SPELLINGS_MAX, KeptSpellings } from '@shared/misspellings'
 import { REFERENCE_PINS_KEY, ReferencePins, defaultReferencePins } from '@shared/references'
 import {
@@ -471,6 +472,39 @@ export function getObservedDismissed(db: TreeDb): ObservedDismissed {
   }
   const parsed = ObservedDismissed.safeParse(json)
   return parsed.success ? parsed.data : defaultObservedDismissed()
+}
+
+/**
+ * Reads which knowledge-model conversions have run on this project (F-9.12) from the `settings`
+ * row under `KNOWLEDGE_MODEL_KEY`. A missing or unreadable row answers "none yet": the worst case
+ * is that the idempotent conversion runs once more.
+ */
+export function getKnowledgeModel(db: TreeDb): KnowledgeModelState {
+  const row = db.select().from(settings).where(eq(settings.key, KNOWLEDGE_MODEL_KEY)).get()
+  const fallback = KnowledgeModelState.parse({})
+  if (!row) return fallback
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return fallback
+  }
+  const parsed = KnowledgeModelState.safeParse(json)
+  return parsed.success ? parsed.data : fallback
+}
+
+/** Merges `patch` into the stored state (upsert on the settings key; other keys kept) and returns it. */
+export function setKnowledgeModel(
+  db: TreeDb,
+  patch: Partial<KnowledgeModelState>
+): KnowledgeModelState {
+  const stored = KnowledgeModelState.parse({ ...getKnowledgeModel(db), ...patch })
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: KNOWLEDGE_MODEL_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
 }
 
 /** Replaces the deleted-entity names (F-5.16; upsert on the settings key) and returns what was stored. */

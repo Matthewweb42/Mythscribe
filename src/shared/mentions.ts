@@ -169,6 +169,65 @@ function walk(node: TiptapNodeT, pos: number, runs: TextRun[]): number {
   return inner + 2
 }
 
+/**
+ * One paragraph of a stored document (F-9.12, the local knowledge index): a text block (a node
+ * with text among its children: a paragraph, a heading, a list item's paragraph) that has text,
+ * numbered from 0 in document order. Empty blocks are not numbered. `[from, to)` is the block's
+ * content in ProseMirror positions, so a mention range is placed by its start. The text joins
+ * the block's text nodes; a hard break reads as a line break and other inline leaves (an inline
+ * tag token, an image) as a space, so words on either side never run together.
+ */
+export interface Paragraph {
+  index: number
+  text: string
+  from: number
+  to: number
+}
+
+/** The document's paragraphs, by the same position arithmetic as `textRuns`. */
+export function passageParagraphs(doc: TiptapNodeT): Paragraph[] {
+  const found: Paragraph[] = []
+  let offset = 0
+  for (const child of doc.content ?? []) offset += collectParagraphs(child, offset, found)
+  return found
+}
+
+/** Collects `node`'s paragraphs and answers how many positions it takes up (as `walk` does). */
+function collectParagraphs(node: TiptapNodeT, pos: number, found: Paragraph[]): number {
+  if (typeof node.text === 'string') return node.text.length
+  if (LEAF_TYPES.has(node.type)) return 1
+  const children = node.content ?? []
+  const start = pos + 1
+  let inner = 0
+  if (children.some((child) => typeof child.text === 'string')) {
+    let text = ''
+    for (const child of children) {
+      if (typeof child.text === 'string') text += child.text
+      else text += child.type === 'hardBreak' ? '\n' : ' '
+      inner += walk(child, start + inner, [])
+    }
+    if (text.trim() !== '')
+      found.push({ index: found.length, text, from: start, to: start + inner })
+    return inner + 2
+  }
+  for (const child of children) inner += collectParagraphs(child, start + inner, found)
+  return inner + 2
+}
+
+/**
+ * The paragraph each range starts in (F-9.12: `tag_mention.paragraphs`), one per range, in the
+ * ranges' order; -1 for a range outside every paragraph, which a mention never is.
+ */
+export function paragraphIndexes(
+  paragraphs: readonly Paragraph[],
+  ranges: readonly MentionRange[]
+): number[] {
+  return ranges.map(([from]) => {
+    const hit = paragraphs.find((paragraph) => paragraph.from <= from && from < paragraph.to)
+    return hit === undefined ? -1 : hit.index
+  })
+}
+
 /** Longest first — most words, then most characters — and character tags ahead of the rest. */
 function ordered(candidates: MentionCandidate[]): MentionCandidate[] {
   return [...candidates].sort((a, b) => {

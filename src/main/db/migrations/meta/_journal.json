@@ -148,6 +148,20 @@
       "when": 1791477622133,
       "tag": "0020_story_categories",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1791497657500,
+      "tag": "0021_knowledge_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1791497662307,
+      "tag": "0022_passage_fts",
+      "breakpoints": true
     }
   ]
 }

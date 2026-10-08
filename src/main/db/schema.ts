@@ -371,6 +371,11 @@ export const tagMention = sqliteTable(
     count: integer('count').notNull(),
     /** JSON array of `[from, to]` pairs; a cell that no longer parses reads as no ranges. */
     positions: text('positions').notNull(),
+    /**
+     * F-9.12: JSON array of the paragraph index (`passageParagraphs`) each range of `positions`
+     * sits in, one per range; `[]` on a row written before F-9.12, until the rescan fills it.
+     */
+    paragraphs: text('paragraphs').notNull().default('[]'),
     updatedAt: text('updated_at').notNull()
   },
   (t) => [index('tag_mention_tag_idx').on(t.tagId), index('tag_mention_node_idx').on(t.nodeId)]
@@ -389,7 +394,13 @@ export const mentionScan = sqliteTable('mention_scan', {
     .primaryKey()
     .references(() => node.id, { onDelete: 'cascade' }),
   contentHash: text('content_hash').notNull(),
-  scannedAt: text('scanned_at').notNull()
+  scannedAt: text('scanned_at').notNull(),
+  /**
+   * F-9.12: the hash of the paragraphs last written to `passage_fts` for this document (the
+   * full-text index, a virtual table drizzle does not model: migration 0022). Null until the
+   * first scan after F-9.12; a match skips rewriting the document's passages.
+   */
+  passageHash: text('passage_hash')
 })
 export type MentionScanRow = typeof mentionScan.$inferSelect
 export type MentionScanInsert = typeof mentionScan.$inferInsert

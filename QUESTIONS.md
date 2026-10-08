@@ -12,6 +12,23 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-08 · M7 (F-8.7, F-9.12–F-9.15, F-5.24) · Knowledge model: the plan's decisions
+Plan: `plan-knowledge-model.md`. P0 (F-8.7) and P1 (F-9.12) are built; P2 onward waits until you have used P1.
+- **Confirmed by you (2026-10-08), not open:** D1 your sheet text is never overwritten; replace fields (age, status, role, allegiance, type, category) show the newest value at the viewed scene, AI-marked with a passage link, your text as the baseline; other fields list AI details under it. D3 a sheet shows "the scene I'm in" by default, with an As-of picker. D4 your edits are an undated baseline; "From scene…" in the field history dates one.
+- **Decided by Claude, unconfirmed:**
+  - D2 "story position" = reading order of the manuscript documents (timeline chronology later, if wanted). Alternative: timeline event order.
+  - D5 relationships are facts with an object record; fixed types (family, partner, friend, ally, enemy, rival, mentor, serves, member-of, owns, located-in, other) plus a free label; directed, the reverse shown on the other sheet. Alternative: a separate relation table.
+  - D6 a thread is a record in a new built-in `thread` category; its events are dated facts (opened/advanced/resolved/dropped); `plotThread` tags map to thread records; the Outline threads grid stays. Alternative: a separate threads table.
+  - D7 default statuses: manuscript facts canon (idea when the scene's status is idea), your records and facts canon, node notes plan; all flippable. Alternative: everything canon.
+  - D8 which tags get records: character, place, and world tags now (F-9.12), plot threads with the thread category (F-9.14); tone, content, and custom stay labels. Alternative: only tags you made.
+  - D9 the old `observed_fact` table is frozen after the P2 conversion and dropped only after you confirm every machine runs the new build. Alternative: drop it in P2.
+  - D10 passage search is FTS5 over manuscript paragraphs (stemmed, accents folded); notes and sheets stay on their own paths; embeddings only if the ledger and evals show FTS missing things. Alternative: index notes and sheets too, or embeddings now.
+  - D11 the P3 conversion asks first on open (scenes, estimated cost, time; Update now / Later), runs in the indexing queue, shows $0 for a local model, and is not shown with Use AI off. Alternative: run on its own under a cost cap.
+  - D12 the Changes log covers the background derivation in P2–P3, and Organise Auto, library Apply, and agent Auto sheet/tag edits in P5; summaries and cards are never logged. Alternative: log everything.
+  - D13 AI facts are sticky: a re-run adds new ones and removes an AI fact only when its quote is gone from the scene. Alternative: replace per run.
+- **F-9.12 details (decided by Claude, unconfirmed):** (1) the one-time conversion also gives every sheet without a tag its tag, as the plan says, including sheets whose tag you unticked in a library review (only the library's Project notes page is left alone); (2) a record made for a tag is named after the tag with each word capitalised ("rose-marsh" → "Rose Marsh"); (3) tag templates, a tag import, and changing a tag's category to Character do not make records by themselves (use Make a record on the tag); (4) "Make a record" on a label tag (tone, content, custom) files the record under World; (5) a paragraph is a text block with text (a paragraph, a heading, a list item's paragraph), numbered from 0, empty ones not counted. To change: `src/main/knowledge/records.ts`, `src/shared/knowledge.ts`, `passageParagraphs` in `src/shared/mentions.ts`.
+- Before installing F-9.12: copy the project folder and run Settings › Backups › Back up now (the pre-migration backup of F-8.7 runs as well).
+
 ## 2026-10-08 · F-8.7 · Migration safety: what happens when the pre-migration backup fails
 - Question: Before a schema upgrade the database is copied to the project's backups folder. What if that copy cannot be written (the chosen backup folder is on a drive that is not there, or is read-only)?
 - Chosen: the upgrade does not run and the project is left exactly as it was; opening it fails with the folder and "choose another backup folder in Settings › Backups". The newest 3 pre-migration copies are kept per project (`pre-migration-<from>-<to>-<date>.db`, beside the zip backups; the zip retention never counts them).

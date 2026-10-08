@@ -126,6 +126,8 @@ import { runReviewChat } from '../ai/reviewChat'
 import { cancelInflight, regenRequestId, registerInflight, releaseInflight } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
 import type { AutoTagsChange } from '../ai/autoTags'
+import { convertKnowledgeIndex, ensureRecordForTag, makeRecordForTag } from '../knowledge/records'
+import { prunePassages } from '../search/passageIndex'
 import type { ObservedFactsChange } from '../ai/observedFacts'
 import { IMPORT_STRUCTURE_PROMPT_VERSION } from '../ai/prompts/importStructure.v1'
 import { createProposal, listPendingProposals, settleProposal } from '../ai/proposalStore'
@@ -1272,7 +1274,12 @@ export function registerHandlers({
   // author. The scans are hash-guarded, so a document the new tag does not touch costs one hash.
   register('tag:create', (input) => {
     const db = manager.require().connection.orm
-    const created = createTag(db, input)
+    // F-9.12 (D8): a character, place, or world tag arrives with its record, in one transaction.
+    const { created, record } = db.transaction((tx) => {
+      const tag = createTag(tx, input)
+      return { created: tag, record: ensureRecordForTag(tx, tag, 'author') }
+    })
+    if (record !== null) emit(windows(), 'entity:changed', record.entity)
     rescanManuscript(db)
     // F-4.12b: the new name is a tag now, so it is proposed no longer — which is what accepting
     // a proposal comes down to. The scans that follow say nothing new about it.
@@ -1317,6 +1324,21 @@ export function registerHandlers({
       void syncSpelling()
     }
     return updated
+  })
+
+  /**
+   * F-9.12: "Make a record" on a tag. A sheet the call made or linked reaches every window as
+   * `entity:changed`; the tag itself only moved if F-9.4's link touched the bank.
+   */
+  register('tag:makeRecord', ({ tagId }) => {
+    const db = manager.require().connection.orm
+    const { entity: record, tag, write } = makeRecordForTag(db, tagId)
+    if (write !== null) {
+      emit(windows(), 'entity:changed', record)
+      publishTagChange(db, write.tagChange)
+      void syncSpelling()
+    }
+    return { entity: record, tag }
   })
 
   register('tag:delete', ({ id }) => {
@@ -1688,6 +1710,8 @@ export function registerHandlers({
    * count moved), and the scene itself as `documentTag:changed`, so an open tag bar refetches.
    */
   const publishAutoTags = (db: TreeDb, nodeId: string, change: AutoTagsChange): void => {
+    // F-9.12: the records the new name tags got reach the windows like any created sheet.
+    for (const record of change.records) emit(windows(), 'entity:changed', record.entity)
     if (change.created.length > 0) {
       rescanManuscript(db)
       publishProposed()
@@ -3681,6 +3705,18 @@ export function registerHandlers({
     clearReplaceUndo()
     // F-10.3: the session's words and active time start again with every project.
     resetGoalsSession()
+    // F-9.12: the local knowledge index, before anything reads the bank or the scenes: the
+    // one-time conversion (every name tag a record, every record a tag) and the passages of
+    // documents that left the manuscript. Local and free; a failure never stops the open.
+    if (info) {
+      try {
+        const db = manager.require().connection.orm
+        convertKnowledgeIndex(db)
+        prunePassages(db)
+      } catch (err) {
+        console.warn('Could not update the knowledge index', err)
+      }
+    }
     // F-3.11, F-3.14: the spellchecker accepts the open project's words and story names and no
     // other project's.
     void syncSpelling()

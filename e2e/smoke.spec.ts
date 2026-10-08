@@ -3609,6 +3609,10 @@ test('create, close, reopen a project on disk', async () => {
   await categories.getByRole('tab', { name: 'Characters' }).click()
   await tagRows.getByRole('button', { name: /^rose/ }).click()
   await expect(tagsPanel.getByRole('textbox', { name: 'Tag name' })).toHaveValue('rose')
+  // F-9.12: the new character tag arrived with its record, a Characters sheet named Rose.
+  await expect(tagsPanel.getByRole('button', { name: 'Open record' })).toBeVisible()
+  const roseRecord = (await listEntities()).find((entity) => entity.name === 'Rose')
+  expect(roseRecord).toMatchObject({ kind: 'character', origin: 'author' })
   await expect(tagsPanel.getByText('Used in 0 documents')).toBeVisible()
   await expect(tagsPanel.getByText('Mentioned in 1 document')).toBeVisible()
   const mentionDocs = tagsPanel.getByRole('list', { name: 'Documents mentioning this tag' })
@@ -3685,6 +3689,24 @@ test('create, close, reopen a project on disk', async () => {
   await expect(mentionList.getByRole('listitem')).toHaveText(['tash ×5', 'rose ×1'], {
     timeout: 15_000
   })
+
+  // F-9.12: Dark Forest (F-4.1), Rose, and Tash arrived with records when their tags were made.
+  // The steps below count the story bible and the scene's cast as they stood before records
+  // existed, so the three records are deleted here (their tags stay); the reopen below reloads
+  // every store.
+  for (const [name, kind] of [
+    ['Dark Forest', 'setting'],
+    ['Rose', 'character'],
+    ['Tash', 'character']
+  ] as const) {
+    const record = (await listEntities()).find((entity) => entity.name === name)
+    expect(record).toMatchObject({ kind, origin: 'author' })
+    const removed = await page.evaluate(
+      (id) => window.mythscribe.invoke('entity:delete', { id }) as Promise<IpcResult<null>>,
+      record?.id ?? ''
+    )
+    expect(removed.ok).toBe(true)
+  }
 
   // F-1.4: the native open dialog (stubbed like the save dialog) opens project.db.
   await closeProject()

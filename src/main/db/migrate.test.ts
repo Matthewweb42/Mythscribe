@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(21)
+    expect(result.version).toBe(23)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -132,6 +132,7 @@ describe('migrate', () => {
     expect(tables()).toContain('snapshot')
     expect(tables()).toContain('snapshot_text')
     expect(tables()).toContain('context_file')
+    expect(tables()).toContain('passage_fts')
   })
 })
 
@@ -898,5 +899,66 @@ describe('story_category (0020_story_categories)', () => {
       hint: '',
       fields: null
     })
+  })
+})
+
+describe('tag_mention.paragraphs, mention_scan.passage_hash, passage_fts (0021, 0022)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    // A database as the build before F-9.12 left it: migrations up to 0020, with a scan on record.
+    migrate(db, loadMigrations().slice(0, 21))
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, content, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, NULL, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '{"type":"doc"}', '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO tag (id, name, category, color, created, modified)
+       VALUES ('rose', 'rose', 'character', '#dc2626', '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO tag_mention (id, tag_id, node_id, count, positions, updated_at)
+       VALUES ('rose:scene', 'rose', 'scene', 1, '[[1,5]]', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO mention_scan (node_id, content_hash, scanned_at) VALUES ('scene', 'h', '2026-01-01')`
+    ).run()
+    migrate(db)
+  })
+  afterEach(() => db.close())
+
+  it('keeps every row of a 0020 database, with no paragraphs and no passage hash yet', () => {
+    expect(db.prepare('SELECT positions, paragraphs FROM tag_mention').get()).toEqual({
+      positions: '[[1,5]]',
+      paragraphs: '[]'
+    })
+    expect(db.prepare('SELECT content_hash, passage_hash FROM mention_scan').get()).toEqual({
+      content_hash: 'h',
+      passage_hash: null
+    })
+    expect(db.prepare('SELECT content FROM node WHERE id = ?').get('scene')).toEqual({
+      content: '{"type":"doc"}'
+    })
+  })
+
+  it('creates an empty full-text table that stems and folds diacritics', () => {
+    expect(db.prepare('SELECT COUNT(*) AS n FROM passage_fts').get()).toEqual({ n: 0 })
+    db.prepare("INSERT INTO passage_fts (node_id, para, text) VALUES ('scene', 0, ?)").run(
+      'Mara was running past the café.'
+    )
+    const hits = (query: string): number =>
+      (
+        db
+          .prepare('SELECT COUNT(*) AS n FROM passage_fts WHERE passage_fts MATCH ?')
+          .get(query) as {
+          n: number
+        }
+      ).n
+    expect(hits('"runs"')).toBe(1)
+    expect(hits('"cafe"')).toBe(1)
+    expect(hits('"mara"')).toBe(1)
+    expect(hits('"lantern"')).toBe(0)
   })
 })
