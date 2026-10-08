@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiSettings } from '@shared/aiSettings'
-import type { ContextAddResult } from '@shared/contextLibrary'
+import type { ContextAddResult, ContextReview } from '@shared/contextLibrary'
 import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
 import { resetAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
@@ -245,5 +245,125 @@ describe('useLibraryStore (F-9.8)', () => {
     expect(sent.files.map((f) => f.name)).toEqual(['people.md'])
     expect(new TextDecoder().decode(sent.files[0]?.data)).toBe('Mara is 35.')
     expect(toasts()[0]).toBe('huge.pdf: The file is larger than 25 MB.')
+  })
+})
+
+describe('the review chat (F-9.9)', () => {
+  const chatAnswer = (): Output<'library:reviewChat'> => ({
+    ok: true,
+    ops: [{ op: 'kind', item: 'e2', kind: 'setting' }],
+    reply: 'Tomas is now a place.',
+    dropped: 0,
+    usage: { inputTokens: 700, outputTokens: 40 },
+    costUsd: 0.003,
+    cached: false,
+    model: 'gpt-5.4',
+    proposalId: 'p-chat',
+    requestId: 'r'
+  })
+
+  const openReview = (): void => {
+    useLibraryStore.setState({
+      flow: { stage: 'review', review: contextReviewFixture(), busy: false }
+    })
+  }
+
+  const review = (): ContextReview => {
+    const flow = useLibraryStore.getState().flow
+    if (flow?.stage !== 'review') throw new Error('no review')
+    return flow.review
+  }
+
+  const settled = (id: string): [Channel, unknown] => [
+    'proposal:settle',
+    { id, status: 'rejected', note: null }
+  ]
+
+  it('sends the review, the message, and the earlier turns, and applies the answer at once', async () => {
+    install({ 'library:reviewChat': () => chatAnswer() })
+    openReview()
+    await useLibraryStore.getState().sendReviewChat('  Tomas is a place.  ')
+    const sent = calls.find(([channel]) => channel === 'library:reviewChat')?.[1]
+    expect(sent).toMatchObject({ message: 'Tomas is a place.', history: [] })
+    expect(review().entities.find((e) => e.id === 'e2')?.kind).toBe('setting')
+    expect(review().proposalIds).toEqual(['p1', 'p-chat'])
+    const chat = useLibraryStore.getState().chat
+    expect(chat.requestId).toBeNull()
+    expect(chat.changed).toEqual(['e2'])
+    expect(chat.entries.map((e) => [e.role, e.text])).toEqual([
+      ['user', 'Tomas is a place.'],
+      ['assistant', 'Tomas is now a place.']
+    ])
+    expect(chat.entries[1]?.changes).toEqual([
+      { text: '“Tomas” is now a setting (a new sheet).', itemIds: ['e2'], skipped: false }
+    ])
+    expect(chat.entries[1]?.request).toMatchObject({ model: 'gpt-5.4', costUsd: 0.003 })
+
+    await useLibraryStore.getState().sendReviewChat('Thanks.')
+    const second = calls.filter(([channel]) => channel === 'library:reviewChat')[1]?.[1]
+    expect(second).toMatchObject({
+      history: [
+        { role: 'user', content: 'Tomas is a place.' },
+        { role: 'assistant', content: 'Tomas is now a place.' }
+      ]
+    })
+  })
+
+  it('undoes the last change and settles its proposal; a manual edit drops the Undo', async () => {
+    install({ 'library:reviewChat': () => chatAnswer() })
+    openReview()
+    await useLibraryStore.getState().sendReviewChat('Tomas is a place.')
+    useLibraryStore.getState().undoReviewChat()
+    expect(review()).toEqual(contextReviewFixture())
+    await vi.waitFor(() => expect(calls).toContainEqual(settled('p-chat')))
+    expect(useLibraryStore.getState().chat).toMatchObject({ undo: null, changed: [] })
+
+    await useLibraryStore.getState().sendReviewChat('Tomas is a place.')
+    expect(useLibraryStore.getState().chat.undo).not.toBeNull()
+    useLibraryStore.getState().edit((r) => ({ ...r, notes: { ...r.notes, include: false } }))
+    expect(useLibraryStore.getState().chat.undo).toBeNull()
+  })
+
+  it('shows a failure in the log, never as a turn, and keeps the review as it was', async () => {
+    install({
+      'library:reviewChat': () => ({
+        ok: false,
+        code: 'RATE_LIMIT',
+        message: 'The provider is busy.',
+        nextStep: 'Wait a minute.',
+        requestId: 'r'
+      })
+    })
+    openReview()
+    await useLibraryStore.getState().sendReviewChat('Merge them.')
+    expect(review()).toEqual(contextReviewFixture())
+    expect(useLibraryStore.getState().chat.entries.at(-1)).toMatchObject({
+      role: 'assistant',
+      text: 'The provider is busy. Wait a minute.',
+      failed: true
+    })
+    await useLibraryStore.getState().sendReviewChat('Again.')
+    const sent = calls.filter(([channel]) => channel === 'library:reviewChat')[1]?.[1]
+    expect(sent).toMatchObject({ history: [{ role: 'user', content: 'Merge them.' }] })
+  })
+
+  it('keeps Apply shut while the AI answers, and drops an answer that comes after Cancel', async () => {
+    let answer: (value: Output<'library:reviewChat'>) => void = () => {}
+    install({
+      'library:reviewChat': () =>
+        new Promise<Output<'library:reviewChat'>>((resolve) => (answer = resolve)),
+      'ai:cancel': () => ({ cancelled: true })
+    })
+    openReview()
+    const pending = useLibraryStore.getState().sendReviewChat('Merge them.')
+    expect(useLibraryStore.getState().chat.requestId).not.toBeNull()
+    await useLibraryStore.getState().apply()
+    expect(channelsCalled()).not.toContain('library:apply')
+    useLibraryStore.getState().discard()
+    answer(chatAnswer())
+    await pending
+    expect(useLibraryStore.getState().flow).toBeNull()
+    expect(useLibraryStore.getState().chat.entries).toEqual([])
+    await vi.waitFor(() => expect(calls).toContainEqual(settled('p-chat')))
   })
 })

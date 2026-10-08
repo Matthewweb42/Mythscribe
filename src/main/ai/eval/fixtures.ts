@@ -215,8 +215,22 @@ import {
   CONTEXT_CHUNK_CHARS,
   CONTEXT_IMAGE_NAMES_MAX,
   chunkParagraphs,
-  splitParagraphs
+  splitParagraphs,
+  type ContextRecord,
+  type ContextReview,
+  type ContextReviewEntity
 } from '@shared/contextLibrary'
+import {
+  REVIEW_CHAT_HISTORY_TURNS,
+  REVIEW_CHAT_MESSAGE_MAX,
+  REVIEW_CHAT_TURN_CHARS,
+  type ReviewOp
+} from '@shared/reviewChat'
+import {
+  buildReviewChatPrompt,
+  REVIEW_CHAT_PROMPT_VERSION,
+  type BuildReviewChatPromptInput
+} from '../prompts/reviewChat.v1'
 import {
   buildQueryPrompt,
   QUERY_PROMPT_VERSION,
@@ -637,6 +651,11 @@ export interface EvalCase {
      * every entity must be of a known kind with a name, and every name in `expected` must be found.
      */
     | { kind: 'contextImport'; expected: string[] }
+    /**
+     * A review chat message (F-9.9): the answer must parse through the feature's own parser with
+     * no operation dropped, and hold an operation of each kind in `expected`.
+     */
+    | { kind: 'reviewChat'; expected: ReviewOp['op'][] }
 }
 
 const general = builtinParams('general')
@@ -1663,6 +1682,141 @@ const CONTEXT_MAXED_CHUNK =
     splitParagraphs(Array.from({ length: 40 }, () => CONTEXT_DOCUMENT).join('\n\n')),
     CONTEXT_CHUNK_CHARS
   )[0] ?? ''
+
+function reviewRecord(id: string, name: string, over: Partial<ContextRecord> = {}): ContextRecord {
+  return {
+    id,
+    fileId: 'f1',
+    fileName: 'lore.md',
+    kind: 'character',
+    name,
+    aliases: [],
+    fields: {},
+    details: [],
+    ...over
+  }
+}
+
+function reviewItem(
+  id: string,
+  records: ContextRecord[],
+  over: Partial<ContextReviewEntity> = {}
+): ContextReviewEntity {
+  return {
+    id,
+    kind: records[0]?.kind ?? 'character',
+    name: records[0]?.name ?? id,
+    existingId: null,
+    include: true,
+    tag: true,
+    records,
+    fields: [],
+    details: records.flatMap((record) => record.details),
+    includeDetails: true,
+    images: [],
+    ...over
+  }
+}
+
+/** A review as the author meets it: a person split under two names, a place read as a person, a war left in the notes. */
+function reviewChatReview(): ContextReview {
+  return {
+    fileIds: ['f1'],
+    entities: [
+      reviewItem(
+        'e1',
+        [
+          reviewRecord('r1', 'Rynna', {
+            fields: { age: '31' },
+            details: ['History: heir to the Falsire seat, raised at the coast.']
+          })
+        ],
+        {
+          fields: [{ field: 'age', upload: '31', existing: null, include: true, choice: 'upload' }]
+        }
+      ),
+      reviewItem('e2', [
+        reviewRecord('r2', 'High Crown Falsire', {
+          aliases: ['the High Crown'],
+          details: ['Rule: the High Crown speaks for the eastern houses at council.']
+        })
+      ]),
+      reviewItem('e3', [
+        reviewRecord('r3', 'Kael', {
+          details: ['Overview: a harbour city on the east coast, walled, with a salt market.']
+        })
+      ])
+    ],
+    notes: {
+      existingId: null,
+      paragraphs: [
+        'Ashfall War: the war that burned the southern forests two hundred years ago.',
+        'Theme: inheritance as a debt.'
+      ],
+      include: true
+    },
+    proposalIds: ['p1'],
+    chunks: 1,
+    usage: { inputTokens: 1_200, outputTokens: 400 },
+    costUsd: 0.01,
+    model: 'gpt-5.4',
+    promptVersion: 'contextImport.v1'
+  }
+}
+
+/** A review at the listing caps: 150 items with fields and details, 60 long notes. */
+function maxedReviewChatReview(): ContextReview {
+  const long = FIXTURE_PASSAGE.repeat(2)
+  return {
+    ...reviewChatReview(),
+    entities: Array.from({ length: 150 }, (_, i) =>
+      reviewItem(
+        `e${i + 1}`,
+        [
+          reviewRecord(`r${i + 1}`, `Character ${i}`, {
+            aliases: [`Alias ${i}`],
+            fields: { age: String(20 + (i % 50)), appearance: long.slice(0, 200) },
+            details: [long.slice(0, 300), long.slice(300, 600), long.slice(600, 900)]
+          })
+        ],
+        {
+          fields: [
+            { field: 'age', upload: '30', existing: '29', include: true, choice: 'existing' },
+            {
+              field: 'appearance',
+              upload: long.slice(0, 200),
+              existing: null,
+              include: true,
+              choice: 'upload'
+            }
+          ]
+        }
+      )
+    ),
+    notes: {
+      existingId: null,
+      paragraphs: Array.from({ length: 60 }, (_, i) => `${i + 1}: ${long.slice(0, 400)}`),
+      include: true
+    }
+  }
+}
+
+function reviewChatCase(
+  name: string,
+  note: string,
+  input: BuildReviewChatPromptInput,
+  expected: ReviewOp['op'][]
+): EvalCase {
+  const built = buildReviewChatPrompt(input)
+  return {
+    version: REVIEW_CHAT_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'reviewChat', expected }
+  }
+}
 
 function queryCase(name: string, note: string, input: BuildQueryPromptInput): EvalCase {
   const built = buildQueryPrompt(input)
@@ -3147,5 +3301,48 @@ export const EVAL_CASES: EvalCase[] = [
       text: CONTEXT_MAXED_CHUNK
     },
     ['Mara Vell']
+  ),
+  reviewChatCase(
+    'merge',
+    'a person read under two names, merged under her full name',
+    {
+      review: reviewChatReview(),
+      history: [],
+      message: 'Merge Rynna and High Crown Falsire. Her full name is Rynna Falsire.'
+    },
+    ['merge']
+  ),
+  reviewChatCase(
+    'kind',
+    'a place the sort read as a person',
+    { review: reviewChatReview(), history: [], message: 'Kael is a place, not a character.' },
+    ['kind']
+  ),
+  reviewChatCase(
+    'fromNotes',
+    'a war left in Project notes that belongs in the World tab, after an earlier turn',
+    {
+      review: reviewChatReview(),
+      history: [
+        { role: 'user', content: 'Kael is a place, not a character.' },
+        { role: 'assistant', content: 'Kael is now a setting.' }
+      ],
+      message: 'Put the Ashfall war in World, not Notes.'
+    },
+    ['fromNotes']
+  ),
+  reviewChatCase(
+    'maxed',
+    'the one retry at the larger cap: a review at both listing caps, every turn and the message at their caps',
+    {
+      review: maxedReviewChatReview(),
+      history: Array.from({ length: REVIEW_CHAT_HISTORY_TURNS }, (_, i) => ({
+        role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+        content: FIXTURE_PASSAGE.repeat(2).slice(0, REVIEW_CHAT_TURN_CHARS)
+      })),
+      message: `Tidy this up. ${FIXTURE_PASSAGE.repeat(4)}`.slice(0, REVIEW_CHAT_MESSAGE_MAX),
+      retry: true
+    },
+    []
   )
 ]

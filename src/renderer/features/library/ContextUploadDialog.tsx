@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import {
   canSplit,
   reviewHasChanges,
@@ -8,6 +8,7 @@ import {
   type ContextReviewField
 } from '@shared/contextLibrary'
 import { ENTITY_FIELDS, ENTITY_KIND_NOUN, entityTagName } from '@shared/entities'
+import { itemAliases, REVIEW_CHAT_MESSAGE_MAX, REVIEW_NOTES_ID } from '@shared/reviewChat'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
@@ -199,6 +200,8 @@ function Review({ review, busy }: { review: ContextReview; busy: boolean }): Rea
   const discard = useLibraryStore((s) => s.discard)
   const apply = useLibraryStore((s) => s.apply)
   const edit = useLibraryStore((s) => s.edit)
+  const changed = useLibraryStore((s) => s.chat.changed)
+  const asking = useLibraryStore((s) => s.chat.requestId !== null)
   const setAll = (include: boolean): void =>
     edit((r) => ({
       ...r,
@@ -217,10 +220,13 @@ function Review({ review, busy }: { review: ContextReview; busy: boolean }): Rea
       </div>
       <ul className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-3" data-testid="library-review">
         {review.entities.map((item) => (
-          <EntityCard key={item.id} item={item} busy={busy} />
+          <EntityCard key={item.id} item={item} busy={busy} changed={changed.includes(item.id)} />
         ))}
-        {review.notes.paragraphs.length > 0 ? <NotesCard review={review} busy={busy} /> : null}
+        {review.notes.paragraphs.length > 0 ? (
+          <NotesCard review={review} busy={busy} changed={changed.includes(REVIEW_NOTES_ID)} />
+        ) : null}
       </ul>
+      <ReviewChat busy={busy} />
       <div className="flex shrink-0 items-center gap-2 border-t border-line px-5 py-3">
         <span
           className="flex-1 text-xs text-fg-subtle tabular-nums"
@@ -247,7 +253,7 @@ function Review({ review, busy }: { review: ContextReview; busy: boolean }): Rea
         <button
           type="button"
           data-testid="library-apply"
-          disabled={busy || !reviewHasChanges(review)}
+          disabled={busy || asking || !reviewHasChanges(review)}
           onClick={() => void apply()}
           className={PRIMARY}
         >
@@ -270,13 +276,28 @@ function useItemEdit(
     }))
 }
 
+/** The badge on a card the last chat change touched (F-9.9). */
+function ChangedBadge(): React.JSX.Element {
+  return (
+    <span
+      className="rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-accent-fg"
+      data-testid="library-item-changed"
+    >
+      Changed
+    </span>
+  )
+}
+
 function EntityCard({
   item,
-  busy
+  busy,
+  changed
 }: {
   item: ContextReviewEntity
   busy: boolean
+  changed: boolean
 }): React.JSX.Element {
+  const aliases = itemAliases(item)
   const editItem = useItemEdit(item.id)
   const split = useLibraryStore((s) => s.split)
   const off = busy || !item.include
@@ -293,9 +314,10 @@ function EntityCard({
     }))
   return (
     <li
-      className="m-0 mb-2 list-none rounded-md border border-line p-3"
+      className={`m-0 mb-2 list-none rounded-md border p-3 ${changed ? 'border-accent' : 'border-line'}`}
       data-testid="library-item"
       data-item-name={item.name}
+      data-changed={changed ? 'true' : undefined}
     >
       <div className="flex items-center gap-2">
         <input
@@ -312,7 +334,13 @@ function EntityCard({
           {ENTITY_KIND_NOUN[item.kind]} ·{' '}
           {item.existingId === null ? 'new sheet' : 'existing sheet'}
         </span>
+        {changed ? <ChangedBadge /> : null}
       </div>
+      {aliases.length > 0 ? (
+        <p className="mt-1 mb-0 text-xs text-fg-muted" data-testid="library-item-aliases">
+          {`Also called: ${aliases.join(', ')}`}
+        </p>
+      ) : null}
       {item.records.length > 1 || (item.existingId !== null && item.records.length > 0) ? (
         <p className="mt-1 mb-0 text-xs text-fg-subtle" data-testid="library-matches">
           {'Matched: '}
@@ -439,12 +467,21 @@ function EntityCard({
   )
 }
 
-function NotesCard({ review, busy }: { review: ContextReview; busy: boolean }): React.JSX.Element {
+function NotesCard({
+  review,
+  busy,
+  changed
+}: {
+  review: ContextReview
+  busy: boolean
+  changed: boolean
+}): React.JSX.Element {
   const edit = useLibraryStore((s) => s.edit)
   return (
     <li
-      className="m-0 mb-2 list-none rounded-md border border-line p-3"
+      className={`m-0 mb-2 list-none rounded-md border p-3 ${changed ? 'border-accent' : 'border-line'}`}
       data-testid="library-notes"
+      data-changed={changed ? 'true' : undefined}
     >
       <label className="flex items-center gap-2">
         <input
@@ -460,6 +497,7 @@ function NotesCard({ review, busy }: { review: ContextReview; busy: boolean }): 
         <span className="text-xs text-fg-muted">
           World tab · {review.notes.existingId === null ? 'new page' : 'added to the page'}
         </span>
+        {changed ? <ChangedBadge /> : null}
       </label>
       <div className="mt-2 pl-6">
         {review.notes.paragraphs.map((paragraph) => (
@@ -469,5 +507,148 @@ function NotesCard({ review, busy }: { review: ContextReview; busy: boolean }): 
         ))}
       </div>
     </li>
+  )
+}
+
+/**
+ * The review chat (F-9.9): a message box under the review. The author says what to change
+ * ("merge Rynna and High Crown Falsire", "Kael is a place"); the AI's operations land on the
+ * review at once, each listed under its reply (skipped ones with why), the cards they touched
+ * marked Changed, and Undo puts the review back. Nothing is written until Apply.
+ */
+function ReviewChat({ busy }: { busy: boolean }): React.JSX.Element {
+  const chat = useLibraryStore((s) => s.chat)
+  const send = useLibraryStore((s) => s.sendReviewChat)
+  const stop = useLibraryStore((s) => s.cancelReviewChat)
+  const undo = useLibraryStore((s) => s.undoReviewChat)
+  const [draft, setDraft] = useState('')
+  const log = useRef<HTMLOListElement>(null)
+  const asking = chat.requestId !== null
+  const inputId = useId()
+
+  useEffect(() => {
+    const el = log.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [chat.entries.length])
+
+  const submit = (): void => {
+    if (asking || busy || draft.trim() === '') return
+    const message = draft
+    setDraft('')
+    void send(message)
+  }
+
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      submit()
+    } else if (event.key === 'Escape' && asking) {
+      // Escape stops the answer under way rather than closing the whole review.
+      event.preventDefault()
+      event.stopPropagation()
+      stop()
+    }
+  }
+
+  return (
+    <div className="shrink-0 border-t border-line px-5 pt-2 pb-3" data-testid="review-chat">
+      {chat.entries.length > 0 ? (
+        <ol
+          ref={log}
+          className="m-0 mb-2 max-h-40 list-none overflow-y-auto p-0 text-sm"
+          aria-live="polite"
+          data-testid="review-chat-log"
+        >
+          {chat.entries.map((entry) => (
+            <li
+              key={entry.id}
+              className="m-0 mb-1.5"
+              data-testid="review-chat-entry"
+              data-role={entry.role}
+            >
+              <span
+                className={
+                  entry.role === 'user'
+                    ? 'font-medium'
+                    : entry.failed
+                      ? 'text-danger'
+                      : 'text-fg-muted'
+                }
+              >
+                {entry.role === 'user' ? 'You: ' : 'AI: '}
+                {entry.text}
+              </span>
+              {entry.changes.length > 0 ? (
+                <ul className="m-0 mt-0.5 list-disc pl-5 text-xs">
+                  {entry.changes.map((change, i) => (
+                    <li
+                      key={i}
+                      className={change.skipped ? 'text-fg-subtle' : ''}
+                      data-testid="review-chat-change"
+                      data-skipped={change.skipped ? 'true' : undefined}
+                    >
+                      {change.text}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {entry.request !== null ? (
+                <span className="block text-xs text-fg-subtle tabular-nums">
+                  <RequestCost request={entry.request} />
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      <label htmlFor={inputId} className="mb-1 block text-xs text-fg-muted">
+        Tell the AI what to change. You see every change before you apply.
+      </label>
+      <div className="flex items-end gap-2">
+        <textarea
+          id={inputId}
+          rows={2}
+          value={draft}
+          maxLength={REVIEW_CHAT_MESSAGE_MAX}
+          disabled={busy}
+          placeholder="“Merge Rynna and High Crown Falsire”, “Kael is a place, not a character”…"
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={onKeyDown}
+          data-testid="review-chat-input"
+          className="min-h-0 flex-1 resize-none rounded-md border border-line bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
+        />
+        {chat.undo !== null && !asking ? (
+          <button
+            type="button"
+            className={BUTTON}
+            disabled={busy}
+            onClick={undo}
+            data-testid="review-chat-undo"
+          >
+            Undo
+          </button>
+        ) : null}
+        {asking ? (
+          <button type="button" className={BUTTON} onClick={stop} data-testid="review-chat-stop">
+            Stop
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={BUTTON}
+            disabled={busy || draft.trim() === ''}
+            onClick={submit}
+            data-testid="review-chat-send"
+          >
+            Send
+          </button>
+        )}
+      </div>
+      {asking ? (
+        <p className="m-0 mt-1 text-xs text-fg-muted" role="status">
+          The AI is changing the review…
+        </p>
+      ) : null}
+    </div>
   )
 }

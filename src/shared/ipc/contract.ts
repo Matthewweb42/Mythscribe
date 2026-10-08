@@ -65,6 +65,7 @@ import {
   ContextReview
 } from '../contextLibrary'
 import { ContinuityFinding } from '../continuity'
+import { REVIEW_CHAT_MESSAGE_MAX, ReviewChatResult, ReviewChatTurn } from '../reviewChat'
 import { CritiqueNotes } from '../critique'
 import {
   DiagnosticsState,
@@ -1562,6 +1563,23 @@ export const contract = {
    * ALREADY_EXISTS; either rolls everything back. Tags created here reach every bank as
    * `tag:changed` and the manuscript is rescanned once.
    */
+  /**
+   * The review chat (F-9.9): the author's instruction about the pending review, answered by the
+   * strong tier as operations on it (`ReviewOp`) and a one-sentence reply. One request (and one
+   * retry of an answer that was cut off), one ledger row each, one proposal the renderer adds to
+   * the review's `proposalIds`. Expected AI failures (Use AI or the toggle off, no key, the cap,
+   * a stop through `ai:cancel { requestId }`) are data. Writes nothing: the renderer applies the
+   * operations to the review it holds.
+   */
+  'library:reviewChat': {
+    input: z.object({
+      review: ContextReview,
+      message: z.string().trim().min(1).max(REVIEW_CHAT_MESSAGE_MAX),
+      history: z.array(ReviewChatTurn).max(40),
+      requestId: z.string()
+    }),
+    output: ReviewChatResult
+  },
   'library:apply': {
     input: z.object({ review: ContextReview }),
     output: ContextApplyCounts.extend({

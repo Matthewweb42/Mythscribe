@@ -121,7 +121,8 @@ describe('budgets', () => {
       voiceNotes: 400,
       editPass: 4_000,
       agent: 3_000,
-      contextImport: 6_000
+      contextImport: 6_000,
+      reviewChat: 3_000
     })
     expect(Object.keys(FEATURE_INPUT_BUDGETS).sort()).toEqual(Object.keys(FEATURE_BUDGETS).sort())
     for (const feature of AI_FEATURE_IDS) {

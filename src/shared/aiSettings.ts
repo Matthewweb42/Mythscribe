@@ -435,6 +435,15 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'images themselves), only after you confirm the estimate.',
     minDial: 1
   },
+  reviewChat: {
+    label: 'Upload review chat',
+    sends:
+      'Only when you send a message on the review of an upload: your message, the last 4 turns ' +
+      'of that conversation, and the pending review as a list (each sheet’s name, kind, other ' +
+      'names, file names, field values, and the opening of its details, up to 14,000 ' +
+      'characters) with the opening of each Project note (up to 3,000 characters).',
+    minDial: 1
+  },
   authorMode: {
     label: 'Author mode',
     sends: "The active scene's text, referenced notes, the scene brief, and your instruction.",

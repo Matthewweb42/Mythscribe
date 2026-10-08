@@ -340,6 +340,28 @@ function contextImportAnswer(messages: { role: string; content: string }[]): str
     images: []
   })
 }
+/**
+ * F-9.9: the opening of the review chat prompt's system turn (`REVIEW_CHAT_RULES` in
+ * `src/main/ai/prompts/reviewChat.v1.ts`, repeated here for the same reason). The answer reads
+ * the item ids from the listed review: Tomas Reed gets the alias "Tom", and a rename of Mara's
+ * existing sheet comes back too, which the review skips with its reason.
+ */
+const REVIEW_CHAT_SENTINEL = 'You are the review assistant inside a novel-writing app.'
+function reviewChatAnswer(messages: { role: string; content: string }[]): string {
+  const listing = messages[1]?.content ?? ''
+  const idOf = (name: string): string =>
+    listing
+      .split('\n')
+      .find((line) => line.includes(` · ${name} · `))
+      ?.split(' · ')[0] ?? ''
+  return JSON.stringify({
+    reply: 'Tomas Reed also goes by Tom.',
+    ops: [
+      { op: 'aliases', item: idOf('Tomas Reed'), aliases: ['Tom'] },
+      { op: 'rename', item: idOf('Mara'), name: 'Mara Vell' }
+    ]
+  })
+}
 const BETA_READER_NOTE = 'I expect the ridge to matter: she keeps looking at it.'
 const BETA_READER_ANSWER = JSON.stringify({
   items: [
@@ -652,6 +674,10 @@ function startFakeOpenAi(): Promise<string> {
           const contextImport = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(CONTEXT_IMPORT_SENTINEL)
           )
+          // F-9.9: a review chat message comes back as operations on the listed review.
+          const reviewChat = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(REVIEW_CHAT_SENTINEL)
+          )
           // F-5.19: the router picks editor's notes for the routed step's message, else chat.
           const route = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(ROUTE_SENTINEL)
@@ -729,44 +755,46 @@ function startFakeOpenAi(): Promise<string> {
                     content: json
                       ? contextImport
                         ? contextImportAnswer(request.messages)
-                        : chatAgent
-                          ? chatAgentReply(request.messages)
-                          : route
-                            ? JSON.stringify({
-                                action: (request.messages.at(-1)?.content ?? '').includes(
-                                  ROUTE_CRITIQUE_MESSAGE
-                                )
-                                  ? 'critique'
-                                  : 'chat',
-                                instruction: null
-                              })
-                            : synopsis
-                              ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
-                              : notesSuggest
-                                ? JSON.stringify({ points: SUGGESTED_POINTS })
-                                : whatNext
-                                  ? WHAT_NEXT_ANSWER
-                                  : editPass
-                                    ? EDIT_PASS_ANSWER
-                                    : proofread
-                                      ? PROOFREAD_ANSWER
-                                      : continuity
-                                        ? continuityAnswer(request.messages)
-                                        : importStructure
-                                          ? IMPORT_STRUCTURE_ANSWER
-                                          : critique
-                                            ? CRITIQUE_ANSWER
-                                            : betaReader
-                                              ? BETA_READER_ANSWER
-                                              : query
-                                                ? QUERY_ANSWER
-                                                : brief
-                                                  ? BRIEF_ANSWER
-                                                  : summary
-                                                    ? SUMMARY_ANSWER
-                                                    : regen
-                                                      ? '{"tags":["antagonist","protagonist"]}'
-                                                      : '{"tags":["dark-forest","protagonist"]}'
+                        : reviewChat
+                          ? reviewChatAnswer(request.messages)
+                          : chatAgent
+                            ? chatAgentReply(request.messages)
+                            : route
+                              ? JSON.stringify({
+                                  action: (request.messages.at(-1)?.content ?? '').includes(
+                                    ROUTE_CRITIQUE_MESSAGE
+                                  )
+                                    ? 'critique'
+                                    : 'chat',
+                                  instruction: null
+                                })
+                              : synopsis
+                                ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
+                                : notesSuggest
+                                  ? JSON.stringify({ points: SUGGESTED_POINTS })
+                                  : whatNext
+                                    ? WHAT_NEXT_ANSWER
+                                    : editPass
+                                      ? EDIT_PASS_ANSWER
+                                      : proofread
+                                        ? PROOFREAD_ANSWER
+                                        : continuity
+                                          ? continuityAnswer(request.messages)
+                                          : importStructure
+                                            ? IMPORT_STRUCTURE_ANSWER
+                                            : critique
+                                              ? CRITIQUE_ANSWER
+                                              : betaReader
+                                                ? BETA_READER_ANSWER
+                                                : query
+                                                  ? QUERY_ANSWER
+                                                  : brief
+                                                    ? BRIEF_ANSWER
+                                                    : summary
+                                                      ? SUMMARY_ANSWER
+                                                      : regen
+                                                        ? '{"tags":["antagonist","protagonist"]}'
+                                                        : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -4477,10 +4505,10 @@ test('create, close, reopen a project on disk', async () => {
   expect(lastAgentBody?.messages[0]?.content).toContain(AGENT_EDIT_RULES_OPENING)
   expect(
     lastAgentBody?.messages.some(
-        (m) =>
-          m.content ===
-          `Continue the scene in this direction: ${WHAT_NEXT_TITLES[0]}. She doubts the crossing and heads back to the camp.`
-      )
+      (m) =>
+        m.content ===
+        `Continue the scene in this direction: ${WHAT_NEXT_TITLES[0]}. She doubts the crossing and heads back to the camp.`
+    )
   ).toBe(true)
   // 2026-10-07: the insertion lands in the editor as ghost text (the draft streams in at the
   // caret); the card mirrors it, and Tab in the editor accepts it.
@@ -5961,6 +5989,26 @@ test('create, close, reopen a project on disk', async () => {
   await expect(libraryReview.getByTestId('library-notes')).toContainText(
     'Theme: The book is about debts'
   )
+  // F-9.9: the review chat. The author asks for a change; the fake server answers operations on
+  // the listed review: Tomas Reed's card shows the new name and is marked Changed, the reply
+  // lists each change with the one the review could not do (renaming an existing sheet) and why,
+  // and the cost line is there. Nothing was written: Apply still decides.
+  const reviewChat = libraryDialog.getByTestId('review-chat')
+  await reviewChat.getByTestId('review-chat-input').fill('Tomas Reed is also called Tom.')
+  await reviewChat.getByTestId('review-chat-send').click()
+  const tomasItem = libraryReview.locator('[data-item-name="Tomas Reed"]')
+  await expect(tomasItem.getByTestId('library-item-changed')).toBeVisible({ timeout: 15_000 })
+  await expect(tomasItem.getByTestId('library-item-aliases')).toHaveText('Also called: Tom')
+  await expect(reviewChat.getByTestId('review-chat-change')).toHaveText([
+    '“Tomas Reed” is also called “Tom”.',
+    'Rename skipped: “Mara” is an existing sheet; rename it in the story bible.'
+  ])
+  await expect(reviewChat.getByTestId('review-chat-entry').last()).toContainText(
+    'AI: Tomas Reed also goes by Tom.'
+  )
+  expect(
+    openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(REVIEW_CHAT_SENTINEL))
+  ).toHaveLength(1)
   await libraryDialog.getByTestId('library-apply').click()
   await expect(libraryDialog).toHaveCount(0)
   await expect(libraryPanel.getByTestId('library-file-state')).toHaveText(['Sorted', 'Sorted'])
@@ -5991,6 +6039,7 @@ test('create, close, reopen a project on disk', async () => {
   expect(
     (await usageSummary()).byFeature.find((f) => f.feature === 'contextImport')?.requests
   ).toBe(2)
+  expect((await usageSummary()).byFeature.find((f) => f.feature === 'reviewChat')?.requests).toBe(1)
   await dismissToasts()
   await sidebarTabs.getByRole('tab', { name: 'Manuscript' }).click()
 

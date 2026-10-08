@@ -36,6 +36,7 @@ import {
 } from '@shared/entityExchange'
 import type { Background } from '@shared/focus'
 import type { ContextProcessResult } from '@shared/contextLibrary'
+import type { ReviewChatResult } from '@shared/reviewChat'
 import type { ImportDetectResult, PendingTagProposal } from '@shared/importStructure'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
 import { VOICE_JOB_DEBOUNCE_MS } from '@shared/voice'
@@ -116,6 +117,7 @@ import { draftBrief } from '../ai/draftBrief'
 import { generateGhostText } from '../ai/ghostText'
 import { detectImportStructure } from '../ai/importStructure'
 import { estimateContextImport, sortContextFiles } from '../ai/contextImport'
+import { runReviewChat } from '../ai/reviewChat'
 import { cancelInflight, regenRequestId, registerInflight, releaseInflight } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
 import type { AutoTagsChange } from '../ai/autoTags'
@@ -1790,6 +1792,32 @@ export function registerHandlers({
       releaseInflight(requestId)
     }
   })
+
+  // F-9.9: the review chat. Like `library:process`, the parent `requestId` is registered here so
+  // `ai:cancel` stops the request or its retry; expected AI failures come back as data.
+  register(
+    'library:reviewChat',
+    async ({ review, message, history, requestId }): Promise<ReviewChatResult> => {
+      const db = manager.require().connection.orm
+      const controller = registerInflight(requestId)
+      try {
+        const answer = await runReviewChat(db, requestDeps(db), {
+          review,
+          message,
+          history,
+          requestId,
+          signal: controller.signal
+        })
+        return { ok: true, ...answer, requestId }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      } finally {
+        releaseInflight(requestId)
+      }
+    }
+  )
 
   /**
    * F-9.8: the reviewed upload, in one transaction. As with `entity:importCommit`, the manuscript

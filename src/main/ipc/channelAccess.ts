@@ -133,6 +133,7 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'library:open': 'read',
   'library:estimate': 'read',
   'library:process': 'ai',
+  'library:reviewChat': 'ai',
   'library:apply': 'write',
   'observedFact:listForEntity': 'read',
   'observedFact:setHidden': 'write',
