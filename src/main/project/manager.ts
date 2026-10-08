@@ -1,6 +1,8 @@
 import path from 'node:path'
+import type { CloudProvider } from '@shared/cloudSync'
 import type { NovelFormat, ProjectInfo } from '@shared/ipc/contract'
 import { AppError } from '../ipc/errors'
+import { cloudProviderFor } from './cloudFolder'
 import {
   DB_FILE,
   createProject,
@@ -8,15 +10,33 @@ import {
   type CreateProjectOptions,
   type ProjectSession
 } from './projectStore'
+import { WorkingCopy } from './workingCopy'
 
 type Listener = (info: ProjectInfo | null) => void
 type BeforeCloseListener = (session: ProjectSession) => void
+
+export interface ProjectManagerOptions {
+  /**
+   * Where working copies of projects in cloud-synced folders live (2026-10-08): userData's
+   * `working/` in the app. Absent, every project opens in place (the unit tests).
+   */
+  workingRoot?: () => string
+  /** Which sync app holds a folder; `cloudProviderFor` unless a test says otherwise. */
+  detectCloud?: (folder: string) => CloudProvider | null
+}
 
 /** Owns the single open project and notifies listeners when it changes. */
 export class ProjectManager {
   private session: ProjectSession | null = null
   private readonly listeners = new Set<Listener>()
   private readonly beforeClose = new Set<BeforeCloseListener>()
+  private readonly workingRoot: (() => string) | null
+  private readonly detectCloud: (folder: string) => CloudProvider | null
+
+  constructor(options: ProjectManagerOptions = {}) {
+    this.workingRoot = options.workingRoot ?? null
+    this.detectCloud = options.detectCloud ?? ((folder) => cloudProviderFor(folder))
+  }
 
   current(): ProjectInfo | null {
     return this.session?.info ?? null
@@ -34,16 +54,29 @@ export class ProjectManager {
     format: NovelFormat,
     options: CreateProjectOptions = {}
   ): ProjectInfo {
-    const next = createProject(folder, name, format, options)
+    const next = createProject(folder, name, format, {
+      ...options,
+      workingCopy: (target) => this.workingCopyFor(target, 'create')
+    })
     this.replace(next)
     return next.info
   }
 
   open(folder: string): ProjectInfo {
     this.closeIfOpen(folder)
-    const next = openProject(folder)
+    const next = openProject(folder, (target) => this.workingCopyFor(target, 'open'))
     this.replace(next)
     return next.info
+  }
+
+  /** A local working copy for a project in a cloud-synced folder; null for a plain folder. */
+  private workingCopyFor(folder: string, mode: 'open' | 'create'): WorkingCopy | null {
+    if (this.workingRoot === null) return null
+    const provider = this.detectCloud(folder)
+    if (provider === null) return null
+    return mode === 'open'
+      ? WorkingCopy.open(folder, this.workingRoot(), provider)
+      : WorkingCopy.create(folder, this.workingRoot(), provider)
   }
 
   /**

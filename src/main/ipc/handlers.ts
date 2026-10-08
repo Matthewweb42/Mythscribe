@@ -86,6 +86,7 @@ import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import type { AccountService } from '../account/accountService'
 import type { AppAccessService } from '../account/appAccess'
 import type { BackupService } from '../backups/backupService'
+import type { CloudSyncService } from '../project/cloudSyncService'
 import type { DiagnosticsService } from '../diagnostics/diagnosticsService'
 import type { DevToolsService } from '../devtools/devToolsService'
 import type { UpdateService } from '../updates/updateService'
@@ -411,6 +412,11 @@ export interface HandlerDeps {
    */
   backups: BackupService
   /**
+   * 2026-10-08: copies a project in a cloud-synced folder back from its working copy while it is
+   * open. Absent (the unit tests) every project is in a plain folder and the channels answer null.
+   */
+  cloudSync?: CloudSyncService
+  /**
    * AI-BILLING-SPEC P5: the hosted price table (`GET /pricing`), cached in app state and fetched
    * again once it is an hour old. Absent in a build with no Cloud wiring: the cache alone answers.
    */
@@ -446,6 +452,7 @@ export function registerHandlers({
   diagnostics,
   devtools,
   backups,
+  cloudSync,
   cloudPricing,
   dialogs,
   windows,
@@ -806,6 +813,10 @@ export function registerHandlers({
 
   register('project:current', () => manager.current())
 
+  register('project:cloudSyncStatus', () => cloudSync?.status() ?? null)
+
+  register('project:cloudSyncNow', async () => (cloudSync ? cloudSync.syncNow() : null))
+
   register('recents:list', () => withExists(appState.get().recents, isProjectFolder))
 
   register('recents:remove', ({ path }) => {
@@ -955,19 +966,19 @@ export function registerHandlers({
   }
 
   register('recovery:stash', ({ kind, id, content }) => {
-    stashRecovery(manager.require().folder, kind, id, content)
+    stashRecovery(manager.require().localFolder, kind, id, content)
     return null
   })
 
   register('recovery:clear', ({ kind, id }) => {
-    clearRecovery(manager.require().folder, kind, id)
+    clearRecovery(manager.require().localFolder, kind, id)
     return null
   })
 
   register('recovery:list', () => {
     const session = manager.require()
     const db = session.connection.orm
-    return liveRecoveryEntries(db, session.folder).map(({ kind, id }) => ({
+    return liveRecoveryEntries(db, session.localFolder).map(({ kind, id }) => ({
       kind,
       id,
       title: getNode(db, id)?.title ?? ''
@@ -977,17 +988,17 @@ export function registerHandlers({
   register('recovery:restore', () => {
     const session = manager.require()
     const db = session.connection.orm
-    return liveRecoveryEntries(db, session.folder).map(({ kind, id, content }) => {
+    return liveRecoveryEntries(db, session.localFolder).map(({ kind, id, content }) => {
       let wordCount: number | null = null
       if (kind === 'document') wordCount = saveFromEditor(db, id, content).wordCount
       else saveNotes(db, id, content)
-      clearRecovery(session.folder, kind, id)
+      clearRecovery(session.localFolder, kind, id)
       return { kind, id, wordCount }
     })
   })
 
   register('recovery:discard', () => {
-    discardRecovery(manager.require().folder)
+    discardRecovery(manager.require().localFolder)
     return null
   })
 
@@ -3431,6 +3442,8 @@ export function registerHandlers({
       emit(windows(), 'continuity:changed', { nodeIds: result.deleted })
     mentionQueue.indexAll('mentions', staleMentionNodeIds(db))
     backfillSummaries(false)
+    // A project in a cloud-synced folder gets the import copied back now, not in three minutes.
+    cloudSync?.changed()
   }
 
   register('import:commit', ({ draft }) => {
@@ -3700,6 +3713,13 @@ export function registerHandlers({
     else backups.projectClosed()
   })
   manager.onBeforeClose((session) => backups.projectClosing(session))
+  if (cloudSync) {
+    manager.onChange((info) => {
+      if (info) cloudSync.projectOpened()
+      else cloudSync.projectClosed()
+    })
+    manager.onBeforeClose(() => cloudSync.projectClosing())
+  }
 }
 
 /** A tag proposal's stored content (F-12.3): the names as JSON, or none when it is anything else. */

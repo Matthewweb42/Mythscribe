@@ -10,6 +10,7 @@ import { insertNodes } from '../tree/treeStore'
 import { isLegacyDatabase } from './legacy'
 import { OPEN_LOCK_FILE, OpenLock } from './openLock'
 import { seedSettings, seedSkeleton } from './seed'
+import type { WorkingCopy } from './workingCopy'
 
 /**
  * A project is a folder `<Name>.mythscribe/` containing `project.db` and `assets/`.
@@ -40,14 +41,42 @@ export class ProjectSession {
     readonly folder: string,
     readonly connection: Connection,
     public info: ProjectInfo,
-    private readonly lock: OpenLock | null = null
+    private readonly lock: OpenLock | null = null,
+    /** Set when the project is in a cloud-synced folder: SQLite works on this local copy. */
+    readonly workingCopy: WorkingCopy | null = null
   ) {}
 
+  /**
+   * Where per-computer files go (the crash journal, F-8.3): the project folder, or beside the
+   * working copy for a project in a cloud-synced folder.
+   */
+  get localFolder(): string {
+    return this.workingCopy?.localFolder ?? this.folder
+  }
+
+  /**
+   * Closes the database and releases the open marker. A project in a cloud-synced folder is
+   * copied back first, while the marker still says this computer has it; a failed copy is
+   * logged and the working copy stays marked as ahead, so the next open copies it back.
+   */
   close(): void {
+    const copy = this.workingCopy
+    let clean = true
+    if (copy) {
+      try {
+        if (copy.hasChanges(this.connection.sqlite)) copy.syncNow(this.connection.sqlite)
+      } catch (err) {
+        clean = false
+        console.warn('Could not copy the project back to its cloud folder; it is kept here', err)
+      }
+    }
+    let closed = false
     try {
       this.connection.close()
+      closed = true
     } finally {
       this.lock?.release()
+      copy?.finish(clean && closed)
     }
   }
 }
@@ -80,13 +109,19 @@ export interface CreateProjectOptions {
    * so a refused import never leaves a half-made project behind.
    */
   fill?: (db: Connection['orm']) => void
+  /**
+   * For a folder in a cloud-synced location (2026-10-08): prepares the local working copy the
+   * database is created in, once the open marker is held. The new project is copied into the
+   * folder before the create answers; a copy that fails undoes the create.
+   */
+  workingCopy?: (folder: string) => WorkingCopy | null
 }
 
 export function createProject(
   folder: string,
   name: string,
   format: NovelFormat,
-  { skeleton = true, fill }: CreateProjectOptions = {}
+  { skeleton = true, fill, workingCopy: prepare }: CreateProjectOptions = {}
 ): ProjectSession {
   if (fs.existsSync(folder)) {
     if (isProjectFolder(folder)) {
@@ -100,10 +135,12 @@ export function createProject(
 
   let connection: Connection | null = null
   let lock: OpenLock | null = null
+  let copy: WorkingCopy | null = null
   try {
     fs.mkdirSync(path.join(folder, ASSETS_DIR), { recursive: true })
     lock = OpenLock.acquire(folder)
-    connection = openDatabase(path.join(folder, DB_FILE))
+    copy = prepare?.(folder) ?? null
+    connection = openDatabase(copy?.dbFile ?? path.join(folder, DB_FILE))
     const now = new Date().toISOString()
     const row: ProjectRow = {
       id: randomUUID(),
@@ -120,15 +157,18 @@ export function createProject(
       tx.insert(settings).values(seedSettings(format)).run()
     })
     fill?.(connection.orm)
+    copy?.syncNow(connection.sqlite)
     return new ProjectSession(
       folder,
       connection,
       toInfo(row, folder, connection.schemaVersion),
-      lock
+      lock,
+      copy
     )
   } catch (err) {
     connection?.close()
     lock?.release()
+    copy?.discard()
     removeCreateLeftovers(folder, createdFolder)
     throw err
   }
@@ -190,7 +230,15 @@ export function locateProject(input: string): ProjectLocation {
   return candidate
 }
 
-export function openProject(input: string): ProjectSession {
+/**
+ * Opens a project. `workingCopy` (2026-10-08) prepares the local working copy for a folder in a
+ * cloud-synced location once the open marker is held; SQLite then opens that copy instead of the
+ * database in the folder. Null (or absent) opens the folder's database in place.
+ */
+export function openProject(
+  input: string,
+  workingCopy?: (folder: string) => WorkingCopy | null
+): ProjectSession {
   const location = locateProject(input)
   if (location.kind === 'legacy') {
     throw new AppError(
@@ -204,9 +252,12 @@ export function openProject(input: string): ProjectSession {
 
   const lock = OpenLock.acquire(folder)
   let connection: Connection
+  let copy: WorkingCopy | null = null
   try {
-    connection = openDatabase(path.join(folder, DB_FILE))
+    copy = workingCopy?.(folder) ?? null
+    connection = openDatabase(copy?.dbFile ?? path.join(folder, DB_FILE))
   } catch (err) {
+    copy?.abandon()
     lock.release()
     throw err
   }
@@ -221,10 +272,12 @@ export function openProject(input: string): ProjectSession {
       folder,
       connection,
       toInfo({ ...row, lastOpened }, folder, connection.schemaVersion),
-      lock
+      lock,
+      copy
     )
   } catch (err) {
     connection.close()
+    copy?.abandon()
     lock.release()
     throw err
   }

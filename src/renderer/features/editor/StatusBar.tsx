@@ -1,6 +1,7 @@
 import { BalanceNotice } from '@renderer/features/account/BalanceNotice'
 import { DraftStatus } from '@renderer/features/drafts/DraftStatus'
 import { GoalsStrip } from '@renderer/features/goals/GoalsStrip'
+import { CloudSyncLine } from '@renderer/features/project/CloudSyncLine'
 import { formatDelta, formatWords } from './wordFormat'
 
 /**
@@ -13,7 +14,8 @@ import { formatDelta, formatWords } from './wordFormat'
  * a store of their own: `DraftStatus` (F-8.5, the active draft's name once there are two or
  * more; a click opens the Drafts dialog), `GoalsStrip` (F-10.3, today's words against the targets; a click opens
  * the Goals dialog) and `BalanceNotice` (F-15.5, AI-BILLING-SPEC E1), pushed to the far end: the
- * MythScribe Cloud balance whenever this project spends it, nothing otherwise.
+ * MythScribe Cloud balance whenever this project spends it, nothing otherwise. `CloudSyncLine`
+ * (2026-10-08) says when a project in Google Drive or another synced folder was last copied there.
  */
 export function StatusBar({
   words,
@@ -43,6 +45,7 @@ export function StatusBar({
       ) : null}
       <DraftStatus />
       <GoalsStrip />
+      <CloudSyncLine />
       <BalanceNotice />
     </footer>
   )

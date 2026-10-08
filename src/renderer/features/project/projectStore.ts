@@ -3,6 +3,7 @@ import type { AiSwitch, AiSource } from '@shared/aiSettings'
 import type { ImportDraft } from '@shared/import'
 import type { NovelFormat, ProjectInfo, RecentProject } from '@shared/ipc/contract'
 import { ipc } from '@renderer/lib/ipc'
+import { confirmCloudCopy } from './cloudSyncStore'
 import { flushPendingSaves } from './pendingSaves'
 import { offerRecovery } from './recovery'
 
@@ -52,7 +53,15 @@ interface ProjectState {
 
 let unsubscribe: (() => void) | null = null
 
-export const useProjectStore = create<ProjectState>((set) => {
+export const useProjectStore = create<ProjectState>((set, get) => {
+  /**
+   * Writes pending saves; then, when a project in a cloud-synced folder is open, copies it there
+   * first and asks the author what to do if that fails (2026-10-08).
+   */
+  const settle = async (going: 'close' | 'switch'): Promise<void> => {
+    await flushPendingSaves()
+    if (get().current !== null) await confirmCloudCopy(going)
+  }
   const run = async <T>(fn: () => Promise<T>): Promise<T> => {
     set({ busy: true })
     try {
@@ -79,7 +88,7 @@ export const useProjectStore = create<ProjectState>((set) => {
 
     create(name, format, directory, aiSource, aiSwitch) {
       return run(async () => {
-        await flushPendingSaves()
+        await settle('switch')
         const info = await ipc().invoke('project:create', {
           name,
           format,
@@ -94,7 +103,7 @@ export const useProjectStore = create<ProjectState>((set) => {
 
     createFromImport(draft, name, format) {
       return run(async () => {
-        await flushPendingSaves()
+        await settle('switch')
         const info = await ipc().invoke('import:createProject', { draft, name, format })
         if (info) set({ current: info })
         return info
@@ -103,7 +112,7 @@ export const useProjectStore = create<ProjectState>((set) => {
 
     open(path) {
       return run(async () => {
-        await flushPendingSaves()
+        await settle('switch')
         const info = await ipc().invoke('project:open', { path })
         if (info) {
           set({ current: info })
@@ -115,7 +124,7 @@ export const useProjectStore = create<ProjectState>((set) => {
 
     restoreBackup(file) {
       return run(async () => {
-        await flushPendingSaves()
+        await settle('switch')
         const info = await ipc().invoke('backups:restore', { file })
         // No recovery offer: a backup never carries the crash journal.
         if (info) set({ current: info })
@@ -125,7 +134,7 @@ export const useProjectStore = create<ProjectState>((set) => {
 
     close() {
       return run(async () => {
-        await flushPendingSaves()
+        await settle('close')
         await ipc().invoke('project:close', undefined)
         set({ current: null })
       })
@@ -139,6 +148,7 @@ export const useProjectStore = create<ProjectState>((set) => {
           await ipc().invoke('window:close-cancelled', undefined)
           throw err
         }
+        await confirmCloudCopy('close')
         await ipc().invoke('window:close', undefined)
       })
     },

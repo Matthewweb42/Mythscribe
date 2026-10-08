@@ -9,6 +9,7 @@ import type {
   RecentProject
 } from '@shared/ipc/contract'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { registerPendingSave, resetPendingSaves } from './pendingSaves'
 import { useProjectStore } from './projectStore'
 
@@ -59,6 +60,7 @@ function fakeClient(): {
 beforeEach(() => {
   resetPendingSaves()
   useProjectStore.setState({ current: null, ready: false, busy: false, recents: [] })
+  useDialogStore.setState({ modals: [], toasts: [] })
 })
 
 describe('projectStore', () => {
@@ -119,7 +121,7 @@ describe('projectStore', () => {
     expect(invoke).toHaveBeenCalledWith('backups:restore', {
       file: '/b/Book 2026-10-04 120000.zip'
     })
-    expect(order).toEqual(['flushed', 'backups:restore'])
+    expect(order).toEqual(['flushed', 'project:cloudSyncNow', 'backups:restore'])
     expect(useProjectStore.getState()).toMatchObject({ current: restored, busy: false })
   })
 
@@ -133,8 +135,9 @@ describe('projectStore', () => {
 
   it('close clears the project even if the request throws', async () => {
     const { client, invoke } = fakeClient()
-    invoke.mockImplementationOnce(async () => {
-      throw new Error('nope')
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'project:close') throw new Error('nope')
+      return null
     })
     setIpcClient(client)
     useProjectStore.setState({ current: info })
@@ -167,8 +170,41 @@ describe('projectStore', () => {
     expect(invoke).not.toHaveBeenCalled()
     resolveFlush()
     await closing
-    expect(order).toEqual(['flushed', 'project:close'])
+    // 2026-10-08: a project in a cloud-synced folder is copied there before it closes.
+    expect(order).toEqual(['flushed', 'project:cloudSyncNow', 'project:close'])
     expect(useProjectStore.getState()).toMatchObject({ current: null, busy: false })
+  })
+
+  it('asks before closing when the copy to the cloud folder failed, and closes on Close anyway', async () => {
+    const { client, invoke } = fakeClient()
+    setIpcClient(client)
+    useProjectStore.setState({ current: info })
+    invoke.mockImplementation(async (channel: string) =>
+      channel === 'project:cloudSyncNow'
+        ? {
+            provider: 'googleDrive',
+            state: 'failed',
+            lastSyncedAt: null,
+            error: 'Could not copy the project to Google Drive: EBUSY',
+            conflictCopy: null
+          }
+        : null
+    )
+    const closing = useProjectStore.getState().close()
+    await vi.waitFor(() => expect(useDialogStore.getState().modals).toHaveLength(1))
+    expect(invoke).not.toHaveBeenCalledWith('project:close', undefined)
+    const modal = useDialogStore.getState().modals[0]
+    if (modal?.kind !== 'confirm') throw new Error('expected a confirm dialog')
+    useDialogStore.getState().resolveConfirm(modal.id, true)
+    await closing
+    expect(invoke).toHaveBeenCalledWith('project:close', undefined)
+  })
+
+  it('does not ask the cloud folder anything when no project is open', async () => {
+    const { client, invoke } = fakeClient()
+    setIpcClient(client)
+    await useProjectStore.getState().open('/tmp/Book.mythscribe')
+    expect(invoke).not.toHaveBeenCalledWith('project:cloudSyncNow', undefined)
   })
 
   it('close does not invoke project:close when a flusher rejects', async () => {
@@ -208,7 +244,7 @@ describe('projectStore', () => {
     expect(useProjectStore.getState().busy).toBe(true)
     resolveFlush()
     await closing
-    expect(order).toEqual(['flushed', 'window:close'])
+    expect(order).toEqual(['flushed', 'project:cloudSyncNow', 'window:close'])
     expect(useProjectStore.getState().busy).toBe(false)
   })
 

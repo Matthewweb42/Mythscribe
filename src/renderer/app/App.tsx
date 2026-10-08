@@ -9,6 +9,7 @@ import { useAccountStore } from '@renderer/features/account/accountStore'
 import { useAppAccessStore } from '@renderer/features/account/appAccessStore'
 import { TrialBanner } from '@renderer/features/account/TrialBanner'
 import { useBackupStore } from '@renderer/features/backups/backupStore'
+import { useCloudSyncStore } from '@renderer/features/project/cloudSyncStore'
 import { useDiagnosticsStore } from '@renderer/features/diagnostics/diagnosticsStore'
 import { DEVTOOLS_CHORD } from '@shared/devtools'
 import { DevToolsPanel } from '@renderer/features/devtools/DevToolsPanel'
@@ -190,6 +191,8 @@ export function App(): React.JSX.Element {
     // F-8.4: backups are app-wide, and main pushes the state after a scheduled or on-close
     // backup (a failure is toasted once), so the subscription is opened here once as well.
     const offBackups = useBackupStore.getState().subscribe()
+    // 2026-10-08: the working copy of a project in a cloud-synced folder; main pushes each copy.
+    const offCloudSync = useCloudSyncStore.getState().subscribe()
     // F-8.3: leaving the window writes every pending save at once, not after the debounce.
     const offBlur = installSaveOnBlur()
     return () => {
@@ -203,6 +206,7 @@ export function App(): React.JSX.Element {
       offDiagnostics()
       offDevTools()
       offBackups()
+      offCloudSync()
     }
   }, [])
 

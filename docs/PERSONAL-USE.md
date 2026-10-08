@@ -61,8 +61,11 @@ and `npm run test:e2e` for anything that touches saving.
 ## First run in the installed app
 
 1. **Create your book** with the new-project wizard. The default folder is
-   `Documents\MythScribe`. Keep it out of OneDrive/Dropbox while the app has it open; sync tools
-   and an open database do not mix.
+   `Documents\MythScribe`. A project in Google Drive, OneDrive, Dropbox, or iCloud Drive works
+   too (since 2026-10-08): MythScribe works on a copy on this PC and copies it back to the
+   project folder every few minutes, when you close it, and when you quit. The status bar says
+   when it last copied ("Copied to Google Drive 2 min ago"). Close MythScribe before opening the
+   project on another computer, and let Drive finish syncing first.
 2. **Backups** (Settings › Backups): point the backup folder at a synced folder (OneDrive,
    Dropbox) so a copy leaves the machine. Backups are on by default (every 30 minutes when
    something changed, and on close; the last 10 kept) and are restored from the same tab.

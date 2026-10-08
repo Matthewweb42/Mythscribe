@@ -27,6 +27,7 @@ import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc
 import { resetAccountStore, useAccountStore } from '@renderer/features/account/accountStore'
 import { resetAppAccessStore } from '@renderer/features/account/appAccessStore'
 import { resetBackupStore } from '@renderer/features/backups/backupStore'
+import { resetCloudSyncStore } from '@renderer/features/project/cloudSyncStore'
 import { draftFixture } from '@renderer/features/import/draftFixture'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetAuthorRulesStore, useAuthorRulesStore } from '@renderer/features/ai/authorRulesStore'
@@ -139,6 +140,7 @@ beforeEach(() => {
   resetAccountStore()
   resetAppAccessStore()
   resetBackupStore()
+  resetCloudSyncStore()
   resetViewStore()
   resetStructureStore()
   resetTimelineStore()

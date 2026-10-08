@@ -43,6 +43,7 @@ import { installSingleInstance } from './lifecycle'
 import { installApplicationMenu } from './menu'
 import { bookFontsDir } from './export/pdf'
 import { assetPathFor, bookFontPathFor } from './project/assetUrl'
+import { CloudSyncService } from './project/cloudSyncService'
 import { ProjectManager } from './project/manager'
 import { isProjectFolder } from './project/projectStore'
 import { spellMenuPayload } from './spellcheck/contextMenu'
@@ -51,7 +52,9 @@ import { loadAutoUpdater } from './updates/autoUpdater'
 import { UpdateService } from './updates/updateService'
 
 const isDev = !app.isPackaged
-const manager = new ProjectManager()
+// 2026-10-08: a project in Google Drive, OneDrive, Dropbox, or iCloud is worked on through a
+// local copy under userData (read lazily: the e2e moves userData before the app is ready).
+const manager = new ProjectManager({ workingRoot: () => join(app.getPath('userData'), 'working') })
 /** F-15.2: built once the app is ready (it reads userData); its poll timer is dropped on quit. */
 let account: AccountService | null = null
 /** AI-BILLING-SPEC M1: the trial and the license; built after the account, its timer dropped on quit. */
@@ -62,6 +65,7 @@ let updates: UpdateService | null = null
 let diagnostics: DiagnosticsService | null = null
 /** F-8.4: built once the app is ready; its schedule timer is dropped on quit. */
 let backups: BackupService | null = null
+let cloudSync: CloudSyncService | null = null
 /** Developer tools (2026-10-07): built once app state is readable; off unless the author turned it on. */
 let devtools: DevToolsService | null = null
 
@@ -429,6 +433,11 @@ if (!primaryInstance) {
       defaultFolder: defaultBackupFolder(),
       onChange: (state) => emit(BrowserWindow.getAllWindows(), 'backups:changed', state)
     })
+    // Copies a cloud-folder project back while it is open; pushes `project:cloudSyncChanged`.
+    cloudSync = new CloudSyncService({
+      projects: manager,
+      onChange: (status) => emit(BrowserWindow.getAllWindows(), 'project:cloudSyncChanged', status)
+    })
     registerHandlers({
       manager,
       appState,
@@ -448,6 +457,7 @@ if (!primaryInstance) {
       diagnostics,
       devtools,
       backups,
+      cloudSync,
       cloudPricing,
       dialogs: createDialogs(
         () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
@@ -500,6 +510,8 @@ app.on('will-quit', () => {
   diagnostics?.dispose()
   // Only the timer stops: the close below still runs the on-close backup (F-8.4).
   backups?.dispose()
+  // The close below copies a cloud-folder project back itself (ProjectSession.close).
+  cloudSync?.dispose()
   manager.close()
 })
 

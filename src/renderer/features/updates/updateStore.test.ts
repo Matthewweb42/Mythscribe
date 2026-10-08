@@ -187,7 +187,8 @@ describe('updateStore (F-15.7)', () => {
     const accepted = store().installNow()
     answerConfirm(true)
     await accepted
-    expect(channels()).toEqual(['project:close', 'updates:install'])
+    // 2026-10-08: closing copies a cloud-folder project back first (null here: a plain folder).
+    expect(channels()).toEqual(['project:cloudSyncNow', 'project:close', 'updates:install'])
     expect(useProjectStore.getState().current).toBeNull()
   })
 

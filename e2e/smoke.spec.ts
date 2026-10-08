@@ -6826,6 +6826,68 @@ test('create, close, reopen a project on disk', async () => {
   await expect(nestCompiled).toHaveCount(0)
 })
 
+// 2026-10-08: a project in Google Drive (any path with a "My Drive" folder) is worked on through a
+// local copy under userData; the database in the folder is only ever written whole, by the copy
+// back, and is never opened by SQLite (so no -wal ever appears beside it).
+test('a project in a Google Drive folder works on a local copy and is copied back', async () => {
+  const drive = path.join(tmp, 'My Drive')
+  fs.mkdirSync(drive, { recursive: true })
+  const folder = path.join(drive, 'Drive Novel.mythscribe')
+  const phrase = 'Rain kept falling on the drive'
+  const made = await page.evaluate(
+    (directory) =>
+      window.mythscribe.invoke('project:create', {
+        name: 'Drive Novel',
+        format: 'webnovel',
+        directory
+      }) as Promise<IpcResult<ProjectInfo | null>>,
+    drive
+  )
+  if (!made.ok || !made.data) throw new Error('the Drive project was not created')
+  expect(made.data.path).toBe(folder)
+  await expect(page.getByTestId('project-name')).toHaveText('Drive Novel')
+  expect(fs.existsSync(path.join(folder, 'project.db'))).toBe(true)
+  const working = path.join(tmp, 'userData', 'working')
+  expect(fs.readdirSync(working)).toHaveLength(1)
+
+  const scene = (await listTree()).find((n) => n.title === 'Scene 1')
+  if (!scene) throw new Error('the starter has no Scene 1')
+  await page
+    .getByRole('tree', { name: 'Document tree' })
+    .getByRole('treeitem', { name: 'Scene 1', exact: true })
+    .first()
+    .click()
+  await expect(page.getByTestId('status-cloud')).toContainText('Google Drive')
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await editor.click()
+  await page.keyboard.type(phrase)
+  await expect.poll(() => documentText(scene.id), { timeout: 5000 }).toContain(phrase)
+  // SQLite works on the local copy: nothing of its own appears in the Drive folder.
+  expect(fs.existsSync(path.join(folder, 'project.db-wal'))).toBe(false)
+
+  // Closing copies the working copy back; the Drive database then holds the text.
+  const closed = await page.evaluate(
+    () => window.mythscribe.invoke('project:close', undefined) as Promise<IpcResult<null>>
+  )
+  expect(closed.ok).toBe(true)
+  await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
+  expect(fs.readFileSync(path.join(folder, 'project.db')).includes(phrase)).toBe(true)
+  expect(fs.existsSync(path.join(folder, 'project.db-wal'))).toBe(false)
+  expect(fs.existsSync(path.join(folder, '.mythscribe-open'))).toBe(false)
+
+  // Reopening finds the text again.
+  const reopened = await page.evaluate(
+    (target) =>
+      window.mythscribe.invoke('project:open', { path: target }) as Promise<
+        IpcResult<ProjectInfo | null>
+      >,
+    folder
+  )
+  expect(reopened.ok).toBe(true)
+  await expect(page.getByTestId('project-name')).toHaveText('Drive Novel')
+  expect(await documentText(scene.id)).toContain(phrase)
+})
+
 /** The single-document editor's text with the ghost-text widget (F-5.3) left out. */
 /**
  * Dismisses every toast on screen, first one first: clicking one removes it and moves the rest

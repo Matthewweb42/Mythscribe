@@ -44,6 +44,7 @@ import { AppAccess } from '../appAccess'
 import { AuthorRules } from '../authorRules'
 import { BackupSettingsPatch, BackupState } from '../backups'
 import { CheckoutBody, CreditsResult, EMAIL_MAX, PricingResult, UsageResult } from '../cloudApi'
+import { CloudSyncStatus } from '../cloudSync'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { BookDetails } from '../bookDetails'
 import { CompiledManuscript } from '../compile'
@@ -909,6 +910,17 @@ export const contract = {
   },
   'project:close': { input: z.undefined(), output: z.null() },
   'project:current': { input: z.undefined(), output: ProjectInfo.nullable() },
+  /**
+   * 2026-10-08: how the open project's working copy stands against its cloud-synced folder;
+   * null when the project is in a plain folder (or none is open).
+   */
+  'project:cloudSyncStatus': { input: z.undefined(), output: CloudSyncStatus.nullable() },
+  /**
+   * Copies the working copy back now if anything is waiting and answers the status after it; the
+   * renderer calls it before closing the project or the window. Never rejects for a failed copy:
+   * that comes back as `state: 'failed'` with the cause.
+   */
+  'project:cloudSyncNow': { input: z.undefined(), output: CloudSyncStatus.nullable() },
   'recents:list': { input: z.undefined(), output: z.array(RecentProject) },
   'recents:remove': { input: z.object({ path: z.string() }), output: z.array(RecentProject) },
   'tree:list': { input: z.undefined(), output: z.array(TreeNode) },
@@ -2745,6 +2757,8 @@ export type CategoryUpdateInput = Input<'category:update'>
 /** Events pushed from main to the renderer. */
 export const events = {
   'project:changed': ProjectInfo.nullable(),
+  /** The working copy's status changed (a copy started, finished, or failed); null for a plain folder. */
+  'project:cloudSyncChanged': CloudSyncStatus.nullable(),
   /** The OS asked to close the window while a project is open; the renderer flushes, then invokes `window:close`. */
   'window:close-requested': z.null(),
   /** A streamed piece of a Plan-mode answer (F-5.4); the renderer appends it to the turn with this `requestId`. */

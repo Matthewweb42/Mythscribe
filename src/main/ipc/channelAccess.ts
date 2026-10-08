@@ -23,6 +23,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'project:open': 'read',
   'project:close': 'read',
   'project:current': 'read',
+  'project:cloudSyncStatus': 'read',
+  'project:cloudSyncNow': 'read',
   'recents:list': 'read',
   'recents:remove': 'read',
   'tree:list': 'read',
