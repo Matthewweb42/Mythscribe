@@ -154,6 +154,35 @@ function parseAnswer(text: string): ModelAnswer {
   return parsed.data
 }
 
+/** How many times a cut-off piece is halved and asked again before the sort fails (2026-10-08). */
+export const CONTEXT_SPLIT_DEPTH = 2
+/** A piece shorter than this is not halved: its answer was not cut off for being long. */
+const CONTEXT_MIN_SPLIT_CHARS = 1_000
+
+/**
+ * A piece cut in two at the paragraph nearest its middle (or, for one long paragraph, at the
+ * sentence end nearest it); null when it is too short to halve.
+ */
+export function halvePiece(piece: ContextChunk): [ContextChunk, ContextChunk] | null {
+  const text = piece.text.trim()
+  if (text.length < CONTEXT_MIN_SPLIT_CHARS) return null
+  const middle = text.length / 2
+  const breaks = [...text.matchAll(/\n\s*\n/g)].map((m) => m.index)
+  const sentences = [...text.matchAll(/[.!?…]["”’)]?\s+/g)].map((m) => m.index + m[0].length)
+  const candidates = breaks.length > 0 ? breaks : sentences
+  if (candidates.length === 0) return null
+  const at = candidates.reduce((best, c) =>
+    Math.abs(c - middle) < Math.abs(best - middle) ? c : best
+  )
+  const first = text.slice(0, at).trim()
+  const second = text.slice(at).trim()
+  if (first === '' || second === '') return null
+  return [
+    { ...piece, text: first },
+    { ...piece, text: second }
+  ]
+}
+
 const NOTES_KEY = toEntityNameKey(PROJECT_NOTES_NAME)
 
 /** The answer's entities as records of this chunk; unknown kinds and nameless items are dropped. */
@@ -215,46 +244,76 @@ export async function sortContextFiles(
   input.signal?.addEventListener('abort', onAbort, { once: true })
   try {
     for (const [index, chunk] of work.chunks.entries()) {
-      stopIfCancelled(input.signal)
-      const prompt = buildContextImportPrompt({ ...chunk, sheets, images: imageNames })
-      const chunkId = `${input.requestId}:c${index}`
-      inFlight = chunkId
-      const answer = await runAiRequest(deps, {
-        feature: 'contextImport',
-        tier: 'strong',
-        messages: prompt.messages,
-        maxTokens: prompt.maxTokens,
-        json: true,
-        contextHash: sha256(prompt.messages.map((m) => m.content).join('\n')),
-        promptVersion: prompt.version,
-        requestId: chunkId
-      })
-      inFlight = null
-      stopIfCancelled(input.signal)
-      usage.inputTokens += answer.usage.inputTokens
-      usage.outputTokens += answer.usage.outputTokens
-      costUsd += answer.costUsd
-      model = answer.model
-      proposalIds.push(
-        createProposal(db, {
+      // 2026-10-08: a piece whose answer is cut off or unreadable is split in half and each half
+      // asked again, at most `CONTEXT_SPLIT_DEPTH` times, before the sort gives up naming the file.
+      const queue: { piece: ContextChunk; depth: number; id: string }[] = [
+        { piece: chunk, depth: 0, id: `${input.requestId}:c${index}` }
+      ]
+      while (queue.length > 0) {
+        const next = queue.shift()
+        if (next === undefined) break
+        const { piece, depth, id: chunkId } = next
+        stopIfCancelled(input.signal)
+        const prompt = buildContextImportPrompt({ ...piece, sheets, images: imageNames })
+        inFlight = chunkId
+        const answer = await runAiRequest(deps, {
           feature: 'contextImport',
-          nodeId: null,
+          tier: 'strong',
+          messages: prompt.messages,
+          maxTokens: prompt.maxTokens,
+          json: true,
+          contextHash: sha256(prompt.messages.map((m) => m.content).join('\n')),
           promptVersion: prompt.version,
-          model: answer.model,
-          promptTokens: answer.usage.inputTokens,
-          completionTokens: answer.usage.outputTokens,
-          costUsd: answer.costUsd,
-          cached: answer.cached,
-          content: answer.text,
-          flagged: null,
-          violation: null
-        }).id
-      )
-      const parsed = parseAnswer(answer.text)
-      records.push(...toRecords(parsed, chunk, records.length))
-      notes.push(...(parsed.notes ?? []).map((note) => note.trim()).filter((n) => n !== ''))
-      for (const image of parsed.images ?? []) {
-        if (imageNames.includes(image.file)) hints.push({ fileName: image.file, name: image.name })
+          requestId: chunkId
+        })
+        inFlight = null
+        stopIfCancelled(input.signal)
+        usage.inputTokens += answer.usage.inputTokens
+        usage.outputTokens += answer.usage.outputTokens
+        costUsd += answer.costUsd
+        model = answer.model
+        proposalIds.push(
+          createProposal(db, {
+            feature: 'contextImport',
+            nodeId: null,
+            promptVersion: prompt.version,
+            model: answer.model,
+            promptTokens: answer.usage.inputTokens,
+            completionTokens: answer.usage.outputTokens,
+            costUsd: answer.costUsd,
+            cached: answer.cached,
+            content: answer.text,
+            flagged: null,
+            violation: null
+          }).id
+        )
+        let parsed: ModelAnswer | null = null
+        if (answer.finishReason !== 'length') {
+          try {
+            parsed = parseAnswer(answer.text)
+          } catch (err) {
+            if (!(err instanceof AiFallbackError)) throw err
+          }
+        }
+        if (parsed === null) {
+          const halves = depth < CONTEXT_SPLIT_DEPTH ? halvePiece(piece) : null
+          if (halves === null) {
+            throw new AiFallbackError(
+              `The model's answer for "${piece.fileName}" was cut off or unreadable, even in smaller pieces. Try again, or switch Thinking off for the strong model in Settings › AI.`
+            )
+          }
+          queue.unshift(
+            { piece: halves[0], depth: depth + 1, id: `${chunkId}a` },
+            { piece: halves[1], depth: depth + 1, id: `${chunkId}b` }
+          )
+          continue
+        }
+        records.push(...toRecords(parsed, piece, records.length))
+        notes.push(...(parsed.notes ?? []).map((note) => note.trim()).filter((n) => n !== ''))
+        for (const image of parsed.images ?? []) {
+          if (imageNames.includes(image.file))
+            hints.push({ fileName: image.file, name: image.name })
+        }
       }
       input.onProgress?.({ done: index + 1, total: work.chunks.length, costUsd })
       if (index < work.chunks.length - 1) {

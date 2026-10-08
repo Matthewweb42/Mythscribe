@@ -133,8 +133,11 @@ export type ContextAddResult = z.infer<typeof ContextAddResult>
 // ---------------------------------------------------------------------------------------------
 // Chunking and the estimate
 
-/** Characters of document text per request (~4,000 tokens), cut at paragraph boundaries. */
-export const CONTEXT_CHUNK_CHARS = 16_000
+/**
+ * Characters of document text per request (~2,000 tokens), cut at paragraph boundaries; halved
+ * from 16,000 on 2026-10-08, when dense worldbuilding pages overran the answer cap.
+ */
+export const CONTEXT_CHUNK_CHARS = 8_000
 /** The existing sheet names the prompt lists, at most this many characters in all. */
 export const CONTEXT_SHEET_NAMES_CHARS = 6_000
 /** Image file names the prompt lists, at most. */

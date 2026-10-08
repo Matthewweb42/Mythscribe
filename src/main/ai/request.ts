@@ -50,11 +50,13 @@ import { insertUsage, type AiDb, type UsageEntry } from './usageStore'
 /**
  * Features whose output caps are too small for a model to think first (2026-10-08): ghost text
  * (35–60 tokens) and scene summaries came back empty on reasoning models because the thinking used
- * the whole cap. They always ask for no reasoning, whatever the author's Thinking setting says.
+ * the whole cap, and context sorting came back cut off. They always ask for no reasoning, whatever
+ * the author's Thinking setting says.
  */
 const NO_REASONING_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
   'ghostText',
-  'summary'
+  'summary',
+  'contextImport'
 ])
 
 export interface AiRequestInput {

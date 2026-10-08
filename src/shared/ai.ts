@@ -384,8 +384,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // asks `AGENT_STEP_MAX_TOKENS` (1,500); the cap is twice that so the one retry of a reply that
   // was cut off can ask for more (2026-10-07).
   agent: 3_000,
-  // F-9.8: one chunk's people, places, and things as JSON, each with its fields and details.
-  contextImport: 3_000
+  // F-9.8: one chunk's people, places, and things as JSON, each with its fields and details
+  // (raised from 3,000 on 2026-10-08: dense worldbuilding pages were cut off).
+  contextImport: 6_000
 }
 
 /**

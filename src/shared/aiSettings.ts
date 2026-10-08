@@ -430,7 +430,7 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     label: 'Context library sorting',
     sends:
       'The documents you upload to the Library (Word, Markdown, text, PDF text), in chunks of ' +
-      'about 16,000 characters (only the new or changed passages of an updated file), the names ' +
+      'about 8,000 characters (only the new or changed passages of an updated file), the names ' +
       'of your existing story-bible sheets, and the file names of uploaded images (never the ' +
       'images themselves), only after you confirm the estimate.',
     minDial: 1

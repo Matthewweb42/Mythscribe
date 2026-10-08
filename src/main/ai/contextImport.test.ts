@@ -10,7 +10,7 @@ import { createEntity } from '../entity/entityStore'
 import { addContextFiles, markContextFileProcessed, type LibraryDb } from '../library/libraryStore'
 import { setAiSettings } from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
-import { contextWork, estimateContextImport, sortContextFiles } from './contextImport'
+import { contextWork, estimateContextImport, halvePiece, sortContextFiles } from './contextImport'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, registerInflight, resetInflight } from './inflight'
 import {
@@ -171,7 +171,7 @@ describe('sortContextFiles (F-9.8)', () => {
     const request = complete.mock.calls[0]![0]
     expect(request.tier).toBe('strong')
     expect(request.json).toBe(true)
-    expect(request.maxTokens).toBe(3_000)
+    expect(request.maxTokens).toBe(6_000)
     expect(request.messages[1]?.content).toContain('Characters: Mara Vell')
     expect(request.messages[1]?.content).toContain('Document "people.md":\nMara, 35')
     expect(ledger).toHaveLength(1)
@@ -217,6 +217,46 @@ describe('sortContextFiles (F-9.8)', () => {
       sortContextFiles(db, deps, { folder: session.folder, fileIds: [id], requestId: 'r-1' })
     ).rejects.toBeInstanceOf(AiProviderError)
     expect(statuses()).toEqual(['rejected'])
+  })
+
+  it('halves a piece whose answer was cut off and asks for each half (2026-10-08)', async () => {
+    const first = 'Mara Vell is the ferrywoman of Greywater. '.repeat(18).trim()
+    const second = 'Tomas Vell keeps the ledgers at the salt office. '.repeat(18).trim()
+    const id = await add('people.md', `${first}\n\n${second}`)
+    const reply = (text: string, finishReason = 'stop'): CompletionResult => ({
+      text,
+      model: 'gpt-5.4',
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason
+    })
+    complete
+      .mockResolvedValueOnce(reply('{"entities": [{"kind": "character", "name": "Ma', 'length'))
+      .mockResolvedValueOnce(reply('{"entities": [{"kind": "character", "name": "Mara Vell"}]}'))
+      .mockResolvedValueOnce(reply('{"entities": [{"kind": "character", "name": "Tomas Vell"}]}'))
+    const review = await sortContextFiles(db, deps, {
+      folder: session.folder,
+      fileIds: [id],
+      requestId: 'r-1'
+    })
+    expect(complete).toHaveBeenCalledTimes(3)
+    expect(complete.mock.calls[1]![0].messages[1]?.content).toContain('ferrywoman')
+    expect(complete.mock.calls[1]![0].messages[1]?.content).not.toContain('ledgers')
+    expect(complete.mock.calls[2]![0].messages[1]?.content).toContain('ledgers')
+    expect(review.entities.map((e) => e.name).sort()).toEqual(['Mara Vell', 'Tomas Vell'])
+  })
+
+  it('halvePiece cuts at the paragraph nearest the middle and refuses a short piece', () => {
+    const piece = {
+      fileId: 'f',
+      fileName: 'a.md',
+      part: 1,
+      parts: 1,
+      changedOnly: false,
+      text: `${'a'.repeat(600)}\n\n${'b'.repeat(600)}`
+    }
+    const halves = halvePiece(piece)
+    expect(halves?.map((h) => h.text)).toEqual(['a'.repeat(600), 'b'.repeat(600)])
+    expect(halvePiece({ ...piece, text: 'Short.' })).toBeNull()
   })
 
   it('stops on a cancel between chunks and settles what was answered', async () => {
