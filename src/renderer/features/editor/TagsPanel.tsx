@@ -13,6 +13,8 @@ import { toTagName } from '@shared/tags'
 import { titleTagProposal } from '@shared/titleTags'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
+import { AiWaitText } from '@renderer/features/ai/AiWaitText'
+import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -488,8 +490,8 @@ export function TagsPanel({ id }: { id: string }): React.JSX.Element {
         {mine ? (
           <div role="group" aria-label="Tag suggestions" className="mb-2">
             {mine.status === 'pending' ? (
-              <p role="status" className="m-0 flex items-center gap-2 text-xs text-fg-muted">
-                <span>Asking for tag suggestions…</span>
+              <div className="flex items-center gap-2 text-xs">
+                <AiWaitText phrases={AI_WAIT_PHRASES.tags} />
                 <button
                   type="button"
                   data-testid="tag-recommend-cancel"
@@ -498,7 +500,7 @@ export function TagsPanel({ id }: { id: string }): React.JSX.Element {
                 >
                   Cancel
                 </button>
-              </p>
+              </div>
             ) : null}
             {mine.status === 'error' ? (
               <p

@@ -1,4 +1,6 @@
 import { BRIEF_SCENE_CHAR_BUDGET, SCENE_BRIEF_FIELDS } from '@shared/sceneMeta'
+import { AiWaitText } from '@renderer/features/ai/AiWaitText'
+import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useBriefDraftStore } from './briefDraftStore'
@@ -20,8 +22,8 @@ export function BriefDraftPanel(): React.JSX.Element | null {
   if (state === null) return null
   if (state.status === 'pending') {
     return (
-      <p role="status" className={`${SECTION} flex items-center gap-2 text-xs text-fg-muted`}>
-        <span>Drafting the brief…</span>
+      <div className={`${SECTION} flex items-center gap-2 text-xs`}>
+        <AiWaitText phrases={AI_WAIT_PHRASES.brief} />
         <button
           type="button"
           data-testid="brief-draft-cancel"
@@ -30,7 +32,7 @@ export function BriefDraftPanel(): React.JSX.Element | null {
         >
           Cancel
         </button>
-      </p>
+      </div>
     )
   }
   if (state.status === 'error') {

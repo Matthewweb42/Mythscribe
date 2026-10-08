@@ -1,5 +1,7 @@
 import type { Editor } from '@tiptap/core'
 import { PROOFREAD_CHAR_BUDGET, PROOFREAD_KIND_LABEL, type ProofreadFix } from '@shared/proofread'
+import { AiWaitText } from '@renderer/features/ai/AiWaitText'
+import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { REWRITE_BUSY_MESSAGE } from './applyFix'
 import { FIX_BUTTON, FIX_PRIMARY_BUTTON, FIX_QUOTE_BUTTON, FixDiff, OffVoiceFlag } from './FixDiff'
@@ -67,9 +69,11 @@ function Body({
     return (
       <>
         {header('Proofreading…')}
-        <p data-testid="proofread-pending" className="m-0 text-xs text-fg-muted" aria-live="polite">
-          Checking spelling, typos, grammar, and punctuation.
-        </p>
+        <AiWaitText
+          phrases={AI_WAIT_PHRASES.proofread}
+          testId="proofread-pending"
+          className="text-xs"
+        />
         <div className="flex gap-2">
           <button type="button" data-testid="proofread-stop" onClick={stop} className={FIX_BUTTON}>
             Stop

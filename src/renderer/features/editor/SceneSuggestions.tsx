@@ -6,6 +6,8 @@ import { BRIEF_TEXT_MIN } from '@shared/sceneMeta'
 import { SCENE_SUGGEST_TEXT_MIN } from '@shared/sceneSuggest'
 import { openAssistant } from '@renderer/features/ai/aiActions'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { AiWaitText } from '@renderer/features/ai/AiWaitText'
+import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useBriefDraftStore } from './briefDraftStore'
@@ -135,12 +137,14 @@ function Waiting({
   const store = useSceneSuggestStore.getState()
   if (status.status === 'pending') {
     return (
-      <p role="status" className="m-0 flex items-center gap-2 text-xs text-fg-muted">
-        <span>{kind === 'synopsis' ? 'Suggesting a synopsis…' : 'Suggesting notes…'}</span>
+      <div className="flex items-center gap-2 text-xs">
+        <AiWaitText
+          phrases={kind === 'synopsis' ? AI_WAIT_PHRASES.synopsis : AI_WAIT_PHRASES.notes}
+        />
         <button type="button" onClick={() => store.cancel(kind, id)} className={LINK_BUTTON}>
           Cancel
         </button>
-      </p>
+      </div>
     )
   }
   return (

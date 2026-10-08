@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { AI_DATA_SHARING } from '@shared/aiSettings'
 import { useAiActivityStore } from './aiActivityStore'
+import { AI_WAIT_CLASS } from './aiWaitPhrases'
 
 /** How long a request must be in flight before the indicator shows, so a cache hit never flickers it. */
 export const AI_ACTIVITY_DELAY_MS = 300
@@ -42,7 +43,7 @@ export function AiActivityIndicator(): React.JSX.Element | null {
       className="flex items-center gap-1.5 text-xs text-fg-muted"
     >
       <Loader2 size={14} aria-hidden="true" className="animate-spin" />
-      <span>{labels.join(', ')}</span>
+      <span className={AI_WAIT_CLASS}>{labels.join(', ')}</span>
     </span>
   )
 }

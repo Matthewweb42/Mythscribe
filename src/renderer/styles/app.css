@@ -14,6 +14,7 @@
   --color-accent: var(--ms-accent);
   --color-accent-hover: var(--ms-accent-hover);
   --color-accent-fg: var(--ms-accent-fg);
+  --color-ai-wait: var(--ms-ai-wait);
   --color-danger: var(--ms-danger);
   --color-danger-fg: var(--ms-danger-fg);
   --color-warning: var(--ms-warning);
@@ -430,4 +431,72 @@ select {
 .focus-control-bar[data-visible='false'] {
   transform: translateY(100%);
   pointer-events: none;
+}
+
+/*
+ * AI waits (2026-10-08): jade italic text with a slow glint sweeping across it, like light on old
+ * ink. `AiWaitText` stacks its phrases in one grid cell and cross-fades the current one in; a
+ * line that keeps live numbers takes `.ai-wait` alone. Custom themes (F-7.8) keep their base
+ * theme's `--ms-ai-wait`. Reduced motion: no fade, no glint.
+ */
+.ai-wait {
+  --ai-wait-glint: color-mix(in oklab, var(--ms-ai-wait) 50%, var(--ms-fg));
+  font-style: italic;
+  color: var(--ms-ai-wait);
+  background-image: linear-gradient(
+    100deg,
+    var(--ms-ai-wait) 0 42%,
+    var(--ai-wait-glint) 50%,
+    var(--ms-ai-wait) 58% 100%
+  );
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ai-wait-glint 4.5s linear infinite;
+}
+
+@keyframes ai-wait-glint {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+.ai-wait-text {
+  display: grid;
+}
+
+.ai-wait-text > .ai-wait-phrase {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transition: opacity 600ms ease;
+}
+
+.ai-wait-text > .ai-wait-phrase[data-current='true'] {
+  opacity: 1;
+}
+
+.ai-wait-text[data-motion='reduce'] > .ai-wait-phrase {
+  transition: none;
+}
+
+.ai-wait-text[data-motion='reduce'] > .ai-wait {
+  animation: none;
+  background-image: none;
+  -webkit-text-fill-color: currentColor;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-wait {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+  }
+
+  .ai-wait-text > .ai-wait-phrase {
+    transition: none;
+  }
 }

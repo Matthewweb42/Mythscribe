@@ -1,4 +1,5 @@
 import { Loader2 } from 'lucide-react'
+import { AI_WAIT_CLASS } from './aiWaitPhrases'
 import { useIndexingStore } from './indexingStore'
 
 const BUTTON = 'rounded-md border border-line px-1.5 py-0.5 hover:bg-surface'
@@ -39,7 +40,7 @@ export function IndexingIndicator(): React.JSX.Element | null {
       className="flex items-center gap-1.5 text-xs text-fg-muted"
     >
       {stalled ? null : <Loader2 size={14} aria-hidden="true" className="animate-spin" />}
-      <span>{text}</span>
+      <span className={stalled ? undefined : AI_WAIT_CLASS}>{text}</span>
       {stalled ? (
         <button
           type="button"

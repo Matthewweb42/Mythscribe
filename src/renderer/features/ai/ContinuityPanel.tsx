@@ -20,6 +20,8 @@ import { useRewriteStore } from '@renderer/features/editor/rewriteStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useContinuityFindings, useContinuityStore } from './continuityStore'
+import { AiWaitText } from './AiWaitText'
+import { AI_WAIT_PHRASES } from './aiWaitPhrases'
 import { RequestCost } from './RequestCost'
 
 /** What a card says once its quote is no longer in the scene. */
@@ -124,13 +126,11 @@ function CheckScene(): React.JSX.Element {
     <div className="flex shrink-0 flex-col gap-1">
       {running !== null ? (
         <div className="flex flex-wrap items-center gap-2">
-          <p
-            data-testid="continuity-pending"
-            aria-live="polite"
-            className="m-0 text-xs text-fg-muted"
-          >
-            Reading the scene against the story bible…
-          </p>
+          <AiWaitText
+            phrases={AI_WAIT_PHRASES.continuity}
+            testId="continuity-pending"
+            className="text-xs"
+          />
           <button type="button" data-testid="continuity-stop" onClick={stop} className={FIX_BUTTON}>
             Stop
           </button>

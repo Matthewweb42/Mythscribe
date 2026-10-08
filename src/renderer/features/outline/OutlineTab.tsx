@@ -11,6 +11,7 @@ import {
 } from '@shared/storyTime'
 import { STRUCTURE_TEMPLATES, STRUCTURE_TEMPLATE_IDS, templateBeats } from '@shared/structure'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useSummaryStore } from '@renderer/features/editor/summaryStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -247,7 +248,7 @@ function FindLinksButton(): React.JSX.Element | null {
       title="Ask the AI which written scene fulfils each planned scene and empty beat"
       className="shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-50"
     >
-      {running ? 'Finding links…' : 'Find links'}
+      {running ? <span className={AI_WAIT_CLASS}>Finding links…</span> : 'Find links'}
     </button>
   )
 }

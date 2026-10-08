@@ -37,9 +37,12 @@ import { DockPanelControls } from '@renderer/features/shell/Dock'
 import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
+import { prefersReducedMotion } from '@renderer/lib/motion'
 import { CONVERSATION_BUSY_MESSAGE, useOpenScene } from './aiActions'
 import { AgentChanges, AgentSteps } from './AgentTurn'
 import { AiResults } from './AiResults'
+import { AiWaitText } from './AiWaitText'
+import { AI_WAIT_PHRASES } from './aiWaitPhrases'
 import { AssistantModeControl } from './AssistantModeControl'
 import { useAiSettingsStore } from './aiSettingsStore'
 import {
@@ -440,7 +443,18 @@ function Turn({
         <div role="status" data-testid="chat-pending" className="flex flex-col gap-0.5">
           <AgentSteps steps={liveSteps} live />
           {liveAnswer === '' ? (
-            <p className="m-0 text-xs text-fg-muted">Thinking…</p>
+            <AiWaitText
+              key={message.action ?? 'chat'}
+              phrases={
+                message.action === 'query'
+                  ? AI_WAIT_PHRASES.query
+                  : message.action === 'whatNext'
+                    ? AI_WAIT_PHRASES.whatNext
+                    : AI_WAIT_PHRASES.chat
+              }
+              announce={false}
+              className="text-xs"
+            />
           ) : (
             <p data-testid="chat-streaming" className="m-0 break-words whitespace-pre-wrap text-sm">
               {liveAnswer}
@@ -807,13 +821,6 @@ function Composer(): React.JSX.Element {
 
 /** How long a suggestion takes to fade out before the next one fades in. */
 const SUGGESTION_FADE_MS = 300
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
-}
 
 /**
  * One suggestion above the message box (2026-10-06): small, muted, centred, picked locally by

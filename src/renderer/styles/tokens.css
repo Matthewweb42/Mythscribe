@@ -24,6 +24,8 @@
   --ms-accent: #6cc38f;
   --ms-accent-hover: #83d1a3;
   --ms-accent-fg: #0f1a13;
+  /* AI waits (2026-10-08): a muted jade of their own, bluer and softer than the accent. */
+  --ms-ai-wait: rgb(124 196 178 / 0.8);
 
   --ms-danger: #e5484d;
   --ms-danger-fg: #ffffff;
@@ -98,6 +100,7 @@
   --ms-accent: #2f8a57;
   --ms-accent-hover: #26754a;
   --ms-accent-fg: #ffffff;
+  --ms-ai-wait: rgb(40 120 108 / 0.85);
 
   --ms-danger: #c62a2f;
   --ms-danger-fg: #ffffff;
@@ -146,6 +149,7 @@
   --ms-accent: #ffd60a;
   --ms-accent-hover: #ffe45c;
   --ms-accent-fg: #000000;
+  --ms-ai-wait: #8fe8cf;
 
   --ms-danger: #ff6b6b;
   --ms-danger-fg: #000000;
@@ -190,6 +194,7 @@
   --ms-accent: #9b5f2a;
   --ms-accent-hover: #844f20;
   --ms-accent-fg: #fffaf0;
+  --ms-ai-wait: rgb(58 110 94 / 0.85);
 
   --ms-danger: #b3282c;
   --ms-danger-fg: #ffffff;

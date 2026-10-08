@@ -23,6 +23,8 @@ import { hostedModelFor, hostedQuote } from '@shared/hostedPricing'
 import { useHostedPricing } from '@renderer/features/account/hostedPricing'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { providerOf, routedTier, useAiStore } from '@renderer/features/ai/aiStore'
+import { AiWaitText } from '@renderer/features/ai/AiWaitText'
+import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { descendantDocuments, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { listOutline } from '@renderer/features/outline/outlineRows'
@@ -99,6 +101,7 @@ function PassProgress({ pass }: { pass: EditPassSummary }): React.JSX.Element {
         value={done.size}
         aria-label="Edit pass progress"
       />
+      <AiWaitText phrases={AI_WAIT_PHRASES.editPass} className="text-sm" />
       <p className="m-0 text-xs text-fg-muted">
         {`${formatUsd(pass.costUsd)} so far · ${formatCount(pass.tokensIn)} tokens in · ${formatCount(pass.tokensOut)} out. The scenes in the pass are read-only until it ends; the report opens when it finishes.`}
       </p>

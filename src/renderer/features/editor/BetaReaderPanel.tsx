@@ -7,6 +7,8 @@ import {
   type BetaReaderItem
 } from '@shared/betaReader'
 import { normalizeProposalNote, PROPOSAL_NOTE_MAX } from '@shared/proposal'
+import { AiWaitText } from '@renderer/features/ai/AiWaitText'
+import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { useBetaReaderStore, type BetaReaderSession } from './betaReaderStore'
@@ -79,13 +81,11 @@ function Body({
     return (
       <>
         <HonestySelect title="Reading up to here…" testId="beta-reader-honesty" />
-        <p
-          data-testid="beta-reader-pending"
-          className="m-0 text-xs text-fg-muted"
-          aria-live="polite"
-        >
-          Your beta reader is reading up to here.
-        </p>
+        <AiWaitText
+          phrases={AI_WAIT_PHRASES.betaReader}
+          testId="beta-reader-pending"
+          className="text-xs"
+        />
         <div className="flex gap-2">
           <button type="button" data-testid="beta-reader-stop" onClick={stop} className={BUTTON}>
             Stop

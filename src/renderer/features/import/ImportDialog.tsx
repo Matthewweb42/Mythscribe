@@ -29,6 +29,7 @@ import {
 } from '@shared/import'
 import { NovelFormat, PROJECT_NAME_MAX } from '@shared/ipc/contract'
 import type { TiptapNodeT } from '@shared/tiptap'
+import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { PROJECT_FORMATS } from '@renderer/features/project/formats'
 import { chapterIds, findNode, sceneIds, type DropZone } from './draftEdits'
@@ -906,7 +907,7 @@ function DetectPanel(): React.JSX.Element | null {
 
       {detect.status === 'running' ? (
         <>
-          <span data-testid="import-detect-progress" className="text-fg-muted">
+          <span data-testid="import-detect-progress" className={AI_WAIT_CLASS}>
             {`Checking chunk ${done} of ${total} · ${formatUsd(detect.progress?.costUsd ?? 0)} so far`}
           </span>
           <span className="flex-1" />

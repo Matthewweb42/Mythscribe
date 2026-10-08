@@ -14,6 +14,8 @@ import {
   FixDiff,
   OffVoiceFlag
 } from '@renderer/features/editor/FixDiff'
+import { AiWaitText } from './AiWaitText'
+import { AI_WAIT_PHRASES } from './aiWaitPhrases'
 import { canUndoChange, useAssistantStore } from './assistantStore'
 
 /** How much of a changed passage a log line quotes. */
@@ -138,13 +140,16 @@ function DraftCard({
       className="flex flex-col gap-1 rounded-md border border-accent p-2"
     >
       <p className="m-0 text-xs font-medium">{describeEdit(change.edit)}</p>
-      <p role="status" className="m-0 text-xs text-fg-muted">
-        {shown
-          ? 'In the editor: Tab accepts, Escape dismisses.'
-          : insertion
-            ? 'Writing into the editor…'
-            : 'Writing the new text…'}
-      </p>
+      {shown ? (
+        <p role="status" className="m-0 text-xs text-fg-muted">
+          In the editor: Tab accepts, Escape dismisses.
+        </p>
+      ) : (
+        <AiWaitText
+          phrases={insertion ? AI_WAIT_PHRASES.agentInsert : AI_WAIT_PHRASES.agentReplace}
+          className="text-xs"
+        />
+      )}
       {text !== '' ? (
         <p data-testid="agent-change-draft" className="m-0 text-sm whitespace-pre-wrap">
           <ins>{tail(text)}</ins>

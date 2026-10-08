@@ -4,6 +4,7 @@ import { AI_DATA_SHARING, needsSwitchText, isFeatureAllowed } from '@shared/aiSe
 import { docToText } from '@shared/docText'
 import { SUMMARY_TEXT_MIN, type StoredSceneSummary } from '@shared/summary'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
 import { useDocumentStore } from './documentStore'
 import { useSummaryStore } from './summaryStore'
 
@@ -70,7 +71,10 @@ export function SummaryBlock({ id }: { id: string }): React.JSX.Element | null {
           )}
           <span className="font-medium">Summary</span>
         </button>
-        <span data-testid="summary-status" className="text-xs text-fg-subtle">
+        <span
+          data-testid="summary-status"
+          className={`text-xs ${pending ? AI_WAIT_CLASS : 'text-fg-subtle'}`}
+        >
           {hint}
         </span>
         <button

@@ -2,6 +2,8 @@ import { useMemo } from 'react'
 import type { Editor } from '@tiptap/core'
 import { normalizeProposalNote, PROPOSAL_NOTE_MAX } from '@shared/proposal'
 import { diffWords } from '@shared/rewrite'
+import { AiWaitText } from '@renderer/features/ai/AiWaitText'
+import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { useRewriteStore, type RewriteSession } from './rewriteStore'
@@ -64,13 +66,17 @@ function Body({
     return (
       <>
         <Header title="Rewriting in your voice…" />
-        <p
-          data-testid="rewrite-draft"
-          className="m-0 whitespace-pre-wrap text-fg-muted"
-          aria-live="polite"
-        >
-          {session.draft || 'Drafting…'}
-        </p>
+        {session.draft ? (
+          <p
+            data-testid="rewrite-draft"
+            className="m-0 whitespace-pre-wrap text-fg-muted"
+            aria-live="polite"
+          >
+            {session.draft}
+          </p>
+        ) : (
+          <AiWaitText phrases={AI_WAIT_PHRASES.rewrite} testId="rewrite-draft" />
+        )}
         <div className="flex gap-2">
           <button type="button" data-testid="rewrite-stop" onClick={stop} className={BUTTON}>
             Stop

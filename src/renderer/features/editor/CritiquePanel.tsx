@@ -5,6 +5,8 @@ import {
   type CritiqueNote
 } from '@shared/critique'
 import { normalizeProposalNote, PROPOSAL_NOTE_MAX } from '@shared/proposal'
+import { AiWaitText } from '@renderer/features/ai/AiWaitText'
+import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { REWRITE_BUSY_MESSAGE } from './applyFix'
@@ -64,9 +66,11 @@ function Body({
     return (
       <>
         <HonestySelect title="Reading the scene…" testId="critique-honesty" />
-        <p data-testid="critique-pending" className="m-0 text-xs text-fg-muted" aria-live="polite">
-          Your editor is making notes.
-        </p>
+        <AiWaitText
+          phrases={AI_WAIT_PHRASES.critique}
+          testId="critique-pending"
+          className="text-xs"
+        />
         <div className="flex gap-2">
           <button type="button" data-testid="critique-stop" onClick={stop} className={FIX_BUTTON}>
             Stop

@@ -10,6 +10,8 @@ import {
 import { categoryFieldLabel, categoryOf, type StoryCategory } from '@shared/categories'
 import { entityTagName } from '@shared/entities'
 import { itemAliases, REVIEW_CHAT_MESSAGE_MAX, REVIEW_NOTES_ID } from '@shared/reviewChat'
+import { AiWaitText } from '@renderer/features/ai/AiWaitText'
+import { AI_WAIT_CLASS, AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
@@ -145,7 +147,7 @@ function Status({ flow }: { flow: Exclude<LibraryFlow, { stage: 'review' }> }): 
     <>
       <div className="px-5 py-4 text-sm">
         {flow.stage === 'estimating' ? (
-          <p className="m-0 text-fg-muted" role="status">
+          <p className={`m-0 ${AI_WAIT_CLASS}`} role="status">
             Working out what sorting would cost…
           </p>
         ) : flow.stage === 'confirm' ? (
@@ -159,15 +161,23 @@ function Status({ flow }: { flow: Exclude<LibraryFlow, { stage: 'review' }> }): 
             </p>
           </>
         ) : flow.stage === 'running' ? (
-          <p
-            className="m-0 text-fg-muted tabular-nums"
-            role="status"
-            data-testid="library-progress"
-          >
-            {flow.progress === null
-              ? `Reading ${formatCount(flow.estimate.chunks, 'request')}…`
-              : `Request ${flow.progress.done} of ${flow.progress.total} · ${formatUsd(flow.progress.costUsd)} so far`}
-          </p>
+          flow.progress === null ? (
+            <AiWaitText
+              phrases={[
+                `Reading ${formatCount(flow.estimate.chunks, 'request')}…`,
+                ...AI_WAIT_PHRASES.contextSort.slice(1)
+              ]}
+              testId="library-progress"
+            />
+          ) : (
+            <p
+              className={`m-0 tabular-nums ${AI_WAIT_CLASS}`}
+              role="status"
+              data-testid="library-progress"
+            >
+              {`Request ${flow.progress.done} of ${flow.progress.total} · ${formatUsd(flow.progress.costUsd)} so far`}
+            </p>
+          )
         ) : (
           <p className="m-0 text-danger" role="alert" data-testid="library-error">
             {`${flow.message} ${flow.nextStep}`.trim()}

@@ -11,6 +11,8 @@ import {
   scopesOf,
   type OrganiseAction
 } from '@shared/organise'
+import { AiWaitText } from '@renderer/features/ai/AiWaitText'
+import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
@@ -114,11 +116,15 @@ function Status(): React.JSX.Element {
   const start = useOrganiseStore((s) => s.start)
   return (
     <>
-      <div className="px-5 py-4 text-sm">
+      <div
+        className={
+          phase === 'running'
+            ? 'flex min-h-40 items-center justify-center px-5 py-10 text-center text-sm'
+            : 'px-5 py-4 text-sm'
+        }
+      >
         {phase === 'running' ? (
-          <p className="m-0 text-fg-muted" role="status" data-testid="organise-running">
-            Reading your tags, sheets, notes, and outline…
-          </p>
+          <AiWaitText phrases={AI_WAIT_PHRASES.organise} testId="organise-running" />
         ) : (
           <p className="m-0 text-danger" role="alert" data-testid="organise-error">
             {error ?? 'Organise did not finish.'}
