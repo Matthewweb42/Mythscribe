@@ -145,6 +145,13 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
   let timer: ReturnType<typeof setTimeout> | null = null
   let lastEditAt = now()
   let newChars = 0
+  /**
+   * 2026-10-08: the first suggestion at a spot needs no new typing (turning VibeWrite on, opening
+   * a scene, or moving the caret and pausing is enough); after a request, the minimum applies
+   * until the caret moves again. Before, the count started at zero and any caret move reset the
+   * wait, so a writer who paused without typing 12 characters in one go never got a suggestion.
+   */
+  let needsNewChars = false
   let pending = false
   let latestRequestId: string | null = null
   /** The pending request already asked to stop, so activity does not ask again. */
@@ -243,7 +250,7 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
       idleMs: now() - lastEditAt,
       minIdleMs: idleMs,
       newChars,
-      minNewChars: GHOST_MIN_NEW_CHARS,
+      minNewChars: needsNewChars ? GHOST_MIN_NEW_CHARS : 0,
       pending,
       visible,
       requestsToday: session.requestsToday,
@@ -259,6 +266,7 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
     cancelRequested = false
     editedSinceSend = false
     newChars = 0
+    needsNewChars = true
     session = { ...session, requestsToday: session.requestsToday + 1 }
     const requestId = `g-${++requestCounter}`
     latestRequestId = requestId
@@ -292,7 +300,10 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
     activity(transaction, transaction.doc.content.size - transaction.before.content.size)
   }
   const onSelection = ({ transaction }: { transaction: Transaction }): void => {
-    if (!transaction.docChanged) activity(transaction, 0)
+    if (transaction.docChanged) return
+    // A caret move is a new spot: its first suggestion needs no new typing.
+    if (transaction.getMeta(GHOST_TEXT_KEY) === undefined) needsNewChars = false
+    activity(transaction, 0)
   }
   const onFocus = (): void => {
     focused = true

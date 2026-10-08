@@ -50,6 +50,13 @@ describe('cacheStore (F-5.14)', () => {
     expect(cacheSize(db)).toBe(1)
   })
 
+  it('never serves an empty answer and removes it (2026-10-08)', () => {
+    putCached(db, { ...entry(), text: '  ' })
+    expect(cacheSize(db)).toBe(1)
+    expect(getCached(db, 'k1')).toBeUndefined()
+    expect(cacheSize(db)).toBe(0)
+  })
+
   it('refreshes a row stored under the same key instead of failing', () => {
     putCached(db, entry())
     putCached(db, entry({ text: 'newer', createdAt: '2026-09-12T11:00:00.000Z' }))

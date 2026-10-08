@@ -46,6 +46,17 @@ import { insertUsage, type AiDb, type UsageEntry } from './usageStore'
  * hashes too little still never serves one feature's answer to another or an old model's to a
  * new one, but it cannot tell whether the caller's context changed underneath the same hash.
  */
+
+/**
+ * Features whose output caps are too small for a model to think first (2026-10-08): ghost text
+ * (35–60 tokens) and scene summaries came back empty on reasoning models because the thinking used
+ * the whole cap. They always ask for no reasoning, whatever the author's Thinking setting says.
+ */
+const NO_REASONING_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
+  'ghostText',
+  'summary'
+])
+
 export interface AiRequestInput {
   feature: AiFeatureId
   tier: Tier
@@ -196,7 +207,9 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
   const reasoning: ReasoningMode =
     routed === null || provider.id === 'cloud'
       ? 'default'
-      : resolveReasoning(routed.routing, tier, model)
+      : NO_REASONING_FEATURES.has(input.feature)
+        ? 'off'
+        : resolveReasoning(routed.routing, tier, model)
   // Called through a closure rather than passed as a method reference: the provider owns it.
   const providerPrice = provider.price
   const price: typeof priceFor = providerPrice

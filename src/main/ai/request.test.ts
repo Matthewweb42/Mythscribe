@@ -827,4 +827,20 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
     await runAiRequest(f.deps, { ...input, contextHash: 'c' })
     expect(seen.at(-1)).not.toHaveProperty('reasoning')
   })
+
+  it('always asks for no reasoning on ghost text and summaries, whatever Settings say (2026-10-08)', async () => {
+    const f = fakes()
+    const seen: CompletionRequest[] = []
+    f.complete.mockImplementation((request) => {
+      seen.push(request)
+      return Promise.resolve({ text: 'x', model: 'm', usage: { inputTokens: 1, outputTokens: 1 } })
+    })
+    f.deps.routing = () => ({ routing: defaultAiRouting(), table: autoTable(null) })
+    await runAiRequest(f.deps, { ...input, feature: 'ghostText', contextHash: 'g' })
+    expect(seen.at(-1)?.reasoning).toBe('off')
+    await runAiRequest(f.deps, { ...input, feature: 'summary', contextHash: 's' })
+    expect(seen.at(-1)?.reasoning).toBe('off')
+    await runAiRequest(f.deps, { ...input, feature: 'tags', contextHash: 't' })
+    expect(seen.at(-1)).not.toHaveProperty('reasoning')
+  })
 })

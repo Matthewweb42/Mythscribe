@@ -27,6 +27,12 @@ export interface CacheEntry extends CachedResponse {
 export function getCached(db: AiDb, key: string): CachedResponse | undefined {
   const row = db.select().from(aiCache).where(eq(aiCache.contextHash, key)).get()
   if (!row) return undefined
+  // An empty answer is never a hit (2026-10-08): before the 2026-10-07 fix a reasoning model that
+  // spent its whole cap thinking was cached as '', and serving it kept a job retrying forever.
+  if (row.response.trim() === '') {
+    db.delete(aiCache).where(eq(aiCache.contextHash, key)).run()
+    return undefined
+  }
   const usage = StoredUsage.safeParse(safeJson(row.usage))
   if (!usage.success) return undefined
   return { text: row.response, usage: usage.data }

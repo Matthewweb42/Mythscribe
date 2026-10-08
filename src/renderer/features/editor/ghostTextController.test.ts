@@ -236,6 +236,9 @@ describe('useGhostTextController (F-5.3)', () => {
     mount()
     type('ab')
     await idle()
+    expect(requests).toHaveLength(1) // the first at a spot needs no minimum
+    await answer(ok(1))
+    type('x') // clears it
     expect(skips).toEqual([])
 
     useDevToolsStore.setState({ enabled: true })
@@ -246,7 +249,7 @@ describe('useGhostTextController (F-5.3)', () => {
     expect(skips).toEqual(['newChars'])
     type(ENOUGH)
     await idle()
-    expect(requests).toHaveLength(1)
+    expect(requests).toHaveLength(2)
     type(ENOUGH)
     await idle()
     expect(skips).toEqual(['newChars', 'pending'])
@@ -267,26 +270,25 @@ describe('useGhostTextController (F-5.3)', () => {
 
   it('does not ask below the minimum new characters, while a suggestion shows, or while one is pending', async () => {
     mount()
-    type('a'.repeat(GHOST_MIN_NEW_CHARS - 1))
-    await idle()
-    expect(requests).toHaveLength(0)
+    // 2026-10-08: the first suggestion at a spot needs no new typing.
     type('a')
     await idle()
     expect(requests).toHaveLength(1)
-    type(ENOUGH) // while pending: no second request
+    await answer(ok(1))
+    type('x') // a mismatch clears it; one new character since the request
+    expect(ghostText()).toBeNull()
+    type('a'.repeat(GHOST_MIN_NEW_CHARS - 2))
     await idle()
     expect(requests).toHaveLength(1)
-    await answer(ok(1)) // edited since it left, so the answer is dropped
-    expect(ghostText()).toBeNull()
-    type(ENOUGH)
+    type('a')
     await idle()
     expect(requests).toHaveLength(2)
-    await answer(ok(2))
-    expect(ghostText()).toBe(' Rain followed.')
-    type(' ') // consumes the first character, keeps the suggestion showing
-    type(ENOUGH.slice(1))
-    expect(ghostText()).toBeNull() // a mismatch cleared it
-    type('b'.repeat(GHOST_MIN_NEW_CHARS))
+    type(ENOUGH) // while pending: no second request
+    await idle()
+    expect(requests).toHaveLength(2)
+    await answer(ok(2)) // edited since it left, so the answer is dropped
+    expect(ghostText()).toBeNull()
+    type(ENOUGH)
     await idle()
     expect(requests).toHaveLength(3)
     await answer(ok(3))
@@ -294,6 +296,21 @@ describe('useGhostTextController (F-5.3)', () => {
     type(' R')
     await idle()
     expect(requests).toHaveLength(3) // visible: no request
+  })
+
+  it('asks at a new spot without new typing: a caret move lifts the minimum once', async () => {
+    mount()
+    type('a')
+    await idle()
+    expect(requests).toHaveLength(1)
+    await answer(ok(1))
+    type('x') // clears it
+    type('y')
+    await idle()
+    expect(requests).toHaveLength(1) // after a request the minimum applies
+    editor.commands.setTextSelection(editor.state.doc.content.size - 3)
+    await idle()
+    expect(requests).toHaveLength(2)
   })
 
   it('never asks while VibeWrite is off, the AI switch is Off, or outside the single-document view', async () => {
