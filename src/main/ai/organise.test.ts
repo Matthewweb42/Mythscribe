@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { priceFor } from '@shared/ai'
 import { defaultAiSettings } from '@shared/aiSettings'
-import { ORGANISE_MAX_OPS } from '@shared/organise'
+import { ORGANISE_MAX_OPS, type OrganiseScope } from '@shared/organise'
 import { aiProposal } from '../db/schema'
 import { saveNotes } from '../document/notesStore'
 import { createEntity } from '../entity/entityStore'
@@ -16,8 +16,7 @@ import { createTag } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { resetInflight } from './inflight'
-import { parseOrganiseAnswer, runOrganise } from './organise'
-import { ORGANISE_RETRY_TURN } from './prompts/organise.v1'
+import { leftOffNotes, parseOrganiseAnswer, runOrganise } from './organise'
 import {
   AiProviderError,
   type CompletionRequest,
@@ -104,8 +103,11 @@ function refs(): {
   }
 }
 
-const run = (instruction = 'Organise everything.'): ReturnType<typeof runOrganise> =>
-  runOrganise(db, deps, { instruction, scope: [], requestId: 'org-1' })
+const run = (
+  instruction = 'Organise everything.',
+  scope: OrganiseScope[] = []
+): ReturnType<typeof runOrganise> =>
+  runOrganise(db, deps, { instruction, scope, requestId: 'org-1' })
 
 describe('parseOrganiseAnswer (F-9.10)', () => {
   it('keeps the operations that parse, counts the rest, and caps them', () => {
@@ -209,27 +211,107 @@ describe('runOrganise (F-9.10)', () => {
     expect(request.messages[2]?.content).toContain('The author asks: Organise everything.')
     expect(request.messages[2]?.content).toContain('Found locally')
     expect(ledger.map((row) => [row.feature, row.tier, row.promptVersion])).toEqual([
-      ['organise', 'strong', 'organise.v1']
+      ['organise', 'strong', 'organise.v2']
     ])
     const proposals = db.select().from(aiProposal).all()
     expect(proposals.map((p) => [p.id, p.feature])).toEqual([[answer.proposalId, 'organise']])
   })
 
-  it('asks once more when an answer was cut off, then fails as PROVIDER with no proposal', async () => {
+  it('halves a chunk whose answer was cut off and plans from both halves', async () => {
+    const r = refs()
     complete
       .mockResolvedValueOnce(reply('{"reply":"Mer', 'length'))
-      .mockResolvedValueOnce(reply('{"reply":"Nothing to do.","ops":[]}'))
+      .mockResolvedValueOnce(
+        reply(
+          JSON.stringify({ reply: 'Tags.', ops: [{ op: 'deleteTag', tag: r.tag('old-draft') }] })
+        )
+      )
+      .mockResolvedValueOnce(
+        reply(
+          JSON.stringify({
+            reply: 'Notes.',
+            ops: [{ op: 'notes', id: r.node(scene), points: ['Grey eyes.'] }]
+          })
+        )
+      )
     const answer = await run()
-    expect(answer.plan.changes).toEqual([])
-    const retry = complete.mock.calls[1]![0]
-    expect(retry.messages.at(-1)?.content).toBe(ORGANISE_RETRY_TURN)
-    expect(retry.maxTokens).toBeGreaterThan(complete.mock.calls[0]![0].maxTokens)
+    expect(complete).toHaveBeenCalledTimes(3)
+    const [whole, first, second] = complete.mock.calls.map(
+      ([request]) => request.messages[2]?.content ?? ''
+    )
+    expect(whole).toContain('Tags in detail:')
+    expect(whole).toContain('Outline:')
+    expect(first).toContain('Tags in detail:')
+    expect(first).not.toContain('Outline:')
+    expect(second).not.toContain('Tags in detail:')
+    expect(second).toContain('Outline:')
+    expect(answer.plan.changes.map((c) => c.action.kind)).toEqual(['deleteTag', 'notes'])
+    expect(answer.plan.reply).toBe('Tags. Notes.')
+    expect(answer.plan.skipped).toEqual([])
+    expect(ledger).toHaveLength(3)
+  })
 
-    complete.mockReset()
+  it('names a piece that fails even halved twice, and keeps what the other pieces planned', async () => {
+    const r = refs()
+    complete
+      .mockResolvedValueOnce(reply('{"ops":[', 'length'))
+      .mockResolvedValueOnce(reply('{"ops":[', 'length'))
+      .mockResolvedValueOnce(reply('not json'))
+      .mockResolvedValueOnce(reply('{"ops":[]}'))
+      .mockResolvedValueOnce(
+        reply(JSON.stringify({ ops: [{ op: 'rename', id: r.node(scene), title: 'The mill' }] }))
+      )
+    const answer = await run()
+    // The chunk, its first half, that half's first quarter (given up), the second quarter, the second half.
+    expect(complete).toHaveBeenCalledTimes(5)
+    expect(answer.plan.changes.map((c) => c.action.kind)).toEqual(['binder'])
+    expect(answer.plan.skipped).toEqual([
+      expect.stringMatching(/^Could not plan for tags “#.+”.*Run Organise again on that section\.$/)
+    ])
+  })
+
+  it('fails as PROVIDER with no proposal only when no piece came back readable', async () => {
     complete.mockResolvedValue(reply('I would merge them.'))
-    const before = db.select().from(aiProposal).all().length
-    await expect(run()).rejects.toMatchObject({ code: 'PROVIDER' })
-    expect(db.select().from(aiProposal).all()).toHaveLength(before)
+    const failure = run()
+    await expect(failure).rejects.toMatchObject({ code: 'PROVIDER' })
+    await expect(failure).rejects.toThrow(/^Organise could not read a plan .* Try again/)
+    // The chunk, two halves, four quarters.
+    expect(complete).toHaveBeenCalledTimes(7)
+    expect(db.select().from(aiProposal).all()).toHaveLength(0)
+  })
+
+  it('sends a part only the local findings about what it lists', async () => {
+    complete.mockResolvedValue(reply('{"reply":"Nothing to do.","ops":[]}'))
+    await run('', ['notes'])
+    const notesOnly = complete.mock.calls[0]![0].messages[2]?.content ?? ''
+    expect(notesOnly).toContain('Notes:')
+    expect(notesOnly).not.toContain('Found locally')
+    await run('', ['tags'])
+    const tagsOnly = complete.mock.calls[1]![0].messages[2]?.content ?? ''
+    const r = refs()
+    expect(tagsOnly).toContain(
+      `Found locally (check them): Likely duplicates: ${r.tag('rynna')} + ${r.tag('rynna-falsire')}. Unused tags: ${r.tag('old-draft')}.`
+    )
+  })
+
+  it('names what the chunk cap and the index left out, and only for the scopes asked', () => {
+    const leftOff = [
+      {
+        kind: 'sheets' as const,
+        entries: [
+          { ref: 's40', name: 'Aldo', line: 'x' },
+          { ref: 's41', name: 'Fenn', line: 'y' }
+        ]
+      }
+    ]
+    expect(leftOffNotes(leftOff, { tags: 3, sheets: 1 }, ['sheets'])).toEqual([
+      '2 more entries were not looked at (sheets “Aldo” to “Fenn” (2)): the project is larger than one run covers. Run Organise again on that section.',
+      'The name index had no room for 1 sheet, so duplicates across parts of the project may be missed.'
+    ])
+    expect(leftOffNotes([], { tags: 3, sheets: 0 }, ['tags', 'binder'])).toEqual([
+      'The name index had no room for 3 tags, so duplicates across parts of the project may be missed.'
+    ])
+    expect(leftOffNotes([], { tags: 0, sheets: 0 }, ['tags'])).toEqual([])
   })
 
   it('is refused while Organise is switched off, before anything is sent', async () => {

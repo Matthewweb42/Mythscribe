@@ -40,7 +40,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `contextImport` | Context library sorting | on request | contextImport.v2 | strong | 884 / 3490 | 1500 / 6000 | $0.000816 · $0.00325 | $0.000979 | $0.0247 | 10 | $0.00816 |
 | `reviewChat` | Upload review chat | on request | reviewChat.v2 | strong | 676 / 5618 | 300 / 3000 | $0.000268 · $0.00244 | $0.000322 | $0.00619 | 1 | $0.000268 |
 | `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000285 · $0.000690 | $0.000341 | $0.00299 | 1 | $0.000285 |
-| `organise` | Organise | on request | organise.v1 | strong | 3491 / 6060 | 1200 / 5000 | $0.00124 · $0.00337 | $0.00148 | $0.0267 | 3 | $0.00371 |
+| `organise` | Organise | on request | organise.v2 | strong | 2571 / 6323 | 1200 / 6000 | $0.00104 · $0.00385 | $0.00125 | $0.0244 | 4 | $0.00418 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -166,5 +166,5 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `organise` — Organise
 
-- **When:** Organise (button, the quiet offer, or the chat): one request per chunk of the tags, sheets, notes, and outline listing.
+- **When:** Organise (button, the quiet offer, or the chat): one request per chunk of the tags, sheets, notes, and outline listing (up to 16 chunks, reasoning off); a chunk whose answer is cut off is halved and each half sent again, at most twice.
 - **Ideas:** Send only the local findings for a quick tidy; skip sections the instruction does not name (already); fast tier for tag-only runs.

@@ -1,0 +1,55 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`organise.v2 prompt (F-9.10, 2026-10-08) > matches the golden messages 1`] = `
+[
+  {
+    "content": "You organise a novelist's project notes inside a writing app. You see the tags (t1…), the story-bible sheets (s1…), the notes of documents and the outline (n1…). Propose changes as operations; the author reviews them. Never invent facts and never write story prose: merge, move, tidy, and fill only from what is listed. Sheet categories: character (people and beings with a name), setting (places: cities, rooms, regions, worlds), world (anything about the world no other category fits), magic (magic, powers, and how they work), faction (groups, orders, guilds, houses, governments, armies), religion (faiths, gods, cults, and their practices), creature (animals, monsters, and species), item (objects, weapons, relics, and artifacts), culture (peoples, nations, customs, and ways of life), history (wars, eras, and past events), language (languages, scripts, and dialects), technology (machines, inventions, and how they work), lore (myths, prophecies, and stories told in the world), and any listed with the project. Tag categories: character, setting, worldBuilding, tone, content, plotThread, custom.
+Operations, with ids exactly as listed:
+- {"op":"mergeTags","keep":"t1","merge":["t2"]}: one tag; the merged names become its aliases. Keep the one with the full name.
+- {"op":"tag","tag":"t1","name":"…","category":"character","parent":"t4","aliases":["…"]}: any of these; "parent":"" for the top level; "aliases" is the whole list.
+- {"op":"deleteTag","tag":"t1"}: only a tag nothing uses.
+- {"op":"mergeSheets","keep":"s1","merge":["s2"]}: sheets about one thing.
+- {"op":"sheet","sheet":"s1","name":"…","category":"magic","set":{"Field":"text"},"add":{"Field":"text"},"aliases":["…"]}: any of these; "set" replaces a field's text (to tidy or de-duplicate it), "add" adds to it (an empty field filled from notes or observed facts); fields by label, "page" for the page.
+- {"op":"newSheet","category":"history","name":"…","fields":{"Field":"text"}}
+- {"op":"deleteSheet","sheet":"s1"}: only an empty sheet.
+- {"op":"category","name":"Ships","singular":"ship","fields":["Crew"]}: a new category, only when several sheets fit none; then name it in other operations.
+- {"op":"notes","id":"n3","points":["…"]}: the document's notes rewritten as these points; leave out facts you moved into a sheet, lose nothing else.
+- {"op":"rename","id":"n3","title":"…"}, {"op":"move","id":"n3","in":"n2","after":"n4"} ("after":"" for first), {"op":"merge","id":"n3","into":"n4"}, {"op":"delete","id":"n5"} (an empty folder only): the binder.
+Give each a "why" of at most 8 words. Titles, nicknames, and spellings of one name are aliases, not tags or sheets of their own. Do what the instruction asks; with none, what clearly helps. At most 40 operations. Reply with JSON only: {"reply":"one sentence","ops":[…]}.",
+    "role": "system",
+  },
+  {
+    "content": "Project categories: c-ships (Ships)
+
+Tags:
+t1 #rynna-falsire · character
+t2 #high-crown · custom
+
+Sheets:
+s1 character · Rynna Falsire · also: Rynna",
+    "role": "user",
+  },
+  {
+    "content": "Organise: tags, story bible, notes, binder.
+
+The author asks: Merge duplicate tags.
+
+Found locally (check them): Likely duplicates: s1 + s9. Unused tags: t2.
+
+Tags in detail:
+t1 #rynna-falsire · character · also: Rynna · 4 docs, 9 mentions · sheet s1
+t2 #high-crown · custom · under t1 · 0 docs, 0 mentions
+
+Sheets in detail:
+s1 Rynna Falsire · Age=19 · empty: Appearance · observed: appearance: grey eyes
+
+Notes:
+n3 Chapter 1 › The mill · notes: Rynna has grey eyes.
+
+Outline:
+n2 Chapter 1 (chapter)
+  n3 The mill (scene, 1,200 words)",
+    "role": "user",
+  },
+]
+`;

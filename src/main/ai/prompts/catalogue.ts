@@ -63,6 +63,7 @@ import { PLAN_LINKS_PROMPT_VERSION } from './planLinks.v1'
 import { CONTEXT_IMPORT_PROMPT_V2_VERSION } from './contextImport.v2'
 import { REVIEW_CHAT_PROMPT_V2_VERSION } from './reviewChat.v2'
 import { ORGANISE_PROMPT_VERSION } from './organise.v1'
+import { ORGANISE_PROMPT_V2_VERSION } from './organise.v2'
 import { AGENT_PROMPT_V4_VERSION } from './agent.v4'
 
 /**
@@ -142,7 +143,8 @@ export const PROMPT_VERSIONS = [
   CONTEXT_IMPORT_PROMPT_V2_VERSION,
   REVIEW_CHAT_PROMPT_V2_VERSION,
   ORGANISE_PROMPT_VERSION,
-  AGENT_PROMPT_V4_VERSION
+  AGENT_PROMPT_V4_VERSION,
+  ORGANISE_PROMPT_V2_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -452,7 +454,13 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     output: 'json',
     since: 'F-9.10'
   },
-  [AGENT_PROMPT_V4_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-9.10' }
+  [AGENT_PROMPT_V4_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-9.10' },
+  [ORGANISE_PROMPT_V2_VERSION]: {
+    feature: 'organise',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-9.10'
+  }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

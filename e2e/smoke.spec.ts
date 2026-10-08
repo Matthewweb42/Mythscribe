@@ -369,10 +369,10 @@ function reviewChatAnswer(messages: { role: string; content: string }[]): string
   })
 }
 /**
- * F-9.10: the opening of the organise prompt's system turn (`ORGANISE_RULES` in
- * `src/main/ai/prompts/organise.v1.ts`, repeated here for the same reason). The answer reads the
- * refs from the index: the stray tag #reed merges into #tomas-reed (while it exists), and The
- * Landing's atmosphere is filled.
+ * F-9.10: the opening of the organise prompt's system turn (`ORGANISE_V2_RULES` in
+ * `src/main/ai/prompts/organise.v2.ts`, version 1's sentence, repeated here for the same reason).
+ * The answer reads the refs from the index: the stray tag #reed merges into #tomas-reed (while it
+ * exists), and The Landing's atmosphere is filled.
  */
 const ORGANISE_SENTINEL = "You organise a novelist's project notes inside a writing app."
 const ORGANISE_ATMOSPHERE = 'Tar and river fog.'

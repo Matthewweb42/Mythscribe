@@ -228,6 +228,14 @@ import {
   organiseIndex,
   type OrganiseListing
 } from '../prompts/organise.v1'
+import {
+  buildOrganisePromptV2,
+  findingsFor,
+  halveOrganiseChunk,
+  organiseChunksV2,
+  organiseIndexV2,
+  type OrganiseListingV2
+} from '../prompts/organise.v2'
 import { buildAgentPromptV4 } from '../prompts/agent.v4'
 import {
   ORGANISE_CHUNK_CHARS,
@@ -2838,6 +2846,63 @@ function organiseCase(
   }
 }
 
+/** organise.v2: the small listing with its findings as data, as `organiseListing` builds them. */
+const ORGANISE_LISTING_V2: OrganiseListingV2 = {
+  ...ORGANISE_LISTING,
+  findings: [
+    { kind: 'duplicate', refs: ['t1', 't2', 't3'] },
+    { kind: 'duplicate', refs: ['s1', 's2'] },
+    { kind: 'unusedTag', refs: ['t5'] }
+  ]
+}
+
+/** organise.v2: the maxed listing with thirty look-alike pairs, as version 1's maxed findings. */
+function maxedOrganiseListingV2(): OrganiseListingV2 {
+  return {
+    ...maxedOrganiseListing(),
+    findings: Array.from({ length: 30 }, (_, i) => ({
+      kind: 'duplicate' as const,
+      refs: [`t${i + 1}`, `t${i + 2}`]
+    }))
+  }
+}
+
+/**
+ * One organise.v2 request (2026-10-08): part `part` of the run the listing and scopes make, or
+ * the first half of it when `half` (a piece of a chunk whose answer was cut off).
+ */
+function organiseCaseV2(
+  name: string,
+  note: string,
+  listing: OrganiseListingV2,
+  scopes: readonly OrganiseScope[],
+  instruction: string,
+  expected: OrganiseOp['op'][],
+  options: { part?: number; half?: boolean } = {}
+): EvalCase {
+  const { chunks } = organiseChunksV2(listing, scopes)
+  const part = Math.min(options.part ?? 1, chunks.length)
+  const whole = chunks[part - 1] ?? []
+  const chunk = options.half === true ? (halveOrganiseChunk(whole)?.[0] ?? whole) : whole
+  const built = buildOrganisePromptV2({
+    index: organiseIndexV2(listing).text,
+    chunk,
+    part,
+    parts: chunks.length,
+    scopes,
+    instruction,
+    findings: findingsFor(listing.findings, chunk)
+  })
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'organise', expected }
+  }
+}
+
 /** F-9.10: an agent.v4 step, fitted as the feature fits it. */
 function agentCaseV4(
   name: string,
@@ -4308,5 +4373,40 @@ export const EVAL_CASES: EvalCase[] = [
       retry: true
     },
     { kind: 'agent', expected: 'answer' }
+  ),
+  // organise.v2 (2026-10-08, "Organise at scale"): tags chunked like the rest, findings per part,
+  // reasoning off, and a cut-off chunk halved instead of asked again.
+  organiseCaseV2(
+    'tags',
+    'merge duplicate tags: Rynna under three tags, with the findings about the listed tags',
+    ORGANISE_LISTING_V2,
+    ['tags'],
+    'Clean up the tags.',
+    ['mergeTags']
+  ),
+  organiseCaseV2(
+    'everything',
+    'organise everything with no instruction: tags, sheets, notes, and the outline in one chunk',
+    ORGANISE_LISTING_V2,
+    [...ORGANISE_SCOPES],
+    '',
+    ['mergeTags', 'mergeSheets']
+  ),
+  organiseCaseV2(
+    'maxed',
+    `every cap: the index at its cap, a full chunk of ${ORGANISE_CHUNK_CHARS.toLocaleString('en-US')} characters with thirty findings, the longest instruction`,
+    maxedOrganiseListingV2(),
+    [...ORGANISE_SCOPES],
+    FIXTURE_PASSAGE.repeat(4).slice(0, ORGANISE_INSTRUCTION_MAX),
+    []
+  ),
+  organiseCaseV2(
+    'half',
+    'the first half of a later part whose answer was cut off, every cap as in maxed',
+    maxedOrganiseListingV2(),
+    [...ORGANISE_SCOPES],
+    FIXTURE_PASSAGE.repeat(4).slice(0, ORGANISE_INSTRUCTION_MAX),
+    [],
+    { part: 2, half: true }
   )
 ]

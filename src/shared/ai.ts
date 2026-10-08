@@ -400,9 +400,10 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-11.1d: up to 30 links as JSON, each two labels and a one-sentence reason.
   planLinks: 400,
   // F-9.10: up to 40 operations on tags, sheets, notes, and the binder as JSON, a sheet's tidied
-  // text included. A request asks `ORGANISE_MAX_TOKENS` (2,500); the cap is twice that for the
-  // one retry of an answer that was cut off (the agent's pattern).
-  organise: 5_000
+  // text included. organise.v2 asks `ORGANISE_V2_MAX_TOKENS` (6,000; raised from 5,000 on
+  // 2026-10-08 with reasoning off: a large project's chunks were cut off); a chunk whose answer is
+  // still cut off is halved rather than asked again.
+  organise: 6_000
 }
 
 /**
@@ -471,8 +472,9 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // and a synopsis, beat hint, or summary cut to 240.
   planLinks: 7_000,
   // F-9.10: per chunk: the rules, the instruction (≤ 2,000 characters), the name index of every
-  // tag and sheet (≤ 6,000 characters), the local findings, and one chunk of the listing
-  // (≤ 14,000 characters of tags, sheets with their fields and observed facts, notes, or outline).
+  // tag and sheet (≤ 6,000 characters), the local findings about what the chunk lists, and one
+  // chunk of the listing (≤ 14,000 characters of tags, sheets with their fields and observed
+  // facts, notes, or outline).
   organise: 8_000
 }
 
