@@ -44,7 +44,7 @@ describe('CloudPricingService (AI-BILLING-SPEC P5)', () => {
     expect(pricing.current()).toBeNull()
     const table = await pricing.refresh()
     expect(fetch).toHaveBeenCalledWith('https://api.example.test/pricing', expect.anything())
-    expect(table).toMatchObject({ markup: 0.2, routing: { features: { summary: 'fast' } } })
+    expect(table).toMatchObject({ markup: 0.25, routing: { features: { summary: 'fast' } } })
     expect(table).not.toHaveProperty('aFieldFromANewerWorker')
     expect(pricing.current()).toEqual(table)
     expect(new AppStateStore(path.join(tmp, 'app-state.json')).get().cloudPricing).toEqual({

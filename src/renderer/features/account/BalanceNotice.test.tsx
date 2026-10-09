@@ -37,7 +37,9 @@ const CREDITS: CreditsResult = {
   periodDays: USAGE_PERIOD_DAYS,
   periodSpend: [{ feature: 'ghostText', micros: 500_000, requests: 3, tokens: 900 }],
   periodFirstChargeAt: Date.now() - 1.5 * DAY_MS,
-  packs: []
+  packs: [],
+  starter: null,
+  refunds: []
 }
 
 let calls: { channel: Channel; input: unknown }[]

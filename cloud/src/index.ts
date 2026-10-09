@@ -26,11 +26,13 @@ import {
   handleCredits,
   handleLemonSqueezyWebhook,
   handlePricing,
+  handleRefund,
   handleUsage
 } from './credits'
 import { importSigningKey, randomToken } from './crypto'
 import { handleDiagnostics } from './diagnostics'
 import { logMailer, resendMailer, type Mailer } from './email'
+import { lemonSqueezyApi } from './lemonSqueezy'
 import { handleLicense, type LicenseDeps, LicenseSigningJwk, type LicenseSigner } from './license'
 import { openAiModelId, openAiUpstream, openRouterUpstream, type Upstream } from './openai'
 import { d1Store, type Store } from './store'
@@ -52,7 +54,11 @@ export interface WorkerEnv {
   LEMONSQUEEZY_SUPPORTER?: string
   /** M1: the $30 app license, the same shape; supersedes the Supporter product. */
   LEMONSQUEEZY_APP_LICENSE?: string
+  /** 2026-10-08: the $5 starter pack, the same shape; exempt from the minimum pack. */
+  LEMONSQUEEZY_STARTER?: string
   LEMONSQUEEZY_WEBHOOK_SECRET?: string
+  /** 2026-10-08: the store's API key, for refunds; absent → `POST /billing/refund` is NOT_CONFIGURED. */
+  LEMONSQUEEZY_API_KEY?: string
   /** A9: the operator's OpenRouter key, the gateway the proxy forwards to. Preferred when set. */
   OPENROUTER_API_KEY?: string
   /** F-15.4: the operator's OpenAI key, used only while `OPENROUTER_API_KEY` is unset. */
@@ -145,6 +151,8 @@ function depsFor(env: WorkerEnv): WorkerDeps {
     packs: packsFor(env),
     supporter: productFor('LEMONSQUEEZY_SUPPORTER', env.LEMONSQUEEZY_SUPPORTER),
     appLicense: productFor('LEMONSQUEEZY_APP_LICENSE', env.LEMONSQUEEZY_APP_LICENSE),
+    starter: productFor('LEMONSQUEEZY_STARTER', env.LEMONSQUEEZY_STARTER),
+    lemonSqueezy: env.LEMONSQUEEZY_API_KEY ? lemonSqueezyApi(env.LEMONSQUEEZY_API_KEY) : null,
     webhookSecret: env.LEMONSQUEEZY_WEBHOOK_SECRET ?? null,
     upstream: upstreamFor(env),
     signingKey: signingKeyFor(env),
@@ -170,6 +178,7 @@ function route(request: Request, deps: WorkerDeps): Promise<Response> | Response
   if (pathname === '/pricing' && method === 'GET') return handlePricing(deps)
   if (pathname === '/usage' && method === 'GET') return handleUsage(request, deps)
   if (pathname === '/billing/checkout' && method === 'POST') return handleCheckout(request, deps)
+  if (pathname === '/billing/refund' && method === 'POST') return handleRefund(request, deps)
   if (pathname === '/billing/lemonsqueezy' && method === 'POST') {
     return handleLemonSqueezyWebhook(request, deps)
   }

@@ -1,7 +1,8 @@
 /**
- * `npm run cloud:products`: enter the four Lemon Squeezy products (the $30 app license and the
- * $10 / $25 / $50 balance packs) one by one, checked as you go, and write them into
- * cloud/wrangler.toml as LEMONSQUEEZY_APP_LICENSE and LEMONSQUEEZY_PACKS. Re-running offers what is
+ * `npm run cloud:products`: enter the five Lemon Squeezy products (the $30 app license, the
+ * $10 / $25 / $50 balance packs, and the $5 starter pack) one by one, checked as you go, and write
+ * them into cloud/wrangler.toml as LEMONSQUEEZY_APP_LICENSE, LEMONSQUEEZY_PACKS, and
+ * LEMONSQUEEZY_STARTER. Re-running offers what is
  * already there, so changing one product is a few Enters. Asks before deploying.
  * The walkthrough is docs/OPERATOR-SETUP.md, Part 2.
  */
@@ -99,9 +100,10 @@ if (problems.length > 0) {
 
 const lines = renderProductLines(entries)
 const next = updateWranglerToml(toml, lines)
-say('These two lines go into cloud/wrangler.toml:\n')
+say('These lines go into cloud/wrangler.toml:\n')
 say(`  ${lines.appLicense}`)
-say(`  ${lines.packs}\n`)
+say(`  ${lines.packs}`)
+say(`  ${lines.starter}\n`)
 if (next === toml) {
   say('No change: wrangler.toml already has exactly these values.')
 } else {

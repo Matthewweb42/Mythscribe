@@ -32,8 +32,12 @@ Endpoint paths, table names, and field names below are suggestions. Requirements
 - M3. Hosted AI is paid from a prepaid balance held in real US dollars, not abstract credits.
 - M4. Packs: `$10`, `$25`, `$50`. Minimum purchase is `$10`.
 - M5. Balances never expire.
-- M6. Hosted usage is billed at provider cost plus a markup (default `20%`).
+- M6. Hosted usage is billed at provider cost plus a markup (default `20%`; **`25%` since 2026-10-08**, author).
 - M7. New accounts get a one-time trial grant (default `$1.00`) after email verification. One grant per verified email.
+  **Replaced 2026-10-08 (author):** no free grant (`trial_grant_usd` = 0; existing balances are kept). New accounts
+  start at $0 and the free app trial does not include hosted AI. Instead, a **$5 starter pack**: credits the full $5,
+  one per account ever (server-enforced, even after a refund), exempt from the $10 minimum, purchasable without an
+  app license, verified email required. See "Starter pack and refunds" below.
 - M8. The user can choose the model for any hosted or own-key request. A default "Auto" mode routes by task (see R4).
 
 ## Architecture
@@ -158,8 +162,8 @@ Error responses from `/v1/completions` MUST distinguish: `insufficient_balance`,
 |---|---|
 | `app_price_usd` | 30 |
 | `pack_sizes_usd` | 10, 25, 50 |
-| `markup` | 0.20 |
-| `trial_grant_usd` | 1.00 |
+| `markup` | 0.25 (was 0.20; author 2026-10-08) |
+| `trial_grant_usd` | 0 (was 1.00; replaced by the starter pack, author 2026-10-08) |
 | `quote_threshold_usd` | 0.25 |
 | `estimate_safety_factor` | 1.20 |
 | `low_balance_warning_usd` | 2.00 |
@@ -204,4 +208,20 @@ Ask the project owner before implementing anything that depends on these:
 - Whether the gateway is OpenRouter or direct provider APIs.
 - The default model and the Auto routing table.
 - The measured per-word cost constants used for estimates (E2, E3). These must come from real measurements, not guesses.
-- Refund policy for unused balance.
+- Refund policy for unused balance. **Decided 2026-10-08 (author):** see "Starter pack and refunds".
+
+## Starter pack and refunds (author, 2026-10-08)
+
+- Refunds return only the **unused balance**, within **30 days** of each purchase ("30 days for everything": every
+  pack, the starter included), self-serve from the billing screen. Never more than the available balance, and never
+  more than that order's amount.
+- The refund request is idempotent and **holds** the amount (the existing holds table) before the payment provider is
+  called, so it cannot be spent mid-refund.
+- Refunds and disputes that start on the provider's side arrive by webhook and debit the ledger once (idempotent by
+  order and cumulative amount). A balance below zero blocks hosted AI until it is topped up.
+- A hosted AI feature used at $0 offers the starter instead of an error: "Try the AI for $5. Any unused balance is
+  refundable for 30 days." Once the account used its starter, it offers the regular packs.
+- Lemon Squeezy partial refunds: `POST https://api.lemonsqueezy.com/v1/orders/{id}/refund` with an optional `amount`
+  in cents (omitted = full; docs.lemonsqueezy.com/api/orders/issue-refund). Lemon Squeezy keeps its platform fee on
+  refunds; a dispute costs $15.
+- Built in `cloud/` (migration `0006_starter_refunds.sql`, `POST /billing/refund`); see `cloud/README.md`.

@@ -124,6 +124,7 @@ export function withAccessTokens(
     credits: (token) => authed(token, (bearer) => client.credits(bearer)),
     checkout: (token, variantId) => authed(token, (bearer) => client.checkout(bearer, variantId)),
     license: (token) => authed(token, (bearer) => client.license(bearer)),
-    usage: (token, cursor) => authed(token, (bearer) => client.usage(bearer, cursor))
+    usage: (token, cursor) => authed(token, (bearer) => client.usage(bearer, cursor)),
+    refund: (token, orderId) => authed(token, (bearer) => client.refund(bearer, orderId))
   }
 }

@@ -71,6 +71,11 @@ interface AccountState {
   loadCredits: () => Promise<void>
   /** Opens the Lemon Squeezy checkout for one pack in the browser (F-15.3); the balance follows a Refresh. */
   buyCredits: (variantId: string) => Promise<void>
+  /**
+   * Refunds the unused balance of one purchase (2026-10-08), then reads the balance again; a
+   * refusal (window passed, nothing unused) lands in `creditsError` with the Worker's reason.
+   */
+  refund: (orderId: string) => Promise<void>
   /** Reads the cached Supporter license (F-15.9); works signed out, so App loads it at start. */
   loadSupporter: () => Promise<void>
   /** Asks the Worker to confirm the license and re-sign the token; unreachable leaves it as it is. */
@@ -201,6 +206,14 @@ export const useAccountStore = create<AccountState>((set, get) => {
     loadCredits: () => runCredits(() => ipc().invoke('account:getCredits', undefined)),
 
     buyCredits: (variantId) => runCredits(() => ipc().invoke('account:buyCredits', { variantId })),
+
+    refund: (orderId) =>
+      runCredits(async () => {
+        await ipc().invoke('account:refund', { orderId })
+        // The history gained a refund row; it reloads the next time it is opened.
+        set({ usage: null, usageCursor: null })
+        return ipc().invoke('account:getCredits', undefined)
+      }),
 
     loadSupporter: () => runSupporter(() => ipc().invoke('account:getSupporter', undefined)),
 

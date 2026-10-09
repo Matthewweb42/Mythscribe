@@ -88,7 +88,8 @@ describe('migrations', () => {
       '0002_credits.sql',
       '0003_diagnostics.sql',
       '0004_supporter.sql',
-      '0005_billing.sql'
+      '0005_billing.sql',
+      '0006_starter_refunds.sql'
     ])
   })
 
@@ -163,6 +164,59 @@ describe('migrations', () => {
         createdAt: NOW
       })
     ).toBe('duplicate')
+  })
+})
+
+describe('migration 0006 (starter pack, refunds)', () => {
+  it('marks every existing account verified as of its creation', async () => {
+    const db = new DatabaseSync(':memory:')
+    migrate(db, { until: '0006_starter_refunds.sql' })
+    db.prepare('INSERT INTO users (id, email, created_at) VALUES (?, ?, ?)').run(USER, 'a@b.co', 7)
+    migrate(db, { from: '0006_starter_refunds.sql' })
+    store = testStore(db)
+    expect((await store.findUserById(USER))?.emailVerifiedAt).toBe(7)
+    // A row written another way is unverified until a sign-in proves the address.
+    await store.insertUser({ id: 'u2', email: 'c@d.co', createdAt: 8 })
+    expect((await store.findUserById('u2'))?.emailVerifiedAt).toBeNull()
+    await store.markEmailVerified('u2', 9)
+    await store.markEmailVerified('u2', 10)
+    expect((await store.findUserById('u2'))?.emailVerifiedAt).toBe(9)
+  })
+
+  it('keeps one starter purchase per account, whatever order comes later', async () => {
+    const starter = (orderId: string): LedgerEntryRow =>
+      plainEntry({
+        id: `s-${orderId}`,
+        userId: USER,
+        type: 'topup',
+        amountMicros: 5_000_000,
+        idempotencyKey: `order_created:${orderId}`,
+        createdAt: NOW,
+        orderId
+      })
+    expect(await store.creditStarter(starter('o1'))).toBe('applied')
+    expect(await store.creditStarter(starter('o1'))).toBe('duplicate')
+    expect(await store.creditStarter(starter('o2'))).toBe('refused')
+    expect(await available()).toBe(5_000_000)
+    expect(await store.findStarterPurchase(USER)).toEqual({ orderId: 'o1', purchasedAt: NOW })
+  })
+
+  it('caps a refund at what its order added, and refunds nothing for an order never paid', async () => {
+    await store.appendLedgerEntry({ ...topup(10_000_000, 'order_created:o9'), orderId: 'o9' })
+    const refund = (orderId: string, micros: number, key: string): Promise<string> =>
+      store.refundOrder({
+        id: `r-${key}`,
+        userId: USER,
+        orderId,
+        refundedMicros: micros,
+        idempotencyKey: key,
+        createdAt: NOW
+      })
+    expect(await refund('o9', 50_000_000, 'k1')).toBe('applied')
+    expect(await available()).toBe(0)
+    expect(await refund('o9', 60_000_000, 'k2')).toBe('duplicate')
+    expect(await refund('never-paid', 5_000_000, 'k3')).toBe('duplicate')
+    expect(await available()).toBe(0)
   })
 })
 

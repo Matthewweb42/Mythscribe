@@ -157,6 +157,24 @@ export const CreditSpendRow = z.object({
 export type CreditSpendRow = z.infer<typeof CreditSpendRow>
 
 /**
+ * One purchase inside the refund window (author decision 2026-10-08: 30 days for every pack, the
+ * starter included). `refundableMicros` is what a refund would return now: the unused balance,
+ * never more than what is left of this order, in whole cents; 0 when the balance is spent.
+ */
+export const RefundableOrder = z.object({
+  orderId: z.string().min(1),
+  /** What the order added to the balance. */
+  paidMicros: z.number().int().positive(),
+  /** Epoch ms of the purchase, and of the end of its refund window. */
+  purchasedAt: z.number().int(),
+  refundUntil: z.number().int(),
+  refundableMicros: z.number().int().nonnegative(),
+  /** A refund of this order is running (its amount is held off the balance until it settles). */
+  pending: z.boolean()
+})
+export type RefundableOrder = z.infer<typeof RefundableOrder>
+
+/**
  * `GET /credits` with `Authorization: Bearer <token>`. The three `period*` fields are the usage
  * meter (F-15.5); they default so the app still reads a Worker deployed before them.
  */
@@ -180,9 +198,45 @@ export const CreditsResult = z.object({
   /** When the oldest charge inside the period was made (epoch ms); null with none. */
   periodFirstChargeAt: z.number().int().nullable().default(null),
   /** Empty until the operator configures the packs on the Worker. */
-  packs: z.array(CreditPack)
+  packs: z.array(CreditPack),
+  /**
+   * The $5 starter pack (2026-10-08), when this account may buy it: on sale, never bought before
+   * (one per account ever, even after a refund), and a verified email. Null otherwise; defaults so
+   * the app still reads a Worker deployed before it.
+   */
+  starter: CreditPack.nullable().default(null),
+  /** Purchases whose unused balance can still be refunded from the app, newest first. */
+  refunds: z.array(RefundableOrder).default([])
 })
 export type CreditsResult = z.infer<typeof CreditsResult>
+
+/** `POST /billing/refund` with the bearer: refund the unused balance of one purchase. */
+export const RefundBody = z.object({ orderId: z.string().min(1).max(64) })
+export type RefundBody = z.infer<typeof RefundBody>
+
+export const RefundResult = z.object({
+  /** What Lemon Squeezy was asked to refund and the ledger took off, in micro-USD. */
+  refundedMicros: z.number().int().positive(),
+  /** What can be spent after the refund. */
+  balanceMicros: z.number().int()
+})
+export type RefundResult = z.infer<typeof RefundResult>
+
+/**
+ * What a hosted request refused for its balance offers instead of a bare error (2026-10-08): the
+ * starter pack while the account may still buy it, the regular packs otherwise. `negative` is a
+ * balance below zero after a refund or a dispute, which blocks hosted AI until it is topped up.
+ */
+export const CreditOffer = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('starter'),
+    variantId: z.string().min(1),
+    priceCents: z.number().int().positive(),
+    refundWindowDays: z.number().int().nonnegative()
+  }),
+  z.object({ kind: z.literal('packs'), negative: z.boolean() })
+])
+export type CreditOffer = z.infer<typeof CreditOffer>
 
 /** `POST /billing/checkout` with the same header */
 export const CheckoutBody = z.object({ variantId: z.string().min(1) })
@@ -240,14 +294,27 @@ export const CloudErrorCode = z.enum([
   'BAD_SIGNATURE',
   /** The balance is at or below zero (F-15.3); the proxy refuses the request (F-15.4). */
   'INSUFFICIENT_CREDITS',
+  /**
+   * 2026-10-08: the account may not do this — buy the starter pack a second time or without a
+   * verified email, or refund a purchase outside the window or with nothing unused. The message
+   * names which.
+   */
+  'NOT_ELIGIBLE',
   /** The model provider behind the proxy failed (F-15.4); the message never echoes the request. */
   'UPSTREAM',
   'INTERNAL'
 ])
 export type CloudErrorCode = z.infer<typeof CloudErrorCode>
 
-/** Every non-2xx answer from the Worker is this JSON body. */
-export const CloudApiError = z.object({ code: CloudErrorCode, message: z.string() })
+/**
+ * Every non-2xx answer from the Worker is this JSON body. `offer` rides on `INSUFFICIENT_CREDITS`
+ * from `/ai/complete` (2026-10-08); an older app strips it.
+ */
+export const CloudApiError = z.object({
+  code: CloudErrorCode,
+  message: z.string(),
+  offer: CreditOffer.optional()
+})
 export type CloudApiError = z.infer<typeof CloudApiError>
 
 /** The HTTP status each error code answers with; one table so the Worker and its tests agree. */
@@ -264,6 +331,7 @@ export const CLOUD_ERROR_STATUS: Record<CloudErrorCode, number> = {
   NOT_FOUND: 404,
   BAD_SIGNATURE: 401,
   INSUFFICIENT_CREDITS: 402,
+  NOT_ELIGIBLE: 409,
   UPSTREAM: 502,
   INTERNAL: 500
 }

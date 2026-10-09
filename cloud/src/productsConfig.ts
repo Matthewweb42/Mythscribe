@@ -1,7 +1,7 @@
 /**
- * The four Lemon Squeezy products in `wrangler.toml` (operator tooling, 2026-10-07): the $30 app
- * license and the $10 / $25 / $50 balance packs, written as `LEMONSQUEEZY_APP_LICENSE` and
- * `LEMONSQUEEZY_PACKS`. Pure, so `npm run cloud:products` (cloud/scripts/setProducts.mjs) and the
+ * The five Lemon Squeezy products in `wrangler.toml` (operator tooling, 2026-10-07): the $30 app
+ * license, the $10 / $25 / $50 balance packs, and (2026-10-08) the $5 starter pack, written as
+ * `LEMONSQUEEZY_APP_LICENSE`, `LEMONSQUEEZY_PACKS`, and `LEMONSQUEEZY_STARTER`. Pure, so `npm run cloud:products` (cloud/scripts/setProducts.mjs) and the
  * tests share it. The shapes match `ConfiguredPack` in credits.ts: `{ variantId, url, priceCents }`.
  * Erasable TypeScript only: Node runs this file directly, without a build.
  */
@@ -13,7 +13,7 @@ export interface ProductEntry {
 }
 
 export interface ProductSlot {
-  key: 'app' | 'pack10' | 'pack25' | 'pack50'
+  key: 'app' | 'pack10' | 'pack25' | 'pack50' | 'starter'
   label: string
   defaultPriceCents: number
 }
@@ -23,8 +23,16 @@ export const PRODUCT_SLOTS: readonly ProductSlot[] = [
   { key: 'app', label: 'MythScribe app license', defaultPriceCents: 3000 },
   { key: 'pack10', label: 'AI balance pack $10', defaultPriceCents: 1000 },
   { key: 'pack25', label: 'AI balance pack $25', defaultPriceCents: 2500 },
-  { key: 'pack50', label: 'AI balance pack $50', defaultPriceCents: 5000 }
+  { key: 'pack50', label: 'AI balance pack $50', defaultPriceCents: 5000 },
+  {
+    key: 'starter',
+    label: 'AI starter pack $5 (one per account, exempt from the $10 minimum)',
+    defaultPriceCents: 500
+  }
 ]
+
+/** The slots sold as `LEMONSQUEEZY_PACKS`, under the minimum pack. */
+const PACK_KEYS: readonly ProductSlot['key'][] = ['pack10', 'pack25', 'pack50']
 
 /** The smallest pack the Worker sells (`min_pack_usd`, default 10). */
 export const MIN_PACK_CENTS = 1000
@@ -72,11 +80,14 @@ export function parsePriceCents(input: string): number | null {
   return cents > 0 ? cents : null
 }
 
-/** Problems with the four entries together: a pack under the minimum, or a variant used twice. */
+/**
+ * Problems with the entries together: a pack under the minimum (the starter is exempt), or a
+ * variant used twice.
+ */
 export function checkProducts(entries: Record<ProductSlot['key'], ProductEntry>): string[] {
   const problems: string[] = []
   for (const slot of PRODUCT_SLOTS) {
-    if (slot.key !== 'app' && entries[slot.key].priceCents < MIN_PACK_CENTS) {
+    if (PACK_KEYS.includes(slot.key) && entries[slot.key].priceCents < MIN_PACK_CENTS) {
       problems.push(`${slot.label}: packs under $10 are not sold (min_pack_usd).`)
     }
   }
@@ -95,15 +106,21 @@ function entryJson(entry: ProductEntry): string {
   })
 }
 
-/** The two `wrangler.toml` lines, uncommented, single-quoted as TOML literal strings. */
-export function renderProductLines(entries: Record<ProductSlot['key'], ProductEntry>): {
+export interface ProductLines {
   packs: string
   appLicense: string
-} {
+  starter: string
+}
+
+/** The three `wrangler.toml` lines, uncommented, single-quoted as TOML literal strings. */
+export function renderProductLines(
+  entries: Record<ProductSlot['key'], ProductEntry>
+): ProductLines {
   const packs = `[${[entries.pack10, entries.pack25, entries.pack50].map(entryJson).join(',')}]`
   return {
     packs: `LEMONSQUEEZY_PACKS = '${packs}'`,
-    appLicense: `LEMONSQUEEZY_APP_LICENSE = '${entryJson(entries.app)}'`
+    appLicense: `LEMONSQUEEZY_APP_LICENSE = '${entryJson(entries.app)}'`,
+    starter: `LEMONSQUEEZY_STARTER = '${entryJson(entries.starter)}'`
   }
 }
 
@@ -112,17 +129,15 @@ function lineFor(name: string): RegExp {
 }
 
 /**
- * `toml` with the two lines replaced where they are (commented or not), or added at the end of
+ * `toml` with the lines replaced where they are (commented or not), or added at the end of
  * `[vars]` when absent. Everything else is left as it was.
  */
-export function updateWranglerToml(
-  toml: string,
-  lines: { packs: string; appLicense: string }
-): string {
+export function updateWranglerToml(toml: string, lines: ProductLines): string {
   let out = toml
   for (const [name, line] of [
     ['LEMONSQUEEZY_PACKS', lines.packs],
-    ['LEMONSQUEEZY_APP_LICENSE', lines.appLicense]
+    ['LEMONSQUEEZY_APP_LICENSE', lines.appLicense],
+    ['LEMONSQUEEZY_STARTER', lines.starter]
   ] as const) {
     const pattern = lineFor(name)
     if (pattern.test(out)) {
@@ -167,13 +182,15 @@ export function readProducts(toml: string): Partial<Record<ProductSlot['key'], P
   }
   const app = asEntry(value('LEMONSQUEEZY_APP_LICENSE'))
   if (app) found.app = app
+  const starter = asEntry(value('LEMONSQUEEZY_STARTER'))
+  if (starter) found.starter = starter
   const packs = value('LEMONSQUEEZY_PACKS')
   if (Array.isArray(packs)) {
     for (const raw of packs) {
       const entry = asEntry(raw)
       if (!entry) continue
       const slot = PRODUCT_SLOTS.find(
-        (s) => s.key !== 'app' && s.defaultPriceCents === entry.priceCents
+        (s) => PACK_KEYS.includes(s.key) && s.defaultPriceCents === entry.priceCents
       )
       if (slot) found[slot.key] = entry
     }

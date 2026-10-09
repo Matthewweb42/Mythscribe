@@ -206,7 +206,7 @@ export const AI_NEXT_STEP: Record<AiErrorCode, string> = {
   DISABLED: 'Turn on Use AI in Settings › AI, or enable the feature there.',
   CANCELLED: 'Send it again whenever you like.',
   SIGNED_OUT: 'Sign in on the Account tab in Settings.',
-  NO_CREDIT: 'Add to your balance on the Account tab in Settings.',
+  NO_CREDIT: 'Open the Account tab in Settings to add to your balance.',
   CLOUD_UNAVAILABLE: 'Switch to My own key or Local model in Settings › AI.',
   TOO_LARGE: 'Select less text, or ask about a shorter passage, and try again.',
   MODEL_UNAVAILABLE: 'Pick another model in Settings › AI, or reset the models to their defaults.',

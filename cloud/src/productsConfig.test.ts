@@ -12,11 +12,12 @@ import {
 } from './productsConfig'
 
 const link = (id: string): string => `https://mythscribe.lemonsqueezy.com/buy/${id}`
-const entries: Record<'app' | 'pack10' | 'pack25' | 'pack50', ProductEntry> = {
+const entries: Record<'app' | 'pack10' | 'pack25' | 'pack50' | 'starter', ProductEntry> = {
   app: { variantId: '444', url: link('a-1'), priceCents: 3000 },
   pack10: { variantId: '111', url: link('p-10'), priceCents: 1000 },
   pack25: { variantId: '222', url: link('p-25'), priceCents: 2500 },
-  pack50: { variantId: '333', url: link('p-50'), priceCents: 5000 }
+  pack50: { variantId: '333', url: link('p-50'), priceCents: 5000 },
+  starter: { variantId: '777', url: link('s-5'), priceCents: 500 }
 }
 
 const TOML = `name = "mythscribe-api"
@@ -59,7 +60,7 @@ describe('productsConfig (operator tooling)', () => {
     expect(parsePriceCents('ten')).toBeNull()
   })
 
-  it('refuses a pack under $10 and a variant used twice', () => {
+  it('refuses a pack under $10 (the $5 starter is exempt) and a variant used twice', () => {
     expect(checkProducts(entries)).toEqual([])
     expect(
       checkProducts({ ...entries, pack10: { ...entries.pack10, priceCents: 500 } })
@@ -72,6 +73,7 @@ describe('productsConfig (operator tooling)', () => {
   it('writes both lines in place of the commented examples, in the Worker’s shape', () => {
     const out = updateWranglerToml(TOML, renderProductLines(entries))
     expect(out).toContain(`LEMONSQUEEZY_APP_LICENSE = '{"variantId":"444"`)
+    expect(out).toContain(`LEMONSQUEEZY_STARTER = '{"variantId":"777"`)
     expect(out).not.toContain('# LEMONSQUEEZY_APP_LICENSE')
     expect(out).not.toContain('# LEMONSQUEEZY_PACKS')
     // The Supporter example and the rest of the file are untouched.

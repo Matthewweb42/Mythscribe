@@ -13,6 +13,7 @@ import type {
   CloudSession,
   CreditsResult,
   LicenseResult,
+  RefundResult,
   UsageResult
 } from '@shared/cloudApi'
 import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
@@ -66,7 +67,9 @@ const CREDITS: CreditsResult = {
   periodDays: USAGE_PERIOD_DAYS,
   periodSpend: [{ feature: 'ghostText', micros: 400, requests: 1, tokens: 300 }],
   periodFirstChargeAt: 1_758_000_000_000,
-  packs: [{ variantId: 'pack-5', priceCents: 500 }]
+  packs: [{ variantId: 'pack-5', priceCents: 500 }],
+  starter: null,
+  refunds: []
 }
 const CHECKOUT: CheckoutResult = { url: 'https://mythscribe.lemonsqueezy.com/buy/abc?x=1' }
 /** F-15.9: the Supporter product the Worker publishes beside the license. */
@@ -111,6 +114,7 @@ let credits: Mock<(token: string) => Promise<CreditsResult>>
 let checkout: Mock<(token: string, variantId: string) => Promise<CheckoutResult>>
 let license: Mock<(token: string) => Promise<LicenseResult>>
 let usage: Mock<(token: string, cursor: string | null) => Promise<UsageResult>>
+let refund: Mock<(token: string, orderId: string) => Promise<RefundResult>>
 
 const schedule: Schedule = (run, ms) => {
   const timer = { run, ms, cancelled: false }
@@ -153,7 +157,8 @@ const build = (keyStore: AiKeyStore = store()): AccountService => {
     credits,
     checkout,
     license,
-    usage
+    usage,
+    refund
   }
   return new AccountService({
     client,
@@ -198,6 +203,7 @@ beforeEach(() => {
   // on construction is harmless and changes nothing.
   license = vi.fn(() => Promise.resolve({ token: null, product: null }))
   usage = vi.fn(() => Promise.resolve(USAGE))
+  refund = vi.fn(() => Promise.resolve({ refundedMicros: 7_000_000, balanceMicros: 0 }))
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
@@ -486,6 +492,26 @@ describe('AccountService (F-15.2)', () => {
     expect(credits).not.toHaveBeenCalled()
     expect(checkout).not.toHaveBeenCalled()
     expect(usage).not.toHaveBeenCalled()
+    service.dispose()
+  })
+
+  it('refunds a purchase with the stored session, and reads a refusal as VALIDATION (2026-10-08)', async () => {
+    expect((await caught(build().refund('o1'))).message).toBe(
+      'Sign in to refund a MythScribe Cloud purchase.'
+    )
+    expect(refund).not.toHaveBeenCalled()
+
+    const service = build(signedInStore())
+    expect(await service.refund('o1')).toEqual({ refundedMicros: 7_000_000, balanceMicros: 0 })
+    expect(refund).toHaveBeenCalledWith(SESSION.token, 'o1')
+
+    refund.mockRejectedValueOnce(
+      new AccountError('NOT_ELIGIBLE', 'Nothing unused is left to refund on this purchase.', 'x')
+    )
+    const refused = await caught(service.refund('o1'))
+    expect(refused).toBeInstanceOf(AppError)
+    expect(refused.code).toBe('VALIDATION')
+    expect(refused.message).toContain('Nothing unused')
     service.dispose()
   })
 

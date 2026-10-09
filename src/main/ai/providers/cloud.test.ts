@@ -99,7 +99,9 @@ const credits = (balanceMicros: number): CreditsResult => ({
   periodDays: USAGE_PERIOD_DAYS,
   periodSpend: [],
   periodFirstChargeAt: null,
-  packs: []
+  packs: [],
+  starter: null,
+  refunds: []
 })
 
 function build(
@@ -258,6 +260,33 @@ describe('buildCloudProvider.complete', () => {
       expect(failed).toBeInstanceOf(expected as never)
       expect((failed as Error).message).not.toContain('the Worker said so')
     }
+  })
+
+  it('turns a refusal for the balance into the offer it carries (2026-10-08)', async () => {
+    const refused = async (offer: unknown): Promise<Error> => {
+      const { fetch } = answering(() =>
+        json(402, { code: 'INSUFFICIENT_CREDITS', message: 'the Worker said so', offer })
+      )
+      return (await build({ fetch })
+        .complete(REQUEST)
+        .catch((err: unknown) => err)) as Error
+    }
+    const starter = await refused({
+      kind: 'starter',
+      variantId: '777',
+      priceCents: 500,
+      refundWindowDays: 30
+    })
+    expect(starter).toBeInstanceOf(AiNoCreditError)
+    expect(starter.message).toBe('Try the AI for $5. Any unused balance is refundable for 30 days.')
+    expect((await refused({ kind: 'packs', negative: true })).message).toContain('below zero')
+    expect((await refused({ kind: 'packs', negative: false })).message).toBe(
+      'Your MythScribe Cloud balance is too low for this request.'
+    )
+    // An older Worker sends no offer.
+    expect((await refused(undefined)).message).toBe(
+      'Your MythScribe Cloud balance is too low for this request.'
+    )
   })
 
   it('reads an unreachable Worker as a network failure and a timeout as one too', async () => {
@@ -485,6 +514,13 @@ describe('buildCloudProvider.testConnection and price', () => {
     await expect(
       build({ credits: () => Promise.resolve(credits(0)) }).testConnection()
     ).rejects.toBeInstanceOf(AiNoCreditError)
+    // While the starter pack is on offer, the empty balance offers it.
+    await expect(
+      build({
+        credits: () =>
+          Promise.resolve({ ...credits(0), starter: { variantId: '777', priceCents: 500 } })
+      }).testConnection()
+    ).rejects.toThrow('Try the AI for $5. Any unused balance is refundable for 30 days.')
     await expect(build({ token: () => null }).testConnection()).rejects.toBeInstanceOf(
       AiSignedOutError
     )

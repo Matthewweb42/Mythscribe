@@ -11,14 +11,24 @@
  * (M1, 2026-10-07) and the older Supporter product it supersedes. Each is one more configured
  * variant, but it grants a row in `supporter_licenses` instead of balance, and `license.ts` turns
  * that row into a signed token.
+ *
+ * 2026-10-08 (author): the $5 starter pack replaces the free trial grant — one per account ever
+ * (even after a refund), exempt from the $10 minimum, for a verified email only, no app license
+ * needed — and unused balance is refundable from the app (`POST /billing/refund`) within the
+ * refund window of each purchase: the amount is held before Lemon Squeezy is called, never more
+ * than the unused paid balance or what is left of the order.
  */
 import { z } from 'zod'
 import {
   AI_COMPLETE_MAX_TOKENS,
   CheckoutBody,
   type CheckoutResult,
+  type CreditOffer,
   CreditPack,
   type CreditsResult,
+  RefundBody,
+  type RefundableOrder,
+  type RefundResult,
   isCheckoutUrl,
   type PricingResult,
   TOKEN_BYTES,
@@ -38,7 +48,8 @@ import {
 } from './auth'
 import { type BillingConfig, loadBillingConfig } from './config'
 import { hmacSha256Hex, timingSafeEqualHex } from './crypto'
-import { plainEntry } from './store'
+import type { LemonSqueezyApi } from './lemonSqueezy'
+import { type HoldRow, type OrderRow, plainEntry, type UserRow } from './store'
 
 /**
  * A pack as the operator configures it: the wire shape plus the hosted checkout URL to send to.
@@ -66,18 +77,36 @@ export interface CreditsDeps extends AuthDeps {
   supporter: ConfiguredPack | null
   /** M1: the $30 app license (`LEMONSQUEEZY_APP_LICENSE`); the same license row as the Supporter. */
   appLicense: ConfiguredPack | null
+  /**
+   * The $5 starter pack (`LEMONSQUEEZY_STARTER`, 2026-10-08): balance like a pack, but exempt
+   * from the minimum pack, one per account ever, and only for a verified email. Null until set.
+   */
+  starter: ConfiguredPack | null
+  /**
+   * The Lemon Squeezy API (`LEMONSQUEEZY_API_KEY`) for refunds; null until the operator sets the
+   * key, and then `POST /billing/refund` answers NOT_CONFIGURED.
+   */
+  lemonSqueezy: LemonSqueezyApi | null
   /** `LEMONSQUEEZY_WEBHOOK_SECRET`; absent means the webhook answers NOT_CONFIGURED. */
   webhookSecret: string | null
 }
 
-/** One variant on sale, and what buying it does: add balance, or grant the license. */
+/** One variant on sale, and what buying it does: add balance (a pack or the starter), or grant the license. */
 interface Variant {
   pack: ConfiguredPack
-  license: boolean
+  kind: 'pack' | 'starter' | 'license'
 }
 
 /** $1 paid is $1 of balance: the markup is on the usage, not on the pack (M6). */
 const MICROS_PER_CENT = MICROS_PER_USD / 100
+const DAY_MS = 24 * 60 * 60_000
+
+/**
+ * How long a refund the app asked for keeps its amount off the balance when Lemon Squeezy's answer
+ * is unknown (a timeout, a 5xx): long enough for the `order_refunded` webhook to land and say what
+ * happened, so a retry can never refund the same money twice. A definite answer closes it at once.
+ */
+export const REFUND_HOLD_MS = DAY_MS
 
 /** The configured packs at or above the minimum pack (M4), in their configured order. */
 export function packsOnSale(deps: CreditsDeps, config: BillingConfig): ConfiguredPack[] {
@@ -96,11 +125,95 @@ function findVariant(
   variantId: string | undefined
 ): Variant | null {
   const pack = packsOnSale(deps, config).find((candidate) => candidate.variantId === variantId)
-  if (pack) return { pack, license: false }
+  if (pack) return { pack, kind: 'pack' }
+  // The starter is exempt from the minimum pack (2026-10-08); nothing else is.
+  if (deps.starter && deps.starter.variantId === variantId) {
+    return { pack: deps.starter, kind: 'starter' }
+  }
   for (const product of [deps.appLicense, deps.supporter]) {
-    if (product && product.variantId === variantId) return { pack: product, license: true }
+    if (product && product.variantId === variantId) return { pack: product, kind: 'license' }
   }
   return null
+}
+
+/** Why an account may not buy the starter pack now; null when it may. */
+async function starterRefusal(
+  deps: CreditsDeps,
+  user: UserRow
+): Promise<'not_on_sale' | 'unverified' | 'used' | null> {
+  if (!deps.starter) return 'not_on_sale'
+  if (user.emailVerifiedAt === null) return 'unverified'
+  if (await deps.store.findStarterPurchase(user.id)) return 'used'
+  return null
+}
+
+/**
+ * What a request refused for its balance offers (2026-10-08): the starter pack while this
+ * account may still buy it, the regular packs otherwise — and whether the balance is below zero
+ * (after a refund or a dispute), which blocks hosted AI until it is topped up.
+ */
+export async function creditOffer(
+  deps: CreditsDeps,
+  user: UserRow,
+  availableMicros: number
+): Promise<CreditOffer> {
+  const config = await loadBillingConfig(deps.store)
+  if (deps.starter && (await starterRefusal(deps, user)) === null) {
+    return {
+      kind: 'starter',
+      variantId: deps.starter.variantId,
+      priceCents: deps.starter.priceCents,
+      refundWindowDays: config.refundWindowDays
+    }
+  }
+  return { kind: 'packs', negative: availableMicros < 0 }
+}
+
+/** Micro-USD rounded down to whole cents: a refund is paid in cents and never rounds up. */
+function floorToCents(micros: number): number {
+  return micros <= 0 ? 0 : Math.floor(micros / MICROS_PER_CENT) * MICROS_PER_CENT
+}
+
+/** The unused paid balance: what can be spent, minus money that was given rather than paid. */
+async function unusedPaidMicros(deps: CreditsDeps, userId: string, now: number): Promise<number> {
+  const balance = await deps.store.getBalance(userId, now)
+  const granted = await deps.store.grantedMicros(userId)
+  return balance.ledgerMicros - balance.heldMicros - granted
+}
+
+/** What refunding `order` would return now: the unused paid balance, capped at what is left of it. */
+function refundableNow(order: OrderRow, unusedMicros: number): number {
+  return floorToCents(Math.min(unusedMicros, order.paidMicros - order.refundedMicros))
+}
+
+/** The purchases still inside the refund window that are not fully refunded, newest first. */
+async function refundableOrders(
+  deps: CreditsDeps,
+  config: BillingConfig,
+  userId: string,
+  now: number
+): Promise<RefundableOrder[]> {
+  if (config.refundWindowDays <= 0) return []
+  const windowMs = config.refundWindowDays * DAY_MS
+  const orders = await deps.store.listOrders(userId, now - windowMs)
+  const unused = await unusedPaidMicros(deps, userId, now)
+  const out: RefundableOrder[] = []
+  for (const order of orders) {
+    if (order.refundedMicros >= order.paidMicros) continue
+    const hold = await deps.store.findRefundHold(userId, order.orderId)
+    // One self-serve refund per purchase: a settled one is done.
+    if (hold?.status === 'settled') continue
+    const pending = hold?.status === 'active' && hold.expiresAt > now
+    out.push({
+      orderId: order.orderId,
+      paidMicros: order.paidMicros,
+      purchasedAt: order.createdAt,
+      refundUntil: order.createdAt + windowMs,
+      refundableMicros: pending ? 0 : refundableNow(order, unused),
+      pending
+    })
+  }
+  return out
 }
 
 /** A pack as the app sees it: the checkout URL stays on the Worker, the app only names a variant. */
@@ -110,6 +223,23 @@ function wirePack({ variantId, priceCents }: ConfiguredPack): CreditPack {
 
 /** One message for an unknown credit pack and an unknown license variant alike (F-15.9). */
 const UNKNOWN_VARIANT = 'That purchase is not on sale. Refresh the Account tab and try again.'
+const STARTER_USED =
+  'The starter pack is one per account, and this account already has it. Pick a pack instead.'
+const STARTER_UNVERIFIED =
+  'The starter pack needs a verified email address. Sign out, then sign in again with the link or code we email you.'
+const REFUNDS_NOT_CONFIGURED = 'Refunds are not configured on the server yet.'
+const UNKNOWN_ORDER = 'That purchase is not on this account.'
+const REFUND_WINDOW_PASSED = 'This purchase is past its refund window.'
+const NOTHING_TO_REFUND = 'Nothing unused is left to refund on this purchase.'
+const BALANCE_CHANGED =
+  'Your balance changed while the refund was being prepared. Refresh and try again.'
+const REFUND_RUNNING = 'A refund of this purchase is already running. Refresh in a few minutes.'
+const REFUND_REFUSED =
+  'Lemon Squeezy did not accept the refund. Nothing was taken off your balance. Try again later.'
+const REFUND_UNCONFIRMED =
+  'Lemon Squeezy did not confirm the refund. The amount stays held until it does; your balance updates on its own.'
+const REFUND_NOT_RECORDED =
+  'The refund was sent, but MythScribe could not record it yet. Your balance updates when Lemon Squeezy confirms it.'
 const WEBHOOK_NOT_CONFIGURED = 'Purchases are not configured on the server yet.'
 const BAD_SIGNATURE_MESSAGE = 'That webhook body was not signed with the configured secret.'
 const STALE_MESSAGE = 'That webhook event is older than the accepted window.'
@@ -132,6 +262,7 @@ export async function handleCredits(request: Request, deps: CreditsDeps): Promis
   const spend = await deps.store.spendByFeature(caller.user.id)
   const periodSpend = await deps.store.spendByFeature(caller.user.id, since)
   const periodFirstChargeAt = await deps.store.firstChargeAt(caller.user.id, since)
+  const starter = (await starterRefusal(deps, caller.user)) === null ? deps.starter : null
   return jsonResponse({
     balanceMicros: balance.ledgerMicros - balance.heldMicros,
     heldMicros: balance.heldMicros,
@@ -139,7 +270,9 @@ export async function handleCredits(request: Request, deps: CreditsDeps): Promis
     periodDays: USAGE_PERIOD_DAYS,
     periodSpend,
     periodFirstChargeAt,
-    packs: packsOnSale(deps, config).map(wirePack)
+    packs: packsOnSale(deps, config).map(wirePack),
+    starter: starter ? wirePack(starter) : null,
+    refunds: await refundableOrders(deps, config, caller.user.id, now)
   } satisfies CreditsResult)
 }
 
@@ -238,6 +371,11 @@ export async function handleCheckout(request: Request, deps: CreditsDeps): Promi
   const config = await loadBillingConfig(deps.store)
   const variant = findVariant(deps, config, parsed.data.variantId)
   if (!variant) return jsonError('NOT_FOUND', UNKNOWN_VARIANT)
+  if (variant.kind === 'starter') {
+    const refusal = await starterRefusal(deps, caller.user)
+    if (refusal === 'unverified') return jsonError('NOT_ELIGIBLE', STARTER_UNVERIFIED)
+    if (refusal !== null) return jsonError('NOT_ELIGIBLE', STARTER_USED)
+  }
 
   const url = new URL(variant.pack.url)
   url.searchParams.set('checkout[custom][user_id]', caller.user.id)
@@ -366,7 +504,7 @@ export async function handleLemonSqueezyWebhook(
 
   const orderId = event.data.id
 
-  if (variant.license) {
+  if (variant.kind === 'license') {
     // F-15.9: a license buys a flag, never balance, so the ledger stays out of it.
     if (kind === 'refund') {
       await deps.store.revokeSupporter(user.id, now)
@@ -377,9 +515,16 @@ export async function handleLemonSqueezyWebhook(
   }
 
   if (kind === 'refund') {
-    // Unused balance is refundable (author decision 2026-10-07): the operator refunds what is
-    // left of a pack in Lemon Squeezy, and the ledger takes off exactly what was refunded —
-    // never more than the pack — with only the difference added on a later partial refund.
+    // A refund (or a dispute, which Lemon Squeezy reports as a refund of the order) of an order
+    // that never added balance — a starter order refused below — has nothing to take back.
+    if ((await deps.store.findOrder(user.id, orderId)) === null) {
+      console.warn(`Lemon Squeezy ${eventName} ${orderId}: no top-up for this order; ignored`)
+      return webhookDone('ignored')
+    }
+    // The ledger takes off exactly what was refunded — never more than the order added — with
+    // only the difference added on a later partial refund, and once per order and amount. Spent
+    // money refunded on the provider's side (the operator's call, or a lost dispute) can leave
+    // the balance below zero, which blocks hosted AI until it is topped up.
     const packCents = variant.pack.priceCents
     // No amount (or 0) on the event means the whole order, as before partial refunds.
     const reported = event.data.attributes.refunded_amount ?? 0
@@ -398,17 +543,154 @@ export async function handleLemonSqueezyWebhook(
 
   // The configured price is the truth for the amount, so currency, discounts, and tax on the
   // order never reach the balance.
-  return webhookDone(
-    await deps.store.appendLedgerEntry(
-      plainEntry({
-        id: deps.random(TOKEN_BYTES),
-        userId: user.id,
-        type: 'topup',
-        amountMicros: variant.pack.priceCents * MICROS_PER_CENT,
-        idempotencyKey: `${eventName}:${orderId}`,
-        createdAt: now,
-        orderId
-      })
-    )
+  const topup = plainEntry({
+    id: deps.random(TOKEN_BYTES),
+    userId: user.id,
+    type: 'topup',
+    amountMicros: variant.pack.priceCents * MICROS_PER_CENT,
+    idempotencyKey: `${eventName}:${orderId}`,
+    createdAt: now,
+    orderId
+  })
+  if (variant.kind === 'pack') return webhookDone(await deps.store.appendLedgerEntry(topup))
+
+  // The starter: one per account ever, verified email only. The buy link is public, so an order
+  // can arrive that the checkout would have refused; it is not credited, and it is refunded in
+  // full when the API key is set (otherwise the operator refunds it by hand).
+  const result = user.emailVerifiedAt === null ? 'refused' : await deps.store.creditStarter(topup)
+  if (result !== 'refused') return webhookDone(result)
+  const why = user.emailVerifiedAt === null ? 'unverified email' : 'starter already bought'
+  if (deps.lemonSqueezy === null) {
+    console.warn(`Lemon Squeezy starter ${orderId}: ${why}; not credited, refund it by hand`)
+    return webhookDone('ignored')
+  }
+  const outcome = await deps.lemonSqueezy.refundOrder(orderId, null)
+  console.warn(`Lemon Squeezy starter ${orderId}: ${why}; not credited, refund ${outcome.status}`)
+  return webhookDone('ignored')
+}
+
+/**
+ * `POST /billing/refund` (2026-10-08): refund the unused balance of one purchase, self-serve.
+ *
+ * 1. The purchase must be this account's paid order, inside the refund window, and not refunded
+ *    from the app before (one self-serve refund per purchase; a repeat answers the first result).
+ * 2. The amount is the unused paid balance (spending counts against paid money first, so granted
+ *    money is never refunded), capped at what is left of the order, rounded down to cents.
+ * 3. It is held — in the same statement that checks both limits — before Lemon Squeezy is called,
+ *    so it cannot be spent while the refund runs, and a second request finds the hold.
+ * 4. Lemon Squeezy refunds it: the `refund` ledger row is written (keyed like the webhook's, so
+ *    the webhook adds nothing) and the hold closes. It refuses: the hold is released. No answer:
+ *    the hold stays until the webhook says what happened, or for `REFUND_HOLD_MS`.
+ */
+export async function handleRefund(request: Request, deps: CreditsDeps): Promise<Response> {
+  const caller = await authenticate(request, deps)
+  if (!caller) return jsonError('UNAUTHORIZED', UNAUTHORIZED_MESSAGE)
+  const userId = caller.user.id
+
+  const parsed = RefundBody.safeParse(await readJson(request))
+  if (!parsed.success) return jsonError('BAD_REQUEST', UNKNOWN_ORDER)
+  const { orderId } = parsed.data
+  const api = deps.lemonSqueezy
+  if (api === null) return jsonError('NOT_CONFIGURED', REFUNDS_NOT_CONFIGURED)
+
+  const now = deps.now().getTime()
+  const config = await loadBillingConfig(deps.store)
+  const order = await deps.store.findOrder(userId, orderId)
+  if (order === null) return jsonError('NOT_FOUND', UNKNOWN_ORDER)
+
+  const earlier = await deps.store.findRefundHold(userId, orderId)
+  const repeat = earlier === null ? null : await repeatAnswer(deps, earlier, userId, now)
+  if (repeat !== null) return repeat
+
+  if (config.refundWindowDays <= 0 || now > order.createdAt + config.refundWindowDays * DAY_MS) {
+    return jsonError('NOT_ELIGIBLE', REFUND_WINDOW_PASSED)
+  }
+  const amountMicros = refundableNow(order, await unusedPaidMicros(deps, userId, now))
+  if (amountMicros <= 0) return jsonError('NOT_ELIGIBLE', NOTHING_TO_REFUND)
+
+  const placed = await deps.store.placeRefundHold(
+    {
+      id: deps.random(TOKEN_BYTES),
+      userId,
+      orderId,
+      requestId: deps.random(TOKEN_BYTES),
+      amountMicros,
+      createdAt: now,
+      expiresAt: now + REFUND_HOLD_MS
+    },
+    now
   )
+  if (placed.status === 'insufficient') return jsonError('NOT_ELIGIBLE', BALANCE_CHANGED)
+  if (placed.status === 'duplicate') {
+    return (
+      (await repeatAnswer(deps, placed.hold, userId, now)) ??
+      jsonError('DUPLICATE_REQUEST', REFUND_RUNNING)
+    )
+  }
+  const hold = placed.hold
+
+  const amountCents = amountMicros / MICROS_PER_CENT
+  const outcome = await api.refundOrder(orderId, amountCents)
+  if (outcome.status === 'refused') {
+    console.warn(`refund ${orderId}: Lemon Squeezy refused (${outcome.httpStatus}); hold released`)
+    await deps.store.releaseHold(hold, deps.now().getTime())
+    return jsonError('UPSTREAM', REFUND_REFUSED)
+  }
+  if (outcome.status === 'unknown') {
+    console.warn(`refund ${orderId}: Lemon Squeezy did not answer; hold kept until confirmed`)
+    return jsonError('UPSTREAM', REFUND_UNCONFIRMED)
+  }
+
+  const cumulativeMicros = order.refundedMicros + amountMicros
+  const settledAt = deps.now().getTime()
+  try {
+    await deps.store.settleRefund(
+      hold,
+      {
+        id: deps.random(TOKEN_BYTES),
+        userId,
+        orderId,
+        refundedMicros: cumulativeMicros,
+        idempotencyKey: `order_refunded:${orderId}:${Math.round(cumulativeMicros / MICROS_PER_CENT)}`,
+        createdAt: settledAt
+      },
+      settledAt
+    )
+  } catch (err) {
+    // The hold stays active: the money is not spendable, and the webhook writes the refund.
+    console.error(`refund ${orderId}: refunded but not recorded; the webhook will`, err)
+    return jsonError('INTERNAL', REFUND_NOT_RECORDED)
+  }
+  console.warn(`refund ${orderId}: ${amountMicros} micros refunded from the app`)
+  return refundAnswer(deps, amountMicros, userId, settledAt)
+}
+
+async function refundAnswer(
+  deps: CreditsDeps,
+  refundedMicros: number,
+  userId: string,
+  now: number
+): Promise<Response> {
+  const balance = await deps.store.getBalance(userId, now)
+  return jsonResponse({
+    refundedMicros,
+    balanceMicros: balance.ledgerMicros - balance.heldMicros
+  } satisfies RefundResult)
+}
+
+/**
+ * The answer to a refund the app already asked for on this order (L8): the first result again
+ * when it settled, "running" while it runs; null when it was released (failed) and may run again.
+ */
+async function repeatAnswer(
+  deps: CreditsDeps,
+  hold: HoldRow,
+  userId: string,
+  now: number
+): Promise<Response | null> {
+  if (hold.status === 'settled') {
+    return refundAnswer(deps, hold.chargeMicros ?? hold.amountMicros, userId, now)
+  }
+  if (hold.status === 'active') return jsonError('DUPLICATE_REQUEST', REFUND_RUNNING)
+  return null
 }

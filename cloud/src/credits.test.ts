@@ -61,6 +61,8 @@ function makeDeps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
     packs: PACKS,
     supporter: SUPPORTER,
     appLicense: APP_LICENSE,
+    starter: null,
+    lemonSqueezy: null,
     webhookSecret: SECRET,
     // F-15.4: the AI proxy has its own tests in `ai.test.ts`.
     upstream: null,
@@ -246,7 +248,9 @@ describe('GET /credits', () => {
       packs: [
         { variantId: '111', priceCents: 1000 },
         { variantId: '222', priceCents: 2500 }
-      ]
+      ],
+      starter: null,
+      refunds: []
     })
   })
 
@@ -640,14 +644,15 @@ describe('GET /pricing (P1, P5)', () => {
 
     expect(body).toMatchObject({
       currency: 'USD',
-      markup: 0.2,
+      // 2026-10-08 (author): cost + 25 %, and no trial grant.
+      markup: 0.25,
       appPriceMicros: 30_000_000,
       minPackMicros: 10_000_000,
       packs: [
         { variantId: '111', priceCents: 1000 },
         { variantId: '222', priceCents: 2500 }
       ],
-      trialGrantMicros: 2_000_000,
+      trialGrantMicros: 0,
       quoteThresholdMicros: 250_000,
       estimateSafetyFactor: 1.2,
       lowBalanceWarningMicros: 2_000_000,
@@ -669,7 +674,7 @@ describe('GET /pricing (P1, P5)', () => {
 
   it('answers a config change on the next call, with no release', async () => {
     const store = deps.store as TestStore
-    store.setConfig('markup', 0.25)
+    store.setConfig('markup', 0.3)
     store.setConfig('word_costs', { lineEdit: 0.00002, consistencyCheck: null })
     store.setConfig('routing', {
       tiers: { fast: 'openai/gpt-5.4-nano', strong: 'openai/gpt-5.4' },
@@ -677,7 +682,7 @@ describe('GET /pricing (P1, P5)', () => {
     })
 
     const body = await pricing()
-    expect(body.markup).toBe(0.25)
+    expect(body.markup).toBe(0.3)
     expect(body.wordCosts.lineEdit).toBe(0.00002)
     expect(body.routing.tiers.fast).toBe('openai/gpt-5.4-nano')
     expect(body.routing.features).toEqual({ tags: 'fast' })
@@ -690,7 +695,7 @@ describe('GET /pricing (P1, P5)', () => {
     store.setConfig('no_such_key', 1)
 
     const body = await pricing()
-    expect(body.markup).toBe(0.2)
+    expect(body.markup).toBe(0.25)
     expect(body.routing.tiers.fast).toBe('deepseek/deepseek-v4-flash')
     expect(warnings).toHaveLength(3)
   })

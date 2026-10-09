@@ -18,7 +18,9 @@ const CREDITS: CreditsResult = {
   periodDays: USAGE_PERIOD_DAYS,
   periodSpend: [],
   periodFirstChargeAt: null,
-  packs: []
+  packs: [],
+  starter: null,
+  refunds: []
 }
 
 /** A client whose bearer routes record the bearer they were called with. */
@@ -48,6 +50,10 @@ function fakeClient(overrides: Partial<CloudAuthClient> = {}): {
       return Promise.resolve({ url: 'https://x.lemonsqueezy.com/buy/1' })
     },
     license: seen({ token: null, product: null }),
+    refund: (token) => {
+      bearers.push(token)
+      return Promise.resolve({ refundedMicros: 1, balanceMicros: 0 })
+    },
     usage: (token) => {
       bearers.push(token)
       return Promise.resolve({ entries: [], nextCursor: null })

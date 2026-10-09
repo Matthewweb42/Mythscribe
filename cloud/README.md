@@ -17,7 +17,8 @@ Source: `src/index.ts` (router, scheduled sweep), `src/auth.ts` (account handler
 store + mailer + clock), `src/credits.ts` (balance, pricing, usage, checkout, webhook),
 `src/config.ts` (the billing config and its defaults), `src/store.ts` (the store over D1; the
 tests run the same SQL on SQLite via `src/testing/sqliteD1.ts`), `src/email.ts` (Resend / log transports), `src/pages.ts` (the two HTML pages),
-`src/crypto.ts` (tokens, hashes, the webhook HMAC, the license signature), `src/ai.ts` (the proxy
+`src/crypto.ts` (tokens, hashes, the webhook HMAC, the license signature), `src/lemonSqueezy.ts` (the one
+Lemon Squeezy API call: refund an order), `src/ai.ts` (the proxy
 handler), `src/openai.ts` (the upstream seam: Chat Completions over plain `fetch`, plus the SSE
 reader), `src/diagnostics.ts` (the diagnostics aggregates) and `src/license.ts` (the Supporter
 token).
@@ -37,12 +38,13 @@ there, not copied.
 | `POST /auth/refresh` | `{ refreshToken }` (the session token) → `{ access: { token, expiresAt } }`, a 15-minute access token; 401 once the session is revoked or expired |
 | `GET /auth/me` | `Authorization: Bearer <access token>` (or, until the app switches, the session token) → `{ email, userId, since }`; 401 when revoked or expired |
 | `POST /auth/signout` | same header; revokes the session (an access token revokes the session it came from, ending all its access tokens), always 204 |
-| `GET /credits` | bearer → `{ balanceMicros, heldMicros, spend[], periodDays, periodSpend[], periodFirstChargeAt, packs[] }` (F-15.3, F-15.5); the available balance in micro-USD (ledger sum minus active holds), the held part, lifetime spend per AI feature, the same breakdown over the usage meter's rolling `USAGE_PERIOD_DAYS` window plus the oldest charge in it (null with none), and the packs on sale |
+| `GET /credits` | bearer → `{ balanceMicros, heldMicros, spend[], periodDays, periodSpend[], periodFirstChargeAt, packs[], starter, refunds[] }` (F-15.3, F-15.5); the available balance in micro-USD (ledger sum minus active holds), the held part, lifetime spend per AI feature, the same breakdown over the usage meter's rolling `USAGE_PERIOD_DAYS` window plus the oldest charge in it (null with none), the packs on sale, the $5 starter pack while this account may buy it (else null), and the purchases inside the refund window with what a refund would return now (2026-10-08) |
 | `GET /pricing` | **no header**: `PricingResult` — markup, app price, minimum pack, packs on sale, trial grant, quote threshold, safety factor, low-balance warning, hold expiry, refund window, limits, the model price table (USD per 1M tokens incl. cached input, display multiplier), the routing table, and the per-word constants (null until measured). All from `billing_config` |
 | `GET /usage?limit=&cursor=` | bearer → `{ entries[], nextCursor }`: the account's ledger newest first (type, amount, time, feature, model, tokens in/out/cached, request id); `limit` 1–200 (default 50) |
 | `POST /billing/checkout` | bearer + `{ variantId }` → `{ url }`; the Lemon Squeezy checkout for one variant on sale — a credit pack or the Supporter product (F-15.9) — with `custom[user_id]` and the email stamped on it. The app opens it, never builds it |
+| `POST /billing/refund` | bearer + `{ orderId }` → `{ refundedMicros, balanceMicros }` (2026-10-08): refunds the unused balance of one purchase through the Lemon Squeezy API, see "Starter pack and refunds". 503 `NOT_CONFIGURED` without `LEMONSQUEEZY_API_KEY`; 404 `NOT_FOUND` for an order that is not this account's top-up; 409 `NOT_ELIGIBLE` past the window or with nothing unused; 409 `DUPLICATE_REQUEST` while one runs; 502 `UPSTREAM` when Lemon Squeezy refuses (hold released) or does not answer (hold kept). A repeat after success answers the first result |
 | `GET /license` | bearer → `{ token, product }` (F-15.9): a freshly signed Supporter token, or `token: null` when the account has no license or it was refunded, plus the Supporter product on sale (null until it is configured). 503 `NOT_CONFIGURED` only when the account *has* a license and `LICENSE_SIGNING_KEY` is unset |
-| `POST /ai/complete` | bearer + optional `Idempotency-Key` header + `AiCompleteBody` (`feature`, `model`, `messages`, `maxTokens`, `json?`, `temperature?`, `stream`) → the relayed answer (F-15.4). An unreadable body, over 4 000 output tokens, or over 64 messages is 400 `BAD_REQUEST`; message content over `max_input_chars` is 413 `REQUEST_TOO_LARGE`; a model not on the price table (or one the gateway stopped serving) 422 `MODEL_UNAVAILABLE`; over `requests_per_minute` 429 `RATE_LIMITED`; a balance short of the hold 402 `INSUFFICIENT_CREDITS`; a key already charged or still running 409 `DUPLICATE_REQUEST`; no gateway key 503 `NOT_CONFIGURED`; a busy gateway 429 `RATE_LIMITED`; any other gateway failure 502 `UPSTREAM` |
+| `POST /ai/complete` | bearer + optional `Idempotency-Key` header + `AiCompleteBody` (`feature`, `model`, `messages`, `maxTokens`, `json?`, `temperature?`, `stream`) → the relayed answer (F-15.4). An unreadable body, over 4 000 output tokens, or over 64 messages is 400 `BAD_REQUEST`; message content over `max_input_chars` is 413 `REQUEST_TOO_LARGE`; a model not on the price table (or one the gateway stopped serving) 422 `MODEL_UNAVAILABLE`; over `requests_per_minute` 429 `RATE_LIMITED`; a balance short of the hold 402 `INSUFFICIENT_CREDITS` (with an `offer`: the starter pack while the account may buy it, else the packs and whether the balance is below zero); a key already charged or still running 409 `DUPLICATE_REQUEST`; no gateway key 503 `NOT_CONFIGURED`; a busy gateway 429 `RATE_LIMITED`; any other gateway failure 502 `UPSTREAM` |
 | `POST /diagnostics` | **no header at all** (F-15.8): `DiagnosticsBody` (`appVersion`, `platform`, `arch`, `electron`, `counts[]`, `crashes[]`) → 204. Folds the report into two aggregate tables and stores nothing per install. A body over `DIAGNOSTICS_BODY_MAX` (32 KB), a counter outside the shared enum, or anything else the schema refuses is 400 `BAD_REQUEST` |
 | `POST /billing/lemonsqueezy` | the webhook. `X-Signature` = HMAC-SHA256 hex of the raw body with `LEMONSQUEEZY_WEBHOOK_SECRET`; `order_created` (status `paid`) credits the pack price, `order_refunded` debits it, everything else answers 200 and is ignored. An order for the Supporter variant grants (or, refunded, revokes) the license instead and never touches the balance |
 
@@ -86,14 +88,16 @@ available balance is the ledger's sum minus the account's active, unexpired hold
 - **Pricing.** `charge = ceil(provider_cost × (1 + markup))` with the provider cost from the price
   table (cached input at its own price), in integer arithmetic (`src/shared/cloudBilling.ts`,
   shared with the app). At least 1 micro-USD per answered request, never more than the hold.
-- **Trial grant.** `trial_grant_usd` ($2.00) once per verified email, on the first sign-in by link
-  or code; keyed by the address's SHA-256, so it is never granted twice.
+- **Trial grant.** `trial_grant_usd` once per verified email, on the first sign-in by link or code;
+  keyed by the address's SHA-256, so it is never granted twice. **0 since 2026-10-08** (author): new
+  accounts start at $0 and try hosted AI with the starter pack; existing balances are kept.
 - **Top-ups and refunds.** `order_created` (paid) writes a `topup` of the configured pack price
   (key `order_created:<order id>`, the same as the 0002 `order_ref`, so replays across the
   migration stay duplicates). `order_refunded` writes a `refund` of the order's cumulative
   `refunded_amount` (the whole pack when absent), capped at the pack, minus what the order already
   had refunded — so the operator refunds what is left of a pack in Lemon Squeezy and the ledger
   follows exactly. Spent money is the operator's call; the refund window is `refund_window_days`.
+- **Starter pack and refunds (2026-10-08, author).** See the section below.
 - **Staleness.** A signed order event older than `webhook_max_age_hours` (by its `created_at`, or
   `refunded_at` for a refund), or one without a timestamp, is 400 `STALE_WEBHOOK` and changes nothing.
 - **Gateway.** `OPENROUTER_API_KEY` set: the proxy forwards to OpenRouter with the price table's
@@ -114,15 +118,15 @@ not on the price table falls back to the default routing.
 | --- | --- |
 | `app_price_usd` | `30` |
 | `min_pack_usd` | `10` (a configured pack below it is not sold) |
-| `markup` | `0.2` |
-| `trial_grant_usd` | `2` |
+| `markup` | `0.25` (was 0.2; 2026-10-08) |
+| `trial_grant_usd` | `0` (was 2; replaced by the starter pack 2026-10-08) |
 | `quote_threshold_usd` | `0.25` |
 | `estimate_safety_factor` | `1.2` |
 | `low_balance_warning_usd` | `2` |
 | `hold_expiry_minutes` | `10` |
 | `requests_per_minute` | `60` |
 | `max_input_chars` | `200000` |
-| `refund_window_days` | `30` |
+| `refund_window_days` | `30` (every pack and the starter; 0 turns self-serve refunds off) |
 | `webhook_max_age_hours` | `72` |
 | `models` | DeepSeek V4 Flash / V4 Pro via OpenRouter (`deepseek/…`, approved 2026-10-07), with cached-input prices and display multipliers (`HOSTED_DEFAULT_MODELS`, `src/shared/ai.ts`) |
 | `routing` | `{"tiers":{"fast":"deepseek/deepseek-v4-flash","strong":"deepseek/deepseek-v4-pro"},"features":{}}` |
@@ -145,6 +149,48 @@ The webhook answers a non-2xx only for the two things an operator can fix (a bod
 our secret: 401 `BAD_SIGNATURE`; no secret configured: 503 `NOT_CONFIGURED`). An unreadable body,
 an unknown user, or an unknown variant is a `console.warn` and a 200, because Lemon Squeezy
 retries every failure for days and none of those would improve.
+
+## Starter pack and refunds (2026-10-08)
+
+**Starter pack** (`LEMONSQUEEZY_STARTER`, `{ variantId, url, priceCents }`, $5): credits its full price, exempt from
+`min_pack_usd` (the only variant that is), one per account ever — `starter_purchases` (0006) keeps one row per
+account, never deleted, so a refunded starter cannot be bought again — sold only to an account whose
+`users.email_verified_at` is set (every sign-in by link or code sets it; 0006 marks every existing account verified as
+of its creation), and needs no app license. The checkout refuses an ineligible account with 409 `NOT_ELIGIBLE` and
+the reason. The buy link is public, so the webhook checks again: a second starter order, or one from an unverified
+account, credits nothing and is refunded in full through the API (with no key, a warning asks the operator to refund
+it by hand); its `order_refunded` then finds no top-up and is ignored.
+
+**Self-serve refund** (`POST /billing/refund`), step by step:
+
+1. The order must be this account's top-up (`ledger_entries.type = 'topup'`, by `order_id`); a license order or
+   another account's is 404. A refund the app already asked for on it answers again: the first result when it
+   settled, `DUPLICATE_REQUEST` while it runs.
+2. Inside `refund_window_days` of the top-up (inclusive), else `NOT_ELIGIBLE`.
+3. Amount = min(unused paid balance, what is left of the order), rounded **down** to whole cents, where unused paid
+   balance = ledger sum − active holds − money given rather than paid (trial grants and positive adjustments:
+   spending counts against paid money first) and what is left = the order's top-up − its refunds. 0 is `NOT_ELIGIBLE`.
+4. **Hold** it (`holds`, key `refund:<order id>`, feature `refund`) in one statement whose `WHERE` re-checks both
+   limits, so no spend and no other refund can slip between the check and the hold; a short balance is `NOT_ELIGIBLE`
+   ("your balance changed"). The hold lasts `REFUND_HOLD_MS` (24 h).
+5. Call Lemon Squeezy with the amount in cents. **Refunded:** one batch writes the `refund` row (key
+   `order_refunded:<order>:<cumulative cents>`, the webhook's own key, amount computed in SQL from the order's
+   refunds and capped at its top-up) and settles the hold (`charge_micros` = the amount). **Refused (4xx):** the hold
+   is released, nothing is taken off, a retry may run. **No answer (5xx, timeout):** the hold stays — the money may
+   have left — until the webhook says what happened or the hold expires.
+6. Lemon Squeezy then sends `order_refunded` with the cumulative amount: its key (or the cumulative arithmetic)
+   matches the row already written, so it adds nothing; landing first, it writes the row and closes the running
+   hold, and the app's own write then adds nothing.
+
+**Provider-side refunds and disputes** (`order_refunded`): debit the order's cumulative refunded amount minus what
+was already refunded, capped at the order's top-up, once per order and amount; an order that never added balance is
+ignored. Spent money refunded this way (the operator's call, or a lost dispute, which Lemon Squeezy reports as a
+refund of the order — assumed, unconfirmed) leaves the balance below zero; `/ai/complete` then refuses every request
+(`INSUFFICIENT_CREDITS`, "below zero after a refund or a dispute") until the account is topped up.
+
+`LEMONSQUEEZY_API_KEY` (a Worker secret, the store's API key from Settings › API) is needed for both refund calls;
+without it `POST /billing/refund` answers 503 "Refunds are not configured on the server yet." Lemon Squeezy keeps its
+platform fee on a refund, and a dispute costs $15.
 
 ## Diagnostics (F-15.8)
 
@@ -190,7 +236,8 @@ login attempts, and sessions; `0002_credits.sql` the balance (`credits`) and its
 (`supporter_licenses`), one row per account, idempotent on the Lemon Squeezy order (since
 2026-10-07 also the $30 app license); `0005_billing.sql` the append-only ledger (`ledger_entries`,
 seeded from `credit_events`), `holds`, `billing_config`, `rate_limits`, `access_tokens`, and the
-sign-in code columns on `login_attempts`. The tests apply every migration in order to an in-memory
+sign-in code columns on `login_attempts`; `0006_starter_refunds.sql` `users.email_verified_at` (backfilled from
+`created_at`), `starter_purchases`, and an index on the ledger by account and order. The tests apply every migration in order to an in-memory
 SQLite database (`src/store.test.ts`), so a migration that does not apply fails the suite.
 
 ```
@@ -208,6 +255,7 @@ npx wrangler secret put OPENROUTER_API_KEY           # the AI gateway (A9); pref
 npx wrangler secret put OPENAI_API_KEY               # the AI proxy before OpenRouter (F-15.4)
 npx wrangler secret put LEMONSQUEEZY_WEBHOOK_SECRET  # signs the billing webhook (F-15.3)
 npx wrangler secret put LICENSE_SIGNING_KEY          # signs Supporter tokens (F-15.9)
+npx wrangler secret put LEMONSQUEEZY_API_KEY         # refunds through the Lemon Squeezy API (2026-10-08)
 ```
 
 Rotating: run the same `secret put` with the new value; no redeploy needed. Without
@@ -258,7 +306,8 @@ The sender address and the email body live in `src/email.ts`.
    $30 app license is one more one-time product, put in `LEMONSQUEEZY_APP_LICENSE`. Note each
    product's **variant id** and its **buy link** (`https://<store>.lemonsqueezy.com/buy/<uuid>`).
 3. Put them in `LEMONSQUEEZY_PACKS` in `wrangler.toml` (the commented example shows the shape)
-   and deploy. A malformed value is logged and treated as "no packs on sale"; the Account tab
+   and deploy. The $5 starter pack is one more one-time product, in `LEMONSQUEEZY_STARTER`
+   (`npm run cloud:products` asks for all five). A malformed value is logged and treated as "no packs on sale"; the Account tab
    then says so rather than failing.
 4. Settings › Webhooks: add `https://api.mythscribe.app/billing/lemonsqueezy` with the events
    `order_created` and `order_refunded`, and a signing secret of your own choosing.

@@ -8,6 +8,8 @@ import {
   hostedPriceFor,
   hostedQuote,
   multiplierLabel,
+  noBalanceText,
+  starterOfferText,
   wordsCovered
 } from './hostedPricing'
 
@@ -53,10 +55,11 @@ describe('bundledPricing (P5: the Worker defaults until GET /pricing answers)', 
     const bundled = bundledPricing()
     expect(PricingResult.parse(bundled)).toEqual(bundled)
     expect(bundled.routing.tiers).toEqual(HOSTED_DEFAULT_MODELS)
-    expect(bundled.markup).toBe(0.2)
+    // 2026-10-08 (author): cost + 25 %, and no free grant (the $5 starter pack replaces it).
+    expect(bundled.markup).toBe(0.25)
     expect(bundled.quoteThresholdMicros).toBe(250_000)
     expect(bundled.lowBalanceWarningMicros).toBe(2_000_000)
-    expect(bundled.trialGrantMicros).toBe(2_000_000)
+    expect(bundled.trialGrantMicros).toBe(0)
     expect(bundled.minPackMicros).toBe(10_000_000)
     expect(bundled.estimateSafetyFactor).toBe(1.2)
     // Measured constants do not exist yet, so every words line stays hidden.
@@ -152,5 +155,32 @@ describe('wordsCovered (E2, E3)', () => {
     expect(wordsCovered(measured, 10_000_000, 'lineEdit')).toBe(160_000)
     expect(wordsCovered(measured, 0, 'lineEdit')).toBeNull()
     expect(wordsCovered(measured, 10_000_000, 'consistencyCheck')).toBeNull()
+  })
+})
+
+describe('the starter pack offer (2026-10-08)', () => {
+  it('says the author’s words, with the price and the window from the Worker', () => {
+    expect(starterOfferText(500, 30)).toBe(
+      'Try the AI for $5. Any unused balance is refundable for 30 days.'
+    )
+    expect(starterOfferText(750, 1)).toBe(
+      'Try the AI for $7.50. Any unused balance is refundable for 1 day.'
+    )
+    expect(starterOfferText(500, 0)).toBe('Try the AI for $5.')
+  })
+
+  it('offers the starter, explains a balance below zero, and falls back for an older Worker', () => {
+    expect(
+      noBalanceText({ kind: 'starter', variantId: 's', priceCents: 500, refundWindowDays: 30 })
+    ).toBe('Try the AI for $5. Any unused balance is refundable for 30 days.')
+    expect(noBalanceText({ kind: 'packs', negative: true })).toBe(
+      'Your MythScribe Cloud balance is below zero after a refund or a dispute.'
+    )
+    expect(noBalanceText({ kind: 'packs', negative: false })).toBe(
+      'Your MythScribe Cloud balance is too low for this request.'
+    )
+    expect(noBalanceText(undefined)).toBe(
+      'Your MythScribe Cloud balance is too low for this request.'
+    )
   })
 })

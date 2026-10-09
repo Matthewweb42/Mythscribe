@@ -161,6 +161,7 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'account:refresh': 'read',
   'account:getCredits': 'read',
   'account:buyCredits': 'read',
+  'account:refund': 'read',
   'account:getUsage': 'read',
   'account:getPricing': 'read',
   'account:getSupporter': 'read',

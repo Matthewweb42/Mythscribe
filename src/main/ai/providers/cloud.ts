@@ -7,11 +7,17 @@ import {
   CLOUD_AI_AVAILABLE,
   CloudApiError,
   type CloudErrorCode,
+  type CreditOffer,
   type CreditsResult,
   IDEMPOTENCY_KEY_HEADER,
   type PricingResult
 } from '@shared/cloudApi'
-import { bundledPricing, hostedPriceFor } from '@shared/hostedPricing'
+import {
+  bundledPricing,
+  hostedPriceFor,
+  noBalanceText,
+  starterOfferText
+} from '@shared/hostedPricing'
 import { AccountError } from '../../account/cloudAuthClient'
 import type { FetchLike } from './openai'
 import {
@@ -89,7 +95,6 @@ export interface CloudProviderOptions {
 
 const SIGNED_OUT = 'Sign in to MythScribe Cloud to use it for this project.'
 const SESSION_ENDED = 'Your MythScribe Cloud session has ended.'
-const NO_CREDIT = 'Your MythScribe Cloud balance is too low for this request.'
 const BUSY = 'MythScribe Cloud is busy, or this account sent too many requests in the last minute.'
 const TOO_LARGE = 'This request is longer than MythScribe Cloud accepts.'
 const MODEL_UNAVAILABLE = 'MythScribe Cloud does not offer the model this request asked for.'
@@ -147,12 +152,13 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
   const available = options.available ?? CLOUD_AI_AVAILABLE
 
   /** The one mapping from a Cloud error code to the app's taxonomy. */
-  const failureOf = (code: CloudErrorCode): AiProviderError => {
+  const failureOf = (code: CloudErrorCode, offer?: CreditOffer): AiProviderError => {
     if (code === 'UNAUTHORIZED') {
       options.onSessionEnded()
       return new AiSignedOutError(SESSION_ENDED)
     }
-    if (code === 'INSUFFICIENT_CREDITS') return new AiNoCreditError(NO_CREDIT)
+    // 2026-10-08: the refusal offers the starter pack (or the packs) instead of a bare error.
+    if (code === 'INSUFFICIENT_CREDITS') return new AiNoCreditError(noBalanceText(offer))
     if (code === 'RATE_LIMITED') return new AiRateLimitError(BUSY)
     if (code === 'REQUEST_TOO_LARGE') return new AiTooLargeError(TOO_LARGE)
     if (code === 'MODEL_UNAVAILABLE') return new AiModelUnavailableError(MODEL_UNAVAILABLE)
@@ -167,7 +173,7 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
   const failureBody = (text: string): AiProviderError => {
     const parsed = CloudApiError.safeParse(parseJson(text))
     if (!parsed.success) return new AiFallbackError(UNREADABLE)
-    return failureOf(parsed.data.code)
+    return failureOf(parsed.data.code, parsed.data.offer)
   }
 
   const bodyFor = (request: CompletionRequest, stream: boolean): AiCompleteBody => {
@@ -290,7 +296,14 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
       } catch (err) {
         throw accountFailure(err, failureOf)
       }
-      if (credits.balanceMicros <= 0) throw new AiNoCreditError(NO_CREDIT)
+      if (credits.balanceMicros <= 0) {
+        const terms = options.pricing?.() ?? bundledPricing()
+        throw new AiNoCreditError(
+          credits.starter === null
+            ? noBalanceText({ kind: 'packs', negative: credits.balanceMicros < 0 })
+            : starterOfferText(credits.starter.priceCents, terms.refundWindowDays)
+        )
+      }
       return { model: options.resolveModel('fast') }
     }
   }

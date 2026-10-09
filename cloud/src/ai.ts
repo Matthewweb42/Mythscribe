@@ -36,7 +36,7 @@ import {
 } from '../../src/shared/cloudBilling'
 import { authenticate, jsonError, jsonResponse, readJson, UNAUTHORIZED_MESSAGE } from './auth'
 import { loadBillingConfig } from './config'
-import type { CreditsDeps } from './credits'
+import { creditOffer, type CreditsDeps } from './credits'
 import type { Upstream, UpstreamParams, UpstreamUsage } from './openai'
 import { UpstreamError } from './openai'
 import type { HoldRow } from './store'
@@ -53,6 +53,8 @@ const MINUTE_MS = 60_000
 const UNKNOWN_MODEL = 'That model is not available on MythScribe hosted AI.'
 const NOT_CONFIGURED = 'The AI proxy is not configured on the server yet.'
 const NO_BALANCE = 'Your MythScribe balance does not cover this request. Add to it to continue.'
+const NEGATIVE_BALANCE =
+  'Your MythScribe balance is below zero after a refund or a dispute. Add to it to use hosted AI again.'
 const BAD_BODY = 'MythScribe could not read that request.'
 const BAD_KEY = 'The Idempotency-Key header is not valid.'
 const TOO_LARGE = 'This request is longer than MythScribe hosted AI accepts. Send less text.'
@@ -251,7 +253,18 @@ export async function handleAiComplete(request: Request, deps: AiDeps): Promise<
     },
     startedAt
   )
-  if (placed.status === 'insufficient') return jsonError('INSUFFICIENT_CREDITS', NO_BALANCE)
+  if (placed.status === 'insufficient') {
+    // 2026-10-08: the refusal carries what to buy (the starter pack while the account may still
+    // buy it), and a balance below zero says why it is blocked.
+    const balance = await deps.store.getBalance(userId, startedAt)
+    const availableMicros = balance.ledgerMicros - balance.heldMicros
+    const offer = await creditOffer(deps, caller.user, availableMicros)
+    return jsonError(
+      'INSUFFICIENT_CREDITS',
+      availableMicros < 0 ? NEGATIVE_BALANCE : NO_BALANCE,
+      offer
+    )
+  }
   if (placed.status === 'duplicate') {
     return jsonError(
       'DUPLICATE_REQUEST',

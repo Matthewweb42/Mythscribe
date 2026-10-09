@@ -2,6 +2,7 @@ import { HOSTED_DEFAULT_MODELS, LEGACY_HOSTED_DEFAULT_MODELS, type Tier } from '
 import {
   AI_COMPLETE_MAX_CHARS,
   AI_COMPLETE_MAX_TOKENS,
+  type CreditOffer,
   type PricingModel,
   type PricingResult
 } from './cloudApi'
@@ -147,6 +148,35 @@ export function hostedModelFor(tier: Tier, chosen: string, pricing: PricingResul
     chosen === HOSTED_DEFAULT_MODELS[tier] || chosen === LEGACY_HOSTED_DEFAULT_MODELS[tier]
   if (!isDefault) return chosen
   return pricing?.routing.tiers[tier] ?? HOSTED_DEFAULT_MODELS[tier]
+}
+
+/** Whole dollars without cents ("$5"), others with them ("$7.50"). */
+function dollarsFromCents(cents: number): string {
+  return cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`
+}
+
+/**
+ * The starter pack offer (author copy, 2026-10-08): "Try the AI for $5. Any unused balance is
+ * refundable for 30 days." The refund sentence is left out when the window is zero.
+ */
+export function starterOfferText(priceCents: number, refundWindowDays: number): string {
+  const offer = `Try the AI for ${dollarsFromCents(priceCents)}.`
+  if (refundWindowDays <= 0) return offer
+  const days = refundWindowDays === 1 ? '1 day' : `${refundWindowDays} days`
+  return `${offer} Any unused balance is refundable for ${days}.`
+}
+
+/**
+ * What a hosted request refused for its balance says (2026-10-08): the starter offer while the
+ * account may buy it, why it is blocked when the balance is below zero, and otherwise that the
+ * balance is too low. An older Worker sends no offer.
+ */
+export function noBalanceText(offer: CreditOffer | undefined): string {
+  if (offer?.kind === 'starter') return starterOfferText(offer.priceCents, offer.refundWindowDays)
+  if (offer?.kind === 'packs' && offer.negative) {
+    return 'Your MythScribe Cloud balance is below zero after a refund or a dispute.'
+  }
+  return 'Your MythScribe Cloud balance is too low for this request.'
 }
 
 /** The actions the per-word constants are measured for (E2, E3), with how the app names them. */

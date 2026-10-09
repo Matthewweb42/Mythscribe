@@ -127,14 +127,15 @@ export const DEFAULT_HOSTED_ROUTING: HostedRouting = {
 
 /**
  * The money terms the Worker serves by default (AI-BILLING-SPEC "Config defaults", author
- * decisions 2026-10-07), in one place: the Worker's `DEFAULT_BILLING_CONFIG` spreads them, and the
+ * decisions 2026-10-07; changed 2026-10-08: cost + 25 %, and no free trial grant — new accounts
+ * start at $0 and try hosted AI with the refundable $5 starter pack instead), in one place: the Worker's `DEFAULT_BILLING_CONFIG` spreads them, and the
  * app's bundled pricing (`bundledPricing`, used until `GET /pricing` has answered) reads them.
  */
 export const DEFAULT_BILLING_TERMS = {
   appPriceUsd: 30,
   minPackUsd: 10,
-  markup: 0.2,
-  trialGrantUsd: 2,
+  markup: 0.25,
+  trialGrantUsd: 0,
   quoteThresholdUsd: 0.25,
   estimateSafetyFactor: 1.2,
   lowBalanceWarningUsd: 2,

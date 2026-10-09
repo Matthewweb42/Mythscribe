@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react'
-import type { CreditsResult, LedgerEntryType, PricingResult, UsageEntry } from '@shared/cloudApi'
+import type {
+  CreditsResult,
+  LedgerEntryType,
+  PricingResult,
+  RefundableOrder,
+  UsageEntry
+} from '@shared/cloudApi'
 import { MICROS_PER_USD } from '@shared/cloudBilling'
 import { creditWarning, periodSpentMicros, projectedDaysLeft } from '@shared/cloudUsage'
-import { multiplierLabel, WORD_COST_ACTIONS, wordsCovered } from '@shared/hostedPricing'
+import {
+  multiplierLabel,
+  starterOfferText,
+  WORD_COST_ACTIONS,
+  wordsCovered
+} from '@shared/hostedPricing'
 import {
   featureLabel,
   formatCount,
@@ -111,6 +122,24 @@ export function BalanceSection(): React.JSX.Element {
             <UsageMeter credits={credits} now={creditsAt} pricing={pricing} />
           )}
 
+          {credits.starter === null ? null : (
+            <div data-testid="account-starter" className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  if (credits.starter !== null) void buyCredits(credits.starter.variantId)
+                }}
+                className={BUTTON}
+              >
+                {`Try it for ${formatUsd(credits.starter.priceCents / 100)}`}
+              </button>
+              <span className="text-xs text-fg-muted">
+                {starterOfferText(credits.starter.priceCents, pricing.refundWindowDays)}
+              </span>
+            </div>
+          )}
+
           {packs === undefined || packs.length === 0 ? (
             <p className="m-0 text-xs text-fg-muted">Packs are not on sale yet.</p>
           ) : (
@@ -147,6 +176,8 @@ export function BalanceSection(): React.JSX.Element {
             {termsText(pricing)}
           </p>
 
+          <RefundList refunds={credits.refunds} busy={busy} />
+
           <SpendTable credits={credits} />
         </>
       )}
@@ -161,6 +192,75 @@ export function BalanceSection(): React.JSX.Element {
         </p>
       )}
     </section>
+  )
+}
+
+const dayOf = (at: number): string =>
+  new Date(at).toLocaleDateString(undefined, { dateStyle: 'medium' })
+
+/**
+ * The purchases whose unused balance can still be refunded (2026-10-08): each with what a refund
+ * returns now and until when, and a Refund button that asks once more before it sends (money
+ * leaves the balance). The Worker holds the amount before it asks Lemon Squeezy, so a second
+ * click can never refund twice.
+ */
+function RefundList({
+  refunds,
+  busy
+}: {
+  refunds: RefundableOrder[]
+  busy: boolean
+}): React.JSX.Element | null {
+  const refund = useAccountStore((s) => s.refund)
+  const [confirming, setConfirming] = useState<string | null>(null)
+  if (refunds.length === 0) return null
+  return (
+    <details data-testid="account-refunds">
+      <summary className="cursor-pointer text-xs">Refund unused balance</summary>
+      <ul aria-label="Refundable purchases" className="m-0 mt-1 flex list-none flex-col gap-1 p-0">
+        {refunds.map((order) => {
+          const amount = formatUsd(order.refundableMicros / MICROS_PER_USD)
+          return (
+            <li key={order.orderId} className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-fg-muted">
+                {`${formatUsd(order.paidMicros / MICROS_PER_USD)} on ${dayOf(order.purchasedAt)}, refundable until ${dayOf(order.refundUntil)}`}
+              </span>
+              {order.pending ? (
+                <span>Refund in progress</span>
+              ) : order.refundableMicros <= 0 ? (
+                <span>Nothing unused to refund</span>
+              ) : confirming === order.orderId ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setConfirming(null)
+                      void refund(order.orderId)
+                    }}
+                    className={BUTTON}
+                  >
+                    {`Refund ${amount} now`}
+                  </button>
+                  <button type="button" onClick={() => setConfirming(null)} className={BUTTON}>
+                    Keep it
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setConfirming(order.orderId)}
+                  className={BUTTON}
+                >
+                  {`Refund ${amount}`}
+                </button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </details>
   )
 }
 

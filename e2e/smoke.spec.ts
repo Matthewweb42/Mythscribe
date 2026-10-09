@@ -917,6 +917,21 @@ const CLOUD_SINCE = '2026-09-19T12:00:00.000Z'
 const CLOUD_BALANCE_MICROS = 2_003_000
 let cloudBalanceMicros = CLOUD_BALANCE_MICROS
 const CLOUD_PACK = { variantId: 'pack-10', priceCents: 1000 }
+/**
+ * 2026-10-08: the $5 starter pack on offer, and one purchase whose unused $1.00 can be refunded.
+ * The fake records each refund asked for and leaves the balance alone, so the later steps that
+ * follow the balance are unaffected.
+ */
+const CLOUD_STARTER = { variantId: 'starter-5', priceCents: 500 }
+const CLOUD_REFUNDABLE = {
+  orderId: 'order-e2e',
+  paidMicros: 10_000_000,
+  purchasedAt: Date.now() - 24 * 60 * 60_000,
+  refundUntil: Date.now() + 29 * 24 * 60 * 60_000,
+  refundableMicros: 1_000_000,
+  pending: false
+}
+const cloudRefunds: string[] = []
 const CLOUD_SPEND = { feature: 'ghostText', micros: 1200, requests: 3, tokens: 900 }
 /** The rolling period's own breakdown: $0.20 spent, the oldest of it three days ago. */
 const CLOUD_PERIOD_SPEND = { feature: 'chat', micros: 200_000, requests: 2, tokens: 5_000 }
@@ -1126,7 +1141,28 @@ async function startFakeCloudApi(): Promise<string> {
         periodDays: USAGE_PERIOD_DAYS,
         periodSpend: [CLOUD_PERIOD_SPEND],
         periodFirstChargeAt: CLOUD_PERIOD_FIRST_CHARGE_AT,
-        packs: [CLOUD_PACK]
+        packs: [CLOUD_PACK],
+        starter: CLOUD_STARTER,
+        refunds: [CLOUD_REFUNDABLE]
+      })
+      return
+    }
+    if (req.method === 'POST' && url === '/billing/refund') {
+      let body = ''
+      req.setEncoding('utf8')
+      req.on('data', (chunk: string) => {
+        body += chunk
+      })
+      req.on('end', () => {
+        if (!authorized(req)) {
+          json(res, 401, { code: 'UNAUTHORIZED', message: 'Sign in again.' })
+          return
+        }
+        cloudRefunds.push((JSON.parse(body) as { orderId: string }).orderId)
+        json(res, 200, {
+          refundedMicros: CLOUD_REFUNDABLE.refundableMicros,
+          balanceMicros: cloudBalanceMicros
+        })
       })
       return
     }
@@ -2020,6 +2056,15 @@ test('create, close, reopen a project on disk', async () => {
     balanceText(cloudBalanceMicros)
   )
   await expect(settingsDialog.getByRole('button', { name: 'Add $10.00' })).toBeVisible()
+  // 2026-10-08: the starter pack offer, and a refund of a purchase's unused balance, which asks
+  // once more before it is sent to the Worker.
+  await expect(settingsDialog.getByTestId('account-starter')).toContainText(
+    'Try the AI for $5. Any unused balance is refundable for 30 days.'
+  )
+  await settingsDialog.getByText('Refund unused balance').click()
+  await settingsDialog.getByRole('button', { name: 'Refund $1.00', exact: true }).click()
+  await settingsDialog.getByRole('button', { name: 'Refund $1.00 now' }).click()
+  await expect.poll(() => cloudRefunds, { timeout: 5000 }).toEqual(['order-e2e'])
   // AI-BILLING-SPEC A5, S6: the balance was asked for with a short-lived access token, never the
   // session (refresh) token. C3: the privacy rule beside the packs. E7: the usage history.
   expect(cloudBearers).toContain(CLOUD_ACCESS_TOKEN)

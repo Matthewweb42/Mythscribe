@@ -195,7 +195,18 @@ describe('createCloudAuthClient credits (F-15.3)', () => {
     periodDays: USAGE_PERIOD_DAYS,
     periodSpend: [{ feature: 'chat', micros: 400, requests: 1, tokens: 300 }],
     periodFirstChargeAt: 1_758_000_000_000,
-    packs: [{ variantId: 'pack-5', priceCents: 500 }]
+    packs: [{ variantId: 'pack-5', priceCents: 500 }],
+    starter: { variantId: 'starter', priceCents: 500 },
+    refunds: [
+      {
+        orderId: 'o1',
+        paidMicros: 10_000_000,
+        purchasedAt: 1_758_000_000_000,
+        refundUntil: 1_760_592_000_000,
+        refundableMicros: 7_000_000,
+        pending: false
+      }
+    ]
   }
 
   it('reads the balance, the spend, and the packs with the session as a bearer', async () => {
@@ -214,7 +225,10 @@ describe('createCloudAuthClient credits (F-15.3)', () => {
       periodDays: USAGE_PERIOD_DAYS,
       periodSpend: [],
       periodFirstChargeAt: null,
-      packs: []
+      packs: [],
+      // 2026-10-08: no starter on offer and nothing refundable from an older Worker.
+      starter: null,
+      refunds: []
     })
   })
 
@@ -325,5 +339,45 @@ describe('createCloudAuthClient access tokens and usage (AI-BILLING-SPEC A5, E7)
     expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer acc-1')
     await client().usage('acc-1', '1700000000000.e1')
     expect(calls[1]?.url).toBe(`${BASE}/usage?cursor=1700000000000.e1`)
+  })
+})
+
+describe('createCloudAuthClient refunds (2026-10-08)', () => {
+  it('asks the Worker to refund one purchase with the bearer', async () => {
+    answers = [json(200, { refundedMicros: 7_000_000, balanceMicros: 0 })]
+    expect(await client().refund('acc-1', 'o1')).toEqual({
+      refundedMicros: 7_000_000,
+      balanceMicros: 0
+    })
+    expect(calls[0]?.url).toBe(`${BASE}/billing/refund`)
+    expect(calls[0]?.init?.method).toBe('POST')
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ orderId: 'o1' }))
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer acc-1')
+  })
+
+  it('shows the Worker’s own reason for a refused refund, but fixed copy for a lost session', async () => {
+    const cases: [CloudErrorCode, string][] = [
+      ['NOT_ELIGIBLE', 'This purchase is past its refund window.'],
+      ['NOT_CONFIGURED', 'Refunds are not configured on the server yet.'],
+      ['UPSTREAM', 'Lemon Squeezy did not accept the refund.'],
+      ['DUPLICATE_REQUEST', 'A refund of this purchase is already running.'],
+      ['NOT_FOUND', 'That purchase is not on this account.']
+    ]
+    for (const [code, message] of cases) {
+      answers = [errorBody(code, message)]
+      const err = await caught(client().refund('acc-1', 'o1'))
+      expect(err.code).toBe(code)
+      expect(err.message).toBe(message)
+    }
+    answers = [errorBody('UNAUTHORIZED', 'the worker said so')]
+    expect((await caught(client().refund('acc-1', 'o1'))).message).toBe(
+      'This MythScribe Cloud sign-in is no longer valid.'
+    )
+  })
+
+  it('shows the Worker’s reason for a starter pack it will not sell', async () => {
+    answers = [errorBody('NOT_ELIGIBLE', 'The starter pack is one per account.')]
+    const err = await caught(client().checkout('acc-1', 'starter'))
+    expect(err.message).toBe('The starter pack is one per account.')
   })
 })

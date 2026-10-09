@@ -42,6 +42,11 @@ LEMONSQUEEZY_PACKS = '[{"variantId":"2219616","url":"https://mythscribe.lemonsqu
 # token as the Supporter product, which it supersedes; `GET /license` offers it once set.
 LEMONSQUEEZY_APP_LICENSE = '{"variantId":"2219611","url":"https://mythscribe.lemonsqueezy.com/checkout/buy/f74c3cc6-9fc7-42c6-a9cd-23ba102c1e1b","priceCents":3000}'
 
+# The $5 starter pack (2026-10-08), the same shape: one per account ever (even after a refund),
+# exempt from `min_pack_usd`, verified email only, no app license needed. Unset until the Lemon
+# Squeezy product exists: the Account tab then offers no starter. `npm run cloud:products` writes it.
+# LEMONSQUEEZY_STARTER = '{"variantId":"123459","url":"https://mythscribe.lemonsqueezy.com/checkout/buy/00000000-0000-0000-0000-000000000000","priceCents":500}'
+
 # Prices, the markup, the trial grant, the limits, and the routing table are not here: they are
 # rows of the `billing_config` D1 table (migration 0005), changed without a deploy. See README.md.
 
@@ -51,6 +56,8 @@ LEMONSQUEEZY_APP_LICENSE = '{"variantId":"2219611","url":"https://mythscribe.lem
 #   OPENAI_API_KEY                the operator's OpenAI key (F-15.4; used only without OPENROUTER_API_KEY)
 #   LEMONSQUEEZY_WEBHOOK_SECRET   signs the billing webhook (F-15.3)         -> `npx wrangler secret put LEMONSQUEEZY_WEBHOOK_SECRET`
 #   LICENSE_SIGNING_KEY           signs Supporter tokens (F-15.9)            -> `npm run cloud:license-keygen`, then `npx wrangler secret put LICENSE_SIGNING_KEY`
+#   LEMONSQUEEZY_API_KEY          the store's API key, for refunds (2026-10-08) -> `npx wrangler secret put LEMONSQUEEZY_API_KEY`
 # Without RESEND_API_KEY the Worker answers 503 NOT_CONFIGURED to /auth/start, and without
-# LEMONSQUEEZY_WEBHOOK_SECRET the same to /billing/lemonsqueezy.
+# LEMONSQUEEZY_WEBHOOK_SECRET the same to /billing/lemonsqueezy; without LEMONSQUEEZY_API_KEY
+# `POST /billing/refund` answers 503 NOT_CONFIGURED ("Refunds are not configured on the server yet.").
 # Local runs read them from ./.dev.vars (git-ignored); copy .dev.vars.example to start.

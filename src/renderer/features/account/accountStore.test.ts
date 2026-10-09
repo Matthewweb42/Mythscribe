@@ -28,7 +28,9 @@ const CREDITS: CreditsResult = {
   periodDays: USAGE_PERIOD_DAYS,
   periodSpend: [{ feature: 'ghostText', micros: 400, requests: 1, tokens: 300 }],
   periodFirstChargeAt: 1_758_000_000_000,
-  packs: [{ variantId: 'pack-5', priceCents: 500 }]
+  packs: [{ variantId: 'pack-5', priceCents: 500 }],
+  starter: null,
+  refunds: []
 }
 
 const PRICING: PricingResult = { ...bundledPricing(), lowBalanceWarningMicros: 3_000_000 }
@@ -107,6 +109,8 @@ function fakeClient(): Fake {
             return SIGNED_IN as Output<C>
           case 'account:getCredits':
             return CREDITS as Output<C>
+          case 'account:refund':
+            return { refundedMicros: 1_000_000, balanceMicros: 1_500_000 } as Output<C>
           case 'account:buyCredits':
             return null as Output<C>
           case 'account:getPricing':
@@ -254,6 +258,30 @@ describe('accountStore (F-15.2)', () => {
       input: { variantId: 'pack-5' }
     })
     expect(store().credits).toEqual(CREDITS)
+  })
+
+  it('refunds a purchase, then reads the balance again and drops the stale history (2026-10-08)', async () => {
+    useAccountStore.setState({ usage: [ENTRY], usageCursor: 'page-2' })
+    await store().refund('o-1')
+    expect(fake.calls).toEqual([
+      { channel: 'account:refund', input: { orderId: 'o-1' } },
+      { channel: 'account:getCredits', input: undefined }
+    ])
+    expect(store().credits).toEqual(CREDITS)
+    expect(store().usage).toBeNull()
+    expect(store().creditsBusy).toBe(false)
+  })
+
+  it('keeps a refused refund as the credits error, with the reason', async () => {
+    fake.fail = new IpcRequestError({
+      code: 'VALIDATION',
+      message: 'This purchase is past its refund window. Refresh the Account tab.'
+    })
+    await store().refund('o-1')
+    expect(store().creditsError).toBe(
+      'This purchase is past its refund window. Refresh the Account tab.'
+    )
+    expect(store().error).toBeNull()
   })
 
   it('keeps a credits failure out of the sign-in error', async () => {

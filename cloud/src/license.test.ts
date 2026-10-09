@@ -51,6 +51,8 @@ function makeDeps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
     packs: [],
     supporter: SUPPORTER,
     appLicense: null,
+    starter: null,
+    lemonSqueezy: null,
     webhookSecret: null,
     upstream: null,
     signingKey: () => importSigningKey(PRIVATE_JWK),

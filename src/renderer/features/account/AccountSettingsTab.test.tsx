@@ -43,7 +43,9 @@ const CREDITS: CreditsResult = {
     { variantId: 'pack-10', priceCents: 1000 },
     { variantId: 'pack-25', priceCents: 2500 },
     { variantId: 'pack-50', priceCents: 5000 }
-  ]
+  ],
+  starter: null,
+  refunds: []
 }
 
 /** E7: two pages of the account's ledger, newest first. */
@@ -126,6 +128,8 @@ interface Fake {
    */
   pricing: PricingResult | null
   pricingCalls: number
+  /** What `account:getCredits` answers. */
+  credits: CreditsResult
 }
 
 function fakeClient(): Fake {
@@ -135,6 +139,7 @@ function fakeClient(): Fake {
     fail: null,
     pricing: null,
     pricingCalls: 0,
+    credits: CREDITS,
     client: {
       async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
         if (channel === 'account:getPricing') {
@@ -154,9 +159,11 @@ function fakeClient(): Fake {
           case 'account:getStatus':
             return SIGNED_OUT as Output<C>
           case 'account:getCredits':
-            return CREDITS as Output<C>
+            return fake.credits as Output<C>
           case 'account:buyCredits':
             return null as Output<C>
+          case 'account:refund':
+            return { refundedMicros: 2_500_000, balanceMicros: 0 } as Output<C>
           case 'account:getUsage': {
             const { cursor } = input as Input<'account:getUsage'>
             return USAGE_PAGES[cursor ?? 'first'] as Output<C>
@@ -214,6 +221,7 @@ const show = (status: AccountStatus | null): void => {
  * `creditsAt` is what the store stamps on them; the meter's projection measures from it.
  */
 const showWithCredits = (credits: CreditsResult): void => {
+  fake.credits = credits
   useAccountStore.setState({ status: SIGNED_IN, credits, creditsAt: Date.now() })
 }
 
@@ -384,11 +392,74 @@ describe('AccountSettingsTab balance (F-15.3, AI-BILLING-SPEC E1-E7, C2-C4)', ()
     expect(screen.getByRole('button', { name: 'Add $50.00' })).toBeInTheDocument()
   })
 
+  it('offers the $5 starter pack with its refund terms while the account may buy it (2026-10-08)', async () => {
+    showWithCredits({ ...CREDITS, starter: { variantId: 'starter', priceCents: 500 } })
+    render(<AccountSettingsTab />)
+    expect(screen.getByTestId('account-starter')).toHaveTextContent(
+      'Try the AI for $5. Any unused balance is refundable for 30 days.'
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Try it for $5.00' }))
+    await waitFor(() => {
+      expect(fake.calls.at(-1)).toEqual({
+        channel: 'account:buyCredits',
+        input: { variantId: 'starter' }
+      })
+    })
+  })
+
+  it('offers no starter pack once the account has used it', () => {
+    showWithCredits(CREDITS)
+    render(<AccountSettingsTab />)
+    expect(screen.queryByTestId('account-starter')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('account-refunds')).not.toBeInTheDocument()
+  })
+
+  it('refunds the unused balance of a purchase after a second click, then reads the balance again', async () => {
+    const now = Date.now()
+    showWithCredits({
+      ...CREDITS,
+      refunds: [
+        {
+          orderId: 'o-1',
+          paidMicros: 10_000_000,
+          purchasedAt: now,
+          refundUntil: now + 30 * DAY_MS,
+          refundableMicros: 2_500_000,
+          pending: false
+        },
+        {
+          orderId: 'o-2',
+          paidMicros: 25_000_000,
+          purchasedAt: now,
+          refundUntil: now + 30 * DAY_MS,
+          refundableMicros: 0,
+          pending: true
+        }
+      ]
+    })
+    render(<AccountSettingsTab />)
+    await userEvent.click(screen.getByText('Refund unused balance'))
+    expect(screen.getByText('Refund in progress')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Refund $2.50' }))
+    // The first click only asks; nothing is sent until the author confirms.
+    expect(fake.calls.some((call) => call.channel === 'account:refund')).toBe(false)
+    await userEvent.click(screen.getByRole('button', { name: 'Keep it' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Refund $2.50' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Refund $2.50 now' }))
+    await waitFor(() => {
+      expect(fake.calls.slice(-2)).toEqual([
+        { channel: 'account:refund', input: { orderId: 'o-1' } },
+        { channel: 'account:getCredits', input: undefined }
+      ])
+    })
+  })
+
   it('positions Cloud as convenience and says the privacy rule beside the packs (C2, C3)', () => {
     showWithCredits(CREDITS)
     render(<AccountSettingsTab />)
     expect(screen.getByTestId('account-positioning')).toHaveTextContent(
-      "One balance in US dollars for every model, without an API key. Each request costs what the model's provider charges plus 20%"
+      "One balance in US dollars for every model, without an API key. Each request costs what the model's provider charges plus 25%"
     )
     expect(screen.getByTestId('account-privacy')).toHaveTextContent(
       'never stores or logs your manuscript, your notes, your questions, or the answers'
@@ -441,7 +512,9 @@ describe('AccountSettingsTab balance (F-15.3, AI-BILLING-SPEC E1-E7, C2-C4)', ()
       periodDays: USAGE_PERIOD_DAYS,
       periodSpend: [],
       periodFirstChargeAt: null,
-      packs: []
+      packs: [],
+      starter: null,
+      refunds: []
     })
     render(<AccountSettingsTab />)
     expect(screen.getByTestId('account-balance')).toHaveTextContent('$0.00')

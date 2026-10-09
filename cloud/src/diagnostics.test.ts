@@ -32,6 +32,8 @@ beforeEach(() => {
     packs: [],
     supporter: null,
     appLicense: null,
+    starter: null,
+    lemonSqueezy: null,
     webhookSecret: null,
     upstream: null,
     signingKey: null

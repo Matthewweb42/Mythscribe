@@ -221,7 +221,7 @@ describe('AiErrorCode (F-15.4)', () => {
     expect(AiErrorCode.parse('SIGNED_OUT')).toBe('SIGNED_OUT')
     expect(AiErrorCode.parse('NO_CREDIT')).toBe('NO_CREDIT')
     expect(AI_NEXT_STEP.SIGNED_OUT).toBe('Sign in on the Account tab in Settings.')
-    expect(AI_NEXT_STEP.NO_CREDIT).toBe('Add to your balance on the Account tab in Settings.')
+    expect(AI_NEXT_STEP.NO_CREDIT).toBe('Open the Account tab in Settings to add to your balance.')
   })
 
   it('names the proxy refusals the author can act on (AI-BILLING-SPEC error codes)', () => {

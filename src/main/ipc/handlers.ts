@@ -2070,6 +2070,10 @@ export function registerHandlers({
   // F-15.3: the Cloud credit balance, what each feature has spent, and the packs on sale.
   register('account:getCredits', () => account.credits())
 
+  // 2026-10-08: refund the unused balance of one purchase; the Worker holds it before Lemon
+  // Squeezy is asked, so a repeat never refunds twice.
+  register('account:refund', ({ orderId }) => account.refund(orderId))
+
   // AI-BILLING-SPEC E7: one page of the account's ledger, newest first.
   register('account:getUsage', ({ cursor }) => account.usage(cursor))
 

@@ -8,7 +8,7 @@ git history of this file is the log of each feature's cost over time (author req
 - Tokens are the eval fixtures' estimates (characters / 4): "typical" is the median fixture,
   "worst" the largest fixture (or the input budget when a feature has no prompt). Output is the
   note's typical estimate and the feature's `max_tokens` cap for the worst case.
-- Own key (OpenRouter) uses the default models: fast `deepseek/deepseek-v4-flash`, strong `deepseek/deepseek-v4-pro`. OpenAI uses fast `gpt-5.4-mini`, strong `gpt-5.4`. Hosted is the OpenRouter cost plus the 20% markup.
+- Own key (OpenRouter) uses the default models: fast `deepseek/deepseek-v4-flash`, strong `deepseek/deepseek-v4-pro`. OpenAI uses fast `gpt-5.4-mini`, strong `gpt-5.4`. Hosted is the OpenRouter cost plus the 25% markup.
 - Estimates only: the ledger (Settings › AI › Usage history) and the developer tools record
   real tokens and cost per request. Use them to correct the typical sizes here.
 
@@ -16,31 +16,31 @@ git history of this file is the log of each feature's cost over time (author req
 
 | Feature | What | Trigger | Prompt | Tier | In typical / worst | Out typical / cap | Own key (OpenRouter) typical · worst | Hosted typical | OpenAI typical | Calls per use | Typical per use (own key) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ghostText` | Ghost text | while typing | ghostText.v4 | fast | 1024 / 2085 | 40 / 60 | $0.0000819 · $0.000139 | $0.0000983 | $0.000948 | 1 | $0.0000819 |
-| `tags` | Tag suggestions | on request | tags.v1 | fast | 1204 / 1913 | 80 / 200 | $0.000139 · $0.000313 | $0.000166 | $0.00126 | 1 | $0.000139 |
-| `summary` | Scene summaries, story bible, and tags | background | summary.v3 | fast | 831 / 6084 | 450 / 800 | $0.000601 · $0.00121 | $0.000721 | $0.00265 | 1 | $0.000601 |
-| `chat` | Assistant chat | on request | chat.v5 | fast | 1050 / 7782 | 400 / 1200 | $0.000544 · $0.00177 | $0.000652 | $0.00259 | 1 | $0.000544 |
+| `ghostText` | Ghost text | while typing | ghostText.v4 | fast | 1024 / 2085 | 40 / 60 | $0.0000819 · $0.000139 | $0.000102 | $0.000948 | 1 | $0.0000819 |
+| `tags` | Tag suggestions | on request | tags.v1 | fast | 1204 / 1913 | 80 / 200 | $0.000139 · $0.000313 | $0.000173 | $0.00126 | 1 | $0.000139 |
+| `summary` | Scene summaries, story bible, and tags | background | summary.v3 | fast | 831 / 6084 | 450 / 800 | $0.000601 · $0.00121 | $0.000751 | $0.00265 | 1 | $0.000601 |
+| `chat` | Assistant chat | on request | chat.v5 | fast | 1050 / 7782 | 400 / 1200 | $0.000544 · $0.00177 | $0.000679 | $0.00259 | 1 | $0.000544 |
 | `authorMode` | Author mode | on request | — | — | 0 / 8000 | 0 / 150 | $0 · $0.000432 | $0 | $0 | 0 | $0 |
-| `query` | Story Intelligence | on request | query.v4 | strong | 1587 / 11711 | 300 / 600 | $0.000459 · $0.00271 | $0.000551 | $0.00847 | 1 | $0.000459 |
-| `critique` | Editor's notes | on request | critique.v3 | strong | 1264 / 7025 | 900 / 1500 | $0.000643 · $0.00211 | $0.000772 | $0.0167 | 1 | $0.000643 |
+| `query` | Story Intelligence | on request | query.v4 | strong | 1587 / 11711 | 300 / 600 | $0.000459 · $0.00271 | $0.000574 | $0.00847 | 1 | $0.000459 |
+| `critique` | Editor's notes | on request | critique.v3 | strong | 1264 / 7025 | 900 / 1500 | $0.000643 · $0.00211 | $0.000804 | $0.0167 | 1 | $0.000643 |
 | `embeddings` | Search indexing | background | — | — | 0 / 8000 | 0 / 150 | $0 · $0.000432 | $0 | $0 | 0 | $0 |
-| `rewrite` | Rewrite in my voice | on request | rewrite.v3 | fast | 910 / 2756 | 250 / 1500 | $0.000347 · $0.00200 | $0.000417 | $0.00181 | 1 | $0.000347 |
-| `brief` | Scene brief drafts | on request | brief.v1 | fast | 2959 / 5410 | 120 / 200 | $0.000242 · $0.000418 | $0.000291 | $0.00276 | 1 | $0.000242 |
-| `betaReader` | Beta reader | on request | betaReader.v1 | strong | 673 / 11599 | 700 / 1200 | $0.000435 · $0.00294 | $0.000522 | $0.0122 | 1 | $0.000435 |
-| `importStructure` | Import structure detection | on request | importStructure.v1 | fast | 2428 / 4178 | 150 / 400 | $0.000265 · $0.000637 | $0.000318 | $0.00250 | 40 | $0.0106 |
-| `continuity` | Consistency check | background | continuity.v2 | strong | 1334 / 5702 | 300 / 800 | $0.000406 · $0.00153 | $0.000487 | $0.00783 | 1 | $0.000406 |
-| `proofread` | Proofread | on request | proofread.v1 | fast | 1055 / 7578 | 600 / 2000 | $0.000800 · $0.00279 | $0.000960 | $0.00349 | 1 | $0.000800 |
-| `whatNext` | What comes next | on request | whatNext.v3 | fast | 1079 / 3027 | 200 / 300 | $0.000288 · $0.000475 | $0.000346 | $0.00171 | 1 | $0.000288 |
-| `route` | Assistant routing | every chat message | route.v1 | fast | 407 / 780 | 40 / 120 | $0.0000634 · $0.000177 | $0.0000761 | $0.000485 | 1 | $0.0000634 |
-| `synopsis` | Synopsis suggestions | on request | synopsis.v1 | fast | 495 / 3400 | 120 / 350 | $0.000168 · $0.000550 | $0.000202 | $0.000911 | 1 | $0.000168 |
-| `notesSuggest` | Notes suggestions | on request | notesSuggest.v2 | fast | 961 / 4798 | 300 / 600 | $0.000413 · $0.000912 | $0.000495 | $0.00207 | 1 | $0.000413 |
-| `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000356 · $0.000568 | $0.000427 | $0.00202 | 1 | $0.000356 |
-| `editPass` | Edit passes | on request | editPass.v1 | strong | 620 / 5161 | 1500 / 4000 | $0.000760 · $0.00276 | $0.000912 | $0.0240 | 60 | $0.0456 |
-| `agent` | Assistant lookups and edits | every chat message | agent.v4 | strong | 1606 / 11199 | 400 / 3000 | $0.000505 · $0.00361 | $0.000606 | $0.0100 | 3 | $0.00152 |
-| `contextImport` | Context library sorting | on request | contextImport.v2 | strong | 884 / 3490 | 1500 / 6000 | $0.000816 · $0.00325 | $0.000979 | $0.0247 | 10 | $0.00816 |
-| `reviewChat` | Upload review chat | on request | reviewChat.v2 | strong | 676 / 5618 | 300 / 3000 | $0.000268 · $0.00244 | $0.000322 | $0.00619 | 1 | $0.000268 |
-| `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000285 · $0.000690 | $0.000341 | $0.00299 | 1 | $0.000285 |
-| `organise` | Organise | on request | organise.v2 | strong | 2571 / 6323 | 1200 / 6000 | $0.00104 · $0.00385 | $0.00125 | $0.0244 | 4 | $0.00418 |
+| `rewrite` | Rewrite in my voice | on request | rewrite.v3 | fast | 910 / 2756 | 250 / 1500 | $0.000347 · $0.00200 | $0.000434 | $0.00181 | 1 | $0.000347 |
+| `brief` | Scene brief drafts | on request | brief.v1 | fast | 2959 / 5410 | 120 / 200 | $0.000242 · $0.000418 | $0.000303 | $0.00276 | 1 | $0.000242 |
+| `betaReader` | Beta reader | on request | betaReader.v1 | strong | 673 / 11599 | 700 / 1200 | $0.000435 · $0.00294 | $0.000544 | $0.0122 | 1 | $0.000435 |
+| `importStructure` | Import structure detection | on request | importStructure.v1 | fast | 2428 / 4178 | 150 / 400 | $0.000265 · $0.000637 | $0.000331 | $0.00250 | 40 | $0.0106 |
+| `continuity` | Consistency check | background | continuity.v2 | strong | 1334 / 5702 | 300 / 800 | $0.000406 · $0.00153 | $0.000508 | $0.00783 | 1 | $0.000406 |
+| `proofread` | Proofread | on request | proofread.v1 | fast | 1055 / 7578 | 600 / 2000 | $0.000800 · $0.00279 | $0.00100 | $0.00349 | 1 | $0.000800 |
+| `whatNext` | What comes next | on request | whatNext.v3 | fast | 1079 / 3027 | 200 / 300 | $0.000288 · $0.000475 | $0.000360 | $0.00171 | 1 | $0.000288 |
+| `route` | Assistant routing | every chat message | route.v1 | fast | 407 / 780 | 40 / 120 | $0.0000634 · $0.000177 | $0.0000793 | $0.000485 | 1 | $0.0000634 |
+| `synopsis` | Synopsis suggestions | on request | synopsis.v1 | fast | 495 / 3400 | 120 / 350 | $0.000168 · $0.000550 | $0.000211 | $0.000911 | 1 | $0.000168 |
+| `notesSuggest` | Notes suggestions | on request | notesSuggest.v2 | fast | 961 / 4798 | 300 / 600 | $0.000413 · $0.000912 | $0.000516 | $0.00207 | 1 | $0.000413 |
+| `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000356 · $0.000568 | $0.000445 | $0.00202 | 1 | $0.000356 |
+| `editPass` | Edit passes | on request | editPass.v1 | strong | 620 / 5161 | 1500 / 4000 | $0.000760 · $0.00276 | $0.000950 | $0.0240 | 60 | $0.0456 |
+| `agent` | Assistant lookups and edits | every chat message | agent.v4 | strong | 1606 / 11199 | 400 / 3000 | $0.000505 · $0.00361 | $0.000632 | $0.0100 | 3 | $0.00152 |
+| `contextImport` | Context library sorting | on request | contextImport.v2 | strong | 884 / 3490 | 1500 / 6000 | $0.000816 · $0.00325 | $0.00102 | $0.0247 | 10 | $0.00816 |
+| `reviewChat` | Upload review chat | on request | reviewChat.v2 | strong | 676 / 5618 | 300 / 3000 | $0.000268 · $0.00244 | $0.000335 | $0.00619 | 1 | $0.000268 |
+| `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000285 · $0.000690 | $0.000356 | $0.00299 | 1 | $0.000285 |
+| `organise` | Organise | on request | organise.v2 | strong | 2571 / 6323 | 1200 / 6000 | $0.00104 · $0.00385 | $0.00130 | $0.0244 | 4 | $0.00418 |
 
 ## When each runs, and ideas to make it cheaper
 

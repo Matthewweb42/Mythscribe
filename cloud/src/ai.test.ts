@@ -119,6 +119,8 @@ function makeDeps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
     packs: [],
     supporter: null,
     appLicense: null,
+    starter: null,
+    lemonSqueezy: null,
     webhookSecret: null,
     upstream: fakeUpstream(),
     signingKey: null,
@@ -221,6 +223,9 @@ beforeEach(async () => {
   seen = []
   logs = []
   store = testStore()
+  // The hand-computed figures above are at cost + 20 %; the default markup is 25 % since
+  // 2026-10-08, and what that default is belongs to `credits.test.ts` (`GET /pricing`).
+  store.setConfig('markup', 0.2)
   deps = makeDeps()
   // The one log line per request is part of the contract; the console is not.
   for (const method of ['log', 'warn', 'error'] as const) {

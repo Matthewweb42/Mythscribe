@@ -7,6 +7,7 @@ import {
   type LicenseResult,
   LOGIN_ATTEMPT_TTL_MS,
   POLL_INTERVAL_MS,
+  type RefundResult,
   type UsageResult
 } from '@shared/cloudApi'
 import {
@@ -254,6 +255,19 @@ export class AccountService {
   }
 
   /**
+   * Refund the unused balance of one purchase (2026-10-08). The Worker holds the amount before it
+   * asks Lemon Squeezy, so a repeat answers the first result rather than refunding twice.
+   */
+  async refund(orderId: string): Promise<RefundResult> {
+    const current = this.requireSignedIn('Sign in to refund a MythScribe Cloud purchase.')
+    try {
+      return await this.client.refund(current.session.token, orderId)
+    } catch (err) {
+      throw this.callFailed(err, current)
+    }
+  }
+
+  /**
    * The Lemon Squeezy checkout URL for one pack (F-15.3). The Worker builds it (it knows the
    * account and the pack); this only carries it back to the handler, which opens it.
    */
@@ -488,7 +502,8 @@ export class AccountService {
     }
     // The pack is gone from the Worker's configuration: the author picked something that is no
     // longer on sale, which is a bad request, not an outage.
-    if (err instanceof AccountError && err.code === 'NOT_FOUND') {
+    // 2026-10-08: so is a starter pack or a refund this account may not have (NOT_ELIGIBLE).
+    if (err instanceof AccountError && (err.code === 'NOT_FOUND' || err.code === 'NOT_ELIGIBLE')) {
       return new AppError('VALIDATION', `${err.message} ${err.nextStep}`, { code: err.code })
     }
     return toAppError(err)

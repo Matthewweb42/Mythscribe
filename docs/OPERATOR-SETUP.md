@@ -105,7 +105,7 @@ server (spec P5).
 Lemon Squeezy is the merchant of record. It takes the card, charges sales tax and VAT, pays you out, and calls our webhook
 when someone pays or gets a refund. MythScribe never touches card data (spec A8).
 
-You sell **four one-time products**:
+You sell **five one-time products**:
 
 | Product | Price | What it does |
 |---|---|---|
@@ -113,8 +113,10 @@ You sell **four one-time products**:
 | MythScribe AI balance — $10 | $10 | Adds $10 to the account's hosted-AI balance |
 | MythScribe AI balance — $25 | $25 | Adds $25 |
 | MythScribe AI balance — $50 | $50 | Adds $50 |
+| MythScribe AI starter — $5 | $5 | Adds $5. One per account ever, even after a refund; below the $10 minimum on purpose; needs no app license |
 
-$1 paid is $1 of balance. The 20% markup is charged on usage, not on the pack price.
+$1 paid is $1 of balance. The 25% markup is charged on usage, not on the pack price. New accounts start at $0 (no free
+grant since 2026-10-08); the starter pack is how they try hosted AI.
 
 ### 2.1 Store, identity, payouts
 1. Sign up at https://lemonsqueezy.com and create a store (for example "MythScribe"). The store's subdomain becomes part of
@@ -125,10 +127,11 @@ $1 paid is $1 of balance. The 20% markup is charged on usage, not on the pack pr
 4. Turn on **Test mode** (the toggle is usually at the bottom-left of the dashboard). Do everything below in test mode first.
 
 ### 2.2 Create the products
-For each of the four products:
+For each of the five products:
 1. Go to **Products › New product**.
 2. Name it, and add a short description. For packs, for example: "Adds $10 to your MythScribe AI balance. Balance never
-   expires. Unused balance is refundable within 30 days of purchase."
+   expires. Unused balance is refundable within 30 days of purchase." For the starter: "Try the AI for $5. Any unused
+   balance is refundable for 30 days. One per account."
 3. Set **Pricing: single payment** (one-time), not subscription.
 4. Choose the tax category for software / digital goods if asked.
 5. **Don't** enable Lemon Squeezy's own "license keys" feature. MythScribe issues its own signed license.
@@ -141,7 +144,7 @@ Each product has one variant; its ID is what the webhook matches on.
 
 ### 2.3 Tell the Worker about the products
 **The easy way:** run `npm run cloud:products`. It asks for each product's buy link, variant ID and price, checks them as you
-go, writes the two lines below into `cloud/wrangler.toml`, and asks before deploying. For the variant ID, you can paste the whole
+go, writes the three lines below into `cloud/wrangler.toml`, and asks before deploying. For the variant ID, you can paste the whole
 variant page URL; it pulls out the number. Re-run it any time; pressing Enter keeps what's already there.
 
 **By hand,** if you prefer:
@@ -150,14 +153,25 @@ variant IDs and buy links are public.
 ```toml
 LEMONSQUEEZY_PACKS = '[{"variantId":"111111","url":"https://<store>.lemonsqueezy.com/buy/<uuid-10>","priceCents":1000},{"variantId":"222222","url":"https://<store>.lemonsqueezy.com/buy/<uuid-25>","priceCents":2500},{"variantId":"333333","url":"https://<store>.lemonsqueezy.com/buy/<uuid-50>","priceCents":5000}]'
 LEMONSQUEEZY_APP_LICENSE = '{"variantId":"444444","url":"https://<store>.lemonsqueezy.com/buy/<uuid-app>","priceCents":3000}'
+LEMONSQUEEZY_STARTER = '{"variantId":"555555","url":"https://<store>.lemonsqueezy.com/buy/<uuid-starter>","priceCents":500}'
 ```
 - `priceCents` must match the price in Lemon Squeezy. It is the amount the balance grows by.
-- Packs under $10 are refused (`min_pack_usd`).
+- Packs under $10 are refused (`min_pack_usd`). The starter is the one exception, and only as `LEMONSQUEEZY_STARTER`.
 - Leave `LEMONSQUEEZY_SUPPORTER` commented out. The $39 Supporter product is superseded by the $30 app license.
 - A malformed value is logged, and the app then says "nothing on sale" instead of crashing. Check the JSON carefully.
 
-You don't need a Lemon Squeezy API key. The Worker builds the checkout from the buy link and adds the user's id and email
-(`custom[user_id]`), so the webhook knows whose balance to credit.
+The Worker builds the checkout from the buy link and adds the user's id and email (`custom[user_id]`), so the webhook knows
+whose balance to credit.
+
+### 2.3b The API key (refunds)
+Self-serve refunds from the app, and the automatic refund of a starter order the Worker refuses (a second one, or from an
+unverified account), call the Lemon Squeezy API. In Lemon Squeezy, go to **Settings › API**, create a key (test mode first;
+live mode needs its own key later), and put it on the Worker:
+```bash
+cd cloud && npx wrangler secret put LEMONSQUEEZY_API_KEY && cd ..
+```
+Without it the app's Refund button answers "Refunds are not configured on the server yet." and nothing else changes. Lemon
+Squeezy keeps its platform fee on every refund, and a dispute costs $15.
 
 ### 2.4 The webhook
 1. Generate a signing secret:
@@ -179,6 +193,9 @@ How the webhook behaves:
 - **Event older than 72 hours:** refused (`STALE_WEBHOOK`).
 - **Unknown variant or user:** answers 200 and logs a warning. Lemon Squeezy would otherwise retry for days for nothing.
 - **Replays:** a replayed event never credits twice, because every ledger row has a unique key.
+- **Refunds and disputes:** `order_refunded` takes the refunded amount off once, never more than the order added. A refund
+  of money already spent (your call, or a lost dispute) leaves the balance below zero, and hosted AI stays blocked until the
+  account buys a pack.
 
 ---
 
@@ -228,15 +245,15 @@ The keys you can set:
 
 | Key | What it controls |
 |---|---|
-| `markup` | Markup on provider cost (default 0.2) |
-| `trial_grant_usd` | One-time grant per verified email (default 2) |
+| `markup` | Markup on provider cost (default 0.25) |
+| `trial_grant_usd` | One-time grant per verified email (default 0: the starter pack replaced it) |
 | `quote_threshold_usd` | Jobs above this ask for confirmation (default 0.25) |
 | `estimate_safety_factor` | Padding on displayed estimates (default 1.2) |
 | `low_balance_warning_usd` | Low-balance warning threshold (default 2) |
 | `hold_expiry_minutes` | How long a hold lasts (default 10) |
 | `requests_per_minute` | Per-user rate limit (default 60) |
 | `max_input_chars` | Largest request accepted |
-| `refund_window_days` | Refund window for unused balance (default 30) |
+| `refund_window_days` | Refund window for unused balance, every pack and the starter (default 30; 0 turns self-serve refunds off) |
 | `webhook_max_age_hours` | Oldest webhook event accepted (default 72) |
 | `models` | Price table: input, output and cached-input price, and display multiplier |
 | `routing` | Which model serves the fast and strong tiers |
@@ -260,15 +277,19 @@ exact statement for a manual credit.
 
 1. In `src/shared/cloudApi.ts`, set `CLOUD_AI_AVAILABLE = true` **in a local build only**. Don't commit it yet.
 2. Run the app: `npm run dev`.
-3. Open **Settings › Account**, sign in with your email (link or 6-digit code). The balance should show **$2.00**, the trial grant.
+3. Open **Settings › Account**, sign in with your email (link or 6-digit code). The balance should show **$0.00** and the
+   offer "Try the AI for $5. Any unused balance is refundable for 30 days." Buy the starter with the test card (step 5): the
+   balance shows $5.00 and the offer disappears; a second try is refused.
 4. Open **Settings › AI**, set **Source** to **MythScribe Cloud**. Ask the chat something. The balance should drop by a few
    cents; the answer's cost line shows dollars.
 5. **Buy a $10 pack.** It opens the Lemon Squeezy checkout in your browser. Pay with the test card `4242 4242 4242 4242`, any
    future date, any CVC. Back in the app, the balance should rise by $10 within a few seconds; it refreshes on window focus.
 6. **Check the webhook log** in Lemon Squeezy (**Settings › Webhooks** › your endpoint): one delivery, response 200.
    Press "Resend" on the same event: the balance must **not** change again.
-7. **Refund part of it.** In Lemon Squeezy, go to **Orders**, pick the test order, and refund $5 of the $10. The balance drops
-   by $5.
+7. **Refund from the app.** Spend a little, then open **Refund unused balance** on the Account tab and refund the $10 pack:
+   the refund is the unused part only, Lemon Squeezy shows a partial refund on the order, and the balance drops by exactly
+   that. The webhook's `order_refunded` that follows must not change the balance again. Also try a refund from the Lemon
+   Squeezy dashboard on another order: the balance follows it once.
 8. **Buy the $30 app license** from the Account tab. The license section should show it as active.
    - Optional check with a test build: set the trial clock back in `%APPDATA%/MythScribe/app-state.json` to see the read-only
      banner, then refresh the Account tab to see it clear.
@@ -294,11 +315,12 @@ never prompt text.
 
 ## Part 7 — Day-to-day
 
-- **Refund requests:** unused balance is refundable within 30 days of buying the pack (your policy). In Lemon Squeezy, refund
-  the *unused amount* of that order. The webhook records exactly that amount. Spent money isn't refunded unless you decide to
-  make an exception.
+- **Refund requests:** unused balance is refundable within 30 days of each purchase, the starter included. Authors do it
+  themselves on the Account tab (it needs `LEMONSQUEEZY_API_KEY`). By hand, in Lemon Squeezy, refund the *unused amount* of
+  that order; the webhook records exactly that amount. Spent money isn't refunded unless you decide to make an exception
+  (the balance then goes below zero and hosted AI stays blocked until the account tops up).
 - **App-license refunds:** refunding the $30 order revokes the license automatically on the user's next check.
-- **Price drift:** check OpenRouter's prices monthly (1.6) and update `models` (4.3) so the 20% stays 20%.
+- **Price drift:** check OpenRouter's prices monthly (1.6) and update `models` (4.3) so the 25% stays 25%.
 - **Fees:** Lemon Squeezy takes a percentage plus a fixed fee per order, about 10% of a $10 pack. That is why packs start at
   $10. Watch it in the payout reports.
 - **Measured costs (later):** once you're ready, measure real per-word costs on a manuscript with your personal OpenRouter key.

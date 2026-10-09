@@ -25,7 +25,9 @@ import {
   AuthStartBody,
   type AuthStartResult,
   CLOUD_ERROR_STATUS,
+  type CloudApiError,
   type CloudErrorCode,
+  type CreditOffer,
   LOGIN_ATTEMPT_TTL_MS,
   LOGIN_CODE_DIGITS,
   LOGIN_CODE_MAX_FAILURES,
@@ -70,9 +72,13 @@ export function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-/** Every non-2xx answer is a `CloudApiError`; the status comes from the shared table. */
-export function jsonError(code: CloudErrorCode, message: string): Response {
-  return jsonResponse({ code, message }, CLOUD_ERROR_STATUS[code])
+/**
+ * Every non-2xx answer is a `CloudApiError`; the status comes from the shared table. `offer` rides
+ * on a refusal for the balance (2026-10-08).
+ */
+export function jsonError(code: CloudErrorCode, message: string, offer?: CreditOffer): Response {
+  const body: CloudApiError = offer === undefined ? { code, message } : { code, message, offer }
+  return jsonResponse(body, CLOUD_ERROR_STATUS[code])
 }
 
 const NOT_FOUND_ATTEMPT = 'That sign-in attempt is no longer available. Send yourself a new link.'
@@ -185,8 +191,17 @@ async function completeSignIn(
 ): Promise<{ user: UserRow; sessionToken: string }> {
   let user = await deps.store.findUserByEmail(attempt.email)
   if (!user) {
-    user = { id: deps.random(TOKEN_BYTES), email: attempt.email, createdAt: now }
+    user = {
+      id: deps.random(TOKEN_BYTES),
+      email: attempt.email,
+      createdAt: now,
+      emailVerifiedAt: now
+    }
     await deps.store.insertUser(user)
+  } else if (user.emailVerifiedAt === null) {
+    // The link or the code just proved the address (2026-10-08: the starter pack needs it).
+    await deps.store.markEmailVerified(user.id, now)
+    user = { ...user, emailVerifiedAt: now }
   }
 
   const sessionToken = deps.random(TOKEN_BYTES)

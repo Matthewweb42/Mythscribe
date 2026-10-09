@@ -43,7 +43,15 @@ import { AliasList } from '../aliases'
 import { AppAccess } from '../appAccess'
 import { AuthorRules } from '../authorRules'
 import { BackupSettingsPatch, BackupState } from '../backups'
-import { CheckoutBody, CreditsResult, EMAIL_MAX, PricingResult, UsageResult } from '../cloudApi'
+import {
+  CheckoutBody,
+  CreditsResult,
+  EMAIL_MAX,
+  PricingResult,
+  RefundBody,
+  RefundResult,
+  UsageResult
+} from '../cloudApi'
 import { CloudSyncStatus } from '../cloudSync'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { BookDetails } from '../bookDetails'
@@ -1800,6 +1808,12 @@ export const contract = {
    * VALIDATION; signed out or unreachable is IO.
    */
   'account:buyCredits': { input: CheckoutBody, output: z.null() },
+  /**
+   * Refunds the unused balance of one purchase (2026-10-08, `POST /billing/refund`): within the
+   * refund window, never more than the unused balance or the order. The Worker's refusal (window
+   * passed, nothing unused, refunds not configured) is IO with its own message.
+   */
+  'account:refund': { input: RefundBody, output: RefundResult },
   /**
    * One page of the signed-in account's MythScribe Cloud ledger, newest first (AI-BILLING-SPEC
    * E7, `GET /usage`): top-ups, charges with their model and tokens, refunds. `cursor` is the

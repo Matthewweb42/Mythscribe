@@ -12,6 +12,8 @@ import {
   CloudApiError,
   CreditsResult,
   LicenseResult,
+  RefundBody,
+  RefundResult,
   UsageResult,
   type CloudErrorCode
 } from '@shared/cloudApi'
@@ -45,6 +47,7 @@ const MESSAGES: Record<AccountErrorCode, string> = {
   NOT_FOUND: 'MythScribe Cloud does not know this sign-in attempt.',
   BAD_SIGNATURE: "MythScribe Cloud refused the request's signature.",
   INSUFFICIENT_CREDITS: 'Your MythScribe Cloud balance is used up.',
+  NOT_ELIGIBLE: 'This account cannot do that.',
   UPSTREAM: 'The AI provider behind MythScribe Cloud did not answer.',
   INTERNAL: 'MythScribe Cloud had a problem with the request.',
   NETWORK: 'Could not reach MythScribe Cloud.',
@@ -64,6 +67,7 @@ const NEXT_STEPS: Record<AccountErrorCode, string> = {
   NOT_FOUND: 'Ask for a new sign-in link.',
   BAD_SIGNATURE: 'Try again; if it keeps happening, update MythScribe.',
   INSUFFICIENT_CREDITS: 'Add to your balance in Settings › Account.',
+  NOT_ELIGIBLE: 'Refresh the Account tab to see what is available.',
   UPSTREAM: 'Try again in a moment.',
   INTERNAL: 'Try again in a moment.',
   NETWORK: 'Check your connection and try again.',
@@ -73,7 +77,9 @@ const NEXT_STEPS: Record<AccountErrorCode, string> = {
 /** Codes whose server message says more than fixed copy can (the 503 names what is missing). */
 const PASS_THROUGH: ReadonlySet<CloudErrorCode> = new Set<CloudErrorCode>([
   'INVALID_EMAIL',
-  'NOT_CONFIGURED'
+  'NOT_CONFIGURED',
+  // 2026-10-08: the starter pack and refund refusals name exactly why (used, unverified, window).
+  'NOT_ELIGIBLE'
 ])
 
 const TIMEOUT_MESSAGE = 'MythScribe Cloud did not answer in time.'
@@ -127,6 +133,11 @@ export interface CloudAuthClient {
   license(token: string): Promise<LicenseResult>
   /** One page of the account's ledger, newest first (AI-BILLING-SPEC E7, `GET /usage`). */
   usage(token: string, cursor: string | null): Promise<UsageResult>
+  /**
+   * Refund the unused balance of one purchase (2026-10-08, `POST /billing/refund`). Every refusal
+   * of this route is about the refund, so the Worker's own message is shown for it.
+   */
+  refund(token: string, orderId: string): Promise<RefundResult>
 }
 
 /** No Cloud call may hang: the author is waiting on the Account tab for every one of them. */
@@ -147,7 +158,7 @@ export function createCloudAuthClient({
   const root = baseUrl.replace(/\/+$/, '')
 
   /** Sends one request and answers its body text, or throws the mapped `AccountError`. */
-  const send = async (path: string, init: RequestInit): Promise<string> => {
+  const send = async (path: string, init: RequestInit, serverCopy = false): Promise<string> => {
     const controller = new AbortController()
     let timedOut = false
     const timer = setTimeout(() => {
@@ -169,7 +180,7 @@ export function createCloudAuthClient({
       clearTimeout(timer)
     }
     const text = await response.text().catch(() => '')
-    if (!response.ok) throw failureOf(text)
+    if (!response.ok) throw failureOf(text, serverCopy)
     return text
   }
 
@@ -243,6 +254,21 @@ export function createCloudAuthClient({
         UsageResult,
         await send(`/usage${query}`, { method: 'GET', headers: bearer(token) })
       )
+    },
+    async refund(token, orderId) {
+      const body = RefundBody.parse({ orderId })
+      return parseBody(
+        RefundResult,
+        await send(
+          '/billing/refund',
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...bearer(token) },
+            body: JSON.stringify(body)
+          },
+          true
+        )
+      )
     }
   }
 }
@@ -262,11 +288,15 @@ function parseBody<S extends z.ZodType>(schema: S, text: string): z.output<S> {
   return parsed.data
 }
 
-/** Maps a non-2xx body to the failure the author sees; an unreadable one is PROTOCOL. */
-function failureOf(text: string): AccountError {
+/**
+ * Maps a non-2xx body to the failure the author sees; an unreadable one is PROTOCOL. `serverCopy`
+ * shows the Worker's message for every code but UNAUTHORIZED (a route whose refusals are all its own).
+ */
+function failureOf(text: string, serverCopy = false): AccountError {
   const parsed = CloudApiError.safeParse(parseJson(text))
   if (!parsed.success) return accountError('PROTOCOL', parsed.error)
   const { code, message } = parsed.data
-  const passed = PASS_THROUGH.has(code) && message.trim() !== ''
+  const own = PASS_THROUGH.has(code) || (serverCopy && code !== 'UNAUTHORIZED')
+  const passed = own && message.trim() !== ''
   return new AccountError(code, passed ? message.trim() : MESSAGES[code], NEXT_STEPS[code])
 }

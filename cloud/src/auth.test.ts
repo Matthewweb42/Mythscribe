@@ -45,6 +45,8 @@ function makeDeps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
     // F-15.9: the Supporter license has its own tests in `license.test.ts`.
     supporter: null,
     appLicense: null,
+    starter: null,
+    lemonSqueezy: null,
     signingKey: null,
     // F-15.4: the AI proxy is off for the account and credit routes' tests.
     upstream: null,
@@ -471,7 +473,9 @@ describe('the trial grant (M7)', () => {
     return CreditsResult.parse(await response.json()).balanceMicros
   }
 
-  it('grants $2.00 on the first verified sign-in and never again for the same email', async () => {
+  it('grants a configured trial once per verified email, never again for the same email', async () => {
+    // 2026-10-08: no grant by default (the starter pack replaces it); an operator may set one.
+    ;(deps.store as TestStore).setConfig('trial_grant_usd', 2)
     const first = await ready(await verifyCode((await start()).body, lastCode()))
     expect(await balanceOf(first.access?.token)).toBe(2_000_000)
 
@@ -481,11 +485,29 @@ describe('the trial grant (M7)', () => {
     expect(ledger.filter((row) => row.type === 'trial_grant')).toHaveLength(1)
   })
 
-  it('grants what the config says, and nothing at zero', async () => {
+  it('grants nothing by default: a new account starts at $0 (2026-10-08)', async () => {
     const store = deps.store as TestStore
-    store.setConfig('trial_grant_usd', 0)
     const result = await ready(await verifyCode((await start()).body, lastCode()))
     expect(await balanceOf(result.access?.token)).toBe(0)
     expect(await store.ledger()).toEqual([])
+  })
+})
+
+describe('email verification (2026-10-08, the starter pack needs it)', () => {
+  it('marks a new account verified at its first sign-in', async () => {
+    await ready(await verifyCode((await start()).body, lastCode()))
+    const user = await deps.store.findUserByEmail(EMAIL)
+    expect(user?.emailVerifiedAt).toBe(clock)
+  })
+
+  it('verifies an account that was not, on its next sign-in, and leaves a verified one alone', async () => {
+    await deps.store.insertUser({ id: 'u-old', email: EMAIL, createdAt: clock - 1000 })
+    expect((await deps.store.findUserById('u-old'))?.emailVerifiedAt).toBeNull()
+    await ready(await verifyCode((await start()).body, lastCode()))
+    expect((await deps.store.findUserById('u-old'))?.emailVerifiedAt).toBe(clock)
+
+    clock += 60_000
+    await ready(await verifyCode((await start()).body, lastCode()))
+    expect((await deps.store.findUserById('u-old'))?.emailVerifiedAt).toBe(clock - 60_000)
   })
 })

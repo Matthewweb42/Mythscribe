@@ -45,7 +45,13 @@ import { SUMMARY_BACKFILL_DELAY_MS } from '@shared/summary'
 import { writeV0Project } from '../project/legacyFixture'
 import { DEFAULT_CATEGORY_COLOR } from '@shared/tags'
 import { TAG_TEMPLATES } from '@shared/tagTemplates'
-import type { CheckoutResult, CloudSession, CreditsResult, LicenseResult } from '@shared/cloudApi'
+import type {
+  CheckoutResult,
+  CloudSession,
+  CreditsResult,
+  LicenseResult,
+  RefundResult
+} from '@shared/cloudApi'
 import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
 import {
   encodeLicensePayload,
@@ -59,7 +65,7 @@ import { builtInTheme, CUSTOM_THEMES_MAX } from '@shared/themes'
 import { AccountService } from '../account/accountService'
 import { AppAccessService } from '../account/appAccess'
 import { TRIAL_ENDED_MESSAGE } from '@shared/appAccess'
-import type { CloudAuthClient } from '../account/cloudAuthClient'
+import { AccountError, type CloudAuthClient } from '../account/cloudAuthClient'
 import { registerInflight, resetInflight } from '../ai/inflight'
 import { AiKeyStore } from '../ai/keyStore'
 import { fakeSafeStorage } from '../ai/keyStoreFixture'
@@ -349,7 +355,8 @@ beforeEach(() => {
     credits: () => Promise.reject(new Error('no cloud in these tests')),
     checkout: () => Promise.reject(new Error('no cloud in these tests')),
     license: () => Promise.reject(new Error('no cloud in these tests')),
-    usage: () => Promise.reject(new Error('no cloud in these tests'))
+    usage: () => Promise.reject(new Error('no cloud in these tests')),
+    refund: () => Promise.reject(new Error('no cloud in these tests'))
   }
   accessNow = Date.now()
   access = new AppAccessService({
@@ -6014,6 +6021,7 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
     typeof vi.fn<(token: string, variantId: string) => Promise<CheckoutResult>>
   >
   let license: ReturnType<typeof vi.fn<(token: string) => Promise<LicenseResult>>>
+  let refund: ReturnType<typeof vi.fn<(token: string, orderId: string) => Promise<RefundResult>>>
   let creditsInvoke: Invoke
   let creditsHandlerFor: (
     channel: Channel
@@ -6027,9 +6035,12 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
         periodDays: USAGE_PERIOD_DAYS,
         periodSpend: [],
         periodFirstChargeAt: null,
-        packs: []
+        packs: [],
+        starter: null,
+        refunds: []
       })
     )
+    refund = vi.fn(() => Promise.reject(new Error('set a refund answer per test')))
     checkout = vi.fn(() => Promise.reject(new Error('set a checkout answer per test')))
     // F-15.9: no license and nothing on sale unless a test says so.
     license = vi.fn(() => Promise.resolve({ token: null, product: null }))
@@ -6052,7 +6063,8 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
         Promise.resolve({
           entries: [],
           nextCursor: cursor === null ? 'page-2' : null
-        })
+        }),
+      refund
     }
     const appState = new AppStateStore(path.join(tmp, 'userData', 'app-state-credits.json'))
     const account = new AccountService({
@@ -6123,7 +6135,9 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
       periodDays: USAGE_PERIOD_DAYS,
       periodSpend: [{ feature: 'ghostText', micros: 400, requests: 1, tokens: 50 }],
       periodFirstChargeAt: 1_758_000_000_000,
-      packs: [{ variantId: 'pack-5', priceCents: 500 }]
+      packs: [{ variantId: 'pack-5', priceCents: 500 }],
+      starter: { variantId: 'starter', priceCents: 500 },
+      refunds: []
     }
     credits.mockResolvedValueOnce(body)
     expect(await creditsInvoke('account:getCredits', undefined)).toEqual(body)
@@ -6149,6 +6163,25 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
     expect(await creditsInvoke('account:buyCredits', { variantId: 'pack-5' })).toBeNull()
     expect(checkout).toHaveBeenCalledWith(SESSION.token, 'pack-5')
     expect(openExternal).toHaveBeenCalledWith(url)
+  })
+
+  it('forwards a refund of one purchase, and reads a refusal as the author’s to fix (2026-10-08)', async () => {
+    refund.mockResolvedValueOnce({ refundedMicros: 7_000_000, balanceMicros: 0 })
+    expect(await creditsInvoke('account:refund', { orderId: 'o1' })).toEqual({
+      refundedMicros: 7_000_000,
+      balanceMicros: 0
+    })
+    expect(refund).toHaveBeenCalledWith(SESSION.token, 'o1')
+
+    refund.mockRejectedValueOnce(
+      new AccountError('NOT_ELIGIBLE', 'This purchase is past its refund window.', 'Refresh.')
+    )
+    const refused = await creditsHandlerFor('account:refund')(null, { orderId: 'o1' })
+    expect(refused.ok).toBe(false)
+    if (!refused.ok) {
+      expect(refused.error.code).toBe('VALIDATION')
+      expect(refused.error.message).toContain('past its refund window')
+    }
   })
 
   it('refuses to open a URL that is not a Lemon Squeezy checkout', async () => {
