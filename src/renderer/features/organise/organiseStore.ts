@@ -29,7 +29,9 @@ import { applyOrganiseAction } from './organiseApply'
  * Accept and is applied with "Apply accepted" (or on reaching the end); in Auto every change that can be undone is
  * applied as soon as the plan is in, each with Undo, and one Undo takes the whole reorganisation
  * back, while merges, deletions, and new categories still wait for Apply (`needsAsk`); in Plan
- * the screen only describes. Undo lives in memory for the session, like the chat's.
+ * the screen only describes. F-9.15: every story-bible change is logged in Changes under the
+ * plan's run, and its Undo here is the log's (one owner); notes and binder changes keep an undo
+ * that lives in memory for the session, like the chat's.
  *
  * The local pass (`organise:candidates`) is kept here too: the quiet offer shows it after an
  * upload is applied or as duplicates build up, until the author waves that set of findings away.
@@ -103,6 +105,8 @@ interface OrganiseState {
 const undos = new Map<string, () => Promise<void>>()
 /** A proposed category's plan id → the id it got once created, for the run. */
 let categoryIds = new Map<string, string>()
+/** F-9.15: the Changes log run of the current plan (its first request id). */
+let runKey = ''
 /** Bumped by every start() and clear(), so a superseded run's answer is dropped. */
 let generation = 0
 let counter = 0
@@ -157,7 +161,11 @@ export const useOrganiseStore = create<OrganiseState>((set, get) => {
         }
         patchView(id, { status: 'applying', error: null })
         try {
-          const undo = await applyOrganiseAction(view.change.action, categoryIds, proposalId)
+          // F-9.15: the plan's changes are one run of the Changes log.
+          const undo = await applyOrganiseAction(view.change.action, categoryIds, proposalId, {
+            source: 'organise',
+            run: runKey
+          })
           if (undo !== null) undos.set(id, undo)
           patchView(id, { status: 'applied' })
         } catch (err) {
@@ -184,6 +192,7 @@ export const useOrganiseStore = create<OrganiseState>((set, get) => {
       undos.clear()
       categoryIds = new Map()
       const requestId = nextRequestId()
+      runKey = requestId
       const mode = useAiSettingsStore.getState().settings?.chatMode ?? DEFAULT_ASSISTANT_MODE
       set({ ...empty, open: true, phase: 'running', request, mode, requestId })
       let result

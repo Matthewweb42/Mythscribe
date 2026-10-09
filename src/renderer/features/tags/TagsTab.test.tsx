@@ -112,6 +112,7 @@ async function renderLoaded(
 
 describe('TagsTab (F-4.2)', () => {
   beforeEach(() => {
+    resetEntityStore()
     resetTagStore()
     resetCustomTemplateStore()
     resetDocumentTagStore()
@@ -901,6 +902,19 @@ describe('TagDetail record (F-9.12)', () => {
     await user.click(screen.getByRole('button', { name: 'Open record' }))
     expect(useEntityStore.getState().selectedId).toBe('e-mara')
     expect(calls.some(([channel]) => channel === 'tag:makeRecord')).toBe(false)
+  })
+
+  it('lists the tags with a record first in the Index, each with a link to it (F-9.15)', async () => {
+    const user = userEvent.setup()
+    useEntityStore.getState().merge(mara('t-mara'))
+    await renderLoaded()
+    expect(rowNames()).toEqual(['mara', 'dark-forest', 'moody'])
+    const items = within(list()).getAllByRole('listitem')
+    expect(items[0]).toHaveTextContent(/^Records/)
+    expect(items[1]).toHaveTextContent(/^Labels/)
+    expect(within(list()).getAllByRole('button', { name: /^Open record/ })).toHaveLength(1)
+    await user.click(within(list()).getByRole('button', { name: 'Open record #mara' }))
+    expect(useEntityStore.getState().selectedId).toBe('e-mara')
   })
 
   it('makes a record for a tag that has none, merges it, and opens it', async () => {

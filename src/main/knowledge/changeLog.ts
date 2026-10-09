@@ -1,27 +1,37 @@
 import { randomUUID } from 'node:crypto'
-import { and, desc, eq, lt, or, sql } from 'drizzle-orm'
+import { and, desc, eq, lt, ne, or, sql } from 'drizzle-orm'
+import { aliasKey } from '@shared/aliases'
 import {
   CHANGES_MAX,
   ChangeUndo,
+  RECORDED_UNDO_OF,
+  changeRunId,
+  changeSourceOf,
   type ChangeEntry,
   type ChangeKind,
   type ChangePage,
-  type ChangeUndoResult
+  type ChangeUndoResult,
+  type RecordChangesInput
 } from '@shared/changes'
+import { toEntityNameKey } from '@shared/entities'
+import type { Entity, Tag } from '@shared/ipc/contract'
+import type { SheetPatch, TagPatch } from '@shared/organise'
+import { toTagName } from '@shared/tags'
 import {
   documentTag,
   entity,
   fact,
   knowledgeChange,
+  node,
   tag,
   type KnowledgeChangeRow
 } from '../db/schema'
-import { deleteEntity, type EntityDb } from '../entity/entityStore'
+import { deleteEntity, getEntity, updateEntity, type EntityDb } from '../entity/entityStore'
 import { setFactHidden } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
 import { getDismissedNames, setDismissedNames } from '../project/settingsStore'
-import { removeDocumentTag } from '../tag/documentTagStore'
-import { deleteTag } from '../tag/tagStore'
+import { addDocumentTag, removeDocumentTag } from '../tag/documentTagStore'
+import { deleteTag, getTagWithUsage, updateTag } from '../tag/tagStore'
 
 /**
  * The Changes log (F-9.13, D12): what the background reading applied on its own, one row per
@@ -42,6 +52,12 @@ export interface ChangeInput {
   undo: ChangeUndo
 }
 
+/** Whether a stored inverse takes anything back (F-9.15: a merge's or a deletion's does not). */
+function undoableRow(row: KnowledgeChangeRow): boolean {
+  const parsed = ChangeUndo.safeParse(JSON.parse(row.undo))
+  return parsed.success && parsed.data.type !== 'none'
+}
+
 function rowToEntry(row: KnowledgeChangeRow): ChangeEntry {
   return {
     id: row.id,
@@ -52,7 +68,9 @@ function rowToEntry(row: KnowledgeChangeRow): ChangeEntry {
     kind: row.kind,
     entityId: row.entityId,
     label: row.label,
-    status: row.status
+    status: row.status,
+    source: changeSourceOf(row.runId),
+    undoable: undoableRow(row)
   }
 }
 
@@ -66,8 +84,19 @@ export function logChanges(
   changes: readonly ChangeInput[],
   now: string
 ): number {
-  if (changes.length === 0) return 0
-  db.insert(knowledgeChange)
+  return insertChanges(db, runId, changes, now).length
+}
+
+/** `logChanges`, answering the rows as written. */
+function insertChanges(
+  db: EntityDb,
+  runId: string,
+  changes: readonly ChangeInput[],
+  now: string
+): KnowledgeChangeRow[] {
+  if (changes.length === 0) return []
+  const rows = db
+    .insert(knowledgeChange)
     .values(
       changes.map((change) => ({
         id: randomUUID(),
@@ -83,9 +112,127 @@ export function logChanges(
         status: 'applied' as const
       }))
     )
-    .run()
+    .returning()
+    .all()
   pruneChanges(db, CHANGES_MAX)
-  return changes.length
+  return rows
+}
+
+/** The parts of a sheet a patch names, compared as the store keeps them (trimmed; names by key). */
+export function sheetMatches(sheet: Entity, patch: SheetPatch): boolean {
+  if (patch.name !== undefined && toEntityNameKey(patch.name) !== toEntityNameKey(sheet.name)) {
+    return false
+  }
+  if (patch.kind !== undefined && patch.kind !== sheet.kind) return false
+  if (patch.fields !== undefined) {
+    const held = new Map(Object.entries(sheet.fields))
+    for (const [field, value] of Object.entries(patch.fields)) {
+      if ((held.get(field) ?? '').trim() !== value.trim()) return false
+    }
+  }
+  if (patch.body !== undefined && (sheet.body ?? '').trim() !== (patch.body ?? '').trim()) {
+    return false
+  }
+  return patch.aliases === undefined || sameAliases(sheet.aliases, patch.aliases)
+}
+
+/** The parts of a tag a patch names, compared as the bank keeps them. */
+export function tagMatches(held: Tag, patch: TagPatch): boolean {
+  if (patch.name !== undefined && toTagName(patch.name) !== held.name) return false
+  if (patch.category !== undefined && patch.category !== held.category) return false
+  if (patch.parentId !== undefined && patch.parentId !== held.parentId) return false
+  return patch.aliases === undefined || sameAliases(held.aliases, patch.aliases)
+}
+
+function sameAliases(a: readonly string[], b: readonly string[]): boolean {
+  const keys = (names: readonly string[]): string =>
+    [...new Set(names.map(aliasKey).filter((key) => key !== ''))].sort().join('\n')
+  return keys(a) === keys(b)
+}
+
+function requireSheet(db: EntityDb, id: string): Entity {
+  const sheet = getEntity(db, id)
+  if (sheet === undefined) throw new AppError('NOT_FOUND', 'Sheet not found', { id })
+  return sheet
+}
+
+function requireTag(db: EntityDb, id: string): Tag {
+  const held = getTagWithUsage(db, id)
+  if (held === undefined) throw new AppError('NOT_FOUND', 'Tag not found', { id })
+  return held
+}
+
+function requireNode(db: EntityDb, id: string): void {
+  const row = db.select({ id: node.id }).from(node).where(eq(node.id, id)).get()
+  if (row === undefined) throw new AppError('NOT_FOUND', 'Scene not found', { id })
+}
+
+function hasLink(db: EntityDb, nodeId: string, tagId: string): boolean {
+  return (
+    db
+      .select({ id: documentTag.id })
+      .from(documentTag)
+      .where(and(eq(documentTag.nodeId, nodeId), eq(documentTag.tagId, tagId)))
+      .get() !== undefined
+  )
+}
+
+/**
+ * Checks one change the renderer applied (F-9.15) and turns it into a log row: its kind may carry
+ * its inverse, everything the inverse names exists, and the change really landed (a restore's
+ * `after` is what the record holds now; a scene's tag is on or off it as the change left it).
+ */
+function recordedInput(db: EntityDb, change: RecordChangesInput['changes'][number]): ChangeInput {
+  const { kind, label, undo } = change
+  if (!RECORDED_UNDO_OF[kind].includes(undo.type)) {
+    throw new AppError('VALIDATION', 'This change cannot be logged with that undo', {
+      kind,
+      undo: undo.type
+    })
+  }
+  const base = { kind, label, quote: null, nodeId: null, undo }
+  const landed = (ok: boolean): void => {
+    if (!ok) throw new AppError('VALIDATION', 'The change is not in the story bible', { kind })
+  }
+  switch (undo.type) {
+    case 'restoreSheet':
+      landed(sheetMatches(requireSheet(db, undo.entityId), undo.after))
+      return { ...base, entityId: undo.entityId, targetId: undo.entityId }
+    case 'deleteSheet': {
+      const sheet = requireSheet(db, undo.entityId)
+      landed(undo.tagId === null || sheet.tagId === undo.tagId)
+      landed(undo.modified === undefined || sheet.modified === undo.modified)
+      return { ...base, entityId: undo.entityId, targetId: undo.entityId }
+    }
+    case 'restoreTag':
+      landed(tagMatches(requireTag(db, undo.tagId), undo.after))
+      return { ...base, entityId: null, targetId: undo.tagId }
+    case 'unlinkTag':
+    case 'linkTag':
+      requireNode(db, undo.nodeId)
+      requireTag(db, undo.tagId)
+      landed(hasLink(db, undo.nodeId, undo.tagId) === (undo.type === 'unlinkTag'))
+      return { ...base, nodeId: undo.nodeId, entityId: null, targetId: undo.tagId }
+    case 'none':
+      return { ...base, entityId: null, targetId: change.targetId ?? kind }
+    default:
+      throw new AppError('VALIDATION', 'This change cannot be logged with that undo', {
+        kind,
+        undo: undo.type
+      })
+  }
+}
+
+/**
+ * Logs what the renderer applied through the stores (`changes:record`, F-9.15): Organise and the
+ * chat agent's sheet and tag edits, one run per Organise plan or chat turn (`source:key`). Every
+ * change is checked first (`recordedInput`), and one that fails refuses the whole call.
+ */
+export function recordChanges(db: EntityDb, input: RecordChangesInput, now: string): ChangeEntry[] {
+  return db.transaction((tx) => {
+    const inputs = input.changes.map((change) => recordedInput(tx, change))
+    return insertChanges(tx, changeRunId(input.source, input.run), inputs, now).map(rowToEntry)
+  })
 }
 
 /** Drops the oldest rows past `max`. */
@@ -141,6 +288,19 @@ interface UndoTally {
   removedTagIds: Set<string>
   entityIds: Set<string>
   nodeIds: Set<string>
+  restoredEntityIds: Set<string>
+  restoredTagIds: Set<string>
+  removedImages: string[]
+}
+
+/**
+ * What an undo did, for the handler: the result the windows get, plus (F-9.15) the sheets and
+ * tags it put back and the pictures of the sheets it deleted, whose files the handler removes.
+ */
+export interface UndoOutcome extends ChangeUndoResult {
+  restoredEntityIds: string[]
+  restoredTagIds: string[]
+  removedImages: string[]
 }
 
 /** Undoes one applied row inside the caller's transaction; a row already undone is left alone. */
@@ -230,6 +390,74 @@ function undoRow(db: EntityDb, row: KnowledgeChangeRow, tally: UndoTally): void 
       }
       break
     }
+    case 'linkTag': {
+      try {
+        addDocumentTag(db, undo.nodeId, undo.tagId)
+        tally.nodeIds.add(undo.nodeId)
+      } catch (err) {
+        // The scene or the tag is gone: there is nothing to put back.
+        if (!(err instanceof AppError) || err.code !== 'NOT_FOUND') throw err
+      }
+      break
+    }
+    case 'restoreSheet': {
+      const sheet = getEntity(db, undo.entityId)
+      if (sheet === undefined) break
+      if (!sheetMatches(sheet, undo.after)) {
+        throw new AppError(
+          'VALIDATION',
+          `"${sheet.name}" has changed since, so this cannot be undone. Edit the sheet by hand.`,
+          { id: row.id, entityId: undo.entityId }
+        )
+      }
+      const written = updateEntity(db, undo.entityId, undo.before)
+      tally.restoredEntityIds.add(undo.entityId)
+      if (written.tagChange !== null) tally.restoredTagIds.add(written.tagChange.tag.id)
+      break
+    }
+    case 'restoreTag': {
+      const held = getTagWithUsage(db, undo.tagId)
+      if (held === undefined) break
+      if (!tagMatches(held, undo.after)) {
+        throw new AppError(
+          'VALIDATION',
+          `#${held.name} has changed since, so this cannot be undone. Edit the tag by hand.`,
+          { id: row.id, tagId: undo.tagId }
+        )
+      }
+      updateTag(db, undo.tagId, undo.before)
+      tally.restoredTagIds.add(undo.tagId)
+      break
+    }
+    case 'deleteSheet': {
+      const sheet = getEntity(db, undo.entityId)
+      if (sheet === undefined) break
+      if (undo.modified !== undefined && sheet.modified !== undo.modified) {
+        throw new AppError(
+          'VALIDATION',
+          `You have edited "${sheet.name}" since, so it is yours now. Delete it from its page if you no longer want it.`,
+          { id: row.id, entityId: undo.entityId }
+        )
+      }
+      deleteEntity(db, undo.entityId)
+      if (sheet.image !== null) tally.removedImages.push(sheet.image)
+      tally.removedEntityIds.add(undo.entityId)
+      // The tag the sheet made goes with it, unless another sheet has taken it since.
+      if (undo.tagId !== null && getTagWithUsage(db, undo.tagId) !== undefined) {
+        const shared = db
+          .select({ id: entity.id })
+          .from(entity)
+          .where(and(eq(entity.tagId, undo.tagId), ne(entity.id, undo.entityId)))
+          .get()
+        if (shared === undefined) {
+          deleteTag(db, undo.tagId)
+          tally.removedTagIds.add(undo.tagId)
+        }
+      }
+      break
+    }
+    case 'none':
+      throw new AppError('VALIDATION', undo.reason, { id: row.id })
   }
   const updated = db
     .update(knowledgeChange)
@@ -240,16 +468,33 @@ function undoRow(db: EntityDb, row: KnowledgeChangeRow, tally: UndoTally): void 
   if (updated !== undefined) tally.entries.push(rowToEntry(updated))
 }
 
-/** The order a run is taken back in: what depends on a sheet or a tag first, the sheet and tag last. */
-const UNDO_ORDER: Readonly<Record<ChangeKind, number>> = { tagLink: 0, fact: 1, record: 2, tag: 3 }
+/**
+ * The order a run is taken back in: what depends on a sheet or a tag first, the sheet and tag
+ * last; F-9.15: edits of a sheet or a tag before the record that made it. Rows of one rank go
+ * newest first (the caller's order), so two edits of one sheet unwind in turn.
+ */
+const UNDO_ORDER: Readonly<Record<ChangeKind, number>> = {
+  tagLink: 0,
+  fact: 1,
+  sheetEdit: 1,
+  tagEdit: 1,
+  record: 2,
+  tag: 3,
+  merge: 4,
+  delete: 4,
+  category: 4
+}
 
-function undoRows(db: EntityDb, rows: readonly KnowledgeChangeRow[]): ChangeUndoResult {
+function undoRows(db: EntityDb, rows: readonly KnowledgeChangeRow[]): UndoOutcome {
   const tally: UndoTally = {
     entries: [],
     removedEntityIds: new Set(),
     removedTagIds: new Set(),
     entityIds: new Set(),
-    nodeIds: new Set()
+    nodeIds: new Set(),
+    restoredEntityIds: new Set(),
+    restoredTagIds: new Set(),
+    removedImages: []
   }
   db.transaction((tx) => {
     for (const row of [...rows].sort((a, b) => UNDO_ORDER[a.kind] - UNDO_ORDER[b.kind])) {
@@ -261,12 +506,15 @@ function undoRows(db: EntityDb, rows: readonly KnowledgeChangeRow[]): ChangeUndo
     removedEntityIds: [...tally.removedEntityIds],
     removedTagIds: [...tally.removedTagIds],
     entityIds: [...tally.entityIds].filter((id) => !tally.removedEntityIds.has(id)),
-    nodeIds: [...tally.nodeIds]
+    nodeIds: [...tally.nodeIds],
+    restoredEntityIds: [...tally.restoredEntityIds].filter((id) => !tally.removedEntityIds.has(id)),
+    restoredTagIds: [...tally.restoredTagIds].filter((id) => !tally.removedTagIds.has(id)),
+    removedImages: tally.removedImages
   }
 }
 
 /** Undoes one change (`changes:undo`); NOT_FOUND for an unknown id (pruned). */
-export function undoChange(db: EntityDb, id: string): ChangeUndoResult {
+export function undoChange(db: EntityDb, id: string): UndoOutcome {
   const row = db.select().from(knowledgeChange).where(eq(knowledgeChange.id, id)).get()
   if (row === undefined) throw new AppError('NOT_FOUND', 'Change not found', { id })
   return undoRows(db, [row])
@@ -275,10 +523,16 @@ export function undoChange(db: EntityDb, id: string): ChangeUndoResult {
 /**
  * Undoes every applied change of one run (`changes:undoRun`), in one transaction: a change that
  * cannot be undone (a sheet or a tag the author has made theirs) refuses the whole run, so nothing is
- * half taken back. NOT_FOUND for a run with no rows.
+ * half taken back. F-9.15: what the log lists but cannot take back (a merge, a deletion) is passed
+ * over. NOT_FOUND for a run with no rows.
  */
-export function undoRun(db: EntityDb, runId: string): ChangeUndoResult {
-  const rows = db.select().from(knowledgeChange).where(eq(knowledgeChange.runId, runId)).all()
+export function undoRun(db: EntityDb, runId: string): UndoOutcome {
+  const rows = db
+    .select()
+    .from(knowledgeChange)
+    .where(eq(knowledgeChange.runId, runId))
+    .orderBy(desc(knowledgeChange.createdAt), desc(sql`rowid`))
+    .all()
   if (rows.length === 0) throw new AppError('NOT_FOUND', 'Run not found', { runId })
-  return undoRows(db, rows)
+  return undoRows(db, rows.filter(undoableRow))
 }

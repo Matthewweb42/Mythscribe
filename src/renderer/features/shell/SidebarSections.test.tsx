@@ -181,7 +181,7 @@ describe('buildSections (F-9.11)', () => {
   }
   const used = (built: SidebarSection[]): string[] => built.filter((s) => s.used).map((s) => s.id)
 
-  it('always uses Manuscript, Characters, Places, Tags, and To do; the rest once they hold something', () => {
+  it('always uses Manuscript, Characters, Places, the Index, and To do; the rest once they hold something', () => {
     expect(used(buildSections(BUILTIN_CATEGORIES, counts))).toEqual([
       'manuscript',
       'character',
@@ -206,11 +206,11 @@ describe('buildSections (F-9.11)', () => {
       'world',
       'magic',
       'tags',
-      'timeline',
       'outline',
-      'edits',
+      'timeline',
       'library',
       'todo',
+      'edits',
       'changes'
     ])
     expect(busy.find((s) => s.id === 'magic')).toMatchObject({
@@ -228,7 +228,7 @@ describe('buildSections (F-9.11)', () => {
       sheets: { 'c-ships': 1, 'c-gone': 1 }
     })
     const bible = built.filter((s) => s.group === 'bible').map((s) => s.label)
-    expect(bible.slice(-2)).toEqual(['Ships', 'c-gone'])
+    expect(bible.slice(-3)).toEqual(['Ships', 'c-gone', 'Index'])
     expect(used(built)).toEqual([
       'manuscript',
       'character',
@@ -240,15 +240,28 @@ describe('buildSections (F-9.11)', () => {
     ])
   })
 
-  it('shows Threads after the library once it has a thread, through the Threads section (F-9.14)', () => {
+  it('shows Threads first of the tools once it has a thread, through the Threads section (F-9.14, F-9.15)', () => {
     const quiet = buildSections(ALL_BUILTIN_CATEGORIES, counts)
     expect(quiet.find((s) => s.id === 'thread')).toMatchObject({ label: 'Threads', used: false })
     const built = buildSections(ALL_BUILTIN_CATEGORIES, { ...counts, sheets: { thread: 2 } })
     const threads = built.find((s) => s.id === 'thread')
-    expect(threads).toMatchObject({ used: true, count: 2, group: 'bible' })
-    const bible = built.filter((s) => s.group === 'bible').map((s) => s.id)
-    expect(bible.at(-1)).toBe('thread')
+    expect(threads).toMatchObject({ used: true, count: 2, group: 'tools' })
+    const tools = built.filter((s) => s.group === 'tools').map((s) => s.id)
+    expect(tools).toEqual(['thread', 'outline', 'timeline', 'library', 'todo', 'edits', 'changes'])
     const panel = threads?.render('novel')
     expect(isValidElement(panel) ? panel.type : null).toBe(ThreadsTab)
+  })
+
+  it('closes the story bible with the tags as its Index (F-9.15)', () => {
+    const built = buildSections(ALL_BUILTIN_CATEGORIES, counts)
+    const bible = built.filter((s) => s.group === 'bible')
+    expect(bible.at(-1)).toMatchObject({ id: 'tags', label: 'Index', used: true })
+    expect(bible.map((s) => s.id)).not.toContain('thread')
+    expect(built.map((s) => s.group)).toEqual(
+      [...built.map((s) => s.group)].sort(
+        (a, b) =>
+          ['manuscript', 'bible', 'tools'].indexOf(a) - ['manuscript', 'bible', 'tools'].indexOf(b)
+      )
+    )
   })
 })

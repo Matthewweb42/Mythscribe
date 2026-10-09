@@ -123,7 +123,8 @@ export { OPEN_SCENE_TIMEOUT_MS, PASSAGE_GONE_MESSAGE }
  * citations main verified and the two flags the panel shows) and `agent` (the lookups and the
  * edits, each pending, applied, skipped, undone, or failed). In Ask each edit waits for Apply;
  * in Auto every edit but a deletion or an off-voice one is applied at once, with its Undo held
- * in memory for the session. `openScene` opens a cited scene and selects the passage.
+ * in memory for the session (F-9.15: a sheet or tag edit's Undo is the Changes log's, which
+ * logged it under the turn). `openScene` opens a cited scene and selects the passage.
  * The quick actions (F-5.17) write into the active conversation through the same turns:
  * `recap` is a read-only agent turn with a fixed question about the open scene, `whatNext`
  * asks `ai:whatNext` and records the directions on the assistant turn, and `writeDirection`
@@ -211,7 +212,10 @@ interface AssistantState {
   skipChange: (messageId: string, changeId: string) => void
   /** 2026-10-07: the card's Accept for an insertion showing in the editor as ghost text (Tab). */
   acceptChange: (messageId: string, changeId: string) => void
-  /** Takes an applied edit back (this session only: the undo lives in memory). */
+  /**
+   * Takes an applied edit back (this session only: the undo lives in memory; for a sheet or tag
+   * edit it calls the Changes log's undo, F-9.15).
+   */
   undoChange: (messageId: string, changeId: string) => Promise<void>
 }
 
@@ -704,9 +708,11 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     const drafted = found.change.proposalId
     setChanging(changeId, true)
     try {
+      // F-9.15: story-bible edits are logged in Changes under the turn; their Undo is the log's.
       const undo = await applyAgentEdit(
         found.change.edit,
-        drafted ?? found.message.proposalId ?? ''
+        drafted ?? found.message.proposalId ?? '',
+        { source: 'chat', run: messageId }
       )
       if (undo !== null) undoers.set(changeId, undo)
       patchChange(messageId, changeId, { status: 'applied', error: null })

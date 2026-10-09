@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ChangeEntry } from '@shared/changes'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
+import {
+  resetEntityDraftStore,
+  useEntityDraftStore
+} from '@renderer/features/entities/entityDraftStore'
 import { entityFixture } from '@renderer/features/entities/entityFixture'
+import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
-import { resetChangesStore, useChangesStore } from './changesStore'
+import { logAppliedChange, resetChangesStore, useChangesStore } from './changesStore'
 
 const entry = (id: string, runId: string, over: Partial<ChangeEntry> = {}): ChangeEntry => ({
   id,
@@ -17,11 +22,17 @@ const entry = (id: string, runId: string, over: Partial<ChangeEntry> = {}): Chan
   entityId: 'e-mara',
   label: `change ${id}`,
   status: 'applied',
+  source: 'reading',
+  undoable: true,
   ...over
 })
 
 let rows: ChangeEntry[]
 let calls: [Channel, unknown][]
+/** What the next `changes:undo` puts back (F-9.15). */
+let restored: Output<'changes:undo'>['entities']
+/** Whether `changes:record` refuses. */
+let refuseRecord: boolean
 let listener: (() => void) | null
 
 function install(): void {
@@ -47,8 +58,26 @@ function install(): void {
           removedEntityIds: [],
           removedTagIds: [],
           entityIds: ['e-mara'],
-          nodeIds: []
+          nodeIds: [],
+          entities: restored,
+          tags: []
         } as Output<C>
+      }
+      if (channel === 'changes:record') {
+        if (refuseRecord) throw new Error('The change is not in the story bible')
+        const { source, run, changes } = input as Input<'changes:record'>
+        const logged = changes.map((change, i) =>
+          entry(`rec-${rows.length + i}`, `${source}:${run}`, {
+            kind: change.kind,
+            label: change.label,
+            nodeId: null,
+            entityId: null,
+            source,
+            undoable: change.undo.type !== 'none'
+          })
+        )
+        rows = [...logged, ...rows]
+        return logged as Output<C>
       }
       if (channel === 'changes:undoRun') {
         const { runId } = input as Input<'changes:undoRun'>
@@ -58,7 +87,9 @@ function install(): void {
           removedEntityIds: ['e-aldous'],
           removedTagIds: ['t-gone'],
           entityIds: [],
-          nodeIds: ['sc-1']
+          nodeIds: ['sc-1'],
+          entities: [],
+          tags: []
         } as Output<C>
       }
       throw new Error(`unexpected ${channel}`)
@@ -76,9 +107,13 @@ function install(): void {
 
 describe('changesStore (F-9.13)', () => {
   beforeEach(async () => {
+    resetPendingSaves()
     resetChangesStore()
     resetEntityStore()
     resetTagStore()
+    resetEntityDraftStore()
+    restored = []
+    refuseRecord = false
     rows = [entry('c1', 'r2'), entry('c2', 'r2', { kind: 'record' }), entry('c3', 'r1')]
     install()
     await useEntityStore.getState().load()
@@ -87,6 +122,7 @@ describe('changesStore (F-9.13)', () => {
     resetChangesStore()
     resetEntityStore()
     resetTagStore()
+    resetEntityDraftStore()
   })
 
   it('loads the newest page, then older ones', async () => {
@@ -146,5 +182,69 @@ describe('changesStore (F-9.13)', () => {
     useChangesStore.getState().clear()
     await pending
     expect(useChangesStore.getState().entries).toEqual([])
+  })
+
+  it('logs a store change and answers the log’s undo as its own (F-9.15)', async () => {
+    await useChangesStore.getState().load()
+    let local = 0
+    const undo = await logAppliedChange(
+      { source: 'organise', run: 'org-1' },
+      {
+        kind: 'sheetEdit',
+        label: 'Sheet “Mara”: 1 field',
+        undo: {
+          type: 'restoreSheet',
+          entityId: 'e-mara',
+          before: { fields: { role: '' } },
+          after: { fields: { role: 'Captain' } }
+        }
+      },
+      async () => {
+        local += 1
+      }
+    )
+    const logged = useChangesStore.getState().entries[0]
+    expect(logged).toMatchObject({ runId: 'organise:org-1', source: 'organise', undoable: true })
+    await undo?.()
+    expect(local).toBe(0)
+    expect(calls.at(-1)).toEqual(['changes:undo', { id: logged?.id }])
+  })
+
+  it('answers no undo for a merge, and the old undo when the log refuses (F-9.15)', async () => {
+    const merge = await logAppliedChange(
+      { source: 'organise', run: 'org-1' },
+      {
+        kind: 'merge',
+        label: 'Merge tags',
+        targetId: 't-1',
+        undo: { type: 'none', reason: 'A merge cannot be undone.' }
+      },
+      async () => undefined
+    )
+    expect(merge).toBeNull()
+    refuseRecord = true
+    const fallback = async (): Promise<void> => undefined
+    const undo = await logAppliedChange(
+      { source: 'chat', run: 'm-1' },
+      {
+        kind: 'tagLink',
+        label: 'Tag Scene 1 #mara',
+        undo: { type: 'unlinkTag', nodeId: 'sc-1', tagId: 't-1' }
+      },
+      fallback
+    )
+    expect(undo).toBe(fallback)
+  })
+
+  it('saves an open sheet page before an undo and shows the sheet as put back (F-9.15)', async () => {
+    const mara = useEntityStore.getState().byId['e-mara']
+    if (mara === undefined) throw new Error('fixture')
+    useEntityDraftStore.getState().open(mara)
+    restored = [{ ...mara, fields: { ...mara.fields, role: 'Put back' } }]
+    await useChangesStore.getState().load()
+    await useChangesStore.getState().undo('c1')
+    expect(useEntityStore.getState().byId['e-mara']?.fields.role).toBe('Put back')
+    expect(useEntityDraftStore.getState().draft?.fields.role).toBe('Put back')
+    expect(useEntityDraftStore.getState().status).toBe('idle')
   })
 })

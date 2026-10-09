@@ -1,5 +1,10 @@
 import { useMemo } from 'react'
-import { CHANGE_KIND_LABEL, type ChangeEntry } from '@shared/changes'
+import {
+  CHANGE_KIND_LABEL,
+  CHANGE_SOURCE_LABEL,
+  type ChangeEntry,
+  type ChangeSource
+} from '@shared/changes'
 import { locateText } from '@renderer/features/editor/locateText'
 import { openPassage } from '@renderer/features/editor/openPassage'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -29,6 +34,7 @@ interface RunGroup {
   runId: string
   createdAt: string
   nodeId: string | null
+  source: ChangeSource
   entries: ChangeEntry[]
 }
 
@@ -42,6 +48,7 @@ function groupRuns(entries: readonly ChangeEntry[]): RunGroup[] {
         runId: entry.runId,
         createdAt: entry.createdAt,
         nodeId: entry.nodeId,
+        source: entry.source,
         entries: [entry]
       })
   }
@@ -53,6 +60,10 @@ function groupRuns(entries: readonly ChangeEntry[]): RunGroup[] {
  * (a fact, a sheet, a tag, a tag on a scene), newest first and grouped by reading, each with the
  * scene and the passage behind it and an Undo; "Undo run" takes back a whole reading. An
  * Undo is for good: the next reading does not redo it.
+ *
+ * F-9.15: the one log of story-bible changes. Runs of Organise, an upload's Apply, and a chat
+ * turn are listed by their source instead of a scene. A merge or a deletion is listed without
+ * an Undo ("No undo"), as Organise's rule has it.
  */
 export function ChangesTab(): React.JSX.Element {
   const entries = useChangesStore((s) => s.entries)
@@ -66,20 +77,25 @@ export function ChangesTab(): React.JSX.Element {
   return (
     <div data-testid="changes-tab" className="min-h-0 flex-1 overflow-y-auto p-2">
       <p className="m-0 mb-2 text-xs text-fg-muted">
-        What the AI added to the story bible on its own while reading your scenes. Undo takes one
-        back for good.
+        What the AI changed in your story bible: while reading your scenes, in Organise, from an
+        upload, or from the chat. Undo takes one back for good.
       </p>
       {groups.length === 0 ? (
         <p className="m-0 text-sm text-fg-muted">Nothing yet.</p>
       ) : (
         <ul role="list" aria-label="Changes" className="m-0 flex list-none flex-col gap-3 p-0">
           {groups.map((group) => {
-            const open = group.entries.some((entry) => entry.status === 'applied')
+            // "Undo run" is for a run of several changes Undo can take back, one still applied.
+            const undoable = group.entries.filter((entry) => entry.undoable)
+            const runUndo =
+              undoable.length > 1 && undoable.some((entry) => entry.status === 'applied')
             const scene = titleOf(group.nodeId)
+            const reading = group.source === 'reading'
+            const heading = reading ? scene : CHANGE_SOURCE_LABEL[group.source]
             return (
               <li
                 key={group.runId}
-                aria-label={`Reading of ${scene}`}
+                aria-label={reading ? `Reading of ${scene}` : heading}
                 className="flex flex-col gap-1 rounded-md border border-line p-2"
               >
                 <div className="flex items-center gap-1 text-xs whitespace-nowrap text-fg-subtle">
@@ -87,10 +103,10 @@ export function ChangesTab(): React.JSX.Element {
                   <span aria-hidden="true" className="shrink-0">
                     ·
                   </span>
-                  <span className="min-w-0 flex-1 truncate" title={scene}>
-                    {scene}
+                  <span className="min-w-0 flex-1 truncate" title={heading}>
+                    {heading}
                   </span>
-                  {open && group.entries.length > 1 ? (
+                  {runUndo ? (
                     <button
                       type="button"
                       disabled={pending.includes(group.runId)}
@@ -120,6 +136,13 @@ export function ChangesTab(): React.JSX.Element {
                         </span>
                         {entry.status === 'undone' ? (
                           <span className="shrink-0 px-1.5 py-0.5 text-fg-subtle">Undone</span>
+                        ) : !entry.undoable ? (
+                          <span
+                            title="Merges, deletions, and new categories cannot be undone."
+                            className="shrink-0 px-1.5 py-0.5 text-fg-subtle"
+                          >
+                            No undo
+                          </span>
                         ) : (
                           <button
                             type="button"

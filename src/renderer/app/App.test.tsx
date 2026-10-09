@@ -400,7 +400,7 @@ describe('App', () => {
       'Manuscript',
       'Characters',
       'Places',
-      'Tags',
+      'Index',
       'Outline',
       'To do',
       'Show unused sections (15)',

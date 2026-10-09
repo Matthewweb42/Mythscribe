@@ -61,6 +61,7 @@ import type {
   AiRouteResult,
   AiSuggestNotesResult,
   AiSuggestSynopsisResult,
+  ChangeUndoReply,
   Channel,
   Entity,
   IpcError,
@@ -229,7 +230,6 @@ import {
   requireCategory,
   updateCategory
 } from '../entity/categoryStore'
-import type { ChangeUndoResult } from '@shared/changes'
 import type { Fact } from '@shared/facts'
 import type { KnowledgeConversion } from '@shared/knowledge'
 import { relationAttribute } from '@shared/relations'
@@ -245,7 +245,13 @@ import { listThreads } from '../knowledge/threads'
 import { TODO_DEBOUNCE_MS, type TodoCheckResult, type TodoSuggestResult } from '@shared/todo'
 import { sceneCardFor } from '../knowledge/sceneCard'
 import { confirmConversion, conversionPending, estimateConversion } from '../knowledge/conversion'
-import { listChanges, undoChange, undoRun } from '../knowledge/changeLog'
+import {
+  listChanges,
+  recordChanges,
+  undoChange,
+  undoRun,
+  type UndoOutcome
+} from '../knowledge/changeLog'
 import { convertKnowledgeFacts } from '../knowledge/factConversion'
 import { listTodo, reopenTodo, settleTodo, syncLocalTodo } from '../knowledge/todoStore'
 import {
@@ -354,6 +360,7 @@ import {
   deleteTags,
   exportTagBank,
   getTag,
+  getTagWithUsage,
   importTagBank,
   listTags,
   loadTagTemplate,
@@ -2181,33 +2188,61 @@ export function registerHandlers({
     listChanges(manager.require().connection.orm, { before, limit })
   )
 
-  const publishUndo = (db: TreeDb, result: ChangeUndoResult): ChangeUndoResult => {
-    if (result.removedTagIds.length > 0) {
+  const publishUndo = (outcome: UndoOutcome): ChangeUndoReply => {
+    const session = manager.require()
+    const db = session.connection.orm
+    // F-9.15: a sheet an upload made takes its picture with it.
+    for (const image of outcome.removedImages) {
+      removeImageAsset(session.folder, ENTITY_IMAGES_DIR, image)
+    }
+    const tags = outcome.restoredTagIds.flatMap((id) => getTagWithUsage(db, id) ?? [])
+    const entities = outcome.restoredEntityIds.flatMap((id) => getEntity(db, id) ?? [])
+    if (outcome.removedTagIds.length > 0 || tags.length > 0) {
       rescanManuscript(db)
       publishProposed()
     }
-    if (result.removedEntityIds.length > 0 || result.removedTagIds.length > 0) {
+    for (const restored of tags) emit(windows(), 'tag:changed', restored)
+    for (const restored of entities) emit(windows(), 'entity:changed', restored)
+    if (
+      outcome.removedEntityIds.length > 0 ||
+      outcome.removedTagIds.length > 0 ||
+      tags.length > 0 ||
+      entities.length > 0
+    ) {
       void syncSpelling()
       emit(windows(), 'continuity:changed', { nodeIds: [] })
     }
-    if (result.nodeIds.length > 0 || result.removedTagIds.length > 0) {
-      emit(windows(), 'documentTag:changed', { nodeIds: result.nodeIds })
+    if (outcome.nodeIds.length > 0 || outcome.removedTagIds.length > 0) {
+      emit(windows(), 'documentTag:changed', { nodeIds: outcome.nodeIds })
     }
-    if (result.entityIds.length > 0)
-      emit(windows(), 'fact:changed', { entityIds: result.entityIds })
+    if (outcome.entityIds.length > 0)
+      emit(windows(), 'fact:changed', { entityIds: outcome.entityIds })
     emit(windows(), 'changes:changed', {})
     queueTodo(db)
-    return result
+    return {
+      entries: outcome.entries,
+      removedEntityIds: outcome.removedEntityIds,
+      removedTagIds: outcome.removedTagIds,
+      entityIds: outcome.entityIds,
+      nodeIds: outcome.nodeIds,
+      entities,
+      tags
+    }
   }
 
-  register('changes:undo', ({ id }) => {
-    const db = manager.require().connection.orm
-    return publishUndo(db, undoChange(db, id))
-  })
+  register('changes:undo', ({ id }) =>
+    publishUndo(undoChange(manager.require().connection.orm, id))
+  )
 
-  register('changes:undoRun', ({ runId }) => {
-    const db = manager.require().connection.orm
-    return publishUndo(db, undoRun(db, runId))
+  register('changes:undoRun', ({ runId }) =>
+    publishUndo(undoRun(manager.require().connection.orm, runId))
+  )
+
+  // F-9.15: what Organise and the chat applied through the stores, logged so Changes is its Undo.
+  register('changes:record', (input) => {
+    const entries = recordChanges(manager.require().connection.orm, input, new Date().toISOString())
+    emit(windows(), 'changes:changed', {})
+    return entries
   })
 
   /**

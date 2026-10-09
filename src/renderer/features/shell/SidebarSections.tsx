@@ -22,7 +22,9 @@ const NEW_CATEGORY = 'action:new-category'
 
 const GROUP_ORDER: readonly SectionGroup[] = ['manuscript', 'bible', 'tools']
 
-const GROUP_LABEL: Record<Exclude<SectionGroup, 'manuscript'>, string> = {
+/** The groups' names; only the story bible's is shown (F-9.15: the tools follow under a rule). */
+const GROUP_LABEL: Record<SectionGroup, string> = {
+  manuscript: 'Manuscript',
   bible: 'Story bible',
   tools: 'Tools'
 }
@@ -40,7 +42,9 @@ interface Row {
  * category. Picking one fills the panel below. The current section is app-wide layout state (the
  * project session restores it, F-1.7); an id with no section falls back to the first. The list
  * is an ARIA listbox: ArrowUp/ArrowDown move (and wrap), Home/End jump, Enter or Space picks,
- * Escape closes and returns focus to the button.
+ * Escape closes and returns focus to the button. F-9.15: only the story bible carries a heading;
+ * the tools follow it under a rule, so the list reads as Manuscript, the story bible, then the
+ * rest.
  */
 export function SidebarSections({ format, sections }: SidebarSectionsProps): React.JSX.Element {
   const projectSections = useSidebarSections()
@@ -220,17 +224,21 @@ export function SidebarSections({ format, sections }: SidebarSectionsProps): Rea
       while (index < shown.length && shown[index]?.group === group) index += 1
       if (index === start) continue
       const items = rows.slice(start, index).map((row, i) => renderRow(row, start + i))
-      const label = group === 'manuscript' ? null : GROUP_LABEL[group]
       out.push(
-        <div key={group} role="group" aria-label={label ?? 'Manuscript'}>
-          {label === null ? null : (
+        <div
+          key={group}
+          role="group"
+          aria-label={GROUP_LABEL[group]}
+          className={group === 'tools' ? 'mt-1 border-t border-line pt-1' : undefined}
+        >
+          {group === 'bible' ? (
             <div
               role="presentation"
               className="px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-fg-muted uppercase"
             >
-              {label}
+              {GROUP_LABEL[group]}
             </div>
-          )}
+          ) : null}
           {items}
         </div>
       )

@@ -1,5 +1,13 @@
 import { create } from 'zustand'
-import { CHANGES_PAGE, type ChangeEntry, type ChangeUndoResult } from '@shared/changes'
+import {
+  CHANGES_PAGE,
+  type ChangeEntry,
+  type RecordChangesInput,
+  type RecordedChange,
+  type RecordedChangeSource
+} from '@shared/changes'
+import type { ChangeUndoReply } from '@shared/ipc/contract'
+import { useEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { ipc } from '@renderer/lib/ipc'
@@ -9,6 +17,11 @@ import { ipc } from '@renderer/lib/ipc'
  * applied on its own, newest first, a page at a time. Main's `changes:changed` re-reads the pages
  * held. An undo merges the rows main marked undone, and drops the sheets and tags it deleted from
  * their stores (the other moves arrive as `fact:changed` and `documentTag:changed`).
+ *
+ * F-9.15: the one Undo of every story-bible change, whoever made it. Organise and the chat log
+ * what they applied (`record`) and their own Undo buttons call `undo` here. An open sheet page
+ * is saved before an undo and shows the sheet as put back after it, so its draft never writes
+ * the undone text again.
  */
 interface ChangesState {
   entries: ChangeEntry[]
@@ -22,6 +35,8 @@ interface ChangesState {
   loadMore: () => Promise<void>
   undo: (id: string) => Promise<void>
   undoRun: (runId: string) => Promise<void>
+  /** F-9.15: logs changes applied through the stores; answers the rows (newest first in the list). */
+  record: (input: RecordChangesInput) => Promise<ChangeEntry[]>
   clear: () => void
   /** Opens the one `changes:changed` subscription (idempotent); call it where the project opens. */
   subscribe: () => void
@@ -33,10 +48,16 @@ let latest = 0
 let unsubscribe: (() => void) | null = null
 
 export const useChangesStore = create<ChangesState>((set, get) => {
-  const applyUndo = (result: ChangeUndoResult): void => {
+  const applyUndo = (result: ChangeUndoReply): void => {
     const undone = new Map(result.entries.map((entry) => [entry.id, entry]))
     set({ entries: get().entries.map((entry) => undone.get(entry.id) ?? entry) })
     const entities = useEntityStore.getState()
+    // F-9.15: what was put back; an open page starts again from the sheet as it now stands.
+    for (const entity of result.entities) entities.merge(entity)
+    for (const tag of result.tags) useTagStore.getState().merge(tag)
+    const draft = useEntityDraftStore.getState()
+    const reopened = result.entities.find((entity) => entity.id === draft.draft?.id)
+    if (reopened !== undefined) draft.open(reopened)
     entities.forget(result.removedEntityIds)
     // A sheet whose tag went keeps no tag, as main cleared it (F-9.4: the sheet outlives its tag).
     const tags = new Set(result.removedTagIds)
@@ -47,10 +68,12 @@ export const useChangesStore = create<ChangesState>((set, get) => {
     }
     useTagStore.getState().forget(result.removedTagIds)
   }
-  const track = async (key: string, task: () => Promise<ChangeUndoResult>): Promise<void> => {
+  const track = async (key: string, task: () => Promise<ChangeUndoReply>): Promise<void> => {
     const mine = generation
     set({ pending: [...get().pending, key] })
     try {
+      // The open page's typing is saved first, so the undo compares against what is on screen.
+      await useEntityDraftStore.getState().flush()
       const result = await task()
       if (mine === generation) applyUndo(result)
     } finally {
@@ -89,6 +112,18 @@ export const useChangesStore = create<ChangesState>((set, get) => {
 
     undoRun: (runId) => track(runId, () => ipc().invoke('changes:undoRun', { runId })),
 
+    async record(input) {
+      const mine = generation
+      const logged = await ipc().invoke('changes:record', input)
+      if (mine === generation) {
+        const held = new Set(logged.map((entry) => entry.id))
+        set({
+          entries: [...[...logged].reverse(), ...get().entries.filter((e) => !held.has(e.id))]
+        })
+      }
+      return logged
+    },
+
     clear() {
       generation++
       set({ entries: [], more: false, pending: [] })
@@ -104,6 +139,36 @@ export const useChangesStore = create<ChangesState>((set, get) => {
     }
   }
 })
+
+/** Where a store's applied change is logged: the source and the run (an Organise plan, a chat turn). */
+export interface ChangeRun {
+  source: RecordedChangeSource
+  run: string
+}
+
+/**
+ * Logs one change a store applied (F-9.15) and answers its Undo, which is the Changes log's: the
+ * caller's own Undo button calls it, so there is one owner. Null for a change the log cannot
+ * take back (a merge, a deletion). If the log refuses the entry (the project closed, the record
+ * moved on meanwhile), the change stays applied and `fallback` is its Undo, as before F-9.15.
+ */
+export async function logAppliedChange(
+  run: ChangeRun,
+  change: RecordedChange,
+  fallback: (() => Promise<void>) | null
+): Promise<(() => Promise<void>) | null> {
+  let entry: ChangeEntry | undefined
+  try {
+    ;[entry] = await useChangesStore.getState().record({ ...run, changes: [change] })
+  } catch {
+    // The change itself landed; only its line in the log is missing, so its own undo stays.
+    return fallback
+  }
+  if (entry === undefined) return fallback
+  if (!entry.undoable) return null
+  const id = entry.id
+  return () => useChangesStore.getState().undo(id)
+}
 
 /** Empties the store and drops the subscription. For tests only. */
 export function resetChangesStore(): void {

@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings, type AssistantMode } from '@shared/aiSettings'
+import type { ChangeEntry } from '@shared/changes'
 import type { Channel, Entity, Input, Output, Tag } from '@shared/ipc/contract'
 import type { OrganiseChange } from '@shared/organise'
+import { resetChangesStore, useChangesStore } from '@renderer/features/changes/changesStore'
 import { resetAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
@@ -142,6 +144,7 @@ function setMode(mode: AssistantMode): void {
 
 beforeEach(() => {
   install()
+  resetChangesStore()
   resetOrganiseStore()
   resetTagStore()
   resetEntityStore()
@@ -200,6 +203,49 @@ describe('useOrganiseStore (F-9.10)', () => {
     await useOrganiseStore.getState().applyAccepted()
     expect(statuses().c2).toBe('applied')
     expect(useTagStore.getState().byId.falseer).toBeUndefined()
+  })
+
+  it('in Auto logs the run in Changes, whose Undo is the plan screen’s (F-9.15)', async () => {
+    setMode('auto')
+    const logged: ChangeEntry[] = []
+    install({
+      'changes:record': (input) => {
+        const { source, run, changes } = input as Input<'changes:record'>
+        const rows = changes.map((change): ChangeEntry => ({
+          id: `log-${logged.length}`,
+          runId: `${source}:${run}`,
+          createdAt: '2026-10-09T10:00:00.000Z',
+          nodeId: null,
+          quote: null,
+          kind: change.kind,
+          entityId: null,
+          label: change.label,
+          status: 'applied',
+          source,
+          undoable: change.undo.type !== 'none'
+        }))
+        logged.push(...rows)
+        return rows
+      },
+      'changes:undo': () => ({
+        entries: [],
+        removedEntityIds: [],
+        removedTagIds: [],
+        entityIds: [],
+        nodeIds: [],
+        entities: [],
+        tags: []
+      })
+    })
+    await useOrganiseStore.getState().start({ instruction: '', scope: [] })
+    expect(logged.map((entry) => entry.kind)).toEqual(['tagEdit', 'sheetEdit'])
+    expect(new Set(logged.map((entry) => entry.runId)).size).toBe(1)
+    expect(logged[0]?.runId).toMatch(/^organise:/)
+    expect(useChangesStore.getState().entries.map((entry) => entry.id)).toEqual(['log-1', 'log-0'])
+    await useOrganiseStore.getState().undo('c3')
+    expect(statuses().c3).toBe('undone')
+    expect(calls.at(-1)).toEqual(['changes:undo', { id: 'log-1' }])
+    expect(channels().filter((c) => c === 'entity:update')).toHaveLength(1)
   })
 
   it('lets the author pick another keeper for a merge before accepting it (Edit)', async () => {

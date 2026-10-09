@@ -4487,6 +4487,45 @@ describe('the Changes log and dated author lines (F-9.13)', () => {
     await expect(invoke('changes:undo', { id: 'missing' })).rejects.toThrowError(/^NOT_FOUND: /)
   })
 
+  it('records a store change, and its undo puts the sheet back and tells the windows (F-9.15)', async () => {
+    await invoke('project:create', { name: 'Record', format: 'novel', directory: tmp })
+    await expect(
+      invoke('changes:record', {
+        source: 'organise',
+        run: 'org-1',
+        changes: [{ kind: 'merge', label: 'm', undo: { type: 'deleteRecord', entityId: 'x' } }]
+      })
+    ).rejects.toThrowError(/^VALIDATION: /)
+    const mara = await invoke('entity:create', {
+      kind: 'character',
+      name: 'Mara',
+      fields: { age: '28' }
+    })
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    const [entry] = await invoke('changes:record', {
+      source: 'chat',
+      run: 'turn-1',
+      changes: [
+        {
+          kind: 'sheetEdit',
+          label: 'Mara · Age',
+          undo: {
+            type: 'restoreSheet',
+            entityId: mara.id,
+            before: { fields: { age: '27' } },
+            after: { fields: { age: '28' } }
+          }
+        }
+      ]
+    })
+    expect(entry).toMatchObject({ runId: 'chat:turn-1', source: 'chat', undoable: true })
+    expect(sent('changes:changed')).toEqual([{}])
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    const undone = await invoke('changes:undo', { id: entry?.id ?? '' })
+    expect(undone.entities).toMatchObject([{ id: mara.id, fields: { age: '27' } }])
+    expect(sent('entity:changed')).toMatchObject([{ id: mara.id, fields: { age: '27' } }])
+  })
+
   it('dates an author line at a scene through entity:update, leaving the sheet text alone', async () => {
     await invoke('project:create', { name: 'Dated', format: 'novel', directory: tmp })
     const scene = (await invoke('tree:list', undefined)).find(

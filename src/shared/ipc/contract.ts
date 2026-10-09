@@ -146,7 +146,14 @@ import { KnowledgeConversion } from '../knowledge'
 import { RELATION_LABEL_MAX, RelationType } from '../relations'
 import { THREAD_NOTE_MAX, ThreadEvent, ThreadView } from '../threads'
 import { TodoCheckResult, TodoSuggestResult, TodoView } from '../todo'
-import { CHANGES_PAGE, CHANGES_PAGE_MAX, ChangePage, ChangeUndoResult } from '../changes'
+import {
+  CHANGES_PAGE,
+  CHANGES_PAGE_MAX,
+  ChangeEntry,
+  ChangePage,
+  ChangeUndoResult,
+  RecordChangesInput
+} from '../changes'
 import { TagMentions } from '../mentions'
 import { EditRole, MenuItemId } from '../menu'
 import { WritingPresets } from '../presets'
@@ -330,6 +337,16 @@ export const Entity = z.object({
   modified: z.string()
 })
 export type Entity = z.infer<typeof Entity>
+
+/**
+ * An undo of the Changes log as the windows get it (F-9.13): F-9.15 adds the sheets and tags it
+ * put back, as they now stand, so the stores and an open sheet page take them at once.
+ */
+export const ChangeUndoReply = ChangeUndoResult.extend({
+  entities: z.array(Entity),
+  tags: z.array(Tag)
+})
+export type ChangeUndoReply = z.infer<typeof ChangeUndoReply>
 
 /** An entity and the tag it is linked to (F-9.4): what `entity:linkTag` answers. */
 export const EntityTagLink = z.object({ entity: Entity, tag: Tag })
@@ -1818,9 +1835,21 @@ export const contract = {
    * already undone changes nothing. VALIDATION for a sheet the author has edited since (it is
    * theirs now); NOT_FOUND for an unknown (pruned) id. Pushes `changes:changed`.
    */
-  'changes:undo': { input: z.object({ id: z.string() }), output: ChangeUndoResult },
-  /** Undoes every change of one reading of a scene, in one transaction; refused whole when one change is. */
-  'changes:undoRun': { input: z.object({ runId: z.string() }), output: ChangeUndoResult },
+  'changes:undo': { input: z.object({ id: z.string() }), output: ChangeUndoReply },
+  /**
+   * Undoes every change of one run (a reading of a scene, an Organise plan, an upload, a chat
+   * turn), in one transaction; refused whole when one change is. F-9.15: what cannot be taken
+   * back (a merge, a deletion) is passed over.
+   */
+  'changes:undoRun': { input: z.object({ runId: z.string() }), output: ChangeUndoReply },
+  /**
+   * F-9.15: logs changes the renderer applied through the stores (Organise, the chat agent's
+   * sheet and tag edits) so the Changes log is their one Undo. Main checks each inverse before it
+   * is stored: its kind may carry it, the sheet, tag, or scene it names exists, and a restore's
+   * `after` is what the record holds now (the change really landed). VALIDATION otherwise.
+   * Answers the logged rows; pushes `changes:changed`.
+   */
+  'changes:record': { input: RecordChangesInput, output: z.array(ChangeEntry) },
   /**
    * The author's own relationship between two sheets, or event on a thread (F-9.14): a fact that
    * is no sheet field, undated (`nodeId` null, "from the start") or holding from a scene. The same

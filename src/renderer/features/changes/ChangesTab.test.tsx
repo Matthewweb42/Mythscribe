@@ -20,6 +20,8 @@ const entry = (id: string, runId: string, over: Partial<ChangeEntry> = {}): Chan
   entityId: 'e-mara',
   label: id,
   status: 'applied',
+  source: 'reading',
+  undoable: true,
   ...over
 })
 
@@ -43,7 +45,9 @@ beforeEach(async () => {
           removedEntityIds: [],
           removedTagIds: [],
           entityIds: [],
-          nodeIds: []
+          nodeIds: [],
+          entities: [],
+          tags: []
         } as Output<C>
       }
       if (channel === 'changes:undoRun') {
@@ -52,7 +56,9 @@ beforeEach(async () => {
           removedEntityIds: [],
           removedTagIds: [],
           entityIds: [],
-          nodeIds: []
+          nodeIds: [],
+          entities: [],
+          tags: []
         } as Output<C>
       }
       throw new Error(`unexpected ${channel}`)
@@ -116,5 +122,39 @@ describe('ChangesTab (F-9.13)', () => {
     expect(useDialogStore.getState().toasts.map((toast) => toast.message)).toEqual([
       'It is yours now.'
     ])
+  })
+
+  it('heads an Organise run by its source and lists a merge without Undo (F-9.15)', () => {
+    useChangesStore.setState({
+      entries: [
+        entry('o1', 'organise:org-1', {
+          kind: 'sheetEdit',
+          label: 'Sheet “Kael”: 1 field',
+          nodeId: null,
+          source: 'organise'
+        }),
+        entry('o2', 'organise:org-1', {
+          kind: 'merge',
+          label: 'Merge tags #kael-2 into #kael',
+          nodeId: null,
+          source: 'organise',
+          undoable: false
+        })
+      ]
+    })
+    render(<ChangesTab />)
+    const run = screen.getByRole('listitem', { name: 'Organise' })
+    const merge = within(run).getByRole('listitem', {
+      name: 'Merge: Merge tags #kael-2 into #kael'
+    })
+    expect(within(merge).getByText('No undo')).toBeInTheDocument()
+    expect(within(merge).queryByRole('button', { name: 'Undo' })).toBeNull()
+    // One change Undo can take back: its own Undo is the run's.
+    expect(within(run).queryByRole('button', { name: 'Undo run' })).toBeNull()
+    expect(
+      within(within(run).getByRole('listitem', { name: /^Sheet: / })).getByRole('button', {
+        name: 'Undo'
+      })
+    ).toBeVisible()
   })
 })

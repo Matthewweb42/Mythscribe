@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { CATEGORY_FILTERS, filterLabel, type CategoryFilter } from './categoryFilter'
+import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { OrganiseBar } from '@renderer/features/organise/OrganiseBar'
 import { TagBankActions } from './TagBankActions'
 import { TagBulkBar } from './TagBulkBar'
@@ -29,6 +30,8 @@ const filterElementId = (filter: CategoryFilter): string => `tag-category-${filt
  * and selected, so the tag naming rules stay on the one rename path. The row's first click has
  * already swapped the list for the detail, so the double-click lands there; a double-click within
  * moments of a row opening the detail counts as the row's, and its second click does nothing else.
+ * F-9.15: the tab is the story bible's Index. The tags that point at a record come first, each
+ * with a link to its sheet; the labels (no record) follow, apart.
  */
 export function TagsTab(): React.JSX.Element {
   const [filter, setFilter] = useState<CategoryFilter>('all')
@@ -51,7 +54,18 @@ export function TagsTab(): React.JSX.Element {
   const buttons = useRef(new Map<CategoryFilter, HTMLButtonElement>())
   const selected = useTagStore((s) => (selectedId === null ? undefined : s.byId[selectedId]))
   const needle = query.trim().toLowerCase()
-  const visibleIds = useTagStore(
+  /** Tag id → the sheet it points at (the first, if two share it). */
+  const records = useEntityStore(
+    useShallow((s) => {
+      const out: Record<string, string> = {}
+      for (const id of s.ids) {
+        const tagId = s.byId[id]?.tagId
+        if (tagId != null && out[tagId] === undefined) out[tagId] = id
+      }
+      return out
+    })
+  )
+  const matchingIds = useTagStore(
     useShallow((s) =>
       s.ids.filter((id) => {
         const tag = s.byId[id]
@@ -60,6 +74,14 @@ export function TagsTab(): React.JSX.Element {
         return needle.length === 0 || tag.name.includes(needle)
       })
     )
+  )
+  // The records first, then the labels, each kept in the bank's order.
+  const visibleIds = useMemo(
+    () => [
+      ...matchingIds.filter((id) => records[id] !== undefined),
+      ...matchingIds.filter((id) => records[id] === undefined)
+    ],
+    [matchingIds, records]
   )
   const total = useTagStore((s) => s.ids.length)
   const [selecting, setSelecting] = useState(false)
@@ -210,6 +232,7 @@ export function TagsTab(): React.JSX.Element {
                 onSelect={selecting ? toggleChecked : openFromRow}
                 onRename={selecting ? undefined : renameFromRow}
                 checked={selecting ? pickedSet : undefined}
+                records={records}
               />
             </div>
             {selecting ? (

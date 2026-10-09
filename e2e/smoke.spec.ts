@@ -1747,9 +1747,10 @@ test('create, close, reopen a project on disk', async () => {
 
   // F-9.11: the sidebar's sections are one labelled picker, not a row of tabs. It shows the
   // current section by name; opened, it lists the sections in use by name — Manuscript, the
-  // story-bible categories with sheets (Characters and Places always), then the tools (Tags
-  // always, Outline once the manuscript has a document) — with every empty category and tool
-  // behind "Show unused sections", and "New category…" last. Its panel holds the tree.
+  // story-bible categories with sheets (Characters and Places always) closed by the Index (the
+  // tags, always; F-9.15), then the tools (Outline once the manuscript has a document) — with
+  // every empty category and tool behind "Show unused sections", and "New category…" last. Its
+  // panel holds the tree.
   const sectionPicker = page.getByRole('button', { name: /^Section: / })
   await expect(sectionPicker).toHaveAccessibleName('Section: Manuscript')
   await sectionPicker.click()
@@ -1758,7 +1759,7 @@ test('create, close, reopen a project on disk', async () => {
     /^Manuscript\d*$/,
     /^Characters\d*$/,
     /^Places\d*$/,
-    /^Tags\d*$/,
+    /^Index\d*$/,
     /^Outline\d*$/,
     // F-9.16: To do is always shown.
     /^To do\d*$/,
@@ -2626,8 +2627,8 @@ test('create, close, reopen a project on disk', async () => {
   // store loaded it on reopen) under All and under its category, creates one through the form
   // (the color pre-fills from the chosen category), opens its detail view, renames it inline,
   // and deletes it after a confirmation.
-  await showSection('Tags')
-  const tagsPanel = page.getByRole('region', { name: 'Tags section', exact: true })
+  await showSection('Index')
+  const tagsPanel = page.getByRole('region', { name: 'Index section', exact: true })
   const categories = tagsPanel.getByRole('tablist', { name: 'Tag categories' })
   await expect(categories.getByRole('tab')).toHaveText([
     'All',
@@ -2640,12 +2641,14 @@ test('create, close, reopen a project on disk', async () => {
     'Custom'
   ])
   const tagRows = tagsPanel.getByRole('list', { name: 'Tags' })
-  await expect(tagRows.getByRole('button')).toHaveText(['dark-forest 0 uses'])
+  // F-9.15: a tag with a record also carries "Open record" beside its row; the rows are these.
+  const tagRowButtons = tagRows.getByRole('button', { name: / \d+ uses?$/ })
+  await expect(tagRowButtons).toHaveText(['dark-forest 0 uses'])
   await expect(
     tagRows.getByRole('button', { name: /^dark-forest/ }).locator('span[aria-hidden]')
   ).toHaveCSS('background-color', 'rgb(234, 88, 12)')
   await categories.getByRole('tab', { name: 'Settings' }).click()
-  await expect(tagRows.getByRole('button')).toHaveText(['dark-forest 0 uses'])
+  await expect(tagRowButtons).toHaveText(['dark-forest 0 uses'])
   await categories.getByRole('tab', { name: 'Tone' }).click()
   await expect(tagsPanel.getByText('No tags match.')).toBeVisible()
   const tagForm = tagsPanel.getByRole('form', { name: 'New tag' })
@@ -2653,7 +2656,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(tagForm.getByLabel('Color')).toHaveValue('#2563eb')
   await tagForm.getByRole('textbox', { name: 'Tag name' }).fill('Moody')
   await tagForm.getByRole('button', { name: 'Create tag' }).click()
-  await expect(tagRows.getByRole('button')).toHaveText(['moody 0 uses'])
+  await expect(tagRowButtons).toHaveText(['moody 0 uses'])
   await expect(tagForm.getByRole('textbox', { name: 'Tag name' })).toHaveValue('')
   await tagRows.getByRole('button', { name: /^moody/ }).click()
   const tagName = tagsPanel.getByRole('textbox', { name: 'Tag name' })
@@ -2670,7 +2673,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(deleteTagDialog).toBeHidden()
   await expect(tagsPanel.getByText('No tags match.')).toBeVisible()
   await categories.getByRole('tab', { name: 'All' }).click()
-  await expect(tagRows.getByRole('button')).toHaveText(['dark-forest 0 uses'])
+  await expect(tagRowButtons).toHaveText(['dark-forest 0 uses'])
   // F-4.3: loading a template after the confirm adds its tags (28 for Standard Fiction) and toasts.
   const templates = tagsPanel.getByRole('form', { name: 'Tag templates' })
   await templates
@@ -2682,7 +2685,7 @@ test('create, close, reopen a project on disk', async () => {
   await loadDialog.getByRole('button', { name: 'Load' }).click()
   await expect(loadDialog).toBeHidden()
   await expect(page.getByRole('status')).toContainText('Added 28 tags')
-  await expect(tagRows.getByRole('button')).toHaveCount(29)
+  await expect(tagRowButtons).toHaveCount(29)
   await expect(tagRows.getByRole('button', { name: /^protagonist/ })).toBeVisible()
   // F-4.11: the bank saved as a custom template joins the list under "Your templates" (app-wide),
   // and the manager deletes it again after a confirm.
@@ -2741,10 +2744,10 @@ test('create, close, reopen a project on disk', async () => {
     'Imported 1 tag, skipped 1 already in the bank'
   )
   await categories.getByRole('tab', { name: 'Custom' }).click()
-  await expect(tagRows.getByRole('button')).toHaveText(['gloomy 0 uses'])
+  await expect(tagRowButtons).toHaveText(['gloomy 0 uses'])
   await tagForm.getByRole('textbox', { name: 'Tag name' }).fill('gloom')
   await tagForm.getByRole('button', { name: 'Create tag' }).click()
-  await expect(tagRows.getByRole('button')).toHaveText(['gloom 0 uses', 'gloomy 0 uses'])
+  await expect(tagRowButtons).toHaveText(['gloom 0 uses', 'gloomy 0 uses'])
   await tagBank.getByRole('button', { name: 'Select' }).click()
   const bulkBar = tagsPanel.getByRole('group', { name: 'Selected tags' })
   await tagRows.getByRole('checkbox', { name: /^gloom 0/ }).check()
@@ -2768,7 +2771,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(tagsPanel.getByText('No tags match.')).toBeVisible()
   await bulkBar.getByRole('button', { name: 'Done' }).click()
   await categories.getByRole('tab', { name: 'All' }).click()
-  await expect(tagRows.getByRole('button')).toHaveCount(29)
+  await expect(tagRowButtons).toHaveCount(29)
 
   // F-9.4: Scene 1 gains a sentence naming Mara, so the character created next has somewhere to
   // appear; it is taken out again once her page has shown it, so the text the later steps assert
@@ -3266,7 +3269,7 @@ test('create, close, reopen a project on disk', async () => {
   // "Show in tree" hands the Manuscript tab the same filter: the select shows dark-forest, the
   // count line reads one, and only Scene 1 and its ancestors remain in the tree. Clear filter
   // brings the whole tree back. (The Tags tab remounts on its list view when it is next shown.)
-  await showSection('Tags')
+  await showSection('Index')
   await tagRows.getByRole('button', { name: /^dark-forest/ }).click()
   const taggedDocuments = tagsPanel.getByRole('list', { name: 'Documents with this tag' })
   await expect(taggedDocuments.getByRole('button')).toHaveText(['Scene 1Chapter 1'])
@@ -3283,14 +3286,14 @@ test('create, close, reopen a project on disk', async () => {
   await expect(tagFilter.locator('option:checked')).toHaveText('All documents')
   await expect(tree.getByRole('treeitem', { name: 'Arc 2', exact: true })).toBeVisible()
   await expect(tree.getByRole('treeitem', { name: 'Front Matter', exact: true })).toBeVisible()
-  await showSection('Tags')
+  await showSection('Index')
   await expect(tagRows.getByRole('button', { name: /^dark-forest/ })).toHaveText(
     'dark-forest 1 use'
   )
   await showSection('Manuscript')
   await tagBar.getByRole('button', { name: 'Remove dark-forest' }).click()
   await expect(tagBar.getByRole('listitem')).toHaveCount(0)
-  await showSection('Tags')
+  await showSection('Index')
   await expect(tagRows.getByRole('button', { name: /^dark-forest/ })).toHaveText(
     'dark-forest 0 uses'
   )
@@ -3650,13 +3653,13 @@ test('create, close, reopen a project on disk', async () => {
   await expect(inlineList.getByRole('listitem')).toHaveText(['dark-forest ×1', 'stormfront ×1'])
   await expect(chipList.getByRole('listitem')).toHaveText(['dark-forest', 'stormfront'])
   await expect(page.getByTestId('status-words')).toHaveText(`${SENTENCE_WORDS + 3} words`)
-  await showSection('Tags')
+  await showSection('Index')
   await categories.getByRole('tab', { name: 'Custom' }).click()
-  await expect(tagRows.getByRole('button')).toHaveText(['stormfront 1 use'])
+  await expect(tagRowButtons).toHaveText(['stormfront 1 use'])
   await showSection('Manuscript')
   await tokens.first().click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Open in Tag Manager' }).click()
-  await expect(sectionPicker).toHaveAccessibleName('Section: Tags')
+  await expect(sectionPicker).toHaveAccessibleName('Section: Index')
   await expect(tagsPanel.getByRole('textbox', { name: 'Tag name' })).toHaveValue('dark-forest')
   await showSection('Manuscript')
   await tokens.last().click({ button: 'right' })
@@ -3741,7 +3744,7 @@ test('create, close, reopen a project on disk', async () => {
   // Tag Manager's detail shows the document with a jump of its own, and Track mentions off
   // drops the rows at once (on again rescans). None of the template's tag names appear in
   // Scene 1 as plain words, so the list holds exactly the one row.
-  await showSection('Tags')
+  await showSection('Index')
   await categories.getByRole('tab', { name: 'Characters' }).click()
   const roseForm = tagsPanel.getByRole('form', { name: 'New tag' })
   await roseForm.getByRole('textbox', { name: 'Tag name' }).fill('Rose')
@@ -3760,7 +3763,7 @@ test('create, close, reopen a project on disk', async () => {
   // A click collapses the selection, so the detail view's jump is seen to select it again.
   await editor.click()
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('')
-  await showSection('Tags')
+  await showSection('Index')
   await categories.getByRole('tab', { name: 'Characters' }).click()
   await tagRows.getByRole('button', { name: /^rose/ }).click()
   await expect(tagsPanel.getByRole('textbox', { name: 'Tag name' })).toHaveValue('rose')
@@ -3798,7 +3801,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(mentionList.getByRole('listitem')).toHaveText(['rose ×1', 'tash ×3'], {
     timeout: 15_000
   })
-  await showSection('Tags')
+  await showSection('Index')
   await categories.getByRole('tab', { name: 'Characters' }).click()
   await expect(tagRows.getByRole('button', { name: /^tash/ })).toHaveText('tash 0 uses')
   await showSection('Manuscript')
@@ -3816,7 +3819,7 @@ test('create, close, reopen a project on disk', async () => {
   // F-4.14: aliases and misspellings. An alias added on the tag's detail counts as a mention
   // of the tag in the prose; a close misspelling of the name is offered as a fix in the tags
   // column, and only the author's Fix changes the text.
-  await showSection('Tags')
+  await showSection('Index')
   await categories.getByRole('tab', { name: 'Characters' }).click()
   await tagRows.getByRole('button', { name: /^tash/ }).click()
   const aliasGroup = tagsPanel.getByRole('group', { name: 'Aliases' })
@@ -3942,7 +3945,7 @@ test('create, close, reopen a project on disk', async () => {
   // Exactly "Dismiss": a proposed tag's row (F-4.12b) carries a "Dismiss <name>" button too.
   await tagBar.getByRole('button', { name: 'Dismiss', exact: true }).click()
   await expect(suggestedList).toHaveCount(0)
-  await showSection('Tags')
+  await showSection('Index')
   await categories.getByRole('tab', { name: 'All' }).click()
   await expect(tagRows.getByRole('button', { name: /^protagonist/ })).toHaveText(
     'protagonist 1 use'
@@ -6484,14 +6487,15 @@ test('create, close, reopen a project on disk', async () => {
     /^Places\d+$/,
     /^World\d+$/,
     'Magic Systems1',
+    'Vessels1',
+    // F-9.15: the tags close the story bible as its Index; Threads leads the rest.
+    /^Index\d+$/,
     // F-9.14: the thread the scene reading opened.
     /^Threads\d+$/,
-    'Vessels1',
-    /^Tags\d+$/,
     /^Outline\d+$/,
-    /^Edits\d+$/,
     'Library2',
     /^To do\d*$/,
+    /^Edits\d+$/,
     /^Changes\d+$/,
     /^Show unused sections \(\d+\)$/,
     'New category…'
@@ -6599,8 +6603,8 @@ test('create, close, reopen a project on disk', async () => {
   )
   if (!strayTag.ok) throw new Error(`tag:create failed: ${strayTag.error.message}`)
   expect((await aiSettings()).chatMode).toBe('ask')
-  await showSection('Tags')
-  const tagsSection = page.getByRole('region', { name: 'Tags section', exact: true })
+  await showSection('Index')
+  const tagsSection = page.getByRole('region', { name: 'Index section', exact: true })
   const organiseOffer = tagsSection.getByTestId('organise-offer')
   await expect(organiseOffer).toContainText('possible duplicate', { timeout: 10_000 })
   expect(organiseBodies()).toBe(0)
@@ -6652,6 +6656,21 @@ test('create, close, reopen a project on disk', async () => {
   await expect(organiseCard).toHaveAttribute('data-status', 'undone')
   await expect.poll(() => sheetField('The Landing', 'atmosphere')).toBeUndefined()
   await organiseDialog.getByRole('button', { name: 'Done' }).click()
+  // F-9.15: both runs are in the one Changes log, newest first. The plan screen's Undo was the
+  // log's, so each sheet change reads as undone there; the merge is listed without an Undo.
+  await showSection('Changes')
+  const changesPanel = page.getByRole('region', { name: 'Changes section', exact: true })
+  const organiseRuns = changesPanel.getByRole('listitem', { name: 'Organise', exact: true })
+  await expect(organiseRuns).toHaveCount(2)
+  await expect(organiseRuns.nth(0).getByRole('listitem', { name: /^Sheet: / })).toContainText(
+    'Undone'
+  )
+  const loggedMerge = organiseRuns.nth(1).getByRole('listitem', { name: /^Merge: / })
+  await expect(loggedMerge).toContainText('No undo')
+  await expect(loggedMerge.getByRole('button', { name: 'Undo' })).toHaveCount(0)
+  await expect(organiseRuns.nth(1).getByRole('listitem', { name: /^Sheet: / })).toContainText(
+    'Undone'
+  )
   await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
   await expect.poll(async () => (await aiSettings()).chatMode).toBe('ask')
   expect(await documentText(imported[3]?.id ?? '')).toBe(sceneTextBeforeOrganise)

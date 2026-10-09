@@ -44,6 +44,11 @@ import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
  * call); a category is used once it has a sheet; Timeline, Edits, and Library once they hold an
  * event, a pass, or a file; Outline once the manuscript has a document, since it is a view of it
  * (decided by Claude, unconfirmed; `QUESTIONS.md`).
+ *
+ * F-9.15 (the story-bible end state, decided by Claude, unconfirmed): Manuscript | Story bible
+ * (its categories, then the tags as its Index: a record's tag beside its sheet, the labels apart)
+ * | Threads | Outline | Timeline | Library | To do | Edits | Changes. The ids are unchanged
+ * (`tags` is the Index, `thread` is Threads), so a stored section still opens.
  */
 export type SectionGroup = 'manuscript' | 'bible' | 'tools'
 
@@ -92,27 +97,21 @@ const MANUSCRIPT: ToolDef = {
   used: () => true
 }
 
+/** F-9.15: the tag bank as the story bible's Index, last in its group; always used. */
+const INDEX: ToolDef = {
+  id: 'tags',
+  label: 'Index',
+  icon: Tag,
+  render: () => createElement(TagsTab),
+  count: (c) => c.tags,
+  used: () => true
+}
+
 /**
- * The tools in picker order (the author's: Tags, Timeline, Outline, Edits, Library; then To do,
- * F-9.16, always shown; then Changes, F-9.13).
+ * The tools in picker order, after Threads (F-9.15: Outline, Timeline, Library, To do, Edits,
+ * Changes; To do, F-9.16, always shown).
  */
 const TOOLS: readonly ToolDef[] = [
-  {
-    id: 'tags',
-    label: 'Tags',
-    icon: Tag,
-    render: () => createElement(TagsTab),
-    count: (c) => c.tags,
-    used: () => true
-  },
-  {
-    id: 'timeline',
-    label: 'Timeline',
-    icon: CalendarRange,
-    render: () => createElement(TimelineTab),
-    count: (c) => c.timeline,
-    used: (c) => c.timeline > 0
-  },
   {
     id: 'outline',
     label: 'Outline',
@@ -122,12 +121,12 @@ const TOOLS: readonly ToolDef[] = [
     used: (c) => c.documents > 0
   },
   {
-    id: 'edits',
-    label: 'Edits',
-    icon: FilePenLine,
-    render: () => createElement(EditPassTab),
-    count: (c) => c.edits,
-    used: (c) => c.edits > 0
+    id: 'timeline',
+    label: 'Timeline',
+    icon: CalendarRange,
+    render: () => createElement(TimelineTab),
+    count: (c) => c.timeline,
+    used: (c) => c.timeline > 0
   },
   {
     id: 'library',
@@ -144,6 +143,14 @@ const TOOLS: readonly ToolDef[] = [
     render: () => createElement(TodoTab),
     count: (c) => c.todo,
     used: () => true
+  },
+  {
+    id: 'edits',
+    label: 'Edits',
+    icon: FilePenLine,
+    render: () => createElement(EditPassTab),
+    count: (c) => c.edits,
+    used: (c) => c.edits > 0
   },
   {
     id: 'changes',
@@ -167,12 +174,16 @@ function toolSection(tool: ToolDef, counts: SectionCounts, group: SectionGroup):
   }
 }
 
-function categorySection(category: StoryCategory, sheets: number): SidebarSection {
+function categorySection(
+  category: StoryCategory,
+  sheets: number,
+  group: SectionGroup
+): SidebarSection {
   return {
     id: category.id,
     label: category.name,
     icon: CATEGORY_ICON[category.icon],
-    group: 'bible',
+    group,
     count: sheets,
     used: ALWAYS_SHOWN_CATEGORIES.includes(category.id) || sheets > 0,
     // F-9.14: the thread category is the Threads section, not a sheet list.
@@ -185,7 +196,9 @@ function categorySection(category: StoryCategory, sheets: number): SidebarSectio
 
 /**
  * Every section in picker order, used or not. A category a sheet names that the list does not
- * carry (never expected) still gets its section, so no sheet is ever out of reach. Pure.
+ * carry (never expected) still gets its section, so no sheet is ever out of reach. F-9.15: the
+ * thread category is Threads, the first of the tools, and the tags close the story bible as its
+ * Index. Pure.
  */
 export function buildSections(
   categories: readonly StoryCategory[],
@@ -195,11 +208,17 @@ export function buildSections(
   const strays = Object.keys(counts.sheets)
     .filter((kind) => !listed.has(kind))
     .map((kind) => categoryOf(kind, categories))
+  const all = [...categories, ...strays]
+  const threads = all.find((category) => category.id === THREAD_KIND)
   return [
     toolSection(MANUSCRIPT, counts, 'manuscript'),
-    ...[...categories, ...strays].map((category) =>
-      categorySection(category, counts.sheets[category.id] ?? 0)
-    ),
+    ...all
+      .filter((category) => category !== threads)
+      .map((category) => categorySection(category, counts.sheets[category.id] ?? 0, 'bible')),
+    toolSection(INDEX, counts, 'bible'),
+    ...(threads === undefined
+      ? []
+      : [categorySection(threads, counts.sheets[threads.id] ?? 0, 'tools')]),
     ...TOOLS.map((tool) => toolSection(tool, counts, 'tools'))
   ]
 }

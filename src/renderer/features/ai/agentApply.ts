@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/core'
-import type { AgentEdit } from '@shared/agent'
+import { describeEdit, type AgentEdit } from '@shared/agent'
+import { NO_UNDO_REASON, changeLabel } from '@shared/changes'
 import type { EntityFieldId, EntityFields } from '@shared/entities'
 import { AI_ORIGIN_MARK } from '@shared/provenance'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
@@ -18,6 +19,7 @@ import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { patchSceneMeta } from '@renderer/features/editor/sceneMetaStore'
 import { appendNotePoints } from '@renderer/features/editor/sceneSuggestStore'
+import { logAppliedChange, type ChangeRun } from '@renderer/features/changes/changesStore'
 import { useEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -33,11 +35,17 @@ import { ipc } from '@renderer/lib/ipc'
  * their stores, structure through the tree store. Answers the undo, or null for an edit that has
  * none (a deletion, a merge; both always asked first). Throws with a message for the author when
  * the book has moved on and the edit no longer fits.
+ *
+ * F-9.15: an edit of the story bible (a sheet field, a tag on a scene, a deleted sheet or tag) is
+ * logged in the Changes log under `run` (the chat turn), and its undo is the log's, so the chat's
+ * Undo and Changes are one owner. Text, notes, and structure keep their own undo here.
  */
 export async function applyAgentEdit(
   edit: AgentEdit,
-  proposalId: string
+  proposalId: string,
+  run: ChangeRun
 ): Promise<(() => Promise<void>) | null> {
+  const label = changeLabel(describeEdit(edit))
   switch (edit.kind) {
     case 'text': {
       const undo = replacePassage(
@@ -79,7 +87,20 @@ export async function applyAgentEdit(
     }
     case 'sheet': {
       await setSheetField(edit.entityId, edit.field, edit.after)
-      return () => setSheetField(edit.entityId, edit.field, edit.before)
+      return logAppliedChange(
+        run,
+        {
+          kind: 'sheetEdit',
+          label,
+          undo: {
+            type: 'restoreSheet',
+            entityId: edit.entityId,
+            before: { fields: { [edit.field]: edit.before } },
+            after: { fields: { [edit.field]: edit.after } }
+          }
+        },
+        () => setSheetField(edit.entityId, edit.field, edit.before)
+      )
     }
     case 'create': {
       const node = await useTreeStore
@@ -130,18 +151,37 @@ export async function applyAgentEdit(
     case 'tag': {
       const tagId = await tagIdFor(edit.tag, edit.add)
       const links = useDocumentTagStore.getState()
-      if (edit.add) {
-        await links.add(edit.nodeId, tagId)
-        return () => useDocumentTagStore.getState().remove(edit.nodeId, tagId)
-      }
-      await links.remove(edit.nodeId, tagId)
-      return () => useDocumentTagStore.getState().add(edit.nodeId, tagId)
+      if (edit.add) await links.add(edit.nodeId, tagId)
+      else await links.remove(edit.nodeId, tagId)
+      return logAppliedChange(
+        run,
+        {
+          kind: 'tagLink',
+          label,
+          undo: { type: edit.add ? 'unlinkTag' : 'linkTag', nodeId: edit.nodeId, tagId }
+        },
+        edit.add
+          ? () => useDocumentTagStore.getState().remove(edit.nodeId, tagId)
+          : () => useDocumentTagStore.getState().add(edit.nodeId, tagId)
+      )
     }
     case 'delete': {
-      if (edit.target === 'node') await useTreeStore.getState().remove(edit.id)
-      else if (edit.target === 'sheet') await useEntityStore.getState().remove(edit.id)
+      if (edit.target === 'node') {
+        await useTreeStore.getState().remove(edit.id)
+        return null
+      }
+      if (edit.target === 'sheet') await useEntityStore.getState().remove(edit.id)
       else await useTagStore.getState().remove(edit.id)
-      return null
+      return logAppliedChange(
+        run,
+        {
+          kind: 'delete',
+          label,
+          targetId: edit.id,
+          undo: { type: 'none', reason: NO_UNDO_REASON.delete }
+        },
+        null
+      )
     }
   }
 }

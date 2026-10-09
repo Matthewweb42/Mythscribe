@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { categoryOf, type StoryCategory } from '@shared/categories'
+import { NO_UNDO_REASON, changeLabel, changeRunId } from '@shared/changes'
 import {
   PROJECT_NOTES_NAME,
   writesField,
@@ -16,6 +18,7 @@ import {
   type EntityFields
 } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
+import type { SheetPatch } from '@shared/organise'
 import { createCategory, listCategories } from '../entity/categoryStore'
 import {
   addEntityAliases,
@@ -28,6 +31,7 @@ import {
   type EntityTagChange
 } from '../entity/entityStore'
 import { AppError } from '../ipc/errors'
+import { logChanges, type ChangeInput } from '../knowledge/changeLog'
 import { addImageAsset, removeImageAsset } from '../project/imageAssets'
 import {
   listContextFiles,
@@ -45,6 +49,59 @@ export interface ContextApplyResult extends ContextApplyCounts {
   files: ContextFile[]
   /** F-9.11: every category of the project after Apply, the accepted proposals among them. */
   categories: StoryCategory[]
+}
+
+/**
+ * F-9.15: a sheet Apply made, for the Changes log: Undo deletes it, with the tag it made, while
+ * the author has not written in it since.
+ */
+function createdChange(sheet: Entity, madeTagId: string | null): ChangeInput {
+  return {
+    kind: 'record',
+    nodeId: null,
+    quote: null,
+    entityId: sheet.id,
+    targetId: sheet.id,
+    label: changeLabel(`New sheet: ${sheet.name}`),
+    undo: { type: 'deleteSheet', entityId: sheet.id, tagId: madeTagId, modified: sheet.modified }
+  }
+}
+
+/**
+ * F-9.15: a sheet Apply filled, for the Changes log: Undo puts back the fields, page, and aliases
+ * Apply wrote, while they still read as Apply left them. Null when none of them moved (only a
+ * tag link or a picture, which Undo does not take back).
+ */
+function updatedChange(before: Entity, after: Entity): ChangeInput | null {
+  const was = new Map(Object.entries(before.fields))
+  const now = new Map(Object.entries(after.fields))
+  const fields = [...new Set([...was.keys(), ...now.keys()])].filter(
+    (field) => (was.get(field) ?? '') !== (now.get(field) ?? '')
+  )
+  const body = (before.body ?? '') !== (after.body ?? '')
+  const aliases = JSON.stringify(before.aliases) !== JSON.stringify(after.aliases)
+  if (fields.length === 0 && !body && !aliases) return null
+  const pick = (sheet: Entity, values: ReadonlyMap<string, string | undefined>): SheetPatch => ({
+    ...(fields.length > 0
+      ? { fields: Object.fromEntries(fields.map((field) => [field, values.get(field) ?? ''])) }
+      : {}),
+    ...(body ? { body: sheet.body } : {}),
+    ...(aliases ? { aliases: sheet.aliases } : {})
+  })
+  return {
+    kind: 'sheetEdit',
+    nodeId: null,
+    quote: null,
+    entityId: after.id,
+    targetId: after.id,
+    label: changeLabel(`${after.name}: filled from the upload`),
+    undo: {
+      type: 'restoreSheet',
+      entityId: after.id,
+      before: pick(before, was),
+      after: pick(after, now)
+    }
+  }
 }
 
 /** `existing` with `paragraphs` appended as paragraphs, or VALIDATION when it would be over `max`. */
@@ -119,6 +176,8 @@ export async function applyContextReview(
       // F-9.11: a category the AI proposed is created when Apply writes a sheet into it (the
       // review is where the author accepted, renamed, or declined it); its sheets take its id.
       const madeIds = new Map<string, string>()
+      // F-9.15: what Apply wrote, logged as one run of the Changes log with its Undo.
+      const changes: ChangeInput[] = []
       for (const category of review.categories) {
         if (!category.proposed) continue
         if (!review.entities.some((item) => item.include && item.kind === category.id)) continue
@@ -134,6 +193,15 @@ export async function applyContextReview(
           'ai'
         )
         madeIds.set(category.id, made.id)
+        changes.push({
+          kind: 'category',
+          nodeId: null,
+          quote: null,
+          entityId: null,
+          targetId: made.id,
+          label: changeLabel(`New category: ${made.name}`),
+          undo: { type: 'none', reason: NO_UNDO_REASON.category }
+        })
       }
       const written = new Map<string, Entity>()
       const tagChanges: EntityTagChange[] = []
@@ -142,6 +210,9 @@ export async function applyContextReview(
       for (const item of review.entities) {
         if (!item.include) continue
         let entity: Entity
+        /** The sheet as it was before Apply (null for one Apply makes), and the tag it made. */
+        let before: Entity | null = null
+        let madeTagId: string | null = null
         if (item.existingId === null) {
           const write = createEntity(
             tx,
@@ -156,6 +227,7 @@ export async function applyContextReview(
           )
           entity = write.entity
           if (write.tagChange !== null) tagChanges.push(write.tagChange)
+          if (write.tagChange?.created === true) madeTagId = write.tagChange.tag.id
           created += 1
         } else {
           const sheet = getEntity(tx, item.existingId)
@@ -164,6 +236,7 @@ export async function applyContextReview(
               id: item.existingId
             })
           }
+          before = sheet
           const fields = fieldPatch(item, sheet)
           const body =
             item.includeDetails && item.details.length > 0 && sheet.template === 'blank'
@@ -197,6 +270,9 @@ export async function applyContextReview(
           entity = setEntityImage(tx, entity.id, copy)
         }
         written.set(entity.id, entity)
+        const change =
+          before === null ? createdChange(entity, madeTagId) : updatedChange(before, entity)
+        if (change !== null) changes.push(change)
       }
       let notes = false
       if (review.notes.include && review.notes.paragraphs.length > 0) {
@@ -204,6 +280,7 @@ export async function applyContextReview(
         const page = listEntities(tx).find(
           (entity) => entity.kind === 'world' && toEntityNameKey(entity.name) === key
         )
+        const pageBefore = page === undefined ? null : getEntity(tx, page.id)
         const entity =
           page === undefined
             ? createEntity(
@@ -221,10 +298,14 @@ export async function applyContextReview(
                 body: appended(page.body ?? '', review.notes.paragraphs, ENTITY_BODY_MAX, page.name)
               }).entity
         written.set(entity.id, entity)
+        const change =
+          pageBefore == null ? createdChange(entity, null) : updatedChange(pageBefore, entity)
+        if (change !== null) changes.push(change)
         notes = true
       }
       const at = new Date().toISOString()
       for (const id of review.fileIds) markContextFileProcessed(tx, id, texts.get(id) ?? null, at)
+      logChanges(tx, changeRunId('library', randomUUID()), changes, at)
       return { entities: [...written.values()], tagChanges, created, updated, notes }
     })
   } catch (err) {

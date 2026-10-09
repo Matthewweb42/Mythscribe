@@ -26,6 +26,7 @@ import {
   resetActiveEditorStore,
   useActiveEditorStore
 } from '@renderer/features/editor/activeEditorStore'
+import { resetChangesStore } from '@renderer/features/changes/changesStore'
 import { resetDocumentStore } from '@renderer/features/editor/documentStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
 import { ghostOf } from '@renderer/features/editor/ghostText'
@@ -35,6 +36,8 @@ import { flushPendingSaves, resetPendingSaves } from '@renderer/features/project
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
+import { entityFixture } from '@renderer/features/entities/entityFixture'
+import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import {
@@ -83,6 +86,9 @@ let stepListener: ((payload: EventPayload<'ai:agentStep'>) => void) | null
 let unsubscribed: number
 /** The tree renames the agent's edits asked for (F-5.22). */
 let renames: Input<'tree:rename'>[]
+/** F-9.15: what the chat logged in Changes, and the log's undos it asked for. */
+let recorded: Input<'changes:record'>[]
+let logUndos: string[]
 
 /**
  * `conversations:get` answers with `stored`; `ai:route` picks `routeAction` locally at once;
@@ -141,6 +147,41 @@ function deferredClient(stored: Conversations): IpcClient {
         const node = treeFixture.find((n) => n.id === rename.id)
         if (!node) throw new Error('unknown node')
         return { ...node, title: rename.title } as Output<C>
+      }
+      if (channel === 'entity:update') {
+        const { id, fields } = input as Input<'entity:update'>
+        const held = useEntityStore.getState().byId[id]
+        if (!held) throw new Error('unknown sheet')
+        return { ...held, fields: { ...held.fields, ...fields } } as Output<C>
+      }
+      if (channel === 'changes:record') {
+        const value = input as Input<'changes:record'>
+        recorded.push(value)
+        return value.changes.map((change, i) => ({
+          id: `log-${recorded.length}-${i}`,
+          runId: `${value.source}:${value.run}`,
+          createdAt: '2026-10-09T10:00:00.000Z',
+          nodeId: null,
+          quote: null,
+          kind: change.kind,
+          entityId: null,
+          label: change.label,
+          status: 'applied',
+          source: value.source,
+          undoable: change.undo.type !== 'none'
+        })) as Output<C>
+      }
+      if (channel === 'changes:undo') {
+        logUndos.push((input as Input<'changes:undo'>).id)
+        return {
+          entries: [],
+          removedEntityIds: [],
+          removedTagIds: [],
+          entityIds: [],
+          nodeIds: [],
+          entities: [],
+          tags: []
+        } as Output<C>
       }
       if (channel === 'ai:cancel') {
         cancels.push((input as Input<'ai:cancel'>).requestId)
@@ -277,6 +318,10 @@ beforeEach(() => {
   stepListener = null
   unsubscribed = 0
   renames = []
+  recorded = []
+  logUndos = []
+  resetChangesStore()
+  resetEntityStore()
   resetAssistantStore()
   resetAiSettingsStore()
   resetDocumentStore()
@@ -290,6 +335,8 @@ beforeEach(() => {
   setIpcClient(deferredClient(STORED))
 })
 afterEach(() => {
+  resetChangesStore()
+  resetEntityStore()
   resetAssistantStore()
   resetAiSettingsStore()
   resetDocumentStore()
@@ -959,6 +1006,64 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
     await store().undoChange(messageId, rename?.id ?? '')
     expect(renames.at(-1)).toEqual({ id: 'sc-1', title: 'Scene 1' })
     expect(changes().map((c) => c.status)).toEqual(['undone', 'skipped'])
+  })
+
+  it('logs a sheet edit in Changes under the turn, and its Undo is the log’s (F-9.15)', async () => {
+    const mara = entityFixture.find((entity) => entity.id === 'e-mara')
+    if (!mara) throw new Error('fixture lost Mara')
+    useEntityStore.getState().merge(mara)
+    useTreeStore.setState(buildIndex(treeFixture))
+    inMode('auto')
+    await store().load()
+    const asking = store().send('Make Mara 28.')
+    await settle()
+    const request = queries[0]
+    if (!request) throw new Error('nothing was asked')
+    const base = agentOk(request.input.requestId)
+    if (!base.ok) throw new Error('agentOk failed')
+    request.resolve({
+      ...base,
+      changes: [
+        {
+          edit: {
+            kind: 'sheet',
+            entityId: 'e-mara',
+            name: 'Mara',
+            field: 'age',
+            label: 'Age',
+            before: '27',
+            after: '28'
+          },
+          violation: null
+        }
+      ]
+    })
+    await asking
+    await settle()
+    const messageId = active().messages.at(-1)?.id ?? ''
+    expect(changes().map((c) => c.status)).toEqual(['applied'])
+    expect(useEntityStore.getState().byId['e-mara']?.fields.age).toBe('28')
+    expect(recorded).toMatchObject([
+      {
+        source: 'chat',
+        run: messageId,
+        changes: [
+          {
+            kind: 'sheetEdit',
+            undo: {
+              type: 'restoreSheet',
+              entityId: 'e-mara',
+              before: { fields: { age: '27' } },
+              after: { fields: { age: '28' } }
+            }
+          }
+        ]
+      }
+    ])
+    const change = active().messages.at(-1)?.agent?.changes[0]
+    await store().undoChange(messageId, change?.id ?? '')
+    expect(logUndos).toEqual(['log-1-0'])
+    expect(changes().map((c) => c.status)).toEqual(['undone'])
   })
 
   it('in Auto applies every edit but a deletion at once, and the deletion still asks', async () => {
