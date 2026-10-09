@@ -276,6 +276,16 @@ describe('convertKnowledgeIndex: no resurrection, no duplicates, AI tags left al
       name: 'Brannoc'
     })
   })
+
+  it('gives a built-in template placeholder tag no record at conversion', () => {
+    const protagonist = bareTag('protagonist', 'character')
+    const rules = bareTag('rules', 'worldBuilding')
+    const mara = bareTag('mara', 'character')
+    convertKnowledgeIndex(db)
+    expect(recordOf(protagonist)).toEqual([])
+    expect(recordOf(rules)).toEqual([])
+    expect(recordOf(mara)).toEqual(['character:Mara:author'])
+  })
 })
 
 describe('a record the author deleted stays deleted (F-9.12)', () => {

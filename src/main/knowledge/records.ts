@@ -9,6 +9,7 @@ import {
   recordNameForTag
 } from '@shared/knowledge'
 import { isObservedDismissed } from '@shared/observedFacts'
+import { TAG_TEMPLATES } from '@shared/tagTemplates'
 import { entity, tag as tagTable } from '../db/schema'
 import {
   createEntity,
@@ -147,6 +148,11 @@ export function ensureRecordsForTags(db: EntityDb, tags: readonly TagRef[]): Ent
   return writes
 }
 
+/** Every built-in tag template's tags, as `category:name`: placeholders the conversion skips. */
+const TEMPLATE_PLACEHOLDERS: ReadonlySet<string> = new Set(
+  TAG_TEMPLATES.flatMap((template) => template.tags.map((t) => `${t.category}:${t.name}`))
+)
+
 /**
  * F-9.12's one-time conversion, run on project open: idempotent, and a no-op (null) once
  * `knowledgeModel.index` says it ran. In one transaction: every character, place, and world tag
@@ -171,6 +177,8 @@ export function convertKnowledgeIndex(db: EntityDb): KnowledgeIndexConversion | 
       .all()
     for (const each of tags) {
       if (each.origin !== 'author') continue
+      // A built-in template's placeholder ("protagonist", "rules") is a label, not a name.
+      if (TEMPLATE_PLACEHOLDERS.has(`${each.category}:${each.name}`)) continue
       const write = ensureRecordForTag(tx, each, 'author')
       if (write !== null) records.push(write)
     }
