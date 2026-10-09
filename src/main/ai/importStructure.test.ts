@@ -120,6 +120,16 @@ async function failure(draft = DRAFT): Promise<{ code: string; message: string }
   throw new Error('expected a failure')
 }
 
+/**
+ * Lets pending promise chains run (up to 50 macrotask turns, none of them a faked timer) until
+ * `done` holds; `() => false` just drains them.
+ */
+async function settled(done: () => boolean): Promise<void> {
+  for (let turn = 0; turn < 50 && !done(); turn++) {
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+}
+
 beforeEach(() => {
   resetInflight()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-structure-'))
@@ -151,6 +161,7 @@ beforeEach(() => {
   }
 })
 afterEach(() => {
+  vi.useRealTimers()
   session.close()
   fs.rmSync(tmp, { recursive: true, force: true })
 })
@@ -304,12 +315,27 @@ describe('detectImportStructure (F-12.3)', () => {
         usage: { inputTokens: 10, outputTokens: 1 }
       })
     const progress: ImportDetectProgress[] = []
-    const started = Date.now()
-    const result = await detectImportStructure(db, deps, {
+    // The gap between chunks is a timer, so the test drives the timer instead of reading the
+    // wall clock: `Date.now()` is not monotonic (WSL resyncs it under load; once it read -715
+    // ms across this test), and a wall-clock check could not tell a gap from a slow machine.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const pass = detectImportStructure(db, deps, {
       draft,
       requestId: 'r-1',
       onProgress: (entry) => void progress.push(entry)
     })
+    // Two gaps between three chunks, each at the index queue's spacing: the next chunk is not
+    // sent one millisecond early, and is sent when the gap ends.
+    // (`vi.waitFor` would advance the fake clock itself, so the waits yield on `setImmediate`.)
+    for (const done of [1, 2]) {
+      await settled(() => progress.length === done)
+      vi.advanceTimersByTime(JOB_MIN_INTERVAL_MS - 1)
+      await settled(() => false)
+      expect(complete).toHaveBeenCalledTimes(done)
+      vi.advanceTimersByTime(1)
+      await settled(() => complete.mock.calls.length === done + 1)
+    }
+    const result = await pass
 
     expect(complete).toHaveBeenCalledTimes(3)
     expect(result.chunks).toBe(3)
@@ -322,8 +348,6 @@ describe('detectImportStructure (F-12.3)', () => {
     expect(result.proposalIds).toHaveLength(3)
     expect(progress.map((p) => p.done)).toEqual([1, 2, 3])
     expect(progress[2]).toMatchObject({ total: 3, costUsd: result.costUsd })
-    // Two gaps between three chunks, at the index queue's spacing.
-    expect(Date.now() - started).toBeGreaterThanOrEqual(2 * JOB_MIN_INTERVAL_MS - 10)
   })
 
   it('stops at the chunk in flight when the pass is cancelled and reports CANCELLED', async () => {

@@ -98,6 +98,9 @@ function install(
       if (channel === 'proposal:pendingTags') return null as Output<C>
       if (channel === 'mention:listForNode') return [] as Output<C>
       if (channel === 'ai:cancel') return { cancelled: true } as Output<C>
+      // The Tags toggle writes the layout after its debounce; refused, the store would put the
+      // column back the way it was, and a test slower than the debounce then saw the toggle undone.
+      if (channel === 'layout:set') return input as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}

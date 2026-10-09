@@ -2617,8 +2617,7 @@ test('create, close, reopen a project on disk', async () => {
   // F-9.4: Scene 1 gains a sentence naming Mara, so the character created next has somewhere to
   // appear; it is taken out again once her page has shown it, so the text the later steps assert
   // is the one they were written for.
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(MARA_SENTENCE)
   await expect
     .poll(() => documentText(scene1Row.id), { timeout: 5000 })
@@ -3470,7 +3469,7 @@ test('create, close, reopen a project on disk', async () => {
   await scene1.click()
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
   await expect(editor.locator('p')).toHaveText(SENTENCE)
-  await editor.click()
+  await clickIntoEditor(editor)
   await page.keyboard.press('End')
   await page.keyboard.type(' #dark')
   const suggestions = page.getByRole('listbox', { name: 'Tag suggestions' })
@@ -3593,7 +3592,7 @@ test('create, close, reopen a project on disk', async () => {
   await roseForm.getByRole('button', { name: 'Create tag' }).click()
   await expect(tagRows.getByRole('button', { name: /^rose/ })).toHaveText('rose 0 uses')
   await showSection('Manuscript')
-  await editor.click()
+  await clickIntoEditor(editor)
   await page.keyboard.press('End')
   await page.keyboard.type(' Rose waited.')
   const mentionList = tagBar.getByRole('list', { name: 'Mentions' })
@@ -3634,8 +3633,7 @@ test('create, close, reopen a project on disk', async () => {
   // Create tag makes it a character tag — which is what the F-4.12 scan then finds — and
   // Dismiss keeps the name out for good, though the text still holds it and every later save
   // scans it again. Nothing is created or hidden until one of the two is clicked.
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(' But Tash saw Tash, then Tash.')
   const proposedList = tagBar.getByRole('list', { name: 'Proposed tags' })
   await expect(proposedList.getByRole('listitem')).toHaveText(['Tash ×3'], { timeout: 15_000 })
@@ -3648,16 +3646,14 @@ test('create, close, reopen a project on disk', async () => {
   await categories.getByRole('tab', { name: 'Characters' }).click()
   await expect(tagRows.getByRole('button', { name: /^tash/ })).toHaveText('tash 0 uses')
   await showSection('Manuscript')
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(' But Bren saw Bren, then Bren.')
   await expect(proposedList.getByRole('listitem')).toHaveText(['Bren ×3'], { timeout: 15_000 })
   await proposedList.getByRole('button', { name: 'Dismiss Bren' }).click()
   await expect(proposedList).toHaveCount(0)
   // A third name proposed after the dismissal is what proves the scan ran again and still
   // leaves Bren out; a plain "the list is empty" could have passed before the scan.
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(' But Kael saw Kael, then Kael.')
   await expect(proposedList.getByRole('listitem')).toHaveText(['Kael ×3'], { timeout: 15_000 })
 
@@ -3672,8 +3668,7 @@ test('create, close, reopen a project on disk', async () => {
   await aliasGroup.getByRole('textbox', { name: 'Add alias' }).press('Enter')
   await expect(aliasGroup.getByRole('listitem')).toHaveText(['The Smith'])
   await showSection('Manuscript')
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(' The Smith nodded. Then Taash left.')
   await expect(mentionList.getByRole('listitem')).toHaveText(['tash ×4', 'rose ×1'], {
     timeout: 15_000
@@ -3724,7 +3719,7 @@ test('create, close, reopen a project on disk', async () => {
   // Ask, with the key saved again, the fake server names dark-forest (linked, so filtered)
   // and protagonist; accepting the one chip links it, and the Usage block shows one request.
   const recommend = tagBar.getByRole('button', { name: 'Recommend' })
-  await editor.click()
+  await clickIntoEditor(editor)
   await page.keyboard.press('End')
   await page.keyboard.type(' The river she had to cross was rising fast.')
   await expect(recommend).toBeEnabled()
@@ -3870,8 +3865,7 @@ test('create, close, reopen a project on disk', async () => {
   // F-14.7: enough third-person past narration for the profile to resolve tense and person
   // (five markers each) and cross the 200-word gate; saved before any ghost-text request
   // leaves, since main builds the profile from the stored rows.
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   for (let i = 0; i < 5; i++) await page.keyboard.type(VOICE_PARAGRAPH)
   await expect
     .poll(async () => ((await documentText(scene1Row.id)) ?? '').split('pulled it open').length, {
@@ -3908,8 +3902,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect.poll(async () => (await aiSettings()).ghostText.enabled).toBe(true)
   const ghost = editor.locator('.ghost-text')
   const beforeGhost = openAiRequests.length
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(' Mara waited on the ridge.')
   await expect(ghost).toHaveText(GHOST_CONTINUATION)
   expect(openAiRequests).toHaveLength(beforeGhost + 1)
@@ -4075,7 +4068,7 @@ test('create, close, reopen a project on disk', async () => {
   const bodiesBeforeRules = openAiChatBodies.length
   await vibeWrite.click()
   await expect(vibeWrite).toHaveAttribute('aria-pressed', 'true')
-  await editor.click()
+  await clickIntoEditor(editor)
   await page.keyboard.press('End')
   await page.keyboard.type(' The lamp burned low.')
   const bannedGhost = editor.locator('.ghost-text[data-flagged="true"]')
@@ -4111,7 +4104,7 @@ test('create, close, reopen a project on disk', async () => {
   // is theirs: the mark goes and the status bar share with it. The span may wrap across lines,
   // so the selection is set on its text node directly (ProseMirror reads the DOM selection on
   // `selectionchange`), and one Delete removes 25 of the 40 accepted characters.
-  await editor.click()
+  await clickIntoEditor(editor)
   await aiSpan.evaluate((el) => {
     const text = el.firstChild
     if (!(text instanceof Text)) throw new Error('expected the span to hold a text node')
@@ -4191,34 +4184,14 @@ test('create, close, reopen a project on disk', async () => {
   await typewriterBox.check()
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
-  await editor.click()
-  // The caret must really be at the end before typing. ProseMirror's focus handler puts its own
-  // selection back into the DOM 20 ms after the editor gains focus, so a Control+End pressed
-  // sooner is undone and the lines land at the top of the scene (seen four times on
-  // 2026-10-06, surfacing only at the rewrite step); wait that timer out first.
-  await expect(editor).toBeFocused()
-  await page.waitForTimeout(60)
-  const caretAtEnd = (): Promise<boolean> =>
-    page.evaluate(() => {
-      const selection = document.getSelection()
-      const root = document.querySelector('.ProseMirror')
-      if (!selection?.focusNode || !root?.lastChild || !root.contains(selection.focusNode)) {
-        return false
-      }
-      const rest = document.createRange()
-      rest.setStart(selection.focusNode, selection.focusOffset)
-      rest.setEndAfter(root.lastChild)
-      return selection.isCollapsed && rest.toString() === ''
-    })
-  await expect(async () => {
-    await page.keyboard.press('Control+End')
-    expect(await caretAtEnd()).toBe(true)
-  }).toPass({ timeout: 5_000 })
+  // The caret must really be at the end before typing (see `clickIntoEditor`: the lines landed
+  // at the top of the scene four times on 2026-10-06, surfacing only at the rewrite step).
+  await caretToEnd(editor)
   // Line by line, each checked to have landed at the end, so a lost caret fails here rather
   // than steps later.
   for (let i = 0; i < 14; i += 1) {
     await page.keyboard.type('\nThe typewriter line rolls on.')
-    await expect.poll(caretAtEnd).toBe(true)
+    await expect.poll(() => caretAtEnd(editor)).toBe(true)
   }
   await expect.poll(caretOffset).toBeLessThan(0.34)
   await page.getByRole('button', { name: 'Settings' }).click()
@@ -4249,7 +4222,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(tagBar).toHaveCount(0)
   await expect(tree).toHaveCount(0)
   await expect(page.getByTestId('status-words')).toBeVisible()
-  await editor.click()
+  await clickIntoEditor(editor)
   await page.keyboard.press('End')
   await page.keyboard.type(' In focus.')
   await expect(editor).toContainText('In focus.')
@@ -4274,7 +4247,7 @@ test('create, close, reopen a project on disk', async () => {
   // it again; moving away hides the bar after the delay; Exit leaves focus mode.
   const controlBar = page.getByTestId('focus-control-bar')
   await expect(controlBar).toHaveCount(1)
-  const screenSize = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  const screenSize = await fullscreenViewport()
   await page.mouse.move(screenSize.w / 2, screenSize.h / 2)
   await expect(controlBar).toHaveAttribute('data-visible', 'false', { timeout: 10_000 })
   await page.mouse.move(screenSize.w / 2, screenSize.h - 8)
@@ -4686,7 +4659,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByRole('button', { name: 'Rewrite in my voice' })).toHaveCount(0)
   const rewriteButton = page.getByTestId('selection-rewrite')
   const rewriteBodiesBefore = openAiChatBodies.length
-  await editor.click()
+  await clickIntoEditor(editor)
   // The author selects what is on screen: the opening is scrolled back into view first.
   await editor.locator('p').first().scrollIntoViewIfNeeded()
   await editor
@@ -4839,8 +4812,7 @@ test('create, close, reopen a project on disk', async () => {
   // so two cards show. Accept takes the first, Accept all the other, each replacing exactly its
   // quoted passage as AI-origin text from the one proposal (how it settles is a store test).
   await dismissToasts()
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(PROOFREAD_TYPED)
   await expect
     .poll(async () => ((await documentText(scene1Row.id)) ?? '').includes(PROOFREAD_TYPED.trim()), {
@@ -4911,8 +4883,7 @@ test('create, close, reopen a project on disk', async () => {
   // with the scene closed, as AI-origin text; the proofread change, whose passage is gone, no
   // longer shows. Both reports are listed under Edit reports.
   await dismissToasts()
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(EDIT_PASS_TYPED)
   await expect
     .poll(async () => ((await documentText(scene1Row.id)) ?? '').includes(EDIT_PASS_TYPED.trim()), {
@@ -5021,8 +4992,7 @@ test('create, close, reopen a project on disk', async () => {
   expect((await listTags()).some((tag) => tag.name === 'zephyr')).toBe(false)
   await aiChip.getByRole('button', { name: 'Remove stormbound' }).click()
   await expect(aiChip).toHaveCount(0)
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(' She counted the boats twice.')
   await expect(metadata.getByTestId('summary-status')).toHaveText('Updating…')
   await expect
@@ -5121,8 +5091,7 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
   await expect(settingsDialog).toHaveCount(0)
   const indexRequestsBefore = openAiRequests.length
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(' The ferryman kept his lamp lit.')
   await expect
     .poll(() => documentText(scene1Row.id), { timeout: 5_000 })
@@ -5485,7 +5454,7 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('F11')
   await expect.poll(isFullScreen).toBe(true)
   const focusBar = page.getByTestId('focus-control-bar')
-  const focusSize = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  const focusSize = await fullscreenViewport()
   await page.mouse.move(focusSize.w / 2, focusSize.h - 8)
   await expect(focusBar).toHaveAttribute('data-visible', 'true')
   await focusBar.getByRole('button', { name: 'AI assistant' }).click()
@@ -6039,8 +6008,7 @@ test('create, close, reopen a project on disk', async () => {
   expect(maraSheet.fields.age).toBe('34')
   await tree.getByRole('treeitem', { name: 'Scene 2', exact: true }).last().click()
   await expect(editor).toContainText('Below, the lanterns')
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(
     ` The road down was slick with old rain and the carts had left ruts a hand deep, so the going was slow and nobody spoke until the gate. ${CONTINUITY_QUOTE} ${CONTINUITY_SECOND_QUOTE}`
   )
@@ -6358,8 +6326,7 @@ test('create, close, reopen a project on disk', async () => {
   // the project) loses nothing: reopening offers the text back and Recover writes it.
   const recoveryDir = path.join(projectPath, 'recovery')
   const crashSentence = 'The lanterns guttered out one by one.'
-  await editor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(editor)
   await page.keyboard.type(` ${crashSentence}`)
   const journalText = (): string => {
     if (!fs.existsSync(recoveryDir)) return ''
@@ -6422,26 +6389,31 @@ test('create, close, reopen a project on disk', async () => {
   // close, into userData/backups under the e2e override); "Back up now" writes one more, and
   // Restore opens the newest as a copy next to the original, with the recovered text in it.
   const backupsRoot = path.join(tmp, 'userData', 'backups')
-  const newestBackupTime = (): number =>
+  // Each archive as `<path>#<inode>`: a backup is written to a temp file and renamed over its
+  // name, so a fresh one is a new pair even when it lands on the same second's name. Not mtimes:
+  // the WSL clock steps backwards under load (journald logs "Time jumped backwards" dozens of
+  // times a day), so a newer file can carry an older mtime and the old check failed now and then.
+  const backupArchives = (): string[] =>
     fs.existsSync(backupsRoot)
-      ? Math.max(
-          0,
-          ...fs
-            .readdirSync(backupsRoot, { recursive: true, encoding: 'utf8' })
-            .filter((name) => name.endsWith('.zip'))
-            .map((name) => fs.statSync(path.join(backupsRoot, name)).mtimeMs)
-        )
-      : 0
+      ? fs
+          .readdirSync(backupsRoot, { recursive: true, encoding: 'utf8' })
+          .filter((name) => name.endsWith('.zip'))
+          .map((name) => `${name}#${fs.statSync(path.join(backupsRoot, name)).ino}`)
+      : []
   const backupsSettings = page.getByRole('dialog', { name: 'Settings' })
   await page.getByRole('button', { name: 'Settings' }).click()
   await backupsSettings.getByRole('tab', { name: 'Backups' }).click()
   await expect(backupsSettings.getByTestId('backups-folder')).toHaveText(backupsRoot)
   const backupRows = backupsSettings.getByTestId('backup-row')
   await expect(backupRows.first()).toBeVisible()
-  const newestBefore = newestBackupTime()
-  expect(newestBefore).toBeGreaterThan(0)
+  const archivesBefore = backupArchives()
+  expect(archivesBefore.length).toBeGreaterThan(0)
   await backupsSettings.getByRole('button', { name: 'Back up now' }).click()
-  await expect.poll(newestBackupTime, { timeout: 5_000 }).toBeGreaterThan(newestBefore)
+  await expect
+    .poll(() => backupArchives().filter((archive) => !archivesBefore.includes(archive)), {
+      timeout: 5_000
+    })
+    .toHaveLength(1)
   await backupRows
     .first()
     .getByRole('button', { name: /Restore the backup from/ })
@@ -6503,8 +6475,7 @@ test('create, close, reopen a project on disk', async () => {
   await draftsDialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(draftsDialog).toHaveCount(0)
   // The switch rebuilt the editor; type at the end of the scene and wait for the autosave.
-  await draftEditor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(draftEditor)
   await page.keyboard.type(` ${draftWord}`)
   await expect.poll(() => documentText(draftScene)).toContain(draftWord)
   await dismissToasts()
@@ -6520,8 +6491,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(draftEditor).not.toContainText(draftWord)
   expect(await documentText(draftScene)).not.toContain(draftWord)
   await draftsDialog.getByRole('button', { name: 'Close', exact: true }).click()
-  await draftEditor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(draftEditor)
   await page.keyboard.type(` ${draftWord}`)
   await expect.poll(() => documentText(draftScene)).toContain(draftWord)
   await dismissToasts()
@@ -6572,8 +6542,7 @@ test('create, close, reopen a project on disk', async () => {
   await snapshotsDialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(snapshotsDialog).toHaveCount(0)
   await dismissToasts()
-  await draftEditor.click()
-  await page.keyboard.press('Control+End')
+  await caretToEnd(draftEditor)
   await page.keyboard.type(` ${snapshotWord}`)
   await expect.poll(() => documentText(draftScene)).toContain(snapshotWord)
   await dismissToasts()
@@ -6630,26 +6599,19 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1 (split)')
   const resumeText = (await documentText(draftScene)) ?? ''
   expect(resumeText.length).toBeGreaterThan(3)
-  await resumeEditor.click()
-  // ProseMirror puts its own selection back 20 ms after the editor gains focus (see the
-  // typewriter step), so the keys wait that out, and the moves repeat until the session holds
-  // them: a move the focus timer undid lands the caret back at 1.
-  await expect(resumeEditor).toBeFocused()
-  await page.waitForTimeout(60)
-  await expect(async () => {
-    await page.keyboard.press('Control+Home')
-    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
-    // The caret after three characters is position 4 (the paragraph opens at 1).
-    await expect
-      .poll(
-        async () => {
-          const session = await getSession()
-          return [session.selectedNodeId, session.positions[0]?.selection]
-        },
-        { timeout: 2000 }
-      )
-      .toEqual([draftScene, { anchor: 4, head: 4 }])
-  }).toPass({ timeout: 10_000 })
+  // The keys wait out ProseMirror's focus timer (`clickIntoEditor`): a move it undid landed the
+  // caret back at 1.
+  await clickIntoEditor(resumeEditor)
+  await page.keyboard.press('Control+Home')
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
+  // The caret after three characters is position 4 (the paragraph opens at 1); the session
+  // holds it after its debounce.
+  await expect
+    .poll(async () => {
+      const session = await getSession()
+      return [session.selectedNodeId, session.positions[0]?.selection]
+    })
+    .toEqual([draftScene, { anchor: 4, head: 4 }])
   const foldButton = resumeTree.getByRole('button', { name: /^Collapse / }).last()
   const foldName = ((await foldButton.getAttribute('aria-label')) ?? '').replace(/^Collapse /, '')
   expect(foldName).not.toBe('')
@@ -6946,6 +6908,66 @@ async function dismissToasts(): Promise<void> {
       .click({ timeout: 2_000 })
       .catch(() => undefined)
   }
+}
+
+/**
+ * Clicks into an editor and waits out ProseMirror's focus timer before any key is pressed.
+ * On gaining focus, prosemirror-view (`handlers.focus`) schedules a 20 ms timer that writes its
+ * own selection back into the DOM unless it has already read the DOM's, so an End or
+ * Control+End pressed in between is undone and the caret falls back to where the click put it.
+ * The typed text then lands mid-paragraph (the F-14.6 disclosure count off by one, the
+ * typewriter lines at the top of the scene, a ghost suggestion asked for in the wrong place:
+ * the e2e caret flakes up to 2026-10-08). A page timer of the same 20 ms set after the click
+ * fires after ProseMirror's, so this waits for that timer itself, not for a guessed delay.
+ */
+async function clickIntoEditor(target: Locator): Promise<void> {
+  await target.click()
+  await expect(target).toBeFocused()
+  await target.page().evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)))
+}
+
+/** Whether the DOM caret is collapsed at the very end of `target`'s text. */
+function caretAtEnd(target: Locator): Promise<boolean> {
+  return target.evaluate((root) => {
+    const selection = document.getSelection()
+    if (!selection?.focusNode || !root.lastChild || !root.contains(selection.focusNode)) {
+      return false
+    }
+    const rest = document.createRange()
+    rest.setStart(selection.focusNode, selection.focusOffset)
+    rest.setEndAfter(root.lastChild)
+    return selection.isCollapsed && rest.toString() === ''
+  })
+}
+
+/** Clicks into `target` and puts the caret at the end of the document, checked, ready to type. */
+async function caretToEnd(target: Locator): Promise<void> {
+  await clickIntoEditor(target)
+  await target.page().keyboard.press('Control+End')
+  await expect.poll(() => caretAtEnd(target)).toBe(true)
+}
+
+/**
+ * The viewport once the renderer has caught up with the window. Main reports fullscreen before
+ * the renderer has resized, so a size read at once can be the old one, and a pointer placed at
+ * its bottom edge then misses the control bar's show zone (seen on WSLg; under Xvfb, with no
+ * window manager, fullscreen never resizes the window, and the sizes agree at once).
+ */
+async function fullscreenViewport(): Promise<{ w: number; h: number }> {
+  const contentSize = (): Promise<{ w: number; h: number } | null> =>
+    app.evaluate(({ BrowserWindow }) => {
+      const bounds = BrowserWindow.getAllWindows()[0]?.getContentBounds()
+      return bounds === undefined ? null : { w: bounds.width, h: bounds.height }
+    })
+  const viewport = (): Promise<{ w: number; h: number }> =>
+    page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  await expect
+    .poll(async () => {
+      const [inner, content] = await Promise.all([viewport(), contentSize()])
+      return inner.w === content?.w && inner.h === content.h
+    })
+    .toBe(true)
+  return viewport()
 }
 
 async function documentTextWithoutGhost(): Promise<string> {

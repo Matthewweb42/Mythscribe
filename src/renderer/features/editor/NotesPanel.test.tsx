@@ -59,6 +59,9 @@ function client(stored: Record<string, TiptapNodeT>): {
           return { id, meta: { ...EMPTY_SCENE_META, synopsis: `About ${id}` } } as Output<C>
         }
         if (channel === 'summary:get') return UNAVAILABLE_SUMMARY as Output<C>
+        // The toggle and the resize write the layout after its debounce; refused, the store
+        // would undo them under a test slower than the debounce.
+        if (channel === 'layout:set') return input as Output<C>
         throw new Error(`unexpected ${channel}`)
       },
       on: () => () => {}

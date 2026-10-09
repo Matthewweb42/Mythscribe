@@ -42,7 +42,7 @@ const TURN_OFF_CODES: ReadonlySet<AiErrorCode> = new Set([
 interface SessionState {
   dayKey: string
   requestsToday: number
-  /** When the last request failed for a reason worth backing off from; null when none did. */
+  /** When (the monotonic `clock`) the last request failed for a reason worth backing off from; null when none did. */
   failedAt: number | null
   /** The turn-off toast was shown; reset when the author turns VibeWrite back on. */
   turnOffToastShown: boolean
@@ -120,7 +120,14 @@ interface GhostSessionDeps {
   config: () => GhostConfig
   /** The subtle failure line for the toolbar indicator; null clears it. */
   onError: (message: string | null) => void
+  /** The wall clock, for the local day the per-day cap counts in. */
   now: () => number
+  /**
+   * A monotonic clock (ms) for the idle wait and the back-off. Not the wall clock: that one can
+   * step backwards (NTP, WSL's resync under load), and a tick that read less idle time than its
+   * timer had waited used to send nothing and never ask again until the next keystroke.
+   */
+  clock: () => number
 }
 
 /**
@@ -141,9 +148,9 @@ interface GhostSessionDeps {
  * a proposal id (an empty suggestion) have nothing to settle.
  */
 function startGhostSession(deps: GhostSessionDeps): GhostSession {
-  const { editor, nodeId, now } = deps
+  const { editor, nodeId, now, clock } = deps
   let timer: ReturnType<typeof setTimeout> | null = null
-  let lastEditAt = now()
+  let lastEditAt = clock()
   let newChars = 0
   /**
    * 2026-10-08: the first suggestion at a spot needs no new typing (turning VibeWrite on, opening
@@ -210,7 +217,7 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
       }
       return
     }
-    session = { ...session, failedAt: now() }
+    session = { ...session, failedAt: clock() }
     deps.onError(`${message} ${nextStep}`.trim())
   }
 
@@ -241,13 +248,14 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
     const { armed, idleMs } = deps.config()
     if (!armed) return
     rollDay()
-    if (session.failedAt !== null && now() - session.failedAt < GHOST_BACKOFF_MS) {
+    if (session.failedAt !== null && clock() - session.failedAt < GHOST_BACKOFF_MS) {
       skip('backoff')
       return
     }
     const visible = ghostOf(editor.state) !== null
+    const idleFor = clock() - lastEditAt
     const throttled = throttleReason({
-      idleMs: now() - lastEditAt,
+      idleMs: idleFor,
       minIdleMs: idleMs,
       newChars,
       minNewChars: needsNewChars ? GHOST_MIN_NEW_CHARS : 0,
@@ -256,6 +264,12 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
       requestsToday: session.requestsToday,
       dailyRequestCap: GHOST_MAX_PER_DAY
     })
+    if (throttled === 'idle') {
+      // The timer fired a hair early by this clock (timers and clocks round differently): wait
+      // out the rest instead of dropping the tick, which would leave no timer running.
+      timer = setTimeout(check, Math.min(idleMs, Math.max(1, Math.ceil(idleMs - idleFor))))
+      return
+    }
     if (throttled !== null) return skip(throttled)
     if (!focused) return skip('unfocused')
     if (!editor.state.selection.empty) return skip('selection')
@@ -288,7 +302,7 @@ function startGhostSession(deps: GhostSessionDeps): GhostSession {
     focused = true
     editedSinceSend = true
     cancelPending() // the answer would be dropped as stale anyway
-    lastEditAt = now()
+    lastEditAt = clock()
     newChars = Math.max(0, newChars + sizeDelta)
     clearTimer()
     const { armed, idleMs } = deps.config()
@@ -375,7 +389,8 @@ export function useGhostTextController({
       nodeId,
       config: () => config.current,
       onError: setError,
-      now: Date.now
+      now: Date.now,
+      clock: () => performance.now()
     })
     sessionRef.current = started
     return () => {
