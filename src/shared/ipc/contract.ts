@@ -1282,6 +1282,14 @@ export const contract = {
   /** Deletes a tag (F-4.1): its document links go with it, its child tags become top-level. */
   'tag:delete': { input: z.object({ id: z.string() }), output: z.null() },
   /**
+   * "Make a record" (F-9.12): the tag's story-bible sheet, created and linked now if it has none
+   * (in its category: character, place, or World; World for a label tag), or the one it already
+   * points at. An untagged sheet of that category with the tag's name is linked instead of a new
+   * one made. NOT_FOUND for an unknown tag; ALREADY_EXISTS when a sheet of that name carries
+   * another tag.
+   */
+  'tag:makeRecord': { input: z.object({ tagId: z.string() }), output: EntityTagLink },
+  /**
    * Loads a tag template (F-4.3): creates every template tag whose normalized name is not already
    * in the bank, using the category's default color; existing names are skipped, not overwritten.
    */

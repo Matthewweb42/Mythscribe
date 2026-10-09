@@ -2,7 +2,7 @@ import { Editor } from '@tiptap/core'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
+import type { Channel, Entity, Input, Output, Tag } from '@shared/ipc/contract'
 import type { TagMentions } from '@shared/mentions'
 import { toTagName } from '@shared/tags'
 import {
@@ -10,6 +10,8 @@ import {
   useActiveEditorStore
 } from '@renderer/features/editor/activeEditorStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
+import { entityFixture } from '@renderer/features/entities/entityFixture'
+import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -867,5 +869,62 @@ describe('TagsTab bulk operations and the tag bank file (F-4.9)', () => {
     expect(screen.getByRole('button', { name: 'Export…' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Select' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Import…' })).toBeEnabled()
+  })
+})
+
+describe('TagDetail record (F-9.12)', () => {
+  const mara = (tagId: string | null): Entity => {
+    const found = entityFixture.find((entity) => entity.id === 'e-mara')
+    if (!found) throw new Error('fixture lost Mara')
+    return { ...found, tagId }
+  }
+
+  beforeEach(() => {
+    resetTagStore()
+    resetCustomTemplateStore()
+    resetDocumentTagStore()
+    resetMentionStore()
+    resetEntityStore()
+    useTreeStore.getState().clear()
+    useDialogStore.setState({ modals: [], toasts: [] })
+  })
+  afterEach(() => {
+    resetEntityStore()
+  })
+
+  it('opens the record a tag points at', async () => {
+    const user = userEvent.setup()
+    useEntityStore.getState().merge(mara('t-mara'))
+    const calls = await renderLoaded()
+    await user.click(row('mara'))
+    expect(screen.queryByRole('button', { name: 'Make a record' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Open record' }))
+    expect(useEntityStore.getState().selectedId).toBe('e-mara')
+    expect(calls.some(([channel]) => channel === 'tag:makeRecord')).toBe(false)
+  })
+
+  it('makes a record for a tag that has none, merges it, and opens it', async () => {
+    const user = userEvent.setup()
+    const calls = await renderLoaded({
+      'tag:makeRecord': () => ({
+        entity: mara('t-mara'),
+        tag: useTagStore.getState().byId['t-mara']
+      })
+    })
+    await user.click(row('mara'))
+    await user.click(screen.getByRole('button', { name: 'Make a record' }))
+    await waitFor(() => expect(useEntityStore.getState().selectedId).toBe('e-mara'))
+    expect(calls).toContainEqual(['tag:makeRecord', { tagId: 't-mara' }])
+    expect(useEntityStore.getState().byId['e-mara']?.tagId).toBe('t-mara')
+    expect(screen.getByRole('button', { name: 'Open record' })).toBeInTheDocument()
+  })
+
+  it('toasts the cause when the record cannot be made', async () => {
+    const user = userEvent.setup()
+    await renderLoaded({ 'tag:makeRecord': failing('A sheet named Mara has another tag') })
+    await user.click(row('mara'))
+    await user.click(screen.getByRole('button', { name: 'Make a record' }))
+    await waitFor(() => expect(toasts().join(' ')).toContain('A sheet named Mara has another tag'))
+    expect(useEntityStore.getState().selectedId).toBeNull()
   })
 })

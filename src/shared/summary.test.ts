@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  promptVersionAtLeast,
   SceneSummary,
   SceneSummaryState,
   StoredSceneSummary,
@@ -115,5 +116,20 @@ describe('StoredSceneSummary and SceneSummaryState (F-5.6)', () => {
     expect(SceneSummaryState.parse(UNAVAILABLE_SUMMARY)).toEqual(UNAVAILABLE_SUMMARY)
     expect(UNAVAILABLE_SUMMARY.available).toBe(false)
     expect(UNAVAILABLE_SUMMARY.stale).toBe(false)
+  })
+})
+
+describe('promptVersionAtLeast (F-8.7)', () => {
+  it('treats the own version and newer ones as current', () => {
+    expect(promptVersionAtLeast('summary.v3', 'summary.v3')).toBe(true)
+    expect(promptVersionAtLeast('summary.v4', 'summary.v3')).toBe(true)
+    expect(promptVersionAtLeast('summary.v10', 'summary.v9')).toBe(true)
+  })
+
+  it('treats older versions, other prompts, and odd strings as not current', () => {
+    expect(promptVersionAtLeast('summary.v2', 'summary.v3')).toBe(false)
+    expect(promptVersionAtLeast('critique.v9', 'summary.v3')).toBe(false)
+    expect(promptVersionAtLeast('summary', 'summary.v3')).toBe(false)
+    expect(promptVersionAtLeast('summary.vX', 'summary.v3')).toBe(false)
   })
 })

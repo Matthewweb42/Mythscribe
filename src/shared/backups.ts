@@ -81,7 +81,8 @@ export const BACKUP_MAX_UNPACKED_BYTES = 2 * 1024 * 1024 * 1024
 
 const pad = (n: number, width = 2): string => String(n).padStart(width, '0')
 
-function stamp(date: Date): string {
+/** `YYYY-MM-DD HHmmss` in local time: the date part of every backup file name. */
+export function backupStamp(date: Date): string {
   return (
     `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
     `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
@@ -90,7 +91,7 @@ function stamp(date: Date): string {
 
 /** `<name> YYYY-MM-DD HHmmss.zip` in local time; `safeName` is already a valid file name. */
 export function backupFileName(safeName: string, date: Date): string {
-  return `${safeName} ${stamp(date)}.zip`
+  return `${safeName} ${backupStamp(date)}.zip`
 }
 
 const BACKUP_NAME = /^.+ (\d{4})-(\d{2})-(\d{2}) (\d{2})(\d{2})(\d{2})\.zip$/

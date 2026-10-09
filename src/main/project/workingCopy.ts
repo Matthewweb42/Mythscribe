@@ -5,6 +5,7 @@ import Database from 'better-sqlite3'
 import { z } from 'zod'
 import type { CloudProvider } from '@shared/cloudSync'
 import { CLOUD_PROVIDER_LABEL } from '@shared/cloudSync'
+import { rollbackSnapshot } from '../db/snapshot'
 import { AppError } from '../ipc/errors'
 import { OPEN_LOCK_FILE } from './openLock'
 import { RECOVERY_DIR } from './recoveryJournal'
@@ -366,7 +367,7 @@ export class WorkingCopy {
 
   /** Copies the working copy back now, blocking: for closing and creating. Throws with the cause. */
   syncNow(sqlite: Database.Database): void {
-    const data = snapshotOf(sqlite)
+    const data = rollbackSnapshot(sqlite)
     const changes = totalChanges(sqlite)
     this.generation++
     const tmp = this.tmpFile()
@@ -387,7 +388,7 @@ export class WorkingCopy {
    * when it was superseded. Throws with the cause.
    */
   async sync(sqlite: Database.Database): Promise<boolean> {
-    const data = snapshotOf(sqlite)
+    const data = rollbackSnapshot(sqlite)
     const changes = totalChanges(sqlite)
     const mine = ++this.generation
     const tmp = this.tmpFile()
@@ -485,21 +486,6 @@ function cloudMatches(cloudFolder: string, state: WorkingState): boolean {
   if (sameFingerprint(current, state.cloud)) return true
   // Sync apps touch modification times; only different bytes are a change.
   return hashOf(cloudFolder) === state.cloudHash
-}
-
-/**
- * The whole database as SQLite sees it (WAL included), as a rollback-journal file: header bytes
- * 18 and 19 say 1 instead of 2, which is what `journal_mode = DELETE` writes. The copy in the
- * cloud folder then needs no `-wal` or `-shm` to be read; MythScribe switches it back to WAL
- * wherever it is opened for writing.
- */
-function snapshotOf(sqlite: Database.Database): Buffer {
-  const data = sqlite.serialize()
-  if (data.length >= 100) {
-    data[18] = 1
-    data[19] = 1
-  }
-  return data
 }
 
 /** Errors Windows gives while another program (the sync app, a virus scanner) holds the file. */

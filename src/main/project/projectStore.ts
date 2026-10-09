@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import type { NovelFormat, ProjectInfo } from '@shared/ipc/contract'
 import { openDatabase, type Connection } from '../db/connection'
+import { writePreMigrationBackup } from '../db/preMigrationBackup'
 import { project as projectTable, settings } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { insertNodes } from '../tree/treeStore'
@@ -230,14 +231,32 @@ export function locateProject(input: string): ProjectLocation {
   return candidate
 }
 
+/** Where a project's backups go (F-8.4), given its id and name: the pre-migration backup's folder. */
+export type BackupDirFor = (project: { id: string; name: string }) => string
+
+/** The project's id and name read straight from SQLite, before the schema is upgraded. */
+function projectIdentity(
+  sqlite: Connection['sqlite'],
+  folder: string
+): { id: string; name: string } {
+  const row = sqlite.prepare('SELECT id, name FROM project LIMIT 1').get() as
+    { id: string; name: string } | undefined
+  // A database without its project row fails to open after the upgrade anyway; its backup still
+  // goes somewhere the author can find, named after the folder.
+  return row ?? { id: 'unknown', name: sanitizeName(path.basename(folder, PROJECT_EXTENSION)) }
+}
+
 /**
  * Opens a project. `workingCopy` (2026-10-08) prepares the local working copy for a folder in a
  * cloud-synced location once the open marker is held; SQLite then opens that copy instead of the
  * database in the folder. Null (or absent) opens the folder's database in place.
+ * `backupDirFor` (F-8.7) names the folder a pre-migration backup goes to before a schema
+ * upgrade; absent (the unit tests), no backup is written.
  */
 export function openProject(
   input: string,
-  workingCopy?: (folder: string) => WorkingCopy | null
+  workingCopy?: (folder: string) => WorkingCopy | null,
+  backupDirFor?: BackupDirFor
 ): ProjectSession {
   const location = locateProject(input)
   if (location.kind === 'legacy') {
@@ -255,7 +274,12 @@ export function openProject(
   let copy: WorkingCopy | null = null
   try {
     copy = workingCopy?.(folder) ?? null
-    connection = openDatabase(copy?.dbFile ?? path.join(folder, DB_FILE))
+    connection = openDatabase(copy?.dbFile ?? path.join(folder, DB_FILE), {
+      beforeUpgrade:
+        backupDirFor &&
+        ((sqlite, step) =>
+          writePreMigrationBackup(sqlite, backupDirFor(projectIdentity(sqlite, folder)), step))
+    })
   } catch (err) {
     copy?.abandon()
     lock.release()

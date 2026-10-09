@@ -1,5 +1,7 @@
 import {
   findMentions,
+  paragraphIndexes,
+  passageParagraphs,
   type MentionCandidate,
   type MentionRange,
   type TagMentions
@@ -9,7 +11,14 @@ import { sha256 } from '../ai/request'
 import { AppError } from '../ipc/errors'
 import type { TreeDb } from '../tree/treeStore'
 import { documentJson, documentText, manuscriptDocuments } from '../voice/profile'
-import { getScanHash, listMentionsForNode, replaceNodeMentions, scanHashes } from './mentionStore'
+import { passageHash, replaceNodePassages } from '../search/passageIndex'
+import {
+  getPassageHash,
+  getScanHash,
+  listMentionsForNode,
+  replaceNodeMentions,
+  scanHashes
+} from './mentionStore'
 import { listTags } from './tagStore'
 
 /**
@@ -75,7 +84,20 @@ export function scanMentions(
   if (getScanHash(db, nodeId) === source.contentHash) return { changed: false, scanned: false }
   const mentions = findMentions(source.doc, source.candidates)
   const changed = !matchesStored(listMentionsForNode(db, nodeId), mentions)
-  replaceNodeMentions(db, nodeId, mentions, source.contentHash, now)
+  // F-9.12: the same pass is the local knowledge index — each range's paragraph, and the
+  // document's paragraphs in the full-text table, rewritten only when they read differently.
+  const paragraphs = passageParagraphs(source.doc)
+  const byTag = new Map(
+    [...mentions].map(([tagId, ranges]) => [tagId, paragraphIndexes(paragraphs, ranges)])
+  )
+  const hash = passageHash(paragraphs)
+  db.transaction((tx) => {
+    if (getPassageHash(tx, nodeId) !== hash) replaceNodePassages(tx, nodeId, paragraphs)
+    replaceNodeMentions(tx, nodeId, mentions, source.contentHash, now, {
+      paragraphs: byTag,
+      passageHash: hash
+    })
+  })
   return { changed, scanned: true }
 }
 
@@ -114,8 +136,15 @@ function mentionCandidates(db: TreeDb): MentionCandidate[] {
 }
 
 /**
- * The hash of everything a scan reads: the document's text and the candidates, by id. A tag
- * without aliases hashes as it did before F-4.14, so an upgrade does not rescan the manuscript.
+ * Salted into every scan hash (F-9.12): bumped when what a scan writes changes (paragraph
+ * indexes, the passage index), so the first open of a project afterwards rescans every document
+ * once, locally.
+ */
+export const MENTION_INDEX_VERSION = 1
+
+/**
+ * The hash of everything a scan reads: the document's text and the candidates, by id, salted
+ * with `MENTION_INDEX_VERSION`.
  */
 function mentionHash(text: string, candidates: MentionCandidate[]): string {
   const names = [...candidates]
@@ -125,5 +154,5 @@ function mentionHash(text: string, candidates: MentionCandidate[]): string {
         ? [candidate.id, candidate.name, candidate.category]
         : [candidate.id, candidate.name, candidate.category, ...(candidate.aliases ?? [])]
     )
-  return sha256(JSON.stringify({ text, names }))
+  return sha256(JSON.stringify({ text, names, index: MENTION_INDEX_VERSION }))
 }

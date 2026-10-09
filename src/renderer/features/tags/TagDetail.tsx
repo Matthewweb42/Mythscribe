@@ -4,6 +4,7 @@ import { useShallow } from 'zustand/react/shallow'
 import type { Tag } from '@shared/ipc/contract'
 import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, TAG_NAME_MAX, TagCategory } from '@shared/tags'
 import { openMention } from '@renderer/features/editor/openPassage'
+import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -50,7 +51,8 @@ interface TagDetailProps {
  * hands the tree the same filter through "Show in tree". The Mentions section (F-4.12) lists
  * where main's scan found the tag's name, apart from those explicit links, and a row jumps to
  * the first occurrence; "Track mentions" turns the scan off for this tag, which drops its
- * recorded rows in main and hides the section.
+ * recorded rows in main and hides the section. F-9.12: "Open record" opens the story-bible sheet
+ * the tag points at; a tag without one (a label) offers "Make a record" (`tag:makeRecord`).
  */
 export function TagDetail({
   tag,
@@ -64,6 +66,8 @@ export function TagDetail({
   const index = useTreeStore(useShallow((s) => ({ rootIds: s.rootIds, childrenOf: s.childrenOf })))
   const tagIdsByNode = useDocumentTagStore((s) => s.tagIdsByNode)
   const mentions = useMentionStore((s) => s.byTag[tag.id])
+  // F-9.12: the tag's record (its story-bible sheet), if one points at it.
+  const recordId = useEntityStore((s) => s.ids.find((id) => s.byId[id]?.tagId === tag.id) ?? null)
   const [busy, setBusy] = useState(false)
   /** The color as picked, shown until main confirms it; null when the field shows the stored color. */
   const [draftColor, setDraftColor] = useState<string | null>(null)
@@ -165,6 +169,21 @@ export function TagDetail({
     }
   }
 
+  const openRecord = (id: string): void => {
+    useEntityStore.getState().select(id)
+  }
+
+  const makeRecord = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      openRecord((await useEntityStore.getState().makeRecord(tag.id)).id)
+    } catch (err) {
+      report(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const confirmDelete = async (): Promise<void> => {
     const ok = await dialogs.confirm({
       title: `Delete "${tag.name}"?`,
@@ -245,6 +264,24 @@ export function TagDetail({
           ))}
         </select>
       </label>
+      {recordId === null ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void makeRecord()}
+          className="self-start rounded-md border border-line px-2 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-50"
+        >
+          Make a record
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => openRecord(recordId)}
+          className="self-start rounded-md border border-line px-2 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg"
+        >
+          Open record
+        </button>
+      )}
       <AliasEditor
         name={tag.name}
         aliases={tag.aliases}

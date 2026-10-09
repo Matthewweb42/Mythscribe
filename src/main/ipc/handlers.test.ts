@@ -88,7 +88,14 @@ import { replaceSceneFacts } from '../entity/observedFactStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { passageHash, replaceAutoExemplars } from '../voice/exemplarStore'
 import { bumpVoiceVersion } from '../voice/versionCache'
-import { getVoiceAutoState, setVoiceNotes } from '../project/settingsStore'
+import {
+  getObservedDismissed,
+  getVoiceAutoState,
+  setObservedDismissed,
+  setVoiceNotes
+} from '../project/settingsStore'
+import { createTag } from '../tag/tagStore'
+import { withObservedDismissed } from '@shared/observedFacts'
 import { aiProposal } from '../db/schema'
 import { AppStateStore } from '../appState/appStateStore'
 import { BackupService } from '../backups/backupService'
@@ -1015,9 +1022,10 @@ describe('stats:dashboard (F-10.5)', () => {
     expect(stats.pov).toContainEqual({ pov: 'Mara', scenes: 1, words: 2 })
     // Mentions depend on the background scan; the link alone puts the scene in.
     expect(stats.characters).toHaveLength(1)
+    // F-9.12: the tag arrived with its record, whose name the dashboard shows.
     expect(stats.characters[0]).toMatchObject({
       tagId: mara.id,
-      name: 'mara',
+      name: 'Mara',
       scenes: 1,
       povScenes: 1
     })
@@ -4088,6 +4096,73 @@ describe('entity handlers (F-9.1)', () => {
     expect(tagsChanged()).toEqual(['rose'])
   })
 
+  it('gives a new name tag its record and tells the windows; a label stays a label (F-9.12)', async () => {
+    await openProject()
+    const sentEntities = (): string[] =>
+      vi
+        .mocked(fakeWin.webContents.send)
+        .mock.calls.filter(([channel]) => channel === 'entity:changed')
+        .map(([, payload]) => (payload as { name: string }).name)
+    const rose = await invoke('tag:create', { name: 'Rose Marsh', category: 'character' })
+    await invoke('tag:create', { name: 'Rain', category: 'tone' })
+    const sheets = await invoke('entity:list', undefined)
+    expect(sheets.map((e) => [e.kind, e.name, e.tagId])).toEqual([
+      ['character', 'Rose Marsh', rose.id]
+    ])
+    expect(sentEntities()).toEqual(['Rose Marsh'])
+  })
+
+  it('makes a record for a label tag through tag:makeRecord, once (F-9.12)', async () => {
+    await openProject()
+    await expect(invoke('tag:makeRecord', { tagId: 'missing' })).rejects.toThrowError(
+      /^NOT_FOUND: /
+    )
+    const rain = await invoke('tag:create', { name: 'Rain', category: 'tone' })
+    const made = await invoke('tag:makeRecord', { tagId: rain.id })
+    expect(made.entity).toMatchObject({ kind: 'world', name: 'Rain', tagId: rain.id })
+    expect(made.tag.id).toBe(rain.id)
+    expect(await invoke('tag:makeRecord', { tagId: rain.id })).toEqual(made)
+    expect(await invoke('entity:list', undefined)).toHaveLength(1)
+  })
+
+  it('gives an AI-made name tag its record once the author edits it, never on a colour or tracking change (F-9.12)', async () => {
+    await openProject()
+    const db = manager.require().connection.orm
+    const records = async (): Promise<string[]> =>
+      (await invoke('entity:list', undefined)).map((e) => `${e.kind}:${e.name}:${e.tagId}`)
+    const brannoc = createTag(db, { name: 'brannoc', category: 'character' }, 'ai')
+    const lark = createTag(db, { name: 'lark', category: 'character' }, 'ai')
+    const mist = createTag(db, { name: 'mist', category: 'tone' }, 'ai')
+    const ghost = createTag(db, { name: 'ghost', category: 'character' }, 'ai')
+    const wisp = createTag(db, { name: 'wisp', category: 'character' }, 'ai')
+
+    // Not a name edit: still a bare tag.
+    await invoke('tag:update', { id: brannoc.id, color: '#123456', trackMentions: false })
+    expect(await records()).toEqual([])
+
+    // Organise's rename, its aliases, a merge into the tag, and a label made a place.
+    await invoke('tag:update', { id: brannoc.id, name: 'Brannoc Vey' })
+    await invoke('tag:update', { id: lark.id, aliases: ['Larkin'] })
+    await invoke('tag:merge', { targetId: wisp.id, sourceIds: [mist.id] })
+    const fog = createTag(db, { name: 'fog', category: 'tone' }, 'ai')
+    await invoke('tag:update', { id: fog.id, category: 'setting' })
+    expect((await records()).sort()).toEqual(
+      [
+        `character:Brannoc Vey:${brannoc.id}`,
+        `character:Lark:${lark.id}`,
+        `character:Wisp:${wisp.id}`,
+        `setting:Fog:${fog.id}`
+      ].sort()
+    )
+    for (const each of await invoke('entity:list', undefined)) expect(each.origin).toBe('author')
+
+    // A name whose sheet the author deleted stays without one; only Make a record brings it.
+    setObservedDismissed(db, withObservedDismissed(getObservedDismissed(db), 'character', 'Ghost'))
+    await invoke('tag:update', { id: ghost.id, aliases: ['Spook'] })
+    expect((await records()).some((row) => row.startsWith('character:Ghost'))).toBe(false)
+    expect((await invoke('tag:makeRecord', { tagId: ghost.id })).entity.name).toBe('Ghost')
+  })
+
   it('refuses entity:linkTag for an unknown id and a nameless name (F-9.4)', async () => {
     await openProject()
     await expect(invoke('entity:linkTag', { id: 'missing' })).rejects.toThrowError(/^NOT_FOUND: /)
@@ -5139,6 +5214,8 @@ describe('tag:loadTemplate (F-4.3)', () => {
       usageCount: 0
     })
     expect(await invoke('tag:list', undefined)).toHaveLength(standard.tags.length)
+    // F-9.12: its role and topic placeholders ("protagonist", "history") get no records.
+    expect(await invoke('entity:list', undefined)).toEqual([])
 
     const again = await invoke('tag:loadTemplate', { template: 'standard-fiction' })
     expect(again.created).toEqual([])
@@ -5201,6 +5278,10 @@ describe('custom tag templates (F-4.11)', () => {
     const parentOf = bank.find((t) => t.name === 'mara-young')?.parentId
     expect(bank.find((t) => t.id === parentOf)?.name).toBe('mara')
     expect(bank.find((t) => t.name === 'the-mill')?.color).toBe('#123456')
+    // F-9.12: a saved bank holds the series' names, so they arrive with their records.
+    const sheets = await invoke('entity:list', undefined)
+    expect(sheets.map((e) => e.name).sort()).toEqual(['Mara', 'Mara Young', 'The Mill'])
+    expect(sheets.every((e) => e.origin === 'author')).toBe(true)
   })
 
   it('renames, trims, and deletes a template; a template needs a tag and an unknown id is NOT_FOUND', async () => {
@@ -5318,7 +5399,9 @@ describe('tag bulk operations and exchange (F-4.9)', () => {
       const rose = await invoke('tag:create', { name: 'Rose', category: 'character' })
       const rosie = await invoke('tag:create', { name: 'Rosie', category: 'character' })
       await invoke('documentTag:add', { nodeId: scene, tagId: rosie.id })
-      const character = await invoke('entity:create', { kind: 'character', name: 'Rosie' })
+      // F-9.12: a new character tag arrives with its record.
+      const character = (await invoke('entity:list', undefined)).find((e) => e.name === 'Rosie')
+      if (character === undefined) throw new Error('Rosie has no record')
       expect(character.tagId).toBe(rosie.id)
       await vi.advanceTimersByTimeAsync(SCAN)
       expect(await invoke('mention:listForTag', { tagId: rosie.id })).toHaveLength(1)
@@ -5331,9 +5414,11 @@ describe('tag bulk operations and exchange (F-4.9)', () => {
       expect(await invoke('tag:aliases', undefined)).toEqual({ [rosie.id]: rose.id })
       expect(sent('documentTag:changed')).toEqual([{ nodeIds: [scene] }])
       expect(sent('mention:changed')).toContainEqual({ nodeIds: [scene] })
-      expect(sent('entity:changed')).toEqual([
+      // Both records read their aliases from the merged tag (Rose's is F-9.12's own record).
+      expect(sent('entity:changed')).toHaveLength(2)
+      expect(sent('entity:changed')).toContainEqual(
         expect.objectContaining({ id: character.id, tagId: rose.id })
-      ])
+      )
       expect((await invoke('documentTag:list', { nodeId: scene })).map((t) => t.id)).toEqual([
         rose.id
       ])
@@ -5396,6 +5481,10 @@ describe('tag bulk operations and exchange (F-4.9)', () => {
       'dark-forest',
       'rain'
     ])
+    // F-9.12: the imported place tag arrived with its record; the label did not.
+    expect(
+      (await invoke('entity:list', undefined)).map((e) => [e.kind, e.name, e.origin, e.tagId])
+    ).toEqual([['setting', 'Dark Forest', 'author', result?.created[0]?.id]])
 
     const bad = path.join(tmp, 'bad.json')
     fs.writeFileSync(bad, '{"format":"mythscribe-tags","version":1,"tags":[{"name":"x"}]}')

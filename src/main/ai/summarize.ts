@@ -21,6 +21,7 @@ import {
   SUMMARY_TAGS_MAX,
   SUMMARY_TEXT_MIN,
   ExtractedTag,
+  promptVersionAtLeast,
   type SceneSummary,
   type StoredSceneSummary
 } from '@shared/summary'
@@ -151,7 +152,7 @@ export function staleSummaryNodeIds(db: TreeDb): string[] {
     const current = stored.get(row.id)
     if (
       current?.contentHash === source.contentHash &&
-      current.promptVersion === SUMMARY_PROMPT_V3_VERSION
+      promptVersionAtLeast(current.promptVersion, SUMMARY_PROMPT_V3_VERSION)
     ) {
       continue
     }
@@ -228,7 +229,7 @@ export async function summarizeScene(
   if (
     stored !== null &&
     stored.contentHash === source.contentHash &&
-    stored.promptVersion === SUMMARY_PROMPT_V3_VERSION
+    promptVersionAtLeast(stored.promptVersion, SUMMARY_PROMPT_V3_VERSION)
   ) {
     return {
       summary: stored,

@@ -126,6 +126,13 @@ import { runReviewChat } from '../ai/reviewChat'
 import { cancelInflight, regenRequestId, registerInflight, releaseInflight } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
 import type { AutoTagsChange } from '../ai/autoTags'
+import {
+  convertKnowledgeIndex,
+  ensureRecordForTag,
+  ensureRecordsForTags,
+  makeRecordForTag
+} from '../knowledge/records'
+import { prunePassages } from '../search/passageIndex'
 import type { ObservedFactsChange } from '../ai/observedFacts'
 import { IMPORT_STRUCTURE_PROMPT_VERSION } from '../ai/prompts/importStructure.v1'
 import { createProposal, listPendingProposals, settleProposal } from '../ai/proposalStore'
@@ -211,7 +218,8 @@ import {
   mergeEntities,
   setEntityImage,
   updateEntity,
-  type EntityTagChange
+  type EntityTagChange,
+  type EntityWrite
 } from '../entity/entityStore'
 import { loadOrganiseProject, organiseCandidates } from '../organise/organiseProject'
 import {
@@ -297,7 +305,11 @@ import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import { EXTERNAL_HOST, isAllowedExternalUrl, type EditRole } from '@shared/menu'
 import { normalizeProposalNote } from '@shared/proposal'
 import { REFERENCE_PINS_MAX, dedupePins, hasPin } from '@shared/references'
-import { TAG_EXCHANGE_EXTENSION, tagExportFileName } from '@shared/tagExchange'
+import {
+  TAG_EXCHANGE_EXTENSION,
+  tagExportFileName,
+  type TagExchangeRecord
+} from '@shared/tagExchange'
 import { keepTemplateRecords } from '@shared/tagTemplates'
 import {
   addDocumentTag,
@@ -1272,7 +1284,12 @@ export function registerHandlers({
   // author. The scans are hash-guarded, so a document the new tag does not touch costs one hash.
   register('tag:create', (input) => {
     const db = manager.require().connection.orm
-    const created = createTag(db, input)
+    // F-9.12 (D8): a character, place, or world tag arrives with its record, in one transaction.
+    const { created, record } = db.transaction((tx) => {
+      const tag = createTag(tx, input)
+      return { created: tag, record: ensureRecordForTag(tx, tag, 'author') }
+    })
+    if (record !== null) emit(windows(), 'entity:changed', record.entity)
     rescanManuscript(db)
     // F-4.12b: the new name is a tag now, so it is proposed no longer — which is what accepting
     // a proposal comes down to. The scans that follow say nothing new about it.
@@ -1289,7 +1306,18 @@ export function registerHandlers({
   register('tag:update', ({ id, ...patch }) => {
     const db = manager.require().connection.orm
     const before = getTag(db, id)
-    const updated = updateTag(db, id, patch)
+    // F-9.12: a name tag the author renames, recategorises (a label made a character, place, or
+    // world tag), or gives aliases gets its record now, in the same transaction, if it has none.
+    const { updated, records } = db.transaction((tx) => {
+      const tag = updateTag(tx, id, patch)
+      const named =
+        before !== undefined &&
+        (before.name !== tag.name ||
+          before.category !== tag.category ||
+          before.aliases !== JSON.stringify(tag.aliases))
+      return { updated: tag, records: named ? ensureRecordsForTags(tx, [tag]) : [] }
+    })
+    publishRecords(db, records)
     if (before !== undefined) {
       if (before.trackMentions && !updated.trackMentions) {
         const nodeIds = deleteMentionsForTag(db, id)
@@ -1319,6 +1347,21 @@ export function registerHandlers({
     return updated
   })
 
+  /**
+   * F-9.12: "Make a record" on a tag. A sheet the call made or linked reaches every window as
+   * `entity:changed`; the tag itself only moved if F-9.4's link touched the bank.
+   */
+  register('tag:makeRecord', ({ tagId }) => {
+    const db = manager.require().connection.orm
+    const { entity: record, tag, write } = makeRecordForTag(db, tagId)
+    if (write !== null) {
+      emit(windows(), 'entity:changed', record)
+      publishTagChange(db, write.tagChange)
+      void syncSpelling()
+    }
+    return { entity: record, tag }
+  })
+
   register('tag:delete', ({ id }) => {
     const db = manager.require().connection.orm
     // F-4.12: the rows cascade away with the tag, so the documents that had them are collected
@@ -1334,6 +1377,8 @@ export function registerHandlers({
 
   register('tag:loadTemplate', ({ template }) => {
     const db = manager.require().connection.orm
+    // F-9.12: no records here. A built-in template's tags are placeholders for roles and topics
+    // ("protagonist", "history"), not names; the author makes a record on one by hand.
     const result = loadTagTemplate(db, template)
     if (result.created.length > 0) {
       rescanManuscript(db)
@@ -1372,7 +1417,12 @@ export function registerHandlers({
         sourceIds.flatMap((id) => listMentionsForTag(db, id).map((mention) => mention.nodeId))
       )
     ]
-    const result = mergeTags(db, targetId, sourceIds)
+    // F-9.12: a tag the author merges names into gets its record if neither it nor a source had one.
+    const { result, records } = db.transaction((tx) => {
+      const merged = mergeTags(tx, targetId, sourceIds)
+      return { result: merged, records: ensureRecordsForTags(tx, [merged.target]) }
+    })
+    publishRecords(db, records)
     if (result.nodeIds.length > 0) {
       emit(windows(), 'documentTag:changed', { nodeIds: result.nodeIds })
     }
@@ -1417,7 +1467,7 @@ export function registerHandlers({
     const chosen = given ?? (await dialogs.chooseTagBankFile())
     if (chosen === null) return null
     const db = session.connection.orm
-    const result = importTagBank(db, readTagBankFile(chosen))
+    const result = importTagBankWithRecords(db, readTagBankFile(chosen))
     if (result.created.length > 0) {
       rescanManuscript(db)
       publishProposed()
@@ -1464,7 +1514,7 @@ export function registerHandlers({
     const template = appState.get().tagTemplates.find((t) => t.id === id)
     if (!template) throw new AppError('NOT_FOUND', 'Tag template not found', { id })
     const db = manager.require().connection.orm
-    const result = importTagBank(db, template.tags)
+    const result = importTagBankWithRecords(db, template.tags)
     if (result.created.length > 0) {
       rescanManuscript(db)
       publishProposed()
@@ -1664,6 +1714,30 @@ export function registerHandlers({
     emit(windows(), 'tag:changed', change.tag)
   }
 
+  /** F-9.12: records a tag change made or linked reach every window, with their tag's change. */
+  const publishRecords = (db: TreeDb, writes: readonly EntityWrite[]): void => {
+    for (const write of writes) {
+      emit(windows(), 'entity:changed', write.entity)
+      publishTagChange(db, write.tagChange)
+    }
+  }
+
+  /**
+   * F-4.9 / F-4.11: a tag bank read in (a file or a saved template); F-9.12: its new name tags
+   * arrive with their records, in the same transaction.
+   */
+  const importTagBankWithRecords = (
+    db: TreeDb,
+    records: readonly TagExchangeRecord[]
+  ): ReturnType<typeof importTagBank> => {
+    const { result, writes } = db.transaction((tx) => {
+      const imported = importTagBank(tx, records)
+      return { result: imported, writes: ensureRecordsForTags(tx, imported.created) }
+    })
+    publishRecords(db, writes)
+    return result
+  }
+
   /**
    * F-5.16: a summary run logged what its scene states. An entity the job created reaches the
    * windows as `entity:changed` and its tag through `publishTagChange`, exactly as if the author
@@ -1688,6 +1762,8 @@ export function registerHandlers({
    * count moved), and the scene itself as `documentTag:changed`, so an open tag bar refetches.
    */
   const publishAutoTags = (db: TreeDb, nodeId: string, change: AutoTagsChange): void => {
+    // F-9.12: the records the new name tags got reach the windows like any created sheet.
+    for (const record of change.records) emit(windows(), 'entity:changed', record.entity)
     if (change.created.length > 0) {
       rescanManuscript(db)
       publishProposed()
@@ -3685,6 +3761,18 @@ export function registerHandlers({
     clearReplaceUndo()
     // F-10.3: the session's words and active time start again with every project.
     resetGoalsSession()
+    // F-9.12: the local knowledge index, before anything reads the bank or the scenes: the
+    // one-time conversion (every name tag a record, every record a tag) and the passages of
+    // documents that left the manuscript. Local and free; a failure never stops the open.
+    if (info) {
+      try {
+        const db = manager.require().connection.orm
+        convertKnowledgeIndex(db)
+        prunePassages(db)
+      } catch (err) {
+        console.warn('Could not update the knowledge index', err)
+      }
+    }
     // F-3.11, F-3.14: the spellchecker accepts the open project's words and story names and no
     // other project's.
     void syncSpelling()

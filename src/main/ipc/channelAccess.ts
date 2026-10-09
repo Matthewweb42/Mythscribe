@@ -97,6 +97,7 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'tag:create': 'write',
   'tag:update': 'write',
   'tag:delete': 'write',
+  'tag:makeRecord': 'write',
   'tag:loadTemplate': 'write',
   'tag:loadCustomTemplate': 'write',
   'tagTemplate:list': 'read',

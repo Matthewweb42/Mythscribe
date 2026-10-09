@@ -61,6 +61,21 @@ export const SUMMARY_DEBOUNCE_MS = 3_000
  */
 export const SUMMARY_BACKFILL_DELAY_MS = 5_000
 
+/**
+ * Whether a stored prompt version (`summary.v4`) is the build's own (`summary.v3`) or newer
+ * (F-8.7). A summary written by a newer build stays current in an older one, which would
+ * otherwise re-summarise, and pay for, every scene the newer build already did. Versions of
+ * different prompts, or ones that are not `<name>.v<N>`, compare as not current.
+ */
+export function promptVersionAtLeast(stored: string, own: string): boolean {
+  const a = PROMPT_VERSION.exec(stored)
+  const b = PROMPT_VERSION.exec(own)
+  if (a === null || b === null || a[1] !== b[1]) return false
+  return Number(a[2]) >= Number(b[2])
+}
+
+const PROMPT_VERSION = /^(.+)\.v(\d+)$/
+
 /** What the model answers and the pane shows: the summary, its key points, and the characters present. */
 export const SceneSummary = z.object({
   summary: z.string().min(1).max(SUMMARY_MAX_CHARS),

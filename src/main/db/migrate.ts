@@ -43,6 +43,21 @@ export function splitStatements(sql: string): string[] {
     .filter((s) => s.length > 0)
 }
 
+/** The schema step about to run on a database that already has one: versions as `user_version` counts them. */
+export interface MigrationStep {
+  from: number
+  to: number
+}
+
+export interface MigrateHooks {
+  /**
+   * Runs once, before the first pending migration, on a database that already has applied
+   * migrations (F-8.7): never for a new database, never when nothing is pending, and never for a
+   * database this build refuses. A throw stops the upgrade with nothing changed.
+   */
+  beforeUpgrade?: (step: MigrationStep) => void
+}
+
 export interface MigrateResult {
   applied: string[]
   version: number
@@ -54,7 +69,8 @@ export interface MigrateResult {
  */
 export function migrate(
   db: Database.Database,
-  migrations: Migration[] = loadMigrations()
+  migrations: Migration[] = loadMigrations(),
+  hooks: MigrateHooks = {}
 ): MigrateResult {
   db.exec(
     `CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -79,11 +95,14 @@ export function migrate(
   }
 
   const appliedIds = new Set(rows.map((r) => r.id))
+  const pending = migrations.filter((m) => !appliedIds.has(m.id))
+  if (rows.length > 0 && pending.length > 0) {
+    hooks.beforeUpgrade?.({ from: rows.length, to: migrations.length })
+  }
   const applied: string[] = []
   const insert = db.prepare('INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)')
 
-  for (const m of migrations) {
-    if (appliedIds.has(m.id)) continue
+  for (const m of pending) {
     db.transaction(() => {
       for (const statement of splitStatements(m.sql)) db.exec(statement)
       insert.run(m.id, m.name, new Date().toISOString())

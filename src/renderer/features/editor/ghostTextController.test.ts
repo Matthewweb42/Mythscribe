@@ -232,6 +232,19 @@ describe('useGhostTextController (F-5.3)', () => {
     expect(ghostText()).toBe(' Rain followed.')
   })
 
+  it('asks after the idle delay even when the wall clock steps backwards meanwhile', async () => {
+    mount()
+    type(ENOUGH)
+    // An NTP or WSL resync: the wall clock goes back 700 ms while the idle timer runs. Read
+    // against the wall clock the pause looked too short, the tick sent nothing, and no timer was
+    // left, so the suggestion never came (the e2e ghost-text flake).
+    vi.setSystemTime(Date.now() - 700)
+    await idle(IDLE_MS - 1)
+    expect(requests).toHaveLength(0)
+    await idle(1)
+    expect(requests).toHaveLength(1)
+  })
+
   it('tells developer tools why an idle tick sent nothing, once per reason, only while they are on', async () => {
     mount()
     type('ab')
