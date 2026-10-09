@@ -12,6 +12,7 @@ import {
 import { STRUCTURE_TEMPLATES, STRUCTURE_TEMPLATE_IDS, templateBeats } from '@shared/structure'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
+import { SceneCardView } from '@renderer/features/editor/SceneCardView'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useSummaryStore } from '@renderer/features/editor/summaryStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -376,6 +377,8 @@ function OutlineRow({
   const loadMeta = useSceneMetaStore((s) => s.load)
   const unloadMeta = useSceneMetaStore((s) => s.unload)
   const aiSummary = useSummaryStore((s) => s.byNode[id]?.summary?.summary ?? null)
+  // F-9.14: the scene card under the synopsis or summary.
+  const card = useSummaryStore((s) => s.byNode[id]?.card ?? null)
   const loadSummary = useSummaryStore((s) => s.load)
   const isDocument = node?.kind === 'document'
 
@@ -431,6 +434,7 @@ function OutlineRow({
           className="line-clamp-2 pl-4"
         />
       ) : null}
+      {card !== null ? <SceneCardView card={card} compact /> : null}
       {isDocument ? <PlanLinkLines id={id} fulfils={fulfils} /> : null}
     </li>
   )

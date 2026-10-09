@@ -5,6 +5,7 @@ import { docToText } from '@shared/docText'
 import { SUMMARY_TEXT_MIN, type StoredSceneSummary } from '@shared/summary'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
+import { SceneCardView } from './SceneCardView'
 import { useDocumentStore } from './documentStore'
 import { useSummaryStore } from './summaryStore'
 
@@ -17,7 +18,8 @@ const CHIP = 'rounded-full border border-line bg-surface-raised px-2 py-0.5 text
  * author stopped typing, behind a disclosure under the brief. Nothing to accept — a summary is
  * derived index data, not text offered to the manuscript — so the block only reads: the status
  * of the node's run, the summary with its key points and the characters present, and a
- * Summarize now button for the author who will not wait for the debounce. It shows for a
+ * Summarize now button for the author who will not wait for the debounce. F-9.14: the scene card
+ * (who, where, when, POV, what changed, threads) heads the section. It shows for a
  * manuscript document alone (`available`); front matter, end matter, and folders get no block.
  */
 export function SummaryBlock({ id }: { id: string }): React.JSX.Element | null {
@@ -100,6 +102,7 @@ export function SummaryBlock({ id }: { id: string }): React.JSX.Element | null {
               {`${state.error.message} ${state.error.nextStep}`.trim()}
             </p>
           ) : null}
+          {state.card ? <SceneCardView card={state.card} /> : null}
           {state.summary !== null ? (
             <SummaryBody summary={state.summary} />
           ) : state.error === null ? (

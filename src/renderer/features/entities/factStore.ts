@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Fact, FactStatus } from '@shared/facts'
+import type { Input } from '@shared/ipc/contract'
 import { ipc } from '@renderer/lib/ipc'
 
 /**
@@ -24,6 +25,13 @@ interface FactState {
   setHidden: (factIds: readonly string[], hidden: boolean) => Promise<void>
   /** Sets the status of the stored facts of one value (D7). Rejects with the first failure. */
   setStatus: (factIds: readonly string[], status: FactStatus) => Promise<void>
+  /**
+   * F-9.14: adds the author's relationship or thread event; the record (and a relationship's other
+   * record) is read again when held. Rejects with main's refusal.
+   */
+  create: (input: Input<'fact:create'>) => Promise<Fact>
+  /** F-9.14: deletes one of the author's relationships or thread events; rereads as above. */
+  remove: (id: string) => Promise<void>
   /** Opens the one `fact:changed` subscription (idempotent); call it where the project opens. */
   subscribe: () => void
 }
@@ -47,6 +55,15 @@ export const useFactStore = create<FactState>((set, get) => {
         [fact.entityId]: held.map((other) => (other.id === fact.id ? fact : other))
       }
     })
+  }
+
+  /** Reads again the held records a fact belongs to (both ends of a relationship). */
+  const reloadOwners = async (fact: Fact): Promise<void> => {
+    const owners =
+      fact.objectEntityId === null ? [fact.entityId] : [fact.entityId, fact.objectEntityId]
+    await Promise.all(
+      owners.filter((id) => get().byEntity[id] !== undefined).map((id) => get().load(id))
+    )
   }
 
   return {
@@ -83,6 +100,17 @@ export const useFactStore = create<FactState>((set, get) => {
         if (mine !== generation) return
         merge(fact)
       }
+    },
+
+    async create(input) {
+      const fact = await ipc().invoke('fact:create', input)
+      await reloadOwners(fact)
+      return fact
+    },
+
+    async remove(id) {
+      const fact = await ipc().invoke('fact:delete', { id })
+      await reloadOwners(fact)
     },
 
     subscribe() {

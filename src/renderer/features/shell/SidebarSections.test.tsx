@@ -1,11 +1,13 @@
+import { isValidElement } from 'react'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BookOpen, Sparkles, Tag, Users } from 'lucide-react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { BUILTIN_CATEGORIES, categoryFromInput } from '@shared/categories'
+import { ALL_BUILTIN_CATEGORIES, BUILTIN_CATEGORIES, categoryFromInput } from '@shared/categories'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { resetCategoryStore, useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { ThreadsTab } from '@renderer/features/threads/ThreadsTab'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetLayoutStore, useLayoutStore } from './layoutStore'
 import { SidebarSections } from './SidebarSections'
@@ -224,5 +226,17 @@ describe('buildSections (F-9.11)', () => {
     const bible = built.filter((s) => s.group === 'bible').map((s) => s.label)
     expect(bible.slice(-2)).toEqual(['Ships', 'c-gone'])
     expect(used(built)).toEqual(['manuscript', 'character', 'setting', 'c-ships', 'c-gone', 'tags'])
+  })
+
+  it('shows Threads after the library once it has a thread, through the Threads section (F-9.14)', () => {
+    const quiet = buildSections(ALL_BUILTIN_CATEGORIES, counts)
+    expect(quiet.find((s) => s.id === 'thread')).toMatchObject({ label: 'Threads', used: false })
+    const built = buildSections(ALL_BUILTIN_CATEGORIES, { ...counts, sheets: { thread: 2 } })
+    const threads = built.find((s) => s.id === 'thread')
+    expect(threads).toMatchObject({ used: true, count: 2, group: 'bible' })
+    const bible = built.filter((s) => s.group === 'bible').map((s) => s.id)
+    expect(bible.at(-1)).toBe('thread')
+    const panel = threads?.render('novel')
+    expect(isValidElement(panel) ? panel.type : null).toBe(ThreadsTab)
   })
 })

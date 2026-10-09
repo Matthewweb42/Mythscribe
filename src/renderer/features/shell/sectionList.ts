@@ -13,6 +13,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { ALWAYS_SHOWN_CATEGORIES, categoryOf, type StoryCategory } from '@shared/categories'
 import type { NovelFormat } from '@shared/ipc/contract'
 import type { SidebarToolId } from '@shared/sidebarTabs'
+import { THREAD_KIND } from '@shared/threads'
 import { ChangesTab } from '@renderer/features/changes/ChangesTab'
 import { useChangesStore } from '@renderer/features/changes/changesStore'
 import { EditPassTab } from '@renderer/features/editPass/EditPassTab'
@@ -28,6 +29,7 @@ import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { OutlineTab } from '@renderer/features/outline/OutlineTab'
 import { TagsTab } from '@renderer/features/tags/TagsTab'
 import { useTagStore } from '@renderer/features/tags/tagStore'
+import { ThreadsTab } from '@renderer/features/threads/ThreadsTab'
 import { TimelineTab } from '@renderer/features/timeline/TimelineTab'
 import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
 
@@ -157,7 +159,11 @@ function categorySection(category: StoryCategory, sheets: number): SidebarSectio
     group: 'bible',
     count: sheets,
     used: ALWAYS_SHOWN_CATEGORIES.includes(category.id) || sheets > 0,
-    render: () => createElement(EntityTab, { kind: category.id })
+    // F-9.14: the thread category is the Threads section, not a sheet list.
+    render: () =>
+      category.id === THREAD_KIND
+        ? createElement(ThreadsTab)
+        : createElement(EntityTab, { kind: category.id })
   }
 }
 

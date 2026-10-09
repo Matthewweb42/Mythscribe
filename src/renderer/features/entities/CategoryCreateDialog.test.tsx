@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  ALL_BUILTIN_CATEGORIES,
   BUILTIN_CATEGORIES,
   categoryFromInput,
   fieldLabelsOf,
@@ -61,7 +62,7 @@ afterEach(() => {
 
 describe('categoryStore (F-9.11)', () => {
   it('stands in with the library, loads the project’s list, renames in place, and clears', async () => {
-    expect(useCategoryStore.getState().categories).toBe(BUILTIN_CATEGORIES)
+    expect(useCategoryStore.getState().categories).toBe(ALL_BUILTIN_CATEGORIES)
     await useCategoryStore.getState().load()
     expect(getCategory('c-ships').name).toBe('Ships')
     await useCategoryStore.getState().update('setting', { name: 'Locations' })

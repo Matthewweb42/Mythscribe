@@ -37,6 +37,9 @@ import { describeError } from '@renderer/lib/errors'
 import { AsOfPicker, FieldFacts, HiddenFacts } from './SheetFacts'
 import { SceneRowButton } from './SceneRowButton'
 import { UsageLog } from './UsageLog'
+import { Relationships } from './Relationships'
+import { ThreadEvents } from '@renderer/features/threads/ThreadEvents'
+import { THREAD_KIND } from '@shared/threads'
 import { useEntityDraftStore } from './entityDraftStore'
 import { useEntityStore } from './entityStore'
 import { ENTITY_TEMPLATE_LABEL, inScenesLabel } from './entityView'
@@ -357,6 +360,18 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
         {entity.kind === 'character' || entity.kind === 'setting' ? (
           <UsageLog entity={entity} />
         ) : null}
+
+        {/* F-9.14: a thread's events, or any other sheet's relationships, as of the viewed scene. */}
+        {entity.kind === THREAD_KIND ? (
+          <ThreadEvents entity={entity} facts={facts} clock={clock} />
+        ) : (
+          <Relationships
+            entity={entity}
+            facts={facts}
+            position={positionOf(asOf, clock)}
+            clock={clock}
+          />
+        )}
 
         <HiddenFacts entity={entity} facts={facts} />
 

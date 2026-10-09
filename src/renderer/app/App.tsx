@@ -107,6 +107,9 @@ import {
 } from '@renderer/features/references/ReferencePanel'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
 import { GoalsDialog } from '@renderer/features/goals/GoalsDialog'
+import { ConversionDialog } from '@renderer/features/knowledge/ConversionDialog'
+import { useConversionStore } from '@renderer/features/knowledge/conversionStore'
+import { useThreadStore } from '@renderer/features/threads/threadStore'
 import { useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { ReplaceDialog } from '@renderer/features/search/ReplaceDialog'
 import { useReplaceStore } from '@renderer/features/search/replaceStore'
@@ -304,6 +307,9 @@ export function App(): React.JSX.Element {
       useFactStore.getState().clear()
       // F-9.13: the Changes log belongs to the project that closed.
       useChangesStore.getState().clear()
+      // F-9.14: and so do its threads and the conversion dialog.
+      useThreadStore.getState().clear()
+      useConversionStore.getState().clear()
       useReferenceStore.getState().clear()
       // F-10.3: the goals, and the dialog if it was open.
       useGoalsStore.getState().clear()
@@ -347,6 +353,9 @@ export function App(): React.JSX.Element {
     useFactStore.getState().subscribe()
     // F-9.13: the background reading logs what it applied; the Changes section lists it.
     useChangesStore.getState().subscribe()
+    // F-9.14: the threads follow the facts; main says when the conversion pass wants the author.
+    useThreadStore.getState().subscribe()
+    useConversionStore.getState().subscribe()
     useChangesStore
       .getState()
       .load()
@@ -1020,6 +1029,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <ReplaceDialog />
       {/* F-10.3: the Goals dialog, open while the goals store says so. */}
       <GoalsDialog />
+      {/* F-9.14: the conversion pass's cost and go-ahead, open while main says scenes wait. */}
+      <ConversionDialog />
     </>
   )
 }

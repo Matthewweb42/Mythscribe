@@ -5,6 +5,7 @@ import {
   FACT_STATUSES,
   FACT_STATUS_LABEL,
   FactStatus,
+  isFieldFact,
   type Fact,
   type FactValueAt,
   type SheetFieldAt
@@ -394,7 +395,10 @@ export function HiddenFacts({
   facts: readonly Fact[]
 }): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
-  const hidden = facts.filter((fact) => fact.hidden)
+  // F-9.14: relationships and thread events have their own blocks; only field facts list here.
+  const hidden = facts.filter(
+    (fact) => fact.hidden && fact.entityId === entity.id && isFieldFact(fact)
+  )
   if (hidden.length === 0) return null
   return (
     <div className="flex flex-col gap-1">
