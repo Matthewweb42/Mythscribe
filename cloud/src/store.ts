@@ -187,6 +187,12 @@ export interface OrderRefund {
 /** One paid order on the ledger (a `topup` with its order id), with what was refunded of it. */
 export interface OrderRow {
   orderId: string
+  /** What the top-up added to the balance: the configured price of its pack. */
+  creditedMicros: number
+  /**
+   * What the customer paid for it, pre-tax (0006): lower than the credit after a discount; the
+   * credit itself on a top-up that did not record it. A refund never returns more than this.
+   */
   paidMicros: number
   /** When the top-up landed (epoch ms): the refund window counts from here. */
   createdAt: number
@@ -316,10 +322,17 @@ export interface Store {
   /** Append one money row; `'duplicate'` when its idempotency key already landed (L8). */
   appendLedgerEntry(entry: LedgerEntryRow): Promise<'applied' | 'duplicate'>
   /**
+   * Credit a pack order's top-up with what the customer paid for it (`paidMicros`, pre-tax USD;
+   * null when the webhook did not say, which counts as the credit itself). `'duplicate'` on a
+   * replay (L8).
+   */
+  creditOrder(entry: LedgerEntryRow, paidMicros: number | null): Promise<'applied' | 'duplicate'>
+  /**
    * Refund (part of) an order: append the difference between `refundedMicros` (capped at what the
    * order added) and what was already refunded for the order, in one statement, and close a
-   * refund the app asked for that is still running for the order (its hold). `'duplicate'` when
-   * nothing is left to add.
+   * refund the app asked for that is still running for the order (its hold) — only when the
+   * order's refunds now cover it, so a replayed or smaller refund leaves it running.
+   * `'duplicate'` when nothing is left to add.
    */
   refundOrder(refund: OrderRefund): Promise<'applied' | 'duplicate'>
   /** The account's paid order `orderId` (its top-up), or null when it never landed. */
@@ -335,13 +348,14 @@ export interface Store {
   findStarterPurchase(userId: string): Promise<StarterPurchaseRow | null>
   /**
    * Record a starter order and credit it, in one transaction: the purchase row (one per account)
-   * and the top-up, which lands only when the purchase row is this order's.
+   * and the top-up (with what was paid, as in `creditOrder`), which lands only when the purchase
+   * row is this order's.
    */
-  creditStarter(entry: LedgerEntryRow): Promise<StarterCreditResult>
+  creditStarter(entry: LedgerEntryRow, paidMicros: number | null): Promise<StarterCreditResult>
   /**
    * Reserve a refund in one statement: placed only when the amount is at most the unused paid
    * balance (the ledger minus active holds minus granted money) and at most what is left of the
-   * order. One per account and order (`refund:<order id>`): a running or settled one is a
+   * order (what was paid for it, capped at its credit, minus its refunds). One per account and order (`refund:<order id>`): a running or settled one is a
    * duplicate; a released (failed) one is taken over.
    */
   placeRefundHold(hold: RefundHold, now: number): Promise<PlaceHoldResult>
@@ -416,6 +430,7 @@ interface RawUser {
 
 interface RawOrder {
   order_id: string
+  credited_micros: number
   paid_micros: number
   created_at: number
   refunded_micros: number
@@ -523,6 +538,7 @@ function toUser(row: RawUser | null): UserRow | null {
 function toOrder(row: RawOrder): OrderRow {
   return {
     orderId: row.order_id,
+    creditedMicros: row.credited_micros,
     paidMicros: row.paid_micros,
     createdAt: row.created_at,
     refundedMicros: row.refunded_micros
@@ -681,12 +697,24 @@ const TAKE_OVER_HOLD = `
 const GRANTED = `(SELECT COALESCE(SUM(amount_micros), 0) FROM ledger_entries
   WHERE user_id = ?2 AND (type = 'trial_grant' OR (type = 'adjustment' AND amount_micros > 0)))`
 
-/** What is left of order `?9` for account `?2`: its top-up minus its refunds. */
+/**
+ * What a top-up row may be refunded from the app: what was paid for it (0006, pre-tax), never more
+ * than it credited; the credit itself on a row that did not record a payment.
+ */
+const REFUND_CAP = 'MIN(COALESCE(paid_micros, amount_micros), amount_micros)'
+
+/** What order `?9` of account `?2` had refunded so far (positive micro-USD). */
+const ORDER_REFUNDED = `(SELECT COALESCE(-SUM(amount_micros), 0) FROM ledger_entries
+  WHERE user_id = ?2 AND order_id = ?9 AND type = 'refund')`
+
+/**
+ * What is left to refund of order `?9` for account `?2`: what was paid for its top-up (capped at
+ * the credit) minus its refunds.
+ */
 const ORDER_LEFT = `(
-  (SELECT COALESCE(SUM(amount_micros), 0) FROM ledger_entries
+  (SELECT COALESCE(SUM(${REFUND_CAP}), 0) FROM ledger_entries
     WHERE user_id = ?2 AND order_id = ?9 AND type = 'topup')
-  + (SELECT COALESCE(SUM(amount_micros), 0) FROM ledger_entries
-    WHERE user_id = ?2 AND order_id = ?9 AND type = 'refund')
+  - ${ORDER_REFUNDED}
 )`
 
 /**
@@ -698,19 +726,24 @@ const ORDER_LEFT = `(
  */
 const REFUND_LIMITS = `${AVAILABLE} - ${GRANTED} >= ?7 AND ${ORDER_LEFT} >= ?7`
 
+/**
+ * Both also record what the order had refunded at that moment (`refund_base_micros`), read in the
+ * same statement, so `SETTLE_REFUND_HOLD` can tell a refund covering this hold from an earlier one.
+ */
 const PLACE_REFUND_HOLD = `
   INSERT INTO holds
     (id, user_id, idempotency_key, request_id, feature, model, amount_micros,
      input_micros_per_m, output_micros_per_m, cached_micros_per_m, markup_bps,
-     status, created_at, expires_at)
-  SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, NULL, 0, 'active', ?12, ?13
+     status, created_at, expires_at, refund_base_micros)
+  SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, NULL, 0, 'active', ?12, ?13, ${ORDER_REFUNDED}
   WHERE ${REFUND_LIMITS}
   ON CONFLICT (user_id, idempotency_key) DO NOTHING`
 
 const TAKE_OVER_REFUND_HOLD = `
   UPDATE holds
      SET request_id = ?4, amount_micros = ?7, status = 'active', created_at = ?12,
-         expires_at = ?13, closed_at = NULL, charge_micros = NULL
+         expires_at = ?13, closed_at = NULL, charge_micros = NULL,
+         refund_base_micros = ${ORDER_REFUNDED}
    WHERE user_id = ?2 AND idempotency_key = ?3 AND status = 'released' AND id <> ?1
      AND ${REFUND_LIMITS}`
 
@@ -742,13 +775,23 @@ function refundParams(refund: OrderRefund): SqlValue[] {
   ]
 }
 
-/** Close the running refund hold of order ?3 for account ?2 as done (the refund landed). */
+/**
+ * Close the running refund hold (key ?3) of order ?4 for account ?2 as done (the refund landed),
+ * only when the order's refunds now reach what it had refunded when the hold was placed plus the
+ * hold: a replayed refund, or a smaller one an operator made, is not this refund and leaves the
+ * hold running. Compared by amount, not time, so a refund in the same millisecond as the hold
+ * cannot pass for it.
+ */
 const SETTLE_REFUND_HOLD = `
   UPDATE holds SET status = 'settled', closed_at = ?1, charge_micros = amount_micros
-   WHERE user_id = ?2 AND idempotency_key = ?3 AND status = 'active'`
+   WHERE user_id = ?2 AND idempotency_key = ?3 AND status = 'active'
+     AND COALESCE(holds.refund_base_micros, 0) + holds.amount_micros <=
+         (SELECT COALESCE(-SUM(r.amount_micros), 0) FROM ledger_entries r
+           WHERE r.user_id = ?2 AND r.order_id = ?4 AND r.type = 'refund')`
 
 const ORDER_COLUMNS = `
-  t.order_id AS order_id, t.amount_micros AS paid_micros, t.created_at AS created_at,
+  t.order_id AS order_id, t.amount_micros AS credited_micros,
+  COALESCE(t.paid_micros, t.amount_micros) AS paid_micros, t.created_at AS created_at,
   (SELECT COALESCE(-SUM(r.amount_micros), 0) FROM ledger_entries r
     WHERE r.user_id = t.user_id AND r.order_id = t.order_id AND r.type = 'refund')
     AS refunded_micros`
@@ -758,6 +801,17 @@ const INSERT_LEDGER_ENTRY = `
     (id, user_id, type, amount_micros, idempotency_key, created_at, order_id, request_id,
      feature, model, tokens_in, tokens_out, tokens_cached, provider_cost_micros, markup_bps)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT (idempotency_key) DO NOTHING`
+
+/** The column list of an order's top-up: a ledger row plus what was paid for it (0006). */
+const TOPUP_COLUMNS = `
+  (id, user_id, type, amount_micros, idempotency_key, created_at, order_id, request_id,
+   feature, model, tokens_in, tokens_out, tokens_cached, provider_cost_micros, markup_bps,
+   paid_micros)`
+
+const INSERT_TOPUP = `
+  INSERT INTO ledger_entries ${TOPUP_COLUMNS}
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT (idempotency_key) DO NOTHING`
 
 function ledgerParams(entry: LedgerEntryRow): SqlValue[] {
@@ -980,13 +1034,14 @@ export function d1Store(db: SqlDatabase): Store {
     async refundOrder(refund: OrderRefund): Promise<'applied' | 'duplicate'> {
       // The amount is computed in the statement from what the order already had refunded, so a
       // second delivery of a larger cumulative refund adds only the difference. A refund the app
-      // asked for that is still running for this order is the same money: its hold closes here,
-      // so the amount is not counted twice (once refunded, once held) until the hold expires.
+      // asked for that is still running for this order is the same money once the order's refunds
+      // cover it: its hold closes here, so the amount is not counted twice (once refunded, once
+      // held) until the hold expires. A refund that does not cover it leaves it running.
       const [inserted] = await db.batch([
         db.prepare(REFUND_ORDER).bind(...refundParams(refund)),
         db
           .prepare(SETTLE_REFUND_HOLD)
-          .bind(refund.createdAt, refund.userId, refundHoldKey(refund.orderId))
+          .bind(refund.createdAt, refund.userId, refundHoldKey(refund.orderId), refund.orderId)
       ])
       return (inserted?.meta.changes ?? 0) > 0 ? 'applied' : 'duplicate'
     },
@@ -1033,7 +1088,21 @@ export function d1Store(db: SqlDatabase): Store {
       return row ? { orderId: row.order_id, purchasedAt: row.purchased_at } : null
     },
 
-    async creditStarter(entry: LedgerEntryRow): Promise<StarterCreditResult> {
+    async creditOrder(
+      entry: LedgerEntryRow,
+      paidMicros: number | null
+    ): Promise<'applied' | 'duplicate'> {
+      const result = await db
+        .prepare(INSERT_TOPUP)
+        .bind(...ledgerParams(entry), paidMicros)
+        .run()
+      return result.meta.changes > 0 ? 'applied' : 'duplicate'
+    },
+
+    async creditStarter(
+      entry: LedgerEntryRow,
+      paidMicros: number | null
+    ): Promise<StarterCreditResult> {
       if (entry.orderId === null) throw new Error('A starter top-up needs its order id')
       // One transaction: claim the account's one starter purchase for this order (a no-op when
       // it already has one, from this order or another), then credit only if the claim is this
@@ -1047,15 +1116,12 @@ export function d1Store(db: SqlDatabase): Store {
           .bind(entry.userId, entry.orderId, entry.createdAt),
         db
           .prepare(
-            `INSERT INTO ledger_entries
-               (id, user_id, type, amount_micros, idempotency_key, created_at, order_id,
-                request_id, feature, model, tokens_in, tokens_out, tokens_cached,
-                provider_cost_micros, markup_bps)
-             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            `INSERT INTO ledger_entries ${TOPUP_COLUMNS}
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
               WHERE EXISTS (SELECT 1 FROM starter_purchases WHERE user_id = ? AND order_id = ?)
              ON CONFLICT (idempotency_key) DO NOTHING`
           )
-          .bind(...ledgerParams(entry), entry.userId, entry.orderId),
+          .bind(...ledgerParams(entry), paidMicros, entry.userId, entry.orderId),
         db.prepare('SELECT order_id FROM starter_purchases WHERE user_id = ?').bind(entry.userId)
       ])
       const owner = (claim?.results[0] as { order_id: string } | undefined)?.order_id

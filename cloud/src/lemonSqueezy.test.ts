@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type FetchFn, lemonSqueezyApi } from './lemonSqueezy'
+import { type FetchFn, lemonSqueezyApi, REFUND_TIMEOUT_MS } from './lemonSqueezy'
 
 /**
  * The Lemon Squeezy refund call over an injected `fetch`: the request it sends (docs:
@@ -67,5 +67,22 @@ describe('lemonSqueezyApi.refundOrder', () => {
         recording(() => Promise.reject(new TypeError('network down'))).fetchFn
       ).refundOrder('1', 1)
     ).toEqual({ status: 'unknown' })
+  })
+
+  it('gives up before the app does: 12 s, under its 15 s request timeout', () => {
+    // `CLOUD_REQUEST_TIMEOUT_MS` in src/main/account/cloudAuthClient.ts; the Worker must answer
+    // "not confirmed yet" before the app stops waiting for it.
+    expect(REFUND_TIMEOUT_MS).toBe(12_000)
+    expect(REFUND_TIMEOUT_MS).toBeLessThan(15_000)
+  })
+
+  it('reads a call that outlives the timeout as unknown', async () => {
+    const hanging: FetchFn = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+      })
+    expect(await lemonSqueezyApi('k', hanging, 5).refundOrder('1', 1)).toEqual({
+      status: 'unknown'
+    })
   })
 })

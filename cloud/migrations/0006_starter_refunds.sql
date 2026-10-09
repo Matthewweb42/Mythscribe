@@ -20,3 +20,15 @@ CREATE TABLE starter_purchases (
 
 -- Paid orders and their refunds are read per account and order (refund limits, `/credits`).
 CREATE INDEX ledger_entries_user_order ON ledger_entries (user_id, order_id, type);
+
+-- What the customer paid for a top-up's order, in micro-USD before tax (Lemon Squeezy's
+-- `total_usd - tax_usd`, so a discount lowers it and tax is never counted). A refund from the app
+-- never returns more than this, even when the balance was credited the full configured price.
+-- NULL on rows from before this column (and on a webhook without the amount): the credit itself.
+ALTER TABLE ledger_entries ADD COLUMN paid_micros INTEGER CHECK (paid_micros IS NULL OR paid_micros >= 0);
+
+-- A refund hold (key 'refund:<order id>') remembers how much of its order was already refunded when
+-- it was placed, so a refund webhook closes it only when the order's refunds reach that plus the
+-- hold: a replayed or smaller refund (an operator's partial one) does not close a refund still
+-- running. NULL on a request's hold.
+ALTER TABLE holds ADD COLUMN refund_base_micros INTEGER;

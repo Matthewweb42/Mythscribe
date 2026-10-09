@@ -181,9 +181,17 @@ async function unusedPaidMicros(deps: CreditsDeps, userId: string, now: number):
   return balance.ledgerMicros - balance.heldMicros - granted
 }
 
+/**
+ * The most a refund of `order` may ever return: what the customer paid for it (pre-tax), never
+ * more than it credited. A discounted order refunds at most its discounted price.
+ */
+function refundCap(order: OrderRow): number {
+  return Math.min(order.paidMicros, order.creditedMicros)
+}
+
 /** What refunding `order` would return now: the unused paid balance, capped at what is left of it. */
 function refundableNow(order: OrderRow, unusedMicros: number): number {
-  return floorToCents(Math.min(unusedMicros, order.paidMicros - order.refundedMicros))
+  return floorToCents(Math.min(unusedMicros, refundCap(order) - order.refundedMicros))
 }
 
 /** The purchases still inside the refund window that are not fully refunded, newest first. */
@@ -199,14 +207,15 @@ async function refundableOrders(
   const unused = await unusedPaidMicros(deps, userId, now)
   const out: RefundableOrder[] = []
   for (const order of orders) {
-    if (order.refundedMicros >= order.paidMicros) continue
+    // Nothing left to refund: refunded in full, or nothing was paid (a 100 % discount).
+    if (order.refundedMicros >= refundCap(order)) continue
     const hold = await deps.store.findRefundHold(userId, order.orderId)
     // One self-serve refund per purchase: a settled one is done.
     if (hold?.status === 'settled') continue
     const pending = hold?.status === 'active' && hold.expiresAt > now
     out.push({
       orderId: order.orderId,
-      paidMicros: order.paidMicros,
+      paidMicros: refundCap(order),
       purchasedAt: order.createdAt,
       refundUntil: order.createdAt + windowMs,
       refundableMicros: pending ? 0 : refundableNow(order, unused),
@@ -404,6 +413,12 @@ const LemonSqueezyEvent = z.looseObject({
       refunded_at: z.string().nullish(),
       /** Cents refunded so far on the order (cumulative); absent means the whole order. */
       refunded_amount: z.number().int().nonnegative().nullish(),
+      /**
+       * What the customer was charged, in US cents, and the tax in it (order_created). A refund
+       * of the balance is capped at `total_usd - tax_usd`: the discounted, pre-tax price.
+       */
+      total_usd: z.number().int().nonnegative().nullish(),
+      tax_usd: z.number().int().nonnegative().nullish(),
       first_order_item: z
         .looseObject({
           // Lemon Squeezy sends the variant id as a number; the config keeps it as a string.
@@ -439,6 +454,17 @@ function eventTime(event: LemonSqueezyEvent, kind: 'purchase' | 'refund'): numbe
   if (!stamp) return null
   const at = Date.parse(stamp)
   return Number.isNaN(at) ? null : at
+}
+
+/**
+ * What the customer paid for an order before tax, in micro-USD: `total_usd - tax_usd` (a discount
+ * already lowered `total_usd`; tax is the government's, never balance). Null when the event does
+ * not carry `total_usd`, which caps a refund at the credit as before 0006.
+ */
+function paidPreTaxMicros(event: LemonSqueezyEvent): number | null {
+  const { total_usd: total, tax_usd: tax } = event.data.attributes
+  if (total === null || total === undefined) return null
+  return Math.max(0, total - (tax ?? 0)) * MICROS_PER_CENT
 }
 
 /**
@@ -541,8 +567,8 @@ export async function handleLemonSqueezyWebhook(
     )
   }
 
-  // The configured price is the truth for the amount, so currency, discounts, and tax on the
-  // order never reach the balance.
+  // The configured price is the truth for the credit, so currency, discounts, and tax on the
+  // order never reach the balance. What was paid is kept beside it: a refund never returns more.
   const topup = plainEntry({
     id: deps.random(TOKEN_BYTES),
     userId: user.id,
@@ -552,12 +578,14 @@ export async function handleLemonSqueezyWebhook(
     createdAt: now,
     orderId
   })
-  if (variant.kind === 'pack') return webhookDone(await deps.store.appendLedgerEntry(topup))
+  const paidMicros = paidPreTaxMicros(event)
+  if (variant.kind === 'pack') return webhookDone(await deps.store.creditOrder(topup, paidMicros))
 
   // The starter: one per account ever, verified email only. The buy link is public, so an order
   // can arrive that the checkout would have refused; it is not credited, and it is refunded in
   // full when the API key is set (otherwise the operator refunds it by hand).
-  const result = user.emailVerifiedAt === null ? 'refused' : await deps.store.creditStarter(topup)
+  const result =
+    user.emailVerifiedAt === null ? 'refused' : await deps.store.creditStarter(topup, paidMicros)
   if (result !== 'refused') return webhookDone(result)
   const why = user.emailVerifiedAt === null ? 'unverified email' : 'starter already bought'
   if (deps.lemonSqueezy === null) {

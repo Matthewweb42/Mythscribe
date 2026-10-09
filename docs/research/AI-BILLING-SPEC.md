@@ -214,7 +214,13 @@ Ask the project owner before implementing anything that depends on these:
 
 - Refunds return only the **unused balance**, within **30 days** of each purchase ("30 days for everything": every
   pack, the starter included), self-serve from the billing screen. Never more than the available balance, and never
-  more than that order's amount.
+  more than what the customer paid for that order: its pre-tax price after any discount (Lemon Squeezy's
+  `total_usd - tax_usd`, recorded on the top-up), capped at the configured pack price (decided by Claude 2026-10-08,
+  unconfirmed). A discounted pack still credits the full configured amount; the discount part is spendable, never
+  refundable.
+- A refund the provider has not confirmed yet stays held; a refund webhook closes it only when the order's refunds
+  reach what was refunded before the hold plus the hold, so a replayed or smaller refund never counts as this one.
+  The Worker waits 12 s for the provider, under the app's 15 s request timeout.
 - The refund request is idempotent and **holds** the amount (the existing holds table) before the payment provider is
   called, so it cannot be spent mid-refund.
 - Refunds and disputes that start on the provider's side arrive by webhook and debit the ledger once (idempotent by

@@ -169,7 +169,10 @@ it by hand); its `order_refunded` then finds no top-up and is ignored.
 2. Inside `refund_window_days` of the top-up (inclusive), else `NOT_ELIGIBLE`.
 3. Amount = min(unused paid balance, what is left of the order), rounded **down** to whole cents, where unused paid
    balance = ledger sum − active holds − money given rather than paid (trial grants and positive adjustments:
-   spending counts against paid money first) and what is left = the order's top-up − its refunds. 0 is `NOT_ELIGIBLE`.
+   spending counts against paid money first) and what is left = what was paid for the order − its refunds. What was
+   paid is `ledger_entries.paid_micros`, recorded from `order_created` as `total_usd − tax_usd` (after discounts,
+   before tax), capped at the top-up; NULL (an event without `total_usd`) counts as the top-up. A discounted pack
+   credits the full pack price, but only the discounted price is refundable. 0 is `NOT_ELIGIBLE`.
 4. **Hold** it (`holds`, key `refund:<order id>`, feature `refund`) in one statement whose `WHERE` re-checks both
    limits, so no spend and no other refund can slip between the check and the hold; a short balance is `NOT_ELIGIBLE`
    ("your balance changed"). The hold lasts `REFUND_HOLD_MS` (24 h).
@@ -177,10 +180,13 @@ it by hand); its `order_refunded` then finds no top-up and is ignored.
    `order_refunded:<order>:<cumulative cents>`, the webhook's own key, amount computed in SQL from the order's
    refunds and capped at its top-up) and settles the hold (`charge_micros` = the amount). **Refused (4xx):** the hold
    is released, nothing is taken off, a retry may run. **No answer (5xx, timeout):** the hold stays — the money may
-   have left — until the webhook says what happened or the hold expires.
+   have left — until the webhook says what happened or the hold expires. The call times out after 12 s, under the
+   app's own 15 s request timeout.
 6. Lemon Squeezy then sends `order_refunded` with the cumulative amount: its key (or the cumulative arithmetic)
    matches the row already written, so it adds nothing; landing first, it writes the row and closes the running
-   hold, and the app's own write then adds nothing.
+   hold, and the app's own write then adds nothing. It closes the hold only when the order's refunds reach what it
+   had refunded when the hold was placed (`holds.refund_base_micros`) plus the hold: a replayed or smaller refund
+   (an operator's partial one) leaves the app's refund running.
 
 **Provider-side refunds and disputes** (`order_refunded`): debit the order's cumulative refunded amount minus what
 was already refunded, capped at the order's top-up, once per order and amount; an order that never added balance is

@@ -198,6 +198,9 @@ interface OrderOptions {
   variantId?: string
   /** Cents refunded so far on the order (cumulative); absent means the whole order. */
   refundedAmount?: number
+  /** What the customer was charged in US cents, and the tax in it; absent on older payloads. */
+  totalUsd?: number
+  taxUsd?: number
 }
 
 /** A signed Lemon Squeezy order event, as the webhook receives it. */
@@ -206,7 +209,9 @@ async function webhook({
   id = 'order-1',
   userId = USER_ID,
   variantId = '111',
-  refundedAmount
+  refundedAmount,
+  totalUsd,
+  taxUsd
 }: OrderOptions = {}): Promise<string> {
   const stamp = new Date(clock).toISOString()
   const body = JSON.stringify({
@@ -220,6 +225,8 @@ async function webhook({
         updated_at: stamp,
         refunded_at: event === 'order_refunded' ? stamp : null,
         ...(refundedAmount === undefined ? {} : { refunded_amount: refundedAmount }),
+        ...(totalUsd === undefined ? {} : { total_usd: totalUsd }),
+        ...(taxUsd === undefined ? {} : { tax_usd: taxUsd }),
         first_order_item: { variant_id: Number(variantId) }
       }
     }
@@ -680,5 +687,129 @@ describe('GET /credits: refundable purchases', () => {
     await webhook()
     expect((await credits()).refunds).toEqual([])
     await expectError(await refund('order-1'), 'NOT_ELIGIBLE')
+  })
+})
+
+describe('verifier: a refund webhook that does not cover a running self-serve refund', () => {
+  it('keeps the self-serve hold when a replayed earlier refund lands while Lemon Squeezy has not answered', async () => {
+    await webhook()
+    // The operator refunded $2 by hand; its webhook landed.
+    expect(await webhook({ event: 'order_refunded', refundedAmount: 200 })).toBe('applied')
+    lemon.outcome = { status: 'unknown' }
+    lemon.during = async () => {
+      // Lemon Squeezy redelivers that same $2 event while the app's $8 refund is in flight.
+      expect(await webhook({ event: 'order_refunded', refundedAmount: 200 })).toBe('duplicate')
+    }
+    await expectError(await refund('order-1'), 'UPSTREAM')
+    // The $8 may have been refunded: it must stay held until a webhook covering it arrives.
+    expect(await available()).toBe(0)
+    expect((await store.holds())[0]?.status).toBe('active')
+  })
+
+  it('does not report a refused self-serve refund as done after a replayed earlier refund', async () => {
+    await webhook()
+    expect(await webhook({ event: 'order_refunded', refundedAmount: 200 })).toBe('applied')
+    lemon.outcome = { status: 'refused', httpStatus: 422 }
+    lemon.during = async () => {
+      expect(await webhook({ event: 'order_refunded', refundedAmount: 200 })).toBe('duplicate')
+    }
+    await expectError(await refund('order-1'), 'UPSTREAM')
+    expect(await refundRows()).toEqual([-2 * USD])
+    // Nothing of the $8 left the account, so a retry must reach Lemon Squeezy again rather than
+    // answer "refunded $8".
+    lemon.outcome = { status: 'refunded' }
+    lemon.during = null
+    expect((await refunded(await refund('order-1'))).refundedMicros).toBe(8 * USD)
+    expect(lemon.calls).toHaveLength(2)
+  })
+
+  it('debits once when the webhook lands after the sweep released an unanswered refund hold', async () => {
+    await webhook()
+    await spend(3 * USD)
+    lemon.outcome = { status: 'unknown' }
+    await expectError(await refund('order-1'), 'UPSTREAM')
+    clock += REFUND_HOLD_MS
+    expect(await store.releaseExpiredHolds(clock)).toBe(1)
+    expect(await available()).toBe(7 * USD)
+    expect(await webhook({ event: 'order_refunded', refundedAmount: 700 })).toBe('applied')
+    expect(await webhook({ event: 'order_refunded', refundedAmount: 700 })).toBe('duplicate')
+    expect(await refundRows()).toEqual([-7 * USD])
+    expect(await available()).toBe(0)
+    await expectError(await refund('order-1'), 'NOT_ELIGIBLE')
+  })
+})
+
+describe('refunds never return more than the customer paid for the order', () => {
+  it('refunds a discounted order at most its discounted price, though it credited the full pack', async () => {
+    await webhook({ totalUsd: 800, taxUsd: 0 })
+    expect(await available()).toBe(10 * USD)
+    expect((await credits()).refunds[0]).toMatchObject({
+      paidMicros: 8 * USD,
+      refundableMicros: 8 * USD
+    })
+    expect((await refunded(await refund('order-1'))).refundedMicros).toBe(8 * USD)
+    expect(lemon.calls).toEqual([{ orderId: 'order-1', amountCents: 800 }])
+    // The $2 the discount gave stays spendable and is never refundable.
+    expect(await available()).toBe(2 * USD)
+    expect((await credits()).refunds).toEqual([])
+    // A repeat answers the first result and asks Lemon Squeezy for nothing more.
+    expect((await refunded(await refund('order-1'))).refundedMicros).toBe(8 * USD)
+    expect(lemon.calls).toHaveLength(1)
+  })
+
+  it('caps at the pre-tax price: the tax in the total is never refunded as balance', async () => {
+    await webhook({ totalUsd: 1210, taxUsd: 210 })
+    expect((await refunded(await refund('order-1'))).refundedMicros).toBe(10 * USD)
+    expect(lemon.calls).toEqual([{ orderId: 'order-1', amountCents: 1000 }])
+  })
+
+  it('refunds nothing of an order a 100 % discount made free', async () => {
+    await webhook({ totalUsd: 0, taxUsd: 0 })
+    expect(await available()).toBe(10 * USD)
+    expect((await credits()).refunds).toEqual([])
+    await expectError(await refund('order-1'), 'NOT_ELIGIBLE')
+    expect(lemon.calls).toEqual([])
+  })
+
+  it('caps a discounted refund after spending at what is left of the paid price', async () => {
+    await webhook({ totalUsd: 800, taxUsd: 0 })
+    await spend(1 * USD)
+    // Unused balance $9, paid $8: the refund is $8, never the $9.
+    expect((await refunded(await refund('order-1'))).refundedMicros).toBe(8 * USD)
+  })
+
+  it('caps at the credit when the order event carries no amount (as before)', async () => {
+    await webhook()
+    expect((await refunded(await refund('order-1'))).refundedMicros).toBe(10 * USD)
+  })
+})
+
+describe('a refund webhook closes a running self-serve refund only when it covers it', () => {
+  it('settles the hold once a later webhook covers the earlier refunds plus the hold', async () => {
+    await webhook()
+    expect(await webhook({ event: 'order_refunded', refundedAmount: 200 })).toBe('applied')
+    lemon.outcome = { status: 'unknown' }
+    await expectError(await refund('order-1'), 'UPSTREAM')
+    // An operator refund of $1 more lands first: $3 refunded, the $8 hold still running.
+    expect(await webhook({ event: 'order_refunded', refundedAmount: 300 })).toBe('applied')
+    expect((await store.holds())[0]?.status).toBe('active')
+    // Then the app's $8 shows up in the cumulative: the order is refunded in full, the hold closes.
+    expect(await webhook({ event: 'order_refunded', refundedAmount: 1000 })).toBe('applied')
+    expect((await store.holds())[0]?.status).toBe('settled')
+    expect(await refundRows()).toEqual([-2 * USD, -1 * USD, -7 * USD])
+    expect(await available()).toBe(0)
+  })
+
+  it('does not settle on a webhook in the same millisecond that predates the hold', async () => {
+    await webhook()
+    // Same clock for the earlier refund, the hold, and the replay: timing cannot tell them apart.
+    expect(await webhook({ event: 'order_refunded', refundedAmount: 500 })).toBe('applied')
+    lemon.outcome = { status: 'unknown' }
+    lemon.during = async () => {
+      expect(await webhook({ event: 'order_refunded', refundedAmount: 500 })).toBe('duplicate')
+    }
+    await expectError(await refund('order-1'), 'UPSTREAM')
+    expect((await store.holds())[0]).toMatchObject({ status: 'active', amountMicros: 5 * USD })
+    expect(await available()).toBe(0)
   })
 })

@@ -194,11 +194,30 @@ describe('migration 0006 (starter pack, refunds)', () => {
         createdAt: NOW,
         orderId
       })
-    expect(await store.creditStarter(starter('o1'))).toBe('applied')
-    expect(await store.creditStarter(starter('o1'))).toBe('duplicate')
-    expect(await store.creditStarter(starter('o2'))).toBe('refused')
+    expect(await store.creditStarter(starter('o1'), null)).toBe('applied')
+    expect(await store.creditStarter(starter('o1'), null)).toBe('duplicate')
+    expect(await store.creditStarter(starter('o2'), null)).toBe('refused')
     expect(await available()).toBe(5_000_000)
     expect(await store.findStarterPurchase(USER)).toEqual({ orderId: 'o1', purchasedAt: NOW })
+  })
+
+  it('keeps what was paid for an order beside its credit; an unrecorded payment is the credit', async () => {
+    const order = (orderId: string): LedgerEntryRow => ({
+      ...topup(10_000_000, `order_created:${orderId}`),
+      id: `t-${orderId}`,
+      orderId
+    })
+    expect(await store.creditOrder(order('paid'), 8_000_000)).toBe('applied')
+    expect(await store.creditOrder(order('paid'), 8_000_000)).toBe('duplicate')
+    expect(await store.creditOrder(order('legacy'), null)).toBe('applied')
+    expect(await store.findOrder(USER, 'paid')).toMatchObject({
+      creditedMicros: 10_000_000,
+      paidMicros: 8_000_000
+    })
+    expect(await store.findOrder(USER, 'legacy')).toMatchObject({
+      creditedMicros: 10_000_000,
+      paidMicros: 10_000_000
+    })
   })
 
   it('caps a refund at what its order added, and refunds nothing for an order never paid', async () => {

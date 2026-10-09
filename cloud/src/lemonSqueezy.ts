@@ -9,8 +9,12 @@
 
 export const LEMONSQUEEZY_API_URL = 'https://api.lemonsqueezy.com/v1'
 
-/** How long the Worker waits for Lemon Squeezy before it treats the outcome as unknown. */
-const REFUND_TIMEOUT_MS = 20_000
+/**
+ * How long the Worker waits for Lemon Squeezy before it treats the outcome as unknown. Below the
+ * app's own 15 s request timeout (`CLOUD_REQUEST_TIMEOUT_MS`), so the app hears the Worker's
+ * answer ("not confirmed yet") instead of giving up on a refund that may have gone through.
+ */
+export const REFUND_TIMEOUT_MS = 12_000
 
 /**
  * What became of a refund call: `refunded` (2xx), `refused` (a 4xx: Lemon Squeezy definitely did
@@ -30,7 +34,8 @@ export type FetchFn = (input: string, init: RequestInit) => Promise<Response>
 
 export function lemonSqueezyApi(
   apiKey: string,
-  fetchFn: FetchFn = (input, init) => fetch(input, init)
+  fetchFn: FetchFn = (input, init) => fetch(input, init),
+  timeoutMs: number = REFUND_TIMEOUT_MS
 ): LemonSqueezyApi {
   return {
     async refundOrder(orderId, amountCents) {
@@ -53,7 +58,7 @@ export function lemonSqueezyApi(
               Authorization: `Bearer ${apiKey}`
             },
             body: JSON.stringify(body),
-            signal: AbortSignal.timeout(REFUND_TIMEOUT_MS)
+            signal: AbortSignal.timeout(timeoutMs)
           }
         )
       } catch {
