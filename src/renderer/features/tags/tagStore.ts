@@ -58,6 +58,8 @@ interface TagState {
    * usage count moves without re-listing; a changed name re-sorts. No IPC call: the caller made one.
    */
   merge: (tag: Tag) => void
+  /** F-9.13: drops tags main already deleted (an Undo in Changes). */
+  forget: (ids: readonly string[]) => void
   /**
    * Opens the one `tag:changed` subscription (idempotent); call it where the project opens.
    * Main emits it for a tag something other than a `tag:*` call created or renamed (F-9.4: an
@@ -139,6 +141,11 @@ export const useTagStore = create<TagState>((set, get) => ({
     await ipc().invoke('tag:delete', { id })
     if (mine !== generation) return
     set(dropTags(get(), new Set([id])))
+  },
+
+  forget(ids) {
+    const gone = new Set(ids.filter((id) => get().byId[id] !== undefined))
+    if (gone.size > 0) set(dropTags(get(), gone))
   },
 
   merge(tag) {

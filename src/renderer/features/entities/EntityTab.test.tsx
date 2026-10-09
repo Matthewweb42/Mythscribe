@@ -35,6 +35,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
           tagId: null,
           aliases: [],
           origin: 'author',
+          status: 'canon',
           created: '2026-09-12T08:00:00.000Z',
           modified: '2026-09-12T08:00:00.000Z'
         }

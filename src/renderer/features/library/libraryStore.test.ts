@@ -43,6 +43,7 @@ const tomas: Entity = {
   tagId: 't1',
   aliases: [],
   origin: 'author',
+  status: 'canon',
   created: '2026-10-07T09:00:00.000Z',
   modified: '2026-10-07T09:00:00.000Z'
 }

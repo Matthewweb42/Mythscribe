@@ -73,6 +73,8 @@ interface EntityState {
   makeRecord: (tagId: string) => Promise<Entity>
   /** Upserts a row main pushed (`entity:changed`, F-5.16); a new or renamed one re-sorts. No IPC call. */
   merge: (entity: Entity) => void
+  /** F-9.13: drops sheets main already deleted (an Undo in Changes); the open page closes. */
+  forget: (ids: readonly string[]) => void
   /**
    * Opens the one `entity:changed` subscription (idempotent); call it where the project opens.
    * Main emits it for an entity something other than an `entity:*` call created (F-5.16: the
@@ -264,6 +266,19 @@ export const useEntityStore = create<EntityState>((set, get) => ({
       useTagStore.getState().merge(tag)
     }
     return entity
+  },
+
+  forget(ids) {
+    const gone = new Set(ids.filter((id) => get().byId[id] !== undefined))
+    if (gone.size === 0) return
+    const byId = { ...get().byId }
+    for (const id of gone) delete byId[id]
+    const selectedId = get().selectedId
+    set({
+      byId,
+      ids: get().ids.filter((other) => !gone.has(other)),
+      selectedId: selectedId !== null && gone.has(selectedId) ? null : selectedId
+    })
   },
 
   merge(entity) {

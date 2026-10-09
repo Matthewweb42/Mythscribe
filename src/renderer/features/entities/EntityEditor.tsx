@@ -12,6 +12,13 @@ import {
   type EntityTemplate
 } from '@shared/entities'
 import { categoryOf } from '@shared/categories'
+import {
+  FACT_STATUSES,
+  FACT_STATUS_LABEL,
+  FactStatus,
+  sheetAt,
+  type SheetFieldAt
+} from '@shared/facts'
 import type { Entity } from '@shared/ipc/contract'
 import { useCategoryStore } from './categoryStore'
 import { parseYear } from '@shared/timeline'
@@ -27,12 +34,13 @@ import { sceneRowsForTag } from '@renderer/features/tags/tagUsage'
 import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { agesOnTimeline, ageText } from '@renderer/features/timeline/timelineView'
 import { describeError } from '@renderer/lib/errors'
-import { ObservedFacts } from './ObservedFacts'
+import { AsOfPicker, FieldFacts, HiddenFacts } from './SheetFacts'
 import { SceneRowButton } from './SceneRowButton'
 import { UsageLog } from './UsageLog'
 import { useEntityDraftStore } from './entityDraftStore'
 import { useEntityStore } from './entityStore'
 import { ENTITY_TEMPLATE_LABEL, inScenesLabel } from './entityView'
+import { positionOf, useRecordFacts, useStoryClock, type AsOf } from './factView'
 import { useEntityUsage } from './useEntityUsage'
 
 const CONTROL = 'w-full rounded-md border border-line bg-bg px-2 py-1.5 text-sm'
@@ -62,6 +70,10 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
   const [busy, setBusy] = useState(false)
   const uid = useId()
   const missing = entity === undefined
+  // F-9.13: the record's dated facts, read as of the scene the author picks (D3: now by default).
+  const [asOf, setAsOf] = useState<AsOf>({ type: 'now' })
+  const facts = useRecordFacts(id)
+  const clock = useStoryClock()
 
   useEffect(() => {
     const row = useEntityStore.getState().byId[id]
@@ -78,6 +90,23 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
 
   if (!entity) return null
   const category = categoryOf(entity.kind, categories)
+  const sheet = sheetAt({
+    facts,
+    fields: entity.template === 'structured' ? entity.fields : {},
+    attributes: category.fields.map((field) => field.id),
+    order: clock.order,
+    position: positionOf(asOf, clock)
+  })
+  const factsOf = (attribute: string): SheetFieldAt | undefined =>
+    sheet.find((field) => field.attribute === attribute)
+  const templateIds = new Set<string>(category.fields.map((field) => field.id))
+  // Attributes only the scenes carry (a sheet moved to another category), and, on a blank page,
+  // every attribute: shown with their label below the page.
+  const loose = sheet.filter(
+    (field) =>
+      field.history.length > 0 && (entity.template === 'blank' || !templateIds.has(field.attribute))
+  )
+  const dated = facts.some((fact) => !fact.hidden)
 
   // Until the draft opens (the first paint, before the effect) the stored row is what is shown.
   const values = draft ?? {
@@ -228,9 +257,52 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
           onChange={(aliases) => useEntityStore.getState().update(id, { aliases })}
         />
 
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex items-center gap-2">
+            <span aria-hidden="true" className={LABEL}>
+              Status
+            </span>
+            <select
+              aria-label="Status"
+              title="Canon is the story as written; a plan is intent; an idea is a maybe"
+              value={entity.status}
+              disabled={busy}
+              onChange={(event) => {
+                const next = FactStatus.safeParse(event.target.value)
+                if (next.success)
+                  void run(() => useEntityStore.getState().update(id, { status: next.data }))
+              }}
+              className="shrink-0 rounded-md border border-line bg-bg px-1.5 py-1 text-xs text-fg-muted"
+            >
+              {FACT_STATUSES.map((each) => (
+                <option key={each} value={each}>
+                  {FACT_STATUS_LABEL[each]}
+                </option>
+              ))}
+            </select>
+          </div>
+          {dated ? <AsOfPicker value={asOf} onChange={setAsOf} clock={clock} /> : null}
+        </div>
+
+        {loose.length === 0 ? null : (
+          <section aria-label="From the scenes" className="flex flex-col gap-2">
+            <h3 className={`m-0 font-normal ${LABEL}`}>From the scenes</h3>
+            {loose.map((field) => (
+              <FieldFacts
+                key={field.attribute}
+                entity={entity}
+                field={field}
+                clock={clock}
+                showLabel
+              />
+            ))}
+          </section>
+        )}
+
         {entity.template === 'structured' ? (
           <div className="flex flex-col gap-3">
             {category.fields.map((field) => {
+              const stated = factsOf(field.id)
               const controlId = `${uid}-${field.id}`
               const value = values.fields[field.id] ?? ''
               return (
@@ -253,6 +325,9 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
                       onChange={(event) => editField(field.id, event.target.value)}
                       className={CONTROL}
                     />
+                  )}
+                  {stated === undefined ? null : (
+                    <FieldFacts entity={entity} field={stated} clock={clock} />
                   )}
                 </div>
               )
@@ -283,7 +358,7 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
           <UsageLog entity={entity} />
         ) : null}
 
-        <ObservedFacts entity={entity} />
+        <HiddenFacts entity={entity} facts={facts} />
 
         {entity.kind === 'world' ? <EntityScenes entity={entity} /> : null}
 

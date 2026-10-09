@@ -25,7 +25,8 @@ import { EntityEditor } from './EntityEditor'
 import { resetEntityDraftStore, useEntityDraftStore } from './entityDraftStore'
 import { entityFixture } from './entityFixture'
 import { resetEntityStore, useEntityStore } from './entityStore'
-import { resetObservedFactStore } from './observedFactStore'
+import { factFixture } from './factFixture'
+import { resetFactStore } from './factStore'
 
 type Handler = (input: unknown) => unknown
 
@@ -38,8 +39,8 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
       const override = overrides[channel]
       if (override) return override(input) as Output<C>
       if (channel === 'entity:list') return entityFixture as Output<C>
-      // F-5.16: the page asks for the entity's observed facts; none unless a test supplies them.
-      if (channel === 'observedFact:listForEntity') return [] as Output<C>
+      // F-9.13: the page asks for the record's dated facts; none unless a test supplies them.
+      if (channel === 'fact:listForEntity') return [] as Output<C>
       // The layout store writes after its own debounce when the Tag Manager is opened (F-9.4).
       if (channel === 'layout:set') return input as Output<C>
       // F-11.2c: the usage log holds every manuscript document's scene metadata; all empty here.
@@ -117,7 +118,7 @@ describe('EntityEditor (F-9.3)', () => {
     resetSceneMetaStore()
     resetEntityDraftStore()
     resetEntityStore()
-    resetObservedFactStore()
+    resetFactStore()
     resetReferenceStore()
     resetTagStore()
     resetDocumentTagStore()
@@ -487,5 +488,86 @@ describe('EntityEditor (F-9.3)', () => {
     cleanup()
     render(<EntityEditor id="e-forest" />)
     expect(screen.queryByRole('region', { name: 'Age on the timeline' })).toBeNull()
+  })
+
+  describe('dated facts on the sheet (F-9.13)', () => {
+    const maraFacts = factFixture.filter((fact) => fact.entityId === 'e-mara')
+    const ageFacts = (): HTMLElement => screen.getByRole('list', { name: 'Age from the scenes' })
+
+    async function openMara(): Promise<[Channel, unknown][]> {
+      useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+      const calls = await openPage('e-mara', {
+        'fact:listForEntity': () => maraFacts,
+        'fact:setHidden': (input) => ({
+          ...maraFacts.find((fact) => fact.id === (input as Input<'fact:setHidden'>).id),
+          hidden: true
+        })
+      })
+      await screen.findByRole('list', { name: 'Age from the scenes' })
+      return calls
+    }
+
+    it('shows the newest value as of now under a replace field, marked as the AI’s, beside the author’s text', async () => {
+      await openMara()
+      // Now is the latest written scene (Scene 6): Scene 4's age is the newest stated (D1).
+      expect(field('Age')).toHaveValue('27')
+      const age = within(ageFacts()).getByRole('listitem', { name: 'Age: 29' })
+      expect(within(age).getByTestId('fact-ai-mark')).toHaveTextContent('AI')
+      expect(age).toHaveTextContent('From Scene 4')
+      expect(within(age).getByRole('button', { name: 'Go to passage in Scene 4' })).toBeVisible()
+      // Accumulate fields list what was stated so far; the hidden background waits under Show hidden.
+      expect(
+        within(screen.getByRole('list', { name: 'Appearance from the scenes' })).getByRole(
+          'listitem',
+          { name: 'Appearance: Grey eyes' }
+        )
+      ).toBeVisible()
+      expect(screen.getByRole('button', { name: 'Show hidden (1)' })).toBeVisible()
+    })
+
+    it('reads the sheet as of another scene, and shows later values in the history', async () => {
+      await openMara()
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'As of' }), 'Scene 2')
+      const age = within(ageFacts()).getByRole('listitem', { name: 'Age: 34' })
+      expect(within(age).getAllByRole('button', { name: /^Go to passage in / })).toHaveLength(2)
+      await userEvent.click(screen.getByRole('button', { name: 'Age history (2)' }))
+      const history = screen.getByRole('list', { name: 'Age history' })
+      expect(within(history).getByRole('listitem', { name: 'Age: 29' })).toHaveTextContent(
+        '(later)'
+      )
+    })
+
+    it('hides a wrong value, re-statuses one, and sets the sheet’s status', async () => {
+      const calls = await openMara()
+      const age = within(ageFacts()).getByRole('listitem', { name: 'Age: 29' })
+      await userEvent.selectOptions(
+        within(age).getByRole('combobox', { name: 'Status of Age: 29' }),
+        'Plan'
+      )
+      expect(calls).toContainEqual(['fact:setStatus', { id: 'f-3', status: 'plan' }])
+      await userEvent.click(within(age).getByRole('button', { name: 'Hide' }))
+      expect(calls).toContainEqual(['fact:setHidden', { id: 'f-3', hidden: true }])
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'Idea')
+      expect(calls).toContainEqual(['entity:update', { id: 'e-mara', status: 'idea' }])
+    })
+
+    it('dates an author line at a scene from the field history (D4)', async () => {
+      const calls = await openMara()
+      await userEvent.click(screen.getByRole('button', { name: 'Age history (2)' }))
+      const group = screen.getByRole('group', { name: 'Age from a scene' })
+      await userEvent.selectOptions(
+        within(group).getByRole('combobox', { name: 'Scene' }),
+        'Scene 2'
+      )
+      await userEvent.type(
+        within(group).getByRole('textbox', { name: 'Age from that scene on' }),
+        '35'
+      )
+      await userEvent.click(within(group).getByRole('button', { name: 'Add' }))
+      expect(calls).toContainEqual([
+        'entity:update',
+        { id: 'e-mara', fields: { age: '35' }, asOf: 'sc-2' }
+      ])
+    })
   })
 })

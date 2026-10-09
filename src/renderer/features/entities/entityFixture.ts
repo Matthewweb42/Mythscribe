@@ -13,6 +13,7 @@ export const entityFixture: Entity[] = [
     tagId: null,
     aliases: [],
     origin: 'author',
+    status: 'canon',
     created: '2026-09-01T10:00:00.000Z',
     modified: '2026-09-01T10:00:00.000Z'
   },
@@ -27,6 +28,7 @@ export const entityFixture: Entity[] = [
     tagId: null,
     aliases: [],
     origin: 'author',
+    status: 'canon',
     created: '2026-09-02T10:00:00.000Z',
     modified: '2026-09-03T11:30:00.000Z'
   },
@@ -41,6 +43,7 @@ export const entityFixture: Entity[] = [
     tagId: null,
     aliases: [],
     origin: 'author',
+    status: 'canon',
     created: '2026-09-02T10:00:00.000Z',
     modified: '2026-09-02T10:00:00.000Z'
   },
@@ -55,6 +58,7 @@ export const entityFixture: Entity[] = [
     tagId: null,
     aliases: [],
     origin: 'author',
+    status: 'canon',
     created: '2026-09-04T10:00:00.000Z',
     modified: '2026-09-04T10:00:00.000Z'
   },
@@ -69,6 +73,7 @@ export const entityFixture: Entity[] = [
     tagId: null,
     aliases: [],
     origin: 'author',
+    status: 'canon',
     created: '2026-09-05T10:00:00.000Z',
     modified: '2026-09-05T10:00:00.000Z'
   }

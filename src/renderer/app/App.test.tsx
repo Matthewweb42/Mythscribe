@@ -56,7 +56,8 @@ import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
-import { resetObservedFactStore } from '@renderer/features/entities/observedFactStore'
+import { resetFactStore } from '@renderer/features/entities/factStore'
+import { resetChangesStore } from '@renderer/features/changes/changesStore'
 import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { resetMentionStore } from '@renderer/features/tags/mentionStore'
 import { resetProposedTagStore } from '@renderer/features/tags/proposedTagStore'
@@ -130,7 +131,8 @@ beforeEach(() => {
   resetEntityDraftStore()
   resetEntityStore()
   resetCategoryStore()
-  resetObservedFactStore()
+  resetFactStore()
+  resetChangesStore()
   resetFocusStore()
   resetBackgroundStore()
   resetShellDialogStore()
@@ -167,7 +169,8 @@ afterEach(() => {
   resetEntityDraftStore()
   resetEntityStore()
   resetCategoryStore()
-  resetObservedFactStore()
+  resetFactStore()
+  resetChangesStore()
   // F-10.1: a search debounce left pending must not fire into the next file's IPC fake.
   resetSearchStore()
   // F-10.2: nor a replace preview's.
@@ -205,7 +208,8 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'tag:aliases') return {}
     if (channel === 'entity:list') return []
     if (channel === 'category:list') return BUILTIN_CATEGORIES
-    if (channel === 'observedFact:listForEntity') return []
+    if (channel === 'fact:listForEntity') return []
+    if (channel === 'changes:list') return { entries: [], more: false }
     if (channel === 'documentTag:list') return []
     if (channel === 'tag:proposed') return []
     if (channel === 'tag:dismissedNames') return []
@@ -391,7 +395,7 @@ describe('App', () => {
       'Places',
       'Tags',
       'Outline',
-      'Show unused sections (14)',
+      'Show unused sections (15)',
       'New category…'
     ])
     await userEvent.click(within(listbox).getByRole('option', { name: /^Show unused sections/ }))

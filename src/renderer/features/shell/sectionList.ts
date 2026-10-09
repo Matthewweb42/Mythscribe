@@ -3,6 +3,7 @@ import {
   BookOpen,
   CalendarRange,
   FilePenLine,
+  History,
   Library,
   ListTree,
   Tag,
@@ -12,6 +13,8 @@ import { useShallow } from 'zustand/react/shallow'
 import { ALWAYS_SHOWN_CATEGORIES, categoryOf, type StoryCategory } from '@shared/categories'
 import type { NovelFormat } from '@shared/ipc/contract'
 import type { SidebarToolId } from '@shared/sidebarTabs'
+import { ChangesTab } from '@renderer/features/changes/ChangesTab'
+import { useChangesStore } from '@renderer/features/changes/changesStore'
 import { EditPassTab } from '@renderer/features/editPass/EditPassTab'
 import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import { CATEGORY_ICON } from '@renderer/features/entities/categoryIcons'
@@ -58,6 +61,8 @@ export interface SectionCounts {
   timeline: number
   edits: number
   library: number
+  /** F-9.13: the Changes log rows held (the newest page). */
+  changes: number
   /** Sheets per category id. */
   sheets: Readonly<Record<string, number>>
 }
@@ -80,7 +85,7 @@ const MANUSCRIPT: ToolDef = {
   used: () => true
 }
 
-/** The tools in picker order (the author's: Tags, Timeline, Outline, Edits, Library). */
+/** The tools in picker order (the author's: Tags, Timeline, Outline, Edits, Library; then Changes, F-9.13). */
 const TOOLS: readonly ToolDef[] = [
   {
     id: 'tags',
@@ -121,6 +126,14 @@ const TOOLS: readonly ToolDef[] = [
     render: () => createElement(LibraryTab),
     count: (c) => c.library,
     used: (c) => c.library > 0
+  },
+  {
+    id: 'changes',
+    label: 'Changes',
+    icon: History,
+    render: () => createElement(ChangesTab),
+    count: (c) => c.changes,
+    used: (c) => c.changes > 0
   }
 ]
 
@@ -186,6 +199,7 @@ export function useSidebarSections(): SidebarSection[] {
   const timeline = useTimelineStore((s) => s.events.length)
   const edits = useEditPassStore((s) => s.ids.length)
   const library = useLibraryStore((s) => s.files.length)
+  const changes = useChangesStore((s) => s.entries.length)
   const sheets = useEntityStore(
     useShallow((s) => {
       const counts: Record<string, number> = {}
@@ -196,5 +210,5 @@ export function useSidebarSections(): SidebarSection[] {
       return counts
     })
   )
-  return buildSections(categories, { documents, tags, timeline, edits, library, sheets })
+  return buildSections(categories, { documents, tags, timeline, edits, library, changes, sheets })
 }

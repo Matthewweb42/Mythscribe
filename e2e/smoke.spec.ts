@@ -22,7 +22,7 @@ import { localDay } from '../src/shared/goals'
 import { encodeLicensePayload, formatLicenseToken, LICENSE_GRACE_MS } from '../src/shared/license'
 import type { Entity, IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
-import type { ObservedFact } from '../src/shared/observedFacts'
+import type { Fact } from '../src/shared/facts'
 import { PRESETS, type WritingPresets } from '../src/shared/presets'
 import type { ReferencePin, ReferencePins } from '../src/shared/references'
 import { matterTemplate } from '../src/shared/matterTemplates'
@@ -5057,13 +5057,14 @@ test('create, close, reopen a project on disk', async () => {
     requests: 2
   })
 
-  // F-5.16: the automatic story bible. The summary answer carried two observed facts, and no
+  // F-5.16, F-9.13: the automatic story bible. The summary answer carried two facts, and no
   // entity was left in the project, so main created both characters as AI-made blank pages with
   // their tags. Kael is listed in the Characters tab marked "Added by AI"; his page shows the
-  // fact under "From the manuscript", and its passage button opens Scene 1 with the quoted
-  // sentence selected (nothing is typed, so the scene reads as it did). Back on his page, Add to
-  // sheet copies the fact onto the blank page (an author edit, so the AI mark goes and the row
-  // says On sheet), and Hide puts the row away. No request is made by any of it.
+  // dated fact under "From the scenes" with the AI mark, and its passage button opens Scene 1
+  // with the quoted sentence selected (nothing is typed, so the scene reads as it did). Back on
+  // his page, the author writes on the page themselves (the AI never does, D1), which makes the
+  // sheet theirs. Then the Changes section lists the fact the reading added, and Undo hides it
+  // for good. No request is made by any of it.
   const factRequestsBefore = openAiRequests.length
   await expect
     .poll(async () =>
@@ -5083,10 +5084,11 @@ test('create, close, reopen a project on disk', async () => {
   await kaelRow.click()
   await expect(entityEditor).toBeVisible()
   await expect(entityEditor).toContainText('Character · Blank page · Added by AI')
-  const observedFacts = entityEditor.getByRole('region', { name: 'From the manuscript' })
+  const observedFacts = entityEditor.getByRole('region', { name: 'From the scenes' })
   const watchfulRow = observedFacts.getByRole('listitem', { name: 'Personality: Watchful' })
   await expect(watchfulRow).toBeVisible()
-  await expect(watchfulRow).not.toContainText('Differs')
+  await expect(watchfulRow.getByTestId('fact-ai-mark')).toHaveText('AI')
+  await expect(watchfulRow).toContainText('From Scene 1')
   await watchfulRow.getByRole('button', { name: 'Go to passage in Scene 1' }).click()
   await expect(entityEditor).toHaveCount(0)
   await expect(page.getByTestId('selected-title')).toHaveText('Scene 1')
@@ -5095,22 +5097,27 @@ test('create, close, reopen a project on disk', async () => {
     .toBe(SUMMARY_FACTS[1]?.quote)
   await kaelRow.click()
   await expect(entityEditor).toBeVisible()
-  await watchfulRow.getByRole('button', { name: 'Add to sheet' }).click()
-  await expect(watchfulRow).toContainText('On sheet')
-  await expect(watchfulRow.getByRole('button', { name: 'Add to sheet' })).toHaveCount(0)
-  await expect(entityEditor.getByRole('textbox', { name: 'Page' })).toHaveValue(
-    'Personality: Watchful'
-  )
+  await entityEditor.getByRole('textbox', { name: 'Page' }).fill('Personality: Watchful')
   await expect(entityEditor).not.toContainText('Added by AI')
   await expect(kaelRow).not.toContainText('Added by AI')
   await expect
     .poll(async () => (await listEntities()).find((entity) => entity.id === kaelEntity.id))
     .toMatchObject({ origin: 'author', body: 'Personality: Watchful' })
-  await watchfulRow.getByRole('button', { name: 'Hide', exact: true }).click()
+  // The AI's fact is still there beside the author's words, not merged into them.
+  await expect(watchfulRow).toBeVisible()
+  await showSection('Changes')
+  const changesTab = page.getByTestId('changes-tab')
+  const watchfulChange = changesTab.getByRole('listitem', {
+    name: 'Fact: Kael · Personality: Watchful'
+  })
+  await expect(watchfulChange).toContainText(SUMMARY_FACTS[1]?.quote ?? '')
+  await expect(changesTab.getByRole('listitem', { name: 'New sheet: Kael' })).toBeVisible()
+  await watchfulChange.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(watchfulChange).toContainText('Undone')
   await expect(watchfulRow).toHaveCount(0)
-  await expect(observedFacts.getByRole('button', { name: 'Show hidden (1)' })).toBeVisible()
+  await expect(entityEditor.getByRole('button', { name: 'Show hidden (1)' })).toBeVisible()
   await expect
-    .poll(async () => (await observedFactsOf(kaelEntity.id)).map((fact) => fact.hidden))
+    .poll(async () => (await factsOf(kaelEntity.id)).map((fact) => fact.hidden))
     .toEqual([true])
   expect(openAiRequests).toHaveLength(factRequestsBefore)
   // Back to Scene 1 for the steps below; the entity page replaced the scene's panes, so the
@@ -5169,11 +5176,11 @@ test('create, close, reopen a project on disk', async () => {
   expect(afterIndexAll.byFeature.find((f) => f.feature === 'summary')).toMatchObject({
     requests: 3
   })
-  // F-5.16: that run read Scene 1 again and its answer carried the same two facts. The one hidden
-  // on Kael's page is a tombstone, so it was not logged a second time; Mara's was replaced as
-  // usual, and no third character appeared.
+  // F-5.16, F-9.13: that run read Scene 1 again and its answer carried the same two facts. The
+  // one undone in Changes is a tombstone, so it was not logged a second time; Mara's stayed
+  // (sticky), and no third character appeared.
   await expect
-    .poll(async () => (await observedFactsOf(kaelEntity.id)).map((fact) => fact.hidden))
+    .poll(async () => (await factsOf(kaelEntity.id)).map((fact) => fact.hidden))
     .toEqual([true])
   expect(
     (await listEntities())
@@ -5182,8 +5189,8 @@ test('create, close, reopen a project on disk', async () => {
   ).toEqual(['Kael', 'Mara'])
   await showSection('Characters')
   await kaelRow.click()
-  await expect(observedFacts.getByRole('button', { name: 'Show hidden (1)' })).toBeVisible()
-  await expect(observedFacts.getByRole('list', { name: 'Observed facts' })).toHaveCount(0)
+  await expect(entityEditor.getByRole('button', { name: 'Show hidden (1)' })).toBeVisible()
+  await expect(observedFacts).toHaveCount(0)
   await entityEditor.getByRole('button', { name: 'Close Kael' }).click()
   await expect(entityEditor).toHaveCount(0)
   await showSection('Manuscript')
@@ -6257,6 +6264,7 @@ test('create, close, reopen a project on disk', async () => {
     /^Outline\d+$/,
     /^Edits\d+$/,
     'Library2',
+    /^Changes\d+$/,
     /^Show unused sections \(\d+\)$/,
     'New category…'
   ])
@@ -7118,16 +7126,16 @@ async function listEntities(): Promise<Entity[]> {
   return result.data
 }
 
-/** Every observed fact of one entity (F-5.16), the hidden ones included, as main lists them. */
-async function observedFactsOf(entityId: string): Promise<ObservedFact[]> {
-  const result = await page.evaluate<IpcResult<ObservedFact[]>, string>(
+/** Every dated fact of one record (F-9.13), the hidden ones included, as main lists them. */
+async function factsOf(entityId: string): Promise<Fact[]> {
+  const result = await page.evaluate<IpcResult<Fact[]>, string>(
     (id) =>
-      window.mythscribe.invoke('observedFact:listForEntity', { entityId: id }) as Promise<
-        IpcResult<ObservedFact[]>
+      window.mythscribe.invoke('fact:listForEntity', { entityId: id }) as Promise<
+        IpcResult<Fact[]>
       >,
     entityId
   )
-  if (!result.ok) throw new Error(`observedFact:listForEntity failed: ${result.error.message}`)
+  if (!result.ok) throw new Error(`fact:listForEntity failed: ${result.error.message}`)
   return result.data
 }
 

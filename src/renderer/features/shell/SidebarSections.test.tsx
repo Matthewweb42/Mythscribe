@@ -63,7 +63,9 @@ describe('SidebarSections (F-9.11)', () => {
     render(<SidebarSections format="novel" sections={sections} />)
     expect(picker()).toHaveAccessibleName('Section: Manuscript')
     expect(picker()).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getByRole('region', { name: 'Manuscript section' })).toHaveTextContent('Manuscript here')
+    expect(screen.getByRole('region', { name: 'Manuscript section' })).toHaveTextContent(
+      'Manuscript here'
+    )
   })
 
   it('lists the used sections by name with their counts, grouped, the unused behind a toggle', async () => {
@@ -171,6 +173,7 @@ describe('buildSections (F-9.11)', () => {
     timeline: 0,
     edits: 0,
     library: 0,
+    changes: 0,
     sheets: {}
   }
   const used = (built: SidebarSection[]): string[] => built.filter((s) => s.used).map((s) => s.id)
@@ -188,6 +191,7 @@ describe('buildSections (F-9.11)', () => {
       timeline: 1,
       edits: 1,
       library: 3,
+      changes: 2,
       sheets: { magic: 2, world: 1 }
     })
     expect(used(busy)).toEqual([
@@ -200,7 +204,8 @@ describe('buildSections (F-9.11)', () => {
       'timeline',
       'outline',
       'edits',
-      'library'
+      'library',
+      'changes'
     ])
     expect(busy.find((s) => s.id === 'magic')).toMatchObject({
       label: 'Magic Systems',

@@ -19,6 +19,7 @@ const sheet: Entity = {
   tagId: 'ferry-tag',
   aliases: [],
   origin: 'author',
+  status: 'canon',
   created: '2026-10-08T09:00:00.000Z',
   modified: '2026-10-08T09:00:00.000Z'
 }

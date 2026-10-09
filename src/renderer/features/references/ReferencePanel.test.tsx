@@ -4,14 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
 import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
 import type { TagMentions } from '@shared/mentions'
-import type { ObservedFact } from '@shared/observedFacts'
+import type { Fact } from '@shared/facts'
 import type { ReferencePin, ReferencePins } from '@shared/references'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { resetNotesStore, useNotesStore } from '@renderer/features/editor/notesStore'
 import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
-import { observedFactFixture } from '@renderer/features/entities/observedFactFixture'
-import { resetObservedFactStore } from '@renderer/features/entities/observedFactStore'
+import { factFixture } from '@renderer/features/entities/factFixture'
+import { resetFactStore } from '@renderer/features/entities/factStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -42,7 +42,7 @@ const LONG = 'A long history. '.repeat(20).trim()
 let pins: ReferencePin[]
 let entities: Entity[]
 let notes: Record<string, TiptapNodeT>
-let facts: ObservedFact[]
+let facts: Fact[]
 let mentions: TagMentions[]
 let linkedTags: Record<string, Output<'documentTag:list'>>
 let sets: ReferencePins[]
@@ -60,8 +60,8 @@ function client(): IpcClient {
       }
       if (channel === 'reference:addImages') return addAnswer as Output<C>
       if (channel === 'entity:list') return entities as Output<C>
-      if (channel === 'observedFact:listForEntity') {
-        const { entityId } = input as Input<'observedFact:listForEntity'>
+      if (channel === 'fact:listForEntity') {
+        const { entityId } = input as Input<'fact:listForEntity'>
         return facts.filter((fact) => fact.entityId === entityId) as Output<C>
       }
       if (channel === 'tree:list') return treeFixture as Output<C>
@@ -114,7 +114,7 @@ const stored = (): readonly ReferencePin[] => useReferenceStore.getState().pins
 function reset(): void {
   resetReferenceStore()
   resetEntityStore()
-  resetObservedFactStore()
+  resetFactStore()
   resetMentionStore()
   resetDocumentTagStore()
   resetNotesStore()
@@ -217,17 +217,18 @@ describe('the cards (F-9.6)', () => {
     )
   })
 
-  it('an entity card lists the first observed facts under From the manuscript (F-5.16)', async () => {
-    facts = observedFactFixture
+  it('an entity card lists the first facts the scenes state as of now under From the scenes (F-9.13)', async () => {
+    facts = factFixture
     pins = [MARA, FOREST]
     await openPanel()
-    const section = await within(card('Mara')).findByRole('region', { name: 'From the manuscript' })
+    const section = await within(card('Mara')).findByRole('region', { name: 'From the scenes' })
     expect(
       within(section)
         .getAllByRole('listitem')
         .map((item) => item.getAttribute('aria-label'))
-    ).toEqual(['Age: 34', 'Age: 29', 'Appearance: Grey eyes'])
-    expect(section).toHaveTextContent('+ 1 more')
+      // Now is the latest written scene: the age is the newest stated (D1), the hidden one is gone.
+    ).toEqual(['Age: 29', 'Appearance: Grey eyes', 'Goals / motivations: Find the lost chart'])
+    expect(section).not.toHaveTextContent('more')
     expect(within(section).queryByRole('button', { name: 'Hide' })).toBeNull()
     // The forest has no facts: its card carries no section.
     expect(within(card('Dark Forest')).queryByRole('region')).toBeNull()

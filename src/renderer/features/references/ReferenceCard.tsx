@@ -7,7 +7,7 @@ import { useCategory } from '@renderer/features/entities/categoryStore'
 import { referenceImageUrl, type ReferencePin } from '@shared/references'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
-import { ObservedFacts } from '@renderer/features/entities/ObservedFacts'
+import { CompactFacts } from '@renderer/features/entities/SheetFacts'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -255,7 +255,7 @@ function EntityCard({
           {body}
         </p>
       )}
-      <ObservedFacts entity={entity} compact />
+      <CompactFacts entity={entity} />
       <div className="flex items-center justify-between gap-2">
         {hasMore ? (
           <MoreToggle expanded={expanded} onToggle={() => setExpanded(!expanded)} />

@@ -99,7 +99,8 @@ import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
 import { EditPassWorkspace } from '@renderer/features/editPass/EditPassWorkspace'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
-import { useObservedFactStore } from '@renderer/features/entities/observedFactStore'
+import { useFactStore } from '@renderer/features/entities/factStore'
+import { useChangesStore } from '@renderer/features/changes/changesStore'
 import {
   ReferencePanel,
   ReferencesToggleButton
@@ -300,7 +301,9 @@ export function App(): React.JSX.Element {
       useCategoryStore.getState().clear()
       // F-9.8: the Library and any upload under review belong to the project that closed.
       useLibraryStore.getState().clear()
-      useObservedFactStore.getState().clear()
+      useFactStore.getState().clear()
+      // F-9.13: the Changes log belongs to the project that closed.
+      useChangesStore.getState().clear()
       useReferenceStore.getState().clear()
       // F-10.3: the goals, and the dialog if it was open.
       useGoalsStore.getState().clear()
@@ -341,7 +344,13 @@ export function App(): React.JSX.Element {
     // F-5.16: the story-bible job creates entities and logs facts in the background; the tabs and
     // the open page hear about both here.
     useEntityStore.getState().subscribe()
-    useObservedFactStore.getState().subscribe()
+    useFactStore.getState().subscribe()
+    // F-9.13: the background reading logs what it applied; the Changes section lists it.
+    useChangesStore.getState().subscribe()
+    useChangesStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
     useProposedTagStore
       .getState()
       .load()

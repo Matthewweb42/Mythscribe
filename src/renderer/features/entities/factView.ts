@@ -1,91 +1,116 @@
-import { builtinCategory } from '@shared/categories'
-import {
-  ENTITY_BODY_MAX,
-  ENTITY_FIELD_MAX,
-  type EntityFieldId,
-  type EntityFields
-} from '@shared/entities'
+import { useEffect, useMemo } from 'react'
+import { useShallow } from 'zustand/react/shallow'
+import { categoryOf } from '@shared/categories'
+import { sheetAt, type Fact, type SheetFieldAt } from '@shared/facts'
 import type { Entity } from '@shared/ipc/contract'
-import { observedAttributeField, observedAttributeLabel } from '@shared/observedFacts'
-import { descendantDocuments, type TreeIndex } from '@renderer/features/manuscript/treeStore'
+import { resolveNow } from '@shared/storyTime'
+import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { describeError } from '@renderer/lib/errors'
+import { useOpenSceneId } from '@renderer/features/references/sceneEntities'
+import {
+  descendantDocuments,
+  useTreeStore,
+  type TreeIndex
+} from '@renderer/features/manuscript/treeStore'
+import { useCategoryStore } from './categoryStore'
+import { useFactStore } from './factStore'
 
-/** How many rows the reference card shows before "+ n more" (F-5.16). */
-export const OBSERVED_FACTS_COMPACT = 3
-
-/**
- * Every document of the project in reading order (front matter, manuscript, end matter, each
- * depth-first by position): what `groupFacts` orders an entity's facts and their passages by.
- */
-export function readingOrder(index: Pick<TreeIndex, 'byId' | 'childrenOf' | 'rootIds'>): string[] {
-  return index.rootIds.flatMap((rootId) => descendantDocuments(index, rootId))
-}
-
-/** Where `Add to sheet` writes a fact: a field of the structured sheet, or the blank page. */
-export type SheetTarget =
-  { type: 'field'; field: EntityFieldId; multiline: boolean } | { type: 'body' }
+/** How many values the reference card shows before "+ n more" (F-9.13). */
+export const FACTS_COMPACT = 3
 
 /**
- * The place on the author's sheet a fact of `attribute` goes (F-5.16): the blank template has
- * one page for everything; the structured one has the attribute's own field, or nothing when
- * the kind has no such field (a row written under an older vocabulary).
+ * The manuscript's documents in reading order (D2: a story position is the reading order of the
+ * manuscript; front and end matter are not story time). What `sheetAt` dates facts by.
  */
-export function sheetTarget(
-  entity: Pick<Entity, 'kind' | 'template'>,
-  attribute: string
-): SheetTarget | null {
-  if (entity.template === 'blank') return { type: 'body' }
-  const field = observedAttributeField(entity.kind, attribute)
-  if (field === null) return null
-  // Facts are logged only about the F-9.1 kinds, which are library categories (F-9.11).
-  const multiline =
-    builtinCategory(entity.kind)?.fields.find((f) => f.id === field)?.multiline ?? true
-  return { type: 'field', field, multiline }
+export function manuscriptOrder(
+  index: Pick<TreeIndex, 'byId' | 'childrenOf' | 'rootIds'>
+): string[] {
+  const root = index.rootIds.find((id) => index.byId[id]?.sectionType === 'manuscript')
+  return root === undefined ? [] : descendantDocuments(index, root)
 }
 
-/** Lower-cased, whitespace collapsed, closing punctuation dropped: how sheet text and a value compare. */
-const fold = (text: string): string =>
-  text
-    .normalize('NFC')
-    .trim()
-    .replace(/\s+/gu, ' ')
-    .replace(/[.!?,;:\s]+$/u, '')
-    .toLocaleLowerCase()
+/** Where a sheet is read at: now (D3), a chosen scene, or the end of the book. */
+export type AsOf = { type: 'now' } | { type: 'scene'; id: string } | { type: 'end' }
 
-/** Whether the sheet text already says `value`, however it is cased or spaced. */
-export function isOnSheet(text: string, value: string): boolean {
-  const needle = fold(value)
-  return needle !== '' && fold(text).includes(needle)
+/** The `<select>` value an `AsOf` is written as, and back. */
+export function asOfValue(asOf: AsOf): string {
+  return asOf.type === 'scene' ? `scene:${asOf.id}` : asOf.type
 }
 
-/** The sheet as the page shows it: the open draft's text when there is one, else the stored row. */
-export interface SheetText {
-  fields: EntityFields
-  body: string
+export function parseAsOf(value: string): AsOf {
+  if (value.startsWith('scene:')) return { type: 'scene', id: value.slice('scene:'.length) }
+  return value === 'end' ? { type: 'end' } : { type: 'now' }
 }
 
-/** The text of the place a fact would go, as it stands. */
-export function sheetTextAt(sheet: SheetText, target: SheetTarget): string {
-  return target.type === 'body' ? sheet.body : (sheet.fields[target.field] ?? '')
+/** The manuscript order, now (the open scene, else the latest written one), and their titles. */
+export interface StoryClock {
+  order: string[]
+  nowId: string | null
+  titleOf: (id: string) => string
 }
 
-/**
- * The target's text with the fact added (F-5.16): the value on a new line of a field (after
- * `; ` in a one-line field, which cannot hold a line break), or `Label: value` on a new line of
- * the blank page, where a bare value would not say what it is about. Null when the result would
- * not fit the column.
- */
-export function withFactAdded(
-  entity: Pick<Entity, 'kind'>,
-  sheet: SheetText,
-  target: SheetTarget,
-  attribute: string,
-  value: string
-): string | null {
-  const current = sheetTextAt(sheet, target).replace(/\s+$/u, '')
-  const addition =
-    target.type === 'body' ? `${observedAttributeLabel(entity.kind, attribute)}: ${value}` : value
-  const separator = target.type === 'field' && !target.multiline ? '; ' : '\n'
-  const next = current === '' ? addition : `${current}${separator}${addition}`
-  const max = target.type === 'body' ? ENTITY_BODY_MAX : ENTITY_FIELD_MAX
-  return next.length > max ? null : next
+/** The story clock of the open project, from the tree store; re-renders as the tree changes. */
+export function useStoryClock(): StoryClock {
+  const index = useTreeStore(
+    useShallow((s) => ({ byId: s.byId, childrenOf: s.childrenOf, rootIds: s.rootIds }))
+  )
+  const openId = useOpenSceneId()
+  return useMemo(() => {
+    const order = manuscriptOrder(index)
+    const documents = order.map((id) => ({ id, wordCount: index.byId[id]?.wordCount ?? 0 }))
+    const now = resolveNow(documents, openId)
+    return {
+      order,
+      nowId: now.nowId,
+      titleOf: (id: string) => index.byId[id]?.title ?? 'a deleted scene'
+    }
+  }, [index, openId])
+}
+
+/** The scene id a sheet is read at for `asOf`; null is the end of the book. */
+export function positionOf(asOf: AsOf, clock: StoryClock): string | null {
+  if (asOf.type === 'end') return null
+  if (asOf.type === 'scene') return clock.order.includes(asOf.id) ? asOf.id : null
+  return clock.nowId
+}
+
+/** Stable empty list, so a selector for a record not yet read does not re-render on every change. */
+const NO_FACTS: readonly Fact[] = []
+
+/** The record's facts from the store, loaded when the record is shown. */
+export function useRecordFacts(entityId: string): readonly Fact[] {
+  const facts = useFactStore((s) => s.byEntity[entityId] ?? NO_FACTS)
+  useEffect(() => {
+    useFactStore
+      .getState()
+      .load(entityId)
+      .catch((err: unknown) => toast.error(describeError(err)))
+  }, [entityId])
+  return facts
+}
+
+/** The record as of `asOf` (`sheetAt`): one row per template field and per attribute only facts carry. */
+export function useSheetAt(
+  entity: Entity,
+  facts: readonly Fact[],
+  asOf: AsOf,
+  clock: StoryClock
+): SheetFieldAt[] {
+  const categories = useCategoryStore((s) => s.categories)
+  const attributes = useMemo(
+    () => categoryOf(entity.kind, categories).fields.map((field) => field.id),
+    [entity.kind, categories]
+  )
+  const position = positionOf(asOf, clock)
+  return useMemo(
+    () =>
+      sheetAt({
+        facts,
+        fields: entity.template === 'structured' ? entity.fields : {},
+        attributes,
+        order: clock.order,
+        position
+      }),
+    [facts, entity.fields, entity.template, attributes, clock.order, position]
+  )
 }
