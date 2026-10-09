@@ -157,6 +157,7 @@ LEMONSQUEEZY_STARTER = '{"variantId":"555555","url":"https://<store>.lemonsqueez
 ```
 - `priceCents` must match the price in Lemon Squeezy. It is the amount the balance grows by.
 - Packs under $10 are refused (`min_pack_usd`). The starter is the one exception, and only as `LEMONSQUEEZY_STARTER`.
+- Do not offer discount codes on the AI packs or the starter. A self-serve refund is capped at what was paid, but a full refund issued from the Lemon Squeezy side debits only what was paid, so the discounted part of the balance would stay spendable.
 - Leave `LEMONSQUEEZY_SUPPORTER` commented out. The $39 Supporter product is superseded by the $30 app license.
 - A malformed value is logged, and the app then says "nothing on sale" instead of crashing. Check the JSON carefully.
 
