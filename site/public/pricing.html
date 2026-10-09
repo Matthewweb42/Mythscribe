@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pricing – MythScribe</title>
+    <meta
+      name="description"
+      content="MythScribe costs $30 once, with 30 days free to try. Your own AI key or a local model is free to use; hosted AI is coming."
+    />
+    <meta name="theme-color" content="#08161e" />
+    <link rel="icon" href="img/favicon.png" type="image/png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="./">
+          <img src="img/favicon.png" alt="" width="34" height="34" />
+          <span class="wordmark">Myth<span>Scribe</span></span>
+        </a>
+        <nav class="site-nav" aria-label="Site">
+          <ul>
+            <li><a href="pricing" aria-current="page">Pricing</a></li>
+            <li><a href="faq">FAQ</a></li>
+            <li class="nav-extra"><a href="docs/">AI settings</a></li>
+          </ul>
+        </nav>
+        <a class="button button-small header-download" href="./#download">
+          Download <span class="soon">Soon</span>
+        </a>
+      </div>
+    </header>
+
+    <main class="page wrap">
+      <!--
+        PRICING BLOCK. Decided by the author 2026-10-07 (docs/research/AI-BILLING-SPEC.md): a $30
+        one-time app with a 30-day free trial; own key or local model free; hosted AI as a prepaid
+        US-dollar balance at provider cost + 25% (2026-10-08), tried with a refundable $5 starter pack. Hosted AI and downloads open at launch. Moved from
+        the landing page to its own page on 2026-10-08 (the "Just write" rewrite).
+      -->
+      <div class="section-head">
+        <p class="eyebrow">Pricing</p>
+        <h1>Simple, and you only pay for AI you use.</h1>
+      </div>
+      <div class="pricing">
+        <article class="price-card featured">
+          <h3>MythScribe</h3>
+          <p class="price">$30 <small>once</small></p>
+          <p>
+            The whole writing app: binder, editor, notes, story bible, tags, outline, timeline,
+            goals, import, export, and backups. Works with AI switched off. No subscription.
+          </p>
+          <ul class="ticks">
+            <li>30 days free to try, no card</li>
+            <li>Windows, macOS, and Linux</li>
+            <li>Your files stay on your computer, and export and backup always work</li>
+          </ul>
+        </article>
+        <article class="price-card">
+          <h3>Your own key or a local model</h3>
+          <p class="price">$0 <small>to us</small></p>
+          <p>
+            Add an OpenRouter key (the default: one key for many models) or an OpenAI key and pay
+            the provider directly for what you use, or point MythScribe at a model on your own
+            computer (Ollama, LM Studio) and pay nothing.
+          </p>
+          <ul class="ticks">
+            <li>Never routed through our servers</li>
+            <li>Cost shown on every request</li>
+            <li>A daily spending cap</li>
+          </ul>
+        </article>
+        <article class="price-card">
+          <h3>Hosted AI <span class="badge">Coming soon</span></h3>
+          <p class="price">Pay as you go</p>
+          <p>
+            For writers who would rather not manage a key: one balance, every model, pay only for
+            what you use. Top up $10, $25, or $50 in real dollars that never expire, billed at the
+            model’s cost plus 25%. Try the AI for $5. Any unused balance is refundable for 30 days.
+          </p>
+          <ul class="ticks">
+            <li>No subscription, no automatic top-ups</li>
+            <li>A price quote before any big job</li>
+            <li>Your text passes through and is never stored or logged by us</li>
+          </ul>
+        </article>
+      </div>
+
+      <div id="estimate" class="estimate">
+        <h3>What does your own OpenAI key cost?</h3>
+        <p class="note">
+          A rough estimate, not a quote: about <strong>$6 a month</strong> for a writer who adds
+          1,000 words a day, keeps background indexing on, takes about 20 VibeWrite suggestions a
+          day, and asks the assistant 3 questions a day, with an OpenAI key on the app’s OpenAI
+          models (GPT-5.4 mini for background work and suggestions, GPT-5.4 for the assistant) at
+          OpenAI’s prices of 5 October 2026. The OpenRouter defaults (DeepSeek V4 Flash and Pro) are
+          priced lower per token.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">
+              Rough monthly cost with your own OpenAI key
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">What</th>
+                <th scope="col">Assumption</th>
+                <th scope="col">Rough cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Background indexing</th>
+                <td>Summaries, story bible, and tags for about 30,000 new words</td>
+                <td>about $0.60 a month</td>
+              </tr>
+              <tr>
+                <th scope="row">VibeWrite</th>
+                <td>About 20 suggestions a day</td>
+                <td>about $0.80 a month</td>
+              </tr>
+              <tr>
+                <th scope="row">Assistant</th>
+                <td>About 3 questions a day, each with a few lookups</td>
+                <td>about $4.60 a month</td>
+              </tr>
+              <tr>
+                <th scope="row">A line edit</th>
+                <td>One pass over a 90,000-word novel, when you run it</td>
+                <td>up to about $2.50 each time</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="fine">
+          Your own numbers depend on how you write and what you ask. The app shows the cost of every
+          request and a running total, the edit-pass screen shows an estimate before you start, and
+          the daily cap (set to $2 when you install) stops requests once it is reached. A local
+          model costs nothing.
+        </p>
+      </div>
+      <!-- END PRICING BLOCK -->
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <div>
+          <a class="brand" href="./">
+            <img src="img/favicon.png" alt="" width="34" height="34" />
+            <span class="wordmark">Myth<span>Scribe</span></span>
+          </a>
+          <p>Made for novelists by Matthew Webecke.</p>
+        </div>
+        <nav aria-label="Footer">
+          <ul>
+            <li><a href="pricing" aria-current="page">Pricing</a></li>
+            <li><a href="faq">FAQ</a></li>
+            <li><a href="docs/">AI settings</a></li>
+            <li><a href="privacy">Privacy</a></li>
+            <li><a href="terms">Terms</a></li>
+            <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
+            <li><a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a></li>
+          </ul>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

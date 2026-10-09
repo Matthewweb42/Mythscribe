@@ -37,6 +37,20 @@ function text(node: Element | null): string {
   return (node?.textContent ?? '').replace(/\s+/g, ' ').trim()
 }
 
+/** Where a relative or root-relative link in `file` points on disk. */
+function target(file: string, path: string): string {
+  return path.startsWith('/')
+    ? join(SITE_ROOT, path)
+    : resolve(dirname(file), path === '' ? '.' : path)
+}
+
+/** The file Workers assets serve for that link: a folder's index, the file, or the clean `.html` path. */
+function served(file: string, path: string): string {
+  const onDisk = target(file, path)
+  if (existsSync(onDisk) && statSync(onDisk).isDirectory()) return join(onDisk, 'index.html')
+  return existsSync(onDisk) ? onDisk : `${onDisk}.html`
+}
+
 function cells(doc: Document, tableId: string): string[][] {
   const rows = Array.from(doc.querySelectorAll(`#${tableId} tbody tr`))
   return rows.map((row) => Array.from(row.querySelectorAll('th, td')).map(text))
@@ -66,11 +80,13 @@ describe('docs page mirrors the AI settings copy (F-15.10)', () => {
 describe('every page (F-15.10)', () => {
   const pages = htmlFiles()
 
-  it('exists: landing, privacy, terms, docs, and the 404 page', () => {
+  it('exists: landing, pricing, FAQ, privacy, terms, docs, and the 404 page', () => {
     expect(pages.map((file) => relative(SITE_ROOT, file).split(sep).join('/'))).toEqual([
       '404.html',
       'docs/index.html',
+      'faq.html',
       'index.html',
+      'pricing.html',
       'privacy.html',
       'terms.html'
     ])
@@ -108,20 +124,41 @@ describe('every page (F-15.10)', () => {
     expect(refs.length).toBeGreaterThan(0)
     for (const ref of refs) {
       const path = ref.replace(/[#?].*$/, '')
-      const target = path.startsWith('/')
-        ? join(SITE_ROOT, path)
-        : resolve(dirname(file), path === '' ? '.' : path)
-      expect(relative(SITE_ROOT, target).startsWith('..'), `${ref} escapes the site`).toBe(false)
+      expect(
+        relative(SITE_ROOT, target(file, path)).startsWith('..'),
+        `${ref} escapes the site`
+      ).toBe(false)
       // Workers assets serve `/privacy` for `privacy.html` (`html_handling = "auto-trailing-slash"`)
       // and 307 the `.html` form, so pages link the clean path and the test resolves it.
       expect(path.endsWith('.html'), `${ref} should link the clean path`).toBe(false)
-      const resolved =
-        existsSync(target) && statSync(target).isDirectory()
-          ? join(target, 'index.html')
-          : existsSync(target)
-            ? target
-            : `${target}.html`
-      expect(existsSync(resolved), `${relative(SITE_ROOT, file)} → ${ref}`).toBe(true)
+      expect(existsSync(served(file, path)), `${relative(SITE_ROOT, file)} → ${ref}`).toBe(true)
+    }
+  })
+
+  it.each(pages)('%s links only to fragments that exist', (file) => {
+    const doc = load(file)
+    const refs = Array.from(doc.querySelectorAll('a[href*="#"]'))
+      .map((el) => el.getAttribute('href') ?? '')
+      .filter((ref) => !/^(mailto:|https?:\/\/)/.test(ref))
+    for (const ref of refs) {
+      const at = ref.indexOf('#')
+      const path = ref.slice(0, at)
+      const fragment = ref.slice(at + 1)
+      const page = path === '' ? file : served(file, path)
+      expect(
+        load(page).getElementById(fragment),
+        `${relative(SITE_ROOT, file)} → ${ref}`
+      ).not.toBeNull()
+    }
+  })
+
+  it('keeps a Download button in the sticky header of every page (2026-10-08)', () => {
+    for (const file of pages) {
+      const doc = load(file)
+      expect(
+        doc.querySelector('header.site-header a.header-download[href$="#download"]'),
+        relative(SITE_ROOT, file)
+      ).not.toBeNull()
     }
   })
 })

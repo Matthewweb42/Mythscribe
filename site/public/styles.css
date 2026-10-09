@@ -287,6 +287,22 @@ em.serif {
   .site-nav .nav-extra {
     display: none;
   }
+
+  /* Brand and Download share the first row; the links wrap underneath. */
+  .site-header .wrap {
+    column-gap: 0.75rem;
+  }
+
+  .site-nav {
+    order: 3;
+  }
+}
+
+/* On a phone the sticky header is the brand and Download only; every link is in the footer. */
+@media (max-width: 30rem) {
+  .site-header .site-nav {
+    display: none;
+  }
 }
 
 .site-footer {
@@ -354,6 +370,22 @@ em.serif {
   color: var(--emerald-fg);
   transform: translateY(-1px);
   box-shadow: 0 12px 34px -10px rgb(52 211 153 / 0.55);
+}
+
+.button-small {
+  min-height: 2.3rem;
+  padding: 0.35rem 0.95rem;
+  font-size: 0.92rem;
+}
+
+.button-small .soon {
+  font-size: 0.62rem;
+  padding: 0 0.4rem;
+}
+
+/* The header's Download stays in view on every page and at every width (the header is sticky). */
+.header-download {
+  flex: none;
 }
 
 .button-ghost {
@@ -614,11 +646,6 @@ em.serif {
   transform: rotate(-45deg);
 }
 
-.shot-pair {
-  display: grid;
-  gap: 1rem;
-}
-
 /* Cards */
 
 .cards {
@@ -660,63 +687,7 @@ em.serif {
   margin-bottom: 0;
 }
 
-.card-icon {
-  display: grid;
-  place-items: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  margin-bottom: 1rem;
-  border-radius: 12px;
-  background: rgb(52 211 153 / 0.12);
-  border: 1px solid rgb(52 211 153 / 0.3);
-  color: var(--emerald-300);
-  font-family: var(--font-serif);
-  font-size: 1.2rem;
-  font-weight: 600;
-}
-
-/* Pull quote: the literary touch */
-
-.pull {
-  margin: clamp(3.5rem, 2rem + 5vw, 6rem) auto 0;
-  max-width: 50rem;
-  text-align: center;
-}
-
-.pull blockquote {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-weight: 400;
-  font-size: clamp(1.4rem, 1.1rem + 1.4vw, 2.1rem);
-  line-height: 1.4;
-  color: var(--paper);
-}
-
-.pull blockquote::before {
-  content: '\201C';
-  display: block;
-  font-size: 3.5em;
-  line-height: 0.6;
-  color: var(--emerald-400);
-  text-shadow: 0 0 24px var(--glow);
-}
-
-.pull figcaption {
-  margin-top: 1rem;
-  color: var(--paper-muted);
-  font-size: 0.95rem;
-}
-
-/* Control: the three modes */
-
-.control {
-  border: 1px solid var(--line);
-  border-radius: calc(var(--radius-lg) + 6px);
-  background:
-    radial-gradient(40rem 20rem at 100% 0%, rgb(16 185 129 / 0.1), transparent 70%), var(--ink-850);
-  padding: clamp(1.5rem, 1rem + 3vw, 3.5rem);
-}
+/* The assistant's three modes (FAQ page) */
 
 .modes {
   list-style: none;
@@ -804,23 +775,6 @@ em.serif {
   font-size: 0.95rem;
 }
 
-.provisional {
-  display: flex;
-  gap: 0.75rem;
-  align-items: flex-start;
-  border: 1px dashed rgb(239 228 207 / 0.35);
-  border-radius: var(--radius);
-  padding: 0.9rem 1.1rem;
-  margin-bottom: 1.5rem;
-  color: var(--paper);
-  background: rgb(239 228 207 / 0.04);
-  font-size: 0.95rem;
-}
-
-.provisional p {
-  margin: 0;
-}
-
 .estimate {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -830,6 +784,23 @@ em.serif {
 
 .estimate h3 {
   font-size: 1.25rem;
+}
+
+/* The price, once, under How it works */
+
+.price-line {
+  margin-top: clamp(3rem, 2rem + 4vw, 5rem);
+  text-align: center;
+}
+
+.price-line .price {
+  font-size: clamp(2.4rem, 2rem + 2vw, 3.25rem);
+  margin-bottom: 0.5rem;
+}
+
+.price-line p {
+  margin-bottom: 0.4rem;
+  color: var(--fg-muted);
 }
 
 /* Downloads */
@@ -903,8 +874,21 @@ em.serif {
   color: var(--fg-muted);
 }
 
-.faq details > div p:last-child {
+.faq details > div p:last-child,
+.faq details > div ul:last-child {
   margin-bottom: 0;
+}
+
+.faq .ticks {
+  margin-top: 0;
+}
+
+.faq-modes {
+  margin-top: 3.5rem;
+}
+
+.faq-modes .modes {
+  margin-top: 1.5rem;
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -1046,14 +1030,6 @@ td {
   .card:hover {
     transform: none;
   }
-}
-
-.highlights {
-  margin-bottom: clamp(3.5rem, 2rem + 5vw, 6rem);
-}
-
-.highlights h3 {
-  margin-top: 0;
 }
 
 .section-cards {

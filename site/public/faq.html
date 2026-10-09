@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FAQ – MythScribe</title>
+    <meta
+      name="description"
+      content="Questions writers ask about MythScribe: where your writing is stored, whether you have to use AI, what it costs, and how the assistant works."
+    />
+    <meta name="theme-color" content="#08161e" />
+    <link rel="icon" href="img/favicon.png" type="image/png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="./">
+          <img src="img/favicon.png" alt="" width="34" height="34" />
+          <span class="wordmark">Myth<span>Scribe</span></span>
+        </a>
+        <nav class="site-nav" aria-label="Site">
+          <ul>
+            <li><a href="pricing">Pricing</a></li>
+            <li><a href="faq" aria-current="page">FAQ</a></li>
+            <li class="nav-extra"><a href="docs/">AI settings</a></li>
+          </ul>
+        </nav>
+        <a class="button button-small header-download" href="./#download">
+          Download <span class="soon">Soon</span>
+        </a>
+      </div>
+    </header>
+
+    <main class="page wrap">
+      <div class="section-head">
+        <p class="eyebrow">FAQ</p>
+        <h1>Questions writers ask</h1>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>What else is in the app?</summary>
+          <div>
+            <ul class="ticks">
+              <li>
+                A binder of parts, chapters, and scenes with word counts at every level, and a
+                book-width page with a focus mode and autosave
+              </li>
+              <li>Synopsis, notes, POV, location, and timeline beside every scene</li>
+              <li>Outline, timeline, goals, and writing statistics</li>
+              <li>Tags and <code>#</code> mentions, and a binder you can filter by tag</li>
+              <li>Automatic backups, drafts, and snapshots you can compare</li>
+              <li>
+                Import from Word or Markdown; compile to a print-ready paperback PDF (trim sizes,
+                mirrored margins, running heads), EPUB, Standard Manuscript, Word, and more, with a
+                live page preview
+              </li>
+              <li>
+                With AI on: VibeWrite (a few words in your style after the cursor when you pause), a
+                voice profile built from your own paragraphs, and edit passes (line edit, copy edit,
+                proofread, and more) that come back as tracked changes for you to accept or reject
+              </li>
+            </ul>
+          </div>
+        </details>
+        <details>
+          <summary>Where is my writing stored, and who can see it?</summary>
+          <div>
+            <p>
+              On your computer. A project is a folder holding one database file and your images;
+              nothing is uploaded and there is no account. With AI off, nothing leaves your machine.
+              With AI on, a feature sends only the text it needs, straight to the provider you
+              chose, and the <a href="docs/">AI settings page</a> lists exactly what each one sends.
+              The <a href="privacy">privacy policy</a> has the details.
+            </p>
+          </div>
+        </details>
+        <details>
+          <summary>Do I have to use AI?</summary>
+          <div>
+            <p>
+              No. MythScribe installs with AI off, and the binder, editor, notes, story bible, tags,
+              outline, timeline, and backups all work without it. You can switch AI on for one
+              project and leave it off for another.
+            </p>
+          </div>
+        </details>
+        <details>
+          <summary>How much does the AI cost?</summary>
+          <div>
+            <p>
+              With your own OpenRouter or OpenAI key you pay the provider directly; for a writer
+              working every day that is roughly a few dollars a month (see the
+              <a href="pricing#estimate">estimate</a>). The app shows the cost of every request and
+              a running total, and stops at a daily cap you set. A model running on your own
+              computer costs nothing.
+            </p>
+          </div>
+        </details>
+        <details>
+          <summary>What do Auto, Ask, and Plan mean?</summary>
+          <div>
+            <p>
+              They are the assistant’s modes, picked under its message box. In
+              <strong>Auto</strong> it makes its edits itself, each with Undo, and still asks before
+              deleting anything. In <strong>Ask</strong> every edit waits for your Apply. In
+              <strong>Plan</strong> it only reads and talks; it never edits. Edit passes always come
+              back as tracked changes, whatever the mode.
+            </p>
+          </div>
+        </details>
+        <details>
+          <summary>Can I bring in a manuscript and my worldbuilding notes?</summary>
+          <div>
+            <p>
+              Yes. Import a Word (.docx) or Markdown file and MythScribe finds the chapters and
+              scenes; you review and adjust them before anything is created. Worldbuilding documents
+              go into the Library: with AI on, MythScribe sorts them into character, place, and
+              world sheets and shows you every change before it is made. Sheets also import from a
+              JSON file or a spreadsheet (CSV), and export the same way, so you can reuse them
+              across books.
+            </p>
+          </div>
+        </details>
+        <details>
+          <summary>Does it work offline?</summary>
+          <div>
+            <p>
+              Yes. Writing, organising, search, and backups need no connection. AI features need to
+              reach your provider, unless you run a local model on your own computer.
+            </p>
+          </div>
+        </details>
+        <details>
+          <summary>Which platforms does it run on?</summary>
+          <div>
+            <p>
+              Windows, macOS, and Linux. MythScribe is in development and there are no public
+              downloads yet; the <a href="./#download">download buttons</a> will work once the first
+              signed builds are out.
+            </p>
+          </div>
+        </details>
+      </div>
+      <section class="faq-modes" aria-labelledby="modes-heading">
+        <h2 id="modes-heading">The assistant’s three modes</h2>
+        <p class="note">
+          AI is off when you install. Turn on Use AI for a project and pick how the assistant may
+          act, right under its message box. Change it whenever you like. The
+          <a href="docs/">AI settings page</a> lists exactly what each feature sends.
+        </p>
+        <ul class="modes">
+          <li class="mode">
+            <h3>Auto</h3>
+            <p>
+              Looks things up, answers with sources, and makes its edits itself, each with Undo.
+              Anything that deletes still asks first.
+            </p>
+          </li>
+          <li class="mode featured">
+            <h3>Ask <span class="badge badge-emerald">Recommended</span></h3>
+            <p>
+              Looks things up and answers with sources. Every edit it wants to make waits for your
+              Apply; nothing changes without you.
+            </p>
+          </li>
+          <li class="mode">
+            <h3>Plan</h3>
+            <p>
+              Reads the whole project to discuss and brainstorm with you. It never proposes or makes
+              an edit.
+            </p>
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <div>
+          <a class="brand" href="./">
+            <img src="img/favicon.png" alt="" width="34" height="34" />
+            <span class="wordmark">Myth<span>Scribe</span></span>
+          </a>
+          <p>Made for novelists by Matthew Webecke.</p>
+        </div>
+        <nav aria-label="Footer">
+          <ul>
+            <li><a href="pricing">Pricing</a></li>
+            <li><a href="faq" aria-current="page">FAQ</a></li>
+            <li><a href="docs/">AI settings</a></li>
+            <li><a href="privacy">Privacy</a></li>
+            <li><a href="terms">Terms</a></li>
+            <li><a href="https://github.com/Matthewweb42/Mythscribe">GitHub</a></li>
+            <li><a href="mailto:hello@mythscribe.app">hello@mythscribe.app</a></li>
+          </ul>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
