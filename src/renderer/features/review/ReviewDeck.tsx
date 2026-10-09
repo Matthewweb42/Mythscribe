@@ -71,13 +71,16 @@ export interface ReviewDeckProps {
   testId?: string
 }
 
+/** Input types that are not text: a key on a checkbox or a radio still decides. */
+const NOT_TEXT = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color'])
+
 /** Whether a key event comes from a field the author types in, where letters are text. */
 function typing(event: KeyboardEvent): boolean {
   const target = event.target
   if (!(target instanceof HTMLElement)) return false
+  if (target instanceof HTMLInputElement) return !NOT_TEXT.has(target.type)
   return (
     target.isContentEditable ||
-    target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement
   )
@@ -126,6 +129,13 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
   useEffect(() => {
     onCurrent?.(shownId)
   }, [shownId, onCurrent])
+
+  // A decision made from inside the card (after ticking a box) unmounts the card and drops the
+  // focus to the page: take it back, so the keys keep working on the next card.
+  useEffect(() => {
+    const active = document.activeElement
+    if (active === null || active === document.body) root.current?.focus({ preventScroll: true })
+  }, [shownId])
 
   const go = (id: string | null): void => setCurrentId(id)
 

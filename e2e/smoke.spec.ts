@@ -6161,26 +6161,67 @@ test('create, close, reopen a project on disk', async () => {
   await expect(libraryDialog.getByTestId('library-estimate')).toContainText('2 files · 2 requests')
   expect(contextBodies()).toHaveLength(0)
   await libraryDialog.getByTestId('library-confirm').click()
-  const libraryReview = libraryDialog.getByTestId('library-review')
+  const libraryReview = libraryDialog.getByTestId('review-deck')
   await expect(libraryReview).toBeVisible({ timeout: 15_000 })
   expect(contextBodies()).toHaveLength(2)
   expect(contextBodies()[0]).toMatch(/^Existing sheets by kind:\ncharacter: .*\bMara\b/)
   await expect(libraryDialog.getByTestId('library-review-summary')).toHaveText(
     '4 new sheets · 1 sheet to update · 1 conflict · 1 note for Project notes'
   )
+  // The review is a deck since 2026-10-08: one card at a time, grouped in the rail, nothing
+  // accepted until the author says so.
+  await expect(
+    libraryDialog.getByRole('navigation', { name: 'Groups' }).getByTestId('review-group')
+  ).toHaveText(['New categories0/1', 'New sheets0/4', 'Conflicts0/1', 'Project notes0/1'])
+  await expect(libraryDialog.getByTestId('review-apply')).toHaveText('Apply 0 accepted')
+  // F-9.9: the review chat. The author asks for a change; the fake server answers operations on
+  // the listed review: Tomas Reed's card (further on) shows the new name and is marked Changed,
+  // the reply lists each change with the one the review could not do (renaming an existing
+  // sheet) and why, and the cost line is there. Nothing was written: the deck still decides.
+  const reviewChat = libraryDialog.getByTestId('review-chat')
+  await reviewChat.getByTestId('review-chat-input').fill('Tomas Reed is also called Tom.')
+  await reviewChat.getByTestId('review-chat-send').click()
+  await expect(reviewChat.getByTestId('review-chat-change')).toHaveText(
+    [
+      '“Tomas Reed” is also called “Tom”.',
+      'Rename skipped: “Mara” is an existing sheet; rename it in the story bible.'
+    ],
+    { timeout: 15_000 }
+  )
+  await expect(reviewChat.getByTestId('review-chat-entry').last()).toContainText(
+    'AI: Tomas Reed also goes by Tom.'
+  )
+  expect(
+    openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(REVIEW_CHAT_SENTINEL))
+  ).toHaveLength(1)
   // F-9.11: the model filed The Weave under Magic Systems and proposed a Ships category for The
-  // Gull; the review shows the proposal above the sheets with Rename and Decline, and the sheet
-  // as a ship. Rename changes the name before anything is created.
+  // Gull; the proposal is the first card, with Rename and Decline. Rename changes the name
+  // before anything is created; Accept keeps it.
   const proposedCategory = libraryReview.getByTestId('library-proposed-category')
   await expect(proposedCategory).toContainText('Proposed new category: Ships')
   await expect(proposedCategory).toContainText('1 sheet · fields: Crew')
-  await expect(libraryReview.locator('[data-item-name="The Weave"]')).toContainText('magic system')
-  await expect(libraryReview.locator('[data-item-name="The Gull"]')).toContainText('ship ·')
   await proposedCategory.getByRole('button', { name: 'Rename…' }).click()
   const renameProposal = page.getByRole('dialog', { name: 'Rename the proposed category' })
   await renameProposal.getByRole('textbox').fill('Vessels')
   await renameProposal.getByRole('button', { name: 'Rename' }).click()
   await expect(proposedCategory).toContainText('Proposed new category: Vessels')
+  await libraryReview.getByTestId('review-accept').click()
+  // The four new sheets, one after the other: A on each.
+  const libraryCard = libraryReview.getByTestId('library-item')
+  const reviewPosition = libraryReview.getByTestId('review-position')
+  for (let i = 1; i <= 4; i++) {
+    await expect(reviewPosition).toHaveText(`New sheet ${i} of 4`)
+    const name = await libraryCard.getAttribute('data-item-name')
+    if (name === 'The Weave') await expect(libraryCard).toContainText('magic system')
+    if (name === 'Tomas Reed') {
+      await expect(libraryCard).toContainText('Tag #tomas-reed')
+      await expect(libraryCard.getByTestId('library-item-changed')).toBeVisible()
+      await expect(libraryCard.getByTestId('library-item-aliases')).toHaveText('Also called: Tom')
+    }
+    await page.keyboard.press('a')
+  }
+  // The conflict: Mara's age, both values side by side; the upload's is picked.
+  await expect(reviewPosition).toHaveText('Conflict 1 of 1')
   const maraItem = libraryReview.locator('[data-item-name="Mara"]')
   await expect(maraItem).toContainText('existing sheet')
   // The two descriptions were merged by the nickname; Split would separate them again.
@@ -6191,33 +6232,13 @@ test('create, close, reopen a project on disk', async () => {
   await expect(ageConflict.getByRole('radio', { name: /Keep the sheet’s\s*34/ })).toBeChecked()
   await ageConflict.getByText('Use the upload’s').click()
   await expect(ageConflict.getByRole('radio', { name: /Use the upload’s\s*35/ })).toBeChecked()
-  await expect(libraryReview.locator('[data-item-name="Tomas Reed"]')).toContainText(
-    'Tag #tomas-reed'
-  )
+  await page.keyboard.press('a')
+  // Project notes last; accepting the last card with nothing skipped applies the review.
   await expect(libraryReview.getByTestId('library-notes')).toContainText(
     'Theme: The book is about debts'
   )
-  // F-9.9: the review chat. The author asks for a change; the fake server answers operations on
-  // the listed review: Tomas Reed's card shows the new name and is marked Changed, the reply
-  // lists each change with the one the review could not do (renaming an existing sheet) and why,
-  // and the cost line is there. Nothing was written: Apply still decides.
-  const reviewChat = libraryDialog.getByTestId('review-chat')
-  await reviewChat.getByTestId('review-chat-input').fill('Tomas Reed is also called Tom.')
-  await reviewChat.getByTestId('review-chat-send').click()
-  const tomasItem = libraryReview.locator('[data-item-name="Tomas Reed"]')
-  await expect(tomasItem.getByTestId('library-item-changed')).toBeVisible({ timeout: 15_000 })
-  await expect(tomasItem.getByTestId('library-item-aliases')).toHaveText('Also called: Tom')
-  await expect(reviewChat.getByTestId('review-chat-change')).toHaveText([
-    '“Tomas Reed” is also called “Tom”.',
-    'Rename skipped: “Mara” is an existing sheet; rename it in the story bible.'
-  ])
-  await expect(reviewChat.getByTestId('review-chat-entry').last()).toContainText(
-    'AI: Tomas Reed also goes by Tom.'
-  )
-  expect(
-    openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(REVIEW_CHAT_SENTINEL))
-  ).toHaveLength(1)
-  await libraryDialog.getByTestId('library-apply').click()
+  await expect(libraryDialog.getByTestId('review-apply')).toHaveText('Apply 6 accepted')
+  await page.keyboard.press('a')
   await expect(libraryDialog).toHaveCount(0)
   await expect(libraryPanel.getByTestId('library-file-state')).toHaveText(['Sorted', 'Sorted'])
   const afterLibrary = await page.evaluate(async () => {

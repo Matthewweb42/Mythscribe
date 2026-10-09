@@ -21,9 +21,11 @@ import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
+import type { ReviewDecision } from '@renderer/features/review/reviewDeckModel'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
+import { decidedReview } from './uploadReview'
 
 /**
  * Where an upload stands (F-9.8): the estimate being worked out, then shown for the author to
@@ -41,7 +43,13 @@ export type LibraryFlow =
       requestId: string
       progress: ContextProgress | null
     }
-  | { stage: 'review'; review: ContextReview; busy: boolean }
+  | {
+      stage: 'review'
+      review: ContextReview
+      busy: boolean
+      /** The author's decision per card of the review deck (2026-10-08); none means pending. */
+      decisions: Record<string, ReviewDecision>
+    }
   | { stage: 'failed'; fileIds: string[]; message: string; nextStep: string }
 
 /** One line of the review chat (F-9.9): the author's message, or the AI's reply with what it changed. */
@@ -108,6 +116,8 @@ interface LibraryState {
   cancelRun: () => void
   /** Closes the estimate, the failure, or the review; nothing is written. */
   discard: () => void
+  /** Records the author's decision on cards of the review deck (2026-10-08). */
+  decide: (ids: readonly string[], decision: ReviewDecision) => void
   /** Edits the review under way (a pure change; ignored outside the review). */
   edit: (change: (review: ContextReview) => ContextReview) => void
   /** Splits a merged sheet back into one per name. */
@@ -116,7 +126,7 @@ interface LibraryState {
   declineCategory: (categoryId: string) => void
   /** Renames a category the AI proposed before Apply creates it (F-9.11). */
   renameCategory: (categoryId: string, name: string) => void
-  /** Writes the review in one transaction. */
+  /** Writes the review in one transaction: what the author accepted, nothing else. */
   apply: () => Promise<void>
   /** Sends the author's instruction about the review; the AI's changes land on it at once (F-9.9). */
   sendReviewChat: (message: string) => Promise<void>
@@ -364,7 +374,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
       }
       if (!reviewHasChanges(result.review)) {
         // Nothing new for the story bible: the files are marked sorted and the author told so.
-        set({ flow: { stage: 'review', review: result.review, busy: true } })
+        set({ flow: { stage: 'review', review: result.review, busy: true, decisions: {} } })
         try {
           const applied = await ipc().invoke('library:apply', { review: result.review })
           settle(result.review, 'rejected')
@@ -375,13 +385,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
           toast.info('Nothing new to add to the story bible from those files.')
         } catch (err) {
           if (mine === generation)
-            set({ flow: { stage: 'review', review: result.review, busy: false } })
+            set({ flow: { stage: 'review', review: result.review, busy: false, decisions: {} } })
           toast.error(describeError(err))
         }
         return
       }
       set({
-        flow: { stage: 'review', review: result.review, busy: false },
+        flow: { stage: 'review', review: result.review, busy: false, decisions: {} },
         chat: emptyReviewChat()
       })
     },
@@ -401,6 +411,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
       }
       dropChat(get().chat)
       set({ flow: null, chat: emptyReviewChat() })
+    },
+
+    decide(ids, decision) {
+      set((s) =>
+        s.flow?.stage === 'review' && !s.flow.busy
+          ? {
+              flow: {
+                ...s.flow,
+                decisions: {
+                  ...s.flow.decisions,
+                  ...Object.fromEntries(ids.map((id) => [id, decision]))
+                }
+              }
+            }
+          : {}
+      )
     },
 
     edit(change) {
@@ -433,7 +459,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
       const flow = get().flow
       if (flow?.stage !== 'review' || flow.busy || get().chat.requestId !== null) return
       const mine = generation
-      const review = flow.review
+      const review = decidedReview(flow.review, flow.decisions, existingSheets())
       set({ flow: { ...flow, busy: true } })
       try {
         const result = await ipc().invoke('library:apply', { review })
