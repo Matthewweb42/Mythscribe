@@ -319,7 +319,14 @@ export const sceneSummary = sqliteTable('scene_summary', {
   model: text('model').notNull(),
   /** Whether the scene was head-truncated to `SUMMARY_SCENE_CHAR_BUDGET` before it was sent. */
   truncated: integer('truncated', { mode: 'boolean' }).notNull(),
-  createdAt: text('created_at').notNull()
+  createdAt: text('created_at').notNull(),
+  /**
+   * F-9.14 (migration `0024_scene_cards`): the AI part of the scene card as JSON (`AiSceneCard`),
+   * written by `summary.v4` and later; null for a row an older prompt wrote. An older build reads
+   * past it and, on its own rewrite of the row, leaves it as it was: a card is shown only with a
+   * row of a version that writes one.
+   */
+  card: text('card')
 })
 export type SceneSummaryRow = typeof sceneSummary.$inferSelect
 export type SceneSummaryInsert = typeof sceneSummary.$inferInsert

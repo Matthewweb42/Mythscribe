@@ -10,6 +10,7 @@ import {
   type ExtractedFact
 } from '@shared/observedFacts'
 import { SUMMARY_KNOWN_NAMES_MAX } from '@shared/summary'
+import { THREAD_KIND } from '@shared/threads'
 import { classifyTagTerm, mayAutoCreateTag } from '@shared/tagTerms'
 import { createEntity, listEntities, type EntityWrite } from '../entity/entityStore'
 import type { Fact, FactStatus } from '@shared/facts'
@@ -107,7 +108,9 @@ export function knownNames(db: TreeDb, sceneText: string): KnownNames {
   }
 
   const entities = listEntities(db)
-  for (const entity of entitiesNamedIn(entities, sceneText))
+  // F-9.14: a thread record is no character, place, or thing; the prompt lists threads apart.
+  const things = entities.filter((entity) => entity.kind !== THREAD_KIND)
+  for (const entity of entitiesNamedIn(things, sceneText))
     add(observedKindOf(entity.kind), entity.name)
 
   const linked = new Set(entities.map((entity) => entity.tagId))
@@ -147,45 +150,119 @@ export interface ObservedFactsChange {
 }
 
 /**
- * The entity a fact's name stands for, or undefined when the story bible has none: the entity
- * of the stated kind with that name, else one of another kind (the model took Ash the place
- * for a person: attach, do not create a twin), else the entity linked to the tag the name
- * makes (`entityTagName`: the sheet reads "Dr. Vell" and the scene says "Dr Vell", one tag
- * `dr-vell`), the stated kind first.
+ * The record a name stands for, or undefined when the story bible has none: the record of the
+ * stated kind with that name, else one of another kind (the model took Ash the place for a
+ * person: attach, do not create a twin), else one with that name as an alias (F-4.14), else the
+ * record linked to the tag the name makes (`entityTagName`: the sheet reads "Dr. Vell" and the
+ * scene says "Dr Vell", one tag `dr-vell`), the stated kind first each time. `kind` null takes
+ * any kind alike (a relationship names its two ends without one).
  */
-function resolveEntity(
+export function resolveName(
   db: TreeDb,
   entities: readonly Entity[],
-  fact: ExtractedFact
+  name: string,
+  kind: string | null
 ): Entity | undefined {
-  const key = toEntityNameKey(fact.entity)
-  const named = entities.filter((entity) => toEntityNameKey(entity.name) === key)
-  const byName = named.find((entity) => entity.kind === fact.kind) ?? named[0]
+  const pick = (found: Entity[]): Entity | undefined =>
+    (kind === null ? undefined : found.find((entity) => entity.kind === kind)) ?? found[0]
+  const key = toEntityNameKey(name)
+  const byName = pick(entities.filter((entity) => toEntityNameKey(entity.name) === key))
   if (byName !== undefined) return byName
-  // F-4.14: a fact about "Rynna" belongs on the sheet that has Rynna as an alias.
-  const aliased = entities.filter((entity) =>
-    entity.aliases.some((alias) => toEntityNameKey(alias) === key)
+  const byAlias = pick(
+    entities.filter((entity) => entity.aliases.some((alias) => toEntityNameKey(alias) === key))
   )
-  const byAlias = aliased.find((entity) => entity.kind === fact.kind) ?? aliased[0]
   if (byAlias !== undefined) return byAlias
-  const tagName = entityTagName(fact.entity)
+  const tagName = entityTagName(name)
   const tagId = tagName === '' ? undefined : findTagByNameOrAlias(db, tagName)
   if (tagId === undefined) return undefined
-  const tagged = entities.filter((entity) => entity.tagId === tagId)
-  return tagged.find((entity) => entity.kind === fact.kind) ?? tagged[0]
+  return pick(entities.filter((entity) => entity.tagId === tagId))
+}
+
+/**
+ * The author's tag rule (2026-10-08) for a sheet the reading makes for a new name: a tag the bank
+ * already has is always linked; a new one only for a name or a repeated term (`classifyTagTerm`
+ * over the whole manuscript, read once and only when asked).
+ */
+export function sheetTagRule(
+  db: TreeDb,
+  nodeId: string,
+  sceneText: string
+): (name: string) => boolean {
+  let texts: string[] | null = null
+  return (name) => {
+    const tagName = entityTagName(name)
+    if (tagName !== '' && findTagByNameOrAlias(db, tagName) !== undefined) return true
+    texts ??= manuscriptTexts(db, { nodeId, text: sceneText })
+    return mayAutoCreateTag(classifyTagTerm(name, texts))
+  }
+}
+
+/** The facts of one scene resolved to records, ready for `applySceneFacts`. */
+export interface ResolvedSceneFacts {
+  rows: SceneFactInput[]
+  /** The records created for a name that had none, each with what its tag did to the bank. */
+  created: EntityWrite[]
+  /** Facts left out: a dismissed name, or an attribute the resolved record's kind does not carry. */
+  skipped: number
+}
+
+/**
+ * Resolves what one scene states (F-5.16, F-9.13) to records, in the caller's transaction: each
+ * fact's name to a record (`resolveName`); a name with no record gets one — AI-made, blank
+ * template, with its tag under the author's tag rule (`sheetTagRule`) — unless the author deleted
+ * a record of that kind and name (`observedFacts.dismissed`), in which case the fact is left out;
+ * a fact that landed on a record of another kind is kept only when that kind carries the
+ * attribute. Nothing is stored yet: the caller hands the rows to `applySceneFacts` with the
+ * scene's other statements (F-9.14's relationships and thread events), in one call.
+ */
+export function resolveObservedFacts(
+  tx: TreeDb,
+  nodeId: string,
+  facts: readonly ExtractedFact[],
+  sceneText: string
+): ResolvedSceneFacts {
+  const entities = listEntities(tx)
+  const dismissed = getObservedDismissed(tx)
+  const created: EntityWrite[] = []
+  const rows: SceneFactInput[] = []
+  let skipped = 0
+  const mayTag = sheetTagRule(tx, nodeId, sceneText)
+  for (const fact of facts) {
+    let entity = resolveName(tx, entities, fact.entity, fact.kind)
+    if (entity === undefined) {
+      if (isObservedDismissed(dismissed, fact.kind, fact.entity)) {
+        skipped += 1
+        continue
+      }
+      const write = createEntity(
+        tx,
+        { kind: fact.kind, name: fact.entity, template: 'blank' },
+        'ai',
+        { tag: mayTag(fact.entity) }
+      )
+      created.push(write)
+      entities.push(write.entity)
+      entity = write.entity
+    }
+    if (!isObservedAttribute(entity.kind, fact.attribute)) {
+      skipped += 1
+      continue
+    }
+    rows.push({
+      entityId: entity.id,
+      attribute: fact.attribute,
+      value: fact.value,
+      quote: fact.quote
+    })
+  }
+  return { rows, created, skipped }
 }
 
 /**
  * Stores what one scene states (F-5.16, F-9.13), in one transaction (it nests as a savepoint
- * inside the caller's): each fact's name is resolved to an entity (`resolveEntity`); a name with
- * no entity gets one — AI-made, blank template, with its tag through the F-9.4 link — unless the
- * author deleted an entity of that kind and name (`observedFacts.dismissed`), in which case the
- * fact is left out (the sheet gets a new tag only under the author's tag rule, `classifyTagTerm`,
- * 2026-10-08: a name or a repeated term; a tag the bank already has is linked either way); a
- * fact that landed on an entity of another kind is kept only when that kind carries the
- * attribute. Then the scene's dated facts are applied, sticky (`applySceneFacts`):
- * new statements added with `status`, tombstones honoured, and a fact whose quote left
- * `sceneText` removed. An empty list with an empty text clears the scene's AI facts.
+ * inside the caller's): the facts resolved (`resolveObservedFacts`), then applied, sticky
+ * (`applySceneFacts`): new statements added with `status`, tombstones honoured, and a fact whose
+ * quote left `sceneText` removed. An empty list with an empty text clears the scene's AI facts.
  */
 export function applyObservedFacts(
   db: TreeDb,
@@ -195,48 +272,13 @@ export function applyObservedFacts(
   status: FactStatus = 'canon'
 ): ObservedFactsChange {
   return db.transaction((tx) => {
-    const entities = listEntities(tx)
-    const dismissed = getObservedDismissed(tx)
-    const created: EntityWrite[] = []
-    const rows: SceneFactInput[] = []
-    let skipped = 0
-    // Read once, and only when a sheet is made: the tag rule needs the whole text.
-    let texts: string[] | null = null
-    const mayTag = (name: string): boolean => {
-      const tagName = entityTagName(name)
-      if (tagName !== '' && findTagByNameOrAlias(tx, tagName) !== undefined) return true
-      texts ??= manuscriptTexts(tx, { nodeId, text: sceneText })
-      return mayAutoCreateTag(classifyTagTerm(name, texts))
+    const resolved = resolveObservedFacts(tx, nodeId, facts, sceneText)
+    const diff = applySceneFacts(tx, nodeId, resolved.rows, sceneText, status)
+    return {
+      entityIds: diff.entityIds,
+      added: diff.added,
+      created: resolved.created,
+      skipped: resolved.skipped
     }
-    for (const fact of facts) {
-      let entity = resolveEntity(tx, entities, fact)
-      if (entity === undefined) {
-        if (isObservedDismissed(dismissed, fact.kind, fact.entity)) {
-          skipped += 1
-          continue
-        }
-        const write = createEntity(
-          tx,
-          { kind: fact.kind, name: fact.entity, template: 'blank' },
-          'ai',
-          { tag: mayTag(fact.entity) }
-        )
-        created.push(write)
-        entities.push(write.entity)
-        entity = write.entity
-      }
-      if (!isObservedAttribute(entity.kind, fact.attribute)) {
-        skipped += 1
-        continue
-      }
-      rows.push({
-        entityId: entity.id,
-        attribute: fact.attribute,
-        value: fact.value,
-        quote: fact.quote
-      })
-    }
-    const diff = applySceneFacts(tx, nodeId, rows, sceneText, status)
-    return { entityIds: diff.entityIds, added: diff.added, created, skipped }
   })
 }

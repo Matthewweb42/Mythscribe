@@ -38,11 +38,11 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   summary: {
     trigger: 'background',
-    when: 'Indexing: once per scene after edits settle (content-hash cached), and for every stale scene after open.',
+    when: 'Indexing: once per scene after edits settle (content-hash cached), and for every stale scene after open; a new prompt version re-reads the book only after the author confirms the cost (F-9.14 conversion dialog).',
     callsPerUse: 1,
-    typicalOutTokens: 450,
+    typicalOutTokens: 600,
     ideas:
-      'The biggest background spend on a large book: batch API when latency allows; skip tiny edits; cap scene text sent; one pass also yields facts and tags.'
+      'The biggest background spend on a large book: batch API when latency allows; skip tiny edits; cap scene text sent; one pass also yields facts, tags, the scene card, relationships, and thread events (summary.v4 added about 150 output tokens); drop empty lists from the JSON shape if the ledger shows cut-offs.'
   },
   chat: {
     trigger: 'on request',

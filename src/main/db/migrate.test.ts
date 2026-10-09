@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(24)
+    expect(result.version).toBe(25)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')

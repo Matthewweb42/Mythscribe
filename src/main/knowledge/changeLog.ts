@@ -153,7 +153,12 @@ function undoRow(db: EntityDb, row: KnowledgeChangeRow, tally: UndoTally): void 
   switch (undo.type) {
     case 'hideFact': {
       const held = db
-        .select({ id: fact.id, hidden: fact.hidden, entityId: fact.entityId })
+        .select({
+          id: fact.id,
+          hidden: fact.hidden,
+          entityId: fact.entityId,
+          objectEntityId: fact.objectEntityId
+        })
         .from(fact)
         .where(eq(fact.id, undo.factId))
         .get()
@@ -161,6 +166,8 @@ function undoRow(db: EntityDb, row: KnowledgeChangeRow, tally: UndoTally): void 
       if (held !== undefined && !held.hidden) {
         setFactHidden(db, undo.factId, true)
         tally.entityIds.add(held.entityId)
+        // F-9.14: a relationship's other sheet moves too.
+        if (held.objectEntityId !== null) tally.entityIds.add(held.objectEntityId)
       }
       break
     }

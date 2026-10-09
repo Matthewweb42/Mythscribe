@@ -128,6 +128,7 @@ import type { AiKeyStore } from '../ai/keyStore'
 import type { AutoTagsChange } from '../ai/autoTags'
 import {
   convertKnowledgeIndex,
+  convertThreadRecords,
   ensureRecordForTag,
   ensureRecordsForTags,
   makeRecordForTag
@@ -229,7 +230,20 @@ import {
   updateCategory
 } from '../entity/categoryStore'
 import type { ChangeUndoResult } from '@shared/changes'
-import { listFactsForEntity, setFactHidden, setFactStatus } from '../entity/factStore'
+import type { Fact } from '@shared/facts'
+import type { KnowledgeConversion } from '@shared/knowledge'
+import { relationAttribute } from '@shared/relations'
+import { threadAttribute } from '@shared/threads'
+import {
+  addAuthorStatement,
+  deleteAuthorStatement,
+  listFactsForEntity,
+  setFactHidden,
+  setFactStatus
+} from '../entity/factStore'
+import { listThreads } from '../knowledge/threads'
+import { sceneCardFor } from '../knowledge/sceneCard'
+import { confirmConversion, conversionPending, estimateConversion } from '../knowledge/conversion'
 import { listChanges, undoChange, undoRun } from '../knowledge/changeLog'
 import { convertKnowledgeFacts } from '../knowledge/factConversion'
 import { importDraft, type ImportResult } from '../import/commit'
@@ -765,7 +779,9 @@ export function registerHandlers({
           : summary.contentHash !== source.contentHash,
       status: queue.nodeStatus(nodeId),
       // The queue's failure carries its code too; the pane shows what to do about it.
-      error: failure === null ? null : { message: failure.message, nextStep: failure.nextStep }
+      error: failure === null ? null : { message: failure.message, nextStep: failure.nextStep },
+      // F-9.14: the scene card, put together from what is stored (no AI, no write).
+      card: sceneCardFor(db, nodeId)
     }
   }
 
@@ -920,11 +936,33 @@ export function registerHandlers({
       const db = manager.require().connection.orm
       // F-14.14: the voice job rides the same triggers; it checks its own gate and thresholds.
       queueVoice(db)
+      // F-9.14: while the conversion waits for the author, the scenes an older prompt read are
+      // held back, and the windows hear what it would cost (the dialog shows on `pending`).
+      const hold = conversionPending(db)
+      if (hold) emit(windows(), 'knowledge:conversionChanged', conversionOf(db))
       if (!access.writable()) return
       if (!isFeatureAllowed(getAiSettings(db), 'summary') || !ai.get(sourceOf(db))) return
       if (lift && queue.status().paused !== null) queue.resume()
-      queue.indexAll('summary', staleSummaryNodeIds(db))
+      queue.indexAll('summary', staleSummaryNodeIds(db, { holdOutdated: hold }))
     }, SUMMARY_BACKFILL_DELAY_MS)
+  }
+
+  /**
+   * F-9.14: the conversion pass as the dialog reads it. Available only where the background
+   * summary could run now (writable, Use AI and summaries on, a provider set up); priced on the
+   * fast tier's model, the hosted quote on MythScribe Cloud, nothing on a local model.
+   */
+  let conversionDeferred = false
+  const conversionOf = (db: TreeDb): KnowledgeConversion => {
+    const source = sourceOf(db)
+    const provider = access.writable() ? ai.get(source) : undefined
+    return estimateConversion(db, {
+      available: isFeatureAllowed(getAiSettings(db), 'summary') && Boolean(provider),
+      source,
+      model: provider?.resolveModel('fast') ?? '',
+      pricing: appState.get().cloudPricing?.pricing ?? null,
+      deferred: conversionDeferred
+    })
   }
   /** A project change drops a pass meant for the project that left. */
   const cancelBackfill = (): void => {
@@ -1918,17 +1956,53 @@ export function registerHandlers({
     listFactsForEntity(manager.require().connection.orm, entityId)
   )
 
+  /** F-9.14: a relationship moves both sheets. */
+  const factOwners = (fact: Fact): string[] =>
+    fact.objectEntityId === null ? [fact.entityId] : [fact.entityId, fact.objectEntityId]
+
   register('fact:setHidden', ({ id, hidden }) => {
     const fact = setFactHidden(manager.require().connection.orm, id, hidden)
-    emit(windows(), 'fact:changed', { entityIds: [fact.entityId] })
+    emit(windows(), 'fact:changed', { entityIds: factOwners(fact) })
     return fact
   })
 
   register('fact:setStatus', ({ id, status }) => {
     const fact = setFactStatus(manager.require().connection.orm, id, status)
-    emit(windows(), 'fact:changed', { entityIds: [fact.entityId] })
+    emit(windows(), 'fact:changed', { entityIds: factOwners(fact) })
     return fact
   })
+
+  // F-9.14: the author's own relationships and thread events (dated facts that are no field).
+  register('fact:create', (input) => {
+    const fact = addAuthorStatement(
+      manager.require().connection.orm,
+      input.kind === 'relation'
+        ? {
+            entityId: input.entityId,
+            attribute: relationAttribute(input.type),
+            value: input.label,
+            objectEntityId: input.objectEntityId,
+            nodeId: input.nodeId
+          }
+        : {
+            entityId: input.entityId,
+            attribute: threadAttribute(input.event),
+            value: input.note,
+            objectEntityId: null,
+            nodeId: input.nodeId
+          }
+    )
+    emit(windows(), 'fact:changed', { entityIds: factOwners(fact) })
+    return fact
+  })
+
+  register('fact:delete', ({ id }) => {
+    const fact = deleteAuthorStatement(manager.require().connection.orm, id)
+    emit(windows(), 'fact:changed', { entityIds: factOwners(fact) })
+    return fact
+  })
+
+  register('thread:list', () => listThreads(manager.require().connection.orm))
 
   // F-9.13: the Changes log. An undo goes through the tombstones; what it removed or moved
   // reaches the windows as the same events the original writes would have.
@@ -3416,8 +3490,40 @@ export function registerHandlers({
       if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
       throw err
     }
-    const queued = queue.indexAll('summary', staleSummaryNodeIds(db))
+    // F-9.14: "Summarize all scenes" does not get past the conversion's cost dialog: the scenes
+    // it holds stay held, and the dialog opens again (Later is lifted) so the author can decide.
+    const hold = conversionPending(db)
+    const queued = queue.indexAll('summary', staleSummaryNodeIds(db, { holdOutdated: hold }))
+    if (hold) {
+      conversionDeferred = false
+      emit(windows(), 'knowledge:conversionChanged', conversionOf(db))
+    }
     return { ok: true, queued, status: queue.status() }
+  })
+
+  // F-9.14 (D11): the conversion pass. The dialog reads the estimate; Update now backs the
+  // project up first (the Settings › Backups path, so a failed backup stops it with its cause),
+  // records the go-ahead, and queues every scene to re-read; Later closes it for this session.
+  register('knowledge:conversion', () => conversionOf(manager.require().connection.orm))
+
+  register('knowledge:convert', () => {
+    const db = manager.require().connection.orm
+    const state = conversionOf(db)
+    if (state.state !== 'pending') return state
+    backups.backupNow()
+    confirmConversion(db)
+    if (queue.status().paused !== null) queue.resume()
+    queue.indexAll('summary', staleSummaryNodeIds(db))
+    const next = conversionOf(db)
+    emit(windows(), 'knowledge:conversionChanged', next)
+    return next
+  })
+
+  register('knowledge:later', () => {
+    conversionDeferred = true
+    const next = conversionOf(manager.require().connection.orm)
+    emit(windows(), 'knowledge:conversionChanged', next)
+    return next
   })
 
   // F-5.10: aborts the request registered under the id, or its fidelity regenerate (F-14.7)
@@ -3814,6 +3920,8 @@ export function registerHandlers({
     clearReplaceUndo()
     // F-10.3: the session's words and active time start again with every project.
     resetGoalsSession()
+    // F-9.14: Later holds for one session of one project.
+    conversionDeferred = false
     // F-9.12: the local knowledge index, before anything reads the bank or the scenes: the
     // one-time conversion (every name tag a record, every record a tag) and the passages of
     // documents that left the manuscript. Local and free; a failure never stops the open.
@@ -3821,6 +3929,8 @@ export function registerHandlers({
       try {
         const db = manager.require().connection.orm
         convertKnowledgeIndex(db)
+        // F-9.14: the author's plot-thread tags get their thread records (once per project).
+        convertThreadRecords(db)
         // F-9.13: old observed facts and the sheets' text into dated facts (every open, cheap).
         convertKnowledgeFacts(db)
         prunePassages(db)

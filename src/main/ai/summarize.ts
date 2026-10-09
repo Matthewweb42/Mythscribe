@@ -8,8 +8,11 @@ import {
   OBSERVED_FACT_QUOTE_MAX,
   OBSERVED_FACT_VALUE_MAX
 } from '@shared/observedFacts'
+import { parseRelationType } from '@shared/relations'
+import { SCENE_CARD_CHANGED_MAX, SCENE_CARD_FIELD_MAX, type AiSceneCard } from '@shared/sceneCard'
 import { parseStoredSceneMeta, promptSceneMeta, type PromptSceneMeta } from '@shared/sceneMeta'
 import { toTagName } from '@shared/tags'
+import { ThreadEvent, THREAD_KIND, THREAD_NOTE_MAX } from '@shared/threads'
 import {
   SUMMARY_CHARACTER_MAX,
   SUMMARY_CHARACTERS_MAX,
@@ -18,9 +21,14 @@ import {
   SUMMARY_KEY_POINTS_MAX,
   SUMMARY_MAX_CHARS,
   SUMMARY_SCENE_CHAR_BUDGET,
+  SUMMARY_RELATIONS_MAX,
   SUMMARY_TAGS_MAX,
   SUMMARY_TEXT_MIN,
+  SUMMARY_THREAD_NAME_MAX,
+  SUMMARY_THREADS_MAX,
+  ExtractedRelation,
   ExtractedTag,
+  ExtractedThreadEvent,
   promptVersionAtLeast,
   type SceneSummary,
   type StoredSceneSummary
@@ -31,12 +39,13 @@ import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { documentText, manuscriptDocuments } from '../voice/profile'
 import type { NodeRow } from '../db/schema'
+import { listEntities } from '../entity/entityStore'
 import { applyDerivedKnowledge } from '../knowledge/derive'
 import { bankTagNames, type AutoTagsChange } from './autoTags'
 import { headTruncate } from './context/chatContext'
 import { assertFeatureAllowed } from './dial'
 import { knownNames, type KnownNames, type ObservedFactsChange } from './observedFacts'
-import { buildSummaryPromptV3, SUMMARY_PROMPT_V3_VERSION } from './prompts/summary.v3'
+import { buildSummaryPromptV4, SUMMARY_PROMPT_V4_VERSION } from './prompts/summary.v4'
 import { AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -65,6 +74,11 @@ import { runAiRequest, sha256, type AiRequestDeps } from './request'
  * that transaction (`applyAutoTags`), apart from the author's own links, and go with the
  * summary too. The bank names the prompt lists are outside the content hash on purpose (see
  * `bankTagNames`).
+ *
+ * F-9.14 (`summary.v4`): and the same request reads the scene card (where, when, POV, what
+ * changed; stored on the summary row), the relationships the scene states between two records,
+ * and its plot-thread events, each of those two with a quote `findQuote` must find. They are
+ * applied with the facts (`applyDerivedKnowledge`) and logged in the Changes log.
  */
 
 const BAD_FORMAT = 'The model did not answer in the expected format.'
@@ -135,27 +149,78 @@ function sourceHash(sceneText: string, meta: PromptSceneMeta | null, known: Know
  * so the queue works through the book from the front. The staleness test is `summarySource`'s
  * hash, the same one `summary:get` shows as "Out of date", so the button and the pane can
  * never disagree; a scene whose hash still matches is left alone and costs nothing.
+ *
+ * F-9.14: `holdOutdated` leaves out the scenes whose only fault is the prompt version (the text
+ * the row was made from is unchanged): while the conversion pass waits for the author's go-ahead,
+ * those are held back, and a scene the author edits is summarised as usual.
  */
-export function staleSummaryNodeIds(db: TreeDb): string[] {
+export function staleSummaryNodeIds(
+  db: TreeDb,
+  options: { holdOutdated?: boolean } = {}
+): string[] {
+  const { stale, outdated } = summaryStaleness(db)
+  if (options.holdOutdated === true) return stale
+  const all = new Set([...stale, ...outdated])
+  return manuscriptDocuments(db)
+    .map((row) => row.id)
+    .filter((id) => all.has(id))
+}
+
+/** The scenes a background pass would summarise, split by why (F-9.14). */
+export interface SummaryStaleness {
+  /** No row, or a row made from other text: these run whatever the conversion waits on. */
+  stale: string[]
+  /** A row made from the same text by an older prompt version: what the conversion re-reads. */
+  outdated: string[]
+}
+
+/** Both lists in reading order, from one pass over the book. */
+export function summaryStaleness(db: TreeDb): SummaryStaleness {
   const rows = manuscriptDocuments(db)
   const stored = summariesFor(
     db,
     rows.map((row) => row.id)
   )
   const stale: string[] = []
+  const outdated: string[] = []
   for (const row of rows) {
     const source = sourceOfRow(db, row)
     if (source.length < SUMMARY_TEXT_MIN) continue
     const current = stored.get(row.id)
-    if (
-      current?.contentHash === source.contentHash &&
-      promptVersionAtLeast(current.promptVersion, SUMMARY_PROMPT_V3_VERSION)
-    ) {
+    if (current?.contentHash !== source.contentHash) {
+      stale.push(row.id)
       continue
     }
-    stale.push(row.id)
+    if (!promptVersionAtLeast(current.promptVersion, SUMMARY_PROMPT_V4_VERSION)) {
+      outdated.push(row.id)
+    }
   }
-  return stale
+  return { stale, outdated }
+}
+
+/**
+ * The thread records' names, newest first: what the prompt's `Threads:` line lists so the model
+ * reuses a thread instead of coining a twin (F-9.14). Outside the content hash, like the bank.
+ */
+export function threadNames(db: TreeDb): string[] {
+  return listEntities(db)
+    .filter((entity) => entity.kind === THREAD_KIND)
+    .sort((a, b) => b.created.localeCompare(a.created) || a.name.localeCompare(b.name))
+    .map((entity) => entity.name)
+}
+
+/** The messages a summary of this source sends now (the run and the conversion estimate share it). */
+export function summaryPrompt(
+  db: TreeDb,
+  source: SummarySource
+): ReturnType<typeof buildSummaryPromptV4> {
+  return buildSummaryPromptV4({
+    sceneText: source.sceneText,
+    meta: source.meta,
+    known: source.known,
+    bank: bankTagNames(db),
+    threads: threadNames(db)
+  })
 }
 
 export interface SummarizeSceneInput {
@@ -232,7 +297,7 @@ export async function summarizeScene(
   if (
     stored !== null &&
     stored.contentHash === source.contentHash &&
-    promptVersionAtLeast(stored.promptVersion, SUMMARY_PROMPT_V3_VERSION)
+    promptVersionAtLeast(stored.promptVersion, SUMMARY_PROMPT_V4_VERSION)
   ) {
     return {
       summary: stored,
@@ -245,12 +310,7 @@ export async function summarizeScene(
     }
   }
 
-  const prompt = buildSummaryPromptV3({
-    sceneText: source.sceneText,
-    meta: source.meta,
-    known: source.known,
-    bank: bankTagNames(db)
-  })
+  const prompt = summaryPrompt(db, source)
   const result = await runAiRequest(deps, {
     feature: 'summary',
     tier: 'fast',
@@ -280,6 +340,8 @@ export async function summarizeScene(
       nodeId: input.nodeId,
       facts: parsed.facts,
       tags: parsed.tags,
+      relations: parsed.relations,
+      threads: parsed.threads,
       sceneText: source.sceneText,
       now: deps.now().toISOString()
     })
@@ -295,7 +357,8 @@ export async function summarizeScene(
       promptVersion: prompt.version,
       model: result.model,
       truncated: source.truncated,
-      createdAt: deps.now().toISOString()
+      createdAt: deps.now().toISOString(),
+      ...(parsed.card === null ? {} : { card: parsed.card })
     }
     upsertSummary(tx, row)
     return { summary: row, change: applied, tagged: tags, logged: derived.logged }
@@ -321,7 +384,10 @@ const ModelAnswer = z.object({
   keyPoints: z.unknown().optional(),
   characters: z.unknown().optional(),
   facts: z.unknown().optional(),
-  tags: z.unknown().optional()
+  tags: z.unknown().optional(),
+  card: z.unknown().optional(),
+  relations: z.unknown().optional(),
+  threads: z.unknown().optional()
 })
 
 /** One tag as the model may answer it, before the name is trimmed and the category checked. */
@@ -336,13 +402,36 @@ const ModelFact = z.object({
   quote: z.string()
 })
 
+/** One relationship as the model may answer it (F-9.14), before it is trimmed and checked. */
+const ModelRelation = z.object({
+  from: z.string(),
+  type: z.string(),
+  to: z.string(),
+  quote: z.string()
+})
+
+/** One thread event as the model may answer it (F-9.14); `question` is optional. */
+const ModelThread = z.object({
+  name: z.string(),
+  event: z.string(),
+  question: z.string().nullish(),
+  quote: z.string()
+})
+
 /** What an answer yields: the summary to store, the facts that passed every check, and how many did not. */
 export interface ParsedSummaryAnswer {
   summary: SceneSummary
   facts: ExtractedFact[]
+  /** Facts, relationships, and thread events of the answer that were not kept (bad shape, no passage). */
   droppedFacts: number
   /** The tags to apply (F-4.13): shaped, deduped by tag name, and capped; resolved against the bank later. */
   tags: ExtractedTag[]
+  /** F-9.14: the card's AI part; null when the answer carries none (or only empty fields). */
+  card: AiSceneCard | null
+  /** F-9.14: the relationships, each with a known type and a quote found in the scene. */
+  relations: ExtractedRelation[]
+  /** F-9.14: the thread events, each with a known event and a quote found in the scene. */
+  threads: ExtractedThreadEvent[]
 }
 
 /**
@@ -378,15 +467,134 @@ export function parseSummaryAnswer(text: string, sceneText: string): ParsedSumma
   const summary = typeof raw === 'string' ? raw.trim().slice(0, SUMMARY_MAX_CHARS).trim() : ''
   if (summary.length === 0) throw new AiFallbackError(BAD_FORMAT)
 
+  const facts = cleanFacts(answer.data.facts, sceneText)
+  const relations = cleanRelations(answer.data.relations, sceneText)
+  const threads = cleanThreads(answer.data.threads, sceneText)
   return {
     summary: {
       summary,
       keyPoints: cleanList(answer.data.keyPoints, SUMMARY_KEY_POINT_MAX, SUMMARY_KEY_POINTS_MAX),
       characters: cleanList(answer.data.characters, SUMMARY_CHARACTER_MAX, SUMMARY_CHARACTERS_MAX)
     },
-    ...cleanFacts(answer.data.facts, sceneText),
-    tags: cleanTags(answer.data.tags)
+    facts: facts.facts,
+    droppedFacts: facts.droppedFacts + relations.dropped + threads.dropped,
+    tags: cleanTags(answer.data.tags),
+    card: cleanCard(answer.data.card),
+    relations: relations.relations,
+    threads: threads.threads
   }
+}
+
+/** A card field: a string trimmed and cut to its cap; anything else is ''. */
+function cardField(value: unknown, max: number): string {
+  return typeof value === 'string' ? value.trim().slice(0, max).trim() : ''
+}
+
+/**
+ * The card's AI part (F-9.14), lenient: each field a trimmed string cut to its cap, anything else
+ * empty; null when the answer has no card or only empty fields. The card states what the scene
+ * does in a few words, so it is not quote-checked; the prompt asks for an empty field rather than
+ * a guess.
+ */
+function cleanCard(value: unknown): AiSceneCard | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const card: AiSceneCard = {
+    where: cardField(raw.where, SCENE_CARD_FIELD_MAX),
+    when: cardField(raw.when, SCENE_CARD_FIELD_MAX),
+    pov: cardField(raw.pov, SCENE_CARD_FIELD_MAX),
+    changed: cardField(raw.changed, SCENE_CARD_CHANGED_MAX)
+  }
+  return Object.values(card).every((field) => field === '') ? null : card
+}
+
+/**
+ * The relationships (F-9.14), strict about grounding like the facts: an entry that is not the
+ * four strings, a blank end, a type outside the list (`parseRelationType` reads "Member of" and
+ * "member_of" too), the same name at both ends, or a quote `findQuote` cannot find in the scene
+ * is dropped and counted. The same pair and type given twice is kept once; the list is capped.
+ * Whether both names are records is decided when it is applied.
+ */
+function cleanRelations(
+  value: unknown,
+  sceneText: string
+): { relations: ExtractedRelation[]; dropped: number } {
+  if (!Array.isArray(value)) return { relations: [], dropped: 0 }
+  const seen = new Set<string>()
+  const relations: ExtractedRelation[] = []
+  let dropped = 0
+  for (const entry of value) {
+    if (relations.length === SUMMARY_RELATIONS_MAX) break
+    const shaped = ModelRelation.safeParse(entry)
+    const type = shaped.success ? parseRelationType(shaped.data.type) : null
+    const relation =
+      shaped.success && type !== null
+        ? ExtractedRelation.safeParse({
+            from: shaped.data.from.trim(),
+            type,
+            to: shaped.data.to.trim(),
+            quote: shaped.data.quote.trim().slice(0, OBSERVED_FACT_QUOTE_MAX)
+          })
+        : null
+    if (
+      !relation?.success ||
+      toEntityNameKey(relation.data.from) === toEntityNameKey(relation.data.to) ||
+      !findQuote(sceneText, relation.data.quote)
+    ) {
+      dropped += 1
+      continue
+    }
+    const key = [
+      toEntityNameKey(relation.data.from),
+      relation.data.type,
+      toEntityNameKey(relation.data.to)
+    ].join('\u0000')
+    if (seen.has(key)) continue
+    seen.add(key)
+    relations.push(relation.data)
+  }
+  return { relations, dropped }
+}
+
+/**
+ * The thread events (F-9.14), strict about grounding: an entry with no name, an event outside the
+ * four, or a quote not in the scene is dropped and counted. The name is cut to its cap and the
+ * question to the note cap (kept for an opening only, when it is applied). The same thread and
+ * event given twice is kept once; the list is capped.
+ */
+function cleanThreads(
+  value: unknown,
+  sceneText: string
+): { threads: ExtractedThreadEvent[]; dropped: number } {
+  if (!Array.isArray(value)) return { threads: [], dropped: 0 }
+  const seen = new Set<string>()
+  const threads: ExtractedThreadEvent[] = []
+  let dropped = 0
+  for (const entry of value) {
+    if (threads.length === SUMMARY_THREADS_MAX) break
+    const shaped = ModelThread.safeParse(entry)
+    const event = shaped.success
+      ? ThreadEvent.safeParse(shaped.data.event.trim().toLowerCase())
+      : null
+    const thread =
+      shaped.success && event?.success === true
+        ? ExtractedThreadEvent.safeParse({
+            name: shaped.data.name.trim().slice(0, SUMMARY_THREAD_NAME_MAX).trim(),
+            event: event.data,
+            question: (shaped.data.question ?? '').trim().slice(0, THREAD_NOTE_MAX).trim(),
+            quote: shaped.data.quote.trim().slice(0, OBSERVED_FACT_QUOTE_MAX)
+          })
+        : null
+    if (!thread?.success || !findQuote(sceneText, thread.data.quote)) {
+      dropped += 1
+      continue
+    }
+    const key = `${toEntityNameKey(thread.data.name)}\u0000${thread.data.event}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    threads.push(thread.data)
+  }
+  return { threads, dropped }
 }
 
 function cleanTags(value: unknown): ExtractedTag[] {

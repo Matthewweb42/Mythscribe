@@ -23,7 +23,12 @@ import { scanMentions, staleMentionNodeIds } from '../tag/scanMentions'
 import { createTag, getTag, listTags, updateTag } from '../tag/tagStore'
 import type { TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
-import { convertKnowledgeIndex, ensureRecordForTag, makeRecordForTag } from './records'
+import {
+  convertKnowledgeIndex,
+  convertThreadRecords,
+  ensureRecordForTag,
+  makeRecordForTag
+} from './records'
 
 let tmp: string
 let session: ProjectSession
@@ -78,13 +83,20 @@ describe('ensureRecordForTag (F-9.12, D8)', () => {
 
   it('leaves labels alone and never makes a second record', () => {
     const rain = createTag(db, { name: 'rain', category: 'tone' })
-    const thread = createTag(db, { name: 'the-debt', category: 'plotThread' })
     expect(ensureRecordForTag(db, rain, 'author')).toBeNull()
-    expect(ensureRecordForTag(db, thread, 'author')).toBeNull()
     const mara = createTag(db, { name: 'mara', category: 'character' })
     expect(ensureRecordForTag(db, mara, 'author')).not.toBeNull()
     expect(ensureRecordForTag(db, mara, 'author')).toBeNull()
     expect(listEntities(db)).toHaveLength(1)
+  })
+
+  it('gives a plot-thread tag a thread record (F-9.14)', () => {
+    const thread = createTag(db, { name: 'the-debt', category: 'plotThread' })
+    expect(ensureRecordForTag(db, thread, 'author')?.entity).toMatchObject({
+      kind: 'thread',
+      name: 'The Debt',
+      tagId: thread.id
+    })
   })
 
   it('links an untagged sheet of that name instead of making another', () => {
@@ -185,18 +197,18 @@ describe('convertKnowledgeIndex (F-9.12)', () => {
   })
 
   it('keeps keys a later build stored beside its own', () => {
-    db.run(
-      sql`INSERT INTO settings (key, value) VALUES ('knowledgeModel', '{"index":0,"cards":1}')`
-    )
+    db.run(sql`INSERT INTO settings (key, value) VALUES ('knowledgeModel', '{"index":0,"todo":1}')`)
     convertKnowledgeIndex(db)
     const row = db.all<{ value: string }>(
       sql`SELECT value FROM settings WHERE key = 'knowledgeModel'`
     )[0]
     expect(JSON.parse(row?.value ?? '{}')).toEqual({
       index: 1,
-      cards: 1,
+      todo: 1,
       facts: 0,
-      factsImportedAt: ''
+      factsImportedAt: '',
+      threads: 0,
+      cards: 0
     })
   })
 
@@ -318,5 +330,19 @@ describe('a record the author deleted stays deleted (F-9.12)', () => {
     })
     deleteEntity(db, lonely.entity.id)
     expect(getObservedDismissed(db).names).toEqual([])
+  })
+})
+
+describe('convertThreadRecords (F-9.14)', () => {
+  it('gives the author’s plot-thread tags their thread records once, skipping AI tags and placeholders', () => {
+    const debt = bareTag('the-debt', 'plotThread')
+    bareTag('rumour', 'plotThread', 'ai')
+    bareTag('main-plot', 'plotThread')
+    const written = convertThreadRecords(db)
+    expect(written?.map((write) => write.entity)).toMatchObject([
+      { kind: 'thread', name: 'The Debt', tagId: debt, origin: 'author' }
+    ])
+    expect(getKnowledgeModel(db).threads).toBe(1)
+    expect(convertThreadRecords(db)).toBeNull()
   })
 })

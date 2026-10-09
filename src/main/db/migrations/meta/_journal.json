@@ -169,6 +169,13 @@
       "when": 1791520730686,
       "tag": "0023_facts",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1791527096688,
+      "tag": "0024_scene_cards",
+      "breakpoints": true
     }
   ]
 }

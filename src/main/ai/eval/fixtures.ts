@@ -194,6 +194,11 @@ import {
   type SummaryBankTags
 } from '../prompts/summary.v3'
 import {
+  buildSummaryPromptV4,
+  SUMMARY_PROMPT_V4_VERSION,
+  SUMMARY_THREAD_NAMES_MAX
+} from '../prompts/summary.v4'
+import {
   buildBetaReaderPrompt,
   BETA_READER_PROMPT_VERSION,
   type BuildBetaReaderPromptInput
@@ -1429,6 +1434,35 @@ function summaryV3Case(
     scoring: { kind: 'summaryFacts', sceneText }
   }
 }
+
+function summaryV4Case(
+  name: string,
+  note: string,
+  sceneText: string,
+  meta: typeof META | null,
+  known: SummaryKnownNames,
+  bank: SummaryBankTags,
+  threads: readonly string[]
+): EvalCase {
+  const built = buildSummaryPromptV4({ sceneText, meta, known, bank, threads })
+  return {
+    version: SUMMARY_PROMPT_V4_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    // F-9.14: the card, relationships, and thread events are checked by the parser the same way
+    // (quotes found in the scene); the facts rule scores the grounding of the answer.
+    scoring: { kind: 'summaryFacts', sceneText }
+  }
+}
+
+/** The thread names a v4 summary request lists (F-9.14): the fixture's one, and the cap. */
+const FIXTURE_THREADS: readonly string[] = ['The Mill Debt']
+const MAXED_THREADS: readonly string[] = Array.from(
+  { length: SUMMARY_THREAD_NAMES_MAX },
+  (_, index) => `A Long Thread Name ${index}`
+)
 
 /** The tag bank a summary request lists (F-4.13): none, a working bank, and the cap. */
 const NO_BANK_TAGS: SummaryBankTags = { tone: [], content: [], plotThread: [], custom: [] }
@@ -3467,6 +3501,38 @@ export const EVAL_CASES: EvalCase[] = [
     },
     MAXED_KNOWN,
     MAXED_BANK_TAGS
+  ),
+  summaryV4Case(
+    'fresh',
+    'the fixture scene with no story-bible names, no tag bank, no threads, and no metadata: the shape a new project sends',
+    FIXTURE_PASSAGE,
+    null,
+    { character: [], setting: [], world: [] },
+    NO_BANK_TAGS,
+    []
+  ),
+  summaryV4Case(
+    'full',
+    "the fixture scene with the story-bible names it contains, a working tag bank, a thread, and the scene's metadata",
+    FIXTURE_PASSAGE,
+    META,
+    FIXTURE_KNOWN,
+    FIXTURE_BANK_TAGS,
+    FIXTURE_THREADS
+  ),
+  summaryV4Case(
+    'maxed',
+    `a scene at the character budget with ${SUMMARY_KNOWN_NAMES_MAX} known names, ${SUMMARY_BANK_TAGS_MAX} bank tags, ${SUMMARY_THREAD_NAMES_MAX} threads, and long metadata: the most a background summary with cards, relationships, and threads can cost`,
+    `${FIXTURE_PASSAGE.repeat(20).slice(0, SUMMARY_SCENE_CHAR_BUDGET)}…`,
+    {
+      location: 'L'.repeat(200),
+      pov: 'P'.repeat(200),
+      timeline: 'T'.repeat(500),
+      brief: EMPTY_SCENE_BRIEF
+    },
+    MAXED_KNOWN,
+    MAXED_BANK_TAGS,
+    MAXED_THREADS
   ),
   queryCase(
     'fresh',

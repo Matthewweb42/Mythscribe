@@ -49,8 +49,12 @@ import {
   staleSummaryNodeIds,
   summarizeScene,
   summarySource,
+  summaryStaleness,
   type SummarizeSceneInput
 } from './summarize'
+import { listChanges, undoChange } from '../knowledge/changeLog'
+import { sceneCardFor } from '../knowledge/sceneCard'
+import { listThreads } from '../knowledge/threads'
 import type { UsageEntry } from './usageStore'
 
 const NOW = new Date(2026, 8, 15, 10, 0, 0)
@@ -183,14 +187,14 @@ afterEach(() => {
 })
 
 describe('summarizeScene (F-5.6)', () => {
-  it('sends the scene as JSON to the fast tier under summary.v3 and stores the row', async () => {
+  it('sends the scene as JSON to the fast tier under summary.v4 and stores the row', async () => {
     const result = await summarize()
     expect(result).toEqual({
       summary: {
         ...ANSWER,
         nodeId: scene,
         contentHash: summarySource(db, scene)?.contentHash,
-        promptVersion: 'summary.v3',
+        promptVersion: 'summary.v4',
         model: 'gpt-5.4-mini',
         truncated: false,
         createdAt: NOW.toISOString()
@@ -199,12 +203,12 @@ describe('summarizeScene (F-5.6)', () => {
       costUsd: priceFor('gpt-5.4-mini', 600, 90).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'summary.v3',
+      promptVersion: 'summary.v4',
       droppedFacts: 0
     })
     expect(getSummary(db, scene)).toEqual(result.summary)
     const request = complete.mock.calls[0]![0]
-    expect(request).toMatchObject({ tier: 'fast', json: true, maxTokens: 800 })
+    expect(request).toMatchObject({ tier: 'fast', json: true, maxTokens: 1_000 })
     expect(
       sent().system.startsWith('You are the scene-summary feature inside a novel-writing app.')
     ).toBe(true)
@@ -213,7 +217,7 @@ describe('summarizeScene (F-5.6)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'summary',
       tier: 'fast',
-      promptVersion: 'summary.v3',
+      promptVersion: 'summary.v4',
       cached: false
     })
   })
@@ -262,7 +266,7 @@ describe('summarizeScene (F-5.6)', () => {
       costUsd: 0,
       cached: true,
       model: 'gpt-5.4-mini',
-      promptVersion: 'summary.v3',
+      promptVersion: 'summary.v4',
       droppedFacts: 0
     })
     expect(complete).toHaveBeenCalledTimes(1)
@@ -397,12 +401,63 @@ describe('parseSummaryAnswer (F-5.6)', () => {
     expect(parsed.characters[0]).toHaveLength(SUMMARY_CHARACTER_MAX)
   })
 
+  it('reads the card leniently and the relationships and thread events strictly (F-9.14)', () => {
+    const parsed = parseSummaryAnswer(
+      JSON.stringify({
+        summary: 'Mara waits.',
+        card: { where: '  The landing ', when: 3, pov: '', changed: 'x'.repeat(400) },
+        relations: [
+          {
+            from: 'Mara',
+            type: 'Member of',
+            to: 'The Ferrymen',
+            quote: 'She set the lantern down'
+          },
+          {
+            from: 'Mara',
+            type: 'member_of',
+            to: 'the ferrymen',
+            quote: 'She set the lantern down'
+          },
+          { from: 'Mara', type: 'ally', to: 'mara', quote: 'She set the lantern down' },
+          { from: 'Mara', type: 'ally', quote: 'She set the lantern down' }
+        ],
+        threads: [
+          { name: 'The Bell', event: 'Opened', quote: 'the bell had lost its clapper' },
+          { name: 'the bell', event: 'opened', quote: 'the bell had lost its clapper' },
+          { name: '', event: 'opened', quote: 'the bell had lost its clapper' }
+        ]
+      }),
+      SCENE
+    )
+    expect(parsed.card).toEqual({
+      where: 'The landing',
+      when: '',
+      pov: '',
+      changed: 'x'.repeat(160)
+    })
+    expect(parsed.relations).toEqual([
+      { from: 'Mara', type: 'member-of', to: 'The Ferrymen', quote: 'She set the lantern down' }
+    ])
+    expect(parsed.threads).toEqual([
+      { name: 'The Bell', event: 'opened', question: '', quote: 'the bell had lost its clapper' }
+    ])
+    // The self-relationship, the one with no end, and the nameless thread.
+    expect(parsed.droppedFacts).toBe(3)
+    expect(
+      parseSummaryAnswer(JSON.stringify({ summary: 'x', card: { where: '' } }), SCENE).card
+    ).toBeNull()
+  })
+
   it('reads a missing list as none, and ignores anything the prompt did not ask for', () => {
     expect(parse({ summary: 'Mara waits.', extra: 1 })).toEqual({
       summary: { summary: 'Mara waits.', keyPoints: [], characters: [] },
       facts: [],
       droppedFacts: 0,
-      tags: []
+      tags: [],
+      card: null,
+      relations: [],
+      threads: []
     })
   })
 })
@@ -601,7 +656,7 @@ describe('summarizeScene logs the story bible (F-5.16)', () => {
     // The rerun rewrites the row under the current version (from the local response cache here:
     // the scene itself has not changed, so the same request is not paid for twice).
     await run()
-    expect(getSummary(db, scene)?.promptVersion).toBe('summary.v3')
+    expect(getSummary(db, scene)?.promptVersion).toBe('summary.v4')
     expect(staleSummaryNodeIds(db)).toEqual([])
   })
 
@@ -714,6 +769,150 @@ describe('staleSummaryNodeIds (F-5.13)', () => {
   it('answers in reading order', () => {
     secondScene(SCENE)
     expect(staleSummaryNodeIds(db)).toEqual([scene, 'scene-2'])
+  })
+
+  it('holds back a scene stale only by its prompt version while the conversion waits (F-9.14)', async () => {
+    await summarize()
+    const stored = getSummary(db, scene)
+    if (!stored) throw new Error('no stored summary')
+    upsertSummary(db, { ...stored, promptVersion: 'summary.v3' })
+    const second = secondScene(`${SCENE} The rope pulled taut.`)
+    expect(summaryStaleness(db)).toEqual({ stale: [second], outdated: [scene] })
+    expect(staleSummaryNodeIds(db, { holdOutdated: true })).toEqual([second])
+    expect(staleSummaryNodeIds(db)).toEqual([scene, second])
+    // An edit makes it an ordinary stale scene: summarised whatever the conversion waits on.
+    saveDocument(db, scene, doc(`${SCENE} She left.`))
+    expect(staleSummaryNodeIds(db, { holdOutdated: true })).toEqual([scene, second])
+  })
+})
+
+describe('summarizeScene reads cards, relationships, and threads (F-9.14)', () => {
+  const CARD = {
+    where: 'The ferry landing',
+    when: 'Night',
+    pov: 'Mara',
+    changed: 'Mara waits alone.'
+  }
+  const MENTOR = { from: 'Mara', type: 'Mentor', to: 'Tomas', quote: 'She set the lantern down' }
+  const BELL = {
+    name: 'The Silent Bell',
+    event: 'opened',
+    question: 'Who took the clapper?',
+    quote: 'the bell had lost its clapper years ago'
+  }
+  let mara: string
+  let tomas: string
+  const read = (): string =>
+    JSON.stringify(
+      db
+        .select({ id: node.id, content: node.content, notes: node.notes, meta: node.sceneMeta })
+        .from(node)
+        .all()
+    )
+
+  beforeEach(() => {
+    complete.mockReset()
+    mara = createEntity(db, { kind: 'character', name: 'Mara' }).entity.id
+    tomas = createEntity(db, { kind: 'character', name: 'Tomas' }).entity.id
+  })
+
+  it('stores the card, a grounded relationship, and a thread event, and logs them, in one request', async () => {
+    const before = read()
+    answers({
+      ...ANSWER,
+      card: CARD,
+      relations: [
+        MENTOR,
+        { ...MENTOR, type: 'nemesis' },
+        { ...MENTOR, to: 'Zed' },
+        { ...MENTOR, quote: 'Never written.' }
+      ],
+      threads: [BELL, { ...BELL, event: 'paused' }, { ...BELL, quote: 'Never written.' }]
+    })
+    const result = await summarize()
+    expect(complete).toHaveBeenCalledTimes(1)
+    // The bad type, the bad event, the two unquoted entries, and the unknown record (applied).
+    expect(result.droppedFacts).toBe(5)
+    expect(getSummary(db, scene)?.card).toEqual(CARD)
+
+    const relation = listFactsForEntity(db, tomas).find((fact) => fact.objectEntityId === tomas)
+    expect(relation).toMatchObject({
+      entityId: mara,
+      attribute: 'relation:mentor',
+      nodeId: scene,
+      origin: 'ai'
+    })
+    expect(listEntities(db).find((entity) => entity.name === 'Zed')).toBeUndefined()
+
+    const threads = listThreads(db)
+    expect(threads).toMatchObject([
+      { name: 'The Silent Bell', origin: 'ai', status: 'open', question: 'Who took the clapper?' }
+    ])
+    expect(threads[0]?.setup).toMatchObject({ event: 'opened', nodeId: scene })
+
+    expect(sceneCardFor(db, scene)).toEqual({
+      where: { value: 'The ferry landing', origin: 'ai' },
+      when: { value: 'Night', origin: 'ai' },
+      pov: { value: 'Mara', origin: 'ai' },
+      changed: 'Mara waits alone.',
+      cast: ['Mara', 'Tomas'],
+      threads: [{ entityId: threads[0]?.entityId, name: 'The Silent Bell', event: 'opened' }]
+    })
+
+    const labels = listChanges(db, { limit: 50 }).entries.map((entry) => entry.label)
+    expect(labels).toContain('Mara · Mentor of Tomas')
+    expect(labels).toContain('Thread The Silent Bell · Opened: Who took the clapper?')
+    expect(labels).toContain('The Silent Bell')
+    // Nothing of it touched the manuscript.
+    expect(read()).toBe(before)
+  })
+
+  it('lets the author’s scene metadata win on the card', async () => {
+    answers({ ...ANSWER, card: CARD })
+    await summarize()
+    setSceneMeta(db, scene, { ...emptySceneMeta(), location: 'The ridge', pov: 'Tomas' })
+    expect(sceneCardFor(db, scene)).toMatchObject({
+      where: { value: 'The ridge', origin: 'author' },
+      pov: { value: 'Tomas', origin: 'author' },
+      when: { value: 'Night', origin: 'ai' }
+    })
+  })
+
+  it('undoes a relationship from Changes for good: the next reading does not bring it back', async () => {
+    answers({ ...ANSWER, relations: [MENTOR] }, { ...ANSWER, relations: [MENTOR] })
+    await summarize()
+    const entry = listChanges(db, { limit: 50 }).entries.find(
+      (row) => row.label === 'Mara · Mentor of Tomas'
+    )
+    if (!entry) throw new Error('relationship not logged')
+    const undone = undoChange(db, entry.id)
+    expect(undone.entityIds.sort()).toEqual([mara, tomas].sort())
+    saveDocument(db, scene, doc(`${SCENE} The water rose.`))
+    await summarize()
+    const visible = listFactsForEntity(db, mara).filter(
+      (fact) => fact.attribute === 'relation:mentor' && !fact.hidden
+    )
+    expect(visible).toEqual([])
+  })
+
+  it('creates at most two thread records per reading and attaches to one that exists', async () => {
+    const thread = (name: string): typeof BELL => ({ ...BELL, name })
+    answers({
+      ...ANSWER,
+      threads: [thread('First'), thread('Second'), thread('Third')]
+    })
+    await summarize()
+    expect(
+      listThreads(db)
+        .map((each) => each.name)
+        .sort()
+    ).toEqual(['First', 'Second'])
+    answers({ ...ANSWER, threads: [{ ...thread('first'), event: 'resolved' }] })
+    saveDocument(db, scene, doc(`${SCENE} The water rose.`))
+    await summarize()
+    const first = listThreads(db).find((each) => each.name === 'First')
+    expect(first?.events.map((event) => event.event)).toEqual(['opened', 'resolved'])
+    expect(first?.status).toBe('resolved')
   })
 })
 

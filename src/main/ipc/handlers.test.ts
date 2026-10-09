@@ -83,7 +83,7 @@ import { AiProviderRegistry } from '../ai/registry'
 import { loadAgentProject } from '../ai/agentTools'
 import { getProposal } from '../ai/proposalStore'
 import { insertUsage } from '../ai/usageStore'
-import { upsertSummary } from '../document/summaryStore'
+import { getSummary, upsertSummary } from '../document/summaryStore'
 import { applyDerivedKnowledge } from '../knowledge/derive'
 import { applySceneFacts } from '../entity/factStore'
 import { manuscriptDocuments } from '../voice/profile'
@@ -3543,7 +3543,8 @@ describe('scene summaries (F-5.6)', () => {
       summary: null,
       stale: true,
       status: 'idle',
-      error: null
+      error: null,
+      card: null
     })
     expect(statusesSent()).toEqual([])
     await write(scene, `${SCENE} She waited.`)
@@ -3575,7 +3576,7 @@ describe('scene summaries (F-5.6)', () => {
     expect(result.state.summary).toMatchObject({
       ...ANSWER,
       nodeId: scene,
-      promptVersion: 'summary.v3',
+      promptVersion: 'summary.v4',
       model: 'gpt-fake',
       truncated: false
     })
@@ -4507,6 +4508,146 @@ describe('the Changes log and dated author lines (F-9.13)', () => {
     ])
     expect(sent('fact:changed')).toEqual([{ entityIds: [mara.id] }])
     expect((await invoke('entity:update', { id: mara.id, status: 'plan' })).status).toBe('plan')
+  })
+})
+
+describe('relationships, threads, and the conversion pass (F-9.14)', () => {
+  const sent = (channel: string): unknown[] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([name]) => name === channel)
+      .map(([, payload]) => payload)
+  const SCENE =
+    'The ferry landing was empty when Mara reached it. The rope hung slack in the water and ' +
+    'the bell had lost its clapper years ago. She set the lantern down on the post and waited. ' +
+    '"You came alone," a voice said behind her.'
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('thread:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('knowledge:conversion', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('fact:delete', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('adds and deletes the author’s relationship, listed on both sheets, and a thread event', async () => {
+    await invoke('project:create', { name: 'Links', format: 'novel', directory: tmp })
+    const scene = (await invoke('tree:list', undefined)).find(
+      (node) => node.kind === 'document' && node.sectionType === null
+    )
+    const mara = await invoke('entity:create', { kind: 'character', name: 'Mara' })
+    const tomas = await invoke('entity:create', { kind: 'character', name: 'Tomas' })
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    const relation = await invoke('fact:create', {
+      kind: 'relation',
+      entityId: mara.id,
+      type: 'mentor',
+      objectEntityId: tomas.id,
+      label: 'teaches the river',
+      nodeId: null
+    })
+    expect(relation).toMatchObject({
+      attribute: 'relation:mentor',
+      objectEntityId: tomas.id,
+      origin: 'author',
+      value: 'teaches the river'
+    })
+    expect(sent('fact:changed')).toEqual([{ entityIds: [mara.id, tomas.id] }])
+    expect(await invoke('fact:listForEntity', { entityId: tomas.id })).toMatchObject([
+      { id: relation.id }
+    ])
+    await expect(
+      invoke('fact:create', {
+        kind: 'relation',
+        entityId: mara.id,
+        type: 'ally',
+        objectEntityId: mara.id,
+        label: '',
+        nodeId: null
+      })
+    ).rejects.toThrowError(/^VALIDATION: /)
+    await expect(
+      invoke('fact:create', {
+        kind: 'threadEvent',
+        entityId: mara.id,
+        event: 'opened',
+        note: '',
+        nodeId: null
+      })
+    ).rejects.toThrowError(/^VALIDATION: /)
+
+    const debt = await invoke('entity:create', { kind: 'thread', name: 'The Debt' })
+    await invoke('fact:create', {
+      kind: 'threadEvent',
+      entityId: debt.id,
+      event: 'opened',
+      note: 'Will Mara pay?',
+      nodeId: scene?.id ?? null
+    })
+    expect(await invoke('thread:list', undefined)).toMatchObject([
+      { entityId: debt.id, name: 'The Debt', status: 'open', question: 'Will Mara pay?' }
+    ])
+
+    expect(await invoke('fact:delete', { id: relation.id })).toMatchObject({ id: relation.id })
+    expect(await invoke('fact:listForEntity', { entityId: tomas.id })).toEqual([])
+  })
+
+  it('holds the outdated scenes behind the dialog, and Update now backs up and re-reads them', async () => {
+    await invoke('project:create', { name: 'Convert', format: 'novel', directory: tmp })
+    const scene = (await invoke('tree:list', undefined)).find(
+      (node) => node.kind === 'document' && node.sectionType === null
+    )
+    const id = scene?.id ?? ''
+    // With Use AI off there is nothing to ask.
+    expect((await invoke('knowledge:conversion', undefined)).state).toBe('none')
+    await invoke('document:save', {
+      id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: SCENE }] }]
+      }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
+    complete.mockResolvedValue({
+      text: JSON.stringify({ summary: 'Mara waits.', keyPoints: [], characters: [] }),
+      model: 'gpt-fake',
+      usage: { inputTokens: 400, outputTokens: 60 }
+    })
+    await invoke('ai:summarize', { nodeId: id, requestId: 'c-1' })
+    // Nothing waits: the scene was read by this build's prompt.
+    expect((await invoke('knowledge:conversion', undefined)).state).toBe('none')
+
+    const db = manager.require().connection.orm
+    const stored = getSummary(db, id)
+    if (!stored) throw new Error('no summary')
+    upsertSummary(db, { ...stored, promptVersion: 'summary.v3' })
+    const pending = await invoke('knowledge:conversion', undefined)
+    expect(pending).toMatchObject({
+      state: 'pending',
+      scenes: 1,
+      model: 'gpt-fake',
+      source: 'ownKey',
+      minutes: 1,
+      deferred: false,
+      // The fake model is not in the price table: unknown, never "free".
+      priced: false
+    })
+    // The scene is not out of date to the pane: its text is what the row was made from.
+    expect((await invoke('summary:get', { id })).stale).toBe(false)
+
+    expect((await invoke('knowledge:later', undefined)).deferred).toBe(true)
+    // "Summarize all scenes" holds the scene too, and opens the dialog again.
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    expect(await invoke('jobs:indexAll', undefined)).toMatchObject({ ok: true, queued: 0 })
+    expect(sent('knowledge:conversionChanged')).toMatchObject([
+      { state: 'pending', deferred: false }
+    ])
+
+    expect((await invoke('backups:get', undefined)).backups).toHaveLength(0)
+    const done = await invoke('knowledge:convert', undefined)
+    expect(done.state).toBe('done')
+    // The author safety rule: a full backup before the pass starts.
+    expect((await invoke('backups:get', undefined)).backups).toHaveLength(1)
+    await vi.waitFor(() => expect(getSummary(db, id)?.promptVersion).toBe('summary.v4'))
   })
 })
 

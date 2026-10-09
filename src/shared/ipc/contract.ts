@@ -142,6 +142,9 @@ import { Layout } from '../layout'
 import { AccentId, SupporterStatus } from '../license'
 import { MatterTemplateId } from '../matterTemplates'
 import { Fact, FactStatus } from '../facts'
+import { KnowledgeConversion } from '../knowledge'
+import { RELATION_LABEL_MAX, RelationType } from '../relations'
+import { THREAD_NOTE_MAX, ThreadEvent, ThreadView } from '../threads'
 import { CHANGES_PAGE, CHANGES_PAGE_MAX, ChangePage, ChangeUndoResult } from '../changes'
 import { TagMentions } from '../mentions'
 import { EditRole, MenuItemId } from '../menu'
@@ -1817,6 +1820,58 @@ export const contract = {
   'changes:undo': { input: z.object({ id: z.string() }), output: ChangeUndoResult },
   /** Undoes every change of one reading of a scene, in one transaction; refused whole when one change is. */
   'changes:undoRun': { input: z.object({ runId: z.string() }), output: ChangeUndoResult },
+  /**
+   * The author's own relationship between two sheets, or event on a thread (F-9.14): a fact that
+   * is no sheet field, undated (`nodeId` null, "from the start") or holding from a scene. The same
+   * relationship at the same scene replaces its label. Answers the fact as stored and pushes
+   * `fact:changed` for both sheets. VALIDATION for a relationship with itself or an event on a
+   * sheet outside Threads; NOT_FOUND for an unknown sheet or scene.
+   */
+  'fact:create': {
+    input: z.discriminatedUnion('kind', [
+      z.object({
+        kind: z.literal('relation'),
+        entityId: z.string(),
+        type: RelationType,
+        objectEntityId: z.string(),
+        label: z.string().trim().max(RELATION_LABEL_MAX),
+        nodeId: z.string().nullable()
+      }),
+      z.object({
+        kind: z.literal('threadEvent'),
+        entityId: z.string(),
+        event: ThreadEvent,
+        note: z.string().trim().max(THREAD_NOTE_MAX),
+        nodeId: z.string().nullable()
+      })
+    ]),
+    output: Fact
+  },
+  /**
+   * Deletes one of the author's own relationships or thread events (F-9.14) and answers it as it
+   * was; pushes `fact:changed`. VALIDATION for an AI fact (hide it instead) or a sheet field.
+   */
+  'fact:delete': { input: z.object({ id: z.string() }), output: Fact },
+  /**
+   * Every thread of the project (F-9.14): the records in the Threads category with their events
+   * in reading order, the derived status (open, resolved, dropped), setup, payoff, and the open
+   * question. Local; refetched on `fact:changed` and `entity:changed`.
+   */
+  'thread:list': { input: z.undefined(), output: z.array(ThreadView) },
+  /**
+   * The conversion pass (F-9.14, D11): how many scenes an older summary prompt read, what
+   * re-reading them would cost on the configured model, and how long. `none` with Use AI off,
+   * summaries off, no provider, or nothing to do; a local model costs 0.
+   */
+  'knowledge:conversion': { input: z.undefined(), output: KnowledgeConversion },
+  /**
+   * Update now: takes a full backup first (the Settings › Backups "Back up now" path; a failed
+   * backup refuses with its cause and nothing starts), records the go-ahead, and queues every
+   * scene to re-read on the background index queue. Answers the state (`done`).
+   */
+  'knowledge:convert': { input: z.undefined(), output: KnowledgeConversion },
+  /** Later: the dialog stays closed until the project is opened again; held scenes stay held. */
+  'knowledge:later': { input: z.undefined(), output: KnowledgeConversion },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
@@ -2867,6 +2922,8 @@ export const events = {
   'fact:changed': z.object({ entityIds: z.array(z.string()) }),
   /** The Changes log moved (F-9.13): a reading logged a run, or a change was undone. */
   'changes:changed': z.object({}),
+  /** The conversion pass's state moved (F-9.14): the project opened, the AI settings changed, or it started. */
+  'knowledge:conversionChanged': KnowledgeConversion,
   /** The findings of these scenes changed (F-13.4): a check ran in the background or on demand, or one was settled; the store refetches `continuity:list`. */
   'continuity:changed': z.object({ nodeIds: z.array(z.string()) }),
   /**

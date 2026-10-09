@@ -311,14 +311,44 @@ export const BUILTIN_CATEGORIES: readonly StoryCategory[] = [
   })
 ]
 
-export const BUILTIN_CATEGORY_IDS: readonly string[] = BUILTIN_CATEGORIES.map((c) => c.id)
+/**
+ * Plot threads (F-9.14, decision D6): a built-in category of its own, apart from the library above
+ * on purpose. The library is the list the AI files sheets into (Organise, the context library, the
+ * review chat render it into their prompts, unchanged); a thread record is made from a plot-thread
+ * tag or a thread event the scene reading finds, and the sidebar shows the category as the
+ * Threads section (`ThreadsTab`), not a sheet list. Its tag category is `plotThread`, so a thread
+ * record's tag is a plot-thread tag and the F-11.1c grid keeps working. Status is derived from its
+ * events (`src/shared/threads.ts`), never a field.
+ */
+export const THREAD_CATEGORY: StoryCategory = builtin({
+  id: 'thread',
+  name: 'Threads',
+  noun: 'thread',
+  icon: 'flag',
+  tagCategory: 'plotThread',
+  hint: 'plot threads: setups, promises, open questions, and subplots',
+  fields: [
+    f('threadKind', 'Kind (setup, promise, question, subplot)', false),
+    DESCRIPTION,
+    f('payoff', 'Intended payoff'),
+    NOTES
+  ]
+})
+
+/** Every built-in category in picker order: the library, then Threads. */
+export const ALL_BUILTIN_CATEGORIES: readonly StoryCategory[] = [
+  ...BUILTIN_CATEGORIES,
+  THREAD_CATEGORY
+]
+
+export const BUILTIN_CATEGORY_IDS: readonly string[] = ALL_BUILTIN_CATEGORIES.map((c) => c.id)
 
 /** The categories the section picker shows even with no sheet (F-9.11, the author's call). */
 export const ALWAYS_SHOWN_CATEGORIES: readonly string[] = ['character', 'setting']
 
 /** The library category with this id, or undefined. */
 export function builtinCategory(id: string): StoryCategory | undefined {
-  return BUILTIN_CATEGORIES.find((category) => category.id === id)
+  return ALL_BUILTIN_CATEGORIES.find((category) => category.id === id)
 }
 
 /** The category of a sheet whose category is gone (never expected; a row stays readable). */
@@ -531,7 +561,7 @@ export function mergeCategories(
   custom: readonly StoryCategory[]
 ): StoryCategory[] {
   return [
-    ...BUILTIN_CATEGORIES.map((category) => {
+    ...ALL_BUILTIN_CATEGORIES.map((category) => {
       const rename = renames.get(category.id)
       return rename === undefined ? category : { ...category, ...rename }
     }),

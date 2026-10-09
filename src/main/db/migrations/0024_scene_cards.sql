@@ -1,0 +1,1 @@
+ALTER TABLE `scene_summary` ADD `card` text;

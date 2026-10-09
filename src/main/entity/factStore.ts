@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import type { RunResult } from 'better-sqlite3'
-import { and, asc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, or, sql } from 'drizzle-orm'
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import { findQuote } from '@shared/critique'
 import { parseEntityFields, type EntityFields } from '@shared/entities'
-import { aiFactKey, authorFactKey, type Fact, type FactStatus } from '@shared/facts'
+import { aiFactKey, authorFactKey, isFieldFact, type Fact, type FactStatus } from '@shared/facts'
 import { factKey } from '@shared/observedFacts'
+import { relationTypeOf } from '@shared/relations'
+import { THREAD_KIND, threadEventOf } from '@shared/threads'
 import type * as schema from '../db/schema'
-import { entity, fact, type FactInsert, type FactRow } from '../db/schema'
+import { entity, fact, node, type FactInsert, type FactRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
 
 /**
@@ -35,6 +37,16 @@ export interface SceneFactInput {
   attribute: string
   value: string
   quote: string
+  /** F-9.14: the other record of a relationship; absent for a field fact or a thread event. */
+  objectEntityId?: string
+}
+
+/**
+ * What tells two statements of one record apart besides the attribute: the value, or for a
+ * relationship (F-9.14) the other record, whatever label it carries.
+ */
+function statementValue(row: { value: string; objectEntityId?: string | null }): string {
+  return row.objectEntityId ?? row.value
 }
 
 export function rowToFact(row: FactRow): Fact {
@@ -65,13 +77,15 @@ const ORDER = [asc(fact.createdAt), asc(fact.id)] as const
 /**
  * Every fact of one record the windows show (F-9.13): the AI's (hidden ones included and
  * flagged, so the sheet can offer to restore them) and the author's dated lines, oldest first.
- * The undated baseline rows are the sheet's own text and are not listed.
+ * The undated baseline rows are the sheet's own text and are not listed. F-9.14: a relationship
+ * that names this record as its other end is listed too (its `entityId` is the other record), so
+ * the sheet's Relationships block reads both directions from one list.
  */
 export function listFactsForEntity(db: FactDb, entityId: string): Fact[] {
   return db
     .select()
     .from(fact)
-    .where(eq(fact.entityId, entityId))
+    .where(or(eq(fact.entityId, entityId), eq(fact.objectEntityId, entityId)))
     .orderBy(...ORDER)
     .all()
     .filter((row) => !isBaseline(row))
@@ -82,6 +96,8 @@ export function listFactsForEntity(db: FactDb, entityId: string): Fact[] {
  * The visible dated facts of these records, oldest first: the AI's (with a scene) and the
  * author's dated lines. What the prompt builders and the sheet "at a scene" read beside the
  * author's text (`sheetAt`). A hidden fact is the author's "wrong", so it never reaches a prompt.
+ * Field facts only (F-9.14): relationships and thread events are no sheet field, and the prompts
+ * that read this list are unchanged by them.
  */
 export function factsForEntities(db: FactDb, entityIds: readonly string[]): Fact[] {
   if (entityIds.length === 0) return []
@@ -91,13 +107,17 @@ export function factsForEntities(db: FactDb, entityIds: readonly string[]): Fact
     .where(and(inArray(fact.entityId, [...entityIds]), eq(fact.hidden, false)))
     .orderBy(...ORDER)
     .all()
-    .filter((row) => !isBaseline(row) && (row.origin === 'author' || row.nodeId !== null))
+    .filter(
+      (row) =>
+        !isBaseline(row) && (row.origin === 'author' || row.nodeId !== null) && isFieldFact(row)
+    )
     .map(rowToFact)
 }
 
 /**
- * The visible AI facts one scene states, oldest first: what the consistency checker (F-13.4)
- * holds against the rest of the story bible.
+ * The visible AI field facts one scene states, oldest first: what the consistency checker
+ * (F-13.4) holds against the rest of the story bible. Relationships and thread events are not
+ * listed (F-9.14): a thread advancing in two scenes is no contradiction.
  */
 export function factsForNode(db: FactDb, nodeId: string): Fact[] {
   return db
@@ -106,6 +126,35 @@ export function factsForNode(db: FactDb, nodeId: string): Fact[] {
     .where(and(eq(fact.nodeId, nodeId), eq(fact.origin, 'ai'), eq(fact.hidden, false)))
     .orderBy(...ORDER)
     .all()
+    .filter(isFieldFact)
+    .map(rowToFact)
+}
+
+/**
+ * The visible statements of one scene that are no sheet field (F-9.14): its relationships and
+ * thread events, AI and author alike, oldest first. The scene card reads its thread events here.
+ */
+export function eventFactsForNode(db: FactDb, nodeId: string): Fact[] {
+  return db
+    .select()
+    .from(fact)
+    .where(and(eq(fact.nodeId, nodeId), eq(fact.hidden, false)))
+    .orderBy(...ORDER)
+    .all()
+    .filter((row) => !isFieldFact(row))
+    .map(rowToFact)
+}
+
+/** Every fact of these records, hidden ones included, oldest first; the Threads section derives from it. */
+export function allFactsForEntities(db: FactDb, entityIds: readonly string[]): Fact[] {
+  if (entityIds.length === 0) return []
+  return db
+    .select()
+    .from(fact)
+    .where(inArray(fact.entityId, [...entityIds]))
+    .orderBy(...ORDER)
+    .all()
+    .filter((row) => !isBaseline(row))
     .map(rowToFact)
 }
 
@@ -240,6 +289,119 @@ export function writeAuthorFact(
     .run()
 }
 
+/** An author's relationship or thread event (F-9.14, `fact:create`). */
+export interface AuthorStatementInput {
+  entityId: string
+  /** `relation:<type>` or `thread:<event>`. */
+  attribute: string
+  /** The free label of a relationship, or a thread event's note; '' for none. */
+  value: string
+  /** The other record of a relationship; null for a thread event. */
+  objectEntityId: string | null
+  /** The scene it holds from; null for "from the start". */
+  nodeId: string | null
+}
+
+/**
+ * Adds the author's own relationship or thread event (F-9.14): a dated (or undated) author fact
+ * that is no sheet field, so `entity.fields` is untouched. The same statement at the same scene
+ * replaces its label. VALIDATION for an attribute that is neither, a relationship with no other
+ * record or with itself, or a thread event on a record outside the thread category; NOT_FOUND for
+ * an unknown record or scene.
+ */
+export function addAuthorStatement(db: FactDb, input: AuthorStatementInput): Fact {
+  const relation = relationTypeOf(input.attribute)
+  const event = threadEventOf(input.attribute)
+  if (relation === null && event === null) {
+    throw new AppError('VALIDATION', 'Not a relationship or a thread event', {
+      attribute: input.attribute
+    })
+  }
+  const owner = db
+    .select({ kind: entity.kind })
+    .from(entity)
+    .where(eq(entity.id, input.entityId))
+    .get()
+  if (owner === undefined) {
+    throw new AppError('NOT_FOUND', 'Entity not found', { id: input.entityId })
+  }
+  if (relation !== null) {
+    if (input.objectEntityId === null || input.objectEntityId === input.entityId) {
+      throw new AppError('VALIDATION', 'A relationship needs another sheet', {
+        entityId: input.entityId
+      })
+    }
+    const other = db
+      .select({ id: entity.id })
+      .from(entity)
+      .where(eq(entity.id, input.objectEntityId))
+      .get()
+    if (other === undefined) {
+      throw new AppError('NOT_FOUND', 'Entity not found', { id: input.objectEntityId })
+    }
+  } else if (owner.kind !== THREAD_KIND || input.objectEntityId !== null) {
+    throw new AppError('VALIDATION', 'A thread event belongs on a thread', {
+      entityId: input.entityId
+    })
+  }
+  if (input.nodeId !== null) {
+    const scene = db.select({ id: node.id }).from(node).where(eq(node.id, input.nodeId)).get()
+    if (scene === undefined) {
+      throw new AppError('NOT_FOUND', 'Scene not found', { id: input.nodeId })
+    }
+  }
+  const objectEntityId = relation === null ? null : input.objectEntityId
+  const key = `${authorFactKey(input.attribute, input.nodeId)}\u0000${statementValue({
+    value: relation === null ? input.value : '',
+    objectEntityId
+  })}`
+  const now = new Date().toISOString()
+  const stored = db
+    .insert(fact)
+    .values({
+      id: randomUUID(),
+      entityId: input.entityId,
+      attribute: input.attribute,
+      value: input.value,
+      objectEntityId,
+      nodeId: input.nodeId,
+      origin: 'author',
+      status: 'canon',
+      factKey: key,
+      createdAt: now,
+      updatedAt: now
+    })
+    .onConflictDoUpdate({
+      target: [fact.entityId, fact.factKey],
+      set: { value: input.value, hidden: false, updatedAt: now }
+    })
+    .returning()
+    .get()
+  return rowToFact(stored)
+}
+
+/**
+ * Deletes one of the author's own relationships or thread events (F-9.14, `fact:delete`) and
+ * answers it as it was. VALIDATION for an AI fact (hide it instead: the hide is what stops the
+ * next reading from adding it again) and for a sheet field (edited on the sheet); NOT_FOUND for
+ * an unknown id.
+ */
+export function deleteAuthorStatement(db: FactDb, id: string): Fact {
+  const row = db.select().from(fact).where(eq(fact.id, id)).get()
+  if (row === undefined) throw new AppError('NOT_FOUND', 'Fact not found', { id })
+  if (row.origin !== 'author' || isFieldFact(row)) {
+    throw new AppError(
+      'VALIDATION',
+      row.origin === 'ai'
+        ? 'The AI read this from a scene: hide it instead, so the next reading does not add it again'
+        : 'Edit this on the sheet',
+      { id }
+    )
+  }
+  db.delete(fact).where(eq(fact.id, id)).run()
+  return rowToFact(row)
+}
+
 /** What one scene's reading did to the facts, for the windows and the Changes log. */
 export interface SceneFactsDiff {
   /** The facts added, as stored. */
@@ -284,7 +446,7 @@ export function applySceneFacts(
               and(inArray(fact.entityId, entityIds), eq(fact.origin, 'ai'), eq(fact.hidden, true))
             )
             .all()
-            .map((row) => `${row.entityId}\u0000${factKey(row.attribute, row.value)}`)
+            .map((row) => `${row.entityId}\u0000${factKey(row.attribute, statementValue(row))}`)
     )
 
     const now = new Date().toISOString()
@@ -292,7 +454,7 @@ export function applySceneFacts(
     const added: Fact[] = []
     const inserts: FactInsert[] = []
     for (const row of rows) {
-      const key = aiFactKey(nodeId, row.attribute, row.value)
+      const key = aiFactKey(nodeId, row.attribute, statementValue(row))
       const id = `${row.entityId}\u0000${key}`
       if (stated.has(id)) continue
       stated.add(id)
@@ -306,12 +468,14 @@ export function applySceneFacts(
         }
         continue
       }
-      if (tombstones.has(`${row.entityId}\u0000${factKey(row.attribute, row.value)}`)) continue
+      if (tombstones.has(`${row.entityId}\u0000${factKey(row.attribute, statementValue(row))}`))
+        continue
       const insert: FactInsert = {
         id: randomUUID(),
         entityId: row.entityId,
         attribute: row.attribute,
         value: row.value,
+        objectEntityId: row.objectEntityId ?? null,
         nodeId,
         quote: row.quote,
         origin: 'ai',
@@ -345,7 +509,12 @@ export function applySceneFacts(
         )
         .run()
     }
-    const touched = new Set([...added, ...removed].map((row) => row.entityId))
+    // F-9.14: a relationship moves the other record's sheet too.
+    const touched = new Set(
+      [...added, ...removed].flatMap((row) =>
+        row.objectEntityId === null ? [row.entityId] : [row.entityId, row.objectEntityId]
+      )
+    )
     return { added, removed, entityIds: [...touched].sort() }
   })
 }

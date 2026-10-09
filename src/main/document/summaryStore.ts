@@ -1,5 +1,6 @@
 import { eq, inArray } from 'drizzle-orm'
-import { StoredSceneSummary } from '@shared/summary'
+import { AiSceneCard } from '@shared/sceneCard'
+import { promptVersionAtLeast, StoredSceneSummary } from '@shared/summary'
 import { sceneSummary, type SceneSummaryRow } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
 
@@ -53,6 +54,9 @@ export function summariesFor(db: TreeDb, nodeIds: string[]): Map<string, StoredS
   return found
 }
 
+/** The first prompt version that writes a scene card (F-9.14). */
+const CARD_VERSION = 'summary.v4'
+
 function toRow(row: StoredSceneSummary): SceneSummaryRow {
   return {
     nodeId: row.nodeId,
@@ -63,17 +67,29 @@ function toRow(row: StoredSceneSummary): SceneSummaryRow {
     promptVersion: row.promptVersion,
     model: row.model,
     truncated: row.truncated,
-    createdAt: row.createdAt
+    createdAt: row.createdAt,
+    card: row.card ? JSON.stringify(row.card) : null
   }
 }
 
+/**
+ * The stored row as both sides read it. F-9.14: the card is read only from a row whose prompt
+ * writes one, so a row an older build rewrote (it leaves the column as it was) never shows the
+ * card of the text before; a card that no longer parses reads as none, not as a broken row.
+ */
 function toStored(row: SceneSummaryRow): StoredSceneSummary | null {
   const parsed = StoredSceneSummary.safeParse({
     ...row,
     keyPoints: parseList(row.keyPoints),
-    characters: parseList(row.characters)
+    characters: parseList(row.characters),
+    card: undefined
   })
-  return parsed.success ? parsed.data : null
+  if (!parsed.success) return null
+  if (row.card === null || !promptVersionAtLeast(row.promptVersion, CARD_VERSION)) {
+    return parsed.data
+  }
+  const card = AiSceneCard.safeParse(parseList(row.card))
+  return card.success ? { ...parsed.data, card: card.data } : parsed.data
 }
 
 function parseList(raw: string): unknown {

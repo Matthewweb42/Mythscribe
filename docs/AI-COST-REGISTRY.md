@@ -18,7 +18,7 @@ git history of this file is the log of each feature's cost over time (author req
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `ghostText` | Ghost text | while typing | ghostText.v4 | fast | 1024 / 2085 | 40 / 60 | $0.0000819 · $0.000139 | $0.000102 | $0.000948 | 1 | $0.0000819 |
 | `tags` | Tag suggestions | on request | tags.v1 | fast | 1204 / 1913 | 80 / 200 | $0.000139 · $0.000313 | $0.000173 | $0.00126 | 1 | $0.000139 |
-| `summary` | Scene summaries, story bible, and tags | background | summary.v3 | fast | 831 / 6084 | 450 / 800 | $0.000601 · $0.00121 | $0.000751 | $0.00265 | 1 | $0.000601 |
+| `summary` | Scene summaries, story bible, and tags | background | summary.v4 | fast | 1096 / 6458 | 600 / 1000 | $0.000801 · $0.00147 | $0.00100 | $0.00352 | 1 | $0.000801 |
 | `chat` | Assistant chat | on request | chat.v5 | fast | 1050 / 7782 | 400 / 1200 | $0.000544 · $0.00177 | $0.000679 | $0.00259 | 1 | $0.000544 |
 | `authorMode` | Author mode | on request | — | — | 0 / 8000 | 0 / 150 | $0 · $0.000432 | $0 | $0 | 0 | $0 |
 | `query` | Story Intelligence | on request | query.v4 | strong | 1587 / 11711 | 300 / 600 | $0.000459 · $0.00271 | $0.000574 | $0.00847 | 1 | $0.000459 |
@@ -56,8 +56,8 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `summary` — Scene summaries, story bible, and tags
 
-- **When:** Indexing: once per scene after edits settle (content-hash cached), and for every stale scene after open.
-- **Ideas:** The biggest background spend on a large book: batch API when latency allows; skip tiny edits; cap scene text sent; one pass also yields facts and tags.
+- **When:** Indexing: once per scene after edits settle (content-hash cached), and for every stale scene after open; a new prompt version re-reads the book only after the author confirms the cost (F-9.14 conversion dialog).
+- **Ideas:** The biggest background spend on a large book: batch API when latency allows; skip tiny edits; cap scene text sent; one pass also yields facts, tags, the scene card, relationships, and thread events (summary.v4 added about 150 output tokens); drop empty lists from the JSON shape if the ledger shows cut-offs.
 
 ### `chat` — Assistant chat
 

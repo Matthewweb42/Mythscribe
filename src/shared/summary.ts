@@ -1,5 +1,8 @@
 import { z } from 'zod'
+import { RelationType } from './relations'
+import { AiSceneCard, SceneCard } from './sceneCard'
 import { TAG_NAME_MAX, TagCategory } from './tags'
+import { ThreadEvent, THREAD_NOTE_MAX } from './threads'
 
 /**
  * Scene summaries (F-5.6): the derived index every Story Intelligence feature reads. A summary
@@ -53,6 +56,14 @@ export const AUTO_TAG_BANK_CATEGORIES = [
   'plotThread',
   'custom'
 ] as const satisfies readonly TagCategory[]
+/** Most relationships kept from one scene (F-9.14, `summary.v4`). */
+export const SUMMARY_RELATIONS_MAX = 4
+/** Most thread events kept from one scene (F-9.14). */
+export const SUMMARY_THREADS_MAX = 4
+/** Most thread records one reading may create (F-9.14), so one scene cannot flood the Threads section. */
+export const SUMMARY_NEW_THREADS_MAX = 2
+/** Longest thread name the reading keeps. */
+export const SUMMARY_THREAD_NAME_MAX = 60
 /** Main waits this long after the last save of a scene before summarising it. */
 export const SUMMARY_DEBOUNCE_MS = 3_000
 /**
@@ -91,6 +102,27 @@ export const ExtractedTag = z.object({
 })
 export type ExtractedTag = z.infer<typeof ExtractedTag>
 
+/**
+ * One relationship of the model's answer (F-9.14), checked: both names are records the story bible
+ * has (resolved later), the type is one of the list, and the quote is in the scene as sent.
+ */
+export const ExtractedRelation = z.object({
+  from: z.string().min(1),
+  type: RelationType,
+  to: z.string().min(1),
+  quote: z.string().min(1)
+})
+export type ExtractedRelation = z.infer<typeof ExtractedRelation>
+
+/** One thread event of the model's answer (F-9.14), checked the same way; `question` may be ''. */
+export const ExtractedThreadEvent = z.object({
+  name: z.string().min(1).max(SUMMARY_THREAD_NAME_MAX),
+  event: ThreadEvent,
+  question: z.string().max(THREAD_NOTE_MAX),
+  quote: z.string().min(1)
+})
+export type ExtractedThreadEvent = z.infer<typeof ExtractedThreadEvent>
+
 /** A stored row: the summary plus what it was made from, so staleness is a hash comparison. */
 export const StoredSceneSummary = SceneSummary.extend({
   nodeId: z.string(),
@@ -100,7 +132,12 @@ export const StoredSceneSummary = SceneSummary.extend({
   model: z.string(),
   /** Whether the scene was head-truncated to `SUMMARY_SCENE_CHAR_BUDGET` before it was sent. */
   truncated: z.boolean(),
-  createdAt: z.string()
+  createdAt: z.string(),
+  /**
+   * F-9.14: the AI part of the scene card (`summary.v4` and later); absent or null for a row an
+   * older prompt wrote, which carries none.
+   */
+  card: AiSceneCard.nullable().optional()
 })
 export type StoredSceneSummary = z.infer<typeof StoredSceneSummary>
 
@@ -120,7 +157,13 @@ export const SceneSummaryState = z.object({
   summary: StoredSceneSummary.nullable(),
   stale: z.boolean(),
   status: SummaryStatus,
-  error: z.object({ message: z.string(), nextStep: z.string() }).nullable()
+  error: z.object({ message: z.string(), nextStep: z.string() }).nullable(),
+  /**
+   * F-9.14: the scene card as main puts it together (the AI's reading, the author's metadata
+   * winning, the cast from the mention index, the scene's thread events); null when it has
+   * nothing to show, absent from an older main.
+   */
+  card: SceneCard.nullable().optional()
 })
 export type SceneSummaryState = z.infer<typeof SceneSummaryState>
 

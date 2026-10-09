@@ -74,6 +74,16 @@ export const REPLACE_FIELDS: readonly string[] = [
   'category'
 ]
 
+/**
+ * Whether a fact states a sheet field (F-9.14): a relationship (`relation:<type>`, with the other
+ * record in `objectEntityId`) and a thread event (`thread:<event>`) are dated facts too, but they
+ * are no field of the sheet, so `sheetAt`, the prompts' story-bible lines, and the consistency
+ * checker never read them as one. A field id never holds a colon (`EntityFieldId`).
+ */
+export function isFieldFact(fact: Pick<Fact, 'attribute' | 'objectEntityId'>): boolean {
+  return fact.objectEntityId === null && !fact.attribute.includes(':')
+}
+
 export function fieldMode(attribute: string): FieldMode {
   return REPLACE_FIELDS.includes(attribute) ? 'replace' : 'accumulate'
 }
@@ -168,7 +178,7 @@ export function sheetAt(input: SheetAtInput): SheetFieldAt[] {
   const at = (fact: Fact): number => (fact.nodeId === null ? -1 : (index.get(fact.nodeId) ?? end))
 
   const dated = input.facts
-    .filter((fact) => !fact.hidden && fact.objectEntityId === null)
+    .filter((fact) => !fact.hidden && isFieldFact(fact))
     .map((fact, input) => ({ fact, input }))
     .sort(
       (a, b) =>

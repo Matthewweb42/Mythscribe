@@ -4,6 +4,7 @@ import { toEntityNameKey, type EntityKind, type EntityOrigin } from '@shared/ent
 import type { Entity, Tag } from '@shared/ipc/contract'
 import {
   KNOWLEDGE_INDEX_VERSION,
+  KNOWLEDGE_THREADS_VERSION,
   RECORD_KIND_FALLBACK,
   RECORD_KIND_FOR_TAG,
   recordNameForTag
@@ -201,5 +202,38 @@ export function convertKnowledgeIndex(db: EntityDb): KnowledgeIndexConversion | 
     }
     setKnowledgeModel(tx, { index: KNOWLEDGE_INDEX_VERSION })
     return { records, tagged }
+  })
+}
+
+/**
+ * F-9.14's one-time thread pass, run on open after `convertKnowledgeIndex`: idempotent, and a
+ * no-op (null) once `knowledgeModel.threads` says it ran. Every plot-thread tag the author made
+ * (built-in template placeholders aside) gets its thread record, unless the author deleted that
+ * record before; AI-made plot-thread tags get none here, as with F-9.12's name tags (one comes when
+ * the author asks or edits the tag). Only `entity` and `tag` rows are written.
+ */
+export function convertThreadRecords(db: EntityDb): EntityWrite[] | null {
+  if (getKnowledgeModel(db).threads >= KNOWLEDGE_THREADS_VERSION) return null
+  return db.transaction((tx) => {
+    const records: EntityWrite[] = []
+    const tags = tx
+      .select({
+        id: tagTable.id,
+        name: tagTable.name,
+        category: tagTable.category,
+        origin: tagTable.origin
+      })
+      .from(tagTable)
+      .where(eq(tagTable.category, 'plotThread'))
+      .orderBy(tagTable.created, tagTable.id)
+      .all()
+    for (const each of tags) {
+      if (each.origin !== 'author') continue
+      if (TEMPLATE_PLACEHOLDERS.has(`${each.category}:${each.name}`)) continue
+      const write = ensureRecordForTag(tx, each, 'author')
+      if (write !== null) records.push(write)
+    }
+    setKnowledgeModel(tx, { threads: KNOWLEDGE_THREADS_VERSION })
+    return records
   })
 }

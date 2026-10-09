@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import {
-  BUILTIN_CATEGORIES,
+  ALL_BUILTIN_CATEGORIES,
   categoryOf,
   type NewCategoryInput,
   type StoryCategory
@@ -35,7 +35,7 @@ interface CategoryState {
 let generation = 0
 
 export const useCategoryStore = create<CategoryState>((set, get) => ({
-  categories: BUILTIN_CATEGORIES,
+  categories: ALL_BUILTIN_CATEGORIES,
   loaded: false,
   creating: false,
 
@@ -56,7 +56,7 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
 
   clear() {
     generation++
-    set({ categories: BUILTIN_CATEGORIES, loaded: false, creating: false })
+    set({ categories: ALL_BUILTIN_CATEGORIES, loaded: false, creating: false })
   },
 
   replace(categories) {
