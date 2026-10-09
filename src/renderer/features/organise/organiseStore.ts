@@ -5,6 +5,7 @@ import {
   candidatesKey,
   needsAsk,
   worthOffering,
+  type OrganiseAction,
   type OrganiseCandidates,
   type OrganiseChange,
   type OrganisePlan,
@@ -15,15 +16,17 @@ import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
+import type { ReviewDecision } from '@renderer/features/review/reviewDeckModel'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { applyOrganiseAction } from './organiseApply'
 
 /**
  * Organise (F-9.10): one run at a time, its plan, and where each change stands. The plan screen
- * (`OrganiseDialog`) reads it; the Organise button, the quiet offer, and the chat (agent.v4's
- * organise request) start it. The run follows the chat mode it was started in (F-5.21): in Ask
- * every change waits for the author's tick and Apply; in Auto every change that can be undone is
+ * (`OrganiseDialog`, one decision at a time on the review deck since 2026-10-08) reads it; the
+ * Organise button, the quiet offer, and the chat (agent.v4's organise request) start it. The run
+ * follows the chat mode it was started in (F-5.21): in Ask every change waits for the author's
+ * Accept and is applied with "Apply accepted" (or on reaching the end); in Auto every change that can be undone is
  * applied as soon as the plan is in, each with Undo, and one Undo takes the whole reorganisation
  * back, while merges, deletions, and new categories still wait for Apply (`needsAsk`); in Plan
  * the screen only describes. Undo lives in memory for the session, like the chat's.
@@ -37,8 +40,8 @@ export type OrganiseChangeStatus = 'pending' | 'applying' | 'applied' | 'undone'
 export interface OrganiseChangeView {
   change: OrganiseChange
   status: OrganiseChangeStatus
-  /** Whether the author keeps it (the checkbox); every change starts ticked. */
-  checked: boolean
+  /** The author's decision on the review deck; every change starts pending (nothing is kept unasked). */
+  decision: ReviewDecision
   /** Why applying or undoing it failed, or why it was skipped. */
   error: string | null
 }
@@ -65,6 +68,8 @@ interface OrganiseState {
   error: string | null
   /** True while changes are being applied or undone. */
   busy: boolean
+  /** The change whose edit form is open (the deck's Edit), or null. */
+  editingId: string | null
   /** The local pass's findings, or null before the first look. */
   candidates: OrganiseCandidates | null
   /** The findings key the author waved away; the offer stays hidden while it is the same. */
@@ -76,10 +81,14 @@ interface OrganiseState {
   stop: () => void
   /** Closes the plan screen and settles the run's proposal. */
   close: () => void
-  toggle: (id: string) => void
-  setAll: (checked: boolean) => void
-  /** Applies every ticked change still pending, in the plan's order (new categories first). */
-  applySelected: () => Promise<void>
+  /** Records the author's decision on changes still pending (the review deck). */
+  decide: (ids: readonly string[], decision: ReviewDecision) => void
+  /** Opens (or, with null, closes) a change's edit form. */
+  setEditing: (id: string | null) => void
+  /** Replaces a pending change with the author's adjusted version (another keeper, a new name). */
+  editChange: (id: string, action: OrganiseAction) => void
+  /** Applies every accepted change still pending, in the plan's order (new categories first). */
+  applyAccepted: () => Promise<void>
   undo: (id: string) => Promise<void>
   /** Takes back every applied change that can be undone, newest first. */
   undoAll: () => Promise<void>
@@ -114,7 +123,8 @@ const empty = {
   model: null,
   cached: false,
   error: null,
-  busy: false
+  busy: false,
+  editingId: null
 }
 
 /** The changes a pass applies: the given ids, new categories first, then the plan's order. */
@@ -212,7 +222,7 @@ export const useOrganiseStore = create<OrganiseState>((set, get) => {
       }
       const views: Record<string, OrganiseChangeView> = {}
       for (const change of result.plan.changes) {
-        views[change.id] = { change, status: 'pending', checked: true, error: null }
+        views[change.id] = { change, status: 'pending', decision: 'pending', error: null }
       }
       set({
         phase: 'ready',
@@ -252,26 +262,35 @@ export const useOrganiseStore = create<OrganiseState>((set, get) => {
       set({ ...empty })
     },
 
-    toggle(id) {
-      const view = get().views[id]
-      if (view?.status === 'pending') patchView(id, { checked: !view.checked })
-    },
-
-    setAll(checked) {
+    decide(ids, decision) {
+      if (get().mode === 'plan') return
       set((s) => ({
         views: Object.fromEntries(
           Object.entries(s.views).map(([id, view]) => [
             id,
-            view.status === 'pending' ? { ...view, checked } : view
+            ids.includes(id) && view.status === 'pending' ? { ...view, decision } : view
           ])
         )
       }))
     },
 
-    async applySelected() {
+    setEditing(id) {
+      set({ editingId: id !== null && get().views[id]?.status === 'pending' ? id : null })
+    },
+
+    editChange(id, action) {
+      const view = get().views[id]
+      if (view?.status !== 'pending' || view.change.action.kind !== action.kind) return
+      patchView(id, { change: { ...view.change, action }, error: null })
+      set({ editingId: null })
+    },
+
+    async applyAccepted() {
       const { phase, mode, busy, order, views } = get()
       if (phase !== 'ready' || mode === 'plan' || busy) return
-      await applyIds(order.filter((id) => views[id]?.status === 'pending' && views[id].checked))
+      await applyIds(
+        order.filter((id) => views[id]?.status === 'pending' && views[id].decision === 'accepted')
+      )
       void get().refreshCandidates()
     },
 

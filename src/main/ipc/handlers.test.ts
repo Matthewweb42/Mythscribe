@@ -3589,27 +3589,30 @@ describe('scene summaries (F-5.6)', () => {
   it('tags the scene from the summary answer and tells the windows: the tags and the scene (F-4.13)', async () => {
     const { scene } = await ready()
     complete.mockResolvedValue({
-      text: JSON.stringify({ ...ANSWER, tags: [{ name: 'Dread', category: 'tone' }] }),
+      text: JSON.stringify({ ...ANSWER, tags: [{ name: 'Mara', category: 'custom' }] }),
       model: 'gpt-fake',
       usage: { inputTokens: 400, outputTokens: 60 }
     })
     const result = await invoke('ai:summarize', { nodeId: scene, requestId: 's-t' })
     if (!result.ok) throw new Error(result.message)
     const linked = await invoke('documentTag:list', { nodeId: scene })
-    expect(linked).toMatchObject([{ name: 'dread', category: 'tone', source: 'ai', usageCount: 1 }])
+    // The author's tag rule (2026-10-08): a name the text capitalises, so it may be made.
+    expect(linked).toMatchObject([
+      { name: 'mara', category: 'custom', source: 'ai', usageCount: 1 }
+    ])
     const sent = (channel: string): unknown[] =>
       vi
         .mocked(fakeWin.webContents.send)
         .mock.calls.filter(([name]) => name === channel)
         .map(([, payload]) => payload)
-    expect(sent('tag:changed')).toMatchObject([{ name: 'dread', usageCount: 1 }])
+    expect(sent('tag:changed')).toMatchObject([{ name: 'mara', usageCount: 1 }])
     expect(sent('documentTag:changed')).toEqual([{ nodeIds: [scene] }])
     // One click removes it, and the removal is the author's: the tag stays in the bank.
-    const dread = linked[0]
-    if (!dread) throw new Error('no tag linked')
-    await invoke('documentTag:remove', { nodeId: scene, tagId: dread.id })
+    const mara = linked[0]
+    if (!mara) throw new Error('no tag linked')
+    await invoke('documentTag:remove', { nodeId: scene, tagId: mara.id })
     expect(await invoke('documentTag:list', { nodeId: scene })).toEqual([])
-    expect(await invoke('tag:list', undefined)).toMatchObject([{ name: 'dread', usageCount: 0 }])
+    expect(await invoke('tag:list', undefined)).toMatchObject([{ name: 'mara', usageCount: 0 }])
   })
 
   it('logs the facts the summary answers and tells the windows: the new entity, its tag, and whose facts moved (F-5.16)', async () => {

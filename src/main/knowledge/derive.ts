@@ -32,7 +32,7 @@ export interface DerivedKnowledgeInput {
 export interface DerivedKnowledge {
   facts: ObservedFactsChange
   tags: AutoTagsChange
-  /** The log run's id; its rows are what "Undo this run" takes back. */
+  /** The log run's id; its rows are what "Undo run" takes back. */
   runId: string
   /** How many rows the run logged; 0 when nothing was added. */
   logged: number

@@ -68,30 +68,47 @@ describe('ContextUploadDialog (F-9.8)', () => {
     expect(useLibraryStore.getState().flow).toBeNull()
   })
 
-  it('reviews matches, conflicts side by side, tags, details, and notes, and applies the picks', async () => {
+  it('reviews one card at a time: conflicts side by side, finer picks on E, and applies what was accepted', async () => {
     useLibraryStore.setState({
-      flow: { stage: 'review', review: contextReviewFixture(), busy: false }
+      flow: { stage: 'review', review: contextReviewFixture(), busy: false, decisions: {} }
     })
     render(<ContextUploadDialog />)
     expect(screen.getByTestId('library-review-summary')).toHaveTextContent(
       '1 new sheet · 1 sheet to update · 1 conflict · 1 note for Project notes'
     )
-    const mara = screen.getAllByTestId('library-item')[0]!
+    // New sheets come first: Tomas. E shows its finer picks; the tag is left out.
+    expect(screen.getByTestId('review-position')).toHaveTextContent('New sheet 1 of 1')
+    expect(screen.getAllByTestId('library-item')).toHaveLength(1)
+    expect(screen.queryByRole('checkbox', { name: 'Tag #tomas' })).toBeNull()
+    await userEvent.keyboard('e')
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Tag #tomas' }))
+    await userEvent.keyboard('a')
+
+    // Then the conflict: Mara, both values side by side.
+    expect(screen.getByTestId('review-position')).toHaveTextContent('Conflict 1 of 1')
+    const mara = screen.getByTestId('library-item')
     expect(within(mara).getByTestId('library-matches')).toHaveTextContent(
       'Matched: “Mara” (people.md), “Mara Vell” (people.md) Split'
     )
     const conflict = within(mara).getByTestId('library-conflict')
     expect(within(conflict).getByRole('radio', { name: /Keep the sheet’s\s*34/ })).toBeChecked()
     await userEvent.click(within(conflict).getByRole('radio', { name: /Use the upload’s\s*35/ }))
+    await userEvent.keyboard('e')
     await userEvent.click(within(mara).getByRole('checkbox', { name: /Appearance/ }))
     expect(within(mara).getByText('History: ran the ferry.')).toBeInTheDocument()
+    await userEvent.keyboard('a')
 
-    const tomas = screen.getAllByTestId('library-item')[1]!
-    await userEvent.click(within(tomas).getByRole('checkbox', { name: 'Tag #tomas' }))
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Include Project notes' }))
-
-    await userEvent.click(screen.getByTestId('library-apply'))
+    // Project notes are skipped: nothing applies by itself, and Apply shows the count.
+    expect(screen.getByTestId('library-notes')).toBeInTheDocument()
+    await userEvent.keyboard('s')
+    expect(screen.getByTestId('review-done')).toHaveTextContent('2 accepted · 1 skipped')
+    expect(applied).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Apply 2 accepted' }))
     const sent = applied?.review
+    expect(sent?.entities.map((e) => [e.id, e.include])).toEqual([
+      ['e1', true],
+      ['e2', true]
+    ])
     expect(sent?.entities[0]?.fields.map((f) => [f.field, f.include, f.choice])).toEqual([
       ['age', true, 'upload'],
       ['appearance', false, 'upload']
@@ -101,15 +118,15 @@ describe('ContextUploadDialog (F-9.8)', () => {
     expect(useLibraryStore.getState().flow).toBeNull()
   })
 
-  it('disables Apply when nothing is included', async () => {
+  it('applies nothing the author did not accept', async () => {
     useLibraryStore.setState({
-      flow: { stage: 'review', review: contextReviewFixture(), busy: false }
+      flow: { stage: 'review', review: contextReviewFixture(), busy: false, decisions: {} }
     })
     render(<ContextUploadDialog />)
-    await userEvent.click(screen.getByRole('button', { name: 'Include nothing' }))
-    expect(screen.getByTestId('library-apply')).toBeDisabled()
-    await userEvent.click(screen.getByRole('button', { name: 'Include everything' }))
-    expect(screen.getByTestId('library-apply')).toBeEnabled()
+    expect(screen.getByTestId('review-apply')).toBeDisabled()
+    await userEvent.keyboard('a')
+    expect(screen.getByTestId('review-apply')).toBeEnabled()
+    expect(screen.getByTestId('review-apply')).toHaveTextContent('Apply 1 accepted')
   })
 
   it('shows progress with Stop while the pass runs, and a failure with its next step', () => {
@@ -170,10 +187,10 @@ describe('ContextUploadDialog (F-9.8)', () => {
       on: () => () => {}
     })
     useLibraryStore.setState({
-      flow: { stage: 'review', review: contextReviewFixture(), busy: false }
+      flow: { stage: 'review', review: contextReviewFixture(), busy: false, decisions: {} }
     })
     render(<ContextUploadDialog />)
-    expect(screen.getAllByTestId('library-item')[0]).toHaveTextContent('Also called: Mara')
+    expect(screen.getByTestId('library-item')).toHaveAttribute('data-item-name', 'Tomas')
     expect(screen.getByTestId('review-chat-send')).toBeDisabled()
     await userEvent.type(screen.getByTestId('review-chat-input'), 'Tomas is also Tom{Enter}')
 
@@ -185,14 +202,19 @@ describe('ContextUploadDialog (F-9.8)', () => {
       ['“Tomas” is also called “Tom”, “the Younger”.', undefined],
       ['Rename skipped: “Mara Vell” is an existing sheet; rename it in the story bible.', 'true']
     ])
-    const tomas = screen.getAllByTestId('library-item')[1]!
+    const tomas = screen.getByTestId('library-item')
     expect(tomas.dataset.changed).toBe('true')
     expect(within(tomas).getByTestId('library-item-changed')).toBeInTheDocument()
     expect(within(tomas).getByTestId('library-item-aliases')).toHaveTextContent(
       'Also called: Tom, the Younger'
     )
-    expect(screen.getAllByTestId('library-item')[0]?.dataset.changed).toBeUndefined()
     expect(screen.getByTestId('review-chat-input')).toHaveValue('')
+    // The next card, Mara, was not touched.
+    await userEvent.click(screen.getByTestId('review-next'))
+    const mara = screen.getByTestId('library-item')
+    expect(mara).toHaveTextContent('Also called: Mara')
+    expect(mara.dataset.changed).toBeUndefined()
+    await userEvent.click(screen.getByTestId('review-prev'))
 
     await userEvent.click(screen.getByTestId('review-chat-undo'))
     expect(screen.queryByTestId('library-item-changed')).toBeNull()

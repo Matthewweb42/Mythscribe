@@ -197,6 +197,8 @@ describe('useLibraryStore (F-9.8)', () => {
           : { ...item, tag: false }
       )
     }))
+    // The review deck (2026-10-08): only what the author accepted is written.
+    useLibraryStore.getState().decide(['e1', 'e2', 'notes'], 'accepted')
     await useLibraryStore.getState().apply()
     const sent = calls.find(
       ([channel]) => channel === 'library:apply'
@@ -266,7 +268,7 @@ describe('the review chat (F-9.9)', () => {
 
   const openReview = (): void => {
     useLibraryStore.setState({
-      flow: { stage: 'review', review: contextReviewFixture(), busy: false }
+      flow: { stage: 'review', review: contextReviewFixture(), busy: false, decisions: {} }
     })
   }
 

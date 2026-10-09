@@ -128,7 +128,7 @@ const PROOFREAD_SENTINEL = 'You are the proofreading feature inside a novel-writ
  */
 const EDIT_PASS_SENTINEL = 'You are the edit-pass feature inside a novel-writing app.'
 /** What the edit-pass step types at the end of Scene 1. */
-const EDIT_PASS_TYPED = ' The harbour bell rang very very slowly over the water.'
+const EDIT_PASS_TYPED = ' The Harbour Bell rang very very slowly over the water.'
 const EDIT_PASS_QUOTE = 'rang very very slowly'
 const EDIT_PASS_REPLACEMENT = 'rang slowly'
 const EDIT_PASS_ANSWER = JSON.stringify({
@@ -196,12 +196,15 @@ const SUMMARY_FACTS = [
   }
 ]
 /**
- * F-4.13: the tags the canned summary carries (`summary.v3` keeps the sentinel too). The tone is
- * new to the bank, so main creates it as AI-made and links it to the scene; "Zephyr" is a
- * character name Scene 1 never holds, so main must drop it.
+ * F-4.13: the tags the canned summary carries (`summary.v3` keeps the sentinel too). "Harbour
+ * Bell" is a name Scene 1 capitalises (the edit-pass sentence), new to the bank, so main creates
+ * it as AI-made and links it to the scene; by the author's tag rule (2026-10-08) the tone
+ * "stormbound", which the text never holds, is not a tag, and "Zephyr" is a character name
+ * Scene 1 never holds: main drops both.
  */
 const SUMMARY_TAGS = [
   { name: 'stormbound', category: 'tone' },
+  { name: 'Harbour Bell', category: 'custom' },
   { name: 'Zephyr', category: 'character' }
 ]
 const SUMMARY_ANSWER = JSON.stringify({
@@ -4964,6 +4967,23 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('tracked-changes-count')).toHaveText(
     '1 tracked change from an edit pass'
   )
+  // One change at a time (2026-10-08, the review deck): "Review one by one" opens the deck as a
+  // strip above the scene, the change on its card; S keeps it for later, the end offers it
+  // again, and Stop reviewing puts the bar back with the change still there.
+  await page.getByTestId('tracked-changes-review').click()
+  const editReview = page.getByTestId('edit-review')
+  await expect(editReview.getByTestId('review-position')).toHaveText('Change 1 of 1')
+  await expect(editReview.getByTestId('edit-review-diff')).toContainText(EDIT_PASS_QUOTE)
+  // The editor jumped to the change: it is on screen, highlighted, while the keys stay on the deck.
+  await expect(editor.locator('.tracked-del')).toBeInViewport()
+  await page.keyboard.press('s')
+  await expect(editReview.getByTestId('review-done')).toContainText('0 accepted · 1 skipped')
+  await editReview.getByTestId('edit-review-close').click()
+  await expect(editReview).toHaveCount(0)
+  await expect(page.getByTestId('tracked-changes-count')).toHaveText(
+    '1 tracked change from an edit pass'
+  )
+  await expect(editor.locator('.tracked-del')).toHaveText(EDIT_PASS_QUOTE)
 
   await showSection('Edits')
   await page.getByTestId('edit-pass-new').click()
@@ -5028,14 +5048,16 @@ test('create, close, reopen a project on disk', async () => {
   const summarySystem = openAiChatBodies.at(-1)?.messages[0]
   expect(summarySystem?.role).toBe('system')
   expect(summarySystem?.content.startsWith(SUMMARY_SENTINEL)).toBe(true)
-  // F-4.13: the same request tagged the scene. The new tone is in the tag bar with the "Added
-  // by AI" mark, without a click; the character the scene never names was not created. One
-  // click takes the tag off, and it stays in the bank.
-  const aiChip = tagBar.locator('li[data-ai="true"]').filter({ hasText: 'stormbound' })
+  // F-4.13: the same request tagged the scene. The new name is in the tag bar with the "Added
+  // by AI" mark, without a click; the character the scene never names and the tone the text
+  // never holds (the author's tag rule) were not created. One click takes the tag off, and it
+  // stays in the bank.
+  const aiChip = tagBar.locator('li[data-ai="true"]').filter({ hasText: 'harbour-bell' })
   await expect(aiChip).toBeVisible()
   await expect(aiChip.getByTestId('tag-ai-mark')).toHaveText('Added by AI')
   expect((await listTags()).some((tag) => tag.name === 'zephyr')).toBe(false)
-  await aiChip.getByRole('button', { name: 'Remove stormbound' }).click()
+  expect((await listTags()).some((tag) => tag.name === 'stormbound')).toBe(false)
+  await aiChip.getByRole('button', { name: 'Remove harbour-bell' }).click()
   await expect(aiChip).toHaveCount(0)
   await caretToEnd(editor)
   await page.keyboard.type(' She counted the boats twice.')
@@ -5047,11 +5069,17 @@ test('create, close, reopen a project on disk', async () => {
   await expect(metadata.getByTestId('summary-text')).toHaveText(SUMMARY_TEXT)
   // F-4.13: the background run answered the same tag again; a tag the author took off this
   // scene is never re-applied to it, and nothing of it is in the manuscript.
-  await expect(tagBar.getByRole('listitem').filter({ hasText: 'stormbound' })).toHaveCount(0)
-  expect((await listTags()).find((tag) => tag.name === 'stormbound')).toMatchObject({
+  // (The Mentions list still names it: the scene says "Harbour Bell".)
+  await expect(
+    tagBar
+      .getByRole('list', { name: 'Document tags' })
+      .getByRole('listitem')
+      .filter({ hasText: 'harbour-bell' })
+  ).toHaveCount(0)
+  expect((await listTags()).find((tag) => tag.name === 'harbour-bell')).toMatchObject({
     usageCount: 0
   })
-  await expect(editor).not.toContainText('stormbound')
+  await expect(editor).not.toContainText('harbour-bell')
   const afterSummary = await usageSummary()
   expect(afterSummary.byFeature.find((f) => f.feature === 'summary')).toMatchObject({
     requests: 2
@@ -6157,26 +6185,67 @@ test('create, close, reopen a project on disk', async () => {
   await expect(libraryDialog.getByTestId('library-estimate')).toContainText('2 files · 2 requests')
   expect(contextBodies()).toHaveLength(0)
   await libraryDialog.getByTestId('library-confirm').click()
-  const libraryReview = libraryDialog.getByTestId('library-review')
+  const libraryReview = libraryDialog.getByTestId('review-deck')
   await expect(libraryReview).toBeVisible({ timeout: 15_000 })
   expect(contextBodies()).toHaveLength(2)
   expect(contextBodies()[0]).toMatch(/^Existing sheets by kind:\ncharacter: .*\bMara\b/)
   await expect(libraryDialog.getByTestId('library-review-summary')).toHaveText(
     '4 new sheets · 1 sheet to update · 1 conflict · 1 note for Project notes'
   )
+  // The review is a deck since 2026-10-08: one card at a time, grouped in the rail, nothing
+  // accepted until the author says so.
+  await expect(
+    libraryDialog.getByRole('navigation', { name: 'Groups' }).getByTestId('review-group')
+  ).toHaveText(['New categories0/1', 'New sheets0/4', 'Conflicts0/1', 'Project notes0/1'])
+  await expect(libraryDialog.getByTestId('review-apply')).toHaveText('Apply 0 accepted')
+  // F-9.9: the review chat. The author asks for a change; the fake server answers operations on
+  // the listed review: Tomas Reed's card (further on) shows the new name and is marked Changed,
+  // the reply lists each change with the one the review could not do (renaming an existing
+  // sheet) and why, and the cost line is there. Nothing was written: the deck still decides.
+  const reviewChat = libraryDialog.getByTestId('review-chat')
+  await reviewChat.getByTestId('review-chat-input').fill('Tomas Reed is also called Tom.')
+  await reviewChat.getByTestId('review-chat-send').click()
+  await expect(reviewChat.getByTestId('review-chat-change')).toHaveText(
+    [
+      '“Tomas Reed” is also called “Tom”.',
+      'Rename skipped: “Mara” is an existing sheet; rename it in the story bible.'
+    ],
+    { timeout: 15_000 }
+  )
+  await expect(reviewChat.getByTestId('review-chat-entry').last()).toContainText(
+    'AI: Tomas Reed also goes by Tom.'
+  )
+  expect(
+    openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(REVIEW_CHAT_SENTINEL))
+  ).toHaveLength(1)
   // F-9.11: the model filed The Weave under Magic Systems and proposed a Ships category for The
-  // Gull; the review shows the proposal above the sheets with Rename and Decline, and the sheet
-  // as a ship. Rename changes the name before anything is created.
+  // Gull; the proposal is the first card, with Rename and Decline. Rename changes the name
+  // before anything is created; Accept keeps it.
   const proposedCategory = libraryReview.getByTestId('library-proposed-category')
   await expect(proposedCategory).toContainText('Proposed new category: Ships')
   await expect(proposedCategory).toContainText('1 sheet · fields: Crew')
-  await expect(libraryReview.locator('[data-item-name="The Weave"]')).toContainText('magic system')
-  await expect(libraryReview.locator('[data-item-name="The Gull"]')).toContainText('ship ·')
   await proposedCategory.getByRole('button', { name: 'Rename…' }).click()
   const renameProposal = page.getByRole('dialog', { name: 'Rename the proposed category' })
   await renameProposal.getByRole('textbox').fill('Vessels')
   await renameProposal.getByRole('button', { name: 'Rename' }).click()
   await expect(proposedCategory).toContainText('Proposed new category: Vessels')
+  await libraryReview.getByTestId('review-accept').click()
+  // The four new sheets, one after the other: A on each.
+  const libraryCard = libraryReview.getByTestId('library-item')
+  const reviewPosition = libraryReview.getByTestId('review-position')
+  for (let i = 1; i <= 4; i++) {
+    await expect(reviewPosition).toHaveText(`New sheet ${i} of 4`)
+    const name = await libraryCard.getAttribute('data-item-name')
+    if (name === 'The Weave') await expect(libraryCard).toContainText('magic system')
+    if (name === 'Tomas Reed') {
+      await expect(libraryCard).toContainText('Tag #tomas-reed')
+      await expect(libraryCard.getByTestId('library-item-changed')).toBeVisible()
+      await expect(libraryCard.getByTestId('library-item-aliases')).toHaveText('Also called: Tom')
+    }
+    await page.keyboard.press('a')
+  }
+  // The conflict: Mara's age, both values side by side; the upload's is picked.
+  await expect(reviewPosition).toHaveText('Conflict 1 of 1')
   const maraItem = libraryReview.locator('[data-item-name="Mara"]')
   await expect(maraItem).toContainText('existing sheet')
   // The two descriptions were merged by the nickname; Split would separate them again.
@@ -6187,33 +6256,13 @@ test('create, close, reopen a project on disk', async () => {
   await expect(ageConflict.getByRole('radio', { name: /Keep the sheet’s\s*34/ })).toBeChecked()
   await ageConflict.getByText('Use the upload’s').click()
   await expect(ageConflict.getByRole('radio', { name: /Use the upload’s\s*35/ })).toBeChecked()
-  await expect(libraryReview.locator('[data-item-name="Tomas Reed"]')).toContainText(
-    'Tag #tomas-reed'
-  )
+  await page.keyboard.press('a')
+  // Project notes last; accepting the last card with nothing skipped applies the review.
   await expect(libraryReview.getByTestId('library-notes')).toContainText(
     'Theme: The book is about debts'
   )
-  // F-9.9: the review chat. The author asks for a change; the fake server answers operations on
-  // the listed review: Tomas Reed's card shows the new name and is marked Changed, the reply
-  // lists each change with the one the review could not do (renaming an existing sheet) and why,
-  // and the cost line is there. Nothing was written: Apply still decides.
-  const reviewChat = libraryDialog.getByTestId('review-chat')
-  await reviewChat.getByTestId('review-chat-input').fill('Tomas Reed is also called Tom.')
-  await reviewChat.getByTestId('review-chat-send').click()
-  const tomasItem = libraryReview.locator('[data-item-name="Tomas Reed"]')
-  await expect(tomasItem.getByTestId('library-item-changed')).toBeVisible({ timeout: 15_000 })
-  await expect(tomasItem.getByTestId('library-item-aliases')).toHaveText('Also called: Tom')
-  await expect(reviewChat.getByTestId('review-chat-change')).toHaveText([
-    '“Tomas Reed” is also called “Tom”.',
-    'Rename skipped: “Mara” is an existing sheet; rename it in the story bible.'
-  ])
-  await expect(reviewChat.getByTestId('review-chat-entry').last()).toContainText(
-    'AI: Tomas Reed also goes by Tom.'
-  )
-  expect(
-    openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(REVIEW_CHAT_SENTINEL))
-  ).toHaveLength(1)
-  await libraryDialog.getByTestId('library-apply').click()
+  await expect(libraryDialog.getByTestId('review-apply')).toHaveText('Apply 6 accepted')
+  await page.keyboard.press('a')
   await expect(libraryDialog).toHaveCount(0)
   await expect(libraryPanel.getByTestId('library-file-state')).toHaveText(['Sorted', 'Sorted'])
   const afterLibrary = await page.evaluate(async () => {
@@ -6279,9 +6328,10 @@ test('create, close, reopen a project on disk', async () => {
   // F-9.10: Organise. A stray #reed tag beside #tomas-reed is what an upload leaves behind; the
   // local pass finds the look-alike and the Tags section offers to organise, quietly. Opening the
   // offer asks the AI for a plan (the fake merges the tags and fills The Landing's atmosphere).
-  // In Ask every change waits with a checkbox; Apply lands both through the stores, and Undo
-  // takes the sheet change back. In Auto the change that can be undone lands at once and "Undo
-  // the whole reorganisation" takes it back. No scene text changes.
+  // In Ask the plan is a review deck, one change at a time (2026-10-08): A accepts the merge, the
+  // sheet change is next, and accepting the last one applies both through the stores; the rail
+  // jumps back to the sheet change, whose Undo takes it back. In Auto the change that can be
+  // undone lands at once and "Undo the whole reorganisation" takes it back. No scene text changes.
   const organiseBodies = (): number =>
     openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(ORGANISE_SENTINEL))
       .length
@@ -6309,19 +6359,28 @@ test('create, close, reopen a project on disk', async () => {
   expect(organiseBodies()).toBe(0)
   await organiseOffer.getByRole('button', { name: 'Review' }).click()
   const organiseDialog = page.getByTestId('organise-dialog')
-  const organiseChanges = organiseDialog.getByTestId('organise-change')
-  await expect(organiseChanges).toHaveCount(2, { timeout: 15_000 })
+  const organiseCard = organiseDialog.getByTestId('organise-change')
+  await expect(organiseCard).toHaveCount(1, { timeout: 15_000 })
   expect(organiseBodies()).toBe(1)
   await expect(organiseDialog.getByTestId('organise-reply')).toHaveText(
     'One Tomas, and the Landing filled in.'
   )
-  await expect(organiseChanges.first()).toContainText('Merge tags “#reed” into #tomas-reed')
-  await expect(organiseChanges.nth(1)).toContainText('Sheet “The Landing”: 1 field')
-  await expect(organiseChanges.nth(1).locator('ins')).toHaveText(ORGANISE_ATMOSPHERE)
-  await expect(organiseDialog.getByRole('checkbox')).toHaveCount(2)
-  await organiseDialog.getByTestId('organise-apply').click()
-  await expect(organiseChanges.first()).toHaveAttribute('data-status', 'applied')
-  await expect(organiseChanges.nth(1)).toHaveAttribute('data-status', 'applied')
+  const organiseRail = organiseDialog.getByRole('navigation', { name: 'Groups' })
+  await expect(organiseRail.getByTestId('review-group')).toHaveText(['Merges0/1', 'Story bible0/1'])
+  await expect(organiseDialog.getByTestId('review-position')).toHaveText('Merge 1 of 1')
+  await expect(organiseCard).toContainText('Merge tags “#reed” into #tomas-reed')
+  await expect(organiseDialog.getByRole('checkbox')).toHaveCount(0)
+  await page.keyboard.press('a')
+  await expect(organiseCard).toContainText('Sheet “The Landing”: 1 field')
+  await expect(organiseCard.locator('ins')).toHaveText(ORGANISE_ATMOSPHERE)
+  await expect(organiseDialog.getByTestId('review-apply')).toHaveText('Apply 1 accepted')
+  await organiseDialog.getByTestId('review-accept').click()
+  await expect(organiseDialog.getByTestId('review-done')).toContainText('All 2 reviewed.')
+  await expect(organiseRail.getByTestId('review-group')).toHaveText(['Merges1/1', 'Story bible1/1'])
+  await organiseRail.getByRole('button', { name: /Merges/ }).click()
+  await expect(organiseCard).toHaveAttribute('data-status', 'applied')
+  await organiseRail.getByRole('button', { name: /Story bible/ }).click()
+  await expect(organiseCard).toHaveAttribute('data-status', 'applied')
   const afterOrganise = await page.evaluate(async () => {
     const tags = (await window.mythscribe.invoke('tag:list', undefined)) as IpcResult<Tag[]>
     if (!tags.ok) throw new Error('tag:list failed')
@@ -6330,11 +6389,8 @@ test('create, close, reopen a project on disk', async () => {
   expect(afterOrganise.map((tag) => tag.name)).not.toContain('reed')
   expect(afterOrganise.find((tag) => tag.name === 'tomas-reed')?.aliases).toContain('Reed')
   expect(await sheetField('The Landing', 'atmosphere')).toBe(ORGANISE_ATMOSPHERE)
-  await organiseChanges
-    .nth(1)
-    .getByRole('button', { name: /^Undo: / })
-    .click()
-  await expect(organiseChanges.nth(1)).toHaveAttribute('data-status', 'undone')
+  await organiseCard.getByRole('button', { name: /^Undo: / }).click()
+  await expect(organiseCard).toHaveAttribute('data-status', 'undone')
   await expect.poll(() => sheetField('The Landing', 'atmosphere')).toBeUndefined()
   await organiseDialog.getByRole('button', { name: 'Done' }).click()
   await expect(organiseDialog).toHaveCount(0)
@@ -6342,11 +6398,11 @@ test('create, close, reopen a project on disk', async () => {
   await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
   await expect.poll(async () => (await aiSettings()).chatMode).toBe('auto')
   await tagsSection.getByTestId('organise-button').click()
-  await expect(organiseChanges).toHaveCount(1, { timeout: 15_000 })
-  await expect(organiseChanges.first()).toHaveAttribute('data-status', 'applied')
+  await expect(organiseCard).toHaveAttribute('data-status', 'applied', { timeout: 15_000 })
+  await expect(organiseRail.getByTestId('review-group')).toHaveText(['Story bible1/1'])
   expect(await sheetField('The Landing', 'atmosphere')).toBe(ORGANISE_ATMOSPHERE)
   await organiseDialog.getByTestId('organise-undo-all').click()
-  await expect(organiseChanges.first()).toHaveAttribute('data-status', 'undone')
+  await expect(organiseCard).toHaveAttribute('data-status', 'undone')
   await expect.poll(() => sheetField('The Landing', 'atmosphere')).toBeUndefined()
   await organiseDialog.getByRole('button', { name: 'Done' }).click()
   await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()

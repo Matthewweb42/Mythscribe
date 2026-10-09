@@ -10,10 +10,12 @@ import {
   type ExtractedFact
 } from '@shared/observedFacts'
 import { SUMMARY_KNOWN_NAMES_MAX } from '@shared/summary'
+import { classifyTagTerm, mayAutoCreateTag } from '@shared/tagTerms'
 import { createEntity, listEntities, type EntityWrite } from '../entity/entityStore'
 import type { Fact, FactStatus } from '@shared/facts'
 import { applySceneFacts, type SceneFactInput } from '../entity/factStore'
 import { getObservedDismissed } from '../project/settingsStore'
+import { manuscriptTexts } from '../tag/proposedTags'
 import { findTagByNameOrAlias, listTags } from '../tag/tagStore'
 import type { TreeDb } from '../tree/treeStore'
 
@@ -178,8 +180,10 @@ function resolveEntity(
  * inside the caller's): each fact's name is resolved to an entity (`resolveEntity`); a name with
  * no entity gets one — AI-made, blank template, with its tag through the F-9.4 link — unless the
  * author deleted an entity of that kind and name (`observedFacts.dismissed`), in which case the
- * fact is left out; a fact that landed on an entity of another kind is kept only when that kind
- * carries the attribute. Then the scene's dated facts are applied, sticky (`applySceneFacts`):
+ * fact is left out (the sheet gets a new tag only under the author's tag rule, `classifyTagTerm`,
+ * 2026-10-08: a name or a repeated term; a tag the bank already has is linked either way); a
+ * fact that landed on an entity of another kind is kept only when that kind carries the
+ * attribute. Then the scene's dated facts are applied, sticky (`applySceneFacts`):
  * new statements added with `status`, tombstones honoured, and a fact whose quote left
  * `sceneText` removed. An empty list with an empty text clears the scene's AI facts.
  */
@@ -196,6 +200,14 @@ export function applyObservedFacts(
     const created: EntityWrite[] = []
     const rows: SceneFactInput[] = []
     let skipped = 0
+    // Read once, and only when a sheet is made: the tag rule needs the whole text.
+    let texts: string[] | null = null
+    const mayTag = (name: string): boolean => {
+      const tagName = entityTagName(name)
+      if (tagName !== '' && findTagByNameOrAlias(tx, tagName) !== undefined) return true
+      texts ??= manuscriptTexts(tx, { nodeId, text: sceneText })
+      return mayAutoCreateTag(classifyTagTerm(name, texts))
+    }
     for (const fact of facts) {
       let entity = resolveEntity(tx, entities, fact)
       if (entity === undefined) {
@@ -206,7 +218,8 @@ export function applyObservedFacts(
         const write = createEntity(
           tx,
           { kind: fact.kind, name: fact.entity, template: 'blank' },
-          'ai'
+          'ai',
+          { tag: mayTag(fact.entity) }
         )
         created.push(write)
         entities.push(write.entity)

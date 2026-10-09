@@ -95,11 +95,21 @@ export function useTrackedChanges(
     useEditPassStore.setState({ focus: null })
     if (range === null) return
     if (tracked) editor.commands.focusTrackedChange(focus.changeId)
-    editor
-      .chain()
-      .focus()
-      .setTextSelection(tracked ? range.from : range)
-      .scrollIntoView()
-      .run()
+    if (focus.quiet !== true) {
+      editor
+        .chain()
+        .focus()
+        .setTextSelection(tracked ? range.from : range)
+        .scrollIntoView()
+        .run()
+      return
+    }
+    // The one-at-a-time review (2026-10-08) keeps the keyboard on its deck: the selection moves
+    // without the editor's focus, and ProseMirror scrolls only a focused view, so the passage is
+    // brought into view through the DOM.
+    editor.commands.setTextSelection(tracked ? range.from : range)
+    const at = editor.view.domAtPos(range.from)
+    const element = at.node instanceof Element ? at.node : at.node.parentElement
+    element?.scrollIntoView({ block: 'center' })
   }, [editor, ready, listed, focus, changes])
 }

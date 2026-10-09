@@ -30,6 +30,23 @@ import { useEditPassViewStore } from './editPassViewStore'
  * when the author accepts from the report with the scene closed.
  */
 
+/**
+ * Stepping through tracked changes one at a time (2026-10-08, the review deck): the changes of a
+ * pass or a scene in reading order, the ones the author kept for later, and where the author is.
+ * The deck shows as a strip above the editor of the change's scene, and the editor jumps to each.
+ */
+export interface EditReviewSession {
+  changes: EditChange[]
+  /** Scene titles, the deck's groups. */
+  titles: Record<string, string>
+  /** Changes the author skipped ("Later"): still pending, reviewable again. */
+  skipped: string[]
+  /** The change on show, or null at the end. */
+  currentId: string | null
+  /** The scene whose editor shows the strip: the current change's, or the last one's at the end. */
+  nodeId: string
+}
+
 export interface StartPassInput {
   type: EditPassType
   instruction: string | null
@@ -49,7 +66,9 @@ interface EditPassState {
   /** The pass this window started; it opens its report when it finishes. */
   startedHere: string | null
   /** A change or note to show when its scene's editor mounts (a jump from the report). */
-  focus: { changeId: string; nodeId: string; quote: string } | null
+  focus: { changeId: string; nodeId: string; quote: string; quiet?: boolean } | null
+  /** The one-at-a-time review under way, or null. */
+  review: EditReviewSession | null
   /** Accepting or rejecting is in progress (the report's buttons wait for it). */
   busy: boolean
 
@@ -68,8 +87,18 @@ interface EditPassState {
   reject: (changes: readonly EditChange[]) => Promise<void>
   /** Marks developmental notes addressed. */
   markDone: (changes: readonly EditChange[]) => Promise<void>
-  /** Opens the change's scene with the change highlighted. */
-  jump: (change: EditChange) => void
+  /**
+   * Opens the change's scene with the change highlighted; `quiet` leaves the keyboard focus
+   * where it is (the review deck keeps it).
+   */
+  jump: (change: EditChange, options?: { quiet?: boolean }) => void
+  /** Starts the one-at-a-time review over these changes (only pending tracked changes count). */
+  startReview: (changes: readonly EditChange[], titles: Record<string, string>) => void
+  /** The deck moved to another change (or to the end): the editor follows. */
+  reviewAt: (id: string | null) => void
+  /** Keeps changes for later in the review. */
+  skipInReview: (ids: readonly string[]) => void
+  endReview: () => void
   savePresets: (presets: EditPassPresets) => Promise<void>
   /** Settles changes whose passage the editor could no longer find. */
   markStale: (ids: readonly string[]) => Promise<void>
@@ -136,8 +165,19 @@ function applySettled(moved: readonly EditChange[]): void {
     const list = nextByNode[nodeId]
     if (list) nextByNode[nodeId] = list.filter((change) => !status.has(change.id))
   }
+  const review = useEditPassStore.getState().review
   useEditPassStore.setState({
     changesByNode: nextByNode,
+    review:
+      review === null
+        ? null
+        : {
+            ...review,
+            changes: review.changes.map((change) => {
+              const next = status.get(change.id)
+              return next === undefined ? change : { ...change, status: next }
+            })
+          },
     detail:
       detail === null
         ? null
@@ -245,6 +285,7 @@ export const useEditPassStore = create<EditPassState>((set, get) => ({
   presets: [],
   startedHere: null,
   focus: null,
+  review: null,
   busy: false,
 
   async load() {
@@ -276,6 +317,7 @@ export const useEditPassStore = create<EditPassState>((set, get) => ({
       presets: [],
       startedHere: null,
       focus: null,
+      review: null,
       busy: false
     })
   },
@@ -423,10 +465,50 @@ export const useEditPassStore = create<EditPassState>((set, get) => ({
     }
   },
 
-  jump(change) {
-    set({ focus: { changeId: change.id, nodeId: change.nodeId, quote: change.original } })
+  jump(change, options) {
+    set({
+      focus: {
+        changeId: change.id,
+        nodeId: change.nodeId,
+        quote: change.original,
+        quiet: options?.quiet === true
+      }
+    })
     // Selecting the scene closes the report, like picking a document closes an entity page.
     useTreeStore.getState().select(change.nodeId)
+  },
+
+  startReview(changes, titles) {
+    const pending = changes.filter((c) => c.kind === 'change' && c.status === 'pending')
+    const first = pending[0]
+    if (first === undefined) {
+      toast.info('No tracked changes left to review.')
+      return
+    }
+    set({
+      review: { changes: pending, titles, skipped: [], currentId: first.id, nodeId: first.nodeId }
+    })
+    get().jump(first, { quiet: true })
+  },
+
+  reviewAt(id) {
+    const review = get().review
+    if (review === null || review.currentId === id) return
+    const change = id === null ? undefined : review.changes.find((c) => c.id === id)
+    set({
+      review: { ...review, currentId: id, nodeId: change?.nodeId ?? review.nodeId }
+    })
+    if (change !== undefined) get().jump(change, { quiet: true })
+  },
+
+  skipInReview(ids) {
+    const review = get().review
+    if (review === null) return
+    set({ review: { ...review, skipped: [...new Set([...review.skipped, ...ids])] } })
+  },
+
+  endReview() {
+    set({ review: null })
   },
 
   async savePresets(presets) {
@@ -464,6 +546,7 @@ export function resetEditPassStore(): void {
     presets: [],
     startedHere: null,
     focus: null,
+    review: null,
     busy: false
   })
 }

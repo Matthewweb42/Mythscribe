@@ -61,6 +61,18 @@ export function listTags(db: TagDb): Tag[] {
   return selectWithUsage(db)
 }
 
+/** The ids of the tags background tagging made and the author has not taken over (F-4.13 `origin`). */
+export function aiMadeTagIds(db: TagDb): Set<string> {
+  return new Set(
+    db
+      .select({ id: tag.id })
+      .from(tag)
+      .where(eq(tag.origin, 'ai'))
+      .all()
+      .map((row) => row.id)
+  )
+}
+
 /** One tag with its usage count, or undefined when the id is unknown. */
 export function getTagWithUsage(db: TagDb, id: string): Tag | undefined {
   return selectWithUsage(db, eq(tag.id, id))[0]

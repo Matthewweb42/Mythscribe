@@ -12,7 +12,9 @@ import { loadAgentProject, type AgentProject } from '../ai/agentTools'
 import { tagMention } from '../db/schema'
 import { listCategories } from '../entity/categoryStore'
 import { factsForEntities } from '../entity/factStore'
-import { listTags } from '../tag/tagStore'
+import { classifyTagTerm } from '@shared/tagTerms'
+import { manuscriptTexts } from '../tag/proposedTags'
+import { aiMadeTagIds, listTags } from '../tag/tagStore'
 import type { TreeDb } from '../tree/treeStore'
 
 /**
@@ -38,6 +40,30 @@ export interface OrganiseProject {
   sheetsOfTag: Map<string, number>
   /** The visible AI facts of each sheet (F-5.16, F-9.13), by sheet id. */
   facts: Map<string, Fact[]>
+  /** Tags the manuscript uses as ordinary words (`classifyTagTerm`, 2026-10-08). */
+  ordinaryTagIds: Set<string>
+  /** Tags background tagging made (F-4.13 `origin`). */
+  aiMadeTagIds: Set<string>
+}
+
+/**
+ * The tags whose name the manuscript uses as an ordinary word (the author's tag rule,
+ * 2026-10-08): neither the name nor any alias reads as a name, a coined term, or an unusual use;
+ * a tag the text never holds is left alone (a theme the author tagged by hand, a name of a
+ * deleted scene).
+ */
+export function ordinaryTags(tags: readonly Tag[], texts: readonly string[]): Set<string> {
+  const ordinary = new Set<string>()
+  for (const tag of tags) {
+    const verdicts = [tag.name, ...tag.aliases].map((name) => classifyTagTerm(name, texts))
+    if (
+      verdicts.includes('ordinary') &&
+      verdicts.every((v) => v === 'ordinary' || v === 'absent')
+    ) {
+      ordinary.add(tag.id)
+    }
+  }
+  return ordinary
 }
 
 function refs<T extends { id: string }>(
@@ -94,7 +120,9 @@ export function loadOrganiseProject(db: TreeDb): OrganiseProject {
     mentions,
     children: tally(tags.map((tag) => tag.parentId)),
     sheetsOfTag: tally(sheets.map((sheet) => sheet.tagId)),
-    facts
+    facts,
+    ordinaryTagIds: ordinaryTags(tags, manuscriptTexts(db)),
+    aiMadeTagIds: aiMadeTagIds(db)
   }
 }
 
@@ -116,7 +144,9 @@ export function organiseCandidates(project: OrganiseProject): OrganiseCandidates
     usageCount: tag.usageCount,
     mentions: project.mentions.get(tag.id) ?? 0,
     children: project.children.get(tag.id) ?? 0,
-    sheets: project.sheetsOfTag.get(tag.id) ?? 0
+    sheets: project.sheetsOfTag.get(tag.id) ?? 0,
+    ordinary: project.ordinaryTagIds.has(tag.id),
+    aiMade: project.aiMadeTagIds.has(tag.id)
   }))
   const sheets: CandidateSheet[] = project.sheets.map((sheet) => ({
     id: sheet.id,

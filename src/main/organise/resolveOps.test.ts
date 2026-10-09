@@ -2,10 +2,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { TiptapNodeT } from '@shared/tiptap'
+import { saveDocument } from '../document/documentStore'
 import { createEntity, getEntity, updateEntity } from '../entity/entityStore'
+import { createTag } from '../tag/tagStore'
+import { manuscriptDocuments } from '../voice/profile'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { createNode, listNodes, type TreeDb } from '../tree/treeStore'
-import { loadOrganiseProject } from './organiseProject'
+import { loadOrganiseProject, organiseCandidates } from './organiseProject'
 import { OrganiseResolver } from './resolveOps'
 
 let tmp: string
@@ -69,5 +73,66 @@ describe('OrganiseResolver sheet moves (F-9.10)', () => {
     const back = getEntity(db, entity.id)
     expect(back?.kind).toBe('character')
     expect(back?.fields).toEqual(entity.fields)
+  })
+})
+
+const doc = (text: string): TiptapNodeT => ({
+  type: 'doc',
+  content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+})
+
+describe('Not names — remove? (the author’s tag rule, 2026-10-08)', () => {
+  const SCENE =
+    'Marta found the memorial fragments where the river bent. The custom in Greywater was to ' +
+    'leave them be, but Marta had never cared for custom. She wrapped the memorial fragments in ' +
+    'oilcloth and set them on the stones. Her trial would come later, said Reed. They spoke of ' +
+    'the Trial at supper, of the Trial at dawn, of the Trial and its price; the Trial took one ' +
+    'of them every year, and the memorial fragments knew it.'
+
+  it('offers the AI’s ordinary-word tags for removal first, and plans no merge of ordinary words', () => {
+    const scene = manuscriptDocuments(db)[0]?.id ?? ''
+    saveDocument(db, scene, doc(SCENE))
+    const custom = createTag(db, { name: 'custom', category: 'custom' }, 'ai')
+    const stones = createTag(db, { name: 'stones', category: 'worldBuilding' }, 'ai')
+    const trial = createTag(db, { name: 'trial', category: 'plotThread' }, 'ai')
+    const marta = createTag(db, { name: 'marta', category: 'character' }, 'ai')
+    const fragments = createTag(db, { name: 'memorial-fragments', category: 'worldBuilding' }, 'ai')
+    const river = createTag(db, { name: 'river', category: 'setting' })
+    const oilcloth = createTag(db, { name: 'oilcloth', category: 'custom' })
+    const project = loadOrganiseProject(db)
+    const found = organiseCandidates(project)
+    // The Trial is unusual (proposed, F-4.12b), Marta a name, the fragments a coined term; the
+    // author's own ordinary words are never offered for removal.
+    expect(found.notNames).toEqual([
+      { id: custom.id, name: 'custom' },
+      { id: stones.id, name: 'stones' }
+    ])
+    expect(project.ordinaryTagIds.has(trial.id)).toBe(false)
+    expect(project.ordinaryTagIds.has(marta.id)).toBe(false)
+    expect(project.ordinaryTagIds.has(fragments.id)).toBe(false)
+    expect(project.ordinaryTagIds.has(river.id)).toBe(true)
+
+    const ref = (id: string): string => project.tagRef.get(id) ?? ''
+    const resolver = new OrganiseResolver(project)
+    resolver.addNotNames(found.notNames)
+    resolver.add([
+      { op: 'mergeTags', keep: ref(custom.id), merge: [ref(stones.id)] },
+      { op: 'mergeTags', keep: ref(river.id), merge: [ref(oilcloth.id)] },
+      { op: 'mergeTags', keep: ref(marta.id), merge: [ref(trial.id)] }
+    ])
+    expect(resolver.changes.map((c) => c.action)).toEqual([
+      { kind: 'deleteTag', tagId: custom.id, name: 'custom', notName: true },
+      { kind: 'deleteTag', tagId: stones.id, name: 'stones', notName: true },
+      {
+        kind: 'mergeTags',
+        target: { id: marta.id, name: 'marta' },
+        sources: [{ id: trial.id, name: 'trial' }]
+      }
+    ])
+    expect(resolver.changes[0]?.reason).toContain('ordinary word')
+    expect(resolver.skipped).toEqual([
+      'mergeTags: #custom is merged or deleted by an earlier change',
+      'mergeTags: #river and the tags to merge into it are ordinary words, not names'
+    ])
   })
 })

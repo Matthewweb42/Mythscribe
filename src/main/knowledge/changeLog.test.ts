@@ -4,6 +4,7 @@ import path from 'node:path'
 import { sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ExtractedFact } from '@shared/observedFacts'
+import type { ExtractedTag } from '@shared/summary'
 import { emptySceneMeta } from '@shared/sceneMeta'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
@@ -23,7 +24,8 @@ let session: ProjectSession
 let db: TreeDb
 let scene: string
 
-const TEXT = 'Kael kept his watchful eyes on the river. The storm broke over the ferry.'
+const TEXT =
+  'Kael kept his watchful eyes on the river. The stormbound ferry waited off Greywater, and the storm broke.'
 
 const doc = (text: string): TiptapNodeT => ({
   type: 'doc',
@@ -41,7 +43,7 @@ const watchful: ExtractedFact = {
 /** One reading of the scene, as the summary run applies it. */
 const read = (
   facts: ExtractedFact[] = [watchful],
-  tags = [{ name: 'stormbound', category: 'tone' as const }]
+  tags: ExtractedTag[] = [{ name: 'Greywater', category: 'setting' }]
 ): ReturnType<typeof applyDerivedKnowledge> =>
   applyDerivedKnowledge(db, {
     nodeId: scene,
@@ -65,9 +67,9 @@ afterEach(() => {
 })
 
 describe('applyDerivedKnowledge logs what it added (F-9.13)', () => {
-  it('logs the new sheet, its tag, the fact, the new tag, and the tag on the scene as one run', () => {
+  it('logs the new sheets, their tags, the fact, and the tag on the scene as one run', () => {
     const run = read()
-    expect(run.logged).toBe(5)
+    expect(run.logged).toBe(6)
     const page = listChanges(db, { limit: 50 })
     expect(page.more).toBe(false)
     expect(page.entries.every((entry) => entry.runId === run.runId)).toBe(true)
@@ -75,9 +77,10 @@ describe('applyDerivedKnowledge logs what it added (F-9.13)', () => {
       [
         ['fact', 'Kael · Personality: Watchful'],
         ['record', 'Kael'],
+        ['record', 'Greywater'],
         ['tag', '#kael'],
-        ['tag', '#stormbound'],
-        ['tagLink', '#stormbound']
+        ['tag', '#greywater'],
+        ['tagLink', '#greywater']
       ].sort()
     )
     const factEntry = page.entries.find((entry) => entry.kind === 'fact')
@@ -91,7 +94,35 @@ describe('applyDerivedKnowledge logs what it added (F-9.13)', () => {
   it('logs nothing for a reading that adds nothing (a sticky re-read)', () => {
     read()
     expect(read().logged).toBe(0)
-    expect(listChanges(db, { limit: 50 }).entries).toHaveLength(5)
+    expect(listChanges(db, { limit: 50 }).entries).toHaveLength(6)
+  })
+
+  it('creates tags under the author’s tag rule: a name, never an ordinary word (2026-10-08)', () => {
+    const river: ExtractedFact = {
+      entity: 'river',
+      kind: 'setting',
+      attribute: 'atmosphere',
+      value: 'Watched',
+      quote: 'his watchful eyes on the river'
+    }
+    const run = read(
+      [watchful, river],
+      [
+        { name: 'stormbound', category: 'tone' },
+        { name: 'storm', category: 'custom' },
+        { name: 'Greywater', category: 'setting' }
+      ]
+    )
+    // "stormbound" and "storm" are ordinary words the scene uses normally: never created.
+    expect(listTags(db).map((each) => each.name).sort()).toEqual(['greywater', 'kael'])
+    expect(run.tags.created.map((each) => each.name)).toEqual(['greywater'])
+    // The sheet a fact needs is still made, but "river" gets no tag of its own.
+    const sheet = listEntities(db).find((each) => each.name === 'river')
+    expect(sheet?.tagId).toBeNull()
+    const labels = listChanges(db, { limit: 50 }).entries.map((entry) => entry.label)
+    expect(labels).not.toContain('#stormbound')
+    expect(labels).not.toContain('#river')
+    expect(labels).toEqual(expect.arrayContaining(['#greywater', '#kael', 'river']))
   })
 
   it('marks a fact from a scene the author marked as an idea as an idea (D7)', () => {
@@ -122,13 +153,13 @@ describe('undo (F-9.13)', () => {
   it('takes a whole run back: tag off the scene, sheet and tags deleted, names remembered', () => {
     const run = read()
     const result = undoRun(db, run.runId)
-    expect(result.entries).toHaveLength(5)
-    expect(result.removedEntityIds).toHaveLength(1)
+    expect(result.entries).toHaveLength(6)
+    expect(result.removedEntityIds).toHaveLength(2)
     expect(result.removedTagIds).toHaveLength(2)
     expect(listEntities(db)).toEqual([])
     expect(listTags(db).map((each) => each.name)).toEqual([])
     expect(listDocumentTags(db, scene)).toEqual([])
-    expect(getDismissedNames(db).names).toEqual(expect.arrayContaining(['kael', 'stormbound']))
+    expect(getDismissedNames(db).names).toEqual(expect.arrayContaining(['kael', 'greywater']))
     // The next reading of the same answer recreates none of it.
     expect(read().logged).toBe(0)
     expect(listEntities(db)).toEqual([])

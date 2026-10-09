@@ -106,7 +106,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
       if (override) return override(input) as Output<C>
       if (channel === 'organise:plan') return planned() as Output<C>
       if (channel === 'organise:candidates') {
-        return { duplicates: [], unusedTags: [], emptySheets: [] } as Output<C>
+        return { duplicates: [], unusedTags: [], emptySheets: [], notNames: [] } as Output<C>
       }
       if (channel === 'tag:update') {
         const { id, ...patch } = input as Input<'tag:update'>
@@ -159,21 +159,22 @@ beforeEach(() => {
 })
 
 describe('useOrganiseStore (F-9.10)', () => {
-  it('asks for a plan and, in Ask, waits for the author with every change ticked', async () => {
+  it('asks for a plan and, in Ask, waits for the author with every change undecided', async () => {
     await useOrganiseStore.getState().start({ instruction: 'Tidy the tags.', scope: ['tags'] })
     const state = useOrganiseStore.getState()
     expect(state).toMatchObject({ open: true, phase: 'ready', mode: 'ask', costUsd: 0.004 })
     expect(calls[0]?.[0]).toBe('organise:plan')
     expect(calls[0]?.[1]).toMatchObject({ instruction: 'Tidy the tags.', scope: ['tags'] })
     expect(statuses()).toEqual({ c1: 'pending', c2: 'pending', c3: 'pending' })
-    expect(Object.values(state.views).every((view) => view.checked)).toBe(true)
+    expect(Object.values(state.views).every((view) => view.decision === 'pending')).toBe(true)
     expect(channels()).not.toContain('tag:update')
   })
 
-  it('applies only the ticked changes through the stores, and undoes one', async () => {
+  it('applies only the accepted changes through the stores, and undoes one', async () => {
     await useOrganiseStore.getState().start({ instruction: '', scope: [] })
-    useOrganiseStore.getState().toggle('c2')
-    await useOrganiseStore.getState().applySelected()
+    useOrganiseStore.getState().decide(['c1', 'c3'], 'accepted')
+    useOrganiseStore.getState().decide(['c2'], 'skipped')
+    await useOrganiseStore.getState().applyAccepted()
     expect(statuses()).toEqual({ c1: 'applied', c2: 'pending', c3: 'applied' })
     expect(useTagStore.getState().byId.rynna?.category).toBe('character')
     expect(useEntityStore.getState().byId.weave?.fields.description).toBe('Threads of light.')
@@ -193,16 +194,45 @@ describe('useOrganiseStore (F-9.10)', () => {
     // Newest first: the sheet went back before the tag.
     const undone = calls.filter(([c]) => c === 'entity:update' || c === 'tag:update').slice(-2)
     expect(undone.map(([c]) => c)).toEqual(['entity:update', 'tag:update'])
-    await useOrganiseStore.getState().applySelected()
+    await useOrganiseStore.getState().applyAccepted()
+    expect(statuses().c2).toBe('pending')
+    useOrganiseStore.getState().decide(['c2'], 'accepted')
+    await useOrganiseStore.getState().applyAccepted()
     expect(statuses().c2).toBe('applied')
     expect(useTagStore.getState().byId.falseer).toBeUndefined()
+  })
+
+  it('lets the author pick another keeper for a merge before accepting it (Edit)', async () => {
+    await useOrganiseStore.getState().start({ instruction: '', scope: [] })
+    const merge = useOrganiseStore.getState().views.c2?.change.action
+    if (merge?.kind !== 'mergeTags') throw new Error('fixture changed')
+    useOrganiseStore.getState().setEditing('c2')
+    expect(useOrganiseStore.getState().editingId).toBe('c2')
+    useOrganiseStore.getState().editChange('c2', {
+      ...merge,
+      target: merge.sources[0] ?? merge.target,
+      sources: [merge.target]
+    })
+    expect(useOrganiseStore.getState().editingId).toBeNull()
+    const edited = useOrganiseStore.getState().views.c2?.change.action
+    expect(edited?.kind === 'mergeTags' ? edited.target.id : null).toBe(merge.sources[0]?.id)
+    // Another kind of change cannot replace it.
+    useOrganiseStore.getState().editChange('c2', {
+      kind: 'deleteTag',
+      tagId: 'x',
+      name: 'x',
+      notName: false
+    })
+    expect(useOrganiseStore.getState().views.c2?.change.action.kind).toBe('mergeTags')
   })
 
   it('in Plan only describes', async () => {
     setMode('plan')
     await useOrganiseStore.getState().start({ instruction: '', scope: [] })
-    await useOrganiseStore.getState().applySelected()
+    useOrganiseStore.getState().decide(['c1', 'c2', 'c3'], 'accepted')
+    await useOrganiseStore.getState().applyAccepted()
     expect(statuses()).toEqual({ c1: 'pending', c2: 'pending', c3: 'pending' })
+    expect(useOrganiseStore.getState().views.c1?.decision).toBe('pending')
   })
 
   it('skips a change whose new category was not applied', async () => {
@@ -237,8 +267,8 @@ describe('useOrganiseStore (F-9.10)', () => {
       })
     })
     await useOrganiseStore.getState().start({ instruction: '', scope: [] })
-    useOrganiseStore.getState().toggle('c1')
-    await useOrganiseStore.getState().applySelected()
+    useOrganiseStore.getState().decide(['c2'], 'accepted')
+    await useOrganiseStore.getState().applyAccepted()
     expect(statuses()).toEqual({ c1: 'pending', c2: 'pending' })
     expect(useOrganiseStore.getState().views.c2?.error).toMatch(/new category/)
   })
@@ -270,7 +300,8 @@ describe('useOrganiseStore (F-9.10)', () => {
       'organise:candidates': () => ({
         duplicates: [{ of: 'tag', ids: ['rynna', 'falseer'], names: ['rynna', 'rynna-falseer'] }],
         unusedTags: [],
-        emptySheets: []
+        emptySheets: [],
+        notNames: []
       })
     })
     await useOrganiseStore.getState().refreshCandidates()

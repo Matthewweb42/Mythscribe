@@ -767,23 +767,17 @@ describe('summarizeScene tags the scene (F-4.13)', () => {
     await run()
     expect(complete).toHaveBeenCalledTimes(1)
     expect(ledger).toHaveLength(1)
-    expect(links()).toEqual({ dread: 'ai', waiting: 'ai', mara: 'ai', 'ferry-landing': 'ai' })
+    // The author's tag rule (2026-10-08): "Waiting" is not in the text and "ferry landing" is
+    // written as ordinary words, once; only the name is made.
+    expect(links()).toEqual({ dread: 'ai', mara: 'ai' })
     // The bank's category wins for a known name; a new one takes the answered category.
     expect(getTag(db, dread.id)).toMatchObject({ category: 'tone', origin: 'author' })
     const made = listTags(db).filter((tag) => tag.id !== dread.id)
-    expect(made.map((tag) => [tag.name, tag.category])).toEqual([
-      ['ferry-landing', 'setting'],
-      ['mara', 'character'],
-      ['waiting', 'custom']
-    ])
+    expect(made.map((tag) => [tag.name, tag.category])).toEqual([['mara', 'character']])
     for (const tag of made) expect(getTag(db, tag.id)?.origin).toBe('ai')
     expect(changes).toHaveLength(1)
-    expect(changes[0]?.created.map((tag) => tag.name).sort()).toEqual([
-      'ferry-landing',
-      'mara',
-      'waiting'
-    ])
-    expect(changes[0]?.moved).toHaveLength(4)
+    expect(changes[0]?.created.map((tag) => tag.name)).toEqual(['mara'])
+    expect(changes[0]?.moved).toHaveLength(2)
     expect(changes[0]?.moved.every((tag) => tag.usageCount === 1)).toBe(true)
     // Nothing of it is in the summary row.
     expect(getSummary(db, scene)).not.toHaveProperty('tags')
@@ -798,7 +792,7 @@ describe('summarizeScene tags the scene (F-4.13)', () => {
     expect(complete).toHaveBeenCalledTimes(1)
   })
 
-  it('creates no name the scene does not hold, no common-noun character, no content tag, and at most three', async () => {
+  it('creates no name the scene does not hold, no ordinary word, no content tag, and at most three', async () => {
     answers({
       ...ANSWER,
       tags: [
@@ -812,15 +806,16 @@ describe('summarizeScene tags the scene (F-4.13)', () => {
       ]
     })
     await run()
-    // "lantern" is deduped by name on the way in, so its first (character) entry decides.
-    expect(Object.keys(links()).sort()).toEqual(['duty', 'loneliness', 'patience'])
+    // The author's tag rule (2026-10-08): themes the text never names and "lantern", an
+    // ordinary word, are not tags.
+    expect(links()).toEqual({})
     answers({
       ...ANSWER,
-      tags: ['a', 'b', 'c', 'd'].map((name) => ({ name: `theme ${name}`, category: 'custom' }))
+      tags: ['Ilse', 'Tomas', 'Brannoc', 'Oskar'].map((name) => ({ name, category: 'character' }))
     })
-    edit()
+    saveDocument(db, scene, doc(`${SCENE} Ilse, Tomas, Brannoc, and Oskar watched from the wall.`))
     await run()
-    expect(Object.keys(links()).sort()).toEqual(['theme-a', 'theme-b', 'theme-c'])
+    expect(Object.keys(links()).sort()).toEqual(['brannoc', 'ilse', 'tomas'])
   })
 
   it('replaces its own links on the next run and never touches the author’s', async () => {
@@ -842,36 +837,34 @@ describe('summarizeScene tags the scene (F-4.13)', () => {
   })
 
   it('never re-applies a tag the author removed from the scene, nor recreates one the author deleted', async () => {
-    answers({
+    saveDocument(db, scene, doc(`${SCENE} Tomas came out of the dark.`))
+    const named = {
       ...ANSWER,
       tags: [
-        { name: 'dread', category: 'tone' },
-        { name: 'waiting', category: 'custom' }
+        { name: 'Mara', category: 'character' },
+        { name: 'Tomas', category: 'character' }
       ]
-    })
+    }
+    answers(named)
     await run()
-    const dread = listTags(db).find((tag) => tag.name === 'dread')
-    const waiting = listTags(db).find((tag) => tag.name === 'waiting')
-    if (!dread || !waiting) throw new Error('tags not created')
-    removeDocumentTag(db, scene, dread.id)
-    deleteTag(db, waiting.id)
-    answers({
-      ...ANSWER,
-      tags: [
-        { name: 'dread', category: 'tone' },
-        { name: 'waiting', category: 'custom' }
-      ]
-    })
-    edit()
+    const mara = listTags(db).find((tag) => tag.name === 'mara')
+    const tomas = listTags(db).find((tag) => tag.name === 'tomas')
+    if (!mara || !tomas) throw new Error('tags not created')
+    removeDocumentTag(db, scene, mara.id)
+    deleteTag(db, tomas.id)
+    answers(named)
+    // Tomas is still in the scene: only the dismissal keeps him from being made again.
+    saveDocument(db, scene, doc(`${SCENE} Tomas came out of the dark. She waited.`))
     await run()
     expect(links()).toEqual({})
-    expect(listTags(db).map((tag) => tag.name)).toEqual(['dread'])
+    expect(listTags(db).map((tag) => tag.name)).toEqual(['mara'])
     // The second run moved nothing, so the windows are not told.
     expect(changes).toHaveLength(1)
   })
 
   it('clears its links, not the author’s, when the scene is cut back under the minimum', async () => {
     const rain = createTag(db, { name: 'Rain', category: 'tone' })
+    createTag(db, { name: 'Dread', category: 'tone' })
     addDocumentTag(db, scene, rain.id)
     answers({ ...ANSWER, tags: [{ name: 'dread', category: 'tone' }] })
     await run()

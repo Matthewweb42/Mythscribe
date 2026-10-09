@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import {
   canSplit,
   reviewHasChanges,
@@ -16,8 +16,11 @@ import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
+import { ReviewDeck } from '@renderer/features/review/ReviewDeck'
+import type { ReviewDecision } from '@renderer/features/review/reviewDeckModel'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLibraryStore, type LibraryFlow } from './libraryStore'
+import { categoryOfCard, decidedReview, UPLOAD_GROUPS, uploadReviewItems } from './uploadReview'
 
 const BUTTON =
   'rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-60'
@@ -72,10 +75,12 @@ function summaryLine(review: ContextReview): string {
 /**
  * The context library's sorting dialog (F-9.8), open while `libraryStore.flow` is set: the
  * estimate to confirm, the pass's progress with Stop, a failure with its next step, and the
- * review — every sheet to create or fill, each field to fill, each conflict with both values
- * side by side, the matches merged across files (with Split), tags, pictures, and Project notes,
- * all included by default except a conflict's upload value and a picture that would replace
- * one. Nothing is written until Apply; Cancel and Escape drop it all.
+ * review — since 2026-10-08 on the review deck, one card at a time: each proposed category, each
+ * sheet to create or fill (its fields, each conflict with both values side by side, the matches
+ * merged across files with Split, its tag and picture), and Project notes. A accepts, S skips
+ * for later, E opens the card's finer choices (which fields, details, pictures, the tag). Nothing
+ * starts accepted and nothing is written until Apply (or the last card, with nothing skipped);
+ * Cancel and Escape drop it all.
  */
 export function ContextUploadDialog(): React.JSX.Element | null {
   const flow = useLibraryStore((s) => s.flow)
@@ -90,7 +95,8 @@ function Dialog({ flow }: { flow: LibraryFlow }): React.JSX.Element {
   const cancelRun = useLibraryStore((s) => s.cancelRun)
 
   useEffect(() => {
-    panel.current?.focus()
+    // The review's deck takes the focus itself, so its keys work at once.
+    if (flow.stage !== 'review') panel.current?.focus()
   }, [flow.stage])
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -111,7 +117,7 @@ function Dialog({ flow }: { flow: LibraryFlow }): React.JSX.Element {
         tabIndex={-1}
         data-testid="library-dialog"
         onKeyDown={onKeyDown}
-        className={`flex max-h-[85vh] max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none ${flow.stage === 'review' ? 'w-[760px]' : 'w-[520px]'}`}
+        className={`flex max-h-[85vh] overflow-y-auto max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none ${flow.stage === 'review' ? 'w-[860px]' : 'w-[520px]'}`}
       >
         <div className="shrink-0 border-b border-line px-5 pt-4 pb-3">
           <h2 id={titleId} className="m-0 text-base font-semibold">
@@ -120,7 +126,8 @@ function Dialog({ flow }: { flow: LibraryFlow }): React.JSX.Element {
           {flow.stage === 'review' ? (
             <>
               <p className="mt-1 mb-0 text-sm text-fg-muted">
-                Pick what goes into your sheets. Nothing is written until you apply.
+                One card at a time: A accepts, S skips, E picks the details. Nothing is written
+                until you apply.
               </p>
               <p className="mt-1 mb-0 text-xs text-fg-subtle" data-testid="library-review-summary">
                 {summaryLine(flow.review)}
@@ -129,7 +136,7 @@ function Dialog({ flow }: { flow: LibraryFlow }): React.JSX.Element {
           ) : null}
         </div>
         {flow.stage === 'review' ? (
-          <Review review={flow.review} busy={flow.busy} />
+          <Review review={flow.review} busy={flow.busy} decisions={flow.decisions} />
         ) : (
           <Status flow={flow} />
         )}
@@ -221,78 +228,112 @@ function Status({ flow }: { flow: Exclude<LibraryFlow, { stage: 'review' }> }): 
   )
 }
 
-function Review({ review, busy }: { review: ContextReview; busy: boolean }): React.JSX.Element {
+function Review({
+  review,
+  busy,
+  decisions
+}: {
+  review: ContextReview
+  busy: boolean
+  decisions: Readonly<Record<string, ReviewDecision>>
+}): React.JSX.Element {
   const discard = useLibraryStore((s) => s.discard)
   const apply = useLibraryStore((s) => s.apply)
-  const edit = useLibraryStore((s) => s.edit)
-  const changed = useLibraryStore((s) => s.chat.changed)
+  const decide = useLibraryStore((s) => s.decide)
   const asking = useLibraryStore((s) => s.chat.requestId !== null)
-  const setAll = (include: boolean): void =>
-    edit((r) => ({
-      ...r,
-      entities: r.entities.map((item) => ({ ...item, include })),
-      notes: { ...r.notes, include }
-    }))
+  const [editing, setEditing] = useState<string | null>(null)
+  const items = useMemo(() => uploadReviewItems(review, decisions), [review, decisions])
+  const existing = useEntityStore((s) => s.byId)
+  const writes = reviewHasChanges(decidedReview(review, decisions, Object.values(existing)))
+  const onEdit = useCallback(
+    (id: string) => {
+      // A proposed category's one adjustable part is its name; a sheet shows its finer choices.
+      const categoryId = categoryOfCard(id)
+      if (categoryId === null) {
+        setEditing((now) => (now === id ? null : id))
+        return
+      }
+      const category = review.categories.find((c) => c.id === categoryId)
+      if (category !== undefined) void renameProposedCategory(category.id, category.name)
+    },
+    [review.categories]
+  )
   return (
     <>
-      <div className="flex shrink-0 gap-3 px-5 pt-2">
-        <button type="button" className={LINK} disabled={busy} onClick={() => setAll(true)}>
-          Include everything
-        </button>
-        <button type="button" className={LINK} disabled={busy} onClick={() => setAll(false)}>
-          Include nothing
-        </button>
-      </div>
-      <ul className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-3" data-testid="library-review">
-        <ProposedCategories review={review} busy={busy} />
-        {review.entities.map((item) => (
-          <EntityCard
-            key={item.id}
-            review={review}
-            item={item}
-            busy={busy}
-            changed={changed.includes(item.id)}
-          />
-        ))}
-        {review.notes.paragraphs.length > 0 ? (
-          <NotesCard review={review} busy={busy} changed={changed.includes(REVIEW_NOTES_ID)} />
-        ) : null}
-      </ul>
+      <ReviewDeck
+        label="Upload review"
+        items={items}
+        groups={UPLOAD_GROUPS}
+        renderCard={(id) => (
+          <ReviewCard review={review} id={id} busy={busy} editing={editing === id} />
+        )}
+        onDecide={(ids, decision) => {
+          setEditing(null)
+          decide(ids, decision)
+        }}
+        onEdit={onEdit}
+        canEdit={(id) => id !== REVIEW_NOTES_ID}
+        apply={{
+          label: (n) => `Apply ${n} accepted`,
+          onApply: () => void apply(),
+          disabled: asking || !writes
+        }}
+        applyOnFinish
+        busy={busy}
+        autoFocus
+        footer={
+          <span className="tabular-nums" data-testid="library-review-cost">
+            <RequestCost
+              request={{
+                model: review.model,
+                costUsd: review.costUsd,
+                usage: review.usage,
+                cached: false
+              }}
+            />
+          </span>
+        }
+        actions={
+          <button
+            type="button"
+            data-testid="library-discard"
+            disabled={busy}
+            onClick={discard}
+            className={BUTTON}
+          >
+            Cancel
+          </button>
+        }
+      />
       <ReviewChat busy={busy} />
-      <div className="flex shrink-0 items-center gap-2 border-t border-line px-5 py-3">
-        <span
-          className="flex-1 text-xs text-fg-subtle tabular-nums"
-          data-testid="library-review-cost"
-        >
-          <RequestCost
-            request={{
-              model: review.model,
-              costUsd: review.costUsd,
-              usage: review.usage,
-              cached: false
-            }}
-          />
-        </span>
-        <button
-          type="button"
-          data-testid="library-discard"
-          disabled={busy}
-          onClick={discard}
-          className={BUTTON}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          data-testid="library-apply"
-          disabled={busy || asking || !reviewHasChanges(review)}
-          onClick={() => void apply()}
-          className={PRIMARY}
-        >
-          Apply
-        </button>
-      </div>
     </>
+  )
+}
+
+/** One card of the deck: a proposed category, a sheet, or Project notes. */
+function ReviewCard({
+  review,
+  id,
+  busy,
+  editing
+}: {
+  review: ContextReview
+  id: string
+  busy: boolean
+  editing: boolean
+}): React.JSX.Element | null {
+  const changed = useLibraryStore((s) => s.chat.changed.includes(id))
+  const categoryId = categoryOfCard(id)
+  if (categoryId !== null) {
+    const category = review.categories.find((c) => c.id === categoryId)
+    return category === undefined ? null : (
+      <CategoryCard review={review} category={category} busy={busy} />
+    )
+  }
+  if (id === REVIEW_NOTES_ID) return <NotesCard review={review} changed={changed} />
+  const item = review.entities.find((entity) => entity.id === id)
+  return item === undefined ? null : (
+    <EntityCard review={review} item={item} busy={busy} changed={changed} editing={editing} />
   )
 }
 
@@ -321,82 +362,69 @@ function ChangedBadge(): React.JSX.Element {
 }
 
 /**
- * The new categories the AI proposes (F-9.11), above the sheets: each with its fields and how
- * many sheets it would hold. Apply creates it; Rename changes its name first; Decline moves its
- * sheets to World (their fields World lacks go to their details).
+ * A new category the AI proposes (F-9.11): its fields and how many sheets it would hold. Accept
+ * creates it at Apply; Rename (E) changes its name first; Decline (or leaving it unaccepted at
+ * Apply) files its sheets under World, their fields World lacks going to their details.
  */
-function ProposedCategories({
+/** Asks for a proposed category's new name (the card's Rename…, and E on its card). */
+async function renameProposedCategory(categoryId: string, current: string): Promise<void> {
+  const taken = useCategoryStore.getState().categories.map((other) => other.name.toLowerCase())
+  const name = await dialogs.prompt({
+    title: 'Rename the proposed category',
+    initialValue: current,
+    confirmLabel: 'Rename',
+    validate: (value) =>
+      value.trim() === ''
+        ? 'A category needs a name.'
+        : taken.includes(value.trim().toLowerCase())
+          ? 'The story bible already has a category of that name.'
+          : null
+  })
+  if (name !== null) useLibraryStore.getState().renameCategory(categoryId, name)
+}
+
+function CategoryCard({
   review,
+  category,
   busy
 }: {
   review: ContextReview
+  category: ContextReview['categories'][number]
   busy: boolean
-}): React.JSX.Element | null {
+}): React.JSX.Element {
   const declineCategory = useLibraryStore((s) => s.declineCategory)
-  const renameCategory = useLibraryStore((s) => s.renameCategory)
-  const proposed = review.categories.filter((category) => category.proposed)
-  if (proposed.length === 0) return null
-  const rename = async (id: string, current: string): Promise<void> => {
-    const taken = useCategoryStore
-      .getState()
-      .categories.map((category) => category.name.toLowerCase())
-    const name = await dialogs.prompt({
-      title: 'Rename the proposed category',
-      initialValue: current,
-      confirmLabel: 'Rename',
-      validate: (value) =>
-        value.trim() === ''
-          ? 'A category needs a name.'
-          : taken.includes(value.trim().toLowerCase())
-            ? 'The story bible already has a category of that name.'
-            : null
-    })
-    if (name !== null) renameCategory(id, name)
-  }
+  const count = review.entities.filter((item) => item.kind === category.id).length
+  const fields = category.fields.filter((field) => field.id !== 'notes')
   return (
-    <>
-      {proposed.map((category) => {
-        const count = review.entities.filter((item) => item.kind === category.id).length
-        const fields = category.fields.filter((field) => field.id !== 'notes')
-        return (
-          <li
-            key={category.id}
-            className="mb-2 rounded-md border border-dashed border-accent p-3"
-            data-testid="library-proposed-category"
-          >
-            <p className="m-0 text-sm">
-              <span className="font-medium">Proposed new category: {category.name}</span>
-              <span className="text-xs text-fg-muted">
-                {' '}
-                · {formatCount(count, 'sheet')}
-                {fields.length > 0 ? ` · fields: ${fields.map((f) => f.label).join(', ')}` : ''}
-              </span>
-            </p>
-            <p className="mt-1 mb-0 text-xs text-fg-muted">
-              Apply creates it in the story bible. Decline files its sheets under World.
-            </p>
-            <div className="mt-2 flex gap-3">
-              <button
-                type="button"
-                className={LINK}
-                disabled={busy}
-                onClick={() => void rename(category.id, category.name)}
-              >
-                Rename…
-              </button>
-              <button
-                type="button"
-                className={LINK}
-                disabled={busy}
-                onClick={() => declineCategory(category.id)}
-              >
-                Decline
-              </button>
-            </div>
-          </li>
-        )
-      })}
-    </>
+    <div className="flex flex-col gap-2" data-testid="library-proposed-category">
+      <p className="m-0 text-base font-medium">Proposed new category: {category.name}</p>
+      <p className="m-0 text-sm text-fg-muted">
+        {formatCount(count, 'sheet')}
+        {fields.length > 0 ? ` · fields: ${fields.map((f) => f.label).join(', ')}` : ''}
+      </p>
+      <p className="m-0 text-xs text-fg-muted">
+        Accept creates it in the story bible. Decline, or leaving it unaccepted, files its sheets
+        under World.
+      </p>
+      <div className="flex gap-3">
+        <button
+          type="button"
+          className={LINK}
+          disabled={busy}
+          onClick={() => void renameProposedCategory(category.id, category.name)}
+        >
+          Rename…
+        </button>
+        <button
+          type="button"
+          className={LINK}
+          disabled={busy}
+          onClick={() => declineCategory(category.id)}
+        >
+          Decline
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -404,17 +432,18 @@ function EntityCard({
   review,
   item,
   busy,
-  changed
+  changed,
+  editing
 }: {
   review: ContextReview
   item: ContextReviewEntity
   busy: boolean
   changed: boolean
+  editing: boolean
 }): React.JSX.Element {
   const aliases = itemAliases(item)
   const editItem = useItemEdit(item.id)
   const split = useLibraryStore((s) => s.split)
-  const off = busy || !item.include
   const tagName = entityTagName(item.name)
   // Details go to a structured sheet's Notes field, or to a blank sheet's page.
   const blank = useEntityStore((s) =>
@@ -426,24 +455,17 @@ function EntityCard({
       ...current,
       fields: current.fields.map((field, i) => (i === index ? { ...field, ...patch } : field))
     }))
+  const fills = item.fields.filter((field) => field.existing === null)
+  const conflicts = item.fields.filter((field) => field.existing !== null)
   return (
-    <li
-      className={`m-0 mb-2 list-none rounded-md border p-3 ${changed ? 'border-accent' : 'border-line'}`}
+    <div
+      className="flex flex-col gap-2"
       data-testid="library-item"
       data-item-name={item.name}
       data-changed={changed ? 'true' : undefined}
     >
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          aria-label={`Include ${item.name}`}
-          checked={item.include}
-          disabled={busy}
-          onChange={(event) =>
-            editItem((current) => ({ ...current, include: event.target.checked }))
-          }
-        />
-        <span className="text-sm font-medium">{item.name}</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-base font-medium">{item.name}</span>
         <span className="text-xs text-fg-muted">
           {itemCategory(review, item.kind).noun} ·{' '}
           {item.existingId === null ? 'new sheet' : 'existing sheet'}
@@ -451,12 +473,12 @@ function EntityCard({
         {changed ? <ChangedBadge /> : null}
       </div>
       {aliases.length > 0 ? (
-        <p className="mt-1 mb-0 text-xs text-fg-muted" data-testid="library-item-aliases">
+        <p className="m-0 text-xs text-fg-muted" data-testid="library-item-aliases">
           {`Also called: ${aliases.join(', ')}`}
         </p>
       ) : null}
       {item.records.length > 1 || (item.existingId !== null && item.records.length > 0) ? (
-        <p className="mt-1 mb-0 text-xs text-fg-subtle" data-testid="library-matches">
+        <p className="m-0 text-xs text-fg-subtle" data-testid="library-matches">
           {'Matched: '}
           {item.records.map((record) => `“${record.name}” (${record.fileName})`).join(', ')}
           {canSplit(item) ? (
@@ -469,28 +491,33 @@ function EntityCard({
           ) : null}
         </p>
       ) : null}
-      <div className="mt-2 flex flex-col gap-1.5 pl-6">
+      <div className="flex flex-col gap-1.5">
         {item.tag !== null && tagName !== '' ? (
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={item.tag}
-              disabled={off}
-              onChange={(event) =>
-                editItem((current) => ({ ...current, tag: event.target.checked }))
-              }
-            />
-            {`Tag #${tagName}`}
-          </label>
+          editing ? (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={item.tag}
+                disabled={busy}
+                onChange={(event) =>
+                  editItem((current) => ({ ...current, tag: event.target.checked }))
+                }
+              />
+              {`Tag #${tagName}`}
+            </label>
+          ) : item.tag ? (
+            <p className="m-0 text-sm">{`Tag #${tagName}`}</p>
+          ) : null
         ) : null}
-        {item.fields.map((field, index) =>
-          field.existing === null ? (
+        {fills.map((field) => {
+          const index = item.fields.indexOf(field)
+          return editing ? (
             <label key={field.field} className="flex items-start gap-2 text-sm">
               <input
                 type="checkbox"
                 className="mt-1"
                 checked={field.include}
-                disabled={off}
+                disabled={busy}
                 onChange={(event) => setField(index, { include: event.target.checked })}
               />
               <span>
@@ -498,17 +525,26 @@ function EntityCard({
                 <span className="whitespace-pre-wrap">{field.upload}</span>
               </span>
             </label>
-          ) : (
+          ) : field.include ? (
+            <p key={field.field} className="m-0 text-sm">
+              <span className="font-medium">{fieldLabel(review, item, field)}: </span>
+              <ins className="whitespace-pre-wrap text-accent no-underline">{field.upload}</ins>
+            </p>
+          ) : null
+        })}
+        {conflicts.map((field) => {
+          const index = item.fields.indexOf(field)
+          return (
             <fieldset
               key={field.field}
               className="m-0 rounded-md border border-warning p-2"
               data-testid="library-conflict"
-              disabled={off}
+              disabled={busy}
             >
               <legend className="px-1 text-xs font-medium text-warning">
                 {`${fieldLabel(review, item, field)}: conflict, pick one`}
               </legend>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2 @md:grid-cols-2">
                 {(['existing', 'upload'] as const).map((choice) => (
                   <label
                     key={choice}
@@ -534,18 +570,20 @@ function EntityCard({
               </div>
             </fieldset>
           )
-        )}
-        {item.details.length > 0 ? (
+        })}
+        {item.details.length > 0 && (editing || item.includeDetails) ? (
           <label className="flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="mt-1"
-              checked={item.includeDetails}
-              disabled={off}
-              onChange={(event) =>
-                editItem((current) => ({ ...current, includeDetails: event.target.checked }))
-              }
-            />
+            {editing ? (
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={item.includeDetails}
+                disabled={busy}
+                onChange={(event) =>
+                  editItem((current) => ({ ...current, includeDetails: event.target.checked }))
+                }
+              />
+            ) : null}
             <span>
               <span className="font-medium">{`Add to ${detailsPlace}: `}</span>
               {item.details.map((detail) => (
@@ -556,71 +594,69 @@ function EntityCard({
             </span>
           </label>
         ) : null}
-        {item.images.map((image) => (
-          <label key={image.fileId} className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={image.include}
-              disabled={off}
-              onChange={(event) =>
-                editItem((current) => ({
-                  ...current,
-                  images: current.images.map((entry) =>
-                    entry.fileId === image.fileId
-                      ? { ...entry, include: event.target.checked }
-                      : entry
-                  )
-                }))
-              }
-            />
-            {`Use ${image.fileName} as the picture${image.replaces ? ' (replaces the current one)' : ''}`}
-          </label>
-        ))}
+        {item.images.map((image) =>
+          editing ? (
+            <label key={image.fileId} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={image.include}
+                disabled={busy}
+                onChange={(event) =>
+                  editItem((current) => ({
+                    ...current,
+                    images: current.images.map((entry) =>
+                      entry.fileId === image.fileId
+                        ? { ...entry, include: event.target.checked }
+                        : entry
+                    )
+                  }))
+                }
+              />
+              {`Use ${image.fileName} as the picture${image.replaces ? ' (replaces the current one)' : ''}`}
+            </label>
+          ) : image.include ? (
+            <p key={image.fileId} className="m-0 text-sm">
+              {`Picture: ${image.fileName}${image.replaces ? ' (replaces the current one)' : ''}`}
+            </p>
+          ) : null
+        )}
       </div>
-    </li>
+      {!editing &&
+      (item.fields.some((field) => field.existing === null && !field.include) ||
+        item.images.some((image) => !image.include) ||
+        (item.details.length > 0 && !item.includeDetails)) ? (
+        <p className="m-0 text-xs text-fg-subtle">Some parts are left out; E shows them.</p>
+      ) : null}
+    </div>
   )
 }
 
 function NotesCard({
   review,
-  busy,
   changed
 }: {
   review: ContextReview
-  busy: boolean
   changed: boolean
 }): React.JSX.Element {
-  const edit = useLibraryStore((s) => s.edit)
   return (
-    <li
-      className={`m-0 mb-2 list-none rounded-md border p-3 ${changed ? 'border-accent' : 'border-line'}`}
+    <div
+      className="flex flex-col gap-2"
       data-testid="library-notes"
       data-changed={changed ? 'true' : undefined}
     >
-      <label className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          aria-label="Include Project notes"
-          checked={review.notes.include}
-          disabled={busy}
-          onChange={(event) =>
-            edit((r) => ({ ...r, notes: { ...r.notes, include: event.target.checked } }))
-          }
-        />
-        <span className="text-sm font-medium">Project notes</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-base font-medium">Project notes</span>
         <span className="text-xs text-fg-muted">
           World tab · {review.notes.existingId === null ? 'new page' : 'added to the page'}
         </span>
         {changed ? <ChangedBadge /> : null}
-      </label>
-      <div className="mt-2 pl-6">
-        {review.notes.paragraphs.map((paragraph) => (
-          <p key={paragraph} className="m-0 mb-1 text-sm whitespace-pre-wrap text-fg-muted">
-            {paragraph}
-          </p>
-        ))}
       </div>
-    </li>
+      {review.notes.paragraphs.map((paragraph) => (
+        <p key={paragraph} className="m-0 text-sm whitespace-pre-wrap text-fg-muted">
+          {paragraph}
+        </p>
+      ))}
+    </div>
   )
 }
 

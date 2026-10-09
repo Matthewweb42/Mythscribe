@@ -221,6 +221,7 @@ export async function runOrganise(
   const index = organiseIndexV2(listing)
   const { chunks, leftOff } = organiseChunksV2(listing, scopes)
   const resolver = new OrganiseResolver(project)
+  if (scopes.includes('tags')) resolver.addNotNames(organiseCandidates(project).notNames)
   const usage: CompletionUsage = { inputTokens: 0, outputTokens: 0 }
   let costUsd = 0
   let cached = true

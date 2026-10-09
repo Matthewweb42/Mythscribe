@@ -80,6 +80,18 @@ export function dismissName(db: TreeDb, name: string): ProposedTag[] {
   return listProposedTags(db)
 }
 
+/**
+ * The text of every manuscript document in reading order, with `replace` standing in for one
+ * document's saved text (the scene exactly as the summary request sent it). The input of the
+ * author's tag rule (`classifyTagTerm`, 2026-10-08).
+ */
+export function manuscriptTexts(db: TreeDb, replace?: { nodeId: string; text: string }): string[] {
+  const rows = manuscriptDocuments(db)
+  const texts = rows.map((row) => (row.id === replace?.nodeId ? replace.text : documentText(row)))
+  const listed = replace === undefined || rows.some((row) => row.id === replace.nodeId)
+  return listed ? texts : [...texts, replace.text]
+}
+
 /** Forgets the memoised counts (a project change, or one test's manuscript before the next). */
 export function resetProposedTagCache(): void {
   memo = new Map()
