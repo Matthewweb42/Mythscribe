@@ -505,6 +505,20 @@ function todoAnswer(messages: { role: string; content: string }[]): string {
         scene,
         why: 'The scene promises an answer about the bell that no thread holds.',
         suggestions: []
+      },
+      {
+        type: 'term',
+        about: 'the Saltmarch',
+        scene,
+        why: 'The card leans on it, but nothing says what it is.',
+        suggestions: ['A tidal marsh the ferry crosses at low water.']
+      },
+      {
+        type: 'timeline',
+        about: 'the winter crossing',
+        scene,
+        why: 'Months pass between the cards with no word of when.',
+        suggestions: []
       }
     ],
     resolved: []
@@ -6437,6 +6451,7 @@ test('create, close, reopen a project on disk', async () => {
   // labelled "Suggestion"); picking one only fills the editable line, and Add writes it to the
   // scene's notes as the author's text and marks the item done. The scene's text is unchanged.
   // A second check on the unchanged book sends nothing.
+  // The fake flags three kinds: a loose end (the question), an undefined term, and a gap.
   await dismissToasts()
   await showSection('To do')
   const todoTab = page.getByTestId('todo-tab')
@@ -6446,6 +6461,14 @@ test('create, close, reopen a project on disk', async () => {
   const todoRow = todoTab.getByTestId('todo-item').filter({ hasText: TODO_SUBJECT })
   await expect(todoRow).toHaveCount(1)
   expect(sentWith(TODO_SENTINEL)).toBe(1)
+  await expect(todoTab.getByRole('region', { name: 'Loose ends' })).toContainText(TODO_SUBJECT)
+  await expect(todoTab.getByRole('region', { name: 'Undefined' })).toContainText('the Saltmarch')
+  await expect(todoTab.getByRole('region', { name: 'Gaps' })).toContainText('the winter crossing')
+  await dismissToasts()
+  await todoTab.getByTestId('todo-check-book').click()
+  await expect(page.getByText('Nothing changed since the last check.')).toBeVisible()
+  expect(sentWith(TODO_SENTINEL)).toBe(1)
+  await dismissToasts()
   const todoListed = await page.evaluate(() => window.mythscribe.invoke('todo:list', undefined))
   if (!todoListed.ok) throw new Error('todo:list failed')
   const todoScene =
@@ -6472,9 +6495,6 @@ test('create, close, reopen a project on disk', async () => {
     .toContain(TODO_OPTIONS[1] ?? '')
   expect(await documentText(todoScene)).toBe(todoSceneText)
   await todoStrip.getByTestId('todo-review-close').click()
-  await todoTab.getByTestId('todo-check-book').click()
-  await expect(page.getByText('Nothing changed since the last check.')).toBeVisible()
-  expect(sentWith(TODO_SENTINEL)).toBe(1)
   await dismissToasts()
   await showSection('Manuscript')
   // F-9.10: Organise. A stray #reed tag beside #tomas-reed is what an upload leaves behind; the

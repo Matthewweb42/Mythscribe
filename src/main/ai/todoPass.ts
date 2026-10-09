@@ -425,6 +425,8 @@ export function locateQuote(book: Book, nodeId: string, about: string): string |
 /** What a check did. */
 export interface TodoPassResult {
   requested: boolean
+  /** Nothing was sent because the book is unchanged since the last check. */
+  unchanged: boolean
   added: number
   resolved: number
   costUsd: number
@@ -446,10 +448,16 @@ export async function runTodoPass(
   assertFeatureAllowed(getAiSettings(db), 'todo')
   const built = buildTodoInput(db)
   const chunks = todoChunks(built)
-  const none: TodoPassResult = { requested: false, added: 0, resolved: 0, costUsd: 0 }
+  const none: TodoPassResult = {
+    requested: false,
+    unchanged: false,
+    added: 0,
+    resolved: 0,
+    costUsd: 0
+  }
   if (chunks.length === 0) return none
   const hash = todoBookHash(chunks)
-  if (getTodoPassState(db).lastPassHash === hash) return none
+  if (getTodoPassState(db).lastPassHash === hash) return { ...none, unchanged: true }
 
   const book = readBook(db)
   let added = 0
@@ -479,7 +487,7 @@ export async function runTodoPass(
     lastPassHash: hash,
     lastPassCostUsd: costUsd
   })
-  return { requested: true, added, resolved, costUsd }
+  return { requested: true, unchanged: false, added, resolved, costUsd }
 }
 
 /** Parses one answer against the table as it is now and writes it, in one transaction. */

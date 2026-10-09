@@ -529,6 +529,8 @@ export const TodoCheckResult = z.discriminatedUnion('ok', [
     ok: z.literal(true),
     /** False when nothing was sent (no scene to read, or nothing changed since the last check). */
     requested: z.boolean(),
+    /** True when nothing was sent because the book is unchanged since the last check. */
+    unchanged: z.boolean(),
     added: z.number().int().nonnegative(),
     resolved: z.number().int().nonnegative(),
     costUsd: z.number(),

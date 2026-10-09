@@ -194,7 +194,7 @@ describe('runTodoPass (F-9.16)', () => {
     answers({ items: [], resolved: [] })
     await runTodoPass(db, deps)
     const again = await runTodoPass(db, deps)
-    expect(again).toEqual({ requested: false, added: 0, resolved: 0, costUsd: 0 })
+    expect(again).toEqual({ requested: false, unchanged: true, added: 0, resolved: 0, costUsd: 0 })
     expect(complete).toHaveBeenCalledTimes(1)
   })
 
@@ -203,7 +203,7 @@ describe('runTodoPass (F-9.16)', () => {
     try {
       setAiSettings(empty.connection.orm, { ...defaultAiSettings(), dial: 1 })
       const result = await runTodoPass(empty.connection.orm, deps)
-      expect(result.requested).toBe(false)
+      expect(result).toMatchObject({ requested: false, unchanged: false })
       expect(complete).not.toHaveBeenCalled()
     } finally {
       empty.close()

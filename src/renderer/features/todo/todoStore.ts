@@ -154,7 +154,7 @@ export const useTodoStore = create<TodoState>((set, get) => {
           }
         } else if (!result.requested) {
           toast.info(
-            get().check.fresh
+            result.unchanged
               ? 'Nothing changed since the last check.'
               : 'No scene has a card yet: the check reads the scene cards.'
           )

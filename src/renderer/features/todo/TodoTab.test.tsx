@@ -25,7 +25,15 @@ beforeEach(async () => {
   calls = []
   items = []
   check = todoCheck()
-  checkResult = { ok: true, requested: true, added: 2, resolved: 0, costUsd: 0.001, requestId: 'x' }
+  checkResult = {
+    ok: true,
+    requested: true,
+    unchanged: false,
+    added: 2,
+    resolved: 0,
+    costUsd: 0.001,
+    requestId: 'x'
+  }
   suggestResult = {
     ok: true,
     suggestions: ['A sinkhole that swallows sound', 'An old quarry'],
