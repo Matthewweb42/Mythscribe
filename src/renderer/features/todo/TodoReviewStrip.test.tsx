@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
+import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import { resetEntityStore } from '@renderer/features/entities/entityStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -13,6 +14,8 @@ let calls: [Channel, unknown][]
 
 beforeEach(() => {
   resetTodoStore()
+  // A category load left in flight by another file must not land here (it answered `categories` undefined).
+  resetCategoryStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   calls = []
   const client: IpcClient = {
@@ -45,6 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   resetTodoStore()
   resetEntityStore()
+  resetCategoryStore()
 })
 
 const deck = (): HTMLElement => screen.getByRole('region', { name: 'Go through the To do list' })
