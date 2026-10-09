@@ -4649,6 +4649,51 @@ describe('relationships, threads, and the conversion pass (F-9.14)', () => {
     expect((await invoke('backups:get', undefined)).backups).toHaveLength(1)
     await vi.waitFor(() => expect(getSummary(db, id)?.promptVersion).toBe('summary.v4'))
   })
+
+  it('starts nothing when the backup before the conversion fails', async () => {
+    await invoke('project:create', { name: 'Convert', format: 'novel', directory: tmp })
+    const scene = (await invoke('tree:list', undefined)).find(
+      (node) => node.kind === 'document' && node.sectionType === null
+    )
+    const id = scene?.id ?? ''
+    await invoke('document:save', {
+      id,
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: SCENE }] }]
+      }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
+    complete.mockResolvedValue({
+      text: JSON.stringify({ summary: 'Mara waits.', keyPoints: [], characters: [] }),
+      model: 'gpt-fake',
+      usage: { inputTokens: 400, outputTokens: 60 }
+    })
+    await invoke('ai:summarize', { nodeId: id, requestId: 'c-1' })
+    const db = manager.require().connection.orm
+    const stored = getSummary(db, id)
+    if (!stored) throw new Error('no summary')
+    upsertSummary(db, { ...stored, promptVersion: 'summary.v3' })
+    expect((await invoke('knowledge:conversion', undefined)).state).toBe('pending')
+    complete.mockClear()
+    vi.mocked(fakeWin.webContents.send).mockClear()
+
+    const backupNow = vi.spyOn(BackupService.prototype, 'backupNow').mockImplementation(() => {
+      throw new Error('The backup folder is not writable')
+    })
+    try {
+      await expect(invoke('knowledge:convert', undefined)).rejects.toThrow(/not writable/)
+    } finally {
+      backupNow.mockRestore()
+    }
+    // No go-ahead recorded, nothing queued, nothing announced: the dialog still asks.
+    expect((await invoke('knowledge:conversion', undefined)).state).toBe('pending')
+    expect(sent('knowledge:conversionChanged')).toEqual([])
+    expect(await invoke('jobs:status', undefined)).toMatchObject({ queued: 0, running: null })
+    expect(complete).not.toHaveBeenCalled()
+    expect(getSummary(db, id)?.promptVersion).toBe('summary.v3')
+  })
 })
 
 describe('entity images (F-9.3)', () => {

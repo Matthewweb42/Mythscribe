@@ -161,7 +161,7 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'fact:delete': 'write',
   'thread:list': 'read',
   'knowledge:conversion': 'read',
-  'knowledge:convert': 'write',
+  'knowledge:convert': 'ai',
   'knowledge:later': 'read',
   'layout:get': 'read',
   'layout:set': 'read',

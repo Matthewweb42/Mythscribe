@@ -49,6 +49,22 @@ function statementValue(row: { value: string; objectEntityId?: string | null }):
   return row.objectEntityId ?? row.value
 }
 
+/**
+ * What a hidden AI fact blocks (D13): the same statement of the same record from any scene — the
+ * author's "wrong" holds everywhere. A thread event (F-9.14) is the exception: it is a moment,
+ * not a statement ("resolved" carries no value), so hiding a premature one in one scene blocks
+ * it only in that scene, never the real one later in the book.
+ */
+function tombstoneKey(
+  entityId: string,
+  attribute: string,
+  value: string,
+  nodeId: string | null
+): string {
+  const scope = threadEventOf(attribute) === null ? '' : (nodeId ?? '')
+  return `${entityId}\u0000${scope}\u0000${factKey(attribute, value)}`
+}
+
 export function rowToFact(row: FactRow): Fact {
   return {
     id: row.id,
@@ -415,8 +431,8 @@ export interface SceneFactsDiff {
 /**
  * What one scene states (F-9.13), sticky (D13), in one transaction: a statement this scene
  * already has stays (its quote refreshed); a new one is added with `status`, unless any hidden
- * fact of the same record says the same (`factKey`, from any scene: the author's "wrong" holds
- * everywhere); a visible AI fact of this scene the reading no longer states goes only when its
+ * fact of the same record says the same (`tombstoneKey`: from any scene, the author's "wrong"
+ * holds everywhere, except a thread event's, which holds in its own scene); a visible AI fact of this scene the reading no longer states goes only when its
  * quote is no longer in `sceneText`, the scene as read. A statement given twice is stored once.
  * Hidden facts are never removed. An empty `rows` with an empty `sceneText` clears the scene's
  * visible AI facts (a scene cut below the summary minimum).
@@ -446,10 +462,13 @@ export function applySceneFacts(
               and(inArray(fact.entityId, entityIds), eq(fact.origin, 'ai'), eq(fact.hidden, true))
             )
             .all()
-            .map((row) => `${row.entityId}\u0000${factKey(row.attribute, statementValue(row))}`)
+            .map((row) =>
+              tombstoneKey(row.entityId, row.attribute, statementValue(row), row.nodeId)
+            )
     )
 
-    const now = new Date().toISOString()
+    const started = Date.now()
+    const now = new Date(started).toISOString()
     const stated = new Set<string>()
     const added: Fact[] = []
     const inserts: FactInsert[] = []
@@ -468,8 +487,9 @@ export function applySceneFacts(
         }
         continue
       }
-      if (tombstones.has(`${row.entityId}\u0000${factKey(row.attribute, statementValue(row))}`))
+      if (tombstones.has(tombstoneKey(row.entityId, row.attribute, statementValue(row), nodeId))) {
         continue
+      }
       const insert: FactInsert = {
         id: randomUUID(),
         entityId: row.entityId,
@@ -482,7 +502,9 @@ export function applySceneFacts(
         status,
         hidden: false,
         factKey: key,
-        createdAt: now,
+        // F-9.14: one millisecond apart, so the facts of a reading list in the model's answer
+        // order (a thread that advances, then resolves, in one scene), not in random id order.
+        createdAt: new Date(started + inserts.length).toISOString(),
         updatedAt: now
       }
       inserts.push(insert)

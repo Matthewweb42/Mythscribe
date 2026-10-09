@@ -10,7 +10,7 @@ import {
 } from '@shared/sceneCard'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import type { Fact } from '@shared/facts'
-import { threadEventOf, type ThreadEvent } from '@shared/threads'
+import { threadEventOf, threadEventRank, type ThreadEvent } from '@shared/threads'
 import { entity, node, tag } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
 import { eventFactsForNode } from '../entity/factStore'
@@ -113,6 +113,9 @@ function threadsOf(db: TreeDb, nodeId: string): SceneCardThread[] {
   )
   const byThread = new Map<string, SceneCardThread>()
   for (const { fact, event } of events) {
+    // The last in stored order, but a resolution or a drop over an opening or an advance.
+    const held = byThread.get(fact.entityId)
+    if (held !== undefined && threadEventRank(held.event) > threadEventRank(event)) continue
     byThread.set(fact.entityId, {
       entityId: fact.entityId,
       name: names.get(fact.entityId) ?? '',

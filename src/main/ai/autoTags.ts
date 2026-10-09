@@ -119,8 +119,10 @@ export function applyAutoTags(
         continue
       }
       const made = createTag(tx, { name, category: answered.category }, 'ai')
-      // F-9.12 (D8): a new name has its record from the start, marked as AI-made.
-      const record = ensureRecordForTag(tx, made, 'ai')
+      // F-9.12 (D8): a new name has its record from the start, marked as AI-made. Not a plot
+      // thread (F-9.14): the reading's thread events make thread records, under one cap
+      // (`SUMMARY_NEW_THREADS_MAX`); the tag stays a label until one names it.
+      const record = answered.category === 'plotThread' ? null : ensureRecordForTag(tx, made, 'ai')
       if (record !== null) records.push(record)
       byName.set(name, made.id)
       createdIds.push(made.id)

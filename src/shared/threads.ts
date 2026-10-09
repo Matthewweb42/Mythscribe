@@ -51,6 +51,15 @@ export function threadEventOf(attribute: string): ThreadEvent | null {
   return parsed.success ? parsed.data : null
 }
 
+/**
+ * Where an event sits among the events one scene states for the same thread (F-9.14): an
+ * opening or an advance before a resolution or a drop, whatever order they were stored in, so a
+ * scene that moves a thread and then closes it always reads as closing it.
+ */
+export function threadEventRank(event: ThreadEvent): number {
+  return event === 'resolved' || event === 'dropped' ? 1 : 0
+}
+
 /** One event of a thread as the Threads section lists it. */
 export const ThreadEventView = z.object({
   factId: z.string(),
@@ -92,6 +101,8 @@ export interface ThreadRecordInput {
  * last, by name). Pure. `facts` are any facts; only visible thread events of the given records
  * count. The status is the last canon event's: resolved or dropped close a thread, an opening or
  * an advance (re)opens it; a thread with no canon event is open (decided by Claude, unconfirmed).
+ * Within one scene the stored order holds, except that a resolution or a drop comes last
+ * (`threadEventRank`).
  * Plan and idea events are listed but never decide it.
  */
 export function deriveThreads(
@@ -123,7 +134,12 @@ export function deriveThreads(
   const views = records.map((record): ThreadView => {
     const events = (byRecord.get(record.id) ?? [])
       .map((event, input) => ({ event, input }))
-      .sort((a, b) => at(a.event) - at(b.event) || a.input - b.input)
+      .sort(
+        (a, b) =>
+          at(a.event) - at(b.event) ||
+          threadEventRank(a.event.event) - threadEventRank(b.event.event) ||
+          a.input - b.input
+      )
       .map(({ event }) => event)
     const canon = events.filter((event) => event.status === 'canon')
     const last = canon[canon.length - 1]
