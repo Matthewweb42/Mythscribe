@@ -3,12 +3,12 @@ import { and, desc, eq, lt, ne, or, sql } from 'drizzle-orm'
 import { aliasKey } from '@shared/aliases'
 import {
   CHANGES_MAX,
+  ChangeKind,
   ChangeUndo,
   RECORDED_UNDO_OF,
   changeRunId,
   changeSourceOf,
   type ChangeEntry,
-  type ChangeKind,
   type ChangePage,
   type ChangeUndoResult,
   type RecordChangesInput
@@ -19,6 +19,7 @@ import type { SheetPatch, TagPatch } from '@shared/organise'
 import { toTagName } from '@shared/tags'
 import {
   documentTag,
+  documentTagDismissal,
   entity,
   fact,
   knowledgeChange,
@@ -52,26 +53,70 @@ export interface ChangeInput {
   undo: ChangeUndo
 }
 
-/** Whether a stored inverse takes anything back (F-9.15: a merge's or a deletion's does not). */
-function undoableRow(row: KnowledgeChangeRow): boolean {
-  const parsed = ChangeUndo.safeParse(JSON.parse(row.undo))
-  return parsed.success && parsed.data.type !== 'none'
+/**
+ * A stored row as this build reads it, or null when it cannot (F-9.15): `CHANGE_KINDS` grows with
+ * no migration, so a database a newer build wrote can hold a kind or an inverse this build does
+ * not know, or (damaged) an inverse that is not JSON. Such a row is passed over, never thrown on.
+ */
+interface ReadRow {
+  row: KnowledgeChangeRow
+  kind: ChangeKind
+  undo: ChangeUndo
 }
 
-function rowToEntry(row: KnowledgeChangeRow): ChangeEntry {
+function readRow(row: KnowledgeChangeRow): ReadRow | null {
+  const kind = ChangeKind.safeParse(row.kind)
+  if (!kind.success) return null
+  let json: unknown
+  try {
+    json = JSON.parse(row.undo)
+  } catch {
+    return null
+  }
+  const undo = ChangeUndo.safeParse(json)
+  return undo.success ? { row, kind: kind.data, undo: undo.data } : null
+}
+
+function toEntry({ row, kind, undo }: ReadRow): ChangeEntry {
   return {
     id: row.id,
     runId: row.runId,
     createdAt: row.createdAt,
     nodeId: row.nodeId,
     quote: row.quote,
-    kind: row.kind,
+    kind,
     entityId: row.entityId,
     label: row.label,
     status: row.status,
     source: changeSourceOf(row.runId),
-    undoable: undoableRow(row)
+    // F-9.15: a merge's or a deletion's inverse takes nothing back.
+    undoable: undo.type !== 'none'
   }
+}
+
+/** A row this build wrote itself (just inserted or updated), as the log lists it. */
+function rowToEntry(row: KnowledgeChangeRow): ChangeEntry {
+  const read = readRow(row)
+  if (read === null) throw new AppError('VALIDATION', 'This change cannot be read', { id: row.id })
+  return toEntry(read)
+}
+
+/**
+ * The sheets (and the tags they made) `entity:create` made this session, per project database
+ * (F-9.15): a recorded `deleteSheet` may only name one of them, so a logged Undo never deletes a
+ * sheet the run did not make.
+ */
+const createdHere = new WeakMap<EntityDb, { sheets: Set<string>; tags: Set<string> }>()
+
+/** Remembers a sheet `entity:create` made, and the tag it made with it (null when it made none). */
+export function noteCreatedSheet(db: EntityDb, entityId: string, madeTagId: string | null): void {
+  let made = createdHere.get(db)
+  if (made === undefined) {
+    made = { sheets: new Set(), tags: new Set() }
+    createdHere.set(db, made)
+  }
+  made.sheets.add(entityId)
+  if (madeTagId !== null) made.tags.add(madeTagId)
 }
 
 /**
@@ -167,6 +212,37 @@ function requireNode(db: EntityDb, id: string): void {
   if (row === undefined) throw new AppError('NOT_FOUND', 'Scene not found', { id })
 }
 
+/** Whether the pair was taken off the scene (`removeDocumentTag` remembers it until relinked). */
+function wasUnlinked(db: EntityDb, nodeId: string, tagId: string): boolean {
+  return (
+    db
+      .select({ nodeId: documentTagDismissal.nodeId })
+      .from(documentTagDismissal)
+      .where(and(eq(documentTagDismissal.nodeId, nodeId), eq(documentTagDismissal.tagId, tagId)))
+      .get() !== undefined
+  )
+}
+
+/**
+ * Whether an inverse only puts back what its change touched: every part `before` names is a part
+ * `after` names, and so is every field, unless the change moved the sheet to another category
+ * (its undo carries the old template's values back).
+ */
+function samePartsSheet(before: SheetPatch, after: SheetPatch): boolean {
+  const parts = (['name', 'kind', 'body', 'aliases'] as const).every(
+    (part) => before[part] === undefined || after[part] !== undefined
+  )
+  if (!parts || before.fields === undefined || after.kind !== undefined) return parts
+  const changed = after.fields ?? {}
+  return Object.keys(before.fields).every((field) => Object.hasOwn(changed, field))
+}
+
+function samePartsTag(before: TagPatch, after: TagPatch): boolean {
+  return (['name', 'category', 'parentId', 'aliases'] as const).every(
+    (part) => before[part] === undefined || after[part] !== undefined
+  )
+}
+
 function hasLink(db: EntityDb, nodeId: string, tagId: string): boolean {
   return (
     db
@@ -182,7 +258,11 @@ function hasLink(db: EntityDb, nodeId: string, tagId: string): boolean {
  * its inverse, everything the inverse names exists, and the change really landed (a restore's
  * `after` is what the record holds now; a scene's tag is on or off it as the change left it).
  */
-function recordedInput(db: EntityDb, change: RecordChangesInput['changes'][number]): ChangeInput {
+function recordedInput(
+  db: EntityDb,
+  change: RecordChangesInput['changes'][number],
+  made: { sheets: ReadonlySet<string>; tags: ReadonlySet<string> } | undefined
+): ChangeInput {
   const { kind, label, undo } = change
   if (!RECORDED_UNDO_OF[kind].includes(undo.type)) {
     throw new AppError('VALIDATION', 'This change cannot be logged with that undo', {
@@ -197,21 +277,29 @@ function recordedInput(db: EntityDb, change: RecordChangesInput['changes'][numbe
   switch (undo.type) {
     case 'restoreSheet':
       landed(sheetMatches(requireSheet(db, undo.entityId), undo.after))
+      landed(samePartsSheet(undo.before, undo.after))
       return { ...base, entityId: undo.entityId, targetId: undo.entityId }
     case 'deleteSheet': {
       const sheet = requireSheet(db, undo.entityId)
-      landed(undo.tagId === null || sheet.tagId === undo.tagId)
-      landed(undo.modified === undefined || sheet.modified === undo.modified)
+      // Only a sheet made this session, untouched since its stamp, with the tag it made itself.
+      landed(made?.sheets.has(undo.entityId) === true)
+      landed(undo.modified !== undefined && sheet.modified === undo.modified)
+      landed(
+        undo.tagId === null || (sheet.tagId === undo.tagId && made?.tags.has(undo.tagId) === true)
+      )
       return { ...base, entityId: undo.entityId, targetId: undo.entityId }
     }
     case 'restoreTag':
       landed(tagMatches(requireTag(db, undo.tagId), undo.after))
+      landed(samePartsTag(undo.before, undo.after))
       return { ...base, entityId: null, targetId: undo.tagId }
     case 'unlinkTag':
     case 'linkTag':
       requireNode(db, undo.nodeId)
       requireTag(db, undo.tagId)
       landed(hasLink(db, undo.nodeId, undo.tagId) === (undo.type === 'unlinkTag'))
+      // A tag put back on a scene must have been taken off it.
+      landed(undo.type === 'unlinkTag' || wasUnlinked(db, undo.nodeId, undo.tagId))
       return { ...base, nodeId: undo.nodeId, entityId: null, targetId: undo.tagId }
     case 'none':
       return { ...base, entityId: null, targetId: change.targetId ?? kind }
@@ -229,8 +317,9 @@ function recordedInput(db: EntityDb, change: RecordChangesInput['changes'][numbe
  * change is checked first (`recordedInput`), and one that fails refuses the whole call.
  */
 export function recordChanges(db: EntityDb, input: RecordChangesInput, now: string): ChangeEntry[] {
+  const made = createdHere.get(db)
   return db.transaction((tx) => {
-    const inputs = input.changes.map((change) => recordedInput(tx, change))
+    const inputs = input.changes.map((change) => recordedInput(tx, change, made))
     return insertChanges(tx, changeRunId(input.source, input.run), inputs, now).map(rowToEntry)
   })
 }
@@ -261,23 +350,34 @@ export function listChanges(
           .from(knowledgeChange)
           .where(eq(knowledgeChange.id, input.before))
           .get()
-  const rows = db
-    .select()
-    .from(knowledgeChange)
-    .where(
-      cursor === undefined
-        ? undefined
-        : or(
-            lt(knowledgeChange.createdAt, cursor.createdAt),
-            and(eq(knowledgeChange.createdAt, cursor.createdAt), sql`rowid < ${cursor.rowid}`)
-          )
-    )
-    .orderBy(desc(knowledgeChange.createdAt), desc(rowid))
-    .limit(input.limit + 1)
-    .all()
-  return {
-    entries: rows.slice(0, input.limit).map(rowToEntry),
-    more: rows.length > input.limit
+  // Rows this build cannot read are passed over (`readRow`), so a page reads on past them.
+  const entries: ChangeEntry[] = []
+  let after = cursor
+  for (;;) {
+    const from = after
+    const rows = db
+      .select({ row: knowledgeChange, rowid })
+      .from(knowledgeChange)
+      .where(
+        from === undefined
+          ? undefined
+          : or(
+              lt(knowledgeChange.createdAt, from.createdAt),
+              and(eq(knowledgeChange.createdAt, from.createdAt), sql`rowid < ${from.rowid}`)
+            )
+      )
+      .orderBy(desc(knowledgeChange.createdAt), desc(rowid))
+      .limit(input.limit + 1)
+      .all()
+    for (const { row } of rows) {
+      const read = readRow(row)
+      if (read === null) continue
+      if (entries.length === input.limit) return { entries, more: true }
+      entries.push(toEntry(read))
+    }
+    const last = rows.at(-1)
+    if (rows.length <= input.limit || last === undefined) return { entries, more: false }
+    after = { createdAt: last.row.createdAt, rowid: last.rowid }
   }
 }
 
@@ -304,12 +404,8 @@ export interface UndoOutcome extends ChangeUndoResult {
 }
 
 /** Undoes one applied row inside the caller's transaction; a row already undone is left alone. */
-function undoRow(db: EntityDb, row: KnowledgeChangeRow, tally: UndoTally): void {
+function undoRow(db: EntityDb, { row, undo }: ReadRow, tally: UndoTally): void {
   if (row.status === 'undone') return
-  const parsed = ChangeUndo.safeParse(JSON.parse(row.undo))
-  if (!parsed.success)
-    throw new AppError('VALIDATION', 'This change cannot be undone', { id: row.id })
-  const undo = parsed.data
   switch (undo.type) {
     case 'hideFact': {
       const held = db
@@ -485,7 +581,7 @@ const UNDO_ORDER: Readonly<Record<ChangeKind, number>> = {
   category: 4
 }
 
-function undoRows(db: EntityDb, rows: readonly KnowledgeChangeRow[]): UndoOutcome {
+function undoRows(db: EntityDb, rows: readonly ReadRow[]): UndoOutcome {
   const tally: UndoTally = {
     entries: [],
     removedEntityIds: new Set(),
@@ -517,7 +613,9 @@ function undoRows(db: EntityDb, rows: readonly KnowledgeChangeRow[]): UndoOutcom
 export function undoChange(db: EntityDb, id: string): UndoOutcome {
   const row = db.select().from(knowledgeChange).where(eq(knowledgeChange.id, id)).get()
   if (row === undefined) throw new AppError('NOT_FOUND', 'Change not found', { id })
-  return undoRows(db, [row])
+  const read = readRow(row)
+  if (read === null) throw new AppError('VALIDATION', 'This change cannot be undone', { id })
+  return undoRows(db, [read])
 }
 
 /**
@@ -534,5 +632,9 @@ export function undoRun(db: EntityDb, runId: string): UndoOutcome {
     .orderBy(desc(knowledgeChange.createdAt), desc(sql`rowid`))
     .all()
   if (rows.length === 0) throw new AppError('NOT_FOUND', 'Run not found', { runId })
-  return undoRows(db, rows.filter(undoableRow))
+  // Passed over: what this build cannot read, and what the log cannot take back.
+  return undoRows(
+    db,
+    rows.map(readRow).filter((read): read is ReadRow => read !== null && read.undo.type !== 'none')
+  )
 }

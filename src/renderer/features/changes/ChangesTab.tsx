@@ -29,7 +29,7 @@ const run = (action: Promise<void>): void => {
   action.catch((err: unknown) => toast.error(describeError(err)))
 }
 
-/** The rows of one reading, in the order the log lists them. */
+/** The rows of one run, in the order the log lists them. */
 interface RunGroup {
   runId: string
   createdAt: string
@@ -38,13 +38,19 @@ interface RunGroup {
   entries: ChangeEntry[]
 }
 
+/**
+ * The log's rows by run, each run once where its newest row stands (F-9.15): a chat turn or an
+ * Organise plan is recorded change by change, so a reading can be logged between two of its rows,
+ * and an older page can bring more of a run already shown. The store keeps the rows in main's
+ * order (newest first), so the page cursor stays its last row.
+ */
 function groupRuns(entries: readonly ChangeEntry[]): RunGroup[] {
-  const groups: RunGroup[] = []
+  const groups = new Map<string, RunGroup>()
   for (const entry of entries) {
-    const last = groups.at(-1)
-    if (last?.runId === entry.runId) last.entries.push(entry)
+    const held = groups.get(entry.runId)
+    if (held !== undefined) held.entries.push(entry)
     else
-      groups.push({
+      groups.set(entry.runId, {
         runId: entry.runId,
         createdAt: entry.createdAt,
         nodeId: entry.nodeId,
@@ -52,7 +58,7 @@ function groupRuns(entries: readonly ChangeEntry[]): RunGroup[] {
         entries: [entry]
       })
   }
-  return groups
+  return [...groups.values()]
 }
 
 /**

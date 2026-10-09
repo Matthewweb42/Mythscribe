@@ -247,6 +247,7 @@ import { sceneCardFor } from '../knowledge/sceneCard'
 import { confirmConversion, conversionPending, estimateConversion } from '../knowledge/conversion'
 import {
   listChanges,
+  noteCreatedSheet,
   recordChanges,
   undoChange,
   undoRun,
@@ -1931,6 +1932,8 @@ export function registerHandlers({
   register('entity:create', (input) => {
     const db = manager.require().connection.orm
     const { entity: created, tagChange } = createEntity(db, input)
+    // F-9.15: Organise may log this sheet with a deleteSheet Undo; main checks it made it.
+    noteCreatedSheet(db, created.id, tagChange?.created === true ? tagChange.tag.id : null)
     publishTagChange(db, tagChange)
     void syncSpelling()
     queueTodo(db)

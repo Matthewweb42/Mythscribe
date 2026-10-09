@@ -4524,6 +4524,24 @@ describe('the Changes log and dated author lines (F-9.13)', () => {
     const undone = await invoke('changes:undo', { id: entry?.id ?? '' })
     expect(undone.entities).toMatchObject([{ id: mara.id, fields: { age: '27' } }])
     expect(sent('entity:changed')).toMatchObject([{ id: mara.id, fields: { age: '27' } }])
+    // A sheet entity:create made may be logged with a deleteSheet Undo; Mara's tag was not made
+    // with the new sheet, so it may not ride along.
+    const ferry = await invoke('entity:create', { kind: 'setting', name: 'The Ferry' })
+    const made = (tagId: string | null) =>
+      invoke('changes:record', {
+        source: 'organise',
+        run: 'org-2',
+        changes: [
+          {
+            kind: 'record',
+            label: 'New sheet “The Ferry”',
+            undo: { type: 'deleteSheet', entityId: ferry.id, tagId, modified: ferry.modified }
+          }
+        ]
+      })
+    await expect(made(mara.tagId)).rejects.toThrowError(/^VALIDATION: /)
+    const [logged] = await made(ferry.tagId)
+    expect(logged).toMatchObject({ kind: 'record', undoable: true })
   })
 
   it('dates an author line at a scene through entity:update, leaving the sheet text alone', async () => {

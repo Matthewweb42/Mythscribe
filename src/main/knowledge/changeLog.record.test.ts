@@ -12,7 +12,7 @@ import { createProject, projectFolderFor, type ProjectSession } from '../project
 import { addDocumentTag, listDocumentTags } from '../tag/documentTagStore'
 import { createTag, getTagWithUsage, listTags, updateTag } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
-import { listChanges, recordChanges, undoChange, undoRun } from './changeLog'
+import { listChanges, noteCreatedSheet, recordChanges, undoChange, undoRun } from './changeLog'
 
 /**
  * F-9.15: the Changes log as the one Undo of every story-bible change. Organise and the chat log
@@ -221,6 +221,7 @@ describe('changes:record (F-9.15)', () => {
 
   it('deletes a sheet Organise made with the tag it made, unless the author wrote in it since', () => {
     const made = createEntity(db, { kind: 'setting', name: 'The Ferry' }).entity
+    noteCreatedSheet(db, made.id, made.tagId)
     const [entry] = recordChanges(
       db,
       {
@@ -248,6 +249,7 @@ describe('changes:record (F-9.15)', () => {
     expect(listTags(db).map((tag) => tag.name)).not.toContain('the-ferry')
 
     const other = createEntity(db, { kind: 'setting', name: 'Greywater' }).entity
+    noteCreatedSheet(db, other.id, null)
     const [second] = recordChanges(
       db,
       {
@@ -269,6 +271,88 @@ describe('changes:record (F-9.15)', () => {
       /^VALIDATION: You have edited "Greywater"/
     )
     expect(getEntity(db, other.id)).toBeDefined()
+  })
+
+  it('refuses a deleteSheet for a sheet this session did not make, or without its stamp', () => {
+    const old = createEntity(db, { kind: 'setting', name: 'The Old Mill' }).entity
+    const made = createEntity(db, { kind: 'setting', name: 'The Ferry' }).entity
+    noteCreatedSheet(db, made.id, null)
+    const record = (undo: {
+      type: 'deleteSheet'
+      entityId: string
+      tagId: string | null
+      modified?: string
+    }) =>
+      refusal(() =>
+        recordChanges(
+          db,
+          { source: 'organise', run: 'org-9', changes: [{ kind: 'record', label: 'x', undo }] },
+          NOW
+        )
+      )
+    const notLanded = 'VALIDATION: The change is not in the story bible'
+    expect(
+      record({ type: 'deleteSheet', entityId: old.id, tagId: null, modified: old.modified })
+    ).toBe(notLanded)
+    expect(record({ type: 'deleteSheet', entityId: made.id, tagId: null })).toBe(notLanded)
+    // The sheet's tag was not one this session noted as made with it.
+    expect(
+      record({ type: 'deleteSheet', entityId: made.id, tagId: made.tagId, modified: made.modified })
+    ).toBe(notLanded)
+    expect(listChanges(db, { limit: 10 }).entries).toEqual([])
+  })
+
+  it('refuses an inverse that reaches past its change: other parts, or a tag never taken off', () => {
+    const mara = createEntity(db, { kind: 'character', name: 'Mara', fields: { age: '28' } }).entity
+    const tag = createTag(db, { name: 'stormbound', category: 'custom' })
+    const notLanded = 'VALIDATION: The change is not in the story bible'
+    const one = (change: Parameters<typeof recordChanges>[1]['changes'][number]) =>
+      refusal(() => recordChanges(db, { source: 'chat', run: 'm-9', changes: [change] }, NOW))
+    expect(
+      one({
+        kind: 'sheetEdit',
+        label: 'Mara · Age',
+        undo: {
+          type: 'restoreSheet',
+          entityId: mara.id,
+          before: { name: 'Someone Else', fields: { age: '27' } },
+          after: { fields: { age: '28' } }
+        }
+      })
+    ).toBe(notLanded)
+    expect(
+      one({
+        kind: 'sheetEdit',
+        label: 'Mara · Age',
+        undo: {
+          type: 'restoreSheet',
+          entityId: mara.id,
+          before: { fields: { age: '27', goal: 'Revenge' } },
+          after: { fields: { age: '28' } }
+        }
+      })
+    ).toBe(notLanded)
+    expect(
+      one({
+        kind: 'tagEdit',
+        label: 'Tag',
+        undo: {
+          type: 'restoreTag',
+          tagId: tag.id,
+          before: { name: 'other', category: 'tone' },
+          after: { name: 'stormbound' }
+        }
+      })
+    ).toBe(notLanded)
+    // Never on the scene, so the chat did not take it off: no Undo may put it on.
+    expect(
+      one({
+        kind: 'tagLink',
+        label: 'Untag the scene',
+        undo: { type: 'linkTag', nodeId: scene, tagId: tag.id }
+      })
+    ).toBe(notLanded)
+    expect(listChanges(db, { limit: 10 }).entries).toEqual([])
   })
 
   it('puts a tag back as it was, and a scene’s tag on or off as the chat left it', () => {
