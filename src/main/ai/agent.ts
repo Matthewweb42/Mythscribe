@@ -45,7 +45,7 @@ import { cancelInflight, registerInflight, releaseInflight } from './inflight'
 import { renderAgentFocus, type AgentTranscriptStep } from './prompts/agent.v1'
 import type { BuildAgentPromptV2Input } from './prompts/agent.v2'
 import type { BuildAgentPromptV3Input } from './prompts/agent.v3'
-import { buildAgentPromptV4, type BuiltAgentPromptV4 } from './prompts/agent.v4'
+import { buildAgentPromptV5, type BuiltAgentPromptV5 } from './prompts/agent.v5'
 import type { ChatTurn } from './prompts/chat.v1'
 import { AiCancelledError, type CompletionUsage } from './providers/types'
 import { runAiStream, sha256, type AiRequestDeps, type AiRequestResult } from './request'
@@ -262,7 +262,7 @@ const ESCAPES: Record<string, string> = { n: '\n', t: '\t', r: '', b: '', f: '',
  * allows at Ask and Auto). The open document goes in every step (title, synopsis, notes head,
  * stored summary, the caret window and the selection the renderer sends); everything else the
  * model reads only through the tools, one step at a time, each step shown live through `onStep`.
- * Every step is one strong-tier JSON request (`agent.v4` since F-9.10) through `runAiStream` (a ledger row
+ * Every step is one strong-tier JSON request (`agent.v5` since F-9.16) through `runAiStream` (a ledger row
  * each); the reply's `answer` text streams to `hooks.answer` as it arrives (2026-10-07). Before
  * a step goes, the oldest tool results are dropped until it fits the input budget, then the
  * oldest history. After `AGENT_MAX_STEPS` lookups, or once the run has spent
@@ -330,7 +330,7 @@ export async function runAgent(
   let promptVersion = ''
   /** Sends one step (or its retry), streaming the answer text, and adds it to the run's totals. */
   const send = async (
-    prompt: BuiltAgentPromptV4,
+    prompt: BuiltAgentPromptV5,
     requestId: string | null
   ): Promise<AiRequestResult> => {
     if (outer?.signal.aborted === true) throw new AiCancelledError('The request was stopped.')
@@ -467,12 +467,12 @@ export function fitAgentPrompt<
   I extends BuildAgentPromptV2Input,
   T extends { messages: { content: string }[] }
 >(input: I, build: (input: I) => T): T
-export function fitAgentPrompt(input: BuildAgentPromptV3Input): BuiltAgentPromptV4
+export function fitAgentPrompt(input: BuildAgentPromptV3Input): BuiltAgentPromptV5
 export function fitAgentPrompt(
   input: BuildAgentPromptV3Input,
   build: (input: BuildAgentPromptV3Input) => {
     messages: { content: string }[]
-  } = buildAgentPromptV4
+  } = buildAgentPromptV5
 ): { messages: { content: string }[] } {
   const budget = inputBudget('agent')
   const estimate = (built: { messages: { content: string }[] }): number =>

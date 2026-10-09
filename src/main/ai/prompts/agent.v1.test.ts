@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { estimateTokens, outputBudget } from '@shared/ai'
-import { AGENT_TOOLS } from '@shared/agent'
+import { AGENT_TOOLS_V1 } from '@shared/agent'
 import {
   AGENT_EDIT_RULES,
   AGENT_FINAL_TURN,
@@ -33,7 +33,7 @@ describe('agent.v1 prompt (F-5.22)', () => {
 
   it('lists every tool in the stable rules and asks for one JSON object', () => {
     expect(AGENT_PROMPT_VERSION).toBe('agent.v1')
-    for (const tool of AGENT_TOOLS) expect(AGENT_RULES).toContain(`- ${tool} {`)
+    for (const tool of AGENT_TOOLS_V1) expect(AGENT_RULES).toContain(`- ${tool} {`)
     expect(
       AGENT_RULES.startsWith(
         "You are the assistant inside a novel-writing app, working for the book's author."

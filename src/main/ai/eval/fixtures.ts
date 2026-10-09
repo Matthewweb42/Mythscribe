@@ -242,6 +242,7 @@ import {
   type OrganiseListingV2
 } from '../prompts/organise.v2'
 import { buildAgentPromptV4 } from '../prompts/agent.v4'
+import { buildAgentPromptV5 } from '../prompts/agent.v5'
 import {
   ORGANISE_CHUNK_CHARS,
   ORGANISE_INSTRUCTION_MAX,
@@ -3064,6 +3065,34 @@ function agentCaseV4(
   }
 }
 
+/** F-9.16: an agent.v5 step, fitted as the feature fits it. */
+function agentCaseV5(
+  name: string,
+  note: string,
+  input: BuildAgentPromptV3Input,
+  scoring: EvalCase['scoring']
+): EvalCase {
+  const built = fitAgentPrompt(input, buildAgentPromptV5)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring
+  }
+}
+
+/** What the `todo` tool hands back for the fixture book (F-9.16). */
+const AGENT_TODO_STEP = {
+  call: '{"tool":"todo","args":{"kind":""}}',
+  result:
+    'Result of todo:\nOpen To do items:\n' +
+    '[Undefined] The Hollowing: Named in 3 scenes, but its sheet is empty and your notes do not explain it. (n2)\n' +
+    '[Loose end] The mill ledger: Still open, and not moved in the last 8 scenes. Open question: who copied it? (n1)\n' +
+    '[Gap] Mara Vell: 3 scenes are told from Mara Vell\u2019s point of view, but no goal is stated. (n2)'
+}
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -4624,5 +4653,71 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed',
     'every cap: the digest, 40 threads, 60 listed and 60 settled, scene lines up to the input budget',
     maxedTodoInput()
+  ),
+  // agent.v5 (F-9.16): version 4 plus the To do tool, which the chat reads for what is left open.
+  agentCaseV5(
+    'fresh',
+    'a read run with no document open: the author asks what is left to figure out, a todo call',
+    {
+      access: 'read',
+      voice: null,
+      map: renderStoryMap(
+        STORY_MAP_ITEMS,
+        { nowId: 's3', basis: 'latest' },
+        STORY_MAP_TOKEN_BUDGET
+      ),
+      focus: null,
+      history: [],
+      message: "What's left to figure out?",
+      steps: [],
+      final: false
+    },
+    { kind: 'agent', expected: 'tool' }
+  ),
+  agentCaseV5(
+    'todo',
+    'the step after the todo call: the open items to report, an answer',
+    {
+      access: 'read',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: [],
+      message: "What's left to figure out?",
+      steps: [AGENT_TODO_STEP],
+      final: false
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV5(
+    'maxed',
+    'the last step of a write run as the fit leaves it: the story map at its budget, every focus part at its cap, six lookups of full results, and the final turn',
+    {
+      access: 'write',
+      voice: null,
+      map: MAXED_STORY_MAP,
+      focus: AGENT_MAXED_FOCUS,
+      history: CHAT_HISTORY,
+      message: FIXTURE_PASSAGE.repeat(3).slice(0, 2_000),
+      steps: Array.from({ length: AGENT_MAX_STEPS }, () => AGENT_MAXED_STEP),
+      final: true
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV5(
+    'retry',
+    'the one retry of a write step whose reply was cut off: the todo case plus the retry turn, at the larger cap',
+    {
+      access: 'write',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: CHAT_HISTORY,
+      message: "What's left to figure out?",
+      steps: [AGENT_TODO_STEP],
+      final: false,
+      retry: true
+    },
+    { kind: 'agent', expected: 'answer' }
   )
 ]

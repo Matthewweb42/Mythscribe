@@ -31,6 +31,7 @@ import {
   type AgentInput
 } from './agent'
 import {
+  AGENT_TODO_ITEMS,
   NOTES_ARE_PLANS,
   SHEETS_ARE_PLANS,
   loadAgentProject,
@@ -38,12 +39,14 @@ import {
   resolveAgentEdit,
   runAgentTool
 } from './agentTools'
+import { todoItem } from '../db/schema'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import { AGENT_FINAL_TURN, AGENT_RULES } from './prompts/agent.v1'
 import { AGENT_EDIT_RULES_V2, AGENT_RETRY_TURN } from './prompts/agent.v2'
 import { AGENT_TIME_RULES } from './prompts/agent.v3'
 import { AGENT_ORGANISE_RULES } from './prompts/agent.v4'
+import { AGENT_TODO_RULES } from './prompts/agent.v5'
 import { STORY_MAP_HEADING } from '@shared/storyTime'
 import {
   AiCancelledError,
@@ -202,9 +205,11 @@ describe('runAgent (F-5.22)', () => {
     expect(system).not.toContain(AGENT_EDIT_RULES_V2)
     expect(system).toContain(`Open document ${ref(scenes[0])}:`)
     // F-5.23 (agent.v3): the story-time rule, then the story map with now on the open scene,
-    // before the open document. F-9.10: version 4 adds the organise rule.
-    expect(result.promptVersion).toBe('agent.v4')
+    // before the open document. F-9.10: version 4 adds the organise rule; F-9.16: version 5 the
+    // To do tool.
+    expect(result.promptVersion).toBe('agent.v5')
     expect(system).toContain(AGENT_ORGANISE_RULES)
+    expect(system).toContain(AGENT_TODO_RULES)
     expect(result.organise).toBeNull()
     expect(system).toContain(AGENT_TIME_RULES)
     expect(system).toContain(STORY_MAP_HEADING)
@@ -671,6 +676,49 @@ describe('the agent tools (F-5.22)', () => {
       id: ref(scenes[1])
     }).result
     expect(later).toContain('(after now: has not happened yet)')
+  })
+
+  it('reads the open To do list, by kind and capped (F-9.16)', () => {
+    const empty = runAgentTool(loadAgentProject(db), null, 'todo', {})
+    expect(empty.step).toEqual({ tool: 'todo', label: 'Reading the To do list…' })
+    expect(empty.result).toBe('The To do list is empty: nothing is left to figure out right now.')
+    const at = NOW.toISOString()
+    const add = (id: string, kind: 'gap' | 'looseEnd', status = 'open'): void => {
+      db.insert(todoItem)
+        .values({
+          id,
+          key: `question:${id}`,
+          kind,
+          rule: kind === 'gap' ? 'timeline' : 'question',
+          source: 'ai',
+          subject: `Item ${id}`,
+          nodeId: scenes[0] ?? null,
+          why: `Why ${id}.`,
+          target: '{"kind":"none"}',
+          status: status as 'open' | 'done',
+          createdAt: at,
+          updatedAt: at
+        })
+        .run()
+    }
+    add('g1', 'gap')
+    add('l1', 'looseEnd')
+    add('d1', 'gap', 'done')
+    const project = loadAgentProject(db)
+    const all = runAgentTool(project, null, 'todo', { kind: '' }).result
+    expect(all).toBe(
+      'Open To do items:\n' +
+        `[Loose end] Item l1: Why l1. (${ref(scenes[0])})\n` +
+        `[Gap] Item g1: Why g1. (${ref(scenes[0])})`
+    )
+    expect(runAgentTool(project, null, 'todo', { kind: 'gap' }).result).not.toContain('l1')
+    expect(runAgentTool(project, null, 'todo', { kind: 'contradiction' }).result).toBe(
+      'The To do list has no open contradiction items.'
+    )
+    for (let i = 0; i < AGENT_TODO_ITEMS + 5; i++) add(`x${i}`, 'gap')
+    const capped = runAgentTool(loadAgentProject(db), null, 'todo', {}).result
+    expect(capped.split('\n').filter((line) => line.startsWith('['))).toHaveLength(AGENT_TODO_ITEMS)
+    expect(capped).toContain('…and 7 more.')
   })
 
   it('counts a passage the way quotes are matched', () => {

@@ -26,6 +26,7 @@ import type { Entity } from '@shared/ipc/contract'
 import { SCENE_SYNOPSIS_MAX, parseStoredSceneMeta } from '@shared/sceneMeta'
 import { STORY_MAP_NOW_MARK, sceneProgress } from '@shared/storyTime'
 import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, toTagName } from '@shared/tags'
+import { TODO_KINDS, TODO_KIND_NOUN, TodoKind } from '@shared/todo'
 import type { NodeRow } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
 import { listCategories } from '../entity/categoryStore'
@@ -34,6 +35,7 @@ import { factsForEntities } from '../entity/factStore'
 import { nodesInTreeOrder } from '../search/searchStore'
 import { findTagByNameOrAlias, getTag, listTags } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
+import { listTodo } from '../knowledge/todoStore'
 import { documentText } from '../voice/profile'
 import { headTruncate } from './context/chatContext'
 import { rankCandidates, sceneTitles } from './context/queryContext'
@@ -168,7 +170,42 @@ export function runAgentTool(
       return listSheets(project, str(args.kind))
     case 'tags':
       return { step: { tool: 'tags', label: 'Reading the tags…' }, result: tags(project) }
+    case 'todo':
+      return {
+        step: { tool: 'todo', label: 'Reading the To do list…' },
+        result: todo(project, args.kind)
+      }
   }
+}
+
+/** The most To do items one call lists. */
+export const AGENT_TODO_ITEMS = 30
+
+/**
+ * The open To do list (F-9.16, agent.v5), grouped by kind in the list's order, one line per item:
+ * `[Gap] Mara: why (n3)`, the ref naming the item's scene when it has one. A known `kind` keeps
+ * that kind only; anything else lists all. At most `AGENT_TODO_ITEMS` lines within the result cap.
+ * The items are what the book leaves open, as the list states them: the agent reports them, it
+ * never resolves one.
+ */
+function todo(project: AgentProject, kind: unknown): string {
+  const wanted = TodoKind.safeParse(kind)
+  const items = listTodo(project.db).items.filter(
+    (item) => !wanted.success || item.kind === wanted.data
+  )
+  if (items.length === 0) {
+    return wanted.success
+      ? `The To do list has no open ${TODO_KIND_NOUN[wanted.data].toLowerCase()} items.`
+      : 'The To do list is empty: nothing is left to figure out right now.'
+  }
+  const ordered = TODO_KINDS.flatMap((each) => items.filter((item) => item.kind === each))
+  const lines = ordered.slice(0, AGENT_TODO_ITEMS).map((item) => {
+    const ref = item.nodeId === null ? undefined : project.refOf.get(item.nodeId)
+    return `[${TODO_KIND_NOUN[item.kind]}] ${item.subject}: ${item.why}${ref === undefined ? '' : ` (${ref})`}`
+  })
+  const more =
+    ordered.length > AGENT_TODO_ITEMS ? `\n…and ${ordered.length - AGENT_TODO_ITEMS} more.` : ''
+  return cap(`Open To do items:\n${lines.join('\n')}${more}`)
 }
 
 function search(project: AgentProject, activeId: string | null, query: string): ToolOutcome {

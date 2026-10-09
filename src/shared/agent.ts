@@ -69,8 +69,8 @@ export const AGENT_ACCESS = ['read', 'write'] as const
 export const AgentAccess = z.enum(AGENT_ACCESS)
 export type AgentAccess = z.infer<typeof AgentAccess>
 
-/** The read tools, as the model names them. */
-export const AGENT_TOOLS = [
+/** The read tools agent.v1 to v4 name in their rules, frozen as they shipped. */
+export const AGENT_TOOLS_V1 = [
   'search',
   'outline',
   'read_scene',
@@ -80,6 +80,9 @@ export const AGENT_TOOLS = [
   'list_sheets',
   'tags'
 ] as const
+
+/** The read tools, as the model names them; `todo` (F-9.16, agent.v5) reads the To do list. */
+export const AGENT_TOOLS = [...AGENT_TOOLS_V1, 'todo'] as const
 export const AgentTool = z.enum(AGENT_TOOLS)
 export type AgentTool = z.infer<typeof AgentTool>
 
