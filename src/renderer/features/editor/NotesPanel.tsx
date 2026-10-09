@@ -5,7 +5,7 @@ import { useSessionStore } from '@renderer/features/project/sessionStore'
 import { DockPanelControls } from '@renderer/features/shell/Dock'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
-import { MetadataPane, SynopsisBox } from './MetadataPane'
+import { MetadataPane, NotesStatusSelect, SynopsisBox } from './MetadataPane'
 import { NotesEditor } from './NotesEditor'
 import { NotesSuggestion, SuggestButton } from './SceneSuggestions'
 
@@ -95,6 +95,7 @@ function NotesContent({
         <span className="min-w-0 flex-1 text-xs font-semibold tracking-wide text-fg-muted uppercase">
           Notes
         </span>
+        <NotesStatusSelect id={id} />
         <SuggestButton id={id} kind="notes" compact />
       </div>
       <NotesSuggestion id={id} />

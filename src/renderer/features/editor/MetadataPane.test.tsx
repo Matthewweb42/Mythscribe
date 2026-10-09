@@ -59,7 +59,8 @@ const stored: Record<string, SceneMeta> = {
     brief: EMPTY_SCENE_BRIEF,
     synopsis: '',
     status: 'none',
-    beats: {}
+    beats: {},
+    notesStatus: 'plan'
   },
   'sc-4': {
     location: '',
@@ -68,7 +69,8 @@ const stored: Record<string, SceneMeta> = {
     brief: STORED_BRIEF,
     synopsis: '',
     status: 'none',
-    beats: {}
+    beats: {},
+    notesStatus: 'plan'
   }
 }
 
@@ -311,7 +313,8 @@ describe('MetadataPane (F-4.5)', () => {
           brief: EMPTY_SCENE_BRIEF,
           synopsis: '',
           status: 'revised',
-          beats: {}
+          beats: {},
+          notesStatus: 'plan'
         }
       }
     ])
@@ -517,7 +520,8 @@ describe('MetadataPane brief (F-14.3)', () => {
           },
           synopsis: '',
           status: 'none',
-          beats: {}
+          beats: {},
+          notesStatus: 'plan'
         }
       }
     ])
@@ -568,7 +572,8 @@ describe('MetadataPane brief (F-14.3)', () => {
           brief: DRAFTED,
           synopsis: '',
           status: 'none',
-          beats: {}
+          beats: {},
+          notesStatus: 'plan'
         }
       }
     ])

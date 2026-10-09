@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
+import { FACT_STATUSES, FACT_STATUS_LABEL, FactStatus } from '@shared/facts'
 import {
   EMPTY_SCENE_META,
   SCENE_BRIEF_FIELDS,
@@ -228,6 +229,43 @@ export function SynopsisBox({ id }: { id: string }): React.JSX.Element {
       />
       <SynopsisSuggestion id={id} />
     </div>
+  )
+}
+
+/**
+ * Where the node's notes stand (F-5.24, D7): Plan (the default), Canon, or Idea, beside the
+ * notes' heading. The chat agent labels the notes with it, so a plan is never told as something
+ * that happened. Loads the node's metadata through the same autosave store as the synopsis.
+ */
+export function NotesStatusSelect({ id }: { id: string }): React.JSX.Element {
+  const meta = useSceneMetaStore((s) => s.docs[id]?.content ?? null)
+  const load = useSceneMetaStore((s) => s.load)
+  const unload = useSceneMetaStore((s) => s.unload)
+  const edit = useSceneMetaStore((s) => s.edit)
+
+  useEffect(() => {
+    load(id).catch((err: unknown) => toast.error(describeError(err)))
+    return () => unload(id)
+  }, [id, load, unload])
+
+  return (
+    <select
+      aria-label="Notes status"
+      title="Plan: not on the page yet. Canon: true of the story. Idea: a maybe."
+      value={meta?.notesStatus ?? 'plan'}
+      disabled={meta === null}
+      onChange={(event) => {
+        const next = FactStatus.safeParse(event.target.value)
+        if (meta !== null && next.success) edit(id, { ...meta, notesStatus: next.data })
+      }}
+      className="shrink-0 rounded-md border border-line bg-bg px-1 py-px text-xs leading-5 text-fg-muted disabled:opacity-50"
+    >
+      {FACT_STATUSES.map((status) => (
+        <option key={status} value={status}>
+          {FACT_STATUS_LABEL[status]}
+        </option>
+      ))}
+    </select>
   )
 }
 

@@ -1,6 +1,10 @@
 import {
   AGENT_BRIEF_MAX,
+  AGENT_CARDS_MAX,
   AGENT_EDIT_TEXT_MAX,
+  AGENT_LOOKUP_CHARS,
+  AGENT_PASSAGE_RESULTS,
+  AGENT_TOOLS_V6,
   AGENT_WORDS_DEFAULT,
   AGENT_WORDS_MAX,
   AGENT_WORDS_MIN,
@@ -21,22 +25,29 @@ import {
   type StoryCategory
 } from '@shared/categories'
 import { toEntityNameKey } from '@shared/entities'
-import { FACT_STATUS_LABEL, sheetAt } from '@shared/facts'
+import { sheetAt, type Fact, type FactStatus } from '@shared/facts'
 import type { Entity } from '@shared/ipc/contract'
+import { passageParagraphs } from '@shared/mentions'
+import { RELATION_INVERSE_LABEL, RELATION_LABEL, relationTypeOf } from '@shared/relations'
+import { renderCard } from '@shared/sceneCard'
 import { SCENE_SYNOPSIS_MAX, parseStoredSceneMeta } from '@shared/sceneMeta'
 import { STORY_MAP_NOW_MARK, sceneProgress } from '@shared/storyTime'
 import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, toTagName } from '@shared/tags'
+import { THREAD_KIND, THREAD_STATUS_LABEL, deriveThreads, type ThreadView } from '@shared/threads'
 import { TODO_KINDS, TODO_KIND_NOUN, TodoKind } from '@shared/todo'
 import type { NodeRow } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
 import { listCategories } from '../entity/categoryStore'
 import { listEntities } from '../entity/entityStore'
-import { factsForEntities } from '../entity/factStore'
+import { allFactsForEntities, factsForEntities, listFactsForEntity } from '../entity/factStore'
+import { sceneCardFor } from '../knowledge/sceneCard'
+import { searchPassages } from '../search/passageIndex'
 import { nodesInTreeOrder } from '../search/searchStore'
+import { listMentionsForTag, mentionParagraphsForTag } from '../tag/mentionStore'
 import { findTagByNameOrAlias, getTag, listTags } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { listTodo } from '../knowledge/todoStore'
-import { documentText } from '../voice/profile'
+import { documentJson, documentText } from '../voice/profile'
 import { headTruncate } from './context/chatContext'
 import { rankCandidates, sceneTitles } from './context/queryContext'
 import { notesText } from './context/scenePanel'
@@ -87,11 +98,9 @@ export function loadAgentProject(db: TreeDb, activeId: string | null = null): Ag
 }
 
 /**
- * F-5.23: what a lookup says about where its source sits in story time. Sheets, notes, and
- * synopses are the author's plans; a scene is before now, now, or after now.
+ * F-5.23: what agent.v5's `search` says about the sheets it names (the tools agent.v6 runs mark
+ * every record, note, and fact with its status instead, `statusMark`).
  */
-export const NOTES_ARE_PLANS =
-  "the author's plans for this document: an event told only here has not happened yet"
 export const SHEETS_ARE_PLANS =
   "the author's notes and plans: true of who and what things are, but an event told only here " +
   'has not happened yet'
@@ -144,10 +153,11 @@ export function runAgentTool(
   project: AgentProject,
   activeId: string | null,
   name: unknown,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  tools: readonly AgentTool[] = AGENT_TOOLS_V6
 ): ToolOutcome {
   const tool = AgentTool.safeParse(name)
-  if (!tool.success) {
+  if (!tool.success || !tools.includes(tool.data)) {
     return {
       step: { tool: 'outline', label: 'Looking around…' },
       result: `There is no tool "${str(name)}". Use one of the tools listed.`
@@ -159,7 +169,7 @@ export function runAgentTool(
     case 'outline':
       return { step: { tool: 'outline', label: 'Reading the outline…' }, result: outline(project) }
     case 'read_scene':
-      return readScene(project, args.id, args.from)
+      return readScene(project, args.id, args.from, args.para)
     case 'read_notes':
       return readNotes(project, args.id)
     case 'read_summary':
@@ -175,7 +185,318 @@ export function runAgentTool(
         step: { tool: 'todo', label: 'Reading the To do list…' },
         result: todo(project, args.kind)
       }
+    case 'lookup':
+      return lookup(project, args.name)
+    case 'cards':
+      return cards(project, args.ids, args.name)
+    case 'find_passages':
+      return findPassages(project, str(args.query))
   }
+}
+
+/**
+ * F-5.24: how a v6 result marks where a source stands (D7): `[canon]` the story as written,
+ * `[plan]` the author's intent not on the page yet, `[idea]` a maybe. The prompt's status rule
+ * reads the same three words.
+ */
+export function statusMark(status: FactStatus): string {
+  return `[${status}]`
+}
+
+/** The record a name points at: its sheet by name or alias (`sheetByName`), else its tag's record. */
+export function recordByName(project: AgentProject, name: unknown): Entity | undefined {
+  const sheet = sheetByName(project, name)
+  if (sheet !== undefined || typeof name !== 'string') return sheet
+  const tagId = findTagByNameOrAlias(project.db, toTagName(name))
+  return tagId === undefined ? undefined : project.entities.find((e) => e.tagId === tagId)
+}
+
+/** A scene's index in reading order; -1 for an undated statement, past the end for one outside it. */
+function readingIndex(project: AgentProject, nodeId: string | null): number {
+  if (nodeId === null) return -1
+  const at = project.time.order.indexOf(nodeId)
+  return at === -1 ? project.time.order.length : at
+}
+
+/** Now's index in reading order; with no now, the end of the book. */
+function nowIndex(project: AgentProject): number {
+  const at = project.time.nowId === null ? -1 : project.time.order.indexOf(project.time.nowId)
+  return at === -1 ? project.time.order.length : at
+}
+
+/** The refs of the scenes behind a value, in order, without repeats. */
+function refsOf(project: AgentProject, nodeIds: readonly (string | null)[]): string {
+  const refs = [
+    ...new Set(
+      nodeIds.flatMap((id) => {
+        const ref = id === null ? undefined : project.refOf.get(id)
+        return ref === undefined ? [] : [ref]
+      })
+    )
+  ]
+  return refs.length > 0 ? ` (${refs.join(', ')})` : ''
+}
+
+/**
+ * The record at now, in brief (F-5.24, at most `AGENT_LOOKUP_CHARS`): the name, category, status,
+ * and other names; each filled field as the author wrote it with what the scenes state up to now
+ * (`sheetAt`); its relationships up to now; its threads (a thread record's own status, else the
+ * open threads moved in scenes that name it); where the book names it (scenes, first and last
+ * with the paragraph); and the card of the last scene up to now that names it. A name no record
+ * answers says what to try instead.
+ */
+function lookup(project: AgentProject, nameArg: unknown): ToolOutcome {
+  const name = str(nameArg).trim()
+  const step: AgentStep = {
+    tool: 'lookup',
+    label: name === '' ? 'Looking up a name…' : `Looking up ${headTruncate(name, 60)}…`
+  }
+  if (name === '') return { step, result: 'lookup needs a "name".' }
+  const entity = recordByName(project, name)
+  if (entity === undefined) {
+    return {
+      step,
+      result: `No record is called "${name}". Try find_passages for the words, or list_sheets.`
+    }
+  }
+  const now = nowIndex(project)
+  const nowRef = project.time.nowId === null ? undefined : project.refOf.get(project.time.nowId)
+  const category = categoryOf(entity.kind, listCategories(project.db))
+  const lines = [
+    `${entity.name} (${category.noun.toLowerCase()}) ${statusMark(entity.status)}` +
+      (entity.aliases.length > 0 ? `; also ${entity.aliases.join(', ')}` : '') +
+      (nowRef === undefined ? '; as of the end of the book' : `; as of ${nowRef} (now)`)
+  ]
+
+  // Fields: the author's text, then what the scenes state up to now.
+  for (const field of sheetAt({
+    facts: factsForEntities(project.db, [entity.id]),
+    fields: entity.fields,
+    attributes: category.fields.map((each) => each.id),
+    order: project.time.order,
+    position: project.time.nowId
+  })) {
+    const stated = (
+      field.mode === 'replace' ? (field.current === null ? [] : [field.current]) : field.details
+    )
+      .filter((value) => value.value.trim() !== (field.baseline ?? '').trim())
+      .map(
+        (value) =>
+          `${value.value}${value.status === 'canon' ? '' : ` ${statusMark(value.status)}`}` +
+          refsOf(
+            project,
+            value.sources.map((source) => source.nodeId)
+          )
+      )
+    const parts = [...(field.baseline === null ? [] : [field.baseline]), ...stated]
+    if (parts.length === 0) continue
+    lines.push(`${categoryFieldLabel(category, field.attribute)}: ${parts.join('; ')}`)
+  }
+
+  // Relationships up to now, both directions.
+  const byId = new Map(project.entities.map((each) => [each.id, each.name]))
+  const relations = listFactsForEntity(project.db, entity.id).flatMap((fact) => {
+    const type = relationTypeOf(fact.attribute)
+    if (type === null || fact.hidden || readingIndex(project, fact.nodeId) > now) return []
+    const subject = fact.entityId === entity.id
+    const other = byId.get((subject ? fact.objectEntityId : fact.entityId) ?? '')
+    if (other === undefined) return []
+    const label = subject ? RELATION_LABEL[type] : RELATION_INVERSE_LABEL[type]
+    const said = fact.value.trim() === '' ? '' : ` “${fact.value.trim()}”`
+    const mark = fact.status === 'canon' ? '' : ` ${statusMark(fact.status)}`
+    return [`${label} ${other}${said}${mark}${refsOf(project, [fact.nodeId])}`]
+  })
+  if (relations.length > 0) lines.push(`Relations: ${relations.join('; ')}`)
+
+  // Where the book names it, in reading order.
+  const mentions =
+    entity.tagId === null
+      ? []
+      : listMentionsForTag(project.db, entity.tagId)
+          .map((mention) => ({ ...mention, at: readingIndex(project, mention.nodeId) }))
+          .filter((mention) => mention.at < project.time.order.length)
+          .sort((a, b) => a.at - b.at)
+  const threads = threadLines(
+    project,
+    entity,
+    mentions.filter((m) => m.at <= now).map((m) => m.nodeId)
+  )
+  if (threads !== '') lines.push(threads)
+  if (mentions.length === 0) {
+    lines.push('Named in no scene yet.')
+  } else {
+    const paragraphs =
+      entity.tagId === null
+        ? new Map<string, number[]>()
+        : mentionParagraphsForTag(project.db, entity.tagId)
+    const where = (nodeId: string, last: boolean): string => {
+      const paras = paragraphs.get(nodeId) ?? []
+      const para = last ? paras.at(-1) : paras[0]
+      return `${project.refOf.get(nodeId) ?? '?'}${para === undefined ? '' : ` ¶${para}`}`
+    }
+    const first = mentions[0]!
+    const last = mentions.at(-1)!
+    const upToNow = mentions.filter((m) => m.at <= now).length
+    lines.push(
+      `Named in ${mentions.length} scene${mentions.length === 1 ? '' : 's'} (${upToNow} up to now): ` +
+        `first ${where(first.nodeId, false)}, last ${where(last.nodeId, true)}`
+    )
+    const seen = [...mentions].reverse().find((m) => m.at <= now)
+    const card = seen === undefined ? null : sceneCardFor(project.db, seen.nodeId)
+    if (seen !== undefined && card !== null) {
+      lines.push(renderCard(`Last seen ${sceneHead(project, seen.nodeId)}:`, card))
+    }
+  }
+  return { step, result: headTruncate(lines.join('\n'), AGENT_LOOKUP_CHARS) }
+}
+
+/** `n7 Chapter 1 › The ferry landing (before now: has happened)`, as the v6 tools head a scene. */
+function sceneHead(project: AgentProject, nodeId: string): string {
+  return `${project.refOf.get(nodeId) ?? '?'} ${project.titleOf(nodeId)} (${positionNote(project.time, nodeId)})`
+}
+
+/** The threads as of now: thread events stated after now are left out (`deriveThreads`). */
+function threadsAtNow(project: AgentProject, records: readonly Entity[]): ThreadView[] {
+  const now = nowIndex(project)
+  const facts = allFactsForEntities(
+    project.db,
+    records.map((record) => record.id)
+  ).filter((fact: Fact) => readingIndex(project, fact.nodeId) <= now)
+  return deriveThreads(
+    records.map((record) => ({ id: record.id, name: record.name, origin: record.origin })),
+    facts,
+    project.time.order
+  )
+}
+
+/**
+ * The lookup's thread line: a thread record's own status at now (with its open question, setup,
+ * and payoff), else the open threads with an event in a scene up to now that names the record
+ * (most shared scenes first, at most 3). '' for none.
+ */
+function threadLines(project: AgentProject, entity: Entity, named: readonly string[]): string {
+  if (entity.kind === THREAD_KIND) {
+    const view = threadsAtNow(project, [entity])[0]
+    if (view === undefined) return ''
+    const parts = [`Thread: ${THREAD_STATUS_LABEL[view.status].toLowerCase()}`]
+    if (view.question !== '') parts.push(`question: ${view.question}`)
+    if (view.setup !== null) parts.push(`set up${refsOf(project, [view.setup.nodeId])}`)
+    if (view.payoff !== null) parts.push(`paid off${refsOf(project, [view.payoff.nodeId])}`)
+    return parts.join('; ')
+  }
+  if (named.length === 0) return ''
+  const inScenes = new Set(named)
+  const open = threadsAtNow(
+    project,
+    project.entities.filter((each) => each.kind === THREAD_KIND)
+  )
+    .filter((view) => view.status === 'open')
+    .map((view) => ({
+      view,
+      shared: view.events.filter((event) => event.nodeId !== null && inScenes.has(event.nodeId))
+        .length
+    }))
+    .filter((each) => each.shared > 0)
+    .sort((a, b) => b.shared - a.shared)
+    .slice(0, 3)
+  if (open.length === 0) return ''
+  return `Open threads: ${open
+    .map(({ view }) => {
+      const question = view.question === '' ? '' : `: ${headTruncate(view.question, 100)}`
+      return `${view.name}${question}${refsOf(project, [view.setup?.nodeId ?? null])}`
+    })
+    .join('; ')}`
+}
+
+/**
+ * Scene cards (F-5.24, at most `AGENT_CARDS_MAX`, about 100 tokens each): the scenes `ids` names
+ * (a list of refs, or one string of them), else the scenes in reading order that name the record
+ * `name`. A scene with no card yet reads as its stored summary's first sentence, or says so.
+ */
+function cards(project: AgentProject, idsArg: unknown, nameArg: unknown): ToolOutcome {
+  const refs = (
+    Array.isArray(idsArg) ? idsArg : typeof idsArg === 'string' ? idsArg.split(/[\s,]+/) : []
+  ).filter((ref): ref is string => typeof ref === 'string' && ref.trim() !== '')
+  let nodeIds: string[]
+  let more = 0
+  if (refs.length > 0) {
+    nodeIds = [
+      ...new Set(
+        refs.flatMap((ref) => {
+          const row = nodeByRef(project, ref)
+          return row?.kind === 'document' && row.parentId !== null ? [row.id] : []
+        })
+      )
+    ]
+  } else {
+    const entity = recordByName(project, nameArg)
+    if (entity === undefined) {
+      const name = str(nameArg).trim()
+      return {
+        step: { tool: 'cards', label: 'Reading scene cards…' },
+        result:
+          name === ''
+            ? 'cards needs "ids" (scene ids) or a "name".'
+            : `No record is called "${name}". Try find_passages, or name the scene ids.`
+      }
+    }
+    const named =
+      entity.tagId === null
+        ? []
+        : listMentionsForTag(project.db, entity.tagId)
+            .map((mention) => ({ id: mention.nodeId, at: readingIndex(project, mention.nodeId) }))
+            .filter((each) => each.at < project.time.order.length)
+            .sort((a, b) => a.at - b.at)
+            .map((each) => each.id)
+    nodeIds = named
+    if (nodeIds.length === 0) {
+      return {
+        step: { tool: 'cards', label: 'Reading scene cards…' },
+        result: `No scene names ${entity.name} yet.`
+      }
+    }
+  }
+  if (nodeIds.length > AGENT_CARDS_MAX) {
+    more = nodeIds.length - AGENT_CARDS_MAX
+    nodeIds = nodeIds.slice(0, AGENT_CARDS_MAX)
+  }
+  const step: AgentStep = {
+    tool: 'cards',
+    label: `Reading ${nodeIds.length} scene card${nodeIds.length === 1 ? '' : 's'}…`
+  }
+  if (nodeIds.length === 0) return { step, result: 'Those ids name no scene; read the outline.' }
+  const blocks = nodeIds.map((nodeId) => {
+    const head = sceneHead(project, nodeId)
+    const card = sceneCardFor(project.db, nodeId)
+    if (card !== null) return renderCard(head, card)
+    const summary = getSummary(project.db, nodeId)?.summary.trim() ?? ''
+    return `${head}\n${summary === '' ? 'No card yet; read the scene.' : headTruncate(summary, 300)}`
+  })
+  const tail = more > 0 ? `\n…and ${more} more scenes; name their ids for their cards.` : ''
+  return { step, result: cap(`${blocks.join('\n\n')}${tail}`) }
+}
+
+/**
+ * The manuscript paragraphs that best match `query` (F-5.24, the local passage index, at most
+ * `AGENT_PASSAGE_RESULTS`): `n7 ¶3 (position): snippet`. A snippet is the paragraph's own words
+ * (cut with "…"), so the words between the cuts are quotable as they stand; `read_scene` with
+ * `"para"` reads the whole paragraph.
+ */
+function findPassages(project: AgentProject, query: string): ToolOutcome {
+  const step: AgentStep = { tool: 'find_passages', label: 'Finding passages…' }
+  if (query.trim() === '') return { step, result: 'find_passages needs a "query".' }
+  const hits = searchPassages(project.db, query, AGENT_PASSAGE_RESULTS).filter((hit) =>
+    project.refOf.has(hit.nodeId)
+  )
+  if (hits.length === 0) {
+    return { step, result: 'No passage matches. Try other words, or look the name up.' }
+  }
+  const lines = hits.map(
+    (hit) =>
+      `${project.refOf.get(hit.nodeId)} ¶${hit.para} (${positionNote(project.time, hit.nodeId)}): ` +
+      hit.snippet.replace(/\s+/g, ' ').trim()
+  )
+  return { step, result: cap(lines.join('\n')) }
 }
 
 /** The most To do items one call lists. */
@@ -267,7 +588,12 @@ function documentFor(
   return { row, title: project.titleOf(row.id) || row.title }
 }
 
-function readScene(project: AgentProject, ref: unknown, fromArg: unknown): ToolOutcome {
+function readScene(
+  project: AgentProject,
+  ref: unknown,
+  fromArg: unknown,
+  paraArg?: unknown
+): ToolOutcome {
   const found = documentFor(project, ref)
   if ('error' in found) {
     return { step: { tool: 'read_scene', label: 'Looking for a scene…' }, result: found.error }
@@ -279,6 +605,9 @@ function readScene(project: AgentProject, ref: unknown, fromArg: unknown): ToolO
   }
   const text = documentText(row)
   if (text.trim() === '') return { step, result: `${title} is empty.` }
+  const para =
+    typeof paraArg === 'number' ? paraArg : typeof paraArg === 'string' ? Number(paraArg) : NaN
+  if (Number.isFinite(para)) return readParagraphs(project, row, title, Math.floor(para), step)
   const from = Math.max(
     0,
     Math.min(typeof fromArg === 'number' ? Math.floor(fromArg) : 0, text.length)
@@ -290,16 +619,48 @@ function readScene(project: AgentProject, ref: unknown, fromArg: unknown): ToolO
   return { step, result: `${head}\n${text.slice(from, to)}${more}` }
 }
 
+/**
+ * F-5.24: a scene from paragraph `para` on (the index `find_passages` and `lookup` name), whole
+ * paragraphs up to `AGENT_READ_CHARS`, with where to read on.
+ */
+function readParagraphs(
+  project: AgentProject,
+  row: NodeRow,
+  title: string,
+  para: number,
+  step: AgentStep
+): ToolOutcome {
+  const json = documentJson(row)
+  const paragraphs = json === null ? [] : passageParagraphs(json)
+  if (paragraphs.length === 0) return { step, result: `${title} has no paragraphs to read.` }
+  const start = Math.max(0, Math.min(para, paragraphs.length - 1))
+  const taken: string[] = []
+  let used = 0
+  let end = start
+  for (; end < paragraphs.length; end++) {
+    const piece = paragraphs[end]!.text
+    if (taken.length > 0 && used + piece.length > AGENT_READ_CHARS) break
+    taken.push(piece.slice(0, AGENT_READ_CHARS))
+    used += piece.length + 2
+  }
+  const when = positionNote(project.time, row.id)
+  const head = `${project.refOf.get(row.id)} ${title} (${when}), ¶${start}–¶${end - 1} of ${paragraphs.length}:`
+  const more = end < paragraphs.length ? `\n(continues; read on with "para":${end})` : ''
+  return { step, result: `${head}\n${taken.join('\n\n')}${more}` }
+}
+
 function readNotes(project: AgentProject, ref: unknown): ToolOutcome {
   const found = documentFor(project, ref)
   if ('error' in found) {
     return { step: { tool: 'read_notes', label: 'Looking for notes…' }, result: found.error }
   }
   const { row, title } = found
-  const synopsis = parseStoredSceneMeta(row.sceneMeta).synopsis.trim()
+  const meta = parseStoredSceneMeta(row.sceneMeta)
+  const synopsis = meta.synopsis.trim()
   const notes = notesText(row.notes, row.id)
   const parts = [
-    `${title} (${NOTES_ARE_PLANS}):`,
+    // F-5.24: the notes' status (`SceneMeta.notesStatus`, plan unless the author says otherwise).
+    `${title}, the author's notes ${statusMark(meta.notesStatus)}:`,
     `Synopsis: ${synopsis || '(none)'}`,
     `Notes:\n${notes || '(none)'}`
   ]
@@ -336,7 +697,7 @@ function readSheet(project: AgentProject, name: unknown): ToolOutcome {
       result: `No sheet is called "${str(name)}"; list the sheets.`
     }
   }
-  const lines = [`${entity.name} (${entity.kind}; ${SHEETS_ARE_PLANS})`]
+  const lines = [`${entity.name} (${entity.kind}) ${statusMark(entity.status)}`]
   const fields = categoryOf(entity.kind, listCategories(project.db)).fields
   for (const field of fields) {
     const value = entity.fields[field.id]?.trim() ?? ''
@@ -361,7 +722,7 @@ function readSheet(project: AgentProject, name: unknown): ToolOutcome {
       const where = value.sources
         .flatMap((source) => (source.nodeId === null ? [] : [project.refOf.get(source.nodeId)]))
         .filter((ref): ref is string => ref !== undefined)
-      const status = value.status === 'canon' ? '' : ` [${FACT_STATUS_LABEL[value.status]}]`
+      const status = value.status === 'canon' ? '' : ` ${statusMark(value.status)}`
       return `${field.attribute}: ${value.value}${status}${where.length ? ` (${where.join(', ')})` : ''}`
     })
   )

@@ -36,7 +36,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `notesSuggest` | Notes suggestions | on request | notesSuggest.v2 | fast | 961 / 4798 | 300 / 600 | $0.000413 · $0.000912 | $0.000516 | $0.00207 | 1 | $0.000413 |
 | `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000356 · $0.000568 | $0.000445 | $0.00202 | 1 | $0.000356 |
 | `editPass` | Edit passes | on request | editPass.v1 | strong | 620 / 5161 | 1500 / 4000 | $0.000760 · $0.00276 | $0.000950 | $0.0240 | 60 | $0.0456 |
-| `agent` | Assistant lookups and edits | every chat message | agent.v5 | strong | 1555 / 11283 | 400 / 3000 | $0.000495 · $0.00363 | $0.000618 | $0.00989 | 3 | $0.00148 |
+| `agent` | Assistant lookups and edits | every chat message | agent.v6 | strong | 1664 / 11421 | 300 / 3000 | $0.000475 · $0.00366 | $0.000594 | $0.00866 | 3 | $0.00143 |
 | `contextImport` | Context library sorting | on request | contextImport.v2 | strong | 884 / 3490 | 1500 / 6000 | $0.000816 · $0.00325 | $0.00102 | $0.0247 | 10 | $0.00816 |
 | `reviewChat` | Upload review chat | on request | reviewChat.v2 | strong | 676 / 5618 | 300 / 3000 | $0.000268 · $0.00244 | $0.000335 | $0.00619 | 1 | $0.000268 |
 | `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000285 · $0.000690 | $0.000356 | $0.00299 | 1 | $0.000285 |
@@ -147,8 +147,8 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `agent` — Assistant lookups and edits
 
-- **When:** Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups); prose drafts stream separately.
-- **Ideas:** Fewer steps via better first retrieval; cap tool results harder; fast tier for lookup steps, strong only for the answer.
+- **When:** Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups; since agent.v6 a ladder: lookup ≤ 1,200 characters, scene cards ~100 tokens each, local passage search, whole scenes last); prose drafts stream separately.
+- **Ideas:** Check the agent.v6 ladder against the ledger (fixtures: a fact question: the answer step 44 % less input than v5, the whole three-request run 25 % less); fast tier for lookup steps, strong only for the answer; answer a lookup-only question in one step.
 
 ### `contextImport` — Context library sorting
 

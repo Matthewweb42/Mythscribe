@@ -4,6 +4,7 @@ import {
   AGENT_CARET_CHARS,
   AGENT_MAX_STEPS,
   AGENT_NOTES_CHARS,
+  AGENT_READ_CHARS,
   AGENT_RESULT_CHARS,
   AGENT_SELECTION_CHARS
 } from '@shared/agent'
@@ -243,6 +244,7 @@ import {
 } from '../prompts/organise.v2'
 import { buildAgentPromptV4 } from '../prompts/agent.v4'
 import { buildAgentPromptV5 } from '../prompts/agent.v5'
+import { buildAgentPromptV6 } from '../prompts/agent.v6'
 import {
   ORGANISE_CHUNK_CHARS,
   ORGANISE_INSTRUCTION_MAX,
@@ -3093,6 +3095,101 @@ const AGENT_TODO_STEP = {
     '[Gap] Mara Vell: 3 scenes are told from Mara Vell\u2019s point of view, but no goal is stated. (n2)'
 }
 
+/** F-5.24: an agent.v6 step, fitted as the feature fits it. */
+function agentCaseV6(
+  name: string,
+  note: string,
+  input: BuildAgentPromptV3Input,
+  scoring: EvalCase['scoring']
+): EvalCase {
+  const built = fitAgentPrompt(input, buildAgentPromptV6)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring
+  }
+}
+
+/** F-5.24: what `lookup` hands back for Mara in the fixture book (the record at now, ~1,000 characters). */
+const AGENT_LOOKUP_STEP = {
+  call: '{"tool":"lookup","args":{"name":"Mara"}}',
+  result:
+    'Result of lookup:\nMara Vell (character) [canon]; also Mara; as of n7 (now)\n' +
+    'Role: The ferry keeper’s daughter\n' +
+    'Age: 19 (n3)\n' +
+    'Appearance: Dark hair, a burn across the left hand; ink on her fingers (n3)\n' +
+    'Personality: Patient, never raises her voice; counts when she is afraid (n7)\n' +
+    'Relations: Family of Pell “brother” (n3); Enemy of Tomas (n7)\n' +
+    'Open threads: The mill ledger: who copied it? (n3)\n' +
+    'Named in 9 scenes (4 up to now): first n3 ¶0, last n21 ¶4\n' +
+    'Last seen n7 Chapter 1 › The ferry landing (now: the scene the author is at):\n' +
+    'Who: Mara Vell, Tomas; Where: the ferry landing; When: night, before the thaw; POV: Mara\n' +
+    'Changed: Mara admits her brother only copied the mill ledger, and names the elm.\n' +
+    'Threads: The mill ledger (advanced)'
+}
+
+/** F-5.24: what `find_passages` hands back for "ledger copied" (8 paragraphs of the local index). */
+const AGENT_PASSAGES_STEP = {
+  call: '{"tool":"find_passages","args":{"query":"ledger copied"}}',
+  result:
+    'Result of find_passages:\n' +
+    'n7 ¶10 (now: the scene the author is at): "He took nothing. He copied it."\n' +
+    'n7 ¶9 (now: the scene the author is at): "He took the ledger," Tomas said. "I want it back before the thaw."\n' +
+    'n3 ¶2 (before now: has happened): Pell copied the mill ledger by lamplight, every column, and …\n' +
+    'n3 ¶5 (before now: has happened): …wrapped the copy in oilcloth and buried it under the elm in the north pasture.\n' +
+    'n3 ¶1 (before now: has happened): The ledger lay open on the mill desk where Tomas had left it.\n' +
+    'n7 ¶11 (now: the scene the author is at): …"Then the copy," he said. "And we forget the rest."\n' +
+    'n12 ¶3 (after now: has not happened yet): Tomas burned the ledger page by page and …\n' +
+    'n15 ¶7 (after now: has not happened yet): …the copy was the only proof left, and Mara knew it.'
+}
+
+/**
+ * F-5.24: the same fact question as agent.v5 answered it: `search` (eight scenes with their
+ * summaries) and one `read_scene` of a typical 2,000-word scene (the first 6,000 characters).
+ */
+const AGENT_FACT_SEARCH_STEP = {
+  call: '{"tool":"search","args":{"query":"ledger copied"}}',
+  result:
+    'Result of search:\nScenes:\n' +
+    [
+      ['n7', 'Chapter 1 › The ferry landing', 'now: the scene the author is at'],
+      ['n3', 'Chapter 1 › The mill', 'before now: has happened'],
+      ['n9', 'Chapter 2 › The elm', 'after now: has not happened yet'],
+      ['n12', 'Chapter 2 › The fire', 'after now: has not happened yet'],
+      ['n4', 'Chapter 1 › Lamplight', 'before now: has happened'],
+      ['n15', 'Chapter 3 › Harrow Ford', 'after now: has not happened yet'],
+      ['n5', 'Chapter 1 › The thaw', 'before now: has happened'],
+      ['n18', 'Chapter 3 › The far bank', 'after now: has not happened yet']
+    ]
+      .map(
+        ([ref, title, when]) =>
+          `${ref} ${title} (${when}): Mara meets Tomas at the ferry landing. He wants the mill ` +
+          'ledger back before the thaw; she tells him her brother only copied it, and walks off ' +
+          'without saying where the copy is, though she names the elm in the north pasture.'
+      )
+      .join('\n')
+}
+const AGENT_FACT_READ_STEP = {
+  call: '{"tool":"read_scene","args":{"id":"n3","from":0}}',
+  result:
+    'Result of read_scene:\nn3 Chapter 1 › The mill (before now: has happened), characters ' +
+    `0–6000 of 11240:\n${FIXTURE_PASSAGE.repeat(4).slice(0, AGENT_READ_CHARS)}\n` +
+    '(continues; read on with "from":6000)'
+}
+/** F-5.24: the lookup of a sheet that plans a death after now, marked canon as every author sheet is. */
+const AGENT_PLAN_LOOKUP_STEP = {
+  call: '{"tool":"lookup","args":{"name":"Pell"}}',
+  result:
+    'Result of lookup:\nPell (character) [canon]; as of n7 (now)\n' +
+    'Role: Mara’s brother, keeper of the mill ledger\n' +
+    'Background: Dies in the war at Harrow Ford, defending the ferry.\n' +
+    'Relations: Family of Mara Vell “brother” (n3)\n' +
+    'Named in 6 scenes (2 up to now): first n3 ¶0, last n15 ¶2'
+}
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -4715,6 +4812,121 @@ export const EVAL_CASES: EvalCase[] = [
       history: CHAT_HISTORY,
       message: "What's left to figure out?",
       steps: [AGENT_TODO_STEP],
+      final: false,
+      retry: true
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV5(
+    'fact',
+    'the baseline of agent.v6’s fact case: the answer step after a search and one read_scene of a typical scene',
+    {
+      access: 'read',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: [],
+      message: 'Who copied the mill ledger, and where is the copy?',
+      steps: [AGENT_FACT_SEARCH_STEP, AGENT_FACT_READ_STEP],
+      final: false
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  // agent.v6 (F-5.24): the lookup ladder (lookup, cards, find_passages, read_scene last) and the
+  // canon / plan / idea labels.
+  agentCaseV6(
+    'fresh',
+    'a read run with no document open: a question about a named character, a lookup call',
+    {
+      access: 'read',
+      voice: null,
+      map: renderStoryMap(
+        STORY_MAP_ITEMS,
+        { nowId: 's3', basis: 'latest' },
+        STORY_MAP_TOKEN_BUDGET
+      ),
+      focus: null,
+      history: [],
+      message: 'Who is Mara’s brother?',
+      steps: [],
+      final: false
+    },
+    { kind: 'agent', expected: 'tool' }
+  ),
+  agentCaseV6(
+    'lookup',
+    'a lookup-only question: the step after one lookup, which already holds the answer',
+    {
+      access: 'read',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: [],
+      message: 'Who is Mara’s brother?',
+      steps: [AGENT_LOOKUP_STEP],
+      final: false
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV6(
+    'fact',
+    'a typical fact question: the answer step after a lookup and find_passages (compare agent.v5 fact)',
+    {
+      access: 'read',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: [],
+      message: 'Who copied the mill ledger, and where is the copy?',
+      steps: [AGENT_LOOKUP_STEP, AGENT_PASSAGES_STEP],
+      final: false
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV6(
+    'plan',
+    'the status check: Pell’s canon sheet says he dies in the war, which no scene up to now shows, and the author asks whether he is alive',
+    {
+      access: 'read',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: [],
+      message: 'Is Pell still alive at this point?',
+      steps: [AGENT_PLAN_LOOKUP_STEP],
+      final: true
+    },
+    {
+      kind: 'storyTime',
+      forbidden: ['\\bpell (is|was) dead\\b', '\\bpell (has )?died\\b', '\\bpell was killed\\b']
+    }
+  ),
+  agentCaseV6(
+    'maxed',
+    'the last step of a write run as the fit leaves it: the story map at its budget, every focus part at its cap, six lookups of full results, and the final turn',
+    {
+      access: 'write',
+      voice: null,
+      map: MAXED_STORY_MAP,
+      focus: AGENT_MAXED_FOCUS,
+      history: CHAT_HISTORY,
+      message: FIXTURE_PASSAGE.repeat(3).slice(0, 2_000),
+      steps: Array.from({ length: AGENT_MAX_STEPS }, () => AGENT_MAXED_STEP),
+      final: true
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV6(
+    'retry',
+    'the one retry of a write step whose reply was cut off: the fact case plus the retry turn, at the larger cap',
+    {
+      access: 'write',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: CHAT_HISTORY,
+      message: 'Who copied the mill ledger, and where is the copy?',
+      steps: [AGENT_LOOKUP_STEP, AGENT_PASSAGES_STEP],
       final: false,
       retry: true
     },

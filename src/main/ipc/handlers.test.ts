@@ -1194,7 +1194,8 @@ describe('sceneMeta:get / sceneMeta:set (F-4.5)', () => {
     brief: { ...EMPTY_SCENE_BRIEF, goal: 'Cross the river tonight.' },
     synopsis: 'Mara bargains for a crossing.',
     status: 'idea' as const,
-    beats: { threeAct: 'inciting-incident' }
+    beats: { threeAct: 'inciting-incident' },
+    notesStatus: 'canon' as const
   }
 
   it('reports NO_PROJECT for both when nothing is open', async () => {

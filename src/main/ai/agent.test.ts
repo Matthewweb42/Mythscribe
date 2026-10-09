@@ -3,7 +3,14 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { estimateTokens, inputBudget, priceFor } from '@shared/ai'
-import { AGENT_CUT_OFF_MESSAGE, AGENT_MAX_STEPS, type AgentStep } from '@shared/agent'
+import {
+  AGENT_CUT_OFF_MESSAGE,
+  AGENT_MAX_STEPS,
+  AGENT_CARDS_MAX,
+  AGENT_LOOKUP_CHARS,
+  AGENT_TOOLS_V5,
+  type AgentStep
+} from '@shared/agent'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { emptySceneMeta } from '@shared/sceneMeta'
 import type { TiptapNodeT } from '@shared/tiptap'
@@ -11,11 +18,12 @@ import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { createEntity } from '../entity/entityStore'
+import { addAuthorStatement, applySceneFacts } from '../entity/factStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { setAiSettings, setAuthorRules } from '../project/settingsStore'
 import { createSeededProject } from '../project/testProject'
 import { createTag } from '../tag/tagStore'
-import type { TreeDb } from '../tree/treeStore'
+import { createNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { manuscriptDocuments } from '../voice/profile'
 import {
@@ -32,8 +40,8 @@ import {
 } from './agent'
 import {
   AGENT_TODO_ITEMS,
-  NOTES_ARE_PLANS,
   SHEETS_ARE_PLANS,
+  statusMark,
   loadAgentProject,
   occurrencesOf,
   resolveAgentEdit,
@@ -42,11 +50,11 @@ import {
 import { todoItem } from '../db/schema'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
-import { AGENT_FINAL_TURN, AGENT_RULES } from './prompts/agent.v1'
+import { AGENT_FINAL_TURN } from './prompts/agent.v1'
 import { AGENT_EDIT_RULES_V2, AGENT_RETRY_TURN } from './prompts/agent.v2'
-import { AGENT_TIME_RULES } from './prompts/agent.v3'
 import { AGENT_ORGANISE_RULES } from './prompts/agent.v4'
-import { AGENT_TODO_RULES } from './prompts/agent.v5'
+import { AGENT_LADDER_RULES, AGENT_RULES_V6, AGENT_STATUS_RULES } from './prompts/agent.v6'
+import { scanMentions } from '../tag/scanMentions'
 import { STORY_MAP_HEADING } from '@shared/storyTime'
 import {
   AiCancelledError,
@@ -174,8 +182,9 @@ afterEach(() => {
 
 describe('runAgent (F-5.22)', () => {
   it('looks things up step by step, shows each step, then answers with verified citations', async () => {
+    scanMentions(db, scenes[0]!, NOW)
     replies(
-      { tool: 'search', args: { query: 'ledger' } },
+      { tool: 'find_passages', args: { query: 'ledger' } },
       { tool: 'read_scene', args: { id: ref(scenes[0]) } },
       {
         answer: 'Under the elm in the north pasture. [1]',
@@ -184,8 +193,8 @@ describe('runAgent (F-5.22)', () => {
       }
     )
     const result = await run()
-    expect(steps.map((s) => s.tool)).toEqual(['search', 'read_scene'])
-    expect(steps[0]?.label).toBe('Searching “ledger”…')
+    expect(steps.map((s) => s.tool)).toEqual(['find_passages', 'read_scene'])
+    expect(steps[0]?.label).toBe('Finding passages…')
     expect(steps[1]?.label).toMatch(/^Reading .+…$/)
     expect(result.steps).toEqual(steps)
     expect(result.answer).toBe('Under the elm in the north pasture. [1]')
@@ -201,17 +210,17 @@ describe('runAgent (F-5.22)', () => {
     expect(request(0)).toMatchObject({ tier: 'strong', json: true, maxTokens: 1_500 })
     // The open document is in every step; the tool results join as turns.
     const system = request(0).messages[0]?.content ?? ''
-    expect(system.startsWith(AGENT_RULES)).toBe(true)
+    expect(system.startsWith(AGENT_RULES_V6)).toBe(true)
     expect(system).not.toContain(AGENT_EDIT_RULES_V2)
     expect(system).toContain(`Open document ${ref(scenes[0])}:`)
     // F-5.23 (agent.v3): the story-time rule, then the story map with now on the open scene,
-    // before the open document. F-9.10: version 4 adds the organise rule; F-9.16: version 5 the
-    // To do tool.
-    expect(result.promptVersion).toBe('agent.v5')
+    // before the open document. F-9.10: version 4 adds the organise rule; F-5.24: version 6 the
+    // lookup ladder and the status labels.
+    expect(result.promptVersion).toBe('agent.v6')
     expect(system).toContain(AGENT_ORGANISE_RULES)
-    expect(system).toContain(AGENT_TODO_RULES)
+    expect(system).toContain(AGENT_LADDER_RULES)
     expect(result.organise).toBeNull()
-    expect(system).toContain(AGENT_TIME_RULES)
+    expect(system).toContain(AGENT_STATUS_RULES)
     expect(system).toContain(STORY_MAP_HEADING)
     expect(system).toMatch(new RegExp(`${ref(scenes[0])} [^\\n]*\\[drafted\\] ▶ NOW`))
     expect(system.indexOf(STORY_MAP_HEADING)).toBeLessThan(system.indexOf('Open document'))
@@ -634,7 +643,7 @@ describe('the agent tools (F-5.22)', () => {
     createTag(db, { name: 'grim', category: 'tone' })
     const project = loadAgentProject(db)
     expect(runAgentTool(project, null, 'read_notes', { id: ref(scenes[0]) }).result).toBe(
-      `${project.titleOf(scenes[0]!)} (${NOTES_ARE_PLANS}):\n` +
+      `${project.titleOf(scenes[0]!)}, the author's notes [plan]:\n` +
         'Synopsis: Mara hides the copy.\nNotes:\nKeep the elm visible.'
     )
     const sheet = runAgentTool(project, null, 'read_sheet', { name: 'mara' })
@@ -662,8 +671,15 @@ describe('the agent tools (F-5.22)', () => {
     const outline = runAgentTool(project, null, 'outline', {}).result
     expect(outline).toMatch(new RegExp(`${ref(scenes[1])} [^\n]*▶ NOW`))
     const sheet = runAgentTool(project, null, 'read_sheet', { name: 'Pell' }).result
-    expect(sheet.split('\n')[0]).toBe(`Pell (character; ${SHEETS_ARE_PLANS})`)
-    const search = runAgentTool(project, null, 'search', { query: 'ledger Pell' }).result
+    expect(sheet.split('\n')[0]).toBe('Pell (character) [canon]')
+    // agent.v5's search (no longer in agent.v6's tools) keeps its wording.
+    const search = runAgentTool(
+      project,
+      null,
+      'search',
+      { query: 'ledger Pell' },
+      AGENT_TOOLS_V5
+    ).result
     expect(search).toContain(
       `${ref(scenes[0])} ${project.titleOf(scenes[0]!)} (before now: has happened)`
     )
@@ -719,6 +735,180 @@ describe('the agent tools (F-5.22)', () => {
     const capped = runAgentTool(loadAgentProject(db), null, 'todo', {}).result
     expect(capped.split('\n').filter((line) => line.startsWith('['))).toHaveLength(AGENT_TODO_ITEMS)
     expect(capped).toContain('…and 7 more.')
+  })
+
+  it('keeps agent.v5’s search and read_summary out of agent.v6’s tools (F-5.24)', () => {
+    const project = loadAgentProject(db)
+    for (const tool of ['search', 'read_summary']) {
+      expect(
+        runAgentTool(project, null, tool, { query: 'ledger', id: ref(scenes[0]) }).result
+      ).toBe(`There is no tool "${tool}". Use one of the tools listed.`)
+    }
+    expect(
+      runAgentTool(project, null, 'read_summary', { id: ref(scenes[0]) }, AGENT_TOOLS_V5).step.tool
+    ).toBe('read_summary')
+  })
+
+  it('looks a record up as of now: the sheet with what the scenes state, relations, threads, where it is named, the last card (F-5.24)', () => {
+    const mara = createEntity(db, {
+      kind: 'character',
+      name: 'Mara',
+      fields: { appearance: 'Tall.' }
+    }).entity
+    const tomas = createEntity(db, { kind: 'character', name: 'Tomas' }).entity
+    const thread = createEntity(db, { kind: 'thread', name: 'The copied ledger' }).entity
+    saveDocument(db, scenes[2]!, doc('Years later Mara had a scar.'))
+    for (const id of scenes) scanMentions(db, id, NOW)
+    applySceneFacts(
+      db,
+      scenes[0]!,
+      [{ entityId: mara.id, attribute: 'appearance', value: 'Ink on her fingers', quote: QUOTE }],
+      LEDGER
+    )
+    // Stated after now (now is the second scene): left out.
+    applySceneFacts(
+      db,
+      scenes[2]!,
+      [{ entityId: mara.id, attribute: 'appearance', value: 'A scar', quote: 'Mara had a scar' }],
+      'Years later Mara had a scar.'
+    )
+    addAuthorStatement(db, {
+      entityId: mara.id,
+      attribute: 'relation:mentor',
+      value: '',
+      objectEntityId: tomas.id,
+      nodeId: scenes[0]!
+    })
+    addAuthorStatement(db, {
+      entityId: thread.id,
+      attribute: 'thread:opened',
+      value: 'Who copied it?',
+      objectEntityId: null,
+      nodeId: scenes[0]!
+    })
+    const project = loadAgentProject(db, scenes[1])
+    const r = (id: string | undefined): string => project.refOf.get(id ?? '') ?? ''
+    const found = runAgentTool(project, null, 'lookup', { name: 'mara' })
+    expect(found.step).toEqual({ tool: 'lookup', label: 'Looking up mara…' })
+    const lines = found.result.split('\n')
+    expect(lines[0]).toBe(`Mara (character) [canon]; as of ${r(scenes[1])} (now)`)
+    expect(found.result).toContain(`Appearance: Tall.; Ink on her fingers (${r(scenes[0])})`)
+    expect(found.result).not.toContain('A scar')
+    expect(found.result).toContain(`Relations: Mentor of Tomas (${r(scenes[0])})`)
+    expect(found.result).toContain(
+      `Open threads: The copied ledger: Who copied it? (${r(scenes[0])})`
+    )
+    expect(found.result).toContain(
+      `Named in 3 scenes (2 up to now): first ${r(scenes[0])} ¶0, last ${r(scenes[2])} ¶0`
+    )
+    expect(found.result).toContain(`Last seen ${r(scenes[1])} `)
+    expect(found.result).toContain('Who: Mara')
+
+    const other = runAgentTool(project, null, 'lookup', { name: 'Tomas' }).result
+    expect(other).toContain(`Relations: Mentored by Mara (${r(scenes[0])})`)
+    expect(other).toContain(`Named in 1 scene (1 up to now): first ${r(scenes[0])} ¶0`)
+    createEntity(db, { kind: 'character', name: 'Pell' })
+    expect(runAgentTool(loadAgentProject(db), null, 'lookup', { name: 'Pell' }).result).toContain(
+      'Named in no scene yet.'
+    )
+    const own = runAgentTool(project, null, 'lookup', { name: 'The copied ledger' }).result
+    expect(own).toContain(`Thread: open; question: Who copied it?; set up (${r(scenes[0])})`)
+    expect(runAgentTool(project, null, 'lookup', { name: 'Nobody' }).result).toBe(
+      'No record is called "Nobody". Try find_passages for the words, or list_sheets.'
+    )
+    expect(runAgentTool(project, null, 'lookup', {}).result).toBe('lookup needs a "name".')
+  })
+
+  it('keeps a lookup within its cap (F-5.24)', () => {
+    createEntity(db, {
+      kind: 'character',
+      name: 'Wordy',
+      fields: { appearance: 'w'.repeat(3_000), personality: 'p'.repeat(3_000) }
+    })
+    const result = runAgentTool(loadAgentProject(db), null, 'lookup', { name: 'Wordy' }).result
+    expect(result.length).toBeLessThanOrEqual(AGENT_LOOKUP_CHARS + 1)
+    expect(result.endsWith('…')).toBe(true)
+  })
+
+  it('reads scene cards by ids or by the record a name points at, at most eight (F-5.24)', () => {
+    createEntity(db, { kind: 'character', name: 'Mara' })
+    const chapter = listNodes(db).find((row) => row.id === manuscriptDocuments(db)[0]?.parentId)
+    if (chapter === undefined) throw new Error('starter project changed')
+    for (let i = 0; i < 9; i++) {
+      const extra = createNode(db, 'novel', {
+        parentId: chapter.id,
+        kind: 'document',
+        hierarchyLevel: 'scene',
+        title: `Extra ${i}`
+      })
+      saveDocument(db, extra.id, doc(`Mara walked the ${i} mile.`))
+    }
+    for (const row of manuscriptDocuments(db)) scanMentions(db, row.id, NOW)
+    const project = loadAgentProject(db, scenes[0])
+    const r = (id: string | undefined): string => project.refOf.get(id ?? '') ?? ''
+    const byIds = runAgentTool(project, null, 'cards', { ids: [r(scenes[0]), r(scenes[1])] })
+    expect(byIds.step).toEqual({ tool: 'cards', label: 'Reading 2 scene cards…' })
+    expect(byIds.result).toContain(
+      `${r(scenes[0])} ${project.titleOf(scenes[0]!)} (now: the scene the author is at)\nWho: Mara`
+    )
+    // A string of refs works too; a ref that names no scene is skipped.
+    expect(runAgentTool(project, null, 'cards', { ids: `${r(scenes[1])}, n9999` }).step.label).toBe(
+      'Reading 1 scene card…'
+    )
+    const byName = runAgentTool(project, null, 'cards', { name: 'Mara' })
+    expect(byName.step.label).toBe(`Reading ${AGENT_CARDS_MAX} scene cards…`)
+    expect(byName.result).toContain('…and 3 more scenes; name their ids for their cards.')
+    expect(runAgentTool(project, null, 'cards', { name: 'Nobody' }).result).toBe(
+      'No record is called "Nobody". Try find_passages, or name the scene ids.'
+    )
+    expect(runAgentTool(project, null, 'cards', {}).result).toBe(
+      'cards needs "ids" (scene ids) or a "name".'
+    )
+  })
+
+  it('finds passages in the local index with their paragraph and position, and reads on from a paragraph (F-5.24)', () => {
+    saveDocument(db, scenes[1]!, doc(QUIET, 'The ledger was gone by morning.', 'Nobody spoke.'))
+    for (const id of scenes) scanMentions(db, id, NOW)
+    const project = loadAgentProject(db, scenes[1])
+    const r = (id: string | undefined): string => project.refOf.get(id ?? '') ?? ''
+    const found = runAgentTool(project, null, 'find_passages', { query: 'ledger' })
+    expect(found.step).toEqual({ tool: 'find_passages', label: 'Finding passages…' })
+    const lines = found.result.split('\n')
+    expect(lines).toHaveLength(2)
+    expect(lines).toContain(
+      `${r(scenes[1])} ¶1 (now: the scene the author is at): The ledger was gone by morning.`
+    )
+    expect(found.result).toContain(`${r(scenes[0])} ¶0 (before now: has happened): `)
+    expect(runAgentTool(project, null, 'find_passages', { query: 'zeppelin' }).result).toBe(
+      'No passage matches. Try other words, or look the name up.'
+    )
+    expect(runAgentTool(project, null, 'find_passages', { query: ' ' }).result).toBe(
+      'find_passages needs a "query".'
+    )
+    const read = runAgentTool(project, null, 'read_scene', { id: r(scenes[1]), para: 1 }).result
+    expect(read).toBe(
+      `${r(scenes[1])} ${project.titleOf(scenes[1]!)} (now: the scene the author is at), ¶1–¶2 of 3:\n` +
+        'The ledger was gone by morning.\n\nNobody spoke.'
+    )
+  })
+
+  it('pages a long scene by paragraph (F-5.24)', () => {
+    const para = 'x'.repeat(2_500)
+    saveDocument(db, scenes[1]!, doc(para, para, para, para))
+    const project = loadAgentProject(db)
+    const read = runAgentTool(project, null, 'read_scene', { id: ref(scenes[1]), para: 0 }).result
+    expect(read).toContain('¶0–¶1 of 4:')
+    expect(read).toContain('(continues; read on with "para":2)')
+  })
+
+  it('marks the notes with their status (F-5.24)', () => {
+    setSceneMeta(db, scenes[0]!, { ...emptySceneMeta(), notesStatus: 'canon' })
+    saveNotes(db, scenes[0]!, doc('The elm is real.'))
+    const project = loadAgentProject(db)
+    expect(runAgentTool(project, null, 'read_notes', { id: ref(scenes[0]) }).result).toContain(
+      `${project.titleOf(scenes[0]!)}, the author's notes [canon]:`
+    )
+    expect(statusMark('idea')).toBe('[idea]')
   })
 
   it('counts a passage the way quotes are matched', () => {

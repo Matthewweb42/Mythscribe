@@ -58,7 +58,8 @@ const filled: SceneMeta = {
   brief: EMPTY_SCENE_BRIEF,
   synopsis: 'Mara reaches the river.',
   status: 'draft',
-  beats: { saveTheCat: 'catalyst' }
+  beats: { saveTheCat: 'catalyst' },
+  notesStatus: 'canon'
 }
 
 function expectCode(fn: () => unknown, code: AppError['code']): void {

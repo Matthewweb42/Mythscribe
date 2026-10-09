@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { FactStatus } from './facts'
 import { STRUCTURE_BEAT_ID_MAX, StructureTemplateId } from './structure'
 import { TIMELINE_EVENT_ID_MAX } from './timeline'
 
@@ -107,7 +108,14 @@ export const SceneMeta = z.object({
    * Optional, not defaulted: absent means unlinked, and an id that names no manuscript document
    * reads as unlinked. Never reaches a prompt (`promptSceneMeta` leaves it out).
    */
-  fulfilledBy: z.string().max(SCENE_FULFILLED_BY_MAX).optional()
+  fulfilledBy: z.string().max(SCENE_FULFILLED_BY_MAX).optional(),
+  /**
+   * F-5.24: where the node's notes stand (D7): `plan` (the default: the author's intent, not on
+   * the page yet), `canon` (true of the story as written), or `idea` (a maybe). The chat agent
+   * labels the notes with it; the picker sits beside the notes' heading. Defaulted, so a row
+   * stored before it parses (no migration). Never reaches a prompt through `promptSceneMeta`.
+   */
+  notesStatus: FactStatus.default('plan')
 })
 export type SceneMeta = z.infer<typeof SceneMeta>
 
@@ -118,7 +126,8 @@ export const EMPTY_SCENE_META: SceneMeta = {
   brief: EMPTY_SCENE_BRIEF,
   synopsis: '',
   status: 'none',
-  beats: {}
+  beats: {},
+  notesStatus: 'plan'
 }
 
 /** A fresh empty metadata record, no object shared with `EMPTY_SCENE_META`. */
@@ -130,7 +139,8 @@ export function emptySceneMeta(): SceneMeta {
     brief: { ...EMPTY_SCENE_BRIEF },
     synopsis: '',
     status: 'none',
-    beats: {}
+    beats: {},
+    notesStatus: 'plan'
   }
 }
 

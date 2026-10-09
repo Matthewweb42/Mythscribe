@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AGENT_RETRY_MAX_TOKENS, AGENT_STEP_MAX_TOKENS, AGENT_TOOLS } from '@shared/agent'
+import { AGENT_RETRY_MAX_TOKENS, AGENT_STEP_MAX_TOKENS, AGENT_TOOLS_V5 } from '@shared/agent'
 import { AGENT_FINAL_TURN, AGENT_RULES } from './agent.v1'
 import { AGENT_EDIT_RULES_V2, AGENT_RETRY_TURN } from './agent.v2'
 import { AGENT_TIME_RULES } from './agent.v3'
@@ -8,7 +8,7 @@ import { AGENT_PROMPT_V5_VERSION, AGENT_TODO_RULES, buildAgentPromptV5 } from '.
 
 describe('agent.v5 prompt (F-9.16 To do list)', () => {
   it('names every tool between the shared rules and the To do paragraph', () => {
-    for (const tool of AGENT_TOOLS) {
+    for (const tool of AGENT_TOOLS_V5) {
       expect(`${AGENT_RULES}\n${AGENT_TODO_RULES}`).toContain(`- ${tool} {`)
     }
     expect(AGENT_TODO_RULES).toContain('never resolve one or fill a gap with your own idea')

@@ -26,6 +26,12 @@ export const AGENT_READ_CHARS = 6_000
 export const AGENT_RESULT_CHARS = 6_000
 /** Scenes one `search` names. */
 export const AGENT_SEARCH_RESULTS = 8
+/** Characters one `lookup` result may take (F-5.24): the record at now, in brief. */
+export const AGENT_LOOKUP_CHARS = 1_200
+/** Scene cards one `cards` call returns (F-5.24); about 100 tokens each. */
+export const AGENT_CARDS_MAX = 8
+/** Passages one `find_passages` call names (F-5.24). */
+export const AGENT_PASSAGE_RESULTS = 8
 /** The open document's text before the caret that rides along with every message. */
 export const AGENT_CARET_CHARS = 1_500
 /** The selected passage that rides along, cut to this many characters. */
@@ -81,8 +87,32 @@ export const AGENT_TOOLS_V1 = [
   'tags'
 ] as const
 
-/** The read tools, as the model names them; `todo` (F-9.16, agent.v5) reads the To do list. */
-export const AGENT_TOOLS = [...AGENT_TOOLS_V1, 'todo'] as const
+/** The read tools agent.v5 names (F-9.16): version 1's plus `todo`, which reads the To do list. */
+export const AGENT_TOOLS_V5 = [...AGENT_TOOLS_V1, 'todo'] as const
+
+/**
+ * The read tools agent.v6 names (F-5.24, the lookup ladder): `lookup` a named record, `cards` for
+ * which scenes, `find_passages` for exact wording, `read_scene` last. `search` and `read_summary`
+ * are gone from this version (the cards and the passage index answer them for less).
+ */
+export const AGENT_TOOLS_V6 = [
+  'lookup',
+  'cards',
+  'find_passages',
+  'outline',
+  'read_scene',
+  'read_notes',
+  'read_sheet',
+  'list_sheets',
+  'tags',
+  'todo'
+] as const
+
+/**
+ * Every read tool any version names, so a step stored with an older turn still parses; which of
+ * them one run may call is the version's own list (`AGENT_TOOLS_V6` for the run that ships).
+ */
+export const AGENT_TOOLS = [...AGENT_TOOLS_V5, 'lookup', 'cards', 'find_passages'] as const
 export const AgentTool = z.enum(AGENT_TOOLS)
 export type AgentTool = z.infer<typeof AgentTool>
 

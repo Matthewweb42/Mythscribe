@@ -35,7 +35,8 @@ describe('SceneMeta', () => {
       brief: BRIEF,
       synopsis: 'Mara wants to cross; the river says no.',
       status: 'draft',
-      beats: { threeAct: 'midpoint' }
+      beats: { threeAct: 'midpoint' },
+      notesStatus: 'idea'
     }
     expect(SceneMeta.parse(filled)).toEqual(filled)
     expect(
@@ -64,7 +65,8 @@ describe('SceneMeta', () => {
       brief: EMPTY_SCENE_BRIEF,
       synopsis: '',
       status: 'none',
-      beats: {}
+      beats: {},
+      notesStatus: 'plan'
     })
     expect(parsed.brief).not.toBe(EMPTY_SCENE_BRIEF)
   })
@@ -104,6 +106,13 @@ describe('SceneMeta', () => {
     ).toBe(false)
   })
 
+  it('reads a row stored before F-5.24 with notes as plans; keeps a set status, refuses an unknown one', () => {
+    const base = { location: '', pov: '', timeline: '' }
+    expect(SceneMeta.parse(base).notesStatus).toBe('plan')
+    expect(SceneMeta.parse({ ...base, notesStatus: 'canon' }).notesStatus).toBe('canon')
+    expect(SceneMeta.safeParse({ ...base, notesStatus: 'maybe' }).success).toBe(false)
+  })
+
   it('emptySceneMeta shares no object with EMPTY_SCENE_META', () => {
     const meta = emptySceneMeta()
     expect(meta).toEqual(EMPTY_SCENE_META)
@@ -128,14 +137,16 @@ describe('parseStoredSceneMeta', () => {
       brief: EMPTY_SCENE_BRIEF,
       synopsis: '',
       status: 'none',
-      beats: {}
+      beats: {},
+      notesStatus: 'plan'
     })
     expect(parseStoredSceneMeta(JSON.stringify({ ...filled, brief: BRIEF }))).toEqual({
       ...filled,
       brief: BRIEF,
       synopsis: '',
       status: 'none',
-      beats: {}
+      beats: {},
+      notesStatus: 'plan'
     })
   })
 

@@ -7,6 +7,7 @@ import {
   AGENT_MAX_EDITS,
   AGENT_MAX_STEPS,
   AGENT_NOTES_CHARS,
+  AGENT_TOOLS_V6,
   editProse,
   type AgentAccess,
   type AgentEdit,
@@ -45,7 +46,7 @@ import { cancelInflight, registerInflight, releaseInflight } from './inflight'
 import { renderAgentFocus, type AgentTranscriptStep } from './prompts/agent.v1'
 import type { BuildAgentPromptV2Input } from './prompts/agent.v2'
 import type { BuildAgentPromptV3Input } from './prompts/agent.v3'
-import { buildAgentPromptV5, type BuiltAgentPromptV5 } from './prompts/agent.v5'
+import { buildAgentPromptV6, type BuiltAgentPromptV6 } from './prompts/agent.v6'
 import type { ChatTurn } from './prompts/chat.v1'
 import { AiCancelledError, type CompletionUsage } from './providers/types'
 import { runAiStream, sha256, type AiRequestDeps, type AiRequestResult } from './request'
@@ -330,7 +331,7 @@ export async function runAgent(
   let promptVersion = ''
   /** Sends one step (or its retry), streaming the answer text, and adds it to the run's totals. */
   const send = async (
-    prompt: BuiltAgentPromptV5,
+    prompt: BuiltAgentPromptV6,
     requestId: string | null
   ): Promise<AiRequestResult> => {
     if (outer?.signal.aborted === true) throw new AiCancelledError('The request was stopped.')
@@ -413,7 +414,13 @@ export async function runAgent(
         }
       }
       if (parsed.kind === 'tool' && !final) {
-        const outcome = runAgentTool(project, active?.id ?? null, parsed.tool, parsed.args)
+        const outcome = runAgentTool(
+          project,
+          active?.id ?? null,
+          parsed.tool,
+          parsed.args,
+          AGENT_TOOLS_V6
+        )
         steps.push(outcome.step)
         onStep(outcome.step)
         const name = typeof parsed.tool === 'string' ? parsed.tool : 'tool'
@@ -461,18 +468,18 @@ function brokenNote(
  * The prompt for one step within `inputBudget('agent')`, measured as `runAiRequest` measures:
  * the oldest tool results give way first (the call stays, so the model knows it looked), then
  * the oldest history turns. Whatever still does not fit is refused by the request path. The
- * builder is `agent.v3`'s (F-5.23); the eval harness passes the older builders for their cases.
+ * builder is `agent.v6`'s (F-5.24); the eval harness passes the older builders for their cases.
  */
 export function fitAgentPrompt<
   I extends BuildAgentPromptV2Input,
   T extends { messages: { content: string }[] }
 >(input: I, build: (input: I) => T): T
-export function fitAgentPrompt(input: BuildAgentPromptV3Input): BuiltAgentPromptV5
+export function fitAgentPrompt(input: BuildAgentPromptV3Input): BuiltAgentPromptV6
 export function fitAgentPrompt(
   input: BuildAgentPromptV3Input,
   build: (input: BuildAgentPromptV3Input) => {
     messages: { content: string }[]
-  } = buildAgentPromptV5
+  } = buildAgentPromptV6
 ): { messages: { content: string }[] } {
   const budget = inputBudget('agent')
   const estimate = (built: { messages: { content: string }[] }): number =>

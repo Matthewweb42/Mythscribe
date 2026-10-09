@@ -550,8 +550,17 @@ const QUERY_ANSWER_TEXT = 'She waits out the storm on the ridge [1], then crosse
 /** What the answer reads once main drops the uncited scene and strips its marker. */
 const QUERY_ANSWER_KEPT = 'She waits out the storm on the ridge [1], then crosses at dawn.'
 /**
- * F-5.22: one step of the chat agent. Without a lookup made yet it searches (or reads Wren's
- * sheet for the sheet question); with one made it answers: the sheet question from the sheet,
+ * F-5.24: a question the fake agent answers down the lookup ladder: `lookup` Wren, then
+ * `find_passages`, then an answer citing the longest stretch of the first passage's snippet
+ * (recorded in `lookupQuote`), which the citation must select in the editor.
+ */
+const LOOKUP_QUESTION = 'Where was Wren when the storm reached the ridge?'
+const LOOKUP_ANSWER = 'Wren watched the storm from the window [1].'
+/** The quote the fake agent last cited from a `find_passages` snippet. */
+let lookupQuote = ''
+/**
+ * F-5.22: one step of the chat agent. Without a lookup made yet it finds passages (agent.v6,
+ * F-5.24; or reads Wren's sheet for the sheet question); with one made it answers: the sheet question from the sheet,
  * the edit message (after reading Scene 1) with one text edit replacing the first sentence of
  * at least 15 characters the scene holds exactly once, anything else with the Query answer's three
  * citations (one real, one fabricated, one naming no document) so both drop rules show.
@@ -561,14 +570,32 @@ function chatAgentReply(messages: { role: string; content: string }[]): string {
   const asked =
     [...messages].reverse().find((m) => m.role === 'user' && !m.content.startsWith('Result of '))
       ?.content ?? ''
+  if (asked === LOOKUP_QUESTION) {
+    if (looked.length === 0) return JSON.stringify({ tool: 'lookup', args: { name: 'Wren' } })
+    if (looked.length === 1) {
+      return JSON.stringify({ tool: 'find_passages', args: { query: 'window ridge storm' } })
+    }
+    const hit = /^(n\d+) ¶\d+ \([^)]*\): (.+)$/mu.exec(looked.at(-1)?.content ?? '')
+    lookupQuote =
+      (hit?.[2] ?? '')
+        .split('…')
+        .map((piece) => piece.trim())
+        .sort((a, b) => b.length - a.length)[0] ?? ''
+    return JSON.stringify({
+      found: true,
+      answer: LOOKUP_ANSWER,
+      citations: [{ id: hit?.[1] ?? 'n1', quote: lookupQuote }]
+    })
+  }
   if (looked.length === 0) {
     return asked === SHEET_QUESTION
       ? JSON.stringify({ tool: 'read_sheet', args: { name: 'Wren' } })
-      : JSON.stringify({ tool: 'search', args: { query: 'storm ridge window' } })
+      : JSON.stringify({ tool: 'find_passages', args: { query: 'storm ridge window' } })
   }
   if (asked === SHEET_QUESTION) return SHEET_ANSWER
   const seen = [...messages.map((m) => m.content)].join('\n')
-  const ref = /(n\d+) Chapter 1 › Scene 1\b/.exec(seen)?.[1] ?? 'n1'
+  // The open document's line (`Open document n3: Chapter 1 › Scene 1`) or a read's head.
+  const ref = /(n\d+):? Chapter 1 › Scene 1\b/.exec(seen)?.[1] ?? 'n1'
   // 2026-10-07: Write this sends a direction to the agent, which answers with one insertion at
   // the caret of Scene 1: a brief (agent.v2), whose prose the app drafts and lands as ghost text.
   if (asked.startsWith('Continue the scene in this direction:')) {
@@ -5469,7 +5496,7 @@ test('create, close, reopen a project on disk', async () => {
   expect(querySystem?.content).toMatch(/n\d+ Scene 1 \[(drafted|revised)\] ▶ NOW/)
   expect(openAiChatBodies.at(-2)?.messages.at(-1)?.content).toBe(QUERY_QUESTION)
   expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toMatch(
-    /^Result of search:\nScenes:\nn\d+ Chapter 1 › Scene 1 \((now|before now|after now)[^)]*\): /
+    /^Result of find_passages:\nn\d+ ¶\d+ \((now|before now|after now)[^)]*\): /
   )
   const afterQuery = await usageSummary()
   expect(afterQuery.byFeature.find((f) => f.feature === 'agent')).toMatchObject({
@@ -5519,6 +5546,35 @@ test('create, close, reopen a project on disk', async () => {
   expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toContain(
     `appearance (Appearance): ${SHEET_APPEARANCE}`
   )
+  // F-5.24: the lookup ladder. The agent looks Wren up (her record at now, ≤ 1,200 characters),
+  // then finds passages in the local index, then answers citing a snippet's words; the step
+  // labels show live, and the citation selects the passage in its scene.
+  const ladderBodiesBefore = openAiChatBodies.length
+  await messageBox.fill(LOOKUP_QUESTION)
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(8)
+  const ladderTurn = turns.nth(7)
+  await expect(ladderTurn).toContainText('Wren watched the storm from the window')
+  // The router's request, then the agent's three steps.
+  expect(openAiChatBodies).toHaveLength(ladderBodiesBefore + 4)
+  expect(openAiChatBodies.at(-2)?.messages.at(-1)?.content).toMatch(
+    /^Result of lookup:\nWren \(character\) \[canon\]; as of /
+  )
+  expect(openAiChatBodies.at(-1)?.messages.at(-1)?.content).toMatch(
+    /^Result of find_passages:\nn\d+ ¶\d+ \(/
+  )
+  expect(lookupQuote.length).toBeGreaterThan(10)
+  await ladderTurn.getByText('Looked up 2 things').click()
+  await expect(ladderTurn.getByTestId('agent-step')).toHaveText([
+    'Looking up Wren…',
+    'Finding passages…'
+  ])
+  const ladderCitation = ladderTurn.getByTestId('query-citation')
+  await expect(ladderCitation).toHaveCount(1)
+  await ladderCitation.click()
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''), { timeout: 5_000 })
+    .toBe(lookupQuote)
   const removed = await page.evaluate(
     (id) => window.mythscribe.invoke('entity:delete', { id }) as Promise<IpcResult<null>>,
     wren.data.id
@@ -5548,7 +5604,7 @@ test('create, close, reopen a project on disk', async () => {
   // The lookups it made fold away under the answer and open on a click.
   await editTurn.getByText('Looked up 2 things').click()
   await expect(editTurn.getByTestId('agent-step')).toHaveText([
-    'Searching “storm ridge window”…',
+    'Finding passages…',
     'Reading Chapter 1 › Scene 1…'
   ])
   await editCard.getByTestId('agent-change-apply').click()
@@ -5685,7 +5741,8 @@ test('create, close, reopen a project on disk', async () => {
   await expect(assistant).toBeVisible()
   // Back to the Query conversation the steps below continue.
   await assistant.getByRole('tab', { name: QUERY_QUESTION }).click()
-  await expect(turns).toHaveCount(6)
+  // Eight turns: the question, the recap, the sheet question, and the lookup-ladder question (F-5.24).
+  await expect(turns).toHaveCount(8)
 
   // F-15.4: MythScribe Cloud does not serve AI yet (`CLOUD_AI_AVAILABLE`, decided by the author
   // 2026-10-07), so no request goes through the fake Worker; the adapter's refusal, the NOT_FOUND
@@ -5719,9 +5776,9 @@ test('create, close, reopen a project on disk', async () => {
   const localBodiesBefore = openAiChatBodies.length
   await messageBox.fill('What is the storm doing?')
   await messageBox.press('Enter')
-  await expect(turns).toHaveCount(8)
-  await expect(turns.nth(7)).toContainText(QUERY_ANSWER_KEPT)
-  await expect(turns.nth(7).getByTestId('chat-turn-cost')).toContainText('$0.0000')
+  await expect(turns).toHaveCount(10)
+  await expect(turns.nth(9)).toContainText(QUERY_ANSWER_KEPT)
+  await expect(turns.nth(9).getByTestId('chat-turn-cost')).toContainText('$0.0000')
   // The router's request, then the agent's two steps, all to the local server.
   expect(openAiChatBodies).toHaveLength(localBodiesBefore + 3)
   await page.getByRole('button', { name: 'Settings' }).click()

@@ -21,7 +21,7 @@ import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetDocumentStore } from './documentStore'
 import { NotesPanel, NotesToggleButton } from './NotesPanel'
 import { resetNotesStore } from './notesStore'
-import { resetSceneMetaStore } from './sceneMetaStore'
+import { resetSceneMetaStore, useSceneMetaStore } from './sceneMetaStore'
 import { resetSummaryStore } from './summaryStore'
 
 const doc = (text: string): TiptapNodeT => ({
@@ -252,6 +252,23 @@ describe('NotesPanel (F-3.7)', () => {
     // The synopsis is the box at the top, never repeated in the details.
     expect(screen.getAllByRole('textbox', { name: 'Synopsis' })).toHaveLength(1)
     expect(metadata).not.toContainElement(synopsis)
+  })
+
+  it('shows where the notes stand, Plan by default, and the picker edits the node’s metadata (F-5.24)', async () => {
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    openNotes()
+    render(<Host id="sc-1" />)
+    const picker = screen.getByRole('combobox', { name: 'Notes status' })
+    await waitFor(() => expect(picker).toBeEnabled())
+    expect(picker).toHaveValue('plan')
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Canon',
+      'Plan',
+      'Idea'
+    ])
+    await userEvent.selectOptions(picker, 'canon')
+    expect(picker).toHaveValue('canon')
+    expect(useSceneMetaStore.getState().docs['sc-1']?.content?.notesStatus).toBe('canon')
   })
 
   it('has notes only, no synopsis or details, for a node without a hierarchy level', () => {

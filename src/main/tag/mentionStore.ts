@@ -33,6 +33,32 @@ export function listAllMentions(db: TreeDb): TagMentions[] {
   return rows(db.select().from(tagMention).all())
 }
 
+/**
+ * F-5.24: per document that mentions the tag, the paragraph index of each mention, in range
+ * order (`tag_mention.paragraphs`). A cell that does not parse reads as no paragraphs, never a
+ * throw; a row written before F-9.12 holds `[]`.
+ */
+export function mentionParagraphsForTag(db: TreeDb, tagId: string): Map<string, number[]> {
+  const found = new Map<string, number[]>()
+  for (const row of db
+    .select({ nodeId: tagMention.nodeId, paragraphs: tagMention.paragraphs })
+    .from(tagMention)
+    .where(eq(tagMention.tagId, tagId))
+    .all()) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(row.paragraphs)
+    } catch {
+      parsed = []
+    }
+    found.set(
+      row.nodeId,
+      Array.isArray(parsed) ? parsed.filter((n): n is number => Number.isInteger(n) && n >= 0) : []
+    )
+  }
+  return found
+}
+
 /** What F-9.12 stores beside a scan: the paragraph of every range, and the passage index's hash. */
 export interface ScanIndex {
   /** Per tag, the paragraph index of each of its ranges, in the same order (`paragraphIndexes`). */

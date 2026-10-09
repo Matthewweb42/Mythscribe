@@ -67,6 +67,7 @@ import { ORGANISE_PROMPT_VERSION } from './organise.v1'
 import { ORGANISE_PROMPT_V2_VERSION } from './organise.v2'
 import { AGENT_PROMPT_V4_VERSION } from './agent.v4'
 import { AGENT_PROMPT_V5_VERSION } from './agent.v5'
+import { AGENT_PROMPT_V6_VERSION } from './agent.v6'
 import { TODO_PROMPT_VERSION } from './todo.v1'
 import { TODO_SUGGEST_PROMPT_VERSION } from './todoSuggest.v1'
 
@@ -153,7 +154,8 @@ export const PROMPT_VERSIONS = [
   // The suggestions first, so the cost registry's row for `todo` shows the check (its last version).
   TODO_SUGGEST_PROMPT_VERSION,
   TODO_PROMPT_VERSION,
-  AGENT_PROMPT_V5_VERSION
+  AGENT_PROMPT_V5_VERSION,
+  AGENT_PROMPT_V6_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -478,7 +480,8 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   },
   [TODO_PROMPT_VERSION]: { feature: 'todo', tier: 'fast', output: 'json', since: 'F-9.16' },
   [AGENT_PROMPT_V5_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-9.16' },
-  [TODO_SUGGEST_PROMPT_VERSION]: { feature: 'todo', tier: 'fast', output: 'json', since: 'F-9.16' }
+  [TODO_SUGGEST_PROMPT_VERSION]: { feature: 'todo', tier: 'fast', output: 'json', since: 'F-9.16' },
+  [AGENT_PROMPT_V6_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-5.24' }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */
