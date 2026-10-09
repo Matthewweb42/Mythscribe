@@ -207,12 +207,36 @@ const SUMMARY_TAGS = [
   { name: 'Harbour Bell', category: 'custom' },
   { name: 'Zephyr', category: 'character' }
 ]
+/**
+ * F-9.14: the scene card, one relationship, and one thread event the canned summary carries
+ * (`summary.v4` keeps the sentinel too). Both quotes are Scene 1's own sentences, and both ends of
+ * the relationship are the characters the facts above create, so main keeps both; the thread is
+ * new, so main makes it an AI-made thread record (no tag: its name is nowhere in the text).
+ */
+const SUMMARY_CARD = {
+  where: 'The ridge',
+  when: 'Night',
+  pov: 'Mara',
+  changed: 'Mara keeps watch alone while the river rises.'
+}
+const SUMMARY_THREAD = 'The Lantern Oath'
+const SUMMARY_THREAD_QUESTION = 'Will Mara keep watch until dawn?'
 const SUMMARY_ANSWER = JSON.stringify({
   summary: SUMMARY_TEXT,
   keyPoints: SUMMARY_KEY_POINTS,
   characters: SUMMARY_CHARACTERS,
   facts: SUMMARY_FACTS,
-  tags: SUMMARY_TAGS
+  tags: SUMMARY_TAGS,
+  card: SUMMARY_CARD,
+  relations: [{ from: 'Kael', type: 'rival', to: 'Mara', quote: 'But Kael saw Kael, then Kael.' }],
+  threads: [
+    {
+      name: SUMMARY_THREAD,
+      event: 'opened',
+      question: SUMMARY_THREAD_QUESTION,
+      quote: 'Mara waited on the ridge.'
+    }
+  ]
 })
 const BRIEF_SENTINEL = 'You are the scene-brief feature inside a novel-writing app.'
 /**
@@ -5044,6 +5068,13 @@ test('create, close, reopen a project on disk', async () => {
     SUMMARY_CHARACTERS
   )
   await expect(metadata.getByTestId('summary-status')).toHaveText('')
+  // F-9.14: the scene card heads the summary: what the AI read (where, when, POV, what changed,
+  // the thread it opened), each AI value marked, unless the author's own scene metadata says.
+  const sceneCard = metadata.getByTestId('scene-card')
+  await expect(sceneCard).toContainText(SUMMARY_CARD.changed)
+  await expect(sceneCard.getByRole('list', { name: 'Threads in this scene' })).toHaveText(
+    `${SUMMARY_THREAD} · opened`
+  )
   expect(openAiRequests).toHaveLength(summaryRequestsBefore + 1)
   const summarySystem = openAiChatBodies.at(-1)?.messages[0]
   expect(summarySystem?.role).toBe('system')
@@ -5145,8 +5176,34 @@ test('create, close, reopen a project on disk', async () => {
   await expect(watchfulRow).toHaveCount(0)
   await expect(entityEditor.getByRole('button', { name: 'Show hidden (1)' })).toBeVisible()
   await expect
-    .poll(async () => (await factsOf(kaelEntity.id)).map((fact) => fact.hidden))
+    .poll(async () => (await fieldFactsOf(kaelEntity.id)).map((fact) => fact.hidden))
     .toEqual([true])
+  // F-9.14: the same reading stated that Kael is Mara's rival. His sheet lists it from his side,
+  // marked as the AI's with the scene; Changes lists it, and Undo hides it for good.
+  const relationships = entityEditor.getByRole('region', { name: 'Relationships' })
+  const rivalRow = relationships.getByRole('listitem', { name: 'Rival of Mara' })
+  await expect(rivalRow.getByTestId('relation-ai-mark')).toHaveText('AI')
+  await expect(rivalRow).toContainText('From Scene 1')
+  const rivalChange = changesTab.getByRole('listitem', { name: 'Fact: Kael · Rival of Mara' })
+  await rivalChange.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(rivalChange).toContainText('Undone')
+  await expect(rivalRow).toHaveCount(0)
+  await expect(relationships).toContainText('None yet.')
+  // And the Threads section lists the thread the reading opened, with its open question.
+  await expect(
+    changesTab.getByRole('listitem', { name: `New sheet: ${SUMMARY_THREAD}` })
+  ).toBeVisible()
+  await entityEditor.getByRole('button', { name: 'Close Kael' }).click()
+  await expect(entityEditor).toHaveCount(0)
+  await showSection('Threads')
+  const openThreads = page.getByTestId('threads-tab').getByRole('region', { name: 'Open threads' })
+  const lanternThread = openThreads.getByRole('listitem', { name: SUMMARY_THREAD })
+  await expect(lanternThread.getByTestId('thread-question')).toHaveText(SUMMARY_THREAD_QUESTION)
+  await expect(lanternThread).toContainText('Set up in Scene 1')
+  await expect(page.getByTestId('threads-counts')).toHaveText('1 open')
+  await showSection('Characters')
+  await kaelRow.click()
+  await expect(entityEditor).toBeVisible()
   expect(openAiRequests).toHaveLength(factRequestsBefore)
   // Back to Scene 1 for the steps below; the entity page replaced the scene's panes, so the
   // Summary disclosure is closed again and is reopened here.
@@ -5206,10 +5263,15 @@ test('create, close, reopen a project on disk', async () => {
   })
   // F-5.16, F-9.13: that run read Scene 1 again and its answer carried the same two facts. The
   // one undone in Changes is a tombstone, so it was not logged a second time; Mara's stayed
-  // (sticky), and no third character appeared.
+  // (sticky), and no third character appeared. F-9.14: the undone relationship stays hidden too.
   await expect
-    .poll(async () => (await factsOf(kaelEntity.id)).map((fact) => fact.hidden))
+    .poll(async () => (await fieldFactsOf(kaelEntity.id)).map((fact) => fact.hidden))
     .toEqual([true])
+  expect(
+    (await factsOf(kaelEntity.id))
+      .filter((fact) => fact.objectEntityId !== null)
+      .map((fact) => fact.hidden)
+  ).toEqual([true])
   expect(
     (await listEntities())
       .filter((entity) => entity.kind === 'character')
@@ -6308,6 +6370,8 @@ test('create, close, reopen a project on disk', async () => {
     /^Places\d+$/,
     /^World\d+$/,
     'Magic Systems1',
+    // F-9.14: the thread the scene reading opened.
+    /^Threads\d+$/,
     'Vessels1',
     /^Tags\d+$/,
     /^Outline\d+$/,
@@ -7183,6 +7247,13 @@ async function listEntities(): Promise<Entity[]> {
 }
 
 /** Every dated fact of one record (F-9.13), the hidden ones included, as main lists them. */
+/** A record's field facts (F-9.14): its relationships and thread events left out. */
+async function fieldFactsOf(entityId: string): Promise<Fact[]> {
+  return (await factsOf(entityId)).filter(
+    (fact) => fact.objectEntityId === null && !fact.attribute.includes(':')
+  )
+}
+
 async function factsOf(entityId: string): Promise<Fact[]> {
   const result = await page.evaluate<IpcResult<Fact[]>, string>(
     (id) =>

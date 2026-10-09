@@ -5,7 +5,8 @@ import type { Channel, Input, Output } from '@shared/ipc/contract'
 import type { KnowledgeConversion } from '@shared/knowledge'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
-import { ConversionDialog, costLine } from './ConversionDialog'
+import { ConversionDialog } from './ConversionDialog'
+import { costLine } from './conversionText'
 import { resetConversionStore, useConversionStore } from './conversionStore'
 
 const PENDING: KnowledgeConversion = {
@@ -65,7 +66,7 @@ describe('ConversionDialog (F-9.14, D11)', () => {
     expect(screen.queryByTestId('conversion-dialog')).toBeNull()
     announce(PENDING)
     expect(screen.getByRole('dialog', { name: 'Update your story index' })).toHaveTextContent(
-      '42 scenes were read by an earlier version'
+      '42 scenes were read by an earlier version and need one more reading.'
     )
     expect(screen.getByTestId('conversion-cost')).toHaveTextContent(
       'Estimated cost: about $0.12 on your own key (deepseek/deepseek-v4-flash).'
@@ -76,7 +77,10 @@ describe('ConversionDialog (F-9.14, D11)', () => {
 
   it('closes on Later for this session', async () => {
     render(<ConversionDialog />)
-    announce(PENDING)
+    announce({ ...PENDING, scenes: 1 })
+    expect(screen.getByRole('dialog')).toHaveTextContent(
+      '1 scene was read by an earlier version and needs one more reading.'
+    )
     await userEvent.click(screen.getByRole('button', { name: 'Later' }))
     expect(calls).toEqual(['knowledge:later'])
     expect(screen.queryByTestId('conversion-dialog')).toBeNull()

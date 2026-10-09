@@ -1,21 +1,11 @@
 import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
 import type { KnowledgeConversion } from '@shared/knowledge'
-import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
+import { formatCount } from '@renderer/features/ai/usageFormat'
 import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { conversionAsks, useConversionStore } from './conversionStore'
-
-/** The estimate's cost line (CLAUDE.md rule 10: the cost is visible before anything is sent). */
-export function costLine(conversion: KnowledgeConversion): string {
-  if (conversion.source === 'local') return 'Free: it runs on your local model.'
-  const model = conversion.model === '' ? 'the fast model' : conversion.model
-  if (!conversion.priced) return `Cost unknown: ${model} is not in the price table.`
-  const cost = `about ${formatUsd(conversion.costUsd)}`
-  return conversion.source === 'cloud'
-    ? `Estimated cost: ${cost} from your MythScribe Cloud balance (${model}).`
-    : `Estimated cost: ${cost} on your own key (${model}).`
-}
+import { costLine } from './conversionText'
 
 /**
  * The conversion dialog (F-9.14, D11): on open, when scenes an earlier version read are waiting,
@@ -80,8 +70,9 @@ function ConversionDialogBody({
         <p className="m-0 text-sm">
           MythScribe now keeps a card for every scene, the relationships between your characters,
           places, and things, and your plot threads. {formatCount(conversion.scenes, 'scene')}{' '}
-          {conversion.scenes === 1 ? 'was' : 'were'} read by an earlier version and need one more
-          reading.
+          {conversion.scenes === 1
+            ? 'was read by an earlier version and needs one more reading.'
+            : 'were read by an earlier version and need one more reading.'}
         </p>
         <ul role="list" className="m-0 flex list-disc flex-col gap-1 pl-5 text-sm">
           <li data-testid="conversion-cost">{costLine(conversion)}</li>

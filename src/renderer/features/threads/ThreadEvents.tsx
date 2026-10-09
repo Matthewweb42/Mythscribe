@@ -14,7 +14,7 @@ import { useFactStore } from '@renderer/features/entities/factStore'
 import type { StoryClock } from '@renderer/features/entities/factView'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
-import { goToEvent } from './ThreadsTab'
+import { goToEvent } from './threadJump'
 
 const LABEL = 'text-xs font-medium text-fg-muted'
 const BUTTON =

@@ -9,27 +9,15 @@ import {
   type ThreadEventView,
   type ThreadView
 } from '@shared/threads'
-import { locateText } from '@renderer/features/editor/locateText'
-import { openPassage } from '@renderer/features/editor/openPassage'
 import { EntityQuickAdd } from '@renderer/features/entities/EntityQuickAdd'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
+import { goToEvent } from './threadJump'
 import { useThreadStore } from './threadStore'
 
 const LINK_BUTTON = 'rounded px-0.5 text-left text-xs text-fg-muted underline hover:text-fg'
-
-/** Goes to the event's passage (or its scene when it has no quote). */
-export function goToEvent(event: ThreadEventView): void {
-  const { nodeId, quote } = event
-  if (nodeId === null) return
-  if (quote === null) {
-    useTreeStore.getState().select(nodeId)
-    return
-  }
-  void openPassage(nodeId, (doc) => locateText(doc, quote))
-}
 
 /**
  * The Threads section (F-9.14, D6): the plot threads of the book, open ones first, then resolved
@@ -146,8 +134,7 @@ function ThreadRow({ thread }: { thread: ThreadView }): React.JSX.Element {
       <div className="flex flex-wrap items-center gap-x-2 text-xs text-fg-subtle">
         {thread.setup !== null ? (
           <span>
-            Set up in{' '}
-            <EventJump event={thread.setup} label={titleOf(thread.setup.nodeId)} />
+            Set up in <EventJump event={thread.setup} label={titleOf(thread.setup.nodeId)} />
           </span>
         ) : (
           <span>Not set up in a scene yet</span>
