@@ -5,12 +5,12 @@ import { eq, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { PROJECT_NOTES_NAME } from '@shared/contextLibrary'
 import { KNOWLEDGE_INDEX_VERSION, recordNameForTag } from '@shared/knowledge'
-import { withObservedDismissed } from '@shared/observedFacts'
+import { isObservedDismissed, withObservedDismissed } from '@shared/observedFacts'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { applyAutoTags } from '../ai/autoTags'
 import { tag as tagTable } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
-import { createEntity, listEntities } from '../entity/entityStore'
+import { createEntity, deleteEntity, listEntities } from '../entity/entityStore'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import {
@@ -141,7 +141,7 @@ describe('applyAutoTags gives new name tags their record (F-9.12)', () => {
 })
 
 describe('convertKnowledgeIndex (F-9.12)', () => {
-  it('gives every name tag a record and every record a tag, once', () => {
+  it('gives every author-made name tag a record and every record a tag, once', () => {
     const mara = bareTag('mara', 'character')
     const brannoc = bareTag('brannoc', 'character', 'ai')
     const rain = bareTag('rain', 'tone')
@@ -156,10 +156,11 @@ describe('convertKnowledgeIndex (F-9.12)', () => {
     )
 
     const result = convertKnowledgeIndex(db)
-    expect(result?.records.map((write) => write.entity.name).sort()).toEqual(['Brannoc', 'Mara'])
+    expect(result?.records.map((write) => write.entity.name)).toEqual(['Mara'])
     expect(result?.tagged.map((write) => write.entity.name)).toEqual(['Salt Flats'])
     expect(recordOf(mara)).toEqual(['character:Mara:author'])
-    expect(recordOf(brannoc)).toEqual(['character:Brannoc:ai'])
+    // An AI-made tag gets none here (the author, 2026-10-08).
+    expect(recordOf(brannoc)).toEqual([])
     expect(recordOf(rain)).toEqual([])
     const flats = listEntities(db).find((entity) => entity.id === lonely.entity.id)
     expect(flats?.tagId).not.toBeNull()
@@ -234,5 +235,73 @@ describe('convertKnowledgeIndex (F-9.12)', () => {
         .where(eq(tagTable.name, 'north-gate'))
         .all()
     ).toEqual([{ name: 'north-gate', category: 'setting' }])
+  })
+})
+
+describe('convertKnowledgeIndex: no resurrection, no duplicates, AI tags left alone (verifier)', () => {
+  it('does not bring back an AI-made sheet the author deleted when its tag is author-made', () => {
+    // The author made the `ghost` tag; the story-bible job (F-5.16) made a "Ghost" sheet on it,
+    // and the author deleted that sheet, which leaves the name on the dismissed list.
+    const ghost = bareTag('ghost', 'character')
+    const sheet = createEntity(db, { kind: 'character', name: 'Ghost' }, 'ai')
+    expect(sheet.entity.tagId).toBe(ghost)
+    deleteEntity(db, sheet.entity.id)
+    expect(recordOf(ghost)).toEqual([])
+
+    convertKnowledgeIndex(db)
+    expect(recordOf(ghost)).toEqual([])
+    expect(isObservedDismissed(getObservedDismissed(db), 'character', 'Ghost')).toBe(true)
+  })
+
+  it('links a same-name untagged sheet of another category instead of making a second sheet', () => {
+    createEntity(db, { kind: 'world', name: 'The Veil' }, 'author', { tag: false })
+    const veil = bareTag('the-veil', 'setting')
+    convertKnowledgeIndex(db)
+    const named = listEntities(db).filter((entity) => entity.name === 'The Veil')
+    expect(named).toHaveLength(1)
+    expect(named[0]?.tagId).toBe(veil)
+  })
+
+  it('gives AI-made name tags no record at conversion, and does not sweep them in later (author, 2026-10-08)', () => {
+    const mara = bareTag('mara', 'character')
+    const brannoc = bareTag('brannoc', 'character', 'ai')
+    convertKnowledgeIndex(db)
+    expect(recordOf(mara)).toEqual(['character:Mara:author'])
+    expect(recordOf(brannoc)).toEqual([])
+    expect(convertKnowledgeIndex(db)).toBeNull()
+    expect(recordOf(brannoc)).toEqual([])
+    // The author can still make it by hand.
+    expect(makeRecordForTag(db, brannoc).entity).toMatchObject({
+      kind: 'character',
+      name: 'Brannoc'
+    })
+  })
+})
+
+describe('a record the author deleted stays deleted (F-9.12)', () => {
+  it('lists the name when an author-made sheet without facts goes and its tag stays', () => {
+    const mara = createTag(db, { name: 'mara', category: 'character' })
+    const record = ensureRecordForTag(db, mara, 'author')
+    expect(record?.entity.origin).toBe('author')
+    deleteEntity(db, record?.entity.id ?? '')
+    expect(isObservedDismissed(getObservedDismissed(db), 'character', 'Mara')).toBe(true)
+
+    // No silent hook brings it back: not the tag hook, not the conversion.
+    expect(ensureRecordForTag(db, mara, 'author')).toBeNull()
+    setKnowledgeModel(db, { index: 0 })
+    convertKnowledgeIndex(db)
+    expect(recordOf(mara.id)).toEqual([])
+
+    // "Make a record" does, and takes the name off the list.
+    expect(makeRecordForTag(db, mara.id).entity).toMatchObject({ name: 'Mara', tagId: mara.id })
+    expect(isObservedDismissed(getObservedDismissed(db), 'character', 'Mara')).toBe(false)
+  })
+
+  it('lists nothing for an author-made sheet that had no tag', () => {
+    const lonely = createEntity(db, { kind: 'setting', name: 'Salt Flats' }, 'author', {
+      tag: false
+    })
+    deleteEntity(db, lonely.entity.id)
+    expect(getObservedDismissed(db).names).toEqual([])
   })
 })

@@ -126,7 +126,12 @@ import { runReviewChat } from '../ai/reviewChat'
 import { cancelInflight, regenRequestId, registerInflight, releaseInflight } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
 import type { AutoTagsChange } from '../ai/autoTags'
-import { convertKnowledgeIndex, ensureRecordForTag, makeRecordForTag } from '../knowledge/records'
+import {
+  convertKnowledgeIndex,
+  ensureRecordForTag,
+  ensureRecordsForTags,
+  makeRecordForTag
+} from '../knowledge/records'
 import { prunePassages } from '../search/passageIndex'
 import type { ObservedFactsChange } from '../ai/observedFacts'
 import { IMPORT_STRUCTURE_PROMPT_VERSION } from '../ai/prompts/importStructure.v1'
@@ -213,7 +218,8 @@ import {
   mergeEntities,
   setEntityImage,
   updateEntity,
-  type EntityTagChange
+  type EntityTagChange,
+  type EntityWrite
 } from '../entity/entityStore'
 import { loadOrganiseProject, organiseCandidates } from '../organise/organiseProject'
 import {
@@ -299,7 +305,11 @@ import { fitsEditorMin, normalizeLayout } from '@shared/layout'
 import { EXTERNAL_HOST, isAllowedExternalUrl, type EditRole } from '@shared/menu'
 import { normalizeProposalNote } from '@shared/proposal'
 import { REFERENCE_PINS_MAX, dedupePins, hasPin } from '@shared/references'
-import { TAG_EXCHANGE_EXTENSION, tagExportFileName } from '@shared/tagExchange'
+import {
+  TAG_EXCHANGE_EXTENSION,
+  tagExportFileName,
+  type TagExchangeRecord
+} from '@shared/tagExchange'
 import { keepTemplateRecords } from '@shared/tagTemplates'
 import {
   addDocumentTag,
@@ -1296,7 +1306,18 @@ export function registerHandlers({
   register('tag:update', ({ id, ...patch }) => {
     const db = manager.require().connection.orm
     const before = getTag(db, id)
-    const updated = updateTag(db, id, patch)
+    // F-9.12: a name tag the author renames, recategorises (a label made a character, place, or
+    // world tag), or gives aliases gets its record now, in the same transaction, if it has none.
+    const { updated, records } = db.transaction((tx) => {
+      const tag = updateTag(tx, id, patch)
+      const named =
+        before !== undefined &&
+        (before.name !== tag.name ||
+          before.category !== tag.category ||
+          before.aliases !== JSON.stringify(tag.aliases))
+      return { updated: tag, records: named ? ensureRecordsForTags(tx, [tag]) : [] }
+    })
+    publishRecords(db, records)
     if (before !== undefined) {
       if (before.trackMentions && !updated.trackMentions) {
         const nodeIds = deleteMentionsForTag(db, id)
@@ -1356,6 +1377,8 @@ export function registerHandlers({
 
   register('tag:loadTemplate', ({ template }) => {
     const db = manager.require().connection.orm
+    // F-9.12: no records here. A built-in template's tags are placeholders for roles and topics
+    // ("protagonist", "history"), not names; the author makes a record on one by hand.
     const result = loadTagTemplate(db, template)
     if (result.created.length > 0) {
       rescanManuscript(db)
@@ -1394,7 +1417,12 @@ export function registerHandlers({
         sourceIds.flatMap((id) => listMentionsForTag(db, id).map((mention) => mention.nodeId))
       )
     ]
-    const result = mergeTags(db, targetId, sourceIds)
+    // F-9.12: a tag the author merges names into gets its record if neither it nor a source had one.
+    const { result, records } = db.transaction((tx) => {
+      const merged = mergeTags(tx, targetId, sourceIds)
+      return { result: merged, records: ensureRecordsForTags(tx, [merged.target]) }
+    })
+    publishRecords(db, records)
     if (result.nodeIds.length > 0) {
       emit(windows(), 'documentTag:changed', { nodeIds: result.nodeIds })
     }
@@ -1439,7 +1467,7 @@ export function registerHandlers({
     const chosen = given ?? (await dialogs.chooseTagBankFile())
     if (chosen === null) return null
     const db = session.connection.orm
-    const result = importTagBank(db, readTagBankFile(chosen))
+    const result = importTagBankWithRecords(db, readTagBankFile(chosen))
     if (result.created.length > 0) {
       rescanManuscript(db)
       publishProposed()
@@ -1486,7 +1514,7 @@ export function registerHandlers({
     const template = appState.get().tagTemplates.find((t) => t.id === id)
     if (!template) throw new AppError('NOT_FOUND', 'Tag template not found', { id })
     const db = manager.require().connection.orm
-    const result = importTagBank(db, template.tags)
+    const result = importTagBankWithRecords(db, template.tags)
     if (result.created.length > 0) {
       rescanManuscript(db)
       publishProposed()
@@ -1684,6 +1712,30 @@ export function registerHandlers({
     rescanManuscript(db)
     publishProposed()
     emit(windows(), 'tag:changed', change.tag)
+  }
+
+  /** F-9.12: records a tag change made or linked reach every window, with their tag's change. */
+  const publishRecords = (db: TreeDb, writes: readonly EntityWrite[]): void => {
+    for (const write of writes) {
+      emit(windows(), 'entity:changed', write.entity)
+      publishTagChange(db, write.tagChange)
+    }
+  }
+
+  /**
+   * F-4.9 / F-4.11: a tag bank read in (a file or a saved template); F-9.12: its new name tags
+   * arrive with their records, in the same transaction.
+   */
+  const importTagBankWithRecords = (
+    db: TreeDb,
+    records: readonly TagExchangeRecord[]
+  ): ReturnType<typeof importTagBank> => {
+    const { result, writes } = db.transaction((tx) => {
+      const imported = importTagBank(tx, records)
+      return { result: imported, writes: ensureRecordsForTags(tx, imported.created) }
+    })
+    publishRecords(db, writes)
+    return result
   }
 
   /**

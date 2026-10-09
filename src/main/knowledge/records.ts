@@ -31,11 +31,16 @@ import { getTagWithUsage } from '../tag/tagStore'
  * story-bible sheet, its record. Three ways in, all local:
  *
  * - `ensureRecordForTag`: a new name tag gets its record in the same transaction (`tag:create`,
- *   the background tagging job of F-4.13). Silent: a tag that cannot have one stays a label.
+ *   a tag-bank import or saved template, the background tagging job of F-4.13), and so does a name
+ *   tag the author edits (`tag:update` on its name, category, or aliases, `tag:merge` into it:
+ *   the Tags panel and Organise). Silent: a tag that cannot have one stays a label, and a name
+ *   whose sheet the author deleted is not made again (F-5.16's dismissed names, every origin).
  * - `makeRecordForTag`: the author's "Make a record" on a tag (`tag:makeRecord`). Errors reach
- *   the author.
+ *   the author; it is the one way past a dismissed name.
  * - `convertKnowledgeIndex`: once per project (settings `knowledgeModel.index`), on open, every
- *   name tag without a record gets one and every record without a tag gets one.
+ *   author-made name tag without a record gets one and every record without a tag gets one. An
+ *   AI-made tag gets none there (the author, 2026-10-08); it gets one when the author asks or
+ *   edits that tag.
  *
  * Only `entity` and `tag` rows are written; no scene text is read or changed.
  */
@@ -49,10 +54,11 @@ function recordOf(db: EntityDb, tagId: string): Entity | undefined {
 }
 
 /**
- * Gives `tag` a record in `kind`: an untagged sheet of that category with the tag's name is
- * linked to it (the tag carries that sheet's name), otherwise a sheet is created and linked
- * through F-9.4's name link. Throws what `createEntity` throws (a name taken by a sheet that has
- * another tag, a name too long for a sheet).
+ * Gives `tag` a record in `kind`: an untagged sheet with the tag's name, in any category (that
+ * kind first), is linked to it (the tag carries that sheet's name), otherwise a sheet is created
+ * and linked through F-9.4's name link, so one tag never gets two sheets. Throws what
+ * `createEntity` throws (a name taken by a sheet that has another tag, a name too long for a
+ * sheet).
  */
 function giveRecord(
   db: EntityDb,
@@ -62,9 +68,10 @@ function giveRecord(
 ): EntityWrite {
   const name = recordNameForTag(tag.name)
   const key = toEntityNameKey(name)
-  const same = listEntities(db).find(
-    (each) => each.kind === kind && toEntityNameKey(each.name) === key && each.tagId === null
+  const named = listEntities(db).filter(
+    (each) => toEntityNameKey(each.name) === key && each.tagId === null
   )
+  const same = named.find((each) => each.kind === kind) ?? named[0]
   const write =
     same === undefined
       ? createEntity(db, { kind, name, template: origin === 'ai' ? 'blank' : 'structured' }, origin)
@@ -78,10 +85,10 @@ function giveRecord(
 }
 
 /**
- * A new name tag's record (D8), in the caller's transaction (a savepoint): null for a tag that
- * names no thing (tone, content, plot thread, custom), one that already has a record, an AI tag
- * whose sheet the author deleted before (F-5.16's dismissed names), or one whose sheet cannot be
- * made (the savepoint is rolled back and the tag stays a label).
+ * A name tag's record (D8), in the caller's transaction (a savepoint): null for a tag that names
+ * no thing (tone, content, plot thread, custom), one that already has a record, one whose sheet
+ * the author deleted before (F-5.16's dismissed names, whoever made the tag), or one whose sheet
+ * cannot be made (the savepoint is rolled back and the tag stays a label).
  */
 export function ensureRecordForTag(
   db: EntityDb,
@@ -90,12 +97,7 @@ export function ensureRecordForTag(
 ): EntityWrite | null {
   const kind = RECORD_KIND_FOR_TAG[tag.category]
   if (kind === undefined || recordOf(db, tag.id) !== undefined) return null
-  if (
-    origin === 'ai' &&
-    isObservedDismissed(getObservedDismissed(db), kind, recordNameForTag(tag.name))
-  ) {
-    return null
-  }
+  if (isObservedDismissed(getObservedDismissed(db), kind, recordNameForTag(tag.name))) return null
   try {
     return db.transaction((tx) => giveRecord(tx, tag, kind, origin))
   } catch (err) {
@@ -132,11 +134,25 @@ export interface KnowledgeIndexConversion {
 }
 
 /**
+ * The records of name tags the author just created or edited (a tag-bank import, a saved
+ * template, a rename, a category change, a merge into the tag), each as `ensureRecordForTag`
+ * makes it with origin `author`; tags that get none are left out.
+ */
+export function ensureRecordsForTags(db: EntityDb, tags: readonly TagRef[]): EntityWrite[] {
+  const writes: EntityWrite[] = []
+  for (const each of tags) {
+    const write = ensureRecordForTag(db, each, 'author')
+    if (write !== null) writes.push(write)
+  }
+  return writes
+}
+
+/**
  * F-9.12's one-time conversion, run on project open: idempotent, and a no-op (null) once
  * `knowledgeModel.index` says it ran. In one transaction: every character, place, and world tag
- * without a record gets one (AI tags as AI-made sheets, marked "Added by AI", unless the author
- * deleted that sheet before); then every sheet without a tag gets one, except the context
- * library's Project notes page. The rescan of every scene that follows is the mention scan's,
+ * the author made, without a record, gets one unless the author deleted that sheet before
+ * (AI-made tags get none: the author, 2026-10-08); then every sheet without a tag gets one,
+ * except the context library's Project notes page. The rescan of every scene that follows is the mention scan's,
  * on its silent queue (the scan hash is salted with `MENTION_INDEX_VERSION`).
  */
 export function convertKnowledgeIndex(db: EntityDb): KnowledgeIndexConversion | null {
@@ -154,7 +170,8 @@ export function convertKnowledgeIndex(db: EntityDb): KnowledgeIndexConversion | 
       .orderBy(tagTable.created, tagTable.id)
       .all()
     for (const each of tags) {
-      const write = ensureRecordForTag(tx, each, each.origin)
+      if (each.origin !== 'author') continue
+      const write = ensureRecordForTag(tx, each, 'author')
       if (write !== null) records.push(write)
     }
     const tagged: EntityWrite[] = []

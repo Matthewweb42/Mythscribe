@@ -544,13 +544,17 @@ export function setEntityImage(db: EntityDb, id: string, image: string | null): 
  *
  * F-5.16: its observed facts cascade with it, and an entity the AI made or one that had any
  * fact (hidden ones included) leaves its kind and name on the dismissed list, so the story-bible job does not create it
- * again from the next scene that names it.
+ * again from the next scene that names it. F-9.12: so does one whose tag stays without it (the
+ * tag's record), so no silent record hook brings it back; only "Make a record" does.
  */
 export function deleteEntity(db: EntityDb, id: string): Entity {
   return db.transaction((tx) => {
     const row = getRow(tx, id)
     if (row === undefined) throw new AppError('NOT_FOUND', 'Entity not found', { id })
-    if (row.origin === 'ai' || hasFacts(tx, id)) {
+    // F-9.12: a sheet deleted while its tag stays was that tag's record; the name goes on the
+    // list too, so no silent hook (the conversion, a new or edited tag) makes it again.
+    const leftTag = row.tagId !== null && !tagIsShared(tx, id, row.tagId)
+    if (row.origin === 'ai' || leftTag || hasFacts(tx, id)) {
       setObservedDismissed(tx, withObservedDismissed(getObservedDismissed(tx), row.kind, row.name))
     }
     const deleted = toEntity(tx, row)

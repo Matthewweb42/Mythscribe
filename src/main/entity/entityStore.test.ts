@@ -320,11 +320,14 @@ describe('origin and dismissed names (F-5.16)', () => {
 
   it('remembers a deleted entity the manuscript had facts about, hidden ones included', () => {
     const tash = createEntity(db, { kind: 'character', name: 'Tash  Vane' }, 'ai').entity
-    const mara = create({ kind: 'character', name: 'Mara' })
+    const mara = createEntity(db, { kind: 'character', name: 'Mara' }, 'author', {
+      tag: false
+    }).entity
     logFact(tash.id)
     setFactHidden(db, listFactsForEntity(db, tash.id)[0]?.id ?? '', true)
     deleteEntity(db, tash.id)
-    // Mara had no facts: nothing to keep the job from, so nothing is recorded.
+    // Mara had no facts and no tag: nothing to keep the job or a record hook from, so nothing
+    // is recorded (a tagged sheet is: F-9.12, `records.test.ts`).
     deleteEntity(db, mara.id)
     expect(getObservedDismissed(db)).toEqual({
       names: [{ kind: 'character', nameKey: 'tash vane' }]
