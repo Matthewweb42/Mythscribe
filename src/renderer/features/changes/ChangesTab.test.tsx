@@ -95,15 +95,15 @@ describe('ChangesTab (F-9.13)', () => {
     })
     expect(fact).toHaveTextContent('his watchful eyes')
     expect(within(fact).getByRole('button', { name: 'Go to passage in Scene 1' })).toBeVisible()
-    // A reading of one change has no "Undo this run": its own Undo is the same thing.
-    expect(within(runs[1]!).queryByRole('button', { name: 'Undo this run' })).toBeNull()
+    // A reading of one change has no "Undo run": its own Undo is the same thing.
+    expect(within(runs[1]!).queryByRole('button', { name: 'Undo run' })).toBeNull()
 
     await userEvent.click(within(fact).getByRole('button', { name: 'Undo' }))
     expect(calls.at(-1)).toEqual(['changes:undo', { id: 'c1' }])
     expect(within(fact).getByText('Undone')).toBeInTheDocument()
     expect(within(fact).queryByRole('button', { name: 'Undo' })).toBeNull()
 
-    await userEvent.click(within(runs[0]!).getByRole('button', { name: 'Undo this run' }))
+    await userEvent.click(within(runs[0]!).getByRole('button', { name: 'Undo run' }))
     expect(calls.at(-1)).toEqual(['changes:undoRun', { runId: 'r1' }])
   })
 
