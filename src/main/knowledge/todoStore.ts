@@ -11,6 +11,7 @@ import {
   parseTodoSuggestions,
   parseTodoTarget,
   todoCounts,
+  type TodoCheck,
   type TodoItem,
   type TodoStatus,
   type TodoTarget,
@@ -23,7 +24,7 @@ import { listOpenFindings } from '../ai/continuityFindingStore'
 import { listCategories } from '../entity/categoryStore'
 import { listEntities } from '../entity/entityStore'
 import { AppError } from '../ipc/errors'
-import { getDismissedNames, setDismissedNames } from '../project/settingsStore'
+import { getDismissedNames, getTodoPassState, setDismissedNames } from '../project/settingsStore'
 import { dismissName } from '../tag/proposedTags'
 import type { TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
@@ -251,9 +252,10 @@ function findingToItem(finding: ContinuityFinding, names: Names): TodoItem {
 /**
  * What `todo:list` answers: the open items of the table and the open findings of the consistency
  * checker, grouped by kind (`TODO_KINDS` order), in reading order of their scenes within a kind
- * (an item with no scene last), then by subject.
+ * (an item with no scene last), then by subject. `check` is the AI check's header as the handler
+ * worked it out (`todoCheckView`); without one the check reads as not allowed.
  */
-export function listTodo(db: TreeDb): TodoView {
+export function listTodo(db: TreeDb, check?: TodoCheck): TodoView {
   const names = readNames(db)
   const position = new Map(manuscriptDocuments(db).map((row, at) => [row.id, at]))
   const at = (nodeId: string | null): number =>
@@ -274,7 +276,19 @@ export function listTodo(db: TreeDb): TodoView {
       a.subject.localeCompare(b.subject) ||
       a.id.localeCompare(b.id)
   )
-  return { items, counts: todoCounts(items) }
+  return { items, counts: todoCounts(items), check: check ?? idleCheck(db) }
+}
+
+/** The check as not allowed: only when it last ran and what that cost. */
+function idleCheck(db: TreeDb): TodoCheck {
+  const state = getTodoPassState(db)
+  return {
+    allowed: false,
+    lastAt: state.lastPassAt,
+    lastCostUsd: state.lastPassCostUsd,
+    estimateUsd: null,
+    fresh: false
+  }
 }
 
 /** One stored item by id, any status; NOT_FOUND for an unknown id. */

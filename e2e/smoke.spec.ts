@@ -22,6 +22,7 @@ import { localDay } from '../src/shared/goals'
 import { encodeLicensePayload, formatLicenseToken, LICENSE_GRACE_MS } from '../src/shared/license'
 import type { Entity, IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
+import type { TodoView } from '../src/shared/todo'
 import type { Fact } from '../src/shared/facts'
 import { PRESETS, type WritingPresets } from '../src/shared/presets'
 import type { ReferencePin, ReferencePins } from '../src/shared/references'
@@ -481,6 +482,34 @@ const PLAN_LINK_WHY = 'The storm scene carries this plan.'
 const PLAN_LINKS_ANSWER = JSON.stringify({
   links: [{ plan: 'P1', scene: 'S1', why: PLAN_LINK_WHY }]
 })
+/**
+ * F-9.16: the openings of the To do check's and suggestions' rules (`TODO_RULES` in
+ * `src/main/ai/prompts/todo.v1.ts`, `TODO_SUGGEST_RULES` in `todoSuggest.v1.ts`). The fake check
+ * flags one open question in the first scene line sent; the fake suggestions offer three options.
+ */
+const TODO_SENTINEL = 'You are the To do check inside a novel-writing app.'
+const TODO_SUGGEST_SENTINEL = 'You are the To do suggestions inside a novel-writing app.'
+const TODO_SUBJECT = 'the lighthouse bell'
+const TODO_OPTIONS = [
+  'The bell rings for the drowned, once a year.',
+  'Mara rang it as a girl and never told anyone.',
+  'Nobody knows who rings it.'
+]
+function todoAnswer(messages: { role: string; content: string }[]): string {
+  const scene = /^Scenes:\n(S\d+) /mu.exec(messages[1]?.content ?? '')?.[1] ?? 'S1'
+  return JSON.stringify({
+    items: [
+      {
+        type: 'question',
+        about: TODO_SUBJECT,
+        scene,
+        why: 'The scene promises an answer about the bell that no thread holds.',
+        suggestions: []
+      }
+    ],
+    resolved: []
+  })
+}
 /** An Auto message the router sends to chat; the agent answers it with one edit to Scene 1. */
 const AGENT_EDIT_MESSAGE = 'Make the opening line plainer.'
 const AGENT_EDIT_ANSWER = 'Here is a plainer line.'
@@ -765,6 +794,13 @@ function startFakeOpenAi(): Promise<string> {
           const notesSuggest = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(NOTES_SUGGEST_SENTINEL)
           )
+          // F-9.16: the To do check flags one question; an item's suggestions are three options.
+          const todoCheck = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(TODO_SENTINEL)
+          )
+          const todoSuggest = request.messages.some(
+            (m) => m.role === 'system' && m.content.startsWith(TODO_SUGGEST_SENTINEL)
+          )
           // F-11.1d: plan links come back as one link of the first plan to the first scene.
           const planLinks = request.messages.some(
             (m) => m.role === 'system' && m.content.startsWith(PLAN_LINKS_SENTINEL)
@@ -833,52 +869,56 @@ function startFakeOpenAi(): Promise<string> {
                   message: {
                     role: 'assistant',
                     content: json
-                      ? planLinks
-                        ? PLAN_LINKS_ANSWER
-                        : contextImport
-                          ? contextImportAnswer(request.messages)
-                          : reviewChat
-                            ? reviewChatAnswer(request.messages)
-                            : organise
-                              ? organiseAnswer(request.messages)
-                              : chatAgent
-                                ? chatAgentReply(request.messages)
-                                : route
-                                  ? JSON.stringify({
-                                      action: (request.messages.at(-1)?.content ?? '').includes(
-                                        ROUTE_CRITIQUE_MESSAGE
-                                      )
-                                        ? 'critique'
-                                        : 'chat',
-                                      instruction: null
-                                    })
-                                  : synopsis
-                                    ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
-                                    : notesSuggest
-                                      ? JSON.stringify({ points: SUGGESTED_POINTS })
-                                      : whatNext
-                                        ? WHAT_NEXT_ANSWER
-                                        : editPass
-                                          ? EDIT_PASS_ANSWER
-                                          : proofread
-                                            ? PROOFREAD_ANSWER
-                                            : continuity
-                                              ? continuityAnswer(request.messages)
-                                              : importStructure
-                                                ? IMPORT_STRUCTURE_ANSWER
-                                                : critique
-                                                  ? CRITIQUE_ANSWER
-                                                  : betaReader
-                                                    ? BETA_READER_ANSWER
-                                                    : query
-                                                      ? QUERY_ANSWER
-                                                      : brief
-                                                        ? BRIEF_ANSWER
-                                                        : summary
-                                                          ? SUMMARY_ANSWER
-                                                          : regen
-                                                            ? '{"tags":["antagonist","protagonist"]}'
-                                                            : '{"tags":["dark-forest","protagonist"]}'
+                      ? todoSuggest
+                        ? JSON.stringify({ suggestions: TODO_OPTIONS })
+                        : todoCheck
+                          ? todoAnswer(request.messages)
+                          : planLinks
+                            ? PLAN_LINKS_ANSWER
+                            : contextImport
+                              ? contextImportAnswer(request.messages)
+                              : reviewChat
+                                ? reviewChatAnswer(request.messages)
+                                : organise
+                                  ? organiseAnswer(request.messages)
+                                  : chatAgent
+                                    ? chatAgentReply(request.messages)
+                                    : route
+                                      ? JSON.stringify({
+                                          action: (request.messages.at(-1)?.content ?? '').includes(
+                                            ROUTE_CRITIQUE_MESSAGE
+                                          )
+                                            ? 'critique'
+                                            : 'chat',
+                                          instruction: null
+                                        })
+                                      : synopsis
+                                        ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
+                                        : notesSuggest
+                                          ? JSON.stringify({ points: SUGGESTED_POINTS })
+                                          : whatNext
+                                            ? WHAT_NEXT_ANSWER
+                                            : editPass
+                                              ? EDIT_PASS_ANSWER
+                                              : proofread
+                                                ? PROOFREAD_ANSWER
+                                                : continuity
+                                                  ? continuityAnswer(request.messages)
+                                                  : importStructure
+                                                    ? IMPORT_STRUCTURE_ANSWER
+                                                    : critique
+                                                      ? CRITIQUE_ANSWER
+                                                      : betaReader
+                                                        ? BETA_READER_ANSWER
+                                                        : query
+                                                          ? QUERY_ANSWER
+                                                          : brief
+                                                            ? BRIEF_ANSWER
+                                                            : summary
+                                                              ? SUMMARY_ANSWER
+                                                              : regen
+                                                                ? '{"tags":["antagonist","protagonist"]}'
+                                                                : '{"tags":["dark-forest","protagonist"]}'
                       : rewrite
                         ? REWRITE_ANSWER
                         : agent
@@ -6392,6 +6432,51 @@ test('create, close, reopen a project on disk', async () => {
       name: /^The Weave/
     })
   ).toBeVisible()
+  // F-9.16: the To do list. Check the whole book asks the fast tier once (only on this click);
+  // the fake flags one open question. Going through from it asks for its suggestions (each
+  // labelled "Suggestion"); picking one only fills the editable line, and Add writes it to the
+  // scene's notes as the author's text and marks the item done. The scene's text is unchanged.
+  // A second check on the unchanged book sends nothing.
+  await dismissToasts()
+  await showSection('To do')
+  const todoTab = page.getByTestId('todo-tab')
+  const sentWith = (sentinel: string): number =>
+    openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(sentinel)).length
+  await todoTab.getByTestId('todo-check-book').click()
+  const todoRow = todoTab.getByTestId('todo-item').filter({ hasText: TODO_SUBJECT })
+  await expect(todoRow).toHaveCount(1)
+  expect(sentWith(TODO_SENTINEL)).toBe(1)
+  const todoListed = await page.evaluate(() => window.mythscribe.invoke('todo:list', undefined))
+  if (!todoListed.ok) throw new Error('todo:list failed')
+  const todoScene =
+    (todoListed.data as TodoView).items.find((item) => item.subject === TODO_SUBJECT)?.nodeId ?? ''
+  const todoSceneText = await documentText(todoScene)
+  await todoRow.getByRole('button', { name: TODO_SUBJECT, exact: true }).click()
+  const todoStrip = page.getByTestId('todo-review')
+  const todoCard = todoStrip.getByTestId('todo-card')
+  await expect(todoCard.getByTestId('todo-suggestions')).toContainText(TODO_OPTIONS[0] ?? '')
+  await expect(todoCard.getByTestId('todo-suggestions')).toContainText('Suggestion')
+  expect(sentWith(TODO_SUGGEST_SENTINEL)).toBeGreaterThanOrEqual(1)
+  await todoCard.getByRole('button', { name: `Use: ${TODO_OPTIONS[1] ?? ''}` }).click()
+  await expect(todoCard.getByTestId('todo-line')).toHaveValue(TODO_OPTIONS[1] ?? '')
+  await todoCard.getByTestId('todo-add').click()
+  await expect(todoRow).toHaveCount(0)
+  await expect
+    .poll(async () => {
+      const notes = await page.evaluate(
+        (id) => window.mythscribe.invoke('notes:get', { id }),
+        todoScene
+      )
+      return notes.ok ? JSON.stringify(notes.data) : ''
+    })
+    .toContain(TODO_OPTIONS[1] ?? '')
+  expect(await documentText(todoScene)).toBe(todoSceneText)
+  await todoStrip.getByTestId('todo-review-close').click()
+  await todoTab.getByTestId('todo-check-book').click()
+  await expect(page.getByText('Nothing changed since the last check.')).toBeVisible()
+  expect(sentWith(TODO_SENTINEL)).toBe(1)
+  await dismissToasts()
+  await showSection('Manuscript')
   // F-9.10: Organise. A stray #reed tag beside #tomas-reed is what an upload leaves behind; the
   // local pass finds the look-alike and the Tags section offers to organise, quietly. Opening the
   // offer asks the AI for a plan (the fake merges the tags and fills The Landing's atmosphere).

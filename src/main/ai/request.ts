@@ -58,7 +58,9 @@ const NO_REASONING_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
   'summary',
   'contextImport',
   // 2026-10-08: a large project's organise plan came back cut off twice; JSON operations need no thinking.
-  'organise'
+  'organise',
+  // F-9.16: the To do check and its suggestions are short JSON lists under small caps.
+  'todo'
 ])
 
 export interface AiRequestInput {

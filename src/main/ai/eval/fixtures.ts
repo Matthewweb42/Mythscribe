@@ -383,6 +383,18 @@ import { buildNotesSuggestPromptV2 } from '../prompts/notesSuggest.v2'
 import { buildPlanLinksPrompt, type BuildPlanLinksPromptInput } from '../prompts/planLinks.v1'
 import { fitAgentPrompt } from '../agent'
 import { PLAN_LINKS_PLANS_MAX, PLAN_LINKS_SCENES_MAX, PLAN_LINKS_TEXT_MAX } from '@shared/planLinks'
+import { buildTodoPrompt, type BuildTodoPromptInput } from '../prompts/todo.v1'
+import { buildTodoSuggestPrompt, type BuildTodoSuggestPromptInput } from '../prompts/todoSuggest.v1'
+import {
+  TODO_DIGEST_MAX,
+  TODO_SCENE_LINE_MAX,
+  TODO_SETTLED_LISTED_MAX,
+  TODO_SUGGEST_PASSAGES_MAX,
+  TODO_SUGGEST_PASSAGE_MAX,
+  TODO_SUGGEST_RECORD_MAX,
+  TODO_SUBJECT_MAX,
+  TODO_WHY_MAX
+} from '@shared/todo'
 import {
   STORY_MAP_SMALL_TOKEN_BUDGET,
   STORY_MAP_TOKEN_BUDGET,
@@ -715,6 +727,13 @@ export interface EvalCase {
     | { kind: 'storyTime'; forbidden: string[] }
     /** Plan links (F-11.1d): the answer must parse to `{ links }` naming only labels that were sent. */
     | { kind: 'planLinks'; plans: number; scenes: number }
+    /**
+     * The To do check (F-9.16): the answer must parse to `{ items, resolved }`, every item of a
+     * known type naming a scene label that was sent.
+     */
+    | { kind: 'todo'; scenes: number }
+    /** A To do item's suggestions (F-9.16): the feature's own parser keeps 2–3 options. */
+    | { kind: 'todoSuggest' }
     /**
      * An organise request (F-9.10): the answer must parse through the feature's own parser with
      * no operation dropped, and hold an operation of each kind in `expected`.
@@ -2624,6 +2643,96 @@ const PLAN_LINKS_MAXED: BuildPlanLinksPromptInput = {
   }))
 }
 
+function todoCase(name: string, note: string, input: BuildTodoPromptInput): EvalCase {
+  const built = buildTodoPrompt(input)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'todo', scenes: input.scenes.length }
+  }
+}
+
+function todoSuggestCase(name: string, note: string, input: BuildTodoSuggestPromptInput): EvalCase {
+  const built = buildTodoSuggestPrompt(input)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'todoSuggest' }
+  }
+}
+
+/** The fixture book as the To do check reads it: four scene cards, a digest, one open thread. */
+const TODO_FIXTURE: BuildTodoPromptInput = {
+  digest: [
+    'Mara Vell (character): blank goals, fears',
+    'Tomas (character): blank background',
+    'The Hollowing (world item): empty',
+    'The Ferry Landing (place)'
+  ],
+  threads: ['The mill ledger: who copied it, and why?'],
+  scenes: [
+    'S1 "The mill" · autumn · POV Pell · Pell copies the mill ledger and hides it under the elm.',
+    'S2 "The ferry landing" · the next morning · POV Mara · Mara meets Tomas, who wants the ledger back.',
+    'S3 "The elm" · that night · POV Mara · Mara digs under the elm and finds the copy.',
+    'S4 "The crossing" · three weeks later · POV Mara · Mara crosses the Hollowing; nobody can hear her.'
+  ],
+  listed: ['emptyRecord: The Hollowing', 'noGoal: Mara Vell'],
+  settled: []
+}
+
+/** Every cap of the check: the digest, threads, and lists full, scene lines up to the input budget. */
+function maxedTodoInput(): BuildTodoPromptInput {
+  const digest: string[] = []
+  for (let at = 0; digest.join('\n').length < TODO_DIGEST_MAX - 100; at++) {
+    digest.push(`Record ${at} (character): blank goals, fears, background, appearance`)
+  }
+  const base: BuildTodoPromptInput = {
+    digest,
+    threads: Array.from({ length: 40 }, (_, at) => `Thread ${at}: ${'q'.repeat(140)}`),
+    scenes: [],
+    listed: Array.from(
+      { length: 60 },
+      (_, at) => `A${at + 1} question: ${'s'.repeat(TODO_SUBJECT_MAX - 20)}`
+    ),
+    settled: Array.from(
+      { length: TODO_SETTLED_LISTED_MAX },
+      (_, at) => `term: ${at} ${'s'.repeat(TODO_SUBJECT_MAX - 10)}`
+    )
+  }
+  const tokens = (input: BuildTodoPromptInput): number =>
+    estimateTokens(
+      buildTodoPrompt(input)
+        .messages.map((message) => message.content)
+        .join('\n')
+    )
+  const scenes: string[] = []
+  const line = (at: number): string =>
+    `S${at + 1} ${'c'.repeat(TODO_SCENE_LINE_MAX - 6)}`.slice(0, TODO_SCENE_LINE_MAX)
+  while (tokens({ ...base, scenes: [...scenes, line(scenes.length)] }) <= inputBudget('todo')) {
+    scenes.push(line(scenes.length))
+  }
+  return { ...base, scenes }
+}
+
+const TODO_SUGGEST_FIXTURE: BuildTodoSuggestPromptInput = {
+  kind: 'Gap',
+  subject: 'Mara Vell',
+  why: '3 scenes are told from Mara Vell’s point of view, but no goal is stated.',
+  target: 'Mara Vell › Goals / motivations',
+  current: '',
+  record: 'Role: Ferry pilot; Appearance: Grey coat, a scar over one eye',
+  passages: [
+    'Mara Vell reached the ferry landing before the bell and did not look at the mill.',
+    'Mara dug under the elm until her nails broke, and found the copy Pell had hidden.'
+  ]
+}
+
 function synopsisCase(name: string, note: string, input: BuildSynopsisPromptInput): EvalCase {
   // The scene is fitted to the input budget exactly as the feature fits it (token rule 8).
   const { sceneText } = fitSceneToBudget(
@@ -4474,5 +4583,46 @@ export const EVAL_CASES: EvalCase[] = [
     FIXTURE_PASSAGE.repeat(4).slice(0, ORGANISE_INSTRUCTION_MAX),
     [],
     { part: 2, half: true }
+  ),
+  // F-9.16: the To do list's whole-book check (on request only) and an item's suggestions.
+  todoSuggestCase('fresh', 'an untagged name with no sheet and one passage', {
+    kind: 'Undefined',
+    subject: 'Hollowing',
+    why: 'Used 4 times, but no tag or record says who or what it is.',
+    target: 'New world item: Hollowing',
+    current: '',
+    record: '',
+    passages: ['Mara crossed the Hollowing, and nobody on the far bank heard her call.']
+  }),
+  todoSuggestCase(
+    'full',
+    'a POV character with no stated goal, the sheet and two passages',
+    TODO_SUGGEST_FIXTURE
+  ),
+  todoSuggestCase('maxed', 'every cap: the reason, the target value, the sheet, three passages', {
+    ...TODO_SUGGEST_FIXTURE,
+    why: 'w'.repeat(TODO_WHY_MAX),
+    current: 'c'.repeat(300),
+    record: 'r'.repeat(TODO_SUGGEST_RECORD_MAX),
+    passages: Array.from({ length: TODO_SUGGEST_PASSAGES_MAX }, () =>
+      FIXTURE_PASSAGE.slice(0, TODO_SUGGEST_PASSAGE_MAX)
+    )
+  }),
+  todoCase('fresh', 'a new book: two scene cards, no sheet, nothing listed or settled', {
+    digest: [],
+    threads: [],
+    scenes: TODO_FIXTURE.scenes.slice(0, 2),
+    listed: [],
+    settled: []
+  }),
+  todoCase(
+    'full',
+    'the fixture book: four scene cards, a digest of four sheets, one thread, two listed items',
+    TODO_FIXTURE
+  ),
+  todoCase(
+    'maxed',
+    'every cap: the digest, 40 threads, 60 listed and 60 settled, scene lines up to the input budget',
+    maxedTodoInput()
   )
 ]

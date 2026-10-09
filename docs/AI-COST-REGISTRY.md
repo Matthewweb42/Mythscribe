@@ -41,6 +41,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `reviewChat` | Upload review chat | on request | reviewChat.v2 | strong | 676 / 5618 | 300 / 3000 | $0.000268 · $0.00244 | $0.000335 | $0.00619 | 1 | $0.000268 |
 | `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000285 · $0.000690 | $0.000356 | $0.00299 | 1 | $0.000285 |
 | `organise` | Organise | on request | organise.v2 | strong | 2571 / 6323 | 1200 / 6000 | $0.00104 · $0.00385 | $0.00130 | $0.0244 | 4 | $0.00418 |
+| `todo` | To do list: gaps and suggestions | on request | todo.v1 | fast | 415 / 9965 | 600 / 1200 | $0.000780 · $0.00183 | $0.000976 | $0.00301 | 1 | $0.000780 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -168,3 +169,8 @@ git history of this file is the log of each feature's cost over time (author req
 
 - **When:** Organise (button, the quiet offer, or the chat): one request per chunk of the tags, sheets, notes, and outline listing (up to 16 chunks, reasoning off); a chunk whose answer is cut off is halved and each half sent again, at most twice.
 - **Ideas:** Send only the local findings for a quick tidy; skip sections the instruction does not name (already); fast tier for tag-only runs.
+
+### `todo` — To do list: gaps and suggestions
+
+- **When:** Only when you click Check the whole book (one request per window of scene cards, at most 3); and one small request per To do card when its suggestions are first shown.
+- **Ideas:** Fold suggestions into the check for the top items; skip the check when no card changed meaningfully (an identical input already sends nothing).

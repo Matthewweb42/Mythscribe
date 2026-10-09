@@ -1,0 +1,22 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`todoSuggest.v1 prompt (F-9.16) > sends the item, its target, the sheet, and the passages; empty parts are left out 1`] = `
+[
+  {
+    "content": "You are the To do suggestions inside a novel-writing app. The book leaves the gap below open. Offer 2 or 3 short options the author could choose to close it, each one sentence of at most 160 characters, consistent with the passages and the sheet and never contradicting them. They are options, not facts: never claim the book says them. Reply with JSON only: {"suggestions":["…","…"]}.",
+    "role": "system",
+  },
+  {
+    "content": "Gap: Mara
+Why: 2 scenes are told from her point of view, but no goal is stated.
+The line goes to: Mara › Goals / motivations
+Sheet:
+Role: Ferry pilot
+Passages:
+- Mara reached the Hollowing at dusk.
+- She did not look back.
+Suggest the options.",
+    "role": "user",
+  },
+]
+`;

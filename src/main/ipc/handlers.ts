@@ -242,12 +242,13 @@ import {
   setFactStatus
 } from '../entity/factStore'
 import { listThreads } from '../knowledge/threads'
-import { TODO_DEBOUNCE_MS } from '@shared/todo'
+import { TODO_DEBOUNCE_MS, type TodoCheckResult, type TodoSuggestResult } from '@shared/todo'
 import { sceneCardFor } from '../knowledge/sceneCard'
 import { confirmConversion, conversionPending, estimateConversion } from '../knowledge/conversion'
 import { listChanges, undoChange, undoRun } from '../knowledge/changeLog'
 import { convertKnowledgeFacts } from '../knowledge/factConversion'
 import { listTodo, reopenTodo, settleTodo, syncLocalTodo } from '../knowledge/todoStore'
+import { runTodoPass, suggestTodo, todoCheckView, type TodoCheckContext } from '../ai/todoPass'
 import { importDraft, type ImportResult } from '../import/commit'
 import { withExisting } from '../import/existing'
 import { readManuscript } from '../import/read'
@@ -999,6 +1000,17 @@ export function registerHandlers({
    * fast tier's model, the hosted quote on MythScribe Cloud, nothing on a local model.
    */
   let conversionDeferred = false
+  /** F-9.16: may the To do check and suggestions run, and on what model at what price. */
+  const todoCheckContext = (db: TreeDb): TodoCheckContext => {
+    const source = sourceOf(db)
+    const provider = access.writable() ? ai.get(source) : undefined
+    return {
+      allowed: isFeatureAllowed(getAiSettings(db), 'todo') && Boolean(provider),
+      source,
+      model: provider?.resolveModel('fast') ?? '',
+      pricing: appState.get().cloudPricing?.pricing ?? null
+    }
+  }
   const conversionOf = (db: TreeDb): KnowledgeConversion => {
     const source = sourceOf(db)
     const provider = access.writable() ? ai.get(source) : undefined
@@ -2072,7 +2084,39 @@ export function registerHandlers({
 
   // F-9.16: the To do list. Settling or reopening an item is the author's; a dismissed name
   // reaches the Tags panel's proposals, a dismissed contradiction the Continuity panel.
-  register('todo:list', () => listTodo(manager.require().connection.orm))
+  register('todo:list', () => {
+    const db = manager.require().connection.orm
+    return listTodo(db, todoCheckView(db, todoCheckContext(db)))
+  })
+
+  // F-9.16: Check the whole book, only on the author's click (the author's call, 2026-10-09:
+  // never automatically). Whatever the outcome, the windows re-read the list: an answer is stored
+  // as it comes, so a failure on a later request still leaves the earlier ones' items.
+  register('todo:check', async ({ requestId }): Promise<TodoCheckResult> => {
+    const db = manager.require().connection.orm
+    try {
+      const result = await runTodoPass(db, requestDeps(db), { requestId })
+      return { ok: true, ...result, requestId }
+    } catch (err) {
+      if (err instanceof AiProviderError) return { ...aiFailure(err.code, err.message), requestId }
+      throw err
+    } finally {
+      emit(windows(), 'todo:changed', {})
+    }
+  })
+
+  // F-9.16: an item's suggestions when its card is first shown, stored on the item. The asking
+  // window updates its own copy; no event, so the list does not re-read under the author.
+  register('todo:suggest', async ({ id, requestId }): Promise<TodoSuggestResult> => {
+    const db = manager.require().connection.orm
+    try {
+      const result = await suggestTodo(db, requestDeps(db), { id, requestId })
+      return { ok: true, ...result, requestId }
+    } catch (err) {
+      if (err instanceof AiProviderError) return { ...aiFailure(err.code, err.message), requestId }
+      throw err
+    }
+  })
 
   register('todo:settle', ({ id, status }) => {
     const db = manager.require().connection.orm

@@ -145,7 +145,7 @@ import { Fact, FactStatus } from '../facts'
 import { KnowledgeConversion } from '../knowledge'
 import { RELATION_LABEL_MAX, RelationType } from '../relations'
 import { THREAD_NOTE_MAX, ThreadEvent, ThreadView } from '../threads'
-import { TodoView } from '../todo'
+import { TodoCheckResult, TodoSuggestResult, TodoView } from '../todo'
 import { CHANGES_PAGE, CHANGES_PAGE_MAX, ChangePage, ChangeUndoResult } from '../changes'
 import { TagMentions } from '../mentions'
 import { EditRole, MenuItemId } from '../menu'
@@ -1876,9 +1876,29 @@ export const contract = {
   /**
    * The To do list (F-9.16): the open items the local rules found, the AI check added, and the
    * open contradictions of the consistency checker (id `c:<findingId>`, read live), grouped by
-   * kind with the counts. Local; refetched on `todo:changed`.
+   * kind with the counts, and the AI check's header (may it run, when it last ran, what a run
+   * would cost now). Local; refetched on `todo:changed`.
    */
   'todo:list': { input: z.undefined(), output: TodoView },
+  /**
+   * Check the whole book (F-9.16, `todo.v1`), only on the author's click (never automatically):
+   * the `todo` gate, then up to three fast-tier JSON requests over the scene cards, the open
+   * threads, and the sheet digest; new AI items are stored open, and the open AI items the answer
+   * resolved are dropped. Nothing is sent when the book has no scene card or is unchanged since
+   * the last check (`requested: false`). Provider failures come back as `ok: false` with the
+   * cause and next step. Pushes `todo:changed`. Never writes a scene.
+   */
+  'todo:check': { input: z.object({ requestId: z.string() }), output: TodoCheckResult },
+  /**
+   * One item's suggestions (`todoSuggest.v1`), asked when its card is first shown: the stored
+   * ones when the item has them (`requested: false`), else one fast-tier JSON request, its answer
+   * stored on the item. Options for the author to choose from, never facts. VALIDATION for a
+   * contradiction or a settled item; NOT_FOUND for an unknown one.
+   */
+  'todo:suggest': {
+    input: z.object({ id: z.string(), requestId: z.string() }),
+    output: TodoSuggestResult
+  },
   /**
    * Done ("handled") or Dismiss ("not a problem"): the item never comes back. A contradiction is
    * dismissed in the consistency checker; an untagged name is dismissed in the Tags panel too.

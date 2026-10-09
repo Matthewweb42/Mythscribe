@@ -61,7 +61,20 @@ export function estimateScenes(
     tokensIn += estimateTokens(prompt.messages.map((message) => message.content).join('\n'))
   }
   const tokensOut = nodeIds.length * AI_COST_NOTES.summary.typicalOutTokens
-  if (context.source === 'local') return { tokensIn, tokensOut, costUsd: 0, priced: true }
+  return { tokensIn, tokensOut, ...estimateCost(context, tokensIn, tokensOut) }
+}
+
+/**
+ * What `tokensIn` and `tokensOut` cost on the configured model: nothing on a local model, the
+ * hosted quote on MythScribe Cloud (`hostedQuote`), the provider's price on an own key
+ * (`priceFor`). F-9.16's check estimate prices the same way.
+ */
+export function estimateCost(
+  context: Pick<ConversionContext, 'source' | 'model' | 'pricing'>,
+  tokensIn: number,
+  tokensOut: number
+): { costUsd: number; priced: boolean } {
+  if (context.source === 'local') return { costUsd: 0, priced: true }
   if (context.source === 'cloud') {
     const quote = hostedQuote(
       context.pricing ?? bundledPricing(),
@@ -69,10 +82,10 @@ export function estimateScenes(
       tokensIn,
       tokensOut
     )
-    return { tokensIn, tokensOut, costUsd: quote.costUsd, priced: quote.priced }
+    return { costUsd: quote.costUsd, priced: quote.priced }
   }
   const price = priceFor(context.model, tokensIn, tokensOut)
-  return { tokensIn, tokensOut, costUsd: price.costUsd, priced: price.priced }
+  return { costUsd: price.costUsd, priced: price.priced }
 }
 
 /**

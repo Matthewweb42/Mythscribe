@@ -23,11 +23,15 @@ function useCardItem(id: string): { item: TodoItem; settled: 'done' | 'dismissed
  * One To do item on the deck (F-9.16): why it was flagged, the passage (the editor has jumped to
  * it), the suggestions (each labelled a suggestion: an option to choose, never a fact), and the
  * editable line. Picking a suggestion only fills the line; Add writes it as the author's own text
- * where the card says, and marks the item done. Cancel writes nothing.
+ * where the card says, and marks the item done. Cancel writes nothing. The suggestions are asked
+ * for when the card is first shown (the store does it as the deck moves, with Use AI on); with
+ * AI off the card offers only its actions.
  */
 export function TodoCard({ id }: { id: string }): React.JSX.Element | null {
   const shown = useCardItem(id)
   const composer = useTodoStore((s) => (s.composer?.id === id ? s.composer : null))
+  const suggesting = useTodoStore((s) => s.suggesting.includes(id))
+  const suggestError = useTodoStore((s) => s.suggestErrors[id] ?? null)
   if (shown === null) return null
   const { item, settled } = shown
   const addable = canAdd(item.target)
@@ -71,6 +75,14 @@ export function TodoCard({ id }: { id: string }): React.JSX.Element | null {
                 </li>
               ))}
             </ul>
+          ) : suggesting ? (
+            <p className="m-0 text-xs text-fg-muted" role="status" data-testid="todo-suggesting">
+              Finding suggestions…
+            </p>
+          ) : suggestError !== null ? (
+            <p className="m-0 text-xs text-fg-muted" data-testid="todo-suggest-error">
+              No suggestions: {suggestError}
+            </p>
           ) : null}
           <div className="flex flex-wrap items-center gap-1.5">
             {addable && composer === null ? (

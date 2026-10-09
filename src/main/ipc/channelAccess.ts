@@ -166,6 +166,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'todo:list': 'read',
   'todo:settle': 'write',
   'todo:reopen': 'write',
+  'todo:check': 'ai',
+  'todo:suggest': 'ai',
   'layout:get': 'read',
   'layout:set': 'read',
   'account:getStatus': 'read',

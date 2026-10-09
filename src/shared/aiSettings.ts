@@ -456,6 +456,18 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'plan, in the background after a scene summary changes or when you ask the outline to find links.',
     minDial: 1
   },
+  todo: {
+    label: 'To do list: gaps and suggestions',
+    sends:
+      "Only when you click Check the whole book: each written scene's title and card (when, " +
+      'point of view, and what changed, up to 200 characters), your open threads with their ' +
+      'questions, the names of your story-bible sheets with which fields are blank (never their ' +
+      'values), and the names of the items already listed or settled. When a To do card first ' +
+      "shows its suggestions: that item, its sheet's fields (up to 600 characters), and up to " +
+      '3 passages that name it (up to 400 characters each). The local To do items are found ' +
+      'on your machine and send nothing.',
+    minDial: 1
+  },
   reviewChat: {
     label: 'Upload review chat',
     sends:

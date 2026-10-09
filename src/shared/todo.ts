@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AiErrorCode } from './ai'
 import { EntityFieldId, EntityKind } from './entities'
 import { fieldMode, isFieldFact, type Fact } from './facts'
 import type { ThreadView } from './threads'
@@ -440,10 +441,28 @@ export const TodoCounts = z.object({
 })
 export type TodoCounts = z.infer<typeof TodoCounts>
 
-/** What `todo:list` answers: the open items, grouped by kind in `TODO_KINDS` order. */
+/**
+ * The whole-book AI check as the section's header shows it (F-9.16; it runs only when the author
+ * clicks Check the whole book, the author's call of 2026-10-09): whether it may run now (Use AI
+ * on, its toggle on, a provider set up), when it last ran and what that cost, an estimate of what
+ * a run would cost now (null when it cannot run or nothing would be sent), and whether the book is
+ * unchanged since the last check (`fresh`: a click sends nothing). `allowed` also gates the
+ * per-item suggestions: with it false, cards offer only actions.
+ */
+export const TodoCheck = z.object({
+  allowed: z.boolean(),
+  lastAt: z.string().nullable(),
+  lastCostUsd: z.number().nullable(),
+  estimateUsd: z.number().nullable(),
+  fresh: z.boolean()
+})
+export type TodoCheck = z.infer<typeof TodoCheck>
+
+/** What `todo:list` answers: the open items, grouped by kind in `TODO_KINDS` order, and the check. */
 export const TodoView = z.object({
   items: z.array(TodoItem),
-  counts: TodoCounts
+  counts: TodoCounts,
+  check: TodoCheck
 })
 export type TodoView = z.infer<typeof TodoView>
 
@@ -456,3 +475,91 @@ export function todoCounts(items: readonly Pick<TodoItem, 'kind'>[]): TodoCounts
 
 /** Quiet after the last change of the knowledge before the local To do sync runs. */
 export const TODO_DEBOUNCE_MS = 5_000
+
+// ---------------------------------------------------------------------------------------------
+// The whole-book AI check (`todo.v1`) and the per-item suggestions (`todoSuggest.v1`).
+// ---------------------------------------------------------------------------------------------
+
+/** Settings key of the check's state: when it last ran, on what input, and at what cost. */
+export const TODO_STATE_KEY = 'todo'
+
+/** The check's state, read leniently so a later build's keys survive (`.loose()`). */
+export const TodoPassState = z
+  .object({
+    lastPassAt: z.string().nullable().default(null),
+    lastPassHash: z.string().nullable().default(null),
+    lastPassCostUsd: z.number().nullable().default(null)
+  })
+  .loose()
+export type TodoPassState = z.infer<typeof TodoPassState>
+
+/** What the check may flag, and the rule (and kind) each becomes. */
+export const TODO_AI_TYPES = ['timeline', 'rule', 'motivation', 'term', 'question'] as const
+export type TodoAiType = (typeof TODO_AI_TYPES)[number]
+export const TODO_AI_RULE: Readonly<Record<TodoAiType, TodoRule>> = {
+  timeline: 'timeline',
+  rule: 'rule',
+  motivation: 'motivation',
+  term: 'term',
+  question: 'question'
+}
+
+/** At most this many new items and resolved ids per answer. */
+export const TODO_AI_ITEMS_MAX = 8
+export const TODO_AI_RESOLVED_MAX = 8
+/** The reason the check gives, at most. */
+export const TODO_AI_WHY_MAX = 200
+/** At most this many requests per check (consecutive windows of the scene lines). */
+export const TODO_PASS_CHUNKS_MAX = 3
+/** One scene line ("S12 "Title" · when · POV · what changed"), at most. */
+export const TODO_SCENE_LINE_MAX = 200
+/** The sheet digest (names and blank fields, no values), at most. */
+export const TODO_DIGEST_MAX = 6_000
+/** At most this many settled subjects are listed as "never again". */
+export const TODO_SETTLED_LISTED_MAX = 60
+/** A suggestion request sends the record's fields within this many characters. */
+export const TODO_SUGGEST_RECORD_MAX = 600
+/** …and up to this many passages, each within this many characters. */
+export const TODO_SUGGEST_PASSAGES_MAX = 3
+export const TODO_SUGGEST_PASSAGE_MAX = 400
+
+/** What `todo:check` answers: how many items the check added and resolved, and what it cost. */
+export const TodoCheckResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    /** False when nothing was sent (no scene to read, or nothing changed since the last check). */
+    requested: z.boolean(),
+    added: z.number().int().nonnegative(),
+    resolved: z.number().int().nonnegative(),
+    costUsd: z.number(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type TodoCheckResult = z.infer<typeof TodoCheckResult>
+
+/** What `todo:suggest` answers: the item's options (cached on the row after the first ask). */
+export const TodoSuggestResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    suggestions: z.array(z.string()),
+    /** False when the row already held them. */
+    requested: z.boolean(),
+    costUsd: z.number(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type TodoSuggestResult = z.infer<typeof TodoSuggestResult>

@@ -1,0 +1,33 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`todo.v1 prompt (F-9.16) > sends the rules alone, the book next, and what is listed or settled last 1`] = `
+[
+  {
+    "content": "You are the To do check inside a novel-writing app. From the scene cards, threads, and sheet digest, list what the book leaves unexplained that only judgement can see: a timeline gap (time passes or the order is unclear), a rule a system follows that is implied but never stated, a motivation the story leans on but never states, a coined term nothing explains, a promise or question no thread holds. Flag only gaps the cards and sheets show. Never fill one. Suggestions are options the author may choose, consistent with what is stated, never facts. Do not repeat blank-field gaps the app already lists, or anything under Already listed or Settled. Reply with JSON only: {"items":[{"type":"timeline|rule|motivation|term|question","about":"the name or term","scene":"S3","why":"one sentence","suggestions":["up to 3 short options"]}],"resolved":["A1"]}; at most 8 items; "resolved" names Already listed ids the cards now answer; with nothing to flag, {"items":[],"resolved":[]}.",
+    "role": "system",
+  },
+  {
+    "content": "Sheets:
+Mara (character): blank goals
+Hollowing (world item): empty
+
+Open threads:
+The missing ferry: where did it go?
+
+Scenes:
+S1 "The quay" · the first night · POV Mara · Mara hears the Hollowing.",
+    "role": "user",
+  },
+  {
+    "content": "Already listed:
+A1 term: Hollowing
+noGoal: Mara
+
+Settled:
+(none)
+
+List the gaps.",
+    "role": "user",
+  },
+]
+`;

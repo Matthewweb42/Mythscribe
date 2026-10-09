@@ -334,7 +334,9 @@ export const AI_FEATURE_IDS = [
   // F-11.1d: plan links, tying the author's planned scenes and beats to the written scene that fulfils them.
   'planLinks',
   // F-9.10: organise, a plan of changes to the tags, the story bible, the notes, and the binder.
-  'organise'
+  'organise',
+  // F-9.16: the To do list's whole-book check (on request only) and its per-item suggestions.
+  'todo'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -404,7 +406,11 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // text included. organise.v2 asks `ORGANISE_V2_MAX_TOKENS` (6,000; raised from 5,000 on
   // 2026-10-08 with reasoning off: a large project's chunks were cut off); a chunk whose answer is
   // still cut off is halved rather than asked again.
-  organise: 6_000
+  organise: 6_000,
+  // F-9.16: the whole-book check's up to 8 gaps as JSON, each a type, a name, a scene label, a
+  // reason, and up to 3 suggestions of 160 characters, plus resolved ids; a suggestion request
+  // asks `TODO_SUGGEST_MAX_TOKENS` (300) under the same cap.
+  todo: 1_200
 }
 
 /**
@@ -476,7 +482,11 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // tag and sheet (≤ 6,000 characters), the local findings about what the chunk lists, and one
   // chunk of the listing (≤ 14,000 characters of tags, sheets with their fields and observed
   // facts, notes, or outline).
-  organise: 8_000
+  organise: 8_000,
+  // F-9.16: per request of the check: the rules, the sheet digest (names and blank fields, no
+  // values, ≤ 6,000 characters), the open threads, one window of scene lines (≤ 200 characters
+  // each), and what is already listed or settled; the window is cut to fit (far scenes first).
+  todo: 10_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

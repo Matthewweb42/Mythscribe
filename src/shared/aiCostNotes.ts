@@ -198,6 +198,14 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     ideas:
       'Send only the local findings for a quick tidy; skip sections the instruction does not name (already); fast tier for tag-only runs.'
   },
+  todo: {
+    trigger: 'on request',
+    when: 'Only when you click Check the whole book (one request per window of scene cards, at most 3); and one small request per To do card when its suggestions are first shown.',
+    callsPerUse: 1,
+    typicalOutTokens: 600,
+    ideas:
+      'Fold suggestions into the check for the top items; skip the check when no card changed meaningfully (an identical input already sends nothing).'
+  },
   reviewChat: {
     trigger: 'on request',
     when: 'A message on the upload review screen that changes the pending plan.',

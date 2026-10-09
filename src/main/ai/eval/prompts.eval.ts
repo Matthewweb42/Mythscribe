@@ -26,6 +26,7 @@ import { parseNotesSuggestAnswer, parseSynopsisAnswer } from '../sceneSuggest'
 import { parseSummaryAnswer } from '../summarize'
 import { parseVoiceNotesAnswer } from '../voiceNotes'
 import { parseWhatNextAnswer } from '../whatNext'
+import { parseTodoAnswer, parseTodoSuggestAnswer } from '../todoPass'
 import { EVAL_CASES, FIXTURE_PROFILE, type EvalCase } from './fixtures'
 import { renderLiveReport, renderTokenReport, tokenRows, type LiveResult } from './report'
 
@@ -484,6 +485,49 @@ function scorePlanLinks(plans: number, scenes: number, answer: string): LiveResu
     : { kind: 'json', ok: false, problem: `${strays} links name labels that were not sent` }
 }
 
+/**
+ * The To do check (F-9.16) scores through the feature's own parser: every item must be kept (a
+ * known type, a name, a scene label that was sent), against an empty table and bible.
+ */
+function scoreTodo(scenes: number, answer: string): LiveResult['verdict'] {
+  let items: unknown[]
+  try {
+    const json: unknown = JSON.parse(answer)
+    items =
+      typeof json === 'object' &&
+      json !== null &&
+      Array.isArray((json as { items?: unknown }).items)
+        ? (json as { items: unknown[] }).items
+        : []
+    const parsed = parseTodoAnswer(answer, {
+      scenes: new Map(Array.from({ length: scenes }, (_, at) => [`s${at + 1}`, `n${at + 1}`])),
+      listed: new Map(),
+      keys: new Set(),
+      entities: [],
+      categories: [],
+      quoteOf: () => null
+    })
+    const dropped = Math.min(items.length, 8) - parsed.items.length
+    return dropped === 0
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: `${dropped} items dropped by the parser` }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not { items: [...], resolved: [...] }' }
+  }
+}
+
+/** A To do item's suggestions (F-9.16): the parser must keep at least two options. */
+function scoreTodoSuggest(answer: string): LiveResult['verdict'] {
+  try {
+    const kept = parseTodoSuggestAnswer(answer)
+    return kept.length >= 2
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: `only ${kept.length} option` }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not { suggestions: [string] }' }
+  }
+}
+
 /** A suggested synopsis (F-5.20) scores through the feature's own parser. */
 function scoreSynopsis(answer: string): LiveResult['verdict'] {
   try {
@@ -726,6 +770,18 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           answer: reply.text,
           verdict: scorePlanLinks(c.scoring.plans, c.scoring.scenes, reply.text)
         })
+        continue
+      }
+      if (c.scoring.kind === 'todo') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreTodo(c.scoring.scenes, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'todoSuggest') {
+        results.push({ ...base, answer: reply.text, verdict: scoreTodoSuggest(reply.text) })
         continue
       }
       if (c.scoring.kind === 'synopsis') {

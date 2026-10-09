@@ -74,7 +74,7 @@ const LIMIT_KINDS = ['magic', 'technology', 'world'] as const
 const CONTRADICTION_RANK = 1_000_000
 
 /** The book as the rules read it: the written scenes in reading order and their documents. */
-interface Book {
+export interface Book {
   rows: NodeRow[]
   /** Manuscript documents with at least `SUMMARY_TEXT_MIN` characters, not marked idea. */
   written: NodeRow[]
@@ -83,7 +83,7 @@ interface Book {
   paragraphsOf: (nodeId: string) => ReturnType<typeof passageParagraphs>
 }
 
-function readBook(db: TreeDb): Book {
+export function readBook(db: TreeDb): Book {
   const rows = listNodes(db)
   const docs = manuscriptDocuments(db, rows)
   const json = new Map(docs.map((row) => [row.id, documentJson(row)]))
@@ -134,13 +134,13 @@ function wordQuote(book: Book, nodeId: string, word: string): string | null {
 }
 
 /** One record's mentions in the written scenes, in reading order. */
-interface RecordMentionList {
+export interface RecordMentionList {
   entity: Entity
   mentions: TagMentions[]
   total: number
 }
 
-function mentionsByRecord(
+export function mentionsByRecord(
   db: TreeDb,
   book: Book,
   entities: readonly Entity[]
@@ -171,7 +171,7 @@ const filled = (entity: Entity, field: string): boolean =>
   (entity.fields[field] ?? '').trim() !== ''
 
 /** The field a record's "what is it?" line goes into. */
-function describeField(category: StoryCategory): string | null {
+export function describeField(category: StoryCategory): string | null {
   const ids = category.fields.map((field) => field.id)
   if (ids.includes('description')) return 'description'
   if (ids.includes('background')) return 'background'

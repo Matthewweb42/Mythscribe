@@ -211,7 +211,11 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'fact:listForEntity') return []
     if (channel === 'changes:list') return { entries: [], more: false }
     if (channel === 'todo:list') {
-      return { items: [], counts: { undefined: 0, contradiction: 0, looseEnd: 0, gap: 0 } }
+      return {
+        items: [],
+        counts: { undefined: 0, contradiction: 0, looseEnd: 0, gap: 0 },
+        check: { allowed: false, lastAt: null, lastCostUsd: null, estimateUsd: null, fresh: false }
+      }
     }
     if (channel === 'documentTag:list') return []
     if (channel === 'tag:proposed') return []

@@ -47,6 +47,7 @@ import {
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
 import { DISMISSED_NAMES_KEY, DismissedNames, defaultDismissedNames } from '@shared/proposedTags'
 import { KNOWLEDGE_MODEL_KEY, KnowledgeModelState } from '@shared/knowledge'
+import { TODO_STATE_KEY, TodoPassState } from '@shared/todo'
 import { KEPT_SPELLINGS_KEY, KEPT_SPELLINGS_MAX, KeptSpellings } from '@shared/misspellings'
 import { REFERENCE_PINS_KEY, ReferencePins, defaultReferencePins } from '@shared/references'
 import {
@@ -718,6 +719,36 @@ export function setPlanLinkState(db: TreeDb, value: PlanLinkState): PlanLinkStat
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: PLAN_LINKS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the To do check's state (F-9.16: when it last ran, on what input, at what cost) from the
+ * `settings` row under `TODO_STATE_KEY`. A missing or unreadable row answers "never ran": the
+ * worst case is that the next check is sent once more.
+ */
+export function getTodoPassState(db: TreeDb): TodoPassState {
+  const row = db.select().from(settings).where(eq(settings.key, TODO_STATE_KEY)).get()
+  const fallback = TodoPassState.parse({})
+  if (!row) return fallback
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return fallback
+  }
+  const parsed = TodoPassState.safeParse(json)
+  return parsed.success ? parsed.data : fallback
+}
+
+/** Merges `patch` into the stored state (upsert on the settings key; other keys kept) and returns it. */
+export function setTodoPassState(db: TreeDb, patch: Partial<TodoPassState>): TodoPassState {
+  const stored = TodoPassState.parse({ ...getTodoPassState(db), ...patch })
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: TODO_STATE_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored
