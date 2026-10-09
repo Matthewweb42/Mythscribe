@@ -83,7 +83,14 @@ describe('reviewDeckModel', () => {
     ])
     expect(
       deckCounts([...decided, { id: 'x', group: 'sheets', decision: 'accepted', settled: true }])
-    ).toEqual({ total: 6, reviewed: 2, accepted: 0, skipped: 1, open: 4 })
+    ).toEqual({
+      total: 6,
+      reviewed: 2,
+      accepted: 0,
+      acceptedTotal: 1,
+      skipped: 1,
+      open: 4
+    })
   })
 })
 

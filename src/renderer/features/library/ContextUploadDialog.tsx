@@ -117,7 +117,7 @@ function Dialog({ flow }: { flow: LibraryFlow }): React.JSX.Element {
         tabIndex={-1}
         data-testid="library-dialog"
         onKeyDown={onKeyDown}
-        className={`flex max-h-[85vh] max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none ${flow.stage === 'review' ? 'w-[860px]' : 'w-[520px]'}`}
+        className={`flex max-h-[85vh] overflow-y-auto max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none ${flow.stage === 'review' ? 'w-[860px]' : 'w-[520px]'}`}
       >
         <div className="shrink-0 border-b border-line px-5 pt-4 pb-3">
           <h2 id={titleId} className="m-0 text-base font-semibold">

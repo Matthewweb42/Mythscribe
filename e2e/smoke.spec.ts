@@ -4967,6 +4967,23 @@ test('create, close, reopen a project on disk', async () => {
   await expect(page.getByTestId('tracked-changes-count')).toHaveText(
     '1 tracked change from an edit pass'
   )
+  // One change at a time (2026-10-08, the review deck): "Review one by one" opens the deck as a
+  // strip above the scene, the change on its card; S keeps it for later, the end offers it
+  // again, and Stop reviewing puts the bar back with the change still there.
+  await page.getByTestId('tracked-changes-review').click()
+  const editReview = page.getByTestId('edit-review')
+  await expect(editReview.getByTestId('review-position')).toHaveText('Change 1 of 1')
+  await expect(editReview.getByTestId('edit-review-diff')).toContainText(EDIT_PASS_QUOTE)
+  // The editor jumped to the change: it is on screen, highlighted, while the keys stay on the deck.
+  await expect(editor.locator('.tracked-del')).toBeInViewport()
+  await page.keyboard.press('s')
+  await expect(editReview.getByTestId('review-done')).toContainText('0 accepted · 1 skipped')
+  await editReview.getByTestId('edit-review-close').click()
+  await expect(editReview).toHaveCount(0)
+  await expect(page.getByTestId('tracked-changes-count')).toHaveText(
+    '1 tracked change from an edit pass'
+  )
+  await expect(editor.locator('.tracked-del')).toHaveText(EDIT_PASS_QUOTE)
 
   await showSection('Edits')
   await page.getByTestId('edit-pass-new').click()

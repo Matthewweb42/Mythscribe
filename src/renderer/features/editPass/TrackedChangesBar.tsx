@@ -1,6 +1,8 @@
-import { Check, Lock, X } from 'lucide-react'
+import { Check, ListChecks, Lock, X } from 'lucide-react'
 import { EDIT_PASS_LABEL } from '@shared/editPass'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useEditPassStore, useSceneLocked } from './editPassStore'
+import { EditReviewStrip } from './EditReviewStrip'
 import { useSceneChanges } from './useTrackedChanges'
 
 const BUTTON =
@@ -9,13 +11,18 @@ const BUTTON =
 /**
  * The strip above a scene's text for edit passes (F-14.15): while the scene is in a running pass,
  * that it is read-only and why, with Stop and the progress; otherwise, when the scene has pending
- * tracked changes, how many, with Accept all and Reject all for the scene. Each change also has
- * its own Accept and Reject inline in the text.
+ * tracked changes, how many, with "Review one by one" (the review deck, 2026-10-08), Accept all,
+ * and Reject all for the scene. Each change also has its own Accept and Reject inline in the
+ * text. While a one-at-a-time review is on this scene, the strip is its deck instead.
  */
 export function TrackedChangesBar({ nodeId }: { nodeId: string }): React.JSX.Element | null {
   const locked = useSceneLocked(nodeId)
   const changes = useSceneChanges(nodeId).filter((change) => change.kind === 'change')
   const busy = useEditPassStore((s) => s.busy)
+  const reviewing = useEditPassStore((s) => s.review?.nodeId === nodeId)
+  const title = useTreeStore((s) => s.byId[nodeId]?.title ?? 'Scene')
+
+  if (locked === null && reviewing) return <EditReviewStrip />
 
   if (locked !== null) {
     const done = locked.doneNodeIds.length
@@ -60,6 +67,16 @@ export function TrackedChangesBar({ nodeId }: { nodeId: string }): React.JSX.Ele
           ? '1 tracked change from an edit pass'
           : `${changes.length} tracked changes from edit passes`}
       </span>
+      <button
+        type="button"
+        className={BUTTON}
+        disabled={busy}
+        data-testid="tracked-changes-review"
+        onClick={() => useEditPassStore.getState().startReview(changes, { [nodeId]: title })}
+      >
+        <ListChecks size={13} aria-hidden="true" />
+        Review one by one
+      </button>
       <button
         type="button"
         className={BUTTON}

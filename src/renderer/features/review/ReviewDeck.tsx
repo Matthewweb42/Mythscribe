@@ -62,6 +62,8 @@ export interface ReviewDeckProps {
   busy?: boolean
   /** Always show the groups as a dropdown (a strip above the editor); otherwise only when narrow. */
   compact?: boolean
+  /** The item to show first (a deck shown again where the author left it); the first waiting otherwise. */
+  initialId?: string | null
   /** Focus the deck when it mounts, so the keys work at once. */
   autoFocus?: boolean
   /** Left of the footer (the cost line). */
@@ -101,7 +103,9 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
   const ordered = useMemo(() => deckOrder(items, groups), [items, groups])
   const [filter, setFilter] = useState<ReviewFilter>('all')
   // undefined: the first item still waiting; null: the end (everything reviewed).
-  const [currentId, setCurrentId] = useState<string | null | undefined>(undefined)
+  const [currentId, setCurrentId] = useState<string | null | undefined>(
+    props.initialId ?? undefined
+  )
   const current = ordered.find((item) => item.id === currentId) ?? null
   // Not chosen yet: the first one still waiting, or the first of all when none waits (a plan
   // that only describes, an Auto run that applied everything). An item that left the list
@@ -257,13 +261,13 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
       tabIndex={-1}
       onKeyDown={onKeyDown}
       data-testid={props.testId ?? 'review-deck'}
-      className="@container flex min-h-0 flex-1 flex-col outline-none"
+      className={`@container flex flex-1 flex-col outline-none ${props.compact === true ? 'min-h-0' : 'min-h-72'}`}
     >
       <div className="flex min-h-0 flex-1">
         <nav
           aria-label="Groups"
           data-testid="review-rail"
-          className={`${compactClass} w-48 shrink-0 flex-col gap-1 border-r border-line p-3`}
+          className={`${compactClass} w-56 shrink-0 flex-col gap-1 border-r border-line p-3`}
         >
           <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
             {stats.map(({ group: g, total, reviewed }) => (
@@ -312,7 +316,7 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
           </div>
           {shown === null ? (
             <Done
-              accepted={counts.accepted}
+              accepted={counts.acceptedTotal}
               skipped={counts.skipped}
               total={counts.total}
               onReviewSkipped={showSkipped}

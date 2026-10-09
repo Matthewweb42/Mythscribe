@@ -84,7 +84,7 @@ function Dialog(): React.JSX.Element {
       ? 'Plan mode: this only describes the changes. Switch the chat to Ask or Auto to apply them.'
       : mode === 'auto'
         ? 'Auto: what can be undone is applied, each with Undo. Merges, deletions, and new categories wait for you. Scene text is never rewritten.'
-        : 'Tick what to keep; nothing changes until you apply. Scene text is never rewritten.'
+        : 'One change at a time: A accepts, S skips, E edits. Nothing changes until you apply. Scene text is never rewritten.'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
@@ -96,7 +96,7 @@ function Dialog(): React.JSX.Element {
         tabIndex={-1}
         data-testid="organise-dialog"
         onKeyDown={onKeyDown}
-        className="flex max-h-[85vh] w-[860px] max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none"
+        className="flex max-h-[85vh] overflow-y-auto w-[860px] max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none"
       >
         <div className="shrink-0 border-b border-line px-5 pt-4 pb-3">
           <h2 id={titleId} className="m-0 text-base font-semibold">

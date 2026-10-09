@@ -114,11 +114,15 @@ export function withDecision(
   return items.map((item) => (set.has(item.id) && !item.settled ? { ...item, decision } : item))
 }
 
-/** Counts for the progress bar and the Apply button. */
+/**
+ * Counts for the progress bar, the Apply button (`accepted`: accepted and not yet applied), and
+ * the end's summary (`acceptedTotal`: applied ones too).
+ */
 export function deckCounts(items: readonly ReviewDeckItem[]): {
   total: number
   reviewed: number
   accepted: number
+  acceptedTotal: number
   skipped: number
   open: number
 } {
@@ -127,6 +131,7 @@ export function deckCounts(items: readonly ReviewDeckItem[]): {
     total: items.length,
     reviewed: items.filter(isReviewed).length,
     accepted: live.filter((item) => item.decision === 'accepted').length,
+    acceptedTotal: items.filter((item) => item.decision === 'accepted').length,
     skipped: live.filter((item) => item.decision === 'skipped').length,
     open: items.filter(isOpen).length
   }

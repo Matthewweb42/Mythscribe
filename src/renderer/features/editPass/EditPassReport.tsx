@@ -40,8 +40,9 @@ const NOTE_STATUS_LABEL: Record<EditChange['status'], string> = {
  * every change scene by scene — the passage struck through, the replacement in colour, and why —
  * with Accept, Reject, and Show in scene (which opens the scene with the change highlighted in
  * its tracked changes). A developmental pass's report is its notes, each citing its passage.
- * Accept all and Reject all act on every change still to review; a stopped or failed pass can
- * be resumed from here.
+ * Accept all and Reject all act on every change still to review; "Review one by one" steps
+ * through them in the scenes on the review deck (2026-10-08, `EditReviewStrip`); a stopped or
+ * failed pass can be resumed from here.
  */
 export function EditPassReport({ passId }: { passId: string }): React.JSX.Element {
   const detail = useEditPassStore((s) => (s.detail?.pass.id === passId ? s.detail : null))
@@ -133,6 +134,15 @@ function ReportBody({ detail }: { detail: EditPassDetail }): React.JSX.Element {
               <button
                 type="button"
                 className={FIX_PRIMARY_BUTTON}
+                disabled={busy || pass.status === 'running'}
+                data-testid="edit-report-review"
+                onClick={() => useEditPassStore.getState().startReview(pending, titles)}
+              >
+                Review one by one
+              </button>
+              <button
+                type="button"
+                className={FIX_BUTTON}
                 disabled={busy}
                 data-testid="edit-report-accept-all"
                 onClick={() => void useEditPassStore.getState().accept(pending)}

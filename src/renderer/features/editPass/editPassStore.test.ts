@@ -291,3 +291,51 @@ describe('the tracked changes extension (F-14.15)', () => {
     expect(stale).toEqual([['c2'], ['c1']])
   })
 })
+
+describe('one change at a time (2026-10-08, the review deck)', () => {
+  it('steps through pending changes: jumps quietly, accepts, keeps for later, and ends', async () => {
+    const second = change({
+      id: 'c2',
+      nodeId: 'sc-2',
+      original: 'over the water',
+      replacement: 'over the sea'
+    })
+    const note = change({ id: 'n1', kind: 'note', replacement: null })
+    changes = [change(), second, note, change({ id: 'c3', status: 'accepted' })]
+    registerTrackedEditor('sc-1', mount())
+    store().startReview(changes, { 'sc-1': 'Scene 1', 'sc-2': 'Scene 2' })
+    expect(store().review).toMatchObject({ currentId: 'c1', nodeId: 'sc-1', skipped: [] })
+    // Only the pending tracked changes: no note, nothing settled.
+    expect(store().review?.changes.map((c) => c.id)).toEqual(['c1', 'c2'])
+    expect(store().focus).toEqual({
+      changeId: 'c1',
+      nodeId: 'sc-1',
+      quote: 'rang very very slowly',
+      quiet: true
+    })
+
+    await store().accept([change()])
+    expect(settles).toEqual([{ ids: ['c1'], status: 'accepted' }])
+    expect(store().review?.changes[0]?.status).toBe('accepted')
+
+    store().reviewAt('c2')
+    expect(store().review).toMatchObject({ currentId: 'c2', nodeId: 'sc-2' })
+    expect(store().focus).toMatchObject({ changeId: 'c2', nodeId: 'sc-2', quiet: true })
+    store().skipInReview(['c2'])
+    store().skipInReview(['c2'])
+    expect(store().review?.skipped).toEqual(['c2'])
+    // The end keeps the strip on the last scene.
+    store().reviewAt(null)
+    expect(store().review).toMatchObject({ currentId: null, nodeId: 'sc-2' })
+    store().endReview()
+    expect(store().review).toBeNull()
+  })
+
+  it('says so when nothing is left to review', () => {
+    store().startReview([change({ status: 'rejected' })], {})
+    expect(store().review).toBeNull()
+    expect(useDialogStore.getState().toasts.at(-1)?.message).toBe(
+      'No tracked changes left to review.'
+    )
+  })
+})
